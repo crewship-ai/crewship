@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strconv"
@@ -65,6 +66,19 @@ type artifactProjectCreate struct {
 	EntryPoint    string                `json:"entrypoint"`
 	Files         []artifactProjectFile `json:"files"`
 	Message       string                `json:"message"`
+}
+
+// artifactProjectURL is where a project response sends a person: its
+// Artifacts detail by immutable page ID (#4995), in the workspace it belongs
+// to. A positive version pins that version (a share link opens the shared
+// version, never Latest); 0 opens the latest one. Old /pages/<slug>?artifact=1
+// links still work: the web app moves them here with the same identity.
+func artifactProjectURL(pageID, workspaceID string, version int64) string {
+	q := url.Values{"workspace_id": {workspaceID}}
+	if version > 0 {
+		q.Set("version", strconv.FormatInt(version, 10))
+	}
+	return "/artifacts/" + url.PathEscape(pageID) + "?" + q.Encode()
 }
 
 func artifactProjectsEnabled() bool { return os.Getenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED") == "true" }
@@ -426,7 +440,7 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 		artifactProjectError(w, err)
 		return
 	}
-	writeJSON(w, 201, map[string]any{"page_id": k.PageID, "slug": p.Slug, "version": receipt.Version, "url": "/pages/" + p.Slug + "?artifact=1&workspace_id=" + k.WorkspaceID})
+	writeJSON(w, 201, map[string]any{"page_id": k.PageID, "slug": p.Slug, "version": receipt.Version, "url": artifactProjectURL(k.PageID, k.WorkspaceID, 0)})
 }
 func (h *PageHandler) PublishArtifactProject(w http.ResponseWriter, r *http.Request) {
 	k, ok := h.artifactProjectStart(w, r)
@@ -553,7 +567,7 @@ func (h *PageHandler) ShareArtifactProject(w http.ResponseWriter, r *http.Reques
 	if notify != nil {
 		notify()
 	}
-	writeJSON(w, 200, artifactProjectShareResponse{SharedVersion: p.Version, URL: "/pages/" + r.PathValue("slug") + "?artifact=1&version=" + strconv.FormatInt(p.Version, 10) + "&workspace_id=" + k.WorkspaceID})
+	writeJSON(w, 200, artifactProjectShareResponse{SharedVersion: p.Version, URL: artifactProjectURL(k.PageID, k.WorkspaceID, p.Version)})
 }
 func artifactProjectManifest(m artifacts.VersionManifest) map[string]any {
 	names := make([]string, 0, len(m.Files))
@@ -731,7 +745,7 @@ func (h *PageHandler) artifactProjectMutationAuthority(r *http.Request, k artifa
 func (h *PageHandler) artifactProjectReceipt(r *http.Request, k artifacts.VersionKey, receipt artifacts.VersionReceipt) artifactProjectMutationResponse {
 	var slug string
 	_ = h.db.QueryRowContext(r.Context(), `SELECT slug FROM pages WHERE id=? AND workspace_id=?`, k.PageID, k.WorkspaceID).Scan(&slug)
-	return artifactProjectMutationResponse{PageID: k.PageID, Slug: slug, Version: receipt.Version, Actor: receipt.Actor, URL: "/pages/" + slug + "?artifact=1&workspace_id=" + k.WorkspaceID}
+	return artifactProjectMutationResponse{PageID: k.PageID, Slug: slug, Version: receipt.Version, Actor: receipt.Actor, URL: artifactProjectURL(k.PageID, k.WorkspaceID, 0)}
 }
 func artifactProjectVersionInfos(infos []artifacts.VersionInfo) []map[string]any {
 	out := make([]map[string]any, 0, len(infos))

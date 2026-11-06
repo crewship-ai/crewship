@@ -144,6 +144,8 @@ func TestArtifactSlidesRechecksAuthorityAfterActualRender(t *testing.T) {
 					mustExec(t, h.db, `UPDATE feature_flag_overrides SET enabled=0 WHERE id='slides-enabled'`)
 				case "project flag":
 					t.Setenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED", "")
+					// Projects are on by default (#4994); the instance switch turns them off.
+					mustExec(t, h.db, `UPDATE feature_flags SET enabled=0 WHERE key='artifact_projects'`)
 				case "retention":
 					mustExec(t, h.db, `UPDATE artifact_version_heads SET shared_version=2 WHERE page_id=?`, page)
 					mustExec(t, h.db, `DELETE FROM artifact_versions WHERE page_id=? AND version=1`, page)

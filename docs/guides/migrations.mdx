@@ -763,16 +763,40 @@ it is.
 | `20261028193411_page_catalog_management`, `20261028195659_artifact_project_test_origin` | `pages.archived_at` and the explicit test-item markers. Existing pages stay unarchived and unmarked. |
 | `20261028202000_artifact_design_yjs` | `artifact_design_documents` for the live Design canvas. Rebuilds `artifact_version_heads` and the Dashboard tables to admit the Design storage family, copying every row. Seeds the `artifacts_design` flag. |
 
-The four flags `artifact_projects`, `artifact_dashboard_data`, `artifact_slides`
-and `artifacts_design` stay off after the upgrade until an administrator enables
-them per workspace (`crewship feature-flag enable <key>`) or sets the matching
-instance switch; see [Operate Artifacts](/guides/artifacts/operations#turning-artifacts-on).
+The flags `artifact_dashboard_data`, `artifact_slides` and `artifacts_design`
+stay off after the upgrade until an administrator enables them per workspace
+(`crewship feature-flag enable <key>`) or sets the matching instance switch; see
+[Operate Artifacts](/guides/artifacts/operations#turning-artifacts-on).
+`artifact_projects` is turned on later by `20261105094324` (next section).
 
 Rolling back across these migrations means restoring the pre-migration snapshot,
 as for any other migration ([Upgrading & Downgrading](/guides/upgrades#rollback-/-downgrade)).
 An older build that boots against the newer schema is refused by the
 version-skew guard. Restoring the snapshot discards every change made after the
 upgrade, including every artifact created since.
+
+## 20261105094324 — Artifact Projects on by default
+
+`20261105094324_artifact_projects_default_on` makes Projects a supported
+default (#4994). It sets the instance default of `artifact_projects` to on, but
+only where the row is still the untouched seed from
+`20261027175100_artifact_project_comments`:
+
+- the row has `id = 'ff_artifact_projects'`, `key = 'artifact_projects'` and
+  `enabled = 0`, and
+- `updated_at = created_at`. The seed wrote both with the same timestamp; every
+  change through `PATCH /api/v1/feature-flags/artifact_projects` (`crewship
+  feature-flag update`, manifest apply) rewrites `updated_at`.
+
+So an administrator who ever changed the instance flag, including turning it
+off, keeps that value. A flag that was deleted stays deleted (the migration
+never inserts), and one that was recreated through the API has a different
+`id` and is left alone. Workspace overrides in `feature_flag_overrides` are not
+touched: a workspace turned off with `crewship feature-flag disable
+artifact_projects` stays off. Running the statement again changes nothing.
+
+To turn Projects off after the upgrade, see
+[Turning Projects off](/configuration/artifacts#turning-projects-off).
 
 ## How to read this in operation
 

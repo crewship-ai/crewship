@@ -166,8 +166,10 @@ crewship page design apply launch-hero --file hero.json -f json
 }
 ```
 
-`apply` changes the live canvas that open browsers see immediately, and works
-even when no browser has it open. Every successful `apply`
+`apply` changes the live canvas seen by browsers authorized for live reads,
+and works even when no browser has it open. Shared-only readers keep seeing
+their shared snapshot. Changing the shared pin does not push replacement
+document state to an already-open shared-only socket; read again or reopen. Every successful `apply`
 records a new version. Re-applying the same file is not a no-op: upserting the
 same nodes again still updates the canvas state and records another version.
 Use `--file -` to read stdin. An
@@ -196,9 +198,16 @@ crewship page design get launch-hero --version 1 -f json
 }
 ```
 
-`--version 0` (the default) reads the live canvas. With `--version N`, the
-`version` and `latest_version` fields both report `N`; use
-`page design versions` for the real latest version.
+`--version 0` (the default) reads the latest canvas for callers with current
+Edit permission plus both CLI `pages:read` and `pages:write` scopes
+(or `pages:*`), and separately authorized workspace OWNER/ADMIN readers. Ordinary
+Read grantees receive only the shared version, and 404 until one is shared. A positive `--version N` is
+limited to that shared pin for shared-only readers. Non-admin Page owners
+and Edit grantees using `pages:read` credentials are shared-only too. Foreign
+administrator access is audited; a read-scoped administrator credential can read the latest
+canvas and history but cannot write. With a selected retained version, the
+`version` and `latest_version` fields both report that version; use
+`page design versions` for the latest version visible to the caller.
 
 ### Save and list versions
 

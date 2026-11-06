@@ -34,6 +34,44 @@ const mount=()=>render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId
 async function ready(){await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalledOnce());await waitFor(()=>expect(screen.getByRole('button',{name:'Převzít úpravy'})).toBeEnabled())}
 async function acquire(){fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}));await waitFor(()=>expect(ports.at(-1)?.setReadOnly).toHaveBeenCalledWith(false,expect.any(AbortSignal)))}
 
+describe('retired draft rendered state',()=>{
+ it.each(['untouched','edited','unretired'] as const)('write retirement keeps leave guard only for recoverable work (%s)',async(kind)=>{
+  rigNativeState='revision:opened'
+  const hashes:Promise<ArrayBuffer>[]=[]
+  vi.stubGlobal('crypto',{randomUUID:webcrypto.randomUUID.bind(webcrypto),getRandomValues:webcrypto.getRandomValues.bind(webcrypto),subtle:{digest(algorithm:AlgorithmIdentifier,data:Parameters<typeof webcrypto.subtle.digest>[1]){const result=webcrypto.subtle.digest(algorithm,data);hashes.push(result);return result}}})
+  const rendered=mount();await ready();await acquire()
+  // Complete the baseline hash before retiring so this test isolates dirty
+  // state from the independently reproduced pending-seed issue.
+  await act(async()=>{await Promise.all(hashes)})
+  vi.stubGlobal('crypto',webcrypto)
+  if(kind==='edited'){
+   ports.at(-1)!.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"body":[2]}'),editorRevision:'typed',documentId:'doc',nativeState:'revision:typed'})
+   // Snapshot identity proves the edit even if the change event arrives late.
+  }
+  if(kind==='unretired')journal.confirm.mockRejectedValue(Error('journal unavailable'))
+  await act(async()=>{
+   stream?.('lease',{...ownedLease,mine:false,can_write:false})
+   await waitFor(()=>expect(journal.close).toHaveBeenCalledOnce())
+  })
+  const status=rendered.container.querySelector('[data-save-phase]')!
+  expect(status).not.toBeNull()
+  const leaves=new Event('beforeunload',{cancelable:true})
+  window.dispatchEvent(leaves)
+  expect(client.save).not.toHaveBeenCalled()
+  if(kind==='untouched'){
+   expect(journal.confirm).toHaveBeenCalledOnce()
+   expect.soft(leaves.defaultPrevented).toBe(false)
+   expect(status).toHaveTextContent('Pouze čtení')
+   expect(status).not.toHaveTextContent('Neuložený koncept')
+   expect(screen.queryByRole('button',{name:'Kopie konceptu'})).not.toBeInTheDocument()
+  }else{
+   expect(status).toHaveTextContent('Neuložený koncept')
+   expect(leaves.defaultPrevented).toBe(true)
+   expect(screen.getByRole('button',{name:'Kopie konceptu'})).toBeInTheDocument()
+  }
+ })
+})
+
 describe('native Word host authority and persistence',()=>{
  it('confirms a handoff request only after the server reply and clears it for a new lease generation',async()=>{
   const held={...ownedLease,mine:false,can_write:false,holder:otherPerson}
