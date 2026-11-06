@@ -1783,6 +1783,31 @@ notice is raised the first time it happens for that occurrence.
 `catchup=all` never "misses" anything (`MISSED` stays `—`) since every
 occurrence in the backlog actually fires.
 
+#### Spreading fire times
+
+Many schedules on the same cron expression (`0 * * * *` across a workspace)
+all start in the same second. Give them a spread window to avoid the stampede:
+
+```bash
+crewship routine schedules create --slug daily-report --cron "0 * * * *" --spread 5m
+crewship routine schedules update <schedule_id> --spread 0   # turn it off
+```
+
+Each schedule is picked up at its cron time plus a **stable offset** in
+`[0, spread)` derived from the schedule id, so the same schedule always lands at
+the same point of the window and different schedules land at different points.
+The default is no spread, which fires exactly at the cron time as before. The
+spread must be shorter than the cron interval (the shortest gap between two
+occurrences); it is validated on create and on update, including when an update
+changes the cron under an existing spread. `routine schedules list` and the API
+show the next run **including** the offset; `next_occurrence_at` in the API is
+the unshifted cron time.
+
+The offset only changes *when* an occurrence is picked up. The occurrence
+itself stays the cron time: it is what the run's idempotency key and the
+durable dedupe use, and what `catchup_policy` counts, so a restart, a duplicate
+tick or a catch-up replay behaves exactly as without a spread.
+
 <Note>
 A **wake-gated** schedule (see below) always behaves like `catchup=once` —
 the probe is evaluated live ("is now the moment to wake"), never re-run

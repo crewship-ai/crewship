@@ -10820,6 +10820,14 @@
         ],
         "type": "object"
       },
+      "FinalCoreAgentWebhookRotateRequest": {
+        "properties": {
+          "previous_secret_ttl_seconds": {
+            "type": "integer"
+          }
+        },
+        "type": "object"
+      },
       "FinalCoreBootstrapRequest": {
         "properties": {
           "email": {
@@ -17671,6 +17679,9 @@
       },
       "RemainingAgentWebhookSecretV1": {
         "properties": {
+          "previous_secret_expires_at": {
+            "type": "string"
+          },
           "rotated_at": {
             "type": "string"
           },
@@ -21556,9 +21567,19 @@
           "name": {
             "type": "string"
           },
+          "next_occurrence_at": {
+            "format": "date-time",
+            "type": "string"
+          },
           "next_run_at": {
             "format": "date-time",
             "type": "string"
+          },
+          "spread_offset_seconds": {
+            "type": "integer"
+          },
+          "spread_seconds": {
+            "type": "integer"
           },
           "target_pipeline_id": {
             "type": "string"
@@ -23947,6 +23968,9 @@
           },
           "name": {
             "type": "string"
+          },
+          "spread_seconds": {
+            "type": "integer"
           },
           "target_pipeline_id": {
             "type": "string"
@@ -62046,6 +62070,115 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/agents/{agentId}/webhook-secret/previous": {
+      "delete": {
+        "description": "Delete agent webhook secret previous (DELETE /api/v1/agents/{agentId}/webhook-secret/previous).",
+        "operationId": "delete_api_v1_agents_agentId_webhook-secret_previous",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "agentId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "No Content"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Delete agent webhook secret previous",
+        "tags": [
+          "agents"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/agents/{agentId}/webhook-secret/rotate": {
       "post": {
         "description": "Rotate agent webhook secret (POST /api/v1/agents/{agentId}/webhook-secret/rotate).",
@@ -62064,7 +62197,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/FinalCoreEmptyRequest"
+                "$ref": "#/components/schemas/FinalCoreAgentWebhookRotateRequest"
               }
             }
           }
@@ -62079,6 +62212,24 @@
               }
             },
             "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
           },
           "401": {
             "content": {
@@ -181711,13 +181862,13 @@
                   "rate_limit_per_min": {
                     "type": "integer"
                   },
+                  "revoke_previous_secret": {
+                    "type": "boolean"
+                  },
                   "rotate_grace_seconds": {
-                    "enum": [
-                      0,
-                      3600,
-                      86400,
-                      604800
-                    ],
+                    "description": "0 (no overlap) or 60..604800 seconds",
+                    "maximum": 604800,
+                    "minimum": 0,
                     "type": "integer"
                   },
                   "rotate_secret": {
