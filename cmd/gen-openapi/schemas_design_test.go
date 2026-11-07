@@ -81,6 +81,10 @@ func TestDesignSchemasValidateNodePatchesAndExactReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixtures := []struct{ schema, good, bad string }{
+		// The engine rejects an order entry that is not a node ID, and IDs stop at
+		// 128 characters. Unbounded entries documented a 65 MB request as valid
+		// shape, far past the 4 MiB the handler reads.
+		{"DesignOperationsRequest", `{"operations":[{"op":"reorder","order":["screen"]}]}`, `{"operations":[{"op":"reorder","order":["` + strings.Repeat("a", 129) + `"]}]}`},
 		{"DesignOperationsRequest", `{"operations":[{"op":"upsert","node":{"id":"existing","fill":"#2563eb"}}]}`, `{"operations":[{"op":"execute","command":"arbitrary"}]}`},
 		{"DesignNode", `{"id":"screen","type":"frame","x":0,"y":0,"width":360,"height":640}`, `{"id":"screen","type":"script","x":0,"y":0,"width":360,"height":640}`},
 		{"DesignVersionReceipt", `{"version":2,"actor":"user"}`, `{"Version":2,"Actor":"user"}`},

@@ -46,7 +46,7 @@ func designSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	operation := map[string]any{"oneOf": []any{
 		object(map[string]any{"op": map[string]any{"type": "string", "enum": []string{"upsert"}}, "node": ref("DesignNodePatch")}, "op", "node"),
 		object(map[string]any{"op": map[string]any{"type": "string", "enum": []string{"delete"}}, "id": str()}, "op", "id"),
-		object(map[string]any{"op": map[string]any{"type": "string", "enum": []string{"reorder"}}, "order": map[string]any{"type": "array", "maxItems": 4000, "items": str()}}, "op", "order"),
+		object(map[string]any{"op": map[string]any{"type": "string", "enum": []string{"reorder"}}, "order": map[string]any{"type": "array", "maxItems": 4000, "items": id()}}, "op", "order"),
 	}}
 	schemas := map[string]any{
 		"DesignNode": node, "DesignNodePatch": patch, "DesignOperation": operation,

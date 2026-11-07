@@ -1,0 +1,1 @@
+- **The API reference allowed Design `reorder` entries of any length.** Each entry is a node ID of at most 128 characters; the reference now says so.
