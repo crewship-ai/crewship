@@ -456,6 +456,68 @@ everything. `--grep RE` narrows the run.
 its tab hidden; the default of 330000 passes the five minutes after which Chromium
 throttles hidden timers.
 
+## Native walk
+
+`e2e/acceptance/native-walk/` walks one short working cycle in the native Word
+editor (`walk.word`) and one in the Sheet editor (`walk.sheet`) on a deployed
+origin, in full headed Chromium under Xvfb, as a person provisioned in a disposable
+workspace that is deleted afterwards. Word: typing, Enter, a heading and the No
+Spacing style from the ribbon, bold. Sheet: three cells entered with Enter. Then,
+for both: autosave, ctrl+s with and without a change, reload, more work, a save
+whose reply is lost on the way back, the next save, and release. Each step records
+input, confirmation and longest render stall in ms, the versions before and after,
+the status, and how often "Ověřit výsledek" was pressed; every press is a failure.
+
+It proves on the RC that the content reaches the server with its styles and cells,
+that ctrl+s with a change makes exactly one version and without a change none, that
+a reload leaves the document and renders it, that a lost reply is recovered without
+a second version, and that a release leaves no unsaved draft. The versions come from
+the save receipts alone: they must run from the starting head without a gap or a
+repeat up to the final head.
+
+It does not prove:
+
+- **GPU rendering.** The host has no GPU; Chromium renders through SwiftShader in
+  software. Stall times are an upper bound for this host, not a client's.
+- **Typing latency.** Opening (about 8–9 s) and reloading (about 19–20 s, including the
+  wait for the closed page's lease, `leaseWaitMs` in the step note) are measured limits of what a person waits
+  for, not per-keystroke latency.
+- **Version history.** The listing (`GET …/craft/document/versions`) is behind the
+  workspace flag `craft_version_history`, which stays off until the feature is
+  accepted. The flag-off 404 (`native version history is not enabled`) is recorded
+  as `history: "not-enabled"` and listed under `notVerified` in `verdict.json`; any
+  other non-200 fails, and a 200 must list exactly the observed versions.
+
+```bash
+pnpm acceptance:native-walk \
+  --origin https://crewship-dev3.unifylab.cz \
+  --rc "$RC_SHA" \
+  --env-file "$HOME/.config/crewship/prd-qa-dev3.env" \
+  --output "$OUT"
+```
+
+`--rc` is the full commit the origin must serve clean (`GET /api/v1/system/version`).
+`--env-file` holds the PRD accounts and is sourced inside the queued job, so no
+credential is on a command line; without it the `PRD_*` variables of the shell are
+used. Run the command directly: it puts Playwright through `crewship-heavy` itself
+where the host has it. `--output` must be new or empty. It needs `xvfb-run` and a
+full Chromium (Playwright's own, else the newest under `PLAYWRIGHT_BROWSERS_PATH`, or
+`--chrome`); the headless shell is refused. `--grep RE` narrows the run.
+
+| Exit code | Meaning |
+| --- | --- |
+| 0 | PASS: both walks listed, each left exactly one passed row, Playwright exited 0 and wrote `finished.json`, and each `walk.json` has every step, no press and contiguous versions |
+| 1 | FAIL: a walk, a row (also an unmapped or extra one), the evidence or the run itself |
+| 2 | SETUP: arguments, browser, credentials, or the origin does not serve `--rc` clean, or `run.json` is missing |
+| 3 | PARTIAL: a `--grep` run passed. Never read this as a pass |
+
+The verdict never reads Playwright's text output. `$OUT` holds `verdict.json`
+(verdict, reasons, `notVerified`, counts, app SHA, the Chromium path and version),
+`summary.md`, `run.json`, `finished.json`, `rows/`,
+`evidence/native-walk/<test>/walk.json` with a screenshot after the reload, and
+`playwright/`. The rules are `e2e/acceptance/native-walk/verdict.mjs`, tested by
+`node --test e2e/acceptance/native-walk/verdict.test.mjs`.
+
 ## RC gate: required IDs
 
 `pnpm acceptance:prd` alone reports only what ran, so a scenario nobody wrote
