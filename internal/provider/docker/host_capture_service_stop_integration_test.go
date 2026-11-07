@@ -32,14 +32,24 @@ var hostCaptureBinaryFlag = flag.String("host-capture-binary", "", "built cmd/cr
 // helper it started. This test puts the controller and the real cmd/crewship
 // helper in a transient systemd scope and lets the actual service manager stop
 // it (stage uses TimeoutStopSec=45). The helper must turn that signal into its
-// own cancellation: exact stop of the admitted exec, the whole-tree receipt and
-// a terminal result, all before the scope is gone. That terminal result plus
-// the receipt is exactly what restart recovery settles from
+// own cancellation: exact stop of the admitted exec and all its descendants,
+// the whole-tree receipt and a terminal result, all before the scope is gone.
+// That terminal result plus the receipt is what restart recovery settles from
 // (orchestrator.RetainedEndConfirmed, work.RecoverRetainedResult). A second
 // launch of the same run is still refused, and the workload started once.
 //
-//	Run: go test -tags integration -run TestHostCaptureDockerServiceStop ./internal/provider/docker \
+// The controller is a fixture that dies on the signal at once, so this
+// qualifies the helper's own handling of the service signal. The server's
+// shutdown sequence (Stop, Alive polling, park reasons) is covered by the
+// internal/dispatch unit tests.
+//
+// It needs direct Docker access (mounts and exec), which the batch job Docker
+// gateway refuses: compile with `go test -c -tags integration`, then run
+//
+//	./docker.test -test.run TestHostCaptureDockerServiceStop \
 //	  -host-capture-sidecar=/abs/crewship-sidecar -host-capture-binary=/abs/crewship
+//
+// with both binaries built CGO_ENABLED=0.
 func TestHostCaptureDockerServiceStopRecordsTerminal(t *testing.T) {
 	requireHostCaptureQualificationUID(t)
 	sidecar := os.Getenv("CREWSHIP_HOST_CAPTURE_SIDECAR")
@@ -123,8 +133,9 @@ func TestHostCaptureDockerServiceStopRecordsTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	directory := filepath.Join(runs, "run")
-	// A workload with descendants that never ends by itself: only a stop ends it.
-	command := runoutput.HostCommand{ContainerID: created.ID, User: "1001:1001", Args: []string{"/bin/sh", "-c", `printf x >> /tmp/starts; printf 'started\n'; printf '%0200d\n' 0; while :; do sleep 0.05; done`}}
+	// A workload that never ends by itself, with a long-lived child and a
+	// detached (own session) descendant: only a whole-tree stop ends them.
+	command := runoutput.HostCommand{ContainerID: created.ID, User: "1001:1001", Args: []string{"/bin/sh", "-c", `printf x >> /tmp/starts; sleep 300 & setsid sleep 301 & printf 'started\n'; printf '%0200d\n' 0; while :; do sleep 0.05; done`}}
 	endpoint, authority, err := p.PrepareHostCapture(ctx, provider.ExecConfig{ContainerID: created.ID, User: "1001:1001"}, directory, []string{"unused"})
 	if err != nil {
 		t.Fatal(err)
@@ -139,7 +150,7 @@ func TestHostCaptureDockerServiceStopRecordsTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	unit := fmt.Sprintf("crewship-servicestop-%d-%d", os.Getpid(), time.Now().UnixNano())
-	controller := exec.Command(systemdRun, "--user", "--scope", "--quiet", "--unit="+unit,
+	controller := exec.Command(systemdRun, "--user", "--scope", "--quiet", "--collect", "--unit="+unit,
 		"-p", "KillMode=control-group", "-p", "TimeoutStopSec=45",
 		executable, "-test.run=^TestHostCaptureDockerSubprocess$", "--", "controller")
 	controller.Env = append(os.Environ(), "CREWSHIP_HOST_DOCKER_CHILD=1", "CREWSHIP_HOST_CAPTURE_BINARY="+binary)
@@ -162,6 +173,8 @@ func TestHostCaptureDockerServiceStopRecordsTerminal(t *testing.T) {
 		t.Helper()
 		for !check() {
 			select {
+			case err := <-waited:
+				t.Fatalf("%s: controller scope exited early: %v; stderr=%s", what, err, diagnostic.String())
 			case <-ctx.Done():
 				files, _ := os.ReadDir(directory)
 				identity, _ := os.ReadFile(filepath.Join(directory, "identity.json"))
@@ -238,13 +251,16 @@ func TestHostCaptureDockerServiceStopRecordsTerminal(t *testing.T) {
 	if err != nil || string(starts) != "x" {
 		t.Fatalf("workload launch count=%q err=%v", starts, err)
 	}
-	ps, err := p.Exec(ctx, provider.ExecConfig{ContainerID: created.ID, User: "1001:1001", Cmd: []string{"ps", "-o", "args"}})
+	// Busybox ps truncates args without a tty; read every cmdline instead.
+	ps, err := p.Exec(ctx, provider.ExecConfig{ContainerID: created.ID, User: "1001:1001", Cmd: []string{"/bin/sh", "-c", `for p in /proc/[0-9]*; do tr '\0' ' ' < "$p/cmdline" 2>/dev/null; echo; done`}})
 	if err != nil {
 		t.Fatal(err)
 	}
 	procs, _ := io.ReadAll(ps.Reader)
 	ps.Reader.Close()
-	if bytes.Contains(procs, []byte("sleep 0.05")) || bytes.Contains(procs, []byte("while :")) {
-		t.Fatalf("workload descendants survived the service stop:\n%s", procs)
+	for _, survivor := range []string{"sleep 300", "sleep 301", "while :"} {
+		if bytes.Contains(procs, []byte(survivor)) {
+			t.Fatalf("workload descendant %q survived the service stop:\n%s", survivor, procs)
+		}
 	}
 }
