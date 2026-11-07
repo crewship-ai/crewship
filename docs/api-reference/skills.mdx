@@ -348,9 +348,9 @@ Walks a remote git repository for `SKILL.md` files and upserts each through the 
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid JSON, missing `git_url`, missing `workspaceId` path value, or a rejected `git_url` (not HTTPS, `localhost`, private/internal IP, embedded user-info, missing host, unparsable) — nothing was cloned |
+| `400` | Invalid JSON, missing `git_url`, missing `workspaceId` path value, or a `git_url`/`git_ref` rejected before any clone (not HTTPS, `localhost`, private/internal IP, embedded user-info, invalid host or port, unsafe ref) |
 | `403` | Insufficient role |
-| `502` | The server's Git is missing or too old, or the git clone failed |
+| `502` | The server's Git is missing or too old, DNS resolution of the host failed, or the git clone failed |
 
 ---
 

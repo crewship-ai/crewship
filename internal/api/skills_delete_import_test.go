@@ -147,30 +147,24 @@ func TestSkillBulkImport_MissingGitURL(t *testing.T) {
 
 func TestIsClientFacingImportError(t *testing.T) {
 	cases := []struct {
-		err   error
-		echo  bool
-		input bool
+		err  error
+		echo bool
 	}{
-		{nil, false, false},
-		{errors.New("bulk import requires https git URLs; got scheme \"http\""), true, true},
-		{errors.New("bulk import only supports https git URLs; got \"git@x\""), true, true},
-		{errors.New("private/internal IP addresses are not allowed in git URL"), true, true},
-		{errors.New("private/internal IP or forbidden destination in git URL"), true, true},
-		{errors.New("localhost git URLs are not allowed"), true, true},
-		{errors.New("git URL must not embed credentials"), true, true},
-		{errors.New("git URL missing host: \"https:///x\""), true, true},
-		{errors.New("parse git URL: bad"), true, true},
-		// The server's own Git environment is not the client's input (#5097).
-		{errors.New("bulk import via git_url requires a working Git >=2.37"), true, false},
-		{errors.New("bulk import via git_url requires `git` in PATH: not found"), true, false},
-		{errors.New("exit status 128: fatal: could not read /tmp/x"), false, false},
+		{nil, false},
+		{errors.New("bulk import requires https git URLs; got scheme \"http\""), true},
+		{errors.New("private/internal IP addresses are not allowed in git URL"), true},
+		{errors.New("bulk import via git_url requires a working Git >=2.37"), true},
+		{errors.New("exit status 128: fatal: could not read /tmp/x"), false},
+		// The client's URL text inside a clone failure cannot pick the class.
+		{errors.New(`git clone failed for "https://good.example/r?x=bulk import requires"`), false},
 	}
 	for _, c := range cases {
 		if got := isClientFacingImportError(c.err); got != c.echo {
 			t.Errorf("isClientFacingImportError(%v)=%v want %v", c.err, got, c.echo)
 		}
-		if got := isBulkImportInputError(c.err); got != c.input {
-			t.Errorf("isBulkImportInputError(%v)=%v want %v", c.err, got, c.input)
+		// Only the importer's own marking makes an error input (#5097).
+		if isBulkImportInputError(c.err) {
+			t.Errorf("untyped %v classified as input", c.err)
 		}
 	}
 }

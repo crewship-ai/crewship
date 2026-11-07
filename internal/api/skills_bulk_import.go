@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -78,34 +79,35 @@ func isClientFacingImportError(err error) bool {
 	if err == nil {
 		return false
 	}
-	return isBulkImportInputError(err) || strings.Contains(err.Error(), "bulk import via git_url")
-}
-
-// isBulkImportInputError reports a git URL the importer refused as input,
-// before any clone: the client's error, answered 400 (#5097). The server's own
-// Git environment ("bulk import via git_url requires ...") is not input.
-func isBulkImportInputError(err error) bool {
-	if err == nil {
-		return false
+	if isBulkImportInputError(err) {
+		return true
 	}
+	// Prefixes, not substrings: a clone failure echoes the (redacted) URL,
+	// and the client's own URL text must not pick the classification.
 	msg := err.Error()
-	if strings.Contains(msg, "bulk import via git_url") {
-		return false
-	}
 	for _, prefix := range []string{
 		"bulk import requires",
 		"bulk import only supports",
+		"bulk import via git_url",
 		"private/internal IP",
 		"localhost git URLs",
 		"git URL missing host",
 		"git URL must not embed",
 		"parse git URL",
 	} {
-		if strings.Contains(msg, prefix) {
+		if strings.HasPrefix(msg, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+// isBulkImportInputError reports a request the importer refused as input,
+// before any clone: the client's error, answered 400 (#5097). The importer
+// marks those itself (skills.ErrImportInput); the server's Git, DNS and the
+// clone are never input, whatever their message says.
+func isBulkImportInputError(err error) bool {
+	return errors.Is(err, skills.ErrImportInput)
 }
 
 // Import handles the request, delegating to skills.Importer.BulkImport.

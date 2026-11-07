@@ -584,19 +584,24 @@ func TestCovSkBulkImportMissingGitURL400(t *testing.T) {
 // A git URL the importer refuses as input is the client's error: nothing
 // upstream was contacted, so 400 with the message echoed, never 502 (#5097).
 func TestCovSkBulkImportRejectedURLIs400(t *testing.T) {
-	for _, raw := range []string{
-		"https://localhost/repo.git",
-		"http://example.com/repo.git",
-		"git@example.com:org/repo.git",
-		"https://token@example.com/repo.git",
-		"https://10.0.0.5/repo.git",
+	for _, tc := range []struct{ url, ref string }{
+		{"https://localhost/repo.git", ""},
+		{"http://example.com/repo.git", ""},
+		{"git@example.com:org/repo.git", ""},
+		{"https://token@example.com/repo.git", ""},
+		{"https://10.0.0.5/repo.git", ""},
+		{"https://example.com:99999/repo.git", ""},
+		{"https://exa mple.com/repo.git", ""},
+		{"https://example.com/repo.git", "--upload-pack=x"},
+		{"https://example.com/repo.git", "a..b"},
 	} {
-		t.Run(raw, func(t *testing.T) {
+		raw := tc.url
+		t.Run(raw+"@"+tc.ref, func(t *testing.T) {
 			db := setupTestDB(t)
 			h := NewSkillBulkImportHandler(db, newTestLogger())
 			userID := seedTestUser(t, db)
 			wsID := seedTestWorkspace(t, db, userID)
-			body, _ := json.Marshal(map[string]string{"git_url": raw})
+			body, _ := json.Marshal(map[string]string{"git_url": raw, "git_ref": tc.ref})
 			req := httptest.NewRequest("POST", "/x", bytes.NewReader(body))
 			req.SetPathValue("workspaceId", wsID)
 			req = withWorkspaceUser(req, userID, wsID, "OWNER")
