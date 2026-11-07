@@ -68,14 +68,17 @@ def positive(issue, assignment, code, tag, candidates, runs, full):
     }
 
 
-def chat_refusal(chat, source, target, actor, task_hash, refused, started):
+def chat_refusal(new_chats, source, target, actor, task_hash, refused, started):
     """The server refusal of a direct owner turn's /assign (#5086).
 
-    The server derives the chat from the run's own run.started entry
-    (internal/api/delegation_run_context.go), so a refusal counts only when its
-    trace_id is an alex run that started in the chat its refs name, and its
-    task hash is the exact task the owner turn sent.
+    The server derives refs.chat_id from the calling run's own run.started
+    entry (internal/api/delegation_run_context.go). The feed strips chat_id
+    from that entry, so the chat must be one of alex's chats created by this
+    turn (new_chats); the trace_id must be an alex run and the task hash the
+    exact task the owner turn sent.
     """
+    if not isinstance(new_chats, list) or not all(isinstance(c, str) for c in new_chats):
+        raise ValueError("invalid chat set")
     if not isinstance(task_hash, str) or not SHA256.fullmatch(task_hash):
         raise ValueError("invalid expected task hash")
     for entry in refused:
@@ -87,15 +90,15 @@ def chat_refusal(chat, source, target, actor, task_hash, refused, started):
                 and entry.get("crew_id") == source and payload.get("reason") == "crews_not_connected"
                 and payload.get("http_status") == 403 and payload.get("source_crew_id") == source
                 and payload.get("target_crew_id") == target and payload.get("target_slug") == "morgan"
-                and payload.get("task_sha256") == task_hash and refs.get("chat_id") == chat):
+                and payload.get("task_sha256") == task_hash and refs.get("chat_id") in new_chats):
             continue
         if entry.get("actor_type") != "agent":
             raise ValueError("incomplete server receipt")
         for start in started:
             if (start.get("entry_type") == "run.started" and start.get("trace_id") == run
-                    and start.get("agent_id") == actor and (start.get("payload") or {}).get("chat_id") == chat):
+                    and start.get("agent_id") == actor):
                 return {
-                    "chat_id": identity(chat), "run_started_entry_id": identity(start.get("id")),
+                    "chat_id": identity(refs.get("chat_id")), "run_started_entry_id": identity(start.get("id")),
                     "source_run_id": identity(run), "source_actor_id": identity(actor),
                     "source_crew_id": identity(source), "target_crew_id": identity(target), "target_slug": "morgan",
                     "refusal": {"entry_id": identity(entry.get("id")), "entry_type": "assignment.refused",
@@ -259,7 +262,7 @@ def main():
             value = positive(issue, assignment, code, tag, json.loads(candidates), json.loads(runs), json.loads(full))
         elif mode == "chat-refusal":
             chat, source, target, actor, task_hash, refused, started = fields(7)
-            value = chat_refusal(chat, source, target, actor, task_hash, json.loads(refused), json.loads(started))
+            value = chat_refusal(json.loads(chat), source, target, actor, task_hash, json.loads(refused), json.loads(started))
         elif mode == "write":
             positive_proof, negative_proof, *context = fields(10)
             value = receipt(json.loads(positive_proof), json.loads(negative_proof), *context)

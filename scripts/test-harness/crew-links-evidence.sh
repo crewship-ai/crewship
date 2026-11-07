@@ -71,29 +71,39 @@ xlink_result_reported() {
 # says not to try an unlinked crew, so an issue asking it to try is declined
 # before any request. The turn hands alex one exact /assign call instead. The
 # server writes the refusal with trace_id = the calling run and refs.chat_id =
-# the chat it derives from that run's run.started entry; the task hash binds
-# it to the exact task this turn sent. No attempt or a model refusal leaves no
-# such receipt and stays a FAIL.
-xlink_chat_refusal_evidence() { # <task-sha256> <source-crew-id> <target-crew-id> <alex-agent-id>
+# the chat it derives from that run's run.started entry. The feed strips
+# chat_id from a human-authorized run.started (internal/journal/serialize.go),
+# so the chat is bound from the other side: it must be a chat of alex that did
+# not exist before this turn. The task hash binds the receipt to the exact task
+# this turn sent. No attempt or a model refusal leaves no such receipt and
+# stays a FAIL.
+xlink_alex_chat_ids() { # -> JSON array of alex's current chat ids
+  local list
+  list="$(cs chat list alex --limit 200 --format json 2>/dev/null)" || return 1
+  printf '%s\n' "$list" | jq -c '[.[] | .id | select(type == "string" and length > 0)] | unique' 2>/dev/null
+}
+
+xlink_chat_refusal_evidence() { # <task-sha256> <source-crew-id> <target-crew-id> <alex-agent-id> <new-chat-ids-json>
   local refused candidates row run chat started projected rc
   refused="$(cs journal --agent alex --type assignment.refused --since 2h --lines 200 --format json 2>/dev/null)" || return 1
-  candidates="$(printf '%s\n' "$refused" | jq -c --arg sha "$1" --arg source "$2" --arg target "$3" --arg actor "$4" '
+  candidates="$(printf '%s\n' "$refused" | jq -c --arg sha "$1" --arg source "$2" --arg target "$3" --arg actor "$4" --argjson new "$5" '
     .[] | select(.entry_type == "assignment.refused" and .actor_id == $actor and .agent_id == $actor and
       .crew_id == $source and .payload.reason == "crews_not_connected" and .payload.http_status == 403 and
       .payload.source_crew_id == $source and .payload.target_crew_id == $target and
       .payload.target_slug == "morgan" and .payload.task_sha256 == $sha and
-      (.trace_id | type == "string" and length > 0) and (.refs.chat_id | type == "string" and length > 0))
+      (.trace_id | type == "string" and length > 0) and
+      (.refs.chat_id as $chat | ($new | index($chat)) != null))
     | {run: .trace_id, chat: .refs.chat_id}' 2>/dev/null)" || return 1
   while IFS= read -r row; do
     [[ -n "$row" ]] || continue
     run="$(printf '%s\n' "$row" | jq -r '.run')"
     chat="$(printf '%s\n' "$row" | jq -r '.chat')"
     started="$(cs journal --run-id "$run" --type run.started --lines 20 --format json 2>/dev/null)" || return 1
-    if ! printf '%s\n' "$started" | jq -e --arg run "$run" --arg actor "$4" --arg chat "$chat" '
-      any(.[]; .entry_type == "run.started" and .trace_id == $run and .agent_id == $actor and .payload.chat_id == $chat)' >/dev/null 2>&1; then continue; fi
+    if ! printf '%s\n' "$started" | jq -e --arg run "$run" --arg actor "$4" '
+      any(.[]; .entry_type == "run.started" and .trace_id == $run and .agent_id == $actor)' >/dev/null 2>&1; then continue; fi
     [[ -n "${HARNESS_DETAIL_DIR:-}" ]] || return 0
     command -v python3 >/dev/null 2>&1 || return 2
-    projected="$(printf '%s\0' "$chat" "$2" "$3" "$4" "$1" "$refused" "$started" |
+    projected="$(printf '%s\0' "$5" "$2" "$3" "$4" "$1" "$refused" "$started" |
       python3 "$_XLINK_EVIDENCE_DIR/crew-links-receipt.py" chat-refusal)"
     rc=$?
     if (( rc == 0 )); then printf '%s\n' "$projected"; return 0; fi

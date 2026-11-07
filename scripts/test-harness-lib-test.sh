@@ -241,7 +241,8 @@ case "$args" in
     printf '%s\n' journal >>"$state/request-categories"
     id="${args##* journal --run-id }"; id="${id%% *}"
     if [ -s "$state/started" ]; then jq -sc --arg run "$id" 'map(select(.trace_id == $run))' "$state/started"; else echo '[]'; fi; exit 0 ;;
-  *" chat list "*) echo "[]"; exit 0 ;;
+  *" chat list "*)
+    if [ -s "$state/chats" ]; then jq -sc . "$state/chats"; else echo '[{"id":"chat-old","created_at":"2026-01-01T00:00:00Z"}]'; fi; exit 0 ;;
   *" work list "*)
     [ "${XLINK_BUSY:-}" = 1 ] && { echo '{"items":[{"id":"busy"}]}'; exit 0; }
     echo '{"items":[]}'; exit 0 ;;
@@ -309,7 +310,10 @@ case "$args" in
       case "$XLINK_MODE" in neg-hangs|neg-failed) exit 1 ;; esac
       task="${prompt#*\"task\":\"}"; task="${task%%\"*}"
       tag="$(printf '%s' "$task" | grep -oE 'XLINKNEG-[A-Z0-9]+' | head -1)"
-      jq -nc '{id:"run-start:chat-run-neg",entry_type:"run.started",trace_id:"chat-run-neg",agent_id:"alex-id",payload:{chat_id:"chat-neg"}}' >>"$state/started"
+      # The real feed strips chat_id from a human-authorized run.started.
+      jq -nc '{id:"run-start:chat-run-neg",entry_type:"run.started",trace_id:"chat-run-neg",agent_id:"alex-id",payload:{agent_slug:"alex"}}' >>"$state/started"
+      [ -s "$state/chats" ] || jq -nc '{id:"chat-old",created_at:"2026-01-01T00:00:00Z"}' >"$state/chats"
+      [ "$XLINK_MODE" = chat-unlisted ] || jq -nc '{id:"chat-neg",created_at:"2026-11-07T00:00:00Z"}' >>"$state/chats"
       if [ "$XLINK_MODE" = leaky ]; then
         jq -nc --arg tag "$tag" '{id:("a-"+$tag),to_slug:"morgan",entry_type:"assignment.created",payload:{assignment_id:("asn-"+$tag),task:("Read actual record "+$tag)}}' >>"$state/landed"
       elif [ -e "$state/unlinked" ] && [ "$XLINK_MODE" != no-attempt ]; then
@@ -452,6 +456,10 @@ if command -v jq >/dev/null 2>&1; then
   expect_contains "completed model refusal without server call -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
   expect_contains "model refusal without server call -> receipt missing" "$out" "no server refusal receipt"
   expect_contains "model refusal without server call -> no-work unproven" "$out" "FAIL no work reaches an unlinked crew"
+
+  out="$(run_crew_links chat-unlisted)"
+  expect_contains "receipt in a chat this turn did not create -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
+  expect_contains "receipt in an unidentified chat -> says the chat is unknown" "$out" "chat could not be identified"
 
   out="$(run_crew_links leaky)"
   expect_contains "assignment lands with no link -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"

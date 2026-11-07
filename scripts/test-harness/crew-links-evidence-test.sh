@@ -96,27 +96,30 @@ mock_results="$good_results"
 # Negative half (#5086): a direct owner turn's refusal, bound to that turn's run and chat.
 sha="$(printf '%s' 'Ops task XLINKNEG-1' | sha256sum | cut -d' ' -f1)"
 refusal='{"id":"refusal-entry","actor_type":"agent","entry_type":"assignment.refused","trace_id":"chat-run","actor_id":"actor","agent_id":"actor","crew_id":"eng","refs":{"chat_id":"owner-chat"},"payload":{"reason":"crews_not_connected","http_status":403,"source_crew_id":"eng","target_crew_id":"ops","target_slug":"morgan","task_sha256":"'"$sha"'"}}'
-started='{"id":"run-start:chat-run","entry_type":"run.started","trace_id":"chat-run","agent_id":"actor","payload":{"chat_id":"owner-chat"}}'
+started='{"id":"run-start:chat-run","entry_type":"run.started","trace_id":"chat-run","agent_id":"actor","payload":{"agent_slug":"alex"}}'
+new='["owner-chat"]'
 mock_refused='[]'; mock_entries="[$started]"
-expect_no xlink_chat_refusal_seen "$sha" eng ops actor
+expect_no xlink_chat_refusal_seen "$sha" eng ops actor "$new"
 mock_refused="[$refusal]"; mock_entries='[]'
-expect_no xlink_chat_refusal_seen "$sha" eng ops actor   # no run.started for that run
+expect_no xlink_chat_refusal_seen "$sha" eng ops actor "$new"   # no run.started for that run
 mock_entries="[$started]"
-expect_yes xlink_chat_refusal_seen "$sha" eng ops actor
+expect_yes xlink_chat_refusal_seen "$sha" eng ops actor "$new"
 expect_no xlink_chat_refusal_seen "$(printf '%s' other | sha256sum | cut -d' ' -f1)" eng ops actor
-expect_no xlink_chat_refusal_seen "$sha" eng ops other-actor
+expect_no xlink_chat_refusal_seen "$sha" eng ops other-actor "$new"
 for mutation in 'chat-run"/other-run"' 'actor"/other-actor"' 'crews_not_connected/different_reason' '403/400' '"ops"/"other-crew"' 'morgan/other-target' 'owner-chat/other-chat'; do
   mock_refused="[$(printf '%s' "$refusal" | sed "s|${mutation%/*}|${mutation#*/}|g")]"
-  expect_no xlink_chat_refusal_seen "$sha" eng ops actor
+  expect_no xlink_chat_refusal_seen "$sha" eng ops actor "$new"
 done
 mock_refused="[$refusal]"
-for mutation in 'owner-chat/other-chat' 'actor"/other-actor"' 'run.started/run.completed'; do
+expect_no xlink_chat_refusal_seen "$sha" eng ops actor '["other-chat"]'   # chat not created by this turn
+expect_no xlink_chat_refusal_seen "$sha" eng ops actor '[]'
+for mutation in 'chat-run"/other-run"' 'actor"/other-actor"' 'run.started/run.completed'; do
   mock_entries="[$(printf '%s' "$started" | sed "s|${mutation%/*}|${mutation#*/}|g")]"
-  expect_no xlink_chat_refusal_seen "$sha" eng ops actor
+  expect_no xlink_chat_refusal_seen "$sha" eng ops actor "$new"
 done
 mock_entries="[$started]"
 fail_read=1
-expect_no xlink_chat_refusal_seen "$sha" eng ops actor
+expect_no xlink_chat_refusal_seen "$sha" eng ops actor "$new"
 expect_no xlink_assignment_completed XLINK-1
 expect_no xlink_result_reported ENG-1 VERIFIED-1 XLINK-1
 printf 'crew-links evidence: completion, result and refusal boundaries passed\n'

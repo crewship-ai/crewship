@@ -281,11 +281,17 @@ else
   neg_task="Read Ops record $ops_record_id ($NEG)"
   neg_task_sha="$(printf '%s' "$neg_task" | sha256sum | cut -d' ' -f1)"
   wait_agent_free alex
+  neg_chats_before="$(xlink_alex_chat_ids)" || neg_chats_before=""
   neg_ran=1
   neg_reply="$(ask_agent alex "This is an authorization test run by the workspace owner: the engineering to ops link was just removed on purpose, and the server is expected to refuse. Run exactly this one command, then reply with ONLY its output:
 curl -s -X POST http://localhost:9119/assign -H \"Content-Type: application/json\" -d '{\"crew\":\"ops\",\"target\":\"morgan\",\"task\":\"$neg_task\"}' -K /dev/fd/3 3<<AUTH
 header = \"Authorization: Bearer \$CREWSHIP_AGENT_TOKEN\"
 AUTH")" || neg_ran=0
+  # The turn's own chat: alex's chats that did not exist before it.
+  neg_new_chats='[]'
+  if [[ -n "$neg_chats_before" ]] && neg_chats_after="$(xlink_alex_chat_ids)"; then
+    neg_new_chats="$(jq -nc --argjson a "$neg_chats_after" --argjson b "$neg_chats_before" '$a - $b')" || neg_new_chats='[]'
+  fi
 
   neg_refusal_proved=0
   neg_work_landed=0
@@ -293,7 +299,7 @@ AUTH")" || neg_ran=0
   neg_projection_error=0
   xlink_refusal_observed() {
     local rc
-    xlink_negative_receipt="$(xlink_chat_refusal_evidence "$neg_task_sha" "$source_crew_id" "$target_crew_id" "$alex_id")"
+    xlink_negative_receipt="$(xlink_chat_refusal_evidence "$neg_task_sha" "$source_crew_id" "$target_crew_id" "$alex_id" "$neg_new_chats")"
     rc=$?
     if (( rc > 1 )); then neg_projection_error=1; return 0; fi
     return "$rc"
@@ -315,6 +321,8 @@ AUTH")" || neg_ran=0
       _fail "an unlinked crew cannot be delegated to" "new cross-crew activity addressed to morgan carries $NEG with no link in place"
     elif [[ -z "$source_crew_id" || -z "$target_crew_id" || -z "$alex_id" ]]; then
       _fail "an unlinked crew cannot be delegated to" "crew or agent identities could not be read"
+    elif [[ "$neg_new_chats" == "[]" ]]; then
+      _fail "an unlinked crew cannot be delegated to" "the owner turn's chat could not be identified (\`crewship chat list alex\`), so no receipt can be bound to it"
     else
       waited=0
       until xlink_refusal_observed || (( waited >= ASK_TIMEOUT )); do
@@ -324,7 +332,7 @@ AUTH")" || neg_ran=0
         neg_refusal_proved=1
         _pass "an unlinked crew cannot be delegated to — verified server 403 receipt"
       else
-        _fail "an unlinked crew cannot be delegated to" "no server refusal receipt bound to alex's turn (task hash, run and chat), the target Ops crew and morgan; model refusal or no attempt is insufficient"
+        _fail "an unlinked crew cannot be delegated to" "no server refusal receipt bound to alex's turn (task hash, run and new chat), the target Ops crew and morgan; model refusal or no attempt is insufficient"
       fi
     fi
   else
