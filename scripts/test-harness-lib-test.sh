@@ -167,6 +167,27 @@ fi
 rm -rf "$deny_dir"
 
 echo
+echo "== keeper ledger request selection (#5083) =="
+if command -v jq >/dev/null 2>&1; then
+  KEEPER_ROWS='[
+    {"id":"bhv","request_type":"behavior","decision":"ESCALATE"},
+    {"id":"dup","request_type":"execute","decision":"DUPLICATE_SUPPRESSED"},
+    {"id":"open","request_type":"execute","decision":"PENDING"},
+    {"id":"exe","request_type":"execute","decision":"DENY"},
+    {"id":"acc","request_type":"access","decision":"ALLOW"}]'
+  pick() { # <function> <rows>
+    bash -c '. "$1/test-harness/keeper-ledger.sh" && "$2" "$3"' _ "$SCRIPT_DIR" "$1" "$2" 2>/dev/null
+  }
+  expect_eq "a raised request skips newer one-shot rows" "exe" "$(pick keeper_pick_raised_request "$KEEPER_ROWS")"
+  expect_eq "the newest one-shot row is a verdict" "bhv" "$(pick keeper_pick_one_shot_request "$KEEPER_ROWS")"
+  expect_eq "a suppression counts as one-shot" "dup" "$(pick keeper_pick_one_shot_request '[{"id":"dup","request_type":"execute","decision":"DUPLICATE_SUPPRESSED"}]')"
+  expect_eq "only one-shot rows leave no raised request" "" "$(pick keeper_pick_raised_request '[{"id":"bhv","request_type":"behavior","decision":"ESCALATE"}]')"
+  expect_eq "a still-pending row is neither" "" "$(pick keeper_pick_raised_request '[{"id":"open","request_type":"access","decision":"PENDING"}]')$(pick keeper_pick_one_shot_request '[{"id":"open","request_type":"access","decision":"PENDING"}]')"
+else
+  pass "keeper ledger selection skipped (jq missing)"
+fi
+
+echo
 echo "== README prereqs =="
 
 # The prereqs say an installed CLI on PATH is enough, so the commands they hand

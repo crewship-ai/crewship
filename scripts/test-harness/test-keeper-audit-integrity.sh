@@ -23,7 +23,7 @@
 #   8. journal hash-chain tamper-evidence: `journal verify` is OK on a healthy
 #      journal and DETECTS an out-of-band row mutation (issue #1369).
 #   9. keeper decisions are append-only: `keeper history` shows every transition,
-#      1-based and gap-free, starting at PENDING, tail matching the current
+#      1-based and gap-free, a raised request starting at PENDING, tail matching the current
 #      decision, each with a recorded actor (issue #1369).
 #  10. an authorised priority edit does NOT break the chain — pin, verify, revert,
 #      verify (issue #1369). The raw-DB-flip half needs CREWSHIP_DB on dev2.
@@ -37,6 +37,8 @@ preflight
 
 # shellcheck source=owned-escalation.sh
 source "$HERE/owned-escalation.sh"
+# shellcheck source=keeper-ledger.sh
+source "$HERE/keeper-ledger.sh"
 register_secret harness-placeholder-not-a-real-token; register_secret audit-v1; register_secret audit-v2  # keep it out of failure evidence (#4874)
 
 AGENT="${AGENT:-morgan}"
@@ -277,28 +279,29 @@ section "9. Keeper decisions are append-only (issue #1369)"
 # keeper_requests is written PENDING then UPDATEd in place, so on its own it
 # cannot show that a request was pending or whether a decision was rewritten.
 # Every transition is now appended to keeper_request_events, surfaced by
-# `crewship keeper history`. Assert: the history exists for a real request, it
-# starts at PENDING, it ends where the current-state log says it ended, and the
-# actor of each transition is recorded.
+# `crewship keeper history`. Assert: the history of a raised request starts at
+# PENDING, it ends where the current-state log says it ended, and the actor of
+# each transition is recorded. A verdict written already decided holds exactly
+# one terminal transition, which is asserted separately.
 if ! cs keeper history --help >/dev/null 2>&1; then
   skip "keeper decision history" "installed crewship has no 'keeper history' command — rebuild"
 elif ! have jq; then
   skip "keeper decision history" "jq missing"
 else
-  req_json="$(cs keeper requests --limit 20 --format json 2>/dev/null)"
-  # Prefer a DECIDED request: a still-pending one legitimately has one transition.
-  req_id="$(printf '%s' "$req_json" | jq -r \
-    'first(.[] | select((.decision // "") != "" and (.decision // "") != "PENDING")) | .id // empty')"
+  # The server caps a page at 200. Phase-2 verdicts can fill a short window.
+  req_json="$(cs keeper requests --limit 200 --format json 2>/dev/null)"
+  req_id="$(keeper_pick_raised_request "$req_json")"
+  shot_id="$(keeper_pick_one_shot_request "$req_json")"
 
   if [[ -z "$req_id" ]]; then
-    skip "keeper decision history" "no decided keeper request in the recent log — drive one (assign a SECRET and run a keeper execute) then re-run"
+    skip "keeper history of a raised request" "no decided access or execute request in the recent log, so PENDING-first is unproven here — drive one (assign a SECRET and run a keeper execute) then re-run"
   else
     hist="$(cs keeper history "$req_id" --format json 2>/dev/null)"
     n_ev="$(printf '%s' "$hist" | jq 'length' 2>/dev/null || echo 0)"
-    if [[ "${n_ev:-0}" -ge 1 ]]; then
+    if [[ "${n_ev:-0}" -ge 2 ]]; then
       _pass "keeper history for $req_id has $n_ev transition(s)"
     else
-      _fail "keeper history is non-empty" "0 transitions for a decided request $req_id"
+      _fail "a decided request has PENDING and its decision" "${n_ev:-0} transitions for $req_id"
     fi
 
     # seq must be 1-based and monotonic — a gap is itself the tamper signal.
@@ -328,13 +331,25 @@ else
       _fail "every transition records an actor_type" \
         "got $(printf '%s' "$hist" | jq -c '[.[].actor_type]')"
     fi
+  fi
 
-    # Cross-workspace / unknown ids must be indistinguishable and never 500.
-    if cs keeper history "kpr_does_not_exist_$(nonce X | tr '-' '_')" >/dev/null 2>&1; then
-      _pass "unknown request id returns an empty history, not an error"
-    else
-      _fail "unknown request id returns an empty history" "the command errored"
-    fi
+  # A verdict written already decided holds exactly that one transition: a second
+  # row, or a state other than the projection, means the history was rewritten.
+  if [[ -z "$shot_id" ]]; then
+    skip "keeper history of a one-shot verdict" "no Phase-2 verdict or suppression in the recent log"
+  else
+    shot_hist="$(cs keeper history "$shot_id" --format json 2>/dev/null)"
+    shot_decision="$(printf '%s' "$req_json" | jq -r --arg id "$shot_id" \
+      'first(.[] | select(.id==$id)) | .decision // ""')"
+    assert_eq "one-shot verdict $shot_id is one terminal transition" "1:1:$shot_decision" \
+      "$(printf '%s' "$shot_hist" | jq -r 'if type == "array" and length > 0 then "\(length):\(.[0].seq):\(.[0].state)" else "none" end' 2>/dev/null)"
+  fi
+
+  # Cross-workspace / unknown ids must be indistinguishable and never 500.
+  if cs keeper history "kpr_does_not_exist_$(nonce X | tr '-' '_')" >/dev/null 2>&1; then
+    _pass "unknown request id returns an empty history, not an error"
+  else
+    _fail "unknown request id returns an empty history" "the command errored"
   fi
 
   cat <<'EOF_APPENDONLY_NOTE'
