@@ -102,13 +102,8 @@ jobs:
         env:
           IMAGE: ${{ steps.target.outputs.image }}@${{ steps.build.outputs.digest }}
         run: |
-          docker run --rm --network none --read-only --cap-drop ALL \
-            --security-opt no-new-privileges --entrypoint /bin/sh "$IMAGE" -ec '
-              test -s /usr/share/licenses/crewship-text/go/manifest.tsv
-              test -s /usr/share/licenses/crewship-text/project/THIRD-PARTY-NOTICES.md
-              test -s /usr/share/crewship-text/release-source.json
-              cd /opt && sha256sum -c /usr/share/crewship-text/runner.sha256
-            '
+          # The image has no shell (#5103): inspect its files from the host.
+          bash scripts/ci/verify-text-image-contents.sh "$IMAGE"
       - name: Scan the candidate before signing
         uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
         with:
