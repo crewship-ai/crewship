@@ -12,6 +12,9 @@ import (
 // This private host mode has no network listener or CLI config loading. The
 // controller sends admitted inputs through stdin, never argv or a disk file.
 func runHostCapture(input io.Reader, diagnostics io.Writer) int {
+	// The controller's service stop must not end the capture before it records
+	// the terminal result (#5081).
+	defer runoutput.SurviveControllerStop()()
 	spec, err := runoutput.ReadHostInput(input)
 	if err != nil {
 		fmt.Fprintln(diagnostics, "host capture handoff refused")

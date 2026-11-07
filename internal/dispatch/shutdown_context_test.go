@@ -3,6 +3,7 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -281,5 +282,100 @@ func TestSettle_OutcomeProbeTimeoutStillPersistsReconciliation(t *testing.T) {
 	p, _, err := h.store.RunProjection(t.Context(), a.RunID)
 	if err != nil || p.Status != "" {
 		t.Fatalf("timeout fabricated terminal: %+v %v", p, err)
+	}
+}
+
+// pendingStopRuntime accepts a stop request without confirming its effect,
+// which is what a protected host-captured run answers (#5081): the stop helper
+// has ended the process tree, but only the run's own return — its terminal
+// capture — proves it. Stop never reports success here.
+type pendingStopRuntime struct {
+	*fakeRuntime
+	requested chan struct{}
+}
+
+func (r *pendingStopRuntime) Stop(context.Context, string) (bool, error) {
+	select {
+	case <-r.requested:
+	default:
+		close(r.requested)
+	}
+	return false, nil
+}
+
+// A restart under a protected host-captured run must settle from the run's own
+// terminal result when it arrives within the stop budget, instead of parking at
+// once with "runtime stop could not be confirmed" and holding a slot (#5081).
+// Without the terminal return the stop remains unconfirmed and still parks.
+func TestShutdown_PendingStopSettlesFromTheRunsOwnReturn(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		classify Outcome
+		returns  bool
+		state    work.State
+		status   string
+		reason   string
+	}{
+		{"known failure after the stop", OutcomeFailed, true, work.StateFailed, "FAILED", ""},
+		{"unclear outcome stays reconciliation", OutcomeUnclear, true, work.StateNeedsReconciliation, "", "the runtime's outcome is unclear"},
+		{"no return stays unconfirmed", OutcomeFailed, false, work.StateNeedsReconciliation, "", "server shutdown: runtime stop could not be confirmed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.rt.classifyAs = tc.classify
+			r := h.accept("shutdown-pending-stop")
+			a, err := h.store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assignment := Assignment{Item: a.Item, RunID: a.RunID, Generation: a.Generation}
+			if err := h.store.Transition(t.Context(), work.TransitionRequest{WorkID: r.WorkID, RunID: a.RunID, Generation: a.Generation, To: work.StateRunning}); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.rt.Run(t.Context(), assignment, func() {}); err != nil {
+				t.Fatal(err)
+			}
+			runtime := &pendingStopRuntime{fakeRuntime: h.rt, requested: make(chan struct{})}
+			runDone := make(chan error, 1)
+			if tc.returns {
+				go func() {
+					<-runtime.requested
+					time.Sleep(50 * time.Millisecond) // the capture turns terminal after the tree stop
+					runDone <- errors.New("execution ended by stop: exit 143")
+				}()
+			}
+			cancelled := make(chan struct{})
+			d := New(h.store, runtime, nil, h.cfg, quiet())
+			began := time.Now()
+			d.shutdownAttempt(&liveAttempt{assignment: assignment, locator: h.rt.Locator(assignment), cancel: func() {
+				select {
+				case <-cancelled:
+				default:
+					close(cancelled)
+				}
+			}}, runDone)
+			if elapsed := time.Since(began); elapsed > 4*h.cfg.StopGrace {
+				t.Fatalf("shutdown settlement took %s, beyond its bounded budget", elapsed)
+			}
+			select {
+			case <-cancelled:
+			default:
+				t.Fatal("shutdown left local supervision running")
+			}
+			it, err := h.store.Get(t.Context(), r.WorkID)
+			if err != nil || it.State != tc.state {
+				t.Fatalf("shutdown state=%v err=%v, want %s", it.State, err, tc.state)
+			}
+			if tc.reason != "" && !strings.Contains(it.StateReason, tc.reason) {
+				t.Fatalf("shutdown reason %q, want %q", it.StateReason, tc.reason)
+			}
+			p, _, err := h.store.RunProjection(t.Context(), a.RunID)
+			if err != nil || p.Status != tc.status {
+				t.Fatalf("shutdown outcome %+v %v, want status %q", p, err, tc.status)
+			}
+			if h.rt.starts.Load() != 1 {
+				t.Fatal("shutdown repeated execution")
+			}
+		})
 	}
 }

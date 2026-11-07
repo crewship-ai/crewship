@@ -58,7 +58,12 @@ func (s *Store) RecoverRetainedResult(ctx context.Context, runID string, result 
 		return true, tx.Commit()
 	}
 	// Kept as a literal here to avoid a work -> dispatch import cycle.
-	parked := strings.HasPrefix(reason, LeaseExpiredReasonPrefix+" in runtime phase ") || reason == "protected host capture awaiting retained result"
+	// A server shutdown that could not confirm the stop lost observation the
+	// way an expired lease does (#5081). Only the capture's own terminal result,
+	// validated by the caller, settles it; the shutdown reason never does.
+	parked := strings.HasPrefix(reason, LeaseExpiredReasonPrefix+" in runtime phase ") || reason == "protected host capture awaiting retained result" ||
+		reason == "server shutdown: runtime stop could not be confirmed at agent-run:"+runID ||
+		reason == "server shutdown: runtime stopped but its outcome was not returned"
 	if it.State != StateNeedsReconciliation || !ended.Valid || !parked || phase == runtimePhasePlanned || locator != "agent-run:"+runID {
 		return true, fmt.Errorf("%w: attempt was not parked by lease recovery", ErrNotBound)
 	}
