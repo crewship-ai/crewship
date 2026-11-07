@@ -14,8 +14,9 @@ import (
 // The retirement triggers do not see a restored row: its grant arrives after its
 // issuer's membership. A bundle made before retirement existed can carry a grant
 // whose issuer had no standing, so the restored set is judged once, in the same
-// transaction. A bundle without memberships is not judged: nothing in it says
-// who has standing, and the target may receive its members from a later restore.
+// transaction, against the target's standing whatever the bundle carried. A
+// bundle without memberships fails closed: an issuer unknown here retires the
+// grant, and a later restore of the members does not bring it back.
 func retireRestoredPageGrants(ctx context.Context, tx *sql.Tx, dump *DBDump) error {
 	if has, err := tableHasColumn(ctx, tx, "page_grants", "retired_at"); err != nil || !has {
 		return err
@@ -27,9 +28,6 @@ func retireRestoredPageGrants(ctx context.Context, tx *sql.Tx, dump *DBDump) err
 			g["page_id"], g["subject_type"], g["subject_id"], g["level"], g["granted_by_user_id"], g["granted_at"]); err != nil {
 			return err
 		}
-	}
-	if len(dump.Tables["workspace_members"]) == 0 {
-		return nil
 	}
 	_, err := tx.ExecContext(ctx, `UPDATE page_grants SET retired_at=strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE rowid IN (SELECT grant_rowid FROM page_grant_verdicts WHERE retired_at IS NULL AND issuer_standing=0)`)
 	return err

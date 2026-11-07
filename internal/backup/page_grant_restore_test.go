@@ -177,6 +177,55 @@ func TestRestoreKeepsPageGrantRetirement(t *testing.T) {
 			t.Fatal("the retirement of the old issuance ended the new one")
 		}
 	})
+	// A bundle without memberships still lands on a target that has them, and
+	// standing is the target's. The grant row is removed before standing changes,
+	// so nothing on the target remembers it: only the arrival can judge it.
+	for _, test := range []struct {
+		name       string
+		arrive     string
+		wantLive   bool
+		afterwards string
+	}{
+		{name: "viewer on the target, promoted later", arrive: `UPDATE workspace_members SET role='VIEWER' WHERE id='grant-admin-SUFFIX'`, afterwards: `UPDATE workspace_members SET role='ADMIN' WHERE id='grant-admin-SUFFIX'`},
+		{name: "unknown on the target", arrive: `DELETE FROM workspace_members WHERE id='grant-admin-SUFFIX'`},
+		{name: "standing on the target", wantLive: true},
+	} {
+		t.Run("a bundle without memberships, issuer "+test.name, func(t *testing.T) {
+			suffix := "gr-pages-" + strings.ReplaceAll(strings.ReplaceAll(test.name, " ", "-"), ",", "")
+			db := openMigratedDBCov(t)
+			workspace, _ := seedPageGrantRestore(t, db, suffix)
+			dump, err := DumpWorkspace(ctx, db, workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, table := range []string{"workspace_members", "crew_members"} {
+				delete(dump.Tables, table)
+			}
+			for _, row := range dump.Tables["page_grants"] {
+				delete(row, "retired_at")
+			}
+			page := "grant-page-" + suffix
+			if _, err := db.Exec(`DELETE FROM page_grants WHERE page_id=?`, page); err != nil {
+				t.Fatal(err)
+			}
+			if test.arrive != "" {
+				if _, err := db.Exec(strings.ReplaceAll(test.arrive, "SUFFIX", suffix)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := RestoreDump(ctx, db, dump); err != nil {
+				t.Fatal(err)
+			}
+			if test.afterwards != "" {
+				if _, err := db.Exec(strings.ReplaceAll(test.afterwards, "SUFFIX", suffix)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if retired := pageGrantRetired(t, db, page); retired == test.wantLive {
+				t.Fatalf("retired=%v, want live=%v", retired, test.wantLive)
+			}
+		})
+	}
 	t.Run("a bundle from before retirement is judged on arrival", func(t *testing.T) {
 		source := openMigratedDBCov(t)
 		workspace, _ := seedPageGrantRestore(t, source, "gr-legacy")
