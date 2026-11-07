@@ -187,9 +187,12 @@ presses (`forcedCtrlS`) is exact either way.
 - `verifyPresses`: "Ověřit výsledek" presses; each press records `waitEndedAt`.
 
 The raw records are in `chain.json` as `saveWaits` and `forcedCtrlS`. The row's
-note starts with the same counts, e.g. "autosave 57×, forced Ctrl+S 6×,
-automatic reconcile 0×, Ověřit výsledek 0×", with the late autosaves, press
-outcomes, ambiguous saves and cause-unknown reconciles added when there are any. This is
+note starts with the measured press counts, then the inferred origins, e.g.
+"forced Ctrl+S 6×, Ověřit výsledek 0×; inferred from request timing, not proven
+(#5112): autosave 57×, press outcomes 6 unattributed, automatic reconcile 0×".
+Only the press counts are measured. The editor does not report what triggered a
+save, so autosave counts, press outcomes, ambiguous saves and reconcile causes are
+inferred from request timing and must not be quoted as fact (#5112). This is
 accounting, not a gate: a forced Ctrl+S never fails the row; the server head
 still decides whether a cycle's typing was saved.
 

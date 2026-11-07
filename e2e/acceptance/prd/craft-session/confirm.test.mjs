@@ -246,7 +246,7 @@ test("an autosave acknowledged after the 4 s cutoff stays an autosave; Ctrl+S on
   assert.equal(a.forcedCtrlSEvents[0].outcome, "confirm-only")
   assert.equal(a.forcedCtrlSEvents[0].newVersion, true)
   assert.equal(waitOrigin(recd.saveWaits[0], ops), "late-autosave")
-  assert.match(a.note, /^autosave 1× \(1 acknowledged after a forced press\), forced Ctrl\+S 1× \(1 confirm-only\)/)
+  assert.match(a.note, /^forced Ctrl\+S 1×, Ověřit výsledek 0×; inferred from request timing, not proven \(#5112\): autosave 1× \(1 acknowledged after a forced press\), press outcomes 1 confirm-only/)
 })
 
 test("an autosave that was preparing at the press and sends 100 ms after it is unattributed, not forced", async () => {
@@ -265,7 +265,7 @@ test("an autosave that was preparing at the press and sends 100 ms after it is u
   assert.deepEqual([a.autosaves, a.ambiguousSaves, a.ambiguousSaveOps, a.forcedCtrlSOutcomes["new-save"], a.forcedCtrlSOutcomes.unattributed], [0, 1, [1], 0, 1])
   assert.equal(waitOrigin(recd.saveWaits[0], ops), "unattributed")
   assert.equal(recd.forcedCtrlS[0].outcome, "unattributed")
-  assert.match(a.note, /forced Ctrl\+S 1× \(1 unattributed\), ambiguous save \(sent within 30 s after a forced press\) 1×, automatic reconcile/)
+  assert.match(a.note, /forced Ctrl\+S 1×, .*press outcomes 1 unattributed, ambiguous save \(sent within 30 s after a forced press\) 1×, automatic reconcile/)
 })
 
 test("a save sent well after the ambiguity window stays the forced save", async () => {
@@ -331,7 +331,7 @@ test("an automatic reconcile retry during a press wait is reported as cause unkn
   const a = accountingOf({ forced, ops })
   assert.deepEqual(a.reconcilesDuringPressWaitOps, [1, 2])
   assert.deepEqual(a.editorReconcileOps, [3])
-  assert.match(a.note, /automatic reconcile 1×, reconcile during a press wait \(cause unknown\) 2×, Ověřit výsledek 0×\.$/)
+  assert.match(a.note, /reconcile during a press wait \(cause unknown\) 2×, automatic reconcile 1×\.$/)
 })
 
 test("a press-triggered reconcile sent just after its wait ended is not counted as automatic", () => {
@@ -348,7 +348,7 @@ test("saveAccounting of a clean hour: every save automatic, nothing forced", () 
   const ops = [save(1, 1, "2"), save(2, 31, "3")]
   const a = accountingOf({ waits: [autoWait(0, 1, "2"), autoWait(1, 31, "3")], ops })
   assert.deepEqual([a.autosaves, a.lateAutosaves, a.forcedCtrlS, a.editorReconciles, a.reconcilesDuringPressWait, a.verifyPresses], [2, 0, 0, 0, 0, 0])
-  assert.equal(a.note, "autosave 2×, forced Ctrl+S 0×, automatic reconcile 0×, Ověřit výsledek 0×.")
+  assert.equal(a.note, "forced Ctrl+S 0×, Ověřit výsledek 0×; inferred from request timing, not proven (#5112): autosave 2×, automatic reconcile 0×.")
   assert.match(a.description, /not a gate/)
 })
 
@@ -357,5 +357,5 @@ test("hourInterruptions puts the save accounting first in the row's note", () =>
   const forced = [{ cycle: 1, at: at(4), site: "save-wait", reason: "x", opsAtPress: 1, endedAt: at(41), newVersion: true, version: "3", outcome: "new-save" }]
   const waits = [autoWait(0, 1, "2"), { cycle: 1, at: at(0), endedAt: at(41), pressed: true, opsAtPress: 1, pressedAt: at(4), version: "3", completed: true }]
   const r = hourInterruptions([], [], accountingOf({ waits, forced, ops }))
-  assert.match(r.note, /^autosave 1×, forced Ctrl\+S 1× \(1 new-save\), automatic reconcile 0×, Ověřit výsledek 0×\. Ověřit výsledek pressed 0 times/)
+  assert.match(r.note, /^forced Ctrl\+S 1×, Ověřit výsledek 0×; inferred from request timing, not proven \(#5112\): autosave 1×, press outcomes 1 new-save, automatic reconcile 0×\. Ověřit výsledek pressed 0 times/)
 })

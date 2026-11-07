@@ -322,6 +322,7 @@ export interface SaveAccounting {
 }
 
 export const SAVE_ACCOUNTING_DESCRIPTION =
+  "Measured: forcedCtrlS and verifyPresses. Inferred from request timing, not proven (#5112): autosaves, lateAutosaves, press outcomes, ambiguousSaves and reconcile causes. " +
   "autosaves: save waits whose version was committed by a save request sent before any forced press (lateAutosaves: of those, acknowledged after the press); " +
   "forcedCtrlS: Control+s pressed by the harness (no new version within 4 s, or the Word table cell not in the head after 4 s with status Neuložený koncept), by outcome new-save / confirm-only / no-version / unattributed / incomplete; " +
   "ambiguousSaves: committing save requests sent within 30 s after a forced press (an autosave prepared before the press cannot be told from the forced save), neither autosaves nor forced saves; " +
@@ -370,13 +371,16 @@ export function saveAccounting(input: {
   const editorReconcileOps = reconciles.filter((o) => !duringPress(o)).map((o) => o.n)
   const counts = { autosaves, forcedCtrlS: events.length, editorReconciles: editorReconcileOps.length, verifyPresses: verifications.length }
   const detail = (Object.entries(forcedCtrlSOutcomes) as Array<[PressOutcome, number]>).filter(([, k]) => k > 0).map(([o, k]) => `${k} ${o}`)
+  // Only the press counts are measured. Every origin below is inferred from request
+  // timing; the editor does not say what triggered a save (#5112).
   const note =
+    `forced Ctrl+S ${counts.forcedCtrlS}×, Ověřit výsledek ${counts.verifyPresses}×; ` +
+    `inferred from request timing, not proven (#5112): ` +
     `autosave ${counts.autosaves}×${lateAutosaves ? ` (${lateAutosaves} acknowledged after a forced press)` : ""}, ` +
-    `forced Ctrl+S ${counts.forcedCtrlS}×${detail.length ? ` (${detail.join(", ")})` : ""}, ` +
+    (detail.length ? `press outcomes ${detail.join(", ")}, ` : "") +
     (ambiguousSaveOps.length ? `ambiguous save (sent within ${PRESS_AMBIGUITY_MS / 1000} s after a forced press) ${ambiguousSaveOps.length}×, ` : "") +
-    `automatic reconcile ${counts.editorReconciles}×, ` +
     (reconcilesDuringPressWaitOps.length ? `reconcile during a press wait (cause unknown) ${reconcilesDuringPressWaitOps.length}×, ` : "") +
-    `Ověřit výsledek ${counts.verifyPresses}×.`
+    `automatic reconcile ${counts.editorReconciles}×.`
   return {
     ...counts,
     lateAutosaves,
