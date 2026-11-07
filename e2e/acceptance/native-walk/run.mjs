@@ -11,6 +11,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 import { formatTable, readRows, summarize, writeSummary } from "../prd/report.mjs"
+import { checkOrigin, jobArgs, runEnv } from "./runner-env.mjs"
 import { EXIT, SCENARIOS, fullChromium, loadEvidence, parseListed, verdict } from "./verdict.mjs"
 
 const HELP = `Usage: pnpm acceptance:native-walk --origin URL --rc SHA --output DIR [--env-file FILE] [--chrome PATH] [--grep RE]
@@ -53,15 +54,6 @@ function parse(argv) {
   return out
 }
 
-/** Bare http(s) origin, as e2e/acceptance/prd/env.ts accepts it. Errors name only scheme and
- * host: a rejected value may carry credentials, a token in the query or a private path. */
-function bareOrigin(raw) {
-  let url
-  try { url = new URL(raw) } catch { fail("--origin is not a URL") }
-  if (!/^https?:$/.test(url.protocol) || url.username || url.password || url.search || url.hash || (url.pathname && url.pathname !== "/")) fail(`--origin must be a bare http(s) origin, got ${url.protocol}//${url.host} with more`)
-  return url.origin
-}
-
 function findChrome(browsers, cli) {
   const own = spawnSync(process.execPath, ["-e", `import("${cli.replace("@playwright/test/cli.js", "playwright-core/index.mjs")}").then(m=>console.log(m.chromium.executablePath()))`], { encoding: "utf8", env: { ...process.env, PLAYWRIGHT_BROWSERS_PATH: browsers } }).stdout?.trim()
   if (own && fs.existsSync(own)) return own
@@ -85,26 +77,9 @@ function envFileFromEnvironment() {
   return { file, remove: () => fs.rmSync(dir, { recursive: true, force: true }) }
 }
 
-/** The only variables the account file may hand to the run. */
-const ACCOUNT_VARS = ["PRD_OWNER_EMAIL", "PRD_OWNER_PASSWORD", "PRD_MEMBER_EMAIL", "PRD_MEMBER_PASSWORD", "PRD_READER_EMAIL", "PRD_READER_PASSWORD", "PRD_WORKSPACE_ID", "PRD_KEEP_WORKSPACES"]
-
-// Sources the account file as shell variables (not exported), exports only ACCOUNT_VARS,
-// then exports the run's own variables over them, so the file can neither turn traces on
-// nor move the run elsewhere; no credential appears in any argv.
-const JOB = [
-  'f=$1; shift',
-  'if [ -n "$f" ]; then . "$f"; fi',
-  'for k in ' + ACCOUNT_VARS.join(" ") + '; do eval "[ -n \\"\\${$k+x}\\" ] && export $k"; done',
-  'while [ "$1" != "--" ]; do export "$1"; shift; done; shift',
-  'exec "$@"',
-].join("\n")
-
-/**
- * Through the shared queue where the host has one; it forwards no environment. The
- * account file is sourced inside the job, then the run's own variables are set over it.
- */
+/** Through the shared queue where the host has one; it forwards no environment. */
 function queued(envFile, env, command, commandArgs, options) {
-  const job = ["sh", "-c", JOB, "sh", envFile ?? "", ...Object.entries(env).map(([k, v]) => `${k}=${v}`), "--", command, ...commandArgs]
+  const job = jobArgs(envFile, env, command, commandArgs)
   if (spawnSync("sh", ["-c", "command -v crewship-heavy"]).status !== 0) return spawnSync(job[0], job.slice(1), options)
   return spawnSync("crewship-heavy", job, options)
 }
@@ -113,7 +88,9 @@ const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, "utf8
 
 const args = parse(process.argv.slice(2))
 if (!args.origin || !args.rc || !args.output) fail(`--origin, --rc and --output are required\n\n${HELP}`)
-const origin = bareOrigin(args.origin)
+const checked = checkOrigin(args.origin)
+if (checked.error) fail(checked.error)
+const origin = checked.origin
 const rc = args.rc.toLowerCase()
 if (!/^[0-9a-f]{40}$/.test(rc)) fail(`--rc must be the full 40-character commit, got ${args.rc}`)
 if (fs.existsSync(args.output) && fs.readdirSync(args.output).length) fail(`${args.output} is not empty: a stale run.json or row must not count for this run`)
@@ -135,11 +112,7 @@ fs.mkdirSync(args.output, { recursive: true })
 
 // Binds run.json, every row, each walk.json and finished.json to this invocation.
 const runId = randomUUID()
-// PRD_TRACE=0: a trace records request bodies, logins included (playwright.prd-acceptance.config.ts).
-const env = {
-  PATH: process.env.PATH, HOME: os.homedir(), PLAYWRIGHT_BROWSERS_PATH: browsers, CI: "1",
-  PRD_MODE: "full", PRD_ORIGIN: origin, PRD_OUTPUT_DIR: args.output, NATIVE_WALK_CHROME: chrome, PRD_TRACE: "0",
-}
+const env = runEnv({ path: process.env.PATH, home: os.homedir(), browsers, origin, output: args.output, chrome })
 const config = path.join(root, "playwright.native-walk.config.ts")
 const select = args.grep ? ["--grep", args.grep] : []
 for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => { accounts.remove(); process.exit(EXIT.setup) })
@@ -150,15 +123,16 @@ if (list.status !== 0) { accounts.remove(); fail(`playwright --list exited ${lis
 // Whatever discovery left in the output directory does not belong to the run.
 for (const name of fs.readdirSync(args.output)) fs.rmSync(path.join(args.output, name), { recursive: true, force: true })
 console.log(`Native walk ${runId} on ${origin}, RC ${rc}, ${chromeVersion} (${chrome})`)
-const run = queued(accounts.file, { ...env, PRD_RUN_ID: runId }, "xvfb-run", ["-a", "-s", "-screen 0 1600x1200x24", process.execPath, cli, "test", "--config", config, ...select], { cwd: root, stdio: "inherit" })
+const run = queued(accounts.file, runEnv({ path: process.env.PATH, home: os.homedir(), browsers, origin, output: args.output, chrome, runId }), "xvfb-run", ["-a", "-s", "-screen 0 1600x1200x24", process.execPath, cli, "test", "--config", config, ...select], { cwd: root, stdio: "inherit" })
 accounts.remove()
 
 const listed = parseListed(listedOut)
 const rows = readRows(path.join(args.output, "rows"))
 const record = readJson(path.join(args.output, "run.json"))
 const finished = readJson(path.join(args.output, "finished.json"))
+const reporter = readJson(path.join(args.output, "reporter.json"))
 writeSummary(args.output, rows, record)
-const result = verdict({ playwrightStatus: run.status, listed, rows, run: record, finished, rc, origin, chrome, runId, narrowed: Boolean(args.grep), evidence: loadEvidence(args.output) })
+const result = verdict({ playwrightStatus: run.status, listed, rows, run: record, finished, reporter, rc, origin, chrome, runId, narrowed: Boolean(args.grep), evidence: loadEvidence(args.output) })
 const counts = summarize(rows)
 fs.writeFileSync(path.join(args.output, "verdict.json"), JSON.stringify({
   ...result, runId, rc, origin, appSha: record?.appSha ?? null, appDirty: record?.appDirty ?? null, playwrightStatus: run.status,

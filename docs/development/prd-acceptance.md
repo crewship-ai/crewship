@@ -505,8 +505,12 @@ credential is on a command line. Only the `PRD_OWNER_*`, `PRD_MEMBER_*`,
 `PRD_READER_*`, `PRD_WORKSPACE_ID` and `PRD_KEEP_WORKSPACES` assignments reach the run,
 and the run's own settings, `PRD_TRACE=0` among them, are set over them. Without
 `--env-file` the shell's `PRD_*` account variables are used. Each run gets a random
-`runId`, which `run.json`, every row, each `walk.json` and `finished.json` must
-carry; artefacts of another run on the same RC and origin do not count. Run the command directly: it puts Playwright through `crewship-heavy` itself
+`runId`, which `run.json`, every row, each `walk.json`, `finished.json` and
+`reporter.json` must carry; artefacts of another run on the same RC and origin do not
+count. `reporter.json` is written only when every callback of the PRD reporter returned
+(Playwright swallows reporter exceptions), and its row count must match the rows read
+and the tests listed. Each walk also reads the deployed build at its start and its end;
+both must be `--rc`, clean, so a deploy during the run cannot pass as the RC. Run the command directly: it puts Playwright through `crewship-heavy` itself
 where the host has it. `--output` must be new or empty. It needs `xvfb-run` and a
 full Chromium (Playwright's own, else the newest under `PLAYWRIGHT_BROWSERS_PATH`, or
 `--chrome`); the headless shell is refused. `--grep RE` narrows the run.
@@ -520,7 +524,7 @@ full Chromium (Playwright's own, else the newest under `PLAYWRIGHT_BROWSERS_PATH
 
 The verdict never reads Playwright's text output. `$OUT` holds `verdict.json`
 (verdict, reasons, `notVerified`, counts, app SHA, the Chromium path and version),
-`summary.md`, `run.json`, `finished.json`, `rows/`,
+`summary.md`, `run.json`, `finished.json`, `reporter.json`, `rows/`,
 `evidence/native-walk/<test>/walk.json` with a screenshot after the reload, and
 `playwright/`. The rules are `e2e/acceptance/native-walk/verdict.mjs`, tested by
 `node --test e2e/acceptance/native-walk/verdict.test.mjs`.

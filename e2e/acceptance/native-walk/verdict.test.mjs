@@ -3,7 +3,9 @@ import assert from "node:assert/strict"
 import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
+import { spawnSync } from "node:child_process"
 import { test } from "node:test"
+import { ACCOUNT_VARS, checkOrigin, jobArgs, runEnv } from "./runner-env.mjs"
 import { EXIT, HISTORY_NOT_ENABLED, SCENARIOS, evidencePath, fullChromium, isHeadlessShell, loadEvidence, parseListed, sameVersions, verdict } from "./verdict.mjs"
 
 const RC = "ce984daf1d5f9dad37e00228c269ad0ae06736dd"
@@ -33,6 +35,7 @@ function walkEvidence(s, over = {}) {
     app: s.app, label: s.app === "wordcraft" ? "Word" : "Sheet", appSha: RC, origin: ORIGIN, runId: RUN,
     chromium: { path: CHROME, version: "156.0.8078.4", headless: false },
     failure: null, violations: [], steps, ops, savesAfterProof: 0, releaseStatus: "ok", pageErrors: [],
+    build: { start: { sha: RC, dirty: false, version: "dev", error: null }, end: { sha: RC, dirty: false, version: "dev", error: null } },
     versions: { start: "1", receipts, head: String(v), headAfterReload: String(v), lostVersions: [lostAt] },
     history: { result: "not-enabled", listingStatus: 404, error: HISTORY_NOT_ENABLED, listing: null, truncated: null },
     ...over,
@@ -47,6 +50,7 @@ const good = (over = {}) => ({
   rows: SCENARIOS.map((s) => row(s)),
   run: { ...RUN_JSON },
   finished: { ...FINISHED },
+  reporter: { runId: RUN, rows: 2 },
   rc: RC, origin: ORIGIN, chrome: CHROME, runId: RUN, narrowed: false,
   evidence: Object.fromEntries(SCENARIOS.map((s) => [s.id, walkEvidence(s)])),
   ...over,
@@ -162,6 +166,18 @@ const cases = [
   // P2-2: listings compare as arrays of digit strings, never as joined text.
   { name: "P2-2 a listing whose joined text matches but whose elements do not", input: withEvidence("walk.word", (e) => { const h = historyOk(e); const l = h.history.listing; return { ...h, history: { ...h.history, listing: [`${l[0]},${l[1]}`, ...l.slice(2)] } } }), want: "FAIL", reason: /is not the observed/ },
   { name: "P2-2 a listing of numbers instead of version strings", input: withEvidence("walk.word", (e) => { const h = historyOk(e); return { ...h, history: { ...h.history, listing: h.history.listing.map(Number) } } }), want: "FAIL", reason: /is not the observed/ },
+  // Codex round 2 on 0aca329e2.
+  // P1: Playwright swallows reporter exceptions, so the PRD reporter must prove it completed.
+  { name: "R2 no reporter.json (a PRD reporter callback threw)", input: good({ reporter: null }), want: "FAIL", reason: /did not record its completion/ },
+  { name: "R2 reporter.json of another run", input: good({ reporter: { runId: OTHER_RUN, rows: 2 } }), want: "FAIL", reason: /reporter.json is of run 0b9a2c11/ },
+  { name: "R2 reporter.json counts fewer rows than were read", input: good({ reporter: { runId: RUN, rows: 1 } }), want: "FAIL", reason: /counts 1 rows, 2 were read/ },
+  { name: "R2 reporter.json counts fewer rows than listed tests", input: good({ reporter: { runId: RUN, rows: 1 }, rows: [row(WORD)] }), want: "FAIL", reason: /counts 1 rows for 2 listed tests/ },
+  // P1: the deployed build is read at the start and the end of each walk.
+  { name: "R2 another build at the start of a walk", input: withEvidence("walk.word", (e) => ({ ...e, build: { ...e.build, start: { sha: "1".repeat(40), dirty: false } } })), want: "FAIL", reason: /served 1{40} \(dirty false\) at the start/ },
+  { name: "R2 another build at the end of a walk (deployed between Word and Sheet)", input: withEvidence("walk.sheet", (e) => ({ ...e, build: { ...e.build, end: { sha: "1".repeat(40), dirty: false } } })), want: "FAIL", reason: /walk.sheet: the origin served 1{40} .* at the end/ },
+  { name: "R2 the build could not be read at the end", input: withEvidence("walk.word", (e) => ({ ...e, build: { ...e.build, end: { sha: "unknown", dirty: null, error: "GET /api/v1/system/version answered 401" } } })), want: "FAIL", reason: /served unknown .* at the end/ },
+  { name: "R2 a dirty build at the start", input: withEvidence("walk.word", (e) => ({ ...e, build: { ...e.build, start: { sha: RC, dirty: true } } })), want: "FAIL", reason: /dirty true\) at the start/ },
+  { name: "R2 no build record", input: withEvidence("walk.word", (e) => ({ ...e, build: undefined })), want: "FAIL", reason: /no deployed build recorded at the start/ },
 ]
 for (const c of cases) {
   test(`not a pass: ${c.name}`, () => {
@@ -173,7 +189,7 @@ for (const c of cases) {
 }
 
 test("a narrowed green run is PARTIAL, never 0", () => {
-  const v = verdict(good({ narrowed: true, listed: [WORD.test], rows: [row(WORD)] }))
+  const v = verdict(good({ narrowed: true, listed: [WORD.test], rows: [row(WORD)], reporter: { runId: RUN, rows: 1 } }))
   assert.equal(v.verdict, "PARTIAL")
   assert.equal(v.exit, EXIT.partial)
   assert.deepEqual(v.expected, ["walk.word"])
@@ -229,4 +245,50 @@ test("P2-2 version lists are equal only element by element", () => {
   assert.ok(!sameVersions(["1", "2", "3"], ["1", "2"]))
   assert.ok(!sameVersions(["v1"], ["v1"]))
   assert.ok(!sameVersions(null, []))
+})
+
+// Runner regressions (Codex round 2): the job environment and the origin refusal.
+function jobEnv(fileText, own) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-walk-job-"))
+  const file = path.join(dir, "accounts.env")
+  fs.writeFileSync(file, fileText, { mode: 0o600 })
+  const job = jobArgs(file, own, "env", [])
+  const r = spawnSync(job[0], job.slice(1), { encoding: "utf8", env: { PATH: process.env.PATH } })
+  fs.rmSync(dir, { recursive: true, force: true })
+  assert.equal(r.status, 0, r.stderr)
+  return { env: Object.fromEntries(r.stdout.split("\n").filter((l) => l.includes("=")).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1)])), argv: job }
+}
+const own = runEnv({ path: process.env.PATH, home: "/home/walk", browsers: "/b", origin: ORIGIN, output: "/out", chrome: CHROME, runId: RUN })
+const PASSWORD = "p w'$x\"y"
+
+test("R2 an account file that exports PRD_TRACE=1 still yields PRD_TRACE=0", () => {
+  assert.equal(own.PRD_TRACE, "0")
+  const { env } = jobEnv(`PRD_OWNER_EMAIL=o@example.test\nexport PRD_TRACE=1\nPRD_TRACE=1\n`, own)
+  assert.equal(env.PRD_TRACE, "0")
+})
+test("R2 a variable outside the account list does not reach the run, exported or not, and cannot move the run", () => {
+  const { env } = jobEnv(`export NOISE=1\nOTHER=2\nexport PRD_ORIGIN=https://evil.test\nexport HOME=/evil\nexport NODE_OPTIONS=--require=/evil.js\nPRD_OWNER_EMAIL=o@example.test\n`, own)
+  assert.equal(env.NOISE, undefined)
+  assert.equal(env.OTHER, undefined)
+  assert.equal(env.NODE_OPTIONS, undefined)
+  assert.equal(env.PRD_ORIGIN, ORIGIN)
+  assert.equal(env.HOME, "/home/walk")
+  assert.equal(env.PRD_OWNER_EMAIL, "o@example.test")
+})
+test("R2 account values arrive intact and never in an argv", () => {
+  const { env, argv } = jobEnv(`PRD_OWNER_EMAIL=o@example.test\nPRD_OWNER_PASSWORD='p w'\\''$x"y'\n`, own)
+  assert.equal(env.PRD_OWNER_PASSWORD, PASSWORD)
+  assert.ok(!argv.some((a) => a.includes("p w")))
+  assert.ok(ACCOUNT_VARS.includes("PRD_OWNER_PASSWORD"))
+})
+test("R2 a rejected origin with userinfo and a token query prints neither", () => {
+  const r = checkOrigin("https://walker:hunter2@crewship-dev3.unifylab.cz/private?token=abc123#frag")
+  assert.ok(r.error)
+  for (const secret of ["walker", "hunter2", "token", "abc123", "private", "frag"]) assert.ok(!r.error.includes(secret), r.error)
+  assert.match(r.error, /https:\/\/crewship-dev3.unifylab.cz/)
+  const bad = checkOrigin("not a url hunter2")
+  assert.ok(bad.error && !bad.error.includes("hunter2"))
+  const ftp = checkOrigin("ftp://walker:hunter2@host")
+  assert.ok(ftp.error && !ftp.error.includes("hunter2") && !ftp.error.includes("walker"))
+  assert.deepEqual(checkOrigin(`${ORIGIN}/`), { origin: ORIGIN })
 })

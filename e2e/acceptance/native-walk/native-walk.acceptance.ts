@@ -9,7 +9,9 @@ import { chromium, type Frame, type Page } from "@playwright/test"
 import { readFacts } from "../prd/craft-lease/sheet-workbook"
 import { holdsMarker, isUnconfirmedStatus, labelVersion, pendingReplies } from "../prd/craft-session/confirm"
 import { walk, wordFacts } from "../prd/craft-session/facts"
-import { expect, prdRequirement, test } from "../prd/fixtures"
+import { readAppBuild, type AppBuild } from "../prd/app-sha"
+import { apiAs, loginStorageState } from "../prd/auth"
+import { expect, prdRequirement, test, type PrdScenario } from "../prd/fixtures"
 import { disposeActors, isolatedActor } from "../prd/outage-lostack/actor"
 import * as N from "../prd/outage-lostack/native"
 import { EVIDENCE_FILE, HISTORY_NOT_ENABLED, SCENARIOS } from "./verdict.mjs"
@@ -58,6 +60,22 @@ const spy = () => {
   new MutationObserver(log).observe(document, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["data-save-phase"] })
 }
 
+/** The build the origin serves now, through a login of its own (same source as global setup). */
+async function deployedBuild(prd: PrdScenario): Promise<AppBuild> {
+  try {
+    const owner = prd.env.accounts.owner
+    if (!owner) return { sha: "unknown", version: null, dirty: null, error: "owner account missing" }
+    const api = await apiAs(prd.origin, await loginStorageState(prd.origin, owner))
+    try {
+      return await readAppBuild(api)
+    } finally {
+      await api.dispose()
+    }
+  } catch (err) {
+    return { sha: "unknown", version: null, dirty: null, error: String(err).slice(0, 200) }
+  }
+}
+
 const bounded = <T>(what: string, ms: number, p: Promise<T>) => {
   let t: NodeJS.Timeout
   return Promise.race([p, new Promise<never>((_, no) => { t = setTimeout(() => no(new Error(`${what}: stalled past ${ms} ms`)), ms) })]).finally(() => clearTimeout(t))
@@ -90,6 +108,8 @@ for (const scenario of SCENARIOS) {
     const out: Record<string, unknown> = { app, label, chromium: { path: exe, version: browser.version(), headless: false }, appSha: prd.appSha, origin: prd.origin, runId: prd.run.runId, startedAt: new Date().toISOString() }
     const opsRef: { ops: N.Op[] } = { ops: [] }
     let failure: string | undefined
+    // A deploy between global setup and this walk, or during it, must not be stamped with the RC.
+    const build: { start: AppBuild; end: AppBuild | null } = { start: await deployedBuild(prd), end: null }
     const pageErrors: { at: string; step: string; message: string }[] = []
     let releaseStatus: string | null = null // "ok", or why the release failed; null when the walk never got there
     let proofAt: number | null = null // ops recorded when the version proof was taken
@@ -478,11 +498,15 @@ for (const scenario of SCENARIOS) {
     } catch (err) {
       failure = String(err).slice(0, 600)
     } finally {
+      build.end = await deployedBuild(prd)
+      for (const [when, b] of [["start", build.start], ["end", build.end]] as const) {
+        if (b.sha !== prd.appSha || b.dirty !== false) violations.push({ step: `build at the ${when}`, rule: `the origin served ${b.sha} (dirty ${String(b.dirty)}${b.error ? `, ${b.error}` : ""}), not ${prd.appSha} clean` })
+      }
       // Nothing may save after the proof; a page error anywhere in the walk fails it.
       const savesAfterProof = proofAt === null ? null : opsRef.ops.slice(proofAt).filter((o) => o.kind === "save").length
       if (savesAfterProof) violations.push({ step: "after the walk", rule: `${savesAfterProof} saves after the version proof` })
       for (const e of pageErrors) violations.push({ step: e.step, rule: `page error: ${e.message}` })
-      Object.assign(out, { finishedAt: new Date().toISOString(), failure: failure ?? null, violations, steps, ops: opsRef.ops, savesAfterProof, releaseStatus, pageErrors, lines: lines.slice(-40) })
+      Object.assign(out, { finishedAt: new Date().toISOString(), failure: failure ?? null, violations, steps, ops: opsRef.ops, savesAfterProof, releaseStatus, pageErrors, build, lines: lines.slice(-40) })
       await prd.evidence(EVIDENCE_FILE, out)
       await disposeActors()
       await browser.close()

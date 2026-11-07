@@ -156,6 +156,12 @@ export function checkEvidence(scenario, evidence, { rc, origin, chrome, runId })
   if (evidence.app !== scenario.app) problems.push(`evidence is for ${evidence.app}, not ${scenario.app}`)
   if (evidence.appSha !== rc) problems.push(`evidence app SHA ${evidence.appSha} is not the RC`)
   if (!runId || evidence.runId !== runId) problems.push(`evidence is of run ${evidence.runId}, not ${runId}`)
+  // Read from the origin at the start and the end of this walk, not only in global setup.
+  for (const when of ["start", "end"]) {
+    const b = evidence.build?.[when]
+    if (!b) problems.push(`no deployed build recorded at the ${when} of the walk`)
+    else if (b.sha !== rc || b.dirty !== false) problems.push(`the origin served ${b.sha} (dirty ${JSON.stringify(b.dirty)}) at the ${when} of the walk, not RC ${rc} clean`)
+  }
   if (normOrigin(evidence.origin) !== normOrigin(origin)) problems.push(`evidence origin ${evidence.origin} is not ${origin}`)
   const c = evidence.chromium ?? {}
   if (!c.version) problems.push("evidence records no Chromium version")
@@ -186,13 +192,13 @@ export function checkEvidence(scenario, evidence, { rc, origin, chrome, runId })
 /**
  * @param {{
  *   playwrightStatus: number | null, listed: string[], rows: Array<Record<string, any>>,
- *   run: Record<string, any> | null, finished: Record<string, any> | null,
+ *   run: Record<string, any> | null, finished: Record<string, any> | null, reporter: Record<string, any> | null,
  *   rc: string, origin: string, chrome?: string, runId: string, narrowed: boolean,
  *   evidence: Record<string, any>,
  * }} input
  * @returns {{ exit: number, verdict: "PASS" | "FAIL" | "SETUP" | "PARTIAL", reasons: string[], notVerified: { id: string, item: string }[], expected: string[] }}
  */
-export function verdict({ playwrightStatus, listed, rows, run, finished, rc, origin, chrome, runId, narrowed, evidence }) {
+export function verdict({ playwrightStatus, listed, rows, run, finished, reporter, rc, origin, chrome, runId, narrowed, evidence }) {
   const setup = [], failed = [], notVerified = []
   if (!/^[0-9a-f]{40}$/.test(String(rc ?? ""))) setup.push(`--rc ${JSON.stringify(rc)} is not a full 40-character SHA`)
   if (!runId) setup.push("no run id")
@@ -215,6 +221,13 @@ export function verdict({ playwrightStatus, listed, rows, run, finished, rc, ori
   }
 
   const titles = Array.isArray(listed) ? listed : []
+  // The PRD reporter's own completion: Playwright swallows reporter exceptions.
+  if (!reporter) failed.push("the PRD reporter did not record its completion: no reporter.json")
+  else {
+    if (!runId || reporter.runId !== runId) failed.push(`reporter.json is of run ${reporter.runId}, not ${runId}`)
+    if (reporter.rows !== (rows ?? []).length) failed.push(`reporter.json counts ${reporter.rows} rows, ${(rows ?? []).length} were read`)
+    if (reporter.rows !== titles.length) failed.push(`reporter.json counts ${reporter.rows} rows for ${titles.length} listed tests`)
+  }
   for (const t of titles) if (!SCENARIOS.some((s) => s.test === t)) failed.push(`unexpected test listed: ${t}`)
   const expected = SCENARIOS.filter((s) => (narrowed ? titles.includes(s.test) : true))
   if (!expected.length) failed.push("no test was listed")
