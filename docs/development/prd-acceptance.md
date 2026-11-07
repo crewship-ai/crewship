@@ -153,7 +153,13 @@ duplicate version, editor usable.
 `craft-write-revoked.acceptance.ts` (`A.craft.write-revoked-word`, `-sheet`)
 withdraws the write right of a person who holds the open editor and has unsaved
 typing: the editor turns read-only, the server refuses further writes, and the
-draft is kept and offered (also after a reload once the right returns).
+draft is kept in the browser but offered to nobody while the right is gone (#5073,
+as draft-revocation proves for the same frame). Once the right returns and the
+person takes the editor, the draft is offered with every typed line, once and in
+order.
+
+`craft-soak.acceptance.ts` changes a fixed-width counter in every save, because an
+identical save at the head creates no version (#5075).
 
 `craft-agent-free-edit.acceptance.ts` (`A.craft.agent.free-edit-word`, `-sheet`)
 lets the seeded agent edit a free document while a person watches it in the

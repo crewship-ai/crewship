@@ -7,21 +7,36 @@
 // version, and nothing newer than it.
 //
 // Full mode only: it drives the real editor of a deployed origin.
+import type { Page } from "@playwright/test"
 import { captureAdmission, peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
 import { APPLICATIONS, NativePage, emptyDocument, parseEvents } from "./craft-lease/native"
 import { headText, inspectDrafts, placeCaret, newTyping, typedMarkers, typeLines, waitForDraftOffer } from "./craft-session/draft"
 import { checkDraftCopies, checkNoLines, lineLedger, type LineCheck } from "./craft-session/lines"
 import { pause } from "./drafts-crash/crash"
 import * as editor from "./drafts-crash/native"
+import { recoveryRows } from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
 
 const REQ = {
-  wordcraft: prdRequirement("A.craft.write-revoked-word", "Word: when the write right is withdrawn the open editor turns read-only and the unsaved draft is kept and offered"),
-  gridcraft: prdRequirement("A.craft.write-revoked-sheet", "Sheet: when the write right is withdrawn the open editor turns read-only and the unsaved draft is kept and offered"),
+  wordcraft: prdRequirement("A.craft.write-revoked-word", "Word: when the write right is withdrawn the open editor turns read-only and the unsaved draft is kept, offered to nobody while the right is gone, and offered with every line when it returns"),
+  gridcraft: prdRequirement("A.craft.write-revoked-sheet", "Sheet: when the write right is withdrawn the open editor turns read-only and the unsaved draft is kept, offered to nobody while the right is gone, and offered with every line when it returns"),
 } as const
 
 // The server rechecks authority on a 5 s tick; leave generous slack.
 const READ_ONLY_WITHIN_MS = 45_000
+
+/** Kept native draft rows of this page in the browser: how many, never what they hold. */
+const storedDrafts = (page: Page, pageId: string) => page.evaluate((id) => new Promise<number>((resolve, reject) => {
+  const open = indexedDB.open("crewship-document-drafts")
+  open.onerror = () => reject(open.error)
+  open.onsuccess = () => {
+    const db = open.result
+    if (!db.objectStoreNames.length) { db.close(); resolve(0); return }
+    const all = db.transaction(db.objectStoreNames[0]).objectStore(db.objectStoreNames[0]).getAllKeys()
+    all.onerror = () => { db.close(); reject(all.error) }
+    all.onsuccess = () => { db.close(); resolve(all.result.filter((k) => String(k).includes(id)).length) }
+  }
+}), pageId)
 
 for (const { application, label } of APPLICATIONS) {
   test.describe(`${label} write right lost`, () => {
@@ -94,11 +109,19 @@ for (const { application, label } of APPLICATIONS) {
           // when the server closes the editor's event stream because the authority changed.
           await expect(page.getByRole("status").filter({ hasText: /Pouze čtení|Editor odpojen/ }).first()).toBeVisible({ timeout: READ_ONLY_WITHIN_MS })
           const readOnlyAfterMs = Date.now() - revokedAt
-          const offeredRows = await waitForDraftOffer(page, READ_ONLY_WITHIN_MS)
-          const drafts = await inspectDrafts(page, typedBefore)
-          // Record the per-line check (lines.json) before any verdict on this copy.
-          await expectLines(checkDraftCopies(ledger, drafts.texts, "draft offered when the right was withdrawn"), "the offered draft holds every line the editor took, once and in order")
-          expect(drafts.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines the editor took`).toBe(true)
+          // Keeping a draft and offering it are separate (#5073): without Edit the
+          // open tab offers the kept draft to nobody, as draft-revocation proves for
+          // the same frame (draft: "retain", reason: "write_revoked"). The page says
+          // the draft is kept, the browser holds it, and its lines are checked when
+          // the right returns below.
+          await expect(page.getByText(/koncept zachován|zůstaly jako místní koncept/).first(), "the page says the draft is kept").toBeVisible({ timeout: READ_ONLY_WITHIN_MS })
+          await expect.poll(() => storedDrafts(page, doc.pageId), { timeout: READ_ONLY_WITHIN_MS, message: "the browser keeps the draft" }).toBeGreaterThan(0)
+          // Long enough for a late read proof to have offered it, if it would.
+          await pause(15_000)
+          const keptRows = await storedDrafts(page, doc.pageId)
+          const offeredWithoutRight = await recoveryRows(page).count()
+          expect(keptRows, "the draft is still kept").toBeGreaterThan(0)
+          expect(offeredWithoutRight, "a kept draft is offered to nobody without Edit").toBe(0)
           const shots: Record<string, Buffer> = { "peer-read-only.png": await page.screenshot({ fullPage: true }) }
 
           // The server takes no further write from the person and nothing was saved.
@@ -147,8 +170,8 @@ for (const { application, label } of APPLICATIONS) {
             ...log,
             readOnlyAfterMs,
             leaseAfterRevocation: view && { mine: view.mine, can_write: view.can_write, can_edit: view.can_edit },
-            offered: offeredRows,
-            draftHasWork: drafts.hasMarker,
+            keptRows,
+            offeredWithoutRight,
             acceptedLines: progress.accepted, typingStoppedBy: progress.stoppedBy ?? null,
             lateWrite: late.status(),
             reacquire: reacquire.status(),
