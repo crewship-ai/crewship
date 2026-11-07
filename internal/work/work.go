@@ -91,6 +91,12 @@ func (s State) Terminal() bool {
 // first process was never confirmed stopped — the two-live-runtimes case the
 // contract calls out and T08 exists to catch. It stops holding the slot when
 // somebody resolves it, not when a timer fires.
+//
+// This is the answer for a caller that sees only a state, and it stays
+// conservative. The capacity queries use SQLHoldsExecutionSlot, which also
+// sees the current attempt: once the protected capture has confirmed that the
+// runtime ended (#5108), the item gives its slot back while it stays in
+// reconciliation for the decision about its effects.
 func (s State) HoldsExecutionSlot() bool {
 	return s == StateStarting || s == StateRunning || s == StateNeedsReconciliation
 }
@@ -116,6 +122,28 @@ func (s State) Live() bool { return s == StateStarting || s == StateRunning }
 // predicates rather than typed out again, because the first version of this
 // package wrote the list inline in four queries and one of them disagreed with
 // the other three.
+// SQLHoldsExecutionSlot is the capacity rule for the work_items row named by
+// alias (a table name or alias in the caller's query), as an SQL boolean
+// expression.
+//
+// starting and running always hold their slot. needs_reconciliation holds it
+// unless the attempt of its CURRENT generation recorded a confirmed runtime end
+// (work_attempts.runtime_end_confirmed_at, written only by the capture-backed
+// settlement in RecoverRetainedResult). The state does not change and nothing
+// is retried: the slot exists to prevent two live runtimes for one piece of
+// work, and a confirmed end removes that risk, while the effects still wait for
+// a resolution (#5108). An attempt of an older generation never counts, so a
+// re-parked later run holds its slot again.
+//
+// Every query that counts execution slots uses this one expression, so the
+// claim scan, the admission checks, the metrics and restricted preflight
+// cannot disagree about what is held.
+func SQLHoldsExecutionSlot(alias string) string {
+	return `(` + alias + `.state IN ('` + string(StateStarting) + `','` + string(StateRunning) + `') OR (` +
+		alias + `.state='` + string(StateNeedsReconciliation) + `' AND NOT EXISTS (SELECT 1 FROM work_attempts slot_end WHERE slot_end.work_id=` +
+		alias + `.id AND slot_end.generation=` + alias + `.generation AND slot_end.runtime_end_confirmed_at IS NOT NULL)))`
+}
+
 var (
 	sqlHoldsExecutionSlot = stateList(func(s State) bool { return s.HoldsExecutionSlot() })
 	sqlOccupiesSession    = stateList(func(s State) bool { return s.OccupiesSession() })

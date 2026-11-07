@@ -129,8 +129,12 @@ type workAttemptView struct {
 	EndReason   string  `json:"end_reason"`
 	// ExitEvidence is an exit code, a signal or a provider status — §3 forbids
 	// credentials in it, and nothing here relaxes that.
-	ExitEvidence string  `json:"exit_evidence"`
-	CostUSD      float64 `json:"cost_usd"`
+	ExitEvidence string `json:"exit_evidence"`
+	// RuntimeEndConfirmedAt is when the protected capture confirmed this
+	// attempt's runtime ended. On a needs_reconciliation item it means the
+	// execution slot is released; the effects still await a resolution (#5108).
+	RuntimeEndConfirmedAt *string `json:"runtime_end_confirmed_at"`
+	CostUSD               float64 `json:"cost_usd"`
 }
 
 // workEventView is one row of the append-only history. detail_json is
@@ -399,7 +403,8 @@ func (h *WorkItemsHandler) readItem(r *http.Request, workspaceID, workItemID str
 func (h *WorkItemsHandler) readAttempts(r *http.Request, workItemID string) ([]workAttemptView, error) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT run_id, attempt, generation, lease_owner, lease_expires_at, heartbeat_at,
-		       runtime_locator, started_at, start_reason, ended_at, end_reason, exit_evidence, cost_usd
+		       runtime_locator, started_at, start_reason, ended_at, end_reason, exit_evidence,
+		       runtime_end_confirmed_at, cost_usd
 		FROM work_attempts WHERE work_id=? ORDER BY attempt`, workItemID)
 	if err != nil {
 		return nil, err
@@ -408,13 +413,14 @@ func (h *WorkItemsHandler) readAttempts(r *http.Request, workItemID string) ([]w
 	out := make([]workAttemptView, 0)
 	for rows.Next() {
 		var a workAttemptView
-		var ended sql.NullString
+		var ended, endConfirmed sql.NullString
 		if err := rows.Scan(&a.RunID, &a.Attempt, &a.Generation, &a.LeaseOwner, &a.LeaseExpiresAt,
 			&a.HeartbeatAt, &a.RuntimeLocator, &a.StartedAt, &a.StartReason, &ended,
-			&a.EndReason, &a.ExitEvidence, &a.CostUSD); err != nil {
+			&a.EndReason, &a.ExitEvidence, &endConfirmed, &a.CostUSD); err != nil {
 			return nil, err
 		}
 		a.EndedAt = workNullString(ended)
+		a.RuntimeEndConfirmedAt = workNullString(endConfirmed)
 		out = append(out, a)
 	}
 	return out, rows.Err()

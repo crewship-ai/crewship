@@ -134,10 +134,12 @@ func workLedgerSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 			"ended_at":      nullable(dateTime()),
 			"end_reason":    str(),
 			"exit_evidence": str(),
-			"cost_usd":      number(),
+			"runtime_end_confirmed_at": map[string]any{"type": "string", "format": "date-time", "nullable": true,
+				"description": "When the protected capture confirmed this attempt's runtime ended. On a needs_reconciliation item the execution slot is then released; the effects still await a resolution."},
+			"cost_usd": number(),
 		}, "run_id", "attempt", "generation", "lease_owner", "lease_expires_at",
 			"heartbeat_at", "runtime_locator", "started_at", "start_reason",
-			"ended_at", "end_reason", "exit_evidence"), // cost_usd: OWNER/ADMIN only (#3590)
+			"ended_at", "end_reason", "exit_evidence", "runtime_end_confirmed_at"), // cost_usd: OWNER/ADMIN only (#3590)
 		"WorkEvent": object(map[string]any{
 			"seq": integer(),
 			"at":  dateTime(),
