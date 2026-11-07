@@ -25,6 +25,7 @@
     "test:e2e:update": "playwright test --update-snapshots",
     "acceptance:prd": "node e2e/acceptance/prd/run.mjs",
     "acceptance:draft-revocation": "node e2e/acceptance/draft-revocation/run.mjs",
+    "acceptance:native-walk": "node e2e/acceptance/native-walk/run.mjs",
     "smoke": "node e2e/smoke.mjs",
     "smoke:create-agent": "node e2e/smoke-create-agent.mjs",
     "db:generate": "dotenv -- prisma generate",
