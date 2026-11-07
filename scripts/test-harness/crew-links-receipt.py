@@ -68,31 +68,42 @@ def positive(issue, assignment, code, tag, candidates, runs, full):
     }
 
 
-def refusal(issue, source, target, source_run, entries):
-    run = source_run.get("run_id") or source_run.get("trace_id")
-    actor = source_run.get("agent_id")
-    if source_run.get("agent_slug") != "alex":
-        raise NotMatched()
-    for entry in entries:
+def chat_refusal(chat, source, target, actor, task_hash, refused, started):
+    """The server refusal of a direct owner turn's /assign (#5086).
+
+    The server derives the chat from the run's own run.started entry
+    (internal/api/delegation_run_context.go), so a refusal counts only when its
+    trace_id is an alex run that started in the chat its refs name, and its
+    task hash is the exact task the owner turn sent.
+    """
+    if not isinstance(task_hash, str) or not SHA256.fullmatch(task_hash):
+        raise ValueError("invalid expected task hash")
+    for entry in refused:
         payload = entry.get("payload") or {}
-        if (entry.get("entry_type") == "assignment.refused" and entry.get("trace_id") == run
+        refs = entry.get("refs") or {}
+        run = entry.get("trace_id")
+        if not (entry.get("entry_type") == "assignment.refused" and isinstance(run, str) and run
                 and entry.get("actor_id") == actor and entry.get("agent_id") == actor
                 and entry.get("crew_id") == source and payload.get("reason") == "crews_not_connected"
                 and payload.get("http_status") == 403 and payload.get("source_crew_id") == source
-                and payload.get("target_crew_id") == target and payload.get("target_slug") == "morgan"):
-            task_hash = payload.get("task_sha256")
-            if entry.get("actor_type") != "agent" or not isinstance(task_hash, str) or not SHA256.fullmatch(task_hash):
-                raise ValueError("incomplete server receipt")
-            return {
-                "issue_identifier": identity(issue), "assignment_id": identity(source_run.get("id")),
-                "source_run_id": identity(run), "source_actor_id": identity(actor),
-                "source_crew_id": identity(source), "target_crew_id": identity(target), "target_slug": "morgan",
-                "refusal": {"entry_id": identity(entry.get("id")), "entry_type": "assignment.refused",
-                            "actor_type": "agent", "actor_id": identity(actor), "agent_id": identity(actor),
-                            "trace_id": identity(run), "crew_id": identity(source),
-                            "reason": "crews_not_connected", "http_status": 403,
-                            "task_sha256": task_hash, "evidence_source": "server_journal"},
-            }
+                and payload.get("target_crew_id") == target and payload.get("target_slug") == "morgan"
+                and payload.get("task_sha256") == task_hash and refs.get("chat_id") == chat):
+            continue
+        if entry.get("actor_type") != "agent":
+            raise ValueError("incomplete server receipt")
+        for start in started:
+            if (start.get("entry_type") == "run.started" and start.get("trace_id") == run
+                    and start.get("agent_id") == actor and (start.get("payload") or {}).get("chat_id") == chat):
+                return {
+                    "chat_id": identity(chat), "run_started_entry_id": identity(start.get("id")),
+                    "source_run_id": identity(run), "source_actor_id": identity(actor),
+                    "source_crew_id": identity(source), "target_crew_id": identity(target), "target_slug": "morgan",
+                    "refusal": {"entry_id": identity(entry.get("id")), "entry_type": "assignment.refused",
+                                "actor_type": "agent", "actor_id": identity(actor), "agent_id": identity(actor),
+                                "trace_id": identity(run), "crew_id": identity(source),
+                                "reason": "crews_not_connected", "http_status": 403,
+                                "task_sha256": task_hash, "evidence_source": "server_journal"},
+                }
     raise NotMatched()
 
 
@@ -121,7 +132,7 @@ def receipt(positive_proof, negative_proof, record_id, record_identifier, source
     positive_keys = {"issue_identifier", "assignment_id", "journal_run_id", "agent_id", "agent_slug", "status", "outcome", "completed_outcome",
                      "created_activity_id", "completed_activity_id", "full_result_utf8_sha256", "full_result_utf8_bytes",
                      "expected_record_code_sha256", "expected_code_present", "correlation_tag_sha256", "tag_matched_created_task", "lookup_cli_exit"}
-    negative_keys = {"issue_identifier", "assignment_id", "source_run_id", "source_actor_id", "source_crew_id", "target_crew_id", "target_slug", "refusal"}
+    negative_keys = {"chat_id", "run_started_entry_id", "source_run_id", "source_actor_id", "source_crew_id", "target_crew_id", "target_slug", "refusal"}
     refusal_keys = {"entry_id", "entry_type", "actor_type", "actor_id", "agent_id", "trace_id", "crew_id", "reason", "http_status", "task_sha256", "evidence_source"}
     if (set(positive_proof) != positive_keys or set(negative_proof) != negative_keys
             or set(negative_proof.get("refusal", {})) != refusal_keys):
@@ -138,7 +149,7 @@ def receipt(positive_proof, negative_proof, record_id, record_identifier, source
             or type(positive_proof["lookup_cli_exit"]) is not int or positive_proof["lookup_cli_exit"] != 0
             or type(positive_proof["full_result_utf8_bytes"]) is not int or positive_proof["full_result_utf8_bytes"] < 1):
         raise ValueError("incomplete positive observation")
-    for key in ["issue_identifier", "assignment_id", "source_run_id", "source_actor_id", "source_crew_id", "target_crew_id"]:
+    for key in ["chat_id", "run_started_entry_id", "source_run_id", "source_actor_id", "source_crew_id", "target_crew_id"]:
         identity(negative_proof[key])
     refusal_proof = negative_proof["refusal"]
     for key in ["entry_id", "actor_id", "agent_id", "trace_id", "crew_id"]:
@@ -164,7 +175,7 @@ def receipt(positive_proof, negative_proof, record_id, record_identifier, source
     if not re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z?", started):
         raise ValueError("invalid start time")
     from datetime import datetime, timezone
-    return {"schema_version": 1, "suite": "test-crew-links", "complete": True,
+    return {"schema_version": 2, "suite": "test-crew-links", "complete": True,
             "started_at": started, "completed_at": datetime.now(timezone.utc).isoformat(),
             "run": {"scan_run_id": run_id, "stage_run_id": stage_run, "workspace_sha256": digest(workspace)},
             "source": source_provenance(),
@@ -246,9 +257,9 @@ def main():
         if mode == "positive":
             issue, assignment, code, tag, candidates, runs, full = fields(7)
             value = positive(issue, assignment, code, tag, json.loads(candidates), json.loads(runs), json.loads(full))
-        elif mode == "refusal":
-            issue, source, target, run, entries = fields(5)
-            value = refusal(issue, source, target, json.loads(run), json.loads(entries))
+        elif mode == "chat-refusal":
+            chat, source, target, actor, task_hash, refused, started = fields(7)
+            value = chat_refusal(chat, source, target, actor, task_hash, json.loads(refused), json.loads(started))
         elif mode == "write":
             positive_proof, negative_proof, *context = fields(10)
             value = receipt(json.loads(positive_proof), json.loads(negative_proof), *context)

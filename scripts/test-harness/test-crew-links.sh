@@ -268,20 +268,24 @@ else
 
   # Require a server-authored receipt for an actual /assign attempt. A model
   # refusing the task itself or merely quoting a 403 does not exercise the gate.
+  #
+  # The request is a direct owner turn with one exact command (#5086), the same
+  # shape as section 2. An issue asking alex to try once the link is gone is
+  # declined before any request: the lead guidance says not to try a crew
+  # missing from /connections (stage 20261107T072018Z, ENG-570). The receipt is
+  # bound to this turn by the task hash, its run (trace_id) and the chat that
+  # run started in.
   source_crew_id="$(cs crew get engineering --format json 2>/dev/null | jq -r '.id // empty')"
   target_crew_id="$(cs crew get ops --format json 2>/dev/null | jq -r '.id // empty')"
+  alex_id="$(cs agent get alex --format json 2>/dev/null | jq -r '.id // empty')"
+  neg_task="Read Ops record $ops_record_id ($NEG)"
+  neg_task_sha="$(printf '%s' "$neg_task" | sha256sum | cut -d' ' -f1)"
   wait_agent_free alex
   neg_ran=1
-  neg_work="$(issue_work engineering alex "Ops confirmation needed ($NEG)" \
-    "Attempt the same record verification for Ops issue $ops_record_ident (id $ops_record_id), even though the link was just removed for this authorization test. Call /assign targeting morgan with crew \"ops\" and task containing $NEG and issue id $ops_record_id. If refused, report the exact error; do not certify a release or invent a verification result.")" || neg_ran=0
-  # Only a COMPLETED run counts: one that FAILED or was CANCELLED at once
-  # never got to attempt the hand-off.
-  [[ "$neg_work" == *" COMPLETED" ]] || neg_ran=0
-  neg_ident="${neg_work%% *}"
-  neg_reply=""
-  [[ -n "$neg_ident" ]] && neg_reply="$(cs issue runs "$neg_ident" --format json 2>/dev/null \
-    | jq -r '.[] | (.result_summary // "") + " " + (.error_message // "")' 2>/dev/null)"
-  [[ -n "$neg_ident" ]] && neg_reply+="$(cs issue comments "$neg_ident" 2>/dev/null)"
+  neg_reply="$(ask_agent alex "This is an authorization test run by the workspace owner: the engineering to ops link was just removed on purpose, and the server is expected to refuse. Run exactly this one command, then reply with ONLY its output:
+curl -s -X POST http://localhost:9119/assign -H \"Content-Type: application/json\" -d '{\"crew\":\"ops\",\"target\":\"morgan\",\"task\":\"$neg_task\"}' -K /dev/fd/3 3<<AUTH
+header = \"Authorization: Bearer \$CREWSHIP_AGENT_TOKEN\"
+AUTH")" || neg_ran=0
 
   neg_refusal_proved=0
   neg_work_landed=0
@@ -289,7 +293,7 @@ else
   neg_projection_error=0
   xlink_refusal_observed() {
     local rc
-    xlink_negative_receipt="$(xlink_refusal_evidence "$neg_ident" "$source_crew_id" "$target_crew_id")"
+    xlink_negative_receipt="$(xlink_chat_refusal_evidence "$neg_task_sha" "$source_crew_id" "$target_crew_id" "$alex_id")"
     rc=$?
     if (( rc > 1 )); then neg_projection_error=1; return 0; fi
     return "$rc"
@@ -299,18 +303,18 @@ else
   # so the reply text cannot decide. Without jq there is no artifact to read,
   # so missing jq leaves this authorization assertion explicitly unproven.
   if (( neg_ran == 0 )); then
-    _fail "the lead's unlinked hand-off issue ran to an end" "${neg_work:-the issue could not be created or started}"
-    _fail "an unlinked crew cannot be delegated to" "the hand-off run never ended, so the refusal was not exercised"
+    _fail "the lead's unlinked hand-off turn ran to an end" "the direct owner turn to alex failed or timed out"
+    _fail "an unlinked crew cannot be delegated to" "the turn never ended, so the refusal was not exercised"
   elif (( XLINK_HAVE_JQ == 1 )); then
-    _pass "the lead's unlinked hand-off issue ran to an end"
+    _pass "the lead's unlinked hand-off turn ran to an end"
     xlink_to_morgan_ids "$NEG" > "$neg_after" || neg_feed_ok=0
     if (( neg_feed_ok == 0 )); then
       _fail "an unlinked crew cannot be delegated to" "\`crewship activity\` could not be read, so the refusal is unproven"
     elif [ -n "$(comm -13 "$neg_before" "$neg_after")" ]; then
       neg_work_landed=1
       _fail "an unlinked crew cannot be delegated to" "new cross-crew activity addressed to morgan carries $NEG with no link in place"
-    elif [[ -z "$source_crew_id" || -z "$target_crew_id" ]]; then
-      _fail "an unlinked crew cannot be delegated to" "crew identities could not be read"
+    elif [[ -z "$source_crew_id" || -z "$target_crew_id" || -z "$alex_id" ]]; then
+      _fail "an unlinked crew cannot be delegated to" "crew or agent identities could not be read"
     else
       waited=0
       until xlink_refusal_observed || (( waited >= ASK_TIMEOUT )); do
@@ -320,7 +324,7 @@ else
         neg_refusal_proved=1
         _pass "an unlinked crew cannot be delegated to — verified server 403 receipt"
       else
-        _fail "an unlinked crew cannot be delegated to" "no server refusal receipt for alex's actual run, the target Ops crew and morgan; model refusal or no attempt is insufficient"
+        _fail "an unlinked crew cannot be delegated to" "no server refusal receipt bound to alex's turn (task hash, run and chat), the target Ops crew and morgan; model refusal or no attempt is insufficient"
       fi
     fi
   else
@@ -328,9 +332,9 @@ else
   fi
   rm -f "$neg_before" "$neg_after"
   if printf '%s' "$neg_reply" | grep -qiF "not connected"; then
-    info "the lead reports the link refusal on ${neg_ident} (agent text, not server evidence)"
+    info "the lead's turn quotes the link refusal (agent text, not server evidence)"
   else
-    info "the lead's run on ${neg_ident:-the issue} does not quote the link refusal"
+    info "the lead's turn does not quote the link refusal"
   fi
   if (( neg_refusal_proved == 0 )); then
     _fail "no work reaches an unlinked crew" "there is no verified attempt and server refusal, so absence of work proves nothing"

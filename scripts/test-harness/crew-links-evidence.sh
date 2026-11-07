@@ -67,34 +67,42 @@ xlink_result_reported() {
   xlink_result_evidence "$@" >/dev/null
 }
 
-xlink_refusal_evidence() { # <issue> <source-crew-id> <target-crew-id>
-  local runs source run actor entries row projected rc
-  runs="$(cs issue runs "$1" --format json 2>/dev/null)" || return 1
-  source="$(printf '%s\n' "$runs" | jq -c '.[] | select(.agent_slug == "alex")' 2>/dev/null)" || return 1
+# The negative half is a direct owner turn (#5086): the lead's own guidance
+# says not to try an unlinked crew, so an issue asking it to try is declined
+# before any request. The turn hands alex one exact /assign call instead. The
+# server writes the refusal with trace_id = the calling run and refs.chat_id =
+# the chat it derives from that run's run.started entry; the task hash binds
+# it to the exact task this turn sent. No attempt or a model refusal leaves no
+# such receipt and stays a FAIL.
+xlink_chat_refusal_evidence() { # <task-sha256> <source-crew-id> <target-crew-id> <alex-agent-id>
+  local refused candidates row run chat started projected rc
+  refused="$(cs journal --agent alex --type assignment.refused --since 2h --lines 200 --format json 2>/dev/null)" || return 1
+  candidates="$(printf '%s\n' "$refused" | jq -c --arg sha "$1" --arg source "$2" --arg target "$3" --arg actor "$4" '
+    .[] | select(.entry_type == "assignment.refused" and .actor_id == $actor and .agent_id == $actor and
+      .crew_id == $source and .payload.reason == "crews_not_connected" and .payload.http_status == 403 and
+      .payload.source_crew_id == $source and .payload.target_crew_id == $target and
+      .payload.target_slug == "morgan" and .payload.task_sha256 == $sha and
+      (.trace_id | type == "string" and length > 0) and (.refs.chat_id | type == "string" and length > 0))
+    | {run: .trace_id, chat: .refs.chat_id}' 2>/dev/null)" || return 1
   while IFS= read -r row; do
     [[ -n "$row" ]] || continue
-    run="$(printf '%s\n' "$row" | jq -r '.run_id // .trace_id // empty')"
-    actor="$(printf '%s\n' "$row" | jq -r '.agent_id // empty')"
-    [[ -n "$run" && -n "$actor" ]] || continue
-    entries="$(cs journal --run-id "$run" --type assignment.refused --lines 100 --format json 2>/dev/null)" || return 1
-    if ! printf '%s\n' "$entries" | jq -e --arg run "$run" --arg actor "$actor" --arg source "$2" --arg target "$3" '
-      any(.[]; .entry_type == "assignment.refused" and .trace_id == $run and
-        .actor_id == $actor and .agent_id == $actor and .crew_id == $source and
-        .payload.reason == "crews_not_connected" and .payload.http_status == 403 and
-        .payload.source_crew_id == $source and .payload.target_crew_id == $target and
-        .payload.target_slug == "morgan")' >/dev/null 2>&1; then continue; fi
+    run="$(printf '%s\n' "$row" | jq -r '.run')"
+    chat="$(printf '%s\n' "$row" | jq -r '.chat')"
+    started="$(cs journal --run-id "$run" --type run.started --lines 20 --format json 2>/dev/null)" || return 1
+    if ! printf '%s\n' "$started" | jq -e --arg run "$run" --arg actor "$4" --arg chat "$chat" '
+      any(.[]; .entry_type == "run.started" and .trace_id == $run and .agent_id == $actor and .payload.chat_id == $chat)' >/dev/null 2>&1; then continue; fi
     [[ -n "${HARNESS_DETAIL_DIR:-}" ]] || return 0
     command -v python3 >/dev/null 2>&1 || return 2
-    projected="$(printf '%s\0' "$1" "$2" "$3" "$row" "$entries" |
-      python3 "$_XLINK_EVIDENCE_DIR/crew-links-receipt.py" refusal)"
+    projected="$(printf '%s\0' "$chat" "$2" "$3" "$4" "$1" "$refused" "$started" |
+      python3 "$_XLINK_EVIDENCE_DIR/crew-links-receipt.py" chat-refusal)"
     rc=$?
     if (( rc == 0 )); then printf '%s\n' "$projected"; return 0; fi
     return 2  # Actual server refusal passed; retention projection failed.
-  done <<< "$source"
+  done <<< "$candidates"
   return 1
 }
 
-xlink_refusal_seen() {
+xlink_chat_refusal_seen() {
   local HARNESS_DETAIL_DIR=""
-  xlink_refusal_evidence "$@" >/dev/null
+  xlink_chat_refusal_evidence "$@" >/dev/null
 }
