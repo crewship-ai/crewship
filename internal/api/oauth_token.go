@@ -163,6 +163,11 @@ func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger 
 			continue
 		}
 
+		if !oauthRefreshPermitted(ctx, db, id, tokenURL) {
+			logger.Warn("OAuth token not refreshed: token endpoint is not an approved host", "credential_id", id)
+			continue
+		}
+
 		// Refresh the token
 		newToken, err := refreshOAuthToken(ctx, tokenURL, clientID, clientSecret, refreshToken, resource)
 		if err != nil {
