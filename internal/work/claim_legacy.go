@@ -21,7 +21,7 @@ import (
 // projection is delayed or retrying.
 var liveSlotsCTE = `WITH live_slots AS (
  SELECT workspace_id,agent_id,crew_id,session_id,class
- FROM work_items WHERE state IN (` + sqlHoldsExecutionSlot + `)
+ FROM work_items WHERE ` + SQLHoldsExecutionSlot("work_items") + `
  UNION ALL
  SELECT a.workspace_id,a.assigned_to_id,COALESCE(ag.crew_id,''),COALESCE(a.session_id,''),'background'
  FROM assignments a JOIN agents ag ON ag.id=a.assigned_to_id AND ag.workspace_id=a.workspace_id

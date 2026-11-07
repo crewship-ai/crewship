@@ -376,6 +376,19 @@ func TestCollectWorkMetrics_ReconciliationAndLeaseLoss(t *testing.T) {
 	if got := metricValue(t, out, "crewshipd_work_live", map[string]string{"class": "background"}); got != 1 {
 		t.Errorf("live background = %v, want 1: needs_reconciliation still holds a slot", got)
 	}
+
+	// #5108: once the capture-backed settlement confirms the runtime ended, the
+	// item stays in reconciliation but no longer counts as live. The column is
+	// set directly here; the store's guarded writer is covered in internal/work.
+	mustExec(t, s.db, `UPDATE work_attempts SET runtime_end_confirmed_at=? WHERE run_id=?`,
+		tsformat.Format(workBaseTime.Add(11*time.Minute)), withRuntimeClaim.RunID)
+	confirmed := renderWorkMetrics(t, s)
+	if got := metricValue(t, confirmed, "crewshipd_work_live", map[string]string{"class": "background"}); got != 0 {
+		t.Errorf("live background = %v, want 0 after a confirmed runtime end", got)
+	}
+	if got := metricValue(t, confirmed, "crewshipd_work_items", map[string]string{"state": "needs_reconciliation"}); got != 1 {
+		t.Errorf("needs_reconciliation work items = %v, want 1: the release must not settle the item", got)
+	}
 	// The start-latency series has one real sample: the claim that reached
 	// `running`. The other attempt never confirmed a runtime and must not
 	// contribute a fabricated zero.

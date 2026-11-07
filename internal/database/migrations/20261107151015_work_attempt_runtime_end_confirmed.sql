@@ -1,0 +1,12 @@
+-- #5108, owner's decision: a needs_reconciliation item whose runtime end is
+-- confirmed gives back its execution slot. Its state, evidence and resolution
+-- are unchanged; only capacity follows the confirmation.
+--
+-- Set once, by the retained settlement (work.Store.RecoverRetainedResult), in
+-- the same transaction that records the captured result. That settlement runs
+-- only after the caller validated the protected capture and confirmed the end
+-- (orchestrator.RetainedEndConfirmed: own exit, runtime absence or a whole-tree
+-- stop receipt). Never set from a park reason alone, never cleared, and no API
+-- or CLI writes it. It belongs to its attempt: a later generation of the same
+-- item does not inherit it.
+ALTER TABLE work_attempts ADD COLUMN runtime_end_confirmed_at TEXT;

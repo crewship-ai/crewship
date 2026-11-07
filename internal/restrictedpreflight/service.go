@@ -13,6 +13,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/paymaster"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
+	"github.com/crewship-ai/crewship/internal/work"
 )
 
 type Service struct {
@@ -173,7 +174,7 @@ func cheap(ctx context.Context, tx *sql.Tx, s source, requireFree bool) error {
 		var busy bool
 		err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM restricted_preflight_reservations r JOIN restricted_workflow_jobs j ON j.id=r.workflow_id WHERE r.issue_id=? AND j.state IN ('pending','running'))
  OR EXISTS(SELECT 1 FROM restricted_workflow_jobs WHERE workspace_id=? AND agent_id=? AND state IN ('pending','running'))
- OR EXISTS(SELECT 1 FROM work_items WHERE workspace_id=? AND agent_id=? AND state IN ('starting','running','needs_reconciliation'))
+ OR EXISTS(SELECT 1 FROM work_items WHERE workspace_id=? AND agent_id=? AND `+work.SQLHoldsExecutionSlot("work_items")+`)
  OR EXISTS(SELECT 1 FROM assignments WHERE workspace_id=? AND assigned_to_id=? AND status NOT IN ('COMPLETED','FAILED','CANCELLED','TIMEOUT'))`, s.Issue, s.Workspace, s.Agent, s.Workspace, s.Agent, s.Workspace, s.Agent).Scan(&busy)
 		if err != nil {
 			return err

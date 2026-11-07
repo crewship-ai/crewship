@@ -22598,6 +22598,12 @@
           "run_id": {
             "type": "string"
           },
+          "runtime_end_confirmed_at": {
+            "description": "When the protected capture confirmed this attempt's runtime ended. On a needs_reconciliation item the execution slot is then released; the effects still await a resolution.",
+            "format": "date-time",
+            "nullable": true,
+            "type": "string"
+          },
           "runtime_locator": {
             "description": "Where the runtime is. Recovery consults it before deciding a process is gone; an expired lease alone does not authorize a second one.",
             "type": "string"
@@ -22622,7 +22628,8 @@
           "start_reason",
           "ended_at",
           "end_reason",
-          "exit_evidence"
+          "exit_evidence",
+          "runtime_end_confirmed_at"
         ],
         "type": "object"
       },

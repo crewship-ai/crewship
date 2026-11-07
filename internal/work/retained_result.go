@@ -17,7 +17,8 @@ import (
 // runID and that the execution provably ended (orchestrator
 // RetainedEndConfirmed). Live workers and operator resolutions retain their own authority.
 // Failed background execution may have external effects, so it keeps
-// reconciliation and its capacity fence; a real successful exit can complete
+// reconciliation; the confirmed end recorded here gives back its execution
+// slot without settling those effects (#5108). A real successful exit can complete
 // the work, and a host chat turn settles a real exit either way, whichever
 // accepted reason parked it.
 func (s *Store) RecoverRetainedResult(ctx context.Context, runID string, result RunResult, successful bool) (bool, error) {
@@ -106,8 +107,12 @@ func (s *Store) RecoverRetainedResult(ctx context.Context, runID string, result 
 			return true, err
 		}
 	}
-	res, err := tx.ExecContext(ctx, `UPDATE work_attempts SET run_result_json=?,run_status=?,exit_evidence=?,end_reason=?,ended_at=? WHERE run_id=? AND work_id=? AND generation=? AND run_status=''`,
-		string(data), status, "protected host capture", "protected retained capture confirmed execution exit", tsformat.Format(now), runID, workID, generation)
+	// The caller confirmed the runtime end before calling (see above), so the
+	// attempt records it here, in the same transaction as the result. It
+	// releases the execution slot of a background item that stays in
+	// reconciliation (SQLHoldsExecutionSlot, #5108); nothing else reads it.
+	res, err := tx.ExecContext(ctx, `UPDATE work_attempts SET run_result_json=?,run_status=?,exit_evidence=?,end_reason=?,ended_at=?,runtime_end_confirmed_at=? WHERE run_id=? AND work_id=? AND generation=? AND run_status=''`,
+		string(data), status, "protected host capture", "protected retained capture confirmed execution exit", tsformat.Format(now), tsformat.Format(now), runID, workID, generation)
 	if err != nil {
 		return true, err
 	}
