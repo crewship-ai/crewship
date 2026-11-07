@@ -471,9 +471,12 @@ the status, and how often "Ověřit výsledek" was pressed; every press is a fai
 It proves on the RC that the content reaches the server with its styles and cells,
 that ctrl+s with a change makes exactly one version and without a change none, that
 a reload leaves the document and renders it, that a lost reply is recovered without
-a second version, and that a release leaves no unsaved draft. The versions come from
-the save receipts alone: they must run from the starting head without a gap or a
-repeat up to the final head.
+a second version, and that a release succeeds and leaves no unsaved draft. A page
+error anywhere in the walk fails it. The versions come from the save receipts alone,
+checked after the last step and its reload: they are exactly the committed saves the
+browser saw plus the dropped reply, they run from the starting head without a gap or
+a repeat, the head after the final reload is the last receipt, and nothing saves
+after that.
 
 It does not prove:
 
@@ -498,15 +501,19 @@ pnpm acceptance:native-walk \
 
 `--rc` is the full commit the origin must serve clean (`GET /api/v1/system/version`).
 `--env-file` holds the PRD accounts and is sourced inside the queued job, so no
-credential is on a command line; without it the `PRD_*` variables of the shell are
-used. Run the command directly: it puts Playwright through `crewship-heavy` itself
+credential is on a command line. Only the `PRD_OWNER_*`, `PRD_MEMBER_*`,
+`PRD_READER_*`, `PRD_WORKSPACE_ID` and `PRD_KEEP_WORKSPACES` assignments reach the run,
+and the run's own settings, `PRD_TRACE=0` among them, are set over them. Without
+`--env-file` the shell's `PRD_*` account variables are used. Each run gets a random
+`runId`, which `run.json`, every row, each `walk.json` and `finished.json` must
+carry; artefacts of another run on the same RC and origin do not count. Run the command directly: it puts Playwright through `crewship-heavy` itself
 where the host has it. `--output` must be new or empty. It needs `xvfb-run` and a
 full Chromium (Playwright's own, else the newest under `PLAYWRIGHT_BROWSERS_PATH`, or
 `--chrome`); the headless shell is refused. `--grep RE` narrows the run.
 
 | Exit code | Meaning |
 | --- | --- |
-| 0 | PASS: both walks listed, each left exactly one passed row, Playwright exited 0 and wrote `finished.json`, and each `walk.json` has every step, no press and contiguous versions |
+| 0 | PASS: both walks listed, each left exactly one passed row, Playwright exited 0 and wrote this run's `finished.json`, and each `walk.json` has every step, no press, no page error, a released document and contiguous versions |
 | 1 | FAIL: a walk, a row (also an unmapped or extra one), the evidence or the run itself |
 | 2 | SETUP: arguments, browser, credentials, or the origin does not serve `--rc` clean, or `run.json` is missing |
 | 3 | PARTIAL: a `--grep` run passed. Never read this as a pass |

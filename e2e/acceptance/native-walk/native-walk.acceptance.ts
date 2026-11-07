@@ -87,9 +87,12 @@ for (const scenario of SCENARIOS) {
     const violations: { step: string; rule: string }[] = []
     const steps: Row[] = []
     const lines: string[] = []
-    const out: Record<string, unknown> = { app, label, chromium: { path: exe, version: browser.version(), headless: false }, appSha: prd.appSha, origin: prd.origin, startedAt: new Date().toISOString() }
+    const out: Record<string, unknown> = { app, label, chromium: { path: exe, version: browser.version(), headless: false }, appSha: prd.appSha, origin: prd.origin, runId: prd.run.runId, startedAt: new Date().toISOString() }
     const opsRef: { ops: N.Op[] } = { ops: [] }
     let failure: string | undefined
+    const pageErrors: { at: string; step: string; message: string }[] = []
+    let releaseStatus: string | null = null // "ok", or why the release failed; null when the walk never got there
+    let proofAt: number | null = null // ops recorded when the version proof was taken
     try {
       await bounded(`${label} walk`, WALK_MS, (async () => {
         const { context, page, api, ws } = await isolatedActor(prd, browser, `native walk ${label}`, { viewport: N.VIEWPORT })
@@ -99,7 +102,7 @@ for (const scenario of SCENARIOS) {
         const ref = await N.createNative(api, ws.id, app, `PRD native walk ${label}`)
         out.initVersion = ref.initVersion
         const ops = (opsRef.ops = N.instrument(context))
-        page.on("pageerror", (e) => lines.push(`${new Date().toISOString()} pageerror ${String(e).slice(0, 240)}`))
+        page.on("pageerror", (e) => pageErrors.push({ at: new Date().toISOString(), step: steps.at(-1)?.name ?? "before the first step", message: String(e).slice(0, 240) }))
         page.on("console", (m) => { if (m.type() === "error") lines.push(`${new Date().toISOString()} error ${m.text().slice(0, 200)}`) })
 
         const tag = Math.random().toString(36).slice(2, 7)
@@ -401,28 +404,13 @@ for (const scenario of SCENARIOS) {
           checkContent(h1, "after the next save")
         })
 
+        // Save receipts: every committed save the browser saw, plus the one whose reply was dropped.
+        const receiptsNow = () => [...ops.filter((o) => o.kind === "save" && o.status === 200 && o.version).map((o) => o.version as string), ...lost.map((x) => x.serverVersion ?? "?")].sort((a, b) => Number(a) - Number(b))
+        const sameVersions = (a: unknown, b: string[]) => Array.isArray(a) && a.length === b.length && a.every((v, i) => typeof v === "string" && /^\d+$/.test(v) && v === b[i])
+        let headAfterReload: string | null = null
         await step("final", async () => {
           const h = await settle()
           checkContent(h, "final")
-          // Versions from the save receipts alone: the history listing below is behind a flag that
-          // stays off until the feature is accepted, so this must hold without it.
-          const receipts = [...ops.filter((o) => o.kind === "save" && o.status === 200 && o.version).map((o) => o.version as string), ...lost.map((x) => x.serverVersion ?? "?")].sort((a, b) => Number(a) - Number(b))
-          const stepRow = (name: string) => steps.find((x) => x.name === name)
-          const unchanged = stepRow("ctrl+s without a change"), lostStep = stepRow("lost reply")
-          const versionProblems: string[] = []
-          receipts.forEach((v, i) => { if (v !== String(BigInt(ref.initVersion) + BigInt(i) + 1n)) versionProblems.push(`receipt ${i + 1} is v${v}, expected v${BigInt(ref.initVersion) + BigInt(i) + 1n}`) })
-          if (!receipts.length) versionProblems.push("no save receipt")
-          if (receipts.at(-1) !== h.version) versionProblems.push(`last receipt v${receipts.at(-1)}, final head v${h.version}`)
-          if (!unchanged || unchanged.versionBefore !== unchanged.versionAfter) versionProblems.push(`ctrl+s without a change: v${unchanged?.versionBefore} to v${unchanged?.versionAfter}`)
-          if (!lostStep?.versionBefore || lostStep.versionAfter !== String(BigInt(lostStep.versionBefore) + 1n)) versionProblems.push(`lost reply: v${lostStep?.versionBefore} to v${lostStep?.versionAfter}`)
-          out.versions = {
-            start: ref.initVersion, receipts, head: h.version, lostReplies: lost.length,
-            unchangedSave: { before: unchanged?.versionBefore ?? null, after: unchanged?.versionAfter ?? null },
-            lostReply: { before: lostStep?.versionBefore ?? null, after: lostStep?.versionAfter ?? null },
-            contiguous: versionProblems.length === 0, problems: versionProblems,
-          }
-          for (const p of versionProblems) violate(`version sequence: ${p}`)
-
           // The history listing: 200 must list exactly the observed versions, the flag-off 404 is
           // recorded as not enabled (NOT VERIFIED in the verdict), anything else is a violation.
           const pageRef = encodeURIComponent("@" + ref.pageId), wsq = `workspace_id=${encodeURIComponent(ref.workspaceId)}`
@@ -431,21 +419,22 @@ for (const scenario of SCENARIOS) {
           const tok = s.status() === 201 ? ((await s.json()) as { session_token: string }).session_token : ""
           const l = await api.get(`/api/v1/pages/${pageRef}/craft/document/versions?${wsq}`, { headers: { "X-Craft-Session": tok } })
           const text = await l.text()
-          type Listing = { error?: unknown; versions?: { version: string }[]; truncated?: unknown }
+          type Listing = { error?: unknown; versions?: { version: unknown }[]; truncated?: unknown }
           let body: Listing | null = null
           try { body = JSON.parse(text) as Listing } catch { /* recorded as the raw text below */ }
-          const observed = [ref.initVersion, ...receipts]
-          const listing = l.status() === 200 && Array.isArray(body?.versions) ? body.versions.map((v) => String(v.version)).reverse() : null
+          const observed = [ref.initVersion, ...receiptsNow()]
+          const listing = l.status() === 200 && Array.isArray(body?.versions) ? body.versions.map((v) => v?.version).reverse() : null
           const error = typeof body?.error === "string" ? body.error : l.status() === 200 ? null : text.slice(0, 200)
           let history: "verified" | "not-enabled" | "mismatch" | "error"
           if (l.status() === 404 && error === HISTORY_NOT_ENABLED) history = "not-enabled"
           else if (l.status() !== 200) history = "error"
-          else history = listing && body?.truncated === false && listing.join(",") === observed.join(",") ? "verified" : "mismatch"
+          else history = body?.truncated === false && sameVersions(listing, observed) ? "verified" : "mismatch"
           out.history = { result: history, listingStatus: l.status(), error, listing, truncated: body?.truncated ?? null, observed }
           check(history !== "error", `version history listing answered ${l.status()}: ${error}`)
           check(history !== "mismatch", `version history listing ${JSON.stringify(listing)} (truncated ${String(body?.truncated)}) is not the observed ${observed.join(",")}`)
           await page.screenshot({ path: test.info().outputPath(`${app}-end.png`), timeout: 30_000 }).catch(() => {})
-          await N.release(page).catch((e) => lines.push(`release ${String(e).slice(0, 160)}`))
+          releaseStatus = await N.release(page).then(() => "ok", (e: unknown) => `failed: ${String(e).slice(0, 200)}`)
+          check(releaseStatus === "ok", `release ${releaseStatus}`)
           // A release of a saved document must leave no unsaved label and no draft to offer (#5089).
           await page.waitForTimeout(5_000)
           const after = (await page.getByRole("status").allInnerTexts().catch(() => [] as string[])).join(" ")
@@ -456,7 +445,31 @@ for (const scenario of SCENARIOS) {
           const offers = await page.getByText("Místní koncept", { exact: false }).count().catch(() => -1)
           out.draftOffersAfterRelease = offers
           check(offers === 0, `draft offered after a release of a saved document: ${offers}`)
+          headAfterReload = (await N.readHead(api, ref)).version
         })
+
+        // The version proof, taken after the last step (release and the reload included) and
+        // independent of the history listing, which stays behind a flag until it is accepted.
+        const receipts = receiptsNow()
+        proofAt = ops.length
+        const stepRow = (name: string) => steps.find((x) => x.name === name)
+        const unchanged = stepRow("ctrl+s without a change"), lostStep = stepRow("lost reply"), finalStep = stepRow("final")
+        const last = receipts.at(-1)
+        const versionProblems: string[] = []
+        receipts.forEach((v, i) => { if (v !== String(BigInt(ref.initVersion) + BigInt(i) + 1n)) versionProblems.push(`receipt ${i + 1} is v${v}, expected v${BigInt(ref.initVersion) + BigInt(i) + 1n}`) })
+        if (!receipts.length) versionProblems.push("no save receipt")
+        if (finalStep?.versionAfter !== last) versionProblems.push(`final head v${finalStep?.versionAfter}, last receipt v${last}`)
+        if (headAfterReload !== last) versionProblems.push(`head after the final reload v${headAfterReload}, last receipt v${last}`)
+        if (!unchanged || unchanged.versionBefore !== unchanged.versionAfter) versionProblems.push(`ctrl+s without a change: v${unchanged?.versionBefore} to v${unchanged?.versionAfter}`)
+        if (!lostStep?.versionBefore || lostStep.versionAfter !== String(BigInt(lostStep.versionBefore) + 1n)) versionProblems.push(`lost reply: v${lostStep?.versionBefore} to v${lostStep?.versionAfter}`)
+        out.versions = {
+          start: ref.initVersion, receipts, head: finalStep?.versionAfter ?? null, headAfterReload,
+          lostVersions: lost.map((x) => x.serverVersion ?? "?"), opsAtProof: proofAt,
+          unchangedSave: { before: unchanged?.versionBefore ?? null, after: unchanged?.versionAfter ?? null },
+          lostReply: { before: lostStep?.versionBefore ?? null, after: lostStep?.versionAfter ?? null },
+          contiguous: versionProblems.length === 0, problems: versionProblems,
+        }
+        for (const p of versionProblems) violate(`version sequence: ${p}`)
         out.marks = marks.length
         const names = steps.map((x) => x.name)
         check(names.join("|") === scenario.steps.join("|"), `steps ${names.join(", ")} are not the expected ${scenario.steps.join(", ")}`)
@@ -465,7 +478,11 @@ for (const scenario of SCENARIOS) {
     } catch (err) {
       failure = String(err).slice(0, 600)
     } finally {
-      Object.assign(out, { finishedAt: new Date().toISOString(), failure: failure ?? null, violations, steps, ops: opsRef.ops, lines: lines.slice(-40) })
+      // Nothing may save after the proof; a page error anywhere in the walk fails it.
+      const savesAfterProof = proofAt === null ? null : opsRef.ops.slice(proofAt).filter((o) => o.kind === "save").length
+      if (savesAfterProof) violations.push({ step: "after the walk", rule: `${savesAfterProof} saves after the version proof` })
+      for (const e of pageErrors) violations.push({ step: e.step, rule: `page error: ${e.message}` })
+      Object.assign(out, { finishedAt: new Date().toISOString(), failure: failure ?? null, violations, steps, ops: opsRef.ops, savesAfterProof, releaseStatus, pageErrors, lines: lines.slice(-40) })
       await prd.evidence(EVIDENCE_FILE, out)
       await disposeActors()
       await browser.close()

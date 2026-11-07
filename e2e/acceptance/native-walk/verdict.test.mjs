@@ -4,14 +4,16 @@ import * as fs from "node:fs"
 import * as os from "node:os"
 import * as path from "node:path"
 import { test } from "node:test"
-import { EXIT, HISTORY_NOT_ENABLED, SCENARIOS, evidencePath, isHeadlessShell, loadEvidence, parseListed, verdict } from "./verdict.mjs"
+import { EXIT, HISTORY_NOT_ENABLED, SCENARIOS, evidencePath, fullChromium, isHeadlessShell, loadEvidence, parseListed, sameVersions, verdict } from "./verdict.mjs"
 
 const RC = "ce984daf1d5f9dad37e00228c269ad0ae06736dd"
 const ORIGIN = "https://crewship-dev3.unifylab.cz"
 const CHROME = "/cache/ms-playwright/chromium-1248/chrome-linux64/chrome"
+const RUN = "6f1c1f7e-4a57-4c1e-9d3b-2f5f0d1a9e01"
+const OTHER_RUN = "0b9a2c11-0000-4000-8000-000000000000"
 const [WORD, SHEET] = SCENARIOS
 
-const row = (s, over = {}) => ({ requirement: s.id, title: s.title, scenario: "native-walk", test: s.test, result: "passed", appSha: RC, origin: ORIGIN, mode: "full", reason: null, ...over })
+const row = (s, over = {}) => ({ requirement: s.id, title: s.title, scenario: "native-walk", test: s.test, result: "passed", appSha: RC, origin: ORIGIN, mode: "full", reason: null, runId: RUN, ...over })
 const unmapped = (s) => ({ ...row(s), requirement: `UNMAPPED ${s.test}`, title: null, result: "failed", reason: "test declares no PRD requirement (use prdRequirement())" })
 
 /** A walk that did everything right; versions 1 → 2..last as the steps advance. */
@@ -23,23 +25,29 @@ function walkEvidence(s, over = {}) {
     return { name, verifyPresses: 0, versionBefore: before, versionAfter: String(v), inputMs: 10, confirmationMs: 10, longestStallMs: 5, status: "Uloženo" }
   })
   const receipts = Array.from({ length: v - 1 }, (_, i) => String(i + 2))
+  const lostAt = steps.find((x) => x.name === "lost reply").versionAfter
+  // Every receipt is a committed save the browser saw, except the dropped reply.
+  const ops = receipts.filter((r) => r !== lostAt).map((version, i) => ({ n: i + 1, kind: "save", status: 200, version, baseVersion: String(Number(version) - 1) }))
+  ops.push({ n: ops.length + 1, kind: "reconcile", status: 200, version: lostAt })
   return {
-    app: s.app, label: s.app === "wordcraft" ? "Word" : "Sheet", appSha: RC, origin: ORIGIN,
+    app: s.app, label: s.app === "wordcraft" ? "Word" : "Sheet", appSha: RC, origin: ORIGIN, runId: RUN,
     chromium: { path: CHROME, version: "156.0.8078.4", headless: false },
-    failure: null, violations: [], steps,
-    versions: { start: "1", receipts, head: String(v) },
+    failure: null, violations: [], steps, ops, savesAfterProof: 0, releaseStatus: "ok", pageErrors: [],
+    versions: { start: "1", receipts, head: String(v), headAfterReload: String(v), lostVersions: [lostAt] },
     history: { result: "not-enabled", listingStatus: 404, error: HISTORY_NOT_ENABLED, listing: null, truncated: null },
     ...over,
   }
 }
 
+const RUN_JSON = { origin: ORIGIN, mode: "full", appSha: RC, appDirty: false, runId: RUN, startedAt: "2026-11-07T07:41:59.585Z" }
+const FINISHED = { runId: RUN, status: "passed", startedAt: "2026-11-07T07:41:58.000Z", finishedAt: "2026-11-07T07:45:16.000Z" }
 const good = (over = {}) => ({
   playwrightStatus: 0,
   listed: SCENARIOS.map((s) => s.test),
   rows: SCENARIOS.map((s) => row(s)),
-  run: { origin: ORIGIN, mode: "full", appSha: RC, appDirty: false },
-  finished: { status: "passed" },
-  rc: RC, origin: ORIGIN, chrome: CHROME, narrowed: false,
+  run: { ...RUN_JSON },
+  finished: { ...FINISHED },
+  rc: RC, origin: ORIGIN, chrome: CHROME, runId: RUN, narrowed: false,
   evidence: Object.fromEntries(SCENARIOS.map((s) => [s.id, walkEvidence(s)])),
   ...over,
 })
@@ -70,18 +78,18 @@ test("a listing that answers 200 with exactly the observed versions passes with 
 // Each case changes one thing of a passing run and must not pass.
 const cases = [
   // The real run of 7 Nov (rc-ce984daf1/walk): both walks passed, but the rows were UNMAPPED and failed.
-  { name: "the real case: two passed walks, two UNMAPPED failed rows, exit 1", input: good({ playwrightStatus: 1, finished: { status: "failed" }, rows: SCENARIOS.map(unmapped) }), want: "FAIL", reason: /unexpected row UNMAPPED Native walk Word/ },
+  { name: "the real case: two passed walks, two UNMAPPED failed rows, exit 1", input: good({ playwrightStatus: 1, finished: { ...FINISHED, status: "failed" }, rows: SCENARIOS.map(unmapped) }), want: "FAIL", reason: /unexpected row UNMAPPED Native walk Word/ },
   { name: "two passed walk rows next to two UNMAPPED failed rows", input: good({ rows: [...SCENARIOS.map((s) => row(s)), ...SCENARIOS.map(unmapped)] }), want: "FAIL", reason: /unexpected row UNMAPPED/ },
   { name: "output says \"2 passed\" but playwright exited 1", input: { ...good({ playwrightStatus: 1 }), log: "  2 passed (3.4m)\n" }, want: "FAIL", reason: /playwright exited 1/ },
   { name: "playwright was killed (no exit status)", input: good({ playwrightStatus: null }), want: "FAIL", reason: /playwright exited null/ },
   { name: "the run did not finish", input: good({ finished: null }), want: "FAIL", reason: /no finished.json/ },
-  { name: "playwright reported the run interrupted", input: good({ finished: { status: "interrupted" } }), want: "FAIL", reason: /interrupted/ },
+  { name: "playwright reported the run interrupted", input: good({ finished: { ...FINISHED, status: "interrupted" } }), want: "FAIL", reason: /interrupted/ },
   { name: "run.json is missing", input: good({ run: null }), want: "SETUP", reason: /run.json is missing/ },
-  { name: "the origin serves another SHA", input: good({ run: { origin: ORIGIN, mode: "full", appSha: "0".repeat(40), appDirty: false } }), want: "SETUP", reason: /not RC/ },
-  { name: "the app build is dirty", input: good({ run: { origin: ORIGIN, mode: "full", appSha: RC, appDirty: true } }), want: "SETUP", reason: /not clean/ },
-  { name: "the dirty flag is unknown", input: good({ run: { origin: ORIGIN, mode: "full", appSha: RC, appDirty: null } }), want: "SETUP", reason: /not clean/ },
-  { name: "the run recorded another origin", input: good({ run: { origin: "https://crewship-dev2.unifylab.cz", mode: "full", appSha: RC, appDirty: false } }), want: "SETUP", reason: /run origin/ },
-  { name: "the run was in quick mode", input: good({ run: { origin: ORIGIN, mode: "quick", appSha: RC, appDirty: false } }), want: "SETUP", reason: /mode quick/ },
+  { name: "the origin serves another SHA", input: good({ run: { ...RUN_JSON, appSha: "0".repeat(40) } }), want: "SETUP", reason: /not RC/ },
+  { name: "the app build is dirty", input: good({ run: { ...RUN_JSON, appDirty: true } }), want: "SETUP", reason: /not clean/ },
+  { name: "the dirty flag is unknown", input: good({ run: { ...RUN_JSON, appDirty: null } }), want: "SETUP", reason: /not clean/ },
+  { name: "the run recorded another origin", input: good({ run: { ...RUN_JSON, origin: "https://crewship-dev2.unifylab.cz" } }), want: "SETUP", reason: /run origin/ },
+  { name: "the run was in quick mode", input: good({ run: { ...RUN_JSON, mode: "quick" } }), want: "SETUP", reason: /mode quick/ },
   { name: "--rc is a short SHA", input: good({ rc: RC.slice(0, 12) }), want: "SETUP", reason: /full 40-character/ },
   { name: "nothing was listed", input: good({ listed: [] }), want: "FAIL", reason: /listed 0 times/ },
   { name: "only one walk was listed without --grep", input: good({ listed: [WORD.test] }), want: "FAIL", reason: /walk.sheet: "Native walk Sheet" listed 0 times/ },
@@ -125,6 +133,35 @@ const cases = [
   { name: "a 403 labelled not-enabled by the spec", input: withEvidence("walk.word", (e) => ({ ...e, history: { result: "not-enabled", listingStatus: 403, error: HISTORY_NOT_ENABLED } })), want: "FAIL", reason: /answered 403/ },
   { name: "a 200 listing that misses a version", input: withEvidence("walk.word", (e) => { const h = historyOk(e); return { ...h, history: { ...h.history, listing: h.history.listing.slice(1) } } }), want: "FAIL", reason: /is not the observed/ },
   { name: "a 200 listing that is truncated", input: withEvidence("walk.word", (e) => { const h = historyOk(e); return { ...h, history: { ...h.history, truncated: true } } }), want: "FAIL", reason: /truncated=true/ },
+  // Review of b9a636cdf (Codex), one regression per finding the verdict can catch.
+  // P1-1: the proof is taken after the final step, its reload included.
+  { name: "P1-1 the final step ended past the last receipt", input: withEvidence("walk.word", (e) => ({ ...e, steps: e.steps.map((s) => (s.name === "final" ? { ...s, versionAfter: String(Number(s.versionAfter) + 1) } : s)) })), want: "FAIL", reason: /the final step ended on v\d+, not the last receipt/ },
+  { name: "P1-1 the head after the final reload is not the last receipt", input: withEvidence("walk.word", (e) => ({ ...e, versions: { ...e.versions, headAfterReload: String(Number(e.versions.head) + 1) } })), want: "FAIL", reason: /head after the final reload/ },
+  { name: "P1-1 a save after the version proof", input: withEvidence("walk.sheet", (e) => ({ ...e, savesAfterProof: 1 })), want: "FAIL", reason: /saves after the version proof: 1/ },
+  { name: "P1-1 no record of saves after the proof", input: withEvidence("walk.sheet", (e) => ({ ...e, savesAfterProof: null })), want: "FAIL", reason: /saves after the version proof: null/ },
+  { name: "P1-1 a recorded save missing from the receipts", input: withEvidence("walk.sheet", (e) => ({ ...e, ops: [...e.ops, { kind: "save", status: 200, version: String(Number(e.versions.head) + 1) }] })), want: "FAIL", reason: /recorded saves .* are not the receipts/ },
+  { name: "P1-1 no ops in the evidence", input: withEvidence("walk.sheet", (e) => ({ ...e, ops: undefined })), want: "FAIL", reason: /no save ops/ },
+  // P1-2: release and page errors are structured and fail the run.
+  { name: "P1-2 the release failed", input: withEvidence("walk.word", (e) => ({ ...e, releaseStatus: "failed: TimeoutError" })), want: "FAIL", reason: /release: "failed: TimeoutError"/ },
+  { name: "P1-2 the walk never released", input: withEvidence("walk.word", (e) => ({ ...e, releaseStatus: null })), want: "FAIL", reason: /release: null/ },
+  { name: "P1-2 a page error", input: withEvidence("walk.sheet", (e) => ({ ...e, pageErrors: [{ at: "t", step: "reload", message: "TypeError: x is undefined" }] })), want: "FAIL", reason: /page error at "reload": TypeError/ },
+  { name: "P1-2 no page error list", input: withEvidence("walk.sheet", (e) => ({ ...e, pageErrors: undefined })), want: "FAIL", reason: /no page error list/ },
+  // P1-3: a marker the discovery (`--list`) would leave carries no run id.
+  { name: "P1-3 finished.json without a run id", input: good({ finished: { status: "passed", startedAt: FINISHED.startedAt, finishedAt: FINISHED.finishedAt } }), want: "FAIL", reason: /finished.json is of run undefined/ },
+  { name: "P1-3 finished.json written before the run started", input: good({ finished: { ...FINISHED, startedAt: "2026-11-07T07:30:00.000Z", finishedAt: "2026-11-07T07:30:05.000Z" } }), want: "FAIL", reason: /does not span run.json startedAt/ },
+  // P1-4: every artefact belongs to this invocation.
+  { name: "P1-4 run.json of another run", input: good({ run: { ...RUN_JSON, runId: OTHER_RUN } }), want: "SETUP", reason: /run.json is of run 0b9a2c11/ },
+  { name: "P1-4 finished.json of another run", input: good({ finished: { ...FINISHED, runId: OTHER_RUN } }), want: "FAIL", reason: /finished.json is of run 0b9a2c11/ },
+  { name: "P1-4 a row of another run", input: good({ rows: [row(WORD), row(SHEET, { runId: OTHER_RUN })] }), want: "FAIL", reason: /walk.sheet: row is of run 0b9a2c11/ },
+  { name: "P1-4 a row without a run id (an older PRD reporter)", input: good({ rows: [row(WORD), row(SHEET, { runId: undefined })] }), want: "FAIL", reason: /walk.sheet: row is of run undefined/ },
+  { name: "P1-4 evidence of another run on the same RC and origin", input: withEvidence("walk.word", (e) => ({ ...e, runId: OTHER_RUN })), want: "FAIL", reason: /evidence is of run 0b9a2c11/ },
+  { name: "P1-4 no run id given to the verdict", input: good({ runId: undefined }), want: "SETUP", reason: /no run id/ },
+  { name: "P1-4 finished.json with unreadable times", input: good({ finished: { ...FINISHED, finishedAt: "soon" } }), want: "FAIL", reason: /does not span/ },
+  // P2-1: what the browser says it is counts, not only its path.
+  { name: "P2-1 the evidence browser reports the headless shell", input: withEvidence("walk.word", (e) => ({ ...e, chromium: { ...e.chromium, version: "HeadlessChrome/156.0.8078.4" } })), want: "FAIL", reason: /headless shell/ },
+  // P2-2: listings compare as arrays of digit strings, never as joined text.
+  { name: "P2-2 a listing whose joined text matches but whose elements do not", input: withEvidence("walk.word", (e) => { const h = historyOk(e); const l = h.history.listing; return { ...h, history: { ...h.history, listing: [`${l[0]},${l[1]}`, ...l.slice(2)] } } }), want: "FAIL", reason: /is not the observed/ },
+  { name: "P2-2 a listing of numbers instead of version strings", input: withEvidence("walk.word", (e) => { const h = historyOk(e); return { ...h, history: { ...h.history, listing: h.history.listing.map(Number) } } }), want: "FAIL", reason: /is not the observed/ },
 ]
 for (const c of cases) {
   test(`not a pass: ${c.name}`, () => {
@@ -170,4 +207,26 @@ test("evidence is read from the path the PRD fixture writes, and a broken file i
   assert.ok(loaded["walk.word"].unreadable)
   assert.equal(loaded["walk.sheet"], null)
   fs.rmSync(dir, { recursive: true, force: true })
+})
+
+test("P2-1 a symlink named chrome that resolves to the headless shell is refused, by path or by --version", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "native-walk-chrome-"))
+  const shell = path.join(dir, "chrome-headless-shell"), full = path.join(dir, "chrome-real")
+  fs.writeFileSync(shell, ""); fs.writeFileSync(full, "")
+  fs.symlinkSync(shell, path.join(dir, "chrome"))
+  const viaLink = fullChromium(path.join(dir, "chrome"), () => "Chromium 156.0.8078.4")
+  assert.equal(viaLink.path, fs.realpathSync(shell))
+  assert.match(viaLink.refused, /headless shell/)
+  assert.match(fullChromium(full, () => "HeadlessChrome 156.0.8078.4").refused, /reports "HeadlessChrome/)
+  assert.match(fullChromium(full, () => null).refused, /--version failed/)
+  assert.deepEqual(fullChromium(full, () => "Chromium 156.0.8078.4"), { path: fs.realpathSync(full), version: "Chromium 156.0.8078.4", refused: null })
+  fs.rmSync(dir, { recursive: true, force: true })
+})
+test("P2-2 version lists are equal only element by element", () => {
+  assert.ok(sameVersions(["1", "2"], ["1", "2"]))
+  assert.ok(!sameVersions(["1,2"], ["1", "2"]))
+  assert.ok(!sameVersions([1, 2], ["1", "2"]))
+  assert.ok(!sameVersions(["1", "2", "3"], ["1", "2"]))
+  assert.ok(!sameVersions(["v1"], ["v1"]))
+  assert.ok(!sameVersions(null, []))
 })
