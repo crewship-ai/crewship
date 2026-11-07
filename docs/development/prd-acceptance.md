@@ -146,6 +146,63 @@ SHA-256, equality with the previous checkpoint, the marker report). The chain
 and checkpoints are also written to `chain.json` however the row ends (a session
 that throws, a failed final assertion, a pass).
 
+Both files also carry `saveAccounting`, how each save of the hour happened. A
+save's origin is the save request that committed its version, not a key press:
+the ops trail records every request when it is sent, and every harness press
+records the trail length at dispatch (`opsAtPress`).
+
+- `autosaves`: save waits (one per cycle, one more after an "Ověřit výsledek"
+  press, and the Sheet warm-up) whose version was committed by a request sent
+  before any press. `lateAutosaves` counts those whose reply arrived only after
+  the harness had pressed Ctrl+S: the press merely confirmed bytes already saved
+  (#5075).
+- `forcedCtrlS`, `forcedCtrlSOutcomes` and `forcedCtrlSEvents`: every Control+s
+  the harness pressed, either in the save wait after 4 s without a new version or
+  in the Word table step after 4 s with the cell text not yet in a table cell of
+  the server head and the status "Neuložený koncept". Each event is written at
+  dispatch and closed in a `finally`, with the cycle, time, reason, `endedAt`,
+  whether a new version followed, and an `outcome`: `new-save` (a request sent
+  after the press committed the version), `confirm-only` (an earlier autosave
+  did), `no-version`, `unattributed` (no answered save carries the version), or
+  `incomplete` (the wait was interrupted after the press).
+- `ambiguousSaves` / `ambiguousSaveOps`: committing save requests sent within
+  30 s after a forced press. They are counted neither as autosaves nor as
+  forced saves, and their press's outcome is `unattributed`.
+
+The limit, plainly: the harness cannot see what triggered a save request. An
+autosave that was already being prepared when Ctrl+S went out (engine snapshot,
+local draft write, validation) sends its request after the press, exactly like
+the forced save would. The editor bounds each of those three steps by its own
+10 s deadline and promises nothing shorter, so any committing request within
+30 s after the press is reported as ambiguous. In practice this means most
+forced presses that are followed by a save come out `unattributed`; `new-save`
+is claimed only for a request sent more than 30 s after the press. The count of
+presses (`forcedCtrlS`) is exact either way.
+- `editorReconciles` / `editorReconcileOps`: reconcile requests sent outside
+  every press window. `reconcilesDuringPressWait` / `...Ops`: reconcile requests
+  sent between a press (Ctrl+S or "Ověřit výsledek") and 2 s after the end of
+  its wait. The requests carry no trigger, so the network trail cannot tell the
+  press from the editor's own retry timer; these are reported apart as cause
+  unknown, never attributed to either side.
+- `verifyPresses`: "Ověřit výsledek" presses; each press records `waitEndedAt`.
+
+The raw records are in `chain.json` as `saveWaits` and `forcedCtrlS`. The row's
+note starts with the measured press counts, then the inferred origins, e.g.
+"forced Ctrl+S 6×, Ověřit výsledek 0×; inferred from request timing, not proven
+(#5112): autosave 57×, press outcomes 6 unattributed, automatic reconcile 0×".
+Only the press counts are measured. The editor does not report what triggered a
+save, so autosave counts, press outcomes, ambiguous saves and reconcile causes are
+inferred from request timing and must not be quoted as fact (#5112). This is
+accounting, not a gate: a forced Ctrl+S never fails the row; the server head
+still decides whether a cycle's typing was saved.
+
+`pageStalls` (name kept for the evidence readers) lists gaps of at least 10 s
+between the editor page's own `craft/proposals` polls; `pageStallsDescription`
+says so in the evidence. They are polling gaps, not a measured renderer or
+input stall. The note's "longest interruption" (`interruptions.longestStallMs`)
+is the longest merged span of such gaps and "Výsledek nepotvrzen" spells up to
+an "Ověřit výsledek" press.
+
 `craft-restart.acceptance.ts` (`A.resilience.restart.word`, `.sheet`) is the
 short form of the restart: unsaved typing, restart, reload, draft offered, no
 duplicate version, editor usable.
