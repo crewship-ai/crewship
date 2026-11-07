@@ -184,3 +184,33 @@ func TestRetainedResultRecoveryAcceptsUnconfirmedShutdownPark(t *testing.T) {
 		})
 	}
 }
+
+// A shutdown-stopped background run records its failed capture, but its work
+// keeps reconciliation and its execution slot: possible external effects need
+// a decision, and nothing here releases capacity on that behalf (#5081).
+func TestRetainedResultRecoveryShutdownFailureKeepsReconciliation(t *testing.T) {
+	s, db, _ := newTestStore(t)
+	r := accept(t, s, db, backgroundReq("agent"))
+	a, err := s.Claim(t.Context(), ClaimOptions{LeaseOwner: "stopped"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkStarting(t.Context(), r.WorkID, a.RunID, a.Generation, "agent-run:"+a.RunID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Transition(t.Context(), TransitionRequest{WorkID: r.WorkID, RunID: a.RunID, Generation: a.Generation, To: StateNeedsReconciliation, Reason: "server shutdown: runtime stop could not be confirmed at agent-run:" + a.RunID}); err != nil {
+		t.Fatal(err)
+	}
+	code := 143
+	if _, err := s.RecoverRetainedResult(t.Context(), a.RunID, RunResult{ExitCode: &code}, false); err != nil {
+		t.Fatal(err)
+	}
+	item, err := s.Get(t.Context(), r.WorkID)
+	if err != nil || item.State != StateNeedsReconciliation || !item.State.HoldsExecutionSlot() {
+		t.Fatalf("state=%v err=%v", item.State, err)
+	}
+	p, owned, err := s.RunProjection(t.Context(), a.RunID)
+	if err != nil || !owned || !p.Ready || p.Status != "FAILED" || *p.Result.ExitCode != 143 {
+		t.Fatalf("projection=%+v owned=%v err=%v", p, owned, err)
+	}
+}
