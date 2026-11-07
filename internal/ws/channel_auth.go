@@ -200,7 +200,7 @@ func (a *DBChannelAuthorizer) isMemberOfPageWorkspace(ctx context.Context, userI
 	err := a.db.QueryRowContext(ctx, `SELECT 1 FROM pages p JOIN workspace_members wm ON wm.workspace_id=p.workspace_id AND wm.user_id=? WHERE p.id=? AND (
  (p.private_audience=0 AND NOT EXISTS(SELECT 1 FROM gridcraft_heads h WHERE h.page_id=p.id))
  OR p.owner_user_id=? OR wm.role='OWNER'
- OR (p.private_audience=0 AND EXISTS(SELECT 1 FROM page_grants g WHERE g.page_id=p.id AND g.subject_type='user' AND g.subject_id=wm.user_id AND g.level='write' AND g.granted_by_user_id=p.owner_user_id)))`+trustedChannelMember, userID, pageID, userID, userID).Scan(&exists)
+ OR (p.private_audience=0 AND EXISTS(SELECT 1 FROM page_grants g WHERE g.page_id=p.id AND g.subject_type='user' AND g.subject_id=wm.user_id AND g.level='write' AND g.granted_by_user_id=p.owner_user_id AND g.retired_at IS NULL)))`+trustedChannelMember, userID, pageID, userID, userID).Scan(&exists)
 	return existsRow(err)
 }
 

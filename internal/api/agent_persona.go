@@ -224,6 +224,10 @@ func (h *PersonaHandler) PutAgentPersona(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if err := memory.WritePersona(paths, memory.PersonaAgent, body.Content); err != nil {
+		if errors.Is(err, memory.ErrPersonaEmpty) {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if strings.Contains(err.Error(), "exceeds cap") {
 			replyError(w, http.StatusRequestEntityTooLarge, err.Error())
 			return
@@ -699,6 +703,10 @@ func (h *PersonaHandler) PutCrewPersona(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if err := memory.WritePersona(paths, memory.PersonaCrew, body.Content); err != nil {
+		if errors.Is(err, memory.ErrPersonaEmpty) {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		if strings.Contains(err.Error(), "exceeds cap") {
 			replyError(w, http.StatusRequestEntityTooLarge, err.Error())
 			return

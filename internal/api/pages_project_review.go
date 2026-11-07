@@ -919,6 +919,16 @@ func (h *PageHandler) ReviewProject(w http.ResponseWriter, r *http.Request) {
 		blocked(reviewBlockerNotPermitted, "Publishing an application requires Page ownership or workspace administration.")
 	}
 	w.Header().Set("Cache-Control", "no-store")
+	// Every definition this snapshot rendered through authorizer.visible: a
+	// panel only the role shows is an audited administrator read.
+	definitions, err := parsedDefinitions(liveSpec, candidateSpec, contextSpec, publishedSpec)
+	if err != nil {
+		replyInternalError(w, h.logger, "read reviewed definitions for audit", err)
+		return
+	}
+	if !h.auditDefinitionPanelsRead(w, r, rec, definitions...) {
+		return
+	}
 	writeJSON(w, 200, snapshot)
 }
 

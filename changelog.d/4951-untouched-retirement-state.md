@@ -1,0 +1,1 @@
+- **An unchanged Word document could still show “Unsaved draft” and warn before leaving after edit access ended.** Once its untouched final recovery copy is successfully retired, the editor now shows its clean read-only state; edited or unconfirmed drafts keep their warning.

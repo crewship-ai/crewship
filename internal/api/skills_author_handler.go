@@ -11,6 +11,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -91,8 +92,11 @@ func (h *SkillProposedHandler) Author(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	staged, err := skills.StageAuthoredSkill(dir, body.Content)
+	staged, err := skills.StageAuthoredSkillGuarded(r.Context(), h.db, dir, body.Content)
 	if err != nil {
+		if refuseLockedSkill(w, r, h.journal, wsID, crewID, journal.ActorAgent, "", "author", err) {
+			return
+		}
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -172,8 +176,12 @@ func (h *SkillProposedHandler) stageProposedSkill(ctx context.Context, wsID, cre
 	if derr != nil {
 		return "", "", "", "", derr
 	}
-	staged, serr := skills.StageAuthoredSkill(dir, content)
+	staged, serr := skills.StageAuthoredSkillGuarded(ctx, h.db, dir, content)
 	if serr != nil {
+		var le *skills.LockedError
+		if errors.As(serr, &le) {
+			emitSkillWriteBlocked(ctx, h.journal, wsID, crewID, journal.ActorAgent, "", le.Slug, origin)
+		}
 		return "", "", "", "", serr
 	}
 	fileName = filepath.Base(staged.Path)

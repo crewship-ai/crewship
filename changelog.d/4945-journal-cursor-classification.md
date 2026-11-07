@@ -1,0 +1,1 @@
+- **Malformed journal pagination cursors return 400 instead of 500.** Valid pagination and genuine storage failures keep their existing behavior.

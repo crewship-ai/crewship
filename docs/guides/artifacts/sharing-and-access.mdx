@@ -13,10 +13,11 @@ access, filing artifacts in shared folders, and checking who can open what.
 <Note>
 The Artifacts library at `/artifacts` is off in a default build. Build the
 web UI with `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` to show it. Project artifacts
-also need the `artifact_projects` workspace flag, which is off by default:
+also need the `artifact_projects` workspace flag. It is on by default; if a
+workspace manager turned it off, turn it back on with:
 
 ```bash
-crewship feature-flag enable artifact_projects
+crewship feature-flag inherit artifact_projects
 ```
 
 Sharing itself has no separate flag. Leave `NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK`
@@ -32,24 +33,98 @@ comes from these sources, and the Access tab shows each one:
 | Source | Shown as | Changed where |
 |---|---|---|
 | Ownership | **Owner** | Fixed. The owner always has Edit. |
-| Workspace role | **Workspace role** | Workspace members settings. Workspace owners and admins can open shared artifacts. |
+| Workspace role | **Workspace role** | Workspace members settings. Workspace owners and admins can read every artifact in the workspace, audited (see [Workspace owners and admins](#workspace-owners-and-admins)). |
 | Folder | **Via folder &lt;name&gt;** | The folder's **Folder settings**. |
 | Crew | **Member of crew &lt;name&gt;** or **Through a crew** | Crew membership. |
 | Direct share | **Shared directly** | The artifact's **Share** dialog. |
 
 ### Private until you share a version
 
-A project created with a private audience is open only to its owner until
-publication. Workspace ownership does not grant access to its project versions.
-The audited workspace-owner access available for some other Pages does not
-bypass this project restriction. While it is private, folders, crews and direct
-shares do not apply, even if they are listed.
+A project created with a private audience is open only to its owner, and to
+the workspace owners and admins described below, until publication. While it
+is private, folders, crews and direct shares do not apply, even if they are
+listed.
 
-The artifact stops being private the first time you share a version (see
-[Share a version](#share-a-version)). Until then the **Share** dialog refuses
-to add anyone and shows: *private artifact audience requires explicit
-publication; ordinary grants cannot widen it*. In the list, a private artifact
-carries a **Private** pill.
+How a private artifact opens depends on its type:
+
+| Type | What ends the private audience |
+|---|---|
+| Project, slides, dashboard | The first time you share a version (see [Share a version](#share-a-version)). |
+| Workbook | Naming its first editor with `crewship workbook share --publish`. |
+| Native Word or Sheet | Nothing yet. Sharing a version moves the shared version but the document stays private, so only its owner and workspace owners and admins can read it. |
+
+While it is private, the **Share** dialog refuses to add anyone and shows:
+*private artifact audience requires explicit publication; ordinary grants cannot
+widen it*. In the list, a private artifact carries a **Private** pill.
+
+### Workspace owners and admins
+
+A workspace owner or admin can read every artifact in the workspace, of every
+type: projects, Pages, Word documents, Sheets (including ones an agent
+created), Designs, Slides and dashboards. This includes another member's
+private artifact that was never shared. They see the latest version and the
+full version history, not only the shared version. This does not depend on
+anything else they hold: an owner or admin who also has an Edit, Comment or
+Read share on the artifact still reads every version.
+
+Every such read is written to the workspace audit log. An entry is written
+whenever an owner or admin opens an artifact they do not own and reach only
+through their workspace role, not through its crew, a folder or a direct
+share. For a project, slides or dashboard, a version their own share already
+serves writes no entry: the latest version for an Edit share, the shared
+version for a Read or Comment share. Any other version, and the version
+history, is reached through the role and writes an entry. That covers the
+artifact itself, its versions, a single version, its history, an export or
+download, and list views that show the artifact. If the entry cannot be
+written, the artifact is not shown. The entries use these actions:
+
+| Action | Written when |
+|---|---|
+| `artifact.private_owner_accessed` | An owner or admin reads someone else's private artifact. |
+| `artifact.workspace_admin_accessed` | An owner or admin reads another member's artifact that is not private, through their role alone. |
+| `design.workspace_admin_accessed` | An owner or admin opens someone else's Design. |
+
+List them with the CLI, for example:
+
+```bash
+crewship audit --action artifact.private_owner_accessed
+crewship audit --action artifact.workspace_admin_accessed
+```
+
+Entries about a private artifact are listed only to the workspace owner and
+to the artifact's own owner. They are not written to the workspace journal
+(`crewship journal`), which every member can read.
+
+An open Sheet is not updated live for a workspace admin who is not its owner
+or editor. Reopen it to see later changes; each reopening is a new audited
+read. A Sheet differs in one respect: an owner or admin whom the Sheet's owner
+named as an editor reads it exactly as without that share, with its full
+history, and each read writes an entry. The editor share adds only editing.
+The Page versions of a Sheet (`crewship page versions`) are likewise open to
+its owner and to workspace owners and admins, audited; editors and other
+members cannot read them, and only the owner can roll back, rename, move or
+delete the Page. An admin's read of them is audited even when the admin is
+also a named editor, because the editor share never opens them. The same holds
+for any Page's versions, export and project sources: an admin with only a read
+share reads them as an admin, audited; an edit share opens them without an
+entry. Opening a Page works the same way: an admin sees every panel and the
+panels' authored settings, and the read is audited whenever someone with the
+admin's own shares and crews, but without the admin role, would see less
+(a panel of another crew, or the authored settings without an edit share).
+On a private Page an admin also reads each panel's declared actions and its
+application history, with one audited entry per read, but cannot run those
+actions: running them stays with the Page's owner and the workspace owner.
+
+An entry records the artifact's owner at the moment its content was read. If
+ownership moves to the reader while the read is in progress, the entry still
+names the previous owner.
+
+This is read access only. It adds no power to edit, share a version,
+publish, restore or change who can open an artifact. A workspace admin cannot
+edit or share someone else's private artifact. Sharing a version stays with
+the artifact's owner, as described under [Access levels](#access-levels).
+Designs are the existing case where workspace owners and admins can also
+edit.
 
 ### Access levels
 
@@ -64,7 +139,8 @@ People get one of three levels. Each level includes the ones before it.
 Some limits always apply, whatever the level:
 
 - People with Read or Comment see only the **shared version**. Later versions
-  stay hidden until the owner shares them.
+  stay hidden until the owner shares them. Workspace owners and admins are the
+  exception: they read every version, audited.
 - People with Edit work on the **latest version**. They cannot see the older
   history, restore an older version or choose the shared version. Only the
   owner can do those.
@@ -77,8 +153,11 @@ Some limits always apply, whatever the level:
 
 ## Share a version
 
-Shared versions belong to project artifacts. The shared version is the one
-everyone except you and your editors sees.
+The shared version is the one everyone except you and your editors sees.
+The steps below are for project artifacts. In a native Word or Sheet document,
+the owner uses **Publikovat náhled** while holding the editor; the button is not
+offered to anyone else, and `crewship craft connect` refuses `share` for them.
+In a Design, the **Share** button in **History** appears only for its owner.
 
 <Steps>
 <Step title="Open the artifact">
@@ -180,7 +259,10 @@ shared versions of the artifacts filed there, now and later.
   library has no button for this.
 - Only a workspace admin, or a manager (or higher) of the owning crew, can
   change who a folder shares with.
-- Folder access does not open a private artifact. Share a version first.
+- Folder access does not open a private artifact. A project, slides or a
+  dashboard opens when you share a version, and a workbook when you name an
+  editor with publication. A private native Word or Sheet does not open, see
+  [Private until you share a version](#private-until-you-share-a-version).
 
 ### Change who a folder shares with
 
@@ -307,7 +389,7 @@ artifact has no such panels, so they do not apply to artifacts.
 | Task | Command |
 |---|---|
 | Share a version | `crewship page artifact share <slug> --base-version <latest> --version <n>` |
-| Give a person or everyone a level | `crewship page grant <slug> --user <email> --level comment` or `--workspace --level read` |
+| Give a person or everyone a level | `crewship page grant <slug> --user <email> --level comment` or `--everyone --level read` |
 | Remove a level | `crewship page revoke <slug> --user <email> --level comment` |
 | List direct shares | `crewship page grants <slug>` |
 | Who can open an artifact | `crewship page access <slug>` |

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"strconv"
@@ -54,6 +55,15 @@ func (h *PageHandler) designEnabled(ctx context.Context) bool {
 func (h *PageHandler) designStore(ctx context.Context) *artifacts.VersionStore {
 	return artifacts.NewVersionStore(h.db, artifacts.VersionOptions{Enabled: h.designEnabled(ctx), ContentType: "design"})
 }
+
+// logDesignEngineUnavailable keeps the engine's phase (startup or work) and
+// budget in the server log; clients only see the stable 503 message.
+func logDesignEngineUnavailable(err error) {
+	if errors.Is(err, design.ErrUnavailable) {
+		slog.Warn("design engine unavailable", "error", err.Error())
+	}
+}
+
 func designError(w http.ResponseWriter, err error) {
 	if artifactStorageRefusal(w, err) {
 		return
@@ -64,6 +74,7 @@ func designError(w http.ResponseWriter, err error) {
 	case errors.Is(err, errDesignAccess), errors.Is(err, artifacts.ErrVersionAuthority):
 		replyError(w, 403, "current Design edit permission required")
 	case errors.Is(err, design.ErrUnavailable):
+		logDesignEngineUnavailable(err)
 		replyError(w, 503, "Design engine is unavailable; changes are not acknowledged")
 	case errors.Is(err, design.ErrInvalid), errors.Is(err, artifacts.ErrVersionInvalid):
 		replyError(w, 400, "invalid Design update")
@@ -492,6 +503,7 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 	var result design.Result
 	var version, shared int64
 	canEdit := false
+	canShare := false
 	canComment := false
 	actor := ""
 	displayName := ""
@@ -523,12 +535,17 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 		if e := tx.QueryRowContext(ctx, `SELECT latest_version,shared_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&version, &shared); e != nil {
 			return e
 		}
-		var readLive bool
-		var e error
-		canEdit, readLive, e = h.designHistoryReader(ctx, tx, r, k)
+		writer, canEditNow, readLive, e := h.designHistoryReader(ctx, tx, r, k)
 		if e != nil {
 			return e
 		}
+		canEdit = canEditNow
+		// The same rule as ShareDesign: the write actor is the Page's owner.
+		var owner string
+		if e := tx.QueryRowContext(ctx, `SELECT coalesce(owner_user_id,'') FROM pages WHERE id=? AND workspace_id=?`, k.PageID, k.WorkspaceID).Scan(&owner); e != nil {
+			return e
+		}
+		canShare = canEdit && owner != "" && writer == owner
 		_, commentErr := h.designCommentAuthority(r, k)(ctx, tx)
 		canComment = commentErr == nil
 		if !readLive {
@@ -557,7 +574,7 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 		designError(w, err)
 		return
 	}
-	writeJSON(w, 200, designSnapshotResponse{AuthorityRevision: authorityRevision, PageID: k.PageID, Origin: origin, CanComment: canComment, Nodes: result.Nodes, Order: result.Order, CanEdit: canEdit, Version: version, LatestVersion: version, SharedVersion: shared, Actor: designActorResponse{ID: actor, Name: displayName}})
+	writeJSON(w, 200, designSnapshotResponse{AuthorityRevision: authorityRevision, PageID: k.PageID, Origin: origin, CanComment: canComment, Nodes: result.Nodes, Order: result.Order, CanEdit: canEdit, CanShare: canShare, Version: version, LatestVersion: version, SharedVersion: shared, Actor: designActorResponse{ID: actor, Name: displayName}})
 }
 
 // A reader synchronizes only the immutable shared snapshot. Live authority
@@ -668,7 +685,7 @@ func (h *PageHandler) DesignVersions(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			return "", artifacts.VersionSelection{}, e
 		}
-		_, readLive, e := h.designHistoryReader(ctx, tx, r, k)
+		_, _, readLive, e := h.designHistoryReader(ctx, tx, r, k)
 		if e != nil {
 			return "", artifacts.VersionSelection{}, e
 		}

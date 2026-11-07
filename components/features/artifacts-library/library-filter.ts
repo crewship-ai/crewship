@@ -3,11 +3,22 @@ import { LIBRARY_KINDS, repeatedSeries, type LibraryItem, type LibraryKind } fro
 /** The places the panel offers. Empty, Clean up, Test items and Archive only show; changes go through a previewed bulk action, and nothing is deleted. */
 export type LibraryView = "home" | "all" | "attention" | "opened" | "mine" | "favorites" | "empty" | "series" | "test" | "archive"
 
-/** What only this person knows: when they last opened each item, and what they starred. Kept per user. */
+/** What only this person knows: when they last opened each item, what they starred and what they made here. Kept per user. */
 export interface Personal {
   opened?: ReadonlyMap<string, number>
   favorites?: ReadonlySet<string>
+  /** Slugs this person created from New artifact; a blank one of these is still theirs to find. */
+  created?: ReadonlySet<string>
 }
+
+/**
+ * Blank legacy storage stays out of the default views, but not a blank the
+ * person made here and still owns: the library's own Page with panels starts
+ * empty, and hiding it would lose what they just created. Ownership is the
+ * server's (`reach` owner), so a slug another person now holds stays hidden.
+ */
+export const hiddenAsEmpty = (item: LibraryItem, personal: Personal = {}) =>
+  item.empty && !(item.ownerLabel === "You" && personal.created?.has(item.slug) === true)
 
 export type Access = "private" | "open"
 export type VersionState = "shared" | "unshared" | "unversioned"
@@ -100,7 +111,7 @@ export function matches(item: LibraryItem, filters: LibraryFilters, skip?: "kind
 /** What a view holds before filters: empty, test and archived items each only in their own view. */
 export function inView(items: LibraryItem[], view: LibraryView, personal: Personal = {}): LibraryItem[] {
   const kept = items.filter(item => !item.archived)
-  const live = kept.filter(item => !item.empty && !item.test)
+  const live = kept.filter(item => !hiddenAsEmpty(item, personal) && !item.test)
   switch (view) {
     case "archive": return items.filter(item => item.archived)
     case "test": return kept.filter(item => item.test)
@@ -167,6 +178,31 @@ export function facetCounts(items: LibraryItem[], filters: LibraryFilters, perso
     version: (["shared", "unshared", "unversioned"] as const).map(key => [key, version.get(key) ?? 0] as [VersionState, number]).filter(([key, n]) => n > 0 || filters.version.includes(key)),
     owners: [...owners.entries()].sort((a, b) => b[1] - a[1]),
   }
+}
+
+/** One server window of the All view (#4471). */
+export const SERVER_PAGE_SIZE = 50
+
+/**
+ * The All view as `GET /api/v1/pages` parameters, or null when only the browser
+ * can express it: another view, query operators, or owner labels (the server
+ * takes canonical owners, the panel shows names). Archived and test items stay
+ * out by the server's defaults, empty ones by `empty=exclude`, as in `inView`.
+ */
+export function serverCatalogParams(filters: LibraryFilters, sort: SortKey, options: { design: boolean }): URLSearchParams | null {
+  if (filters.view !== "all" || filters.owners.length) return null
+  const query = parseQuery(filters.q)
+  if (query.kinds.length || query.is.length || query.owner.length) return null
+  const kinds = (filters.kinds.length ? filters.kinds : options.design ? [] : LIBRARY_KINDS.map(entry => entry.kind))
+    .filter(kind => options.design || kind !== "design")
+  if (filters.kinds.length && !kinds.length) return null
+  const params = new URLSearchParams({ empty: "exclude", sort })
+  if (query.text) params.set("q", query.text)
+  if (kinds.length) params.set("kind", kinds.join(","))
+  if (filters.access.length) params.set("access", filters.access.join(","))
+  if (filters.version.length) params.set("version", filters.version.join(","))
+  if (filters.folder !== null) params.set("folder", filters.folder === "" ? UNFILED : filters.folder)
+  return params
 }
 
 export const activeFacetCount = (filters: LibraryFilters) =>

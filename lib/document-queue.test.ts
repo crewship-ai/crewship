@@ -45,3 +45,61 @@ it.skipIf(!existsSync(chromium.executablePath()))("isolates durable drafts by hu
   expect(result.remaining.map(row=>row.id)).toEqual(["another-tab"])
  }finally{await browser.close()}
 })
+
+// #5104: a take-over that gives up on an open must not keep this Page's lock
+// or IDB connection, or the next attempt and other tabs find storage taken.
+it.skipIf(!existsSync(chromium.executablePath()))("a cancelled exclusive open releases the Page lock and closes a late IDB connection",async()=>{
+ const browser=await chromium.launch({headless:true})
+ try{
+  const page=await browser.newPage()
+  await page.route("https://document-queue.test/**",route=>route.fulfill({body:"<!doctype html><title>Document journal</title>",contentType:"text/html"}))
+  await page.goto("https://document-queue.test")
+  const {outputFiles}=buildSync({entryPoints:[`${process.cwd()}/lib/document-queue.ts`],bundle:true,write:false,platform:"browser",format:"iife",globalName:"documentQueue"})
+  await page.addScriptTag({content:outputFiles[0].text})
+  const result=await page.evaluate(async()=>{
+   const {openDocumentDrafts}= (window as unknown as {documentQueue: typeof import("./document-queue")}).documentQueue
+   const outcome=(p:Promise<unknown>)=>p.then(()=>"opened",(e:Error)=>e.constructor.name)
+   const pageLockHeld=async()=>((await navigator.locks.query()).held??[]).some(l=>String(l.name).startsWith("crewship-document-drafts:"))
+   // Releasing a Web Lock settles asynchronously; a leaked lock stays held for good.
+   const lockReleased=async()=>{for(let i=0;i<40;i++){if(!await pageLockHeld())return true;await new Promise(r=>setTimeout(r,50))}return false}
+   const exclusiveNow=async()=>{const s=await openDocumentDrafts("alice","w","page",{requireExclusive:true});const e=s.exclusive;s.close();return e}
+   // 1. Already abandoned: nothing is opened.
+   const before=new AbortController();before.abort()
+   const preAborted=await outcome(openDocumentDrafts("alice","w","page",{requireExclusive:true,signal:before.signal}))
+   // 2. Abandoned while the lock request is pending (the grant arrives asynchronously).
+   const early=new AbortController(),pending=openDocumentDrafts("alice","w","page",{requireExclusive:true,signal:early.signal});early.abort()
+   const duringLock=await outcome(pending)
+   const lockAfterLockAbort=!await lockReleased()
+   // 3. Abandoned while IDB opens: hold the open request, abort, then deliver a late success.
+   const realOpen=indexedDB.open.bind(indexedDB)
+   let held:{request:Record<string,unknown>;closed:boolean}|undefined,openCalled!:()=>void
+   const opened=new Promise<void>(r=>{openCalled=r})
+   ;(indexedDB as unknown as {open:unknown}).open=()=>{const request:Record<string,unknown>={};held={request,closed:false};openCalled();return request}
+   const middle=new AbortController(),idbPending=openDocumentDrafts("alice","w","page",{requireExclusive:true,signal:middle.signal})
+   await opened
+   const lockWhileIdbOpening=await pageLockHeld()
+   middle.abort()
+   const duringIdb=await outcome(idbPending)
+   const lockAfterIdbAbort=!await lockReleased()
+   ;(held!.request as {result:unknown}).result={close(){held!.closed=true}}
+   ;(held!.request.onsuccess as ()=>void)?.()
+   ;(indexedDB as unknown as {open:unknown}).open=realOpen
+   // 4. Abandoned only after it opened: the returned store stays usable and is closed by its owner.
+   const after=new AbortController(),store=await openDocumentDrafts("alice","w","page",{requireExclusive:true,signal:after.signal});after.abort()
+   const draft={id:"kept",update:"",attempted:false,schema:1,epoch:"e",snapshot:"s"}
+   await store.put(draft);const keptRows=(await store.load()).length;await store.remove("kept");store.close()
+   const lockAfterClose=!await lockReleased()
+   return {preAborted,duringLock,lockAfterLockAbort,lockWhileIdbOpening,duringIdb,lockAfterIdbAbort,lateClosed:held!.closed,keptRows,lockAfterClose,exclusiveAtEnd:await exclusiveNow()}
+  })
+  expect(result.preAborted).toBe("DocumentStorageError")
+  expect(result.duringLock).toBe("DocumentStorageError")
+  expect(result.lockAfterLockAbort).toBe(false)
+  expect(result.lockWhileIdbOpening).toBe(true)
+  expect(result.duringIdb).toBe("DocumentStorageError")
+  expect(result.lockAfterIdbAbort).toBe(false)
+  expect(result.lateClosed).toBe(true)
+  expect(result.keptRows).toBe(1)
+  expect(result.lockAfterClose).toBe(false)
+  expect(result.exclusiveAtEnd).toBe(true)
+ }finally{await browser.close()}
+})

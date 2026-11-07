@@ -1,0 +1,1 @@
+- **Design reader help describes the currently permitted view.** CLI help/watch documentation and agent tool instructions distinguish shared pins, current write authority and separately authorized audited administrator reads. Comments API descriptions include the read-scoped administrator exception. Authorization and transport behavior are unchanged.

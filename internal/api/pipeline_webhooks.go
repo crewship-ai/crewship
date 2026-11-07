@@ -93,14 +93,18 @@ type webhookResponse struct {
 	// the secret before the current one is still accepted until then.
 	PreviousSecretExpiresAt *time.Time     `json:"previous_secret_expires_at,omitempty"`
 	InputsTemplate          map[string]any `json:"inputs_template"`
-	Enabled                 bool           `json:"enabled"`
-	RateLimitPerMin         int            `json:"rate_limit_per_min"`
-	LastFiredAt             *time.Time     `json:"last_fired_at,omitempty"`
-	LastStatus              string         `json:"last_status,omitempty"`
-	LastRunID               string         `json:"last_run_id,omitempty"`
-	FireCount               int64          `json:"fire_count"`
-	CreatedAt               time.Time      `json:"created_at"`
-	UpdatedAt               time.Time      `json:"updated_at"`
+	// Signal delivery mode: a verified delivery wakes parked wait:event steps
+	// (matched by correlation key) instead of starting a run.
+	SignalEventType       string     `json:"signal_event_type,omitempty"`
+	SignalCorrelationPath string     `json:"signal_correlation_path,omitempty"`
+	Enabled               bool       `json:"enabled"`
+	RateLimitPerMin       int        `json:"rate_limit_per_min"`
+	LastFiredAt           *time.Time `json:"last_fired_at,omitempty"`
+	LastStatus            string     `json:"last_status,omitempty"`
+	LastRunID             string     `json:"last_run_id,omitempty"`
+	FireCount             int64      `json:"fire_count"`
+	CreatedAt             time.Time  `json:"created_at"`
+	UpdatedAt             time.Time  `json:"updated_at"`
 }
 
 func (h *PipelineHandler) toWebhookResponse(w *pipeline.Webhook, slug string, includeSecret bool) webhookResponse {
@@ -122,6 +126,8 @@ func (h *PipelineHandler) toWebhookResponse(w *pipeline.Webhook, slug string, in
 		Token:                 w.Token,
 		SigningSecretSet:      w.SigningSecret != "",
 		InputsTemplate:        tmpl,
+		SignalEventType:       w.SignalEventType,
+		SignalCorrelationPath: w.SignalCorrelationPath,
 		Enabled:               w.Enabled,
 		RateLimitPerMin:       w.RateLimitPerMin,
 		LastFiredAt:           w.LastFiredAt,
@@ -150,6 +156,11 @@ type webhookRequestBody struct {
 	InputsTemplate        map[string]any `json:"inputs_template"`
 	Enabled               *bool          `json:"enabled,omitempty"`
 	RateLimitPerMin       int            `json:"rate_limit_per_min"`
+	// SignalEventType + SignalCorrelationPath switch the webhook to signal
+	// delivery. On PATCH, absent keeps the current value; empty strings for
+	// both return the webhook to starting runs.
+	SignalEventType       string `json:"signal_event_type"`
+	SignalCorrelationPath string `json:"signal_correlation_path"`
 	// RotateSecret is PATCH-only (F21, B9 #2362): the explicit, opt-in
 	// signal to mint a new HMAC signing secret. Absent/false means "leave
 	// the existing secret alone" — the whole point of this endpoint over
@@ -160,13 +171,23 @@ type webhookRequestBody struct {
 	// all; that still requires delete + recreate.
 	RotateSecret bool `json:"rotate_secret,omitempty"`
 	// RotateGraceSeconds keeps the secret a rotation replaces valid for this
-	// long (ODCH-INT-11): 0 (the default), 3600, 86400 or 604800, and only with
+	// long (ODCH-INT-11): 0 (the default) or 60..604800 (7 days), and only with
 	// rotate_secret. The response says when it stops, never what it was.
 	RotateGraceSeconds *int `json:"rotate_grace_seconds,omitempty"`
+	// RevokePreviousSecret ends an open overlap window now. It cannot be
+	// combined with rotate_secret (a rotation already decides the window).
+	RevokePreviousSecret bool `json:"revoke_previous_secret,omitempty"`
 }
 
-// webhookRotateGraceSeconds are the windows the rotate dialog offers.
-var webhookRotateGraceSeconds = map[int]bool{0: true, 3600: true, 86400: true, 604800: true}
+// Overlap window bounds for a rotated secret, in seconds. 0 means no overlap.
+const (
+	webhookOverlapMinSeconds = 60
+	webhookOverlapMaxSeconds = 7 * 24 * 3600
+)
+
+func validWebhookOverlapSeconds(n int) bool {
+	return n == 0 || (n >= webhookOverlapMinSeconds && n <= webhookOverlapMaxSeconds)
+}
 
 // CreateWebhook POST /workspaces/{wsId}/pipeline-webhooks
 func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) {
@@ -236,11 +257,17 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 		TargetPipelineVersion: body.TargetPipelineVersion,
 		SigningSecret:         signingSecret,
 		InputsTemplate:        body.InputsTemplate,
+		SignalEventType:       body.SignalEventType,
+		SignalCorrelationPath: body.SignalCorrelationPath,
 		Enabled:               enabled,
 		RateLimitPerMin:       body.RateLimitPerMin,
 	}
 	saved, err := h.webhooks.Save(r.Context(), in)
 	if err != nil {
+		if errors.Is(err, pipeline.ErrInvalidSignalDelivery) {
+			replyError(w, http.StatusBadRequest, signalDeliveryConfigMsg(err))
+			return
+		}
 		if errors.Is(err, pipeline.ErrInvalidTrigger) {
 			replyError(w, http.StatusBadRequest, "target does not support automatic triggers")
 			return
@@ -260,6 +287,11 @@ func (h *PipelineHandler) CreateWebhook(w http.ResponseWriter, r *http.Request) 
 	// once, the user copies it into the sender, and we never expose
 	// it again. Stripe / GitHub use the same one-shot pattern.
 	writeJSON(w, http.StatusCreated, h.toWebhookResponse(saved, slug, true))
+}
+
+func signalDeliveryConfigMsg(err error) string {
+	return "invalid signal delivery configuration: signal_event_type and signal_correlation_path (a dotted JSON path) " +
+		"must be set together, on a crewship-profile webhook (" + err.Error() + ")"
 }
 
 // UpdateWebhook PATCH /workspaces/{wsId}/pipeline-webhooks/{webhookId}
@@ -361,20 +393,34 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 		rateLimit = body.RateLimitPerMin
 	}
 
+	signalEventType, signalPath := existing.SignalEventType, existing.SignalCorrelationPath
+	if _, mentioned := rawKeys["signal_event_type"]; mentioned {
+		signalEventType = body.SignalEventType
+	}
+	if _, mentioned := rawKeys["signal_correlation_path"]; mentioned {
+		signalPath = body.SignalCorrelationPath
+	}
+
 	// Secret rotation is explicit and opt-in (F21). Every other path keeps
 	// the existing plaintext (GetByID already decrypted it) so Save's
 	// re-encrypt is a no-op change in content.
 	signingSecret := existing.SigningSecret
 	rotated := false
+	var previousUntil *time.Time
+	previousSecret := ""
 	if body.RotateGraceSeconds != nil {
 		if !body.RotateSecret {
 			replyError(w, http.StatusBadRequest, "rotate_grace_seconds only applies together with rotate_secret")
 			return
 		}
-		if !webhookRotateGraceSeconds[*body.RotateGraceSeconds] {
-			replyError(w, http.StatusBadRequest, "rotate_grace_seconds must be 0, 3600, 86400 or 604800")
+		if !validWebhookOverlapSeconds(*body.RotateGraceSeconds) {
+			replyError(w, http.StatusBadRequest, "rotate_grace_seconds must be 0 or between 60 and 604800 (7 days)")
 			return
 		}
+	}
+	if body.RevokePreviousSecret && body.RotateSecret {
+		replyError(w, http.StatusBadRequest, "revoke_previous_secret cannot be combined with rotate_secret")
+		return
 	}
 	if body.RotateSecret {
 		gen, gerr := generateWebhookSigningSecret()
@@ -385,6 +431,13 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 		}
 		signingSecret = gen
 		rotated = true
+		// The replaced secret keeps working for the requested window; no
+		// window (or none asked for) clears whatever an earlier rotation left.
+		// Recorded in the same transaction as the new secret (RotatePrevious).
+		if body.RotateGraceSeconds != nil && *body.RotateGraceSeconds > 0 && existing.SigningSecret != "" {
+			t := time.Now().UTC().Add(time.Duration(*body.RotateGraceSeconds) * time.Second)
+			previousUntil, previousSecret = &t, existing.SigningSecret
+		}
 	}
 
 	if body.IngressProfile != "" && body.IngressProfile != existing.IngressProfile {
@@ -400,11 +453,20 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 		TargetPipelineVersion: body.TargetPipelineVersion,
 		SigningSecret:         signingSecret,
 		InputsTemplate:        inputsTemplate,
+		SignalEventType:       signalEventType,
+		SignalCorrelationPath: signalPath,
 		Enabled:               enabled,
 		RateLimitPerMin:       rateLimit,
+		RotatePrevious:        rotated,
+		PreviousSecret:        previousSecret,
+		PreviousExpires:       previousUntil,
 	}
 	saved, err := h.webhooks.Save(r.Context(), in)
 	if err != nil {
+		if errors.Is(err, pipeline.ErrInvalidSignalDelivery) {
+			replyError(w, http.StatusBadRequest, signalDeliveryConfigMsg(err))
+			return
+		}
 		if errors.Is(err, pipeline.ErrInvalidTrigger) {
 			replyError(w, http.StatusBadRequest, "target does not support automatic triggers")
 			return
@@ -418,19 +480,24 @@ func (h *PipelineHandler) UpdateWebhook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	if rotated {
-		// The replaced secret keeps working for the requested window; no
-		// window (or none asked for) clears whatever an earlier rotation left.
-		var until *time.Time
-		prev := ""
-		if body.RotateGraceSeconds != nil && *body.RotateGraceSeconds > 0 && existing.SigningSecret != "" {
-			t := time.Now().UTC().Add(time.Duration(*body.RotateGraceSeconds) * time.Second)
-			until, prev = &t, existing.SigningSecret
+		until := previousUntil
+		meta := map[string]interface{}{"overlap": until != nil}
+		if until != nil {
+			meta["previous_secret_expires_at"] = until.Format(time.RFC3339)
 		}
-		if err := h.webhooks.SetPreviousSecret(r.Context(), webhookID, prev, until); err != nil {
-			// The new secret is already live; failing now would hide a
-			// rotation that happened. The old one simply stops now.
-			h.logger.Error("update pipeline webhook: record previous secret", "error", err, "webhook_id", webhookID)
+		auditFromRequest(r, h.db, "webhook.secret.rotated", "PIPELINE_WEBHOOK", webhookID, meta)
+		if reloaded, rerr := h.webhooks.GetByID(r.Context(), webhookID); rerr == nil {
+			reloaded.Token = saved.Token
+			saved = reloaded
 		}
+	}
+	if body.RevokePreviousSecret {
+		if err := h.webhooks.SetPreviousSecret(r.Context(), webhookID, "", nil); err != nil {
+			h.logger.Error("update pipeline webhook: revoke previous secret", "error", err, "webhook_id", webhookID)
+			replyError(w, http.StatusInternalServerError, "failed to revoke the previous secret")
+			return
+		}
+		auditFromRequest(r, h.db, "webhook.previous_secret.revoked", "PIPELINE_WEBHOOK", webhookID, nil)
 		if reloaded, rerr := h.webhooks.GetByID(r.Context(), webhookID); rerr == nil {
 			reloaded.Token = saved.Token
 			saved = reloaded
@@ -706,6 +773,9 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusUnauthorized, "invalid GitHub webhook")
 			return
 		}
+		if strings.HasSuffix(verdict.KeyID, ":previous") {
+			h.auditPreviousSecretUse(r, wh, "github")
+		}
 		// This endpoint has one fixed action: invoke this routine for PR changes.
 		// Unsigned event headers cannot select a different target or action.
 		if verdict.EventType == profiles.EventPing {
@@ -732,14 +802,20 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	} else {
 		sig := r.Header.Get("X-Crewship-Signature")
+		var sigOK, usedPrev bool
+		scheme := "hmac"
 		if ts := r.Header.Get("X-Crewship-Timestamp"); ts != "" {
-			if !wh.ValidateTimestampedSignature(body, ts, sig, time.Now(), 0) {
-				replyError(w, http.StatusUnauthorized, "signature mismatch")
-				return
-			}
-		} else if !wh.ValidateSignature(body, sig) {
+			scheme = "hmac-timestamped"
+			sigOK, usedPrev = wh.MatchTimestampedSignature(body, ts, sig, time.Now(), 0)
+		} else {
+			sigOK, usedPrev = wh.MatchSignature(body, sig, time.Now())
+		}
+		if !sigOK {
 			replyError(w, http.StatusUnauthorized, "signature mismatch")
 			return
+		}
+		if usedPrev {
+			h.auditPreviousSecretUse(r, wh, scheme)
 		}
 
 	}
@@ -795,9 +871,38 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A webhook switched back from signal delivery (--clear-signal) still holds
+	// the receipts of the bodies it processed as signals. Within their retention
+	// a replay of such a body is a duplicate, not new work: otherwise clearing
+	// the mode would reopen the replay window for every captured request.
+	if wh.SignalEventType == "" && h.db != nil {
+		if res, found, err := pipeline.LookupSignalReceipt(r.Context(), h.db, wh.ID, bodySHA); err != nil {
+			h.logger.Error("webhook fire: signal receipt lookup failed; refusing rather than guessing",
+				"error", err, "webhook_id", wh.ID)
+			w.Header().Set("Retry-After", webhook.IngressRetryAfterSeconds)
+			replyError(w, http.StatusServiceUnavailable, "acceptance unavailable")
+			return
+		} else if found {
+			status := "DELIVERED"
+			if res.Outcome == "ignored" {
+				status = "IGNORED"
+			}
+			writeJSON(w, http.StatusOK, map[string]any{"status": status, "delivered": len(res.RunIDs), "run_ids": res.RunIDs, "duplicate": true})
+			return
+		}
+	}
+
 	if !pipeline.AllowWebhookFire(wh.Token, effectiveLimit) {
 		w.Header().Set("Retry-After", "60")
 		replyError(w, http.StatusTooManyRequests, "rate limit exceeded")
+		return
+	}
+
+	// Signal-delivery mode: the verified delivery wakes parked wait:event
+	// steps by correlation key. It never starts a run, so none of the run
+	// pre-checks below apply. Reached only after signature verification.
+	if wh.SignalEventType != "" {
+		h.fireWebhookSignal(w, r, wh, idemKey, body)
 		return
 	}
 
@@ -910,6 +1015,72 @@ func (h *PipelineHandler) FireWebhook(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]any{
 		"run_id": runID, "status": "PENDING", "deduped": false, "delivery_id": receipt.DeliveryID, "pending_id": receipt.PendingID, "duplicate": false,
 	})
+}
+
+// fireWebhookSignal answers a verified delivery to a signal-mode webhook.
+// 200 {"status":"DELIVERED"} when waits were woken, 503 {"status":"IGNORED",
+// "retry":true} with Retry-After when no wait was armed yet (the body is not
+// consumed, so a redelivery can still wake a later wait), 200 IGNORED when the
+// body can never match, and the
+// same body with duplicate:true when the same signed body was already processed,
+// and 409 delivery_conflict when the delivery id was used for a different body.
+func (h *PipelineHandler) fireWebhookSignal(w http.ResponseWriter, r *http.Request, wh *pipeline.Webhook, deliveryID string, body []byte) {
+	if h.db == nil {
+		replyError(w, http.StatusServiceUnavailable, "signal wait store not wired")
+		return
+	}
+	res, err := pipeline.DeliverWebhookSignal(r.Context(), h.db, wh, deliveryID, body)
+	if errors.Is(err, pipeline.ErrSignalDeliveryConflict) {
+		h.logger.Warn("webhook signal: delivery conflict", "webhook_id", wh.ID)
+		replyError(w, http.StatusConflict, "delivery_conflict")
+		return
+	}
+	if err != nil {
+		// Waits claimed before the failure are already durable: wake them now
+		// and let the sender's retry of the same body finish the remainder.
+		for _, runID := range res.RunIDs {
+			if h.signals != nil {
+				h.signals.Signal(runID, wh.SignalEventType, string(body))
+			}
+			h.resumeAfterSignal(runID)
+		}
+		h.logger.Error("webhook signal: durable deliver", "error", err, "webhook_id", wh.ID)
+		w.Header().Set("Retry-After", webhook.IngressRetryAfterSeconds)
+		replyError(w, http.StatusServiceUnavailable, "signal delivery unavailable")
+		return
+	}
+	if !res.Duplicate {
+		for _, runID := range res.RunIDs {
+			if h.signals != nil {
+				h.signals.Signal(runID, wh.SignalEventType, string(body))
+			}
+			h.resumeAfterSignal(runID)
+		}
+		status := "SIGNALED"
+		if res.Outcome == "ignored" {
+			status = "IGNORED"
+			h.logger.Info("webhook signal: no matching wait", "webhook_id", wh.ID, "reason", res.Reason, "delivery_id", deliveryID)
+		}
+		// Operator-visible: last_status on `routine webhooks list`.
+		_, _ = h.webhooks.RecordFire(r.Context(), wh.ID, "", status)
+	}
+	status := "DELIVERED"
+	if res.Outcome == "ignored" {
+		status = "IGNORED"
+	}
+	resp := map[string]any{"status": status, "delivered": len(res.RunIDs), "run_ids": res.RunIDs, "duplicate": res.Duplicate}
+	if res.Reason != "" {
+		resp["reason"] = res.Reason
+	}
+	if res.Retry {
+		// Nothing was waiting yet and the body was not consumed: tell the
+		// sender to redeliver once the wait has armed.
+		resp["retry"] = true
+		w.Header().Set("Retry-After", webhook.IngressRetryAfterSeconds)
+		writeJSON(w, http.StatusServiceUnavailable, resp)
+		return
+	}
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // routineReceipt identifies accepted work whose pending start committed with it.
@@ -1289,4 +1460,15 @@ func githubVerifyKeys(wh *pipeline.Webhook, now time.Time) []profiles.Key {
 		keys = append(keys, profiles.Key{ID: id, Secret: []byte(s)})
 	}
 	return keys
+}
+
+// auditPreviousSecretUse records that a delivery verified with the previous
+// secret of an open rotation overlap, so operators can see when every sender
+// has moved to the new one. Metadata carries no secret material.
+func (h *PipelineHandler) auditPreviousSecretUse(r *http.Request, wh *pipeline.Webhook, scheme string) {
+	meta := map[string]interface{}{"scheme": scheme}
+	if wh.PreviousSecretExpiresAt != nil {
+		meta["previous_secret_expires_at"] = wh.PreviousSecretExpiresAt.UTC().Format(time.RFC3339)
+	}
+	WriteAuditLog(r.Context(), h.db, nil, "webhook.previous_secret.used", "PIPELINE_WEBHOOK", wh.ID, "", wh.WorkspaceID, meta)
 }

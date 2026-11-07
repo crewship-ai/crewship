@@ -15,6 +15,8 @@ export interface RunInfo {
   appShaError: string | null
   roles: string[]
   startedAt: string
+  /** PRD_RUN_ID of the runner that started this run, binding rows and evidence to it; null when unset. */
+  runId: string | null
 }
 
 export default async function globalSetup() {
@@ -36,7 +38,7 @@ export default async function globalSetup() {
     const account = env.accounts[role]
     if (!account) continue
     const state = await loginStorageState(env.origin, account)
-    const file = storageStatePath(env.origin, role)
+    const file = storageStatePath(env, role)
     fs.writeFileSync(file, JSON.stringify(state), { mode: 0o600 })
     fs.chmodSync(file, 0o600)
     roles.push(role)
@@ -59,6 +61,7 @@ export default async function globalSetup() {
     appShaError: build?.error ?? null,
     roles,
     startedAt: new Date().toISOString(),
+    runId: process.env.PRD_RUN_ID?.trim() || null,
   }
   fs.writeFileSync(paths.run, JSON.stringify(info, null, 2) + "\n")
 }

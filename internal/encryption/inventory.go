@@ -69,6 +69,8 @@ var EnvelopeColumns = []EnvelopeColumn{
 	{Table: "oauth_states", Column: "code_verifier"},
 	{Table: "agents", Column: "webhook_secret", FailOpen: true},
 	{Table: "pipeline_webhooks", Column: "signing_secret", FailOpen: true},
+	{Table: "agents", Column: "previous_webhook_secret", FailOpen: true},
+	{Table: "pipeline_webhooks", Column: "previous_signing_secret", FailOpen: true},
 	{Table: "crews", Column: "services_json", Where: "services_json LIKE 'crewsvc:%'", Prefix: "crewsvc:"},
 	{Table: "backup_offsite_destinations", Column: "secret_enc"},
 }

@@ -137,7 +137,7 @@ func FilterCatalog(entries []CatalogEntry, query string) []CatalogEntry {
 	}
 
 	q := strings.ToLower(strings.TrimSpace(query))
-	var results []CatalogEntry
+	results := []CatalogEntry{}
 	for _, e := range entries {
 		if strings.Contains(strings.ToLower(e.Name), q) ||
 			strings.Contains(strings.ToLower(e.Description), q) ||

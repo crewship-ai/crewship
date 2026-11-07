@@ -116,8 +116,21 @@ func (h *PageHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !workbookPageOwnerOnly(rec, user.ID) {
-		h.refusePageAction(w, r, rec, workbookPageRefusal, "")
-		return
+		// PRD §5: a live, trusted workspace OWNER/ADMIN reads this history
+		// too, through the audited administrator read below
+		// (auditWholeArrangementRead, which audits it even when the reader
+		// also holds the Sheet editor grant). Every other non-owner, including the
+		// Sheet's named editor, is still refused. Read only: rollback, rename,
+		// delete and folder moves keep the owner-only rule.
+		role, err := h.liveContentHumanRole(r.Context(), wsID, user.ID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			replyInternalError(w, h.logger, "authorize workbook page history", err)
+			return
+		}
+		if !workspaceArtifactReader(role) {
+			h.refusePageAction(w, r, rec, workbookPageRefusal, "")
+			return
+		}
 	}
 
 	rows, err := h.pageAuthReader(r.Context()).QueryContext(r.Context(), `
@@ -170,7 +183,7 @@ func (h *PageHandler) ListVersions(w http.ResponseWriter, r *http.Request) {
 		out[0].Current = true
 	}
 
-	if !h.auditPrivateOwnerAccess(w, r, rec) {
+	if !h.auditWholeArrangementRead(w, r, rec, true) {
 		return
 	}
 

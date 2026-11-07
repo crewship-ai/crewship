@@ -214,6 +214,11 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 
 	case "event":
 		eventType := Render(step.Wait.EventType, parentRender)
+		eventFilter := Render(step.Wait.EventFilter, parentRender)
+		correlationKey := Render(step.Wait.CorrelationKey, parentRender)
+		if err := ValidateEventFilter(eventFilter); err != nil {
+			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (event): %w", step.ID, err)
+		}
 		if e.signals == nil {
 			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (event) no signal registry wired", step.ID)
 		}
@@ -259,7 +264,7 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		}
 		if e.signalWaits != nil {
 			var err error
-			deadline, err = e.signalWaits.ArmWithTimeout(ctx, in.WorkspaceID, runID, step.ID, eventType, timeout)
+			deadline, err = e.signalWaits.ArmMatching(ctx, in.WorkspaceID, runID, step.ID, eventType, eventFilter, correlationKey, timeout)
 			if err != nil {
 				return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("wait step %q (event) arm: %w", step.ID, err)
 			}
@@ -286,6 +291,9 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 		for {
 			select {
 			case payload := <-ch:
+				if e.signalWaits == nil && !EventFilterMatches(eventFilter, payload) {
+					continue // not for this wait; keep waiting on the same timer
+				}
 				if e.signalWaits != nil {
 					if output, ok, err := check(); err != nil || ok {
 						return output, 0, time.Since(stepStart).Milliseconds(), err

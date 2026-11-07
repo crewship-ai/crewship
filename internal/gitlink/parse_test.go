@@ -372,3 +372,25 @@ func TestRef_APIEndpointFor_UsesTheSuppliedHostNotTheParsedOne(t *testing.T) {
 		})
 	}
 }
+
+func TestAPIHost(t *testing.T) {
+	cases := []struct {
+		provider Provider
+		host     string
+		want     string
+	}{
+		{ProviderGitHub, "github.com", "api.github.com"},
+		{ProviderGitHub, "www.github.com", "api.github.com"},
+		{ProviderGitHub, "GITHUB.COM", "api.github.com"},
+		{ProviderGitHub, "ghe.example.com", "ghe.example.com"},
+		{ProviderGitHub, "ghe.example.com:8443", "ghe.example.com:8443"},
+		{ProviderGitLab, "gitlab.com", "gitlab.com"},
+		{ProviderGitLab, "www.gitlab.com", "gitlab.com"},
+		{ProviderGitLab, "gitlab.example.com", "gitlab.example.com"},
+	}
+	for _, tc := range cases {
+		if got := APIHost(tc.provider, tc.host); got != tc.want {
+			t.Errorf("APIHost(%v, %q) = %q, want %q", tc.provider, tc.host, got, tc.want)
+		}
+	}
+}

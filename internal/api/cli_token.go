@@ -3,7 +3,7 @@ package api
 // CLI token management. Two tiers post-Patch-J:
 //
 //   - STANDARD ("crewship_cli_"): 256-bit random (was 160-bit), SHA-256
-//     hash at rest, optional expiry, async last_used_at debounce.
+//     hash at rest, optional expiry, last_used_at written at most once a minute.
 //     Used by regular humans for their day-to-day CLI work.
 //
 //   - ADMIN ("crewship_admin_"): 256-bit random, HMAC-SHA256 keyed by
@@ -768,10 +768,10 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 	// fatal to the auth result — we'd rather 500 the caller than
 	// silently grant access without a trail.
 	//
-	// Best-effort path stays for last_used_at, which is just a UX
-	// breadcrumb on the settings page; missing one update because
-	// SQLite was momentarily wedged is acceptable, missing an audit
-	// row for an ADMIN action is not.
+	// last_used_at below stays best-effort: it is just a UX breadcrumb
+	// on the settings page; missing one update because SQLite was
+	// momentarily wedged is acceptable, missing an audit row for an
+	// ADMIN action is not.
 	if dbTier == "ADMIN" {
 		useID := generateCUID()
 		if _, auditErr := db.ExecContext(ctx,
@@ -786,21 +786,12 @@ func ValidateCLITokenFull(ctx context.Context, db *sql.DB, token string, audit V
 		}
 	}
 
-	// last_used_at update stays fire-and-forget. Background ctx so
-	// the update survives the caller's deadline (auth has already
-	// been accepted); 5s bounds a wedged SQLite without leaking
-	// unbounded goroutines.
-	finish := beginBackgroundWork()
-	go func(id string) {
-		defer finish()
-		bgCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if _, ierr := db.ExecContext(bgCtx,
-			"UPDATE cli_tokens SET last_used_at = ? WHERE id = ?", nowStr, id); ierr != nil {
-			// Best-effort. Silent — operator wouldn't act on this.
-			_ = ierr
-		}
-	}(tokenID)
+	// last_used_at is a best-effort UX breadcrumb on the settings page. It is
+	// queued, at most once per token per interval in this process, and written
+	// off the request path by cliTokenTouches (cli_token_touch.go): a write on
+	// the caller made authentication wait whenever another writer held SQLite's
+	// lock (#4847).
+	cliTokenTouches.touch(db, tokenID, nowStr)
 
 	return ValidateCLITokenResult{
 		TokenID: tokenID, ExpiresAt: expiry,

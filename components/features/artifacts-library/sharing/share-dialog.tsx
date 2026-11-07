@@ -31,7 +31,7 @@ export function ShareDialog({ workspaceId, item, open, onOpenChange }: ShareDial
   // A new session or item starts a new form: nothing typed or read for the previous one carries over.
   const { humanId } = useSharingHuman()
   const close = () => onOpenChange(false)
-  return <CreateSurface open={open} onOpenChange={onOpenChange} size="md">
+  return <CreateSurface open={open} onOpenChange={onOpenChange} size="md" restoreOpenerFocus>
     <CreateSurfaceHeader icon={Share2} title={`Share “${item.name}”`} description="Choose who in this workspace can open it, and how." onClose={close} />
     <CreateSurfaceBody>
       {open && <ShareBody key={`${humanId ?? ""}:${workspaceId}:${item.slug}`} workspaceId={workspaceId} item={item} />}

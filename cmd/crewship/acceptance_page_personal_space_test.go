@@ -53,6 +53,7 @@ func TestAcceptance_PagePersonalSpaceClassification(t *testing.T) {
 	server := httptest.NewServer(router)
 	t.Cleanup(server.Close)
 	binary := buildCrewshipBinary(t)
+	user := func(role string) string { return "space-" + role }
 	for _, role := range []string{"MEMBER", "ADMIN", "OWNER"} {
 		t.Run(role, func(t *testing.T) {
 			config := filepath.Join(t.TempDir(), "cli.yaml")
@@ -87,8 +88,17 @@ func TestAcceptance_PagePersonalSpaceClassification(t *testing.T) {
 					t.Errorf("%s classification=%v", row.Slug, *row.Private)
 				}
 			}
-			if !found["legacy-unfiled"] || found["explicit-private"] != (role != "ADMIN") {
+			// PRD §5 (#4825): the custodian, the workspace OWNER and the
+			// workspace ADMIN all list the private Page; the administrators'
+			// listing is audited.
+			if !found["legacy-unfiled"] || !found["explicit-private"] {
 				t.Fatalf("unexpected authorized list: %#v", found)
+			}
+			if role != "MEMBER" {
+				var audits int
+				if err := db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND user_id=? AND entity_id='explicit-private'`, user(role)).Scan(&audits); err != nil || audits < 1 {
+					t.Fatalf("%s private listing not audited: %d %v", role, audits, err)
+				}
 			}
 			personal := exec.CommandContext(t.Context(), binary, "page", "list", "--audience", "personal", "--limit", "1")
 			personal.Env = command.Env

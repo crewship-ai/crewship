@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -230,5 +231,109 @@ func TestDesignExportByWorkspaceAdminIsAudited(t *testing.T) {
 	}
 	if count != 1 {
 		t.Fatalf("admin export audit rows %d", count)
+	}
+}
+
+// The export admits exactly the callers GET .../design admits, for exactly
+// the same versions, and a workspace administrator's foreign export leaves
+// the same audit record as the read, differing only in its operation (#4449).
+// The Design here was never shared, so only history readers see anything.
+func TestDesignExportMatchesGetDesignAuthorityAndAudit(t *testing.T) {
+	for _, private := range []bool{false, true} {
+		t.Run(fmt.Sprintf("private=%v", private), func(t *testing.T) {
+			f := newDesignAuthorityFixture(t)
+			if w := f.call(t, f.owner, "apply", `{"operations":[{"op":"upsert","node":{"id":"screen","type":"frame","name":"Screen","x":0,"y":0,"width":360,"height":640}},{"op":"upsert","node":{"id":"secret","type":"text","parentId":"screen","name":"Secret","x":0,"y":0,"width":200,"height":30,"text":"UNSHARED_V2"}}]}`); w.Code != 200 {
+				t.Fatal(w.Code, w.Body)
+			}
+			for _, user := range []string{"parity-admin", "parity-read-admin", "parity-viewer", "parity-member", "parity-outsider"} {
+				mustExec(t, f.h.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, user, user+"@example.test", user)
+				if user != "parity-outsider" {
+					mustExec(t, f.h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, generateCUID(), f.workspace, user)
+				}
+			}
+			mustExec(t, f.h.db, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id IN ('parity-admin','parity-read-admin')`, f.workspace)
+			f.token(t, "parity-read-admin")
+			mustExec(t, f.h.db, `UPDATE cli_tokens SET scopes='["pages:read"]' WHERE user_id='parity-read-admin'`)
+			if w := f.grant(t, "parity-viewer", "read"); w.Code != 200 {
+				t.Fatal(w.Code, w.Body)
+			}
+			if private {
+				mustExec(t, f.h.db, `UPDATE pages SET private_audience=1 WHERE id=?`, f.page)
+			}
+			allowed := map[string]bool{f.owner: true, "parity-admin": true, "parity-read-admin": true}
+			for _, user := range []string{f.owner, "parity-admin", "parity-read-admin", "parity-viewer", "parity-member", "parity-outsider"} {
+				for _, query := range []string{"?version=1", "?version=2", "?version=99", ""} {
+					get := f.request(t, user, http.MethodGet, query, "")
+					gw := httptest.NewRecorder()
+					f.h.GetDesign(gw, get)
+					ew := f.export(t, user, query)
+					switch {
+					case query == "?version=99":
+						if gw.Code != 404 || ew.Code != 404 {
+							t.Errorf("%s%s: read %d, export %d", user, query, gw.Code, ew.Code)
+						}
+					case !allowed[user]:
+						if gw.Code == 200 || ew.Code != gw.Code || ew.Body.String() != gw.Body.String() {
+							t.Errorf("%s%s: export %d %s, read %d %s", user, query, ew.Code, ew.Body, gw.Code, gw.Body)
+						}
+						if bytes.Contains(ew.Body.Bytes(), []byte("UNSHARED_V2")) {
+							t.Errorf("%s%s: refusal leaked content", user, query)
+						}
+					default:
+						if gw.Code != 200 {
+							t.Fatalf("%s%s: read %d %s", user, query, gw.Code, gw.Body)
+						}
+						var read struct{ Version int64 }
+						if err := json.Unmarshal(gw.Body.Bytes(), &read); err != nil {
+							t.Fatal(err)
+						}
+						want := fmt.Sprint(read.Version)
+						if query == "" {
+							want = "2" // export reads the latest saved version, never the live canvas
+						}
+						if got := exportVersion(t, ew); got != want {
+							t.Errorf("%s%s: exported v%s, read v%s", user, query, got, want)
+						}
+						if bytes.Contains(ew.Body.Bytes(), []byte("UNSHARED_V2")) != (want == "2") {
+							t.Errorf("%s%s: export content does not match v%s", user, query, want)
+						}
+					}
+				}
+			}
+			type auditRow struct{ Action, Workspace, Entity, EntityID, Operation, OwnerUser, OwnerCrew, Actor string }
+			for _, user := range []string{"parity-admin", "parity-read-admin"} {
+				rows, err := f.h.db.Query(`SELECT action,workspace_id,entity_type,entity_id,json_extract(metadata,'$.operation'),json_extract(metadata,'$.owner_user_id'),json_extract(metadata,'$.owner_crew_id'),json_extract(metadata,'$.actor') FROM audit_logs WHERE user_id=? ORDER BY created_at`, user)
+				if err != nil {
+					t.Fatal(err)
+				}
+				byOperation := map[string][]auditRow{}
+				for rows.Next() {
+					var row auditRow
+					if err := rows.Scan(&row.Action, &row.Workspace, &row.Entity, &row.EntityID, &row.Operation, &row.OwnerUser, &row.OwnerCrew, &row.Actor); err != nil {
+						t.Fatal(err)
+					}
+					byOperation[row.Operation] = append(byOperation[row.Operation], row)
+				}
+				if err := rows.Close(); err != nil {
+					t.Fatal(err)
+				}
+				// Three successful reads and three successful exports; a missing
+				// version rolls its admission audit back with the refused read.
+				reads, exports := byOperation["read"], byOperation["export"]
+				if len(reads) != 3 || len(exports) != 3 || len(byOperation) != 2 {
+					t.Fatalf("%s audit rows %+v", user, byOperation)
+				}
+				want := reads[0]
+				want.Operation = "export"
+				if want.Action != "design.workspace_admin_accessed" || want.OwnerUser != f.owner || want.Actor != user || want.EntityID != f.page {
+					t.Fatalf("%s read audit %+v", user, reads[0])
+				}
+				for _, row := range exports {
+					if row != want {
+						t.Errorf("%s export audit %+v, want %+v", user, row, want)
+					}
+				}
+			}
+		})
 	}
 }

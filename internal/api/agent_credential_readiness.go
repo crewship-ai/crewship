@@ -58,6 +58,18 @@ type agentCredentialReadinessResponse struct {
 	// Notes is operator-facing prose: why an unknown is unknown, what a
 	// missing is missing. Never null.
 	Notes []string `json:"notes"`
+	// HostBoundWithheld lists credentials a human bound to approved hosts that
+	// are NOT delivered because the crew's egress allowlist cannot satisfy
+	// them. Never null. A delivery precondition only — see
+	// credential_allowed_hosts.go for what it does not guarantee.
+	HostBoundWithheld []hostBoundWithheldReport `json:"host_bound_withheld"`
+}
+
+type hostBoundWithheldReport struct {
+	CredentialID   string   `json:"credential_id"`
+	CredentialName string   `json:"credential_name,omitempty"`
+	AllowedHosts   []string `json:"allowed_hosts"`
+	Reason         string   `json:"reason"`
 }
 
 // resolveAgentCredentialReadiness computes the report for one agent. The
@@ -76,7 +88,7 @@ func resolveAgentCredentialReadiness(r *http.Request, db *sql.DB, workspaceID, a
 	// The delivery set, still encrypted: readiness is decided by type,
 	// provider, variable name and handle-only — never by the value, which
 	// this endpoint must not open for a report.
-	delivered, _, err := loadDeliveredCredentials(ctx, db, agentID)
+	delivered, slotNotices, err := loadDeliveredCredentials(ctx, db, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -113,6 +125,22 @@ func resolveAgentCredentialReadiness(r *http.Request, db *sql.DB, workspaceID, a
 	}
 	if out.Notes == nil {
 		out.Notes = []string{}
+	}
+	out.HostBoundWithheld = []hostBoundWithheldReport{}
+	var names map[string]string
+	for _, n := range slotNotices {
+		if !n.HostBound {
+			continue
+		}
+		if names == nil {
+			if names, err = visibleCredentialNames(r, db, workspaceID); err != nil {
+				return nil, err
+			}
+		}
+		out.HostBoundWithheld = append(out.HostBoundWithheld, hostBoundWithheldReport{
+			CredentialID: n.CredentialID, CredentialName: names[n.CredentialID],
+			AllowedHosts: n.Hosts, Reason: n.Reason,
+		})
 	}
 	if rep.State == orchestrator.ModelCredentialReady {
 		d := byID[rep.CredentialID]

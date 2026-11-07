@@ -27,6 +27,23 @@ export function forgetLocalDraftPage(scope: LocalDraftScope) {
     if (handle.human === scope.human && handle.workspace === scope.workspace && handle.page === scope.page) handle.close()
   }
 }
+/** What the server says about this person's read of the Page. Native admission
+ * refuses Comment, but Comment keeps the shared version, so a refusal alone proves
+ * nothing. Only `draft_read_revoked` is "revoked" and only `readable: true` is
+ * "readable"; anything else is "unknown" and keeps the draft. This has no side
+ * effects: the caller decides whether the answer is still current. */
+export async function nativeDraftRead(scope: LocalDraftScope, signal?: AbortSignal): Promise<"revoked" | "readable" | "unknown"> {
+  const generation = identityGeneration
+  const response = await apiFetch(`/api/v1/pages/@${encodeURIComponent(scope.page)}/draft-key?workspace_id=${encodeURIComponent(scope.workspace)}`, {
+    method: "POST", cache: "no-store", redirect: "error", skipRefresh: true, signal,
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ human: scope.human, operation: "check" }),
+  })
+  const body = await response.json().catch(() => null)
+  if (generation !== identityGeneration) return "unknown"
+  if (response.status === 403 && body?.code === "draft_read_revoked") return "revoked"
+  return response.status === 200 && body?.readable === true ? "readable" : "unknown"
+}
 function base64(bytes: Uint8Array): string {
   let raw = ""
   for (let i = 0; i < bytes.length; i += 32768) raw += String.fromCharCode(...bytes.subarray(i, i + 32768))
@@ -43,8 +60,9 @@ export function isSealedLocalDraft(raw: string): boolean {
   try { return JSON.parse(raw)?.format === format } catch { return false }
 }
 /** Each open performs fresh server admission. Data keys stay only in this handle's RAM. */
-export async function createLocalDraftCipher(scope: LocalDraftScope): Promise<LocalDraftCipher> {
+export async function createLocalDraftCipher(scope: LocalDraftScope, options?: { signal?: AbortSignal }): Promise<LocalDraftCipher> {
   scope = { ...scope }
+  if (options?.signal?.aborted) throw unavailable()
   if (![scope.human, scope.workspace, scope.page].every(value => value && value.length <= 256 && !value.includes("\0"))) throw unavailable()
   if (principal !== undefined && principal !== scope.human) throw unavailable()
   const lifetime = new AbortController()
@@ -77,6 +95,9 @@ export async function createLocalDraftCipher(scope: LocalDraftScope): Promise<Lo
     try { return await crypto.subtle.importKey("raw", new Uint8Array(raw), "AES-GCM", false, ["encrypt", "decrypt"]) }
     finally { raw.fill(0) }
   }
+  // Only construction follows the caller's signal (#5104); a returned cipher lives until its own close().
+  const abandon = () => lifetime.abort()
+  options?.signal?.addEventListener("abort", abandon, { once: true })
   try {
     // Prepare before editing, so offline changes can still be sealed without
     // obtaining a new key after the session has expired.
@@ -88,6 +109,7 @@ export async function createLocalDraftCipher(scope: LocalDraftScope): Promise<Lo
       writer = await importKey(base64(raw)); ready()
     } finally { raw.fill(0) }
   } catch (error) { handle.close(); throw error }
+  finally { options?.signal?.removeEventListener("abort", abandon) }
   return {
     async seal(text, purpose) {
       // Old admitted writers may finish encrypted persistence during identity

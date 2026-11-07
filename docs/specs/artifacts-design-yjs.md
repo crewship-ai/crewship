@@ -40,7 +40,12 @@ message `Create Design`.
 ## How a change is applied
 
 Every change runs through a short-lived Yjs engine that has no database,
-network or credentials and runs for at most five seconds. The engine applies
+network or credentials. It has two separate budgets: up to 15 seconds to start
+(node and the Yjs bundle loading, which measured 27-31 ms idle and at most
+306 ms under 4x CPU oversubscription) and then up to five seconds for the
+change itself. When either budget runs out the process is killed and the
+change is refused as `503 Design engine is unavailable`; the server log names
+the phase (`startup` or `work`) that ran out. The engine applies
 the change to the live state and validates the whole resulting document (see
 [Limits](#limits)). Every database transaction below starts behind the shared
 writer fence and checks the caller's current credentials, workspace membership
@@ -67,10 +72,11 @@ transactions:
    increased. If `revision` changed in the meantime, the request answers `409`
    and nothing is written.
 
-In both paths the server then sends the resulting Yjs update to every connected
-browser. A change that fails validation, permission or revision checks is not
-written and not broadcast. Connected browsers only ever receive committed
-state.
+In both paths the server sends the committed Yjs update only to connections
+with live-read authority: editors and the separately audited administrative
+read path. Shared-only readers synchronize the shared snapshot and receive
+presence, without receiving later live document updates. A change that fails
+validation, permission or revision checks is not written or broadcast.
 
 ## Operations and snapshots
 
@@ -103,8 +109,13 @@ version without changing it.
 
 **Restore** (`POST .../design/restore` with `version`) changes the live document
 to match an earlier version and publishes that as a new version. The restore is
-applied as a Yjs update to the existing document, so connected browsers stay
-connected and see the result. History is never deleted.
+applied as a Yjs update to the existing document. Connected browsers authorized
+for live reads receive the result; shared-only readers keep their shared
+snapshot and presence. Changing the shared pin does not push replacement
+document state to an already-open shared-only socket; read again or reopen. Separately authorized
+workspace OWNER/ADMIN live reads remain audited for foreign Designs, including
+with a read-scoped credential, which grants no write authority. History is
+never deleted.
 
 **Share** (`POST .../design/share` with `version`) pins a version for readers.
 Only the Page owner can share; an Edit grant does not allow it.
@@ -147,12 +158,15 @@ Design workspace flag like every other Design route, and
   version and a shared-only caller the shared version. The version's
   `design.yjs` runs through the same engine validation as every read.
 - **Access.** The canonical Design read rule shared with `GET .../design` and
-  `GET .../design/versions`: Edit access (owner, Edit grant) or a workspace
-  manager reads any retained version; Read and Comment audiences only the shared
+  `GET .../design/versions`: current Edit authority (owner or Edit grant, with
+  a browser session or a CLI credential that also carries `pages:write`) or a
+  workspace OWNER/ADMIN (also with `pages:read` alone) reads any retained
+  version; everyone else the read admits, including Read and Comment audiences
+  and owners or Edit grantees narrowed to `pages:read`, only the shared
   version. Every other case, including an unshared version, a missing version,
   a non-member or another workspace, answers exactly as `GET .../design` does.
   Authority is checked under the writer fence before and after rendering; a
-  workspace manager's export of a foreign Design is audited as
+  workspace OWNER/ADMIN's export of a foreign Design is audited as
   `design.workspace_admin_accessed` with operation `export`.
 - **Output.** One HTML document with a meta Content-Security-Policy
   `default-src 'none'; style-src 'unsafe-inline'; img-src data:` and no script.
@@ -200,29 +214,75 @@ standard `y-protocols` sync and awareness messages in binary frames.
 The browser opens a fresh socket every five minutes after rechecking its
 permissions, keeping the local document and any unsent changes.
 
+Each tab holds its own document, so the local canvas draft is one sealed row
+with one entry per tab: that tab's full document state and the confirmed canvas
+it was made from. An entry and its base are one write, and a tab replaces only
+its own entry, under the cross-tab draft lock. After an identity change a tab
+that cannot open the row adds a sealed part, and the owner's next load combines
+the parts. The row has its own kind, `design-tabs`. The `design-canvas` and
+`design-pending` rows of older builds are only read, so a rollback finds no draft
+rather than a format it cannot open: a bare state counts as one more entry, and a
+mark supplies its base.
+
+Reopening merges every entry in a fixed order and turns what the merge hides into
+a conflict notice, so a notice exists only for texts that were really stored. An
+entry goes only from the tab that wrote or recovered it, when a confirmed document
+holds it and every notice that tab found is stored. Causal coverage cannot speak
+for an entry nobody examined, because it includes text a merge dropped, so that
+entry waits for the next reopen.
+
+A version save has five seconds from the call, on the monotonic clock, to get a
+sync request through the client's copy of the server's bucket and receive the
+reply, including any wait behind earlier saves. Closing the socket, closing the
+editor or the caller's `AbortSignal` ends it at once, and the work stays
+unconfirmed in the browser.
+
 ## Who can do what
+
+Live-read/Edit authority means the effective authority of this request, not
+only the Page ownership or grant label. Human CLI reads need a read-capable
+credential: `pages:read`, `pages:*`, `*`, or an unscoped full-role token;
+write scope alone does not imply read scope. Live/history reads need both
+`pages:read` and `pages:write` (or `pages:*`, `*`, or an unscoped full-role token) plus current Edit permission, or
+current Edit permission through a browser session. Ordinary Read/Comment
+callers and non-admin Page owners/Edit grantees using only `pages:read` are
+shared-only. Separately authorized workspace OWNER/ADMIN readers can read
+latest/history even with read scope, with audit for foreign Designs; that
+credential still cannot write. Agent tools retain their separate exact-run
+mandate, original human credential and live authority checks; these human CLI
+scope examples do not replace agent credential validation. Every credential
+form still requires live membership and current Page permission; a wildcard
+or unscoped full-role token does not confer Edit by itself.
 
 | Action | Required |
 |---|---|
 | Create | A human with Page creation permission. Agents cannot create a Design. |
-| Read live canvas, open the websocket | Read access to the Page. |
+| Read canvas, open the websocket | Read access to the Page; shared-only readers are limited to the shared snapshot and presence. |
 | Edit (live sync, operations, snapshot, restore) | Edit access to the Page, or an admitted agent run for this Page. |
 | Comment | Edit access, or an explicit Comment grant. |
 | Share a version | The Page owner. |
-| Export a version as HTML | Same as reading that version: Edit access or a workspace manager for any version, otherwise only the shared version. Human authentication only. |
+| Export a version as HTML | Same as reading that version: Edit authority (a browser session, or a CLI credential that also carries `pages:write`) or a workspace OWNER/ADMIN (also with `pages:read` alone) for any version, otherwise only the shared version. Human authentication only. |
 
-Readers see the live canvas read-only and receive live updates. The version
-list and comments they see are limited to the shared version, and they can open
-only that version by number. Tokens need `pages:read` for reads and
-`pages:write` for changes.
+Shared-only Read and Comment grantees receive the immutable shared snapshot
+and presence, not unsaved live canvas updates. Their version list and comments
+are limited to the shared version, and they can open only that version by
+number. Workspace administrators using the separately audited read path can
+still read live state; a read-only token does not gain write permission. Narrowed
+tokens are checked for `pages:read` on reads and `pages:write` on changes;
+matching wildcards and unscoped full-role alternatives apply as described above.
+
+Snapshot access and presence do not establish live editing or a collaboration
+acceptance result. Live multiuser behavior must be qualified separately on the
+enabled deployment and its supported clients.
 
 ## Agents
 
 Agents use the MCP tools `design_get`, `design_apply`, `design_snapshot`,
 `design_versions` and `design_restore`. They reach the same server path as
 people, under the exact Page chosen by the human who started the run. An agent
-applying operations does not need an open browser; people who have the canvas
-open see the change immediately. When the run was started from a comment, its
+applying operations does not need an open browser; connections with live-read
+authority receive the committed update. Shared-only readers keep the shared
+snapshot until the owner shares a different version. When the run was started from a comment, its
 first successful operations request answers that comment.
 
 The CLI equivalents are the `crewship page design` commands; see the

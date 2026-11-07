@@ -17,8 +17,8 @@ func privateControlFixture(t *testing.T) (*PageHandler, string, *pageRecord, str
 	return h, rig.wsID, &pageRecord{ID: page, Slug: page, OwnerUserID: rig.userID, PrivateAudience: true}, rig.userID, rig.adminID, admin
 }
 
-// Call the control predicates directly: private metadata is still hidden from
-// other roles by the existing loader. A future read-only invitation must not
+// Call the control predicates directly: a workspace ADMIN may read private
+// output (PRD §5, audited), but never administer or produce it. A future read-only invitation must not
 // turn that visibility into grant administration or production authority.
 func TestPrivatePageControlIntrinsicAuthority(t *testing.T) {
 	h, workspace, rec, author, owner, admin := privateControlFixture(t)
@@ -41,10 +41,14 @@ func TestPrivatePageControlIntrinsicAuthority(t *testing.T) {
 					t.Errorf("private %s production=%v reason=%q want%v", kind, allowed, reason, tc.allowed)
 				}
 			}
-			// These shared intrinsic predicates must remain unchanged.
-			if privatePageViewer(rec, &pageViewer{UserID: tc.user, Role: tc.role}) != tc.allowed ||
+			// The editor boundary is unchanged. The read audience additionally
+			// admits every workspace OWNER/ADMIN (PRD §5, #4825), audited.
+			if privatePageCustodian(rec, &pageViewer{UserID: tc.user, Role: tc.role}) != tc.allowed ||
 				h.mayEditSpec(ctx, workspace, tc.user, tc.role, rec) != tc.allowed {
-				t.Error("private viewer/editor intrinsic boundary changed")
+				t.Error("private custodian/editor intrinsic boundary changed")
+			}
+			if !privatePageViewer(rec, &pageViewer{UserID: tc.user, Role: tc.role}) {
+				t.Error("private read audience refused its custodian or a workspace administrator")
 			}
 			// Stronger agent/routine producer identity is not bypassed even by
 			// custodians or OWNER; no explicit producer grant exists here.

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { toPageView, type WirePage } from "@/hooks/use-pages"
 import { libraryItems, withLibraryState } from "../library-items"
-import { applyFilters, EMPTY_FILTERS, facetCounts, filtersFromParams, filtersToParams, groupItems, parseQuery, sortItems, type LibraryFilters } from "../library-filter"
+import { applyFilters, EMPTY_FILTERS, facetCounts, filtersFromParams, filtersToParams, groupItems, parseQuery, serverCatalogParams, sortItems, type LibraryFilters } from "../library-filter"
 
 const page = (over: Partial<WirePage>): WirePage => ({ id: over.slug ?? "p", slug: "p", name: "P", owner: "user/u1", updated_at: "2026-10-27T10:00:00Z", reach: ["owner"], ...over } as WirePage)
 
@@ -20,6 +20,24 @@ describe("library filters", () => {
   it("hides empty items everywhere but the Empty view", () => {
     expect(filter({})).not.toContain("blank")
     expect(filter({ view: "empty" })).toEqual(["blank"])
+  })
+
+  // #4898: the library's own dialog makes a blank Page and opens it; the person
+  // who made it must still find it in the default views and by search.
+  it("keeps a blank item the caller created and owns in the default views, never another person's", () => {
+    const blanks = libraryItems([
+      page({ slug: "mine-new", name: "UX walkthrough page" }),
+      page({ slug: "mine-old", name: "Old blank" }),
+      page({ slug: "theirs", name: "UX walkthrough other", owner: "user/u2", reach: ["role"] }),
+    ].map(toPageView))
+    const personal = { created: new Set(["mine-new", "theirs"]), opened: new Map([["mine-new", 2], ["mine-old", 1]]) }
+    const view = (over: Partial<LibraryFilters>) => applyFilters(blanks, { ...EMPTY_FILTERS, view: "all", ...over }, personal).map(item => item.slug)
+    expect(view({})).toEqual(["mine-new"])
+    expect(view({ q: "walkthrough" })).toEqual(["mine-new"])
+    expect(view({ view: "mine" })).toEqual(["mine-new"])
+    expect(view({ view: "opened" })).toEqual(["mine-new"])
+    expect(view({ view: "empty" }).sort()).toEqual(["mine-new", "mine-old", "theirs"])
+    expect(applyFilters(blanks, { ...EMPTY_FILTERS, view: "all" }).map(item => item.slug)).toEqual([])
   })
 
   it("shows archived items only in Archive and test items only in Test items, deleting nothing", () => {
@@ -107,5 +125,29 @@ describe("personal views", () => {
 
   it("the opened and favorite views survive the URL", () => {
     for (const v of ["opened", "mine", "favorites"] as const) expect(filtersFromParams(filtersToParams({ ...EMPTY_FILTERS, view: v })).view).toBe(v)
+  })
+})
+
+describe("serverCatalogParams", () => {
+  const all: LibraryFilters = { ...EMPTY_FILTERS, view: "all" }
+  const asObject = (params: URLSearchParams | null) => params && Object.fromEntries(params)
+
+  it("maps the All view's plain filters to the server catalog, leaving empty items out as the view does", () => {
+    expect(asObject(serverCatalogParams({ ...all, q: "  Pricing   Site ", kinds: ["project", "word"], access: ["private"], version: ["unshared"], folder: "" }, "name", { design: true })))
+      .toEqual({ empty: "exclude", sort: "name", q: "pricing site", kind: "project,word", access: "private", version: "unshared", folder: "~unfiled" })
+    expect(asObject(serverCatalogParams(all, "updated", { design: true }))).toEqual({ empty: "exclude", sort: "updated" })
+  })
+
+  it("keeps Design out of the server request while Design is off, as the browser list does", () => {
+    expect(serverCatalogParams(all, "kind", { design: false })?.get("kind")).toBe("project,dashboard,page,word,sheet,slides")
+    expect(serverCatalogParams({ ...all, kinds: ["design", "word"] }, "kind", { design: false })?.get("kind")).toBe("word")
+    expect(serverCatalogParams({ ...all, kinds: ["design"] }, "kind", { design: false })).toBeNull()
+  })
+
+  it("leaves what only the browser can express to the browser", () => {
+    expect(serverCatalogParams(EMPTY_FILTERS, "updated", { design: true })).toBeNull()
+    for (const view of ["attention", "opened", "mine", "favorites", "empty", "series", "test", "archive"] as const) expect(serverCatalogParams({ ...all, view }, "updated", { design: true })).toBeNull()
+    expect(serverCatalogParams({ ...all, owners: ["You"] }, "updated", { design: true })).toBeNull()
+    for (const q of ["kind:word", "is:private", "owner:you plan"]) expect(serverCatalogParams({ ...all, q }, "updated", { design: true })).toBeNull()
   })
 })

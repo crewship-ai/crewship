@@ -1,4 +1,5 @@
 import type { PageFolderRef, PageView } from "@/hooks/use-pages"
+import { artifactDashboards, artifactSlides } from "@/lib/feature-flags"
 
 /**
  * The kinds the library shows: each has a backend that stores and opens it.
@@ -71,8 +72,11 @@ function ownerOf(page: PageView): string | null {
   return page.reach?.includes("owner") ? "You" : null
 }
 
-/** Every Page the caller can read, typed or not; `visibleItems` decides what the default views show. */
-export function libraryItems(pages: PageView[]): LibraryItem[] {
+/**
+ * Every Page the caller can read, typed or not; `visibleItems` decides what the default views show.
+ * `keepOrder` is for a server window, which is already sorted by the chosen key.
+ */
+export function libraryItems(pages: PageView[], options: { keepOrder?: boolean } = {}): LibraryItem[] {
   const items: LibraryItem[] = pages.map(page => {
     const kind = kindOf(page)
     const typedKind = page.artifactKind
@@ -94,11 +98,50 @@ export function libraryItems(pages: PageView[]): LibraryItem[] {
       ...(typeof page.pagesVersion === "number" ? { pagesVersion: page.pagesVersion } : {}),
     }
   })
+  if (options.keepOrder) return items
   // The server already orders by last edit; keep a stable newest-first order if it did not.
   return items.sort((a, b) => (b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0))
 }
 
 /** Archive, test origin and a pending move, from the server's fields or the sharing mock. */
+/** A positive safe integer `?version=` pin, or undefined. */
+export function versionPin(raw: string | null | undefined): number | undefined {
+  const value = Number(raw)
+  return raw && Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
+/**
+ * The Artifacts address of one project in a workspace, optionally pinned to a
+ * version: what the API returns for create, share and restore (#4995) and
+ * where an old /pages/<slug>?artifact=1 link moves.
+ */
+export function artifactsProjectHref(id: string, workspaceId: string, version?: number): string {
+  const query = new URLSearchParams({ workspace_id: workspaceId })
+  if (version !== undefined) query.set("version", String(version))
+  return `/artifacts/${encodeURIComponent(id)}?${query}`
+}
+
+/** The Pages address of an item; a project keeps the version its address pins. */
+export function openInPagesHref(workspaceId: string, item: Pick<LibraryItem, "slug" | "pageId" | "projectBacked">, version?: number): string {
+  const query = new URLSearchParams({ workspace_id: workspaceId })
+  if (item.projectBacked) {
+    query.set("artifact", "1")
+    if (version !== undefined) query.set("version", String(version))
+  }
+  const reference = item.projectBacked && item.pageId ? "@" + item.pageId : item.slug
+  return `/pages/${encodeURIComponent(reference)}?${query}`
+}
+
+/**
+ * Whether the Artifacts detail shows this versioned item in its own project
+ * viewer (a Project, and a Dashboard or Slides behind their build switches).
+ * The same rule decides whether an old /pages/<slug>?artifact=1 link moves to
+ * Artifacts: anything else keeps opening on Pages.
+ */
+export function viewsProjectInline(item: LibraryItem): boolean {
+  return item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides())
+}
+
 export function withLibraryState(items: LibraryItem[], state: {
   archived: ReadonlySet<string>; test: ReadonlySet<string>; moved?: ReadonlyMap<string, { slug: string; name: string } | null>
 }): LibraryItem[] {

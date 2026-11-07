@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
@@ -272,5 +273,86 @@ func TestAuxStatus_HonoursThePinnedKey(t *testing.T) {
 	}
 	if !strings.Contains(row.Detail, "revoked") {
 		t.Errorf("detail = %q, want the credential's own reason", row.Detail)
+	}
+}
+
+// #5045: an agent's tool calls drive the evaluators, and the lookup does not
+// know where the key goes, so a host-bound credential cannot be an evaluator
+// key. The write refuses it up front; the lookup covers a list added later.
+func TestAuxCredential_HostBoundRefused(t *testing.T) {
+	ensureEncryptionKey(t)
+	db := setupTestDB(t)
+	ownerID := seedTestUser(t, db)
+	wsID := seedTestWorkspace(t, db, ownerID)
+	e, err := encryption.Encrypt("sk-live-123")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	for id, hosts := range map[string]string{
+		"key_open": `[]`, "key_bound": `["api.anthropic.com"]`, "key_garbled": `not-json`,
+	} {
+		execOrFatal(t, db, `INSERT INTO credentials
+			(id, workspace_id, name, encrypted_value, type, status, created_by, allowed_hosts)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			id, wsID, id, e, CredTypeAPIKey, "ACTIVE", ownerID, hosts)
+	}
+	ctx := context.Background()
+	lookup := NewAuxCredentialLookup(db)
+	check := newAuxCredentialCheck(db)
+
+	if got, err := lookup(ctx, "key_open"); err != nil || got != "sk-live-123" {
+		t.Fatalf("unbound key: got (%q, %v), want the key", got, err)
+	}
+	if err := check(ctx, wsID, "key_open"); err != nil {
+		t.Fatalf("unbound key refused at write: %v", err)
+	}
+	for _, id := range []string{"key_bound", "key_garbled"} {
+		if got, err := lookup(ctx, id); err == nil || got != "" {
+			t.Errorf("%s: lookup returned (%q, %v), want a refusal", id, got, err)
+		}
+		if err := check(ctx, wsID, id); err == nil {
+			t.Errorf("%s: write accepted a host-bound credential", id)
+		}
+	}
+}
+
+// #5045: the verdict slots cache a built provider. Binding a pinned key must
+// stop that key on the next call rather than at the next restart.
+func TestAuxProvider_BindingAPinnedKeyDropsTheCachedClient(t *testing.T) {
+	ensureEncryptionKey(t)
+	db := setupTestDB(t)
+	store := keepercfg.NewAuxStore(db, llm.AuxiliaryModels{
+		RunSummary: llm.AuxModel{Provider: "ollama", Model: "boot-model", Timeout: 15 * time.Second},
+		Fallback:   llm.AuxModel{Provider: "ollama", Model: "boot-fallback", Timeout: 10 * time.Second},
+	})
+	if err := store.Load(context.Background()); err != nil {
+		t.Fatalf("load aux store: %v", err)
+	}
+	r := &Router{keeperAuxSettings: store, logger: newTestLogger(), db: db}
+	ownerID := seedTestUser(t, r.db)
+	wsID := seedTestWorkspace(t, r.db, ownerID)
+	e, err := encryption.Encrypt("sk-live-123")
+	if err != nil {
+		t.Fatalf("encrypt: %v", err)
+	}
+	execOrFatal(t, r.db, `INSERT INTO credentials
+		(id, workspace_id, name, encrypted_value, type, status, created_by)
+		VALUES ('key_pin', ?, 'pin', ?, ?, 'ACTIVE', ?)`, wsID, e, CredTypeAPIKey, ownerID)
+	id := "key_pin"
+	if _, err := r.KeeperAuxSettings().Apply(context.Background(), string(llm.SlotRunSummary),
+		keepercfg.AuxPatch{CredentialID: &id}, ""); err != nil {
+		t.Fatalf("pin key: %v", err)
+	}
+	pinned := &stubVerdictProvider{}
+	r.runVerdictCache.fpr = "ollama|boot-model||key_pin"
+	r.runVerdictCache.provider = pinned
+	r.runVerdictCache.model = "boot-model"
+
+	if got, _, _ := r.RunVerdict(); got != llm.Provider(pinned) {
+		t.Fatal("an unbound pinned key must keep its cached client")
+	}
+	execOrFatal(t, r.db, `UPDATE credentials SET allowed_hosts = '["api.anthropic.com"]' WHERE id = 'key_pin'`)
+	if got, _, _ := r.RunVerdict(); got == llm.Provider(pinned) {
+		t.Fatal("a cached client kept spending a key after it was bound")
 	}
 }

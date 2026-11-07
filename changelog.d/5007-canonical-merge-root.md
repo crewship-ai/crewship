@@ -1,0 +1,1 @@
+- **Memory proposal approval stays inside its own crew directory (#5007).** The merge into the learned file now locks, reads and writes through one directory handle pinned to the storage root.

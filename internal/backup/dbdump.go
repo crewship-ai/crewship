@@ -1422,6 +1422,22 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 					}
 					val = fixed
 				}
+				// #5045: approved hosts are a delivery precondition; see
+				// normalizeRestoredAllowedHosts.
+				if table == credentialsTable && k == allowedHostsColumn {
+					val = normalizeRestoredAllowedHosts(val)
+				}
+				// #5045: a skill lock is an instance administrator's
+				// decision over a row every workspace shares, so a
+				// workspace bundle never brings one back.
+				if table == "skills" {
+					switch k {
+					case "locked":
+						val = 0
+					case "locked_by", "locked_at":
+						val = nil
+					}
+				}
 				cols = append(cols, quoteIdent(k))
 				placeholders = append(placeholders, "?")
 				args = append(args, val)
@@ -1558,6 +1574,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	}
 	if err := reconcileRestoredIssueOutbox(ctx, tx); err != nil {
 		return stats, fmt.Errorf("backup: reconcile durable issue audit delivery: %w", err)
+	}
+	if err := retireRestoredPageGrants(ctx, tx, dump); err != nil {
+		return stats, fmt.Errorf("backup: retire restored page grants: %w", err)
 	}
 	if err := assertNoFKViolationsTx(ctx, tx); err != nil {
 		return stats, err

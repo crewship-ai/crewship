@@ -14,7 +14,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { Input } from "@/components/ui/input"
 import { useDesign } from "./use-design"
 import { readablePeerFill } from "./peer-colors"
-import { designLinkTarget, designScreenOf, removeDesignNode, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignNode, type DesignNodeType } from "./design-document"
+import { designLinkTarget, designScreenOf, removeDesignNode, restoreDesignConflict, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignConflict, type DesignNode, type DesignNodeType } from "./design-document"
 import { DesignNodeShape } from "./design-node-shape"
 import { DesignPrototypePlayer } from "./design-prototype-player"
 import { DesignExportButton } from "./design-export-button"
@@ -202,7 +202,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   <header className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
    <Frame className="size-5" aria-hidden="true" />
    <h1 className="mr-auto truncate font-semibold">{slug} <span className="ml-2 text-xs font-normal text-muted-foreground">Design</span></h1>
-   <span role="status" className="text-xs text-muted-foreground">{version ? `Version ${version}` : historyFull ? "History full · changes kept in this browser" : design.connection === "connected" ? design.dirty ? "Live · changes saved as you work" : "Live · up to date" : design.connection === "denied" ? "Access changed · reopen to continue" : design.connection === "rejected" ? "The server refused changes made in this browser (too large or invalid) · they will not sync" : design.connection === "connecting" ? "Connecting…" : "Offline · changes kept in this browser"}</span>
+   <span role="status" className="text-xs text-muted-foreground">{version ? `Version ${version}` : historyFull ? "History full · changes kept in this browser" : design.unsynced && data.can_edit === false ? "Jen pro čtení · neodeslané změny zůstaly v tomto prohlížeči a vrátí se, až budete moci znovu upravovat" : design.connection === "connected" ? design.unsynced ? "Live · sending changes…" : !design.editable ? "Connected · read only" : design.dirty ? "Live · changes saved as you work" : "Live · up to date" : design.connection === "denied" ? "Access changed · reopen to continue" : design.connection === "rejected" ? "The server refused changes made in this browser (too large or invalid) · they will not sync" : design.connection === "connecting" ? "Connecting…" : "Offline · changes kept in this browser"}</span>
    {!design.editable && <span className="rounded bg-muted px-2 py-1 text-xs">{version ? "History" : "Read only"}</span>}
    <div className="flex -space-x-1" aria-label="People on this canvas">{design.peers.map(peer => <span key={peer.clientId} title={peer.name} className="flex size-7 items-center justify-center rounded-full border-2 border-background text-xs font-medium text-white" style={{ backgroundColor: readablePeerFill(peer.color) }}>{peer.name.slice(0, 2).toUpperCase()}</span>)}</div>
    {prototype && frames.length > 0 && <Button ref={playButton} variant="outline" onClick={play}><Play className="size-4" />Play</Button>}
@@ -215,6 +215,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   {continued?.scope===continueScope&&<div role="status" className="border-b px-4 py-3 text-sm"><p>A new Design contains the copied canvas. This original canvas, its history and your unsent feedback remain here.</p><a className="underline" href={`/artifacts/${encodeURIComponent(continued.page)}?workspace_id=${encodeURIComponent(workspaceId)}`} target="_blank" rel="noopener noreferrer">Open new Design</a></div>}
   {failure && !historyFull && <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">{failure.message}</p>}
   {design.connection==="quota"&&!historyFull&&<p role="alert" className="border-b px-4 py-2 text-sm">Storage capacity is full. Your changes are kept in this browser and nothing was deleted. Save a version to open the recovery choices.</p>}
+  {design.conflicts.map((conflict, index) => <DesignConflictNotice key={`${conflict.id}-${index}`} conflict={conflict} canRestore={design.editable && Boolean(design.doc)} onRestore={() => { if (design.doc) restoreDesignConflict(design.doc, conflict); design.dismissConflict(conflict) }} onDismiss={() => design.dismissConflict(conflict)} />)}
   {design.draftError && <p role="alert" className="border-b px-4 py-2 text-sm">Browser draft storage is unavailable or full. Keep this window open until connected and save a version.</p>}
   <div className="flex min-h-0 flex-1 flex-col md:flex-row">
    <aside className="flex max-h-40 shrink-0 flex-col overflow-auto border-b md:max-h-none md:w-48 md:border-b-0 md:border-r" aria-label="Layers">
@@ -228,7 +229,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
     <div className="z-10 flex flex-wrap items-center gap-1 border-b bg-background px-3 py-2" aria-label="Design tools">
      <Button variant="ghost" size="sm" title="Select and move"><MousePointer2 className="size-4" /><span className="sr-only">Select and move</span></Button>
      {design.editable && <><Button variant="outline" size="sm" onClick={() => add("frame")}><Plus className="size-4" />Screen</Button><Button variant="ghost" size="sm" onClick={() => add("rect")}><Square className="size-4" />Rectangle</Button><Button variant="ghost" size="sm" onClick={() => add("text")}><Type className="size-4" />Text</Button><Button variant="ghost" size="sm" onClick={() => add("image")}><ImagePlus className="size-4" />Image</Button></>}
-     <span className="ml-auto text-xs text-muted-foreground">{selected ? selected.name || selected.type : design.editable ? "Drag to move · edit in Properties" : "Follow changes live"}</span>
+     <span className="ml-auto text-xs text-muted-foreground">{selected ? selected.name || selected.type : design.editable ? "Drag to move · edit in Properties" : "View canvas"}</span>
     </div>
     <div className="min-h-0 flex-1 overflow-auto bg-muted/40" aria-label="Design canvas viewport">
      <svg ref={canvas} role="img" aria-label="Design canvas" width={width} height={height} className="touch-none" onPointerMove={move} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerLeave={() => design.setCursor(null)} onPointerDown={() => setSelectedId(null)}>
@@ -251,9 +252,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
     {panel === "history" ? <>
      <h2 className="mb-3 text-sm font-semibold">History</h2>
      {Boolean(design.versions.data?.shared_version) && <a className="mb-3 inline-block text-xs underline" target="_blank" rel="noopener noreferrer" href={`/artifacts?design=1&item=${encodeURIComponent(slug)}&version=${design.versions.data!.shared_version}&workspace_id=${encodeURIComponent(workspaceId)}`}>Open shared version {design.versions.data!.shared_version}</a>}
-     <Button className="mb-3 w-full" variant={version ? "outline" : "secondary"} onClick={() => setVersion(undefined)}>Live canvas</Button>
+     <Button className="mb-3 w-full" variant={version ? "outline" : "secondary"} onClick={() => setVersion(undefined)}>{data.can_edit ? "Live canvas" : "Current view"}</Button>
      {design.versions.isError && <p role="alert" className="text-sm text-destructive">{design.versions.error.message}</p>}
-     {design.versions.data?.versions.map(item => <div key={item.version} className="mb-3 rounded border p-3 text-xs"><button className="w-full text-left" onClick={() => setVersion(item.version)}><span className="font-medium">Version {item.version}</span>{item.version === design.versions.data?.shared_version && <span className="ml-2 text-muted-foreground">Shared</span>}<p className="mt-1 text-muted-foreground">{item.message || "Design checkpoint"}</p>{item.created_at && <p className="mt-1 text-muted-foreground">{new Date(item.created_at).toLocaleString()}</p>}</button>{data.can_edit && <div className="mt-2 flex gap-2"><Button size="sm" variant="outline" disabled={design.restore.isPending} onClick={() => design.restore.mutate(item.version, { onSuccess: () => setVersion(undefined) })}>Restore</Button><Button size="sm" variant="ghost" disabled={design.share.isPending} onClick={() => design.share.mutate(item.version)}>Share</Button></div>}</div>)}
+     {design.versions.data?.versions.map(item => <div key={item.version} className="mb-3 rounded border p-3 text-xs"><button className="w-full text-left" onClick={() => setVersion(item.version)}><span className="font-medium">Version {item.version}</span>{item.version === design.versions.data?.shared_version && <span className="ml-2 text-muted-foreground">Shared</span>}<p className="mt-1 text-muted-foreground">{item.message || "Design checkpoint"}</p>{item.created_at && <p className="mt-1 text-muted-foreground">{new Date(item.created_at).toLocaleString()}</p>}</button>{data.can_edit && <div className="mt-2 flex gap-2"><Button size="sm" variant="outline" disabled={design.restore.isPending} onClick={() => design.restore.mutate(item.version, { onSuccess: () => setVersion(undefined) })}>Restore</Button>{data.can_share === true && <Button size="sm" variant="ghost" disabled={design.share.isPending} onClick={() => design.share.mutate(item.version)}>Share</Button>}</div>}</div>)}
     </> : <>
      <h2 className="mb-4 text-sm font-semibold">Properties</h2>
      {selected ? <div className="space-y-3">
@@ -302,4 +303,22 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
  return <label className="block text-xs text-muted-foreground"><span className="mb-1.5 block">{label}</span>{children}</label>
+}
+
+/** Two people changed one text from a stale canvas and only one text stayed on it. */
+function DesignConflictNotice({ conflict, canRestore, onRestore, onDismiss }: { conflict: DesignConflict; canRestore: boolean; onRestore: () => void; onDismiss: () => void }) {
+ const [copy, setCopy] = useState<"" | "copied" | "failed">("")
+ const lost = conflict.kept === "mine" ? conflict.theirs : conflict.mine
+ const copyText = () => { void navigator.clipboard.writeText(lost).then(() => setCopy("copied"), () => setCopy("failed")) }
+ return <div role="alert" className="space-y-2 border-b px-4 py-3 text-sm">
+  <p><b>Konflikt úprav: text vrstvy „{conflict.name}“ změnili dva lidé.</b></p>
+  <p>{conflict.left === undefined ? "Vrstva je mezitím smazaná. Její text je jen tady v tomto prohlížeči:" : conflict.kept === "mine" ? "Na plátně zůstal váš text. Text druhého člověka byl přepsán a v historii zůstává, jen pokud byl uložen ve verzi. Tady je:" : "Na plátně zůstal text druhého člověka. Váš text se neuložil a je jen tady v tomto prohlížeči:"}</p>
+  <blockquote className="max-h-32 overflow-auto whitespace-pre-wrap rounded border bg-muted p-2">{lost}</blockquote>
+  <div className="flex flex-wrap items-center gap-2">
+   <Button variant="outline" size="sm" disabled={!canRestore} onClick={onRestore}>Obnovit tento text</Button>
+   <Button variant="outline" size="sm" onClick={copyText}>Kopírovat text</Button>
+   <Button variant="ghost" size="sm" onClick={onDismiss}>Zavřít upozornění</Button>
+   {copy && <span className="text-xs text-muted-foreground">{copy === "copied" ? "Text je zkopírovaný." : "Kopírování se nepovedlo, označte text ručně."}</span>}
+  </div>
+ </div>
 }

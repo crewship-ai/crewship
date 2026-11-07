@@ -25,16 +25,18 @@ var designExportSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 
 // designHistoryReader is the canonical Design read rule for retained versions:
 // a person with current Edit access (owner, Edit grant, admitted agent run) or
-// a workspace manager reads any retained version; everyone else whom the Page
+// a workspace OWNER/ADMIN (designManagerRead) reads any retained version; everyone else whom the Page
 // read check admits sees only the shared version. GetDesign, DesignVersions
 // and ExportDesign all decide through this one predicate.
-func (h *PageHandler) designHistoryReader(ctx context.Context, tx *sql.Tx, r *http.Request, k artifacts.VersionKey) (canEdit, history bool, err error) {
-	_, writeErr := h.designAuthority(r, k, true)(ctx, tx)
+// writer is the admitted write actor (empty without Edit access); GetDesign
+// compares it with the Page owner for canShare, as ShareDesign does.
+func (h *PageHandler) designHistoryReader(ctx context.Context, tx *sql.Tx, r *http.Request, k artifacts.VersionKey) (writer string, canEdit, history bool, err error) {
+	writer, writeErr := h.designAuthority(r, k, true)(ctx, tx)
 	if writeErr == nil {
-		return true, true, nil
+		return writer, true, true, nil
 	}
 	history, err = h.designManagerRead(ctx, tx, k)
-	return false, history, err
+	return "", false, history, err
 }
 
 // designReadableVersion maps a requested version (0 = default) to the version
@@ -76,7 +78,7 @@ func designVersionState(ctx context.Context, tx *sql.Tx, k artifacts.VersionKey,
 // file (#4449). It never reads the live document: without `version` an editor
 // gets the latest retained version and a shared-only reader the shared one.
 // Authorization, the Design flag and the not-found shape are those of
-// GetDesign; a workspace manager's foreign export is audited as "export".
+// GetDesign; a workspace OWNER/ADMIN's foreign export is audited as "export".
 func (h *PageHandler) ExportDesign(w http.ResponseWriter, r *http.Request) {
 	k, r, ok := h.designKey(w, newDesignAdminAuditRequest(r, "export"))
 	if !ok {
@@ -115,7 +117,7 @@ func (h *PageHandler) ExportDesign(w http.ResponseWriter, r *http.Request) {
 		if e := tx.QueryRowContext(ctx, `SELECT h.latest_version,h.shared_version,p.slug,p.name FROM artifact_version_heads h JOIN pages p ON p.workspace_id=h.workspace_id AND p.id=h.page_id WHERE h.workspace_id=? AND h.page_id=? AND h.content_type='design'`, k.WorkspaceID, k.PageID).Scan(&latest, &shared, &slug, &name); e != nil {
 			return e
 		}
-		_, history, e := h.designHistoryReader(ctx, tx, r, k)
+		_, _, history, e := h.designHistoryReader(ctx, tx, r, k)
 		if e != nil {
 			return e
 		}

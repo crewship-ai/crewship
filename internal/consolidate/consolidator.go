@@ -635,7 +635,7 @@ func (c *Consolidator) appendRules(outputDir string, now time.Time, rules []Lear
 	// per crew, sharing an output dir if the operator misconfigures
 	// them) could otherwise interleave block fragments on the same
 	// file. flock is per-fd, blocking — the second caller waits.
-	lk := memory.NewFileLock(path + ".lock")
+	lk := memory.NewRootFileLock(root, fname+".lock")
 	if err := lk.Lock(); err != nil {
 		return "", nil, fmt.Errorf("lock %s: %w", path, err)
 	}

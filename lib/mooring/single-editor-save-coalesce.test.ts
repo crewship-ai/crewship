@@ -12,7 +12,7 @@ it("does not continually schedule redundant versions while the next snapshot is 
   const requests: NativeSaveRequest[] = []
   let captures = 0
   const receipt = (r: NativeSaveRequest) => ({ ...r, version: String(BigInt(r.baseVersion) + 1n), durability: "node", issuedBy: "crewship", phase: "committed", candidateHash: r.contentHash })
-  const controller = createSingleEditorSave({ workspaceId: "w", pageId: "p", applicationId: "wordcraft", enginePin: "synthetic-engine", baseVersion: "1", generation: "1", sessionId: "session", idleMs: 5, onState() {}, journal: { async persist() {}, async confirm() {}, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {} }, engine: {
+  const controller = createSingleEditorSave({ workspaceId: "w", pageId: "p", applicationId: "wordcraft", enginePin: "synthetic-engine", baseVersion: "1", generation: "1", sessionId: "session", idleMs: 5, onState() {}, journal: { async persist() {}, async confirm() {}, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {}, async discardRecovered() {} }, engine: {
     async snapshot() {
       captures++
       if (captures === 1) return { bytes: new Uint8Array([1]), editorRevision: "revision:1" }
@@ -44,7 +44,7 @@ it("coalesces edit-triggered autosaves while an earlier native snapshot is prepa
   let revision = 0, duplicate!: () => void
   const repeated = new Promise<boolean>(resolve => { duplicate = () => resolve(true) })
   const requests: NativeSaveRequest[] = []
-  const controller = createSingleEditorSave({ workspaceId:"w",pageId:"p",applicationId:"wordcraft",enginePin:"fixture",baseVersion:"1",generation:"1",sessionId:"session",idleMs:5,onState(){},journal:{async persist(){},async confirm(){},async recovery(){return []},onRetire(){return()=>{}},async close(){},async revokeRead(){}},engine:{
+  const controller = createSingleEditorSave({ workspaceId:"w",pageId:"p",applicationId:"wordcraft",enginePin:"fixture",baseVersion:"1",generation:"1",sessionId:"session",idleMs:5,onState(){},journal:{async persist(){},async confirm(){},async recovery(){return []},onRetire(){return()=>{}},async close(){},async revokeRead(){},async discardRecovered(){}},engine:{
     async snapshot() { const captured = revision; if (captured) await new Promise(resolve=>setTimeout(resolve,40)); return {bytes:new Uint8Array([captured]),editorRevision:`revision:${captured}`} },async validate(){},
   },transport:{async save(r){requests.push(r);if(requests.filter(row=>row.editorRevision==="revision:6").length>=2)duplicate();return {...r,version:String(BigInt(r.baseVersion)+1n),durability:"node",issuedBy:"crewship",phase:"committed",candidateHash:r.contentHash}}}})
   let deadline: ReturnType<typeof setTimeout> | undefined
@@ -63,7 +63,7 @@ it("still durably captures newer edits while an older manual snapshot prepares a
   let started!:()=>void
   const preparing=new Promise<void>(resolve=>{started=resolve})
   let stored:string|undefined, revision=1, sends=0
-  const controller=createSingleEditorSave({workspaceId:"w",pageId:"p",applicationId:"wordcraft",enginePin:"fixture",baseVersion:"1",generation:"1",sessionId:"session",idleMs:5,onState(){},journal:{async persist(d){stored=d.editorRevision},async confirm(){},async recovery(){return []},onRetire(){return()=>{}},async close(){},async revokeRead(){}},engine:{async snapshot(_signal,requestId){const captured=revision;if(requestId){started();await new Promise(resolve=>setTimeout(resolve,40))}return {bytes:new Uint8Array([captured]),editorRevision:`revision:${captured}`}},async validate(){}},transport:{async save(){sends++;return new Promise(()=>{})}}})
+  const controller=createSingleEditorSave({workspaceId:"w",pageId:"p",applicationId:"wordcraft",enginePin:"fixture",baseVersion:"1",generation:"1",sessionId:"session",idleMs:5,onState(){},journal:{async persist(d){stored=d.editorRevision},async confirm(){},async recovery(){return []},onRetire(){return()=>{}},async close(){},async revokeRead(){},async discardRecovered(){}},engine:{async snapshot(_signal,requestId){const captured=revision;if(requestId){started();await new Promise(resolve=>setTimeout(resolve,40))}return {bytes:new Uint8Array([captured]),editorRevision:`revision:${captured}`}},async validate(){}},transport:{async save(){sends++;return new Promise(()=>{})}}})
   const manual=controller.save("manual-original");void manual.catch(()=>{})
   try {
     await preparing;revision=2;controller.edited()

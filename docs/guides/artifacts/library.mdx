@@ -18,7 +18,7 @@ The library is off by default. Each part of it is switched on separately:
 | What | Needs |
 |---|---|
 | The library at `/artifacts`, and the sidebar **Artifacts** link pointing to it | build-time `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` |
-| Projects: the project viewer, versions, history and restore | build-time `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true`, and the workspace flag `artifact_projects` (or the server switch `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true`) |
+| Projects: the project viewer, versions, history and restore | build-time `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true`, and the workspace flag `artifact_projects` (on by default, unless a manager turned it off; `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` forces it on) |
 | Dashboards in the viewer, and creating one | the project switches above, plus build-time `NEXT_PUBLIC_ARTIFACT_DASHBOARDS=true`, and the workspace flag `artifact_dashboard_data` (or `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true`). Without the server switch, a dashboard is listed as a Project. |
 | Slide decks in the viewer, and creating one | the project switches above, plus build-time `NEXT_PUBLIC_ARTIFACT_SLIDES=true`, and the workspace flag `artifact_slides` (or `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true`). Without the server switch, a slide deck is listed as a Project. |
 | Designs: listing, creating and the canvas | build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN=true`, and the workspace flag `artifacts_design` (or `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true`) |
@@ -70,6 +70,8 @@ Other chips mark an item as **Private**, **Empty**, **Test** or **Archived**.
    **Recently opened**), then **Views** and **Folders**.
 
 An empty workspace shows **No artifacts yet** with a **New artifact** button.
+If the workspace holds only blank items, the message says how many are in
+**Empty** and offers **Show empty**.
 
 ## Find an artifact
 
@@ -85,7 +87,7 @@ name or the address (slug). You can also use these operators:
 | `is:unshared` or `is:draft` | Artifacts with versions but no shared version |
 | `is:private` | Artifacts only their owner can open |
 | `is:empty` | Artifacts with nothing in them yet |
-| `owner:you` | Your own artifacts, or a crew name |
+| `owner:you` | Artifacts whose owner name contains the text, ignoring case: `you` for your own, or part of a crew name |
 
 For example, `kind:dashboard is:shared sales` finds shared dashboards whose
 name contains "sales". If you search from **Home**, the library switches to
@@ -99,7 +101,8 @@ name contains "sales". If you search from **Home**, the library switches to
 3. Pick values: **Who can open** has **Everyone with access** and
    **Private**, **Version** has **Shared version**, **Not shared yet** and
    **No versions**. The count next to each value is how many items you
-   would see if you picked it. **Clear** in the block's header drops all
+   would see if you picked it. **Kind** and **Version** values with no
+   matching artifact are hidden unless you already selected them. **Clear** in the block's header drops all
    filters.
 4. To close the block, press <kbd>Esc</kbd> or click **Filter** again.
    Chips under the main lists show the filters you set; click a chip's
@@ -119,7 +122,10 @@ name contains "sales". If you search from **Home**, the library switches to
 - **Archive**: archived artifacts.
 
 Empty, test and archived items appear only in their own view, never in
-**All artifacts**, **Mine** or **Favorites**. **Clean up**, **Test items**,
+**All artifacts**, **Mine** or **Favorites**. One exception: a blank item you
+created yourself with **New artifact**, such as a new **Page with panels**,
+stays in **All artifacts**, **Mine** and search, so you can find it again
+before crews fill it. It also stays in **Empty**. **Clean up**, **Test items**,
 **Empty** and **Archive** appear in the panel only when they hold something.
 Nothing in these views is deleted.
 
@@ -197,7 +203,9 @@ same.
 1. Click **New artifact** in the top bar, or a kind under **Make something**
    on Home.
 2. In **New artifact**, pick a kind. Kinds that this workspace can't create
-   are listed under **Coming**.
+   are listed under **Coming**. **Word** is offered when the server confirms a
+   document format, native Word (`wordcraft_native`) included; **Sheet** when
+   it confirms native Sheet (`gridcraft_native`).
 3. Enter a **Name**. Pick a **Folder**, or leave it **Unfiled**. If an
    artifact of the same kind and name is already in that folder, a warning
    offers **Open it** instead.
@@ -337,14 +345,14 @@ place. A version with more than 256 files is refused as invalid.
 
 Both lists are personal. They follow you to other devices and nobody else
 sees them. **Favorites** and **Recently opened** leave out empty, test and
-archived items.
+archived items, except a blank item you created yourself.
 
 ## Troubleshooting
 
 | You see | Why | What to do |
 |---|---|---|
 | **Artifacts** in the sidebar opens `/pages` | The build was made without `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` | Rebuild the web app with the flag |
-| A project shows only its name and **Open in Pages** | The project viewer is off: `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` is not `true`, or the server reports projects unavailable for this workspace | Set the build flag and enable `artifact_projects` |
+| A project shows only its name and **Open in Pages** | The project viewer is off: `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` is not `true`, or the server reports projects unavailable for this workspace | Set the build flag; if `artifact_projects` was turned off, run `crewship feature-flag inherit artifact_projects` (or `enable`) |
 | **Make something** lacks a kind | That kind's build flag or workspace switch is off, or you can't create artifacts | See the table at the top of this page |
 | **This artifact isn't available** | The artifact was archived, or you are not allowed to see that version | Ask the owner to share it with you |
 | **Saving is paused** | The history or a single version reached its limit | Ask an agent to make the artifact smaller, or save a copy |

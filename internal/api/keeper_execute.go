@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/keeper"
@@ -663,6 +664,18 @@ func (h *KeeperHandler) HandleExecute(w http.ResponseWriter, r *http.Request) {
 		h.logger.Warn("keeper execute: credential no longer active at inject time",
 			"credential_id", body.CredentialID, "error", err)
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "credential not found"})
+		return
+	}
+
+	// #5045: a host-bound credential is released into the container only when
+	// the agent's crew egress allowlist covers its approved hosts. Same shared
+	// check as every other delivery path; unknown means withheld.
+	if ok, why := credhostgate.Deliverable(r.Context(), h.db, body.RequestingAgentID, body.CredentialID); !ok {
+		h.logger.Warn("keeper execute: host-bound credential withheld",
+			"credential_id", body.CredentialID, "reason", why)
+		writeJSON(w, http.StatusForbidden, map[string]string{
+			"error": "credential is bound to approved hosts and is withheld: " + why,
+		})
 		return
 	}
 

@@ -22,9 +22,8 @@ import (
 // Skipped intentionally: the network/interactive-browser branches of
 // the pairing flow live entirely on the frontend (UI displays the
 // `crewship login --pair --code=…` snippet and polls); the backend has
-// no browser-launch path to exercise here. The fire-and-forget
-// last_used_at background goroutine in ValidateCLIToken is also not
-// asserted (timing-dependent, best-effort by design).
+// no browser-launch path to exercise here. The throttled last_used_at
+// write is covered by cli_token_touch_test.go.
 
 // covCLIPairHandler builds a CliPairHandler with a quiet logger.
 func covCLIPairHandler(t *testing.T, db *sql.DB) *CliPairHandler {

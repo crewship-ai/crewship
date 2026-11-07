@@ -1,0 +1,1 @@
+- **Resetting a never-written persona no longer fails.** Agent and crew persona resets succeed when their memory directory does not yet exist; empty or whitespace-only persona updates return 400 instead of 500.

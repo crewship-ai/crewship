@@ -48,7 +48,12 @@ type scheduleRow struct {
 	LastWakeAt            *string                `json:"last_wake_at,omitempty" yaml:"last_wake_at,omitempty"`
 	LastWakeStatus        string                 `json:"last_wake_status,omitempty" yaml:"last_wake_status,omitempty"`
 	CatchupPolicy         string                 `json:"catchup_policy,omitempty" yaml:"catchup_policy,omitempty"`
-	LastMissedCount       int                    `json:"last_missed_count,omitempty" yaml:"last_missed_count,omitempty"`
+	// Spread: next_run_at already includes the stable offset; NextOccurrenceAt
+	// is the nominal cron time (only present with a spread).
+	SpreadSeconds       int     `json:"spread_seconds,omitempty" yaml:"spread_seconds,omitempty"`
+	SpreadOffsetSeconds int     `json:"spread_offset_seconds,omitempty" yaml:"spread_offset_seconds,omitempty"`
+	NextOccurrenceAt    *string `json:"next_occurrence_at,omitempty" yaml:"next_occurrence_at,omitempty"`
+	LastMissedCount     int     `json:"last_missed_count,omitempty" yaml:"last_missed_count,omitempty"`
 	// Circuit breaker (#1405).
 	ConsecutiveFailures    int    `json:"consecutive_failures" yaml:"consecutive_failures"`
 	MaxConsecutiveFailures int    `json:"max_consecutive_failures" yaml:"max_consecutive_failures"`
@@ -342,6 +347,14 @@ var routineSchedulesCreateCmd = &cobra.Command{
 		if catchup != "" {
 			body["catchup_policy"] = catchup
 		}
+		if cmd.Flags().Changed("spread") {
+			raw, _ := cmd.Flags().GetString("spread")
+			seconds, perr := parseScheduleSpread(raw)
+			if perr != nil {
+				return cli.WithExitCode(perr, cli.ExitValidation)
+			}
+			body["spread_seconds"] = seconds
+		}
 		if cmd.Flags().Changed("pin-version") {
 			pin, _ := cmd.Flags().GetInt("pin-version")
 			if pin < 1 {
@@ -408,11 +421,35 @@ var routineSchedulesCreateCmd = &cobra.Command{
 					fmt.Printf("  Policy: fail-closed (a probe error/timeout HOLDS the run instead of firing)\n")
 				}
 			}
+			if out.SpreadSeconds > 0 {
+				fmt.Printf("  Spread: %ds window, this schedule fires +%ds after each cron time\n", out.SpreadSeconds, out.SpreadOffsetSeconds)
+			}
 			if out.NextRunAt != nil {
 				fmt.Printf("  Next:   %s\n", formatTimestamp(*out.NextRunAt))
 			}
 		})
 	},
+}
+
+// parseScheduleSpread turns a --spread value (a duration such as 5m, or
+// 0/none to clear it) into whole seconds. The server additionally requires it
+// to be shorter than the cron interval.
+func parseScheduleSpread(raw string) (int, error) {
+	v := strings.ToLower(strings.TrimSpace(raw))
+	if v == "0" || v == "none" || v == "off" {
+		return 0, nil
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		return 0, fmt.Errorf("--spread %q: want a duration like 30s or 5m, or 0 to turn it off", raw)
+	}
+	if d <= 0 {
+		return 0, fmt.Errorf("--spread %q must be positive (use 0 to turn it off)", raw)
+	}
+	if d%time.Second != 0 {
+		return 0, fmt.Errorf("--spread %q must be a whole number of seconds", raw)
+	}
+	return int(d / time.Second), nil
 }
 
 // schedulePreviewResult is `routine schedules preview`'s machine payload —
@@ -525,6 +562,14 @@ var routineSchedulesUpdateCmd = &cobra.Command{
 		if v, _ := cmd.Flags().GetString("catchup"); v != "" {
 			body["catchup_policy"] = v
 		}
+		if cmd.Flags().Changed("spread") {
+			raw, _ := cmd.Flags().GetString("spread")
+			seconds, perr := parseScheduleSpread(raw)
+			if perr != nil {
+				return cli.WithExitCode(perr, cli.ExitValidation)
+			}
+			body["spread_seconds"] = seconds
+		}
 		unpin, _ := cmd.Flags().GetBool("unpin")
 		if cmd.Flags().Changed("pin-version") {
 			if unpin {
@@ -578,7 +623,7 @@ var routineSchedulesUpdateCmd = &cobra.Command{
 			body["wake_fail_closed"] = fc
 		}
 		if len(body) == 0 {
-			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --max-failures / --wake-slug / --wake-inputs / --no-wake / --fail-closed / --catchup required")
+			return fmt.Errorf("at least one of --cron / --timezone / --name / --enabled / --inputs / --pin-version / --unpin / --max-failures / --wake-slug / --wake-inputs / --no-wake / --fail-closed / --catchup / --spread required")
 		}
 		if err := requireAuth(); err != nil {
 			return err
@@ -873,6 +918,8 @@ func init() {
 	routineSchedulesUpdateCmd.Flags().Bool("fail-closed", false, "set the wake gate's probe-failure policy: --fail-closed HOLDS the run on a probe error/timeout; --fail-closed=false restores fail-open (fire anyway, record ERROR). Absent = keep existing")
 	routineSchedulesUpdateCmd.Flags().Int("pin-version", 0, "pin (or re-pin) the schedule to a specific routine version; fires execute that immutable version instead of head")
 	routineSchedulesUpdateCmd.Flags().Bool("unpin", false, "remove the version pin (fires track head again); updates that mention neither --pin-version nor --unpin keep the existing pin")
+	routineSchedulesCreateCmd.Flags().String("spread", "", "offset every fire by a stable per-schedule delay within this window (e.g. 5m) so schedules sharing a cron do not all fire in the same second; must be shorter than the cron interval. Default off. The displayed next run includes the offset; occurrence identity and catch-up are unchanged")
+	routineSchedulesUpdateCmd.Flags().String("spread", "", "set the fire-time spread window (e.g. 5m), or 0 to turn it off (see 'schedules create --help'). Absent = keep existing")
 	routineSchedulesUpdateCmd.Flags().String("catchup", "", "set the missed-run catch-up policy: 'skip' / 'once' / 'all' (see 'schedules create --help'). Absent = keep existing")
 	routineSchedulesUpdateCmd.Flags().Int("max-failures", 0, "circuit breaker: consecutive FAILED fires before the schedule auto-disables; absent keeps the existing threshold")
 

@@ -253,7 +253,7 @@ func upsert(
 			maturity = ?,
 			description_quality = ?,
 			updated_at = ?
-		WHERE id = ?`,
+		WHERE id = ? AND locked = 0`, // a locked skill keeps its curated content (#5045)
 		displayName,
 		nullableStr(parsed.Meta.Description), version, nullableStr(parsed.Meta.Author),
 		vmeta.displayLicense, man.category, man.icon, parsed.Content, tagsJSON,

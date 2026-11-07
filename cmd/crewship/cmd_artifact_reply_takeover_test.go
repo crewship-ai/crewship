@@ -18,6 +18,10 @@ import (
 // Exercise the actual HTTP boundary: the save commits and sends 201 headers,
 // but the connection closes before its advertised body is complete.
 func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, scenario := range []string{"matching", "different", "absent", "read-fails", "definitive-refusal", "rejected-refusal", "rate-refusal", "clean-partial", "conflict-unreadable"} {
 		t.Run(scenario, func(t *testing.T) {
 			guardCLIState(t)
@@ -64,6 +68,12 @@ func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
 					_, _ = io.WriteString(w, `{"manifest":`)
 				case http.MethodGet:
 					gets++
+					if scenario == "absent" && r.URL.Query().Get("version") == "" {
+						// 404 for base+1 is proof of absence only when the
+						// latest version is not newer than the base.
+						_ = json.NewEncoder(w).Encode(map[string]any{"page_id": "cpagedemo", "slug": "demo", "can_write": true, "latest_version": 7, "manifest": map[string]any{"version": 7}})
+						return
+					}
 					if r.URL.Query().Get("version") != "8" {
 						t.Errorf("wrong successor: %s", r.URL)
 					}
@@ -124,6 +134,9 @@ func TestPageArtifactPublishReconcilesTruncatedSuccess(t *testing.T) {
 				}
 			}
 			wantGets := 1
+			if scenario == "absent" {
+				wantGets = 2 // base+1, then the latest version
+			}
 			if strings.HasSuffix(scenario, "refusal") {
 				wantGets = 0
 			}

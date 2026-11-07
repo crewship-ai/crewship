@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/pages"
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -37,17 +38,17 @@ func (r *Router) registerMooring(h *gridcraftHTTP) {
 	}
 	// openapi: responses 200,401,403
 	r.mux.Handle("GET /api/v1/mooring/apps", authed(wsCtx(http.HandlerFunc(func(w http.ResponseWriter, q *http.Request) { writeJSON(w, 200, mooring.Applications()) }))))
-	// openapi: responses 200,201,400,401,403,404,409,500,503
+	// openapi: responses 200,201,400,401,403,404,409,413,500,503
 	r.authedMut("POST", "/api/v1/mooring/documents", roleInline, m.create)
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/mooring", authed(wsCtx(http.HandlerFunc(m.read))))
-	// openapi: responses 200,400,401,403,404,409,500,503
+	// openapi: responses 200,400,401,403,404,409,413,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/mooring/commands", roleInline, m.command)
 	// openapi: responses 200,400,401,403,404,409,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/mooring/mandates", roleInline, m.mandate)
 	// openapi: responses 200,400,401,403,404,500,503
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/mooring/mandates/{mandate}", roleInline, m.revoke)
-	// openapi: responses 200,400,403,404,409,500,503
+	// openapi: responses 200,400,403,404,409,413,500,503
 	r.mux.Handle("POST /api/v1/internal/mooring", internalAuth(http.HandlerFunc(m.agent)))
 }
 func mooringError(w http.ResponseWriter, e error) {
@@ -78,27 +79,38 @@ func (m *mooringHTTP) begin(r *http.Request) (*sql.Tx, error) {
 	return tx, nil
 }
 func (m *mooringHTTP) human(r *http.Request, tx *sql.Tx, write bool) (appengine.Key, string, error) {
+	k, actor, _, e := m.humanRecord(r, tx, write)
+	return k, actor, e
+}
+
+// humanRecord is human plus the Page record authorized inside tx. A read keeps
+// that record as the custodian of the content it releases: the audit decision
+// must use the owner the content was read under, never a later lookup (a
+// custody transfer to the reader after the read would otherwise skip it).
+func (m *mooringHTTP) humanRecord(r *http.Request, tx *sql.Tx, write bool) (appengine.Key, string, *pageRecord, error) {
 	k := appengine.Key{WorkspaceID: WorkspaceIDFromContext(r.Context())}
 	if !gridcraftHumanCaller(r) {
-		return k, "", appengine.ErrForbidden
+		return k, "", nil, appengine.ErrForbidden
 	}
 	if e := gridcraftCredential(r, tx, write); e != nil {
-		return k, "", e
+		return k, "", nil, e
 	}
 	column, ref := "slug", r.PathValue("slug")
 	if strings.HasPrefix(ref, "@") {
 		column, ref = "id", strings.TrimPrefix(ref, "@")
 	}
 	if tx.QueryRowContext(r.Context(), `SELECT id FROM pages WHERE workspace_id=? AND `+column+`=?`, k.WorkspaceID, ref).Scan(&k.PageID) != nil {
-		return k, "", appengine.ErrNotFound
+		return k, "", nil, appengine.ErrNotFound
 	}
 	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
 	user := UserFromContext(ctx)
 	rec, access, e := m.workbook.pages.workbookHumanAccess(ctx, k.WorkspaceID, k.PageID, user.ID, write)
-	if e != nil || rec == nil || !rec.PrivateAudience || access != workbookOwner || rec.HasWorkbook {
-		return k, "", appengine.ErrForbidden
+	// A read also admits the audited workspace OWNER/ADMIN (PRD §5); the
+	// caller records that audit before releasing the document.
+	if e != nil || rec == nil || !rec.PrivateAudience || rec.HasWorkbook || access != workbookOwner && (write || access != workbookAuditor) {
+		return k, "", nil, appengine.ErrForbidden
 	}
-	return k, "user:" + user.ID, nil
+	return k, "user:" + user.ID, rec, nil
 }
 func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 	var req struct {
@@ -166,6 +178,12 @@ func (m *mooringHTTP) create(w http.ResponseWriter, r *http.Request) {
 	id = generateCUID()
 	stamp := tsformat.Format(time.Now())
 	raw, _ := json.Marshal(spec)
+	// Free-disk admission (#4835) before the Page, its first version, the
+	// document row and the journal entry.
+	if e = storageheadroom.Check(r.Context(), tx, 2*int64(len(raw))+int64(len(manifest.InitialState))+4*collabDiskRowOverhead+4096); e != nil {
+		mooringError(w, e)
+		return
+	}
 	_, e = tx.ExecContext(r.Context(), `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,created_at,updated_at,private_audience,created_by_test) VALUES(?,?,?,?,?,?,?,?,1,?)`, id, ws, req.Slug, req.Name, user.ID, string(raw), stamp, stamp, req.CreatedByTest)
 	if e == nil {
 		e = insertPageVersion(r.Context(), tx, id, 1, string(raw), user.ID, stamp)
@@ -218,7 +236,7 @@ func (m *mooringHTTP) read(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
-	k, _, e := m.human(r, tx, false)
+	k, _, rec, e := m.humanRecord(r, tx, false)
 	if e != nil {
 		mooringError(w, e)
 		return
@@ -226,6 +244,13 @@ func (m *mooringHTTP) read(w http.ResponseWriter, r *http.Request) {
 	manifest, state, e := m.document(r.Context(), tx, k)
 	if e != nil {
 		mooringError(w, e)
+		return
+	}
+	// Release the read snapshot before the durable audit (one-connection safe).
+	// The audit decision uses rec, the custodian captured in that snapshot.
+	_ = tx.Rollback()
+	privateReadAuditSeam(k.PageID)
+	if !m.workbook.pages.auditPrivateOwnerAccess(w, r, rec) {
 		return
 	}
 	editor := map[string]string{}

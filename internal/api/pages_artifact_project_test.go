@@ -34,6 +34,9 @@ func artifactProjectFixture(t *testing.T) (*PageHandler, string, string, func(st
 		req.SetPathValue("slug", "three-screens")
 		w := httptest.NewRecorder()
 		switch {
+		case strings.HasPrefix(path, "draft-key/"):
+			req.SetPathValue("slug", "@"+strings.TrimPrefix(path, "draft-key/"))
+			h.LocalDraftKey(w, req)
 		case path == "artifacts":
 			h.CreateArtifactProject(w, req)
 		case strings.Contains(path, "restore"):
@@ -127,9 +130,11 @@ func TestArtifactProjectCommentsRejectStaleAnchorAndRevokedCredentials(t *testin
 		t.Fatal("comment count", n)
 	}
 }
-func TestArtifactProjectDefaultOffAndInvalidCreateRollsBack(t *testing.T) {
+func TestArtifactProjectInstanceOffAndInvalidCreateRollsBack(t *testing.T) {
 	h, _, owner, call := artifactProjectFixture(t)
 	t.Setenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED", "")
+	// Projects are on by default (#4994); an admin's explicit instance off hides them.
+	mustExec(t, h.db, `UPDATE feature_flags SET enabled=0, updated_at='2026-11-05T10:00:00Z' WHERE key='artifact_projects'`)
 	if w := call(owner, "POST", "artifacts", `{}`); w.Code != 404 {
 		t.Fatal(w.Code, w.Body)
 	}

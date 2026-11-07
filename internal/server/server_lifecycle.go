@@ -681,6 +681,11 @@ func (s *Server) Shutdown() error {
 		// a wedged LLM call can't hang shutdown past the configured timeout.
 		s.apiRouter.DrainVerdicts(s.cfg.Server.ShutdownTimeout)
 	}
+	// Write queued CLI token last_used_at breadcrumbs (#4847) while the
+	// database is still open; HTTP shutdown above has stopped new ones.
+	if !goapi.FlushCLITokenTouches(ctx) {
+		s.logger.Warn("cli token last_used_at flush did not finish before the shutdown timeout")
+	}
 
 	s.logWriter.Close()
 	s.convStore.Close()
@@ -1140,6 +1145,13 @@ func (s *Server) recoverOrphanedRuns(ctx context.Context) {
 			// A confirmed stop protects only its trace from generic recovery,
 			// never unrelated runs or the entire agent's status.
 			if run.Status == "cancelled" && run.StopJournalPending && run.ID != "" {
+				protectedRuns[run.ID] = true
+			}
+			// A retained run settled without projection decided exactly which
+			// rows of its trace it may end (#4700). Its status is no longer
+			// "running", but generic recovery must still not cancel the trace
+			// under an owner that settlement deliberately left untouched (#4798).
+			if run.Output != nil && run.Output.Unprojected != "" && run.ID != "" && key == run.ID {
 				protectedRuns[run.ID] = true
 			}
 		}

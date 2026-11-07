@@ -8,6 +8,7 @@ import { usePageWorkspace } from "@/hooks/use-page-workspace"
 import { artifactsDesign, artifactsLibrary } from "@/lib/feature-flags"
 import { ArtifactsLibrary } from "./artifacts-library"
 import { filtersFromParams, filtersToParams } from "./library-filter"
+import { versionPin } from "./library-items"
 
 const DesignEditor = dynamic(() => import("@/components/features/artifacts-design/design-editor").then(module => module.DesignEditor), { ssr: false })
 
@@ -32,13 +33,25 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
   const linked = params?.get("workspace_id")
   if (linked) workspaceQuery.set("workspace_id", linked)
 
+  const pinned = versionPin(params?.get("version"))
   useEffect(() => {
+    if (enabled || loading || linkUnavailable) return
     // The static export has no server redirect; a saved link still lands on Pages.
-    if (!enabled) router.replace(`/pages${workspaceQuery.size ? `?${workspaceQuery}` : ""}`)
-  }, [enabled]) // eslint-disable-line react-hooks/exhaustive-deps
+    // An artifact address keeps its identity and pin there: links the API
+    // returns for projects open in the Pages project viewer of a build without
+    // the library.
+    if (item && !bySlug) {
+      const query = new URLSearchParams(workspaceQuery)
+      query.set("artifact", "1")
+      if (pinned !== undefined) query.set("version", String(pinned))
+      router.replace(`/pages/${encodeURIComponent("@" + item)}?${query}`)
+      return
+    }
+    router.replace(`/pages${workspaceQuery.size ? `?${workspaceQuery}` : ""}`)
+  }, [enabled, loading, linkUnavailable]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!enabled) return null
   if (linkUnavailable) return <p className="p-6" role="alert">Artifacts unavailable.</p>
+  if (!enabled) return null
   if (loading || !workspaceId) return <Skeleton className="m-6 h-12" />
 
   const filters = filtersFromParams(params)
@@ -57,7 +70,6 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
     router.replace(`/artifacts${next.size ? `?${next}` : ""}`)
   }
   const designSlug = design && params?.get("design") === "1" ? params.get("item") : null
-  const version = Number(params?.get("version"))
-  if (designSlug) return <div className="h-full p-4"><DesignEditor workspaceId={workspaceId} slug={designSlug} initialVersion={Number.isSafeInteger(version) && version > 0 ? version : undefined} /></div>
-  return <ArtifactsLibrary workspaceId={workspaceId} item={item} bySlug={bySlug} onSelect={select} onCanonical={canonical} filters={filters} onFiltersChange={filter} />
+  if (designSlug) return <div className="h-full p-4"><DesignEditor workspaceId={workspaceId} slug={designSlug} initialVersion={pinned} /></div>
+  return <ArtifactsLibrary workspaceId={workspaceId} item={item} version={item ? pinned : undefined} bySlug={bySlug} onSelect={select} onCanonical={canonical} filters={filters} onFiltersChange={filter} />
 }

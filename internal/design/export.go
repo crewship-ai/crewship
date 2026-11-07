@@ -187,7 +187,8 @@ func writeLayer(b *bytes.Buffer, node *exportNode, geometry string, anchors map[
 			attrs = " title=\"Linked screen was deleted\""
 		}
 	}
-	fmt.Fprintf(b, "<%s class=\"%s\" data-node-id=\"%s\"%s style=\"%s\">%s</%s>\n", tag, class, html.EscapeString(node.ID), attrs, style, body, tag)
+	// The engine admits only frame, rect, text and image; escape anyway.
+	fmt.Fprintf(b, "<%s class=\"%s\" data-node-id=\"%s\"%s style=\"%s\">%s</%s>\n", tag, html.EscapeString(class), html.EscapeString(node.ID), attrs, style, body, tag)
 }
 
 // Order follows the document's order array, then any remaining nodes in

@@ -284,31 +284,44 @@ func firstLine(s string) string {
 	return ""
 }
 
-// fetchFirstUserPrompt fetches messages for a chat and returns the first
-// USER role content, or empty on any failure or absence.
+// fetchFirstUserPrompt returns the first user message for a preview, or empty
+// on any failure or absence. A saved native Craft instruction previews as
+// nothing: it is not the prompt of any run.
 func fetchFirstUserPrompt(c *cli.Client, chatID string) string {
-	resp, err := c.Get("/api/v1/chats/" + url.PathEscape(chatID) + "/messages?limit=10")
-	if err != nil {
+	prompt, instruction := recoverFirstUserPrompt(c, chatID)
+	if instruction {
 		return ""
 	}
+	return prompt
+}
+
+// recoverFirstUserPrompt returns a chat's first user message and whether it is
+// a saved native Craft instruction, which a caller that re-issues the prompt
+// must refuse rather than pass on or replace with a later message.
+func recoverFirstUserPrompt(c *cli.Client, chatID string) (prompt string, instruction bool) {
+	resp, err := c.Get("/api/v1/chats/" + url.PathEscape(chatID) + "/messages?limit=10")
+	if err != nil {
+		return "", false
+	}
 	if err := cli.CheckError(resp); err != nil {
-		return ""
+		return "", false
 	}
 	var body struct {
 		Messages []struct {
-			Role    string `json:"role" yaml:"role"`
-			Content string `json:"content" yaml:"content"`
+			Role        string `json:"role" yaml:"role"`
+			Content     string `json:"content" yaml:"content"`
+			Instruction bool   `json:"native_craft_instruction" yaml:"native_craft_instruction"`
 		} `json:"messages" yaml:"messages"`
 	}
 	if err := cli.ReadJSON(resp, &body); err != nil {
-		return ""
+		return "", false
 	}
 	for _, m := range body.Messages {
 		if strings.EqualFold(m.Role, "user") || strings.EqualFold(m.Role, "human") {
-			return m.Content
+			return m.Content, m.Instruction
 		}
 	}
-	return ""
+	return "", false
 }
 
 func init() {

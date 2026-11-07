@@ -1,0 +1,1 @@
+- **Unsupported milestone statuses returned a server error.** Create and update requests now reject statuses outside active, completed, and cancelled with HTTP 400; creation keeps its existing default for an omitted, null, or empty status.

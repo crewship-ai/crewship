@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
@@ -200,5 +201,20 @@ func TestEnvironmentRevisionKeepsQualificationBoundToArtifact(t *testing.T) {
 	}
 	if evidence.Qualification == nil || evidence.Qualification.Status != "passed" || evidence.Qualification.ImageID != evidence.ImageID {
 		t.Fatalf("qualification not bound in durable record: %s", raw)
+	}
+}
+
+// A finished build must survive a writer queue longer than the old 10 s budget.
+func TestProvisionResultOutwaitsBusyWriter(t *testing.T) {
+	config := `{"image":"ubuntu:22.04"}`
+	h, wsID, crewID := covProvRig(t, &covCommitClient{}, config)
+	writer, err := h.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	released := time.AfterFunc(11*time.Second, func() { _ = writer.Rollback() })
+	defer released.Stop()
+	if _, err := h.publishProvisionResult(crewID, wsID, provisionDefinition{Config: config}, revisionFixture()); err != nil {
+		t.Fatalf("save lost to a busy writer: %v", err)
 	}
 }

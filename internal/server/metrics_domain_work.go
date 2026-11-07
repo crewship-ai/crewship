@@ -103,17 +103,10 @@ var memoryMutationStateSet = []string{"intent", "renamed", "confirmed", "conflic
 // `reconciliation` parked the work with its execution slot still held.
 var workLeaseLossOutcomeSet = []string{"requeued", "reconciliation"}
 
-// sqlWorkStatesHoldingSlot is the quoted state list for "occupies an execution
-// slot", built from work.StatesHoldingExecutionSlot so the capacity metrics
-// count exactly what Claim counts — needs_reconciliation included.
-var sqlWorkStatesHoldingSlot = func() string {
-	states := work.StatesHoldingExecutionSlot()
-	quoted := make([]string, 0, len(states))
-	for _, s := range states {
-		quoted = append(quoted, "'"+string(s)+"'")
-	}
-	return strings.Join(quoted, ",")
-}()
+// sqlWorkHoldsSlot is the work_items predicate for "occupies an execution
+// slot", the same expression Claim counts with (work.SQLHoldsExecutionSlot):
+// needs_reconciliation included unless its runtime end is confirmed (#5108).
+var sqlWorkHoldsSlot = work.SQLHoldsExecutionSlot("work_items")
 
 // collectWorkLedgerMetrics is the §10 fan-out, called from
 // collectDomainMetrics alongside the other domain collectors.
@@ -384,7 +377,7 @@ func (s *Server) collectWorkCapacityMetrics(ctx context.Context, b *strings.Buil
 				COUNT(*),
 				COALESCE(SUM(CASE WHEN class = 'chat' THEN 1 ELSE 0 END), 0),
 				COALESCE(SUM(CASE WHEN class = 'background' THEN 1 ELSE 0 END), 0)
-			  FROM work_items WHERE state IN (`+sqlWorkStatesHoldingSlot+`)`,
+			  FROM work_items WHERE `+sqlWorkHoldsSlot,
 		).Scan(&total, &chat, &background); err != nil {
 			s.logger.Warn("metrics: work live counts failed", "error", err)
 		} else {
@@ -413,7 +406,7 @@ func (s *Server) collectWorkCapacityMetrics(ctx context.Context, b *strings.Buil
 					SUM(CASE WHEN class = 'chat' THEN 1 ELSE 0 END) AS nchat,
 					SUM(CASE WHEN class = 'background' THEN 1 ELSE 0 END) AS nbg
 				  FROM work_items
-				 WHERE agent_id != '' AND state IN (`+sqlWorkStatesHoldingSlot+`)
+				 WHERE agent_id != '' AND `+sqlWorkHoldsSlot+`
 				 GROUP BY agent_id
 			  )`, limits.AgentTotal, limits.AgentChat, limits.AgentBackground,
 		).Scan(&overTotal, &overChat, &overBackground); err != nil {
@@ -433,7 +426,7 @@ func (s *Server) collectWorkCapacityMetrics(ctx context.Context, b *strings.Buil
 	}
 
 	writePromMetric(b, "crewshipd_work_live",
-		"Work items holding an execution slot per class (starting, running, or needs_reconciliation)",
+		"Work items holding an execution slot per class (starting, running, or needs_reconciliation without a confirmed runtime end)",
 		"gauge", hostname, statusSamples(workClassSet, "class", live))
 	writePromMetric(b, "crewshipd_work_capacity_violations",
 		"Capacity dimensions currently over their §6 cap — server total, server background, and the number of agents over each per-agent cap. Target 0; non-zero means admission (I3) did not hold",

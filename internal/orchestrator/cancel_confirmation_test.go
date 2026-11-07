@@ -59,6 +59,8 @@ func TestRunAgentCancellationKeepsOwnershipWhenHostStopIsUnconfirmed(t *testing.
 	o.SetDetachedExecMonitoring(time.Millisecond, time.Hour)
 	req := covRunReq()
 	req.RunID = "cancel-unconfirmed-original"
+	terminalObserved := false
+	req.OnExecTerminal = func(int) { terminalObserved = true }
 	req.Credentials = []Credential{{Type: "SECRET", EnvVarName: "QA_TOKEN", PlainValue: "synthetic"}}
 	ctx, cancel := context.WithCancelCause(t.Context())
 	defer cancel(nil)
@@ -66,6 +68,9 @@ func TestRunAgentCancellationKeepsOwnershipWhenHostStopIsUnconfirmed(t *testing.
 	err := o.RunAgent(ctx, req, nil)
 	if !errors.Is(err, ErrDetachedStillRunning) || errors.Is(err, ErrExecutionStopConfirmed) {
 		t.Fatalf("unconfirmed cancellation misreported: %v", err)
+	}
+	if terminalObserved {
+		t.Fatal("uncertain stop manufactured terminal proof")
 	}
 	if got := covRunStatus(t, state, req.RunID); got != "running" {
 		t.Fatalf("unconfirmed run became terminal %s", got)
@@ -98,12 +103,17 @@ func TestRunAgentCancellationDoesNotConfirmNaturalLegacyExit(t *testing.T) {
 			o := New(c, state, covQuietLogger())
 			req := covRunReq()
 			req.RunID = "legacy-cancel-exit-" + fmt.Sprint(code)
+			var observed []int
+			req.OnExecTerminal = func(exit int) { observed = append(observed, exit) }
 			ctx, cancel := context.WithCancelCause(t.Context())
 			defer cancel(nil)
 			req.OnExecStarted = func(string) { cancel(ws.ErrExplicitStopRequested) }
 			err := o.RunAgent(ctx, req, nil)
 			if got := errors.Is(err, ErrExecutionStopConfirmed); got != (code == 143) {
 				t.Fatalf("exit%d cancellation=%v err=%v", code, got, err)
+			}
+			if len(observed) != 1 || observed[0] != code {
+				t.Fatalf("actual exit callback=%v want [%d]", observed, code)
 			}
 			wantStatus := map[int]string{0: "completed", 1: "error", 143: "cancelled"}[code]
 			if got := covRunStatus(t, state, req.RunID); got != wantStatus {
@@ -223,5 +233,71 @@ func TestRunAgentAgentStopIsNotChatCancellationConfirmation(t *testing.T) {
 	err := o.RunAgent(t.Context(), req, nil)
 	if !errors.Is(err, ErrAgentStopped) || errors.Is(err, ErrExecutionStopConfirmed) {
 		t.Fatalf("agent stop outcome misreported: %v", err)
+	}
+}
+
+// absentableContainer reports its container gone (and its execs
+// uninspectable) once absent is set, as when an operator removes it.
+type absentableContainer struct {
+	*covContainer
+	absent atomic.Bool
+}
+
+func (c *absentableContainer) ContainerStatus(ctx context.Context, id string) (*provider.ContainerStatus, error) {
+	if c.absent.Load() {
+		return nil, provider.ErrContainerNotFound
+	}
+	return c.covContainer.ContainerStatus(ctx, id)
+}
+
+func (c *absentableContainer) ExecInspect(ctx context.Context, id string) (bool, int, error) {
+	if c.absent.Load() {
+		return false, 0, errors.New("no such exec")
+	}
+	return c.covContainer.ExecInspect(ctx, id)
+}
+
+// B12 (G4): a legacy run whose container is removed while its stop
+// confirmation is pending must release its holds, not retry forever.
+func TestRunAgentCancellationReleasesHoldsWhenContainerIsRemoved(t *testing.T) {
+	c := &absentableContainer{covContainer: covNewRunContainer(covRunOpts{stream: "{}\n"})} // no authoritative stop reply
+	o := New(c, newMemState(), covQuietLogger())
+	o.ipcToken = "fixture-key"
+	o.SetDetachedExecMonitoring(time.Millisecond, time.Millisecond) // the watcher must tick
+	req := covRunReq()
+	req.RunID = "cancel-container-removed"
+	req.Credentials = []Credential{{Type: "SECRET", EnvVarName: "QA_TOKEN", PlainValue: "synthetic"}}
+	ctx, cancel := context.WithCancelCause(t.Context())
+	defer cancel(nil)
+	req.OnExecStarted = func(string) { cancel(ws.ErrExplicitStopRequested) }
+	if err := o.RunAgent(ctx, req, nil); !errors.Is(err, ErrDetachedStillRunning) {
+		t.Fatalf("unconfirmed cancellation misreported: %v", err)
+	}
+	o.detachedMu.Lock()
+	h := o.detached[req.RunID]
+	o.detachedMu.Unlock()
+	if h == nil || !h.requireExecTerminal {
+		t.Fatal("exact exec watcher missing")
+	}
+	t.Cleanup(func() { o.closeDetachedHold(h, true) })
+	c.absent.Store(true)
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		o.detachedMu.Lock()
+		_, held := o.detached[req.RunID]
+		o.detachedMu.Unlock()
+		if !held {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("hold survived the container's removal")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if len(o.runSem) != 0 || o.secretsHoldCount(req.ContainerID, req.AgentSlug, req.RunID) != 0 {
+		t.Fatal("removed container left capacity or credential holds")
+	}
+	if _, _, found := runHomeLocation(req.RunID); found {
+		t.Fatal("removed container left its HOME registration")
 	}
 }

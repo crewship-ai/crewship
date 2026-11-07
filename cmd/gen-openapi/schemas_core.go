@@ -45,10 +45,10 @@ func coreResourceSchemas() map[string]any {
 	agentCounts := object(map[string]any{
 		"skills": intSchema(), "credentials": intSchema(), "chats": intSchema(),
 	}, "skills", "credentials", "chats")
-	agentCrew := object(map[string]any{
+	agentCrew := nullableObject(object(map[string]any{
 		"name": stringSchema(), "slug": stringSchema(),
 		"color": nullableString(), "avatar_style": nullableString(),
-	}, "name", "slug", "color", "avatar_style")
+	}, "name", "slug", "color", "avatar_style"))
 
 	workspace := object(map[string]any{
 		"id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),

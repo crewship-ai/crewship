@@ -58,6 +58,7 @@ CREATE TABLE credentials (
     type            TEXT NOT NULL,
     status          TEXT NOT NULL DEFAULT 'ACTIVE',
     encrypted_value TEXT NOT NULL,
+    allowed_hosts   TEXT NOT NULL DEFAULT '[]',
     deleted_at      TEXT,
     created_at      TEXT NOT NULL DEFAULT (datetime('now','subsec'))
 );
@@ -413,5 +414,37 @@ func TestRunStep_NoCredentialFailsCleanly(t *testing.T) {
 	}
 	if !errors.Is(err, errNoAnthropicCred) {
 		t.Errorf("err = %v, want wraps errNoAnthropicCred", err)
+	}
+}
+
+// #5045: the routine LLM step sends the workspace key to one fixed host. A
+// host-bound key that does not approve that host must not be used.
+func TestProviderForWorkspace_HostBoundKey(t *testing.T) {
+	cases := []struct {
+		name, hosts string
+		wantErr     bool
+	}{
+		{"unbound unchanged", `[]`, false},
+		{"approved host used", `["api.anthropic.com"]`, false},
+		{"wildcard covering host used", `["*.anthropic.com"]`, false},
+		{"other host refused", `["api.github.com"]`, true},
+		{"unreadable list refused", `not-json`, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := setupLLMRunnerDB(t)
+			insertCredential(t, db, "c1", "ws1", "ANTHROPIC", "API_KEY", "ACTIVE", "sk-ant-test", false)
+			if _, err := db.Exec(`UPDATE credentials SET allowed_hosts = ? WHERE id = 'c1'`, tc.hosts); err != nil {
+				t.Fatal(err)
+			}
+			r := NewLLMRunner(db, llmRunnerNoopJournal{}, slog.Default())
+			_, err := r.providerForWorkspace(context.Background(), "ws1")
+			if tc.wantErr != errors.Is(err, errAnthropicCredHostBound) {
+				t.Fatalf("err = %v, want host-bound refusal = %v", err, tc.wantErr)
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
 	}
 }

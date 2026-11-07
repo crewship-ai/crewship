@@ -271,7 +271,7 @@ func (h *PageHandler) Export(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	if !h.auditPrivateOwnerAccess(w, r, rec) {
+	if !h.auditWholeArrangementRead(w, r, rec, false, doc) {
 		return
 	}
 

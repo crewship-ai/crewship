@@ -20,11 +20,11 @@ it.skipIf(!existsSync(chromium.executablePath()))("plays three linked screens A 
    setDesignNodeLink(doc,"to-b","b"); setDesignNodeLink(doc,"to-c","c");
    window.designUpdates = 0; doc.on("update",()=>{window.designUpdates++});
    const mutation={mutate(){},mutateAsync:async()=>({version:1}),isPending:false,error:null};
-   window.designFixture={query:{data:{page_id:"page",can_edit:false,can_comment:false,latest_version:1},isError:false},comments:{data:{comments:[]}},versions:{data:{versions:[{version:1}]}},doc,nodes:designNodes(doc),peers:[],connection:"connected",editable:false,dirty:false,draftError:false,save:mutation,restore:mutation,share:mutation,comment:mutation,connectAgent:mutation,setCursor(){}};
+   window.designFixture={conflicts:[],dismissConflict(){},query:{data:{page_id:"page",can_edit:false,can_comment:false,latest_version:1},isError:false},comments:{data:{comments:[]}},versions:{data:{versions:[{version:1}]}},doc,nodes:designNodes(doc),peers:[],connection:"connected",editable:false,dirty:false,draftError:false,save:mutation,restore:mutation,share:mutation,comment:mutation,connectAgent:mutation,setCursor(){}};
    createRoot(document.getElementById("root")).render(<DesignEditor workspaceId="ws" slug="flow"/>);
   ` },
   bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
-  define: { "process.env.NODE_ENV": '"production"', "process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN": '"true"', "process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE": '"true"' },
+  define: { "process.env.NODE_ENV": '"production"', "process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN": '"true"', "process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE": '"true"', "process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_EXPORT": '"true"' },
   plugins: [{ name: "editor-fixtures", setup(builder) {
    builder.onResolve({ filter: /^(next\/dynamic|@\/hooks\/(use-auth|use-artifact-agent-dispatch)|\.\/use-design)$/ }, args => ({ path: args.path, namespace: "fixture" }))
    builder.onLoad({ filter: /.*/, namespace: "fixture" }, args => ({ contents:
@@ -41,6 +41,15 @@ it.skipIf(!existsSync(chromium.executablePath()))("plays three linked screens A 
   await page.route("https://design-prototype.test/**", route => route.fulfill({ body: '<!doctype html><div id="root"></div>', contentType: "text/html" }))
   await page.goto("https://design-prototype.test/flow")
   await page.addScriptTag({ content: bundle.outputFiles[0].text })
+  // This real browser fixture is read-only: presence connectivity must not
+  // promise that the shared canvas receives live document updates.
+  await page.getByText("Connected · read only", { exact: true }).waitFor()
+  expect(await page.getByLabel("Design tools").getByText("View canvas", { exact: true }).count()).toBe(1)
+  expect(await page.getByText("Follow changes live", { exact: true }).count()).toBe(0)
+  await page.getByRole("button", { name: /History/ }).click()
+  const history = page.getByLabel("Version history")
+  expect(await history.getByRole("button", { name: "Current view", exact: true }).count()).toBe(1)
+  expect(await history.getByRole("button", { name: "Live canvas", exact: true }).count()).toBe(0)
   await page.getByRole("button", { name: "Play" }).click()
   const player = page.getByRole("dialog", { name: "Prototype playback" })
   await player.getByRole("heading", { name: "Screen A" }).waitFor()

@@ -200,8 +200,11 @@ func (r *GovModelResolver) Status(ctx context.Context, workspaceID string) GovMo
 
 // buildProvider maps a resolved gov model to a concrete provider. Tenant
 // endpoints (openai_compat, remote ollama sourced from a vault credential) dial
-// through the SSRF fence; the degraded OLLAMA default (trusted server config,
-// typically loopback) uses a plain client so it isn't blocked by the fence.
+// through the SSRF fence. The degraded OLLAMA default is the instance judge URL,
+// which an OWNER/ADMIN sets at runtime: it dials through the same
+// trusted-endpoint client as every other use of that URL (keeperJudgeHTTPClient),
+// so loopback and LAN stay reachable while metadata, link-local and redirects do
+// not (#4793).
 func (r *GovModelResolver) buildProvider(m governance.ResolvedGovModel) (llm.Provider, error) {
 	switch m.Provider {
 	case governance.ProviderOllama:
@@ -211,7 +214,7 @@ func (r *GovModelResolver) buildProvider(m governance.ResolvedGovModel) (llm.Pro
 			if url == "" {
 				url = r.defaults().URL
 			}
-			return llm.NewOllama(url, m.Model), nil
+			return llm.NewOllamaWithClient(url, m.Model, httpsafe.TrustedEndpointClient(120*time.Second)), nil
 		}
 		// Tenant-configured ollama endpoint → SSRF-fenced.
 		return llm.NewOllamaWithClient(m.EndpointURL, m.Model, r.ssrf), nil

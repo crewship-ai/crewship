@@ -1,11 +1,13 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"strings"
 	"unicode/utf8"
 
+	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
 )
 
@@ -29,11 +31,11 @@ func newPageArtifactCommentCommand() *cobra.Command {
 		body.SendToAgent, _ = cmd.Flags().GetBool("send-to-agent")
 		for _, value := range []string{args[0], body.Path, body.Selector, body.Quote, body.Text} {
 			if !utf8.ValidString(value) {
-				return fmt.Errorf("artifact comment arguments must be valid UTF-8")
+				return cli.WithExitCode(errors.New("artifact comment arguments must be valid UTF-8"), cli.ExitValidation)
 			}
 		}
 		if body.Version < 1 || strings.TrimSpace(body.Path) == "" || strings.TrimSpace(body.Selector) == "" || strings.TrimSpace(body.Quote) == "" || strings.TrimSpace(body.Text) == "" {
-			return fmt.Errorf("positive --version and nonempty --path, --selector, --quote and --text are required")
+			return cli.WithExitCode(errors.New("positive --version and nonempty --path, --selector, --quote and --text are required"), cli.ExitValidation)
 		}
 		wait, timeout, err := artifactCommentWaitRequested(cmd, body.SendToAgent)
 		if err != nil {

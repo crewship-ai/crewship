@@ -20,7 +20,7 @@ import (
 // cacheArtifactReferences joins immutable IDs and legacy tag references. An
 // image may have several aliases; all describe the same underlying artifact.
 func cacheArtifactReferences(refs map[string][]string, img image.Summary) []string {
-	crews := append([]string(nil), refs[img.ID]...)
+	crews := append([]string{}, refs[img.ID]...)
 	for _, tag := range img.RepoTags {
 		crews = append(crews, refs[tag]...)
 	}

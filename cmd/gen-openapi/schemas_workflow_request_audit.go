@@ -77,7 +77,7 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"name": str(), "target_pipeline_slug": str(), "target_pipeline_id": str(), "target_pipeline_version": integer(),
 		"cron_expr": str(), "timezone": str(), "inputs": anyObject(), "enabled": boolean(),
 		"wake_pipeline_slug": nullable(str()), "wake_pipeline_id": nullable(str()), "wake_inputs": anyObject(),
-		"wake_fail_closed": boolean(), "catchup_policy": str(), "max_consecutive_failures": integer(),
+		"wake_fail_closed": boolean(), "catchup_policy": str(), "spread_seconds": integer(), "max_consecutive_failures": integer(),
 	})
 	replay := obj(map[string]any{
 		"pinned_version": map[string]any{"type": "integer", "minimum": 1},
@@ -95,8 +95,8 @@ func workflowRequestSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	recurringUpdate := obj(map[string]any{"crew_id": nullable(str()), "title": nullable(str()), "description": nullable(str()), "priority": nullable(str()), "project_id": nullable(str()), "milestone_id": nullable(str()), "assignee_type": nullable(str()), "assignee_id": nullable(str()), "labels_json": nullable(str()), "cron_expression": nullable(str()), "enabled": nullable(boolean())})
 	triageCreate := obj(map[string]any{"name": str(), "pattern": str(), "match_type": str(), "crew_id": nullable(str()), "assignee_id": nullable(str()), "priority": nullable(str()), "project_id": nullable(str()), "labels_json": nullable(str())})
 	triageUpdate := obj(map[string]any{"name": nullable(str()), "pattern": nullable(str()), "match_type": nullable(str()), "crew_id": nullable(str()), "assignee_id": nullable(str()), "priority": nullable(str()), "project_id": nullable(str()), "labels_json": nullable(str()), "position": nullable(integer()), "enabled": nullable(boolean())})
-	milestoneCreate := obj(map[string]any{"name": str(), "description": nullable(str()), "target_date": nullable(str()), "status": str()})
-	milestoneUpdate := obj(map[string]any{"name": nullable(str()), "description": nullable(str()), "target_date": nullable(str()), "status": nullable(str()), "position": nullable(integer())})
+	milestoneCreate := obj(map[string]any{"name": str(), "description": nullable(str()), "target_date": nullable(str()), "status": map[string]any{"type": "string", "nullable": true, "enum": []any{"", "active", "completed", "cancelled", nil}, "description": "Omitted, null, or empty status defaults to active."}})
+	milestoneUpdate := obj(map[string]any{"name": nullable(str()), "description": nullable(str()), "target_date": nullable(str()), "status": map[string]any{"type": "string", "nullable": true, "enum": []any{"active", "completed", "cancelled", nil}, "description": "Omitted or null status leaves it unchanged when another field is updated; a request without updatable fields is rejected. Empty or unsupported status is rejected."}, "position": nullable(integer())})
 	escalationResolve := obj(map[string]any{"resolution": str(), "action": str(), "redirect_to": str()})
 	// Supplying is the one route a human-typed secret takes (#2376): the
 	// value, plus name/type/tier for a free-text ask that staged no credential.

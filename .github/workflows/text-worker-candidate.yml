@@ -7,9 +7,14 @@ on:
       - .github/workflows/text-worker-release.yml
       - cmd/crewship-restricted-runner/**
       - scripts/ci/prepare-text-release.sh
+      - scripts/ci/verify-text-image-contents.sh
       - scripts/ci/test_text_release.py
       - internal/restrictedruntime/**
       - internal/restricteddispatch/**
+      - internal/api/**
+      - internal/access/**
+      - internal/auth/**
+      - internal/restrictedworkflow/**
       - go.mod
       - go.sum
 
@@ -34,19 +39,25 @@ jobs:
           bash scripts/ci/prepare-text-release.sh "$RUNNER_TEMP/text-context"
       - name: Build the candidate without publication
         run: docker build --pull --tag crewship-text-candidate:verify "$RUNNER_TEMP/text-context"
+      - name: Verify distributed binary and legal contents
+        run: bash scripts/ci/verify-text-image-contents.sh crewship-text-candidate:verify
       - name: Exercise the actual text worker and durable accounting
         run: |
           image=$(docker image inspect --format '{{.Id}}' crewship-text-candidate:verify)
           CREWSHIP_RESTRICTED_LIVE=1 CREWSHIP_RESTRICTED_PRODUCTION_IMAGE="$image" \
-            go test -tags restrictedruntime_live ./internal/restricteddispatch \
-              -run '^TestLiveProductionWorkerDurableAccounting$' -count=1 -timeout 10m -json > "$RUNNER_TEMP/text-worker-tests.jsonl"
+            go test -tags restrictedruntime_live ./internal/restricteddispatch ./internal/api \
+              -run '^(TestLiveProductionWorkerDurableAccounting|TestLiveRestrictedTextRouterProductionWorker)$' -p 1 -count=1 -timeout 10m -json > "$RUNNER_TEMP/text-worker-tests.jsonl"
           python3 - "$RUNNER_TEMP/text-worker-tests.jsonl" <<'PYTEST'
           import json, sys
           events = [json.loads(line) for line in open(sys.argv[1])]
-          name = 'TestLiveProductionWorkerDurableAccounting'
-          selected = [e['Action'] for e in events if e.get('Test') == name]
-          if selected.count('run') != 1 or selected.count('pass') != 1 or 'skip' in selected or 'fail' in selected:
-              raise SystemExit('The real text worker canary must execute and pass exactly once')
+          required = {
+              ('github.com/crewship-ai/crewship/internal/restricteddispatch', 'TestLiveProductionWorkerDurableAccounting'),
+              ('github.com/crewship-ai/crewship/internal/api', 'TestLiveRestrictedTextRouterProductionWorker'),
+          }
+          for package, name in required:
+              selected = [e['Action'] for e in events if e.get('Package') == package and e.get('Test') == name]
+              if selected.count('run') != 1 or selected.count('pass') != 1 or 'skip' in selected or 'fail' in selected:
+                  raise SystemExit(f'{package}/{name} must execute and pass exactly once')
           PYTEST
       - name: Scan before this recipe can be approved
         id: scan

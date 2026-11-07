@@ -11,6 +11,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -50,7 +51,11 @@ func init() {
 	if err != nil {
 		os.Exit(125)
 	}
-	_, err = runoutput.CaptureHost(context.Background(), input, executor)
+	// Same signal contract as cmd/crewship's helper: a service stop becomes
+	// the capture's own cancellation (stop, receipt, terminal result).
+	ctx, stop := signal.NotifyContext(context.Background(), runoutput.ExecutionSignals()...)
+	_, err = runoutput.CaptureHost(ctx, input, executor)
+	stop()
 	_ = closer.Close()
 	if err != nil {
 		os.Exit(125)
@@ -191,6 +196,10 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":true,"result":"fi
 exit 7
 `
 	if err = os.WriteFile(script, []byte(scriptData), 0755); err != nil {
+		t.Fatal(err)
+	}
+	// WriteFile honours the umask; the container user must be able to run it.
+	if err = os.Chmod(script, 0755); err != nil {
 		t.Fatal(err)
 	}
 	created, err := cli.ContainerCreate(ctx, client.ContainerCreateOptions{Name: "crewship-retained-" + strings.ToLower(rand.Text()), Config: &container.Config{Image: image.ID, User: "1001:1001", Cmd: []string{"sleep", "90"}, Labels: map[string]string{"ai.crewship.retained-test": "owned"}}, HostConfig: &container.HostConfig{NetworkMode: "none", ReadonlyRootfs: true, CapDrop: []string{"ALL"}, SecurityOpt: []string{"no-new-privileges"}, Mounts: []mount.Mount{{Type: mount.TypeBind, Source: script, Target: "/usr/local/bin/claude", ReadOnly: true}}, Tmpfs: map[string]string{"/tmp": "rw,nosuid,nodev,size=1048576,mode=1777", "/crew": "rw,nosuid,nodev,size=1048576,mode=1777", "/output": "rw,nosuid,nodev,size=1048576,mode=1777"}}})

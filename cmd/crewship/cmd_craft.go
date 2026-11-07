@@ -28,9 +28,14 @@ func newCraftCommand() *cobra.Command {
 		return craftResponse(cmd, r, e, "")
 	}})
 	craft.AddCommand(&cobra.Command{Use: "preview <page>", Args: cobra.ExactArgs(1), Short: "Read only the published native preview without opening an editor session", RunE: craftPreview})
-	craft.AddCommand(&cobra.Command{Use: "connect <page>", Args: cobra.ExactArgs(1), Short: "Read bounded NDJSON actions; watch keeps the lease stream alive", RunE: craftConnect})
-	initialize := &cobra.Command{Use: "initialize <page>", Args: cobra.ExactArgs(1), Short: "Initialize an existing empty owned Page as Word native; keep its admission in this process", RunE: craftInitialize}
-	initialize.Flags().String("file", "", "Native Word document file (or - for stdin, without subsequent actions)")
+	craft.AddCommand(&cobra.Command{Use: "versions <page>", Args: cobra.ExactArgs(1), Short: "List saved native versions, newest first; read-only (restore through connect)", RunE: craftVersions})
+	version := &cobra.Command{Use: "version <page> <version>", Args: cobra.ExactArgs(2), Short: "Read one saved native version's bytes, read-only (preview or diagnose; restore through connect)", RunE: craftVersion}
+	version.Flags().StringP("output", "o", "", "Write the decoded native document to this file (- for stdout) and print only its metadata")
+	craft.AddCommand(version)
+	craft.AddCommand(&cobra.Command{Use: "connect <page>", Args: cobra.ExactArgs(1), Short: "Read bounded NDJSON actions; watch keeps the lease stream alive", Long: "Read bounded NDJSON actions; watch keeps the lease stream alive.\n\nThe share action needs the page's owner: Edit rights or a workspace role exit 4. Each lease row says so in can_share.", RunE: craftConnect})
+	initialize := &cobra.Command{Use: "initialize <page>", Args: cobra.ExactArgs(1), Short: "Initialize an existing empty owned Page as native Word or Sheet; keep its admission in this process", RunE: craftInitialize}
+	initialize.Flags().String("application", "word", `Application to create: "word" or "sheet"`)
+	initialize.Flags().String("file", "", "Native document file (or - for stdin, without subsequent actions)")
 	_ = initialize.MarkFlagRequired("file")
 	craft.AddCommand(initialize)
 	craft.AddCommand(newCraftAgentTaskCommand())
@@ -62,10 +67,12 @@ func craftConnect(cmd *cobra.Command, args []string) error {
 		}
 		return fmt.Errorf("native session HTTP %d", r.StatusCode)
 	}
-	return craftUseAdmission(cmd, args, c, r, false)
+	return craftUseAdmission(cmd, args, c, r, "")
 }
 
-func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http.Response, initialized bool) error {
+// craftUseAdmission runs the action loop on a new admission. A nonempty
+// initialized names the application that craft initialize asked for.
+func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http.Response, initialized string) error {
 	raw, e := craftReadJSON(r.Body)
 	if e != nil {
 		return e
@@ -93,8 +100,8 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 	httpClient.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	c.HTTPClient = &httpClient
 	fields := map[string]string{"session_id": admission.ID}
-	if initialized {
-		if !craftPositiveVersion(admission.Generation) || admission.Version != "1" || admission.Application != "wordcraft" || admission.Page == "" {
+	if initialized != "" {
+		if !craftPositiveVersion(admission.Generation) || admission.Version != "1" || admission.Application != initialized || admission.Page == "" {
 			return fmt.Errorf("invalid native initialization response")
 		}
 		fields["application_id"] = admission.Application
@@ -165,6 +172,8 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/restore", a.Snapshot)
 		case "reconcile":
 			r, e = c.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/craft/document/reconcile", a.Snapshot)
+		case "versions":
+			r, e = c.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/document/versions")
 		case "status":
 			r, e = c.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/craft/lease")
 		case "acquire":
@@ -200,6 +209,8 @@ func craftUseAdmission(cmd *cobra.Command, args []string, c *cli.Client, r *http
 		limit := int64(64 << 10)
 		if a.Action == "read" || a.Action == "proposal" {
 			limit = craftNativeJSONLimit
+		} else if a.Action == "versions" {
+			limit = craftNativeVersionsLimit
 		}
 		if e = craftResponseLimit(cmd, r, e, token, limit); e != nil {
 			if craftLeaseAction(a.Action) {
@@ -260,7 +271,7 @@ func craftEmit(cmd *cobra.Command, raw json.RawMessage, secret string) error {
 	}
 	formatter := resolvedFormatter(cmd)
 	formatter.Writer = cmd.OutOrStdout()
-	if cmd.Name() == "availability" {
+	if cmd.Name() == "availability" || cmd.Name() == "versions" || cmd.Name() == "version" {
 		return formatter.Machine(clean(value))
 	}
 	return formatter.WriteStreamRow(clean(value))

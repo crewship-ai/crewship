@@ -12,8 +12,9 @@ import (
 
 // securityHeadersMiddleware adds standard security headers to all HTTP responses.
 // CSP is path-aware:
-//   - SPA UI: looser policy with 'unsafe-inline' / 'unsafe-eval' for the Next.js
-//     runtime; connect-src 'self' covers same-origin WebSocket.
+//   - SPA UI: looser policy with 'unsafe-inline' for the Next.js bootstrap and
+//     'wasm-unsafe-eval' for WebAssembly, but no 'unsafe-eval'; connect-src
+//     'self' covers same-origin WebSocket.
 //   - /openapi (the browsable spec rendering): default-src 'none' with 'self'
 //     for its one stylesheet and one script, and nothing else — see #1846.
 //   - API / health endpoints: strict default-src 'none'. Same baseline is
@@ -161,7 +162,7 @@ func securityHeadersMiddlewareWith(next http.Handler, o securityHeaderOptions) h
 			// 'self' covers same-origin ws/wss, which is what we want.
 			w.Header().Set("Content-Security-Policy",
 				"default-src 'self'; "+
-					"script-src 'self' 'unsafe-inline' 'unsafe-eval'; "+
+					"script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; "+
 					"style-src 'self' 'unsafe-inline'; "+
 					// logos.composio.dev serves the managed-integration brand
 					// logos (Gmail, GitHub, Slack, …) shown in the connector

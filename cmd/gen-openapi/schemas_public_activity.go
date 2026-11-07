@@ -80,6 +80,7 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"id":              str(), "workspace_id": str(), "name": str(), "target_pipeline_id": str(),
 		"target_pipeline_slug": str(), "target_pipeline_version": nullable(integer()), "token": str(),
 		"signing_secret_set": boolean(), "signing_secret": str(), "inputs_template": anyObject(),
+		"signal_event_type": str(), "signal_correlation_path": str(),
 		"enabled": boolean(), "rate_limit_per_min": integer(), "last_fired_at": nullable(str()),
 		"last_status": str(), "last_run_id": str(), "fire_count": integer(), "created_at": str(), "updated_at": str(),
 		// Set while a rotation's grace window is open (ODCH-INT-11).
@@ -111,6 +112,7 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 		"ingress_profile": map[string]any{"type": "string", "enum": []string{"crewship", "github"}, "default": "crewship"},
 		"name":            str(), "target_pipeline_slug": str(), "target_pipeline_id": str(),
 		"target_pipeline_version": nullable(integer()), "signing_secret": str(), "inputs_template": anyObject(),
+		"signal_event_type": str(), "signal_correlation_path": str(),
 		"enabled": nullable(boolean()), "rate_limit_per_min": integer(),
 	}, "name")
 	// webhookUpdateRequest — F21 (B9, #2362): edit in place. Every field is
@@ -122,9 +124,11 @@ func publicActivitySchemaCatalog() map[string]map[string]DomainSchema {
 	webhookUpdateRequest := request(map[string]any{
 		"name": str(), "target_pipeline_slug": str(), "target_pipeline_id": str(),
 		"target_pipeline_version": nullable(integer()), "inputs_template": anyObject(),
+		"signal_event_type": str(), "signal_correlation_path": str(),
 		"enabled": nullable(boolean()), "rate_limit_per_min": integer(), "rotate_secret": boolean(),
 		// How long the secret a rotation replaces stays valid; only with rotate_secret.
-		"rotate_grace_seconds": map[string]any{"type": "integer", "enum": []int{0, 3600, 86400, 604800}},
+		"rotate_grace_seconds":   map[string]any{"type": "integer", "minimum": 0, "maximum": 604800, "description": "0 (no overlap) or 60..604800 seconds"},
+		"revoke_previous_secret": boolean(),
 	})
 
 	chatDomain := map[string]DomainSchema{

@@ -1,6 +1,7 @@
 import { webcrypto } from "node:crypto"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { createNativeEditorPort, type NativeEditorPortOptions, type NativeStructuredPort } from "./native-editor-port"
+import { createSingleEditorSave, type NativeSaveRequest } from "./single-editor-save"
 
 beforeEach(() => vi.stubGlobal("crypto", webcrypto))
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
@@ -48,7 +49,7 @@ it.each(["wordcraft", "gridcraft"] as const)("binds %s only after correlated asy
   expect(request.type).toBe(applicationId === "wordcraft" ? "wordcraft:snapshot" : "gridcraft:export-native")
   expect(request.requestId).toMatch(/^[0-9a-f-]{36}$/)
   reply(r, request)
-  expect(await snapshot).toEqual({ bytes, documentId: "bound", editorRevision: expect.stringContaining(`snapshot:${request.requestId}:`), ...(applicationId === "wordcraft" ? { nativeState: expect.stringMatching(/^[a-f0-9]{64}$/) } : {}) })
+  expect(await snapshot).toEqual({ bytes, documentId: "bound", revision: expect.any(String), editorRevision: expect.stringContaining(`snapshot:${request.requestId}:`), ...(applicationId === "wordcraft" ? { nativeState: expect.stringMatching(/^[a-f0-9]{64}$/) } : {}) })
   expect(r.frame.postMessage).toHaveBeenCalledTimes(1); r.adapter.close()
 })
 it("rejects snapshots before bootstrap and does not treat changed as import completion", async () => {
@@ -119,6 +120,69 @@ it.each(["wordcraft", "gridcraft"] as const)("ACKs %s only for its own committed
   expect(await r.adapter.ack(receipt)).toBe(true)
   expect(latest(r)).toEqual({ type: app === "wordcraft" ? "wordcraft:saved" : "gridcraft:save-ack", requestId: request.requestId, document: "bound", revision: app === "wordcraft" ? "opaque:9007199254740993:7" : "18446744073709551615" })
   expect(await r.adapter.ack(receipt)).toBe(false); r.adapter.close()
+})
+it.each(["wordcraft", "gridcraft"] as const)("#5075: confirms an unchanged %s snapshot at the acknowledged version, for its own proof only", async app => {
+  const r = rig(app); await bootstrap(r)
+  const first = r.adapter.snapshot(signal()); reply(r, latest(r))
+  const saved = await receiptFor(r, await first)
+  expect(await r.adapter.ack(saved)).toBe(true)
+  const second = r.adapter.snapshot(signal()); const request = latest(r); reply(r, latest(r))
+  const snapshot = await second, unchanged = { ...await receiptFor(r, snapshot), baseVersion: "2", version: "2", unchanged: true as const }
+  // Not a confirmation: an ordinary receipt repeating the version, another
+  // hash, a skewed version, an older version, or anything but a literal true.
+  expect(await r.adapter.ack({ ...unchanged, unchanged: undefined })).toBe(false)
+  expect(await r.adapter.ack({ ...unchanged, contentHash: "sha256:wrong", candidateHash: "sha256:wrong" })).toBe(false)
+  expect(await r.adapter.ack({ ...unchanged, baseVersion: "1" })).toBe(false)
+  expect(await r.adapter.ack({ ...unchanged, baseVersion: "1", version: "1" })).toBe(false)
+  expect(await r.adapter.ack({ ...unchanged, unchanged: "yes" } as never)).toBe(false)
+  expect(await r.adapter.ack({ ...unchanged, editorRevision: "snapshot:other" })).toBe(false)
+  r.port.postMessage.mockClear()
+  expect(await r.adapter.ack(unchanged)).toBe(true)
+  expect(r.port.postMessage).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ type: app === "wordcraft" ? "wordcraft:saved" : "gridcraft:save-ack", requestId: request.requestId, document: "bound" }), undefined)
+  // Its proof is spent, and the next real version still acknowledges.
+  expect(await r.adapter.ack(unchanged)).toBe(false)
+  const third = r.adapter.snapshot(signal()); reply(r, latest(r))
+  expect(await r.adapter.ack({ ...await receiptFor(r, await third), baseVersion: "2", version: "3" })).toBe(true)
+  r.adapter.close()
+})
+it("#5075: an unchanged confirmation at the opened version acknowledges a Word ticket", async () => {
+  const r = rig(); await bootstrap(r)
+  r.receive({ type: "wordcraft:save-request", requestId: "ticket-clean", document: "bound", revision: "clean" })
+  const pending = r.adapter.snapshot(signal(), "ticket-clean"); reply(r, latest(r), "bound", "clean")
+  const receipt = { ...await receiptFor(r, await pending), version: "1", unchanged: true as const }
+  expect(await r.adapter.ack(receipt)).toBe(true)
+  expect(latest(r)).toEqual({ type: "wordcraft:saved", requestId: "ticket-clean", document: "bound", revision: "clean" })
+  r.adapter.close()
+})
+it.each(["wordcraft", "gridcraft"] as const)("#5075: Ctrl+S on a saved %s document reaches the engine through the real port with no save RPC", async app => {
+  const r = rig(app); await bootstrap(r)
+  r.port.postMessage.mockImplementation((message: Record<string, unknown>) => {
+    if (message.type === "wordcraft:snapshot" || message.type === "gridcraft:export-native") queueMicrotask(() => reply(r, message))
+    if (message.type === "gridcraft:validate-native") queueMicrotask(() => r.receive({ type: "gridcraft:native-validated", requestId: message.requestId, valid: true, error: "" }))
+  })
+  const saves: NativeSaveRequest[] = [], acknowledged: boolean[] = []
+  const controller = createSingleEditorSave({
+    workspaceId: "w", pageId: "p", applicationId: app, enginePin: r.options.enginePin, baseVersion: "1", generation: r.options.scope.generation, sessionId: r.options.scope.sessionId, idleMs: 1,
+    journal: { async persist() {}, async confirm() {}, async recovery() { return [] }, onRetire() { return () => {} }, async close() {}, async revokeRead() {}, async discardRecovered() {} },
+    engine: { snapshot: (s, id) => r.adapter.snapshot(s, id), validate: (d, s) => r.adapter.validate(d, s) },
+    transport: { async save(q) { saves.push(q); return { ...q, version: String(BigInt(q.baseVersion) + 1n), durability: "node", issuedBy: "crewship", phase: "committed", candidateHash: q.contentHash } } },
+    onState() {},
+    async onReceipt(receipt) { acknowledged.push(await r.adapter.ack(receipt)) },
+  })
+  try {
+    controller.edited()
+    await vi.waitFor(() => expect(acknowledged).toEqual([true]))
+    await vi.waitFor(() => expect(controller.confirmedVersion()).toBe("2"))
+    r.port.postMessage.mockClear()
+    if (app === "wordcraft") r.receive({ type: "wordcraft:save-request", requestId: "ticket-saved", document: "bound", revision: "opaque:9007199254740993:7" })
+    await controller.save(app === "wordcraft" ? "ticket-saved" : undefined)
+    await vi.waitFor(() => expect(acknowledged).toEqual([true, true]))
+    expect(saves).toHaveLength(1)
+    const ack = r.port.postMessage.mock.calls.map(call => call[0] as Record<string, unknown>).at(-1)!
+    expect(ack.type).toBe(app === "wordcraft" ? "wordcraft:saved" : "gridcraft:save-ack")
+    if (app === "wordcraft") expect(ack.requestId).toBe("ticket-saved")
+    expect(controller.confirmedVersion()).toBe("2")
+  } finally { await controller.close(); r.adapter.close() }
 })
 it("preserves Word's manual save ticket and fails only that ticket", async () => {
   const r = rig(); await bootstrap(r)

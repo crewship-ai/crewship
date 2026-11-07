@@ -139,3 +139,15 @@ it("never offers the signed-in person as someone to share with, and names their 
   expect(options).toContain("Ada Lovelace")
   expect(options).not.toContain("Me Myself")
 })
+
+it("returns focus to the Share button that opened it once the dialog unmounts", async () => {
+  const opener = document.createElement("button")
+  opener.textContent = "Share"
+  document.body.append(opener)
+  opener.focus()
+  const { unmount } = renderDialog()
+  expect(document.activeElement).not.toBe(opener)
+  unmount()
+  await waitFor(() => expect(document.activeElement).toBe(opener))
+  opener.remove()
+})

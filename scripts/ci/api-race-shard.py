@@ -196,7 +196,7 @@ def completed_seconds(directory, selected):
     return seconds
 
 
-def run(index, count, timeout, bootstrap_directory=None):
+def run(index, count, timeout, bootstrap_directory=None, *, profile_directory=None, allocations=False):
     if not 0 <= index < count or timeout <= 0:
         raise ValueError('invalid shard index or timeout')
     directory = Path(os.environ.get('CI_RESULTS_DIR', ROOT / '.ci-results')).resolve()
@@ -210,6 +210,19 @@ def run(index, count, timeout, bootstrap_directory=None):
     if bootstrap_directory is not None:
         _, bootstrap_digest = validate_bootstrap(bootstrap_directory)
         env['CREWSHIP_TESTUTIL_IMPORT_BUNDLE'] = str(Path(bootstrap_directory).absolute())
+    profile_flags = []
+    if profile_directory is not None:
+        if PACKAGE != MODULE + '/internal/api' or count != 6 or bootstrap_directory is None:
+            raise ValueError('profiles require one of six API partitions and a measured bootstrap')
+        profile_directory = Path(profile_directory).absolute()
+        if profile_directory.is_symlink() or not profile_directory.is_dir():
+            raise ValueError('profile output must be a real directory')
+        profile_flags = [f'-cpuprofile={profile_directory / "cpu.pprof"}',
+                         f'-outputdir={profile_directory}', f'-o={profile_directory / "api.test"}']
+        if allocations:
+            profile_flags += [f'-memprofile={profile_directory / "alloc.pprof"}', '-memprofilerate=524288']
+    elif allocations:
+        raise ValueError('allocations require diagnostic profiling')
     # Match build tags/instrumentation to execution, including tests guarded
     # by //go:build race. A failed enumeration must abort the run.
     # Same flags as scripts/ci/go-test.sh adds under -race, so the listing
@@ -224,9 +237,11 @@ def run(index, count, timeout, bootstrap_directory=None):
                 'package': PACKAGE, 'source_sha': os.environ.get('GITHUB_SHA', '')}
     if bootstrap_digest is not None:
         manifest['bootstrap_sha256'] = bootstrap_digest
+    if profile_directory is not None:
+        manifest['diagnostic_profile'] = True
     print(f'{PACKAGE_DIR} race shard {index}/{count}: {len(selected)} of {len(names)} parents', flush=True)
     result = subprocess.run(['bash', str(ROOT / 'scripts/ci/go-test.sh'), PACKAGE,
-                             '-race', '-count=1', '-timeout', f'{timeout}s', '-run', pattern],
+                             '-race', '-count=1', '-timeout', f'{timeout}s', '-run', pattern] + profile_flags,
                             cwd=ROOT, env=env)
     if result.returncode:
         return result.returncode
@@ -242,6 +257,8 @@ def validate_manifests(manifests, count, expected_sha=None, bootstrap_digest=Non
     combined = []
     seconds = 0
     for manifest in manifests:
+        if manifest.get('diagnostic_profile'):
+            raise ValueError('diagnostic profiles cannot supply ordinary budget evidence')
         if manifest.get('bootstrap_sha256') != bootstrap_digest:
             raise ValueError('API shards do not reference the required measured bootstrap')
         # Identity: one package and one source revision. Download patterns
@@ -270,14 +287,25 @@ def validate_manifests(manifests, count, expected_sha=None, bootstrap_digest=Non
     return seconds, len(combined)
 
 
+def combined_alarm(baseline):
+    """The erosion alarm: RACE_COMBINED_ALARM_SECONDS when the workflow names one
+    explicitly (a measured, owner-approved limit), else the historical 1.6x baseline."""
+    explicit = os.environ.get('RACE_COMBINED_ALARM_SECONDS')
+    if explicit is None:
+        return baseline * 1.6
+    if not explicit.isdigit() or int(explicit) < baseline:
+        raise ValueError('RACE_COMBINED_ALARM_SECONDS must be whole seconds not below the measured baseline')
+    return int(explicit)
+
+
 def report(directory, count, baseline, bootstrap_directory=None):
     if baseline <= 0 or count <= 0:
         raise ValueError('invalid API report budget or shard count')
+    alarm = combined_alarm(baseline)
     manifests = [json.loads(path.read_text()) for path in Path(directory).rglob('api-race-shard.json')]
     bootstrap_elapsed, bootstrap_digest = (0, None) if bootstrap_directory is None else validate_bootstrap(bootstrap_directory)
     seconds, total = validate_manifests(manifests, count, os.environ.get('GITHUB_SHA'), bootstrap_digest)
     seconds += bootstrap_elapsed
-    alarm = baseline * 1.6
     summary = (f'### Go Race ({PACKAGE_DIR[2:]}) — combined budget\n\n'
                f'{total} top-level tests covered exactly once across {count} shards.\n\n'
                f'Summed package seconds: {seconds:.3f}; baseline (same summed metric): {baseline}s; '
@@ -290,7 +318,7 @@ def report(directory, count, baseline, bootstrap_directory=None):
         output.write(summary)
     if seconds > alarm:
         main_push = os.environ.get('GITHUB_EVENT_NAME') == 'push'
-        print(f'::{"error" if main_push else "warning"}::API race combined duration exceeds '
+        print(f'::{"error" if main_push else "warning"}::{PACKAGE_DIR[2:]} race combined duration exceeds '
               'the erosion alarm; re-measure from green main runs before changing the budget.')
         return int(main_push)
     return 0

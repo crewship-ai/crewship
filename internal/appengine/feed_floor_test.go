@@ -49,6 +49,25 @@ func TestClaimCommittedWithNothingPendingTakesNoWriteLock(t *testing.T) {
 	if _, err := s.ClaimCommitted(t.Context(), "", 10); err != nil {
 		t.Fatal(err)
 	}
+	// The holder pins one pooled connection, so the timed claims need a second.
+	// Open it now: under -race a fresh connection on the full schema costs
+	// hundreds of milliseconds, which would otherwise be billed to the lock
+	// (#4782). The pool keeps idle connections (MaxIdleConns == MaxOpenConns).
+	var err error
+	warm := make([]*sql.Conn, 2)
+	for i := range warm {
+		if warm[i], err = db.Conn(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		if err = warm[i].PingContext(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, c := range warm {
+		if err := c.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
 	holder, err := db.BeginTx(t.Context(), nil)
 	if err != nil {
 		t.Fatal(err)

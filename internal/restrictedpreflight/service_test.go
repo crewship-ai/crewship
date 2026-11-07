@@ -376,3 +376,29 @@ func TestCompletedRevisionCanRunAgainButRecoveryNeverReplays(t *testing.T) {
 		t.Fatal("recovery repeated effects")
 	}
 }
+
+// #5108: an agent's reconciliation item keeps the agent busy for restricted
+// work until its runtime end is confirmed; the confirmation frees the agent
+// without settling the item.
+func TestReconciliationBusyUntilRuntimeEndConfirmed(t *testing.T) {
+	s, _ := fixture(t)
+	if _, err := s.DB.Exec(`INSERT INTO work_items(id,workspace_id,source,agent_id,crew_id,class,state,generation,eligible_at,created_at,updated_at) VALUES('parked','w','webhook','agent','crew','background','needs_reconciliation',1,'2000-01-01T00:00:00Z','2000-01-01T00:00:00Z','2000-01-01T00:00:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.DB.Exec(`INSERT INTO work_attempts(run_id,work_id,attempt,generation,lease_owner,lease_expires_at,heartbeat_at,started_at,ended_at) VALUES('parked-run','parked',1,1,'gone','2000-01-01T00:05:00Z','2000-01-01T00:00:00Z','2000-01-01T00:00:00Z','2000-01-01T00:06:00Z')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimAssignedIssue(t.Context(), "h1", "w", "agent", "i1", "issue-work"); !errors.Is(err, ErrBusy) {
+		t.Fatalf("unconfirmed reconciliation did not keep the agent busy: %v", err)
+	}
+	if _, err := s.DB.Exec(`UPDATE work_attempts SET runtime_end_confirmed_at='2000-01-01T00:07:00Z' WHERE run_id='parked-run'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ClaimAssignedIssue(t.Context(), "h1", "w", "agent", "i1", "issue-work"); err != nil {
+		t.Fatalf("confirmed end still blocks the agent: %v", err)
+	}
+	var state string
+	if err := s.DB.QueryRow(`SELECT state FROM work_items WHERE id='parked'`).Scan(&state); err != nil || state != "needs_reconciliation" {
+		t.Fatalf("reconciliation item changed: %q %v", state, err)
+	}
+}

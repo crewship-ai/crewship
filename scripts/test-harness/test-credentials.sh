@@ -15,6 +15,7 @@
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
+keep_failure_evidence  # #4874: keep transcripts of a failing run before the gauntlet reseed
 
 CRED_NAME="HARNESS_$(nonce CRED | tr '-' '_')"   # env-var-safe unique name
 
@@ -22,6 +23,8 @@ preflight
 
 # shellcheck source=owned-escalation.sh
 source "$HERE/owned-escalation.sh"
+# Synthetic values this suite stores; keep them out of failure evidence (#4874).
+for _v in demo-value-rotate-me harness-placeholder-not-a-real-token revoke-me-token keeper-gated-secret-value lease-me-token self-made-demo; do register_secret "$_v"; done
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "1. Human creates + assigns a credential (baseline)"
@@ -60,9 +63,9 @@ section "2. Agent raises a CREDENTIAL escalation → human grants it"
 # This is the intentional design: an autonomous agent CANNOT mint access it
 # wasn't given — it must escalate, and a human (here, the CLI) grants it.
 ESC_NAME="HARNESS_$(nonce PAGER | tr '-' '_')"
-info "Driving morgan to raise a credential escalation…"
-if ! ask_agent morgan "You need a ${ESC_NAME} API token to read the synthetic pager service's status for this authorized integration probe. You do not have it: raise a CREDENTIAL escalation with metadata.name exactly ${ESC_NAME}, describe that read-only purpose, and include no secret value. Do not contact any external service." >/dev/null; then
-  _fail "credential request agent run completed"
+info "Opening an ops issue whose work needs a credential only a human has ($ESC_NAME)…"
+if ! esc_work="$(request_credential_via_issue ops morgan "$ESC_NAME")"; then
+  _fail "credential request issue reached an escalation or an end" "${esc_work:-the issue could not be created or started}"
 fi
 
 if have jq; then
@@ -82,6 +85,9 @@ if have jq; then
 else
   _fail "credential escalation ownership checks require jq"
 fi
+# The supplied answer resumes morgan's parked run (the agent waits up to 5
+# minutes for it); let that run end before later sections drive morgan again.
+wait_agent_free morgan
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "3. Agent self-service credential (probe — may be a gap)"

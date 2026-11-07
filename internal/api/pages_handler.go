@@ -537,31 +537,138 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wsID := WorkspaceIDFromContext(r.Context())
-
-	viewer, err := h.loadViewer(r.Context(), wsID, user.ID)
+	// Ordinary catalogs keep a read snapshot. If admitted candidates require a
+	// custody audit, reload once under the existing metadata writer fence.
+	r, read, err := h.startMetadataRead(r, false)
 	if err != nil {
-		replyInternalError(w, h.logger, "load page viewer", err)
+		replyInternalError(w, h.logger, "begin page catalog read", err)
 		return
 	}
-	index, err := h.loadPageIndex(r.Context(), wsID, viewer, pagesInWorkspace(wsID))
-	if err != nil {
-		replyInternalError(w, h.logger, "list pages", err)
-		return
+	defer func() { read.tx.Rollback() }()
+	var viewer *pageViewer
+	var index *pageIndex
+	var candidates []pageIndexRow
+	for {
+		viewer, err = h.loadViewer(r.Context(), wsID, user.ID)
+		if err != nil {
+			replyInternalError(w, h.logger, "load page viewer", err)
+			return
+		}
+		index, err = h.loadPageIndex(r.Context(), wsID, viewer, pagesInWorkspace(wsID))
+		if err != nil {
+			replyInternalError(w, h.logger, "list pages", err)
+			return
+		}
+		candidates, err = pageCatalogCandidates(r, index, user.ID)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		needsAudit := false
+		for i := range candidates {
+			if catalogRowNeedsAudit(&candidates[i], viewer) {
+				needsAudit = true
+				break
+			}
+		}
+		if read.writer || !needsAudit {
+			break
+		}
+		read.tx.Rollback()
+		nextRequest, nextRead, beginErr := h.startMetadataRead(r, true)
+		if beginErr != nil {
+			replyInternalError(w, h.logger, "begin page catalog audit", beginErr)
+			return
+		}
+		r, read = nextRequest, nextRead
 	}
 	rows, total, err := pageCatalogRows(r, index, user.ID)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	// Audit every candidate the filters consumed, not only the released
+	// window: an empty page still discloses whether a custodian's private
+	// artifact matched. auditCatalogRows appends to the writer fence taken
+	// above, so the audit set is the one the filters read, all-or-nothing.
+	if !h.auditCatalogRows(w, r, candidates, viewer) {
+		return
+	}
 	out := make([]pageListWire, 0, len(rows))
 	for i := range rows {
-		if !h.auditPrivateOwnerAccess(w, r, &rows[i].rec) {
-			return
-		}
 		out = append(out, h.pageListRow(&rows[i], index.folders, viewer))
+	}
+	if !h.finishMetadataRead(w, r, read) {
+		return
 	}
 	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	writeJSON(w, http.StatusOK, out)
+}
+
+// auditCatalogRows records, in one writer batch committed before any row is
+// released, the audit of every catalog row that needs one (another
+// custodian's private artifact, or an ordinary artifact this caller reaches
+// only through its workspace OWNER/ADMIN role). False means the response was
+// already written and nothing may be released.
+func (h *PageHandler) auditCatalogRows(w http.ResponseWriter, r *http.Request, rows []pageIndexRow, viewer *pageViewer) bool {
+	audited := r
+	// A caller already holding the writer fence (the filtered catalog) owns
+	// the batch and commits it; a second writer here would wait on itself.
+	batch, _ := r.Context().Value(privateMetadataReadKey{}).(*privateMetadataRead)
+	owned := batch == nil || !batch.writer
+	if owned {
+		batch = nil
+	}
+	for i := range rows {
+		if !catalogRowNeedsAudit(&rows[i], viewer) {
+			continue
+		}
+		if batch == nil {
+			var err error
+			audited, batch, err = h.startMetadataRead(r, true)
+			if err != nil {
+				replyInternalError(w, h.logger, "begin catalog read audit", err)
+				return false
+			}
+			defer batch.tx.Rollback()
+		}
+		if rows[i].rec.PrivateAudience {
+			if !h.auditPrivateOwnerAccess(w, audited, &rows[i].rec) {
+				return false
+			}
+			continue
+		}
+		// catalogRowNeedsAudit already decided from the loaded row that only
+		// the role reaches it or shows its sealed panels' state.
+		if !h.auditWorkspaceAdminReadBeyond(w, audited, &rows[i].rec, func(context.Context, string, string) (bool, error) { return true, nil }) {
+			return false
+		}
+	}
+	return !owned || batch == nil || h.finishMetadataRead(w, audited, batch)
+}
+
+// catalogRowNeedsAudit selects the rows that need an administrator audit:
+// another custodian's private artifact; an ordinary artifact the caller
+// reaches only through the workspace role arm (pageReach); or, for an
+// OWNER/ADMIN, one whose state rollup counts a panel the same person as a
+// plain member would have sealed (pageListRow counts only visible panels).
+func catalogRowNeedsAudit(row *pageIndexRow, viewer *pageViewer) bool {
+	if row.rec.PrivateAudience {
+		return row.rec.OwnerUserID != viewer.UserID
+	}
+	if len(row.reach) == 1 && row.reach[0] == pageReachRole {
+		return true
+	}
+	if !workspaceArtifactReader(viewer.Role) || row.rec.OwnerUserID == viewer.UserID {
+		return false
+	}
+	member := pageViewer{UserID: viewer.UserID, Role: "MEMBER", Crews: viewer.Crews}
+	for _, panel := range row.panels {
+		if !pages.CanSeePanel(member.Role, member.Crews[panel.OwnerCrewID]) {
+			return true
+		}
+	}
+	return false
 }
 
 // pageIndex is what the index and the folder readers share: every page in
@@ -866,7 +973,7 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !h.auditPrivateOwnerAccess(w, r, rec) {
+	if !h.auditPageDocumentRead(w, r, rec, panels) {
 		return
 	}
 
@@ -1550,7 +1657,15 @@ func (h *PageHandler) loadPageWithPrivateAudience(ctx context.Context, wsID, slu
 		if err != nil {
 			return nil, err
 		}
-		if !privatePageViewer(&p, viewer) {
+		// Readers get the PRD §5 audience (custodian, workspace OWNER/ADMIN),
+		// audited at the response boundary. Mutation and configuration loads
+		// keep the custodian audience: an administrator's read never becomes
+		// write, share, publish or custody power over private output.
+		allowed := privatePageCustodian(&p, viewer)
+		if custodyRead {
+			allowed = privatePageViewer(&p, viewer)
+		}
+		if !allowed {
 			return nil, sql.ErrNoRows
 		}
 	}

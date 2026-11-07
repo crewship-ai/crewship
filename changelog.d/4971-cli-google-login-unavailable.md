@@ -1,0 +1,1 @@
+- ⚠️ **Behaviour change: `crewship login --google` now reports that Google sign-in is unavailable before contacting a server.** Google redirect and callback routes are disabled; the CLI no longer starts the legacy browser/token-paste flow against older servers. Use email/password, `--token` or `--pair` instead. Help and login documentation now describe the supported modes.

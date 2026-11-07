@@ -309,11 +309,18 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 	retired := c.retirements[string(q.GateID)]
 	validCurrent := !c.closed && c.participantBinding != nil && q.GateID == protocol.Identifier(c.joined.gate.GateID) && q.PermissionVersion == protocol.Counter(c.joined.gate.PermissionVersion)
 	closed := c.closed
+	tearing := c.tearingDown.Load()
 	c.mu.Unlock()
+	// A frame owed to a socket that is leaving is dropped, never an error: nothing
+	// reaches the recipient, and its records may already be retired, so failing
+	// here would end the session for everyone else over a frame nobody will read.
+	if tearing && retired == nil {
+		return nil
+	}
 	if retired == nil && !validCurrent {
 		return errCollaborationHTTP
 	}
-	if !closed {
+	if !closed && !tearing {
 		err = c.ensureCurrentGate(ctx)
 		if err != nil && !errors.Is(err, errCollaborationRecipientDenied) {
 			return err
@@ -322,12 +329,19 @@ func (d *collaborationHTTPDocument) outputControl(ctx context.Context, token moo
 	c.mu.Lock()
 	retired = c.retirements[string(q.GateID)]
 	denied := c.closed
+	tearing = c.tearingDown.Load()
 	c.mu.Unlock()
 	if retired != nil {
 		if err = d.cell.runtime.ValidateRetiredOutput(token, retired.proof); err != nil {
 			return err
 		}
+		if tearing {
+			return nil
+		}
 		return c.committedOutputRecipient(ctx, q, raw, header.Type, retired.gate, denied)
+	}
+	if tearing {
+		return nil
 	}
 	if denied {
 		return errCollaborationHTTP

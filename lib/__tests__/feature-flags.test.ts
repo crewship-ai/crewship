@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { readFileSync } from "node:fs"
 import { parseEnv } from "node:util"
-import { buildProfile, refTargetsMain, RELEASE_FLAGS } from "../../e2e/build-profile"
-import { artifactDesignSystem, artifactSlides, artifactsLibrary, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations, pagesOpenArtifacts } from "@/lib/feature-flags"
+import { buildProfile, refTargetsMain, RELEASE_FLAGS, UNACCEPTED_FLAGS } from "../../e2e/build-profile"
+import { artifactDesignSystem, artifactSlides, artifactsLibrary, artifactsServerCatalog, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations, pagesOpenArtifacts } from "@/lib/feature-flags"
 
 describe.each([
   ["NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", chatArtifactProjects],
@@ -112,9 +112,8 @@ describe("artifactSlides", () => {
     vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", "true")
     expect(artifactSlides()).toBe(true)
   })
-  it("follows the checked-in build profile", () => {
-    const profile = buildProfile()
-    expect(profile.env.NEXT_PUBLIC_ARTIFACT_SLIDES === "true").toBe(profile.name === "release")
+  it("stays off in the checked-in build profile until milestone D is accepted", () => {
+    expect(buildProfile().env.NEXT_PUBLIC_ARTIFACT_SLIDES).not.toBe("true")
   })
 })
 
@@ -133,6 +132,11 @@ describe("build profile", () => {
     for (const flag of RELEASE_FLAGS) expect(profile.env[flag] === "true", flag).toBe(profile.name === "release")
     expect(profile.env.NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK).not.toBe("true")
   })
+  it("keeps unaccepted milestones off in every profile", () => {
+    const profile = buildProfile()
+    for (const flag of UNACCEPTED_FLAGS) expect(profile.env[flag], flag).not.toBe("true")
+    expect(RELEASE_FLAGS.filter(flag => (UNACCEPTED_FLAGS as readonly string[]).includes(flag))).toEqual([])
+  })
 })
 
 describe("artifactDesignSystem", () => {
@@ -148,5 +152,16 @@ describe("artifactDesignSystem", () => {
   it("keeps the tracked production build configuration default-off", () => {
     const production = readFileSync(".env.production", "utf8")
     expect(production.match(/^NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM\s*=\s*(.*?)\s*$/m)?.[1]).not.toBe("true")
+  })
+})
+
+describe("artifactsServerCatalog", () => {
+  afterEach(() => vi.unstubAllEnvs())
+  it("defaults off and needs the library itself", () => {
+    expect(artifactsServerCatalog()).toBe(false)
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_SERVER_CATALOG", "true")
+    expect(artifactsServerCatalog()).toBe(false)
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+    expect(artifactsServerCatalog()).toBe(true)
   })
 })

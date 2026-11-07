@@ -91,6 +91,9 @@ func (s *Store) CheckpointRequestGuarded(ctx context.Context, k Key, l Lease, id
 		if size+len(snapshot)+len(v.Projection) > s.opts.MaxHistoryBytes {
 			return ErrQuota
 		}
+		if err = admitDisk(ctx, t, len(snapshot), len(v.Projection)); err != nil {
+			return err
+		}
 		c = Checkpoint{id, v.HeadRev, v.Schema, snapshot, v.Projection, actor}
 		_, err = t.ExecContext(ctx, "INSERT INTO document_checkpoints(workspace_id,page_id,id,rev,schema_version,snapshot,projection,actor) VALUES(?,?,?,?,?,?,?,?)", k.WorkspaceID, k.PageID, id, c.Rev, c.Schema, snapshot, []byte(c.Projection), actor)
 		if err != nil {
@@ -163,6 +166,9 @@ func (s *Store) RestoreRequestWithFingerprintAtGeneration(ctx context.Context, k
 			return err
 		}
 		if err = s.admitNewReceipt(ctx, t, k); err != nil {
+			return err
+		}
+		if err = admitDisk(ctx, t, len(c.Snapshot), len(c.Projection)); err != nil {
 			return err
 		}
 		r = Receipt{requestID, v.HeadRev + 1, v.Epoch + 1, actor, "restore"}

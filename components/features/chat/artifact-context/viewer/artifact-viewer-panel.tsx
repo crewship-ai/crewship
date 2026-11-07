@@ -507,7 +507,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
       <Clock className="size-3.5" aria-hidden />History
     </Button>}
     <div className="flex-1" />
-    {canWrite && <Link className="inline-flex items-center px-2 text-sm underline coarse:min-h-[44px]" href={`/pages/${encodeURIComponent(target.slug)}?${new URLSearchParams({artifact:"1",workspace_id:workspaceId})}`}>Edit source</Link>}
+    {canWrite && <Link className="inline-flex items-center px-2 text-sm underline coarse:min-h-[44px]" href={`/pages/${encodeURIComponent(target.slug)}?${new URLSearchParams({artifact:"1",edit:"1",workspace_id:workspaceId})}`}>Edit source</Link>}
     {canShare && <Popover open={confirmShare} onOpenChange={setConfirmShare}>
       <PopoverTrigger asChild><Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5"><Link2 className="size-3.5" aria-hidden />Share</Button></PopoverTrigger>
       <PopoverContent align="end" className="w-72 space-y-3 text-sm">
@@ -665,7 +665,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const waitingCount = data.comments.filter(c => c.status === "pending").length
   const tabCount = (n: number) => n > 0 && <span aria-hidden className="ml-1.5 font-mono text-micro text-muted-foreground">{n}</span>
 
-  if(draftReadError?.key===draftKey&&draftReadError.revoked)return shell(header,<p role="alert" className="p-6">Page read access was removed.</p>)
+  if(draftReadError?.key===draftKey&&draftReadError.revoked)return shell(header,<p role="alert" className="p-6">Page read access was removed. The local draft has been deleted where this browser could reach it.</p>)
   return shell(header, <>
     {draftReadError?.key===draftKey&&<p role="alert" className="p-3">Private draft could not be opened. Reconnect and reopen; the stored copy is retained.</p>}
     {library && <div role="tablist" aria-label="Artifact detail" className="flex gap-1 border-b px-3 py-2" onKeyDown={event => {

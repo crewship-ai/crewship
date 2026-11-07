@@ -46,6 +46,15 @@ means a process may still be alive under a locator nobody has verified, so it
 keeps holding its capacity until a person or a reconciler resolves it. A timer
 never clears it.
 
+There is one exception to the capacity rule, and only to it. When the protected
+run capture later confirms that the current attempt's runtime ended (its own
+exit, the runtime gone, or a whole-tree stop receipt), the attempt records
+`runtime_end_confirmed_at` and the item gives back its **execution slot**. It
+stays in `needs_reconciliation`, keeps its result and evidence, is not retried
+or replayed, and still needs a resolution, because its effects remain unknown.
+A park reason, an expired lease or an operator note never confirms an end, and
+a later attempt of the same item does not inherit an earlier confirmation.
+
 `cancelled` means a **confirmed** stop. Work whose process could not be
 stopped, or whose outcome is unclear, goes to `needs_reconciliation` instead —
 never to `cancelled`.
@@ -100,7 +109,8 @@ does not resolve ids by hand:
 The detail adds two lists. `attempts[]` carries one entry per attempt —
 `run_id` (the same namespace as the journal's run id), the lease and its
 heartbeat, the `runtime_locator` recovery consults before deciding a process
-is gone, and `cost_usd`. `events[]` is the append-only history in sequence
+is gone, `runtime_end_confirmed_at` (when the protected capture confirmed the
+runtime ended, otherwise `null`), and `cost_usd`. `events[]` is the append-only history in sequence
 order.
 
 ## Cancelling

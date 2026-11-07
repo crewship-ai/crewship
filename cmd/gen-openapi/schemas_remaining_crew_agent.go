@@ -44,8 +44,8 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 
 	// Agent read subresources.
 	add("GET", "/api/v1/agents/crews-status", "RemainingAgentCrewsStatusV1", object(map[string]any{"crews": array(anyObject()), "agents": array(anyObject())}))
-	add("GET", "/api/v1/agent-load", "RemainingAgentLoadV1", object(map[string]any{"agents": array(anyObject()), "total": integer(), "running": integer()}))
-	add("GET", "/api/v1/agents/{agentId}/credential-bindings", "RemainingAgentCredentialBindingsV1", array(anyObject()))
+	add("GET", "/api/v1/agent-load", "RemainingAgentLoadV1", array(anyObject()))
+	add("GET", "/api/v1/agents/{agentId}/credential-bindings", "RemainingAgentCredentialBindingsV1", object(map[string]any{"agent_id": str(), "slots": array(anyObject()), "warnings": array(str())}))
 	// ListCredentials writes []agentCredentialResponse (agent_credentials.go);
 	// AgentCredential's required list is graded against that struct.
 	routes["GET /api/v1/agents/{agentId}/credentials"] = DomainSchema{Response: ref("AgentCredentialList")}
@@ -67,17 +67,23 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 		"adapter":          str(),
 		"model_credential": modelCredential,
 		"notes":            array(str()),
+		"host_bound_withheld": array(object(map[string]any{
+			"credential_id":   str(),
+			"credential_name": str(),
+			"allowed_hosts":   array(str()),
+			"reason":          str(),
+		})),
 	})
-	readiness["required"] = []string{"agent_id", "agent_slug", "adapter", "model_credential", "notes"}
+	readiness["required"] = []string{"agent_id", "agent_slug", "adapter", "model_credential", "notes", "host_bound_withheld"}
 	add("GET", "/api/v1/agents/{agentId}/credential-readiness", "RemainingAgentCredentialReadinessV1", readiness)
 	add("GET", "/api/v1/agents/{agentId}/debug", "RemainingAgentDebugV1", object(map[string]any{"agent_id": str(), "status": str(), "details": anyObject()}))
 	add("GET", "/api/v1/agents/{agentId}/git-log", "RemainingAgentGitLogV1", object(map[string]any{"commits": array(anyObject()), "branch": str()}))
 	add("GET", "/api/v1/agents/{agentId}/integrations/resolved", "RemainingAgentResolvedIntegrationsV1", object(map[string]any{"integrations": array(anyObject())}))
 	add("GET", "/api/v1/agents/{agentId}/learning", "RemainingAgentLearningV1", object(map[string]any{"agent_id": str(), "enabled": boolean(), "mode": str(), "updated_at": str()}))
 	add("GET", "/api/v1/agents/{agentId}/logs", "RemainingAgentLogsV1", object(map[string]any{"logs": array(str()), "agent_id": str()}))
-	add("GET", "/api/v1/agents/{agentId}/notification-channels", "RemainingAgentNotificationChannelsV1", array(anyObject()))
+	add("GET", "/api/v1/agents/{agentId}/notification-channels", "RemainingAgentNotificationChannelsV1", object(map[string]any{"channels": array(anyObject())}))
 	add("GET", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaV1", object(map[string]any{"agent_id": str(), "content": str(), "version": integer(), "created_at": str(), "updated_at": str()}))
-	add("GET", "/api/v1/agents/{agentId}/persona/history", "RemainingAgentPersonaHistoryV1", array(anyObject()))
+	add("GET", "/api/v1/agents/{agentId}/persona/history", "RemainingAgentPersonaHistoryV1", object(map[string]any{"entries": array(anyObject())}))
 	components["FeedbackPreferenceV1"] = object(map[string]any{"id": str(), "revision": integer(), "feedback_id": str(), "source_revision": integer(), "chat_id": str(), "message_id": str(), "reason": str(), "value": str(), "status": str(), "source_type": str()})
 	add("GET", "/api/v1/agents/{agentId}/peers", "RemainingAgentPeersV1", object(map[string]any{"agent_id": str(), "peers": array(anyObject()), "preferences": array(ref("FeedbackPreferenceV1"))}))
 	addNoContent("PATCH", "/api/v1/agents/{agentId}/peers/{userId}")
@@ -225,7 +231,8 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	agentDeleted := object(map[string]any{"success": boolean(), "runs": agentRuns})
 	agentDeleted["required"] = []string{"success", "runs"}
 	add("DELETE", "/api/v1/agents/{agentId}", "RemainingAgentDeletedV1", agentDeleted)
-	add("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", "RemainingAgentWebhookSecretV1", object(map[string]any{"webhook_secret": str(), "rotated_at": str()}))
+	add("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", "RemainingAgentWebhookSecretV1", object(map[string]any{"webhook_secret": str(), "rotated_at": str(), "previous_secret_expires_at": str()}))
+	addNoContent("DELETE", "/api/v1/agents/{agentId}/webhook-secret/previous")
 	addAction("DELETE", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaDeletedV1")
 	add("PUT", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaUpdatedV1", ref("RemainingAgentPersonaV1"))
 	add("POST", "/api/v1/agents/{agentId}/persona/suggest", "RemainingAgentPersonaSuggestionV1", object(map[string]any{"content": str(), "rationale": str()}))
@@ -240,12 +247,21 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	// older domain catalogs. Optional fields are intentionally not marked
 	// required: handlers apply defaults and validate presence themselves.
 	addRequest("POST", "/api/v1/workspaces/{workspaceId}/members", "RemainingWorkspaceMemberRequestV1", object(map[string]any{"user_id": str(), "role": str()}))
-	addRequest("PUT", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaRequestV1", object(map[string]any{"content": str()}))
+	// Persona content is required and must contain a non-whitespace rune.
+	// This character class mirrors strings.TrimSpace (Unicode White_Space),
+	// including NEL and excluding BOM; ECMAScript \s has different semantics.
+	personaRequest := object(map[string]any{"content": map[string]any{
+		"type": "string", "minLength": 1,
+		"pattern":     "[^\\t\\n\\v\\f\\r \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]",
+		"description": "Persona text containing at least one non-whitespace character. Use DELETE to reset a persona.",
+	}})
+	personaRequest["required"] = []string{"content"}
+	addRequest("PUT", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaRequestV1", personaRequest)
 	addRequest("PATCH", "/api/v1/agents/{agentId}/learning", "RemainingAgentLearningRequestV1", object(map[string]any{"enabled": boolean(), "mode": str()}))
-	addRequest("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaRequestV1", object(map[string]any{"content": str()}))
+	addRequest("PUT", "/api/v1/crews/{crewId}/persona", "RemainingCrewPersonaRequestV1", personaRequest)
 	crewPolicyRequest := object(map[string]any{"autonomy_level": str(), "behavior_mode": str(), "whole_run_approval": map[string]any{"type": "boolean", "nullable": true, "description": "Omitted or null preserves the current whole-run approval setting."}, "reason": str()})
 	crewPolicyRequest["required"] = []string{"autonomy_level", "behavior_mode"}
-	crewBudgetRequest := object(map[string]any{"limit_usd": map[string]any{"type": "number", "exclusiveMinimum": 0}, "mode": map[string]any{"type": "string", "enum": []string{"soft", "hard", "tiered"}}})
+	crewBudgetRequest := object(map[string]any{"limit_usd": map[string]any{"type": "number", "minimum": 0, "exclusiveMinimum": true, "maximum": 1e9}, "mode": map[string]any{"type": "string", "enum": []string{"soft", "hard", "tiered"}}})
 	crewBudgetRequest["required"] = []string{"limit_usd"}
 	addRequest("PUT", "/api/v1/crews/{crewId}/budget", "CrewBudgetRequestV1", crewBudgetRequest)
 	addRequest("PUT", "/api/v1/crews/{crewId}/policy", "RemainingCrewPolicyRequestV1", crewPolicyRequest)

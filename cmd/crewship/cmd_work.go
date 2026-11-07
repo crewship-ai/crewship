@@ -159,17 +159,20 @@ func workAgentCell(agent *workLedgerAgent, id string) string {
 }
 
 type workAttemptRow struct {
-	RunID          string   `json:"run_id" yaml:"run_id"`
-	Attempt        int      `json:"attempt" yaml:"attempt"`
-	Generation     int64    `json:"generation" yaml:"generation"`
-	LeaseOwner     string   `json:"lease_owner" yaml:"lease_owner"`
-	LeaseExpiresAt string   `json:"lease_expires_at" yaml:"lease_expires_at"`
-	RuntimeLocator string   `json:"runtime_locator" yaml:"runtime_locator"`
-	StartedAt      string   `json:"started_at" yaml:"started_at"`
-	EndedAt        *string  `json:"ended_at" yaml:"ended_at"`
-	EndReason      string   `json:"end_reason" yaml:"end_reason"`
-	ExitEvidence   string   `json:"exit_evidence" yaml:"exit_evidence"`
-	CostUSD        *float64 `json:"cost_usd" yaml:"cost_usd"` // nil below ADMIN (#3590)
+	RunID          string  `json:"run_id" yaml:"run_id"`
+	Attempt        int     `json:"attempt" yaml:"attempt"`
+	Generation     int64   `json:"generation" yaml:"generation"`
+	LeaseOwner     string  `json:"lease_owner" yaml:"lease_owner"`
+	LeaseExpiresAt string  `json:"lease_expires_at" yaml:"lease_expires_at"`
+	RuntimeLocator string  `json:"runtime_locator" yaml:"runtime_locator"`
+	StartedAt      string  `json:"started_at" yaml:"started_at"`
+	EndedAt        *string `json:"ended_at" yaml:"ended_at"`
+	EndReason      string  `json:"end_reason" yaml:"end_reason"`
+	ExitEvidence   string  `json:"exit_evidence" yaml:"exit_evidence"`
+	// RuntimeEndConfirmed is set when the protected capture confirmed the
+	// runtime ended: a reconciliation item then no longer holds a slot (#5108).
+	RuntimeEndConfirmed *string  `json:"runtime_end_confirmed_at" yaml:"runtime_end_confirmed_at"`
+	CostUSD             *float64 `json:"cost_usd" yaml:"cost_usd"` // nil below ADMIN (#3590)
 }
 
 type workEventRow struct {
@@ -433,11 +436,14 @@ conversation. Its fingerprint is.`,
 			// The locator is in the table rather than only in -f json: an item
 			// parked in needs_reconciliation cannot be diagnosed without it,
 			// and that is exactly when somebody is reading this by eye.
-			fmt.Fprintln(w, "#\tRUN\tGEN\tOWNER\tLOCATOR\tSTARTED\tENDED\tCOST\tEND REASON")
+			// RUNTIME END is the capture-confirmed end: on a reconciliation item
+			// it is why the item no longer holds an execution slot (#5108).
+			fmt.Fprintln(w, "#\tRUN\tGEN\tOWNER\tLOCATOR\tSTARTED\tENDED\tRUNTIME END\tCOST\tEND REASON")
 			for _, a := range detail.Attempts {
-				fmt.Fprintf(w, "%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				fmt.Fprintf(w, "%d\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					a.Attempt, workShortID(f, a.RunID), a.Generation, a.LeaseOwner, a.RuntimeLocator,
-					workShortTime(a.StartedAt), workShortTime(workDeref(a.EndedAt)), usdOrDash("%.4f", a.CostUSD), a.EndReason)
+					workShortTime(a.StartedAt), workShortTime(workDeref(a.EndedAt)), workShortTime(workDeref(a.RuntimeEndConfirmed)),
+					usdOrDash("%.4f", a.CostUSD), a.EndReason)
 			}
 			_ = w.Flush()
 			if len(detail.Attempts) == 0 {
@@ -527,7 +533,9 @@ the new item records what it is a replay of and why.
 --target-revision is inherited from the original unless you name one, because
 running against a different revision has to be a deliberate act.
 
-Replaying live work is refused — cancel it first. Replaying webhook-sourced
+Replaying live work is refused — cancel it first. A chat turn is refused too:
+nothing in the work queue runs chat turns, so send the message again in its
+chat instead. Replaying webhook-sourced
 work whose raw payload has passed its retention is also refused, with the
 expiry named: the original bytes are gone and only the sender can produce them
 again.`,

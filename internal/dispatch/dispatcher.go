@@ -839,16 +839,56 @@ func (d *Dispatcher) drain() {
 	}
 }
 
+// shutdownConfirmPoll paces the provider checks while a shutdown waits for a
+// requested stop to take effect.
+const shutdownConfirmPoll = 200 * time.Millisecond
+
 func (d *Dispatcher) shutdownAttempt(live *liveAttempt, runDone <-chan error) {
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
 	stopped, stopErr := d.runtime.Stop(stopCtx, live.locator)
+	confirmed := stopErr == nil && stopped
+	// A stop request is not its effect. A protected host-captured run cannot
+	// confirm one at once: the stop helper ends the process tree, and only the
+	// terminal capture with its stop receipt proves it (#5081). Keep asking
+	// the provider whether the runtime still exists, within the same grace,
+	// exactly as enforceCancel's last look does. Nothing is signalled twice,
+	// and an error is never read as absence. A return seen meanwhile is kept
+	// and settles only after the stop is confirmed.
+	var runErr error
+	returned := false
+	for !confirmed && stopCtx.Err() == nil {
+		poll := time.NewTimer(shutdownConfirmPoll)
+		if returned {
+			select {
+			case <-poll.C:
+			case <-stopCtx.Done():
+			}
+		} else {
+			select {
+			case runErr = <-runDone:
+				returned = true
+			case <-poll.C:
+			case <-stopCtx.Done():
+			}
+		}
+		poll.Stop()
+		if stopCtx.Err() != nil {
+			break
+		}
+		alive, aliveErr := d.runtime.Alive(stopCtx, live.locator)
+		confirmed = aliveErr == nil && !alive
+	}
 	stopCancel()
 	live.cancel()
 	// The stop deadline may be exhausted. Persist with a fresh bounded context.
 	ctx, cancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
 	defer cancel()
-	if stopErr != nil || !stopped {
+	if !confirmed {
 		d.park(ctx, live.assignment, "server shutdown: runtime stop could not be confirmed at "+live.locator)
+		return
+	}
+	if returned {
+		d.settle(ctx, live, runErr)
 		return
 	}
 	// Stopping a process is not proof its external effects can be repeated,

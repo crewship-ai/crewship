@@ -28,7 +28,7 @@ func TestCraftNativeCommentOnlyNeverGetsLatestOrLease(t *testing.T) {
 	if got := craftNativeSessionCall(native, ctx); got.Code != 403 {
 		t.Fatalf("comment-only opened latest observer: %d %s", got.Code, got.Body)
 	}
-	// Pre-existing explicit read still opens the observer, without granting edit.
+	// Explicit read opens the lease-status observer, without granting edit.
 	mustExec(t, f.db, `UPDATE page_grants SET level='read' WHERE page_id='native-page' AND subject_id=?`, user)
 	read := craftNativeSessionCall(native, ctx)
 	if read.Code != 201 {

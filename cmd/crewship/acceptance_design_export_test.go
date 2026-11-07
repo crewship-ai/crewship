@@ -25,8 +25,11 @@ import (
 // The Design HTML export contract (#4449) as people and scripts use it: the
 // real binary against a real router, an owner and a shared-version reader.
 func TestAcceptance_DesignHTMLExportBinary(t *testing.T) {
+	// No skip: the Design engine needs node, like the sibling prototype-links
+	// acceptance test, and a skipped test would read as a pass
+	// (scripts/skip-budget.sh).
 	if _, err := exec.LookPath("node"); err != nil {
-		t.Skip("Design engine needs node on PATH")
+		t.Fatalf("node is required by the Design engine: %v", err)
 	}
 	t.Setenv("CREWSHIP_ARTIFACTS_DESIGN_ENABLED", "true")
 	copy := testutil.MigratedDB(t)

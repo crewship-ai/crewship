@@ -62,6 +62,10 @@ func (h *JournalHandler) List(w http.ResponseWriter, r *http.Request) {
 
 	entries, next, err := journal.List(r.Context(), h.db, q)
 	if err != nil {
+		if errors.Is(err, journal.ErrInvalidCursor) {
+			replyError(w, http.StatusBadRequest, "bad cursor")
+			return
+		}
 		h.logger.Error("journal list failed", "err", err)
 		replyError(w, http.StatusInternalServerError, "journal list failed")
 		return

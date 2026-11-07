@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { flushSync } from "react-dom"
 import Link from "next/link"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
@@ -12,12 +13,16 @@ import { ArtifactDashboardPreview } from "@/components/features/chat/artifact-co
 import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { ArtifactSlidesPreview } from "@/components/features/chat/artifact-context/viewer/artifact-slides-preview"
 import { createLocalDraftCipher, LocalDraftReadRevoked } from "@/lib/local-draft-seal"
-import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactDraft, artifactDraftRevision, purgeLocalDraftPage, captureLocalDraftPage } from "@/lib/artifact-drafts"
+import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactDraft, artifactDraftRevision, purgeLocalDraftPage, captureLocalDraftPage, findSlugArtifactDraft, adoptSlugArtifactDraft, discardSlugArtifactDraft, type SlugArtifactDraft } from "@/lib/artifact-drafts"
+
+// A return read that failed or never settled is asked again, with the draft still off screen.
+const RETURN_READ_RETRY_MS=10_000
+const ACCESS_NOTICE_MS=1_000
 
 export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) {
  const session = useSessionSafe()
  const [version, setVersion] = useState<number | undefined>(initialVersion)
- const { query, restore, share, comment, save } = useArtifactProject(workspaceId, slug, version)
+ const { query, readAfter, restore, share, comment, save } = useArtifactProject(workspaceId, slug, version)
  const data = query.data
  const human = session?.data?.user?.id
  const pageScope = JSON.stringify([human, workspaceId, data?.page_id])
@@ -66,6 +71,27 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
   void writeArtifactDraft(sourceKey,JSON.stringify({body:value.body,path:value.path})).then(()=>setStorageError(false),()=>setStorageError(true))
  }
  const forgetSource=useCallback((key:string|null,revision?:number)=>{if(!key)return;const chosen=activeSource??storedSource?.draft;void clearArtifactDraft(key,JSON.stringify({body:chosen?.body,path:chosen?.path}),revision??artifactDraftRevision(key)).catch(()=>{});setStoredSource(undefined)},[storedSource,activeSource])
+ // Drafts a build before Page-ID keys kept under the slug (G4 B16). A slug is
+ // not a Page identity (it can be renamed or reused), so such a draft is only
+ // shown as an older draft and adopted under the Page ID on an explicit choice.
+ const slugPage=!query.isError&&!readDenied?data?.page_id:undefined
+ const [slugRead,setSlugRead]=useState(0)
+ const slugSource=useMemo(()=>slugRead>=0?findSlugArtifactDraft("artifact-source",human,workspaceId,slug,slugPage):undefined,[human,workspaceId,slug,slugPage,slugRead])
+ const slugComment=useMemo(()=>slugRead>=0?findSlugArtifactDraft("artifact-comment",human,workspaceId,slug,slugPage):undefined,[human,workspaceId,slug,slugPage,slugRead])
+ const slugSourceDraft=useMemo(()=>{try{const parsed=slugSource?JSON.parse(slugSource.text):null;return parsed&&Array.isArray(parsed.body?.files)&&typeof parsed.path==="string"?parsed as {body:ArtifactProjectSave;path:string}:undefined}catch{return undefined}},[slugSource])
+ const [slugNotice,setSlugNotice]=useState<string>()
+ // While an adoption is being stored, its editor stays closed: nothing typed
+ // meanwhile can be replaced by the adopted value.
+ const [adopting,setAdopting]=useState<SlugArtifactDraft["kind"]>()
+ // Adoption checks the destination atomically: a draft another tab stored
+ // after the offer is kept and shown, and the older draft stays offered.
+ const adoptSlug=(found:SlugArtifactDraft,key:string,text:string,adopted:()=>void,kept:()=>void)=>{setAdopting(found.kind);void adoptSlugArtifactDraft(found,key,text).finally(()=>setAdopting(undefined)).then(result=>{
+  setStorageError(false)
+  if(result==="adopted"){setSlugNotice(undefined);adopted()}
+  else{setSlugNotice("This Page already has a newer draft in this browser. It was kept, and the older draft was not used.");kept()}
+  setSlugRead(read=>read+1)
+ },()=>setStorageError(true))}
+ const discardSlug=(found:SlugArtifactDraft)=>{discardSlugArtifactDraft(found);setSlugRead(read=>read+1)}
  const sourceCurrent=useRef({scope:sourceScope,draft:activeSource,canWrite:false})
  sourceCurrent.current={scope:sourceScope,draft:activeSource,canWrite:data?.can_write===true&&!query.isError}
  const agent = useArtifactAgentDispatch(workspaceId, data?.page_id, data?.origin, data?.can_write === true && data?.can_send_to_agent === true && !query.isError)
@@ -98,18 +124,73 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  if(lastPage.current.address!==address)lastPage.current={address}
  if(data?.page_id&&!query.isError)lastPage.current.page=data.page_id
  const accessStatus=(query.error as {status?:number}|null)?.status
+ // A tab coming back heard nothing while away. Its draft leaves the screen in the
+ // same turn, before the browser paints, and only a read asked after that return
+ // shows it again. A refused read offers nothing: a kept draft is shown only by a
+ // read that says this person may edit this content now.
+ // Counted, not timed: a clock says nothing about which read started after a return.
+ const returnGeneration=useRef(0)
+ const [returned,setReturned]=useState(0)
+ const [answered,setAnswered]=useState(0)
+ const [readProof,setReadProof]=useState(0)
+ const returning=returned>answered&&readProof<returned
+ const [slowCheck,setSlowCheck]=useState(false)
+ useEffect(()=>{
+  setSlowCheck(false)
+  if(!returning)return
+  const notice=setTimeout(()=>setSlowCheck(true),ACCESS_NOTICE_MS)
+  return()=>clearTimeout(notice)
+ },[returning])
+ // Inert takes focus and selection away, so they are kept apart and only come back
+ // when the read answers. A second return finds the focus already gone and keeps these.
+ const keptFocus=useRef<{field:HTMLElement;start?:number|null;end?:number|null;scroll:number}>(undefined)
+ const keepFocus=useCallback(()=>{
+  const field=document.activeElement
+  if(!(field instanceof HTMLElement)||!field.closest("[data-draft-area]"))return
+  keptFocus.current={field,scroll:field.scrollTop,...(field instanceof HTMLTextAreaElement?{start:field.selectionStart,end:field.selectionEnd}:{})}
+ },[])
+ useLayoutEffect(()=>{
+  if(returning)return
+  const kept=keptFocus.current
+  keptFocus.current=undefined
+  if(!kept?.field.isConnected||document.activeElement!==document.body&&document.activeElement!==kept.field)return
+  kept.field.focus()
+  if(kept.field instanceof HTMLTextAreaElement)kept.field.setSelectionRange(kept.start??0,kept.end??0)
+  kept.field.scrollTop=kept.scroll
+ },[returning])
+ const askAfterReturn=useCallback((generation:number)=>{void readAfter(generation).then(current=>{
+  // Superseded, failed or started before the return: this answer proves nothing.
+  if(current&&generation===returnGeneration.current)setAnswered(generation)
+ })},[readAfter])
+ useEffect(()=>{
+  if(!human)return
+  const back=()=>{keepFocus();const generation=++returnGeneration.current;flushSync(()=>setReturned(generation));askAfterReturn(generation)}
+  const visible=()=>{if(document.visibilityState==="visible")back()}
+  document.addEventListener("visibilitychange",visible)
+  window.addEventListener("pageshow",back)
+  window.addEventListener("online",back)
+  return()=>{document.removeEventListener("visibilitychange",visible);window.removeEventListener("pageshow",back);window.removeEventListener("online",back)}
+ },[human,askAfterReturn,keepFocus])
+ // A refusal goes to the proof below. Anything else unclear is asked again.
+ const refused=accessStatus===403||accessStatus===404
+ useEffect(()=>{
+  if(!returning||refused)return
+  const again=setInterval(()=>askAfterReturn(returnGeneration.current),RETURN_READ_RETRY_MS)
+  return()=>clearInterval(again)
+ },[returning,refused,askAfterReturn])
+ const refusal=query.error
  useEffect(()=>{
   const page=lastPage.current.page
   if(!page||!human||(accessStatus!==403&&accessStatus!==404))return
   let active=true
   const scope={human,workspace:workspaceId,page}
-  void captureLocalDraftPage(scope).then(captured=>createLocalDraftCipher(scope).then(cipher=>cipher.close(),async error=>{
+  void captureLocalDraftPage(scope).then(captured=>createLocalDraftCipher(scope).then(cipher=>{cipher.close();if(active)setReadProof(returned)},async error=>{
    if(!(error instanceof LocalDraftReadRevoked))return
    await purgeLocalDraftPage(scope,captured)
    if(active){setReadDeniedScope(JSON.stringify([human,workspaceId,page]));setSourceDraft(undefined);setStoredSource(undefined);setDraftState(null)}
   })).catch(()=>{})
   return()=>{active=false}
- },[accessStatus,address,human,workspaceId])
+ },[accessStatus,address,human,workspaceId,refusal,returned])
  useEffect(() => {
   const receive = (event: MessageEvent) => {
    if (event.origin !== "null" || event.source !== frame.current?.contentWindow || event.data?.token !== token || !manifest) return
@@ -122,8 +203,8 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
   return () => window.removeEventListener("message", receive)
  }, [token, manifest, path, selecting, canComment, setAnchor, setSelecting])
  // A query error immediately removes cached content, including after revocation.
- if (readDenied) return <p role="alert" className="p-6">Page read access was removed. Reopen after access is granted.</p>
- if (query.isError) return <section className="p-6"><p role="alert">{query.error.message}</p>{activeSource&&<SourceRecovery body={activeSource.body}/>}</section>
+ if (readDenied) return <p role="alert" className="p-6">Page read access was removed. The local draft has been deleted where this browser could reach it.</p>
+ if (query.isError) return <section className="p-6"><p role="alert">{query.error.message}</p></section>
  if (!data || query.isFetchedAfterMount === false) return <p role="status" className="p-6">Loading artifact project…</p>
  const mutationError = restore.error ?? share.error ?? comment.error
  const viewedVersion = version ?? manifest?.version ?? data.latest_version
@@ -172,11 +253,27 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
    {data.can_write === true && data.can_restore === true && <Button variant="outline" disabled={restore.isPending} onClick={() => restore.mutate({ version: viewedVersion, base_version: data.latest_version }, { onSuccess: () => { setVersion(undefined); setAnchor(undefined) } })}>Restore version {viewedVersion}</Button>}{data.can_write === true && data.can_share === true && <Button variant="outline" disabled={share.isPending} onClick={() => share.mutate({ version: viewedVersion, base_version: data.latest_version })}>Share version {viewedVersion}</Button>}
   </header>
   {data.can_write && <div className="border-b px-4 py-2 text-xs text-muted-foreground" role="status">Storage: {data.quota.used_bytes.toLocaleString()} / {data.quota.limit_bytes.toLocaleString()} bytes. All versions retained; history is never deleted automatically.{data.quota.warning && <strong className="ml-2 text-destructive">Storage is nearly full. Existing versions remain safe.</strong>}</div>}
-  {activeSource && !data.can_write && <SourceRecovery body={activeSource.body}/>}
-  {data.can_write === true && manifest?.version === data.latest_version && <section aria-label="Project source" className="border-b p-3">
+  {slugNotice&&<p role="status" className="border-b px-4 py-2 text-sm">{slugNotice}</p>}
+ {slowCheck&&<p role="status" className="border-b px-4 py-2 text-sm text-muted-foreground">Checking access…</p>}
+ {(slugSource&&data.can_write===true||slugComment&&canComment)&&<section aria-label="Older draft" {...unseen(returning)} className="space-y-3 border-b p-3">{[slugSource,slugComment].map(found=>{
+  if(!found)return null
+  const isSource=found.kind==="artifact-source"
+  if(isSource?data.can_write!==true:!canComment)return null
+  const canAdopt=isSource?!!slugSourceDraft&&!!sourceKey&&data.can_write===true&&manifest?.version===data.latest_version&&sourceReadDone&&!sourceRead.failed&&!activeSource&&storedSource?.key!==sourceKey:canComment&&!!draftKey&&draftState?.key===draftKey&&!draft
+  return <div key={found.key} className="space-y-1">
+   <p>This browser kept an unsaved {isSource?"source draft":"comment"} from an older version of Crewship under the address “{slug}”. It may belong to another Page that used this address before, so it is not applied here automatically. Check it before you use it.</p>
+   <textarea readOnly aria-label={isSource?"Older source draft":"Older comment"} className="min-h-24 w-full rounded border bg-background p-2 font-mono text-sm" value={isSource&&slugSourceDraft?JSON.stringify(slugSourceDraft.body,null,2):found.text} />
+   {canAdopt&&<Button variant="outline" disabled={adopting!==undefined} onClick={()=>{
+    if(isSource&&slugSourceDraft&&sourceKey){const value={scope:sourceScope,...slugSourceDraft};adoptSlug(found,sourceKey,JSON.stringify({body:value.body,path:value.path}),()=>{setSourceError(undefined);setSourceDraft(value)},()=>setSourceReadAttempt(attempt=>attempt+1))}
+    else if(!isSource&&draftKey){const key=draftKey;adoptSlug(found,key,found.text,()=>setDraftState(previous=>previous?.key===key&&!previous.text?{key,text:found.text}:previous),()=>{void loadArtifactDraft(key).then(text=>setDraftState(previous=>previous?.key===key&&!previous.text?{key,text}:previous),()=>setStorageError(true))})}
+   }}>{isSource?"Use old source draft here":"Use old comment here"}</Button>}
+   <Button variant="ghost" onClick={()=>discardSlug(found)}>{isSource?"Discard old source draft":"Discard old comment"}</Button>
+  </div>
+ })}</section>}
+  {data.can_write === true && manifest?.version === data.latest_version && <section aria-label="Project source" {...unseen(returning)} className="border-b p-3">
    {!activeSource&&storedSource?.key===sourceKey&&data.can_write&&<div role="status" className="space-y-1"><p>Unsaved source draft from version {storedSource.draft.body.base_version} was kept in this browser.{storedSource.draft.body.base_version!==data.latest_version?` The project is now at version ${data.latest_version}; saving it will report a conflict, and your draft stays.`:""}</p><Button variant="outline" onClick={()=>{setSourceError(undefined);changeSource({scope:sourceScope,...storedSource.draft})}}>Restore source draft</Button><Button variant="ghost" onClick={()=>forgetSource(sourceKey)}>Discard it</Button></div>}
    {!activeSource&&sourceReadDone&&sourceRead.failed&&<div role="alert" className="space-y-1"><p>This browser could not check for an unsaved source draft. Editing now may replace one kept here.</p><Button variant="outline" onClick={()=>setSourceReadAttempt(attempt=>attempt+1)}>Check again</Button></div>}
-   {!activeSource ? (storedSource?.key===sourceKey ? null : <Button variant="outline" disabled={!sourceReadDone} onClick={()=>{setSourceError(undefined);changeSource({scope:sourceScope,path:manifest!.entrypoint,body:{base_version:data.latest_version,entrypoint:manifest!.entrypoint,files:manifest!.files.map(file=>({...file}))}})}}>Edit source</Button>) : <div className="space-y-2">
+   {!activeSource ? (storedSource?.key===sourceKey ? null : <Button variant="outline" disabled={!sourceReadDone||adopting==="artifact-source"} onClick={()=>{setSourceError(undefined);changeSource({scope:sourceScope,path:manifest!.entrypoint,body:{base_version:data.latest_version,entrypoint:manifest!.entrypoint,files:manifest!.files.map(file=>({...file}))}})}}>Edit source</Button>) : <div className="space-y-2">
     <label>Source file path<select aria-label="Source file path" value={activeSource.path} onChange={event=>changeSource({...activeSource,path:event.target.value})} className="ml-2 rounded border bg-background p-2 coarse:min-h-[44px]">{activeSource.body.files.map(file=><option key={file.path} value={file.path}>{file.path}</option>)}</select></label>
     <textarea aria-label="Source file" className="min-h-48 w-full rounded border bg-background p-2 font-mono text-sm" value={activeSource.body.files.find(file=>file.path===activeSource.path)?.content??""} onChange={event=>changeSource({...activeSource,body:{...activeSource.body,files:activeSource.body.files.map(file=>file.path===activeSource.path?{...file,content:event.target.value}:file)}})} />
     <Button disabled={save.isPending} onClick={saveSource}>Save project</Button><Button variant="ghost" disabled={save.isPending} onClick={()=>{setSourceDraft(undefined);forgetSource(sourceKey)}}>Discard source draft</Button>
@@ -198,7 +295,7 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
    </section>
    <aside className="w-full overflow-auto border-t p-4 md:w-80 md:border-l md:border-t-0" aria-label="Comments">
     <h2 className="mb-3 font-semibold">Comments</h2>
-    {canComment && <div className="mb-4 space-y-2">{anchor ? <blockquote className="rounded border p-2 text-sm">Version {anchor.version} · {anchor.path}<p>{anchor.quote || anchor.selector}</p></blockquote> : <p className="text-sm text-muted-foreground">Select an element in the preview to give the agent an exact location.</p>}<textarea disabled={!draftKey||draftState?.key!==draftKey} aria-label={data.can_write && data.can_send_to_agent ? "Comment for agent" : "Comment"} value={draft} onChange={event => setDraft(event.target.value)} className="min-h-24 w-full rounded border bg-background p-2 text-sm" placeholder="What should change?" /><p className="text-xs text-muted-foreground">{storageError ? "Browser storage unavailable. Copy your draft before leaving." : "Your unsent comment is saved in this browser."}</p><Button disabled={!anchor || !draft.trim() || comment.isPending} onClick={send}>{data.can_write && data.can_send_to_agent ? "Send to agent" : "Post comment"}</Button></div>}
+    {canComment && <div {...unseen(returning)} className="mb-4 space-y-2">{anchor ? <blockquote className="rounded border p-2 text-sm">Version {anchor.version} · {anchor.path}<p>{anchor.quote || anchor.selector}</p></blockquote> : <p className="text-sm text-muted-foreground">Select an element in the preview to give the agent an exact location.</p>}<textarea disabled={!draftKey||draftState?.key!==draftKey||adopting==="artifact-comment"} aria-label={data.can_write && data.can_send_to_agent ? "Comment for agent" : "Comment"} value={draft} onChange={event => setDraft(event.target.value)} className="min-h-24 w-full rounded border bg-background p-2 text-sm" placeholder="What should change?" /><p className="text-xs text-muted-foreground">{storageError ? "Browser storage unavailable. Copy your draft before leaving." : "Your unsent comment is saved in this browser."}</p><Button disabled={!anchor || !draft.trim() || comment.isPending} onClick={send}>{data.can_write && data.can_send_to_agent ? "Send to agent" : "Post comment"}</Button></div>}
     {data.comments.map(item => <article key={item.id} className="mb-3 rounded border p-3 text-sm"><p className="mb-1 text-xs text-muted-foreground">Version {item.version} · {item.path}</p><blockquote className="mb-2 border-l-2 pl-2">{item.quote}</blockquote><p>{item.text}</p>{item.task_id && <p className="mt-2 text-xs">{item.replies?.length ? "Answered" : delivery[item.id] ?? "Queued for agent"}</p>}{data.can_write && data.can_send_to_agent === true && data.origin && item.task_id && !item.replies?.length && <Button size="sm" variant="ghost" disabled={!agent.ready} onClick={async () => { const accepted = await agent.dispatch(item); setDelivery(previous => ({...previous,[item.id]:accepted ? "Sent to agent" : "Comment saved. Agent delivery could not be confirmed."})) }}>Retry agent delivery</Button>}{item.replies?.map((reply, index) => <p key={index} className="mt-2 border-t pt-2">Version {reply.version}: {reply.text}</p>)}</article>)}
     {data.shared_version > 0 && <Link className="inline-flex items-center text-sm underline coarse:min-h-[44px]" onClick={event => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && version !== data.shared_version) selectVersion(data.shared_version) }} href={`/pages/${encodeURIComponent(slug)}?artifact=1&version=${data.shared_version}&workspace_id=${encodeURIComponent(workspaceId)}`}>Open shared version {data.shared_version}</Link>}
    </aside>
@@ -206,4 +303,5 @@ export function ArtifactProject({ workspaceId, slug, initialVersion }: { workspa
  </main>
 }
 
-function SourceRecovery({body}:{body:ArtifactProjectSave}){return <div className="mt-3 space-y-2 p-3"><p>Local source draft. Copy it before leaving this page.</p><textarea aria-label="Source recovery draft" readOnly className="min-h-48 w-full rounded border bg-background p-2 font-mono text-sm" value={JSON.stringify(body,null,2)} /></div>}
+// Off screen and out of reach of keyboard, pointer and accessibility, still mounted.
+const unseen=(off:boolean)=>({"data-draft-area":true,...off?{inert:true,"aria-hidden":true,style:{opacity:0}}:{}})

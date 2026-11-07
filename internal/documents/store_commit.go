@@ -104,6 +104,9 @@ func (s *Store) Commit(ctx context.Context, k Key, c Commit, a Authorize) (r Rec
 		if len(c.Update) > s.opts.MaxLogBytes {
 			return ErrQuota
 		}
+		if err = admitDisk(ctx, t, len(c.Update), len(c.CandidateSnapshot), len(c.Projection)); err != nil {
+			return err
+		}
 		r = Receipt{c.ID, v.HeadRev + 1, v.Epoch, actor, c.Kind}
 		if _, err = t.ExecContext(ctx, "INSERT INTO document_updates VALUES(?,?,?,?)", k.WorkspaceID, k.PageID, r.Rev, c.Update); err != nil {
 			return err

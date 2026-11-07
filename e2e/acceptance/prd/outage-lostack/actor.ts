@@ -9,6 +9,7 @@
 import type { APIRequestContext, Browser, BrowserContext, BrowserContextOptions, Page } from "@playwright/test"
 import { apiAs, createQaWorkspace, deleteQaWorkspace, loginStorageState, provisionMember, type QaWorkspace } from "../auth"
 import type { PrdScenario } from "../fixtures"
+import { withSessionRenewal } from "../session-refresh"
 
 export interface Actor {
   /** Owner API (own login): workspace administration only. */
@@ -25,13 +26,21 @@ export interface Actor {
 const ROLE = "MANAGER"
 const cleanups: Array<() => Promise<unknown>> = []
 
-export async function isolatedActor(prd: PrdScenario, browser: Browser, title: string, options: BrowserContextOptions = {}): Promise<Actor> {
+/**
+ * `keepWorkspace`: leave the QA workspace in place after the test (the hour rows keep it, so
+ * the stored versions of their document can be inspected after a failure; the row records its
+ * workspace and page ids). PRD_KEEP_WORKSPACES=1 keeps every workspace.
+ */
+export async function isolatedActor(prd: PrdScenario, browser: Browser, title: string, options: BrowserContextOptions = {}, keep: { keepWorkspace?: boolean } = {}): Promise<Actor> {
   const ownerAccount = prd.env.accounts.owner
   if (!ownerAccount) throw new Error("owner account missing")
-  const owner = await apiAs(prd.origin, await loginStorageState(prd.origin, ownerAccount))
+  // Both API contexts outlive the 15-minute access cookie in the long rows
+  // (craft-hour): each owns its login and refreshes it on "session expired"
+  // (session-refresh.ts).
+  const owner = withSessionRenewal(await apiAs(prd.origin, await loginStorageState(prd.origin, ownerAccount)), prd.origin)
   cleanups.push(() => owner.dispose())
   const ws = await createQaWorkspace(owner, title)
-  if (process.env.PRD_KEEP_WORKSPACES !== "1") {
+  if (process.env.PRD_KEEP_WORKSPACES !== "1" && !keep.keepWorkspace) {
     // Runs before owner.dispose (cleanups run newest first).
     cleanups.push(async () => {
       const status = await deleteQaWorkspace(owner, ws)
@@ -40,7 +49,10 @@ export async function isolatedActor(prd: PrdScenario, browser: Browser, title: s
   }
   const person = await provisionMember(owner, prd.origin, ws, ROLE, "PRD outage person")
   const state = await loginStorageState(prd.origin, person.account)
-  const api = await apiAs(prd.origin, state)
+  // The person's API gets a login of its own (refresh tokens rotate with replay
+  // detection: refreshing the browser's session would revoke it for both); it
+  // refreshes only that session and never logs in again during the row.
+  const api = withSessionRenewal(await apiAs(prd.origin, await loginStorageState(prd.origin, person.account)), prd.origin)
   cleanups.push(() => api.dispose())
   const context = await browser.newContext({ baseURL: prd.origin, storageState: state, ...options })
   cleanups.push(() => context.close())

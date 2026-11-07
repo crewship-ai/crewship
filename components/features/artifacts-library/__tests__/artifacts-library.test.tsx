@@ -6,7 +6,12 @@ const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: (...args: unknown[]) => { state.pagesArgs = args; return { pages: state.pages, loading: state.loading, error: state.error, refresh: state.refresh } },
+  usePageCatalogWindow: (_ws: string, params: URLSearchParams | null, offset: number, limit: number) => {
+    windowState.calls.push({ params: params?.toString() ?? null, offset, limit })
+    return { pages: params ? windowState.pages : [], total: params ? windowState.total : 0, loading: false, error: null }
+  },
 }))
+const windowState = vi.hoisted(() => ({ calls: [] as { params: string | null; offset: number; limit: number }[], pages: [] as PageView[], total: 0 }))
 vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-project-data", () => ({ useArtifactProjectsAvailable: () => state.projectsOn }))
 vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-context", () => ({
   ArtifactViewerProvider: ({ children, target }: { children: React.ReactNode; target: { slug: string; tab?: string } }) =>
@@ -34,9 +39,10 @@ vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-c
   useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: true, sheets: false, pages: true, ...state.caps }),
 }))
 vi.mock("../new-artifact-dialog", () => ({
-  NewArtifactDialog: ({ defaultKind, defaultFolderSlug, onCreated }: { defaultKind?: string; defaultFolderSlug?: string; onCreated: (slug: string) => void }) =>
+  NewArtifactDialog: ({ defaultKind, defaultFolderSlug, onCreated }: { defaultKind?: string; defaultFolderSlug?: string; onCreated: (slug: string, id?: string) => void }) =>
     <div role="dialog" aria-label="New artifact" data-kind={defaultKind ?? ""} data-folder={defaultFolderSlug ?? ""}>
       <button type="button" onClick={() => onCreated("fresh-design")}>Create</button>
+      <button type="button" onClick={() => onCreated("fresh-sheet", "page-id-1")}>Create with ID</button>
     </div>,
 }))
 vi.mock("@/components/layout/secondary-panel", async importOriginal => ({ ...(await importOriginal<typeof import("@/components/layout/secondary-panel")>()), SecondaryPanel: ({ label, children }: { label: string; children: React.ReactNode }) => <aside aria-label={label}>{children}</aside> }))
@@ -70,6 +76,7 @@ beforeEach(() => {
     wire({ slug: "weekly", id: "page-weekly", name: "Weekly report", panel_count: 2 } as Partial<WirePage>),
     wire({ slug: "calc", id: "page-calc", name: "Calculator", has_application: true } as Partial<WirePage>),
   ]
+  windowState.calls = []; windowState.pages = []; windowState.total = 0
   state.folders = []; state.reads = []; state.pagesArgs = []; state.mobile = false; state.readStatus = "ready"; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.caps = {}; state.select.mockReset(); state.refresh.mockReset()
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
@@ -92,6 +99,67 @@ it("lists every kind with something in it, a panel Page as Page, and keeps empty
   expect(screen.queryByText("Calculator")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: /Empty/ }))
   expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Calculator")])
+})
+
+it("without the server catalog flag, All filters the full list in the browser and never asks for a window", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+  renderLibrary()
+  openAll()
+  expect(screen.getAllByText("Pricing site").length).toBeGreaterThan(0)
+  expect(windowState.calls.length).toBeGreaterThan(0)
+  expect(windowState.calls.every(call => call.params === null)).toBe(true)
+  expect(screen.queryByRole("navigation", { name: "Artifact pages" })).toBeNull()
+})
+
+it("with the server catalog flag, All shows the server's window, its total and pages through it", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_SERVER_CATALOG", "true")
+  windowState.pages = [wire({ slug: "server-only", id: "page-server-only", name: "Server window row", artifact_kind: "project" })]
+  windowState.total = 120
+  renderLibrary()
+  openAll()
+  expect(screen.getAllByText("Server window row").length).toBeGreaterThan(0)
+  expect(screen.queryByText("Partner brief")).toBeNull()
+  const last = () => windowState.calls[windowState.calls.length - 1]
+  expect(new URLSearchParams(last().params!).get("empty")).toBe("exclude")
+  expect(last()).toMatchObject({ offset: 0, limit: 50 })
+  const pager = screen.getByRole("navigation", { name: "Artifact pages" })
+  expect(within(pager).getByText("1–1 of 120")).toBeTruthy()
+  fireEvent.click(within(pager).getByRole("button", { name: "Next" }))
+  expect(last()).toMatchObject({ offset: 50, limit: 50 })
+})
+
+const serverOn = () => { vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true"); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_SERVER_CATALOG", "true") }
+const listedNames = () => within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(row => within(row).getByRole("heading").textContent)
+
+it.each([
+  ["name", [wire({ slug: "alpha", id: "page-alpha", name: "Alpha", artifact_kind: "word", updated_at: "2026-10-20T10:00:00Z" }), wire({ slug: "zulu", id: "page-zulu", name: "Zulu", artifact_kind: "word", updated_at: "2026-10-30T10:00:00Z" })], ["Alpha", "Zulu"]],
+  ["kind", [wire({ slug: "deck", id: "page-deck", name: "Older project", artifact_kind: "project", updated_at: "2026-10-20T10:00:00Z" }), wire({ slug: "memo", id: "page-memo", name: "Newer word", artifact_kind: "word", updated_at: "2026-10-30T10:00:00Z" })], ["Older project", "Newer word"]],
+] as const)("a server window keeps the server's %s order, never re-sorted by update time", (sort, pages, want) => {
+  serverOn()
+  windowState.pages = [...pages]
+  windowState.total = 2
+  renderLibrary()
+  openAll()
+  fireEvent.change(screen.getByRole("combobox", { name: "Sort" }), { target: { value: sort } })
+  fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
+  expect(new URLSearchParams(windowState.calls[windowState.calls.length - 1].params!).get("sort")).toBe(sort)
+  expect(listedNames()).toEqual(want)
+})
+
+it("moves to the last page when the total shrinks under the current offset, so nothing becomes unreachable", () => {
+  serverOn()
+  windowState.pages = [wire({ slug: "last", id: "page-last", name: "Last one", artifact_kind: "project" })]
+  windowState.total = 51
+  const view = renderLibrary()
+  openAll()
+  fireEvent.click(within(screen.getByRole("navigation", { name: "Artifact pages" })).getByRole("button", { name: "Next" }))
+  expect(windowState.calls[windowState.calls.length - 1]).toMatchObject({ offset: 50 })
+  // The last item was archived: the same offset now reads nothing, and only 50 remain.
+  windowState.pages = []
+  windowState.total = 50
+  view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
+  expect(windowState.calls[windowState.calls.length - 1]).toMatchObject({ offset: 0 })
 })
 
 it("asks the server for archived and test-made items, which it leaves out by default", () => {
@@ -152,6 +220,17 @@ it("a just-created artifact opens by its slug, never as an ID, so it does not la
   // The new item is not in the list yet; the route opens it by slug and moves to its ID once it resolves.
   expect(state.select).toHaveBeenCalledWith(null, "fresh-design")
   expect(state.select).not.toHaveBeenCalledWith("fresh-design")
+})
+
+it("opens a just-created artifact with a confirmed ID at its own address, never by slug first (#4902)", () => {
+  // By slug, the library mounted the native editor (whose admission refreshes
+  // the session) and the exported build then reloaded the page as
+  // /artifacts/<id> mid-refresh, which signed the person out.
+  renderLibrary()
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  fireEvent.click(screen.getByRole("button", { name: "Create with ID" }))
+  expect(state.select).toHaveBeenCalledWith("page-id-1")
+  expect(state.select).not.toHaveBeenCalledWith(null, "fresh-sheet")
 })
 
 it("searches with operators, filters by kind with counts and switches to a table", () => {
@@ -473,4 +552,38 @@ it("a chosen folder has its settings", () => {
   render(withQuery(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} filters={{ view: "all", q: "", kinds: [], access: [], version: [], owners: [], folder: "sales" }} />))
   fireEvent.click(screen.getByRole("button", { name: "Folder settings" }))
   expect(screen.getByRole("dialog", { name: "Settings for Sales" })).toBeTruthy()
+})
+
+// #4898: New artifact → Page with panels makes a blank Page; it must not vanish
+// from the library the person made it in, and hidden blanks are pointed to.
+it("keeps a blank Page the person just created in the library and points to hidden blank items", () => {
+  state.pages = [wire({ slug: "fresh-design", id: "page-fresh", name: "UX walkthrough page" })]
+  renderLibrary()
+  expect(screen.getByText("No artifacts yet")).toBeTruthy()
+  expect(screen.getByText(/1 blank item is in Empty/)).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Show empty (1)" }))
+  expect(screen.getAllByText("UX walkthrough page").length).toBeGreaterThan(0)
+  cleanup()
+
+  renderLibrary()
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  fireEvent.click(within(screen.getByRole("dialog", { name: "New artifact" })).getByRole("button", { name: "Create" }))
+  expect(state.select).toHaveBeenCalledWith(null, "fresh-design")
+  expect(screen.queryByText("No artifacts yet")).toBeNull()
+  expect(screen.getAllByText("UX walkthrough page").length).toBeGreaterThan(0)
+})
+
+// #4471 review: the server's empty=exclude cannot see what this person made
+// here, so with the server catalog on, All must still keep their blank Page.
+it("with the server catalog flag, All keeps a blank Page the person just created", () => {
+  serverOn()
+  state.pages = [wire({ slug: "fresh-design", id: "page-fresh", name: "UX walkthrough page" })]
+  windowState.pages = []
+  windowState.total = 0
+  renderLibrary()
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  fireEvent.click(within(screen.getByRole("dialog", { name: "New artifact" })).getByRole("button", { name: "Create" }))
+  openAll()
+  expect(windowState.calls[windowState.calls.length - 1].params).toBeNull()
+  expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(row => row.textContent)).toEqual([expect.stringContaining("UX walkthrough page")])
 })

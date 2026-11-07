@@ -16,6 +16,8 @@ existing explicit native Page and its qualified startup profile.
 ```bash
 crewship craft availability <page>
 crewship craft preview <page>
+crewship craft versions <page>
+crewship craft version <page> <version> [--output FILE]
 crewship craft connect <page>
 ```
 
@@ -58,6 +60,7 @@ refusal bodies can describe a private runtime, but exit with the same codes.
 | `reauthorize` | `POST /api/v1/pages/{slug}/craft/sessions/reauthorize` |
 | `watch` | `GET /api/v1/pages/{slug}/craft/events` |
 | `read` | `GET /api/v1/pages/{slug}/craft/document` |
+| `versions` | `GET /api/v1/pages/{slug}/craft/document/versions` |
 | `save` | `POST /api/v1/pages/{slug}/craft/document/save` |
 | `import` | `POST /api/v1/pages/{slug}/craft/document/import` |
 | `restore` | `POST /api/v1/pages/{slug}/craft/document/restore` |
@@ -65,6 +68,17 @@ refusal bodies can describe a private runtime, but exit with the same codes.
 | `share` | `POST /api/v1/pages/{slug}/craft/document/share` |
 | `proposals` | `GET /api/v1/pages/{slug}/craft/proposals` |
 | `proposal` | `GET /api/v1/pages/{slug}/craft/proposals/{proposal_id}` |
+
+A Read grantee can open `connect`, but only `status`, `watch` and `reauthorize`
+answer: they report who holds the lease, never content. `read`, `versions`,
+`proposals` and `proposal` need edit rights or the workspace owner or admin read
+rule and otherwise answer `403` (exit code `4`). Comment alone cannot open
+`connect`. Read the shared version with `crewship craft preview <page>`.
+
+`share` needs the Page's owner. Edit rights and the workspace owner or admin role
+are not enough: they answer `403` (exit code `4`) with
+`only the page owner may share a version`, even while holding the lease. The
+lease row's `can_share` says whether this connection may share.
 | `accept-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/accept` |
 | `reject-proposal` | `POST /api/v1/pages/{slug}/craft/proposals/{proposal_id}/reject` |
 
@@ -77,6 +91,95 @@ refusal bodies can describe a private runtime, but exit with the same codes.
 {"action":"proposals"}
 {"action":"accept-proposal","proposal_id":"ncp_0123456789abcdef01234567","generation":"9007199254740993"}
 ```
+
+### Version history
+
+`crewship craft versions <page>` opens one native admission
+(`POST /api/v1/pages/{slug}/craft/sessions`), reads
+`GET /api/v1/pages/{slug}/craft/document/versions` under it and exits. It never
+acquires the lease and never writes; the private session token is not printed.
+Inside `connect`, the `versions` action reads the same listing on the open
+connection.
+
+The listing needs the same rights as `read`: edit rights, or the workspace
+owner or admin read rule. A Read or Comment grantee or a non-member gets the same
+refusal as `read` (`403`, exit code `4`); `crewship craft preview <page>` is how a
+Read or Comment grantee reads the document. While the workspace feature flag
+`craft_version_history` is off (the default), the route answers `404` (exit code
+`3`) to anyone who has those rights.
+
+```bash
+crewship craft versions @PAGE_ID --format json
+```
+
+```json
+{
+  "currentVersion": "3",
+  "truncated": false,
+  "versions": [
+    {"version": "3", "createdAt": "2026-10-31T10:00:00Z", "author": {"actorId": "user:USER_ID", "kind": "human", "displayName": "Pavel"}, "restoredFrom": "1", "current": true},
+    {"version": "2", "createdAt": "2026-10-31T09:00:00Z", "author": {"actorId": "agent:AGENT_ID", "kind": "agent", "displayName": "Drafting Agent"}, "current": false},
+    {"version": "1", "createdAt": "2026-10-31T08:00:00Z", "author": {"actorId": "user:USER_ID", "kind": "human", "displayName": "Pavel"}, "current": false}
+  ]
+}
+```
+
+Versions are newest first; `current` marks the head. At most 200 entries are
+returned; `truncated: true` means older versions exist and remain restorable.
+Entries carry no document bytes.
+
+### Read one saved version
+
+`crewship craft version <page> <version>` opens the same read-only admission,
+reads `GET /api/v1/pages/{slug}/craft/document/versions/{version}` and exits.
+It returns that version's complete bytes (base64 in `bytes`), its time and
+author, whether it is the current version, and the editor profile needed to
+open it read-only. Use it to preview or diagnose an old version without
+touching the document: it never acquires the lease, never writes and never
+changes the shared version.
+
+With `--output FILE` the decoded document is written to `FILE` (mode `0600`;
+`-` writes it to stdout) and only the metadata is printed.
+
+The version must be a canonical positive decimal integer within the signed
+64-bit range. A non-positive, non-canonical or overflowing version returns
+validation exit code `2` before authentication, admission or any HTTP request;
+machine-readable errors also carry `error.exit_code: 2`. For a negative
+positional value, place it after `--` (for example,
+`crewship craft version @PAGE_ID -- -1`) so it is checked as a version rather
+than parsed as a flag.
+
+```bash
+crewship craft version @PAGE_ID 2 --format json
+crewship craft version @PAGE_ID 2 --output v2.json --format json
+```
+
+```json
+{"version": "2", "currentVersion": "3", "current": false, "createdAt": "2026-10-31T09:00:00Z", "author": {"actorId": "agent:AGENT_ID", "kind": "agent", "displayName": "Drafting Agent"}, "applicationId": "wordcraft", "enginePin": "…", "editorBundle": "…", "editorURL": "…", "bytes": "eyJ2IjoyfQ=="}
+```
+
+It needs the same rights as `read` and the same `craft_version_history` flag
+as the listing. A Read or Comment grantee or a non-member gets `403` (exit code
+`4`) for every version, the shared one included; a missing version, or the flag
+off, gets `404` (exit code `3`), and only someone who may read learns that a
+version does not exist. A workspace owner
+or admin reading another member's document is audited exactly like `read`
+(`artifact.private_owner_accessed` or `artifact.workspace_admin_accessed`); if
+the audit entry cannot be written, nothing is returned. The listing is audited
+the same way.
+
+To restore, use the `restore` action inside `connect` while holding the lease.
+It is the fenced write a save uses (current generation, `baseVersion` equal to
+the latest version) and appends `baseVersion + 1` with the target's content;
+nothing is deleted:
+
+```json
+{"action":"restore","snapshot":{"workspaceId":"WORKSPACE","pageId":"PAGE","applicationId":"wordcraft","enginePin":"ENGINE_PIN","sessionId":"PUBLIC_SESSION_ID","generation":"1","baseVersion":"3","targetVersion":"1"}}
+```
+
+A stale generation, a moved-on `baseVersion` or a missing lease answers `409`
+(exit code `5`); without edit rights the answer is `403`. For the lease holder,
+a `targetVersion` that does not exist answers `404` (exit code `3`).
 
 ### Agent proposals
 
@@ -104,6 +207,51 @@ exports. The snapshot public session ID must match this connection; private
 admission tokens never belong in the snapshot. No automatic mutation retry
 occurs after a conflict or unknown ACK.
 
+### Confirm a save after a lost reply
+
+Give each `save` a fresh `attemptId` in its snapshot: 8 to 64 of
+`[A-Za-z0-9_-]`, chosen by you. `import` takes it too; `share` and `restore`
+refuse it. If the reply is lost but the `connect` process is still running, send
+`reconcile` on that same connection with the original snapshot fields, without
+`bytes`, and the same `attemptId`:
+
+| Answer | Meaning | Next step |
+|---|---|---|
+| Exit 0, receipt | The save committed at `baseVersion + 1`. | Nothing to send. |
+| `410` (exit `1`) | Under your live lease, that attempt did not commit and never will. | Open a new connection and save again with a fresh `editorRevision` and `attemptId`. |
+| `409` (exit `5`) | Unconfirmed: no `attemptId`, or this session no longer holds the live lease. Nothing was recorded. | Keep the local draft and follow the steps below. |
+
+Reconcile is bound to the original admission. The server compares the session in
+the snapshot with the session that committed, and the admission token lives only
+in the `connect` process, so another process can never confirm the save.
+
+### Recover after losing the `connect` process
+
+There is no reconcile from a new process. The original snapshot is refused
+before any request with `invalid native snapshot binding` (exit `1`), because
+its `sessionId` is not the new connection's. With `sessionId` rewritten, the
+server answers `409` (exit `5`) even when the save committed. A `410` from a
+different session says nothing about the old attempt either: it answers for that
+session's own attempts, and the old save may still have committed. Do not use
+reconcile here. Check the history instead:
+
+1. Keep the local draft and note the `baseVersion` of the lost save.
+2. Open a new `connect` and send `acquire`. The old lease lapses about 15 seconds
+   after its process stops, and `acquire` is refused with `409` (exit `5`) until
+   then, which ends that connection, so start a new one and try again. The new
+   generation fences the old session: its save can no longer publish.
+3. Send `read` and compare `version` with the lost `baseVersion`.
+4. If `version` still equals `baseVersion`, nothing committed. Save again with a
+   fresh `editorRevision` and `attemptId`.
+5. If `version` is higher, inspect `baseVersion + 1` with
+   `crewship craft versions <page>` and
+   `crewship craft version <page> <version> --output candidate.json`. Without the
+   `craft_version_history` flag these answer `404` (exit `3`); `read` then shows
+   only the head.
+6. If the sha256 of `candidate.json` equals your `contentHash` and the author is
+   you, the save committed: do not save again. Otherwise someone else wrote that
+   version: merge your draft onto the head and save at the current version.
+
 `watch` consumes the server's live SSE stream until cancellation or stream end;
 it does not process later stdin actions. Only a valid `session_retired` event
 is a confirmed clean end; unexpected EOF reports an unconfirmed disconnect.
@@ -114,11 +262,12 @@ reacquisition. EOF does not save content or release/reacquire a lease; send an
 explicit `release` when wanted. Reauthorization uses the current CLI credential
 and cannot revive an expired admission or replace its original authority.
 
-## Initialize one owned Word Page
+## Initialize one owned Word or Sheet Page
 
-`crewship craft initialize <page> --file <native.json>` calls
-`POST /api/v1/pages/{slug}/craft/initialize` with Word native bytes (at most
-32 MiB). The Page must already exist, be empty, and be personally owned by the
+`crewship craft initialize <page> [--application word|sheet] --file <native.json>`
+calls `POST /api/v1/pages/{slug}/craft/initialize` with native bytes (at most
+32 MiB). `--application` defaults to `word`; any other value than `word` or
+`sheet` exits 2 before a request. The Page must already exist, be empty, and be personally owned by the
 current human with `pages:write`. The server chooses all qualified pins and
 atomically creates its initial native version and lease. This does not convert
 legacy content or create a Page.
@@ -137,6 +286,18 @@ These human commands require the separate default-off native agent flag and
 current Page write rights. They use normal CLI authentication and workspace
 selection; they do not create an editor session or borrow an agent identity.
 
+### crewship craft task instruction
+
+```sh
+crewship craft task instruction AGENT "Rewrite the summary" --workspace WORKSPACE
+```
+
+Opens a new private chat with the agent and saves the instruction there without
+an agent turn, the same way the editor's "Upravit agentem" does. The text
+reaches no ordinary run, agent log or journal entry, and a later message in the
+chat cannot repeat it. Prints `chat_id` and `message_id` for `task start`. The
+command fails if the server does not confirm the save.
+
 ### crewship craft task start
 
 ```sh
@@ -144,10 +305,16 @@ crewship craft task start @PAGE --chat-id CHAT --message-id MESSAGE --whole-docu
 ```
 
 `--chat-id` selects the registered agent chat, `--message-id` selects your own
-persisted original instruction and `--whole-document` supplies explicit consent
-for this one task. All three are required; consent defaults to false and
-`--whole-document=false` is refused before any request. Acceptance means queued,
+instruction saved by `craft task instruction` and `--whole-document` supplies
+explicit consent for this one task. All three are required; consent defaults to
+false and `--whole-document=false` is refused before any request. An ordinary
+chat message or a group chat message answers `403`. Acceptance means queued,
 not executed or saved. Start never automatically retries or follows redirects.
+The agent's crew must be on the enabled
+[agent artifact policy](/cli/artifacts#agent-publishing-policy); otherwise start
+answers `403` and nothing is queued. Removing the crew or disabling the policy
+stops a running task at its next step: any agent tool call (including reads),
+dispatch or confirmation.
 
 ### crewship craft task status
 

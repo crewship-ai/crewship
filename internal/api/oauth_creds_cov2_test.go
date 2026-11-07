@@ -25,6 +25,21 @@ func TestOC2_LoadOAuthCredential_Direct(t *testing.T) {
 			t.Errorf("err = %v", err)
 		}
 	})
+	t.Run("non-OAuth credential (NULL OAuth columns) loads with an empty config", func(t *testing.T) {
+		if _, err := h.db.Exec(`
+			INSERT INTO credentials (id, workspace_id, name, type, encrypted_value, status, created_by, created_at, updated_at)
+			VALUES ('cred-oc2-apikey', ?, 'ak', 'API_KEY', '', 'ACTIVE', ?, datetime('now'), datetime('now'))`,
+			wsID, userID); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		got, err := h.loadOAuthCredential(context.Background(), "cred-oc2-apikey", wsID)
+		if err != nil {
+			t.Fatalf("err = %v, want an empty config the handlers answer with 400 (#4906)", err)
+		}
+		if got.ClientID != "" || got.AuthURL != "" || got.TokenURL != "" {
+			t.Errorf("config = %+v, want empty", got)
+		}
+	})
 	t.Run("decrypt failure", func(t *testing.T) {
 		covOF2SeedBadSecretCred(t, h, wsID, userID, "cred-oc2-bad")
 		_, err := h.loadOAuthCredential(context.Background(), "cred-oc2-bad", wsID)

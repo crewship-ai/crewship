@@ -310,15 +310,21 @@ type Webhook struct {
 	PreviousSigningSecret   string
 	PreviousSecretExpiresAt *time.Time
 	InputsTemplateJSON      string
-	Enabled                 bool
-	RateLimitPerMin         int
-	LastFiredAt             *time.Time
-	LastStatus              string
-	LastRunID               string
-	FireCount               int64
-	CreatedAt               time.Time
-	UpdatedAt               time.Time
-	DeletedAt               *time.Time
+	// SignalEventType, when set, puts the webhook in signal-delivery mode: a
+	// verified delivery wakes parked wait:event steps instead of starting a run.
+	// SignalCorrelationPath is the dotted path in the verified JSON body whose
+	// value is the correlation key. Both set, or both empty.
+	SignalEventType       string
+	SignalCorrelationPath string
+	Enabled               bool
+	RateLimitPerMin       int
+	LastFiredAt           *time.Time
+	LastStatus            string
+	LastRunID             string
+	FireCount             int64
+	CreatedAt             time.Time
+	UpdatedAt             time.Time
+	DeletedAt             *time.Time
 }
 
 // SaveWebhookInput is the payload for WebhookStore.Save.
@@ -331,8 +337,18 @@ type SaveWebhookInput struct {
 	TargetPipelineVersion *int
 	SigningSecret         string
 	InputsTemplate        map[string]any
+	SignalEventType       string
+	SignalCorrelationPath string
 	Enabled               bool
 	RateLimitPerMin       int
+
+	// RotatePrevious applies PreviousSecret/PreviousExpires to the previous
+	// secret slot in the SAME transaction as the update, so a rotation either
+	// records its overlap (or clears an older one when PreviousSecret is
+	// empty) or does not happen. Update only.
+	RotatePrevious  bool
+	PreviousSecret  string
+	PreviousExpires *time.Time
 }
 
 // WebhookStore is the persistence + lookup layer for pipeline_webhooks.
@@ -395,6 +411,17 @@ func (s *WebhookStore) Save(ctx context.Context, in SaveWebhookInput) (*Webhook,
 	if in.WorkspaceID == "" || in.TargetPipelineID == "" {
 		return nil, errors.New("pipeline_webhooks: workspace_id + target_pipeline_id required")
 	}
+	if (in.SignalEventType == "") != (in.SignalCorrelationPath == "") {
+		return nil, ErrInvalidSignalDelivery
+	}
+	if in.SignalEventType != "" {
+		if in.IngressProfile != "crewship" {
+			return nil, ErrInvalidSignalDelivery
+		}
+		if err := ValidateJSONPath(in.SignalCorrelationPath); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidSignalDelivery, err)
+		}
+	}
 	tmplJSON, err := json.Marshal(in.InputsTemplate)
 	if err != nil {
 		return nil, fmt.Errorf("marshal inputs_template: %w", err)
@@ -440,8 +467,9 @@ INSERT INTO pipeline_webhooks (
     id, workspace_id, name, target_pipeline_id, target_pipeline_version,
     token, token_hash, signing_secret, inputs_template,
     enabled, rate_limit_per_min,
-    created_at, updated_at, ingress_profile
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    created_at, updated_at, ingress_profile,
+    signal_event_type, signal_correlation_path
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			id, in.WorkspaceID, in.Name, in.TargetPipelineID,
 			nullInt(in.TargetPipelineVersion),
 			// The cleartext never reaches the table (#1888): only its
@@ -451,6 +479,7 @@ INSERT INTO pipeline_webhooks (
 			nullStr(storedSigning), string(tmplJSON),
 			boolToInt(in.Enabled), in.RateLimitPerMin,
 			now, now, in.IngressProfile,
+			nullStr(in.SignalEventType), nullStr(in.SignalCorrelationPath),
 		)
 		if err != nil {
 			return nil, fmt.Errorf("insert webhook: %w", err)
@@ -472,14 +501,21 @@ INSERT INTO pipeline_webhooks (
 UPDATE pipeline_webhooks
 SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     signing_secret = ?, inputs_template = ?, enabled = ?, rate_limit_per_min = ?,
-    updated_at = ?, ingress_profile = ?
+    updated_at = ?, ingress_profile = ?,
+    signal_event_type = ?, signal_correlation_path = ?
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		nullStr(storedSigning), string(tmplJSON),
-		boolToInt(in.Enabled), in.RateLimitPerMin, now, in.IngressProfile, in.ID,
+		boolToInt(in.Enabled), in.RateLimitPerMin, now, in.IngressProfile,
+		nullStr(in.SignalEventType), nullStr(in.SignalCorrelationPath), in.ID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("update webhook: %w", err)
+	}
+	if in.RotatePrevious {
+		if err := setPreviousSecretExec(ctx, tx, in.ID, in.PreviousSecret, in.PreviousExpires); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err
@@ -492,6 +528,12 @@ WHERE id = ? AND deleted_at IS NULL`,
 // rotation with no grace window does. The secret is encrypted at rest like the
 // current one.
 func (s *WebhookStore) SetPreviousSecret(ctx context.Context, id, secret string, expires *time.Time) error {
+	return setPreviousSecretExec(ctx, s.db, id, secret, expires)
+}
+
+func setPreviousSecretExec(ctx context.Context, x interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+}, id, secret string, expires *time.Time) error {
 	var stored string
 	var exp any
 	if secret != "" && expires != nil {
@@ -501,7 +543,7 @@ func (s *WebhookStore) SetPreviousSecret(ctx context.Context, id, secret string,
 		}
 		exp = expires.UTC().Format(time.RFC3339Nano) // tsformat:allow: grace expiry is parsed and compared as time.Time in Go; SQL only stores and reads it by ID
 	}
-	_, err := s.db.ExecContext(ctx,
+	_, err := x.ExecContext(ctx,
 		`UPDATE pipeline_webhooks SET previous_signing_secret = ?, previous_secret_expires_at = ? WHERE id = ? AND deleted_at IS NULL`,
 		nullStr(stored), exp, id)
 	if err != nil {
@@ -729,15 +771,19 @@ RETURNING consecutive_fire_failures`,
 // dispatch URL. Audit chain finding (A13.2 + A17.2): MEMBER creates
 // webhook → public URL fires pipeline → no auth.
 func (w *Webhook) ValidateSignature(body []byte, providedHex string) bool {
-	for _, secret := range w.acceptedSecrets(time.Now()) {
-		if validateBodySignature(secret, body, providedHex) {
-			return true
-		}
-	}
-	// No secret on the row (or none that matched): no signature is verifiable.
-	// The dispatch is unauthenticated rather than silently passing; the webhook
-	// needs its secret rotated before it can fire again.
-	return false
+	ok, _ := w.MatchSignature(body, providedHex, time.Now())
+	return ok
+}
+
+// MatchSignature is ValidateSignature that also reports whether the delivery
+// was signed with the previous secret of an open rotation overlap, so the
+// caller can record that a sender has not migrated yet. Both secrets are
+// always compared (no early exit) so timing does not reveal which one matched.
+func (w *Webhook) MatchSignature(body []byte, providedHex string, now time.Time) (ok, usedPrevious bool) {
+	cur, prev := w.currentAndPrevious(now)
+	curOK := cur != "" && validateBodySignature(cur, body, providedHex)
+	prevOK := prev != "" && validateBodySignature(prev, body, providedHex)
+	return curOK || prevOK, !curOK && prevOK
 }
 
 // AcceptedSecrets lists the signing secrets a delivery may be signed with at
@@ -747,13 +793,25 @@ func (w *Webhook) AcceptedSecrets(now time.Time) []string { return w.acceptedSec
 
 func (w *Webhook) acceptedSecrets(now time.Time) []string {
 	var out []string
-	if w.SigningSecret != "" {
-		out = append(out, w.SigningSecret)
+	cur, prev := w.currentAndPrevious(now)
+	if cur != "" {
+		out = append(out, cur)
 	}
-	if w.PreviousSigningSecret != "" && w.PreviousSecretExpiresAt != nil && now.Before(*w.PreviousSecretExpiresAt) {
-		out = append(out, w.PreviousSigningSecret)
+	if prev != "" {
+		out = append(out, prev)
 	}
 	return out
+}
+
+// currentAndPrevious returns the current secret and, only while the overlap
+// window is open at now, the previous one. The window ends strictly at its
+// expiry instant: at or after it the previous secret is not accepted.
+func (w *Webhook) currentAndPrevious(now time.Time) (cur, prev string) {
+	cur = w.SigningSecret
+	if w.PreviousSigningSecret != "" && w.PreviousSecretExpiresAt != nil && now.Before(*w.PreviousSecretExpiresAt) {
+		prev = w.PreviousSigningSecret
+	}
+	return cur, prev
 }
 
 func validateBodySignature(secret string, body []byte, providedHex string) bool {
@@ -790,15 +848,22 @@ func validateBodySignature(secret string, body []byte, providedHex string) bool 
 // (rather than reading time.Now internally) so callers/tests can pin a
 // deterministic clock; production callers pass time.Now().
 func (w *Webhook) ValidateTimestampedSignature(body []byte, ts, providedHex string, now time.Time, tolerance time.Duration) bool {
-	secrets := w.acceptedSecrets(now)
-	if len(secrets) == 0 {
+	ok, _ := w.MatchTimestampedSignature(body, ts, providedHex, now, tolerance)
+	return ok
+}
+
+// MatchTimestampedSignature is ValidateTimestampedSignature that also reports
+// whether the previous secret of an open rotation overlap verified it.
+func (w *Webhook) MatchTimestampedSignature(body []byte, ts, providedHex string, now time.Time, tolerance time.Duration) (ok, usedPrevious bool) {
+	cur, prev := w.currentAndPrevious(now)
+	if cur == "" && prev == "" {
 		// Mirrors ValidateSignature: no secret on this row means no
 		// signature is verifiable, timestamped or not.
-		return false
+		return false, false
 	}
 	secs, err := strconv.ParseInt(ts, 10, 64)
 	if err != nil {
-		return false
+		return false, false
 	}
 	if tolerance <= 0 {
 		tolerance = DefaultWebhookTimestampTolerance
@@ -810,22 +875,24 @@ func (w *Webhook) ValidateTimestampedSignature(body []byte, ts, providedHex stri
 	tolSec := int64(tolerance / time.Second)
 	nowSec := now.Unix()
 	if secs < nowSec-tolSec || secs > nowSec+tolSec {
-		return false
+		return false, false
 	}
 	providedHex = strings.TrimPrefix(providedHex, "sha256=")
 	if providedHex == "" {
-		return false
+		return false, false
 	}
-	for _, secret := range secrets {
+	check := func(secret string) bool {
+		if secret == "" {
+			return false
+		}
 		mac := hmac.New(sha256.New, []byte(secret))
 		_, _ = mac.Write([]byte(ts + "."))
 		_, _ = mac.Write(body)
 		expected := hex.EncodeToString(mac.Sum(nil))
-		if hmac.Equal([]byte(expected), []byte(providedHex)) {
-			return true
-		}
+		return hmac.Equal([]byte(expected), []byte(providedHex))
 	}
-	return false
+	curOK, prevOK := check(cur), check(prev)
+	return curOK || prevOK, !curOK && prevOK
 }
 
 // rateLimiter is the in-memory throttle for webhooks. Per-token
@@ -913,7 +980,8 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        enabled, rate_limit_per_min,
        last_fired_at, COALESCE(last_status, ''), COALESCE(last_run_id, ''),
        fire_count, created_at, updated_at, deleted_at, ingress_profile,
-       COALESCE(previous_signing_secret, ''), previous_secret_expires_at
+       COALESCE(previous_signing_secret, ''), previous_secret_expires_at,
+       COALESCE(signal_event_type, ''), COALESCE(signal_correlation_path, '')
 FROM pipeline_webhooks`
 
 func scanWebhook(rs rowScanner) (*Webhook, error) {
@@ -934,6 +1002,7 @@ func scanWebhook(rs rowScanner) (*Webhook, error) {
 		&lastFired, &w.LastStatus, &w.LastRunID,
 		&w.FireCount, &createdAt, &updatedAt, &deletedAt, &w.IngressProfile,
 		&w.PreviousSigningSecret, &prevExpires,
+		&w.SignalEventType, &w.SignalCorrelationPath,
 	)
 	if err != nil {
 		return nil, err

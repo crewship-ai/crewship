@@ -1,3 +1,4 @@
+import { isSignOutRow, pendingSignOutRoots, signOutRowKey } from "./document-draft-sign-out"
 import { isSealedLocalDraft } from "./local-draft-seal"
 
 /** Private, browser-local recovery journal. It never grants replay authority. */
@@ -13,7 +14,8 @@ export interface DocumentDraft {
 }
 export interface DocumentDraftStore {
   load(): Promise<DocumentDraft[]>
-  put(draft: DocumentDraft): Promise<void>
+  /** `final`: the editor's last capture as it retires, not a new edit. */
+  put(draft: DocumentDraft, options?: { final?: boolean }): Promise<void>
   remove(id: string): Promise<void>
   close(): void
   /** True when this tab holds the Page's journal lock, so every row in it is an orphan. */
@@ -51,9 +53,12 @@ function boundDraftTransaction(tx: IDBTransaction, complete: () => void, reject:
   return abort
 }
 
-export async function openDocumentDrafts(human: string, workspace: string, page: string, options?: { maxDraftBytes?: number; requireExclusive?: boolean }): Promise<DocumentDraftStore> {
+export async function openDocumentDrafts(human: string, workspace: string, page: string, options?: { maxDraftBytes?: number; requireExclusive?: boolean; signal?: AbortSignal }): Promise<DocumentDraftStore> {
   const maxDraftBytes = options?.maxDraftBytes ?? 4 * 1024 * 1024
   const requireExclusive = options?.requireExclusive === true
+  // A caller that gave up (#5104): stop waiting, release what this open holds.
+  const signal = options?.signal
+  if (signal?.aborted) throw new DocumentStorageError(message)
   if (!Number.isSafeInteger(maxDraftBytes) || maxDraftBytes < 1 || maxDraftBytes > 64 * 1024 * 1024) throw new DocumentStorageError(message)
   if (!human || !workspace || !page || typeof indexedDB === "undefined") throw new DocumentStorageError(message)
   const owner = JSON.stringify([human, workspace, page])
@@ -68,12 +73,15 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
     // new instance starts. Only a lock that stays held is another live tab.
     const wait = new AbortController()
     let accepting = true
-    const outcome = await new Promise<{ release: () => void } | "busy" | "none">(resolve => {
-      const finish = (value: { release: () => void } | "busy" | "none") => {
+    let onAbort = () => {}
+    const outcome = await new Promise<{ release: () => void } | "busy" | "none" | "aborted">(resolve => {
+      const finish = (value: { release: () => void } | "busy" | "none" | "aborted") => {
         if (!accepting) return
         accepting = false; clearTimeout(timer); resolve(value)
       }
       const timer = setTimeout(() => { finish(requireExclusive ? "none" : "busy"); wait.abort() }, STORAGE_LOCK_WAIT_MS)
+      onAbort = () => { finish("aborted"); wait.abort() }
+      signal?.addEventListener("abort", onAbort, { once: true })
       const refused = (cause: unknown) => {
         // A refused request (SecurityError, ...) means no lock is available, not that another tab holds one.
         finish(cause instanceof DOMException && cause.name === "AbortError" ? "busy" : "none")
@@ -87,14 +95,20 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
         }).catch(refused)
       } catch (cause) { refused(cause) }
     })
+    signal?.removeEventListener("abort", onAbort)
+    if (outcome === "aborted") throw new DocumentStorageError(message)
     if (outcome === "busy") throw new DocumentStorageBusy("Another tab is editing this document; its local draft is not available here.")
     if (outcome !== "none") releaseLock = outcome.release
     else if (requireExclusive) throw new DocumentStorageError(message)
   }
+  if (signal?.aborted) { releaseLock?.(); throw new DocumentStorageError(message) }
+  let dropOpen = () => {}
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     let settled = false
     const timer = setTimeout(() => { settled = true; reject(new DocumentStorageError(message)) }, STORAGE_OPEN_TIMEOUT_MS)
     const fail = () => { if (settled) return; settled = true; clearTimeout(timer); reject(new DocumentStorageError(message)) }
+    dropOpen = fail
+    signal?.addEventListener("abort", fail, { once: true })
     try {
       const request = indexedDB.open("crewship-document-drafts", 1)
       request.onupgradeneeded = () => request.result.createObjectStore("drafts", { keyPath: "key" })
@@ -107,6 +121,8 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
       }
     } catch { fail() }
   }).catch(() => { releaseLock?.(); throw new DocumentStorageError(message) })
+    .finally(() => signal?.removeEventListener("abort", dropOpen))
+  if (signal?.aborted) { db.close(); releaseLock?.(); throw new DocumentStorageError(message) }
   db.onversionchange = () => db.close()
   const keys = new Map<string, [string, string]>()
   function transaction<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
@@ -135,12 +151,26 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
         })
       } finally { clearTimeout(timer) }
     },
-    async put(draft) {
+    async put(draft, how) {
       // Bound each journal row before structured cloning large editor state.
       const serialized = JSON.stringify(draft)
       if (serialized.length > maxDraftBytes || (options?.maxDraftBytes !== undefined && new TextEncoder().encode(serialized).byteLength > maxDraftBytes)) throw new DocumentStorageError(message)
       const key: [string,string] = [owner,JSON.stringify([draft.schema,draft.epoch,draft.id])]
-      await transaction("readwrite", store => store.put({ key, draft, revision: crypto.randomUUID() }))
+      const revision = crypto.randomUUID(), row = JSON.stringify(key)
+      if (!how?.final) {
+        ownRoots.set(row, revision)
+        await transaction("readwrite", store => store.put({ key, draft, revision }))
+      } else await transaction("readwrite", store => {
+        const previous = store.get(key), intent = store.get(signOutRowKey(human))
+        intent.onsuccess = () => {
+          const root: string | undefined = previous.result?.finalRoot ?? previous.result?.revision ?? ownRoots.get(row)
+          // The person already confirmed erasing this chain: nothing to keep.
+          if (root && (intent.result?.roots?.includes(root) || pendingSignOutRoots(human).includes(root))) { store.delete(key); return }
+          ownRoots.set(row, root ?? revision)
+          store.put({ key, draft, revision, ...(root ? { finalRoot: root } : {}) })
+        }
+        return intent
+      })
       keys.set(draft.id,key)
     },
     async remove(id) {
@@ -202,7 +232,7 @@ async function purgeRows(range: () => IDBKeyRange | undefined, owns: (owner: str
               const row = cursor.result
               if (!row) return
               const key = row.key as [string, string]
-              if (owns(key[0])) row.delete()
+              if (!isSignOutRow(key[0]) && owns(key[0])) row.delete()
               row.continue()
             } catch { abort() }
           }
@@ -238,6 +268,12 @@ export function purgeOtherDocumentDrafts(userId: string | null): Promise<void> {
   return identityPurge
 }
 
+// An editor's final capture keeps the root revision of its chain: however many
+// retirement writes follow one another, confirming any of them confirms the root.
+// A real edit starts a new chain. The confirming tab may have erased the row
+// first; what this tab last wrote there still names the root.
+const ownRoots = new Map<string, string>()
+
 /** Preserve rows on expiry/account replacement. Editors capture before journals close. */
 let suspensionInFlight: Promise<void> | undefined
 export function suspendOtherDocumentDrafts(userId: string | null): Promise<void> {
@@ -270,6 +306,7 @@ export function suspendOtherDocumentDrafts(userId: string | null): Promise<void>
         cursor.onsuccess = () => {
           const row = cursor.result; if (!row) return
           const value = row.value
+          if (isSignOutRow(value.key[0])) { row.continue(); return }
           let human: unknown
           try { human = JSON.parse(value.key[0])[0] } catch { /* Unknown plaintext ownership is not retainable. */ }
           const sealed = typeof value.draft?.snapshot === "string" && isSealedLocalDraft(value.draft.snapshot) && value.draft.update === "" && !value.draft.request
@@ -286,7 +323,7 @@ export function suspendOtherDocumentDrafts(userId: string | null): Promise<void>
   void work.then(() => { if (suspensionInFlight === work) suspensionInFlight = undefined }, () => { if (suspensionInFlight === work) suspensionInFlight = undefined })
   return work
 }
-export interface CapturedDocumentDraft { key: [string, string]; revision: string | null; draft?: string }
+export interface CapturedDocumentDraft { key: [string, string]; revision: string | null; /** The chain this revision belongs to. */ root?: string; draft?: string }
 async function withDraftRows<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore, done: (value: T) => void) => void): Promise<T> {
   if (typeof indexedDB === "undefined") throw new DocumentStorageError(message)
   return new Promise<T>((resolve, reject) => {
@@ -321,12 +358,21 @@ export function captureDocumentDrafts(human: string, workspace?: string, page?: 
         if (owner[0] === human && (!workspace || owner[1] === workspace) && (!page || owner[2] === page) && value.draft) {
           const revision = typeof value.revision === "string" ? value.revision : crypto.randomUUID()
           if (!value.revision) row.update({...value, revision})
-          rows.push({key:value.key, revision})
+          rows.push({key:value.key, revision, root: value.finalRoot ?? revision})
         }
       } catch { /* Unknown legacy rows are preserved. */ }
       row.continue()
     }
   })
+}
+/** Deletes exactly one journal row by its full key, for a journal handle that
+ * is already closed (#4348). It needs no Page lock: the key names one mount's
+ * own row, so no other tab's or mount's row can match. Rejects when the
+ * deletion is not confirmed. */
+export function removeDocumentDraftRow(human: string, workspace: string, page: string, row: { schema: number; epoch: string; id: string }): Promise<void> {
+  if (!human || !workspace || !page || !row.id) return Promise.reject(new DocumentStorageError(message))
+  const key: [string, string] = [JSON.stringify([human, workspace, page]), JSON.stringify([row.schema, row.epoch, row.id])]
+  return withDraftRows("readwrite", (store, done) => { done(undefined); store.delete(key) })
 }
 export function removeCapturedDocumentDrafts(rows: CapturedDocumentDraft[]): Promise<void> {
   if (!rows.length) return Promise.resolve()

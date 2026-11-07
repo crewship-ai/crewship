@@ -5,7 +5,7 @@ import * as fs from "node:fs"
 import * as path from "node:path"
 import type { FullResult, Reporter, TestCase, TestResult } from "@playwright/test/reporter"
 import { outputPaths, readPrdEnv } from "./env"
-import { PRD_EVIDENCE, PRD_REQUIREMENT, parseRequirement } from "./requirements"
+import { PRD_EVIDENCE, PRD_NOTE, PRD_REQUIREMENT, parseRequirement } from "./requirements"
 import { resultOf, readRows, slug, writeSummary } from "./report.mjs"
 import type { RunInfo } from "./global-setup"
 
@@ -38,6 +38,7 @@ export default class PrdAcceptanceReporter implements Reporter {
     const scenario = path.basename(test.location.file).replace(/\.acceptance\.ts$/, "")
     const evidenceFiles = [...new Set(result.annotations.filter((a) => a.type === PRD_EVIDENCE && a.description).map((a) => a.description as string))]
     const skip = annotations.find((a) => a.type === "skip")?.description ?? null
+    const notes = result.annotations.filter((a) => a.type === PRD_NOTE && a.description).map((a) => a.description as string)
     // eslint-disable-next-line no-control-regex
     const error = result.error?.message?.replace(/\u001b\[[0-9;]*m/g, "").split("\n")[0]?.slice(0, 300) ?? null
     let status = resultOf(result.status)
@@ -58,8 +59,10 @@ export default class PrdAcceptanceReporter implements Reporter {
         test: test.title,
         result: status,
         appSha: run?.appSha ?? "unknown",
+        runId: run?.runId ?? null,
         evidence: evidenceFiles[0] ?? null,
         evidenceFiles,
+        notes,
         mode: this.env.mode,
         origin: this.env.origin,
         reason,
