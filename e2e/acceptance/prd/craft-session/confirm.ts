@@ -130,8 +130,9 @@ export function hourInterruptions(verifications: readonly VerifyPress[], stalls:
 // it carries no trigger, and the editor queues captures one after another
 // (lib/mooring/single-editor-save.ts, `preparations`), so an autosave queued behind
 // a slow capture can leave any time later, exactly like the forced save. No time
-// window proves which one it was. A write sent after a harness Ctrl+S or release
-// flush is therefore "unknown" until that editor instance ended (its page closed):
+// window proves which one it was. A write sent after a harness Ctrl+S, "Ověřit
+// výsledek" (a reconcile that proves an attempt absent lets the editor send a fresh
+// save) or release flush is therefore "unknown" until that editor instance ended (its page closed):
 // a closed page sends nothing more. The harness cannot tell a forced save from an
 // autosave; it only counts the presses, exactly.
 
@@ -144,6 +145,10 @@ export interface AccountedOp {
   version?: string
   baseVersion?: string
   contentHash?: string
+  /** The snapshot identity the request carried (request body), bound by the server's receipt. */
+  editorRevision?: string
+  sessionId?: string
+  attemptId?: string
   /** The server's #5075 answer: no version was created. */
   unchanged?: boolean
 }
@@ -226,6 +231,13 @@ function confirmsWrite(o: AccountedOp): boolean {
   return o.kind === "save" && o.unchanged !== true && o.version !== o.baseVersion
 }
 
+const defined = (...v: Array<string | undefined>) => v.every((x) => x !== undefined)
+/** Do two requests carry the same snapshot of the same attempt (what a reconcile proves, internal/mooring/native_save_receipt.go)? */
+function sameSnapshot(a: AccountedOp, b: AccountedOp): boolean {
+  if (!defined(a.baseVersion, a.contentHash, a.editorRevision, b.baseVersion, b.contentHash, b.editorRevision)) return false
+  return a.baseVersion === b.baseVersion && a.contentHash === b.contentHash && a.editorRevision === b.editorRevision && a.sessionId === b.sessionId && a.attemptId === b.attemptId
+}
+
 /** The writes the server confirmed, one per version, in the order of their first confirmation. */
 export function committedWrites(ops: readonly AccountedOp[]): CommittedWrite[] {
   const seen = new Set<string>()
@@ -234,7 +246,9 @@ export function committedWrites(ops: readonly AccountedOp[]): CommittedWrite[] {
     if (!confirmsWrite(c) || seen.has(c.version!)) continue
     seen.add(c.version!)
     // The same snapshot sent again (a repeat of the attempt) may be the one that committed.
-    const same = (o: AccountedOp) => o.kind === "save" && o.n <= c.n && c.baseVersion !== undefined && c.contentHash !== undefined && o.baseVersion === c.baseVersion && o.contentHash === c.contentHash
+    // Matched on the identity the server binds (base, revision, hash, session, attempt);
+    // a request that lacks any of it matches nothing, so its write stays unknown.
+    const same = (o: AccountedOp) => o.kind === "save" && o.n <= c.n && sameSnapshot(o, c)
     const senders = ops.filter((o) => o === c || same(o)).filter((o) => o.kind === "save").map((o) => o.n)
     out.push({ version: c.version!, op: senders[0], ops: senders, confirmedBy: c.n, confirmedByKind: c.kind === "reconcile" ? "reconcile" : "save" })
   }
@@ -247,27 +261,44 @@ export function producerOf(ops: readonly AccountedOp[], version: string): Accoun
   return w?.op === undefined ? undefined : ops.find((o) => o.n === w.op)
 }
 
+/** The harness actions after which a request may be the harness's: presses, "Ověřit výsledek", releases, and the closed pages that end them. */
+export interface Interventions {
+  presses: readonly ForcedCtrlS[]
+  /** "Ověřit výsledek": a reconcile that proves an attempt absent lets the editor send a fresh save (single-editor-save.ts, settle). */
+  verifications?: readonly VerifyPress[]
+  releases?: readonly TrailMark[]
+  editorEnds?: readonly TrailMark[]
+}
+
 /**
- * Why request `n` cannot be called the editor's own, or undefined when it can: it was
- * sent after a harness Ctrl+S or release whose editor had not ended yet.
+ * Why request `o` cannot be called the editor's own, or undefined when it can: it was
+ * sent after a harness Ctrl+S, "Ověřit výsledek" or release whose editor had not ended yet.
  */
-export function openIntervention(n: number, p: { presses: readonly ForcedCtrlS[]; releases?: readonly TrailMark[]; editorEnds?: readonly TrailMark[] }): string | undefined {
-  const ended = (m: { at: string; opsAt: number }) => (p.editorEnds ?? []).some((e) => Date.parse(e.at) >= Date.parse(m.at) && n > e.opsAt)
+export function openIntervention(o: Pick<AccountedOp, "n" | "sentAt">, p: Interventions): string | undefined {
+  const sent = o.sentAt ? Date.parse(o.sentAt) : NaN
+  // After the action: by the trail cut when it was recorded, else by time; a request without a time counts as after.
+  const after = (m: { at: string; opsAt?: number }) => (m.opsAt !== undefined ? o.n > m.opsAt : Number.isNaN(sent) || sent >= Date.parse(m.at))
+  const ended = (m: { at: string }) => (p.editorEnds ?? []).some((e) => Date.parse(e.at) >= Date.parse(m.at) && o.n > e.opsAt)
   for (const press of p.presses) {
-    if (n > press.opsAtPress && !ended({ at: press.at, opsAt: press.opsAtPress })) return `sent after a harness Ctrl+S (cycle ${press.cycle}, ${press.site}, ${press.at}) of the same editor`
+    const m = { at: press.at, opsAt: press.opsAtPress }
+    if (after(m) && !ended(m)) return `sent after a harness Ctrl+S (cycle ${press.cycle}, ${press.site}, ${press.at}) of the same editor`
+  }
+  for (const v of p.verifications ?? []) {
+    const m = { at: v.pressedAt, opsAt: v.opsAtPress }
+    if (after(m) && !ended(m)) return `sent after a harness Ověřit výsledek (cycle ${v.cycle}, ${v.pressedAt}) of the same editor`
   }
   for (const r of p.releases ?? []) {
-    if (n > r.opsAt && !ended(r)) return `sent after a harness release (flush before transfer, ${r.at}) of the same editor`
+    if (after(r) && !ended(r)) return `sent after a harness release (flush before transfer, ${r.at}) of the same editor`
   }
   return undefined
 }
 
-/** Every confirmed write with its origin: "autosave" only when no harness press or release could have sent it. */
-export function accountWrites(ops: readonly AccountedOp[], p: { presses: readonly ForcedCtrlS[]; releases?: readonly TrailMark[]; editorEnds?: readonly TrailMark[] }): AccountedWrite[] {
+/** Every confirmed write with its origin: "autosave" only when no harness action could have sent it. */
+export function accountWrites(ops: readonly AccountedOp[], p: Interventions): AccountedWrite[] {
   return committedWrites(ops).map((w) => {
-    if (w.op === undefined) return { ...w, origin: "unknown", reason: `confirmed by reconcile ${w.confirmedBy}, but no save request of that snapshot is in the trail` }
+    if (w.op === undefined) return { ...w, origin: "unknown", reason: `confirmed by reconcile ${w.confirmedBy}, but no save request of that snapshot (base, revision, hash, session, attempt) is in the trail` }
     for (const n of w.ops) {
-      const why = openIntervention(n, p)
+      const why = openIntervention(ops.find((o) => o.n === n) ?? { n }, p)
       if (why) return { ...w, origin: "unknown", reason: `save request ${n} ${why}` }
     }
     return { ...w, origin: "autosave" }
@@ -343,7 +374,7 @@ const OPEN_VERIFY_MS = 15_000
 export interface SaveAccounting {
   /** Writes the server confirmed, each version once: autosaves + unknownOrigin. */
   committedWrites: number
-  /** Confirmed writes sent while no harness Ctrl+S or release of the same editor could have sent them. */
+  /** Confirmed writes sent while no harness Ctrl+S, Ověřit výsledek or release of the same editor could have caused them. */
   autosaves: number
   /** Confirmed writes whose origin the trail cannot prove: a forced save and a queued autosave look the same. */
   unknownOrigin: number
@@ -370,8 +401,8 @@ export interface SaveAccounting {
 
 export const SAVE_ACCOUNTING_DESCRIPTION =
   "Measured: forcedCtrlS, releases and verifyPresses. committedWrites: versions the server confirmed (a save answer that created a version, or a reconcile that proved one), each once; committedWrites = autosaves + unknownOrigin. " +
-  "autosaves: writes sent before every harness Ctrl+S and release of the same editor (or after its page closed), so no press caused them; " +
-  "unknownOrigin: writes sent after a harness Ctrl+S or release of the still-open editor, or confirmed without a save request in the trail. The request carries no trigger and an autosave can queue behind a slow capture, so the harness cannot tell a forced save from an autosave (#5112); a forced save is among these, never counted apart; " +
+  "autosaves: writes sent before every harness Ctrl+S, Ověřit výsledek and release of the same editor (or after its page closed), so no harness action caused them; " +
+  "unknownOrigin: writes sent after a harness Ctrl+S, Ověřit výsledek or release of the still-open editor, or confirmed without a save request in the trail. The request carries no trigger and an autosave can queue behind a slow capture, so the harness cannot tell a forced save from an autosave (#5112); a forced save is among these, never counted apart; " +
   "forcedCtrlS: Control+s pressed by the harness (no new version within 4 s, or the Word table cell not in the head after 4 s with status Neuložený koncept), by outcome confirm-only / no-version / unattributed / incomplete; " +
   "editorReconciles: reconcile requests sent outside every press window; reconcilesDuringPressWait: reconcile requests sent between a press (Ctrl+S or Ověřit výsledek) and 2 s after its wait, cause unknown; " +
   "verifyPresses: Ověřit výsledek presses. Accounting only, not a gate."
@@ -387,7 +418,7 @@ export function saveAccounting(input: {
 }): SaveAccounting {
   const { forced, ops, verifications } = input
   const releases = input.releases ?? []
-  const writes = accountWrites(ops, { presses: forced, releases, editorEnds: input.editorEnds })
+  const writes = accountWrites(ops, { presses: forced, verifications, releases, editorEnds: input.editorEnds })
   const autosaves = writes.filter((w) => w.origin === "autosave").length
   const unknown = writes.filter((w) => w.origin === "unknown")
   // Re-classified with the final trail: a reply that arrived after the wait ended counts.
@@ -414,7 +445,7 @@ export function saveAccounting(input: {
   const note =
     `forced Ctrl+S ${events.length}×, Ověřit výsledek ${verifications.length}×${releases.length ? `, release ${releases.length}×` : ""}; ` +
     `server-confirmed writes ${writes.length}× = autosave ${autosaves}× + origin unknown ${unknown.length}×` +
-    (unknown.length ? ` (sent after a harness Ctrl+S or release, or without a save request in the trail: the harness cannot tell a forced save from an autosave, #5112)` : "") +
+    (unknown.length ? ` (sent after a harness Ctrl+S, Ověřit výsledek or release, or without a save request in the trail: the harness cannot tell a forced save from an autosave, #5112)` : "") +
     `, ` +
     (detail.length ? `press outcomes ${detail.join(", ")}, ` : "") +
     (reconcilesDuringPressWaitOps.length ? `reconcile during a press wait (cause unknown) ${reconcilesDuringPressWaitOps.length}×, ` : "") +
@@ -584,6 +615,8 @@ export interface VerifyPress {
   reconcile: { status?: number; version?: string; failed?: string } | null
   /** When the session stopped waiting for the press's effect (the press window of the save accounting). */
   waitEndedAt?: string
+  /** The ops trail length right before the press; without it, requests are placed by time. */
+  opsAtPress?: number
 }
 
 /**

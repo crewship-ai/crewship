@@ -238,7 +238,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
         for (const limit = Date.now() + 15_000; isUnconfirmedStatus(await N.status(page)) && Date.now() < limit; ) await N.pause(250)
         const reconcile = ops.slice(opsAt).find((o) => o.kind === "reconcile")
         const statusAfter = (await N.status(page)).slice(0, 60)
-        input.evidence.verifications.push({ cycle, firstSeenAt: new Date(since).toISOString(), pressedAt, unconfirmedForMs: Date.now() - since, statusAfter, reconcile: reconcile ? { status: reconcile.status, version: reconcile.version, failed: reconcile.failed } : null, waitEndedAt: new Date().toISOString() })
+        input.evidence.verifications.push({ cycle, firstSeenAt: new Date(since).toISOString(), pressedAt, unconfirmedForMs: Date.now() - since, statusAfter, reconcile: reconcile ? { status: reconcile.status, version: reconcile.version, failed: reconcile.failed } : null, waitEndedAt: new Date().toISOString(), opsAtPress: opsAt })
         note(`cycle ${cycle}: pressed Ověřit výsledek after ${Date.now() - since} ms: ${statusAfter}`)
         return true
       }
