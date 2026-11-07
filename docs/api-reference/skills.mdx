@@ -162,7 +162,7 @@ filters) only sees the caller's workspace.
 | `scan_status` | string | Security scan status |
 | `description_quality` | string? | Description quality rating |
 | `lifecycle_state` | string | Curator sweep verdict: `active`, `stale`, `archived` or `deprecated` |
-| `locked` | boolean | `true` while a curator holds the skill against autonomous rewrites |
+| `locked` | boolean | `true` while an instance administrator holds the skill against autonomous rewrites |
 | `locked_at` | string? | When the skill was locked; null when unlocked |
 | `needs_credentials` | string[] | Env-var names the skill expects an agent to hold (decoded `credential_requirements`); `[]` when none |
 | `usage` | object | This workspace's invocations: `uses_7d`, `uses_30d`, `errors_7d`, `errors_30d` (non-zero exit), `uses_total`, `last_used_at` (null when never used) |
@@ -433,7 +433,8 @@ the `OWNER` or `ADMIN` role in the workspace in the path, and use a person's
 credential (a session or a full-access CLI token). Scoped CLI tokens, even with
 `instance:admin`, run tokens, sidecar tokens and agent identities get `403`.
 Assigning a skill to agents grants nothing here. Restoring a workspace backup
-never brings a lock back.
+never brings a lock back, so after restoring a bundle an instance administrator
+locks the skill again if it should stay locked.
 
 **Response:** `200 OK`
 

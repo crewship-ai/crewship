@@ -81,7 +81,7 @@ type SkillRow struct {
 	LifecycleState skills.LifecycleState
 	LastUsedAt     time.Time
 	Assignments    int
-	// Locked: a curator locked the skill; the sweep must not age it out.
+	// Locked: an instance administrator locked the skill; the sweep must not age it out.
 	Locked bool
 }
 

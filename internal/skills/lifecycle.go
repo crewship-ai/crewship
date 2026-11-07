@@ -108,7 +108,7 @@ type LifecycleSnapshot struct {
 	// Counted at the SQL layer so the pure function doesn't have to
 	// reason about expiry.
 	ActiveAssignments int
-	// Locked is true when a curator locked the skill against autonomous
+	// Locked is true when an instance administrator locked the skill against autonomous
 	// rewrites (#5045). A locked skill is held exactly where it is: the
 	// sweep never moves it to stale or archived.
 	Locked bool
@@ -162,7 +162,7 @@ func EvaluateTransition(s LifecycleSnapshot) Transition {
 		return Transition{Next: LifecycleActive}
 	}
 
-	// A locked skill is deliberately kept by its curator: hold its state,
+	// A locked skill is deliberately kept by an instance administrator: hold its state,
 	// the same way an assignment does, rather than aging it out.
 	if s.Locked {
 		switch s.Current {

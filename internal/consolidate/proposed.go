@@ -433,7 +433,7 @@ func newProposalID(now time.Time) string {
 	return now.UTC().Format("20060102150405") + "-" + hex.EncodeToString(r[:])
 }
 
-// skillLockedFn reports whether a slug names a skill locked by its curator, so
+// skillLockedFn reports whether a slug names a skill locked by an instance administrator, so
 // the memory-to-skill bridge never stages a rewrite of it (#5045). A blocked
 // promotion is journaled. Without a database it reports nothing locked; a
 // lookup error fails closed.
