@@ -21,6 +21,7 @@ apart and meet only when the live state is saved as a version.
 | Instance switch `CREWSHIP_ARTIFACTS_DESIGN_ENABLED` | unset | `true` enables Design for every workspace |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN` | off | `true` at build time shows the canvas in the Artifacts library |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | off | `true` at build time adds link editing and prototype playback ([Prototype links](#prototype-links)) |
+| Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_EXPORT` | off | `true` at build time adds the **Export HTML** button ([HTML export](#html-export)) |
 
 The Design flag is independent of `artifact_projects`. When it is off, every
 Design route answers `404`. The server also needs a `node` executable on its
@@ -143,6 +144,54 @@ which only hides the editor controls. A server without this field refuses any
 document that contains it, so deploy the server before turning on the UI
 variable.
 
+## HTML export
+
+`GET /api/v1/pages/{slug}/design/export?format=html&version=N` renders one
+immutable version as a single self-contained HTML file (#4449). The server
+generates it in Go, so the browser button and `crewship page design export`
+receive the same bytes. There is no separate server flag: the route follows the
+Design workspace flag like every other Design route, and
+`NEXT_PUBLIC_ARTIFACTS_DESIGN_EXPORT` only hides the button.
+
+- **Source.** Always a retained version, never the live document. `version`
+  selects it; without it, a caller who may read history gets the latest
+  version and a shared-only caller the shared version. The version's
+  `design.yjs` runs through the same engine validation as every read.
+- **Access.** The canonical Design read rule shared with `GET .../design` and
+  `GET .../design/versions`: current Edit authority (owner or Edit grant, with
+  a browser session or a CLI credential that also carries `pages:write`) or a
+  workspace OWNER/ADMIN (also with `pages:read` alone) reads any retained
+  version; everyone else the read admits, including Read and Comment audiences
+  and owners or Edit grantees narrowed to `pages:read`, only the shared
+  version. Every other case, including an unshared version, a missing version,
+  a non-member or another workspace, answers exactly as `GET .../design` does.
+  Authority is checked under the writer fence before and after rendering; a
+  workspace OWNER/ADMIN's export of a foreign Design is audited as
+  `design.workspace_admin_accessed` with operation `export`.
+- **Output.** One HTML document with a meta Content-Security-Policy
+  `default-src 'none'; style-src 'unsafe-inline'; img-src data:` and no script.
+  Every screen (`frame`) is a section `screen-1`, `screen-2`, … in document
+  order; each non-screen layer is drawn on its nearest screen with the same
+  geometry as the prototype player (positions summed through `parentId`, sizes
+  at least 1). Text and names are HTML-escaped; a `fill` that is not plain color
+  syntax falls back to the default paint. Only raster `data:image/(png|jpeg|webp|gif);base64`
+  images are embedded; other image sources are never fetched and appear as a
+  placeholder. A layer whose `linkTo` names an existing screen becomes
+  `<a href="#screen-N">`; a link to a missing screen is drawn with a dashed
+  outline and no target.
+- **Response.** `text/html; charset=utf-8`, `Content-Disposition: attachment;
+  filename="<slug>-design-v<N>.html"`, `X-Crewship-Design-Version: <N>`, and the
+  same policy plus `sandbox` as a response header. Apart from the Design's
+  current name in the title and heading, the output depends only on the
+  version, so the same version under the same name always exports to the same
+  bytes; renaming the Design changes only those two places.
+- **Limit.** An export over 8 MiB answers `413` with code
+  `design_export_limit`. Unknown parameters, a repeated parameter, a format
+  other than `html` or a malformed `version` answer `400`.
+
+Agents have no export tool: the agent MCP channel returns bounded JSON, and a
+run can already read any version it may see with `design_get`.
+
 ## Websocket
 
 `GET /api/v1/pages/{slug}/design/ws` upgrades to a websocket that speaks the
@@ -214,6 +263,7 @@ or unscoped full-role token does not confer Edit by itself.
 | Edit (live sync, operations, snapshot, restore) | Edit access to the Page, or an admitted agent run for this Page. |
 | Comment | Edit access, or an explicit Comment grant. |
 | Share a version | The Page owner. |
+| Export a version as HTML | Same as reading that version: Edit authority (a browser session, or a CLI credential that also carries `pages:write`) or a workspace OWNER/ADMIN (also with `pages:read` alone) for any version, otherwise only the shared version. Human authentication only. |
 
 Shared-only Read and Comment grantees receive the immutable shared snapshot
 and presence, not unsaved live canvas updates. Their version list and comments
@@ -255,6 +305,7 @@ The CLI equivalents are the `crewship page design` commands; see the
 | Operations request body | 4 MiB | `413` |
 | Comment request body (`POST .../design/comments`) | 20,000 bytes | `413` |
 | Create, snapshot, restore, share and agent request bodies | 8 KiB | `413` |
+| Exported HTML file | 8 MiB | `413` `design_export_limit` |
 | Version history | 256 MiB per Design | `413` "Design capacity is full; existing work is retained" |
 
 Validation errors answer `400` with "invalid Design update" and change nothing.
@@ -269,6 +320,7 @@ Page slug, or `@<page-id>`.
 | `POST /api/v1/pages/design` | Create (`slug`, `name`). `201`. |
 | `GET /api/v1/pages/{slug}/design` | Nodes, order, `can_edit`, `can_comment`, `version`, `latest_version`, `shared_version`, `actor` and `authority_revision`. Optional `version`. The version list is at `GET .../design/versions`. |
 | `GET /api/v1/pages/{slug}/design/versions` | Version list. |
+| `GET /api/v1/pages/{slug}/design/export` | One retained version as a self-contained HTML file. |
 | `GET /api/v1/pages/{slug}/design/ws` | Live websocket. |
 | `POST /api/v1/pages/{slug}/design/operations` | Apply operations and publish a version. |
 | `POST /api/v1/pages/{slug}/design/snapshots` | Save the live state as a version. |

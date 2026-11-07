@@ -136,6 +136,7 @@ The API applies these edits even when no browser has the canvas open.`, RunE: fu
 	agent.Flags().String("chat-id", "", "Existing private owner chat")
 	cmd.AddCommand(agent)
 	cmd.AddCommand(newPageDesignWatchCommand())
+	cmd.AddCommand(newPageDesignExportCommand())
 	return cmd
 }
 

@@ -535,8 +535,11 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 		if e := tx.QueryRowContext(ctx, `SELECT latest_version,shared_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&version, &shared); e != nil {
 			return e
 		}
-		writer, e := h.designAuthority(r, k, true)(ctx, tx)
-		canEdit = e == nil
+		writer, canEditNow, readLive, e := h.designHistoryReader(ctx, tx, r, k)
+		if e != nil {
+			return e
+		}
+		canEdit = canEditNow
 		// The same rule as ShareDesign: the write actor is the Page's owner.
 		var owner string
 		if e := tx.QueryRowContext(ctx, `SELECT coalesce(owner_user_id,'') FROM pages WHERE id=? AND workspace_id=?`, k.PageID, k.WorkspaceID).Scan(&owner); e != nil {
@@ -545,36 +548,13 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 		canShare = canEdit && owner != "" && writer == owner
 		_, commentErr := h.designCommentAuthority(r, k)(ctx, tx)
 		canComment = commentErr == nil
-		readLive := canEdit
 		if !readLive {
-			readLive, e = h.designManagerRead(ctx, tx, k)
-			if e != nil {
+			if selected, e = designReadableVersion(selected, version, shared, false); e != nil {
 				return e
 			}
-		}
-		if !readLive {
-			if shared < 1 || selected > 0 && selected != shared {
-				return artifacts.ErrVersionNotFound
-			}
-			selected = shared
 		}
 		if selected > 0 {
-			if !readLive && selected != shared {
-				return artifacts.ErrVersionNotFound
-			}
-			var raw string
-			if e = tx.QueryRowContext(ctx, `SELECT manifest_json FROM artifact_versions WHERE workspace_id=? AND page_id=? AND version=?`, k.WorkspaceID, k.PageID, selected).Scan(&raw); e != nil {
-				return e
-			}
-			var m struct {
-				Files map[string]struct {
-					Hash string `json:"hash"`
-				} `json:"files"`
-			}
-			if e = json.Unmarshal([]byte(raw), &m); e != nil {
-				return e
-			}
-			if e = tx.QueryRowContext(ctx, `SELECT content FROM artifact_version_blobs WHERE workspace_id=? AND page_id=? AND hash=?`, k.WorkspaceID, k.PageID, m.Files["design.yjs"].Hash).Scan(&state); e != nil {
+			if state, e = designVersionState(ctx, tx, k, selected); e != nil {
 				return e
 			}
 			version = selected
@@ -705,13 +685,9 @@ func (h *PageHandler) DesignVersions(w http.ResponseWriter, r *http.Request) {
 		if e != nil {
 			return "", artifacts.VersionSelection{}, e
 		}
-		_, writeErr := h.designAuthority(r, k, true)(ctx, tx)
-		readLive := writeErr == nil
-		if !readLive {
-			readLive, e = h.designManagerRead(ctx, tx, k)
-			if e != nil {
-				return "", artifacts.VersionSelection{}, e
-			}
+		_, _, readLive, e := h.designHistoryReader(ctx, tx, r, k)
+		if e != nil {
+			return "", artifacts.VersionSelection{}, e
 		}
 		return actor, artifacts.VersionSelection{SharedOnly: !readLive, IncludeHistory: readLive}, nil
 	})
