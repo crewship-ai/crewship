@@ -9,7 +9,7 @@
 // through the editor's lease bar on a deployed instance with native bundles.
 import { loginStorageState } from "./auth"
 import { captureAdmission, isCraft, nativeProfile, PEER_NAME, peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
-import { APPLICATIONS, NativePage, sessionUserId, type Admission, type LeaseView } from "./craft-lease/native"
+import { APPLICATIONS, markedDocument, NativePage, sessionUserId, type Admission, type LeaseView } from "./craft-lease/native"
 import { headText, inspectDrafts, placeCaret, newTyping, typedMarkers, typeLines, waitForDraftOffer } from "./craft-session/draft"
 import { checkDraftCopies, checkNoLines, lineLedger, type LineCheck } from "./craft-session/lines"
 import * as editor from "./drafts-crash/native"
@@ -77,15 +77,23 @@ for (const { application, label } of APPLICATIONS) {
 
           // The holder saves; a non-holder save under the holder's generation is refused.
           const v1 = await doc.document(request, owner)
-          const bytes = Buffer.from(v1.bytes, "base64")
-          const ownerSave = await doc.save(request, owner, { generation: gOwner!, baseVersion: v1.version, enginePin: v1.enginePin, bytes, editorRevision: `prd-owner-${Date.now()}` })
+          // Each write carries its own content: an identical save at the head
+          // creates no version (#5075), and a fenced write must be one that
+          // would otherwise have counted.
+          const content = (who: string) => markedDocument(application, `PRD lease ${who} ${Date.now()}`)
+          const ownerBytes = content("owner")
+          expect(ownerBytes.toString("base64"), "the holder's save changes the content").not.toBe(v1.bytes)
+          const ownerSave = await doc.save(request, owner, { generation: gOwner!, baseVersion: v1.version, enginePin: v1.enginePin, bytes: ownerBytes, editorRevision: `prd-owner-${Date.now()}` })
           expect(ownerSave.status(), "the holder saves").toBe(200)
           const v2 = (await ownerSave.json()) as { version: string; phase: string }
           expect(v2.phase).toBe("committed")
           expect(BigInt(v2.version)).toBeGreaterThan(BigInt(v1.version))
-          const intruder = await doc.save(peerCtx, other, { generation: gOwner!, baseVersion: v2.version, enginePin: v1.enginePin, bytes, editorRevision: `prd-intruder-${Date.now()}` })
+          expect((await doc.document(request, owner)).bytes, "the new version holds the holder's content").toBe(ownerBytes.toString("base64"))
+          const intruder = await doc.save(peerCtx, other, { generation: gOwner!, baseVersion: v2.version, enginePin: v1.enginePin, bytes: content("intruder"), editorRevision: `prd-intruder-${Date.now()}` })
           expect(intruder.status(), "a non-holder cannot save under the holder's generation").toBe(409)
-          expect((await doc.document(peerCtx, other)).version).toBe(v2.version)
+          const afterIntruder = await doc.document(peerCtx, other)
+          expect(afterIntruder.version).toBe(v2.version)
+          expect(afterIntruder.bytes, "the refused write changed nothing").toBe(ownerBytes.toString("base64"))
 
           // Request and handoff.
           const requested = await doc.leaseOp(peerCtx, other, "request-handoff")
@@ -113,7 +121,7 @@ for (const { application, label } of APPLICATIONS) {
 
           // The retired generation is fenced: save, renew and release all 409, nothing changes.
           const head = await doc.document(peerCtx, other)
-          const stale = await doc.save(request, owner, { generation: gOwner!, baseVersion: head.version, enginePin: head.enginePin, bytes, editorRevision: `prd-stale-${Date.now()}` })
+          const stale = await doc.save(request, owner, { generation: gOwner!, baseVersion: head.version, enginePin: head.enginePin, bytes: content("stale"), editorRevision: `prd-stale-${Date.now()}` })
           expect(stale.status(), "stale-generation save").toBe(409)
           const staleRenew = await doc.leaseOp(request, owner, "renew", { generation: gOwner! })
           expect(staleRenew.status(), "stale-generation renew").toBe(409)
@@ -127,10 +135,12 @@ for (const { application, label } of APPLICATIONS) {
           log.stale = { save: stale.status(), renew: staleRenew.status(), release: staleRelease.status(), reacquire: ownerReacquire.status(), versionUnchanged: unchanged.version }
 
           // The new holder saves and releases; the document is free again.
-          const peerSave = await doc.save(peerCtx, other, { generation: gPeer!, baseVersion: head.version, enginePin: head.enginePin, bytes, editorRevision: `prd-peer-${Date.now()}` })
+          const peerBytes = content("peer")
+          const peerSave = await doc.save(peerCtx, other, { generation: gPeer!, baseVersion: head.version, enginePin: head.enginePin, bytes: peerBytes, editorRevision: `prd-peer-${Date.now()}` })
           expect(peerSave.status(), "the new holder saves").toBe(200)
           const v3 = (await peerSave.json()) as { version: string }
           expect(BigInt(v3.version)).toBeGreaterThan(BigInt(head.version))
+          expect((await doc.document(peerCtx, other)).bytes, "the new holder's version holds its content").toBe(peerBytes.toString("base64"))
           const released = await doc.leaseOp(peerCtx, other, "release", { generation: gPeer! })
           expect(released.status()).toBe(200)
           expect(((await released.json()) as LeaseView).holder).toBeNull()

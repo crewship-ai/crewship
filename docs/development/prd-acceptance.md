@@ -220,8 +220,10 @@ release and report, and the RC gate does not count them.
   the only way to a conflict is a stale live canvas. Yjs picks the surviving
   text by client order, so the row checks the notice whichever side won.
 - `role.*.revoke-draft`, `role.project.revoke-read-draft`: the right goes with
-  unsaved work open. The server takes nothing, the work stays visible, and it
-  returns with the right. When the read right goes too, the page has to say the
+  unsaved work open. The server takes nothing, the work is kept, and it
+  returns with the right. A Project source draft is kept in the browser but
+  offered to nobody while the write right is gone, in the open tab as after a
+  reload: an open tab is no right of its own (#5073). When the read right goes too, the page has to say the
   draft was deleted: the row proves its storage probe sees the draft first, then
   requires it gone from the screen and from IndexedDB and localStorage, and
   absent after the right returns.

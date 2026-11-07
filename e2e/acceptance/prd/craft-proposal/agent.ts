@@ -31,8 +31,11 @@ export async function openChat(api: APIRequestContext, agent: SeededAgent): Prom
 }
 
 /**
- * Sends the owner's instruction over the product WebSocket (as the chat UI
- * does) and returns the server-assigned message id the native task binds to.
+ * Records the owner's instruction over the product WebSocket the way the
+ * document's own start control does: an instruction-only send
+ * (`metadata.native_craft_instruction`), which starts no ordinary agent turn.
+ * Since #5043 (#5009) a native task binds only to such a message, so an
+ * ordinary chat turn is refused. Returns the server-assigned message id.
  */
 export async function sendInstruction(
   page: Page,
@@ -51,11 +54,15 @@ export async function sendInstruction(
         messageId?: string
         assistantSeen: boolean
         ackError: boolean
+        recorded: boolean
+        noReply: boolean
       }>((resolve, reject) => {
         let messageId: string | undefined
         let assistantSeen = false
         let settled = false
         let ackError = false
+        let recorded = false
+        let noReply = false
         const socket = new WebSocket(location.origin.replace(/^http/, "ws") + "/ws")
         const timer = setTimeout(() => finish(new Error("chat ack timeout")), 240_000)
         function finish(e?: Error) {
@@ -64,7 +71,7 @@ export async function sendInstruction(
           clearTimeout(timer)
           socket.close()
           if (e) reject(e)
-          else resolve({ messageId, assistantSeen, ackError })
+          else resolve({ messageId, assistantSeen, ackError, recorded, noReply })
         }
         socket.onopen = () => {
           socket.send(JSON.stringify({ type: "auth", token: ticket }))
@@ -76,7 +83,7 @@ export async function sendInstruction(
               payload: {
                 session_id: chatId,
                 content: instruction,
-                max_turns: 2,
+                metadata: { native_craft_instruction: true },
               },
             }),
           )
@@ -97,10 +104,13 @@ export async function sendInstruction(
           const e = (typeof f.payload === "string" ? JSON.parse(f.payload) : f.payload) as {
             type?: string
             content?: unknown
-            metadata?: { author_user_id?: string; message_id?: string }
+            metadata?: { author_user_id?: string; message_id?: string; native_craft_instruction?: boolean; no_reply?: boolean }
           } | null
           if (!e) return
-          if (e.type === "user_message" && e.content === instruction && e.metadata?.author_user_id === ownerUserId) messageId = e.metadata.message_id
+          if (e.type === "user_message" && e.content === instruction && e.metadata?.author_user_id === ownerUserId) {
+            messageId = e.metadata.message_id
+            recorded = e.metadata.native_craft_instruction === true
+          }
           if (e.type === "text" && typeof e.content === "string" && e.content.trim()) assistantSeen = true
           if (e.type === "error") {
             if (messageId) {
@@ -109,12 +119,18 @@ export async function sendInstruction(
             }
             return finish(new Error("chat run error"))
           }
-          if (e.type === "done" && messageId) finish()
+          if (e.type === "done" && messageId) {
+            noReply = e.metadata?.no_reply === true
+            finish()
+          }
         }
       }),
     { ticket, chatId, agentId: agent.id, instruction, ownerUserId },
   )
   expect(r.messageId, "the chat must echo the owner's message id").toBeTruthy()
+  expect(r.recorded, "the echo marks the message as a native Craft instruction").toBe(true)
+  expect(r.assistantSeen, "an instruction-only send starts no ordinary agent turn").toBe(false)
+  expect(r.noReply, "the send settles without an agent reply").toBe(true)
   return {
     messageId: r.messageId!,
     assistantSeen: r.assistantSeen,
