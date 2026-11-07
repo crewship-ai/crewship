@@ -54,7 +54,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pages"
@@ -290,7 +289,11 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 		}
 		panelJSON = string(encoded)
 	}
-	now := h.evaluator().Now().UTC().Format(time.RFC3339)
+	now, err := pageGrantIssuedAt(r.Context(), tx, h.evaluator().Now(), rec.ID, req.SubjectType, subjectID, req.Level, user.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "stamp page grant", err)
+		return
+	}
 
 	before, err := readPageGrantSubject(r.Context(), tx, rec.ID, "", "")
 	if err != nil {

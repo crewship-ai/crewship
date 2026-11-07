@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"reflect"
 	"sort"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 )
@@ -43,6 +44,25 @@ func (g pageGrantSnapshot) MarshalJSON() ([]byte, error) {
 		Panels  any `json:"panel_ids"`
 		Retired any `json:"retired_at,omitempty"`
 	}{fields(g), panels, retired})
+}
+
+// pageGrantIssuedAt stamps a new issuance. page_grant_retired_issuances names an
+// issuance by page, subject, level, issuer and granted_at, and granted_at keeps
+// whole seconds, so a reissue in the second of a retired issuance would be taken
+// for it at the next restore (#5069). It moves to the first free second instead,
+// inside the transaction that writes the grant.
+func pageGrantIssuedAt(ctx context.Context, tx *sql.Tx, at time.Time, page, kind, subject, level, issuer string) (string, error) {
+	for at = at.UTC(); ; at = at.Add(time.Second) {
+		stamp := at.Format(time.RFC3339)
+		var retired bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM page_grant_retired_issuances WHERE page_id=? AND subject_type=? AND subject_id=? AND level=? AND granted_by_user_id=? AND granted_at=?)`,
+			page, kind, subject, level, issuer, stamp).Scan(&retired); err != nil {
+			return "", err
+		}
+		if !retired {
+			return stamp, nil
+		}
+	}
 }
 
 func readPageGrantSubject(ctx context.Context, tx *sql.Tx, page, kind, subject string) ([]pageGrantSnapshot, error) {

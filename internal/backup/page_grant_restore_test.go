@@ -101,7 +101,7 @@ func TestRestoreKeepsPageGrantRetirement(t *testing.T) {
 		}},
 		{name: "retire, reissue, older restore", then: []string{
 			`UPDATE workspace_members SET role='ADMIN' WHERE id='grant-admin-SUFFIX'`,
-			`UPDATE page_grants SET retired_at=NULL,granted_at='2026-06-01T00:00:00Z' WHERE page_id='grant-page-SUFFIX'`,
+			`UPDATE page_grants SET retired_at=NULL,granted_at='2026-01-01T00:00:01Z' WHERE page_id='grant-page-SUFFIX'`,
 		}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -162,7 +162,7 @@ func TestRestoreKeepsPageGrantRetirement(t *testing.T) {
 		for _, step := range []string{
 			`UPDATE workspace_members SET role='VIEWER' WHERE id='grant-admin-gr-new'`,
 			`UPDATE workspace_members SET role='ADMIN' WHERE id='grant-admin-gr-new'`,
-			`UPDATE page_grants SET retired_at=NULL,granted_at='2026-06-01T00:00:00Z' WHERE page_id='grant-page-gr-new'`,
+			`UPDATE page_grants SET retired_at=NULL,granted_at='2026-01-01T00:00:01Z' WHERE page_id='grant-page-gr-new'`,
 		} {
 			if _, err := db.Exec(step); err != nil {
 				t.Fatal(err)

@@ -154,7 +154,11 @@ func (h *gridcraftHTTP) share(w http.ResponseWriter, r *http.Request) {
 		gridcraftError(w, err)
 		return
 	}
-	now := h.pages.evaluator().Now().UTC().Format(time.RFC3339)
+	now, err := pageGrantIssuedAt(ctx, tx, h.pages.evaluator().Now(), rec.ID, pageSubjectUser, editorID, pageGrantWrite, user.ID)
+	if err != nil {
+		gridcraftError(w, err)
+		return
+	}
 	if err = execOneRow(ctx, tx, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,panel_ids,granted_by_user_id,granted_at) VALUES(?,?,?,?,NULL,?,?)
 ON CONFLICT(page_id,subject_type,subject_id,level) DO UPDATE SET panel_ids=NULL,granted_by_user_id=excluded.granted_by_user_id,granted_at=excluded.granted_at,retired_at=NULL`, rec.ID, pageSubjectUser, editorID, pageGrantWrite, user.ID, now); err != nil {
 		gridcraftError(w, err)
