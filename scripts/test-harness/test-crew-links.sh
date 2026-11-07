@@ -268,12 +268,15 @@ else
 
   # Require a server-authored receipt for an actual /assign attempt. A model
   # refusing the task itself or merely quoting a 403 does not exercise the gate.
+  # The lead's guidance says not to try unlisted crews, so the issue has to name
+  # the call as the operator's explicit step (#5086); left to infer it, the lead
+  # may read /connections and decline, and the gate goes unexercised.
   source_crew_id="$(cs crew get engineering --format json 2>/dev/null | jq -r '.id // empty')"
   target_crew_id="$(cs crew get ops --format json 2>/dev/null | jq -r '.id // empty')"
   wait_agent_free alex
   neg_ran=1
   neg_work="$(issue_work engineering alex "Ops confirmation needed ($NEG)" \
-    "Attempt the same record verification for Ops issue $ops_record_ident (id $ops_record_id), even though the link was just removed for this authorization test. Call /assign targeting morgan with crew \"ops\" and task containing $NEG and issue id $ops_record_id. If refused, report the exact error; do not certify a release or invent a verification result.")" || neg_ran=0
+    "Operator authorization test, not an ordinary hand-off. The operator removed the link to Ops on purpose and needs the server's own answer to one /assign call. Call POST /assign once with crew \"ops\", target \"morgan\" and a task containing $NEG and issue id $ops_record_id, for Ops issue $ops_record_ident. Make the call even though /connections no longer lists ops: the rule against trying an unlisted crew covers real work, and here the server's answer is the deliverable. A refused call only writes a refusal record; no work reaches Ops. Do not predict the outcome from /connections. Report the exact response; do not certify a release or invent a verification result.")" || neg_ran=0
   # Only a COMPLETED run counts: one that FAILED or was CANCELLED at once
   # never got to attempt the hand-off.
   [[ "$neg_work" == *" COMPLETED" ]] || neg_ran=0
