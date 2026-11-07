@@ -59,6 +59,7 @@ export default class PrdAcceptanceReporter implements Reporter {
         test: test.title,
         result: status,
         appSha: run?.appSha ?? "unknown",
+        runId: run?.runId ?? null,
         evidence: evidenceFiles[0] ?? null,
         evidenceFiles,
         notes,

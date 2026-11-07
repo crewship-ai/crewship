@@ -3,7 +3,7 @@ import { createLocalDraftCipher, isSealedLocalDraft, LocalDraftProtectionError, 
 
 /** The raw IDB layer keeps its locking and strict transactions; only encrypted
  * document payloads cross that boundary in production. */
-export async function openProtectedDocumentDrafts(human: string, workspace: string, page: string, options?: { maxDraftBytes?: number; requireExclusive?: boolean }): Promise<DocumentDraftStore> {
+export async function openProtectedDocumentDrafts(human: string, workspace: string, page: string, options?: { maxDraftBytes?: number; requireExclusive?: boolean; signal?: AbortSignal }): Promise<DocumentDraftStore> {
   const scope = { human, workspace, page }
   const limit = options?.maxDraftBytes ?? 4 * 1024 * 1024
   // Acquire custody before checking/erasing recovery data. No content leaves
@@ -18,10 +18,11 @@ export async function openProtectedDocumentDrafts(human: string, workspace: stri
     finally { closeRaw() }
     throw error
   }
-  const cipher = await createLocalDraftCipher(scope).catch(async error => {
+  const cipher = await createLocalDraftCipher(scope, { signal: options?.signal }).catch(async error => {
     if (error instanceof LocalDraftReadRevoked) return purgeAndDeny(error)
     closeRaw(); throw error
   })
+  if (options?.signal?.aborted) { cipher.close(); closeRaw(); throw new LocalDraftProtectionError("Private draft storage open was abandoned.") }
   const purpose = (draft: DocumentDraft) => JSON.stringify(["document", draft.id, draft.schema, draft.epoch])
   const close = () => { cipher.close(); closeRaw() }
   const protect = async (draft: DocumentDraft) => {

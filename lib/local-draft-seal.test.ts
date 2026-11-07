@@ -78,3 +78,19 @@ it("refuses a tagged record downgraded to an untagged format", async () => {
     await expect(a.open(forged, "comment")).rejects.toThrow()
   }
 })
+
+it("an abandoned construction aborts its key request and yields no cipher (#5104)", async () => {
+  let seen: AbortSignal | undefined
+  server.send.mockImplementationOnce((_url: string, init: RequestInit) => { seen = init.signal ?? undefined; return new Promise((_, reject) => init.signal?.addEventListener("abort", () => reject(new DOMException("aborted", "AbortError")))) })
+  const caller = new AbortController(), pending = createLocalDraftCipher(scope, { signal: caller.signal })
+  await vi.waitFor(() => expect(seen).toBeDefined())
+  caller.abort()
+  await expect(pending).rejects.toBeDefined()
+  expect(seen!.aborted).toBe(true)
+  await expect(createLocalDraftCipher(scope, { signal: caller.signal })).rejects.toBeDefined()
+})
+it("a cipher already returned is not closed by a later abort of its construction signal (#5104)", async () => {
+  const caller = new AbortController(), cipher = await createLocalDraftCipher(scope, { signal: caller.signal })
+  caller.abort()
+  await expect(cipher.seal("text", "source")).resolves.toBeTypeOf("string")
+})

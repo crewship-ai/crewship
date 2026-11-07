@@ -53,9 +53,12 @@ function boundDraftTransaction(tx: IDBTransaction, complete: () => void, reject:
   return abort
 }
 
-export async function openDocumentDrafts(human: string, workspace: string, page: string, options?: { maxDraftBytes?: number; requireExclusive?: boolean }): Promise<DocumentDraftStore> {
+export async function openDocumentDrafts(human: string, workspace: string, page: string, options?: { maxDraftBytes?: number; requireExclusive?: boolean; signal?: AbortSignal }): Promise<DocumentDraftStore> {
   const maxDraftBytes = options?.maxDraftBytes ?? 4 * 1024 * 1024
   const requireExclusive = options?.requireExclusive === true
+  // A caller that gave up (#5104): stop waiting, release what this open holds.
+  const signal = options?.signal
+  if (signal?.aborted) throw new DocumentStorageError(message)
   if (!Number.isSafeInteger(maxDraftBytes) || maxDraftBytes < 1 || maxDraftBytes > 64 * 1024 * 1024) throw new DocumentStorageError(message)
   if (!human || !workspace || !page || typeof indexedDB === "undefined") throw new DocumentStorageError(message)
   const owner = JSON.stringify([human, workspace, page])
@@ -70,12 +73,15 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
     // new instance starts. Only a lock that stays held is another live tab.
     const wait = new AbortController()
     let accepting = true
-    const outcome = await new Promise<{ release: () => void } | "busy" | "none">(resolve => {
-      const finish = (value: { release: () => void } | "busy" | "none") => {
+    let onAbort = () => {}
+    const outcome = await new Promise<{ release: () => void } | "busy" | "none" | "aborted">(resolve => {
+      const finish = (value: { release: () => void } | "busy" | "none" | "aborted") => {
         if (!accepting) return
         accepting = false; clearTimeout(timer); resolve(value)
       }
       const timer = setTimeout(() => { finish(requireExclusive ? "none" : "busy"); wait.abort() }, STORAGE_LOCK_WAIT_MS)
+      onAbort = () => { finish("aborted"); wait.abort() }
+      signal?.addEventListener("abort", onAbort, { once: true })
       const refused = (cause: unknown) => {
         // A refused request (SecurityError, ...) means no lock is available, not that another tab holds one.
         finish(cause instanceof DOMException && cause.name === "AbortError" ? "busy" : "none")
@@ -89,14 +95,20 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
         }).catch(refused)
       } catch (cause) { refused(cause) }
     })
+    signal?.removeEventListener("abort", onAbort)
+    if (outcome === "aborted") throw new DocumentStorageError(message)
     if (outcome === "busy") throw new DocumentStorageBusy("Another tab is editing this document; its local draft is not available here.")
     if (outcome !== "none") releaseLock = outcome.release
     else if (requireExclusive) throw new DocumentStorageError(message)
   }
+  if (signal?.aborted) { releaseLock?.(); throw new DocumentStorageError(message) }
+  let dropOpen = () => {}
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
     let settled = false
     const timer = setTimeout(() => { settled = true; reject(new DocumentStorageError(message)) }, STORAGE_OPEN_TIMEOUT_MS)
     const fail = () => { if (settled) return; settled = true; clearTimeout(timer); reject(new DocumentStorageError(message)) }
+    dropOpen = fail
+    signal?.addEventListener("abort", fail, { once: true })
     try {
       const request = indexedDB.open("crewship-document-drafts", 1)
       request.onupgradeneeded = () => request.result.createObjectStore("drafts", { keyPath: "key" })
@@ -109,6 +121,8 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
       }
     } catch { fail() }
   }).catch(() => { releaseLock?.(); throw new DocumentStorageError(message) })
+    .finally(() => signal?.removeEventListener("abort", dropOpen))
+  if (signal?.aborted) { db.close(); releaseLock?.(); throw new DocumentStorageError(message) }
   db.onversionchange = () => db.close()
   const keys = new Map<string, [string, string]>()
   function transaction<T>(mode: IDBTransactionMode, action: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
