@@ -3,7 +3,11 @@
 // the broadcast, or die. So the confirmation lives beside the rows, in the same
 // object store, where a retiring editor's write reads it in its own transaction.
 // A reserved row needs no schema version, which open tabs would block.
+// That store can refuse the write while still taking a holder's a moment later, so
+// the same confirmation goes to local storage first, which a final write and every
+// sweep read too, and leaves it once the row exists.
 const OWNER = "sign-out"
+const PENDING = "crewship.sign-out-intent:"
 const OPEN_TIMEOUT_MS = 2_000
 export const signOutRowKey = (human: string): [string, string] => [OWNER, human]
 export const isSignOutRow = (owner: unknown) => owner === OWNER
@@ -31,13 +35,56 @@ function withDrafts(action: (store: IDBObjectStore) => void): Promise<void> {
   })
 }
 
-/** Records, durably, that this person confirmed erasing these chains. Later
- * sign-outs add to it. Written after the server acknowledged, before any cleanup. */
-export function recordSignOut(human: string, roots: string[]): Promise<void> {
+// One key per confirmation, never rewritten: a transfer removes the key it read, so
+// no check-then-remove can erase a confirmation another tab adds meanwhile.
+interface Pending { human: string; at: number; roots: string[] }
+function readPending(key: string): Pending | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(key) ?? "null")
+    return value && typeof value.human === "string" && typeof value.at === "number" && Array.isArray(value.roots) ? value : null
+  } catch { return null }
+}
+function pendingKeys(): string[] {
+  try { return Object.keys(localStorage).filter(name => name.startsWith(PENDING)) } catch { return [] }
+}
+function keepPending(pending: Pending): string {
+  const key = `${PENDING}${pending.at}-${Math.random()}`
+  try { localStorage.setItem(key, JSON.stringify(pending)) } catch { /* The row is then the only record, as it was. */ }
+  return key
+}
+function dropPending(key: string) {
+  try { localStorage.removeItem(key) } catch { /* It stays and is applied again. */ }
+}
+/** Chains this person confirmed erasing whose row is not in the store yet. */
+export function pendingSignOutRoots(human: string): string[] {
+  return [...new Set(pendingKeys().map(readPending).flatMap(pending => pending?.human === human ? pending.roots : []))]
+}
+
+function writeIntent(human: string, at: number, roots: string[]): Promise<void> {
   return withDrafts(store => {
     const key = signOutRowKey(human), existing = store.get(key)
-    existing.onsuccess = () => { store.put({ key, at: Date.now(), roots: [...new Set([...(existing.result?.roots ?? []), ...roots])] }) }
+    existing.onsuccess = () => { store.put({ key, at: Math.max(at, existing.result?.at ?? 0), roots: [...new Set([...(existing.result?.roots ?? []), ...roots])] }) }
   })
+}
+
+/** Records, durably, that this person confirmed erasing these chains. Later
+ * sign-outs add to it. Written after the server acknowledged, before any cleanup. */
+export async function recordSignOut(human: string, roots: string[]): Promise<void> {
+  const at = Date.now(), key = keepPending({ human, at, roots })
+  await writeIntent(human, at, roots)
+  dropPending(key)
+  // An earlier confirmation may never have reached the store.
+  await storePending()
+}
+
+/** A confirmation still waiting for the store gets there before any sweep reads it. */
+async function storePending(): Promise<void> {
+  for (const key of pendingKeys()) {
+    const pending = readPending(key)
+    if (!pending) continue
+    await writeIntent(pending.human, pending.at, pending.roots)
+    dropPending(key)
+  }
 }
 
 function sweep(store: IDBObjectStore, done: () => void) {
@@ -61,13 +108,15 @@ function sweep(store: IDBObjectStore, done: () => void) {
 /** Erases every row in a confirmed chain, for every recorded person. It never
  * clears an intent: no mount or session answer can know that no tab of theirs is
  * still retiring, and a root names one chain, so keeping it costs nothing. */
-export function sweepSignOuts(): Promise<void> {
+export async function sweepSignOuts(): Promise<void> {
+  await storePending().catch(() => {})
   return withDrafts(store => sweep(store, () => {}))
 }
 
 /** After a sign-in the server accepted: sweeps, then ends this person's intent if
  * it is older than that request. A later sign-out's intent outlives this answer. */
-export function clearSignOut(human: string, signInStarted: number): Promise<void> {
+export async function clearSignOut(human: string, signInStarted: number): Promise<void> {
+  await storePending().catch(() => {})
   return withDrafts(store => sweep(store, () => {
     const key = signOutRowKey(human), intent = store.get(key)
     intent.onsuccess = () => { if (intent.result && intent.result.at < signInStarted) store.delete(key) }
