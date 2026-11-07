@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import {flushSync} from "react-dom"
 import {registerDocumentDraftWriter} from "@/lib/document-queue"
 import {Button} from "@/components/ui/button"
 import {apiFetch} from "@/lib/api-fetch"
@@ -35,6 +36,10 @@ function leaseView(raw:unknown):Lease {
 }
 /** How long a lapsed cached lease may wait for the server's confirmation before write is retired. */
 const RECHECK_MS=5_000
+// A return read that never settles is given up, so the editor is not left blank for good.
+const RETURN_READ_DEADLINE_MS=10_000
+/** A return's check is usually over before anyone could read this. */
+const ACCESS_NOTICE_MS=1_000
 function holds(view:Lease,generation?:string):boolean{return view.can_edit===true&&view.mine&&view.can_write&&view.generation!==null&&(!generation||view.generation===generation)}
 function owns(view:Lease,generation?:string):boolean{return holds(view,generation)&&typeof view.expires_at==='string'&&Date.parse(view.expires_at)>Date.now()}
 /** The server selects the approved bundle. No query, credentials or alternative executable path is accepted. */
@@ -90,7 +95,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
  const scopeKey=JSON.stringify([humanId,workspaceId,pageId])
  const [stateScope,setStateScope]=React.useState(scopeKey)
  const [readVerified,setReadVerified]=React.useState(false),[offerWithdrawn,setOfferWithdrawn]=React.useState(false)
- const [retainedBuffer,setRetainedBuffer]=React.useState(false),[authEnded,setAuthEnded]=React.useState(false)
+ const [retainedBuffer,setRetainedBuffer]=React.useState(false),[authEnded,setAuthEnded]=React.useState(false),[accessCheck,setAccessCheck]=React.useState(false)
  const retryRead=React.useRef<()=>void>(()=>{})
  const copyRecovery=React.useRef<(scope:string,draft:NativeDraft)=>void>(()=>{})
  const publishPreview=React.useRef<()=>void>(()=>{}),[publishedVersion,setPublishedVersion]=React.useState<string>()
@@ -112,7 +117,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
  useLeaveGuard(dirty)
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
-  setOfferWithdrawn(false);setStateScope(scopeKey);setReadVerified(false);setRetainedBuffer(false);setAuthEnded(false);setView(vacant);setRecoveries([]);setComparison(undefined);setProposals([]);setQuota(undefined);setApplicationId(undefined);setPublishedVersion(undefined);setHistoryKey(0);setSavedVersion(undefined);setDirty(false);setOwnsEditor(false);setError(undefined);setMismatch(undefined);setSaveTrace(undefined);setLabel('Připojuji…')
+  setOfferWithdrawn(false);setAccessCheck(false);setStateScope(scopeKey);setReadVerified(false);setRetainedBuffer(false);setAuthEnded(false);setView(vacant);setRecoveries([]);setComparison(undefined);setProposals([]);setQuota(undefined);setApplicationId(undefined);setPublishedVersion(undefined);setHistoryKey(0);setSavedVersion(undefined);setDirty(false);setOwnsEditor(false);setError(undefined);setMismatch(undefined);setSaveTrace(undefined);setLabel('Připojuji…')
   setBusy(true);setConnectionRetired(false);setHandoffRequest(undefined)
   const lifetime=new AbortController()
   // Replaced only by a fresh read admission after the server retires write (#4348).
@@ -135,12 +140,29 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   let dead=false,networkRetired=false,nativeFailed=false,sessionId='',current:Runtime|undefined,transition=false,viewNow=vacant,readerRefresh:{client:typeof client,done:Promise<void>}|undefined
   let privacyJournal:NativeDraftJournal|undefined,privacyRetirement:Promise<void>|undefined,readLossCheck:Promise<boolean>|undefined
   let offerCheck:AbortController|undefined,renewNow:()=>void=()=>{}
+  // The frame taken off screen by a return, until a read asked after that return.
+  let concealed:Runtime|undefined,accessNotice:ReturnType<typeof setTimeout>|undefined
   let reauthorize:ReturnType<typeof setInterval>|undefined,leaseWatch:ReturnType<typeof setInterval>|undefined,proposalWatch:ReturnType<typeof setInterval>|undefined,keptDraftWatch:ReturnType<typeof setInterval>|undefined
   // Every server confirmation of read, however it arrives, supersedes earlier proofs.
   const readLossAbort=new AbortController()
   const draftScope={human:humanId,workspace:workspaceId,page:pageId},readConfirmed=()=>confirmNativeRead(draftScope)
-  function readAccess(value:boolean){if(value){frameWithdrawn=false;readConfirmed();offerCheck?.abort();offerCheck=undefined;withdrawOffer(false)}readable=value;setReadVerified(value)}
+  // While a return waits for its read, an older answer grants nothing and cancels nothing.
+  function readAccess(value:boolean){if(value){if(!offerStale){frameWithdrawn=false;readConfirmed();reveal()}}else{clearTimeout(accessNotice);setAccessCheck(false)}readable=value;setReadVerified(value)}
   function withdrawOffer(value:boolean){offerStale=value;setOfferWithdrawn(value)}
+  // Opacity, not visibility: a hidden frame stops rendering (#5060). Neither inert nor
+  // blur: both drop the engine's focus inside its frame, no call brings that back, and
+  // inert does not even stop the keys. Nor read-only: that ends a cell being typed, and
+  // the keyboard with it until a click. So the engine keeps taking input, and what it
+  // takes stays out of the journal until the read answers: a loss of Edit keeps a capture
+  // from before the return, a confirmed read lets the typing carry on.
+  function conceal(r:Runtime){
+   concealed=r;r.frame.style.opacity='0';r.frame.style.pointerEvents='none';r.frame.tabIndex=-1;r.frame.setAttribute('aria-hidden','true')
+   r.coordinator?.hold()
+   clearTimeout(accessNotice);accessNotice=setTimeout(()=>{if(concealed===r)setAccessCheck(true)},ACCESS_NOTICE_MS)
+  }
+  // The same for an editor about to be captured: it still has to answer.
+  function unseen(r:Runtime){r.frame.style.visibility='';r.frame.style.opacity='0'}
+  function reveal(){const r=concealed;concealed=undefined;clearTimeout(accessNotice);setAccessCheck(false);if(!r?.ready)return;r.frame.style.opacity='';r.frame.removeAttribute('aria-hidden');if(!r.frame.hasAttribute('inert')){r.frame.style.pointerEvents='';r.frame.removeAttribute('tabindex')}r.coordinator?.release()}
   function offerRecoveries(rows:NativeRecovery[]){keptRecoveries=rows.length>0;setRecoveries(rows)}
   const live=(r:Runtime)=>!dead&&!lifetime.signal.aborted&&current===r&&!r.abort.signal.aborted
   const display=(r:Runtime)=>{
@@ -175,7 +197,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    finally{transition=false;if(!dead)setBusy(false)}
   })()}
   function freezeInput(r:Runtime){r.frame.setAttribute('inert','');r.frame.tabIndex=-1;r.frame.style.pointerEvents='none';r.frame.blur();mount.current?.focus();setBusy(true)}
-  function resumeViewing(r:Runtime){if(live(r)&&(r.nativeReadOnly||!r.blocked)){r.frame.removeAttribute('inert');r.frame.removeAttribute('tabindex');r.frame.style.pointerEvents=''}setBusy(false)}
+  function resumeViewing(r:Runtime){if(live(r)&&(r.nativeReadOnly||!r.blocked)){r.frame.removeAttribute('inert');if(concealed!==r){r.frame.removeAttribute('tabindex');r.frame.style.pointerEvents=''}}setBusy(false)}
   function detach(r:Runtime){r.abort.abort();r.port.close();r.frame.remove()}
   function armAdmissionDeadline(){
    const epoch=++admissionEpoch;initializing=true;readerRefreshNeeded=false;clearTimeout(admissionDeadline)
@@ -263,20 +285,28 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // Keeping a draft and offering it are separate decisions. An offer stands only on
   // an answer this mount got for this content, so a return withdraws it, then asks.
   function askContent(){
-   const own=client,check=offerCheck=new AbortController(),generation=checkGeneration,frozen=frameWithdrawn?current:undefined
+   const own=client,check=offerCheck=new AbortController(),generation=checkGeneration
    const stale=()=>generation!==checkGeneration||authSuspended
-   void own.read(AbortSignal.any([check.signal,lifetime.signal])).then(()=>{
-    if(stale()||offerCheck!==check||dead||client!==own)return
+   // An unclear answer leaves it sealed and asks again, without waiting for a renewal.
+   const again=()=>{if(offerStale)setTimeout(()=>{if(offerStale&&!offerCheck&&!dead&&!networkRetired&&!authSuspended)askContent()},RECHECK_MS)}
+   let deadline:ReturnType<typeof setTimeout>|undefined
+   const late=new Promise<never>((_,fail)=>{deadline=setTimeout(()=>{check.abort();fail(Error('native_read_deadline'))},RETURN_READ_DEADLINE_MS)})
+   void Promise.race([own.read(AbortSignal.any([check.signal,lifetime.signal])),late]).then(()=>{
+    if(stale()||offerCheck!==check)return
     offerCheck=undefined
-    if(!frozen){if(readable)withdrawOffer(false);return}
-    if(current!==frozen||!live(frozen)||metadataOnly||privacyRetirement)return
-    frameWithdrawn=false;frozen.frame.style.visibility='';readAccess(true)
+    if(dead)return
+    if(client!==own){again();return}
+    const frozen=frameWithdrawn?current:undefined
+    if(!frozen){withdrawOffer(false);if(readable)reveal();return}
+    if(!live(frozen)||metadataOnly||privacyRetirement)return
+    withdrawOffer(false);frozen.frame.style.visibility='';frozen.frame.style.opacity='';readAccess(true)
    }).catch((cause:unknown)=>{
     if(stale()||offerCheck!==check)return
     offerCheck=undefined
-    // An unclear answer leaves it sealed; the next renewal asks again.
-    if(!dead&&client===own&&cause instanceof Error&&cause.message==='native_private_read_refused'){frameWithdrawn=false;void reopenReadOnly().catch(()=>stop('Přístup editoru se nepotvrdil.'))}
-   })
+    // A refusal during an admission is answered once that admission has finished.
+    if(!dead&&client===own&&cause instanceof Error&&cause.message==='native_private_read_refused'&&(readable||!initializing)){frameWithdrawn=false;void reopenReadOnly().catch(()=>stop('Přístup editoru se nepotvrdil.'));return}
+    again()
+   }).finally(()=>clearTimeout(deadline))
   }
   // Only a read started after the latest return, with no suspension since, counts.
   function invalidateCheck(){checkGeneration++;offerCheck?.abort();offerCheck=undefined}
@@ -286,11 +316,16 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(dead)return
    const r=current
    invalidateCheck()
-   if((readable||frameWithdrawn)&&(r||keptRecoveries)){
+   // An admission in flight answers a question asked before the return.
+   const opening=initializing||readOpening||Boolean(readerRefresh)||Boolean(r&&!r.ready)
+   if(opening||(readable||frameWithdrawn)&&(r||keptRecoveries)){
     // A frozen frame holds what was never saved: it leaves now, and only the read
     // restores it. The buffer itself stays until read loss is proven.
     if(r?.blocked&&readable){frameWithdrawn=true;r.frame.style.visibility='hidden';readAccess(false)}
-    if(keptRecoveries)withdrawOffer(true)
+    // A live editor holds the same unsaved work, and the same read has to answer for it.
+    else if(r?.ready&&readable)conceal(r)
+    // The offer goes before the next paint too; the frame above already has.
+    flushSync(()=>withdrawOffer(true))
     askContent()
    }
    if(!networkRetired)renewNow()
@@ -358,10 +393,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    let port:NativeEditorPort
    try{port=createNativeEditorPort({applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,sessionId,baseVersion:snapshot.version,generation},requireAccessProtocol:true,
     onExport(file){
-     if(!r||!liveMount()||!r.ready||r.blocked||!readable||networkRetired)return
+     if(!r||!liveMount()||!r.ready||r.blocked||!readable||offerStale||networkRetired)return
      try{downloadNativeExport(file)}catch{setError('Export se nepodařilo stáhnout. Dokument zůstává otevřený.')}
     },
-    onChanged(){if(r&&liveMount()&&r.ready&&r.writable&&!r.blocked){r.edit++;r.ackedVersion=undefined;r.coordinator?.edited();display(r)}},
+    onChanged(revision){if(r&&liveMount()&&r.ready&&r.writable&&!r.blocked){r.edit++;r.ackedVersion=undefined;r.coordinator?.edited(revision);display(r)}},
     onSaveRequest(request){if(r&&liveMount()&&r.writable&&!r.blocked&&r.coordinator){r.ackedVersion=undefined;void r.coordinator.save(request.requestId).catch(()=>{if(r&&live(r)){if(request.requestId)r.port.saveFailed(request.requestId,'Uložení nebylo potvrzeno.');display(r)}})}},
     onError(){clearTimeout(timer);reject(Error('native_lifecycle_failure'));if(r&&liveMount())failNative(r,'Spojení s editorem skončilo. Poslední změny nejsou potvrzené; původní editor zůstává uzamčený.')},
     onReady(){if(!r||!liveMount())return;clearTimeout(timer);void(async()=>{
@@ -372,7 +407,10 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      await currentLease(admission,abort.signal)
      if(!r||!liveMount())throw Error('native_startup_canceled')
      r.mountedState=mounted?.nativeState;r.ready=true;setHistoryKey(n=>n+1)
-     frame.style.opacity='';frame.style.visibility='';frame.removeAttribute('inert');readAccess(true);setRetainedBuffer(false);display(r);resolve(r)
+     frame.style.visibility='';frame.removeAttribute('inert')
+     if(offerStale)conceal(r);else frame.style.opacity=''
+     readAccess(true);setRetainedBuffer(false);display(r);resolve(r)
+     if(offerStale&&!offerCheck)askContent()
     })().catch(()=>{reject(Error('native_bootstrap_failed'));if(liveMount())stop('Dokument nelze bezpečně otevřít.')})},
    })}catch(cause){finish();frame.remove();throw cause}
    r={enginePin:snapshot.enginePin,sessionId:admittedSession,port,frame,abort,version:snapshot.version,generation,ready:false,writable:false,nativeReadOnly:true,edit:0,blocked:false};current=r
@@ -436,7 +474,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   const backOnline=()=>{reconcile.current();checkOnReturn()}
   window.addEventListener('online',backOnline)
   // A frozen tab's timers stopped with it, so its return cannot wait for one.
-  const backVisible=()=>{if(document.visibilityState==='visible')checkOnReturn()}
+  const backVisible=()=>{if(document.visibilityState==='visible')checkOnReturn();else void current?.coordinator?.captureLocal()}
   document.addEventListener('visibilitychange',backVisible)
   window.addEventListener('pageshow',checkOnReturn)
   const windowMessage=(event:MessageEvent)=>{current?.port.handleWindowMessage(event)}
@@ -476,7 +514,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   async function suspendForAuth(){
    authSuspended=true;invalidateCheck();clearInterval(keptDraftWatch);readLossAbort.abort();setAuthEnded(true);readAccess(false);endDraftHold()
    const r=current
-   if(r){freezeInput(r);r.frame.style.visibility='hidden'}
+   if(r){freezeInput(r);unseen(r)}
    // Another retirement may already be capturing the only native buffer.
    // Wait for its result: suspension cannot silently succeed ahead of it.
    if(r?.retiring&&!r.retirementFinished){
@@ -486,7 +524,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(r?.blocked&&r.journal&&r.ready&&!dead){
     // Retry only a local recovery capture. The failed retirement never
     // released its frame/journal, and no save or custody action is replayed.
-    freezeInput(r)
+    freezeInput(r);unseen(r)
     const snapshot=await r.port.snapshot(r.abort.signal)
     const draft:NativeDraft={applicationId:sessionApplication!,enginePin:r.enginePin,sessionId:r.sessionId,generation:r.generation,baseVersion:r.receiptVersion??r.version,editorRevision:snapshot.editorRevision,bytes:snapshot.bytes.slice()}
     await r.port.validate(draft,r.abort.signal)
@@ -507,7 +545,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    // Its terminal failure must still hide the retained buffer and copy UI.
    if(dead||networkRetired&&!readOpening&&!nativeFailed)return
    readAccess(false)
-   if(current){freezeInput(current);current.frame.style.visibility='hidden'}
+   if(current){freezeInput(current);unseen(current)}
    proveReadLoss()
    readOpening=false;readOpeningAbort?.abort()
    networkRetired=true;setConnectionRetired(true);setError(message);clearInterval(reauthorize);clearInterval(leaseWatch)
@@ -517,6 +555,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(r&&(r.writable||r.retiring&&!r.retirementFinished)){
     if(!await retireWrite(r)){stop(message);return}
    }
+   if(current)current.frame.style.visibility='hidden'
    client.close()
    if(dead)return
    // A confirmed draft waits for read to be confirmed again, not for a reload.
@@ -539,7 +578,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    networkRetired=true;clearInterval(reauthorize);clearInterval(leaseWatch);viewNow=vacant;setView(vacant);setHandoffRequest(undefined);setOwnsEditor(false);dropPrivateViews()
    if(!metadataOnly)setError(message)
    const r=current
-   if(r){freezeInput(r);r.frame.style.visibility='hidden'}
+   if(r){freezeInput(r);unseen(r)}
    readAccess(false)
    if(r&&(r.writable||r.retiring&&!r.retirementFinished))await retireWrite(r)
    if(dead)return
@@ -580,7 +619,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      if(!valid()||current!==r)return
      await currentLease(admission,operation.signal);if(!valid()||current!==r)return
      // Keep input inert even if native read-only could not be confirmed.
-     r!.frame.style.opacity='';r!.frame.style.visibility='';readAccess(true);setRetainedBuffer(true)
+     if(offerStale){frameWithdrawn=true;if(!offerCheck)askContent()}
+     else{r!.frame.style.opacity='';r!.frame.style.visibility='';readAccess(true)}
+     setRetainedBuffer(true)
     }else{
      let snapshot:NativeDocumentSnapshot
      try{snapshot=await admission.read(operation.signal)}
@@ -714,6 +755,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      return acknowledgement
     },
    });r.coordinator=coordinator
+   if(concealed===r)coordinator.hold()
    freezeInput(r)
    if(await r.port.setReadOnly(false,r.abort.signal)!==false)throw Error('native_write_unconfirmed')
    if(!live(r))return
@@ -866,7 +908,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     readConfirmed();void observeLease(value,true).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Aktuální přístup nelze potvrdit.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})
    }).catch(()=>{if(!dead&&client===own&&metadataOnly){retryMetadata();return}if(!dead&&client===own)void retireConnection('Spojení přerušeno. Zápis není potvrzen.').catch(()=>stop('Přístup editoru se nepotvrdil.'))})
   }
-  return()=>{closed=true;clearTimeout(metadataRetry);clearInterval(keptDraftWatch);readLossAbort.abort();unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);document.removeEventListener('visibilitychange',backVisible);window.removeEventListener('pageshow',checkOnReturn);control.current=()=>{};retryRead.current=()=>{};copyRecovery.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen',true)}
+  return()=>{closed=true;clearTimeout(metadataRetry);clearTimeout(accessNotice);clearInterval(keptDraftWatch);readLossAbort.abort();unregisterPrivacy();window.removeEventListener('message',windowMessage);window.removeEventListener('online',backOnline);document.removeEventListener('visibilitychange',backVisible);window.removeEventListener('pageshow',checkOnReturn);control.current=()=>{};retryRead.current=()=>{};copyRecovery.current=()=>{};publishPreview.current=()=>{};history.current={load:async()=>null,loadVersion:async()=>{throw Error('native_editor_closed')},restore:()=>{}};stopAgent.current=()=>{};reconcile.current=()=>{};compare.current=()=>{};decide.current=()=>{};compareProposal.current=()=>{};downloadDraft.current=()=>{};stop('Editor uzavřen',true)}
  },[enabled,humanId,workspaceId,pageId,scopeKey])
  function copy(draft:NativeDraft){const blob=new Blob([new Uint8Array(draft.bytes)],{type:'application/json'}),url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=`${draft.applicationId}-recovery.json`;link.click();setTimeout(()=>URL.revokeObjectURL(url),0)}
  if(stateScope!==scopeKey)return <p role="status" className="p-6">Připojuji…</p>
@@ -892,6 +934,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   </div>)}
   {readVerified&&!offerWithdrawn&&recoveries.map((recovery,index)=><div key={index} className="flex gap-2 px-3 py-2"><span>Místní koncept · verze {recovery.draft.baseVersion}</span><Button variant="outline" onClick={()=>compare.current(recovery.draft,scopeKey)}>Porovnat</Button><Button variant="outline" onClick={()=>copyRecovery.current(scopeKey,recovery.draft)}>Kopie konceptu</Button></div>)}
   {readVerified&&!offerWithdrawn&&comparison&&<div className="grid gap-2 p-3 md:grid-cols-2"><p className="md:col-span-2">Serverová verze {comparison.version} a {comparison.draftLabel?.toLowerCase()??'místní koncept'}: {comparison.equal?'shodná data':'odlišná data'}. Nativní data jsou pouze pro čtení.</p><label>Serverová verze<textarea aria-label="Serverová verze" readOnly value={comparison.server} className="h-48 w-full font-mono text-xs"/><span className="break-all text-xs">SHA256 {comparison.serverHash}</span></label><label>{comparison.draftLabel??'Místní koncept'}<textarea aria-label={comparison.draftLabel??'Místní koncept'} readOnly value={comparison.draft} className="h-48 w-full font-mono text-xs"/><span className="break-all text-xs">SHA256 {comparison.draftHash}</span></label><Button variant="outline" onClick={()=>setComparison(undefined)}>Zavřít porovnání</Button></div>}
-  <div ref={mount} tabIndex={-1} className="relative min-h-0 flex-1" aria-busy={busy}/>
+  {accessCheck&&<p className="px-3 py-2 text-sm text-muted-foreground">Ověřuji přístup…</p>}
+  <div ref={mount} tabIndex={-1} className="relative min-h-0 flex-1" aria-busy={busy||accessCheck}/>
  </section>
 }

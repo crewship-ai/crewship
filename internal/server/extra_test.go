@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -161,6 +162,32 @@ func TestSecurityHeadersMiddleware(t *testing.T) {
 		if got != h.want {
 			t.Errorf("%s = %q, want %q", h.k, got, h.want)
 		}
+	}
+}
+
+// The SPA needs WebAssembly (syntax highlighting compiles Oniguruma), which only
+// 'wasm-unsafe-eval' has to allow. Plain 'unsafe-eval' would also let any
+// injected script run eval and new Function.
+func TestSecurityHeadersMiddleware_SPAScriptsCannotEval(t *testing.T) {
+	t.Parallel()
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	rec := httptest.NewRecorder()
+	securityHeadersMiddleware(inner).ServeHTTP(rec, httptest.NewRequest("GET", "/dashboard", nil))
+
+	var scriptSrc string
+	for _, directive := range strings.Split(rec.Header().Get("Content-Security-Policy"), ";") {
+		if d := strings.TrimSpace(directive); strings.HasPrefix(d, "script-src ") {
+			scriptSrc = d
+		}
+	}
+	sources := strings.Fields(scriptSrc)
+	if slices.Contains(sources, "'unsafe-eval'") {
+		t.Errorf("SPA script-src must not allow eval: %q", scriptSrc)
+	}
+	if !slices.Contains(sources, "'wasm-unsafe-eval'") {
+		t.Errorf("SPA script-src must allow WebAssembly compilation: %q", scriptSrc)
 	}
 }
 

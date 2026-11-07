@@ -378,6 +378,10 @@ func (m *craftNativeAgentManager) applyTool(ctx context.Context, e *craftNativeA
 		if !prior.attempted {
 			return zero, ErrCraftNativeAgentEngine
 		}
+		// A repeat of a no-op has no successor version to prove.
+		if prior.receipt != nil && prior.receipt.Unchanged {
+			return *prior.receipt, nil
+		}
 		receipt, err := store.ReconcileSnapshot(ctx, prior.lease, prior.base, prior.revision, prior.hash)
 		if err == nil {
 			prior.receipt = &receipt

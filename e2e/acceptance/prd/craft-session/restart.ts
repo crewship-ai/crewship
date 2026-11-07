@@ -18,6 +18,7 @@ import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as path from "node:path"
 import { request as playwrightRequest } from "@playwright/test"
+import { restartOutcome } from "./restart-outcome"
 
 export interface RestartRecord {
   command: string
@@ -26,6 +27,8 @@ export interface RestartRecord {
   tookMs: number
   uptimeBefore: number | null
   uptimeAfter: number
+  /** The restart control's complaint when it refused although the server did restart. */
+  controlRefused?: string
 }
 
 const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -59,18 +62,25 @@ export async function restartServer(origin: string, reason: string): Promise<Res
   const command = process.env.PRD_RESTART_COMMAND?.trim().split(/\s+/)
   const handshake = process.env.PRD_RESTART_HANDSHAKE?.trim()
   if (!command?.length && !handshake) throw new Error("PRD_RESTART_COMMAND or PRD_RESTART_HANDSHAKE is not set: the restart rows need a way to restart the server under test (for example PRD_RESTART_COMMAND='crew restart dev3')")
-  const uptimeBefore = await uptimeSeconds(origin)
+  // Taken before the command: without it no later measurement proves a new process.
+  let uptimeBefore: number | null = null
+  for (let i = 0; i < 6 && uptimeBefore === null; i++) {
+    if (i) await pause(5_000)
+    uptimeBefore = await uptimeSeconds(origin)
+  }
+  if (uptimeBefore === null) throw new Error("environment: no /healthz uptime before the restart, so no restart was attempted and it proves nothing")
   const label = command?.length ? command.join(" ") : `handshake ${handshake}`
   const note = process.env.PRD_RESTART_NOTE_FILE?.trim()
   if (note) fs.appendFileSync(note, `- ${new Date().toISOString()} restart (${label}): ${reason}\n`)
   const started = Date.now()
   const startedAt = new Date(started).toISOString()
+  let answer = "ok"
   if (command?.length) {
     try {
       execFileSync(command[0], command.slice(1), { stdio: ["ignore", "pipe", "pipe"], timeout: 5 * 60_000, encoding: "utf8" })
     } catch (err) {
       const e = err as { status?: number | null; stdout?: string; stderr?: string }
-      throw new Error(`${label} exited ${e.status ?? "abnormally"}: ${`${e.stdout ?? ""} ${e.stderr ?? ""}`.replace(/\s+/g, " ").trim().slice(0, 800)}`)
+      answer = `${label} exited ${e.status ?? "abnormally"}: ${`${e.stdout ?? ""} ${e.stderr ?? ""}`.replace(/\s+/g, " ").trim().slice(0, 800)}`
     }
   } else {
     const request = path.join(handshake!, "restart.request")
@@ -82,17 +92,18 @@ export async function restartServer(origin: string, reason: string): Promise<Res
       if (Date.now() > waitUntil) throw new Error(`nobody answered ${request} within 10 minutes (is the restart watcher running?)`)
       await pause(500)
     }
-    const answer = fs.readFileSync(done, "utf8").trim()
+    answer = fs.readFileSync(done, "utf8").trim()
     fs.rmSync(done, { force: true })
-    if (!answer.startsWith("ok")) throw new Error(`restart handshake answered: ${answer.slice(0, 400)}`)
   }
   const deadline = Date.now() + 3 * 60_000
   for (;;) {
     const up = await uptimeSeconds(origin)
-    if (up !== null && (uptimeBefore === null || up < uptimeBefore)) {
-      return { command: label, startedAt, backAt: new Date().toISOString(), tookMs: Date.now() - started, uptimeBefore, uptimeAfter: up }
+    const outcome = restartOutcome(answer, uptimeBefore, up)
+    if (outcome.kind === "restarted") {
+      return { command: label, startedAt, backAt: new Date().toISOString(), tookMs: Date.now() - started, uptimeBefore, uptimeAfter: up!, ...(outcome.refusedBy ? { controlRefused: outcome.refusedBy } : {}) }
     }
-    if (Date.now() > deadline) throw new Error("no restarted server answered /healthz within 3 minutes")
+    if (outcome.kind === "refused") throw new Error(`environment: the restart was refused and no new server process is proven, nothing about the product was tested: ${outcome.reason}`)
+    if (Date.now() > deadline) throw new Error(`no restarted server answered /healthz within 3 minutes; control answered: ${answer.slice(0, 400)}`)
     await pause(1_000)
   }
 }

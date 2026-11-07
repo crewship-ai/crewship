@@ -12,7 +12,7 @@ let forbiddenRequests = 0, runtimeURL = ''
 const server = createServer((req, res) => {
   if (req.url === '/probe') forbiddenRequests++
   res.setHeader('Content-Type', 'text/html')
-  res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src ${new URL(runtimeURL).origin}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`)
+  res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src ${new URL(runtimeURL).origin}; frame-ancestors 'none'; base-uri 'self'; form-action 'self'`)
   res.setHeader('Cross-Origin-Embedder-Policy', 'credentialless')
   res.end('<!doctype html><html><body><h1>Studio host</h1></body></html>')
 })

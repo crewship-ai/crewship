@@ -215,8 +215,13 @@ func TestLocalDraftKeyOperationalFailureNeverProvesRevocation(t *testing.T) {
 		t.Fatal(w.Code, w.Body)
 	}
 	t.Run("ACL storage fault retains draft", func(t *testing.T) {
-		mustExec(t, f.h.db, `ALTER TABLE page_grants RENAME TO page_grants_broken`)
-		defer mustExec(t, f.h.db, `ALTER TABLE page_grants_broken RENAME TO page_grants`)
+		// A renamed table would carry the view along, so the reader's view goes.
+		var view string
+		if err := f.h.db.QueryRow(`SELECT sql FROM sqlite_master WHERE type='view' AND name='page_grant_verdicts'`).Scan(&view); err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, f.h.db, `DROP VIEW page_grant_verdicts`)
+		defer mustExec(t, f.h.db, view)
 		if w := call("recovery-reader"); w.Code < 500 || strings.Contains(w.Body.String(), "draft_read_revoked") {
 			t.Fatal("storage error authorized deleting the draft", w.Code, w.Body)
 		}

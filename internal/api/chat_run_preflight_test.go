@@ -140,3 +140,35 @@ func TestChatRunPreflightReadsPayerBudgetWithoutEffectsAndRevokes(t *testing.T) 
 		t.Fatalf("revoked read leaked: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestChatRunPreflightAnswersForASoloAgent(t *testing.T) {
+	db, user, ws, _, agent := acrSeed(t, "CLAUDE_CODE", "ANTHROPIC", "claude-sonnet-4-6")
+	execOrFatal(t, db, `UPDATE agents SET crew_id=NULL WHERE id=?`, agent)
+	execOrFatal(t, db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('solo-chat',?,?,?,'private')`, ws, agent, user)
+	r := &Router{db: db, logger: newTestLogger()}
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/", nil), user, ws, "OWNER")
+	req.SetPathValue("chatId", "solo-chat")
+	rr := httptest.NewRecorder()
+	r.chatRunPreflight(rr, req)
+	var got chatRunPreflightResponse
+	if rr.Code != 200 || json.Unmarshal(rr.Body.Bytes(), &got) != nil {
+		t.Fatalf("preflight %d %s", rr.Code, rr.Body.String())
+	}
+	if got.AgentID != agent || got.Gate.ConfiguredMode != "none" || got.Gate.PredictedMode != "none" || got.Gate.Blocking {
+		t.Fatalf("solo agent runs with no gate: %+v", got)
+	}
+}
+
+func TestChatRunPreflightHidesAChatOfADeletedCrew(t *testing.T) {
+	db, user, ws, crew, agent := acrSeed(t, "CLAUDE_CODE", "ANTHROPIC", "claude-sonnet-4-6")
+	execOrFatal(t, db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES('gone-crew-chat',?,?,?,'private')`, ws, agent, user)
+	execOrFatal(t, db, `UPDATE crews SET deleted_at=CURRENT_TIMESTAMP WHERE id=?`, crew)
+	r := &Router{db: db, logger: newTestLogger()}
+	req := withWorkspaceUser(httptest.NewRequest("GET", "/", nil), user, ws, "OWNER")
+	req.SetPathValue("chatId", "gone-crew-chat")
+	rr := httptest.NewRecorder()
+	r.chatRunPreflight(rr, req)
+	if rr.Code != 404 {
+		t.Fatalf("deleted crew: %d %s", rr.Code, rr.Body.String())
+	}
+}

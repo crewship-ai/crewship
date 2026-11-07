@@ -498,8 +498,7 @@ class AgentFlow {
     const lease = await this.doc.lease(admission)
     expect(lease.body.holder?.kind, "the person holds the editor before the agent starts").toBe("human")
     const sent = await sendInstruction(this.page, this.request, this.agent, this.chatId, this.ownerUserId, instruction)
-    // The chat turn acknowledges; the explicit native task does the edit.
-    await this.page.waitForTimeout(15_000)
+    // The send records the instruction only; the explicit native task does the edit.
     const startedAt = new Date()
     const start = await this.doc.startTask(this.chatId, sent.messageId)
     expect(start.status, `start native task: ${JSON.stringify(start.body).slice(0, 200)}`).toBeLessThan(300)
@@ -556,6 +555,7 @@ class AgentFlow {
 
   /** Types in the editor (end of the Word text, cell A9 of the Sheet) and saves with Ctrl+S. */
   async typeAndSave(text: string) {
+    const before = await this.doc.head()
     if (this.app === "wordcraft") {
       const frame = this.page.frameLocator('iframe[title="WordCraft editor"]')
       await frame
@@ -567,12 +567,12 @@ class AgentFlow {
     } else {
       await typeMarker(this.page, await frameOf(this.page, this.app), this.app, text, 9)
     }
-    const saved = this.page.waitForResponse((r) => r.url().includes("/document/save") && r.request().method() === "POST" && r.status() === 200, {
-      timeout: 60_000,
-    })
     await this.page.keyboard.press("Control+s")
-    await saved
-    return this.doc.head()
+    // An autosave may already hold the text: Ctrl+S then sends nothing (#5075), so
+    // wait for the server's head, not for a request. The caller asserts its content.
+    let head = await this.doc.head()
+    for (const end = Date.now() + 60_000; head.version === before.version && Date.now() < end; head = await this.doc.head()) await this.page.waitForTimeout(250)
+    return head
   }
 
   async dispose(): Promise<void> {

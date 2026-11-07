@@ -60,7 +60,6 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
 
           const instruction = app === "wordcraft" ? wordInstruction(marker) : sheetInstruction("B2", marker)
           const sent = await sendInstruction(page, request, agent, chatId, ownerId, instruction)
-          await page.waitForTimeout(15_000)
           const started = await doc.startTask(chatId, sent.messageId)
           expect(started.status, `start native task: ${JSON.stringify(started.body).slice(0, 200)}`).toBeLessThan(300)
           const task = await waitForTask(doc, started.body.work_id!)

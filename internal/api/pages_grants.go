@@ -54,7 +54,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pages"
@@ -160,7 +159,8 @@ func (h *PageHandler) ListGrants(w http.ResponseWriter, r *http.Request) {
 // Re-issuing re-anchors `granted_by_user_id` to the human running it. That is
 // deliberate and it is the §7.1b invariant working as intended: the authority
 // behind a grant is whoever vouches for it NOW, so the person re-issuing takes
-// it over from whoever issued it before.
+// it over from whoever issued it before. It is also the only way back for a
+// retired grant (#5069): a new operation, journalled like any other.
 func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 	user := UserFromContext(r.Context())
 	if user == nil {
@@ -289,7 +289,11 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 		}
 		panelJSON = string(encoded)
 	}
-	now := h.evaluator().Now().UTC().Format(time.RFC3339)
+	now, err := pageGrantIssuedAt(r.Context(), tx, h.evaluator().Now(), rec.ID, req.SubjectType, subjectID, req.Level, user.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "stamp page grant", err)
+		return
+	}
 
 	before, err := readPageGrantSubject(r.Context(), tx, rec.ID, "", "")
 	if err != nil {
@@ -302,7 +306,8 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 		ON CONFLICT (page_id, subject_type, subject_id, level) DO UPDATE SET
 			panel_ids          = excluded.panel_ids,
 			granted_by_user_id = excluded.granted_by_user_id,
-			granted_at         = excluded.granted_at`,
+			granted_at         = excluded.granted_at,
+			retired_at         = NULL`,
 		rec.ID, req.SubjectType, subjectID, req.Level, panelJSON, user.ID, now)
 	if err := requirePageGrantRows(result, err, 1); err != nil {
 		replyInternalError(w, h.logger, "insert page grant", err)

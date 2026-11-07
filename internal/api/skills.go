@@ -156,11 +156,12 @@ func (h *SkillHandler) List(w http.ResponseWriter, r *http.Request) {
 	maturity := r.URL.Query().Get("maturity")
 	runtime := r.URL.Query().Get("runtime")
 	// installed_for_agent_id narrows the list to skills assigned to a
-	// specific agent (per-agent installed view); installed=1 alone
-	// returns any skill with at least one agent_skills row in the
+	// specific agent (per-agent installed view); installed=1 or the
+	// documented installed=true alone returns any skill with at least one agent_skills row in the
 	// workspace (workspace-wide installed view).
 	installedForAgent := r.URL.Query().Get("installed_for_agent_id")
-	installedFlag := r.URL.Query().Get("installed") == "1"
+	installed := r.URL.Query().Get("installed")
+	installedFlag := installed == "1" || installed == "true"
 	workspaceID := WorkspaceIDFromContext(r.Context())
 
 	query := `SELECT id, name, slug, display_name, description, version, author,

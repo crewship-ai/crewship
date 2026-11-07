@@ -56,6 +56,17 @@ it("offers a slug-keyed source draft as an older draft and adopts it under the P
  expect(screen.queryByRole("region", { name: "Older draft" })).toBeNull()
 })
 
+it("offers an older source draft to nobody who cannot edit now", async () => {
+ local.set("artifact-source:owner:w:demo", oldSource("Old private source"))
+ const write = state.data.can_write
+ state.data.can_write = false
+ try {
+  render(<ArtifactProject workspaceId="w" slug="demo" />)
+  await screen.findByText("Read only")
+  expect(screen.queryByRole("region", { name: "Older draft" })).toBeNull()
+  expect(document.body.textContent).not.toContain("Old private source")
+ } finally { state.data.can_write = write }
+})
 it("adopts a slug-keyed comment draft into the empty comment only when chosen", async () => {
  local.set("artifact-comment:owner:w:demo", "Old slug comment")
  render(<ArtifactProject workspaceId="w" slug="demo" />)

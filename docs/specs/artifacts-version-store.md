@@ -46,6 +46,10 @@ A manifest lists every file path with its media type and content hash. Files
 with identical bytes are stored once per artifact, so an unchanged file costs
 nothing in a new version.
 
+A native Craft save goes through `ApplyChanged`: when its base is the head and
+the head already holds exactly its files, nothing is written or charged and the
+receipt names the head. An earlier version with the same content does not count.
+
 The family is fixed by the first publication. A later attempt to write the same
 artifact through another family is refused, and the database refuses to change
 `content_type` in place.

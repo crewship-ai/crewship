@@ -220,8 +220,10 @@ release and report, and the RC gate does not count them.
   the only way to a conflict is a stale live canvas. Yjs picks the surviving
   text by client order, so the row checks the notice whichever side won.
 - `role.*.revoke-draft`, `role.project.revoke-read-draft`: the right goes with
-  unsaved work open. The server takes nothing, the work stays visible, and it
-  returns with the right. When the read right goes too, the page has to say the
+  unsaved work open. The server takes nothing, the work is kept, and it
+  returns with the right. A Project source draft is kept in the browser but
+  offered to nobody while the write right is gone, in the open tab as after a
+  reload: an open tab is no right of its own (#5073). When the read right goes too, the page has to say the
   draft was deleted: the row proves its storage probe sees the draft first, then
   requires it gone from the screen and from IndexedDB and localStorage, and
   absent after the right returns.
@@ -401,48 +403,60 @@ not as `missing` on the RC.
 
 ## Draft revocation proof
 
-`e2e/acceptance/draft-revocation/` measures what happens to an unsaved native
-draft when access changes: delivery of the revocation, the client's reaction
-and reconnect, each timed apart. It is targeted pre-RC proof, not a row of this
-suite. It rewrites a server's database and needs a proxy in front of it, so it
-cannot run against a deployed origin. `pnpm acceptance:prd` does not pick it up,
-its `A.craft.draft.*` IDs are not in `required-ids.json`, and `--gate` does not
-count them. Never point it at a shared server.
+`e2e/acceptance/draft-revocation/` proves in a real browser what happens to an
+unsaved Word, Sheet and Project draft when access changes: delivery of the
+revocation, the client's reaction and the return to the tab or the network, each
+timed apart. An offline browser cannot learn of a revocation immediately, so the
+offline cases measure the reconnect, not delivery. Hidden-tab cases run in a full
+Chromium attached with `noDefaults`, the only setup here where a background tab
+really hides. Frozen-tab cases freeze the page through the browser's lifecycle
+state, and the frame-by-frame timeline is recorded inside the page, so it shows
+what was painted and not what a later poll found. Unchanged returns compare real
+screenshots of the editor, which stay in the evidence, and fail on a blank or
+one-colour image or on lost content. They then go on from the keyboard alone and
+read the server through the API, so a return is proven by work that continues.
 
-Start a server from `scripts/throwaway-server.sh` with native Craft enabled and
-`CREWSHIP_NEXTJS_URL` set to the proxy's origin, because the editor refuses any
-other host. Seed it, start the proxy, then run the spec with its own config:
+It rewrites a server's database and cuts its connections, so it cannot run against
+a deployed origin and it is not a row of this suite. `pnpm acceptance:prd` does not
+pick it up, its `A.craft.draft.*` IDs are not in `required-ids.json`, and `--gate`
+does not count them. **A green RC gate says nothing about these cases.** Run this
+command on the release candidate as well:
 
 ```bash
-node e2e/acceptance/draft-revocation/revocation-proxy.mjs 8111 8112 8113 &
-crewship-heavy env \
-  REVOCATION_DB="$STATE/data/crewship.db" \
-  REVOCATION_PROXY_CONTROL=http://127.0.0.1:8113 \
-  REVOCATION_DIRECT=http://127.0.0.1:8112 \
-  PRD_MODE=quick PRD_ORIGIN=http://127.0.0.1:8111 PRD_CRAFT_NATIVE=on \
-  PRD_OUTPUT_DIR="$OUT" E2E_EMAIL=... E2E_PASSWORD=... CI=1 \
-  pnpm exec playwright test --config=playwright.draft-revocation.config.ts
+pnpm acceptance:draft-revocation \
+  --binary "$RC_BINARY" \
+  --native-env "$WORD_ENV" --native-env "$GRID_ENV" \
+  --output "$OUT"
 ```
 
-The arguments to `revocation-proxy.mjs` are the port it listens on, the server's
-port and its control port. `crewship-heavy` does not forward the environment,
-which is why the variables go through `env`.
+Run it directly, not through `crewship-heavy`: the throwaway server has to stay
+outside the queue to be able to stop, and the command puts Playwright through
+`crewship-heavy` itself where the host has it. It takes about an hour. It needs
+`xvfb-run`, `sqlite3` and a full Chromium; the headless shell alone cannot hide a
+tab. It picks Playwright's own Chromium, else the newest one under
+`PLAYWRIGHT_BROWSERS_PATH` (default `~/.cache/ms-playwright`), and `--chrome` names
+another.
 
-| Variable | Meaning |
+`--binary` is the server to prove, with the embedded app built from the same
+commit. `--native-env` names env files holding the `CREWSHIP_CRAFT_NATIVE_*` settings
+of both engines. Other lines are ignored, agents stay off, and a missing Word or
+Sheet setting stops the run before it starts. It starts a server from
+`scripts/throwaway-server.sh` with Page projects and those settings, puts
+`revocation-proxy.mjs` in front of it, seeds it, runs every case once and stops
+everything. `--grep RE` narrows the run.
+
+| Exit code | Meaning |
 | --- | --- |
-| `REVOCATION_DB` | Database file of the throwaway server. The expiry case sets `expires_at` here, because a real expiry takes the session's whole lifetime. Without it that case is skipped |
-| `REVOCATION_PROXY_CONTROL` | Control URL of `revocation-proxy.mjs`: `POST /cut` closes every connection and refuses new ones, `POST /restore` accepts them again. Chromium's offline emulation leaves an established stream running, so it cannot prove this case. Without it the offline case is skipped |
-| `REVOCATION_DIRECT` | Server URL around the proxy, so the owner can revoke while the browser is cut off. Without it the offline case is skipped |
-| `REVOCATION_CHROME` | Path of a full Chromium for the hidden-tab case. Without it, or without `DISPLAY`, that case is skipped |
-| `REVOCATION_HIDDEN_MS` | How long the hidden-tab case keeps the tab hidden, in milliseconds. Default 330000 |
+| 0 | Every listed test ran and passed |
+| 1 | A test failed or was skipped, or a listed test left no result. One skip fails the run |
+| 2 | Setup failed: arguments, engine settings, tools, server or seed |
+| 3 | Partial: a `--grep` run passed. Never read this as a pass |
 
-**Hidden-tab timing is not measured.** The headless shell always reports
-`visibilityState` as `visible`, so it cannot hide a tab. Full Chromium 1243 and
-1248, headless and under Xvfb with software rendering, never finish starting
-the editor: they stop at "Dokument nelze bezpečně otevřít", and on 1243 the
-snapshot request went unanswered. The cause is not established. The case stays
-in the spec and fails or is skipped until that is resolved, so a passing run of
-the other cases says nothing about a hidden tab.
+`$OUT` holds `verdict.json` (verdict, counts, app SHA, the Chromium used),
+`summary.md`, `evidence/` with `timing.json` or `timeline.json` per test, and
+`playwright/`. Set `REVOCATION_HIDDEN_MS` to change how long the Word case keeps
+its tab hidden; the default of 330000 passes the five minutes after which Chromium
+throttles hidden timers.
 
 ## RC gate: required IDs
 

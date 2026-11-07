@@ -79,6 +79,36 @@ export function cellInTable(raw: string, cell: string): boolean {
   return false
 }
 
+/**
+ * What a passed hour row must not hide: the row keeps going by pressing "Ověřit
+ * výsledek", so a pass alone reads as if saving recovered by itself. Intervals are
+ * the page stalls and the unconfirmed spells up to each press, merged so that an
+ * overlap is not counted twice. The longest one is the longest stall.
+ */
+export function hourInterruptions(verifications: readonly VerifyPress[], stalls: readonly PageStall[]): { presses: number; interruptedMs: number; longestStallMs: number; note: string } {
+  const spans = [
+    ...stalls.map((s) => [Date.parse(s.from), Date.parse(s.to)]),
+    ...verifications.map((v) => [Date.parse(v.firstSeenAt), Date.parse(v.pressedAt)]),
+  ].sort((a, b) => a[0] - b[0])
+  let interruptedMs = 0, longestStallMs = 0, from = NaN, to = NaN
+  const close = () => {
+    if (Number.isNaN(from)) return
+    interruptedMs += to - from
+    longestStallMs = Math.max(longestStallMs, to - from)
+  }
+  for (const [a, b] of spans) {
+    if (a > to) { close(); from = a; to = b }
+    else if (Number.isNaN(from)) { from = a; to = b }
+    else to = Math.max(to, b)
+  }
+  close()
+  const seconds = (ms: number) => `${Math.round(ms / 1000)} s`
+  const presses = verifications.length
+  const note = `Ověřit výsledek pressed ${presses} times, interrupted ${seconds(interruptedMs)} in total, longest stall ${seconds(longestStallMs)}.` +
+    (presses ? " Saving did not recover by itself." : "")
+  return { presses, interruptedMs, longestStallMs, note }
+}
+
 // ---------------------------------------------------------------------------
 // The Word table step and the markers already saved (RC-4 rerun, #4877).
 //
@@ -193,4 +223,58 @@ export function sentSince<T extends SentOp>(ops: T[], from: number): T[] {
 /** The numbers of the requests that had neither a reply nor a failure yet. */
 export function pendingReplies(ops: SentOp[]): number[] {
   return ops.filter((o) => o.status === undefined && o.failed === undefined).map((o) => o.n)
+}
+
+// ---------------------------------------------------------------------------
+// "Výsledek nepotvrzen" in the hour rows and the lost-reply rows (RC f3035b06c).
+//
+// A renderer stalled past the editor's 10 s save deadline turns a committed save into
+// "Výsledek nepotvrzen", and the editor sends nothing until somebody asks. A person
+// presses "Ověřit výsledek"; the hour session does too, a little after that deadline,
+// and records it. The press proves nothing about the typing: confirmCycle stays the judge.
+
+/** Past the editor's own 10 s save deadline, so a reply that is merely late can still land. */
+export const VERIFY_AFTER_MS = 15_000
+
+export const isUnconfirmedStatus = (status: string): boolean => /^Výsledek nepotvrzen/.test(status)
+
+/** Has the status said "Výsledek nepotvrzen" for longer than the deadline, counted from `since`? */
+export function verifyDue(status: string, since: number, now: number, after = VERIFY_AFTER_MS): boolean {
+  return isUnconfirmedStatus(status) && now - since >= after
+}
+
+/** One press of "Ověřit výsledek", for the row's evidence. */
+export interface VerifyPress {
+  cycle: number
+  firstSeenAt: string
+  pressedAt: string
+  unconfirmedForMs: number
+  statusAfter: string
+  reconcile: { status?: number; version?: string; failed?: string } | null
+}
+
+/** A gap in the page's own proposal polling: the renderer did not run its timers. */
+export interface PageStall {
+  from: string
+  to: string
+  gapMs: number
+}
+
+export function pageStalls(trail: ReadonlyArray<{ at: string; who: string; path: string }>, minGapMs = 10_000): PageStall[] {
+  const polls = trail.filter((c) => c.who === "person" && c.path === "craft/proposals")
+  const stalls: PageStall[] = []
+  for (let i = 1; i < polls.length; i++) {
+    const gapMs = Date.parse(polls[i].at) - Date.parse(polls[i - 1].at)
+    if (gapMs >= minGapMs) stalls.push({ from: polls[i - 1].at, to: polls[i].at, gapMs })
+  }
+  return stalls
+}
+
+/**
+ * The version of the last save the server answered. A repeat of the same bytes creates no
+ * version (#5075), so an `unchanged` answer names the version the editor already holds.
+ * The contiguity of the first save is a separate assertion.
+ */
+export function lastCommittedSave(ops: ReadonlyArray<{ kind: string; status?: number; version?: string }>): string | undefined {
+  return ops.filter((o) => o.kind === "save" && o.status === 200 && o.version !== undefined).at(-1)?.version
 }

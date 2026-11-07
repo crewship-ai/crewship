@@ -57,7 +57,6 @@ test.describe("craft agent edit", () => {
           const chatId = await openChat(request, agent)
           const marker = `PRDAGENT${label.toUpperCase()}_${randomUUID().slice(0, 8)}`
           const sent = await sendInstruction(page, request, agent, chatId, ownerUserId, app === "wordcraft" ? wordInstruction(marker) : sheetInstruction("B2", marker))
-          await page.waitForTimeout(15_000)
           const start = await doc.startTask(chatId, sent.messageId)
           expect(start.status, `start native task: ${JSON.stringify(start.body).slice(0, 200)}`).toBeLessThan(300)
           const st = await waitForTask(doc, start.body.work_id!)

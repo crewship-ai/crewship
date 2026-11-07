@@ -310,3 +310,94 @@ func TestNativeRetirementRecoversRepeatedOutagesWithTheSameLease(t *testing.T) {
 		t.Fatalf("historical committed receipt changed after pruning: %+v %v", receipt, err)
 	}
 }
+
+// Review of #5075: a retired attempt whose row was pruned must not get the
+// receipt of another attempt that shares its revision and bytes. Pruning lifts
+// the runtime fence, so the identity has to be durable in the committed version.
+func TestNativeDelayedRetiredAttemptGetsNoReceiptOfASameRevisionAttempt(t *testing.T) {
+	s, _, db, _, scope, p := nativeStoreFixture(t)
+	l, _, err := s.Initialize(t.Context(), scope, p, []byte(`{"v":1}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := []byte(`{"v":2}`)
+	hash := nativeReceiptHash(raw)
+	if _, err = s.ReconcileAttempt(t.Context(), l, 1, "r", hash, "attempt-a-0001"); !errors.Is(err, ErrNativeAttemptAbsent) {
+		t.Fatal(err)
+	}
+	committed, err := s.SaveAttempt(t.Context(), l, 1, "r", hash, raw, "attempt-b-0001")
+	if err != nil || committed.Version != "2" {
+		t.Fatalf("fresh attempt: %+v %v", committed, err)
+	}
+	// Retiring anything at the new head prunes A's row, whose base is now below it.
+	next := []byte(`{"v":3}`)
+	if _, err = s.ReconcileAttempt(t.Context(), l, 2, "r2", nativeReceiptHash(next), "attempt-c-0001"); !errors.Is(err, ErrNativeAttemptAbsent) {
+		t.Fatal(err)
+	}
+	var kept int
+	if err = db.QueryRowContext(t.Context(), `SELECT count(*) FROM craft_native_retired_attempts WHERE attempt_id='attempt-a-0001'`).Scan(&kept); err != nil || kept != 0 {
+		t.Fatalf("A's row was not pruned: %d %v", kept, err)
+	}
+	if got, err := s.SaveAttempt(t.Context(), l, 1, "r", hash, raw, "attempt-a-0001"); !errors.Is(err, artifacts.ErrVersionConflict) || got.Version != "" {
+		t.Fatalf("delayed retired attempt answered: %+v %v", got, err)
+	}
+	// Its reconcile reports the same thing: it did not commit.
+	if got, err := s.ReconcileAttempt(t.Context(), l, 1, "r", hash, "attempt-a-0001"); !errors.Is(err, ErrNativeAttemptAbsent) {
+		t.Fatalf("reconcile of the retired attempt: %+v %v", got, err)
+	}
+	// B keeps both proofs.
+	if got, err := s.SaveAttempt(t.Context(), l, 1, "r", hash, raw, "attempt-b-0001"); err != nil || got != committed {
+		t.Fatalf("repeat of B: %+v %v", got, err)
+	}
+	if got, err := s.ReconcileAttempt(t.Context(), l, 1, "r", hash, "attempt-b-0001"); err != nil || got != committed {
+		t.Fatalf("reconcile of B: %+v %v", got, err)
+	}
+}
+
+// Review of #5075, round two: an attempt that reconcile retired never gets the
+// receipt of an anonymous save with the same revision and bytes, with or without
+// its retirement row. The version proves neither its commit nor its absence.
+func TestNativeRetiredAttemptGetsNoReceiptOfAnAnonymousSave(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		prune bool
+	}{{"row kept", false}, {"row pruned", true}} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _, db, _, scope, p := nativeStoreFixture(t)
+			l, _, err := s.Initialize(t.Context(), scope, p, []byte(`{"v":1}`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			raw := []byte(`{"v":2}`)
+			hash := nativeReceiptHash(raw)
+			if _, err = s.ReconcileAttempt(t.Context(), l, 1, "r", hash, "attempt-a-0001"); !errors.Is(err, ErrNativeAttemptAbsent) {
+				t.Fatal(err)
+			}
+			anonymous, err := s.SaveSnapshot(t.Context(), l, 1, "r", hash, raw)
+			if err != nil || anonymous.Version != "2" {
+				t.Fatalf("anonymous save: %+v %v", anonymous, err)
+			}
+			want := 1
+			if tc.prune {
+				want = 0
+				next := []byte(`{"v":3}`)
+				if _, err = s.ReconcileAttempt(t.Context(), l, 2, "r2", nativeReceiptHash(next), "attempt-c-0001"); !errors.Is(err, ErrNativeAttemptAbsent) {
+					t.Fatal(err)
+				}
+			}
+			var kept int
+			if err = db.QueryRowContext(t.Context(), `SELECT count(*) FROM craft_native_retired_attempts WHERE attempt_id='attempt-a-0001'`).Scan(&kept); err != nil || kept != want {
+				t.Fatalf("A's rows %d, want %d: %v", kept, want, err)
+			}
+			if got, err := s.ReconcileAttempt(t.Context(), l, 1, "r", hash, "attempt-a-0001"); !errors.Is(err, ErrNativeUnconfirmed) || got.Version != "" {
+				t.Fatalf("reconcile of A: %+v %v", got, err)
+			}
+			if got, err := s.SaveAttempt(t.Context(), l, 1, "r", hash, raw, "attempt-a-0001"); err == nil || got.Version != "" {
+				t.Fatalf("delayed A: %+v %v", got, err)
+			}
+			if got, err := s.ReconcileSnapshot(t.Context(), l, 1, "r", hash); err != nil || got != anonymous {
+				t.Fatalf("snapshot reconcile: %+v %v", got, err)
+			}
+		})
+	}
+}

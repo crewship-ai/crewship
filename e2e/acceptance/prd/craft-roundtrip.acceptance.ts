@@ -144,9 +144,9 @@ test.describe("Word rich round trip", () => {
       await page.waitForTimeout(1500)
       await shot("image")
 
-      const saved = page.waitForResponse((r) => r.url().includes("/document/save") && r.request().method() === "POST" && r.status() === 200, { timeout: 60_000 })
+      // The autosave may already hold everything: Ctrl+S then sends nothing and
+      // confirms that version (#5075). The reload below compares the server head.
       await kb.press("Control+s")
-      await saved
       const version = await native.waitSaved(page)
       await prd.evidence("editor-after-save.png", await page.screenshot({ fullPage: true }))
 

@@ -55,6 +55,8 @@ func TestNativeSaveSnapshotCannotClaimGenericSaveOrRevokedGeneration(t *testing.
 	if _, err = s.SaveSnapshot(t.Context(), l, 2, "r2", nativeReceiptHash([]byte("forged")), raw); err == nil {
 		t.Fatal("wrong candidate hash admitted")
 	}
+	raw = []byte(`{"v":2,"snapshot":true}`)
+	hash = nativeReceiptHash(raw)
 	if _, err = s.SaveSnapshot(t.Context(), l, 2, "r2", hash, raw); err != nil {
 		t.Fatal(err)
 	}

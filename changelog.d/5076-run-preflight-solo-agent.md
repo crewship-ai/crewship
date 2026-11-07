@@ -1,0 +1,1 @@
+- **The chat composer reported budget and gate facts as unavailable for a solo agent.** The run preflight assumed every agent has a crew and answered 503. It now reports a solo agent's facts, and a real preflight failure leaves a server log line.

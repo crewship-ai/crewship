@@ -318,12 +318,14 @@ describe('a draft kept after write loss',()=>{
  })
  it('marks the capture of a retiring editor as final, and an edit as not',async()=>{
   await opened()
+  // The capture hashes with real crypto, which fake time does not move on a busy host.
+  const settled=async(final:boolean)=>{for(let i=0;i<200&&journal.persist.mock.calls.at(-1)?.[1]!==final;i++){await advance(50)}}
   act(()=>options.at(-1)!.onChanged('typed','doc'))
-  await advance(3_000)
+  await settled(false)
   expect(journal.persist.mock.calls.at(-1)?.[1]).toBe(false)
   server.state='comment-only'
   server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
-  await advance(1_000)
+  await settled(true)
   expect(journal.persist.mock.calls.at(-1)?.[1]).toBe(true)
  })
  it('the watch ends with the editor',async()=>{
@@ -351,6 +353,18 @@ describe('keeping a draft is not offering it',()=>{
   server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
   await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
   expect(recoveredOffer()).toBe(false);expect(contentVisible()).toBe(false)
+  expect(m.purge).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
+ })
+ it('Read of the latest content keeps the draft and offers nothing either, in the same tab',async()=>{
+  await opened()
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  await advance(3_000)
+  const answer=m.server
+  m.server=async(input,init)=>{const response=await answer(input,init);return route(String(input))==='lease'||route(String(input))==='action'?json({...lease(),can_edit:false,mine:false,can_write:false,holder:undefined}):response}
+  server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
+  await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+  expect(screen.queryAllByRole('button',{name:'Kopie konceptu'})).toHaveLength(0)
+  expect(rows()).toBe(0)
   expect(m.purge).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
  })
  it('Comment on a shared version keeps the draft and offers nothing',async()=>{
@@ -391,11 +405,209 @@ describe('keeping a draft is not offering it',()=>{
   await act(async()=>{await Promise.resolve()})
   expect(server.count('reauthorize')).toBe(1);expect(server.calls).toContain('draft-key');expect(server.count('document')).toBe(1)
  })
+ describe('a live editor on return',()=>{
+  const opacity=()=>frame()?.style.opacity
+  const returns=[['visibilitychange',()=>{setVisibility('visible');document.dispatchEvent(new Event('visibilitychange'))}],['pageshow',()=>{window.dispatchEvent(new Event('pageshow'))}],['online',()=>{window.dispatchEvent(new Event('online'))}]] as const
+  async function dirty(){await opened();act(()=>options.at(-1)!.onChanged('typed','doc'));await advance(3_000);server.calls.length=0}
+  it.each(returns)('%s leaves the screen before any answer, without taking focus',async(_,back)=>{
+   await dirty()
+   server.stall.add('document')
+   await act(async()=>{back()})
+   expect(opacity()).toBe('0')
+   expect(frame()!.isConnected).toBe(true)
+  })
+  it.each(returns)('%s hides it from pointer and accessibility, keeping focus and the engine as it is, until the read',async(_,back)=>{
+   await dirty()
+   frame()!.focus()
+   const readOnly=m.port.mock.results.at(-1)!.value.setReadOnly as ReturnType<typeof vi.fn>
+   readOnly.mockClear()
+   server.stall.add('document')
+   await act(async()=>{back()})
+   await advance(1_000)
+   expect(frame()!.style.pointerEvents).toBe('none')
+   expect(frame()!.getAttribute('aria-hidden')).toBe('true')
+   expect(frame()!.tabIndex).toBe(-1)
+   expect(document.activeElement).toBe(frame())
+   server.stall.delete('document')
+   await act(async()=>{back()})
+   await settle(()=>opacity()==='')
+   expect(readOnly).not.toHaveBeenCalled()
+   expect(frame()!.style.pointerEvents).toBe('')
+   expect(frame()!.hasAttribute('aria-hidden')).toBe(false)
+   expect(document.activeElement).toBe(frame())
+  })
+  it('a tab going hidden stores the draft at once and sends nothing for it',async()=>{
+   await opened();journal.persist.mockClear();server.calls.length=0
+   act(()=>options.at(-1)!.onChanged('typed','doc'))
+   setVisibility('hidden')
+   await act(async()=>{document.dispatchEvent(new Event('visibilitychange'))})
+   await advance(100)
+   setVisibility('visible')
+   expect(journal.persist).toHaveBeenCalled()
+   expect(server.count('save')).toBe(0)
+  })
+  it('input during a check stays out of the journal, and is saved once the read confirms',async()=>{
+   await dirty()
+   journal.persist.mockClear()
+   server.stall.add('document')
+   await act(async()=>{window.dispatchEvent(new Event('pageshow'))})
+   act(()=>options.at(-1)!.onChanged('blind','doc'))
+   await advance(3_000)
+   expect(journal.persist).not.toHaveBeenCalled()
+   server.stall.delete('document')
+   await act(async()=>{window.dispatchEvent(new Event('pageshow'))})
+   await settle(()=>opacity()==='')
+   await advance(3_000)
+   expect(journal.persist).toHaveBeenCalled()
+  })
+  it('a loss of Edit during a check captures nothing over the row from before it',async()=>{
+   await dirty()
+   journal.persist.mockClear()
+   server.stall.add('document')
+   await act(async()=>{window.dispatchEvent(new Event('pageshow'))})
+   act(()=>options.at(-1)!.onChanged('blind','doc'))
+   server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
+   await advance(3_000)
+   expect(journal.persist).not.toHaveBeenCalled()
+   expect(journal.revokeRead).not.toHaveBeenCalled()
+  })
+  it.each(returns)('%s comes back only with a read started after it',async(_,back)=>{
+   await dirty()
+   server.stall.add('document')
+   await act(async()=>{back()})
+   await advance(1_000)
+   expect(opacity()).toBe('0')
+   server.stall.delete('document')
+   await act(async()=>{back()})
+   await settle(()=>opacity()==='')
+   expect(opacity()).toBe('')
+  })
+  it('stays off screen when read is refused, and the draft stays',async()=>{
+   await dirty()
+   server.state='reader'
+   await act(async()=>{window.dispatchEvent(new Event('pageshow'))})
+   await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
+   expect(contentVisible()&&opacity()==='').toBe(false)
+   expect(m.purge).not.toHaveBeenCalled()
+  })
+  it('an unclear answer keeps it off screen and asks again without waiting for the interval',async()=>{
+   await dirty()
+   const answer=m.server
+   let refused=true
+   m.server=async(input,init)=>{if(refused&&route(String(input))==='document')return json({error:'unavailable'},503);return answer(input,init)}
+   await act(async()=>{window.dispatchEvent(new Event('pageshow'))})
+   await advance(1_000)
+   expect(opacity()).toBe('0')
+   refused=false
+   await advance(5_000)
+   await settle(()=>opacity()==='')
+   expect(opacity()).toBe('')
+  })
+  it('says why it is empty when the answer takes long, and not on a quick one',async()=>{
+   await dirty()
+   server.stall.add('document')
+   await act(async()=>{window.dispatchEvent(new Event('pageshow'))})
+   expect(screen.queryByText('Ověřuji přístup…')).toBeNull()
+   await advance(1_500)
+   expect(screen.getByText('Ověřuji přístup…')).toBeTruthy()
+  })
+  // An answer to something asked before the return says nothing about after it.
+  function held(){
+   const answer=m.server,h={holdLease:true,holdRead:false,lease:undefined as (()=>void)|undefined,reads:[] as {go:()=>void,signal?:AbortSignal|null}[],version:'1'}
+   m.server=async(input,init)=>{
+    const name=route(String(input))
+    if(name==='lease'&&h.holdLease&&frame())await new Promise<void>(go=>{h.lease=go})
+    if(name==='document'&&h.holdRead)await new Promise<void>(go=>{h.reads.push({go,signal:init.signal})})
+    const response=await answer(input,init)
+    return name==='document'&&h.version!=='1'?json({...await response.json(),version:h.version}):response
+   }
+   return h
+  }
+  const backNow=()=>act(async()=>{window.dispatchEvent(new Event('pageshow'))})
+  async function finishAdmission(h:ReturnType<typeof held>){h.holdLease=false;h.lease!();await advance(500)}
+  async function answerRead(h:ReturnType<typeof held>){h.holdRead=false;h.reads.at(-1)!.go();await settle(()=>opacity()==='');expect(opacity()).toBe('')}
+  it('a first admission finishing after a return waits for a read asked after it',async()=>{
+   const h=held()
+   render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId="human" enabled/>)
+   await advance(50)
+   expect(h.lease).toBeTruthy()
+   h.holdRead=true
+   await backNow()
+   await finishAdmission(h)
+   expect(opacity()).toBe('0')
+   expect(h.reads).toHaveLength(1)
+   await answerRead(h)
+  })
+  it('a replacement frame finishing after a return neither shows nor cancels the read asked after it',async()=>{
+   const h=held();h.holdLease=false
+   render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId="human" enabled/>)
+   await advance(50)
+   server.push('lease',lease());await advance(50)
+   const first=frame()
+   h.holdLease=true;h.version='2'
+   server.push('lease',lease())
+   await settle(()=>frame()!==first&&Boolean(h.lease))
+   expect(frame()).not.toBe(first)
+   h.holdRead=true
+   await backNow()
+   expect(h.reads).toHaveLength(1)
+   await finishAdmission(h)
+   expect(opacity()).toBe('0')
+   expect(h.reads[0].signal?.aborted).toBe(false)
+   await answerRead(h)
+  })
+  it('a read that never answers is given up, asked again, and says so, with the editor off screen',async()=>{
+   await dirty()
+   const answer=m.server
+   let silent=true,asked=0
+   m.server=async(input,init)=>{if(route(String(input))==='document'){asked++;if(silent)return new Promise<Response>(()=>{})}return answer(input,init)}
+   await backNow()
+   await advance(11_000+5_000)
+   expect(asked).toBeGreaterThan(1)
+   expect(opacity()).toBe('0')
+   expect(screen.getByText('Ověřuji přístup…')).toBeTruthy()
+   silent=false
+   await advance(20_000)
+   await settle(()=>opacity()==='')
+   expect(opacity()).toBe('')
+   expect(screen.queryByText('Ověřuji přístup…')).toBeNull()
+  })
+ })
  it('going hidden asks nothing',async()=>{
   await opened()
   server.calls.length=0;setVisibility('hidden')
   await act(async()=>{document.dispatchEvent(new Event('visibilitychange'))})
   expect(server.calls).toEqual([])
+ })
+})
+// Full Chromium stops rendering a visibility:hidden frame (#5060), and an engine that
+// answers on an animation frame then never gives up its last changes.
+describe('a retiring editor keeps rendering until it is captured',()=>{
+ async function watched(){
+  await opened()
+  const seen:string[]=[],port=m.port.mock.results.at(-1)!.value as {snapshot:ReturnType<typeof vi.fn>}
+  const answer=port.snapshot.getMockImplementation() as (...args:unknown[])=>unknown
+  port.snapshot.mockImplementation((...args:unknown[])=>{seen.push(frame()?.style.visibility??'gone');return answer(...args)})
+  act(()=>options.at(-1)!.onChanged('typed','doc'))
+  return seen
+ }
+ it.each([
+  ['Edit lost',()=>{server.state='reader';server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})}],
+  ['a retired connection',()=>{server.push('session_retired',{delivery:'stopped',reason:'session_ended',draft:'retain'})}],
+ ] as [string,()=>void][])('%s',async(_,retire)=>{
+  const seen=await watched()
+  await act(async()=>{retire()})
+  await advance(2_000)
+  expect(seen.length).toBeGreaterThan(0)
+  expect(seen).not.toContain('hidden')
+  expect(frame()===null||!contentVisible()||frame()!.style.opacity==='0').toBe(true)
+ })
+ it('an auth suspension',async()=>{
+  const seen=await watched()
+  await act(async()=>{await suspendOtherDocumentDrafts('human').catch(()=>{})})
+  await advance(2_000)
+  expect(seen.length).toBeGreaterThan(0)
+  expect(seen).not.toContain('hidden')
  })
 })
 describe('a stale proof',()=>{

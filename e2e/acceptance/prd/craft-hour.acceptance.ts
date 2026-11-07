@@ -16,7 +16,8 @@
 // debugging) does the same work and then fails on purpose: it is not evidence.
 import { readHeadText, sheetSession, wordSession, type Checkpoint, type CycleChain, type SessionKind } from "./craft-session/hour-steps"
 import type { CraftCall } from "./craft-lease/helpers"
-import { restartServer } from "./craft-session/restart"
+import { hourInterruptions, pageStalls, type VerifyPress } from "./craft-session/confirm"
+import { restartServer, type RestartRecord } from "./craft-session/restart"
 import { expect, prdRequirement, test } from "./fixtures"
 import { disposeActors, isolatedActor } from "./outage-lostack/actor"
 import * as N from "./outage-lostack/native"
@@ -64,7 +65,7 @@ for (const { app, label } of KINDS) {
       const ops = N.instrument(context)
       const trail: CraftCall[] = []
       const steps: Array<{ atMs: number; step: string }> = []
-      const evidence = { chain: [] as CycleChain[], checkpoints: [] as Checkpoint[] }
+      const evidence = { chain: [] as CycleChain[], checkpoints: [] as Checkpoint[], verifications: [] as VerifyPress[], restart: null as RestartRecord | null }
       await prd.evidence("document-ref.json", { workspaceId: ws.id, pageId: ref.pageId, kept: true })
       const session = (app === "wordcraft" ? wordSession : sheetSession)({ prd, context, api, ref, ops, trail, steps, evidence, minutes, restart: (why) => restartServer(prd.origin, `${label} hour session: ${why}`) })
       let result
@@ -79,10 +80,12 @@ for (const { app, label } of KINDS) {
       } finally {
         // The evidence chain on disk however the row ends (a thrown session, a failed
         // assertion below, a pass), written after the run so late replies are in it.
-        await prd.evidence("chain.json", { workspaceId: ws.id, pageId: ref.pageId, ...evidence }).catch(() => {})
+        const interruptions = hourInterruptions(evidence.verifications, pageStalls(trail))
+        prd.note(interruptions.note)
+        await prd.evidence("chain.json", { workspaceId: ws.id, pageId: ref.pageId, ...evidence, pageStalls: pageStalls(trail), interruptions }).catch(() => {})
       }
       const head = await readHeadText(api, ref)
-      await prd.evidence("result.json", { ...result, finalVersion: head.version, finalHash: head.hash })
+      await prd.evidence("result.json", { ...result, finalVersion: head.version, finalHash: head.hash, verifications: evidence.verifications, pageStalls: pageStalls(trail) })
       expect(result.failures, "the session found no loss").toEqual([])
       expect(result.restart, "the server was restarted in the middle").toBeTruthy()
       expect(result.durationMs, "the session lasted its full length").toBeGreaterThanOrEqual(minutes * 60_000)

@@ -1,0 +1,1 @@
+- **The API reference omitted errors the server really sends, and `GET /api/v1/skills?installed=true` returned the whole catalog.** `private-preflight` now documents 400, 404, 409 and 503, the paused `/api/v1/hooks` operations document 503, and the Composio operations document 502 for a rejected key. `installed=true`, the documented boolean form, now filters like `installed=1`.

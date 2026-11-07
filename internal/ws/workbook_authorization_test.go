@@ -189,3 +189,22 @@ func TestDelayedWorkbookSessionCloseKeepsRestoredReadSubscription(t *testing.T) 
 	default:
 	}
 }
+
+// A workbook editor's grant that ended with its issuer's standing (#5069) does
+// not open the channel. The test schema has no retirement triggers, so the
+// marker is set here; the migration test covers who sets it.
+func TestWorkbookChannelRefusesRetiredGrant(t *testing.T) {
+	db := workbookAuthorizationDB(t)
+	authorizer := &DBChannelAuthorizer{db: db}
+	allowed, err := authorizer.isMemberOfPageWorkspace(t.Context(), "work-editor", "one")
+	if err != nil || !allowed {
+		t.Fatalf("calibration: %v %v", allowed, err)
+	}
+	if _, err := db.Exec(`UPDATE page_grants SET retired_at='2026-11-06T10:00:00Z' WHERE page_id='one'`); err != nil {
+		t.Fatal(err)
+	}
+	allowed, err = authorizer.isMemberOfPageWorkspace(t.Context(), "work-editor", "one")
+	if err != nil || allowed {
+		t.Fatalf("the channel opened on a retired grant: %v %v", allowed, err)
+	}
+}
