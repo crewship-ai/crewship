@@ -80,6 +80,19 @@ func TestPageGrantRetirementMigrationRetiresOnlyGrantsWithoutStanding(t *testing
 	if err := db.QueryRow(`SELECT count(*) FROM page_grants`).Scan(&total); err != nil || total != 8 {
 		t.Fatalf("grants kept = %d, %v", total, err)
 	}
+	if err := db.QueryRow(`SELECT count(*) FROM page_grant_retired_issuances`).Scan(&total); err != nil || total != 5 {
+		t.Fatalf("retired issuances remembered = %d, %v", total, err)
+	}
+	// Revoke leaves the memory; deleting a person removes what names them.
+	mustExec(t, db, `DELETE FROM page_grants WHERE granted_by_user_id='r-plain'`)
+	if err := db.QueryRow(`SELECT count(*) FROM page_grant_retired_issuances WHERE granted_by_user_id='r-plain'`).Scan(&total); err != nil || total != 1 {
+		t.Fatalf("revoke erased the retirement: %d, %v", total, err)
+	}
+	mustExec(t, db, `DELETE FROM workspace_members WHERE user_id='r-plain'`)
+	mustExec(t, db, `DELETE FROM users WHERE id='r-plain'`)
+	if err := db.QueryRow(`SELECT count(*) FROM page_grant_retired_issuances WHERE granted_by_user_id='r-plain' OR subject_id='r-plain'`).Scan(&total); err != nil || total != 0 {
+		t.Fatalf("a deleted person is still named: %d, %v", total, err)
+	}
 	// Retired at migration means retired for good: the issuer's return is no
 	// new operation.
 	mustExec(t, db, `UPDATE users SET suspended_at=NULL WHERE id='r-suspended'`)

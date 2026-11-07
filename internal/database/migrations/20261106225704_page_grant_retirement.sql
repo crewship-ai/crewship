@@ -41,6 +41,51 @@ JOIN pages p ON p.id=g.page_id
 LEFT JOIN workspace_members wm ON wm.user_id=g.granted_by_user_id AND wm.workspace_id=p.workspace_id
 LEFT JOIN users actor ON actor.id=g.granted_by_user_id;
 
+-- What retirement does beyond the marker, in the transaction that sets it.
+--
+-- A retired issuance is remembered without the grant row: revoke deletes the row
+-- and reissue overwrites it, and an earlier bundle restored over this target must
+-- still meet the retirement. Target-local, like workspace_member_retired_ids: no
+-- foreign key, so a replacing restore leaves it, and it never travels in a bundle.
+CREATE TABLE page_grant_retired_issuances (
+ workspace_id TEXT NOT NULL,
+ page_id TEXT NOT NULL,
+ subject_type TEXT NOT NULL,
+ subject_id TEXT NOT NULL,
+ level TEXT NOT NULL,
+ granted_by_user_id TEXT NOT NULL,
+ granted_at TEXT NOT NULL,
+ retired_at TEXT NOT NULL,
+ PRIMARY KEY(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at)
+) WITHOUT ROWID;
+CREATE INDEX idx_page_grant_retired_issuer ON page_grant_retired_issuances(granted_by_user_id);
+CREATE INDEX idx_page_grant_retired_subject ON page_grant_retired_issuances(subject_id);
+
+-- A workbook ticket is opened on its editor's write grant and checks no grant
+-- identity afterwards, so it closes here: the sweep only visits Pages with
+-- subscribers, and a reissue would otherwise authorize the old ticket again.
+CREATE TRIGGER page_grant_retired AFTER UPDATE OF retired_at ON page_grants
+WHEN OLD.retired_at IS NULL AND NEW.retired_at IS NOT NULL
+BEGIN
+ INSERT OR IGNORE INTO page_grant_retired_issuances(workspace_id,page_id,subject_type,subject_id,level,granted_by_user_id,granted_at,retired_at)
+  SELECT p.workspace_id,NEW.page_id,NEW.subject_type,NEW.subject_id,NEW.level,NEW.granted_by_user_id,NEW.granted_at,NEW.retired_at FROM pages p WHERE p.id=NEW.page_id;
+ UPDATE gridcraft_sessions SET closed_at=CAST(strftime('%s','now') AS INTEGER)*1000
+  WHERE NEW.level='write' AND NEW.subject_type='user' AND page_id=NEW.page_id AND user_id=NEW.subject_id AND closed_at IS NULL;
+END;
+
+-- A bundle's retired row is remembered like one retired here.
+CREATE TRIGGER page_grant_retired_import AFTER INSERT ON page_grants
+WHEN NEW.retired_at IS NOT NULL
+BEGIN
+ INSERT OR IGNORE INTO page_grant_retired_issuances(workspace_id,page_id,subject_type,subject_id,level,granted_by_user_id,granted_at,retired_at)
+  SELECT p.workspace_id,NEW.page_id,NEW.subject_type,NEW.subject_id,NEW.level,NEW.granted_by_user_id,NEW.granted_at,NEW.retired_at FROM pages p WHERE p.id=NEW.page_id;
+END;
+
+CREATE TRIGGER page_grant_retired_user_deleted AFTER DELETE ON users
+BEGIN
+ DELETE FROM page_grant_retired_issuances WHERE granted_by_user_id=OLD.id OR (subject_type='user' AND subject_id=OLD.id);
+END;
+
 -- A grant whose issuer has no standing today is retired once. A live grant is
 -- not touched.
 UPDATE page_grants SET retired_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')

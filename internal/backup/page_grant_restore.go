@@ -6,48 +6,25 @@ import (
 )
 
 // A retired Page grant stays retired (#5069), and a restore must not be the way
-// back. A replacing restore deletes the target's rows, so the bundle's earlier
-// copy of a grant retired here would land live: the identity of each retired
-// issuance is read first and applied again afterwards. A new issuance has its
-// own granted_at and is not matched.
+// back. page_grant_retired_issuances remembers every retired issuance on this
+// target, past revoke and reissue, and is outside the backup, so a replacing
+// restore neither removes it nor brings a copy. Each imported grant meets it
+// here. A new issuance has its own granted_at and is not matched.
 //
 // The retirement triggers do not see a restored row: its grant arrives after its
 // issuer's membership. A bundle made before retirement existed can carry a grant
 // whose issuer had no standing, so the restored set is judged once, in the same
 // transaction. A bundle without memberships is not judged: nothing in it says
 // who has standing, and the target may receive its members from a later restore.
-
-type retiredPageGrant struct {
-	page, subjectType, subject, level, issuer, grantedAt, retiredAt string
-}
-
-func captureRetiredPageGrants(ctx context.Context, tx *sql.Tx) ([]retiredPageGrant, error) {
-	if has, err := tableHasColumn(ctx, tx, "page_grants", "retired_at"); err != nil || !has {
-		return nil, err
-	}
-	rows, err := tx.QueryContext(ctx, `SELECT page_id,subject_type,subject_id,level,granted_by_user_id,granted_at,retired_at FROM page_grants WHERE retired_at IS NOT NULL`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	var out []retiredPageGrant
-	for rows.Next() {
-		var g retiredPageGrant
-		if err := rows.Scan(&g.page, &g.subjectType, &g.subject, &g.level, &g.issuer, &g.grantedAt, &g.retiredAt); err != nil {
-			return nil, err
-		}
-		out = append(out, g)
-	}
-	return out, rows.Err()
-}
-
-func retireRestoredPageGrants(ctx context.Context, tx *sql.Tx, dump *DBDump, retired []retiredPageGrant) error {
+func retireRestoredPageGrants(ctx context.Context, tx *sql.Tx, dump *DBDump) error {
 	if has, err := tableHasColumn(ctx, tx, "page_grants", "retired_at"); err != nil || !has {
 		return err
 	}
-	for _, g := range retired {
-		if _, err := tx.ExecContext(ctx, `UPDATE page_grants SET retired_at=? WHERE page_id=? AND subject_type=? AND subject_id=? AND level=? AND granted_by_user_id=? AND granted_at=? AND retired_at IS NULL`,
-			g.retiredAt, g.page, g.subjectType, g.subject, g.level, g.issuer, g.grantedAt); err != nil {
+	for _, g := range dump.Tables["page_grants"] {
+		if _, err := tx.ExecContext(ctx, `UPDATE page_grants SET retired_at=(SELECT t.retired_at FROM page_grant_retired_issuances t WHERE t.page_id=page_grants.page_id AND t.subject_type=page_grants.subject_type AND t.subject_id=page_grants.subject_id AND t.level=page_grants.level AND t.granted_by_user_id=page_grants.granted_by_user_id AND t.granted_at=page_grants.granted_at)
+			WHERE page_id=? AND subject_type=? AND subject_id=? AND level=? AND granted_by_user_id=? AND granted_at=? AND retired_at IS NULL
+			AND EXISTS(SELECT 1 FROM page_grant_retired_issuances t WHERE t.page_id=page_grants.page_id AND t.subject_type=page_grants.subject_type AND t.subject_id=page_grants.subject_id AND t.level=page_grants.level AND t.granted_by_user_id=page_grants.granted_by_user_id AND t.granted_at=page_grants.granted_at)`,
+			g["page_id"], g["subject_type"], g["subject_id"], g["level"], g["granted_by_user_id"], g["granted_at"]); err != nil {
 			return err
 		}
 	}

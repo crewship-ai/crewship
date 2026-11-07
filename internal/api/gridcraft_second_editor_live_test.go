@@ -206,3 +206,55 @@ func TestGridCraftWriterToAuditorOwnerChangeClosesOnlyAffectedEditor(t *testing.
 	wantCode(t, f.do(ann, "POST", first+"/sessions"+q, `{"session_id":"`+affected.SessionID+`"}`), 404, "auditor cannot reuse editor ticket")
 	wantCode(t, f.do(ann, "POST", second+"/sessions"+q, `{"session_id":"`+unaffected.SessionID+`"}`), 200, "unrelated editor stays live")
 }
+
+// A workbook ticket is opened on a grant, so it ends with that grant (#5069).
+// Nothing reads or subscribes between the steps, so only the transaction that
+// retires the grant can close the ticket; reissuing must not bring it back.
+func TestGridCraftTicketDoesNotReturnWithAReissuedGrant(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		cycle []string
+	}{
+		{name: "owner suspended and reactivated", cycle: []string{
+			`UPDATE users SET suspended_at='2026-11-06T10:00:00Z' WHERE id='ann'`,
+			`UPDATE users SET suspended_at=NULL WHERE id='ann'`,
+		}},
+		{name: "custody away and back", cycle: []string{
+			`UPDATE pages SET owner_user_id='bob' WHERE id='live-shared'`,
+			`UPDATE pages SET owner_user_id='ann' WHERE id='live-shared'`,
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := gridcraftInstanceFixture(t)
+			f.r.RegisterGridCraft(appengine.Options{Enabled: true, Editor: true}, gridcraftCellsEngine{})
+			setGridCraftEditorFlag(t, f, "ws-old", true)
+			seedInstanceUser(t, f.db, "ann", "ann@ex.com", "ws-old", "MEMBER")
+			seedInstanceUser(t, f.db, "bob", "bob@ex.com", "ws-old", "MEMBER")
+			ann := mintTokenFor(t, f.db, "ann", "workbookann000000000000000")
+			bob := mintTokenFor(t, f.db, "bob", "workbookbob000000000000000")
+			q := "?workspace_id=ws-old"
+			base := liveWorkbook(t, f, ann, "ann", "live-shared")
+			wantCode(t, f.do(ann, "POST", base+"/editors"+q, `{"editor":"bob@ex.com","publish":true}`), 200, "share")
+			editor := openEditorSession(t, f, bob, base)
+			mine := openEditorSession(t, f, ann, base)
+
+			for _, step := range test.cycle {
+				mustExec(t, f.db, step)
+			}
+			var closed int
+			if err := f.db.QueryRow(`SELECT count(*) FROM gridcraft_sessions WHERE session_id=? AND closed_at IS NOT NULL`, editor.SessionID).Scan(&closed); err != nil || closed != 1 {
+				t.Fatalf("retirement left the editor's ticket open: %d %v", closed, err)
+			}
+			wantCode(t, f.do(ann, "POST", base+"/editors"+q, `{"editor":"bob@ex.com"}`), 200, "same owner shares again")
+			wantError(t, f.do(bob, "POST", base+"/sessions"+q, `{"session_id":"`+editor.SessionID+`"}`), 409, "editor_session_expired", "old ticket after reissue")
+			wantCode(t, f.do(bob, "POST", base+"/edits"+q, cellEdit(editor.SessionID, 1, 1, "D4", "old-ticket")), 409, "old ticket cannot edit")
+			if fresh := openEditorSession(t, f, bob, base); fresh.SessionID == editor.SessionID {
+				t.Fatal("the new grant did not open a new ticket")
+			}
+			var ownerClosed int
+			if err := f.db.QueryRow(`SELECT count(*) FROM gridcraft_sessions WHERE session_id=? AND closed_at IS NOT NULL`, mine.SessionID).Scan(&ownerClosed); err != nil || ownerClosed != 0 {
+				t.Fatalf("the owner's own ticket holds no grant, closed=%d %v", ownerClosed, err)
+			}
+		})
+	}
+}

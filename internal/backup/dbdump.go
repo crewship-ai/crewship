@@ -1185,10 +1185,6 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	if err != nil {
 		return stats, fmt.Errorf("backup: read live web authority epoch: %w", err)
 	}
-	retiredGrants, err := captureRetiredPageGrants(ctx, tx)
-	if err != nil {
-		return stats, fmt.Errorf("backup: read retired page grants: %w", err)
-	}
 	// PreInsert hook runs BEFORE any per-table INSERT. The canonical
 	// use case is --replace: clear the target workspace's rows so the
 	// bundle's rows land with their original IDs instead of either
@@ -1568,7 +1564,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	if err := reconcileRestoredIssueOutbox(ctx, tx); err != nil {
 		return stats, fmt.Errorf("backup: reconcile durable issue audit delivery: %w", err)
 	}
-	if err := retireRestoredPageGrants(ctx, tx, dump, retiredGrants); err != nil {
+	if err := retireRestoredPageGrants(ctx, tx, dump); err != nil {
 		return stats, fmt.Errorf("backup: retire restored page grants: %w", err)
 	}
 	if err := assertNoFKViolationsTx(ctx, tx); err != nil {
