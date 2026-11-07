@@ -3,6 +3,8 @@ package dispatch
 import (
 	"context"
 	"errors"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -281,5 +283,104 @@ func TestSettle_OutcomeProbeTimeoutStillPersistsReconciliation(t *testing.T) {
 	p, _, err := h.store.RunProjection(t.Context(), a.RunID)
 	if err != nil || p.Status != "" {
 		t.Fatalf("timeout fabricated terminal: %+v %v", p, err)
+	}
+}
+
+// hostStopRuntime answers like a protected host-captured run (#5081): the stop
+// request ends the process tree, yet Stop itself reports an error because a
+// leader exit does not prove descendant absence. Only once the capture records
+// its terminal result and stop receipt does Alive report the runtime gone.
+type hostStopRuntime struct {
+	*fakeRuntime
+	stopCalls  atomic.Int32
+	terminalAt atomic.Int64 // unix nanos; zero = never
+	terminal   time.Duration
+}
+
+func (r *hostStopRuntime) Stop(context.Context, string) (bool, error) {
+	if r.stopCalls.Add(1) == 1 && r.terminal > 0 {
+		r.terminalAt.Store(time.Now().Add(r.terminal).UnixNano())
+	}
+	return false, errors.New("leader exit does not prove descendant absence")
+}
+
+func (r *hostStopRuntime) Alive(context.Context, string) (bool, error) {
+	at := r.terminalAt.Load()
+	return at == 0 || time.Now().UnixNano() < at, nil
+}
+
+// A restart under a protected host-captured run must wait, within the stop
+// grace, for the provider to confirm the stop it requested, then settle the
+// run's own return. Parking at once with "runtime stop could not be confirmed"
+// left a reason retained recovery refused and a slot held for good (#5081).
+// Without confirmation the old park stays, and a return seen before the stop
+// is confirmed (a detached hand-back) never settles as ended.
+func TestShutdown_HostStopWaitsForConfirmedEnd(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		terminal time.Duration
+		runErr   error
+		classify Outcome
+		returnAt time.Duration // after the stop request; negative = already returned
+		state    work.State
+		reason   string
+	}{
+		{"terminal capture settles through retained recovery", 300 * time.Millisecond, errors.New("capture unconfirmed"), OutcomeRetained, 350 * time.Millisecond, work.StateNeedsReconciliation, RetainedCapturePendingReason},
+		{"a runtime-classified failure settles as failed", 300 * time.Millisecond, errors.New("exit 143"), OutcomeFailed, 350 * time.Millisecond, work.StateFailed, ""},
+		{"no confirmation keeps the shutdown park", 0, errors.New("capture unconfirmed"), OutcomeRetained, 100 * time.Millisecond, work.StateNeedsReconciliation, "server shutdown: runtime stop could not be confirmed"},
+		{"detached return before confirmation keeps the shutdown park", 0, errors.New("detached"), OutcomeDetached, -1, work.StateNeedsReconciliation, "server shutdown: runtime stop could not be confirmed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.rt.classifyAs = tc.classify
+			r := h.accept("shutdown-host-stop")
+			a, err := h.store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "owner"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			assignment := Assignment{Item: a.Item, RunID: a.RunID, Generation: a.Generation}
+			if err := h.store.Transition(t.Context(), work.TransitionRequest{WorkID: r.WorkID, RunID: a.RunID, Generation: a.Generation, To: work.StateRunning}); err != nil {
+				t.Fatal(err)
+			}
+			if err := h.rt.Run(t.Context(), assignment, func() {}); err != nil {
+				t.Fatal(err)
+			}
+			runtime := &hostStopRuntime{fakeRuntime: h.rt, terminal: tc.terminal}
+			runDone := make(chan error, 1)
+			if tc.returnAt < 0 {
+				runDone <- tc.runErr
+			} else {
+				go func() {
+					for runtime.stopCalls.Load() == 0 {
+						time.Sleep(5 * time.Millisecond)
+					}
+					time.Sleep(tc.returnAt)
+					runDone <- tc.runErr
+				}()
+			}
+			var cancelled atomic.Bool
+			d := New(h.store, runtime, nil, h.cfg, quiet())
+			began := time.Now()
+			d.shutdownAttempt(&liveAttempt{assignment: assignment, locator: h.rt.Locator(assignment), cancel: func() { cancelled.Store(true) }}, runDone)
+			if elapsed := time.Since(began); elapsed > 3*h.cfg.StopGrace {
+				t.Fatalf("shutdown settlement took %s, beyond its bounded budget", elapsed)
+			}
+			if !cancelled.Load() {
+				t.Fatal("shutdown left local supervision running")
+			}
+			if n := runtime.stopCalls.Load(); n != 1 {
+				t.Fatalf("shutdown signalled the runtime %d times, want once", n)
+			}
+			it, err := h.store.Get(t.Context(), r.WorkID)
+			if err != nil || it.State != tc.state {
+				t.Fatalf("shutdown state=%v err=%v, want %s", it.State, err, tc.state)
+			}
+			if tc.reason != "" && !strings.HasPrefix(it.StateReason, tc.reason) {
+				t.Fatalf("shutdown reason %q, want %q", it.StateReason, tc.reason)
+			}
+			if h.rt.starts.Load() != 1 {
+				t.Fatal("shutdown repeated execution")
+			}
+		})
 	}
 }
