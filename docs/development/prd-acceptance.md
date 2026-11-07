@@ -146,6 +146,29 @@ SHA-256, equality with the previous checkpoint, the marker report). The chain
 and checkpoints are also written to `chain.json` however the row ends (a session
 that throws, a failed final assertion, a pass).
 
+Both files also carry `saveAccounting`, how each save of the hour happened:
+`autosaves` (save waits whose new version arrived without a forced press: one
+wait per cycle, one more after an "Ověřit výsledek" press, and the Sheet
+warm-up), `forcedCtrlS` with `forcedCtrlSEvents` (every Control+s the harness
+pressed: in the save wait after 4 s without a new version, or in the Word table
+step after 4 s with the cell text not yet in a table cell of the server head and
+the status "Neuložený koncept"; each event has the cycle, the time, the reason,
+whether a new version followed, and the reconcile requests sent while the
+harness waited after it), `editorReconciles` with `editorReconcileOps` (reconcile
+requests the editor sent by itself, i.e. not after an "Ověřit výsledek" press or
+a forced Ctrl+S) and `verifyPresses`. The raw records are in `chain.json` as
+`saveWaits` and `forcedCtrlS`. The row's note starts with the same counts, e.g.
+"autosave 57×, forced Ctrl+S 6×, automatic reconcile 0×, Ověřit výsledek 0×".
+This is accounting, not a gate: a forced Ctrl+S never fails the row; the server
+head still decides whether a cycle's typing was saved.
+
+`pageStalls` (name kept for the evidence readers) lists gaps of at least 10 s
+between the editor page's own `craft/proposals` polls; `pageStallsDescription`
+says so in the evidence. They are polling gaps, not a measured renderer or
+input stall. The note's "longest interruption" (`interruptions.longestStallMs`)
+is the longest merged span of such gaps and "Výsledek nepotvrzen" spells up to
+an "Ověřit výsledek" press.
+
 `craft-restart.acceptance.ts` (`A.resilience.restart.word`, `.sheet`) is the
 short form of the restart: unsaved typing, restart, reload, draft offered, no
 duplicate version, editor usable.

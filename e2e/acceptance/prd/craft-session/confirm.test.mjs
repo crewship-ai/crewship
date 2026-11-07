@@ -2,7 +2,7 @@
 // (also run by e2e/acceptance/prd/report.test.mjs, the PRD runner step in CI)
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { hourInterruptions, isUnconfirmedStatus, lastCommittedSave, pageStalls, verifyDue, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
+import { PAGE_STALLS_DESCRIPTION, hourInterruptions, isUnconfirmedStatus, saveAccounting, lastCommittedSave, pageStalls, verifyDue, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
 
 const word = (paras) => JSON.stringify({ body: paras.map((text) => ({ kind: "para", text, runs: [{ len: text.length }] })) })
 const C = "HOURf9vyrC010"
@@ -183,7 +183,7 @@ test("gaps in the page's polling are reported as stalls", () => {
   assert.deepEqual(pageStalls(trail), [{ from: "2026-11-06T09:47:05.000Z", to: "2026-11-06T09:47:45.000Z", gapMs: 40_000 }])
 })
 
-test("hourInterruptions does not count an overlap twice and names the longest stall", () => {
+test("hourInterruptions does not count an overlap twice and names the longest interruption", () => {
   const at = (s) => new Date(Date.UTC(2026, 10, 6, 10, 0, s)).toISOString()
   const stalls = [{ from: at(0), to: at(30), gapMs: 30_000 }, { from: at(40), to: at(55), gapMs: 15_000 }]
   const presses = [{ cycle: 1, firstSeenAt: at(10), pressedAt: at(35), unconfirmedForMs: 25_000, statusAfter: "", reconcile: null }]
@@ -191,11 +191,63 @@ test("hourInterruptions does not count an overlap twice and names the longest st
   assert.equal(r.presses, 1)
   assert.equal(r.interruptedMs, 50_000)
   assert.equal(r.longestStallMs, 35_000)
-  assert.match(r.note, /pressed 1 times, interrupted 50 s in total, longest stall 35 s\. Saving did not recover by itself/)
+  assert.equal(r.pollGaps, 2)
+  assert.match(r.note, /pressed 1 times, interrupted 50 s in total \(page-poll gaps and unconfirmed spells\), longest interruption 35 s; 2 page-poll gap\(s\) of at least 10 s/)
+  assert.match(r.note, /not a measured renderer or input stall\)\. Saving did not recover by itself/)
+  // The note does not claim that the page froze.
+  assert.doesNotMatch(r.note, /longest stall|page stall/)
 })
 
 test("hourInterruptions reports a clean hour as zero, without the warning", () => {
   const r = hourInterruptions([], [])
   assert.deepEqual([r.presses, r.interruptedMs, r.longestStallMs], [0, 0, 0])
-  assert.equal(r.note, "Ověřit výsledek pressed 0 times, interrupted 0 s in total, longest stall 0 s.")
+  assert.equal(r.note, `Ověřit výsledek pressed 0 times, interrupted 0 s in total (page-poll gaps and unconfirmed spells), longest interruption 0 s; 0 page-poll gap(s) of at least 10 s (${PAGE_STALLS_DESCRIPTION}).`)
+})
+
+test("the page-stall description says what was measured and what was not", () => {
+  assert.match(PAGE_STALLS_DESCRIPTION, /craft\/proposals/)
+  assert.match(PAGE_STALLS_DESCRIPTION, /not a measured renderer or input stall/)
+})
+
+// Save accounting: how each save of an hour row happened.
+const at = (s) => new Date(Date.UTC(2026, 10, 7, 10, 0, s)).toISOString()
+const wait = (cycle, pressed, version) => ({ cycle, at: at(cycle === "warmup" ? 0 : cycle), pressed, version })
+const forced = (cycle, site, newVersion, reconcileOps = []) => ({ cycle, at: at(cycle), site, reason: site === "save-wait" ? "no autosave within 4 s" : "table cell text not in a table cell of the server head v3 after 4 s, status Neuložený koncept", newVersion, version: newVersion ? "9" : null, reconcileOps })
+
+test("saveAccounting counts autosaves, forced Ctrl+S, automatic reconciles and Ověřit výsledek apart", () => {
+  const waits = [wait("warmup", false, "2"), wait(0, false, "3"), wait(1, true, "4"), wait(2, false, "5"), wait(3, true, null), wait(3, false, "6")]
+  const presses = [forced(1, "save-wait", true), forced(2, "table-cell", true, [7]), forced(3, "save-wait", false)]
+  const ops = [
+    { n: 1, kind: "save" }, { n: 2, kind: "reconcile" }, { n: 3, kind: "save" }, { n: 4, kind: "reconcile" },
+    { n: 5, kind: "save" }, { n: 6, kind: "reconcile" }, { n: 7, kind: "reconcile" },
+  ]
+  const verifications = [{ cycle: 3, firstSeenAt: at(30), pressedAt: at(45), unconfirmedForMs: 15_000, statusAfter: "", reconcile: { status: 200 }, reconcileOps: [4] }]
+  const a = saveAccounting({ waits, forced: presses, ops, verifications })
+  // The warm-up and cycles 0, 2 and the second wait of 3 saved by themselves; a wait that pressed is not an autosave.
+  assert.equal(a.autosaves, 4)
+  assert.equal(a.forcedCtrlS, 3)
+  assert.deepEqual(a.forcedCtrlSEvents.map((e) => [e.cycle, e.site, e.newVersion]), [[1, "save-wait", true], [2, "table-cell", true], [3, "save-wait", false]])
+  // 4 followed the Ověřit výsledek press, 7 the table step's Ctrl+S: only 2 and 6 were the editor's own.
+  assert.deepEqual(a.editorReconcileOps, [2, 6])
+  assert.equal(a.editorReconciles, 2)
+  assert.equal(a.verifyPresses, 1)
+  assert.equal(a.note, "autosave 4×, forced Ctrl+S 3× (1 without a new version), automatic reconcile 2×, Ověřit výsledek 1×.")
+  assert.match(a.description, /not a gate/)
+})
+
+test("saveAccounting of a clean hour: every save automatic, nothing forced", () => {
+  const a = saveAccounting({ waits: [wait(0, false, "2"), wait(1, false, "3")], forced: [], ops: [{ n: 1, kind: "save" }, { n: 2, kind: "save" }], verifications: [] })
+  assert.deepEqual([a.autosaves, a.forcedCtrlS, a.editorReconciles, a.verifyPresses], [2, 0, 0, 0])
+  assert.equal(a.note, "autosave 2×, forced Ctrl+S 0×, automatic reconcile 0×, Ověřit výsledek 0×.")
+})
+
+test("a press recorded before the reconcile numbers existed (no reconcileOps) still counts", () => {
+  const a = saveAccounting({ waits: [], forced: [], ops: [{ n: 1, kind: "reconcile" }], verifications: [{ cycle: 0, firstSeenAt: at(0), pressedAt: at(15), unconfirmedForMs: 15_000, statusAfter: "", reconcile: null }] })
+  assert.deepEqual([a.verifyPresses, a.editorReconciles], [1, 1])
+})
+
+test("hourInterruptions puts the save accounting first in the row's note", () => {
+  const a = saveAccounting({ waits: [wait(0, false, "2"), wait(1, true, "3")], forced: [forced(1, "save-wait", true)], ops: [], verifications: [] })
+  const r = hourInterruptions([], [], a)
+  assert.match(r.note, /^autosave 1×, forced Ctrl\+S 1×, automatic reconcile 0×, Ověřit výsledek 0×\. Ověřit výsledek pressed 0 times/)
 })

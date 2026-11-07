@@ -82,10 +82,13 @@ export function cellInTable(raw: string, cell: string): boolean {
 /**
  * What a passed hour row must not hide: the row keeps going by pressing "Ověřit
  * výsledek", so a pass alone reads as if saving recovered by itself. Intervals are
- * the page stalls and the unconfirmed spells up to each press, merged so that an
- * overlap is not counted twice. The longest one is the longest stall.
+ * the page-poll gaps (pageStalls) and the unconfirmed spells up to each press,
+ * merged so that an overlap is not counted twice. `longestStallMs` (name kept for
+ * the evidence readers) is the longest merged interruption, not a measured
+ * renderer or input stall. With `accounting`, the note starts with how the saves
+ * happened (saveAccounting).
  */
-export function hourInterruptions(verifications: readonly VerifyPress[], stalls: readonly PageStall[]): { presses: number; interruptedMs: number; longestStallMs: number; note: string } {
+export function hourInterruptions(verifications: readonly VerifyPress[], stalls: readonly PageStall[], accounting?: SaveAccounting): { presses: number; interruptedMs: number; longestStallMs: number; pollGaps: number; note: string } {
   const spans = [
     ...stalls.map((s) => [Date.parse(s.from), Date.parse(s.to)]),
     ...verifications.map((v) => [Date.parse(v.firstSeenAt), Date.parse(v.pressedAt)]),
@@ -104,9 +107,76 @@ export function hourInterruptions(verifications: readonly VerifyPress[], stalls:
   close()
   const seconds = (ms: number) => `${Math.round(ms / 1000)} s`
   const presses = verifications.length
-  const note = `Ověřit výsledek pressed ${presses} times, interrupted ${seconds(interruptedMs)} in total, longest stall ${seconds(longestStallMs)}.` +
+  const pollGaps = stalls.length
+  const note = (accounting ? accounting.note + " " : "") +
+    `Ověřit výsledek pressed ${presses} times, interrupted ${seconds(interruptedMs)} in total (page-poll gaps and unconfirmed spells), longest interruption ${seconds(longestStallMs)}; ` +
+    `${pollGaps} page-poll gap(s) of at least 10 s (${PAGE_STALLS_DESCRIPTION}).` +
     (presses ? " Saving did not recover by itself." : "")
-  return { presses, interruptedMs, longestStallMs, note }
+  return { presses, interruptedMs, longestStallMs, pollGaps, note }
+}
+
+// ---------------------------------------------------------------------------
+// How each save of the hour rows happened (save accounting). Accounting only: a
+// forced Ctrl+S never fails the row; confirmCycle stays the judge of the typing.
+
+/** Where a cycle's save could come from: one wait of saveByAutosaveOrKey (draft.ts). */
+export interface SaveWait {
+  /** The cycle number, or "warmup" for the Sheet warm-up. */
+  cycle: number | "warmup"
+  at: string
+  /** Did the harness press Ctrl+S because no new version came within 4 s. */
+  pressed: boolean
+  /** The new version the wait ended with, or null when none came. */
+  version: string | null
+}
+
+/** One Ctrl+S the harness pressed (not the person's own shortcut: the hour rows have none). */
+export interface ForcedCtrlS {
+  cycle: number | "warmup"
+  at: string
+  /** Which harness code pressed it: the cycle's save wait or the Word table step's cell check. */
+  site: "save-wait" | "table-cell"
+  reason: string
+  /** Did a new version follow the press (a newer "Uloženo · verze N", or a newer server head for the table cell). */
+  newVersion: boolean
+  version: string | null
+  /** Reconcile requests sent while the harness waited after the press (not counted as automatic). */
+  reconcileOps: number[]
+}
+
+export interface SaveAccounting {
+  /** Save waits (one per cycle, one more after an Ověřit výsledek press, the Sheet warm-up) whose new version arrived without a forced press. */
+  autosaves: number
+  forcedCtrlS: number
+  forcedCtrlSEvents: ForcedCtrlS[]
+  /** Reconcile requests the editor sent by itself: neither after an Ověřit výsledek press nor after a forced Ctrl+S. */
+  editorReconciles: number
+  editorReconcileOps: number[]
+  verifyPresses: number
+  description: string
+  note: string
+}
+
+export const SAVE_ACCOUNTING_DESCRIPTION =
+  "autosaves: save waits whose new version arrived without a forced press; forcedCtrlS: Control+s pressed by the harness (no autosave within 4 s, or the Word table cell not in the head after 4 s with status Neuložený koncept); editorReconciles: reconcile requests not following an Ověřit výsledek press or a forced Ctrl+S; verifyPresses: Ověřit výsledek presses. Accounting only, not a gate."
+
+/** Counts how the saves of an hour row happened. Pure: the session records the waits, presses and requests. */
+export function saveAccounting(input: {
+  waits: readonly SaveWait[]
+  forced: readonly ForcedCtrlS[]
+  ops: ReadonlyArray<{ n: number; kind: string }>
+  verifications: readonly VerifyPress[]
+}): SaveAccounting {
+  const { waits, forced, ops, verifications } = input
+  const autosaves = waits.filter((w) => !w.pressed && w.version !== null).length
+  const prompted = new Set<number>([...forced.flatMap((f) => f.reconcileOps), ...verifications.flatMap((v) => v.reconcileOps ?? [])])
+  const editorReconcileOps = ops.filter((o) => o.kind === "reconcile" && !prompted.has(o.n)).map((o) => o.n)
+  const counts = { autosaves, forcedCtrlS: forced.length, editorReconciles: editorReconcileOps.length, verifyPresses: verifications.length }
+  const without = forced.filter((f) => !f.newVersion).length
+  const note =
+    `autosave ${counts.autosaves}×, forced Ctrl+S ${counts.forcedCtrlS}×${without ? ` (${without} without a new version)` : ""}, ` +
+    `automatic reconcile ${counts.editorReconciles}×, Ověřit výsledek ${counts.verifyPresses}×.`
+  return { ...counts, forcedCtrlSEvents: [...forced], editorReconcileOps, description: SAVE_ACCOUNTING_DESCRIPTION, note }
 }
 
 // ---------------------------------------------------------------------------
@@ -251,9 +321,18 @@ export interface VerifyPress {
   unconfirmedForMs: number
   statusAfter: string
   reconcile: { status?: number; version?: string; failed?: string } | null
+  /** Every reconcile request sent while the session waited after the press (not counted as automatic). */
+  reconcileOps?: number[]
 }
 
-/** A gap in the page's own proposal polling: the renderer did not run its timers. */
+/**
+ * What a PageStall is, for the evidence and the note. The name `pageStalls` is kept for
+ * the readers of the evidence; it does not prove that the page froze.
+ */
+export const PAGE_STALLS_DESCRIPTION =
+  "gaps in the page's own polling (craft/proposals requests of the editor page); not a measured renderer or input stall"
+
+/** A gap of at least `minGapMs` between two of the page's own craft/proposals polls (see PAGE_STALLS_DESCRIPTION). */
 export interface PageStall {
   from: string
   to: string
