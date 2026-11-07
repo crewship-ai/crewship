@@ -49,6 +49,15 @@ it("a save that reports read_revoked ends revoked, and Ctrl+S and a flush reject
   expect(terminal(r.states)).toHaveLength(1)
 })
 
+it("after read loss a held editor's Ctrl+S and flush reject with read_revoked, not native_save_held", async () => {
+  const r = rig()
+  r.controller.hold()
+  await r.controller.revokeRead()
+  await expect(r.controller.save("ticket-1")).rejects.toMatchObject({ reason: "read_revoked" })
+  await expect(r.controller.flush()).rejects.toMatchObject({ reason: "read_revoked" })
+  expect(r.transport.save).not.toHaveBeenCalled()
+})
+
 it("a flush waiting on a save in flight rejects with read_revoked when that save reports it", async () => {
   const r = rig()
   let refuse!: (error: unknown) => void

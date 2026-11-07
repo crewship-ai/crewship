@@ -317,6 +317,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     return writing
   }
   function save(requestId?: string, autosaveToken?: number, hostFlush = false, localOnly = false): Promise<void> {
+    if (readRevoked) return Promise.reject(new NativeSaveError("read_revoked"))
     if (held) return Promise.reject(new Error("native_save_held"))
     const manual = requestId !== undefined || hostFlush
     // A press of Ctrl+S: Word's carries a ticket, Sheet's has none. Revocation's
@@ -428,7 +429,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         // Another save can finish, fail, or retire authority during storage.
         // Its state and receipt baseline always supersede this older capture.
         if (unavailable() || confirmed !== baseline || baseVersion !== baseline.version) {
-          if (requestId !== undefined) throw new Error(unavailable() ?? "superseded")
+          if (requestId !== undefined) throw refused(unavailable() ?? "superseded")
           return
         }
         // Storage recovered after a committed save whose row could not be
