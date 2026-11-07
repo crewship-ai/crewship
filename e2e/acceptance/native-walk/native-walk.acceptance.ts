@@ -460,7 +460,13 @@ for (const scenario of SCENARIOS) {
           const after = (await page.getByRole("status").allInnerTexts().catch(() => [] as string[])).join(" ")
           out.statusAfterRelease = after.slice(0, 200)
           check(!after.includes("Neuložený koncept"), `status after a release of a saved document: ${after.slice(0, 120)}`)
-          await page.reload({ waitUntil: "domcontentloaded" })
+          // The reloaded page must be the editor itself, not an error page with no offer on it.
+          const reloaded = await page.reload({ waitUntil: "domcontentloaded" })
+          out.finalReloadStatus = reloaded?.status() ?? null
+          check(reloaded !== null && reloaded.ok(), `final reload answered ${reloaded?.status() ?? "nothing"}`)
+          const editorBack = await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 }).then(() => true, () => false)
+          out.editorAfterFinalReload = editorBack
+          check(editorBack, "the editor did not come back after the final reload")
           await page.waitForTimeout(25_000)
           const offers = await page.getByText("Místní koncept", { exact: false }).count().catch(() => -1)
           out.draftOffersAfterRelease = offers
