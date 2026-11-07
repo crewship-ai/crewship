@@ -318,12 +318,14 @@ describe('a draft kept after write loss',()=>{
  })
  it('marks the capture of a retiring editor as final, and an edit as not',async()=>{
   await opened()
+  // The capture hashes with real crypto, which fake time does not move on a busy host.
+  const settled=async(final:boolean)=>{for(let i=0;i<200&&journal.persist.mock.calls.at(-1)?.[1]!==final;i++){await advance(50)}}
   act(()=>options.at(-1)!.onChanged('typed','doc'))
-  await advance(3_000)
+  await settled(false)
   expect(journal.persist.mock.calls.at(-1)?.[1]).toBe(false)
   server.state='comment-only'
   server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
-  await advance(1_000)
+  await settled(true)
   expect(journal.persist.mock.calls.at(-1)?.[1]).toBe(true)
  })
  it('the watch ends with the editor',async()=>{
