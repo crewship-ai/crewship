@@ -581,22 +581,34 @@ func TestCovSkBulkImportMissingGitURL400(t *testing.T) {
 	}
 }
 
-func TestCovSkBulkImportSSRFBlocked502(t *testing.T) {
-	db := setupTestDB(t)
-	h := NewSkillBulkImportHandler(db, newTestLogger())
-	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
-
-	// A localhost/private git URL trips the importer's URL validation,
-	// which is a client-facing error → 502 with the message echoed.
-	req := httptest.NewRequest("POST", "/x",
-		strings.NewReader(`{"git_url":"https://localhost/repo.git"}`))
-	req.SetPathValue("workspaceId", wsID)
-	req = withWorkspaceUser(req, userID, wsID, "OWNER")
-	rr := httptest.NewRecorder()
-	h.Import(rr, req)
-	if rr.Code != http.StatusBadGateway {
-		t.Errorf("status = %d, want 502 (blocked git URL), body=%s", rr.Code, rr.Body.String())
+// A git URL the importer refuses as input is the client's error: nothing
+// upstream was contacted, so 400 with the message echoed, never 502 (#5097).
+func TestCovSkBulkImportRejectedURLIs400(t *testing.T) {
+	for _, raw := range []string{
+		"https://localhost/repo.git",
+		"http://example.com/repo.git",
+		"git@example.com:org/repo.git",
+		"https://token@example.com/repo.git",
+		"https://10.0.0.5/repo.git",
+	} {
+		t.Run(raw, func(t *testing.T) {
+			db := setupTestDB(t)
+			h := NewSkillBulkImportHandler(db, newTestLogger())
+			userID := seedTestUser(t, db)
+			wsID := seedTestWorkspace(t, db, userID)
+			body, _ := json.Marshal(map[string]string{"git_url": raw})
+			req := httptest.NewRequest("POST", "/x", bytes.NewReader(body))
+			req.SetPathValue("workspaceId", wsID)
+			req = withWorkspaceUser(req, userID, wsID, "OWNER")
+			rr := httptest.NewRecorder()
+			h.Import(rr, req)
+			if rr.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, want 400 (rejected git URL), body=%s", rr.Code, rr.Body.String())
+			}
+			if !strings.Contains(rr.Body.String(), "bulk import rejected") {
+				t.Fatalf("rejection reason not echoed: %s", rr.Body.String())
+			}
+		})
 	}
 }
 

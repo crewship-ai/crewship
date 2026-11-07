@@ -35,7 +35,7 @@ func TestSkillGitRequestCannotExpandPrivateHosts(t *testing.T) {
 	req = withWorkspaceUser(req, user, ws, "OWNER")
 	response := httptest.NewRecorder()
 	handler.Import(response, req)
-	if response.Code != http.StatusBadGateway {
+	if response.Code != http.StatusBadRequest {
 		t.Fatalf("request changed private-host authority: status=%d body=%s", response.Code, response.Body.String())
 	}
 	if len(handler.gitPolicy.PrivateHosts) != 0 {

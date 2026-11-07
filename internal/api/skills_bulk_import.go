@@ -78,11 +78,23 @@ func isClientFacingImportError(err error) bool {
 	if err == nil {
 		return false
 	}
+	return isBulkImportInputError(err) || strings.Contains(err.Error(), "bulk import via git_url")
+}
+
+// isBulkImportInputError reports a git URL the importer refused as input,
+// before any clone: the client's error, answered 400 (#5097). The server's own
+// Git environment ("bulk import via git_url requires ...") is not input.
+func isBulkImportInputError(err error) bool {
+	if err == nil {
+		return false
+	}
 	msg := err.Error()
+	if strings.Contains(msg, "bulk import via git_url") {
+		return false
+	}
 	for _, prefix := range []string{
 		"bulk import requires",
 		"bulk import only supports",
-		"bulk import via git_url",
 		"private/internal IP",
 		"localhost git URLs",
 		"git URL missing host",
@@ -143,13 +155,16 @@ func (h *SkillBulkImportHandler) Import(w http.ResponseWriter, r *http.Request) 
 		DryRun:             body.DryRun,
 	})
 	if err != nil {
-		// Validation errors (bad URL, blocked SSRF, missing git binary)
-		// are safe to echo verbatim — they're authored by us in this
+		// A rejected git URL is the client's input error (400). Server
+		// environment errors (missing or old git) stay 502. Both are safe
+		// to echo verbatim — they're authored by us in this
 		// codebase. Anything else (clone process stderr, walker
 		// surprises) can carry git's raw output, which leaks server
 		// filesystem paths and any embedded URL credentials. Map those
 		// to a generic 502 and keep the detail in the server log.
-		if isClientFacingImportError(err) {
+		if isBulkImportInputError(err) {
+			writeProblem(w, r, http.StatusBadRequest, "bulk import rejected: "+err.Error())
+		} else if isClientFacingImportError(err) {
 			writeProblem(w, r, http.StatusBadGateway, "bulk import failed: "+err.Error())
 		} else {
 			h.logger.Error("bulk import: server-side failure",
