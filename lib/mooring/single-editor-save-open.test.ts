@@ -118,7 +118,7 @@ for (const later of ["edit", "capture", "read-retirement"] as const) it(`untouch
     release()
     await retirement
     expect(r.states.at(-1)?.dirty).toBe(true)
-    if (later === "read-retirement") expect(r.states.at(-1)?.phase).toBe("stopped")
+    if (later === "read-retirement") expect(r.states.at(-1)?.phase).toBe("revoked")
   } finally { release(); await r.controller.close() }
 })
 

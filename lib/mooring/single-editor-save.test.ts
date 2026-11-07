@@ -529,7 +529,7 @@ it.each([
   expect(captured).toBe(false)
   expect(r.journal.confirm).not.toHaveBeenCalled()
   expect(r.transport.save).toHaveBeenCalledOnce()
-  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "stopped" }))
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "revoked", reason: "read_revoked" }))
   await r.controller.close()
 })
 
