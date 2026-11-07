@@ -1,0 +1,1 @@
+- **Crew AI suggestions respect a key's approved hosts (#5045).** `crewship crew suggest` and the crew wizard no longer send a workspace Anthropic key that a person bound to other hosts to `api.anthropic.com`; they answer `422` instead. Unbound keys behave as before.
