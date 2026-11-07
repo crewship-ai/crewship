@@ -60,6 +60,8 @@ it.skipIf(!existsSync(chromium.executablePath()))("a cancelled exclusive open re
    const {openDocumentDrafts}= (window as unknown as {documentQueue: typeof import("./document-queue")}).documentQueue
    const outcome=(p:Promise<unknown>)=>p.then(()=>"opened",(e:Error)=>e.constructor.name)
    const pageLockHeld=async()=>((await navigator.locks.query()).held??[]).some(l=>String(l.name).startsWith("crewship-document-drafts:"))
+   // Releasing a Web Lock settles asynchronously; a leaked lock stays held for good.
+   const lockReleased=async()=>{for(let i=0;i<40;i++){if(!await pageLockHeld())return true;await new Promise(r=>setTimeout(r,50))}return false}
    const exclusiveNow=async()=>{const s=await openDocumentDrafts("alice","w","page",{requireExclusive:true});const e=s.exclusive;s.close();return e}
    // 1. Already abandoned: nothing is opened.
    const before=new AbortController();before.abort()
@@ -67,7 +69,7 @@ it.skipIf(!existsSync(chromium.executablePath()))("a cancelled exclusive open re
    // 2. Abandoned while the lock request is pending (the grant arrives asynchronously).
    const early=new AbortController(),pending=openDocumentDrafts("alice","w","page",{requireExclusive:true,signal:early.signal});early.abort()
    const duringLock=await outcome(pending)
-   const lockAfterLockAbort=await pageLockHeld()
+   const lockAfterLockAbort=!await lockReleased()
    // 3. Abandoned while IDB opens: hold the open request, abort, then deliver a late success.
    const realOpen=indexedDB.open.bind(indexedDB)
    let held:{request:Record<string,unknown>;closed:boolean}|undefined,openCalled!:()=>void
@@ -78,7 +80,7 @@ it.skipIf(!existsSync(chromium.executablePath()))("a cancelled exclusive open re
    const lockWhileIdbOpening=await pageLockHeld()
    middle.abort()
    const duringIdb=await outcome(idbPending)
-   const lockAfterIdbAbort=await pageLockHeld()
+   const lockAfterIdbAbort=!await lockReleased()
    ;(held!.request as {result:unknown}).result={close(){held!.closed=true}}
    ;(held!.request.onsuccess as ()=>void)?.()
    ;(indexedDB as unknown as {open:unknown}).open=realOpen
@@ -86,7 +88,8 @@ it.skipIf(!existsSync(chromium.executablePath()))("a cancelled exclusive open re
    const after=new AbortController(),store=await openDocumentDrafts("alice","w","page",{requireExclusive:true,signal:after.signal});after.abort()
    const draft={id:"kept",update:"",attempted:false,schema:1,epoch:"e",snapshot:"s"}
    await store.put(draft);const keptRows=(await store.load()).length;await store.remove("kept");store.close()
-   return {preAborted,duringLock,lockAfterLockAbort,lockWhileIdbOpening,duringIdb,lockAfterIdbAbort,lateClosed:held!.closed,keptRows,exclusiveAtEnd:await exclusiveNow()}
+   const lockAfterClose=!await lockReleased()
+   return {preAborted,duringLock,lockAfterLockAbort,lockWhileIdbOpening,duringIdb,lockAfterIdbAbort,lateClosed:held!.closed,keptRows,lockAfterClose,exclusiveAtEnd:await exclusiveNow()}
   })
   expect(result.preAborted).toBe("DocumentStorageError")
   expect(result.duringLock).toBe("DocumentStorageError")
@@ -96,6 +99,7 @@ it.skipIf(!existsSync(chromium.executablePath()))("a cancelled exclusive open re
   expect(result.lockAfterIdbAbort).toBe(false)
   expect(result.lateClosed).toBe(true)
   expect(result.keptRows).toBe(1)
+  expect(result.lockAfterClose).toBe(false)
   expect(result.exclusiveAtEnd).toBe(true)
  }finally{await browser.close()}
 })
