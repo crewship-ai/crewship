@@ -522,16 +522,22 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       if (error instanceof NativeSaveError && error.reason === "read_revoked") await revokeRead().catch(() => {})
     }
   }
-  // An untouched final capture equals the server version; keeping it would
-  // offer a "local draft" on every later open. Unproven, it stays for compare.
+  // Exactly the bytes of the version the server confirmed to this session (#5089).
+  function isConfirmedCopy(attempt: Prepared): boolean {
+    return confirmed !== undefined && !confirmed.seeded && !baselineStale && confirmed.version === baseVersion
+      && attempt.draft.baseVersion === baseVersion && attempt.draft.contentHash === confirmed.contentHash
+  }
+  // A final capture that is the server version, untouched since mount or equal
+  // to the last confirmed save, must not stay as a "local draft" offered on every
+  // later open or hold the leave guard. Unproven, it stays for compare.
   async function retireUntouched() {
     const capture = latest
-    if (!active || !capture || unconfirmed || !untouched(capture)) return
+    if (!active || !capture || unconfirmed || !untouched(capture) && !isConfirmedCopy(capture)) return
     try {
       await confirmRow(capture.draft)
       // Confirmation may race another capture, an edit or privacy retirement.
-      // Only this exact, still untouched final capture can release the guard.
-      if (active && latest === capture && !unconfirmed && !newerThan(capture) && untouched(capture)) {
+      // Only this exact, still unchanged final capture can release the guard.
+      if (active && latest === capture && !unconfirmed && !newerThan(capture) && (untouched(capture) || isConfirmedCopy(capture))) {
         dirty = false
         emit("read-only", "write_revoked")
       }

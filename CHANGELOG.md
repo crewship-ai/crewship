@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Releasing a saved Word or Sheet document no longer shows an unsaved draft (#5089).** A final capture with the exact bytes of the last confirmed save now counts as that version, so the status stays honest, the leave guard releases and no copy waits in the browser to be offered later.
 - **Deleting an agent stops its runs whose container is already gone (#5050).** A protected host run in a removed container stayed pending and held on to its work; it now counts as stopped. Any other inspect failure still reports an error.
 - ⚠️ **Behaviour change: only OWNER or ADMIN can change the governance model credential (#5024).** PATCH, rotate, escalation answers, OAuth completion and internal token writes refuse a bound credential for narrower roles, and `credential.rotate` no longer reaches it. Binding now needs an active credential.
 - **A delayed sign-out no longer removes unsent chat proposals (#5026).** If a tab learns of a sign-out after its person signed back in, it now keeps their chat recovery. A real sign-out still removes it, even when saving drafts fails.
