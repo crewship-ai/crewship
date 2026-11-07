@@ -274,6 +274,11 @@ func ensureFreshOAuthToken(
 		return currentEncValue
 	}
 
+	if !oauthTokenEndpointPermitted(ctx, db, credID, tokenURL) {
+		logger.Warn("OAuth token not refreshed: token endpoint is not an approved host", "credential_id", credID)
+		return currentEncValue
+	}
+
 	// Call the token endpoint.
 	tokenResp, err := refreshOAuthToken(ctx, tokenURL, clientID, clientSecret, refreshToken, resource)
 	if err != nil {

@@ -1,0 +1,4 @@
+- **Crew AI suggestions respect a key's approved hosts (#5045).** `crewship crew suggest` and the crew wizard no longer send a workspace Anthropic key that a person bound to other hosts to `api.anthropic.com`; they answer `422` instead. Unbound keys behave as before.
+- **Stored credential tests skip host-bound credentials (#5045).** `crewship credential test-stored` and **Test now** answer `409` for a credential with approved hosts instead of sending its value to a test endpoint.
+- **Token refresh respects approved hosts (#5045).** An OAuth2 credential or provider login bound to hosts that do not cover its token endpoint is no longer refreshed; the stored token is kept until it expires, and `crewship credential refresh` answers `409`.
+- **OAuth connect and token requests respect approved hosts (#5045).** Connecting an OAuth2 credential whose approved hosts do not cover its token URL is refused with `409`, and token requests no longer follow redirects.

@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
@@ -524,15 +525,15 @@ func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 	args := append([]any{credID, workspaceID}, visArgs...)
 
 	var (
-		provider, ctype, encValue string
-		loginMode                 sql.NullString
+		provider, ctype, encValue, allowedHosts string
+		loginMode                               sql.NullString
 	)
 	err := h.db.QueryRowContext(r.Context(), `
-		SELECT c.provider, c.type, c.encrypted_value,
+		SELECT c.provider, c.type, c.encrypted_value, COALESCE(c.allowed_hosts, '[]'),
 			(SELECT f.value FROM credential_fields f WHERE f.credential_id = c.id AND f.key = 'mode' LIMIT 1)
 		FROM credentials c
 		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL `+visFilter+`
-	`, args...).Scan(&provider, &ctype, &encValue, &loginMode)
+	`, args...).Scan(&provider, &ctype, &encValue, &allowedHosts, &loginMode)
 	if err == sql.ErrNoRows {
 		replyError(w, http.StatusNotFound, "Credential not found")
 		return
@@ -540,6 +541,15 @@ func (h *CredentialHandler) TestStored(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		h.logger.Error("test stored: lookup", "error", err, "credential_id", credID)
 		replyError(w, http.StatusInternalServerError, "Internal server error")
+		return
+	}
+
+	// #5045: the probe sends the value to the provider's fixed host or to a
+	// stored endpoint. A host-bound credential is never probed: no probe
+	// destination is checked against its approved hosts, so refuse before the
+	// value is decrypted.
+	if _, bound, _ := credhostgate.Bound(allowedHosts); bound {
+		replyError(w, http.StatusConflict, "this credential is bound to approved hosts, so it is not sent to a test endpoint; clear its hosts to test it")
 		return
 	}
 

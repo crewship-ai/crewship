@@ -376,7 +376,10 @@ type OpenAIRefresher struct {
 // single-flight lock past PendingBackoff.
 func NewOpenAIRefresher(client *http.Client) *OpenAIRefresher {
 	if client == nil {
-		client = &http.Client{Timeout: 30 * time.Second}
+		// No redirects: a 307/308 would replay the refresh token to another
+		// host, past the approved-hosts check (#5045).
+		client = &http.Client{Timeout: 30 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	}
 	return &OpenAIRefresher{Client: client, TokenURL: OpenAITokenURL, ClientID: OpenAIClientID}
 }
