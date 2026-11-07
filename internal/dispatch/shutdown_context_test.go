@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -285,45 +286,54 @@ func TestSettle_OutcomeProbeTimeoutStillPersistsReconciliation(t *testing.T) {
 	}
 }
 
-// pendingStopRuntime accepts a stop request without confirming its effect,
-// which is what a protected host-captured run answers (#5081): the stop helper
-// has ended the process tree, but only the run's own return — its terminal
-// capture — proves it. Stop never reports success here.
-type pendingStopRuntime struct {
+// hostStopRuntime answers like a protected host-captured run (#5081): the stop
+// request ends the process tree, yet Stop itself reports an error because a
+// leader exit does not prove descendant absence. Only once the capture records
+// its terminal result and stop receipt does Alive report the runtime gone.
+type hostStopRuntime struct {
 	*fakeRuntime
-	requested chan struct{}
+	stopCalls  atomic.Int32
+	terminalAt atomic.Int64 // unix nanos; zero = never
+	terminal   time.Duration
 }
 
-func (r *pendingStopRuntime) Stop(context.Context, string) (bool, error) {
-	select {
-	case <-r.requested:
-	default:
-		close(r.requested)
+func (r *hostStopRuntime) Stop(context.Context, string) (bool, error) {
+	if r.stopCalls.Add(1) == 1 && r.terminal > 0 {
+		r.terminalAt.Store(time.Now().Add(r.terminal).UnixNano())
 	}
-	return false, nil
+	return false, errors.New("leader exit does not prove descendant absence")
 }
 
-// A restart under a protected host-captured run must settle from the run's own
-// terminal result when it arrives within the stop budget, instead of parking at
-// once with "runtime stop could not be confirmed" and holding a slot (#5081).
-// Without the terminal return the stop remains unconfirmed and still parks.
-func TestShutdown_PendingStopSettlesFromTheRunsOwnReturn(t *testing.T) {
+func (r *hostStopRuntime) Alive(context.Context, string) (bool, error) {
+	at := r.terminalAt.Load()
+	return at == 0 || time.Now().UnixNano() < at, nil
+}
+
+// A restart under a protected host-captured run must wait, within the stop
+// grace, for the provider to confirm the stop it requested, then settle the
+// run's own return. Parking at once with "runtime stop could not be confirmed"
+// left a reason retained recovery refused and a slot held for good (#5081).
+// Without confirmation the old park stays, and a return seen before the stop
+// is confirmed (a detached hand-back) never settles as ended.
+func TestShutdown_HostStopWaitsForConfirmedEnd(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
+		terminal time.Duration
+		runErr   error
 		classify Outcome
-		returns  bool
+		returnAt time.Duration // after the stop request; negative = already returned
 		state    work.State
-		status   string
 		reason   string
 	}{
-		{"known failure after the stop", OutcomeFailed, true, work.StateFailed, "FAILED", ""},
-		{"unclear outcome stays reconciliation", OutcomeUnclear, true, work.StateNeedsReconciliation, "", "the runtime's outcome is unclear"},
-		{"no return stays unconfirmed", OutcomeFailed, false, work.StateNeedsReconciliation, "", "server shutdown: runtime stop could not be confirmed"},
+		{"terminal capture settles through retained recovery", 300 * time.Millisecond, errors.New("capture unconfirmed"), OutcomeRetained, 350 * time.Millisecond, work.StateNeedsReconciliation, RetainedCapturePendingReason},
+		{"a runtime-classified failure settles as failed", 300 * time.Millisecond, errors.New("exit 143"), OutcomeFailed, 350 * time.Millisecond, work.StateFailed, ""},
+		{"no confirmation keeps the shutdown park", 0, errors.New("capture unconfirmed"), OutcomeRetained, 100 * time.Millisecond, work.StateNeedsReconciliation, "server shutdown: runtime stop could not be confirmed"},
+		{"detached return before confirmation keeps the shutdown park", 0, errors.New("detached"), OutcomeDetached, -1, work.StateNeedsReconciliation, "server shutdown: runtime stop could not be confirmed"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t)
 			h.rt.classifyAs = tc.classify
-			r := h.accept("shutdown-pending-stop")
+			r := h.accept("shutdown-host-stop")
 			a, err := h.store.Claim(t.Context(), work.ClaimOptions{LeaseOwner: "owner"})
 			if err != nil {
 				t.Fatal(err)
@@ -335,43 +345,38 @@ func TestShutdown_PendingStopSettlesFromTheRunsOwnReturn(t *testing.T) {
 			if err := h.rt.Run(t.Context(), assignment, func() {}); err != nil {
 				t.Fatal(err)
 			}
-			runtime := &pendingStopRuntime{fakeRuntime: h.rt, requested: make(chan struct{})}
+			runtime := &hostStopRuntime{fakeRuntime: h.rt, terminal: tc.terminal}
 			runDone := make(chan error, 1)
-			if tc.returns {
+			if tc.returnAt < 0 {
+				runDone <- tc.runErr
+			} else {
 				go func() {
-					<-runtime.requested
-					time.Sleep(50 * time.Millisecond) // the capture turns terminal after the tree stop
-					runDone <- errors.New("execution ended by stop: exit 143")
+					for runtime.stopCalls.Load() == 0 {
+						time.Sleep(5 * time.Millisecond)
+					}
+					time.Sleep(tc.returnAt)
+					runDone <- tc.runErr
 				}()
 			}
-			cancelled := make(chan struct{})
+			var cancelled atomic.Bool
 			d := New(h.store, runtime, nil, h.cfg, quiet())
 			began := time.Now()
-			d.shutdownAttempt(&liveAttempt{assignment: assignment, locator: h.rt.Locator(assignment), cancel: func() {
-				select {
-				case <-cancelled:
-				default:
-					close(cancelled)
-				}
-			}}, runDone)
-			if elapsed := time.Since(began); elapsed > 4*h.cfg.StopGrace {
+			d.shutdownAttempt(&liveAttempt{assignment: assignment, locator: h.rt.Locator(assignment), cancel: func() { cancelled.Store(true) }}, runDone)
+			if elapsed := time.Since(began); elapsed > 3*h.cfg.StopGrace {
 				t.Fatalf("shutdown settlement took %s, beyond its bounded budget", elapsed)
 			}
-			select {
-			case <-cancelled:
-			default:
+			if !cancelled.Load() {
 				t.Fatal("shutdown left local supervision running")
+			}
+			if n := runtime.stopCalls.Load(); n != 1 {
+				t.Fatalf("shutdown signalled the runtime %d times, want once", n)
 			}
 			it, err := h.store.Get(t.Context(), r.WorkID)
 			if err != nil || it.State != tc.state {
 				t.Fatalf("shutdown state=%v err=%v, want %s", it.State, err, tc.state)
 			}
-			if tc.reason != "" && !strings.Contains(it.StateReason, tc.reason) {
+			if tc.reason != "" && !strings.HasPrefix(it.StateReason, tc.reason) {
 				t.Fatalf("shutdown reason %q, want %q", it.StateReason, tc.reason)
-			}
-			p, _, err := h.store.RunProjection(t.Context(), a.RunID)
-			if err != nil || p.Status != tc.status {
-				t.Fatalf("shutdown outcome %+v %v, want status %q", p, err, tc.status)
 			}
 			if h.rt.starts.Load() != 1 {
 				t.Fatal("shutdown repeated execution")
