@@ -521,5 +521,31 @@ describe("NoteCraft reference application", () => {
     await expect(closing).resolves.toBe("local-copy")
     expect(a.note.value).toBe("Alice late")
   })
+
+  it("a retired save's late read refusal during custody loss never puts text back into the view", async () => {
+    for (const ticks of [0, 1, 2, 3, 4, 6, 8, 12]) {
+      document.body.innerHTML = ""
+      const server = createFakeCraftServer("server secret"), rows = new Map<string, RecoveryDraft>()
+      const a = open(server, alice, rows)
+      await editing(a)
+      let refuse!: (error: unknown) => void
+      const pending = new Promise<never>((_, reject) => { refuse = reject })
+      const save = vi.spyOn(a.client, "save").mockImplementation(() => pending)
+      a.type("typed secret")
+      await vi.waitFor(() => expect(save).toHaveBeenCalled())
+      server.takeOver(bob)
+      const read = a.client.read
+      vi.spyOn(a.client, "read").mockImplementation(async (...args) => {
+        const result = await read(...args)
+        void (async () => { for (let i = 0; i < ticks; i++) await null; refuse(new SaveError("read_revoked")) })()
+        return result
+      })
+      await a.app.refresh()
+      await vi.waitFor(() => expect(a.status(), `ticks ${ticks}`).toBe("Přístup ke čtení byl odebrán"))
+      await new Promise(resolve => setTimeout(resolve, 20))
+      expect(a.note.value, `ticks ${ticks}`).toBe("")
+      expect(shown(), `ticks ${ticks}`).not.toContain("secret")
+    }
+  })
 })
 

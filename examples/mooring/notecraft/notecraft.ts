@@ -219,11 +219,16 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
     const unsaved = !clean && text !== decode(latest.bytes)
     // The lifecycle's journal holds a captured draft; otherwise store it now,
     // and never load the server version over text no journal holds.
+    // Every await below may end in a read revocation (e.g. a retired save's
+    // late reply); text is never put back into a terminated view.
     if (unsaved && !captured && !await preserve(text, current.generation, base, "Váš neuložený koncept")) {
+      if (terminated) return
       if (stray !== undefined) { note.value = stray; stray = undefined } // the newest text wins the note
       server = latest; return
     }
-    if (!await keepStray(text, current.generation, base)) { server = latest; return }
+    const strayKept = await keepStray(text, current.generation, base)
+    if (terminated) return
+    if (!strayKept) { server = latest; return }
     server = latest; note.value = decode(latest.bytes)
     if (unsaved && captured) keep(text, current.generation, base, "Váš neuložený koncept")
   }
