@@ -146,38 +146,45 @@ SHA-256, equality with the previous checkpoint, the marker report). The chain
 and checkpoints are also written to `chain.json` however the row ends (a session
 that throws, a failed final assertion, a pass).
 
-Both files also carry `saveAccounting`, how each save of the hour happened. A
-save's origin is the save request that committed its version, not a key press:
-the ops trail records every request when it is sent, and every harness press
-records the trail length at dispatch (`opsAtPress`).
+Both files also carry `saveAccounting`, how each save of the hour happened. The
+unit is a write the server confirmed, not a save wait (#5112): a save answer that
+created a version (an `unchanged` answer creates none, #5075, and a repeat of the
+same attempt answers the same version) or a reconcile that proved one after a lost
+reply. Each version is counted once, whether a wait saw it or not. A write's
+origin is the save request that sent it, not a key press: the ops trail records
+every request when it is sent, and every harness press, release and closed page
+records the trail length at that moment.
 
-- `autosaves`: save waits (one per cycle, one more after an "Ověřit výsledek"
-  press, and the Sheet warm-up) whose version was committed by a request sent
-  before any press. `lateAutosaves` counts those whose reply arrived only after
-  the harness had pressed Ctrl+S: the press merely confirmed bytes already saved
-  (#5075).
+- `committedWrites` = `autosaves` + `unknownOrigin`, and `writes` lists each one
+  (version, save request(s), confirming answer, origin, and why it is unknown).
+- `autosaves`: writes sent before every harness Ctrl+S, "Ověřit výsledek" press
+  and release of the same editor, or after that editor's page was closed (a
+  closed page sends nothing more). No harness action could have caused them.
+  "Ověřit výsledek" counts because a reconcile that proves an attempt absent
+  lets the editor send a fresh save.
+- `unknownOrigin` / `unknownOriginOps`: writes sent after a harness Ctrl+S,
+  "Ověřit výsledek" or release while that editor was still open, or confirmed by
+  a reconcile without a save request of that snapshot in the trail. A reconcile
+  is matched to a save only by the whole identity the server binds (base version,
+  editor revision, content hash, session and attempt id).
 - `forcedCtrlS`, `forcedCtrlSOutcomes` and `forcedCtrlSEvents`: every Control+s
   the harness pressed, either in the save wait after 4 s without a new version or
   in the Word table step after 4 s with the cell text not yet in a table cell of
   the server head and the status "Neuložený koncept". Each event is written at
   dispatch and closed in a `finally`, with the cycle, time, reason, `endedAt`,
-  whether a new version followed, and an `outcome`: `new-save` (a request sent
-  after the press committed the version), `confirm-only` (an earlier autosave
-  did), `no-version`, `unattributed` (no answered save carries the version), or
-  `incomplete` (the wait was interrupted after the press).
-- `ambiguousSaves` / `ambiguousSaveOps`: committing save requests sent within
-  30 s after a forced press. They are counted neither as autosaves nor as
-  forced saves, and their press's outcome is `unattributed`.
+  whether a new version followed, and an `outcome`: `confirm-only` (the version
+  that followed was sent before the press), `no-version`, `unattributed` (a
+  version followed, sent after the press or by no request in the trail), or
+  `incomplete` (the wait was interrupted after the press). `releases` counts the
+  harness's "Uvolnit úpravy" at the end, which flushes the editor.
 
-The limit, plainly: the harness cannot see what triggered a save request. An
-autosave that was already being prepared when Ctrl+S went out (engine snapshot,
-local draft write, validation) sends its request after the press, exactly like
-the forced save would. The editor bounds each of those three steps by its own
-10 s deadline and promises nothing shorter, so any committing request within
-30 s after the press is reported as ambiguous. In practice this means most
-forced presses that are followed by a save come out `unattributed`; `new-save`
-is claimed only for a request sent more than 30 s after the press. The count of
-presses (`forcedCtrlS`) is exact either way.
+The limit, plainly: the harness cannot tell a forced save from an autosave. A
+save request carries no trigger, and the editor prepares captures one after
+another, so an autosave queued behind a slow capture can send its request any
+time after the press, exactly like the forced save would. No time window proves
+which it was, so every write sent after a press is `unknownOrigin` until that
+editor's page closed; a forced save is among them, never counted apart. The
+press counts are exact.
 - `editorReconciles` / `editorReconcileOps`: reconcile requests sent outside
   every press window. `reconcilesDuringPressWait` / `...Ops`: reconcile requests
   sent between a press (Ctrl+S or "Ověřit výsledek") and 2 s after the end of
@@ -186,15 +193,14 @@ presses (`forcedCtrlS`) is exact either way.
   unknown, never attributed to either side.
 - `verifyPresses`: "Ověřit výsledek" presses; each press records `waitEndedAt`.
 
-The raw records are in `chain.json` as `saveWaits` and `forcedCtrlS`. The row's
-note starts with the measured press counts, then the inferred origins, e.g.
-"forced Ctrl+S 6×, Ověřit výsledek 0×; inferred from request timing, not proven
-(#5112): autosave 57×, press outcomes 6 unattributed, automatic reconcile 0×".
-Only the press counts are measured. The editor does not report what triggered a
-save, so autosave counts, press outcomes, ambiguous saves and reconcile causes are
-inferred from request timing and must not be quoted as fact (#5112). This is
-accounting, not a gate: a forced Ctrl+S never fails the row; the server head
-still decides whether a cycle's typing was saved.
+The raw records are in `chain.json` as `saveWaits`, `forcedCtrlS`, `releases` and
+`editorEnds`. The row's note starts with the measured counts, then the writes, e.g.
+"forced Ctrl+S 6×, Ověřit výsledek 0×, release 1×; server-confirmed writes 63× =
+autosave 41× + origin unknown 22× (sent after a harness Ctrl+S, Ověřit výsledek or
+release, or without a save request in the trail: the harness cannot tell a forced save from
+an autosave, #5112), press outcomes 6 unattributed, automatic reconcile 0×".
+This is accounting, not a gate: a forced Ctrl+S never fails the row; the server
+head still decides whether a cycle's typing was saved.
 
 `pageStalls` (name kept for the evidence readers) lists gaps of at least 10 s
 between the editor page's own `craft/proposals` polls; `pageStallsDescription`

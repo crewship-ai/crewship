@@ -9,7 +9,7 @@ import * as N from "../outage-lostack/native"
 import { holdsAll, inspectDrafts, newTyping, offerEvidence, placeCaret, saveByAutosaveOrKeyReport, typedMarkers, typeLines, type DraftOffer } from "./draft"
 import { checkDraftCopies, checkLines, holdsAnyLine, lineLedger, type LineCheck } from "./lines"
 import { present, sha256, wordFacts } from "./facts"
-import { VERIFY_AFTER_MS, isUnconfirmedStatus, verifyDue, type VerifyPress, type ForcedCtrlS, type SaveWait, finishPress, startPress, trackedSaveWait, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, pendingReplies, sentSince, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
+import { VERIFY_AFTER_MS, isUnconfirmedStatus, verifyDue, type VerifyPress, type ForcedCtrlS, type SaveWait, type TrailMark, finishPress, markTrail, startPress, startVerify, trackedSaveWait, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, pendingReplies, sentSince, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
 import type { RestartRecord } from "./restart"
 import { restartNote } from "./restart-outcome"
 
@@ -30,7 +30,7 @@ export interface SessionInput {
    * wait and every Ctrl+S the harness pressed (save accounting, confirm.ts) and the restart
    * (filled while the session runs, so a failed run still shows them).
    */
-  evidence: { chain: CycleChain[]; checkpoints: Checkpoint[]; verifications: VerifyPress[]; saveWaits: SaveWait[]; forcedCtrlS: ForcedCtrlS[]; restart: RestartRecord | null }
+  evidence: { chain: CycleChain[]; checkpoints: Checkpoint[]; verifications: VerifyPress[]; saveWaits: SaveWait[]; forcedCtrlS: ForcedCtrlS[]; releases: TrailMark[]; editorEnds: TrailMark[]; restart: RestartRecord | null }
   minutes: number
   restart(why: string): Promise<RestartRecord>
 }
@@ -232,13 +232,20 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
       if (!isUnconfirmedStatus(status)) return false
       since ??= Date.now()
       if (verifyDue(status, since, Date.now())) {
-        const pressedAt = new Date().toISOString()
         const opsAt = ops.length
-        await page.getByRole("button", { name: "Ověřit výsledek", exact: true }).click()
-        for (const limit = Date.now() + 15_000; isUnconfirmedStatus(await N.status(page)) && Date.now() < limit; ) await N.pause(250)
-        const reconcile = ops.slice(opsAt).find((o) => o.kind === "reconcile")
-        const statusAfter = (await N.status(page)).slice(0, 60)
-        input.evidence.verifications.push({ cycle, firstSeenAt: new Date(since).toISOString(), pressedAt, unconfirmedForMs: Date.now() - since, statusAfter, reconcile: reconcile ? { status: reconcile.status, version: reconcile.version, failed: reconcile.failed } : null, waitEndedAt: new Date().toISOString() })
+        // In the evidence from the dispatch on: an interrupted wait keeps the press (no waitEndedAt).
+        const v = startVerify(input.evidence.verifications, { cycle, firstSeenAt: new Date(since).toISOString(), opsAtPress: opsAt })
+        let statusAfter = ""
+        try {
+          await page.getByRole("button", { name: "Ověřit výsledek", exact: true }).click()
+          for (const limit = Date.now() + 15_000; isUnconfirmedStatus(await N.status(page)) && Date.now() < limit; ) await N.pause(250)
+          const reconcile = ops.slice(opsAt).find((o) => o.kind === "reconcile")
+          statusAfter = (await N.status(page)).slice(0, 60)
+          Object.assign(v, { unconfirmedForMs: Date.now() - since, statusAfter, reconcile: reconcile ? { status: reconcile.status, version: reconcile.version, failed: reconcile.failed } : null, waitEndedAt: new Date().toISOString() })
+        } catch (e) {
+          v.statusAfter = `interrupted: ${String(e).slice(0, 80)}`
+          throw e
+        }
         note(`cycle ${cycle}: pressed Ověřit výsledek after ${Date.now() - since} ms: ${statusAfter}`)
         return true
       }
@@ -402,6 +409,8 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   // never imported into a read-only view).
   await N.pause(20_000)
   await page.close()
+  // The closed page's editor sends nothing more: its presses cannot cause a later save.
+  markTrail(input.evidence.editorEnds, ops)
   page = await context.newPage()
   page.setDefaultTimeout(90_000)
   traceCraft(page, "person", input.trail)
@@ -436,6 +445,8 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   checkpoint("final", fin)
   failures.push(...d.verify(fin.text, saved, "at the end"))
   if (savedByEditor) lineFailures(checkLines(ledger, fin.text, `server head v${fin.version} at the end`))
+  // Releasing flushes the editor before the transfer: a harness intervention in the save accounting.
+  markTrail(input.evidence.releases, ops)
   await N.release(page).catch(() => {})
   await page.reload()
   await N.frameOf(page, d.app)

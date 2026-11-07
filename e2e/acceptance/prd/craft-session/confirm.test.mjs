@@ -2,7 +2,7 @@
 // (also run by e2e/acceptance/prd/report.test.mjs, the PRD runner step in CI)
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { PAGE_STALLS_DESCRIPTION, PRESS_AMBIGUITY_MS, finishPress, hourInterruptions, isUnconfirmedStatus, pressOutcome, producerOf, saveAccounting, startPress, trackedSaveWait, waitOrigin, lastCommittedSave, pageStalls, verifyDue, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
+import { PAGE_STALLS_DESCRIPTION, finishPress, hourInterruptions, isUnconfirmedStatus, markTrail, pressOutcome, producerOf, saveAccounting, startPress, startVerify, trackedSaveWait, lastCommittedSave, pageStalls, verifyDue, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
 
 const word = (paras) => JSON.stringify({ body: paras.map((text) => ({ kind: "para", text, runs: [{ len: text.length }] })) })
 const C = "HOURf9vyrC010"
@@ -240,16 +240,13 @@ test("an autosave acknowledged after the 4 s cutoff stays an autosave; Ctrl+S on
   })
   assert.equal(result.v, "5")
   const a = accountingOf({ waits: recd.saveWaits, forced: recd.forcedCtrlS, ops })
-  assert.equal(a.autosaves, 1)
-  assert.equal(a.lateAutosaves, 1)
-  assert.equal(a.forcedCtrlS, 1)
+  assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin, a.forcedCtrlS], [1, 1, 0, 1])
   assert.equal(a.forcedCtrlSEvents[0].outcome, "confirm-only")
   assert.equal(a.forcedCtrlSEvents[0].newVersion, true)
-  assert.equal(waitOrigin(recd.saveWaits[0], ops), "late-autosave")
-  assert.match(a.note, /^forced Ctrl\+S 1×, Ověřit výsledek 0×; inferred from request timing, not proven \(#5112\): autosave 1× \(1 acknowledged after a forced press\), press outcomes 1 confirm-only/)
+  assert.match(a.note, /^forced Ctrl\+S 1×, Ověřit výsledek 0×; server-confirmed writes 1× = autosave 1× \+ origin unknown 0×, press outcomes 1 confirm-only/)
 })
 
-test("an autosave that was preparing at the press and sends 100 ms after it is unattributed, not forced", async () => {
+test("an autosave that was preparing at the press and sends 100 ms after it is unknown, not forced", async () => {
   // The capture started before the press (snapshot, draft write, validation) and its
   // request leaves at 4.1 s, 100 ms after Ctrl+S at 4 s: the trail cannot tell it from the forced save.
   const ops = []
@@ -260,30 +257,10 @@ test("an autosave that was preparing at the press and sends 100 ms after it is u
     clock.s = 5
     return { version: "6" }
   })
-  assert.equal(PRESS_AMBIGUITY_MS, 30_000)
   const a = accountingOf({ waits: recd.saveWaits, forced: recd.forcedCtrlS, ops })
-  assert.deepEqual([a.autosaves, a.ambiguousSaves, a.ambiguousSaveOps, a.forcedCtrlSOutcomes["new-save"], a.forcedCtrlSOutcomes.unattributed], [0, 1, [1], 0, 1])
-  assert.equal(waitOrigin(recd.saveWaits[0], ops), "unattributed")
+  assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin, a.unknownOriginOps, a.forcedCtrlSOutcomes.unattributed], [1, 0, 1, [1], 1])
   assert.equal(recd.forcedCtrlS[0].outcome, "unattributed")
-  assert.match(a.note, /forced Ctrl\+S 1×, .*press outcomes 1 unattributed, ambiguous save \(sent within 30 s after a forced press\) 1×, automatic reconcile/)
-})
-
-test("a save sent well after the ambiguity window stays the forced save", async () => {
-  const ops = []
-  const { recd } = await playWait(ops, 3, async (onPress, ops, clock) => {
-    clock.s = 4
-    onPress()
-    ops.push(save(1, 40, "6"))
-    clock.s = 41
-    return { version: "6" }
-  })
-  const a = accountingOf({ waits: recd.saveWaits, forced: recd.forcedCtrlS, ops })
-  assert.deepEqual([a.autosaves, a.ambiguousSaves, a.forcedCtrlS, a.forcedCtrlSOutcomes["new-save"]], [0, 0, 1, 1])
-  assert.equal(waitOrigin(recd.saveWaits[0], ops), "forced")
-  assert.doesNotMatch(a.note, /ambiguous save/)
-  // The edge: exactly at the window is still ambiguous; a request without a time is too.
-  assert.equal(pressOutcome({ opsAtPress: 0, pressedAt: at(4), version: "6", completed: true }, [save(1, 34, "6")]), "unattributed")
-  assert.equal(pressOutcome({ opsAtPress: 0, pressedAt: at(4), version: "6", completed: true }, [{ n: 1, kind: "save", status: 200, version: "6" }]), "unattributed")
+  assert.match(a.note, /forced Ctrl\+S 1×, .*origin unknown 1× \(sent after a harness Ctrl\+S.*cannot tell a forced save from an autosave, #5112\), press outcomes 1 unattributed, automatic reconcile/)
 })
 
 test("a repeat save after the press that answers the autosave's version does not take its origin", () => {
@@ -293,6 +270,13 @@ test("a repeat save after the press that answers the autosave's version does not
   assert.equal(pressOutcome({ opsAtPress: 1, version: "7", completed: true }, ops), "confirm-only")
   assert.equal(pressOutcome({ opsAtPress: 1, version: null, completed: true }, ops), "no-version")
   assert.equal(pressOutcome({ opsAtPress: 1, version: "8", completed: true }, ops), "unattributed")
+  assert.equal(pressOutcome({ opsAtPress: 1, version: "7", completed: false }, ops), "incomplete")
+})
+
+test("markTrail records the trail length right before a harness action", () => {
+  const marks = []
+  markTrail(marks, [1, 2, 3], at(9))
+  assert.deepEqual(marks, [{ at: at(9), opsAt: 3 }])
 })
 
 test("a wait interrupted after the press leaves an explicit incomplete event in the evidence", async () => {
@@ -312,7 +296,7 @@ test("a wait interrupted after the press leaves an explicit incomplete event in 
   assert.notEqual(e.endedAt, null)
   assert.deepEqual([recd.saveWaits[0].completed, recd.saveWaits[0].pressed], [false, true])
   const a = accountingOf({ waits: recd.saveWaits, forced: recd.forcedCtrlS, ops })
-  assert.deepEqual([a.forcedCtrlS, a.forcedCtrlSOutcomes.incomplete, a.autosaves], [1, 1, 0])
+  assert.deepEqual([a.forcedCtrlS, a.forcedCtrlSOutcomes.incomplete, a.committedWrites], [1, 1, 0])
 })
 
 test("startPress and finishPress keep a table-cell press that saw no newer head as no-version", () => {
@@ -347,15 +331,156 @@ test("a press-triggered reconcile sent just after its wait ended is not counted 
 test("saveAccounting of a clean hour: every save automatic, nothing forced", () => {
   const ops = [save(1, 1, "2"), save(2, 31, "3")]
   const a = accountingOf({ waits: [autoWait(0, 1, "2"), autoWait(1, 31, "3")], ops })
-  assert.deepEqual([a.autosaves, a.lateAutosaves, a.forcedCtrlS, a.editorReconciles, a.reconcilesDuringPressWait, a.verifyPresses], [2, 0, 0, 0, 0, 0])
-  assert.equal(a.note, "forced Ctrl+S 0×, Ověřit výsledek 0×; inferred from request timing, not proven (#5112): autosave 2×, automatic reconcile 0×.")
+  assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin, a.forcedCtrlS, a.releases, a.editorReconciles, a.reconcilesDuringPressWait, a.verifyPresses], [2, 2, 0, 0, 0, 0, 0, 0])
+  assert.equal(a.note, "forced Ctrl+S 0×, Ověřit výsledek 0×; server-confirmed writes 2× = autosave 2× + origin unknown 0×, automatic reconcile 0×.")
   assert.match(a.description, /not a gate/)
+  assert.match(a.description, /cannot tell a forced save from an autosave/)
 })
 
 test("hourInterruptions puts the save accounting first in the row's note", () => {
   const ops = [save(1, 1, "2"), save(2, 40, "3")]
-  const forced = [{ cycle: 1, at: at(4), site: "save-wait", reason: "x", opsAtPress: 1, endedAt: at(41), newVersion: true, version: "3", outcome: "new-save" }]
+  const forced = [{ cycle: 1, at: at(4), site: "save-wait", reason: "x", opsAtPress: 1, endedAt: at(41), newVersion: true, version: "3", outcome: "unattributed" }]
   const waits = [autoWait(0, 1, "2"), { cycle: 1, at: at(0), endedAt: at(41), pressed: true, opsAtPress: 1, pressedAt: at(4), version: "3", completed: true }]
-  const r = hourInterruptions([], [], accountingOf({ waits, forced, ops }))
-  assert.match(r.note, /^forced Ctrl\+S 1×, Ověřit výsledek 0×; inferred from request timing, not proven \(#5112\): autosave 1×, press outcomes 1 new-save, automatic reconcile 0×\. Ověřit výsledek pressed 0 times/)
+  const r = hourInterruptions([], [], accountingOf({ waits, forced, ops, releases: [{ at: at(50), opsAt: 2 }] }))
+  assert.match(r.note, /^forced Ctrl\+S 1×, Ověřit výsledek 0×, release 1×; server-confirmed writes 2× = autosave 1× \+ origin unknown 1× \(.*\), press outcomes 1 unattributed, automatic reconcile 0×\. Ověřit výsledek pressed 0 times/)
+})
+
+// #5112: the accounting counts server-confirmed writes, once each, not save waits. The
+// origin of a write is its save request; a request sent after a harness Ctrl+S (or a
+// release flush) carries no trigger, so it is "unknown" until that editor instance ended,
+// however long after the press it was sent (an autosave can queue behind a slow capture).
+const sumOf = (a) => a.autosaves + a.unknownOrigin
+/** The snapshot identity a save or reconcile request carries (what the server's receipt binds). */
+const snap = (base, hash, attempt = `att-${hash}`) => ({ baseVersion: base, contentHash: `sha256:${hash}`, editorRevision: `rev-${hash}`, sessionId: "s1", attemptId: attempt })
+
+test("#5112: two autosaves committed before one wait are two writes, not one", () => {
+  // v5 and v6 both commit before the wait sees "verze 6"; nothing is pressed.
+  const ops = [save(1, 0.3, "5"), save(2, 0.9, "6")]
+  ops.forEach((o, i) => { o.baseVersion = String(4 + i) })
+  const a = accountingOf({ waits: [autoWait(0, 0, "6")], ops })
+  assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin, sumOf(a)], [2, 2, 0, 2])
+  assert.deepEqual(a.writes.map((w) => [w.version, w.op, w.origin]), [["5", 1, "autosave"], ["6", 2, "autosave"]])
+})
+
+test("#5112: an autosave queued behind a slow capture and sent 36 s after Ctrl+S is unknown, never forced", () => {
+  // Ctrl+S at 4 s; the queued autosave leaves at 40 s, past the old 30 s window.
+  // The stored outcome is derived again from the final trail.
+  const forced = [{ cycle: 3, at: at(4), site: "save-wait", reason: "x", opsAtPress: 0, endedAt: at(41), newVersion: true, version: "6", outcome: "confirm-only" }]
+  const waits = [{ cycle: 3, at: at(0), endedAt: at(41), pressed: true, opsAtPress: 0, pressedAt: at(4), version: "6", completed: true }]
+  const ops = [{ ...save(1, 40, "6"), baseVersion: "5" }]
+  const a = accountingOf({ waits, forced, ops })
+  assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin, a.forcedCtrlS], [1, 0, 1, 1])
+  assert.equal(a.forcedCtrlSEvents[0].outcome, "unattributed")
+  assert.equal(a.forcedCtrlSOutcomes["new-save"], undefined)
+  assert.match(a.writes[0].reason, /after a harness Ctrl\+S/)
+  assert.match(a.note, /cannot tell a forced save from an autosave/)
+})
+
+test("#5112: a write no wait observed is still counted once, by its own request", () => {
+  // Cycle 1 pressed at 4 s; v3 (sent at 2 s) and v4 (sent at 6 s) commit; the wait saw v4 only.
+  const forced = [{ cycle: 1, at: at(4), site: "save-wait", reason: "x", opsAtPress: 1, endedAt: at(7), newVersion: true, version: "4", outcome: "unattributed" }]
+  const waits = [{ cycle: 1, at: at(0), endedAt: at(7), pressed: true, opsAtPress: 1, pressedAt: at(4), version: "4", completed: true }]
+  const ops = [{ ...save(1, 2, "3"), baseVersion: "2" }, { ...save(2, 6, "4"), baseVersion: "3" }]
+  const a = accountingOf({ waits, forced, ops })
+  assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin, a.unknownOriginOps], [2, 1, 1, [2]])
+})
+
+test("#5112: repeats, unchanged answers and a reconcile of a lost reply add no second write", () => {
+  const ops = [
+    { ...save(1, 1, "5"), baseVersion: "4" },
+    { ...save(2, 2, "5"), baseVersion: "4" }, // attempt repeat: same receipt
+    { ...save(3, 3, "5"), baseVersion: "5", unchanged: true }, // #5075: no version created
+    { ...save(4, 4, undefined, undefined), ...snap("5", "aa"), failed: "net::ERR_FAILED" }, // reply lost
+    { ...rec(5, 20), ...snap("5", "aa"), version: "6" }, // proves v6
+    { ...rec(6, 21), ...snap("5", "aa"), version: "6" },
+  ]
+  const a = accountingOf({ ops })
+  assert.deepEqual(a.writes.map((w) => [w.version, w.op, w.confirmedBy, w.origin]), [["5", 1, 1, "autosave"], ["6", 4, 5, "autosave"]])
+  assert.deepEqual([a.committedWrites, sumOf(a)], [2, 2])
+  // A reconcile whose save request is not in the trail: confirmed, origin unknown.
+  const orphan = accountingOf({ ops: [{ ...rec(1, 5), ...snap("8", "bb"), version: "9" }] })
+  assert.deepEqual([orphan.committedWrites, orphan.unknownOrigin], [1, 1])
+  assert.match(orphan.writes[0].reason, /no save request/)
+})
+
+test("#5112: closing the page ends an earlier press; a release flush is a harness intervention", () => {
+  const forced = [{ cycle: 2, at: at(4), site: "table-cell", reason: "x", opsAtPress: 0, endedAt: at(10), newVersion: false, version: null, outcome: "no-version" }]
+  const ops = [{ ...save(1, 50, "3"), baseVersion: "2" }, { ...save(2, 200, "4"), baseVersion: "3" }, { ...save(3, 300, "5"), baseVersion: "4" }]
+  // The page closed at 100 s (trail length 1); a release at 250 s (trail length 2) flushed v5.
+  const a = accountingOf({ forced, ops, editorEnds: [{ at: at(100), opsAt: 1 }], releases: [{ at: at(250), opsAt: 2 }] })
+  assert.deepEqual(a.writes.map((w) => w.origin), ["unknown", "autosave", "unknown"])
+  assert.match(a.writes[2].reason, /release/)
+  assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin], [3, 1, 2])
+})
+
+test("#5112: every server-confirmed write lands in exactly one bucket", () => {
+  // A pseudo-random hour: saves, repeats, unchanged answers, lost replies with reconciles, presses.
+  let seed = 7
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2 ** 31) / 2 ** 31)
+  for (let round = 0; round < 50; round++) {
+    const ops = [], forced = []
+    let head = 1
+    for (let s = 1; s < 120; s += 1 + Math.floor(rnd() * 5)) {
+      const r = rnd()
+      if (r < 0.1) forced.push({ cycle: 1, at: at(s), site: "save-wait", reason: "x", opsAtPress: ops.length, endedAt: at(s + 3), newVersion: false, version: null, outcome: "no-version" })
+      else if (r < 0.2) ops.push({ ...save(ops.length + 1, s, String(head)), baseVersion: String(head), unchanged: true })
+      else if (r < 0.3 && ops.length) ops.push({ ...ops[ops.length - 1], n: ops.length + 1, sentAt: at(s) })
+      else if (r < 0.4) {
+        ops.push({ ...save(ops.length + 1, s, undefined, undefined), ...snap(String(head), String(s)), failed: "lost" })
+        ops.push({ ...rec(ops.length + 1, s + 0.5), ...snap(String(head), String(s)), version: String(++head) })
+      } else ops.push({ ...save(ops.length + 1, s, String(head + 1)), baseVersion: String(head++) })
+    }
+    const versions = new Set(ops.filter((o) => o.status === 200 && o.version !== undefined && !o.unchanged && o.version !== o.baseVersion).map((o) => o.version))
+    const a = accountingOf({ forced, ops })
+    assert.equal(a.committedWrites, versions.size)
+    assert.equal(sumOf(a), a.committedWrites)
+    assert.equal(new Set(a.writes.map((w) => w.version)).size, a.writes.length)
+  }
+})
+
+test("#5112 review: a fresh save after an Ověřit výsledek press is unknown, not an autosave", () => {
+  // The reconcile at 21 s proves the attempt absent; the editor then sends a fresh save at 22 s.
+  const verifications = [{ cycle: 4, firstSeenAt: at(5), pressedAt: at(20), unconfirmedForMs: 15_000, statusAfter: "", reconcile: null, waitEndedAt: at(30), opsAtPress: 1 }]
+  const ops = [{ ...save(1, 3, undefined, undefined), ...snap("5", "aa"), failed: "timeout" }, { ...rec(2, 21), ...snap("5", "aa"), status: 409 }, { ...save(3, 22, "6"), ...snap("5", "ab") }]
+  const a = accountingOf({ verifications, ops })
+  assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin], [1, 0, 1])
+  assert.match(a.writes[0].reason, /Ověřit výsledek/)
+  // A press recorded without its trail cut is placed by time.
+  const legacy = accountingOf({ verifications: [{ ...verifications[0], opsAtPress: undefined }], ops })
+  assert.equal(legacy.unknownOrigin, 1)
+  // Before the press it stays the editor's own.
+  assert.equal(accountingOf({ verifications, ops: [{ ...save(1, 3, "6"), ...snap("5", "aa") }] }).autosaves, 1)
+})
+
+test("#5112 review: a reconcile is matched to its save only by the whole snapshot identity", () => {
+  // An earlier attempt with the same base and bytes but another attempt id is not the reconciled one.
+  const forced = [{ cycle: 2, at: at(10), site: "save-wait", reason: "x", opsAtPress: 1, endedAt: at(20), newVersion: true, version: "6", outcome: "unattributed" }]
+  const ops = [{ ...save(1, 2, undefined, undefined), ...snap("5", "aa", "att-1"), failed: "lost" }, { ...rec(2, 30), ...snap("5", "aa", "att-2"), version: "6" }]
+  const a = accountingOf({ forced, ops })
+  assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin], [1, 0, 1])
+  assert.equal(a.writes[0].op, undefined)
+  assert.equal(a.forcedCtrlSEvents[0].outcome, "unattributed")
+  // Without the revision a request proves nothing either.
+  const bare = accountingOf({ ops: [{ ...ops[0], editorRevision: undefined }, { ...ops[1], attemptId: "att-1", editorRevision: undefined }] })
+  assert.equal(bare.unknownOrigin, 1)
+  // The same attempt matches: the write is the pre-press save's.
+  assert.equal(accountingOf({ forced, ops: [ops[0], { ...ops[1], attemptId: "att-1" }] }).autosaves, 1)
+})
+
+test("#5112 review 2: a later repeat of the same attempt may have committed; the write is unknown", () => {
+  // Request 1 (before the press) and its repeat 2 (after it) carry the same attempt; only 1's answer is recorded.
+  const forced = [{ cycle: 1, at: at(4), site: "save-wait", reason: "x", opsAtPress: 1, endedAt: at(9), newVersion: true, version: "6", outcome: "unattributed" }]
+  const ops = [{ ...save(1, 2, "6"), ...snap("5", "aa") }, { ...save(2, 5, undefined, undefined), ...snap("5", "aa"), failed: "lost" }]
+  const a = accountingOf({ forced, ops })
+  assert.deepEqual(a.writes.map((w) => [w.ops, w.origin]), [[[1, 2], "unknown"]])
+  assert.equal(a.forcedCtrlSEvents[0].outcome, "unattributed")
+})
+
+test("#5112 review 2: startVerify records an Ověřit výsledek press before the click", () => {
+  const verifications = []
+  const v = startVerify(verifications, { cycle: 3, firstSeenAt: at(5), opsAtPress: 1, at: at(20) })
+  assert.deepEqual([verifications.length, v.waitEndedAt, v.opsAtPress, v.unconfirmedForMs], [1, undefined, 1, 15_000])
+  // The click threw; the press still makes the later fresh save unknown.
+  const a = accountingOf({ verifications, ops: [{ ...save(1, 3, "6"), ...snap("5", "aa") }, { ...save(2, 22, "7"), ...snap("6", "ab") }] })
+  assert.deepEqual([a.verifyPresses, a.autosaves, a.unknownOrigin], [1, 1, 1])
 })

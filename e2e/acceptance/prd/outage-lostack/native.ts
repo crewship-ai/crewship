@@ -90,11 +90,17 @@ export interface Op {
   sentAt: string
   baseVersion?: string
   contentHash?: string
+  /** The snapshot identity of the request body (the save accounting matches a reconcile to its save by it). */
+  editorRevision?: string
+  sessionId?: string
+  attemptId?: string
   /** SHA-256 of the request body as sent (the snapshot the editor sent, for the evidence chain). */
   bodySha256?: string
   status?: number
   version?: string
   phase?: string
+  /** The save answer's #5075 flag: no version was created. */
+  unchanged?: boolean
   failed?: string
 }
 
@@ -106,12 +112,12 @@ export function instrument(ctx: BrowserContext): Op[] {
     const p = new URL(req.url()).pathname
     const kind = p.endsWith("/craft/document/save") ? "save" : p.endsWith("/craft/document/reconcile") ? "reconcile" : undefined
     if (req.method() !== "POST" || !kind) return
-    let body: { baseVersion?: unknown; contentHash?: string } | undefined
+    let body: { baseVersion?: unknown; contentHash?: string; editorRevision?: string; sessionId?: string; attemptId?: string } | undefined
     try {
       body = req.postDataJSON()
     } catch {}
     const raw = req.postDataBuffer()
-    const op: Op = { n: ops.length + 1, kind, sentAt: new Date().toISOString(), baseVersion: body?.baseVersion === undefined ? undefined : String(body.baseVersion), contentHash: body?.contentHash, bodySha256: raw ? sha256(raw) : undefined }
+    const op: Op = { n: ops.length + 1, kind, sentAt: new Date().toISOString(), baseVersion: body?.baseVersion === undefined ? undefined : String(body.baseVersion), contentHash: body?.contentHash, editorRevision: body?.editorRevision, sessionId: body?.sessionId, attemptId: body?.attemptId, bodySha256: raw ? sha256(raw) : undefined }
     ops.push(op)
     byReq.set(req, op)
   })
@@ -121,9 +127,10 @@ export function instrument(ctx: BrowserContext): Op[] {
     op.status = res.status()
     void res
       .json()
-      .then((b: { version?: unknown; phase?: string }) => {
+      .then((b: { version?: unknown; phase?: string; unchanged?: unknown }) => {
         op.version = b?.version === undefined ? undefined : String(b.version)
         op.phase = b?.phase
+        if (b?.unchanged === true) op.unchanged = true
       })
       .catch(() => {})
   })
