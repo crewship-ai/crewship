@@ -181,8 +181,10 @@ Design workspace flag like every other Design route, and
   outline and no target.
 - **Response.** `text/html; charset=utf-8`, `Content-Disposition: attachment;
   filename="<slug>-design-v<N>.html"`, `X-Crewship-Design-Version: <N>`, and the
-  same policy plus `sandbox` as a response header. The output depends only on
-  the version, so the same version always exports to the same bytes.
+  same policy plus `sandbox` as a response header. Apart from the Design's
+  current name in the title and heading, the output depends only on the
+  version, so the same version under the same name always exports to the same
+  bytes; renaming the Design changes only those two places.
 - **Limit.** An export over 8 MiB answers `413` with code
   `design_export_limit`. Unknown parameters, a repeated parameter, a format
   other than `html` or a malformed `version` answer `400`.

@@ -64,8 +64,8 @@ const exportStyle = `*{box-sizing:border-box}body{margin:0;background:#f1f5f9;co
 // (frame) of the version. Layers use the same geometry as the prototype
 // player: positions accumulate through parentId and each non-screen layer is
 // drawn on its nearest screen. Prototype links become fragment anchors. The
-// output depends only on the input, so a version always exports to the same
-// bytes.
+// output depends only on the input (the version and the Design name), so a
+// version always exports to the same bytes under the same name.
 func RenderHTML(in ExportInput, limit int) ([]byte, error) {
 	nodes, err := exportOrderedNodes(in)
 	if err != nil {
@@ -75,38 +75,20 @@ func RenderHTML(in ExportInput, limit int) ([]byte, error) {
 	for _, node := range nodes {
 		byID[node.ID] = node
 	}
-	position := func(node *exportNode) (float64, float64) {
-		var x, y float64
-		seen := map[string]bool{}
-		for current := node; current != nil && !seen[current.ID]; current = byID[current.ParentID] {
-			seen[current.ID] = true
-			x += current.X
-			y += current.Y
-			if current.ParentID == "" {
-				break
-			}
-		}
-		return x, y
-	}
-	screenOf := func(node *exportNode) string {
-		seen := map[string]bool{}
-		for current := node; current != nil && !seen[current.ID]; current = byID[current.ParentID] {
-			if current.Type == "frame" {
-				return current.ID
-			}
-			seen[current.ID] = true
-			if current.ParentID == "" {
-				break
-			}
-		}
-		return ""
-	}
+	geometry := exportGeometry(nodes, byID)
 	var screens []*exportNode
 	anchors := map[string]string{}
 	for _, node := range nodes {
 		if node.Type == "frame" {
 			screens = append(screens, node)
 			anchors[node.ID] = "screen-" + strconv.Itoa(len(screens))
+		}
+	}
+	// Each non-screen layer belongs to its nearest screen, in document order.
+	layers := map[string][]*exportNode{}
+	for _, node := range nodes {
+		if node.Type != "frame" && geometry[node.ID].screen != "" {
+			layers[geometry[node.ID].screen] = append(layers[geometry[node.ID].screen], node)
 		}
 	}
 	name := in.Name
@@ -132,18 +114,15 @@ func RenderHTML(in ExportInput, limit int) ([]byte, error) {
 	}
 	for _, screen := range screens {
 		anchor := anchors[screen.ID]
-		ox, oy := position(screen)
+		ox, oy := geometry[screen.ID].x, geometry[screen.ID].y
 		width, height := atLeastOne(screen.Width), atLeastOne(screen.Height)
 		fmt.Fprintf(&b, "<section class=\"screen\" id=\"%s\" data-node-id=\"%s\" aria-labelledby=\"%s-title\">\n", anchor, html.EscapeString(screen.ID), anchor)
 		fmt.Fprintf(&b, "<h2 id=\"%s-title\"><a href=\"#%s\">%s</a></h2>\n", anchor, anchor, html.EscapeString(label(screen.Name, "Screen")))
 		fmt.Fprintf(&b, "<div class=\"scroll\"><div class=\"canvas\" role=\"img\" aria-label=\"%s\" style=\"width:%spx;height:%spx;background:%s\">\n", html.EscapeString(label(screen.Name, "Screen")), px(width), px(height), color(screen.Fill, "#ffffff"))
-		for _, node := range nodes {
-			if node.Type == "frame" || screenOf(node) != screen.ID {
-				continue
-			}
-			x, y := position(node)
-			geometry := fmt.Sprintf("left:%spx;top:%spx;width:%spx;height:%spx", px(x-ox), px(y-oy), px(atLeastOne(node.Width)), px(atLeastOne(node.Height)))
-			writeLayer(&b, node, geometry, anchors, byID)
+		for _, node := range layers[screen.ID] {
+			at := geometry[node.ID]
+			style := fmt.Sprintf("left:%spx;top:%spx;width:%spx;height:%spx", px(at.x-ox), px(at.y-oy), px(atLeastOne(node.Width)), px(atLeastOne(node.Height)))
+			writeLayer(&b, node, style, anchors, byID)
 		}
 		b.WriteString("</div></div>\n</section>\n")
 		if b.Len() > limit {
@@ -155,6 +134,82 @@ func RenderHTML(in ExportInput, limit int) ([]byte, error) {
 		return nil, ErrExportTooLarge
 	}
 	return b.Bytes(), nil
+}
+
+type exportPlacement struct {
+	x, y   float64
+	screen string
+}
+
+// exportGeometry resolves every node's absolute position (its own offset plus
+// every distinct ancestor's, following parentId) and its nearest screen (the
+// node itself when it is a frame, else its nearest frame ancestor), exactly
+// as the prototype player does, in time linear in the number of nodes. Each
+// walk stops at a resolved node, a missing parent or a cycle; every node in a
+// parentId cycle gets the sum of the cycle and the cycle's next frame.
+func exportGeometry(nodes []*exportNode, byID map[string]*exportNode) map[string]exportPlacement {
+	placed := make(map[string]exportPlacement, len(nodes))
+	for _, start := range nodes {
+		if _, done := placed[start.ID]; done {
+			continue
+		}
+		// Walk up until a resolved ancestor, the root, a missing parent or a
+		// node already on this walk (a cycle).
+		var path []*exportNode
+		onPath := map[string]int{}
+		var base exportPlacement
+		cycleAt := -1
+		for current := start; current != nil; {
+			if at, done := placed[current.ID]; done {
+				base = at
+				break
+			}
+			if index, seen := onPath[current.ID]; seen {
+				cycleAt = index
+				break
+			}
+			onPath[current.ID] = len(path)
+			path = append(path, current)
+			if current.ParentID == "" {
+				break
+			}
+			current = byID[current.ParentID]
+		}
+		end := len(path)
+		if cycleAt >= 0 {
+			// Every member of the cycle sums the whole cycle once. Its screen is
+			// the first frame met walking up from that member, if any.
+			cycle := path[cycleAt:]
+			var sx, sy float64
+			for _, node := range cycle {
+				sx += node.X
+				sy += node.Y
+			}
+			for i, node := range cycle {
+				screen := ""
+				for k := range cycle {
+					if candidate := cycle[(i+k)%len(cycle)]; candidate.Type == "frame" {
+						screen = candidate.ID
+						break
+					}
+				}
+				placed[node.ID] = exportPlacement{x: sx, y: sy, screen: screen}
+			}
+			end = cycleAt
+			base = placed[path[cycleAt].ID]
+		}
+		// Unwind: each node adds its offset to its parent's placement.
+		for i := end - 1; i >= 0; i-- {
+			node := path[i]
+			at := exportPlacement{x: node.X + base.x, y: node.Y + base.y, screen: base.screen}
+			if node.Type == "frame" {
+				at.screen = node.ID
+			}
+			placed[node.ID] = at
+			base = at
+		}
+	}
+	return placed
 }
 
 func writeLayer(b *bytes.Buffer, node *exportNode, geometry string, anchors map[string]string, byID map[string]*exportNode) {

@@ -4,8 +4,11 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"math/rand"
 	"strings"
 	"testing"
+	"time"
 )
 
 func exportFixture(nodes ...map[string]any) ExportInput {
@@ -103,5 +106,94 @@ func TestRenderHTMLIsDeterministicAndBounded(t *testing.T) {
 	empty, err := RenderHTML(ExportInput{Name: "", Version: 1}, 1<<20)
 	if err != nil || !bytes.Contains(empty, []byte("This version has no screens.")) {
 		t.Fatalf("empty Design export: %v %s", err, empty)
+	}
+}
+
+// naiveExportGeometry is the per-node ancestor walk the renderer used before
+// #4745's review: correct, but quadratic on deep parentId chains.
+func naiveExportGeometry(nodes []*exportNode, byID map[string]*exportNode) map[string]exportPlacement {
+	out := map[string]exportPlacement{}
+	for _, node := range nodes {
+		var at exportPlacement
+		seen := map[string]bool{}
+		for current := node; current != nil && !seen[current.ID]; current = byID[current.ParentID] {
+			seen[current.ID] = true
+			at.x += current.X
+			at.y += current.Y
+			if current.ParentID == "" {
+				break
+			}
+		}
+		seen = map[string]bool{}
+		for current := node; current != nil && !seen[current.ID]; current = byID[current.ParentID] {
+			if current.Type == "frame" {
+				at.screen = current.ID
+				break
+			}
+			seen[current.ID] = true
+			if current.ParentID == "" {
+				break
+			}
+		}
+		out[node.ID] = at
+	}
+	return out
+}
+
+// The linear geometry must place every layer exactly where the ancestor walk
+// did, including missing parents and parentId cycles with and without frames.
+func TestExportGeometryMatchesAncestorWalk(t *testing.T) {
+	random := rand.New(rand.NewSource(4745))
+	types := []string{"frame", "rect", "text", "image"}
+	for round := 0; round < 400; round++ {
+		count := 1 + random.Intn(24)
+		nodes := make([]*exportNode, count)
+		byID := map[string]*exportNode{}
+		for i := range nodes {
+			nodes[i] = &exportNode{ID: fmt.Sprint("n", i), Type: types[random.Intn(len(types))], X: float64(random.Intn(50)), Y: float64(random.Intn(50))}
+			byID[nodes[i].ID] = nodes[i]
+		}
+		for _, node := range nodes {
+			switch random.Intn(4) {
+			case 0: // root
+			case 1:
+				node.ParentID = "missing"
+			default:
+				node.ParentID = nodes[random.Intn(count)].ID // may form cycles
+			}
+		}
+		random.Shuffle(len(nodes), func(i, j int) { nodes[i], nodes[j] = nodes[j], nodes[i] })
+		want, got := naiveExportGeometry(nodes, byID), exportGeometry(nodes, byID)
+		for _, node := range nodes {
+			if want[node.ID] != got[node.ID] {
+				t.Fatalf("round %d node %s: got %+v, want %+v", round, node.ID, got[node.ID], want[node.ID])
+			}
+		}
+	}
+}
+
+// A deep but engine-valid chain of layers must not make rendering quadratic:
+// the export runs inside the Design read transaction.
+func TestRenderHTMLDeepChainIsLinear(t *testing.T) {
+	nodes := []map[string]any{}
+	for i := 0; i < 700; i++ {
+		nodes = append(nodes, map[string]any{"id": fmt.Sprint("f", i), "type": "frame", "x": 0, "y": 0, "width": 1, "height": 1})
+	}
+	parent := "f0"
+	for i := 0; i < 1400; i++ {
+		id := fmt.Sprint("r", i)
+		nodes = append(nodes, map[string]any{"id": id, "type": "rect", "parentId": parent, "x": 1, "y": 0, "width": 1, "height": 1})
+		parent = id
+	}
+	started := time.Now()
+	out, err := RenderHTML(exportFixture(nodes...), 8<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 5*time.Second {
+		t.Fatalf("deep chain took %s", elapsed)
+	}
+	if !strings.Contains(string(out), `data-node-id="r1399" style="left:1400px;`) {
+		t.Fatal("deepest layer is not placed at the sum of its ancestors")
 	}
 }

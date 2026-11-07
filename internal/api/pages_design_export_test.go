@@ -185,6 +185,17 @@ func TestDesignExportContentIsInertAndDeterministic(t *testing.T) {
 	if !bytes.Equal(first.Body.Bytes(), again.Body.Bytes()) {
 		t.Fatal("the same version exported to different bytes")
 	}
+	// The Design's current name is the only mutable input: renaming the Page
+	// changes the title and heading and nothing else.
+	mustExec(t, f.h.db, `UPDATE pages SET name='Renamed Board' WHERE id=?`, f.page)
+	renamed := f.export(t, f.owner, "?version=2")
+	exportVersion(t, renamed)
+	if got, want := strings.Count(renamed.Body.String(), "Renamed Board"), 2; got != want {
+		t.Fatalf("renamed export names the Design %d times, want %d", got, want)
+	}
+	if strings.ReplaceAll(renamed.Body.String(), "Renamed Board", "Authority boundary") != page {
+		t.Fatal("renaming the Design changed more than its title and heading")
+	}
 }
 
 func TestDesignExportRefusals(t *testing.T) {

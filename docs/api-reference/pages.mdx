@@ -2826,7 +2826,9 @@ policy `default-src 'none'; style-src 'unsafe-inline'; img-src data:; sandbox`.
 The file is one HTML document with every screen as a section, absolutely
 positioned layers, escaped text, raster `data:` images embedded and other
 image sources left out, prototype links as `<a href="#screen-N">` and no
-script. The same version always exports to the same bytes. A workspace
+script. The title and heading carry the Design's current name; otherwise the
+output depends only on the version, so the same version under the same name
+always exports to the same bytes. A workspace
 OWNER/ADMIN's export of someone else's Design is audited as
 `design.workspace_admin_accessed` with operation `export`. **Statuses:** 200
 success, 400 invalid `version`, unsupported `format` or unknown parameter, 401
