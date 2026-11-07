@@ -3,6 +3,7 @@ package work
 import (
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -155,5 +156,80 @@ func TestRuntimeEndConfirmationDoesNotCarryToNextGeneration(t *testing.T) {
 func TestStateOnlySlotAnswerStaysConservative(t *testing.T) {
 	if !StateNeedsReconciliation.HoldsExecutionSlot() {
 		t.Fatal("state-only callers must keep treating reconciliation as holding a slot")
+	}
+}
+
+// The slot predicate runs inside every correlated capacity count of the claim,
+// under the write lock. It must keep using the live partial indexes; written
+// as an OR of the two cases it made SQLite scan all of work_items, terminal
+// history included.
+func TestSlotPredicateUsesLivePartialIndex(t *testing.T) {
+	_, db, _ := newTestStore(t)
+	for _, c := range []struct{ where, index string }{
+		{"agent_id=? AND class=?", "idx_work_items_agent_live"},
+		{"workspace_id=?", "idx_work_items_workspace_live"},
+	} {
+		q := `EXPLAIN QUERY PLAN ` + liveSlotsCTE + `SELECT COUNT(*) FROM live_slots WHERE ` + c.where
+		args := []any{"a", "background"}
+		if c.where == "workspace_id=?" {
+			args = []any{"w"}
+		}
+		rows, err := db.Query(q, args...)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var plan []string
+		for rows.Next() {
+			var id, parent, unused int
+			var detail string
+			if err := rows.Scan(&id, &parent, &unused, &detail); err != nil {
+				t.Fatal(err)
+			}
+			plan = append(plan, detail)
+		}
+		if err := rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+		joined := strings.Join(plan, "\n")
+		if !strings.Contains(joined, c.index) {
+			t.Errorf("%s: plan does not use %s:\n%s", c.where, c.index, joined)
+		}
+		for _, line := range plan {
+			if strings.HasPrefix(line, "SCAN work_items") {
+				t.Errorf("%s: full scan of work_items in the capacity count:\n%s", c.where, joined)
+			}
+		}
+	}
+}
+
+// The release applies to the server-wide caps too, not only the per-agent one:
+// a confirmed end frees the server background slot for another agent.
+func TestConfirmedRuntimeEndReleasesServerBackgroundSlot(t *testing.T) {
+	s, db, clock := newTestStore(t)
+	lim := DefaultLimits()
+	lim.ServerBackground = 1
+	accept(t, s, db, backgroundReq("first"))
+	a, err := s.Claim(t.Context(), ClaimOptions{LeaseOwner: "departed", Limits: lim})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkStarting(t.Context(), a.Item.ID, a.RunID, a.Generation, "agent-run:"+a.RunID); err != nil {
+		t.Fatal(err)
+	}
+	clock.Advance(LeaseDuration + time.Second)
+	if _, err := s.RecoverExpiredLeases(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	other := accept(t, s, db, backgroundReq("second"))
+	if got, err := s.Claim(t.Context(), ClaimOptions{LeaseOwner: "next", Limits: lim}); !errors.Is(err, ErrNoWork) {
+		t.Fatalf("server slot released without a confirmed end: %+v %v", got, err)
+	}
+	code := 143
+	if _, err := s.RecoverRetainedResult(t.Context(), a.RunID, RunResult{ExitCode: &code}, false); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Claim(t.Context(), ClaimOptions{LeaseOwner: "next", Limits: lim})
+	if err != nil || got.Item.ID != other.WorkID {
+		t.Fatalf("confirmed end did not release the server slot: %+v %v", got, err)
 	}
 }

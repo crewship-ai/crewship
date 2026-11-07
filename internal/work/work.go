@@ -118,10 +118,6 @@ func (s State) OccupiesSession() bool {
 // only wants the ordinary two states.
 func (s State) Live() bool { return s == StateStarting || s == StateRunning }
 
-// SQL fragments for the two sets above. They are derived from the same
-// predicates rather than typed out again, because the first version of this
-// package wrote the list inline in four queries and one of them disagreed with
-// the other three.
 // SQLHoldsExecutionSlot is the capacity rule for the work_items row named by
 // alias (a table name or alias in the caller's query), as an SQL boolean
 // expression.
@@ -138,12 +134,23 @@ func (s State) Live() bool { return s == StateStarting || s == StateRunning }
 // Every query that counts execution slots uses this one expression, so the
 // claim scan, the admission checks, the metrics and restricted preflight
 // cannot disagree about what is held.
+//
+// The expression keeps the state list as its own AND term, word for word the
+// WHERE clause of the partial indexes idx_work_items_agent_live and
+// idx_work_items_workspace_live. SQLite uses a partial index only when the
+// query repeats that term; written as an OR of the two cases it scanned the
+// whole table, including all terminal history, inside the claim's write lock.
+// TestSlotPredicateUsesLivePartialIndex pins the plan.
 func SQLHoldsExecutionSlot(alias string) string {
-	return `(` + alias + `.state IN ('` + string(StateStarting) + `','` + string(StateRunning) + `') OR (` +
-		alias + `.state='` + string(StateNeedsReconciliation) + `' AND NOT EXISTS (SELECT 1 FROM work_attempts slot_end WHERE slot_end.work_id=` +
+	return `(` + alias + `.state IN ('` + string(StateStarting) + `','` + string(StateRunning) + `','` + string(StateNeedsReconciliation) + `') AND NOT (` +
+		alias + `.state='` + string(StateNeedsReconciliation) + `' AND EXISTS (SELECT 1 FROM work_attempts slot_end WHERE slot_end.work_id=` +
 		alias + `.id AND slot_end.generation=` + alias + `.generation AND slot_end.runtime_end_confirmed_at IS NOT NULL)))`
 }
 
+// SQL fragments for the two sets above. They are derived from the same
+// predicates rather than typed out again, because the first version of this
+// package wrote the list inline in four queries and one of them disagreed with
+// the other three.
 var (
 	sqlHoldsExecutionSlot = stateList(func(s State) bool { return s.HoldsExecutionSlot() })
 	sqlOccupiesSession    = stateList(func(s State) bool { return s.OccupiesSession() })

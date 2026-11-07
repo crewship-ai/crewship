@@ -259,9 +259,12 @@ func AllStates() []State {
 	return out
 }
 
-// StatesHoldingExecutionSlot returns the states that occupy one of the
-// server's execution slots — the same set the capacity counting in Claim uses,
-// needs_reconciliation included (see State.HoldsExecutionSlot for why).
+// StatesHoldingExecutionSlot returns the states that CAN occupy one of the
+// server's execution slots, needs_reconciliation included (see
+// State.HoldsExecutionSlot for why). It is a state-only, conservative answer:
+// the counting queries use SQLHoldsExecutionSlot, which also releases a
+// reconciliation item whose current attempt has a confirmed runtime end
+// (#5108).
 func StatesHoldingExecutionSlot() []State {
 	var out []State
 	for _, s := range allStates {

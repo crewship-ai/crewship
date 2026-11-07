@@ -426,7 +426,7 @@ func (s *Server) collectWorkCapacityMetrics(ctx context.Context, b *strings.Buil
 	}
 
 	writePromMetric(b, "crewshipd_work_live",
-		"Work items holding an execution slot per class (starting, running, or needs_reconciliation)",
+		"Work items holding an execution slot per class (starting, running, or needs_reconciliation without a confirmed runtime end)",
 		"gauge", hostname, statusSamples(workClassSet, "class", live))
 	writePromMetric(b, "crewshipd_work_capacity_violations",
 		"Capacity dimensions currently over their §6 cap — server total, server background, and the number of agents over each per-agent cap. Target 0; non-zero means admission (I3) did not hold",
