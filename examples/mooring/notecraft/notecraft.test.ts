@@ -495,5 +495,31 @@ describe("NoteCraft reference application", () => {
     expect(shown()).not.toContain("old secret")
     expect(a.note).toMatchObject({ value: "", readOnly: true })
   })
+
+  it("close waits for a custody loss in progress and never reports uncaptured text durable", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    let failing = false
+    const journal = async (): Promise<RecoveryJournal> => {
+      const real = memoryJournal(rows)
+      return { ...real, persist: draft => failing ? Promise.reject(new Error("quota")) : real.persist(draft) }
+    }
+    const a = open(server, alice, rows, true, journal)
+    await editing(a)
+    failing = true
+    server.takeOver(bob)
+    a.type("Alice late")
+    await vi.waitFor(() => expect(a.status()).toBe("Koncept zůstává v tomto editoru"))
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const read = a.client.read
+    const delayed = vi.spyOn(a.client, "read").mockImplementation(async (...args) => { await gate; return read(...args) })
+    const refreshing = a.app.refresh()
+    await vi.waitFor(() => expect(delayed).toHaveBeenCalled())
+    const closing = a.app.close()
+    release()
+    await refreshing
+    await expect(closing).resolves.toBe("local-copy")
+    expect(a.note.value).toBe("Alice late")
+  })
 })
 

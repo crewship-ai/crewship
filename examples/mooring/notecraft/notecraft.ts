@@ -187,7 +187,15 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
   }
   /** Lost custody: capture the draft durably, stop writing, show the server
    * version, and offer any unsaved text for compare/copy. Never resend it. */
-  async function stopEditing() {
+  let custody: Promise<void> | undefined
+  /** `close()` waits for a custody loss in progress: until it settles, text
+   * it took from the lifecycle may be neither saved nor journaled. */
+  function stopEditing(): Promise<void> {
+    const running = stopEditingNow()
+    custody = running
+    return running.finally(() => { if (custody === running) custody = undefined })
+  }
+  async function stopEditingNow() {
     const current = editing
     if (!current) return
     const text = note.value, clean = current.controller.confirmedVersion() !== undefined
@@ -349,6 +357,8 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
   async function closeOnce(): Promise<NoteCraftCloseResult> {
     if (terminated) return "revoked"
     closing = true; note.readOnly = true
+    while (custody) await custody.catch(() => {})
+    if (terminated) return "revoked"
     const current = editing
     let durable = true
     if (current && current.state.phase !== "stopped" && !saveSettled(current.state)) {
