@@ -143,6 +143,10 @@ func ServeRuntime(w http.ResponseWriter, studio string) {
 	w.Header().Set("Cross-Origin-Resource-Policy", "cross-origin")
 	w.Header().Set("Cross-Origin-Embedder-Policy", "credentialless")
 	w.Header().Set("Origin-Agent-Cluster", "?1")
-	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'none'; script-src 'nonce-%s'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors %s", nonce, strings.TrimSuffix(studio, "/")))
+	// Two policies, both enforced. A nonce also authorizes an external script,
+	// and code running here can read the nonce, so the second policy, which
+	// names no source at all, allows inline scripts only: a nonce'd
+	// <script src> or import() of any URL is refused and cannot carry data out.
+	w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'none'; script-src 'nonce-%s'; style-src 'unsafe-inline'; img-src data: blob:; font-src data:; connect-src 'none'; frame-src 'none'; worker-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors %s, script-src 'unsafe-inline'", nonce, strings.TrimSuffix(studio, "/")))
 	_, _ = fmt.Fprintf(w, `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"></head><body><div id="root"></div><script nonce="%s">const expectedParent=%s;const bootNonce=%q;%s</script></body></html>`, nonce, encodedParent, nonce, bootstrap)
 }

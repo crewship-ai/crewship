@@ -125,6 +125,15 @@ describe("parseArtifactProject", () => {
     expect(parsed.quota).toEqual({ used_bytes: 10, limit_bytes: 100, warning: false })
   })
 
+  it("keeps the interactive runtime only in its exact server shape", () => {
+    const interactive = { runtime_url: "https://pages.example.net/api/v1/pages/runtime/bootstrap", development_same_origin: false, collections: ["votes", "tasks"] }
+    expect(parseArtifactProject({ ...snapshot, interactive })?.interactive).toEqual(interactive)
+    expect(parseArtifactProject({ ...snapshot, interactive: { ...interactive, runtime_url: "" } })?.interactive).toEqual({ ...interactive, runtime_url: "" })
+    for (const bad of [null, true, "x", [], { ...interactive, runtime_url: 1 }, { ...interactive, development_same_origin: "false" }, { ...interactive, collections: "votes" }, { ...interactive, collections: ["votes", 2] }])
+      expect(parseArtifactProject({ ...snapshot, interactive: bad })?.interactive).toBeUndefined()
+    expect(parseArtifactProject(snapshot)?.interactive).toBeUndefined()
+  })
+
   it("rejects snapshots missing required fields", () => {
     expect(parseArtifactProject(null)).toBeNull()
     expect(parseArtifactProject({ ...snapshot, can_write: "true" })).toBeNull()

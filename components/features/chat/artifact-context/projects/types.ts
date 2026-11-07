@@ -55,10 +55,20 @@ export interface ArtifactComment {
   replies?: ArtifactCommentReply[]
 }
 
+/** Where an interactive artifact's own scripts run. It grants no data access. */
+export interface ArtifactInteractiveRuntime {
+  /** Fixed Page runtime bootstrap on a separate site; empty when none isolates this host. */
+  runtime_url: string
+  development_same_origin: boolean
+  collections: string[]
+}
+
 export interface ArtifactProjectSnapshot {
   page_id: string
   /** Server classification of the selected authorized version, when the capability is enabled. */
   artifact_kind?: "slides"
+  /** Present only when artifact_interactive is on and the version has interactive.json. */
+  interactive?: ArtifactInteractiveRuntime
   /** proposed: display name and slug, so a chat card needs no second request. */
   name?: string
   slug?: string

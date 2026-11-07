@@ -36,8 +36,10 @@ vi.mock("../../projects/use-artifact-project-data", () => ({
 
 vi.mock("../artifact-dashboard-preview", () => ({ ArtifactDashboardPreview: () => <div>Bound dashboard</div> }))
 vi.mock("../artifact-slides-preview", () => ({ ArtifactSlidesPreview: () => <div>Typed slides preview</div> }))
+vi.mock("../artifact-interactive-preview", () => ({ ArtifactInteractivePreview: (props: { canWrite: boolean; codeVersion: number }) => <div>Interactive runtime canWrite={String(props.canWrite)} v{props.codeVersion}</div> }))
 
 import { ArtifactViewerPanel, commentQueueChip } from "../artifact-viewer-panel"
+import { parseArtifactProject } from "../../projects/client"
 
 const html = (name: string) => ({ path: name, content: `<body><h1 id="hero">Big  idea</h1>${name}</body>`, media_type: "text/html" })
 function snap(patch: Partial<ArtifactProjectSnapshot> = {}): ArtifactProjectSnapshot {
@@ -779,5 +781,46 @@ it("links the chat viewer to the artifact's own address in Artifacts only with t
     cleanup()
     render(<ArtifactViewerPanel variant="library" />)
     expect(screen.queryByRole("link", { name: /Open in Artifacts/ })).toBeNull()
+  } finally { vi.unstubAllEnvs() }
+})
+
+it("keeps the inert preview for an interactive.json Project when the server sends no runtime (flag off)", async () => {
+  const snapshot = snap()
+  snapshot.manifest.files.push({ path: "interactive.json", media_type: "application/json", content: '{"schema_version":1}' })
+  state.snapshot.data = snapshot
+  render(<ArtifactViewerPanel />)
+  expect(screen.queryByText(/Interactive runtime/)).toBeNull()
+  expect(screen.getByTitle(/Preview of/)).toHaveAttribute("srcdoc")
+})
+
+it("runs an interactive artifact only when the server advertises its runtime, and keeps Select on the inert preview", async () => {
+  state.snapshot.data = Object.assign(snap(), { interactive: { runtime_url: "https://pages.example.net/api/v1/pages/runtime/bootstrap", development_same_origin: false, collections: ["votes"] } })
+  render(<ArtifactViewerPanel />)
+  expect(screen.getByText(/Interactive runtime canWrite=true/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Select" }))
+  expect(screen.queryByText(/Interactive runtime/)).toBeNull()
+  expect(screen.getByTitle(/Preview of/)).toHaveAttribute("srcdoc")
+})
+
+it("gives a reader of an interactive artifact a read-only broker", async () => {
+  state.snapshot.data = Object.assign(snap({ can_write: false }), { interactive: { runtime_url: "https://pages.example.net/api/v1/pages/runtime/bootstrap", development_same_origin: false, collections: ["votes"] } })
+  render(<ArtifactViewerPanel />)
+  expect(screen.getByText(/Interactive runtime canWrite=false/)).toBeInTheDocument()
+})
+
+// The wire body of GET /api/v1/pages/{slug}/artifact exactly as the Go server
+// encodes artifactProjectSnapshotResponse with artifact_interactive on (field
+// order and extra keys included), so the real parser is what is under test.
+const SERVER_INTERACTIVE_SNAPSHOT = `{"interactive":{"runtime_url":"http://127.0.0.1:18620/api/v1/pages/runtime/bootstrap","development_same_origin":false,"collections":["votes"]},"page_id":"cmvx368b704a92cd67b2e","name":"Lunch poll","slug":"lunch-poll","origin":null,"enabled":true,"can_comment":true,"can_share":true,"can_restore":true,"can_send_to_agent":false,"can_write":true,"latest_version":1,"shared_version":0,"manifest":{"created_at":"2026-11-07T15:02:11.900739637Z","entrypoint":"index.html","files":[{"path":"dashboard.json","content":"{\\"schema_version\\":1,\\"collections\\":[\\"votes\\"]}","media_type":"application/json"},{"path":"index.html","content":"\\u003ch1 id=\\"artifact-title\\"\\u003eLunch poll\\u003c/h1\\u003e\\u003cscript\\u003ecrewship.data.get(\\"votes\\")\\u003c/script\\u003e","media_type":"text/html"},{"path":"interactive.json","content":"{\\"schema_version\\":1}","media_type":"application/json"}],"message":"","restored_from":0,"version":1},"versions":[{"actor":"test-user-id","created_at":"2026-11-07T15:02:11.900739637Z","entrypoint":"index.html","message":"","restored_from":0,"version":1}],"quota":{"used_bytes":741,"limit_bytes":268435456,"warning":false,"retention":"keep-all","level":"none","storage_level":"none"},"comments":[],"retention_preview":{"policy":"recent-14d-then-daily","recent_days":14,"dry_run":true,"evaluated_at":"2026-11-07T15:02:12Z","total":1,"retained":1,"would_thin":[]}}`
+
+it("keeps the server's interactive runtime through the real parser and runs the artifact (#4720 walk)", async () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", "true")
+  try {
+    const parsed = parseArtifactProject(JSON.parse(SERVER_INTERACTIVE_SNAPSHOT))
+    expect(parsed?.interactive).toEqual({ runtime_url: "http://127.0.0.1:18620/api/v1/pages/runtime/bootstrap", development_same_origin: false, collections: ["votes"] })
+    state.snapshot.data = parsed
+    render(<ArtifactViewerPanel />)
+    expect(screen.getByText(/Interactive runtime canWrite=true v1/)).toBeInTheDocument()
+    expect(screen.queryByText("Bound dashboard")).toBeNull()
   } finally { vi.unstubAllEnvs() }
 })

@@ -25,6 +25,7 @@ import { useArtifactProjectMutations, useArtifactProjectSnapshot } from "../proj
 import type { ArtifactComment, ArtifactProjectSnapshot } from "../projects/types"
 import { ArtifactPreviewFrame, type PreviewSelection } from "./artifact-preview-frame"
 import { ArtifactDashboardPreview } from "./artifact-dashboard-preview"
+import { ArtifactInteractivePreview } from "./artifact-interactive-preview"
 import { ArtifactSlidesPreview } from "./artifact-slides-preview"
 import { ArtifactDesignSystemPreview } from "@/components/features/artifacts/design-system/design-system-preview"
 import { hasDesignSystemFile } from "@/components/features/artifacts/design-system/manifest"
@@ -609,6 +610,9 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
     <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>
       {slidesMode === "unsupported" ? <p role="alert" className="p-4">This Slides format is unsupported.</p>
         : slidesMode === "slides" ? <ArtifactSlidesPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} artifactKind={data.artifact_kind} path={screenPath ?? ""} title={`Preview of ${labelOf(screen)}`} selectMode={canComment && selectMode && !viewingOld} onSelect={select} onNavigate={setScreenPath} />
+        // Select mode keeps the static preview so comments anchor to inert markup.
+        : data.interactive && !(canComment && selectMode && !viewingOld)
+        ? <ArtifactInteractivePreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} files={data.manifest.files} path={screen} runtime={data.interactive} canWrite={canWrite && !viewingOld} title={`Preview of ${labelOf(screen)}`} />
         : designSystem ? <ArtifactDesignSystemPreview files={data.manifest.files} title={`Preview of ${data.name ?? data.slug ?? target.slug}`} />
         : artifactDashboards() && data.manifest.files.some(file => file.path === "dashboard.json")
         ? <ArtifactDashboardPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} files={data.manifest.files} path={screen} selectMode={canComment && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`} onSelect={select} onNavigate={setScreenPath} />

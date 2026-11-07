@@ -30,7 +30,7 @@ func TestRuntimeHeadersAndConstantBootstrap(t *testing.T) {
 	if w.Header().Get("X-Frame-Options") != "" {
 		t.Fatal("bootstrap remains unframeable")
 	}
-	for _, part := range []string{"connect-src 'none'", "frame-src 'none'", "frame-ancestors https://studio.example.com", "script-src 'nonce-"} {
+	for _, part := range []string{"connect-src 'none'", "frame-src 'none'", "frame-ancestors https://studio.example.com", "script-src 'nonce-", ", script-src 'unsafe-inline'"} {
 		if !strings.Contains(w.Header().Get("Content-Security-Policy"), part) {
 			t.Fatal(part)
 		}
