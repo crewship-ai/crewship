@@ -543,3 +543,44 @@ it("a write refusal from reconcile during write revocation keeps the captured dr
   expect(r.journal.confirm).not.toHaveBeenCalled()
   await r.controller.close()
 })
+
+it("releases a saved document as clean: a final capture of the confirmed bytes is that version (#5089)", async () => {
+  const r = rig()
+  r.controller.edited()
+  await r.controller.save()
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  expect(await r.controller.revokeWrite()).toBe(true)
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "read-only", dirty: false }))
+  // The journal must not keep the final capture as a draft to offer on the next open.
+  expect(r.journal.persist).toHaveBeenCalledTimes(2)
+  expect(r.journal.confirm).toHaveBeenCalledTimes(2)
+  expect(r.journal.confirm).toHaveBeenLastCalledWith(expect.objectContaining({ baseVersion: "2" }))
+  await r.controller.close()
+})
+
+it("keeps a final capture with other bytes as a draft after a save (#5089)", async () => {
+  const r = rig()
+  r.controller.edited()
+  await r.controller.save()
+  r.engine.snapshot.mockResolvedValueOnce({ bytes: new Uint8Array([9]), editorRevision: "doc:1:1" })
+  r.controller.edited("doc:1:1")
+  const confirms = r.journal.confirm.mock.calls.length
+  expect(await r.controller.revokeWrite()).toBe(true)
+  expect(r.journal.confirm).toHaveBeenCalledTimes(confirms)
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "read-only", dirty: true }))
+  await r.controller.close()
+})
+
+it("keeps the draft when the save before a release was never confirmed (#5089)", async () => {
+  const r = rig()
+  r.controller.edited()
+  r.transport.save.mockRejectedValueOnce(new Error("lost ACK"))
+  await r.controller.save()
+  const confirms = r.journal.confirm.mock.calls.length
+  r.transport.reconcile.mockRejectedValue(new Error("offline"))
+  await r.controller.revokeWrite()
+  expect(r.journal.confirm).toHaveBeenCalledTimes(confirms)
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "read-only", dirty: true }))
+  await r.controller.close()
+})
