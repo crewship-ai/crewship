@@ -10,6 +10,7 @@ import {NativeCraftAgentTaskStatus} from "./native-craft-agent-task-status"
 import {useLeaveGuard} from "@/lib/editor-lifecycle/use-leave-guard"
 import {createNativeDocumentClient,type NativeDocumentSnapshot,type NativeProposal} from "@/lib/mooring/native-document-client"
 import {createNativeEditorPort,type NativeEditorPort} from "@/lib/mooring/native-editor-port"
+import {openJournalWithRetry} from "@/lib/mooring/native-journal-open"
 import {openNativeDraftJournal,validNativeVersion,type NativeDraft,type NativeDraftJournal,type NativeRecovery} from "@/lib/mooring/native-draft"
 import {createSingleEditorSave,type NativeSaveState} from "@/lib/mooring/single-editor-save"
 import {confirmNativeRead,verifyNativeReadLoss} from "@/lib/mooring/native-read-loss"
@@ -24,6 +25,16 @@ interface Lease extends NativeCraftLeaseView {expires_at: string|null}
 const vacant:Lease={can_edit:false,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v)&&typeof v==='object'&&!Array.isArray(v)
 const text=(v:unknown):v is string=>typeof v==='string'&&v.length>0&&v.length<=512&&!v.includes('\0')
+/** A take-over that failed: the stage it reached and, when it never became
+ * writable, whether its fresh lease was given back (#5104). */
+class AcquireFailure extends Error {
+ constructor(readonly stage:string,readonly released:boolean|undefined,readonly inner:unknown){super(inner instanceof Error?inner.message:'acquire_failed')}
+}
+/** What a person reads after a take-over that never became writable. */
+function acquireFailure(stage:string,released:boolean):string{
+ const what=stage==='journal'||stage==='recovery'?'Úložiště konceptu v tomto prohlížeči se nepodařilo otevřít, proto úpravy nezačaly.':'Převzetí úprav se nedokončilo.'
+ return released?`${what} Dokument je znovu volný; zkuste Převzít úpravy znovu.`:`${what} Úpravy se nepodařilo potvrzeně uvolnit; použijte Uvolnit úpravy, nebo stránku obnovte.`
+}
 function leaseView(raw:unknown):Lease {
  if(!object(raw)||typeof raw.mine!=='boolean'||typeof raw.can_write!=='boolean'||!(raw.generation===null||validNativeVersion(raw.generation)&&raw.generation!=='0')||!(raw.acquired_at===null||text(raw.acquired_at))||!(raw.expires_at===null||text(raw.expires_at))||!Array.isArray(raw.handoff_requested_by)||raw.handoff_requested_by.length>128)throw Error('invalid_lease')
  const actor=(v:unknown)=>object(v)&&text(v.actor_id)&&text(v.display_name)&&(v.kind==='human'||v.kind==='agent')
@@ -441,7 +452,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!dead&&!lifetime.signal.aborted&&epoch===privateEpoch)setComparison({version:snapshot.version,server:decoder.decode(snapshot.bytes),draft:decoder.decode(candidate),serverHash,draftHash,equal:serverHash===draftHash,draftLabel:`Návrh ${proposal.authorName} nad verzí ${proposal.baseVersion}`})
   })().catch(()=>{if(!dead&&epoch===privateEpoch)setError('Návrh se nepodařilo načíst k porovnání.')})}
   decide.current=(id,decision)=>{
-   if(dead||networkRetired||transition||viewNow.can_edit!==true)return
+   if(dead||networkRetired||transition||acquiring||viewNow.can_edit!==true)return
    transition=true;setBusy(true);setError(undefined)
    const r=current
    void(async()=>{
@@ -711,24 +722,32 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(initializing||r&&!r.ready)readerRefreshNeeded=true
    else if(!transition)await refreshReader()
   }
-  // What a failed take-over reached. The one message on screen covers them all.
-  let acquireStage='lease'
+  // One take-over at a time (#5104): a later one must never meet the cleanup of
+  // an earlier one, which could otherwise release the same-session generation.
+  let acquiring=false
   async function acquire(){
-   acquireStage='lease'
+   if(acquiring)throw new AcquireFailure('busy',undefined,Error('acquire_in_progress'))
    // Startup limits must never detach a writer's uncaptured buffer.
    if(current&&(current.writable||current.blocked||!current.nativeReadOnly))throw Error('unsaved_editor_replacement')
+   acquiring=true
+   // What this take-over reached; the one message on screen covers them all.
+   let acquireStage='lease'
    const startup=armAdmissionDeadline()
+   let taken:string|undefined,mounted:Runtime|undefined,opened:NativeDraftJournal|undefined
    try{
    const response=leaseView(await client.leaseAction('acquire',{},lifetime.signal))
    const proof=await currentLease(client,lifetime.signal)
    if(!owns(response)||!owns(proof,response.generation!))throw Error('lease_not_current')
+   taken=proof.generation!
    // Never import an old local draft. A new generation begins from a fresh server whole read.
    acquireStage='read'
    const snapshot=await client.read(lifetime.signal)
    acquireStage='mount'
-   const r=await mountEditor(snapshot,proof.generation!)
+   const r=await mountEditor(snapshot,proof.generation!);mounted=r
    acquireStage='journal'
-   const journal=await openNativeDraftJournal({human:humanId,workspace:workspaceId,page:pageId,applicationId:snapshot.applicationId})
+   // A slow browser store gets a bounded number of attempts; a late answer
+   // of an abandoned attempt is closed and never unlocks this editor (#5104).
+   const journal=await openJournalWithRetry(signal=>openNativeDraftJournal({human:humanId,workspace:workspaceId,page:pageId,applicationId:snapshot.applicationId},{signal}),{alive:()=>live(r),signal:lifetime.signal});opened=journal
    if(!live(r)){await journal.close();return}
    acquireStage='recovery'
    r.journal=journal;privacyJournal=journal;const recovery=await retireCommitted(journal,await journal.recovery(),snapshot.bytes);if(!live(r)){await journal.close();return}offerRecoveries(recovery)
@@ -757,6 +776,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    });r.coordinator=coordinator
    if(concealed===r)coordinator.hold()
    freezeInput(r)
+   // A runtime already retiring (a custody transfer began) never becomes writable.
+   if(r.retiring)throw Error('runtime_retiring')
    if(await r.port.setReadOnly(false,r.abort.signal)!==false)throw Error('native_write_unconfirmed')
    if(!live(r))return
    r.nativeReadOnly=false
@@ -765,8 +786,30 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     if(await r.port.setReadOnly(true,r.abort.signal)!==true)throw Error('native_read_only_unconfirmed')
     r.nativeReadOnly=true;r.blocked=!captured;setHostBlocked(r.blocked);resumeViewing(r);throw Error('lease_not_current')
    }
+   if(r.retiring||!live(r)){const captured=await coordinator.revokeWrite();if(await r.port.setReadOnly(true,r.abort.signal)!==true)throw Error('native_read_only_unconfirmed');r.nativeReadOnly=true;r.blocked=!captured;setHostBlocked(r.blocked);throw Error('runtime_retiring')}
    r.transferSaved=false;r.writable=true;setOwnsEditor(true);resumeViewing(r);display(r)
-   }finally{finishAdmission(startup)}
+   }catch(cause){
+    let released:boolean|undefined
+    if(acquireStage==='read'||acquireStage==='mount'||acquireStage==='journal'||acquireStage==='recovery'){
+     // A journal this take-over opened but never wrote through gives up its
+     // exclusive custody now. privacyJournal keeps the closed handle, whose
+     // retirement erases only its own row (#4348).
+     if(opened){if(mounted?.journal===opened)mounted.journal=undefined;await opened.close().catch(()=>{})}
+     // The editor never became writable, so nothing uncaptured is at stake:
+     // give the fresh lease back instead of holding a document nobody can
+     // edit. The release is fenced by holder and this generation; take-overs
+     // are serialized, and no writable editor of this tab may exist.
+     if(taken&&!dead&&!current?.writable)released=await releaseUnused(taken)
+    }
+    throw new AcquireFailure(acquireStage,released,cause)
+   }finally{acquiring=false;finishAdmission(startup)}
+  }
+  async function releaseUnused(generation:string):Promise<boolean>{
+   try{
+    await client.leaseAction('release',{generation},lifetime.signal)
+    const proof=await currentLease(client,lifetime.signal)
+    return !(proof.mine&&proof.generation===generation)
+   }catch{return false}
   }
   async function flushBeforeTransfer(r:Runtime):Promise<boolean>{
    if(!live(r))return false
@@ -789,7 +832,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   }
   publishPreview.current=()=>{void(async()=>{
    const r=current
-   if(dead||networkRetired||transition||!r?.ready||viewNow.can_edit!==true||viewNow.can_share!==true||!owns(viewNow,r.generation)||!r.writable)return
+   if(dead||networkRetired||transition||acquiring||!r?.ready||viewNow.can_edit!==true||viewNow.can_share!==true||!owns(viewNow,r.generation)||!r.writable)return
    transition=true;setBusy(true);setError(undefined)
    try{
     if(!await flushBeforeTransfer(r)||!r.ackedVersion||!owns(viewNow,r.generation))throw Error('publish_save_unconfirmed')
@@ -803,7 +846,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // confirmed base version; the reopened editor then starts from the new head.
   history.current={load:signal=>client.versions(signal),loadVersion:(version,signal)=>client.version(version,signal),restore:target=>{void(async()=>{
    const r=current
-   if(dead||networkRetired||transition||!r?.ready||viewNow.can_edit!==true||!owns(viewNow,r.generation)||!r.writable)return
+   if(dead||networkRetired||transition||acquiring||!r?.ready||viewNow.can_edit!==true||!owns(viewNow,r.generation)||!r.writable)return
    transition=true;setBusy(true);setError(undefined)
    try{
     if(!await flushBeforeTransfer(r)||!r.ackedVersion||!owns(viewNow,r.generation))throw Error('restore_save_unconfirmed')
@@ -817,7 +860,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    }finally{transition=false;if(!dead){setBusy(false);setHistoryKey(n=>n+1)}}
   })()}}
   control.current=(action,body)=>{
-   if(dead||networkRetired||transition||viewNow.can_edit!==true||!current?.ready)return
+   if(dead||networkRetired||transition||viewNow.can_edit!==true||!current?.ready||acquiring)return
    transition=true;setBusy(true);setError(undefined)
    let handoffConfirmed=false
    void(async()=>{
@@ -854,14 +897,14 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     await observeLease(await currentLease(client,lifetime.signal))
    })().catch(async(cause:unknown)=>{
     // Codes only: no document content reaches these messages.
-    if(action==='acquire')console.warn(`native_acquire_failed stage=${acquireStage} error=${(cause instanceof Error?cause.message:'unknown').slice(0,80)}`)
+    if(action==='acquire'){const reached=cause instanceof AcquireFailure?cause.stage:'lease',inner=cause instanceof AcquireFailure?cause.inner:cause;console.warn(`native_acquire_failed stage=${reached} error=${(inner instanceof Error?inner.message:'unknown').slice(0,80)}`)}
     if(dead||nativeFailed)return
     const r=current
     if(r&&(action==='handoff'||action==='release')){
      if(r.writable&&owns(viewNow,r.generation)&&r.phase?.phase!=='read-only')resumeViewing(r)
      else if(!r.nativeReadOnly)await retireWrite(r).catch(()=>stop('Přístup editoru se nepotvrdil.'))
     }
-    if(!dead){setError(handoffConfirmed?'Žádost byla odeslána, ale aktuální stav úprav nelze načíst. Koncept zůstává zachován.':'Výsledek akce nebyl potvrzen. Koncept zůstává zachován.');setSavedVersion(undefined)}
+    if(!dead){setError(cause instanceof AcquireFailure&&cause.released!==undefined?acquireFailure(cause.stage,cause.released):handoffConfirmed?'Žádost byla odeslána, ale aktuální stav úprav nelze načíst. Koncept zůstává zachován.':'Výsledek akce nebyl potvrzen. Koncept zůstává zachován.');setSavedVersion(undefined)}
    }).finally(()=>{transition=false;if(!dead){setBusy(false);catchUpReader()}})
   }
   const initialStartup=armAdmissionDeadline()
