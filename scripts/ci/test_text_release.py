@@ -36,9 +36,23 @@ class TextReleaseTests(unittest.TestCase):
         self.assertLess(publish.index('go test -tags restrictedruntime_live'), publish.index('cosign sign --yes'))
         self.assertIn('docker pull "$IMAGE"', publish)
         self.assertIn('CREWSHIP_RESTRICTED_PRODUCTION_IMAGE="$immutable_image_id"', publish)
-        self.assertIn('runner.sha256', publish)
+        self.assertIn('bash scripts/ci/verify-text-image-contents.sh "$IMAGE"', publish)
+        self.assertLess(publish.index('verify-text-image-contents.sh'), publish.index('cosign sign --yes'))
         self.assertIn('provenance: mode=max', publish)
         self.assertIn('sbom: true', publish)
+
+    def test_image_contents_are_verified_without_a_shell_in_the_image(self):
+        # #5103: the runner image is built from scratch, so a check that runs
+        # /bin/sh inside it can never pass. Both workflows verify from the host.
+        for name in ('text-worker-release.yml', 'text-worker-candidate.yml'):
+            text = (ROOT / '.github/workflows' / name).read_text()
+            self.assertNotIn('--entrypoint /bin/sh', text)
+            self.assertIn('scripts/ci/verify-text-image-contents.sh', text)
+        script = (ROOT / 'scripts/ci/verify-text-image-contents.sh').read_text()
+        self.assertIn('sha256sum -c runner.sha256', script)
+        self.assertIn('/usr/share/licenses/crewship-text/go/manifest.tsv', script)
+        dockerfile = (ROOT / 'cmd/crewship-restricted-runner/Dockerfile').read_text()
+        self.assertIn('ARG BASE=scratch', dockerfile)
 
     def test_pr_canary_never_accepts_skip_missing_or_failed_test(self):
         text = (ROOT / '.github/workflows/text-worker-candidate.yml').read_text()

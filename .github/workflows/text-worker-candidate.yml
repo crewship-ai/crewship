@@ -7,6 +7,7 @@ on:
       - .github/workflows/text-worker-release.yml
       - cmd/crewship-restricted-runner/**
       - scripts/ci/prepare-text-release.sh
+      - scripts/ci/verify-text-image-contents.sh
       - scripts/ci/test_text_release.py
       - internal/restrictedruntime/**
       - internal/restricteddispatch/**
@@ -38,6 +39,8 @@ jobs:
           bash scripts/ci/prepare-text-release.sh "$RUNNER_TEMP/text-context"
       - name: Build the candidate without publication
         run: docker build --pull --tag crewship-text-candidate:verify "$RUNNER_TEMP/text-context"
+      - name: Verify distributed binary and legal contents
+        run: bash scripts/ci/verify-text-image-contents.sh crewship-text-candidate:verify
       - name: Exercise the actual text worker and durable accounting
         run: |
           image=$(docker image inspect --format '{{.Id}}' crewship-text-candidate:verify)
