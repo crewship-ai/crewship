@@ -454,6 +454,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// rotate mints + returns the new value exactly once. Gate is inline
 	// (canEditAgent) — same as Update.
 	r.authedMut("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", roleInline, agents.RotateWebhookSecret)
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/webhook-secret/previous", roleInline, agents.RevokePreviousWebhookSecret)
 
 	// Persisted avatar (#1297). GET is readable by any workspace member —
 	// rosters render each other — while PUT/DELETE take the same inline
@@ -680,16 +681,22 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/skills/{skillId}", roleManage, skills.Delete)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/archive", roleManage, skills.Archive)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/restore", roleManage, skills.Restore)
+	// openapi: responses 200,403,404,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/lock", roleManage, skills.Lock)
+	// openapi: responses 200,403,404,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/unlock", roleManage, skills.Unlock)
 	skillGen := NewSkillGenerateHandler(r.db, r.logger)
 	// Same stash-for-reuse pattern as creds above — the internal
 	// /api/v1/internal/skills/generate adapter shares the instance
 	// (per-workspace LLM credential cache must not fork).
 	r.skillGenHandler = skillGen
+	skillGen.SetJournal(r.Journal())
 	// Path param name MUST match what the wsCtx middleware reads — the
 	// pattern is {workspaceId} everywhere else in the API, and changing
 	// it broke the workspace lookup on this route in the prior commit.
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/generate", roleInline, skillGen.Generate)
 	skillBulk := NewSkillBulkImportHandler(r.db, r.logger, r.skillGitImportPolicy)
+	skillBulk.SetJournal(r.Journal())
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/bulk-import", roleCreate, skillBulk.Import)
 
 	// Devcontainer feature catalog (auth required, no workspace context needed).

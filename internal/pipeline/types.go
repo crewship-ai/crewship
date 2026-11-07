@@ -138,6 +138,13 @@ type DSL struct {
 	Parallelism string `json:"parallelism,omitempty"`
 
 	Steps []Step `json:"steps"`
+
+	// inheritedSignalSteps names the parent's wait:event steps for a foreach
+	// body. Runtime only, never serialized.
+	inheritedSignalSteps map[string]struct{}
+	// untrustedItemInput is the foreach loop variable when its items come
+	// from a signal wait. Runtime only, never serialized.
+	untrustedItemInput string
 }
 
 // EvalConfig groups eval-time configuration. Currently scoped to
@@ -584,8 +591,14 @@ type WaitStep struct {
 	// datetime fields
 	Until string `json:"until,omitempty"` // RFC3339 or template
 	// event fields
-	EventType   string `json:"event_type,omitempty"`
-	EventFilter string `json:"event_filter,omitempty"` // simple equality match on payload
+	EventType string `json:"event_type,omitempty"`
+	// EventFilter is a conjunction of `path == value` terms over a JSON signal
+	// payload (syntax: see event_filter.go). A signal that does not match is
+	// not delivered to this wait. Empty accepts any signal.
+	EventFilter string `json:"event_filter,omitempty"`
+	// CorrelationKey (templated) lets a signed webhook configured for signal
+	// delivery find this parked wait by value instead of by run id.
+	CorrelationKey string `json:"correlation_key,omitempty"`
 	// TimeoutSec is the documented wait-body alias for timeout_seconds.
 	// A positive timeout_seconds on the step takes precedence. Zero uses
 	// the kind's default (24h for approval, 1h for event).

@@ -148,6 +148,9 @@ export const JOURNAL_ENTRY_TYPES = [
   // Skills
   "skill.imported",
   "skill.deleted",
+  "skill.locked",
+  "skill.unlocked",
+  "skill.write_blocked",
   "skill.archived",
   "skill.restored",
   "skill.assigned",

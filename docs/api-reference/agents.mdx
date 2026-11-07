@@ -29,6 +29,7 @@ An **agent** is an AI coding agent with a configurable role, CLI adapter, skills
 | PATCH | [/api/v1/agents/{agentId}](#update-agent) | Partially update an agent |
 | DELETE | [/api/v1/agents/{agentId}](#delete-agent) | Soft-delete an agent |
 | POST | [/api/v1/agents/{agentId}/webhook-secret/rotate](#rotate-webhook-secret) | Rotate and return an agent webhook secret once |
+| DELETE | [/api/v1/agents/{agentId}/webhook-secret/previous](#rotate-webhook-secret) | End a rotation overlap now |
 | POST | [/api/v1/agents/hire](#hire-agent) | Spawn a new ephemeral agent under a crew |
 | POST | [/api/v1/agents/{agentId}/rehire](#rehire-agent) | Resurrect or extend an ephemeral agent |
 | POST | [/api/v1/agents/{agentId}/release](#release-agent) | End a temporary hire now |
@@ -560,6 +561,14 @@ POST /api/v1/agents/{agentId}/webhook-secret/rotate
 Uses the same per-agent edit gate as Update. The new signing secret is
 returned exactly once; Crewship stores only its protected form and does not
 provide a read endpoint.
+
+Optional body `{"previous_secret_ttl_seconds": N}` keeps the replaced secret
+valid for N seconds (`0`, the default, or `60` to `604800`); the response then
+also carries `previous_secret_expires_at`. Rotating again during an overlap
+replaces the remembered secret. `DELETE
+/api/v1/agents/{agentId}/webhook-secret/previous` ends an overlap now
+(idempotent, same edit gate, `204`). Each delivery verified
+with the previous secret is audited as `agent.webhook_previous_secret.used`.
 
 **Response:** `200 OK`
 

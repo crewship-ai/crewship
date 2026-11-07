@@ -166,7 +166,8 @@ func loadSkillSweepInputs(
 	rows, err := db.QueryContext(ctx, `
 		SELECT s.id, s.name, COALESCE(s.description, ''),
 		       COALESCE(s.lifecycle_state, 'active'),
-		       COALESCE(s.last_used_at, '')
+		       COALESCE(s.last_used_at, ''),
+		       COALESCE(s.locked, 0)
 		  FROM skills s
 		 ORDER BY s.id ASC`)
 	if err != nil {
@@ -181,8 +182,9 @@ func loadSkillSweepInputs(
 	for rows.Next() {
 		var (
 			id, name, desc, lifecycle, lastUsedStr string
+			locked                                 int
 		)
-		if err := rows.Scan(&id, &name, &desc, &lifecycle, &lastUsedStr); err != nil {
+		if err := rows.Scan(&id, &name, &desc, &lifecycle, &lastUsedStr, &locked); err != nil {
 			logger.Warn("keeper.skill_review: scan skill row", "error", err)
 			continue
 		}
@@ -261,6 +263,7 @@ func loadSkillSweepInputs(
 				LifecycleState: skills.LifecycleState(lifecycle),
 				LastUsedAt:     lastUsed,
 				Assignments:    assignments,
+				Locked:         locked == 1,
 			},
 			Stats: stats,
 			// AssignedAgents + FailurePeeks left empty for MVP — the
@@ -302,7 +305,7 @@ func (p *sqlSkillPersister) MarkUnverified(ctx context.Context, skillID string) 
 
 func (p *sqlSkillPersister) SetLifecycle(ctx context.Context, skillID string, next skills.LifecycleState, reason string) error {
 	_, err := p.db.ExecContext(ctx,
-		`UPDATE skills SET lifecycle_state = ?, updated_at = ? WHERE id = ? AND lifecycle_state != ?`,
+		`UPDATE skills SET lifecycle_state = ?, updated_at = ? WHERE id = ? AND lifecycle_state != ? AND locked = 0`,
 		string(next), time.Now().UTC().Format(time.RFC3339), skillID, string(next))
 	if err != nil {
 		return err

@@ -15,6 +15,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
@@ -24,15 +25,26 @@ import (
 // the result back as a fresh row with source='GENERATED'. The user can then
 // edit the body via the skills detail page or re-import a hand-tuned version.
 type SkillGenerateHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	journal journal.Emitter
+}
+
+// SetJournal wires the emitter that records generation attempts refused by a
+// skill's content lock. Nil keeps the no-op default.
+func (h *SkillGenerateHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 // NewSkillGenerateHandler wires the handler against an open *sql.DB. Workspace
 // resolution and credential decryption are done per-request to honour the
 // "credentials are workspace-scoped" rule from the keeper architecture notes.
 func NewSkillGenerateHandler(db *sql.DB, logger *slog.Logger) *SkillGenerateHandler {
-	return &SkillGenerateHandler{db: db, logger: logger}
+	return &SkillGenerateHandler{db: db, logger: logger, journal: noopEmitter{}}
 }
 
 type skillGenerateRequest struct {
@@ -147,6 +159,14 @@ func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) 
 		// CLI command, smart enough to write a usable SKILL.md without the
 		// Opus tax.
 		model = llm.DefaultModel("anthropic")
+	}
+
+	// A locked skill is never regenerated; refuse before spending an LLM call.
+	if lockErr := skills.CheckUnlocked(r.Context(), h.db, body.Slug); lockErr != nil {
+		actor, actorID := skillWriteActor(r)
+		if refuseLockedSkill(w, r, h.journal, wsID, "", actor, actorID, "generate", lockErr) {
+			return
+		}
 	}
 
 	rawSkill, ok := h.produceSkillMD(w, r, wsID, body.Slug, body.Prompt, model)

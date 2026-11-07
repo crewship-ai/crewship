@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
 
@@ -17,6 +18,17 @@ type SkillBulkImportHandler struct {
 	db        *sql.DB
 	logger    *slog.Logger
 	gitPolicy skills.GitImportPolicy
+	journal   journal.Emitter
+}
+
+// SetJournal wires the emitter that records bulk-import entries skipped
+// because the skill is locked (#5045). Nil keeps the no-op default.
+func (h *SkillBulkImportHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 // NewSkillBulkImportHandler wires the handler against an open *sql.DB.
@@ -25,7 +37,7 @@ func NewSkillBulkImportHandler(db *sql.DB, logger *slog.Logger, policies ...skil
 	if len(policies) > 0 {
 		policy.PrivateHosts = append([]string(nil), policies[0].PrivateHosts...)
 	}
-	return &SkillBulkImportHandler{db: db, logger: logger, gitPolicy: policy}
+	return &SkillBulkImportHandler{db: db, logger: logger, gitPolicy: policy, journal: noopEmitter{}}
 }
 
 type skillBulkImportRequest struct {
@@ -169,6 +181,10 @@ func (h *SkillBulkImportHandler) Import(w http.ResponseWriter, r *http.Request) 
 	}
 	skipped := make([]skillBulkSkippedItem, 0, len(res.Skipped))
 	for _, s := range res.Skipped {
+		if s.Locked {
+			actor, actorID := skillWriteActor(r)
+			emitSkillWriteBlocked(r.Context(), h.journal, WorkspaceIDFromContext(r.Context()), "", actor, actorID, s.Slug, "bulk_import")
+		}
 		skipped = append(skipped, skillBulkSkippedItem{
 			Path:   s.Path,
 			Slug:   s.Slug,

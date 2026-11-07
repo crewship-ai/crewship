@@ -34,6 +34,7 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 			"set": array(str()), "grant": array(str()), "revoke": array(str()), "preset": str(),
 		}),
 		"FinalCoreAgentPersonaSuggestionRequest": object(map[string]any{"content": str(), "rationale": str()}, "content"),
+		"FinalCoreAgentWebhookRotateRequest":     object(map[string]any{"previous_secret_ttl_seconds": integer()}),
 		"FinalCoreAgentRehireRequest":            object(map[string]any{"ttl_minutes": integer(), "reason": str()}, "reason"),
 		"FinalCoreBootstrapRequest": object(map[string]any{
 			"full_name": str(), "email": str(), "password": str(),
@@ -71,7 +72,7 @@ func finalRequestCrewsAgentsWorkspacesChatsSchemaCatalog() (map[string]DomainSch
 	add("POST", "/api/v1/agents/{agentId}/persona/suggest", "FinalCoreAgentPersonaSuggestionRequest")
 	add("POST", "/api/v1/agents/{agentId}/rehire", "FinalCoreAgentRehireRequest")
 	add("POST", "/api/v1/agents/{agentId}/stop", "FinalCoreEmptyRequest")
-	add("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", "FinalCoreEmptyRequest")
+	add("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", "FinalCoreAgentWebhookRotateRequest")
 	add("POST", "/api/v1/bootstrap", "FinalCoreBootstrapRequest")
 	add("POST", "/api/v1/chats/{chatId}/steer", "FinalCoreChatSteerRequest")
 	add("POST", "/api/v1/crews/{crewId}/apply-avatar-style", "FinalCoreCrewAvatarStyleRequest")

@@ -482,7 +482,7 @@ func (e *Executor) executeOneStep(
 	}
 	resMu.Unlock()
 	ctxRender := buildStepRenderContext(inputsForCtx, outputsSnap, renderEnv, runMeta, dsl.EgressTargets, in.stateSnapshot)
-	renderedPrompt := renderAgentPrompt(*step, ctxRender, in.TriggeredVia)
+	renderedPrompt := renderAgentPrompt(*step, ctxRender, in.TriggeredVia, dsl)
 
 	// Conditional skip — same semantics as the linear path.
 	if step.If != "" {

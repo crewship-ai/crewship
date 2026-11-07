@@ -127,3 +127,37 @@ func TestStartRoutineReceiptRetentionSweeper_SweepsOnStart(t *testing.T) {
 		t.Fatalf("after the sweeper's first pass receipts = %v, want only the live one", got)
 	}
 }
+
+// Signal delivery rows of a deleted webhook or workspace are never pruned by a
+// delivery, so the retention sweep must remove them once past retention.
+func TestSweepRoutineWebhookReceipts_RemovesExpiredSignalDeliveries(t *testing.T) {
+	db := testutil.MigratedSQLDB(t)
+	now := time.Date(2026, 11, 6, 12, 0, 0, 0, time.UTC)
+	for id, at := range map[string]time.Time{
+		"old":   now.Add(-SignalDeliveryRetention - time.Second),
+		"fresh": now.Add(-SignalDeliveryRetention + time.Hour),
+	} {
+		if _, err := db.Exec(`INSERT INTO pipeline_signal_deliveries
+			(webhook_id, delivery_id, workspace_id, outcome, received_at, body_sha256)
+			VALUES ('gone-wh', ?, 'gone-ws', 'ignored', ?, ?)`, id, tsformat.Format(at), "sha-"+id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := SweepRoutineWebhookReceipts(context.Background(), db, now); err != nil {
+		t.Fatal(err)
+	}
+	var left []string
+	rows, err := db.Query(`SELECT delivery_id FROM pipeline_signal_deliveries`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var d string
+		_ = rows.Scan(&d)
+		left = append(left, d)
+	}
+	if len(left) != 1 || left[0] != "fresh" {
+		t.Fatalf("signal deliveries left = %v, want only [fresh]", left)
+	}
+}

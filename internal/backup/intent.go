@@ -392,6 +392,9 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"webhook_deliveries": IntentExcludeRuntime,
 	// Receipt identities refer to this instance's pipeline runtime history.
 	"routine_webhook_receipts": IntentExcludeRuntime,
+	// Signal delivery outcomes hold the sender's delivery ids and the run ids of
+	// this instance; both only mean something against its own runtime history.
+	"pipeline_signal_deliveries": IntentExcludeRuntime,
 	// Undelivered chat turns waiting for their session. These ARE user words,
 	// which is the argument for including them — but they are addressed to a
 	// live session and a work item that do not survive the restore, so a

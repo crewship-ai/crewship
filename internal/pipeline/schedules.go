@@ -88,6 +88,13 @@ type Schedule struct {
 	// Telemetry only — never governs behaviour.
 	LastMissedCount int
 
+	// SpreadSeconds is the optional fire-time spread window (0 = off).
+	// SpreadOffsetSeconds is this schedule's stable offset inside it, derived
+	// from the id; the schedule is picked up at NextRunAt + that offset. See
+	// schedules_spread.go.
+	SpreadSeconds       int
+	SpreadOffsetSeconds int
+
 	// Circuit breaker (#1405). ConsecutiveFailures counts back-to-back
 	// FAILED main-routine fires; a COMPLETED fire resets it to 0.
 	// MaxConsecutiveFailures is the per-schedule trip threshold (default
@@ -182,6 +189,10 @@ type SaveScheduleInput struct {
 	// CatchupPolicy — see Schedule.CatchupPolicy. Empty defaults to
 	// CatchupOnce (today's unchanged behaviour).
 	CatchupPolicy string
+	// SpreadSeconds — see Schedule.SpreadSeconds. Whole-row replace on
+	// update, like every other field here (the API layer merges absent
+	// requests with the stored value). 0 = no spread.
+	SpreadSeconds int
 	// MaxConsecutiveFailures overrides the circuit breaker's trip
 	// threshold (#1405). <= 0 means "use defaultMaxConsecutiveFailures" —
 	// on create that's a fresh default; on update the existing stored
@@ -310,6 +321,9 @@ func prepareScheduleWrite(in SaveScheduleInput) (preparedSchedule, error) {
 		return preparedSchedule{}, fmt.Errorf("%w: invalid catchup_policy %q (must be %q, %q, or %q)",
 			ErrInvalidTrigger, in.CatchupPolicy, CatchupSkip, CatchupOnce, CatchupAll)
 	}
+	if err := validateSpread(in.CronExpr, in.Timezone, in.SpreadSeconds); err != nil {
+		return preparedSchedule{}, err
+	}
 	if in.Activation != "" && in.Activation != TriggerActivationDraft {
 		return preparedSchedule{}, fmt.Errorf("%w: invalid activation %q (must be empty or %q)",
 			ErrInvalidTrigger, in.Activation, TriggerActivationDraft)
@@ -358,8 +372,9 @@ INSERT INTO pipeline_schedules (
     catchup_policy,
     max_consecutive_failures,
     activation,
-    created_at, updated_at, chat_origin_id
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    created_at, updated_at, chat_origin_id,
+    spread_seconds, spread_offset_seconds
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, p.in.WorkspaceID, p.in.Name, p.in.TargetPipelineID,
 		nullInt(p.in.TargetPipelineVersion),
 		p.in.CronExpr, p.in.Timezone, string(p.inputsJSON), boolToInt(p.enabled),
@@ -369,6 +384,7 @@ INSERT INTO pipeline_schedules (
 		p.maxFailures,
 		nullStr(p.in.Activation),
 		tsformat.Format(now), tsformat.Format(now), nullableStr(p.in.ChatOriginID),
+		p.in.SpreadSeconds, ScheduleSpreadOffset(id, p.in.SpreadSeconds),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert schedule: %w", err)
@@ -394,12 +410,15 @@ func upsertTriggerSchedule(ctx context.Context, x sqlExecQuerier, in SaveSchedul
 		return nil, err
 	}
 	var existingID string
+	var existingSpread int
+	var existingCron, existingTZ string
+	var existingNext sql.NullString
 	err = x.QueryRowContext(ctx,
-		`SELECT id FROM pipeline_schedules
+		`SELECT id, spread_seconds, cron_expr, timezone, next_run_at FROM pipeline_schedules
 		 WHERE workspace_id = ? AND target_pipeline_id = ? AND deleted_at IS NULL
 		 ORDER BY created_at ASC LIMIT 1`,
 		in.WorkspaceID, in.TargetPipelineID,
-	).Scan(&existingID)
+	).Scan(&existingID, &existingSpread, &existingCron, &existingTZ, &existingNext)
 	switch {
 	case errors.Is(err, sql.ErrNoRows):
 		return insertScheduleRow(ctx, x, generateScheduleID(), prepared)
@@ -407,15 +426,31 @@ func upsertTriggerSchedule(ctx context.Context, x sqlExecQuerier, in SaveSchedul
 		return nil, fmt.Errorf("look up existing trigger schedule: %w", err)
 	}
 	now := time.Now().UTC()
+	// The trigger path has no spread field: keep what the schedule API set,
+	// unless the new cron interval no longer admits it.
+	if validateSpread(prepared.in.CronExpr, prepared.in.Timezone, existingSpread) != nil {
+		existingSpread = 0
+	}
+	// Keep a due-but-unfired occurrence (held by the spread offset or waiting
+	// for the next tick) when the cadence is unchanged, as updateSchedule does;
+	// otherwise a re-save inside [T, T+offset) would skip occurrence T.
+	nextRunToStore := prepared.nextRun
+	if existingCron == prepared.in.CronExpr && existingTZ == prepared.in.Timezone && existingNext.Valid {
+		if prev, perr := time.Parse(time.RFC3339Nano, existingNext.String); perr == nil && !prev.After(now) { // tsformat:allow: read-only parse, not a SQL comparison
+			nextRunToStore = prev
+		}
+	}
 	if _, err := x.ExecContext(ctx, `
 UPDATE pipeline_schedules
 SET name = ?, cron_expr = ?, timezone = ?, inputs_json = ?, enabled = ?,
+    spread_seconds = ?, spread_offset_seconds = ?,
     next_run_at = ?, catchup_policy = ?,
     max_consecutive_failures = COALESCE(?, max_consecutive_failures),
     activation = ?, updated_at = ?, chat_origin_id = COALESCE(?,chat_origin_id)
 WHERE id = ?`,
 		prepared.in.Name, prepared.in.CronExpr, prepared.in.Timezone, string(prepared.inputsJSON),
-		boolToInt(prepared.enabled), tsformat.Format(prepared.nextRun), prepared.in.CatchupPolicy,
+		boolToInt(prepared.enabled), existingSpread, ScheduleSpreadOffset(existingID, existingSpread),
+		tsformat.Format(nextRunToStore), prepared.in.CatchupPolicy,
 		nullIntIfPositive(prepared.in.MaxConsecutiveFailures),
 		nullStr(prepared.in.Activation), tsformat.Format(now), nullableStr(in.ChatOriginID),
 		existingID,
@@ -480,6 +515,15 @@ func updateSchedule(ctx context.Context, x sqlExecQuerier, in SaveScheduleInput)
 		return nil, fmt.Errorf("pipeline_schedules: invalid catchup_policy %q (must be %q, %q, or %q)",
 			in.CatchupPolicy, CatchupSkip, CatchupOnce, CatchupAll)
 	}
+	// Revalidate the spread only when it, the cron or the timezone changes: the
+	// scan window moves with the calendar (a DST gap can enter it), and an
+	// unrelated edit such as enable must not start failing for that. The runtime
+	// clamp still bounds the offset at fire time.
+	if existingRow.SpreadSeconds != in.SpreadSeconds || existingRow.CronExpr != in.CronExpr || existingRow.Timezone != in.Timezone {
+		if err := validateSpread(in.CronExpr, in.Timezone, in.SpreadSeconds); err != nil {
+			return nil, err
+		}
+	}
 	inputsJSON, err := json.Marshal(in.Inputs)
 	if err != nil {
 		return nil, fmt.Errorf("marshal inputs: %w", err)
@@ -534,7 +578,8 @@ SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     consecutive_failures = CASE WHEN ? = 1 AND enabled = 0 THEN 0 ELSE consecutive_failures END,
     disabled_reason = CASE WHEN ? = 1 AND enabled = 0 THEN NULL ELSE disabled_reason END,
     next_run_at = ?, wake_pipeline_id = ?, wake_inputs_json = ?,
-    wake_fail_closed = ?, catchup_policy = ?, updated_at = ?, chat_origin_id = ?
+    wake_fail_closed = ?, catchup_policy = ?, updated_at = ?, chat_origin_id = ?,
+    spread_seconds = ?, spread_offset_seconds = ?
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
@@ -544,6 +589,7 @@ WHERE id = ? AND deleted_at IS NULL`,
 		nullStr(in.WakePipelineID), string(wakeInputsJSON), boolToInt(in.WakeFailClosed),
 		in.CatchupPolicy,
 		tsformat.Format(now), nullableStr(in.ChatOriginID),
+		in.SpreadSeconds, ScheduleSpreadOffset(in.ID, in.SpreadSeconds),
 		in.ID,
 	)
 	if err != nil {
@@ -701,19 +747,27 @@ func activateSchedule(ctx context.Context, x sqlExecQuerier, id string) (*Schedu
 // crosses into the next second, and disappears once the row's next
 // UpdateAfterRun/Save rewrites it fixed-width.
 func (s *ScheduleStore) listDueSchedules(ctx context.Context) ([]*Schedule, error) {
+	now := time.Now()
+	// The spread offset is applied in Go, not SQL: a legacy row's stored offset
+	// may exceed what its cron interval admits and is clamped per row
+	// (EffectiveSpreadOffset). SQL only narrows to nominally due rows.
 	rows, err := s.db.QueryContext(ctx, scheduleSelect+`
 WHERE enabled = 1 AND deleted_at IS NULL AND next_run_at <= ?
-ORDER BY next_run_at ASC LIMIT 100`,
-		tsformat.Format(time.Now()))
+ORDER BY next_run_at ASC`,
+		tsformat.Format(now))
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []*Schedule
-	for rows.Next() {
+	for rows.Next() && len(out) < 100 {
 		s, err := scanSchedule(rows)
 		if err != nil {
 			return nil, err
+		}
+		if s.SpreadOffsetSeconds > 0 && s.NextRunAt != nil &&
+			s.NextRunAt.Add(time.Duration(EffectiveSpreadOffset(s))*time.Second).After(now) {
+			continue
 		}
 		out = append(out, s)
 	}
@@ -1694,6 +1748,7 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        last_wake_at, COALESCE(last_wake_status, ''),
        COALESCE(wake_fail_closed, 0),
        COALESCE(catchup_policy, 'once'), COALESCE(last_missed_count, 0),
+       COALESCE(spread_seconds, 0), COALESCE(spread_offset_seconds, 0),
        COALESCE(consecutive_failures, 0), COALESCE(max_consecutive_failures, 5),
        COALESCE(disabled_reason, ''),
        COALESCE(activation, ''),
@@ -1723,6 +1778,7 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		&lastWakeAt, &s.LastWakeStatus,
 		&wakeFailClsd,
 		&s.CatchupPolicy, &s.LastMissedCount,
+		&s.SpreadSeconds, &s.SpreadOffsetSeconds,
 		&s.ConsecutiveFailures, &s.MaxConsecutiveFailures,
 		&s.DisabledReason,
 		&s.Activation,
