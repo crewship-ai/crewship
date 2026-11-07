@@ -1,1 +1,2 @@
 - **Crew AI suggestions respect a key's approved hosts (#5045).** `crewship crew suggest` and the crew wizard no longer send a workspace Anthropic key that a person bound to other hosts to `api.anthropic.com`; they answer `422` instead. Unbound keys behave as before.
+- **Stored credential tests skip host-bound credentials (#5045).** `crewship credential test-stored` and **Test now** answer `409` for a credential with approved hosts instead of sending its value to a test endpoint.
