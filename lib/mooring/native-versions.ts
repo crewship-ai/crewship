@@ -3,9 +3,9 @@ import {validNativeVersion} from "./native-draft"
 /**
  * Native Word/Sheet version history (`GET .../craft/document/versions`).
  *
- * Local adapter: the Mooring SDK's `lib/mooring/sdk/versions` (PR #4723) is not
- * on main yet. When it lands, this parser and the client's `versions`/`restore`
- * methods should move onto it; the wire contract is the same server route.
+ * This module is the one parser for that wire contract. The experimental
+ * Mooring SDK (`lib/mooring/sdk/versions`, `nativeCraftVersions`) adapts the
+ * client's `versions`/`restore` methods built on it instead of parsing again.
  */
 export const CRAFT_VERSION_HISTORY_FLAG = "craft_version_history"
 
