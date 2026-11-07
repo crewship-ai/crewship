@@ -552,9 +552,27 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   const filters = controlled ?? own
   const setFilters = (next: LibraryFilters) => { setOwn(next); onFiltersChange?.(next) }
   const [sort, setSort] = useState<SortKey>("updated")
+  const [group, setGroup] = useState<GroupKey>("none")
+  const [layout, setLayout] = useState<Layout>("list")
+  const [newKind, setNewKind] = useState<ArtifactKindKey | null | undefined>(undefined)
+  const creatable = ARTIFACT_KINDS.filter(kind => kind.live(caps)).map(kind => kind.key)
+  // Per person, synced across devices: what they opened and what they starred. Never shared with others.
+  const [recent, setRecent] = useUserPreference<{ slug: string; at: number }[]>(`artifacts.${workspaceId}.recentlyOpened`, [])
+  const [favorites, setFavorites] = useUserPreference<string[]>(`artifacts.${workspaceId}.favorites`, [])
+  // What this person made from New artifact: a blank Page they just created is still theirs to find.
+  const [madeHere, setMadeHere] = useUserPreference<string[]>(`artifacts.${workspaceId}.created`, [])
+  const personal = useMemo<Personal>(() => ({
+    opened: new Map(Array.isArray(recent) ? recent.filter(entry => typeof entry?.slug === "string" && Number.isFinite(entry?.at)).map(entry => [entry.slug, entry.at]) : []),
+    favorites: new Set(Array.isArray(favorites) ? favorites.filter(slug => typeof slug === "string") : []),
+    created: new Set(Array.isArray(madeHere) ? madeHere.filter(slug => typeof slug === "string") : []),
+  }), [recent, favorites, madeHere])
   // Behind its own default-off flag, the All view is filtered, sorted and paged
   // by the server; the mock sharing store changes archive state the server cannot see.
-  const serverParams = artifactsServerCatalog() && !artifactsSharingMock() && item === null
+  // A blank Page this person made here stays visible in All (hiddenAsEmpty);
+  // the server's empty=exclude cannot see that list, so the browser keeps All
+  // while such a Page exists rather than dropping it from the list and count.
+  const keptBlank = items.some(entry => entry.empty && !hiddenAsEmpty(entry, personal))
+  const serverParams = artifactsServerCatalog() && !artifactsSharingMock() && item === null && !keptBlank
     ? serverCatalogParams(filters, sort, { design: artifactsDesign() }) : null
   const serverKey = serverParams?.toString() ?? null
   const [serverWindow, setServerWindow] = useState<{ key: string | null; page: number }>({ key: null, page: 0 })
@@ -571,20 +589,6 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   useEffect(() => {
     if (pastEnd) setServerWindow({ key: serverKey, page: lastServerPage })
   }, [pastEnd, serverKey, lastServerPage])
-  const [group, setGroup] = useState<GroupKey>("none")
-  const [layout, setLayout] = useState<Layout>("list")
-  const [newKind, setNewKind] = useState<ArtifactKindKey | null | undefined>(undefined)
-  const creatable = ARTIFACT_KINDS.filter(kind => kind.live(caps)).map(kind => kind.key)
-  // Per person, synced across devices: what they opened and what they starred. Never shared with others.
-  const [recent, setRecent] = useUserPreference<{ slug: string; at: number }[]>(`artifacts.${workspaceId}.recentlyOpened`, [])
-  const [favorites, setFavorites] = useUserPreference<string[]>(`artifacts.${workspaceId}.favorites`, [])
-  // What this person made from New artifact: a blank Page they just created is still theirs to find.
-  const [madeHere, setMadeHere] = useUserPreference<string[]>(`artifacts.${workspaceId}.created`, [])
-  const personal = useMemo<Personal>(() => ({
-    opened: new Map(Array.isArray(recent) ? recent.filter(entry => typeof entry?.slug === "string" && Number.isFinite(entry?.at)).map(entry => [entry.slug, entry.at]) : []),
-    favorites: new Set(Array.isArray(favorites) ? favorites.filter(slug => typeof slug === "string") : []),
-    created: new Set(Array.isArray(madeHere) ? madeHere.filter(slug => typeof slug === "string") : []),
-  }), [recent, favorites, madeHere])
   // An ID address fails closed: it never falls back to a slug, which another artifact may hold now.
   const selected = item === null ? null : items.find(entry => bySlug ? entry.slug === item : entry.pageId === item) ?? null
   const canonical = bySlug ? selected?.pageId : undefined

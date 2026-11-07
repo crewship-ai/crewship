@@ -572,3 +572,18 @@ it("keeps a blank Page the person just created in the library and points to hidd
   expect(screen.queryByText("No artifacts yet")).toBeNull()
   expect(screen.getAllByText("UX walkthrough page").length).toBeGreaterThan(0)
 })
+
+// #4471 review: the server's empty=exclude cannot see what this person made
+// here, so with the server catalog on, All must still keep their blank Page.
+it("with the server catalog flag, All keeps a blank Page the person just created", () => {
+  serverOn()
+  state.pages = [wire({ slug: "fresh-design", id: "page-fresh", name: "UX walkthrough page" })]
+  windowState.pages = []
+  windowState.total = 0
+  renderLibrary()
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  fireEvent.click(within(screen.getByRole("dialog", { name: "New artifact" })).getByRole("button", { name: "Create" }))
+  openAll()
+  expect(windowState.calls[windowState.calls.length - 1].params).toBeNull()
+  expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(row => row.textContent)).toEqual([expect.stringContaining("UX walkthrough page")])
+})
