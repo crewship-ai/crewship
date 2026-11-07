@@ -452,5 +452,48 @@ describe("NoteCraft reference application", () => {
     expect(stored(rows)).toBe("")
     await expect(a.app.close()).resolves.toBe("revoked")
   })
+
+  it("keeps uncaptured text when the server read after a lost custody fails, so close is never durable", async () => {
+    const server = createFakeCraftServer("start"), rows = new Map<string, RecoveryDraft>()
+    let failing = false
+    const journal = async (): Promise<RecoveryJournal> => {
+      const real = memoryJournal(rows)
+      return { ...real, persist: draft => failing ? Promise.reject(new Error("quota")) : real.persist(draft) }
+    }
+    const a = open(server, alice, rows, true, journal)
+    await editing(a)
+    failing = true
+    server.takeOver(bob)
+    a.type("Alice late")
+    await vi.waitFor(() => expect(a.status()).toBe("Koncept zůstává v tomto editoru"))
+    vi.spyOn(a.client, "read").mockRejectedValueOnce(new Error("network"))
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.q.getByRole("alert").hidden).toBe(false))
+    expect(a.note.value).toBe("Alice late")
+    expect(rows.size).toBe(0)
+    await expect(a.app.close()).resolves.toBe("local-copy")
+    expect(a.note.value).toBe("Alice late")
+  })
+
+  it("a recovery listing that resolves after a read revoke never shows the draft or its copy controls", async () => {
+    const server = createFakeCraftServer("start")
+    const rows = new Map<string, RecoveryDraft>([["old-tab", { applicationId: "notecraft", enginePin: "pin", sessionId: "tab-old", generation: "1", baseVersion: "1", editorRevision: "local", bytes: new TextEncoder().encode("old secret") }]])
+    let release!: () => void
+    const gate = new Promise<void>(resolve => { release = resolve })
+    const journal = async (): Promise<RecoveryJournal> => {
+      const real = memoryJournal(rows)
+      return { ...real, recovery: async () => { const listed = await real.recovery(); await gate; return listed } }
+    }
+    const a = open(server, alice, rows, true, journal)
+    vi.spyOn(a.client, "lease").mockRejectedValue(new SaveError("read_revoked"))
+    await a.app.refresh()
+    await vi.waitFor(() => expect(a.status()).toBe("Přístup ke čtení byl odebrán"))
+    release()
+    await a.app.ready.catch(() => {})
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(a.q.queryByRole("button", { name: "Kopírovat" })).toBeNull()
+    expect(shown()).not.toContain("old secret")
+    expect(a.note).toMatchObject({ value: "", readOnly: true })
+  })
 })
 

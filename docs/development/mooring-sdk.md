@@ -86,8 +86,10 @@ it never grants anything, and every advisory check (`ownsLease`,
    Czech labels.
 5. **Read revocation.** The current host lifecycle reports a read revocation
    (`SaveError` reason `read_revoked`) as `stopped`, the same phase as a close
-   or a sign-out retirement, and its later calls reject with a plain
-   `native_session_retired` error. An application that must tell them apart
+   or a sign-out retirement. Afterwards a ticketed `save(requestId)` and
+   `flush()` reject with a plain `native_session_retired` error, while
+   `save()` without a ticket and `reconcile()` resolve without sending
+   anything. An application that must tell them apart
    watches the replies of its own transport for `read_revoked`, as NoteCraft
    does, and then removes the text from the view without keeping a copy. A
    separate change (#5114) proposes a distinct terminal state; this SDK does
@@ -169,8 +171,10 @@ any product code, not bundled into the UI, not packaged into
 `internal/editororigin/packages/` and has no server-side application ID or
 manifest pin; registering a Craft application is security-sensitive server
 work this change does not do. It runs only against `fake-server.ts`, an
-in-memory double that applies the server's lease, generation and
-base-version fences, in tests and in a local demo.
+in-memory double that applies the server's lease-holder, generation and
+base-version fences, in tests and in a local demo. It fences custody by actor
+only, not by editor session or lease expiry, so the tests say nothing about
+two tabs of the same person.
 
 NoteCraft tries not to close or overwrite typed text before it is saved or
 journaled. `close()` sends the final save, or journals the text when the save

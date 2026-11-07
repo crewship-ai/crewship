@@ -153,7 +153,9 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
     $("reconcile").hidden = editing?.state.phase !== "uncertain"
   }
   async function load() {
-    server = await doc.read(signal)
+    const read = await doc.read(signal)
+    if (terminated) return
+    server = read
     note.value = decode(server.bytes)
   }
   /** A lifecycle that revoked its writing never writes again. */
@@ -197,7 +199,14 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
     if (editing === current) editing = undefined
     const base = server.version
     if (purged || terminated) return
-    const latest = await doc.read(signal)
+    let latest: { version: string; bytes: Uint8Array }
+    try { latest = await doc.read(signal) } catch (error) {
+      // Without the server bytes it is unknown whether the text differs, so
+      // text no lifecycle captured is kept (journal row, else local copy)
+      // before the failure is reported. A read revocation already terminated.
+      if (!terminated && !clean && !captured) await preserve(text, current.generation, base, "Váš neuložený koncept")
+      throw error
+    }
     if (terminated) return
     const unsaved = !clean && text !== decode(latest.bytes)
     // The lifecycle's journal holds a captured draft; otherwise store it now,
@@ -251,20 +260,24 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
   }
   /** Compare and copy are the only actions; there is deliberately no "save". */
   function offer(offers: (Pick<RecoveryOffer, "draft" | "compare" | "copy"> & { label?: string })[]) {
-    if (!offers.length) return
+    // A late result (e.g. a recovery listing that resolves after a read
+    // revocation) never brings text or its copy controls back.
+    if (!offers.length || terminated) return
     $("recovery").hidden = false
     for (const o of offers) {
       const item = document.createElement("li")
       item.append(`${o.label ?? "Místní koncept"} nad verzí ${o.draft.baseVersion}`,
-        button("Porovnat", () => void o.compare(server).then(describe)),
-        button("Kopírovat", () => { const text = decode(o.copy()); $<HTMLTextAreaElement>("copy").value = text; void navigator.clipboard?.writeText(text).catch(() => {}) }))
+        button("Porovnat", () => { if (!terminated) void o.compare(server).then(describe) }),
+        button("Kopírovat", () => { if (terminated) return; const text = decode(o.copy()); $<HTMLTextAreaElement>("copy").value = text; void navigator.clipboard?.writeText(text).catch(() => {}) }))
       $("offers").append(item)
     }
   }
-  const describe = (c: RecoveryComparison) => { $("compare").textContent = c.equal ? `Shodné se serverovou verzí ${c.serverVersion}` : `Liší se od serverové verze ${c.serverVersion}` }
+  const describe = (c: RecoveryComparison) => { if (terminated) return; $("compare").textContent = c.equal ? `Shodné se serverovou verzí ${c.serverVersion}` : `Liší se od serverové verze ${c.serverVersion}` }
   async function listVersions() {
+    const listed = await history.list(signal)
+    if (terminated) return
     const ol = $("versions"); ol.replaceChildren()
-    for (const v of await history.list(signal)) {
+    for (const v of listed) {
       const li = document.createElement("li")
       li.append(`Verze ${v.version}${v.current ? " · aktuální" : ""}${v.restoredFrom ? ` · obnoveno z ${v.restoredFrom}` : ""}`)
       if (editing && !v.current) li.append(button(`Obnovit verzi ${v.version}`, () => void run(() => restore(v.version), "Obnovení nebylo potvrzeno.")))

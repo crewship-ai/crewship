@@ -1,7 +1,10 @@
 /** In-memory stand-in for the Go backend's Craft routes, for NoteCraft's
  * tests and local demo only. It applies the same fences the server applies:
  * one lease holder, a generation per custody, every write checked against
- * generation and base version, restore as a new version. It is not a server. */
+ * generation and base version, restore as a new version. It is not a server:
+ * it fences custody by actor only, not by editor session or lease expiry as
+ * the backend does (internal/mooring/edit_lease.go), so two tabs of the same
+ * person share one lease here and these tests prove nothing about that case. */
 import { SaveError, type LeaseActor, type LeaseTransport, type RecoveryDraft, type RecoveryJournal, type SaveRequest, type VersionsTransport } from "../../../lib/mooring/sdk"
 
 interface StoredVersion { version: string; bytes: Uint8Array; contentHash?: string; sessionId?: string; generation?: string; editorRevision?: string; restoredFrom?: string; createdAt: string }
