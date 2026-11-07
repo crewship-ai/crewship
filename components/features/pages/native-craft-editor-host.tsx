@@ -10,6 +10,7 @@ import {NativeCraftAgentTaskStatus} from "./native-craft-agent-task-status"
 import {useLeaveGuard} from "@/lib/editor-lifecycle/use-leave-guard"
 import {createNativeDocumentClient,type NativeDocumentSnapshot,type NativeProposal} from "@/lib/mooring/native-document-client"
 import {createNativeEditorPort,type NativeEditorPort} from "@/lib/mooring/native-editor-port"
+import {openJournalWithRetry} from "@/lib/mooring/native-journal-open"
 import {openNativeDraftJournal,validNativeVersion,type NativeDraft,type NativeDraftJournal,type NativeRecovery} from "@/lib/mooring/native-draft"
 import {createSingleEditorSave,type NativeSaveState} from "@/lib/mooring/single-editor-save"
 import {confirmNativeRead,verifyNativeReadLoss} from "@/lib/mooring/native-read-loss"
@@ -24,6 +25,11 @@ interface Lease extends NativeCraftLeaseView {expires_at: string|null}
 const vacant:Lease={can_edit:false,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v)&&typeof v==='object'&&!Array.isArray(v)
 const text=(v:unknown):v is string=>typeof v==='string'&&v.length>0&&v.length<=512&&!v.includes('\0')
+/** What a person reads after a take-over that never became writable. */
+function acquireFailure(stage:string,released:boolean):string{
+ const what=stage==='journal'||stage==='recovery'?'Úložiště konceptu v tomto prohlížeči se nepodařilo otevřít, proto úpravy nezačaly.':'Převzetí úprav se nedokončilo.'
+ return released?`${what} Dokument je znovu volný; zkuste Převzít úpravy znovu.`:`${what} Úpravy se nepodařilo potvrzeně uvolnit; použijte Uvolnit úpravy, nebo stránku obnovte.`
+}
 function leaseView(raw:unknown):Lease {
  if(!object(raw)||typeof raw.mine!=='boolean'||typeof raw.can_write!=='boolean'||!(raw.generation===null||validNativeVersion(raw.generation)&&raw.generation!=='0')||!(raw.acquired_at===null||text(raw.acquired_at))||!(raw.expires_at===null||text(raw.expires_at))||!Array.isArray(raw.handoff_requested_by)||raw.handoff_requested_by.length>128)throw Error('invalid_lease')
  const actor=(v:unknown)=>object(v)&&text(v.actor_id)&&text(v.display_name)&&(v.kind==='human'||v.kind==='agent')
@@ -713,22 +719,29 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   }
   // What a failed take-over reached. The one message on screen covers them all.
   let acquireStage='lease'
+  // Set when a take-over that never became writable gave its fresh lease back
+  // (true) or tried and could not confirm that (false).
+  let acquireReleased:boolean|undefined
   async function acquire(){
-   acquireStage='lease'
+   acquireStage='lease';acquireReleased=undefined
    // Startup limits must never detach a writer's uncaptured buffer.
    if(current&&(current.writable||current.blocked||!current.nativeReadOnly))throw Error('unsaved_editor_replacement')
    const startup=armAdmissionDeadline()
+   let taken:string|undefined
    try{
    const response=leaseView(await client.leaseAction('acquire',{},lifetime.signal))
    const proof=await currentLease(client,lifetime.signal)
    if(!owns(response)||!owns(proof,response.generation!))throw Error('lease_not_current')
+   taken=proof.generation!
    // Never import an old local draft. A new generation begins from a fresh server whole read.
    acquireStage='read'
    const snapshot=await client.read(lifetime.signal)
    acquireStage='mount'
    const r=await mountEditor(snapshot,proof.generation!)
    acquireStage='journal'
-   const journal=await openNativeDraftJournal({human:humanId,workspace:workspaceId,page:pageId,applicationId:snapshot.applicationId})
+   // A slow browser store gets a bounded number of attempts; a late answer
+   // of an abandoned attempt is closed and never unlocks this editor (#5104).
+   const journal=await openJournalWithRetry(()=>openNativeDraftJournal({human:humanId,workspace:workspaceId,page:pageId,applicationId:snapshot.applicationId}),{alive:()=>live(r)&&!lifetime.signal.aborted})
    if(!live(r)){await journal.close();return}
    acquireStage='recovery'
    r.journal=journal;privacyJournal=journal;const recovery=await retireCommitted(journal,await journal.recovery(),snapshot.bytes);if(!live(r)){await journal.close();return}offerRecoveries(recovery)
@@ -766,7 +779,21 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     r.nativeReadOnly=true;r.blocked=!captured;setHostBlocked(r.blocked);resumeViewing(r);throw Error('lease_not_current')
    }
    r.transferSaved=false;r.writable=true;setOwnsEditor(true);resumeViewing(r);display(r)
+   }catch(cause){
+    // The editor never became writable, so nothing uncaptured is at stake:
+    // give the fresh lease back instead of holding a document nobody can
+    // edit. The release is fenced by this generation and cannot touch a
+    // later holder.
+    if(taken&&!dead&&(acquireStage==='read'||acquireStage==='mount'||acquireStage==='journal'||acquireStage==='recovery'))acquireReleased=await releaseUnused(taken)
+    throw cause
    }finally{finishAdmission(startup)}
+  }
+  async function releaseUnused(generation:string):Promise<boolean>{
+   try{
+    await client.leaseAction('release',{generation},lifetime.signal)
+    const proof=await currentLease(client,lifetime.signal)
+    return !(proof.mine&&proof.generation===generation)
+   }catch{return false}
   }
   async function flushBeforeTransfer(r:Runtime):Promise<boolean>{
    if(!live(r))return false
@@ -861,7 +888,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
      if(r.writable&&owns(viewNow,r.generation)&&r.phase?.phase!=='read-only')resumeViewing(r)
      else if(!r.nativeReadOnly)await retireWrite(r).catch(()=>stop('Přístup editoru se nepotvrdil.'))
     }
-    if(!dead){setError(handoffConfirmed?'Žádost byla odeslána, ale aktuální stav úprav nelze načíst. Koncept zůstává zachován.':'Výsledek akce nebyl potvrzen. Koncept zůstává zachován.');setSavedVersion(undefined)}
+    if(!dead){setError(action==='acquire'&&acquireReleased!==undefined?acquireFailure(acquireStage,acquireReleased):handoffConfirmed?'Žádost byla odeslána, ale aktuální stav úprav nelze načíst. Koncept zůstává zachován.':'Výsledek akce nebyl potvrzen. Koncept zůstává zachován.');setSavedVersion(undefined)}
    }).finally(()=>{transition=false;if(!dead){setBusy(false);catchUpReader()}})
   }
   const initialStartup=armAdmissionDeadline()
