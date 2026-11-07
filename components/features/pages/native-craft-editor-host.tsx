@@ -452,7 +452,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(!dead&&!lifetime.signal.aborted&&epoch===privateEpoch)setComparison({version:snapshot.version,server:decoder.decode(snapshot.bytes),draft:decoder.decode(candidate),serverHash,draftHash,equal:serverHash===draftHash,draftLabel:`Návrh ${proposal.authorName} nad verzí ${proposal.baseVersion}`})
   })().catch(()=>{if(!dead&&epoch===privateEpoch)setError('Návrh se nepodařilo načíst k porovnání.')})}
   decide.current=(id,decision)=>{
-   if(dead||networkRetired||transition||viewNow.can_edit!==true)return
+   if(dead||networkRetired||transition||acquiring||viewNow.can_edit!==true)return
    transition=true;setBusy(true);setError(undefined)
    const r=current
    void(async()=>{
@@ -776,6 +776,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    });r.coordinator=coordinator
    if(concealed===r)coordinator.hold()
    freezeInput(r)
+   // A runtime already retiring (a custody transfer began) never becomes writable.
+   if(r.retiring)throw Error('runtime_retiring')
    if(await r.port.setReadOnly(false,r.abort.signal)!==false)throw Error('native_write_unconfirmed')
    if(!live(r))return
    r.nativeReadOnly=false
@@ -784,6 +786,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     if(await r.port.setReadOnly(true,r.abort.signal)!==true)throw Error('native_read_only_unconfirmed')
     r.nativeReadOnly=true;r.blocked=!captured;setHostBlocked(r.blocked);resumeViewing(r);throw Error('lease_not_current')
    }
+   if(r.retiring||!live(r)){const captured=await coordinator.revokeWrite();if(await r.port.setReadOnly(true,r.abort.signal)!==true)throw Error('native_read_only_unconfirmed');r.nativeReadOnly=true;r.blocked=!captured;setHostBlocked(r.blocked);throw Error('runtime_retiring')}
    r.transferSaved=false;r.writable=true;setOwnsEditor(true);resumeViewing(r);display(r)
    }catch(cause){
     let released:boolean|undefined
@@ -829,7 +832,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   }
   publishPreview.current=()=>{void(async()=>{
    const r=current
-   if(dead||networkRetired||transition||!r?.ready||viewNow.can_edit!==true||viewNow.can_share!==true||!owns(viewNow,r.generation)||!r.writable)return
+   if(dead||networkRetired||transition||acquiring||!r?.ready||viewNow.can_edit!==true||viewNow.can_share!==true||!owns(viewNow,r.generation)||!r.writable)return
    transition=true;setBusy(true);setError(undefined)
    try{
     if(!await flushBeforeTransfer(r)||!r.ackedVersion||!owns(viewNow,r.generation))throw Error('publish_save_unconfirmed')
@@ -843,7 +846,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   // confirmed base version; the reopened editor then starts from the new head.
   history.current={load:signal=>client.versions(signal),loadVersion:(version,signal)=>client.version(version,signal),restore:target=>{void(async()=>{
    const r=current
-   if(dead||networkRetired||transition||!r?.ready||viewNow.can_edit!==true||!owns(viewNow,r.generation)||!r.writable)return
+   if(dead||networkRetired||transition||acquiring||!r?.ready||viewNow.can_edit!==true||!owns(viewNow,r.generation)||!r.writable)return
    transition=true;setBusy(true);setError(undefined)
    try{
     if(!await flushBeforeTransfer(r)||!r.ackedVersion||!owns(viewNow,r.generation))throw Error('restore_save_unconfirmed')
@@ -857,7 +860,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    }finally{transition=false;if(!dead){setBusy(false);setHistoryKey(n=>n+1)}}
   })()}}
   control.current=(action,body)=>{
-   if(dead||networkRetired||transition||viewNow.can_edit!==true||!current?.ready||(action==='acquire'&&acquiring))return
+   if(dead||networkRetired||transition||viewNow.can_edit!==true||!current?.ready||acquiring)return
    transition=true;setBusy(true);setError(undefined)
    let handoffConfirmed=false
    void(async()=>{
