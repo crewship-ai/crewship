@@ -233,14 +233,16 @@ case "$args" in
     [ -e "$state/unlinked" ] || echo "link cc_stub engineering ops bidirectional"; exit 0 ;;
   *" crew get engineering "*) echo '{"id":"eng-id"}'; exit 0 ;;
   *" crew get ops "*) echo '{"id":"ops-id"}'; exit 0 ;;
+  *" agent get alex "*) echo '{"id":"alex-id"}'; exit 0 ;;
+  *" journal --agent alex "*)
+    printf '%s\n' journal >>"$state/request-categories"
+    if [ -s "$state/refused" ]; then jq -sc . "$state/refused"; else echo '[]'; fi; exit 0 ;;
   *" journal --run-id "*)
     printf '%s\n' journal >>"$state/request-categories"
     id="${args##* journal --run-id }"; id="${id%% *}"
-    if [ -e "$state/unlinked" ] && [ "$XLINK_MODE" != no-attempt ]; then
-      jq -nc --arg run "$id" --arg mode "$XLINK_MODE" '[{id:("refused-"+$run),actor_type:"agent",entry_type:"assignment.refused",trace_id:$run,actor_id:"alex-id",agent_id:"alex-id",crew_id:"eng-id",payload:{reason:"crews_not_connected",http_status:403,source_crew_id:"eng-id",target_crew_id:"ops-id",target_slug:"morgan",task_sha256:("a"*64)}}]
-        | if $mode == "landed-no-refusal-receipt-id" then map(del(.id)) else . end'
-    else echo '[]'; fi; exit 0 ;;
-  *" chat list "*) echo "[]"; exit 0 ;;
+    if [ -s "$state/started" ]; then jq -sc --arg run "$id" 'map(select(.trace_id == $run))' "$state/started"; else echo '[]'; fi; exit 0 ;;
+  *" chat list "*)
+    if [ -s "$state/chats" ]; then jq -sc . "$state/chats"; else echo '[{"id":"chat-old","created_at":"2026-01-01T00:00:00Z"}]'; fi; exit 0 ;;
   *" work list "*)
     [ "${XLINK_BUSY:-}" = 1 ] && { echo '{"items":[{"id":"busy"}]}'; exit 0; }
     echo '{"items":[]}'; exit 0 ;;
@@ -302,6 +304,25 @@ case "$args" in
     exit 0 ;;
   *" issue comments "*|*" issue get "*) exit 0 ;;
   *" ask "*)
+    if [[ "$prompt" == *"9119/assign"* ]]; then
+      # The direct owner turn of section 4: one exact /assign while unlinked.
+      printf '%s\n' ask-assign >>"$state/request-categories"
+      case "$XLINK_MODE" in neg-hangs|neg-failed) exit 1 ;; esac
+      task="${prompt#*\"task\":\"}"; task="${task%%\"*}"
+      tag="$(printf '%s' "$task" | grep -oE 'XLINKNEG-[A-Z0-9]+' | head -1)"
+      # The real feed strips chat_id from a human-authorized run.started.
+      jq -nc '{id:"run-start:chat-run-neg",entry_type:"run.started",trace_id:"chat-run-neg",agent_id:"alex-id",payload:{agent_slug:"alex"}}' >>"$state/started"
+      [ -s "$state/chats" ] || jq -nc '{id:"chat-old",created_at:"2026-01-01T00:00:00Z"}' >"$state/chats"
+      [ "$XLINK_MODE" = chat-unlisted ] || jq -nc '{id:"chat-neg",created_at:"2026-11-07T00:00:00Z"}' >>"$state/chats"
+      if [ "$XLINK_MODE" = leaky ]; then
+        jq -nc --arg tag "$tag" '{id:("a-"+$tag),to_slug:"morgan",entry_type:"assignment.created",payload:{assignment_id:("asn-"+$tag),task:("Read actual record "+$tag)}}' >>"$state/landed"
+      elif [ -e "$state/unlinked" ] && [ "$XLINK_MODE" != no-attempt ]; then
+        jq -nc --arg sha "$(printf '%s' "$task" | sha256sum | cut -d' ' -f1)" --arg mode "$XLINK_MODE" '{id:"refused-chat-run-neg",actor_type:"agent",entry_type:"assignment.refused",trace_id:"chat-run-neg",actor_id:"alex-id",agent_id:"alex-id",crew_id:"eng-id",refs:{chat_id:"chat-neg"},payload:{reason:"crews_not_connected",http_status:403,source_crew_id:"eng-id",target_crew_id:"ops-id",target_slug:"morgan",task_sha256:$sha}}
+          | if $mode == "landed-no-refusal-receipt-id" then del(.id) else . end' >>"$state/refused"
+      fi
+      printf '{"error":"crews are not connected — create a crew connection first"}\n' >"$save"
+      exit 0
+    fi
     printf 'ops\n' >"$save"
     [ "${XLINK_ASK:-}" = partial ] && exit 1
     exit 0 ;;
@@ -351,7 +372,7 @@ if command -v jq >/dev/null 2>&1; then
   out="$(XLINK_REQUEST_TRACE="$request_trace" run_crew_links landed)"
   expect_contains "tag-correlated assignment -> section 3 PASSES" "$out" "PASS delegation crossed the link"
   expect_contains "tag-correlated completion -> result PASSES" "$out" "PASS the cross-crew assignment completed with a result"
-  expect_contains "landed run -> the lead's own (lead-planning) run is the one awaited" "$out" "PASS the lead's unlinked hand-off issue ran to an end"
+  expect_contains "landed run -> the lead's direct owner turn ended" "$out" "PASS the lead's unlinked hand-off turn ran to an end"
   expect_not_contains "landed run -> the agent's refusal text is never a PASS" "$out" "PASS the unlinked hand-off was attempted"
   expect_contains "landed run -> unlinked half PASSES" "$out" "PASS an unlinked crew cannot be delegated to"
   expect_contains "landed run -> suite is green" "$out" "failed: 0"
@@ -414,7 +435,8 @@ if command -v jq >/dev/null 2>&1; then
   if jq -e --arg sha "$receipt_sha" '.complete == true and .source.sha == $sha and .assertions.passed == 9 and
       .positive.assignment_id != .positive.journal_run_id and .positive.expected_code_present == true and
       .negative.refusal.http_status == 403 and .negative.refusal.trace_id == .negative.source_run_id and
-      .negative.refusal.actor_id == .negative.source_actor_id and .topology.link_restored == true' "$receipt_file" >/dev/null 2>&1; then
+      .negative.refusal.actor_id == .negative.source_actor_id and .negative.chat_id == "chat-neg" and
+      .negative.run_started_entry_id == "run-start:chat-run-neg" and .schema_version == 2 and .topology.link_restored == true' "$receipt_file" >/dev/null 2>&1; then
     pass "success receipt retains actual full-result/refusal joins before cleanup"
   else fail "success receipt retains actual full-result/refusal joins before cleanup"; fi
   code="$(cat "$receipt_fixture/state/verification-code")"
@@ -435,17 +457,21 @@ if command -v jq >/dev/null 2>&1; then
   expect_contains "model refusal without server call -> receipt missing" "$out" "no server refusal receipt"
   expect_contains "model refusal without server call -> no-work unproven" "$out" "FAIL no work reaches an unlinked crew"
 
+  out="$(run_crew_links chat-unlisted)"
+  expect_contains "receipt in a chat this turn did not create -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
+  expect_contains "receipt in an unidentified chat -> says the chat is unknown" "$out" "chat could not be identified"
+
   out="$(run_crew_links leaky)"
   expect_contains "assignment lands with no link -> unlinked half FAILS" "$out" "FAIL an unlinked crew cannot be delegated to"
 
   out="$(run_crew_links neg-hangs)"
-  expect_contains "unlinked hand-off run never ends -> FAILS, not a vacuous pass" "$out" "FAIL the lead's unlinked hand-off issue ran to an end"
-  expect_contains "unlinked hand-off run never ends -> refusal unproven" "$out" "FAIL an unlinked crew cannot be delegated to"
-  expect_contains "unlinked hand-off run never ends -> no-work check unproven" "$out" "FAIL no work reaches an unlinked crew"
+  expect_contains "unlinked hand-off turn never ends -> FAILS, not a vacuous pass" "$out" "FAIL the lead's unlinked hand-off turn ran to an end"
+  expect_contains "unlinked hand-off turn never ends -> refusal unproven" "$out" "FAIL an unlinked crew cannot be delegated to"
+  expect_contains "unlinked hand-off turn never ends -> no-work check unproven" "$out" "FAIL no work reaches an unlinked crew"
 
   out="$(run_crew_links neg-failed)"
-  expect_contains "unlinked hand-off run FAILED at once -> not a pass" "$out" "FAIL an unlinked crew cannot be delegated to"
-  expect_contains "unlinked hand-off run FAILED at once -> no-work check unproven" "$out" "FAIL no work reaches an unlinked crew"
+  expect_contains "unlinked hand-off turn failed at once -> not a pass" "$out" "FAIL an unlinked crew cannot be delegated to"
+  expect_contains "unlinked hand-off turn failed at once -> no-work check unproven" "$out" "FAIL no work reaches an unlinked crew"
 
   out="$(run_crew_links feed-down)"
   expect_contains "unreadable activity feed -> section 3 names the feed" "$out" "could not be read, so there is no evidence"
