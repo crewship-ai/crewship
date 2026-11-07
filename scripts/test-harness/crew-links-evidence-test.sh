@@ -104,7 +104,7 @@ mock_refused="[$refusal]"; mock_entries='[]'
 expect_no xlink_chat_refusal_seen "$sha" eng ops actor "$new"   # no run.started for that run
 mock_entries="[$started]"
 expect_yes xlink_chat_refusal_seen "$sha" eng ops actor "$new"
-expect_no xlink_chat_refusal_seen "$(printf '%s' other | sha256sum | cut -d' ' -f1)" eng ops actor
+expect_no xlink_chat_refusal_seen "$(printf '%s' other | sha256sum | cut -d' ' -f1)" eng ops actor "$new"
 expect_no xlink_chat_refusal_seen "$sha" eng ops other-actor "$new"
 for mutation in 'chat-run"/other-run"' 'actor"/other-actor"' 'crews_not_connected/different_reason' '403/400' '"ops"/"other-crew"' 'morgan/other-target' 'owner-chat/other-chat'; do
   mock_refused="[$(printf '%s' "$refusal" | sed "s|${mutation%/*}|${mutation#*/}|g")]"

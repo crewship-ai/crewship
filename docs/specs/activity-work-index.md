@@ -20,7 +20,7 @@ The rail and the home list chains from `pipeline_runs` only. Agent work started 
 | Routine run (+ what it dispatched) | `pipeline_runs.id`, `chain_origin` | yes, today's index |
 | Assignment tree started outside a routine | root `assignments.id`. The root has `chain_origin` NULL and `parent_run_id` NULL; its descendants carry `chain_origin` = root id | yes — stored on every row |
 | Attempt of an assignment | journal `run.started` with `payload.assignment_id`, `trace_id` = run id | per assignment, via the journal |
-| Direct chat turn (no assignment) | journal `run.started` with `payload.chat_id`, `trace_id` = run id | **none**. No row ties several turns into one piece of work |
+| Direct chat turn (no assignment) | journal `run.started` with `payload.chat_id`, `trace_id` = run id. The activity feed strips `payload.chat_id` from a human-authorized `run.started` (`internal/journal/serialize.go`), so feed readers cannot bind a turn to its chat this way | **none**. No row ties several turns into one piece of work |
 
 ## Proposal
 
