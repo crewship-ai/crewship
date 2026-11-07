@@ -9,7 +9,7 @@ import * as N from "../outage-lostack/native"
 import { holdsAll, inspectDrafts, newTyping, offerEvidence, placeCaret, saveByAutosaveOrKeyReport, typedMarkers, typeLines, type DraftOffer } from "./draft"
 import { checkDraftCopies, checkLines, holdsAnyLine, lineLedger, type LineCheck } from "./lines"
 import { present, sha256, wordFacts } from "./facts"
-import { VERIFY_AFTER_MS, isUnconfirmedStatus, verifyDue, type VerifyPress, type ForcedCtrlS, type SaveWait, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, pendingReplies, sentSince, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
+import { VERIFY_AFTER_MS, isUnconfirmedStatus, verifyDue, type VerifyPress, type ForcedCtrlS, type SaveWait, finishPress, startPress, trackedSaveWait, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, pendingReplies, sentSince, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
 import type { RestartRecord } from "./restart"
 import { restartNote } from "./restart-outcome"
 
@@ -157,31 +157,13 @@ interface Driver {
 
 const newer = (a: string, b: string | undefined) => (b !== undefined && BigInt(b) > BigInt(a) ? b : a)
 
-/** The reconcile requests sent since index `from` (they follow a harness press, not the editor's own decision). */
-const reconcilesSince = (ops: N.Op[], from: number) => ops.slice(from).filter((o) => o.kind === "reconcile").map((o) => o.n)
-
 /**
- * saveByAutosaveOrKey with the save accounting: records the wait, and a forced Ctrl+S with
- * the cycle, the time, the reason and whether a new version followed. Same waits and
- * timeouts; returns the version only.
+ * saveByAutosaveOrKey with the save accounting (confirm.ts, trackedSaveWait): the wait is
+ * recorded when it starts, a forced Ctrl+S when it is dispatched, and both are closed
+ * even when the wait throws. Same waits and timeouts; returns the version only.
  */
-async function recordedSave(input: SessionInput, page: Page, after: string, cycle: number | "warmup", context = ""): Promise<string | undefined> {
-  const at = new Date().toISOString()
-  let opsAt = input.ops.length
-  const r = await saveByAutosaveOrKeyReport(page, after, () => (opsAt = input.ops.length))
-  input.evidence.saveWaits.push({ cycle, at, pressed: r.pressed, version: r.version ?? null })
-  if (r.pressed) {
-    input.evidence.forcedCtrlS.push({
-      cycle,
-      at: r.pressedAt ?? at,
-      site: "save-wait",
-      reason: `no autosave within 4 s (no "Uloženo · verze" newer than ${after})${context}`,
-      newVersion: r.version !== undefined,
-      version: r.version ?? null,
-      reconcileOps: reconcilesSince(input.ops, opsAt),
-    })
-  }
-  return r.version
+function recordedSave(input: SessionInput, page: Page, after: string, cycle: number | "warmup", context = ""): Promise<string | undefined> {
+  return trackedSaveWait(input.evidence, input.ops, { cycle, reason: `no autosave within 4 s (no "Uloženo · verze" newer than ${after})${context}` }, (onPress) => saveByAutosaveOrKeyReport(page, after, onPress))
 }
 
 const CYCLE_MS = (minutes: number) => Math.round(Math.min(60_000, Math.max(20_000, (minutes * 60_000) / 12)))
@@ -256,7 +238,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
         for (const limit = Date.now() + 15_000; isUnconfirmedStatus(await N.status(page)) && Date.now() < limit; ) await N.pause(250)
         const reconcile = ops.slice(opsAt).find((o) => o.kind === "reconcile")
         const statusAfter = (await N.status(page)).slice(0, 60)
-        input.evidence.verifications.push({ cycle, firstSeenAt: new Date(since).toISOString(), pressedAt, unconfirmedForMs: Date.now() - since, statusAfter, reconcile: reconcile ? { status: reconcile.status, version: reconcile.version, failed: reconcile.failed } : null, reconcileOps: reconcilesSince(ops, opsAt) })
+        input.evidence.verifications.push({ cycle, firstSeenAt: new Date(since).toISOString(), pressedAt, unconfirmedForMs: Date.now() - since, statusAfter, reconcile: reconcile ? { status: reconcile.status, version: reconcile.version, failed: reconcile.failed } : null, waitEndedAt: new Date().toISOString() })
         note(`cycle ${cycle}: pressed Ověřit výsledek after ${Date.now() - since} ms: ${statusAfter}`)
         return true
       }
@@ -520,30 +502,30 @@ export function wordSession(input: SessionInput) {
   // after the last keystroke; an unsaved draft gets Ctrl+S once, as in saveByAutosaveOrKey.
   // The press is recorded in the save accounting (confirm.ts), with whether a newer head followed.
   const cellSaved = async (page: Page, cycle: number): Promise<boolean> => {
-    let forced: { event: ForcedCtrlS; headVersion: string; opsAt: number } | undefined
-    const settle = () => {
-      if (forced) forced.event.reconcileOps = reconcilesSince(input.ops, forced.opsAt)
+    let forced: { event: ForcedCtrlS; headVersion: string } | undefined
+    let newerHead: string | null = null
+    let completed = false
+    try {
+      for (const start = Date.now(); Date.now() - start < 15_000; ) {
+        const head = await readHeadText(input.api, input.ref)
+        if (forced && newerHead === null && BigInt(head.version) > BigInt(forced.headVersion)) newerHead = head.version
+        if (cellInTable(head.text, m.cell)) {
+          completed = true
+          return true
+        }
+        if (!forced && Date.now() - start > 4_000 && /^Neuložený koncept/.test(await N.status(page))) {
+          // In the evidence from the dispatch on: a press whose wait is cut short stays "incomplete".
+          const event = startPress(input.evidence.forcedCtrlS, { cycle, site: "table-cell", reason: `table cell text not in a table cell of the server head v${head.version} after 4 s, status Neuložený koncept`, opsAtPress: input.ops.length })
+          forced = { event, headVersion: head.version }
+          await page.keyboard.press("Control+s")
+        }
+        await N.pause(1_000)
+      }
+      completed = true
+      return false
+    } finally {
+      if (forced) finishPress(forced.event, input.ops, { version: newerHead, completed })
     }
-    for (const start = Date.now(); Date.now() - start < 15_000; ) {
-      const head = await readHeadText(input.api, input.ref)
-      if (forced && !forced.event.newVersion && BigInt(head.version) > BigInt(forced.headVersion)) {
-        forced.event.newVersion = true
-        forced.event.version = head.version
-      }
-      if (cellInTable(head.text, m.cell)) {
-        settle()
-        return true
-      }
-      if (!forced && Date.now() - start > 4_000 && /^Neuložený koncept/.test(await N.status(page))) {
-        const event: ForcedCtrlS = { cycle, at: new Date().toISOString(), site: "table-cell", reason: `table cell text not in a table cell of the server head v${head.version} after 4 s, status Neuložený koncept`, newVersion: false, version: null, reconcileOps: [] }
-        forced = { event, headVersion: head.version, opsAt: input.ops.length }
-        input.evidence.forcedCtrlS.push(event)
-        await page.keyboard.press("Control+s")
-      }
-      await N.pause(1_000)
-    }
-    settle()
-    return false
   }
   const driver: Driver = {
     app: "wordcraft",
