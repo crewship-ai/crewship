@@ -607,7 +607,7 @@ func TestWorkspaceCmds_APIErrorPropagation(t *testing.T) {
 	}{
 		{"get", func() error { return workspaceGetCmd.RunE(workspaceGetCmd, nil) }},
 		{"create", func() error {
-			c := newFlagCmd(map[string]string{"name": "X", "slug": "", "language": ""}, nil)
+			c := newFlagCmd(map[string]string{"name": "QA", "slug": "", "language": ""}, nil)
 			return workspaceCreateCmd.RunE(c, nil)
 		}},
 		{"update", func() error {
@@ -730,7 +730,7 @@ func TestWorkspaceCmds_GuardsAndTransport(t *testing.T) {
 		{"list", false, func() error { return workspaceListCmd.RunE(workspaceListCmd, nil) }},
 		{"get", false, func() error { return workspaceGetCmd.RunE(workspaceGetCmd, []string{covWS}) }},
 		{"create", false, func() error {
-			c := newFlagCmd(map[string]string{"name": "X", "slug": "", "language": ""}, nil)
+			c := newFlagCmd(map[string]string{"name": "QA", "slug": "", "language": ""}, nil)
 			return workspaceCreateCmd.RunE(c, nil)
 		}},
 		{"update", true, func() error {
@@ -793,7 +793,7 @@ func TestWorkspaceCmds_MalformedJSONResponses(t *testing.T) {
 		{"list", func() error { return workspaceListCmd.RunE(workspaceListCmd, nil) }},
 		{"get", func() error { return workspaceGetCmd.RunE(workspaceGetCmd, []string{covWS}) }},
 		{"create", func() error {
-			c := newFlagCmd(map[string]string{"name": "X", "slug": "", "language": ""}, nil)
+			c := newFlagCmd(map[string]string{"name": "QA", "slug": "", "language": ""}, nil)
 			return workspaceCreateCmd.RunE(c, nil)
 		}},
 		{"member list", func() error { return workspaceMemberListCmd.RunE(workspaceMemberListCmd, nil) }},
