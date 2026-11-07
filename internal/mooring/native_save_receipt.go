@@ -175,7 +175,7 @@ func (s *NativeStore) SaveAttempt(ctx context.Context, l EditLease, base int64, 
 		// The write authority above just passed; this writes nothing.
 		var repeat NativeSaveReceipt
 		same := func(stored string) bool { return stored == message }
-		repeatErr := s.readAttempt(ctx, l, base, editorRevision, contentHash, same, func(*sql.Tx) error { return ErrNativeUnconfirmed }, &repeat)
+		repeatErr := s.readAttempt(ctx, l, base, editorRevision, contentHash, same, func(*sql.Tx, string) error { return ErrNativeUnconfirmed }, &repeat)
 		if repeatErr == nil {
 			return repeat, nil
 		}
@@ -207,6 +207,7 @@ func (s *NativeStore) ReconcileSnapshot(ctx context.Context, l EditLease, base i
 // retired in the same fenced transaction and reports ErrNativeAttemptAbsent:
 // the attempt has not committed and now never will (#4899). Without an
 // attemptID nothing can be retired, and the answer stays ErrNativeUnconfirmed.
+// So does a version with this snapshot but no stored attempt id (#5075).
 func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash, attemptID string) (NativeSaveReceipt, error) {
 	if err := s.ready(); err != nil {
 		return NativeSaveReceipt{}, err
@@ -222,19 +223,21 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 	if err != nil {
 		return NativeSaveReceipt{}, err
 	}
-	// A version without an attempt id predates identification or was saved
-	// without one, so its revision and hash stay the proof. A caller that names
-	// no attempt asks only about the snapshot. Another named attempt is not this one.
+	// A named attempt needs its own stored id. A caller that names no attempt
+	// asks only about the snapshot, so revision and hash are its proof.
 	proven := func(stored string) bool {
 		if attemptID == "" {
 			return withoutAttempt(stored) == anonymous
 		}
-		return stored == message || stored == anonymous
+		return stored == message
 	}
 	absent := false
 	var receipt NativeSaveReceipt
-	err = s.readAttempt(ctx, l, base, editorRevision, contentHash, proven, func(tx *sql.Tx) error {
-		if attemptID == "" {
+	err = s.readAttempt(ctx, l, base, editorRevision, contentHash, proven, func(tx *sql.Tx, stored string) error {
+		// A version with this snapshot and no attempt id may be this attempt
+		// (saved by an older binary) or another save. It proves neither a named
+		// commit nor absence, so nothing is retired and the outcome stays open.
+		if attemptID == "" || stored == anonymous {
 			return ErrNativeUnconfirmed
 		}
 		return s.retireAttempt(ctx, tx, l, base, attemptID, &absent)
@@ -250,8 +253,8 @@ func (s *NativeStore) ReconcileAttempt(ctx context.Context, l EditLease, base in
 
 // readAttempt fills receipt when version base+1 is proven to be this attempt, under
 // current write rights and the original admission. Otherwise it runs notProven
-// in the same fenced transaction. It never writes a version.
-func (s *NativeStore) readAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string, proven func(string) bool, notProven func(*sql.Tx) error, receipt *NativeSaveReceipt) error {
+// in the same fenced transaction, with that version's message if it has one. It never writes a version.
+func (s *NativeStore) readAttempt(ctx context.Context, l EditLease, base int64, editorRevision, contentHash string, proven func(string) bool, notProven func(tx *sql.Tx, stored string) error, receipt *NativeSaveReceipt) error {
 	return s.versions.ReadVersionFenced(ctx, nativeVersionKey(l.Scope), base+1, s.holderAuthority(l, "write"), func(tx *sql.Tx, m artifacts.VersionManifest, readErr error) error {
 		if readErr == nil {
 			file, ok := m.Files["document.json"]
@@ -261,7 +264,7 @@ func (s *NativeStore) readAttempt(ctx context.Context, l EditLease, base int64, 
 				return nil
 			}
 		}
-		return notProven(tx)
+		return notProven(tx, m.Message)
 	})
 }
 

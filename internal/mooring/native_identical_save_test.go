@@ -167,10 +167,11 @@ func TestNativeSaveStillDecidesWhatIsNotARepeat(t *testing.T) {
 	}
 }
 
-// A version committed without an attempt id (an older binary, the agent tool)
-// proves nothing about a named attempt's repeat, but its reconcile still finds
-// it: a reply lost across an upgrade must not turn into a false "did not commit".
-func TestNativeVersionWithoutAttemptIDStaysProvable(t *testing.T) {
+// A version committed without an attempt id (an older binary, the agent tool, an
+// HTTP save that names none) is ambiguous for a named attempt: it proves neither
+// that attempt's commit nor its absence, so the answer stays unconfirmed and
+// nothing is retired. Asking about the snapshot, with no attempt named, still works.
+func TestNativeVersionWithoutAttemptIDProvesNoNamedAttempt(t *testing.T) {
 	s, _, _, scope, acting, _ := nativeProposalFixture(t)
 	l, _, err := s.Initialize(t.Context(), scope, *acting, []byte(`{"v":1}`))
 	if err != nil {
@@ -199,8 +200,15 @@ func TestNativeVersionWithoutAttemptIDStaysProvable(t *testing.T) {
 	if got, err := s.SaveSnapshot(t.Context(), l, 1, "r1", hash, second); err != nil || got != first {
 		t.Fatalf("anonymous repeat: %+v %v", got, err)
 	}
-	if got, err := s.ReconcileAttempt(t.Context(), l, 1, "r1", hash, "attempt-named"); err != nil || got != first {
-		t.Fatalf("reconcile across the upgrade: %+v %v", got, err)
+	if got, err := s.ReconcileAttempt(t.Context(), l, 1, "r1", hash, "attempt-named"); !errors.Is(err, ErrNativeUnconfirmed) || got.Version != "" {
+		t.Fatalf("an anonymous version answered a named attempt: %+v %v", got, err)
+	}
+	var rows int
+	if err = s.db.QueryRowContext(t.Context(), `SELECT count(*) FROM craft_native_retired_attempts WHERE attempt_id='attempt-named'`).Scan(&rows); err != nil || rows != 0 {
+		t.Fatalf("an ambiguous answer retired the attempt: %d %v", rows, err)
+	}
+	if got, err := s.ReconcileSnapshot(t.Context(), l, 1, "r1", hash); err != nil || got != first {
+		t.Fatalf("snapshot reconcile: %+v %v", got, err)
 	}
 }
 

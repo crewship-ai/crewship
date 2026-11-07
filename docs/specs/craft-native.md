@@ -465,9 +465,13 @@ A repeat never writes (#5075). These are two separate checks on the server:
   back, even when the head has moved on. The snapshot message of the committed
   version stores the `attemptId`, because retirement rows are pruned. Another
   attempt with the same revision and bytes is not a repeat: it gets the 409, and
-  its reconcile answers 410 or stays unconfirmed. A version without a stored id
-  (older than this rule, or saved without one) is still found by reconcile from
-  its revision and hash, and never answers a named attempt's repeat.
+  its reconcile answers 410 or stays unconfirmed. A version with the same
+  revision and bytes but no stored id (older than this rule, or saved without
+  one) proves neither a named commit nor its absence: a named reconcile answers
+  409 and retires nothing, and a named repeat gets the 409. Only a reconcile that
+  names no attempt, which asks about the snapshot, is answered from revision and
+  hash. A client caught mid-save across the upgrade therefore stays unconfirmed
+  until it reloads; it writes nothing.
 - **Content equality.** A fresh attempt whose base is the head and whose bytes
   equal the head creates no version and charges no quota. The receipt has
   `unchanged: true` and `version` equal to `baseVersion`; lease, write rights,
