@@ -31,7 +31,7 @@ import (
 // uiTourExclusiveFlags are the seed flags that make no sense with the tour:
 // it is additive (never --nuke) and seeds nothing the default phases do.
 var uiTourExclusiveFlags = []string{
-	"nuke", "skip-issues", "with-evals", "smoke-test", "test-backup", "wait-provision",
+	"nuke", "skip-issues", "skip-showcase", "with-evals", "smoke-test", "test-backup", "wait-provision",
 	"with-memory", "with-team-chat", "with-users", "codex-auth-file",
 }
 

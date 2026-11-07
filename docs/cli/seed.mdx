@@ -37,6 +37,7 @@ default selections are preserved.
 | `--nuke` | `false` | Delete all workspace contents before seeding. Runs *after* auth, so a missing/invalid token won't wipe the wrong workspace. **Prompts for confirmation** — see below. |
 | `--yes` | `false` | Skip the `--nuke` confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug; a non-interactive session refuses to nuke unless `--yes` is set. |
 | `--skip-issues` | `false` | Skip the issue/project/label phase. Useful when you only need crews + agents and want a faster seed. |
+| `--skip-showcase` | `false` | Skip the [showcase](#showcase-documents-and-artifacts): native Word and Sheet documents, a Slides deck, a dashboard, interactive artifacts and a Design. Refused together with `--ui-tour`. |
 | `--with-evals` | `false` | Also install the synthetic model-regression routine catalogue. Intended for eval development, not the normal product demo. |
 | `--password <pw>` | `password123` | Admin password used by bootstrap. The default is the dev convention `password123` — override in any non-local environment. |
 | `--smoke-test` | `false` | After seeding, send a test prompt to each agent to verify end-to-end execution. Implies `--wait-provision`. |
@@ -328,12 +329,60 @@ satisfies a pack's `env` gate.
 | Schedules | The normal seed creates no cron schedules. Create one explicitly after checking a routine, or use `crewship digest enable` for the workspace digest. | — |
 | 10. Issues | One TODO Issue per story plus the Crewship Lab issue, with their projects and labels (unless `--skip-issues`) | Fatal |
 | 10c. Pages | Six Pages (one per story, Crewship Lab, live monitor), their story folders and visual identity, demo payloads, then one run of every routine a panel names as producer | Fatal on spec, non-fatal per run |
+| 10d. Showcase (unless `--skip-showcase`) | Turns on the artifact and Craft workspace flags, then creates four native Word documents, three native Sheets, a dashboard with data, a poll, an ROI calculator, a Slides deck and a Design canvas — see [below](#showcase-documents-and-artifacts) | Non-fatal per item: an unavailable capability skips that item with one line |
 | 10b. Wait for provisioning | If `--wait-provision`, blocks until images are ready, then refreshes the Crewship Lab telemetry once the Ops sidecar exists | Fatal in sync mode, deferred otherwise |
 | 10c. Backup self-test | If `--test-backup`, full round-trip on one crew | Fatal |
 | 11. Summary | Prints `Seed complete: N crews, M agents` | — |
 | 12. Smoke test | If `--smoke-test`, one prompt per agent | Fatal on any failure |
 
 The async-by-default model means a plain `crewship seed` returns quickly (~seconds for the API mutations) while crew containers warm up in the background. Pair with `crewship crew provision status <slug>` to check on individual crews.
+
+## Showcase documents and artifacts
+
+A fresh install (and every `crew reset --yes` on a dev slot) opens with
+content for each editor, in Czech, created through the same routes as the CLI
+commands named below. It needs no provider credential, so `--offline-demo`
+seeds it too; `--skip-showcase` leaves it out.
+
+| Slug | Name | Kind | Created like |
+| --- | --- | --- | --- |
+| `obchodni-nabidka` | Obchodní nabídka – Acme Company | Word | `crewship page create --allow-empty` + `crewship craft initialize --application word` |
+| `zapis-z-porady` | Zápis z porady vedení 7. 11. | Word | same |
+| `shrnuti-smlouvy` | Shrnutí smlouvy o službách | Word | same |
+| `playbook-onboarding` | Playbook: první týden obchodníka | Word | same |
+| `cenova-nabidka` | Cenová nabídka (kalkulace) | Sheet | `crewship craft initialize --application sheet` |
+| `rozpocet-2027` | Rozpočet 2027 | Sheet | same |
+| `pipeline-q4` | Obchodní pipeline Q4 | Sheet | same |
+| `obchod-dashboard` | Dashboard: Obchod Q4 2026 | Dashboard + `pipeline` data | `crewship page artifact create` + `page artifact data batch` |
+| `hlasovani-akce` | Hlasování: vánoční akce | Interactive poll + `votes` data | same |
+| `kalkulacka-roi` | Kalkulačka návratnosti | Interactive | `crewship page artifact create` |
+| `prodejni-prezentace` | Prezentace: Crewship pro vaši firmu | Slides | `crewship page artifact create` |
+| `landing-page` | Design: Landing page Crewship | Design | `crewship page design create` + `apply` + `snapshot` |
+
+Before the items, the phase enables the workspace flags `artifact_projects`,
+`artifact_slides`, `artifact_interactive`, `artifact_dashboard_data`,
+`artifacts_design`, `gridcraft_editor` and `craft_version_history` (creating the
+`craft_version_history` definition first when the instance has none). Setting a
+flag needs an instance administrator; when that is refused the phase prints one
+line and continues.
+
+Behaviour:
+
+- **Idempotent by slug.** An item whose Page already exists is reported as
+  already present and left untouched, so a re-seed never overwrites a document
+  somebody has edited.
+- **Fail-soft per capability.** Native Word or Sheet is skipped without creating
+  a Page when `GET /api/v1/documents/status` does not report that engine; an
+  artifact or Design refused by its flag or by artifact storage is skipped with
+  the server's own sentence. If native initialization itself is refused after
+  the Page was created, the empty Page is kept and reported.
+- **No lingering edit lease.** Native initialization opens a session holding the
+  edit lease; the seed releases it straight away, so the first person to open a
+  document is not asked to take it over. The session token is never printed.
+
+The content and its sources live in `cmd/crewship/seeddata/showcase/` — its
+README describes how the native files are regenerated from the Markdown and
+command-script sources.
 
 ## What the seeded chat surface shows
 

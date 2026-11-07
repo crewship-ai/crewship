@@ -1,0 +1,9 @@
+{"command": "sheet.rename", "params": {"name": "Rozpočet 2027"}}
+{"command": "range.setValues", "params": {"range": "B2", "values": [["Rozpočet 2027 (tis. Kč)"]]}}
+{"command": "home.bold", "params": {"range": "B2"}}
+{"command": "range.setValues", "params": {"range": "B4", "values": [["Oblast", "Q1", "Q2", "Q3", "Q4", "Celkem", "Skutečnost 2026", "Změna"], ["Personál", 3200, 3250, 3300, 3400, "=SUM(C5:F5)", 12100, "=G5/H5-1"], ["Marketing", 450, 600, 520, 700, "=SUM(C6:F6)", 1900, "=G6/H6-1"], ["IT a licence", 380, 380, 400, 420, "=SUM(C7:F7)", 1350, "=G7/H7-1"], ["Kanceláře", 290, 290, 290, 300, "=SUM(C8:F8)", 1150, "=G8/H8-1"], ["Cestovné", 120, 160, 110, 180, "=SUM(C9:F9)", 520, "=G9/H9-1"], ["Rezerva", 100, 100, 100, 100, "=SUM(C10:F10)", 300, "=G10/H10-1"], ["Celkem", "=SUM(C5:C10)", "=SUM(D5:D10)", "=SUM(E5:E10)", "=SUM(F5:F10)", "=SUM(G5:G10)", "=SUM(H5:H10)", "=G11/H11-1"]]}}
+{"command": "insert.table", "params": {"range": "B4:I10", "header": true, "style": "TableStyleMedium9", "name": "Rozpocet"}}
+{"command": "home.bold", "params": {"range": "B11:I11"}}
+{"command": "home.numberFormat", "params": {"range": "I5:I11", "format": "Percentage"}}
+{"command": "home.columnWidth", "params": {"cols": "B:B", "chars": 18}}
+{"command": "insert.chart", "params": {"range": "B4:F10", "type": "column", "subtype": "stacked", "title": "Rozpočet po kvartálech", "at": "K4"}}

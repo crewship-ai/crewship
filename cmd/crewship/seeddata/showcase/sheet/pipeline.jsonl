@@ -1,0 +1,12 @@
+{"command": "sheet.rename", "params": {"name": "Pipeline"}}
+{"command": "range.setValues", "params": {"range": "B2", "values": [["Obchodní pipeline Q4 2026"]]}}
+{"command": "home.bold", "params": {"range": "B2"}}
+{"command": "range.setValues", "params": {"range": "B4", "values": [["Zákazník", "Fáze", "Hodnota (Kč)", "Pravděpodobnost", "Vážená hodnota", "Obchodník"], ["Acme Company", "Nabídka", 1110000, 0.6, "=D5*E5", "Tomáš Dvořák"], ["Globex", "Jednání", 850000, 0.4, "=D6*E6", "Jana Nováková"], ["Initech", "Kvalifikace", 420000, 0.2, "=D7*E7", "Tomáš Dvořák"], ["Umbrella", "Uzavřeno", 1600000, 1, "=D8*E8", "Agent Obchod"], ["Stark Industries", "Nabídka", 2300000, 0.5, "=D9*E9", "Jana Nováková"], ["Wayne Enterprises", "Jednání", 980000, 0.35, "=D10*E10", "Agent Obchod"]]}}
+{"command": "insert.table", "params": {"range": "B4:G10", "header": true, "style": "TableStyleMedium4", "name": "Pipeline"}}
+{"command": "range.setValues", "params": {"range": "E12", "values": [["Vážená pipeline", "=SUM(F5:F10)"]]}}
+{"command": "home.bold", "params": {"range": "E12:F12"}}
+{"command": "home.numberFormat", "params": {"range": "D5:D10", "code": "#,##0 \"Kč\""}}
+{"command": "home.numberFormat", "params": {"range": "F5:F12", "code": "#,##0 \"Kč\""}}
+{"command": "home.numberFormat", "params": {"range": "E5:E10", "format": "Percentage"}}
+{"command": "home.columnWidth", "params": {"cols": "B:G", "chars": 18}}
+{"command": "insert.chart", "params": {"range": "B4:B10,F4:F10", "type": "bar", "title": "Vážená hodnota podle zákazníka", "at": "I4"}}

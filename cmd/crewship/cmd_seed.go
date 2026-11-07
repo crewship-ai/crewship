@@ -51,6 +51,7 @@ func init() {
 	seedCmd.Flags().Bool("ui-tour", false, "Add the UI tour on top of an already seeded demo workspace: scheduled routines in folders with run history (completed, waiting for a person, failed), a longer issue board and the inbox items they produce. Additive and idempotent; needs no provider credentials")
 	seedCmd.Flags().Bool("yes", false, "Skip the --nuke confirmation prompt (for CI/scripts). Without it, an interactive nuke requires typing the workspace slug.")
 	seedCmd.Flags().Bool("skip-issues", false, "Skip issue/project/label seeding")
+	seedCmd.Flags().Bool("skip-showcase", false, "Skip the showcase: native Word and Sheet documents, a Slides deck, a dashboard, interactive artifacts and a Design")
 	seedCmd.Flags().Bool("with-evals", false, "Also seed model-regression routines (kept out of the normal product demo)")
 	seedCmd.Flags().String("password", "", "Admin password for bootstrap (defaults to devDefaultPassword)")
 	seedCmd.Flags().Bool("smoke-test", false, "After seeding, send a test prompt to each agent to verify end-to-end")
@@ -426,6 +427,17 @@ func runSeed(cmd *cobra.Command, args []string) error {
 	}
 	if err := seedDemoIdentity(ctx, client, agentIDs, crewIDs, createdAgents, createdCrews); err != nil {
 		return fmt.Errorf("demo identity: %w", err)
+	}
+
+	// ── Phase 10d: Showcase documents and artifacts ──
+	// Native Word/Sheet documents, a Slides deck, a dashboard, interactive
+	// artifacts and a Design. Fail-soft per item: a server without one of the
+	// capabilities skips that item with one line. Needs no provider credential,
+	// so it runs for --offline-demo too.
+	if skipShowcase, _ := cmd.Flags().GetBool("skip-showcase"); !skipShowcase {
+		if _, err := seedShowcase(ctx, client, os.Stderr); err != nil {
+			return err
+		}
 	}
 
 	// ── Phase 10b: Wait for background provisioning (only if requested) ──
