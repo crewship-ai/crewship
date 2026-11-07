@@ -1,0 +1,1057 @@
+{
+  "sheets": [
+    {
+      "name": "Pipeline",
+      "cells": {
+        "bands": {
+          "0": {
+            "rows": {
+              "1": {
+                "1": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Obchodní pipeline Q4 2026"
+                  },
+                  "formula": null,
+                  "style": 1
+                }
+              },
+              "3": {
+                "1": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Zákazník"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "2": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Fáze"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "3": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Hodnota (Kč)"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "4": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Pravděpodobnost"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "5": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Vážená hodnota"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "6": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Obchodník"
+                  },
+                  "formula": null,
+                  "style": 0
+                }
+              },
+              "4": {
+                "1": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Acme Company"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "2": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Nabídka"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "3": {
+                  "value": {
+                    "t": "Number",
+                    "v": 1110000.0
+                  },
+                  "formula": null,
+                  "style": 2
+                },
+                "4": {
+                  "value": {
+                    "t": "Number",
+                    "v": 0.6
+                  },
+                  "formula": null,
+                  "style": 4
+                },
+                "5": {
+                  "value": {
+                    "t": "Number",
+                    "v": 666000.0
+                  },
+                  "formula": {
+                    "text": "D5*E5",
+                    "array": null
+                  },
+                  "style": 2
+                },
+                "6": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Tomáš Dvořák"
+                  },
+                  "formula": null,
+                  "style": 0
+                }
+              },
+              "5": {
+                "1": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Globex"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "2": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Jednání"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "3": {
+                  "value": {
+                    "t": "Number",
+                    "v": 850000.0
+                  },
+                  "formula": null,
+                  "style": 2
+                },
+                "4": {
+                  "value": {
+                    "t": "Number",
+                    "v": 0.4
+                  },
+                  "formula": null,
+                  "style": 4
+                },
+                "5": {
+                  "value": {
+                    "t": "Number",
+                    "v": 340000.0
+                  },
+                  "formula": {
+                    "text": "D6*E6",
+                    "array": null
+                  },
+                  "style": 2
+                },
+                "6": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Jana Nováková"
+                  },
+                  "formula": null,
+                  "style": 0
+                }
+              },
+              "6": {
+                "1": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Initech"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "2": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Kvalifikace"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "3": {
+                  "value": {
+                    "t": "Number",
+                    "v": 420000.0
+                  },
+                  "formula": null,
+                  "style": 2
+                },
+                "4": {
+                  "value": {
+                    "t": "Number",
+                    "v": 0.2
+                  },
+                  "formula": null,
+                  "style": 4
+                },
+                "5": {
+                  "value": {
+                    "t": "Number",
+                    "v": 84000.0
+                  },
+                  "formula": {
+                    "text": "D7*E7",
+                    "array": null
+                  },
+                  "style": 2
+                },
+                "6": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Tomáš Dvořák"
+                  },
+                  "formula": null,
+                  "style": 0
+                }
+              },
+              "7": {
+                "1": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Umbrella"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "2": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Uzavřeno"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "3": {
+                  "value": {
+                    "t": "Number",
+                    "v": 1600000.0
+                  },
+                  "formula": null,
+                  "style": 2
+                },
+                "4": {
+                  "value": {
+                    "t": "Number",
+                    "v": 1.0
+                  },
+                  "formula": null,
+                  "style": 4
+                },
+                "5": {
+                  "value": {
+                    "t": "Number",
+                    "v": 1600000.0
+                  },
+                  "formula": {
+                    "text": "D8*E8",
+                    "array": null
+                  },
+                  "style": 2
+                },
+                "6": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Agent Obchod"
+                  },
+                  "formula": null,
+                  "style": 0
+                }
+              },
+              "8": {
+                "1": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Stark Industries"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "2": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Nabídka"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "3": {
+                  "value": {
+                    "t": "Number",
+                    "v": 2300000.0
+                  },
+                  "formula": null,
+                  "style": 2
+                },
+                "4": {
+                  "value": {
+                    "t": "Number",
+                    "v": 0.5
+                  },
+                  "formula": null,
+                  "style": 4
+                },
+                "5": {
+                  "value": {
+                    "t": "Number",
+                    "v": 1150000.0
+                  },
+                  "formula": {
+                    "text": "D9*E9",
+                    "array": null
+                  },
+                  "style": 2
+                },
+                "6": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Jana Nováková"
+                  },
+                  "formula": null,
+                  "style": 0
+                }
+              },
+              "9": {
+                "1": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Wayne Enterprises"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "2": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Jednání"
+                  },
+                  "formula": null,
+                  "style": 0
+                },
+                "3": {
+                  "value": {
+                    "t": "Number",
+                    "v": 980000.0
+                  },
+                  "formula": null,
+                  "style": 2
+                },
+                "4": {
+                  "value": {
+                    "t": "Number",
+                    "v": 0.35
+                  },
+                  "formula": null,
+                  "style": 4
+                },
+                "5": {
+                  "value": {
+                    "t": "Number",
+                    "v": 343000.0
+                  },
+                  "formula": {
+                    "text": "D10*E10",
+                    "array": null
+                  },
+                  "style": 2
+                },
+                "6": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Agent Obchod"
+                  },
+                  "formula": null,
+                  "style": 0
+                }
+              },
+              "10": {
+                "5": {
+                  "value": {
+                    "t": "Empty"
+                  },
+                  "formula": null,
+                  "style": 2
+                }
+              },
+              "11": {
+                "4": {
+                  "value": {
+                    "t": "Text",
+                    "v": "Vážená pipeline"
+                  },
+                  "formula": null,
+                  "style": 1
+                },
+                "5": {
+                  "value": {
+                    "t": "Number",
+                    "v": 4183000.0
+                  },
+                  "formula": {
+                    "text": "SUM(F5:F10)",
+                    "array": null
+                  },
+                  "style": 3
+                }
+              }
+            }
+          }
+        },
+        "len": 46
+      },
+      "cols": {
+        "1": {
+          "size": 131.0,
+          "hidden": false,
+          "outline": 0,
+          "collapsed": false,
+          "style": null,
+          "custom": false
+        },
+        "2": {
+          "size": 131.0,
+          "hidden": false,
+          "outline": 0,
+          "collapsed": false,
+          "style": null,
+          "custom": false
+        },
+        "3": {
+          "size": 131.0,
+          "hidden": false,
+          "outline": 0,
+          "collapsed": false,
+          "style": null,
+          "custom": false
+        },
+        "4": {
+          "size": 131.0,
+          "hidden": false,
+          "outline": 0,
+          "collapsed": false,
+          "style": null,
+          "custom": false
+        },
+        "5": {
+          "size": 131.0,
+          "hidden": false,
+          "outline": 0,
+          "collapsed": false,
+          "style": null,
+          "custom": false
+        },
+        "6": {
+          "size": 131.0,
+          "hidden": false,
+          "outline": 0,
+          "collapsed": false,
+          "style": null,
+          "custom": false
+        }
+      },
+      "rows": {},
+      "default_col_width": 64.0,
+      "default_row_height": 20.0,
+      "merges": [],
+      "freeze": null,
+      "tab_color": null,
+      "visibility": "Visible",
+      "show_gridlines": true,
+      "show_headings": true,
+      "show_formulas": false,
+      "show_zeros": true,
+      "show_outline_symbols": true,
+      "summary_below": true,
+      "summary_right": true,
+      "right_to_left": false,
+      "zoom": 100,
+      "cond_formats": [],
+      "validations": [],
+      "tables": [
+        {
+          "id": 1,
+          "name": "Pipeline",
+          "range": {
+            "start": {
+              "row": 3,
+              "col": 1
+            },
+            "end": {
+              "row": 9,
+              "col": 6
+            }
+          },
+          "header_row": true,
+          "totals_row": false,
+          "columns": [
+            {
+              "name": "Zákazník",
+              "totals": "None",
+              "totals_label": null,
+              "formula": null,
+              "unique_name": null,
+              "xml": null
+            },
+            {
+              "name": "Fáze",
+              "totals": "None",
+              "totals_label": null,
+              "formula": null,
+              "unique_name": null,
+              "xml": null
+            },
+            {
+              "name": "Hodnota (Kč)",
+              "totals": "None",
+              "totals_label": null,
+              "formula": null,
+              "unique_name": null,
+              "xml": null
+            },
+            {
+              "name": "Pravděpodobnost",
+              "totals": "None",
+              "totals_label": null,
+              "formula": null,
+              "unique_name": null,
+              "xml": null
+            },
+            {
+              "name": "Vážená hodnota",
+              "totals": "None",
+              "totals_label": null,
+              "formula": null,
+              "unique_name": null,
+              "xml": null
+            },
+            {
+              "name": "Obchodník",
+              "totals": "None",
+              "totals_label": null,
+              "formula": null,
+              "unique_name": null,
+              "xml": null
+            }
+          ],
+          "style": "TableStyleMedium4",
+          "banded_rows": true,
+          "banded_cols": false,
+          "first_col": false,
+          "last_col": false,
+          "filter_button": true,
+          "filter": [],
+          "table_type": null,
+          "connection_id": null
+        }
+      ],
+      "autofilter": null,
+      "comments": {},
+      "hyperlinks": {},
+      "charts": [
+        {
+          "id": 2,
+          "kind": "BarClustered",
+          "anchor": {
+            "cell": {
+              "row": 3,
+              "col": 8
+            },
+            "dx": 0.0,
+            "dy": 0.0,
+            "width": 480.0,
+            "height": 288.0,
+            "mode": "MoveAndSize"
+          },
+          "title": "Vážená hodnota podle zákazníka",
+          "series": [
+            {
+              "name": "Pipeline!$F$4",
+              "categories": "Pipeline!$B$5:$B$10",
+              "values": "Pipeline!$F$5:$F$10",
+              "bubble_sizes": null,
+              "color": null,
+              "secondary": false,
+              "kind": null,
+              "smooth": false,
+              "quartiles": "Exclusive",
+              "trendlines": []
+            }
+          ],
+          "legend": "Bottom",
+          "data_labels": false,
+          "gridlines": true,
+          "style": 1,
+          "x_title": null,
+          "y_title": null,
+          "source": null,
+          "by_rows": false,
+          "pivot": null
+        }
+      ],
+      "images": [],
+      "shapes": [],
+      "sparklines": [],
+      "slicers": [],
+      "pivots": [],
+      "protection": null,
+      "print": {
+        "orientation": "Portrait",
+        "paper": "Letter",
+        "margins": [
+          0.7,
+          0.7,
+          0.75,
+          0.75,
+          0.3,
+          0.3
+        ],
+        "print_area": null,
+        "title_rows": null,
+        "title_cols": null,
+        "scale": 100,
+        "fit_to": null,
+        "gridlines": false,
+        "headings": false,
+        "center_h": false,
+        "center_v": false,
+        "header": "",
+        "footer": "",
+        "row_breaks": [],
+        "col_breaks": [],
+        "different_first": false,
+        "different_odd_even": false,
+        "first_header": "",
+        "first_footer": "",
+        "even_header": "",
+        "even_footer": "",
+        "hf_scale_with_doc": true,
+        "hf_align_with_margins": true
+      },
+      "view_active": {
+        "row": 0,
+        "col": 0
+      },
+      "view_top_left": {
+        "row": 0,
+        "col": 0
+      },
+      "view": "normal"
+    }
+  ],
+  "names": [],
+  "styles": {
+    "styles": [
+      {
+        "font": {
+          "name": "Calibri",
+          "size": 11.0,
+          "bold": false,
+          "italic": false,
+          "underline": "None",
+          "strike": false,
+          "color": "Auto",
+          "vert": "Baseline",
+          "charset": null,
+          "family": null,
+          "minor": true
+        },
+        "fill": {
+          "pattern": "None",
+          "fg": "Auto",
+          "bg": "Auto"
+        },
+        "borders": {
+          "left": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "right": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "top": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "bottom": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "diag_down": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "diag_up": {
+            "style": "None",
+            "color": "Auto"
+          }
+        },
+        "align": {
+          "h": "General",
+          "v": "Bottom",
+          "wrap": false,
+          "shrink": false,
+          "indent": 0,
+          "rotation": 0
+        },
+        "num_fmt": "General",
+        "protection": {
+          "locked": true,
+          "hidden": false
+        },
+        "dxf_stated": {
+          "bold": false,
+          "italic": false,
+          "strike": false,
+          "underline": false,
+          "size": false,
+          "name": false,
+          "scheme": null,
+          "protection": false
+        }
+      },
+      {
+        "font": {
+          "name": "Calibri",
+          "size": 11.0,
+          "bold": true,
+          "italic": false,
+          "underline": "None",
+          "strike": false,
+          "color": "Auto",
+          "vert": "Baseline",
+          "charset": null,
+          "family": null,
+          "minor": true
+        },
+        "fill": {
+          "pattern": "None",
+          "fg": "Auto",
+          "bg": "Auto"
+        },
+        "borders": {
+          "left": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "right": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "top": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "bottom": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "diag_down": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "diag_up": {
+            "style": "None",
+            "color": "Auto"
+          }
+        },
+        "align": {
+          "h": "General",
+          "v": "Bottom",
+          "wrap": false,
+          "shrink": false,
+          "indent": 0,
+          "rotation": 0
+        },
+        "num_fmt": "General",
+        "protection": {
+          "locked": true,
+          "hidden": false
+        },
+        "dxf_stated": {
+          "bold": false,
+          "italic": false,
+          "strike": false,
+          "underline": false,
+          "size": false,
+          "name": false,
+          "scheme": null,
+          "protection": false
+        }
+      },
+      {
+        "font": {
+          "name": "Calibri",
+          "size": 11.0,
+          "bold": false,
+          "italic": false,
+          "underline": "None",
+          "strike": false,
+          "color": "Auto",
+          "vert": "Baseline",
+          "charset": null,
+          "family": null,
+          "minor": true
+        },
+        "fill": {
+          "pattern": "None",
+          "fg": "Auto",
+          "bg": "Auto"
+        },
+        "borders": {
+          "left": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "right": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "top": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "bottom": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "diag_down": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "diag_up": {
+            "style": "None",
+            "color": "Auto"
+          }
+        },
+        "align": {
+          "h": "General",
+          "v": "Bottom",
+          "wrap": false,
+          "shrink": false,
+          "indent": 0,
+          "rotation": 0
+        },
+        "num_fmt": "#,##0 \"Kč\"",
+        "protection": {
+          "locked": true,
+          "hidden": false
+        },
+        "dxf_stated": {
+          "bold": false,
+          "italic": false,
+          "strike": false,
+          "underline": false,
+          "size": false,
+          "name": false,
+          "scheme": null,
+          "protection": false
+        }
+      },
+      {
+        "font": {
+          "name": "Calibri",
+          "size": 11.0,
+          "bold": true,
+          "italic": false,
+          "underline": "None",
+          "strike": false,
+          "color": "Auto",
+          "vert": "Baseline",
+          "charset": null,
+          "family": null,
+          "minor": true
+        },
+        "fill": {
+          "pattern": "None",
+          "fg": "Auto",
+          "bg": "Auto"
+        },
+        "borders": {
+          "left": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "right": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "top": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "bottom": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "diag_down": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "diag_up": {
+            "style": "None",
+            "color": "Auto"
+          }
+        },
+        "align": {
+          "h": "General",
+          "v": "Bottom",
+          "wrap": false,
+          "shrink": false,
+          "indent": 0,
+          "rotation": 0
+        },
+        "num_fmt": "#,##0 \"Kč\"",
+        "protection": {
+          "locked": true,
+          "hidden": false
+        },
+        "dxf_stated": {
+          "bold": false,
+          "italic": false,
+          "strike": false,
+          "underline": false,
+          "size": false,
+          "name": false,
+          "scheme": null,
+          "protection": false
+        }
+      },
+      {
+        "font": {
+          "name": "Calibri",
+          "size": 11.0,
+          "bold": false,
+          "italic": false,
+          "underline": "None",
+          "strike": false,
+          "color": "Auto",
+          "vert": "Baseline",
+          "charset": null,
+          "family": null,
+          "minor": true
+        },
+        "fill": {
+          "pattern": "None",
+          "fg": "Auto",
+          "bg": "Auto"
+        },
+        "borders": {
+          "left": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "right": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "top": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "bottom": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "diag_down": {
+            "style": "None",
+            "color": "Auto"
+          },
+          "diag_up": {
+            "style": "None",
+            "color": "Auto"
+          }
+        },
+        "align": {
+          "h": "General",
+          "v": "Bottom",
+          "wrap": false,
+          "shrink": false,
+          "indent": 0,
+          "rotation": 0
+        },
+        "num_fmt": "0.00%",
+        "protection": {
+          "locked": true,
+          "hidden": false
+        },
+        "dxf_stated": {
+          "bold": false,
+          "italic": false,
+          "strike": false,
+          "underline": false,
+          "size": false,
+          "name": false,
+          "scheme": null,
+          "protection": false
+        }
+      }
+    ]
+  },
+  "theme": {
+    "name": "Craft",
+    "colors": [
+      16777215,
+      0,
+      15263976,
+      927809,
+      1400962,
+      15298866,
+      1665828,
+      1023701,
+      10496915,
+      5154606,
+      4618374,
+      9855101
+    ],
+    "major_font": "Calibri",
+    "minor_font": "Calibri",
+    "major_font_ea": "",
+    "minor_font_ea": "",
+    "major_font_cs": "",
+    "minor_font_cs": "",
+    "major_font_scripts": [],
+    "minor_font_scripts": []
+  },
+  "date_system": "D1900",
+  "calc": {
+    "mode": "Automatic",
+    "iterative": false,
+    "max_iterations": 100,
+    "max_change": 0.001,
+    "precision_as_displayed": false
+  },
+  "active_sheet": 0,
+  "props": {
+    "title": "",
+    "subject": "",
+    "author": "",
+    "company": "",
+    "keywords": "",
+    "description": ""
+  },
+  "protected_structure": false,
+  "custom_lists": [],
+  "cell_styles": [],
+  "vba_project": null
+}
