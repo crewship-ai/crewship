@@ -3,6 +3,7 @@ package api
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -90,6 +91,11 @@ func isClientFacingImportError(err error) bool {
 	if err == nil {
 		return false
 	}
+	if isBulkImportInputError(err) {
+		return true
+	}
+	// Prefixes, not substrings: a clone failure echoes the (redacted) URL,
+	// and the client's own URL text must not pick the classification.
 	msg := err.Error()
 	for _, prefix := range []string{
 		"bulk import requires",
@@ -101,11 +107,19 @@ func isClientFacingImportError(err error) bool {
 		"git URL must not embed",
 		"parse git URL",
 	} {
-		if strings.Contains(msg, prefix) {
+		if strings.HasPrefix(msg, prefix) {
 			return true
 		}
 	}
 	return false
+}
+
+// isBulkImportInputError reports a request the importer refused as input,
+// before any clone: the client's error, answered 400 (#5097). The importer
+// marks those itself (skills.ErrImportInput); the server's Git, DNS and the
+// clone are never input, whatever their message says.
+func isBulkImportInputError(err error) bool {
+	return errors.Is(err, skills.ErrImportInput)
 }
 
 // Import handles the request, delegating to skills.Importer.BulkImport.
@@ -155,13 +169,16 @@ func (h *SkillBulkImportHandler) Import(w http.ResponseWriter, r *http.Request) 
 		DryRun:             body.DryRun,
 	})
 	if err != nil {
-		// Validation errors (bad URL, blocked SSRF, missing git binary)
-		// are safe to echo verbatim — they're authored by us in this
+		// A rejected git URL is the client's input error (400). Server
+		// environment errors (missing or old git) stay 502. Both are safe
+		// to echo verbatim — they're authored by us in this
 		// codebase. Anything else (clone process stderr, walker
 		// surprises) can carry git's raw output, which leaks server
 		// filesystem paths and any embedded URL credentials. Map those
 		// to a generic 502 and keep the detail in the server log.
-		if isClientFacingImportError(err) {
+		if isBulkImportInputError(err) {
+			writeProblem(w, r, http.StatusBadRequest, "bulk import rejected: "+err.Error())
+		} else if isClientFacingImportError(err) {
 			writeProblem(w, r, http.StatusBadGateway, "bulk import failed: "+err.Error())
 		} else {
 			h.logger.Error("bulk import: server-side failure",

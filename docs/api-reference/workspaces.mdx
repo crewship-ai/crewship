@@ -1933,9 +1933,9 @@ Local-path bulk import (the importer's `Paths` field beyond the optional in-repo
 
 | Status | Condition |
 |---|---|
-| `400` | Missing `git_url`, invalid workspace |
+| `400` | Missing `git_url`, invalid workspace, or a `git_url`/`git_ref` the importer rejects before any clone (not HTTPS, `localhost`, private/internal IP, embedded user-info, invalid host or port, unsafe ref); the reason is echoed as `bulk import rejected: …` |
 | `403` | Caller below `MANAGER` |
-| `502` | Walker failure (git clone failed, missing `git` binary, etc.); validation errors are echoed verbatim while raw clone-process stderr is replaced with a generic message |
+| `502` | The server's Git is missing or too old, DNS resolution of the host failed, or the clone failed; Git environment messages are echoed verbatim while raw clone-process stderr is replaced with a generic message |
 
 ### Generate skill (LLM)
 

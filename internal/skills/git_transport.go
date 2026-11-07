@@ -46,20 +46,20 @@ func ValidateGitImportPolicy(policy GitImportPolicy) error {
 func planGitClone(ctx context.Context, raw string, policy GitImportPolicy, resolver gitIPResolver) (gitClonePlan, error) {
 	u, err := url.Parse(raw)
 	if err != nil {
-		return gitClonePlan{}, fmt.Errorf("parse git URL: invalid URL")
+		return gitClonePlan{}, inputError(fmt.Errorf("parse git URL: invalid URL"))
 	}
 	if u.Scheme != "https" || u.Opaque != "" {
-		return gitClonePlan{}, fmt.Errorf("bulk import requires https git URLs")
+		return gitClonePlan{}, inputError(fmt.Errorf("bulk import requires https git URLs"))
 	}
 	if u.User != nil {
-		return gitClonePlan{}, fmt.Errorf("git URL must not embed credentials")
+		return gitClonePlan{}, inputError(fmt.Errorf("git URL must not embed credentials"))
 	}
 	host, err := canonicalGitHost(u.Hostname())
 	if err != nil {
-		return gitClonePlan{}, err
+		return gitClonePlan{}, inputError(err)
 	}
 	if host == "localhost" || strings.HasSuffix(host, ".localhost") {
-		return gitClonePlan{}, fmt.Errorf("localhost git URLs are not allowed")
+		return gitClonePlan{}, inputError(fmt.Errorf("localhost git URLs are not allowed"))
 	}
 	port := u.Port()
 	if port == "" {
@@ -67,7 +67,7 @@ func planGitClone(ctx context.Context, raw string, policy GitImportPolicy, resol
 	}
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 1 || n > 65535 {
-		return gitClonePlan{}, fmt.Errorf("invalid git URL port")
+		return gitClonePlan{}, inputError(fmt.Errorf("invalid git URL port"))
 	}
 	port = strconv.Itoa(n)
 	allowed := false
@@ -82,7 +82,7 @@ func planGitClone(ctx context.Context, raw string, policy GitImportPolicy, resol
 	}
 	if !allowed {
 		if err := validateGitURL(raw); err != nil {
-			return gitClonePlan{}, err
+			return gitClonePlan{}, inputError(err)
 		}
 	}
 	var addresses []net.IPAddr
@@ -106,7 +106,7 @@ func planGitClone(ctx context.Context, raw string, policy GitImportPolicy, resol
 	for _, address := range addresses {
 		ip := address.IP
 		if ip == nil || address.Zone != "" || ip.IsLoopback() || httpsafe.IsHardBlockedIP(ip) || !allowed && httpsafe.IsBlockedIP(ip) {
-			return gitClonePlan{}, fmt.Errorf("private/internal IP or forbidden destination in git URL")
+			return gitClonePlan{}, inputError(fmt.Errorf("private/internal IP or forbidden destination in git URL"))
 		}
 	}
 	// All answers are checked, and only one approved address is used. Failure
