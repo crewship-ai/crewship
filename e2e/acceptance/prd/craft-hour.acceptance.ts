@@ -16,7 +16,7 @@
 // debugging) does the same work and then fails on purpose: it is not evidence.
 import { readHeadText, sheetSession, wordSession, type Checkpoint, type CycleChain, type SessionKind } from "./craft-session/hour-steps"
 import type { CraftCall } from "./craft-lease/helpers"
-import { hourInterruptions, pageStalls, type VerifyPress } from "./craft-session/confirm"
+import { hourInterruptions, PAGE_STALLS_DESCRIPTION, pageStalls, saveAccounting, type ForcedCtrlS, type SaveWait, type VerifyPress } from "./craft-session/confirm"
 import { restartServer, type RestartRecord } from "./craft-session/restart"
 import { expect, prdRequirement, test } from "./fixtures"
 import { disposeActors, isolatedActor } from "./outage-lostack/actor"
@@ -65,7 +65,7 @@ for (const { app, label } of KINDS) {
       const ops = N.instrument(context)
       const trail: CraftCall[] = []
       const steps: Array<{ atMs: number; step: string }> = []
-      const evidence = { chain: [] as CycleChain[], checkpoints: [] as Checkpoint[], verifications: [] as VerifyPress[], restart: null as RestartRecord | null }
+      const evidence = { chain: [] as CycleChain[], checkpoints: [] as Checkpoint[], verifications: [] as VerifyPress[], saveWaits: [] as SaveWait[], forcedCtrlS: [] as ForcedCtrlS[], restart: null as RestartRecord | null }
       await prd.evidence("document-ref.json", { workspaceId: ws.id, pageId: ref.pageId, kept: true })
       const session = (app === "wordcraft" ? wordSession : sheetSession)({ prd, context, api, ref, ops, trail, steps, evidence, minutes, restart: (why) => restartServer(prd.origin, `${label} hour session: ${why}`) })
       let result
@@ -80,12 +80,16 @@ for (const { app, label } of KINDS) {
       } finally {
         // The evidence chain on disk however the row ends (a thrown session, a failed
         // assertion below, a pass), written after the run so late replies are in it.
-        const interruptions = hourInterruptions(evidence.verifications, pageStalls(trail))
+        // How each save happened (autosave, forced Ctrl+S, automatic reconcile, Ověřit
+        // výsledek): accounting for the reader, never a reason to fail the row.
+        const accounting = saveAccounting({ waits: evidence.saveWaits, forced: evidence.forcedCtrlS, ops, verifications: evidence.verifications })
+        const interruptions = hourInterruptions(evidence.verifications, pageStalls(trail), accounting)
         prd.note(interruptions.note)
-        await prd.evidence("chain.json", { workspaceId: ws.id, pageId: ref.pageId, ...evidence, pageStalls: pageStalls(trail), interruptions }).catch(() => {})
+        await prd.evidence("chain.json", { workspaceId: ws.id, pageId: ref.pageId, ...evidence, pageStalls: pageStalls(trail), pageStallsDescription: PAGE_STALLS_DESCRIPTION, interruptions, saveAccounting: accounting }).catch(() => {})
       }
       const head = await readHeadText(api, ref)
-      await prd.evidence("result.json", { ...result, finalVersion: head.version, finalHash: head.hash, verifications: evidence.verifications, pageStalls: pageStalls(trail) })
+      const accounting = saveAccounting({ waits: evidence.saveWaits, forced: evidence.forcedCtrlS, ops, verifications: evidence.verifications })
+      await prd.evidence("result.json", { ...result, finalVersion: head.version, finalHash: head.hash, verifications: evidence.verifications, pageStalls: pageStalls(trail), pageStallsDescription: PAGE_STALLS_DESCRIPTION, saveAccounting: accounting })
       expect(result.failures, "the session found no loss").toEqual([])
       expect(result.restart, "the server was restarted in the middle").toBeTruthy()
       expect(result.durationMs, "the session lasted its full length").toBeGreaterThanOrEqual(minutes * 60_000)

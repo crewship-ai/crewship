@@ -203,14 +203,31 @@ export async function savedAfter(page: Page, after: string, timeout: number): Pr
   return undefined
 }
 
+/** What one saveByAutosaveOrKey wait did: the version it ended with, and whether it pressed Ctrl+S. */
+export interface SaveOutcome {
+  version: string | undefined
+  pressed: boolean
+  /** When Ctrl+S was pressed (only when pressed). */
+  pressedAt?: string
+}
+
 /**
  * The editor saves by itself 300 ms after the last keystroke. Takes that save
  * when it comes and presses Ctrl+S only when it does not. After an autosave
- * Ctrl+S sends nothing: it confirms the saved version (#5075).
+ * Ctrl+S sends nothing: it confirms the saved version (#5075). Reports whether it
+ * pressed; `onPress` runs right before the press (the hour rows mark the requests
+ * sent from then on as following the press).
  */
-export async function saveByAutosaveOrKey(page: Page, after: string): Promise<string | undefined> {
+export async function saveByAutosaveOrKeyReport(page: Page, after: string, onPress?: () => void): Promise<SaveOutcome> {
   const v = await savedAfter(page, after, 4_000)
-  if (v) return v
+  if (v) return { version: v, pressed: false }
+  onPress?.()
+  const pressedAt = new Date().toISOString()
   await page.keyboard.press("Control+s")
-  return savedAfter(page, after, 60_000)
+  return { version: await savedAfter(page, after, 60_000), pressed: true, pressedAt }
+}
+
+/** saveByAutosaveOrKeyReport, only the version. */
+export async function saveByAutosaveOrKey(page: Page, after: string): Promise<string | undefined> {
+  return (await saveByAutosaveOrKeyReport(page, after)).version
 }
