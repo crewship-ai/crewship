@@ -7,10 +7,43 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/spf13/cobra"
+	"golang.org/x/text/unicode/norm"
 )
+
+// workspaceSlugMaxLen is the server's limit (internal/api/workspaces_mutate.go).
+const workspaceSlugMaxLen = 50
+
+// workspaceSlugFromName derives the slug `workspace create` sends when --slug
+// is not given (#5116), like the web UI's create dialog (lowercase, every
+// other run of characters one hyphen, no leading or trailing hyphen, at most
+// 50 bytes), except that accents are folded rather than cut
+// ("Účetnictví" -> "ucetnictvi", where the dialog gives "etnictv").
+// A name with nothing derivable returns "" and the caller asks for --slug.
+func workspaceSlugFromName(name string) string {
+	var b strings.Builder
+	hyphen := true // suppress a leading hyphen
+	for _, r := range norm.NFD.String(strings.ToLower(name)) {
+		switch {
+		case unicode.Is(unicode.Mn, r):
+			continue
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			hyphen = false
+		case !hyphen:
+			b.WriteByte('-')
+			hyphen = true
+		}
+	}
+	s := b.String()
+	if len(s) > workspaceSlugMaxLen {
+		s = s[:workspaceSlugMaxLen]
+	}
+	return strings.Trim(s, "-")
+}
 
 func truncateID(id string, n int) string {
 	if len(id) < n {
@@ -164,12 +197,16 @@ var workspaceCreateCmd = &cobra.Command{
 			return fmt.Errorf("--name is required")
 		}
 
+		if slug == "" {
+			slug = workspaceSlugFromName(name)
+			if len(slug) < 2 {
+				return fmt.Errorf("cannot derive a slug from --name %q; pass --slug (2-50 characters)", name)
+			}
+		}
+
 		lang, _ := cmd.Flags().GetString("language")
 
-		body := map[string]interface{}{"name": name}
-		if slug != "" {
-			body["slug"] = slug
-		}
+		body := map[string]interface{}{"name": name, "slug": slug}
 		if lang != "" {
 			body["preferred_language"] = lang
 		}
@@ -951,7 +988,7 @@ func formatPagesTheme(theme map[string]string) string {
 
 func init() {
 	workspaceCreateCmd.Flags().String("name", "", "Workspace name (required)")
-	workspaceCreateCmd.Flags().String("slug", "", "Workspace slug (auto-generated from name)")
+	workspaceCreateCmd.Flags().String("slug", "", "Workspace slug (derived from --name when omitted: lowercase ASCII, accents dropped, other characters as hyphens)")
 	workspaceCreateCmd.Flags().String("language", "", "Preferred language (e.g. cs, en)")
 
 	workspaceUpdateCmd.Flags().String("name", "", "Workspace name")

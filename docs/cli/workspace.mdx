@@ -77,7 +77,7 @@ settings, counts, `pages_theme`, `appearance_default` and every other field. `Ap
 | Flag | Default | Effect |
 | --- | --- | --- |
 | `--name <string>` | (required) | Display name. |
-| `--slug <string>` | (auto) | URL slug. Auto-generated from `--name` if omitted. |
+| `--slug <string>` | (derived) | URL slug, 2–50 characters. When omitted, the CLI derives it from `--name` like the web UI create dialog, except that accents are folded instead of cut: lowercase, every other run of characters one hyphen, cut to 50 (`"Účetnictví 7. 11."` → `ucetnictvi-7-11`). A name with nothing to derive (for example only non-Latin letters) exits non-zero and asks for `--slug`; a derived slug that is already taken is the server's 409. |
 | `--language <code>` | (server default) | Preferred reply language for agents (e.g. `cs`, `en`). Reinforced at the top and bottom of every agent prompt — including chat sessions, assignments, and pipelines — so the agent answers in this language. |
 
 ### `workspace update`
