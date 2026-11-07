@@ -26,9 +26,11 @@ def fixture():
     run = {"id": "assignment", "agent_slug": "morgan", "agent_id": "morgan", "run_id": "distinct-journal",
            "status": "COMPLETED", "result_summary": "preview without code"}
     full = {"status": "COMPLETED", "outcome": "SUCCEEDED", "result_summary": summary, "untrusted_extra": "SYNTHETIC-CANARY"}
-    source = {"id": "source-assignment", "run_id": "source-journal", "agent_id": "alex", "agent_slug": "alex", "status": "COMPLETED"}
-    refused = {"id": "refused", "entry_type": "assignment.refused", "actor_type": "agent", "trace_id": "source-journal",
+    source = {"id": "run-start:chat-run", "entry_type": "run.started", "trace_id": "chat-run", "agent_id": "alex",
+              "summary": "SYNTHETIC-CANARY", "payload": {"agent_slug": "alex"}}
+    refused = {"id": "refused", "entry_type": "assignment.refused", "actor_type": "agent", "trace_id": "chat-run",
                "actor_id": "alex", "agent_id": "alex", "crew_id": "eng", "summary": "SYNTHETIC-CANARY",
+               "refs": {"chat_id": "owner-chat"},
                "payload": {"reason": "crews_not_connected", "http_status": 403, "source_crew_id": "eng",
                            "target_crew_id": "ops", "target_slug": "morgan", "task_sha256": "a" * 64}}
     return code, tag, candidate, run, full, source, refused
@@ -42,7 +44,7 @@ class ProjectionTests(unittest.TestCase):
         return receipt.positive("ENG-1", "assignment", self.code, self.tag, [self.candidate], [self.run], self.full)
 
     def negative(self):
-        return receipt.refusal("ENG-2", "eng", "ops", self.source, [self.refused])
+        return receipt.chat_refusal(["owner-chat"], "eng", "ops", "alex", "a" * 64, [self.refused], [self.source])
 
     def build(self, positive=None, negative=None):
         with mock.patch.dict(os.environ, {"SCAN_RUN_ID": "fixture-run", "STAGE_RUN_ID": "fixture-run", "CREWSHIP_WORKSPACE": "workspace"}), \
@@ -73,8 +75,14 @@ class ProjectionTests(unittest.TestCase):
             section[key] = old
 
     def test_refusal_is_joined_to_actual_server_actor_trace_crews_and_403(self):
-        self.assertEqual(self.negative()["refusal"]["evidence_source"], "server_journal")
+        proof = self.negative()
+        self.assertEqual(proof["refusal"]["evidence_source"], "server_journal")
+        self.assertEqual((proof["chat_id"], proof["source_run_id"], proof["run_started_entry_id"]), ("owner-chat", "chat-run", "run-start:chat-run"))
         for section, key, value in [
+            (self.refused["refs"], "chat_id", "other-chat"),
+            (self.refused["payload"], "task_sha256", "b" * 64),
+            (self.source, "trace_id", "other-run"), (self.source, "agent_id", "other"),
+            (self.source, "entry_type", "run.completed"),
             (self.refused, "trace_id", "other"), (self.refused, "actor_id", "other"),
             (self.refused, "agent_id", "other"), (self.refused, "crew_id", "other"),
             (self.refused["payload"], "target_crew_id", "other"),
@@ -90,7 +98,13 @@ class ProjectionTests(unittest.TestCase):
                     self.negative()
             section[key] = old
         with self.assertRaises(receipt.NotMatched):
-            receipt.refusal("ENG-2", "eng", "ops", self.source, [])
+            receipt.chat_refusal(["owner-chat"], "eng", "ops", "alex", "a" * 64, [], [self.source])
+        with self.assertRaises(receipt.NotMatched):
+            receipt.chat_refusal(["owner-chat"], "eng", "ops", "alex", "a" * 64, [self.refused], [])
+        with self.assertRaises(ValueError):
+            receipt.chat_refusal(["owner-chat"], "eng", "ops", "alex", "not-a-hash", [self.refused], [self.source])
+        with self.assertRaises(receipt.NotMatched):
+            receipt.chat_refusal(["other-chat"], "eng", "ops", "alex", "a" * 64, [self.refused], [self.source])
 
     def test_final_projection_rejects_extra_fields_changed_bindings_or_unbounded_text(self):
         for proof, key, value in [
@@ -180,7 +194,7 @@ class PersistenceTests(unittest.TestCase):
     def test_actual_writer_cli_source_binding_permissions_and_failure_exit(self):
         code, tag, candidate, run, full, source, refused = fixture()
         positive = receipt.positive("ENG-1", "assignment", code, tag, [candidate], [run], full)
-        negative = receipt.refusal("ENG-2", "eng", "ops", source, [refused])
+        negative = receipt.chat_refusal(["owner-chat"], "eng", "ops", "alex", "a" * 64, [refused], [source])
         checkout = self.root / "fixture-repo"
         here = checkout / "scripts/test-harness"
         here.mkdir(parents=True)
