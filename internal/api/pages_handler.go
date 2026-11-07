@@ -537,28 +537,69 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	wsID := WorkspaceIDFromContext(r.Context())
-
-	viewer, err := h.loadViewer(r.Context(), wsID, user.ID)
+	// Ordinary catalogs keep a read snapshot. If admitted candidates require a
+	// custody audit, reload once under the existing metadata writer fence.
+	r, read, err := h.startMetadataRead(r, false)
 	if err != nil {
-		replyInternalError(w, h.logger, "load page viewer", err)
+		replyInternalError(w, h.logger, "begin page catalog read", err)
 		return
 	}
-	index, err := h.loadPageIndex(r.Context(), wsID, viewer, pagesInWorkspace(wsID))
-	if err != nil {
-		replyInternalError(w, h.logger, "list pages", err)
-		return
+	defer func() { read.tx.Rollback() }()
+	var viewer *pageViewer
+	var index *pageIndex
+	var candidates []pageIndexRow
+	for {
+		viewer, err = h.loadViewer(r.Context(), wsID, user.ID)
+		if err != nil {
+			replyInternalError(w, h.logger, "load page viewer", err)
+			return
+		}
+		index, err = h.loadPageIndex(r.Context(), wsID, viewer, pagesInWorkspace(wsID))
+		if err != nil {
+			replyInternalError(w, h.logger, "list pages", err)
+			return
+		}
+		candidates, err = pageCatalogCandidates(r, index, user.ID)
+		if err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		needsAudit := false
+		for i := range candidates {
+			if catalogRowNeedsAudit(&candidates[i], viewer) {
+				needsAudit = true
+				break
+			}
+		}
+		if read.writer || !needsAudit {
+			break
+		}
+		read.tx.Rollback()
+		nextRequest, nextRead, beginErr := h.startMetadataRead(r, true)
+		if beginErr != nil {
+			replyInternalError(w, h.logger, "begin page catalog audit", beginErr)
+			return
+		}
+		r, read = nextRequest, nextRead
 	}
 	rows, total, err := pageCatalogRows(r, index, user.ID)
 	if err != nil {
 		replyError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if !h.auditCatalogRows(w, r, rows, viewer) {
+	// Audit every candidate the filters consumed, not only the released
+	// window: an empty page still discloses whether a custodian's private
+	// artifact matched. auditCatalogRows appends to the writer fence taken
+	// above, so the audit set is the one the filters read, all-or-nothing.
+	if !h.auditCatalogRows(w, r, candidates, viewer) {
 		return
 	}
 	out := make([]pageListWire, 0, len(rows))
 	for i := range rows {
 		out = append(out, h.pageListRow(&rows[i], index.folders, viewer))
+	}
+	if !h.finishMetadataRead(w, r, read) {
+		return
 	}
 	w.Header().Set("X-Total-Count", strconv.Itoa(total))
 	writeJSON(w, http.StatusOK, out)
@@ -571,7 +612,13 @@ func (h *PageHandler) List(w http.ResponseWriter, r *http.Request) {
 // already written and nothing may be released.
 func (h *PageHandler) auditCatalogRows(w http.ResponseWriter, r *http.Request, rows []pageIndexRow, viewer *pageViewer) bool {
 	audited := r
-	var batch *privateMetadataRead
+	// A caller already holding the writer fence (the filtered catalog) owns
+	// the batch and commits it; a second writer here would wait on itself.
+	batch, _ := r.Context().Value(privateMetadataReadKey{}).(*privateMetadataRead)
+	owned := batch == nil || !batch.writer
+	if owned {
+		batch = nil
+	}
 	for i := range rows {
 		if !catalogRowNeedsAudit(&rows[i], viewer) {
 			continue
@@ -597,7 +644,7 @@ func (h *PageHandler) auditCatalogRows(w http.ResponseWriter, r *http.Request, r
 			return false
 		}
 	}
-	return batch == nil || h.finishMetadataRead(w, audited, batch)
+	return !owned || batch == nil || h.finishMetadataRead(w, audited, batch)
 }
 
 // catalogRowNeedsAudit selects the rows that need an administrator audit:

@@ -153,6 +153,16 @@ export function pagesOpenArtifacts(): boolean {
 }
 
 /**
+ * Pages the library's All view on the server (`GET /api/v1/pages` filters,
+ * sort, `limit`/`offset`, #4471) instead of filtering the whole list in the
+ * browser. Only with the library itself on; views and filters the server
+ * cannot express stay client-side. Default OFF.
+ */
+export function artifactsServerCatalog(): boolean {
+  return artifactsLibrary() && process.env.NEXT_PUBLIC_ARTIFACTS_SERVER_CATALOG === "true"
+}
+
+/**
  * Runs Share, Access, folder settings, archive and bulk actions in the
  * Artifacts library against an in-browser mock of the agreed interface,
  * until the server serves `/pages/{slug}/access`, `/pages/bulk`, the

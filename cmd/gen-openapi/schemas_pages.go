@@ -487,7 +487,12 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"POST /api/v1/pages/{slug}/archive":   {Request: archiveRequest, RequestRequired: true, Response: archiveResponse},
 		"POST /api/v1/pages/{slug}/unarchive": {Request: archiveRequest, RequestRequired: true, Response: archiveResponse},
 		"GET /api/v1/pages": {
-			Response: arr(pageRow),
+			Response:   arr(pageRow),
+			Parameters: pageCatalogQueryParameters(),
+			SuccessHeaders: map[string]any{"X-Total-Count": map[string]any{
+				"description": "Authorized rows matching all catalog filters, before limit and offset.",
+				"schema":      map[string]any{"type": "integer", "minimum": 0},
+			}},
 		},
 		"DELETE /api/v1/pages/{slug}": {
 			// 204, no body. Declared so the document says "nothing comes back"
