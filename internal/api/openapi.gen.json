@@ -15386,6 +15386,13 @@
           "sessionId": {
             "type": "string"
           },
+          "unchanged": {
+            "description": "No version was created: version equals baseVersion, which already holds this snapshot.",
+            "enum": [
+              true
+            ],
+            "type": "boolean"
+          },
           "version": {
             "description": "Canonical bounded int64 decimal string; maximum 9223372036854775807. Never parse as a JavaScript number.",
             "maxLength": 19,

@@ -42,9 +42,9 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
     const r = opened(app, 5, 3)
     try { await r.controller.flush(); expect(r.requests).toHaveLength(1) } finally { await r.controller.close() }
   })
-  it(`${app}: a native Ctrl+S ticket still transmits unchanged bytes`, async () => {
+  it(`${app}: a native Ctrl+S ticket on unchanged bytes sends nothing (#5075)`, async () => {
     const r = opened(app)
-    try { await r.controller.save("ticket-1"); expect(r.requests).toHaveLength(1) } finally { await r.controller.close() }
+    try { await r.controller.save("ticket-1"); expect(r.requests).toHaveLength(0); expect(r.controller.confirmedVersion()).toBe("3") } finally { await r.controller.close() }
   })
 }
 
@@ -88,9 +88,9 @@ it("wordcraft: text typed while the capture runs, its changed event late -> stil
     expect(r.requests.map(q => q.bytes[0])).toEqual([6]); expect(r.controller.confirmedVersion()).toBe("4")
   } finally { await r.controller.close() }
 })
-it("wordcraft: mounted from the loaded bytes, a native Ctrl+S ticket still transmits", async () => {
+it("wordcraft: mounted from the loaded bytes, a native Ctrl+S ticket sends nothing (#5075)", async () => {
   const r = mounted("wordcraft")
-  try { await r.controller.save("ticket-1"); expect(r.requests).toHaveLength(1) } finally { await r.controller.close() }
+  try { await r.controller.save("ticket-1"); expect(r.requests).toHaveLength(0); expect(r.controller.confirmedVersion()).toBe("3") } finally { await r.controller.close() }
 })
 it("wordcraft: an untouched final capture on revoke leaves no local draft to offer", async () => {
   const r = mounted("wordcraft")

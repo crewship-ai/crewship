@@ -333,6 +333,58 @@ func (s *VersionStore) Apply(ctx context.Context, k VersionKey, r VersionRequest
 	}
 	return
 }
+
+// ApplyChanged is Apply for a writer whose repeat must not grow history. When
+// the base is the head and the head already holds exactly these files, it
+// writes and charges nothing and reports unchanged with the head as the receipt
+// version. The same authority and writer fence run first, so a caller that
+// could not save learns nothing. Any other request is an ordinary Apply.
+func (s *VersionStore) ApplyChanged(ctx context.Context, k VersionKey, r VersionRequest, a VersionAuthorize) (out VersionReceipt, unchanged bool, err error) {
+	err = s.writeTransaction(ctx, k, a, func(tx *sql.Tx, actor string) error {
+		same, e := headHolds(ctx, tx, k, r)
+		if e != nil {
+			return e
+		}
+		if same {
+			out, unchanged = VersionReceipt{r.BaseVersion, actor}, true
+			return nil
+		}
+		out, e = s.publish(ctx, tx, k, r, actor, 0)
+		return e
+	})
+	if err != nil {
+		return VersionReceipt{}, false, err
+	}
+	return
+}
+
+// headHolds compares file hashes and media types against the base when it is
+// the head. An earlier version with the same content does not count.
+func headHolds(ctx context.Context, tx *sql.Tx, k VersionKey, r VersionRequest) (bool, error) {
+	latest, _, err := versionHead(ctx, tx, k)
+	if err != nil || latest == 0 || latest != r.BaseVersion {
+		return false, err
+	}
+	var raw []byte
+	if err = tx.QueryRowContext(ctx, `SELECT manifest_json FROM artifact_versions WHERE workspace_id=? AND page_id=? AND version=?`, k.WorkspaceID, k.PageID, latest).Scan(&raw); err != nil {
+		return false, err
+	}
+	var m storedManifest
+	if err = json.Unmarshal(raw, &m); err != nil {
+		return false, err
+	}
+	if m.EntryPoint != r.EntryPoint || len(m.Files) != len(r.Files) {
+		return false, nil
+	}
+	for name, file := range r.Files {
+		stored, ok := m.Files[name]
+		sum := sha256.Sum256(file.Content)
+		if !ok || stored.MediaType != file.MediaType || stored.Hash != hex.EncodeToString(sum[:]) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
 func (s *VersionStore) publish(ctx context.Context, tx *sql.Tx, k VersionKey, r VersionRequest, actor string, restored int64) (VersionReceipt, error) {
 	latest, _, err := versionHead(ctx, tx, k)
 	if err != nil {

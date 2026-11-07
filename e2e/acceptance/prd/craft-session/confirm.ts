@@ -271,9 +271,9 @@ export function pageStalls(trail: ReadonlyArray<{ at: string; who: string; path:
 }
 
 /**
- * The version of the last save the server committed. An autosave before Ctrl+S gives two
- * saves of the same bytes (a Ctrl+S ticket always transmits), so the next version is not
- * always what the editor ends on. The contiguity of the first one is a separate assertion.
+ * The version of the last save the server answered. A repeat of the same bytes creates no
+ * version (#5075), so an `unchanged` answer names the version the editor already holds.
+ * The contiguity of the first save is a separate assertion.
  */
 export function lastCommittedSave(ops: ReadonlyArray<{ kind: string; status?: number; version?: string }>): string | undefined {
   return ops.filter((o) => o.kind === "save" && o.status === 200 && o.version !== undefined).at(-1)?.version

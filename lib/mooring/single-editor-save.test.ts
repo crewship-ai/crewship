@@ -302,7 +302,7 @@ it("forwards two manual RPC ticket IDs to separate fresh snapshots", async () =>
 })
 it("retains the second manual RPC snapshot through a delayed first ACK and ACKs each exact ticket", async () => {
   const r = rig(), firstACK = deferred<ReturnType<typeof receipt>>()
-  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new Uint8Array([1, 2]), editorRevision: `rpc:${args[1]}` }))
+  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new TextEncoder().encode(String(args[1])), editorRevision: `rpc:${args[1]}` }))
   r.transport.save.mockReturnValueOnce(firstACK.promise)
   const first = r.controller.save("ticket-one")
   await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce())
@@ -318,7 +318,7 @@ it("retains the second manual RPC snapshot through a delayed first ACK and ACKs 
 })
 it("bounds concurrent manual RPC saves without a lifetime save cap", async () => {
   const r = rig(), firstACK = deferred<ReturnType<typeof receipt>>()
-  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new Uint8Array([1, 2]), editorRevision: `rpc:${args[1]}` }))
+  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new TextEncoder().encode(String(args[1])), editorRevision: `rpc:${args[1]}` }))
   r.transport.save.mockReturnValueOnce(firstACK.promise)
   const saves = Array.from({ length: 4 }, (_, i) => r.controller.save(`ticket-${i}`))
   saves.forEach(save => { void save.catch(() => {}) })
@@ -336,16 +336,19 @@ it("retains unsent manual RPC drafts after unknown ACK and requires explicit rec
   await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce())
   const second = r.controller.save("ticket-second"); void second.catch(() => {})
   await vi.waitFor(() => expect(r.journal.persist).toHaveBeenCalledTimes(2))
+  // The waiting ticket looks the original up first (#5075); the server can't tell yet.
+  r.transport.reconcile.mockRejectedValue(new Error("offline"))
   firstACK.resolve(receipt(r.transport.save.mock.calls[0][0]))
   await expect(first).rejects.toThrow("unconfirmed")
   await expect(second).rejects.toThrow("unconfirmed")
+  expect(r.transport.reconcile).toHaveBeenCalledOnce()
   expect(r.transport.save).toHaveBeenCalledOnce(); expect(r.onReceipt).not.toHaveBeenCalled()
   expect(r.journal.confirm).not.toHaveBeenCalled(); await r.controller.close()
 })
 it("does not overwrite a newer durable draft when a waiting manual RPC snapshot rebases", async () => {
   const r = rig(), firstACK = deferred<ReturnType<typeof receipt>>()
   let recovery: { editorRevision: string; baseVersion: string } | undefined
-  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new Uint8Array([1, 2]), editorRevision: `rpc:${args[1] ?? "newer-auto"}` }))
+  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new TextEncoder().encode(String(args[1])), editorRevision: `rpc:${args[1] ?? "newer-auto"}` }))
   r.journal.persist.mockImplementation(async (draft: NativeDraft) => { recovery = { editorRevision: draft.editorRevision, baseVersion: draft.baseVersion } })
   r.journal.confirm.mockImplementation(async (draft: NativeDraft) => { if (recovery?.editorRevision === draft.editorRevision && recovery.baseVersion === draft.baseVersion) recovery = undefined })
   r.transport.save.mockReturnValueOnce(firstACK.promise)

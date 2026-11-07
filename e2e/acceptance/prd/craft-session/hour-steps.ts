@@ -279,8 +279,8 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     const local = await statusTrace(page)
     if (cycles < 2) await prd.evidence(`step-cycle-${cycles}-typed.png`, await page.screenshot()).catch(() => {})
     // The editor saves by itself 300 ms after the last keystroke. Take that
-    // save when it comes; press Ctrl+S only when it does not (Ctrl+S always
-    // sends, so after an autosave it would store identical bytes again).
+    // save when it comes; press Ctrl+S only when it does not. After an autosave
+    // Ctrl+S sends nothing and confirms the saved version (#5075).
     await verifyIfUnconfirmed(n)
     let label = await saveByAutosaveOrKey(page, baseline)
     if (await verifyIfUnconfirmed(n)) label = (await saveByAutosaveOrKey(page, newer(baseline, label))) ?? label

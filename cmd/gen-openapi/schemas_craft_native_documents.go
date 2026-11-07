@@ -43,6 +43,7 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	receipt["durability"] = map[string]any{"type": "string", "enum": []string{"node"}}
 	receipt["issuedBy"] = map[string]any{"type": "string", "enum": []string{"crewship"}}
 	receipt["phase"] = map[string]any{"type": "string", "enum": []string{"committed"}}
+	receipt["unchanged"] = map[string]any{"type": "boolean", "enum": []bool{true}, "description": "No version was created: version equals baseVersion, which already holds this snapshot."}
 	receiptRequired := append(append([]string{}, required...), "editorRevision", "contentHash", "version", "candidateHash", "durability", "issuedBy", "phase")
 	quota := obj(map[string]any{"usedBytes": version(true), "limitBytes": version(false), "warning": map[string]any{"type": "boolean"}, "level": map[string]any{"type": "string", "enum": []string{"none", "near", "critical", "full"}}, "retention": str()}, "usedBytes", "limitBytes", "warning", "retention")
 	document := obj(map[string]any{"version": version(false), "bytes": bytes(), "applicationId": properties()["applicationId"], "enginePin": pin(), "editorBundle": pin(), "editorURL": str(), "quota": ref("NativeCraftDocumentQuota")}, "version", "bytes", "applicationId", "enginePin", "editorBundle", "editorURL", "quota")

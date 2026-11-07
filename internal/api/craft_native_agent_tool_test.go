@@ -96,6 +96,38 @@ func nativeAgentToolFixture(t *testing.T) (*artifactPrincipalFixture, *craftNati
 	return f, m, human, call, calls
 }
 
+// #5075: an agent change that leaves the document as it is adds no version, and
+// its retry gets the same answer instead of asking for a successor that never existed.
+func TestCraftNativeAgentToolNoChangeAddsNoVersionAndRetries(t *testing.T) {
+	f, m, _, call, calls := nativeAgentToolFixture(t)
+	m.config.AgentApply = func(_ context.Context, _ CraftNativeDocumentProfile, native []byte, _ json.RawMessage) ([]byte, error) {
+		*calls++
+		return native, nil
+	}
+	acquired := call(`{"operation":"acquire"}`)
+	if acquired.Code != 200 {
+		t.Fatal(acquired.Code, acquired.Body)
+	}
+	var lease struct {
+		Generation string `json:"generation"`
+	}
+	json.Unmarshal(acquired.Body.Bytes(), &lease)
+	packet := fmt.Sprintf(`{"operation":"apply","generation":%q,"base_version":"1","request_id":"no-change","commands":[{"command":"text.insert","params":{"text":""}}]}`, lease.Generation)
+	first := call(packet)
+	var receipt mooring.NativeSaveReceipt
+	if err := json.Unmarshal(first.Body.Bytes(), &receipt); first.Code != 200 || err != nil || !receipt.Unchanged || receipt.Version != "1" {
+		t.Fatal("no-change apply", first.Code, first.Body, err)
+	}
+	repeat := call(packet)
+	if repeat.Code != 200 || repeat.Body.String() != first.Body.String() || *calls != 1 {
+		t.Fatal("retry of a no-op", repeat.Code, repeat.Body, *calls)
+	}
+	var head int64
+	if err := f.rig.db.QueryRow(`SELECT latest_version FROM artifact_version_heads WHERE page_id='native-agent-page'`).Scan(&head); err != nil || head != 1 {
+		t.Fatal("no-op published a version", head, err)
+	}
+}
+
 func TestCraftNativeAgentToolHumanBusyThenRealAgentReceiptAndExactRetry(t *testing.T) {
 	f, m, human, call, calls := nativeAgentToolFixture(t)
 	r := httptest.NewRequest("POST", "/", strings.NewReader(`{}`)).WithContext(human)
@@ -173,8 +205,18 @@ func TestCraftNativeAgentToolHumanBusyThenRealAgentReceiptAndExactRetry(t *testi
 	}
 }
 
+// nativeAgentApplyDistinct makes each engine run produce new content, so every
+// apply is a real change and not a no-op over the previous one (#5075).
+func nativeAgentApplyDistinct(m *craftNativeAgentManager, calls *int) {
+	m.config.AgentApply = func(context.Context, CraftNativeDocumentProfile, []byte, json.RawMessage) ([]byte, error) {
+		*calls++
+		return fmt.Appendf(nil, `{"body":[{"kind":"para","text":"agent edit %d"}]}`, *calls), nil
+	}
+}
+
 func TestCraftNativeAgentToolHistoricalRetryCannotClearAnotherUncertainAttempt(t *testing.T) {
 	f, m, _, call, calls := nativeAgentToolFixture(t)
+	nativeAgentApplyDistinct(m, calls)
 	acquired := call(`{"operation":"acquire"}`)
 	if acquired.Code != 200 {
 		t.Fatal(acquired.Code, acquired.Body)
@@ -213,7 +255,8 @@ func TestCraftNativeAgentToolHistoricalRetryCannotClearAnotherUncertainAttempt(t
 }
 
 func TestCraftNativeAgentToolHistoricalRetryCannotRegressLastCommittedReceipt(t *testing.T) {
-	f, m, _, call, _ := nativeAgentToolFixture(t)
+	f, m, _, call, calls := nativeAgentToolFixture(t)
+	nativeAgentApplyDistinct(m, calls)
 	acquired := call(`{"operation":"acquire"}`)
 	if acquired.Code != 200 {
 		t.Fatal(acquired.Code, acquired.Body)
