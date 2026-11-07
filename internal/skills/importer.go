@@ -372,7 +372,13 @@ func (imp *Importer) upsertEnriched(
 		return nil, fmt.Errorf("check skill existence: %w", err)
 	}
 
-	_, updateErr := imp.db.ExecContext(ctx, `
+	// A locked skill is never rewritten by an import (#5045). The WHERE guard
+	// below closes the window between this read and the write.
+	if lockErr := CheckUnlocked(ctx, imp.db, slug); lockErr != nil {
+		return nil, lockErr
+	}
+
+	updateRes, updateErr := imp.db.ExecContext(ctx, `
 		UPDATE skills SET
 			name = ?, display_name = ?, description = ?, version = ?, author = ?,
 			category = ?, icon = ?,
@@ -384,7 +390,7 @@ func (imp *Importer) upsertEnriched(
 			description_quality = ?,
 			license = COALESCE(?, license),
 			updated_at = ?
-		WHERE id = ?`,
+		WHERE id = ? AND locked = 0`,
 		displayName, displayName,
 		nullableStr(parsed.Meta.Description), version, nullableStr(parsed.Meta.Author),
 		category, nullableStr(parsed.Meta.Icon),
@@ -398,6 +404,9 @@ func (imp *Importer) upsertEnriched(
 			return nil, fmt.Errorf("a skill with name %q already exists", displayName)
 		}
 		return nil, fmt.Errorf("update skill: %w", updateErr)
+	}
+	if n, _ := updateRes.RowsAffected(); n == 0 {
+		return nil, &LockedError{Slug: slug}
 	}
 	return &ImportResult{
 		SkillID: existingID,

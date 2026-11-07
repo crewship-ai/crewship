@@ -134,8 +134,8 @@ func toTriggerResponse(trigger *pipeline.TriggerInput, sched *pipeline.Schedule)
 		Enabled:          sched.Enabled,
 		ApprovalRequired: sched.Activation == pipeline.TriggerActivationDraft,
 	}
-	if sched.NextRunAt != nil {
-		t := sched.NextRunAt.Format("2006-01-02T15:04:05.999999999Z07:00")
+	if eff := sched.EffectiveNextRunAt(); eff != nil {
+		t := eff.Format("2006-01-02T15:04:05.999999999Z07:00")
 		out.FirstFireAt = &t
 	}
 	return out
@@ -209,8 +209,8 @@ func (h *PipelineHandler) proposeTriggerActivationInbox(ctx context.Context, wor
 		return
 	}
 	firstFire := ""
-	if sched.NextRunAt != nil {
-		firstFire = sched.NextRunAt.Format("2006-01-02T15:04:05.999999999Z07:00")
+	if eff := sched.EffectiveNextRunAt(); eff != nil {
+		firstFire = eff.Format("2006-01-02T15:04:05.999999999Z07:00")
 	}
 	headVersion := 0
 	if h.store != nil {

@@ -27,6 +27,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"net/http"
 	"os"
@@ -220,6 +221,13 @@ func (h *SkillInternalAdapter) generateStaged(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Refuse before spending an LLM call on a rewrite of a locked skill.
+	if lockErr := skills.CheckUnlocked(r.Context(), h.gen.db, body.Slug); lockErr != nil {
+		if refuseLockedSkill(w, r, h.gen.journal, wsID, crewID, journal.ActorAgent, "", "generate_staged", lockErr) {
+			return
+		}
+	}
+
 	raw, ok := h.gen.produceSkillMD(w, r, wsID, body.Slug, body.Prompt, model)
 	if !ok {
 		return
@@ -228,6 +236,10 @@ func (h *SkillInternalAdapter) generateStaged(w http.ResponseWriter, r *http.Req
 	fileName, slug, scanStatus, scanReason, err := h.prop.stageProposedSkill(
 		r.Context(), wsID, crewID, raw, "generated")
 	if err != nil {
+		if skills.IsLocked(err) {
+			writeProblem(w, r, http.StatusLocked, err.Error())
+			return
+		}
 		if errors.Is(err, os.ErrNotExist) || errors.Is(err, errStorageNotConfigured) {
 			h.prop.mapDirError(w, err)
 			return

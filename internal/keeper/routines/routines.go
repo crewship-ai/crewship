@@ -81,6 +81,8 @@ type SkillRow struct {
 	LifecycleState skills.LifecycleState
 	LastUsedAt     time.Time
 	Assignments    int
+	// Locked: an instance administrator locked the skill; the sweep must not age it out.
+	Locked bool
 }
 
 // SkillSweepInput bundles the per-skill snapshot the evaluator needs
@@ -144,6 +146,7 @@ func RunSkillReview(
 			Current:           in.Skill.LifecycleState,
 			LastUsedAt:        in.Skill.LastUsedAt,
 			ActiveAssignments: in.Skill.Assignments,
+			Locked:            in.Skill.Locked,
 			Now:               now,
 		}
 		req := gatekeeper.SkillReviewRequest{

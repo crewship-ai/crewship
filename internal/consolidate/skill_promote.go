@@ -34,6 +34,10 @@ type SkillPromoteOptions struct {
 	MinRecall    int
 	MinComposite float64
 
+	// IsLocked, when set, reports whether a skill with this slug is locked
+	// against autonomous rewrites (#5045). A locked slug is not staged.
+	IsLocked func(slug string) bool
+
 	// afterProposedDirValidated is a test seam for deterministic directory-swap
 	// attacks between validation and the staged skill write.
 	afterProposedDirValidated func()
@@ -86,6 +90,10 @@ func PromoteRuleToSkill(rule LearnedRule, score ScoreResult, opts SkillPromoteOp
 	slug := skills.Slugify(rule.Pattern)
 	if slug == "" {
 		return "", fmt.Errorf("promote: pattern %q slugified to empty string", rule.Pattern)
+	}
+
+	if opts.IsLocked != nil && opts.IsLocked(slug) {
+		return "", &skills.LockedError{Slug: slug}
 	}
 
 	proposedDir := filepath.Join(opts.OutputDir, ".proposed")

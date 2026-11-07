@@ -954,6 +954,60 @@ crewship signal send --event-type deploy.finished --payload "v1.4.2"
 
 The topic form is what makes `wait: event` usable as a subscription rather than a callback: several routines can park on `mission.status_change` and one delivery resumes all of them, each with the payload as its wait step's output. The `event_type` is a free-form string — there is no registry to add to, so a producer and a consumer only have to agree on a name.
 
+**Filtering what a wait accepts: `event_filter`.** A `wait: event` step may set `event_filter` to accept only some signals. The filter is a conjunction of terms joined by `&&`; each term is `path == value`.
+
+- `path` is a dotted path into the signal payload, which must be a JSON document (segments are letters, digits, `_` or `-`; a numeric segment indexes an array).
+- `value` is bare text (trimmed) or a double-quoted string for values containing `&&`, `"` or leading/trailing spaces; `""` is the empty string. Strings compare as written; numbers by their written form (`42`, `1.5`); booleans as `true`/`false`; JSON `null` as `null`.
+- A missing path, an object/array at the path, or a non-JSON payload does not match. There is no OR and no negation.
+- The field is templated (`{{ inputs.env }}`) and rendered when the wait arms. A templated value that renders with a quote or `&&` changes the terms, so quote templated values you do not control.
+
+```yaml
+- id: gate
+  type: wait
+  wait:
+    kind: event
+    event_type: deploy.finished
+    event_filter: 'env.name == prod && status == ok'
+```
+
+A signal that does not match is **not** delivered to that wait: the wait stays pending (same deadline), and the signal remains available to other waits that do match. A per-run signal that matches nothing answers `404`, a topic signal that matches nothing answers `delivered: 0`. A malformed filter is rejected when the routine is saved. An empty filter accepts any signal, as before.
+
+> **Behaviour change.** Previously `event_filter` was accepted and ignored, so any signal completed the wait. Routines that set a filter now only complete on matching payloads; a filter that never matches ends in the normal wait timeout. Review any saved routine that sets `event_filter`.
+
+**Waking a wait from a signed webhook: correlation.** A sender that cannot know a run id can still wake the right wait. The wait declares a templated `correlation_key`, and a routine webhook is switched to signal delivery:
+
+```yaml
+- id: await_payment
+  type: wait
+  wait:
+    kind: event
+    event_type: payment.settled
+    correlation_key: "{{ inputs.order_id }}"
+    event_filter: 'status == paid'
+```
+
+```bash
+crewship routine webhooks create --slug checkout \
+  --signal-event-type payment.settled --signal-correlation-path order.id
+# change later:  routine webhooks update <id> --signal-event-type ... --signal-correlation-path ...
+# back to starting runs:  routine webhooks update <id> --clear-signal
+```
+
+In this mode a delivery to the webhook's public URL **never starts a run**. After the usual signature check and rate limit, the server reads the scalar at `--signal-correlation-path` (dotted JSON path in the verified body) and wakes every parked `wait: event` whose `event_type` and `correlation_key` equal it, whose run belongs to the webhook's workspace **and its target routine**, and whose `event_filter` accepts the body. The raw body is the wait step's output. Any `{{ steps.<wait>.output }}` reference to a `wait: event` output inside an `agent_run` prompt is wrapped in the untrusted-ingress fence (`<untrusted source="signal" ...>`), however the run was started; the egress floor for webhook-triggered runs is unchanged. It uses the same durable store as `signal`, so it survives restarts, honours each wait's original deadline, and cannot wake a cancelled, finished or timed-out run.
+
+| Response (`200`) | Meaning |
+|---|---|
+| `{"status":"DELIVERED","delivered":N,"run_ids":[...]}` | N waits were woken. |
+| `503` `{"status":"IGNORED","reason":"no_matching_wait","retry":true}` with `Retry-After` | Nothing was parked for that key yet, or its `event_filter` rejected the body. A body the filter rejects cannot pass that wait on retry, so senders retry until their own policy stops. The body is **not** consumed and no run starts: redeliver it after the wait arms and it wakes the wait. Senders that retry on `5xx` do this by themselves. |
+| `{"status":"IGNORED","reason":"no_correlation_value"}` | The body had no scalar at the path (or it was empty). Final: do not retry. |
+| same body plus `"duplicate":true` | The same signed body was already processed; nothing is signalled again, whatever `Idempotency-Key` or `X-Crewship-Event-ID` it carries. |
+| `409 delivery_conflict` | The `Idempotency-Key` / `X-Crewship-Event-ID` was already used for a different body. The original record is kept and nothing is signalled. |
+| `503` | Claiming the waits failed part way. The waits already claimed were woken; retry the same body and only the remaining waits are claimed. |
+
+A delivery that matched no wait is recorded for the operator but stays retryable; every other delivery is recorded for the operator: the webhook's `last_status` becomes `IGNORED` (`SIGNALED` after a delivery that woke waits) in `crewship routine webhooks list`, and the delivery is kept for 30 days so redeliveries stay idempotent (a delivery answered `503 retry` is not yet final). The receipt is keyed on the webhook and the SHA-256 of the signed body, because the delivery id header is not covered by the signature. The consequence: a sender that intentionally sends byte-identical payloads for separate events (for example a bare `{"order":{"id":"A-1"}}` twice) has the second one treated as a duplicate for 30 days, even if a new wait has been armed since. Include a unique, signed field such as an event id or timestamp in every payload that must be delivered more than once. `--clear-signal` does not forget these receipts: for the rest of the 30 days a body already processed as a signal answers `200` with `"duplicate":true` instead of starting a run.
+
+**Replay boundary.** The signature covers the request body only; it carries no timestamp, so there is no signed time limit. The receipt stops a captured signed request from being replayed *within the 30 day retention window*, whatever headers the replay carries. It is not general replay protection: once a receipt has aged out, the same signed bytes are accepted again as new work and will wake a matching wait. Put a signed expiry or event id in the payload, and filter on it with `event_filter`, if replays after 30 days matter. The wait claims and the receipt are written in one database transaction, so a crash between them leaves neither; the sender's retry of the same body then completes the delivery, and no wait is woken twice. A wait with no `correlation_key` (or an empty rendered one) can only be woken by run or topic. Signal delivery is available on `crewship`-profile webhooks only; `inputs_template` and the pinned version are unused in this mode. An invalid signature gets `401` and signals nothing.
+
 Both forms are workspace-fenced: a topic delivery never reaches a run in another workspace, and each parked wait is claimed exactly once, so two producers announcing the same event at the same instant cannot resume one run twice. Delivering a topic nobody is waiting on is a success with `delivered: 0`, not a `404` — an event source emits whether or not anything is listening. (The per-run form still answers `404` when that specific run is not at the wait step, because there the caller named a run and was wrong about it.)
 
 ### `code`
@@ -1733,6 +1787,31 @@ notice is raised the first time it happens for that occurrence.
 `catchup=all` never "misses" anything (`MISSED` stays `—`) since every
 occurrence in the backlog actually fires.
 
+#### Spreading fire times
+
+Many schedules on the same cron expression (`0 * * * *` across a workspace)
+all start in the same second. Give them a spread window to avoid the stampede:
+
+```bash
+crewship routine schedules create --slug daily-report --cron "0 * * * *" --spread 5m
+crewship routine schedules update <schedule_id> --spread 0   # turn it off
+```
+
+Each schedule is picked up at its cron time plus a **stable offset** in
+`[0, spread)` derived from the schedule id, so the same schedule always lands at
+the same point of the window and different schedules land at different points.
+The default is no spread, which fires exactly at the cron time as before. The
+spread plus the 30 second scheduler poll must not exceed the cron interval (the
+shortest gap between two occurrences), so `*/5` accepts at most 270 seconds; it is validated on create and on update, including when an update
+changes the cron under an existing spread. `routine schedules list` and the API
+show the next run **including** the offset; `next_occurrence_at` in the API is
+the unshifted cron time.
+
+The offset only changes *when* an occurrence is picked up. The occurrence
+itself stays the cron time: it is what the run's idempotency key and the
+durable dedupe use, and what `catchup_policy` counts, so a restart, a duplicate
+tick or a catch-up replay behaves exactly as without a spread.
+
 <Note>
 A **wake-gated** schedule (see below) always behaves like `catchup=once` —
 the probe is evaluated live ("is now the moment to wake"), never re-run
@@ -2021,6 +2100,30 @@ opt-in flag rather than the only way to change anything:
 ```bash
 crewship routine webhooks update wh_abc123 --rotate-secret
 ```
+
+To let senders migrate without a window of 401s, keep the replaced secret valid
+for a bounded overlap, and end it early once every sender has switched:
+
+```bash
+crewship routine webhooks update wh_abc123 --rotate-secret --previous-secret-ttl 24h
+crewship routine webhooks update wh_abc123 --revoke-previous-secret
+```
+
+The overlap is 60 seconds to 7 days (`24h`, `3d`, `7d`, ...); the default is none,
+which keeps the old behaviour of invalidating the replaced secret at once. While
+it is open, both the current and the previous secret verify (body-only,
+timestamped and GitHub profiles), compared in constant time. The previous secret
+is encrypted at rest, never returned by any API, and expires strictly at the
+reported `previous_secret_expires_at`. Rotating again during an overlap replaces
+the remembered secret, so at most two secrets are ever valid. The new secret and
+its overlap (or the clearing of an older one) are written in one transaction: if
+the overlap cannot be recorded the rotation fails with `500` and nothing changes,
+so an older previous secret can never outlive a rotation reported as having no
+overlap. Each delivery
+verified with the previous secret is recorded in the audit log as
+`webhook.previous_secret.used` (revocations as `webhook.previous_secret.revoked`),
+so an empty trail tells you every sender has moved. `--grace` (`none`, `1h`,
+`24h`, `7d`) is the older spelling of the same option.
 
 <Warning>
 The signing secret is still shown **once** per reveal — on create, or on an

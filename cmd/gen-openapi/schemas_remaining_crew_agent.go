@@ -231,7 +231,8 @@ func remainingCrewAgentSchemaCatalogV1() (map[string]DomainSchema, map[string]an
 	agentDeleted := object(map[string]any{"success": boolean(), "runs": agentRuns})
 	agentDeleted["required"] = []string{"success", "runs"}
 	add("DELETE", "/api/v1/agents/{agentId}", "RemainingAgentDeletedV1", agentDeleted)
-	add("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", "RemainingAgentWebhookSecretV1", object(map[string]any{"webhook_secret": str(), "rotated_at": str()}))
+	add("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", "RemainingAgentWebhookSecretV1", object(map[string]any{"webhook_secret": str(), "rotated_at": str(), "previous_secret_expires_at": str()}))
+	addNoContent("DELETE", "/api/v1/agents/{agentId}/webhook-secret/previous")
 	addAction("DELETE", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaDeletedV1")
 	add("PUT", "/api/v1/agents/{agentId}/persona", "RemainingAgentPersonaUpdatedV1", ref("RemainingAgentPersonaV1"))
 	add("POST", "/api/v1/agents/{agentId}/persona/suggest", "RemainingAgentPersonaSuggestionV1", object(map[string]any{"content": str(), "rationale": str()}))

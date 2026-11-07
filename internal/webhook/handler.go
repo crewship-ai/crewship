@@ -20,6 +20,11 @@ type WebhookPayload struct {
 	RecvAt time.Time `json:"received_at"`
 }
 
+// OverlapObserver is told, after a delivery has verified, that it was signed
+// with the PREVIOUS secret of an open rotation overlap. scheme names the auth
+// shape ("hmac", "hmac-timestamped" or "secret"). It carries no secret.
+type OverlapObserver func(ctx context.Context, crewID, agentID, scheme string)
+
 // SecretLookup retrieves the expected webhook secret for a given crew and agent pair.
 type SecretLookup func(ctx context.Context, crewID, agentID string) (string, error)
 
@@ -158,7 +163,12 @@ const DefaultTimestampTolerance = 5 * time.Minute
 type Handler struct {
 	logger       *slog.Logger
 	lookupSecret SecretLookup
-	trigger      TriggerFunc
+	// lookupPrevious returns the previous secret while a rotation overlap is
+	// open, "" otherwise. An error is treated as "no previous secret": the
+	// overlap can only widen acceptance, so failing it closed is always safe.
+	lookupPrevious SecretLookup
+	onOverlap      OverlapObserver
+	trigger        TriggerFunc
 	// requireTimestamp, when set, decides per (crew, agent) whether the
 	// timestamped signature scheme is mandatory. nil = never required.
 	requireTimestamp RequireTimestampLookup
@@ -227,6 +237,23 @@ func bodyForAcceptError(status int) string {
 func (h *Handler) SetRequireTimestampLookup(f RequireTimestampLookup) *Handler {
 	h.requireTimestamp = f
 	return h
+}
+
+// SetPreviousSecretLookup enables rotation overlap: a delivery that does not
+// match the current secret is also compared, in constant time, against the
+// previous one. obs (optional) is called when that is the secret that matched.
+func (h *Handler) SetPreviousSecretLookup(f SecretLookup, obs OverlapObserver) *Handler {
+	h.lookupPrevious = f
+	h.onOverlap = obs
+	return h
+}
+
+// matchSecrets runs check against the current and the previous secret without
+// an early exit, so timing does not reveal which one (if any) matched.
+func matchSecrets(check func(secret string) bool, current, previous string) (ok, usedPrevious bool) {
+	curOK := check(current)
+	prevOK := previous != "" && check(previous)
+	return curOK || prevOK, !curOK && prevOK
 }
 
 // NewHandler creates a webhook Handler with the given secret lookup and trigger functions.
@@ -314,6 +341,16 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	previousSecret := ""
+	if h.lookupPrevious != nil {
+		if p, perr := h.lookupPrevious(r.Context(), crewID, agentID); perr == nil {
+			previousSecret = p
+		} else {
+			h.logger.Warn("webhook previous-secret lookup failed; ignoring overlap", "crew_id", crewID, "agent_id", agentID, "error", perr)
+		}
+	}
+	usedPrevious, overlapScheme := false, ""
+
 	// §5: an oversized body is 413, and no work. It used to be
 	// io.LimitReader(r.Body, 1<<20), which does not fail — it stops at the
 	// limit and reports EOF, so a 2 MiB delivery was silently TRUNCATED to its
@@ -380,21 +417,27 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			signed := append([]byte(ts+"."), body...)
-			if !ValidateHMAC(signed, providedSig, expectedSecret) {
+			ok, prev := matchSecrets(func(sec string) bool { return ValidateHMAC(signed, providedSig, sec) }, expectedSecret, previousSecret)
+			if !ok {
 				h.logger.Warn("webhook invalid HMAC signature (timestamped)", "crew_id", crewID, "agent_id", agentID)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}
+			usedPrevious, overlapScheme = prev, "hmac-timestamped"
 		} else if requireTS {
 			// Body-only HMAC is replayable indefinitely; this agent opted into
 			// mandatory timestamping. Reject with a clear pointer at the scheme.
 			h.logger.Warn("webhook body-only signature rejected; agent requires timestamped signatures", "crew_id", crewID, "agent_id", agentID)
 			http.Error(w, "this agent requires a timestamped signature: send X-Timestamp and sign \"<timestamp>.<body>\"", http.StatusBadRequest)
 			return
-		} else if !ValidateHMAC(body, providedSig, expectedSecret) {
-			h.logger.Warn("webhook invalid HMAC signature", "crew_id", crewID, "agent_id", agentID)
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
+		} else {
+			ok, prev := matchSecrets(func(sec string) bool { return ValidateHMAC(body, providedSig, sec) }, expectedSecret, previousSecret)
+			if !ok {
+				h.logger.Warn("webhook invalid HMAC signature", "crew_id", crewID, "agent_id", agentID)
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			usedPrevious, overlapScheme = prev, "hmac"
 		}
 	case providedSecret != "":
 		if requireTS {
@@ -405,15 +448,25 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "this agent requires a timestamped signature: use X-Signature over \"<timestamp>.<body>\" with X-Timestamp", http.StatusBadRequest)
 			return
 		}
-		if !ValidateSecret(providedSecret, expectedSecret) {
+		ok, prev := matchSecrets(func(sec string) bool { return ValidateSecret(providedSecret, sec) }, expectedSecret, previousSecret)
+		if !ok {
 			h.logger.Warn("webhook invalid secret", "crew_id", crewID, "agent_id", agentID)
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		usedPrevious, overlapScheme = prev, "secret"
 		w.Header().Set("Deprecation", `version="X-Webhook-Secret"`)
 		w.Header().Set("Sunset", "Thu, 31 Dec 2026 23:59:59 GMT")
 		h.logger.Warn("webhook accepted on deprecated X-Webhook-Secret path; migrate to X-Signature (HMAC-SHA256 of body)",
 			"crew_id", crewID, "agent_id", agentID)
+	}
+
+	if usedPrevious {
+		h.logger.Warn("webhook verified with the previous secret of an open rotation overlap; the sender has not switched yet",
+			"crew_id", crewID, "agent_id", agentID, "scheme", overlapScheme)
+		if h.onOverlap != nil {
+			h.onOverlap(r.Context(), crewID, agentID, overlapScheme)
+		}
 	}
 
 	var payload WebhookPayload

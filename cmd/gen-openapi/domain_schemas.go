@@ -120,7 +120,8 @@ func executionSchemaComponents() map[string]any {
 		"last_run_at": timeString(), "last_status": str(), "last_run_id": str(), "next_run_at": timeString(),
 		"wake_pipeline_id": str(), "wake_pipeline_slug": str(), "wake_inputs": anyMap, "wake_fail_closed": boolean(),
 		"wake_check_count": integer(), "wake_fire_count": integer(), "last_wake_at": timeString(), "last_wake_status": str(),
-		"catchup_policy": str(), "last_missed_count": integer(), "consecutive_failures": integer(),
+		"catchup_policy": str(), "last_missed_count": integer(),
+		"spread_seconds": integer(), "spread_offset_seconds": integer(), "next_occurrence_at": timeString(), "consecutive_failures": integer(),
 		"max_consecutive_failures": integer(), "disabled_reason": str(), "created_at": timeString(), "updated_at": timeString(),
 	})
 	warning := obj(map[string]any{"stage": str(), "message": str(), "at": timeString()})

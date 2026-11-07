@@ -1,6 +1,8 @@
 package skills
 
 import (
+	"context"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,6 +50,20 @@ func StageAuthoredSkill(proposedDir, content string) (StagedSkill, error) {
 		return StagedSkill{}, err
 	}
 	return StagedSkill{Path: path, Slug: slug, Scan: scan}, nil
+}
+
+// StageAuthoredSkillGuarded is StageAuthoredSkill for callers that act for an
+// agent: it refuses with a *LockedError when the document's slug names a skill
+// a curator has locked, so an agent cannot even queue a rewrite of it (#5045).
+func StageAuthoredSkillGuarded(ctx context.Context, db *sql.DB, proposedDir, content string) (StagedSkill, error) {
+	if parsed, err := ParseSKILLMD(content); err == nil {
+		if slug := Slugify(parsed.Meta.Name); slug != "" {
+			if err := CheckUnlocked(ctx, db, slug); err != nil {
+				return StagedSkill{}, err
+			}
+		}
+	}
+	return StageAuthoredSkill(proposedDir, content)
 }
 
 // WriteUniqueSkillFile writes body to the first non-colliding

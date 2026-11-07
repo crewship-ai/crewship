@@ -118,6 +118,8 @@ Examples:
 			// LifecycleState is the keeper sweep's verdict; empty from a
 			// server that predates it (read as active).
 			LifecycleState string `json:"lifecycle_state" yaml:"lifecycle_state"`
+			// Locked: a curator holds the skill against autonomous rewrites.
+			Locked bool `json:"locked" yaml:"locked"`
 			// Workspace-scoped (#3032): agents of this workspace holding
 			// the skill, and this workspace's invocations.
 			InstalledOn []struct {
@@ -143,7 +145,7 @@ Examples:
 		// declares what the table needs, and the server's skill row has
 		// grown well past it (#4508). docs[i] and skills[i] are the same row.
 		f := newFormatter()
-		headers := []string{"SLUG", "VENDOR", "NAME", "CATEGORY", "MATURITY", "SOURCE", "SCAN", "LIFECYCLE", "AGENTS", "USES 7D", "USES 30D"}
+		headers := []string{"SLUG", "VENDOR", "NAME", "CATEGORY", "MATURITY", "SOURCE", "SCAN", "LIFECYCLE", "LOCKED", "AGENTS", "USES 7D", "USES 30D"}
 		var rows [][]string
 		kept := []cli.RawJSON{}
 		for i, s := range skills {
@@ -156,7 +158,7 @@ Examples:
 			if s.Vendor != nil && *s.Vendor != "" {
 				vendor = *s.Vendor
 			}
-			rows = append(rows, []string{s.Slug, vendor, s.Name, s.Category, s.Maturity, s.Source, s.ScanStatus, state,
+			rows = append(rows, []string{s.Slug, vendor, s.Name, s.Category, s.Maturity, s.Source, s.ScanStatus, state, skillLockedLabel(s.Locked),
 				strconv.Itoa(len(s.InstalledOn)), strconv.Itoa(s.Usage.Uses7d), strconv.Itoa(s.Usage.Uses30d)})
 		}
 		return f.Auto(kept, headers, rows)
@@ -202,6 +204,7 @@ var skillGetCmd = &cobra.Command{
 			// LifecycleState, NeedsCredentials, Usage and InstalledOn are the
 			// workspace view the library card shows (#3032).
 			LifecycleState   string   `json:"lifecycle_state" yaml:"lifecycle_state"`
+			Locked           bool     `json:"locked" yaml:"locked"`
 			NeedsCredentials []string `json:"needs_credentials" yaml:"needs_credentials"`
 			Usage            struct {
 				Uses7d     int     `json:"uses_7d" yaml:"uses_7d"`
@@ -239,6 +242,7 @@ var skillGetCmd = &cobra.Command{
 			{"Maturity", dashIfEmpty(skill.Maturity)},
 			{"Scan", dashIfEmpty(skill.ScanStatus)},
 			{"Lifecycle", skillLifecycleOf(skill.LifecycleState)},
+			{"Locked", skillLockedLabel(skill.Locked)},
 			{"Needs credentials", dashIfEmpty(strings.Join(skill.NeedsCredentials, ", "))},
 			{"Uses 7d/30d", fmt.Sprintf("%d / %d (errors %d / %d, total %d)", skill.Usage.Uses7d, skill.Usage.Uses30d,
 				skill.Usage.Errors7d, skill.Usage.Errors30d, skill.Usage.UsesTotal)},
@@ -767,6 +771,14 @@ func skillLastUsed(at *string) string {
 
 // validSkillLifecycle is internal/skills' LifecycleState vocabulary.
 var validSkillLifecycle = map[string]bool{"active": true, "stale": true, "archived": true, "deprecated": true}
+
+// skillLockedLabel renders the content-lock state for the table views.
+func skillLockedLabel(locked bool) string {
+	if locked {
+		return "locked"
+	}
+	return "-"
+}
 
 // skillLifecycleOf reads an empty state (a server predating the sweep) as
 // active, which is what that server meant.

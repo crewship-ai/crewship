@@ -567,6 +567,13 @@ const (
 	// archives unused skills on its own and does not emit these).
 	EntrySkillArchived EntryType = "skill.archived"
 	EntrySkillRestored EntryType = "skill.restored"
+	// EntrySkillLocked / EntrySkillUnlocked fire when a person locks a skill
+	// against autonomous rewrites or lifts the lock. EntrySkillWriteBlocked
+	// fires when a write path (import, proposal, generation, promotion) is
+	// refused because the skill is locked (#5045).
+	EntrySkillLocked       EntryType = "skill.locked"
+	EntrySkillUnlocked     EntryType = "skill.unlocked"
+	EntrySkillWriteBlocked EntryType = "skill.write_blocked"
 	// EntrySkillInvoked fires when an agent actually calls one of its
 	// assigned skills (matched on the orchestrator tool-call hot path).
 	// Payload carries `skill_id`, `skill_slug`, `agent_id`, `tool_name`,

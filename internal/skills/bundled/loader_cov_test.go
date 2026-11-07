@@ -99,6 +99,7 @@ CREATE TABLE skills (
     vendor TEXT, homepage TEXT, spdx_license TEXT, runtime TEXT,
     maturity TEXT, scan_status TEXT, description_quality TEXT,
     verification TEXT, pricing_tier TEXT,
+    locked INTEGER NOT NULL DEFAULT 0,
     created_at TEXT, updated_at TEXT,
     UNIQUE(vendor, slug)
 );`
@@ -273,5 +274,32 @@ func TestInstall_MissingTableContinuesWithoutFatal(t *testing.T) {
 
 	if err := Install(context.Background(), db, covLogger()); err != nil {
 		t.Errorf("Install on schemaless DB = %v, want nil (best-effort)", err)
+	}
+}
+
+// The bundled re-seed on server start never overwrites a locked skill (#5045).
+func TestUpsert_LockedRowKeepsContent(t *testing.T) {
+	t.Parallel()
+	db := openMinimalDB(t)
+	ctx := context.Background()
+	vmeta := vendors["anthropic"]
+	man := skillManifest{category: "CODING", icon: "sparkles"}
+	first := &skills.ParsedSkill{Meta: skills.SkillMeta{Description: "v1", Version: "1.0.0"}, Content: "# v1"}
+	if err := upsert(ctx, db, first, "anthropic", "lk-skill", vmeta, man, "2026-06-10T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE skills SET locked = 1 WHERE slug = 'lk-skill'`); err != nil {
+		t.Fatal(err)
+	}
+	second := &skills.ParsedSkill{Meta: skills.SkillMeta{Description: "v2", Version: "2.0.0"}, Content: "# v2"}
+	if err := upsert(ctx, db, second, "anthropic", "lk-skill", vmeta, man, "2026-06-11T00:00:00Z"); err != nil {
+		t.Fatal(err)
+	}
+	var content string
+	if err := db.QueryRow(`SELECT content FROM skills WHERE slug = 'lk-skill'`).Scan(&content); err != nil {
+		t.Fatal(err)
+	}
+	if content != "# v1" {
+		t.Fatalf("locked bundled skill was rewritten: %q", content)
 	}
 }
