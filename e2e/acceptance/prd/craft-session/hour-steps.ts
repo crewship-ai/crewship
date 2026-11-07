@@ -9,7 +9,7 @@ import * as N from "../outage-lostack/native"
 import { holdsAll, inspectDrafts, newTyping, offerEvidence, placeCaret, saveByAutosaveOrKeyReport, typedMarkers, typeLines, type DraftOffer } from "./draft"
 import { checkDraftCopies, checkLines, holdsAnyLine, lineLedger, type LineCheck } from "./lines"
 import { present, sha256, wordFacts } from "./facts"
-import { VERIFY_AFTER_MS, isUnconfirmedStatus, verifyDue, type VerifyPress, type ForcedCtrlS, type SaveWait, type TrailMark, finishPress, markTrail, startPress, trackedSaveWait, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, pendingReplies, sentSince, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
+import { VERIFY_AFTER_MS, isUnconfirmedStatus, verifyDue, type VerifyPress, type ForcedCtrlS, type SaveWait, type TrailMark, finishPress, markTrail, startPress, startVerify, trackedSaveWait, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, pendingReplies, sentSince, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
 import type { RestartRecord } from "./restart"
 import { restartNote } from "./restart-outcome"
 
@@ -232,13 +232,20 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
       if (!isUnconfirmedStatus(status)) return false
       since ??= Date.now()
       if (verifyDue(status, since, Date.now())) {
-        const pressedAt = new Date().toISOString()
         const opsAt = ops.length
-        await page.getByRole("button", { name: "Ověřit výsledek", exact: true }).click()
-        for (const limit = Date.now() + 15_000; isUnconfirmedStatus(await N.status(page)) && Date.now() < limit; ) await N.pause(250)
-        const reconcile = ops.slice(opsAt).find((o) => o.kind === "reconcile")
-        const statusAfter = (await N.status(page)).slice(0, 60)
-        input.evidence.verifications.push({ cycle, firstSeenAt: new Date(since).toISOString(), pressedAt, unconfirmedForMs: Date.now() - since, statusAfter, reconcile: reconcile ? { status: reconcile.status, version: reconcile.version, failed: reconcile.failed } : null, waitEndedAt: new Date().toISOString(), opsAtPress: opsAt })
+        // In the evidence from the dispatch on: an interrupted wait keeps the press (no waitEndedAt).
+        const v = startVerify(input.evidence.verifications, { cycle, firstSeenAt: new Date(since).toISOString(), opsAtPress: opsAt })
+        let statusAfter = ""
+        try {
+          await page.getByRole("button", { name: "Ověřit výsledek", exact: true }).click()
+          for (const limit = Date.now() + 15_000; isUnconfirmedStatus(await N.status(page)) && Date.now() < limit; ) await N.pause(250)
+          const reconcile = ops.slice(opsAt).find((o) => o.kind === "reconcile")
+          statusAfter = (await N.status(page)).slice(0, 60)
+          Object.assign(v, { unconfirmedForMs: Date.now() - since, statusAfter, reconcile: reconcile ? { status: reconcile.status, version: reconcile.version, failed: reconcile.failed } : null, waitEndedAt: new Date().toISOString() })
+        } catch (e) {
+          v.statusAfter = `interrupted: ${String(e).slice(0, 80)}`
+          throw e
+        }
         note(`cycle ${cycle}: pressed Ověřit výsledek after ${Date.now() - since} ms: ${statusAfter}`)
         return true
       }

@@ -245,10 +245,11 @@ export function committedWrites(ops: readonly AccountedOp[]): CommittedWrite[] {
   for (const c of ops) {
     if (!confirmsWrite(c) || seen.has(c.version!)) continue
     seen.add(c.version!)
-    // The same snapshot sent again (a repeat of the attempt) may be the one that committed.
-    // Matched on the identity the server binds (base, revision, hash, session, attempt);
-    // a request that lacks any of it matches nothing, so its write stays unknown.
-    const same = (o: AccountedOp) => o.kind === "save" && o.n <= c.n && sameSnapshot(o, c)
+    // The same snapshot sent again (a repeat of the attempt), before or after this answer,
+    // may be the one that committed: replies carry no commit time. Matched on the identity
+    // the server binds (base, revision, hash, session, attempt); a request that lacks any
+    // of it matches nothing, so its write stays unknown.
+    const same = (o: AccountedOp) => o.kind === "save" && sameSnapshot(o, c)
     const senders = ops.filter((o) => o === c || same(o)).filter((o) => o.kind === "save").map((o) => o.n)
     out.push({ version: c.version!, op: senders[0], ops: senders, confirmedBy: c.n, confirmedByKind: c.kind === "reconcile" ? "reconcile" : "save" })
   }
@@ -327,6 +328,17 @@ export function finishPress(event: ForcedCtrlS, ops: readonly AccountedOp[], res
   event.version = result.version
   event.newVersion = result.version !== null
   event.outcome = pressOutcome({ opsAtPress: event.opsAtPress, version: result.version, completed: result.completed }, ops)
+}
+
+/**
+ * Records an "Ověřit výsledek" press at dispatch, before the click: an interrupted wait
+ * still leaves the press (without `waitEndedAt`) in the evidence. The caller fills in the rest.
+ */
+export function startVerify(verifications: VerifyPress[], p: { cycle: number; firstSeenAt: string; opsAtPress: number; at?: string }): VerifyPress {
+  const pressedAt = p.at ?? new Date().toISOString()
+  const v: VerifyPress = { cycle: p.cycle, firstSeenAt: p.firstSeenAt, pressedAt, unconfirmedForMs: Date.parse(pressedAt) - Date.parse(p.firstSeenAt), statusAfter: "", reconcile: null, opsAtPress: p.opsAtPress }
+  verifications.push(v)
+  return v
 }
 
 /** Records a harness action (a release, a closed page) with the trail length right before it. */

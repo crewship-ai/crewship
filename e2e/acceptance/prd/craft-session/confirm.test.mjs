@@ -2,7 +2,7 @@
 // (also run by e2e/acceptance/prd/report.test.mjs, the PRD runner step in CI)
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { PAGE_STALLS_DESCRIPTION, finishPress, hourInterruptions, isUnconfirmedStatus, markTrail, pressOutcome, producerOf, saveAccounting, startPress, trackedSaveWait, lastCommittedSave, pageStalls, verifyDue, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
+import { PAGE_STALLS_DESCRIPTION, finishPress, hourInterruptions, isUnconfirmedStatus, markTrail, pressOutcome, producerOf, saveAccounting, startPress, startVerify, trackedSaveWait, lastCommittedSave, pageStalls, verifyDue, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
 
 const word = (paras) => JSON.stringify({ body: paras.map((text) => ({ kind: "para", text, runs: [{ len: text.length }] })) })
 const C = "HOURf9vyrC010"
@@ -465,4 +465,22 @@ test("#5112 review: a reconcile is matched to its save only by the whole snapsho
   assert.equal(bare.unknownOrigin, 1)
   // The same attempt matches: the write is the pre-press save's.
   assert.equal(accountingOf({ forced, ops: [ops[0], { ...ops[1], attemptId: "att-1" }] }).autosaves, 1)
+})
+
+test("#5112 review 2: a later repeat of the same attempt may have committed; the write is unknown", () => {
+  // Request 1 (before the press) and its repeat 2 (after it) carry the same attempt; only 1's answer is recorded.
+  const forced = [{ cycle: 1, at: at(4), site: "save-wait", reason: "x", opsAtPress: 1, endedAt: at(9), newVersion: true, version: "6", outcome: "unattributed" }]
+  const ops = [{ ...save(1, 2, "6"), ...snap("5", "aa") }, { ...save(2, 5, undefined, undefined), ...snap("5", "aa"), failed: "lost" }]
+  const a = accountingOf({ forced, ops })
+  assert.deepEqual(a.writes.map((w) => [w.ops, w.origin]), [[[1, 2], "unknown"]])
+  assert.equal(a.forcedCtrlSEvents[0].outcome, "unattributed")
+})
+
+test("#5112 review 2: startVerify records an Ověřit výsledek press before the click", () => {
+  const verifications = []
+  const v = startVerify(verifications, { cycle: 3, firstSeenAt: at(5), opsAtPress: 1, at: at(20) })
+  assert.deepEqual([verifications.length, v.waitEndedAt, v.opsAtPress, v.unconfirmedForMs], [1, undefined, 1, 15_000])
+  // The click threw; the press still makes the later fresh save unknown.
+  const a = accountingOf({ verifications, ops: [{ ...save(1, 3, "6"), ...snap("5", "aa") }, { ...save(2, 22, "7"), ...snap("6", "ab") }] })
+  assert.deepEqual([a.verifyPresses, a.autosaves, a.unknownOrigin], [1, 1, 1])
 })
