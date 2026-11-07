@@ -118,65 +118,218 @@ export function hourInterruptions(verifications: readonly VerifyPress[], stalls:
 // ---------------------------------------------------------------------------
 // How each save of the hour rows happened (save accounting). Accounting only: a
 // forced Ctrl+S never fails the row; confirmCycle stays the judge of the typing.
+//
+// A press of Ctrl+S is not the origin of a save. The origin is the save request
+// that committed the version: one sent before the press is the editor's autosave,
+// even when its reply arrives after the press (Ctrl+S then only confirms the saved
+// bytes, #5075); one sent after the press is the forced save. Requests are told
+// apart by their place in the ops trail (instrument() appends each request when it
+// is sent), so `opsAtPress` (the trail length right before the press) is the cut.
 
-/** Where a cycle's save could come from: one wait of saveByAutosaveOrKey (draft.ts). */
+/** A save/reconcile request as instrument() records it. */
+export interface AccountedOp {
+  n: number
+  kind: string
+  sentAt?: string
+  status?: number
+  version?: string
+}
+
+/** One wait of saveByAutosaveOrKey (draft.ts): where a cycle's save comes from. */
 export interface SaveWait {
   /** The cycle number, or "warmup" for the Sheet warm-up. */
   cycle: number | "warmup"
   at: string
+  /** When the wait ended (also when it threw); null while it runs. */
+  endedAt: string | null
   /** Did the harness press Ctrl+S because no new version came within 4 s. */
   pressed: boolean
+  /** The ops trail length right before the press (only when pressed). */
+  opsAtPress?: number
   /** The new version the wait ended with, or null when none came. */
   version: string | null
+  /** False when the wait threw (a closed page, a keyboard error). */
+  completed: boolean
 }
 
-/** One Ctrl+S the harness pressed (not the person's own shortcut: the hour rows have none). */
+/**
+ * What a forced press led to: "new-save" (a save request sent after the press
+ * committed the version), "confirm-only" (the version was committed by a request
+ * sent before the press: an autosave the press only confirmed), "no-version" (no
+ * new version followed), "unattributed" (a version followed, but no answered save in
+ * the trail carries it), "incomplete" (the wait was interrupted after the press).
+ */
+export type PressOutcome = "new-save" | "confirm-only" | "no-version" | "unattributed" | "incomplete"
+
+/** One Ctrl+S the harness pressed (the hour rows have no Ctrl+S of the person's own). */
 export interface ForcedCtrlS {
   cycle: number | "warmup"
+  /** When the press was dispatched; the event exists from then on. */
   at: string
   /** Which harness code pressed it: the cycle's save wait or the Word table step's cell check. */
   site: "save-wait" | "table-cell"
   reason: string
+  opsAtPress: number
+  /** When the wait after the press ended (also when it threw); null while it runs. */
+  endedAt: string | null
   /** Did a new version follow the press (a newer "Uloženo · verze N", or a newer server head for the table cell). */
   newVersion: boolean
   version: string | null
-  /** Reconcile requests sent while the harness waited after the press (not counted as automatic). */
-  reconcileOps: number[]
+  outcome: PressOutcome
 }
 
+/** The save request that committed `version`: the first answered save carrying it (a repeat answers the same version, #5075). */
+export function producerOf(ops: readonly AccountedOp[], version: string): AccountedOp | undefined {
+  return ops.find((o) => o.kind === "save" && o.status === 200 && o.version === version)
+}
+
+/** Classifies a press by the request that committed the version that followed it. */
+export function pressOutcome(press: { opsAtPress: number; version: string | null; completed: boolean }, ops: readonly AccountedOp[]): PressOutcome {
+  if (!press.completed) return "incomplete"
+  if (press.version === null) return "no-version"
+  const producer = producerOf(ops, press.version)
+  if (!producer) return "unattributed"
+  return producer.n > press.opsAtPress ? "new-save" : "confirm-only"
+}
+
+/** Records a press at dispatch: the event is in the evidence before the key goes out. */
+export function startPress(forced: ForcedCtrlS[], p: { cycle: number | "warmup"; site: ForcedCtrlS["site"]; reason: string; opsAtPress: number; at?: string }): ForcedCtrlS {
+  const event: ForcedCtrlS = { cycle: p.cycle, at: p.at ?? new Date().toISOString(), site: p.site, reason: p.reason, opsAtPress: p.opsAtPress, endedAt: null, newVersion: false, version: null, outcome: "incomplete" }
+  forced.push(event)
+  return event
+}
+
+/** Fills in a press's outcome once its wait ended; an interrupted wait stays "incomplete". */
+export function finishPress(event: ForcedCtrlS, ops: readonly AccountedOp[], result: { version: string | null; completed: boolean }, endedAt = new Date().toISOString()): void {
+  event.endedAt = endedAt
+  event.version = result.version
+  event.newVersion = result.version !== null
+  event.outcome = pressOutcome({ opsAtPress: event.opsAtPress, version: result.version, completed: result.completed }, ops)
+}
+
+/**
+ * Runs one save wait with the accounting: the wait is recorded when it starts, a press
+ * when it is dispatched (`wait` calls `onPress` right before the key), and both are
+ * closed in a finally, so an interrupted wait leaves an explicit "incomplete" record.
+ */
+export async function trackedSaveWait(
+  rec: { saveWaits: SaveWait[]; forcedCtrlS: ForcedCtrlS[] },
+  ops: readonly AccountedOp[],
+  p: { cycle: number | "warmup"; reason: string },
+  wait: (onPress: () => void) => Promise<{ version: string | undefined }>,
+): Promise<string | undefined> {
+  const w: SaveWait = { cycle: p.cycle, at: new Date().toISOString(), endedAt: null, pressed: false, version: null, completed: false }
+  rec.saveWaits.push(w)
+  let event: ForcedCtrlS | undefined
+  try {
+    const r = await wait(() => {
+      w.pressed = true
+      w.opsAtPress = ops.length
+      event = startPress(rec.forcedCtrlS, { cycle: p.cycle, site: "save-wait", reason: p.reason, opsAtPress: ops.length })
+    })
+    w.version = r.version ?? null
+    w.completed = true
+    return r.version
+  } finally {
+    w.endedAt = new Date().toISOString()
+    if (event) finishPress(event, ops, { version: w.version, completed: w.completed }, w.endedAt)
+  }
+}
+
+/**
+ * Where a wait's version came from: "autosave" (no press), "late-autosave" (pressed,
+ * but the committing request was sent before the press), "forced" (sent after the
+ * press), "unattributed", or "none" (no version).
+ */
+export function waitOrigin(w: SaveWait, ops: readonly AccountedOp[]): "autosave" | "late-autosave" | "forced" | "unattributed" | "none" {
+  if (w.version === null) return "none"
+  if (!w.pressed) return "autosave"
+  const o = pressOutcome({ opsAtPress: w.opsAtPress ?? 0, version: w.version, completed: true }, ops)
+  return o === "new-save" ? "forced" : o === "confirm-only" ? "late-autosave" : "unattributed"
+}
+
+/** A reconcile within this long after a press wait ended may still be the press's request. */
+export const PRESS_GRACE_MS = 2_000
+/** A press wait whose end was not recorded is taken to last this long (the save wait's 4 s + 60 s, with room). */
+const OPEN_PRESS_MS = 75_000
+const OPEN_VERIFY_MS = 15_000
+
 export interface SaveAccounting {
-  /** Save waits (one per cycle, one more after an Ověřit výsledek press, the Sheet warm-up) whose new version arrived without a forced press. */
+  /** Save waits whose version was committed by a request the editor sent before any press (late-autosave included). */
   autosaves: number
+  /** Of the autosaves: those acknowledged only after the harness had pressed Ctrl+S. */
+  lateAutosaves: number
   forcedCtrlS: number
+  /** Presses by outcome (PressOutcome). */
+  forcedCtrlSOutcomes: Record<PressOutcome, number>
   forcedCtrlSEvents: ForcedCtrlS[]
-  /** Reconcile requests the editor sent by itself: neither after an Ověřit výsledek press nor after a forced Ctrl+S. */
+  /** Reconcile requests sent outside every harness press window: the editor's own. */
   editorReconciles: number
   editorReconcileOps: number[]
+  /** Reconcile requests sent during a press wait (press to its end plus PRESS_GRACE_MS): the network trail cannot tell press from timer. */
+  reconcilesDuringPressWait: number
+  reconcilesDuringPressWaitOps: number[]
   verifyPresses: number
   description: string
   note: string
 }
 
 export const SAVE_ACCOUNTING_DESCRIPTION =
-  "autosaves: save waits whose new version arrived without a forced press; forcedCtrlS: Control+s pressed by the harness (no autosave within 4 s, or the Word table cell not in the head after 4 s with status Neuložený koncept); editorReconciles: reconcile requests not following an Ověřit výsledek press or a forced Ctrl+S; verifyPresses: Ověřit výsledek presses. Accounting only, not a gate."
+  "autosaves: save waits whose version was committed by a save request sent before any forced press (lateAutosaves: of those, acknowledged after the press); " +
+  "forcedCtrlS: Control+s pressed by the harness (no new version within 4 s, or the Word table cell not in the head after 4 s with status Neuložený koncept), by outcome new-save / confirm-only / no-version / unattributed / incomplete; " +
+  "editorReconciles: reconcile requests sent outside every press window; reconcilesDuringPressWait: reconcile requests sent between a press (Ctrl+S or Ověřit výsledek) and 2 s after its wait, cause unknown; " +
+  "verifyPresses: Ověřit výsledek presses. Accounting only, not a gate."
 
 /** Counts how the saves of an hour row happened. Pure: the session records the waits, presses and requests. */
 export function saveAccounting(input: {
   waits: readonly SaveWait[]
   forced: readonly ForcedCtrlS[]
-  ops: ReadonlyArray<{ n: number; kind: string }>
+  ops: readonly AccountedOp[]
   verifications: readonly VerifyPress[]
 }): SaveAccounting {
   const { waits, forced, ops, verifications } = input
-  const autosaves = waits.filter((w) => !w.pressed && w.version !== null).length
-  const prompted = new Set<number>([...forced.flatMap((f) => f.reconcileOps), ...verifications.flatMap((v) => v.reconcileOps ?? [])])
-  const editorReconcileOps = ops.filter((o) => o.kind === "reconcile" && !prompted.has(o.n)).map((o) => o.n)
-  const counts = { autosaves, forcedCtrlS: forced.length, editorReconciles: editorReconcileOps.length, verifyPresses: verifications.length }
-  const without = forced.filter((f) => !f.newVersion).length
+  const origins = waits.map((w) => waitOrigin(w, ops))
+  const lateAutosaves = origins.filter((o) => o === "late-autosave").length
+  const autosaves = origins.filter((o) => o === "autosave").length + lateAutosaves
+  // Re-classified with the final trail: a reply that arrived after the wait ended counts.
+  // An interrupted press (or one still running) stays "incomplete".
+  const events: ForcedCtrlS[] = forced.map((e) => ({
+    ...e,
+    outcome: e.endedAt === null || e.outcome === "incomplete" ? "incomplete" : pressOutcome({ opsAtPress: e.opsAtPress, version: e.version, completed: true }, ops),
+  }))
+  const forcedCtrlSOutcomes: Record<PressOutcome, number> = { "new-save": 0, "confirm-only": 0, "no-version": 0, unattributed: 0, incomplete: 0 }
+  for (const e of events) forcedCtrlSOutcomes[e.outcome]++
+  const windows = [
+    ...forced.map((e) => [Date.parse(e.at), (e.endedAt ? Date.parse(e.endedAt) : Date.parse(e.at) + OPEN_PRESS_MS) + PRESS_GRACE_MS]),
+    ...verifications.map((v) => [Date.parse(v.pressedAt), (v.waitEndedAt ? Date.parse(v.waitEndedAt) : Date.parse(v.pressedAt) + OPEN_VERIFY_MS) + PRESS_GRACE_MS]),
+  ]
+  const duringPress = (o: AccountedOp) => {
+    const t = o.sentAt ? Date.parse(o.sentAt) : NaN
+    // A request without a time cannot be placed outside the windows.
+    return Number.isNaN(t) ? windows.length > 0 : windows.some(([a, b]) => t >= a && t <= b)
+  }
+  const reconciles = ops.filter((o) => o.kind === "reconcile")
+  const reconcilesDuringPressWaitOps = reconciles.filter(duringPress).map((o) => o.n)
+  const editorReconcileOps = reconciles.filter((o) => !duringPress(o)).map((o) => o.n)
+  const counts = { autosaves, forcedCtrlS: events.length, editorReconciles: editorReconcileOps.length, verifyPresses: verifications.length }
+  const detail = (Object.entries(forcedCtrlSOutcomes) as Array<[PressOutcome, number]>).filter(([, k]) => k > 0).map(([o, k]) => `${k} ${o}`)
   const note =
-    `autosave ${counts.autosaves}×, forced Ctrl+S ${counts.forcedCtrlS}×${without ? ` (${without} without a new version)` : ""}, ` +
-    `automatic reconcile ${counts.editorReconciles}×, Ověřit výsledek ${counts.verifyPresses}×.`
-  return { ...counts, forcedCtrlSEvents: [...forced], editorReconcileOps, description: SAVE_ACCOUNTING_DESCRIPTION, note }
+    `autosave ${counts.autosaves}×${lateAutosaves ? ` (${lateAutosaves} acknowledged after a forced press)` : ""}, ` +
+    `forced Ctrl+S ${counts.forcedCtrlS}×${detail.length ? ` (${detail.join(", ")})` : ""}, ` +
+    `automatic reconcile ${counts.editorReconciles}×, ` +
+    (reconcilesDuringPressWaitOps.length ? `reconcile during a press wait (cause unknown) ${reconcilesDuringPressWaitOps.length}×, ` : "") +
+    `Ověřit výsledek ${counts.verifyPresses}×.`
+  return {
+    ...counts,
+    lateAutosaves,
+    forcedCtrlSOutcomes,
+    forcedCtrlSEvents: events,
+    editorReconcileOps,
+    reconcilesDuringPressWait: reconcilesDuringPressWaitOps.length,
+    reconcilesDuringPressWaitOps,
+    description: SAVE_ACCOUNTING_DESCRIPTION,
+    note,
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -321,8 +474,8 @@ export interface VerifyPress {
   unconfirmedForMs: number
   statusAfter: string
   reconcile: { status?: number; version?: string; failed?: string } | null
-  /** Every reconcile request sent while the session waited after the press (not counted as automatic). */
-  reconcileOps?: number[]
+  /** When the session stopped waiting for the press's effect (the press window of the save accounting). */
+  waitEndedAt?: string
 }
 
 /**
