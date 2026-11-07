@@ -7,6 +7,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"errors"
 	"io"
 	"os"
 	"os/exec"
@@ -45,7 +46,6 @@ import (
 // effects need a decision; #5108 owns capacity), but now carries the captured
 // failure. Nothing is started again.
 func TestRetainedDockerServiceStopSettlesParkedWork(t *testing.T) {
-	binary := os.Getenv("CREWSHIP_HOST_CAPTURE_BINARY")
 	sidecar := os.Getenv("CREWSHIP_HOST_CAPTURE_SIDECAR")
 	if !filepath.IsAbs(sidecar) {
 		t.Fatal("integration requires an absolute, statically linked CREWSHIP_HOST_CAPTURE_SIDECAR")
@@ -164,7 +164,7 @@ while :; do sleep 0.05; done
 	input := runoutput.HostInput{Endpoint: cli.DaemonHost(), Authority: authority, Directory: directory, Deadline: deadline, MaxBytes: runoutput.DefaultLimit, Command: runoutput.HostCommand{ContainerID: created.ID, User: "1001:1001", Args: []string{"/usr/local/bin/claude"}}}
 	run := orchestrator.RunState{ID: runID, AgentID: "retained-agent", AgentSlug: "retained", WorkspaceID: "retained-ws", ContainerID: created.ID, Status: "running", StartedAt: time.Now().UTC(), Output: &orchestrator.RunOutputState{Version: 2, Directory: filepath.Join(directory, "output"), Deadline: deadline, Adapter: "CLAUDE_CODE", Endpoint: input.Endpoint, Authority: authority}}
 	statePath := filepath.Join(root, "state.db")
-	spec, err := json.Marshal(retainedDockerControllerInput{Input: input, Run: run, StatePath: statePath, Binary: binary})
+	spec, err := json.Marshal(retainedDockerControllerInput{Input: input, Run: run, StatePath: statePath})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -172,7 +172,7 @@ while :; do sleep 0.05; done
 	if err != nil {
 		t.Fatal(err)
 	}
-	unit := "crewship-service-stop-" + strconv.Itoa(os.Getpid())
+	unit := "crewship-service-stop-" + strings.ToLower(rand.Text())
 	controller := exec.Command("systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit="+unit,
 		"-p", "KillMode=control-group", "-p", "TimeoutStopSec=45",
 		executable, "-test.run=^TestRetainedDockerControllerChild$")
@@ -206,6 +206,14 @@ while :; do sleep 0.05; done
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The dispatcher confirms the started runtime (dispatcher.go StartRunning).
+	if err = store.StartRunning(ctx, receipt.WorkID, runID, claimed.Generation, locator); err != nil {
+		t.Fatal(err)
+	}
+	// 1: the scan below must be able to see the descendants it later expects gone.
+	wait("descendants", func() bool {
+		return hostProcessWithCmdline(created.ID, "sleep 300") != "" && hostProcessWithCmdline(created.ID, "sleep 301") != ""
+	})
 
 	// The service stop, delivered by systemd to the whole control group.
 	began := time.Now()
@@ -276,6 +284,10 @@ while :; do sleep 0.05; done
 	}
 	if err = db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE trace_id=? AND entry_type='run.completed'`, runID).Scan(&completed); err != nil || completed != 0 {
 		t.Fatalf("a stopped run was journaled as completed: %d %v", completed, err)
+	}
+	// A restarted dispatcher cannot claim it again: reconciliation is not queued work.
+	if again, err := store.Claim(ctx, work.ClaimOptions{LeaseOwner: "restarted-server"}); !errors.Is(err, work.ErrNoWork) {
+		t.Fatalf("parked work was claimable after the restart: %+v %v", again, err)
 	}
 	if starts := containerFile(ctx, t, cli, created.ID, "/tmp/starts"); starts != "x" {
 		t.Fatalf("the turn started %q times, want exactly once", starts)
