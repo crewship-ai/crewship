@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -179,7 +180,7 @@ func (e *Executor) runForeachItem(ctx context.Context, step Step, item any, in R
 	// gate see the same routine-level egress allowlist. MaxCostUSD stays 0
 	// here — the whole fan-out's spend is bounded by the OUTER step's cost
 	// being summed and checked against the run's effective cap.
-	subDSL := &DSL{Name: subDSLName(in), EgressTargets: parentRender.EgressTargets, Steps: fe.Steps}
+	subDSL := foreachBodyDSL(subDSLName(in), in.dsl, parentRender.EgressTargets, fe.Steps, fe.Items, as)
 
 	subIn := in
 	subIn.Inputs = itemInputs
@@ -247,4 +248,21 @@ func jsonOrString(s string) any {
 		return v
 	}
 	return s
+}
+
+// foreachBodyDSL wraps a foreach body. The body cannot declare wait steps, so
+// it carries the parent's signal waits for prompt fencing.
+//
+// A loop variable drawn from a signal wait is that same external payload, one
+// item at a time, so it is fenced too.
+func foreachBodyDSL(name string, parent *DSL, egress []string, steps []Step, items, as string) *DSL {
+	signals := signalWaitStepIDs(parent)
+	sub := &DSL{Name: name, EgressTargets: egress, Steps: steps, inheritedSignalSteps: signals}
+	for id := range signals {
+		if strings.Contains(items, "steps."+id+".") {
+			sub.untrustedItemInput = as
+			break
+		}
+	}
+	return sub
 }

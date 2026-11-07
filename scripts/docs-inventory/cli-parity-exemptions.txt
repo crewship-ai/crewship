@@ -14,6 +14,7 @@
 
 # --- Not a CLI surface ------------------------------------------------------
 /api/health                                        unauthenticated liveness probe; `crewship doctor` reads /healthz
+GET /api/v1/auth/google/status                     retained legacy compatibility metadata, always enabled=false; current CLI and UI do not support Google sign-in and there is no CLI authentication action
 /api/v1/auth/forgot                                password-reset e-mail flow, driven from the login page
 /api/v1/auth/signup                                public browser registration; CLI seed uses authenticated member provisioning instead of enabling signup
 /api/v1/system/setup-status                        public browser setup/signup discovery; CLI seed authenticates its explicit target and does not alter signup policy

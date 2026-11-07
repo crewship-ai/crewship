@@ -18,8 +18,8 @@ import { captureDocumentDrafts, removeCapturedDocumentDrafts, type CapturedDocum
  * persistent revisions; newer writes survive an older sign-out acknowledgement.
  */
 
-export type ArtifactDraftKind = "artifact-source" | "artifact-comment" | "artifact-viewer-comment" | "design-canvas" | "design-comment" | "wordcraft-pending"
-const KINDS: readonly ArtifactDraftKind[] = ["artifact-source", "artifact-comment", "artifact-viewer-comment", "design-canvas", "design-comment", "wordcraft-pending"]
+export type ArtifactDraftKind = "artifact-source" | "artifact-comment" | "artifact-viewer-comment" | "design-canvas" | "design-tabs" | "design-comment" | "design-conflict" | "design-pending" | "wordcraft-pending"
+const KINDS: readonly ArtifactDraftKind[] = ["artifact-source", "artifact-comment", "artifact-viewer-comment", "design-canvas", "design-tabs", "design-comment", "design-conflict", "design-pending", "wordcraft-pending"]
 export type ArtifactDraftRow = [human: string, kind: ArtifactDraftKind, workspace: string, target: string]
 type Row = ArtifactDraftRow
 export interface CapturedArtifactDraft { row: Row; revision: string | null; text?: string }
@@ -35,6 +35,9 @@ export interface ArtifactDraftStore {
   /** Privacy migration: retain only sealed rows belonging to other identities. */
   purgeUnsealed?(keep: string | null): Promise<void>
   read?(row: Row): Promise<{ text: string; revision?: string } | undefined>
+  /** Atomic compare-and-set: stores only when no row exists, in one
+   * transaction. Resolves false when a row exists. */
+  putIfAbsent?(row: Row, text: string, revision: string): Promise<boolean>
   capture(human: string, workspace?: string, page?: string): Promise<CapturedArtifactDraft[]>
   removeCaptured(rows: CapturedArtifactDraft[]): Promise<void>
 }
@@ -112,6 +115,16 @@ const indexedDbStore: ArtifactDraftStore = {
   },
   async put(row, text, revision = crypto.randomUUID()) { await transact("readwrite", store => store.put({ key: row, text, revision })) },
   async delete(row) { await transact("readwrite", store => store.delete(row)) },
+  async putIfAbsent(row, text, revision) {
+    let written = false
+    // One readwrite transaction: IndexedDB serializes it against every other
+    // tab's write to this store, so the check and the put cannot be split.
+    await transact("readwrite", store => {
+      const found = store.get(row)
+      found.onsuccess = () => { if (found.result === undefined) { store.put({ key: row, text, revision }); written = true } }
+    })
+    return written
+  },
   async read(row) {
     const found = await transact<{ text?: unknown; revision?: unknown } | undefined>("readonly", store => store.get(row))
     return typeof found?.text === "string" ? { text: found.text, revision: typeof found.revision === "string" ? found.revision : undefined } : undefined
@@ -144,7 +157,7 @@ const indexedDbStore: ArtifactDraftStore = {
       cursor.onsuccess = () => {
         const row = cursor.result; if (!row) return
         const value = row.value
-        if ((!keep || value.key?.[0] !== keep) && (typeof value.text !== "string" || !isSealedLocalDraft(value.text))) row.delete()
+        if ((!keep || value.key?.[0] !== keep) && (typeof value.text !== "string" || !sealedAtRest(value.text))) row.delete()
         row.continue()
       }
     })
@@ -198,9 +211,13 @@ async function freshCipher(key: string, row: Row) {
 
 // One lane per draft: writes are ordered and coalesced (latest value wins), so
 // typing never queues more than one strict transaction behind the running one.
-interface Lane { next: string; scheduled?: Promise<void>; tail: Promise<void>; failed?: boolean }
+interface Lane { next: string; nextSeq?: number; scheduled?: Promise<void>; tail: Promise<void>; failed?: boolean; merging?: number }
 const lanes = new Map<string, Lane>()
 const writes = new Map<string, number>()
+// The newest write number (see `writes`, fixed when the write is admitted)
+// whose text is durably stored.
+const durableWrites = new Map<string, number>()
+const stored = (key: string, seq: number) => { if (seq > (durableWrites.get(key) ?? 0)) durableWrites.set(key, seq) }
 
 // The person whose drafts may be written: undefined until the auth hook first
 // settles, null after sign-out. Set by purgeOtherArtifactDrafts.
@@ -209,8 +226,10 @@ const retired = (row: Row) => owner !== undefined && owner !== row[0]
 const retiredError = () => new Error("This browser is no longer signed in as the draft's owner.")
 let identityPurge: Promise<void> = Promise.resolve()
 
-const successfulWrites = new Map<string, { text: string; revision: string }>()
-async function persist(row: Row, text: string): Promise<void> {
+// `over` for a fallback copy: the IndexedDB revision it supersedes, null when
+// IndexedDB held none, undefined when that could not be determined.
+const successfulWrites = new Map<string, { text: string; revision: string; fallback?: string; over?: string | null }>()
+async function persist(row: Row, text: string, seq: number): Promise<void> {
   const key = JSON.stringify(row), revision = crypto.randomUUID()
   // Admission happened in writeArtifactDraft. Already admitted writes must
   // finish before identity retirement; later writes are rejected at the call.
@@ -220,17 +239,63 @@ async function persist(row: Row, text: string): Promise<void> {
     catch (error) { if (error instanceof LocalDraftReadRevoked) void purgeLocalDraftPage(scopeFor(row)).catch(() => {}); throw error }
   }
   const store = durable()
+  // The IndexedDB revision a fallback copy would supersede, read before this
+  // write: a revision another tab stores later is newer and must stay.
+  let over: string | null | undefined
+  if (text && store?.read) { try { over = (await store.read(row))?.revision ?? null } catch { /* unknown: the copy must not be cleared blindly */ } }
   if (store) {
     try {
       if (text) await store.put(row, sealed, revision)
       else await store.delete(row)
       legacyRemove(row)
       successfulWrites.set(key, { text, revision })
+      stored(key, seq)
       return
     } catch { /* Fall back to localStorage below rather than lose the text. */ }
   }
-  if (!text) { legacyRemove(row); if (!store) return; throw new Error("Artifact draft storage is unavailable.") }
+  if (!text) { legacyRemove(row); if (!store) { stored(key, seq); return } throw new Error("Artifact draft storage is unavailable.") }
   localStorage.setItem(legacyKey(row), sealed)
+  stored(key, seq)
+  // Remember the fallback copy so a save, discard or sign-out can remove it.
+  successfulWrites.set(key, { text, revision, fallback: sealed, over })
+}
+
+/**
+ * Leaving the page (#4823). A strict write is asynchronous (seal, then the
+ * IndexedDB transaction) and dies with the document, so an edit typed just
+ * before a navigation or tab close may never be stored. Nothing can seal it
+ * synchronously without an unauthenticated record or raw key bytes in the
+ * page, so the browser asks before leaving while any draft's newest write is
+ * not durable yet. A pagehide without beforeunload (a killed mobile tab)
+ * cannot ask; that edit can be lost.
+ *
+ * States per draft: "queued" (typed: accepted into the lane, RAM only) and
+ * "durable" (strict IndexedDB commit, or the sealed localStorage fallback).
+ * Server confirmation belongs to the editor: its save ACK clears the draft
+ * with clearArtifactDraft.
+ */
+function uncommittedDrafts(): number {
+  let count = 0
+  for (const [key, lane] of lanes) {
+    if ((writes.get(key) ?? 0) <= (durableWrites.get(key) ?? 0)) continue
+    // A pending deletion loses no work.
+    if (!lane.next && !lane.merging && !lane.failed) continue
+    count++
+  }
+  return count
+}
+let unloadHooked = false
+function hookUnload() {
+  if (unloadHooked || typeof window === "undefined") return
+  unloadHooked = true
+  window.addEventListener("beforeunload", event => { if (uncommittedDrafts() > 0) { event.preventDefault(); event.returnValue = "" } })
+}
+export type ArtifactDraftStorageState = "none" | "queued" | "durable"
+/** Where the newest write of this draft is: see "Leaving the page" above. */
+export function artifactDraftStorageState(key: string): ArtifactDraftStorageState {
+  const seq = writes.get(key) ?? 0
+  if (!seq) return "none"
+  return seq <= (durableWrites.get(key) ?? 0) ? "durable" : "queued"
 }
 
 /**
@@ -243,9 +308,11 @@ function queueArtifactDraft(key: string, text: string, admitted = false): Promis
   if (!row) return Promise.reject(new Error("Invalid artifact draft key."))
   if (!admitted && retired(row)) return Promise.reject(retiredError())
   writes.set(key, (writes.get(key) ?? 0) + 1)
+  hookUnload()
   let lane = lanes.get(key)
   if (!lane) { lane = { next: text, tail: Promise.resolve() }; lanes.set(key, lane) }
   lane.next = text
+  lane.nextSeq = writes.get(key)
   if (lane.scheduled) return lane.scheduled
   const current = lane
   // A write also waits for an identity purge that began before it, so that
@@ -255,23 +322,132 @@ function queueArtifactDraft(key: string, text: string, admitted = false): Promis
   const purging = admitted ? Promise.resolve() : identityPurge
   const scheduled = Promise.all([current.tail, purging]).then(() => {
     current.scheduled = undefined
-    return persist(row, current.next)
+    // Coalesced: this persist stores the newest admitted text.
+    return persist(row, current.next, current.nextSeq ?? 0)
   })
   current.scheduled = scheduled
-  current.tail = scheduled.then(() => { current.failed = false }, () => { current.failed = true }).then(() => { if (!current.scheduled && !current.failed && lanes.get(key) === current) lanes.delete(key) })
+  current.tail = scheduled.then(() => { current.failed = false }, () => { current.failed = true }).then(() => { if (!current.scheduled && !current.failed && !current.merging && lanes.get(key) === current) lanes.delete(key) })
   return scheduled
+}
+
+// A stop merged after an identity change cannot open a row another tab wrote
+// meanwhile. It appends its own sealed part instead; the owner's next load
+// opens every part and combines them. Parts are sealed like any other row.
+const BUNDLE = "crewship-local-draft-bundle-v1"
+const MAX_PARTS = 64
+function bundleParts(raw: string): string[] | undefined {
+  try {
+    const value = JSON.parse(raw)
+    if (value?.format === BUNDLE && Array.isArray(value.parts) && value.parts.length >= 1 && value.parts.length <= MAX_PARTS && value.parts.every((part: unknown) => typeof part === "string" && isSealedLocalDraft(part))) return value.parts
+  } catch { /* Not a bundle. */ }
+  return undefined
+}
+const sealedAtRest = (raw: string) => isSealedLocalDraft(raw) || bundleParts(raw) !== undefined
+type LaneRead = { text: string } | { append: string[] }
+
+/** The stored text, read inside the draft's own lane (no lane wait, no
+ * migration write). A failed read rejects: the caller must not merge into an
+ * assumed-empty draft. Uses the cipher this page already admitted. */
+async function readInLane(key: string, row: Row, combine?: (parts: string[]) => string): Promise<LaneRead> {
+  const store = durable()
+  const record = store ? (store.read ? await store.read(row) : await store.get(row).then(text => text === undefined ? undefined : { text, revision: undefined })) : undefined
+  const legacy = legacyGet(row), raw = legacy ?? record?.text
+  if (raw === undefined) return { text: "" }
+  // Appending needs no plaintext: only for a caller retired by an identity
+  // change, with a combiner, on durable storage.
+  const appendable = (error: unknown) => !(error instanceof LocalDraftReadRevoked) && retired(row) && legacy === undefined && !!combine && !!store
+  const parts = bundleParts(raw)
+  if (parts) {
+    if (!combine || legacy !== undefined) throw new Error("Artifact draft storage could not be read.")
+    try {
+      const cipher = await cipherFor(key, row), texts: string[] = []
+      for (const part of parts) texts.push(await cipher.open(part, row[1]))
+      return { text: combine(texts) }
+    } catch (error) { if (appendable(error)) return { append: parts }; throw error }
+  }
+  if (!isSealedLocalDraft(raw)) return { text: raw }
+  try { return { text: await (await cipherFor(key, row)).open(raw, row[1]) } }
+  catch (error) {
+    // An identity change that began after this merge was admitted blocks
+    // every plaintext read (beginLocalDraftIdentity), so the deferred open
+    // fails. When the stored row is exactly the revision this tab itself last
+    // stored or loaded, its text is already in this tab's RAM: merge into it
+    // rather than lose the stop's originals. Any other row stays unreadable.
+    const known = successfulWrites.get(key)
+    if (!(error instanceof LocalDraftReadRevoked) && retired(row) && legacy === undefined && known && record?.revision !== undefined && known.revision === record.revision) return { text: known.text }
+    // A row another tab wrote meanwhile: keep it as it is and add this stop.
+    if (appendable(error)) return { append: [raw] }
+    throw error
+  }
+}
+
+/**
+ * Read-modify-write of one draft, admitted at the call like a write: an
+ * identity change that begins later waits for it (its lane tail), so the
+ * person who stopped keeps the result and the next person never receives it.
+ * The read runs at execution time under a cross-tab Web Lock, so a late
+ * result never overwrites a newer draft. Resolves with the stored text ("" for
+ * a caller retired by an identity change); rejects when nothing durable was
+ * stored.
+ */
+export function mergeArtifactDraft(key: string, merge: (existing: string) => string, combine?: (parts: string[]) => string): Promise<string> {
+  const row = parse(key)
+  if (!row) return Promise.reject(new Error("Invalid artifact draft key."))
+  if (retired(row)) return Promise.reject(retiredError())
+  return runMerge(key, row, merge, combine)
+}
+function runMerge(key: string, row: Row, merge: (existing: string) => string, combine?: (parts: string[]) => string): Promise<string> {
+  // A merge is not coalesced: its write number is fixed here, at admission.
+  const seq = (writes.get(key) ?? 0) + 1
+  writes.set(key, seq)
+  hookUnload()
+  let lane = lanes.get(key)
+  if (!lane) { lane = { next: "", tail: Promise.resolve() }; lanes.set(key, lane) }
+  const current = lane
+  current.merging = (current.merging ?? 0) + 1
+  const before = Promise.all([current.scheduled ?? Promise.resolve(), current.tail]).catch(() => {})
+  const task = async () => {
+    const existing = await readInLane(key, row, combine)
+    if ("append" in existing) {
+      // Retired and unable to open what is stored: seal this stop's own
+      // result as one more part under the original owner's scope. Nothing
+      // stored is opened or replaced; the owner's next load combines them.
+      if (existing.append.length >= MAX_PARTS) throw new Error("Artifact draft storage is unavailable.")
+      const sealed = await (await cipherFor(key, row)).seal(merge(""), row[1])
+      await durable()!.put(row, JSON.stringify({ format: BUNDLE, parts: [...existing.append, sealed] }), crypto.randomUUID())
+      successfulWrites.delete(key)
+      stored(key, seq)
+      current.failed = false
+      return ""
+    }
+    const text = merge(existing.text)
+    await persist(row, text, seq)
+    // The merge is now the lane's latest durable value: an older failed write
+    // must not be retried over it when the lane retires. A write queued after
+    // this merge keeps its own (newer) value.
+    current.failed = false
+    if (!current.scheduled) current.next = text
+    // A caller retired by an identity change gets no plaintext back.
+    return retired(row) ? "" : text
+  }
+  const locks = typeof navigator === "undefined" ? undefined : navigator.locks
+  const run = before.then(() => locks ? locks.request(`crewship-artifact-draft:${key}`, task) : task())
+  current.tail = run.then(() => {}, () => {}).then(() => {
+    current.merging! -= 1
+    if (!current.scheduled && !current.failed && !current.merging && lanes.get(key) === current) lanes.delete(key)
+  })
+  return run
 }
 
 export function writeArtifactDraft(key: string, text: string): Promise<void> { return queueArtifactDraft(key, text) }
 /** Captured only after a successful draft load. This capability may finish
- * local persistence during retirement; it never obtains new authority. */
-export function admittedArtifactDraftCapture(key: string): (text: string) => Promise<void> {
-  const cell = cipherCells.get(key)
-  if (!cell) throw new Error("Private draft was not admitted.")
-  return text => {
-    if (cipherCells.get(key) !== cell) return Promise.reject(retiredError())
-    return queueArtifactDraft(key, text, true)
-  }
+ * local persistence during retirement; it never obtains new authority. It is a
+ * merge, not a replacement, because other tabs share the draft: what it cannot
+ * open after an identity change it keeps, adding a sealed part. */
+export function admittedArtifactDraftMerge(key: string, merge: (existing: string) => string, combine: (parts: string[]) => string): () => Promise<string> {
+  const cell = cipherCells.get(key), row = parse(key)
+  if (!cell || !row) throw new Error("Private draft was not admitted.")
+  return () => cipherCells.get(key) === cell ? runMerge(key, row, merge, combine) : Promise.reject(retiredError())
 }
 /**
  * Reads the draft ("" when there is none), moving an older localStorage copy
@@ -279,7 +455,7 @@ export function admittedArtifactDraftCapture(key: string): (text: string) => Pro
  * localStorage copy exists: the draft may still be on disk, so a caller must
  * not treat the failure as "no draft" and write an empty or fresh value over it.
  */
-export async function loadArtifactDraft(key: string): Promise<string> {
+export async function loadArtifactDraft(key: string, combine?: (parts: string[]) => string): Promise<string> {
   const row = parse(key)
   if (!row || retired(row)) return ""
   await lanes.get(key)?.tail
@@ -297,11 +473,19 @@ export async function loadArtifactDraft(key: string): Promise<string> {
       if (failed) throw new Error("Artifact draft storage could not be read.")
       return ""
     }
-    const text = isSealedLocalDraft(raw) ? await cipher.open(raw, row[1]) : raw
+    // A bundle is opened part by part and combined by its owner's editor.
+    // Recovery never rewrites it: a write here would hold no cross-tab lock
+    // and could replace a merge another tab committed meanwhile. The next
+    // stop merge compacts it under the lock. Without a combiner it is unreadable.
+    const parts = bundleParts(raw)
+    if (parts && !combine) throw new Error("Artifact draft storage could not be read.")
+    let text: string
+    if (parts) { const texts: string[] = []; for (const part of parts) texts.push(await cipher.open(part, row[1])); text = combine!(texts) }
+    else text = isSealedLocalDraft(raw) ? await cipher.open(raw, row[1]) : raw
     if (retired(row)) throw retiredError()
     if (persistedRevision && legacy === undefined && (writes.get(key) ?? 0) === seen) successfulWrites.set(key, { text, revision: persistedRevision })
     // A valid legacy row is sealed durably before it can enter the editor.
-    if ((!isSealedLocalDraft(raw) || legacy !== undefined) && (writes.get(key) ?? 0) === seen) await writeArtifactDraft(key, text)
+    if (!parts && (!isSealedLocalDraft(raw) || legacy !== undefined) && (writes.get(key) ?? 0) === seen) await writeArtifactDraft(key, text)
     if (retired(row)) throw retiredError()
     return text
   } catch (error) {
@@ -320,9 +504,63 @@ export function readArtifactDraft(key: string): Promise<string> {
 // the owner's id; versioned prefixes come before their legacy forms.
 const LOCAL_PREFIXES = ["crewship-design:v2:", "design-comment:v2:", ...KINDS.map(kind => `${kind}:`), "crewship-design:"]
 
+/**
+ * A Project source or comment draft that a build before Page-ID keys (#4628)
+ * kept in localStorage under the Page *slug*. The record carries no Page
+ * identity, and a slug can be renamed or reused by another Page (G4 B23b), so
+ * it is never applied automatically and never deleted silently: the editor
+ * shows it as an older draft that may belong to another Page, and only the
+ * person's explicit choice adopts it (sealed under the Page ID) or discards
+ * it. Only the signed-in person's own key is read; other accounts' copies are
+ * removed on identity change and sign-out like every legacy plaintext copy.
+ */
+export type SlugArtifactDraftKind = "artifact-source" | "artifact-comment"
+export interface SlugArtifactDraft { key: string; text: string; kind: SlugArtifactDraftKind; human: string; workspace: string; slug: string }
+export function findSlugArtifactDraft(kind: SlugArtifactDraftKind, human: string | null | undefined, workspace: string, slug: string, pageId: string | null | undefined): SlugArtifactDraft | undefined {
+  // slug === pageId is the Page-ID key itself, migrated by loadArtifactDraft.
+  if (!human || !workspace || !slug || !pageId || slug === pageId) return undefined
+  if (owner !== undefined && owner !== human) return undefined
+  const key = legacyKey([human, kind, workspace, slug])
+  try {
+    const text = localStorage.getItem(key)
+    // Builds before #4628 wrote only plaintext; a sealed value is not theirs.
+    if (!text || isSealedLocalDraft(text)) return undefined
+    return { key, text, kind, human, workspace, slug }
+  } catch { return undefined }
+}
+/** Explicit adoption into an empty Page-ID draft, as a compare-and-set: the
+ * text is sealed first, then written in one IndexedDB transaction only if no
+ * Page-ID row exists. A draft any tab stored meanwhile, including during the
+ * seal, is kept ("kept-existing") and so is the slug copy. Only after a durable
+ * adoption is the slug copy removed, and only if it is still the one shown. A
+ * failure rejects and keeps the slug copy. */
+export async function adoptSlugArtifactDraft(found: SlugArtifactDraft, pageKey: string, text = found.text): Promise<"adopted" | "kept-existing"> {
+  const row = parse(pageKey)
+  if (!row || row[0] !== found.human || row[1] !== found.kind || row[2] !== found.workspace) throw new Error("Invalid artifact draft key.")
+  if (retired(row)) throw retiredError()
+  const store = durable()
+  if (!store?.putIfAbsent || !text) throw new Error("Artifact draft storage is unavailable.")
+  await lanes.get(pageKey)?.tail
+  // A sealed fallback copy of a Page-ID draft is a draft too.
+  if (legacyGet(row) !== undefined) return "kept-existing"
+  const sealed = await (await cipherFor(pageKey, row)).seal(text, row[1])
+  if (retired(row)) throw retiredError()
+  const revision = crypto.randomUUID()
+  if (!(await store.putIfAbsent(row, sealed, revision))) return "kept-existing"
+  successfulWrites.set(pageKey, { text, revision })
+  removeCapturedLegacyLocalDrafts([{ key: found.key, text: found.text }])
+  return "adopted"
+}
+/** Explicit discard of the copy that was shown; a changed copy stays. */
+export function discardSlugArtifactDraft(found: SlugArtifactDraft): void {
+  removeCapturedLegacyLocalDrafts([{ key: found.key, text: found.text }])
+}
+
 export interface CapturedLegacyLocalDraft { key: string; text: string }
-/** Old localStorage copies are included in sign-out's visible discard warning. */
-export function captureLegacyLocalDrafts(human?: string): CapturedLegacyLocalDraft[] {
+/** Old localStorage copies are included in sign-out's visible discard warning.
+ * `includeSealed` also takes encrypted fallback copies (written when IndexedDB
+ * refused the draft); sign-out removes them, an identity change keeps them. */
+export function captureLegacyLocalDrafts(human?: string, includeSealed = false): CapturedLegacyLocalDraft[] {
   const rows: CapturedLegacyLocalDraft[] = []
   try {
     if (typeof localStorage === "undefined") return rows
@@ -330,7 +568,7 @@ export function captureLegacyLocalDrafts(human?: string): CapturedLegacyLocalDra
       const prefix = LOCAL_PREFIXES.find(start => key.startsWith(start))
       if (!prefix || (human && key.slice(prefix.length).split(":")[0] !== human)) continue
       const text = localStorage.getItem(key)
-      if (text !== null && !isSealedLocalDraft(text)) rows.push({key, text})
+      if (text !== null && (includeSealed || !isSealedLocalDraft(text))) rows.push({key, text})
     }
   } catch { /* Storage the browser will not let us read holds nothing we can protect or warn about. */ }
   return rows
@@ -380,7 +618,7 @@ export function suspendOtherArtifactDrafts(userId: string | null): Promise<void>
     for (const [key, lane] of retiring) {
       if (!lane.failed || lanes.get(key) !== lane) continue
       const row = parse(key)!
-      await persist(row, lane.next) // retained admitted text, no new authority or server save
+      await persist(row, lane.next, lane.nextSeq ?? 0) // retained admitted text, no new authority or server save
       lane.failed = false; lane.next = ""
       if (lanes.get(key) === lane) lanes.delete(key)
     }
@@ -417,6 +655,20 @@ export async function clearArtifactDraft(key: string, text: string, revision: nu
   await lanes.get(key)?.tail
   const row = parse(key), saved = successfulWrites.get(key)
   if (!row || !saved || saved.text !== text || artifactDraftRevision(key) !== revision) return
+  if (saved.fallback !== undefined) {
+    // The superseded IndexedDB revision goes first (revision-guarded: a newer
+    // write from another tab stays). If that fails, the newer fallback copy
+    // stays too, so the older revision is never what reopening finds.
+    // An unknown superseded revision is uncertainty, not consent: removing the
+    // copy could leave an older IndexedDB revision as the recovered draft, so
+    // the copy stays. A verified read revocation still purges it
+    // (purgeLocalDraftPage), independent of this.
+    if (saved.over === undefined) { successfulWrites.delete(key); return }
+    if (saved.over) await durable()?.removeCaptured([{ row, revision: saved.over }])
+    try { if (localStorage.getItem(legacyKey(row)) === saved.fallback) localStorage.removeItem(legacyKey(row)) } catch { /* Unavailable storage holds nothing to remove. */ }
+    successfulWrites.delete(key)
+    return
+  }
   await durable()?.removeCaptured([{ row, revision: saved.revision }])
 }
 export interface LocalDraftPageCapture { artifacts: CapturedArtifactDraft[]; documents: CapturedDocumentDraft[]; local: {key:string; text:string}[] }
@@ -424,10 +676,13 @@ export interface LocalDraftPageCapture { artifacts: CapturedArtifactDraft[]; doc
 export async function captureLocalDraftPage(scope: LocalDraftScope): Promise<LocalDraftPageCapture> {
   const [artifacts, documents] = await Promise.all([captureArtifactDrafts(scope.human, scope.workspace, scope.page), captureDocumentDrafts(scope.human, scope.workspace, scope.page)])
   const local: {key:string; text:string}[] = []
-  for (const kind of KINDS) for (const key of legacyKeys([scope.human, kind, scope.workspace, scope.page])) {
-    const text = localStorage.getItem(key)
-    if (text !== null) local.push({key,text})
-  }
+  // Blocked localStorage must not fail a load that IndexedDB can serve.
+  try {
+    for (const kind of KINDS) for (const key of legacyKeys([scope.human, kind, scope.workspace, scope.page])) {
+      const text = localStorage.getItem(key)
+      if (text !== null) local.push({key,text})
+    }
+  } catch { /* Preserve inaccessible storage. */ }
   return {
     local,
     artifacts: artifacts.filter(({row}) => row[2] === scope.workspace && row[3] === scope.page),
@@ -451,5 +706,5 @@ export async function purgeLocalDraftPage(scope: LocalDraftScope, captured?: Loc
     cipherCells.delete(key); successfulWrites.delete(key)
   }
   await Promise.all([removeCapturedArtifactDrafts(known.artifacts), removeCapturedDocumentDrafts(known.documents)])
-  for (const row of known.local) if (localStorage.getItem(row.key) === row.text) localStorage.removeItem(row.key)
+  try { for (const row of known.local) if (localStorage.getItem(row.key) === row.text) localStorage.removeItem(row.key) } catch { /* Unavailable storage holds nothing to remove. */ }
 }

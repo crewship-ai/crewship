@@ -257,7 +257,9 @@ stored transcript keeps the earlier answer; this is a new turn. If the message
 was sent with a Page, the server's appended snapshot is stripped and the Page
 is requested again by slug, so access is re-checked and the snapshot is fresh.
 An ask-form envelope is not resent: its submission id belonged to the original
-send. Restricted chats refuse it (their history is immutable).
+send. Restricted chats refuse it (their history is immutable). A saved native
+Craft instruction is refused too: it runs only through `craft task start`, so
+retry stops rather than fall back to an earlier message.
 
 ### `chat edit <chat-id>`
 

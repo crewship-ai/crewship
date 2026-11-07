@@ -267,16 +267,16 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 	defer cancel()
 	now := r.now()
 
-	var provider, wsID, name string
+	var provider, wsID, name, allowedHosts string
 	var refreshEnc sql.NullString
 	err := r.db.QueryRowContext(ctx, `
-		SELECT c.provider, c.workspace_id, c.name,
+		SELECT c.provider, c.workspace_id, c.name, COALESCE(c.allowed_hosts, '[]'),
 		       (SELECT encrypted_value FROM credential_fields f WHERE f.credential_id = c.id AND f.key = ?)
 		FROM credentials c
 		WHERE c.id = ? AND c.type = ? AND c.deleted_at IS NULL
 		  AND EXISTS (SELECT 1 FROM credential_fields m WHERE m.credential_id = c.id AND m.key = ? AND m.value = ?)`,
 		providerlogin.PartRefreshToken, credID, CredTypeProviderLogin, providerlogin.PartMode, providerlogin.ModeSubscription).
-		Scan(&provider, &wsID, &name, &refreshEnc)
+		Scan(&provider, &wsID, &name, &allowedHosts, &refreshEnc)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && (!refreshEnc.Valid || refreshEnc.String == "")) {
 		return "", ErrRefreshUnsupported
 	}
@@ -289,6 +289,9 @@ func (r *ProviderLoginRefresher) Refresh(ctx context.Context, credID string, for
 			return "", errRefreshConfiguration
 		}
 		return "", ErrRefreshUnsupported
+	}
+	if !loginRefreshPermitted(allowedHosts, tr) {
+		return "", errRefreshHostNotApproved
 	}
 
 	// The claim. One statement decides who refreshes: the row is created if
@@ -687,6 +690,9 @@ func (h *CredentialHandler) Refresh(w http.ResponseWriter, r *http.Request) {
 	case err == nil:
 	case errors.Is(err, ErrRefreshInFlight), errors.Is(err, errRefreshSuperseded):
 		replyError(w, http.StatusConflict, err.Error())
+		return
+	case errors.Is(err, errRefreshHostNotApproved):
+		replyError(w, http.StatusConflict, errRefreshHostNotApproved.Error())
 		return
 	case errors.Is(err, errRefreshConfiguration):
 		replyError(w, http.StatusServiceUnavailable, errRefreshConfiguration.Error())

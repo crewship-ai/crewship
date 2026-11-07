@@ -119,6 +119,16 @@ func resolveEffectiveSecondApprover(s governance.Settings) effectiveSecondApprov
 	return out
 }
 
+// governanceForResponse fills what an unset row leaves nil, so the wire contract
+// holds: watch_presets is always an array. Only answers go through it; the
+// stored settings and the preview fingerprint keep their own shape.
+func governanceForResponse(s governance.Settings) governance.Settings {
+	if s.WatchPresets == nil {
+		s.WatchPresets = []string{}
+	}
+	return s
+}
+
 // Get handles GET /api/v1/admin/keeper/governance (ADMIN+).
 func (h *KeeperGovernanceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	wsID := WorkspaceIDFromContext(r.Context())
@@ -130,7 +140,7 @@ func (h *KeeperGovernanceHandler) Get(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, keeperGovernanceResponse{
 		Configured:              found,
-		Settings:                s,
+		Settings:                governanceForResponse(s),
 		EffectiveSecondApprover: resolveEffectiveSecondApprover(s),
 	})
 }
@@ -254,7 +264,7 @@ func (h *KeeperGovernanceHandler) Put(w http.ResponseWriter, r *http.Request) {
 
 	writeJSON(w, http.StatusOK, keeperGovernanceResponse{
 		Configured:              true,
-		Settings:                s,
+		Settings:                governanceForResponse(s),
 		EffectiveSecondApprover: resolveEffectiveSecondApprover(s),
 		Warning:                 strings.Join(warnings, " "),
 	})
@@ -377,11 +387,11 @@ func checkGovernanceRefs(ctx context.Context, db *sql.DB, wsID string, body keep
 	// update must not be blocked because a previously-stored credential was
 	// since revoked (the resolver's revoke-safety handles that at build time).
 	if body.GovModelCredentialID != nil && cur.GovModelCredentialID != "" {
-		var credType string
+		var credType, credStatus string
 		err := db.QueryRowContext(ctx, `
-			SELECT type FROM credentials
+			SELECT type, status FROM credentials
 			WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
-			cur.GovModelCredentialID, wsID).Scan(&credType)
+			cur.GovModelCredentialID, wsID).Scan(&credType, &credStatus)
 		if errors.Is(err, sql.ErrNoRows) {
 			return http.StatusBadRequest, "gov_model_credential_id is not a credential in this workspace"
 		}
@@ -390,6 +400,20 @@ func checkGovernanceRefs(ctx context.Context, db *sql.DB, wsID string, body keep
 		}
 		if credType != governance.CredTypeEndpointURL && credType != governance.CredTypeAPIKey {
 			return http.StatusBadRequest, "gov_model_credential_id must reference an ENDPOINT_URL or API_KEY credential"
+		}
+		// A row still waiting on an escalation would take its value from
+		// whoever answers that escalation, not from an OWNER or ADMIN.
+		// Re-sending the stored id binds nothing new, and a monitored credential
+		// can be RATE_LIMITED for a while.
+		if credStatus != "ACTIVE" {
+			var previous sql.NullString
+			err := db.QueryRowContext(ctx, `SELECT gov_model_credential_id FROM keeper_governance_settings WHERE workspace_id = ?`, wsID).Scan(&previous)
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return http.StatusInternalServerError, fmt.Sprintf("%s: %v", "keeper governance: stored gov model credential", err)
+			}
+			if previous.String != cur.GovModelCredentialID {
+				return http.StatusBadRequest, "gov_model_credential_id must reference an active credential"
+			}
 		}
 	}
 

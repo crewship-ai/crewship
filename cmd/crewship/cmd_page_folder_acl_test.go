@@ -185,14 +185,14 @@ func TestPageCLI_GrantWorkspaceTravelsWithoutASubject(t *testing.T) {
 		_ = json.Unmarshal(raw, &body)
 		return http.StatusOK, []byte(`{"page":"fleet-201","grants":[{"subject_type":"workspace","subject":"workspace","subject_id":"","level":"read","granted_by":"root@example.com","live":true}]}`), "application/json"
 	})
-	out, err := runPageGrantCLI(t, "page", "grant", "fleet-201", "--workspace", "--level", "read")
+	out, err := runPageGrantCLI(t, "page", "grant", "fleet-201", "--everyone", "--level", "read")
 	if err != nil {
-		t.Fatalf("grant --workspace: %v\n%s", err, out)
+		t.Fatalf("grant --everyone: %v\n%s", err, out)
 	}
 	if body["subject_type"] != "workspace" || body["subject"] != "" {
 		t.Errorf("body = %v, want subject_type workspace and an empty subject", body)
 	}
-	if _, err := runPageGrantCLI(t, "page", "grant", "fleet-201", "--workspace", "--user", "ada@example.com", "--level", "read"); err == nil || !strings.Contains(err.Error(), "both given") {
+	if _, err := runPageGrantCLI(t, "page", "grant", "fleet-201", "--everyone", "--user", "ada@example.com", "--level", "read"); err == nil || !strings.Contains(err.Error(), "both given") {
 		t.Errorf("two subjects: err = %v", err)
 	}
 	var query string
@@ -200,9 +200,9 @@ func TestPageCLI_GrantWorkspaceTravelsWithoutASubject(t *testing.T) {
 		query = r.URL.RawQuery
 		return http.StatusOK, []byte(`{"page":"fleet-201","grants":[],"changed":2}`), "application/json"
 	})
-	out, err = runPageGrantCLI(t, "page", "revoke", "fleet-201", "--workspace")
+	out, err = runPageGrantCLI(t, "page", "revoke", "fleet-201", "--everyone")
 	if err != nil || !strings.Contains(out, "everyone in the workspace") {
-		t.Fatalf("revoke --workspace: %v\n%s", err, out)
+		t.Fatalf("revoke --everyone: %v\n%s", err, out)
 	}
 	if !strings.Contains(query, "subject_type=workspace") || strings.Contains(query, "subject=") {
 		t.Errorf("revoke query = %q, want subject_type=workspace and no subject", query)

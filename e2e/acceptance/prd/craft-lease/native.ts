@@ -26,6 +26,23 @@ export function emptyDocument(application: NativeApplication): Buffer {
   return Buffer.from(application === "gridcraft" ? emptyGridCraftNativeDocument() : createEmptyNativeWord())
 }
 
+/**
+ * A small document that differs from the blank one by `marker`: a last Word
+ * paragraph, or text in Sheet A1. An identical save at the head creates no
+ * version (#5075), so a scenario that proves a save wrote must change the
+ * content, and a fenced write must carry content that would otherwise count.
+ */
+export function markedDocument(application: NativeApplication, marker: string): Buffer {
+  if (application === "gridcraft") {
+    const wb = JSON.parse(emptyDocument("gridcraft").toString("utf8")) as { sheets: Array<{ cells: unknown }> }
+    wb.sheets[0].cells = { bands: { "0": { rows: { "0": { "0": { value: { t: "Text", v: marker }, formula: null, style: 0 } } } } }, len: 1 }
+    return Buffer.from(JSON.stringify(wb))
+  }
+  const doc = JSON.parse(emptyDocument("wordcraft").toString("utf8")) as { body: unknown[] }
+  doc.body = [{ kind: "para", text: marker, runs: [{ len: [...marker].length }], props: { style: "Normal" } }]
+  return Buffer.from(JSON.stringify(doc))
+}
+
 export interface Availability {
   enabled: boolean
   can_edit: boolean

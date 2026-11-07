@@ -13,7 +13,7 @@
 //     nothing, and A gets both drafts back after signing in again.
 import type { Page } from "@playwright/test"
 import { loginStorageState } from "./auth"
-import { CrashableProfile, createProject, ensureArtifactProjects, grantPage, openProject, openViewer, pause, prepareViewerComment, projectOffer, shareProject, typeSourceDraft, viewerCommentValue } from "./drafts-crash/crash"
+import { CrashableProfile, createProject, ensureArtifactProjects, grantPage, openProject, openViewer, projectURL, pause, prepareViewerComment, projectOffer, shareProject, typeSourceDraft, viewerCommentValue } from "./drafts-crash/crash"
 import { expect, prdRequirement, test } from "./fixtures"
 
 async function userIdOf(request: import("@playwright/test").APIRequestContext) {
@@ -83,11 +83,24 @@ async function logOut(page: Page): Promise<{ confirmShown: boolean; confirmText:
   return { confirmShown: shown, confirmText }
 }
 
-async function logIn(page: Page, email: string, password: string) {
-  if (!/\/login/.test(page.url())) await page.goto("/login")
+/**
+ * Signs in. With a target, the person comes back to that page the way the
+ * product returns an expired session (`/login?redirect=…`), and the helper
+ * waits until the browser is on the target path. Without it, the dashboard
+ * may still be redirecting (a fresh MEMBER goes on to /onboarding), and a
+ * following goto races that redirect (#4875).
+ */
+async function logIn(page: Page, email: string, password: string, target?: string) {
+  if (target) await page.goto(`/login?redirect=${encodeURIComponent(target)}`)
+  else if (!/\/login/.test(page.url())) await page.goto("/login")
   await page.locator("#email").fill(email)
   await page.locator("#password").fill(password)
   await page.locator('button[type="submit"]').first().click()
+  if (target) {
+    const want = new URL(target, page.url()).pathname
+    await expect.poll(() => new URL(page.url()).pathname, { timeout: 60_000, message: `signed in: landed on ${want}` }).toBe(want)
+    return
+  }
   await expect.poll(() => new URL(page.url()).pathname, { timeout: 60_000, message: "signed in: left the login page" }).not.toMatch(/^\/login/)
 }
 
@@ -122,6 +135,12 @@ test.describe("drafts and identity", () => {
         const COMMENT = `Identity unsent comment ${tag}`
         await openProject(a, project.slug, ws.id)
         const typed = await typeSourceDraft(a, MARK)
+        // The draft is sealed and written to IndexedDB asynchronously; a person's
+        // last keystroke precedes leaving the page by far more than a programmatic
+        // fill does. Navigating 0 ms after fill() outran that write on dev2 (the
+        // restored text was the pre-edit snapshot); 500 ms passed. The crash rows
+        // prove a hard kill 300 ms after typing keeps the draft.
+        await pause(1_000)
         await openViewer(a, project.slug, ws.id)
         const fill = await prepareViewerComment(a)
         await fill(COMMENT)
@@ -139,7 +158,7 @@ test.describe("drafts and identity", () => {
         const leaked = (h: string) => h.includes(d.MARK) || h.includes(d.COMMENT)
         traffic.length = 0
         watching = true
-        await logIn(a, other.account.email, other.account.password)
+        await logIn(a, other.account.email, other.account.password, projectURL(project.slug, ws.id))
         await openProject(a, project.slug, ws.id)
         await a.waitForTimeout(3_000)
         const offer = await projectOffer(a)
@@ -190,7 +209,7 @@ test.describe("drafts and identity", () => {
         const out1 = await logOut(a)
         ev.logout = { ...out1, b: await readAsB(a, "logout", d1) }
         await logOut(a)
-        await logIn(a, ownerAccount.email, ownerAccount.password)
+        await logIn(a, ownerAccount.email, ownerAccount.password, projectURL(project.slug, ws.id))
         await openProject(a, project.slug, ws.id)
         await a.waitForTimeout(3_000)
         const after1 = await projectOffer(a)
@@ -207,20 +226,34 @@ test.describe("drafts and identity", () => {
         await a.goto("/login")
         ev.expiry = { b: await readAsB(a, "expiry", d2) }
         await logOut(a)
-        await logIn(a, ownerAccount.email, ownerAccount.password)
+        await logIn(a, ownerAccount.email, ownerAccount.password, projectURL(project.slug, ws.id))
         await openProject(a, project.slug, ws.id)
         await a.waitForTimeout(3_000)
         const back = await projectOffer(a)
         let restoredIdentical: boolean | null = null
+        let restoredDiff: { typedLength: number; restoredLength: number; firstDifferenceAt: number; typedAround: string; restoredAround: string } | null = null
         if (back.restoreOffered === 1) {
           await a.getByRole("button", { name: "Restore source draft", exact: true }).click()
-          restoredIdentical = (await a.getByRole("textbox", { name: "Source file", exact: true }).inputValue()) === d2.typed
+          const source = a.getByRole("textbox", { name: "Source file", exact: true })
+          // Bounded: the restored text must appear; the value itself is evidence either way.
+          const end = Date.now() + 10_000
+          let restored = await source.inputValue()
+          while (restored !== d2.typed && Date.now() < end) {
+            await a.waitForTimeout(250)
+            restored = await source.inputValue()
+          }
+          restoredIdentical = restored === d2.typed
+          if (!restoredIdentical) {
+            let at = 0
+            while (at < restored.length && at < d2.typed.length && restored[at] === d2.typed[at]) at++
+            restoredDiff = { typedLength: d2.typed.length, restoredLength: restored.length, firstDifferenceAt: at, typedAround: d2.typed.slice(Math.max(0, at - 40), at + 80), restoredAround: restored.slice(Math.max(0, at - 40), at + 80) }
+          }
         }
         await openViewer(a, project.slug, ws.id)
         await prepareViewerComment(a)
         const aComment = await viewerCommentValue(a)
         await a.screenshot({ path: test.info().outputPath("expiry-a-again.png"), fullPage: true })
-        ;(ev.expiry as Record<string, unknown>).aAgain = { offer: back, restoredIdentical, viewerComment: aComment }
+        ;(ev.expiry as Record<string, unknown>).aAgain = { offer: back, restoredIdentical, restoredDiff, viewerComment: aComment }
         checks.push(() => {
           expect.soft(back.restoreOffered, "expiry: A is offered the source draft again").toBe(1)
           expect.soft(restoredIdentical, "expiry: the restored source is what A typed").toBe(true)

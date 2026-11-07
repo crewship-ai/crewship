@@ -37,7 +37,7 @@ export interface NativeEditorPort {
 }
 export function createNativeEditorPort(options: NativeEditorPortOptions): NativeEditorPort { return buildNativeEditorPort(options) }
 
-export interface NativeEditorSnapshot { bytes: Uint8Array; editorRevision: string; documentId: string; nativeState?: string }
+export interface NativeEditorSnapshot { bytes: Uint8Array; editorRevision: string; documentId: string; nativeState?: string; revision?: string }
 interface SnapshotProof { requestId: string; revision: string; editorRevision: string; document: string; hash: Promise<string>; wordBytes?: Uint8Array }
 interface PendingRPC { kind: "snapshot" | "validate" | "open" | "access"; readOnly?: boolean; resolve(value: unknown): void; reject(error: Error): void; finish(): void }
 const MAX_NATIVE_BYTES = 32 * 1024 * 1024
@@ -125,7 +125,7 @@ function buildNativeEditorPort(options: NativeEditorPortOptions): NativeEditorPo
       const expired = [...proofs.keys()].find(key => !tickets.has(key) && key !== id)
       if (expired !== undefined) proofs.delete(expired)
     }
-    request.finish(); request.resolve({ bytes, editorRevision, documentId: document, ...(app === "wordcraft" ? { nativeState: hex(identityDigest) } : {}) })
+    request.finish(); request.resolve({ bytes, editorRevision, documentId: document, revision: app === "wordcraft" ? revision : `${document}:${revision}`, ...(app === "wordcraft" ? { nativeState: hex(identityDigest) } : {}) })
   }
   function receive(raw: unknown) {
     if (closed) return
@@ -255,13 +255,18 @@ function buildNativeEditorPort(options: NativeEditorPortOptions): NativeEditorPo
       // Copy the verified candidate before awaiting its hash; host callbacks
       // cannot mutate the metadata midway through an acknowledgement.
       const saved = { ...receipt }
-      if (closed || !port || boundDocument === undefined || saved.applicationId !== app || saved.enginePin !== options.enginePin || saved.workspaceId !== options.scope.workspaceId || saved.pageId !== options.scope.pageId || saved.sessionId !== options.scope.sessionId || saved.generation !== options.scope.generation || saved.issuedBy !== "crewship" || saved.durability !== "node" || saved.phase !== "committed" || saved.candidateHash !== saved.contentHash || !validNativeVersion(saved.baseVersion) || !validNativeVersion(saved.version) || BigInt(saved.version) !== BigInt(saved.baseVersion) + 1n || BigInt(saved.version) <= lastAcknowledged) return false
+      // `unchanged` confirms this snapshot at a version the document already has,
+      // so it may repeat the last acknowledged version but never go below it.
+      const unchanged = saved.unchanged === true
+      if ("unchanged" in saved && !unchanged) return false
+      const superseded = () => unchanged ? BigInt(saved.version) < lastAcknowledged : BigInt(saved.version) <= lastAcknowledged
+      if (closed || !port || boundDocument === undefined || saved.applicationId !== app || saved.enginePin !== options.enginePin || saved.workspaceId !== options.scope.workspaceId || saved.pageId !== options.scope.pageId || saved.sessionId !== options.scope.sessionId || saved.generation !== options.scope.generation || saved.issuedBy !== "crewship" || saved.durability !== "node" || saved.phase !== "committed" || saved.candidateHash !== saved.contentHash || !validNativeVersion(saved.baseVersion) || !validNativeVersion(saved.version) || BigInt(saved.version) !== BigInt(saved.baseVersion) + (unchanged ? 0n : 1n) || superseded()) return false
       const matching: SnapshotProof[] = []
       for (const proof of proofs.values()) {
         if (proof.editorRevision !== saved.editorRevision || proof.document !== boundDocument) continue
         try { if (await proof.hash === saved.contentHash) matching.push(proof) } catch { return false }
       }
-      if (closed || !port || BigInt(saved.version) <= lastAcknowledged || matching.length !== 1) return false
+      if (closed || !port || superseded() || matching.length !== 1) return false
       let sent = false
       for (const proof of matching) {
         const delivered = app === "wordcraft" ? post({ type: "wordcraft:saved", requestId: proof.requestId, document: proof.document, revision: proof.revision }) : post({ type: "gridcraft:save-ack", requestId: proof.requestId, document: proof.document, revision: proof.revision })

@@ -18,11 +18,12 @@ Artifacts library turned on, the full catalogue of your artifacts lives under
 **Artifacts** in the left navigation.
 
 <Note>
-Everything on this page is off by default. Each surface needs these switches:
+Apart from the workspace flag `artifact_projects`, which is on by default,
+everything on this page is off by default. Each surface needs these switches:
 
 | Surface | Needs |
 | --- | --- |
-| **Create artifact project** in the composer | Workspace flag `artifact_projects`: `crewship feature-flag enable artifact_projects`. An operator can turn it on for every workspace with `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true`. |
+| **Create artifact project** in the composer | Workspace flag `artifact_projects`, on by default. A workspace manager can turn it off with `crewship feature-flag disable artifact_projects`; `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` forces it on for every workspace. |
 | Progress cards, artifact cards and the side viewer | Build-time `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true`, plus the workspace flag `artifact_projects`. The default production build sets `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=false`. |
 | **Dashboard** on a card | Build-time `NEXT_PUBLIC_ARTIFACT_DASHBOARDS=true`. Without it a dashboard shows as **Project**. |
 | **Slides** on a card | Build-time `NEXT_PUBLIC_ARTIFACT_SLIDES=true`, plus the workspace flag `artifact_slides` (`crewship feature-flag enable artifact_slides`) or the instance switch `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true`. With only the build-time variable, a slide deck shows as **Artifact** with **Can't show this version here**. Without the build-time variable, it shows as **Project**. |

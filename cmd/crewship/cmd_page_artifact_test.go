@@ -55,6 +55,10 @@ func TestPageArtifactRestoreRequiresExplicitBase(t *testing.T) {
 }
 
 func TestPageArtifactManifestRejectsAmbiguousJSONBeforeNetwork(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, raw := range []string{
 		`{"entrypoint":"index.html","entrypoint":"other.html","files":[]}`,
 		`{"entrypoint":"index.html","files":[{"path":"index.html","content":"first","content":"last","media_type":"text/html"}]}`,

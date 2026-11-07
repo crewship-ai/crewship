@@ -22,6 +22,7 @@ export interface DesignState {
   version: number
   latest_version?: number
   can_edit?: boolean
+  can_comment?: boolean
   origin?: { chat_id: string; agent_id: string } | null
   nodes: DesignNode[]
 }

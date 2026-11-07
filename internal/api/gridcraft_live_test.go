@@ -259,7 +259,8 @@ func TestGridCraftCommitsFeedUnderReadAccess(t *testing.T) {
 	for _, bad := range []string{"", "&since=-1", "&since=x", "&since=0&limit=0", "&since=0&limit=201", "&since=0&limit=x"} {
 		wantCode(t, f.do(f.boss, "GET", base+"/commits"+q+bad, ""), 400, "bad query "+bad)
 	}
-	wantCode(t, f.do(f.wsAdmin, "GET", base+"/commits"+q+"&since=0", ""), 404, "ADMIN without access")
+	// PRD §5 (#4825): a workspace ADMIN reads the commit feed as an audited reader.
+	wantCode(t, f.do(f.wsAdmin, "GET", base+"/commits"+q+"&since=0", ""), 200, "ADMIN audited read")
 
 	// History that was pruned cannot be replayed: 410 says from where it can.
 	mustExec(t, f.db, `UPDATE gridcraft_audit SET kind='snapshot',command=NULL WHERE page_id='feed-book' AND rev<=2`)

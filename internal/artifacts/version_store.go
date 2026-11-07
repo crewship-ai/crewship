@@ -244,10 +244,46 @@ func (s *VersionStore) Read(ctx context.Context, k VersionKey, a VersionAuthoriz
 	}
 	return
 }
+
+// ReadVersionFenced reads one version inside a transaction that holds the
+// document writer fence, then runs after(tx, manifest, err) in that same
+// transaction before it commits. ErrVersionNotFound is passed to after, not
+// returned, so a caller can record what it proved absent atomically with the
+// read; after's own error rolls the transaction back.
+func (s *VersionStore) ReadVersionFenced(ctx context.Context, k VersionKey, version int64, a VersionAuthorize, after func(*sql.Tx, VersionManifest, error) error) error {
+	return s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error {
+		m, e := readVersion(ctx, tx, k, version)
+		if e != nil && !errors.Is(e, ErrVersionNotFound) {
+			return e
+		}
+		return after(tx, m, e)
+	})
+}
 func (s *VersionStore) ReadVersion(ctx context.Context, k VersionKey, version int64, a VersionAuthorize) (out VersionManifest, err error) {
 	err = s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error { var e error; out, e = readVersion(ctx, tx, k, version); return e })
 	if err != nil {
 		return VersionManifest{}, err
+	}
+	return
+}
+
+// ReadVersionWithHead reads one stored version and the current head in the
+// same transaction, under the caller's live authority. It never writes: the
+// head is reported so a caller can tell an old version from the current one.
+func (s *VersionStore) ReadVersionWithHead(ctx context.Context, k VersionKey, version int64, a VersionAuthorize) (out VersionManifest, latest int64, err error) {
+	if version < 1 {
+		return VersionManifest{}, 0, fmt.Errorf("%w: version", ErrVersionInvalid)
+	}
+	err = s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error {
+		var e error
+		if latest, _, e = versionHead(ctx, tx, k); e != nil {
+			return e
+		}
+		out, e = readVersion(ctx, tx, k, version)
+		return e
+	})
+	if err != nil {
+		return VersionManifest{}, 0, err
 	}
 	return
 }
@@ -296,6 +332,58 @@ func (s *VersionStore) Apply(ctx context.Context, k VersionKey, r VersionRequest
 		return VersionReceipt{}, err
 	}
 	return
+}
+
+// ApplyChanged is Apply for a writer whose repeat must not grow history. When
+// the base is the head and the head already holds exactly these files, it
+// writes and charges nothing and reports unchanged with the head as the receipt
+// version. The same authority and writer fence run first, so a caller that
+// could not save learns nothing. Any other request is an ordinary Apply.
+func (s *VersionStore) ApplyChanged(ctx context.Context, k VersionKey, r VersionRequest, a VersionAuthorize) (out VersionReceipt, unchanged bool, err error) {
+	err = s.writeTransaction(ctx, k, a, func(tx *sql.Tx, actor string) error {
+		same, e := headHolds(ctx, tx, k, r)
+		if e != nil {
+			return e
+		}
+		if same {
+			out, unchanged = VersionReceipt{r.BaseVersion, actor}, true
+			return nil
+		}
+		out, e = s.publish(ctx, tx, k, r, actor, 0)
+		return e
+	})
+	if err != nil {
+		return VersionReceipt{}, false, err
+	}
+	return
+}
+
+// headHolds compares file hashes and media types against the base when it is
+// the head. An earlier version with the same content does not count.
+func headHolds(ctx context.Context, tx *sql.Tx, k VersionKey, r VersionRequest) (bool, error) {
+	latest, _, err := versionHead(ctx, tx, k)
+	if err != nil || latest == 0 || latest != r.BaseVersion {
+		return false, err
+	}
+	var raw []byte
+	if err = tx.QueryRowContext(ctx, `SELECT manifest_json FROM artifact_versions WHERE workspace_id=? AND page_id=? AND version=?`, k.WorkspaceID, k.PageID, latest).Scan(&raw); err != nil {
+		return false, err
+	}
+	var m storedManifest
+	if err = json.Unmarshal(raw, &m); err != nil {
+		return false, err
+	}
+	if m.EntryPoint != r.EntryPoint || len(m.Files) != len(r.Files) {
+		return false, nil
+	}
+	for name, file := range r.Files {
+		stored, ok := m.Files[name]
+		sum := sha256.Sum256(file.Content)
+		if !ok || stored.MediaType != file.MediaType || stored.Hash != hex.EncodeToString(sum[:]) {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 func (s *VersionStore) publish(ctx context.Context, tx *sql.Tx, k VersionKey, r VersionRequest, actor string, restored int64) (VersionReceipt, error) {
 	latest, _, err := versionHead(ctx, tx, k)
@@ -418,6 +506,52 @@ func (s *VersionStore) Versions(ctx context.Context, k VersionKey, a VersionAuth
 	err = s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error { var e error; out, e = listVersions(ctx, tx, k); return e })
 	if err != nil {
 		return nil, err
+	}
+	return
+}
+
+// versionRowsQuerier is the part of *sql.Tx the bounded history read needs.
+type versionRowsQuerier interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+// listRecentVersions scans at most limit+1 rows, newest first. The extra row
+// only tells the caller that older versions exist.
+func listRecentVersions(ctx context.Context, q versionRowsQuerier, k VersionKey, limit int) (out []VersionInfo, err error) {
+	out = []VersionInfo{}
+	rows, e := q.QueryContext(ctx, `SELECT version,json_extract(manifest_json,'$.entry_point'),message,actor,created_at,restored_from FROM artifact_versions WHERE workspace_id=? AND page_id=? ORDER BY version DESC LIMIT ?`, k.WorkspaceID, k.PageID, limit+1)
+	if e != nil {
+		return nil, e
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var v VersionInfo
+		if e = rows.Scan(&v.Version, &v.EntryPoint, &v.Message, &v.Actor, &v.CreatedAt, &v.RestoredFrom); e != nil {
+			return nil, e
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// RecentVersions lists at most limit versions, newest first, under the same
+// live authority and writer fence as Read, so a listing is ordered against a
+// concurrent revocation exactly like a document read. The bound is applied in
+// SQL; truncated reports that older versions exist (and remain stored).
+func (s *VersionStore) RecentVersions(ctx context.Context, k VersionKey, limit int, a VersionAuthorize) (out []VersionInfo, truncated bool, err error) {
+	if limit < 1 || limit > 1000 {
+		return nil, false, fmt.Errorf("%w: history limit", ErrVersionInvalid)
+	}
+	err = s.transaction(ctx, k, a, func(tx *sql.Tx, _ string) error {
+		var e error
+		out, e = listRecentVersions(ctx, tx, k, limit)
+		return e
+	})
+	if err != nil {
+		return nil, false, err
+	}
+	if len(out) > limit {
+		out, truncated = out[:limit], true
 	}
 	return
 }

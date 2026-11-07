@@ -779,7 +779,7 @@ func (h *PageHandler) PageApplication(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ws := WorkspaceIDFromContext(r.Context())
-	rec, err := h.loadPage(r.Context(), ws, r.PathValue("slug"))
+	rec, err := h.loadPageForRead(r.Context(), ws, r.PathValue("slug"))
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, 404, "Page not found")
 		return
@@ -805,6 +805,9 @@ func (h *PageHandler) PageApplication(w http.ResponseWriter, r *http.Request) {
 	}
 	if !reachable {
 		replyError(w, 404, "Page not found")
+		return
+	}
+	if !h.auditPrivateOwnerAccess(w, r, rec) {
 		return
 	}
 	release, leased := h.pageLease(w, r)

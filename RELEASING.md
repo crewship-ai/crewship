@@ -22,9 +22,22 @@ Before tagging, verify:
       `pnpm lint && pnpm build && pnpm test --run`.
 - [ ] `gofmt -l internal/ cmd/` is empty for files touched in the
       release window.
+- [ ] Fragments are collected: on a release-prep branch run
+      `python3 scripts/changelog-collect.py` (`--dry-run` first to preview).
+      It moves every `changelog.d/<number>-<slug>.md` to the top of
+      `## [Unreleased]`, highest number first, and deletes the fragment
+      files; it refuses, changing nothing, on an empty fragment or a missing
+      heading. If it stops partway (crash, kill, full disk), just rerun it:
+      it records what it collects in `CHANGELOG.md.collect-journal`,
+      installs `CHANGELOG.md` durably before deleting any fragment, and the
+      rerun finishes from that journal, so no note is lost or added twice.
+      If you edited `CHANGELOG.md` in between, it refuses and says what to
+      check. Commit the result with
+      the version bump below. Fragments
+      merged after that commit wait for the next release.
 - [ ] `CHANGELOG.md` has a populated `## [X.Y.Z]` section under
       `## [Unreleased]`. Move the entries down, leave `## [Unreleased]`
-      empty.
+      empty; `changelog.d/` holds only its `README.md`.
 - [ ] `package.json` `version` matches the target tag (without the `v`
       prefix; `0.1.0-beta.1` for tag `v0.1.0-beta.1`).
 - [ ] No unresolved major review findings on the release PR; follow [Review before merge](CONTRIBUTING.md#review-before-merge).
@@ -77,6 +90,20 @@ surface is off and the Artifacts nav opens `/pages`. A shared dev release
 (a `demo/release-*` branch with a draft PR for CI) changes only this file: set
 `CREWSHIP_BUILD_PROFILE=release` and turn on the flags listed in
 `RELEASE_FLAGS` in `e2e/build-profile.ts`; the sharing mock stays off.
+
+The profile separates three things that must not be read as one:
+
+| Surface | Production default (`main`) | Shared dev release | Accepted |
+|---|---|---|---|
+| Artifacts library, Pages opening in Artifacts, chat artifact context and projects, Craft lease, Design | off | on (`RELEASE_FLAGS`) | only on the exact release SHA whose `VALIDACE` records milestones A and B |
+| Dashboard (milestone C) | off | off (`UNACCEPTED_FLAGS`) | no |
+| Slides and Design System (milestone D) | off | off (`UNACCEPTED_FLAGS`) | no |
+
+A surface moves into `RELEASE_FLAGS` after its milestone is accepted, not to make
+it reachable for a demo; the unit test fails if a flag is listed in both, or if
+either profile turns on an unaccepted flag. This table covers the build-time
+`NEXT_PUBLIC_*` flags. Server-side flags (`crewship feature-flag`, environment
+`CREWSHIP_*`) live with each environment and are verified on the deployed slot.
 
 The feature-flag unit tests and the phone browser contract read the profile and
 check either build, so CI of the exact release SHA is green without skipping
@@ -360,14 +387,20 @@ quietly into production events.
 
 ## Branch protection
 
-`main` is protected; configure via `scripts/setup-branch-protection.sh`
-(run once with repo-admin gh credentials). Required checks (must match
-the names emitted in the workflow files exactly — see the setup script
-for the canonical list): **Frontend**, **Backend (Go)**, **Lint
-migrations**, **Security**, **End-to-end (devcontainer)**. One approval
-needed (use auto-approve for trivial dep bumps via Renovate).
-Force-push is disallowed; linear history is required;
-`enforce_admins=true` (admins can't bypass the gate).
+Changes to `main` go through a pull request and the merge queue. Follow
+[Review before merge](CONTRIBUTING.md#review-before-merge),
+[Review scaled by risk](CONTRIBUTING.md#review-scaled-by-risk) and
+[Merge through the queue](CONTRIBUTING.md#merge-through-the-queue) for the
+required aggregate checks, review evidence and exact-head submission procedure.
+A formal approval count or a green PR run does not replace that procedure or
+the queue's checks.
+
+See the [CI/CD runbook](docs/runbooks/ci-cd-implementation-2026-09-11.md) for
+exact-SHA release verification and the authorized repository-policy workflow.
+When auditing live protection, inspect the branch's
+[effective rules](https://docs.github.com/en/rest/repos/rules#get-rules-for-a-branch).
+A missing classic branch-protection API response alone does not mean `main`
+is unprotected: rulesets also enforce branch policy.
 
 ## Cadence
 

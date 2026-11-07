@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
@@ -145,6 +146,10 @@ func (h *TemplateHandler) Create(w http.ResponseWriter, r *http.Request) {
 		VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
 		id, wsID, req.Name, req.Description, string(req.TemplateJSON), req.Icon, req.Color, now, now)
 	if err != nil {
+		if isTemplateNameConflict(err) {
+			writeProblem(w, r, http.StatusConflict, "Template name already exists")
+			return
+		}
 		h.logger.Error("create template", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Failed to create template")
 		return
@@ -227,6 +232,10 @@ func (h *TemplateHandler) Update(w http.ResponseWriter, r *http.Request) {
 
 	query, args := ub.Build("workflow_templates", "id = ? AND workspace_id = ?", templateID, wsID)
 	if _, err := h.db.ExecContext(r.Context(), query, args...); err != nil {
+		if isTemplateNameConflict(err) {
+			writeProblem(w, r, http.StatusConflict, "Template name already exists")
+			return
+		}
 		h.logger.Error("update template", "error", err)
 		writeProblem(w, r, http.StatusInternalServerError, "Failed to update template")
 		return
@@ -265,4 +274,15 @@ func generateTemplateID() string {
 		return fmt.Sprintf("wt_%d", time.Now().UnixNano())
 	}
 	return fmt.Sprintf("wt_%x", b)
+}
+
+// Only the workspace/name uniqueness contract is a client conflict. Other
+// uniqueness failures and storage errors retain their server-error handling.
+func isTemplateNameConflict(err error) bool {
+	if !isUniqueConstraintErr(err) {
+		return false
+	}
+	_, columns, ok := strings.Cut(err.Error(), "UNIQUE constraint failed: ")
+	const expected = "workflow_templates.workspace_id, workflow_templates.name"
+	return ok && (columns == expected || columns == expected+" (2067)")
 }

@@ -7,13 +7,12 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
 	"modernc.org/sqlite"
 
-	"github.com/crewship-ai/crewship/internal/diskusage"
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -27,10 +26,14 @@ var ErrStorageQuota = fmt.Errorf("%w: aggregate artifact storage capacity reache
 var ErrStorageBusy = errors.New("artifact storage admission busy; retry shortly")
 
 // StorageBudgetError preserves the surrounding HTTP error contract while
-// identifying only the private SQLite quota-trigger sentinel.
+// identifying the private SQLite quota-trigger sentinel and the shared
+// free-disk refusal as the aggregate storage refusal.
 func StorageBudgetError(err error) error {
 	if err == nil || errors.Is(err, ErrVersionQuota) || errors.Is(err, ErrStorageBusy) {
 		return err
+	}
+	if errors.Is(err, storageheadroom.ErrInsufficient) {
+		return errors.Join(ErrStorageQuota, err)
 	}
 	var sqliteError *sqlite.Error
 	if errors.As(err, &sqliteError) && sqliteError.Code() == 1811 && strings.Contains(sqliteError.Error(), "artifact_storage_quota") {
@@ -186,42 +189,16 @@ func ConsumeStorageUpload(ctx context.Context, tx *sql.Tx, k VersionKey) error {
 	return err
 }
 
-var storageDiskUsage = diskusage.Usage
-
-// CheckStorageHeadroom runs under the existing database writer fence. Logical
-// admission is enforced by SQL capacity charges, never by this probe alone.
-// Keep one whole DB copy plus the operation reserve, and twice the outstanding
-// payload allowance for SQLite pages/WAL. Reads do not call this guard.
+// CheckStorageHeadroom is the free-disk admission for artifact writers. It runs
+// under the existing database writer fence. Logical admission is enforced by
+// SQL capacity charges, never by this probe alone. Legacy document, Slides,
+// GridCraft and Mooring writers call storageheadroom.Check directly; StorageBudgetError maps both to
+// the same ErrStorageQuota refusal. Reads do not call this guard.
 func CheckStorageHeadroom(ctx context.Context, tx *sql.Tx, writeBytes int64) error {
 	if writeBytes < 0 || writeBytes > MaxStorageUploadBytes {
 		return ErrVersionInvalid
 	}
-	if err := expireStorageUploads(ctx, tx); err != nil {
-		return err
-	}
-	var path string
-	if err := tx.QueryRowContext(ctx, `SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&path); err != nil {
-		return err
-	}
-	if path == "" {
-		return nil
-	}
-	var pages, pageSize, reserved, reserve int64
-	if err := tx.QueryRowContext(ctx, `SELECT (SELECT page_count FROM pragma_page_count),(SELECT page_size FROM pragma_page_size),reserved_bytes,min_free_bytes FROM artifact_storage_global WHERE id=1`).Scan(&pages, &pageSize, &reserved, &reserve); err != nil {
-		return err
-	}
-	if pages < 0 || pageSize <= 0 || reserved < 0 || reserve < 0 {
-		return ErrStorageQuota
-	}
-	stats, err := storageDiskUsage(filepath.Dir(path))
-	if err != nil {
-		return errors.Join(ErrStorageQuota, err)
-	}
-	required := uint64(reserve) + uint64(pages)*uint64(pageSize) + 2*(uint64(reserved)+uint64(writeBytes))
-	if stats.FreeBytes < required {
-		return ErrStorageQuota
-	}
-	return nil
+	return StorageBudgetError(storageheadroom.Check(ctx, tx, writeBytes))
 }
 
 // WorkspaceStorageUsage is the owner/admin view of one workspace's aggregate

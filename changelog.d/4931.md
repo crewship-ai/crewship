@@ -1,0 +1,1 @@
+- **OpenAPI clients can validate crew budget limits with OpenAPI 3.0.** The generated request now expresses the existing positive limit as `minimum: 0` with boolean `exclusiveMinimum: true`, and includes the server's inclusive USD 1 billion ceiling. Runtime budget behavior is unchanged.

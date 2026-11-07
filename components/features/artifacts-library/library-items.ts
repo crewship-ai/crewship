@@ -1,4 +1,5 @@
 import type { PageFolderRef, PageView } from "@/hooks/use-pages"
+import { artifactDashboards, artifactSlides } from "@/lib/feature-flags"
 
 /**
  * The kinds the library shows: each has a backend that stores and opens it.
@@ -103,6 +104,44 @@ export function libraryItems(pages: PageView[], options: { keepOrder?: boolean }
 }
 
 /** Archive, test origin and a pending move, from the server's fields or the sharing mock. */
+/** A positive safe integer `?version=` pin, or undefined. */
+export function versionPin(raw: string | null | undefined): number | undefined {
+  const value = Number(raw)
+  return raw && Number.isSafeInteger(value) && value > 0 ? value : undefined
+}
+
+/**
+ * The Artifacts address of one project in a workspace, optionally pinned to a
+ * version: what the API returns for create, share and restore (#4995) and
+ * where an old /pages/<slug>?artifact=1 link moves.
+ */
+export function artifactsProjectHref(id: string, workspaceId: string, version?: number): string {
+  const query = new URLSearchParams({ workspace_id: workspaceId })
+  if (version !== undefined) query.set("version", String(version))
+  return `/artifacts/${encodeURIComponent(id)}?${query}`
+}
+
+/** The Pages address of an item; a project keeps the version its address pins. */
+export function openInPagesHref(workspaceId: string, item: Pick<LibraryItem, "slug" | "pageId" | "projectBacked">, version?: number): string {
+  const query = new URLSearchParams({ workspace_id: workspaceId })
+  if (item.projectBacked) {
+    query.set("artifact", "1")
+    if (version !== undefined) query.set("version", String(version))
+  }
+  const reference = item.projectBacked && item.pageId ? "@" + item.pageId : item.slug
+  return `/pages/${encodeURIComponent(reference)}?${query}`
+}
+
+/**
+ * Whether the Artifacts detail shows this versioned item in its own project
+ * viewer (a Project, and a Dashboard or Slides behind their build switches).
+ * The same rule decides whether an old /pages/<slug>?artifact=1 link moves to
+ * Artifacts: anything else keeps opening on Pages.
+ */
+export function viewsProjectInline(item: LibraryItem): boolean {
+  return item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides())
+}
+
 export function withLibraryState(items: LibraryItem[], state: {
   archived: ReadonlySet<string>; test: ReadonlySet<string>; moved?: ReadonlyMap<string, { slug: string; name: string } | null>
 }): LibraryItem[] {

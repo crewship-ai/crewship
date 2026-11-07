@@ -184,3 +184,37 @@ func TestWatcher_MissingRoot(t *testing.T) {
 		t.Fatalf("expected error from missing root, got nil")
 	}
 }
+
+// A debounce callback can start after Stop has already waited for in-flight
+// flushes (time.AfterFunc runs it on its own goroutine, #4814). It must not
+// send on the closed events channel, and a late note must not arm a new timer.
+func TestWatcher_FlushAfterStopDoesNotSendOnClosedChannel(t *testing.T) {
+	silent := slog.New(slog.NewTextHandler(io.Discard, nil))
+	w, err := StartWatcher(context.Background(), t.TempDir(), WatchConfig{
+		Debounce:     time.Hour,
+		PollInterval: time.Hour,
+		Logger:       silent,
+	})
+	if err != nil {
+		t.Fatalf("StartWatcher: %v", err)
+	}
+	w.Stop()
+	// With both w.stop and the closed w.events ready, select picks at random;
+	// 64 late callbacks make a send-on-closed panic certain on the old code.
+	for i := 0; i < 64; i++ {
+		w.debounceMu.Lock()
+		w.pendingPaths["late.md"] = struct{}{}
+		w.debounceMu.Unlock()
+		w.flush()
+	}
+	w.note("late.md")
+	w.debounceMu.Lock()
+	armed := w.debounceTimer != nil
+	w.debounceMu.Unlock()
+	if armed {
+		t.Fatal("note after Stop armed a debounce timer")
+	}
+	if _, ok := <-w.Events(); ok {
+		t.Fatal("event delivered after Stop")
+	}
+}

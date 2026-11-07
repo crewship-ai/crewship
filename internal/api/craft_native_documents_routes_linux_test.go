@@ -237,6 +237,40 @@ func TestCraftNativeDocumentRoutesTwoHumansSaveLostACKRestoreAndStaleGeneration(
 		t.Fatalf("head %d %v", head, err)
 	}
 }
+
+// #4899: a reconcile with the attempt id answers 410 when nothing landed and
+// retires that attempt; the retired attempt is refused (409) and a fresh
+// attempt of the same bytes saves. Without an id the answer stays 409.
+func TestCraftNativeDocumentRoutesReconcileRetiresAnAbsentAttempt(t *testing.T) {
+	f, _, call, owner, _, cfg := craftNativeDataTCPFixture(t, true)
+	at, aid := craftNativeDataTCPAdmission(t, call, owner)
+	if status, raw := call("POST", "lease", owner, at, struct{}{}); status != 200 {
+		t.Fatalf("acquire %d %s", status, raw)
+	}
+	lost := craftNativeDataTCPBody(f, cfg, aid, "1", "1", "opaque:offline:1", []byte(`{"v":"offline"}`))
+	if status, raw := call("POST", "document/reconcile", owner, at, lost); status != 409 {
+		t.Fatalf("reconcile without attempt id %d %s", status, raw)
+	}
+	lost["attemptId"] = "attempt-offline-1"
+	if status, raw := call("POST", "document/reconcile", owner, at, lost); status != 410 {
+		t.Fatalf("reconcile of an absent attempt %d %s", status, raw)
+	}
+	if status, raw := call("POST", "document/save", owner, at, lost); status != 409 {
+		t.Fatalf("retired attempt saved %d %s", status, raw)
+	}
+	lost["attemptId"] = "attempt-fresh-1"
+	status, raw := call("POST", "document/save", owner, at, lost)
+	if status != 200 || !bytes.Contains(raw, []byte(`"version":"2"`)) || bytes.Contains(raw, []byte("attempt")) {
+		t.Fatalf("fresh attempt %d %s", status, raw)
+	}
+	if status, raw = call("POST", "document/reconcile", owner, at, lost); status != 200 || !bytes.Contains(raw, []byte(`"version":"2"`)) {
+		t.Fatalf("reconcile of the landed attempt %d %s", status, raw)
+	}
+	lost["attemptId"] = "bad id"
+	if status, raw = call("POST", "document/reconcile", owner, at, lost); status != 422 {
+		t.Fatalf("invalid attempt id %d %s", status, raw)
+	}
+}
 func TestCraftNativeDocumentRoutesProductionValidatorRefusesSyntheticNativeAndOverrides(t *testing.T) {
 	f, _, call, owner, _, cfg := craftNativeDataTCPFixture(t, false)
 	token, id := craftNativeDataTCPAdmission(t, call, owner)

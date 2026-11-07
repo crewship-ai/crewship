@@ -39,9 +39,10 @@ vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-c
   useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: true, sheets: false, pages: true, ...state.caps }),
 }))
 vi.mock("../new-artifact-dialog", () => ({
-  NewArtifactDialog: ({ defaultKind, defaultFolderSlug, onCreated }: { defaultKind?: string; defaultFolderSlug?: string; onCreated: (slug: string) => void }) =>
+  NewArtifactDialog: ({ defaultKind, defaultFolderSlug, onCreated }: { defaultKind?: string; defaultFolderSlug?: string; onCreated: (slug: string, id?: string) => void }) =>
     <div role="dialog" aria-label="New artifact" data-kind={defaultKind ?? ""} data-folder={defaultFolderSlug ?? ""}>
       <button type="button" onClick={() => onCreated("fresh-design")}>Create</button>
+      <button type="button" onClick={() => onCreated("fresh-sheet", "page-id-1")}>Create with ID</button>
     </div>,
 }))
 vi.mock("@/components/layout/secondary-panel", async importOriginal => ({ ...(await importOriginal<typeof import("@/components/layout/secondary-panel")>()), SecondaryPanel: ({ label, children }: { label: string; children: React.ReactNode }) => <aside aria-label={label}>{children}</aside> }))
@@ -219,6 +220,17 @@ it("a just-created artifact opens by its slug, never as an ID, so it does not la
   // The new item is not in the list yet; the route opens it by slug and moves to its ID once it resolves.
   expect(state.select).toHaveBeenCalledWith(null, "fresh-design")
   expect(state.select).not.toHaveBeenCalledWith("fresh-design")
+})
+
+it("opens a just-created artifact with a confirmed ID at its own address, never by slug first (#4902)", () => {
+  // By slug, the library mounted the native editor (whose admission refreshes
+  // the session) and the exported build then reloaded the page as
+  // /artifacts/<id> mid-refresh, which signed the person out.
+  renderLibrary()
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  fireEvent.click(screen.getByRole("button", { name: "Create with ID" }))
+  expect(state.select).toHaveBeenCalledWith("page-id-1")
+  expect(state.select).not.toHaveBeenCalledWith(null, "fresh-sheet")
 })
 
 it("searches with operators, filters by kind with counts and switches to a table", () => {
@@ -540,4 +552,23 @@ it("a chosen folder has its settings", () => {
   render(withQuery(<ArtifactsLibrary workspaceId="ws1" item={null} onSelect={state.select} filters={{ view: "all", q: "", kinds: [], access: [], version: [], owners: [], folder: "sales" }} />))
   fireEvent.click(screen.getByRole("button", { name: "Folder settings" }))
   expect(screen.getByRole("dialog", { name: "Settings for Sales" })).toBeTruthy()
+})
+
+// #4898: New artifact → Page with panels makes a blank Page; it must not vanish
+// from the library the person made it in, and hidden blanks are pointed to.
+it("keeps a blank Page the person just created in the library and points to hidden blank items", () => {
+  state.pages = [wire({ slug: "fresh-design", id: "page-fresh", name: "UX walkthrough page" })]
+  renderLibrary()
+  expect(screen.getByText("No artifacts yet")).toBeTruthy()
+  expect(screen.getByText(/1 blank item is in Empty/)).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "Show empty (1)" }))
+  expect(screen.getAllByText("UX walkthrough page").length).toBeGreaterThan(0)
+  cleanup()
+
+  renderLibrary()
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  fireEvent.click(within(screen.getByRole("dialog", { name: "New artifact" })).getByRole("button", { name: "Create" }))
+  expect(state.select).toHaveBeenCalledWith(null, "fresh-design")
+  expect(screen.queryByText("No artifacts yet")).toBeNull()
+  expect(screen.getAllByText("UX walkthrough page").length).toBeGreaterThan(0)
 })

@@ -19,18 +19,17 @@ version; earlier versions stay as they were.
 
 Slides is off by default. It needs both switches below.
 
-**Server, per workspace.** A workspace owner or admin enables two workspace
-feature flags. `artifact_projects` is the base for every versioned artifact, and
-`artifact_slides` adds the deck view and PDF export:
+**Server, per workspace.** Slides builds on the workspace flag
+`artifact_projects`, the base for every versioned artifact, which is on unless
+someone turned it off. A workspace owner or admin enables `artifact_slides`,
+which adds the deck view and PDF export:
 
 ```bash
-crewship feature-flag enable artifact_projects
 crewship feature-flag enable artifact_slides
 ```
 
-An operator can instead switch them on for every workspace on the instance with
-`CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` and
-`CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` in the server environment. See
+An operator can instead switch Slides on for every workspace on the instance
+with `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` in the server environment. See
 [`crewship feature-flag`](/cli/feature-flag) for overrides and how to revert
 them.
 
@@ -209,8 +208,8 @@ but it explains why a version is refused. A deck version contains:
 - One `slides/<id>.html` file per listed slide and no other files.
 
 Each slide file is a single `<section id="<id>">` holding, in order, any number
-of these elements and at most one closing `<aside>` with plain-text speaker
-notes:
+of these elements and at most one closing `<aside id="...">` (the `id` is required) with plain-text
+speaker notes:
 
 - `<p>`: a text block with plain text only.
 - `<div data-shape="rectangle">` or `<div data-shape="ellipse">`: an empty shape.

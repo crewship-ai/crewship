@@ -2,6 +2,7 @@ package journal
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -223,4 +224,37 @@ func TestReplayTerminalReceiptAuthenticatesScopeAfterPruning(t *testing.T) {
 	if _, _, err := w.ReplayTerminal(t.Context(), e.ID, "ws_test", "agent", "receipt-scope"); !errors.Is(err, ErrReplayConflict) {
 		t.Fatalf("chunk acknowledged terminal: %v", err)
 	}
+}
+
+// A terminal receipt written without an exit code (routine child runs report
+// only their status) records no exit fact, so a later captured exit cannot
+// contradict it. A recorded exit still has to match exactly, and an absent
+// expectation never acknowledges a receipt that does carry one.
+func TestReplayTerminalReceiptWithoutExitAcceptsCapturedExit(t *testing.T) {
+	db := openTestDB(t)
+	defer db.Close()
+	w := NewWriter(db, quietLogger(), WriterOptions{})
+	defer w.Close()
+	e := Entry{ID: "run-terminal:no-exit", WorkspaceID: "ws_test", AgentID: "agent", TraceID: "no-exit", SpanID: "run-terminal:no-exit", TS: time.Now().UTC(), Type: EntryRunCompleted, Severity: SeverityInfo, ActorType: ActorSidecar, Summary: "routine child terminal"}
+	if _, _, err := w.EmitReplaySync(t.Context(), e); err != nil {
+		t.Fatal(err)
+	}
+	zero, one := 0, 1
+	for _, code := range []*int{nil, &zero, &one} {
+		if kind, exists, err := w.ReplayTerminal(t.Context(), e.ID, "ws_test", "agent", "no-exit", code); err != nil || !exists || kind != EntryRunCompleted {
+			t.Fatalf("exit %s against receipt without exit: %s,%v,%v", formatExit(code), kind, exists, err)
+		}
+	}
+	for _, scope := range [][3]string{{"foreign", "agent", "no-exit"}, {"ws_test", "foreign", "no-exit"}, {"ws_test", "agent", "foreign"}} {
+		if _, _, err := w.ReplayTerminal(t.Context(), e.ID, scope[0], scope[1], scope[2], &zero); !errors.Is(err, ErrReplayConflict) {
+			t.Fatalf("foreign scope accepted: %v", err)
+		}
+	}
+}
+
+func formatExit(code *int) string {
+	if code == nil {
+		return "<absent>"
+	}
+	return fmt.Sprint(*code)
 }

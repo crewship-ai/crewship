@@ -7,6 +7,10 @@ import (
 )
 
 func TestPageArchiveCLINeverConfirmsWithoutReviewedToken(t *testing.T) {
+	// The subtests' fixtures cannot register the CLI-state reset (guardCLIState
+	// skips subtests), so the parent owns it: the commands run the root
+	// PersistentPreRun, which blanks the colour palette.
+	guardCLIState(t)
 	for _, operation := range []string{"archive", "unarchive"} {
 		t.Run(operation, func(t *testing.T) {
 			stub := pageStub(t)

@@ -691,3 +691,60 @@ describe("buffered-frame cancellation", () => {
     expect(result.current.isStreaming).toBe(false)
   })
 })
+
+describe("a saved native Craft instruction (#5009)", () => {
+  const marked = {
+    id: "m1", role: "user", content: "Confidential merger instruction",
+    timestamp: new Date(), metadata: { native_craft_instruction: true },
+  }
+
+  it("refuses regenerate instead of resending it as an ordinary turn", () => {
+    const { result } = setup()
+    act(() => { result.current.loadHistory([marked] as never) })
+    mockSend.mockClear()
+    toastError.mockClear()
+
+    act(() => { result.current.regenerateLastTurn() })
+
+    expect(mockSend).not.toHaveBeenCalled()
+    expect(result.current.isStreaming).toBe(false)
+    expect(toastError).toHaveBeenCalledTimes(1)
+  })
+
+  it("refuses edit and resend the same way", () => {
+    const { result } = setup()
+    act(() => { result.current.loadHistory([marked] as never) })
+    const turnId = result.current.turns[0].id
+    mockSend.mockClear()
+    toastError.mockClear()
+
+    act(() => { result.current.editAndResend(turnId, "Confidential merger instruction, again") })
+
+    expect(mockSend).not.toHaveBeenCalled()
+    expect(result.current.turns[0].parts[0].content).toBe(marked.content)
+    expect(toastError).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the mark on a turn that arrives live", () => {
+    const { result } = setup()
+    dispatch(chatEvent("user_message", "Confidential merger instruction", { author_user_id: "teammate", native_craft_instruction: true }))
+    mockSend.mockClear()
+    toastError.mockClear()
+
+    act(() => { result.current.regenerateLastTurn() })
+
+    expect(mockSend).not.toHaveBeenCalled()
+    expect(toastError).toHaveBeenCalledTimes(1)
+  })
+
+  it("still regenerates an ordinary turn sent after the instruction", () => {
+    const { result } = setup()
+    act(() => { result.current.loadHistory([marked, { id: "u2", role: "user", content: "ordinary", timestamp: new Date() }] as never) })
+    mockSend.mockClear()
+
+    act(() => { result.current.regenerateLastTurn() })
+
+    expect(mockSend).toHaveBeenCalledTimes(1)
+    expect(String(mockSend.mock.calls[0][0].payload)).toContain("ordinary")
+  })
+})

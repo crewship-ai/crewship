@@ -137,9 +137,7 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				// Same as create: a soft-deleted agent's slug must not block it.
-				if _, err := h.db.ExecContext(r.Context(),
-					"UPDATE agents SET slug = slug || '_deleted_' || id WHERE workspace_id = ? AND slug = ? AND deleted_at IS NOT NULL",
-					workspaceID, newSlug); err != nil {
+				if err := freeDeletedAgentSlug(r.Context(), h.db, workspaceID, newSlug); err != nil {
 					h.logger.Warn("free deleted agent slug", "slug", newSlug, "error", err)
 				}
 			}

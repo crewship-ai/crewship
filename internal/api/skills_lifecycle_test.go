@@ -16,22 +16,25 @@ func TestSkillArchiveRestore(t *testing.T) {
 		action     string // "archive" or "restore"
 		startState string
 		source     string // defaults to CUSTOM
+		locked     bool   // skill is locked against autonomous rewrites
 		role       string
 		skillID    string
 		wantCode   int
 		wantState  string
 		wantEntry  journal.EntryType
 	}{
-		{"archive an active skill", "archive", "active", "", "OWNER", "sk-life", http.StatusOK, "archived", journal.EntrySkillArchived},
-		{"archive a stale skill", "archive", "stale", "", "ADMIN", "sk-life", http.StatusOK, "archived", journal.EntrySkillArchived},
-		{"archiving twice is idempotent", "archive", "archived", "", "OWNER", "sk-life", http.StatusOK, "archived", ""},
-		{"restore an archived skill", "restore", "archived", "", "OWNER", "sk-life", http.StatusOK, "active", journal.EntrySkillRestored},
-		{"restoring an active skill is a no-op", "restore", "active", "", "OWNER", "sk-life", http.StatusOK, "active", ""},
-		{"deprecated is terminal: archive refused", "archive", "deprecated", "", "OWNER", "sk-life", http.StatusConflict, "deprecated", ""},
-		{"deprecated is terminal: restore refused", "restore", "deprecated", "", "OWNER", "sk-life", http.StatusConflict, "deprecated", ""},
-		{"bundled skills are shared: archive refused", "archive", "active", "BUNDLED", "OWNER", "sk-life", http.StatusForbidden, "active", ""},
-		{"below manage is forbidden", "archive", "active", "", "MANAGER", "sk-life", http.StatusForbidden, "active", ""},
-		{"unknown skill", "archive", "active", "", "OWNER", "ghost", http.StatusNotFound, "active", ""},
+		{"archive an active skill", "archive", "active", "", false, "OWNER", "sk-life", http.StatusOK, "archived", journal.EntrySkillArchived},
+		{"archive a stale skill", "archive", "stale", "", false, "ADMIN", "sk-life", http.StatusOK, "archived", journal.EntrySkillArchived},
+		{"archiving twice is idempotent", "archive", "archived", "", false, "OWNER", "sk-life", http.StatusOK, "archived", ""},
+		{"restore an archived skill", "restore", "archived", "", false, "OWNER", "sk-life", http.StatusOK, "active", journal.EntrySkillRestored},
+		{"restoring an active skill is a no-op", "restore", "active", "", false, "OWNER", "sk-life", http.StatusOK, "active", ""},
+		{"deprecated is terminal: archive refused", "archive", "deprecated", "", false, "OWNER", "sk-life", http.StatusConflict, "deprecated", ""},
+		{"deprecated is terminal: restore refused", "restore", "deprecated", "", false, "OWNER", "sk-life", http.StatusConflict, "deprecated", ""},
+		{"bundled skills are shared: archive refused", "archive", "active", "BUNDLED", false, "OWNER", "sk-life", http.StatusForbidden, "active", ""},
+		{"below manage is forbidden", "archive", "active", "", false, "MANAGER", "sk-life", http.StatusForbidden, "active", ""},
+		{"a locked skill can still be archived by a person", "archive", "active", "", true, "OWNER", "sk-life", http.StatusOK, "archived", journal.EntrySkillArchived},
+		{"a locked skill can still be restored by a person", "restore", "archived", "", true, "OWNER", "sk-life", http.StatusOK, "active", journal.EntrySkillRestored},
+		{"unknown skill", "archive", "active", "", false, "OWNER", "ghost", http.StatusNotFound, "active", ""},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -39,7 +42,7 @@ func TestSkillArchiveRestore(t *testing.T) {
 			userID := seedTestUser(t, db)
 			wsID := seedTestWorkspace(t, db, userID)
 			seedSkillForTest(t, db, "sk-life", "life", "CODING")
-			execOrFatal(t, db, `UPDATE skills SET lifecycle_state = ?, source = COALESCE(NULLIF(?, ''), source) WHERE id = 'sk-life'`, tc.startState, tc.source)
+			execOrFatal(t, db, `UPDATE skills SET lifecycle_state = ?, source = COALESCE(NULLIF(?, ''), source), locked = ? WHERE id = 'sk-life'`, tc.startState, tc.source, tc.locked)
 
 			h := NewSkillHandler(db, newTestLogger())
 			rec := &recordingEmitter{}

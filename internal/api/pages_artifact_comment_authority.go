@@ -36,10 +36,9 @@ func (h *PageHandler) mayCommentPage(ctx context.Context, wsID, userID, role str
 	return false
 }
 
-// Native observer and existing collaborative checkpoint reads currently serve
-// latest rather than a shared snapshot.
-// Preserve all pre-existing read paths, but do not turn the new comment level
-// into permission to obtain native private bytes before shared reads exist.
+// mayReadNativeWithoutComment admits a native observer session, which carries
+// lease status only, and the collaborative checkpoint read, which serves latest
+// rather than a shared snapshot. The comment level never qualifies.
 func (h *PageHandler) mayReadNativeWithoutComment(ctx context.Context, wsID string, rec *pageRecord, viewer *pageViewer) bool {
 	if rec == nil || viewer == nil {
 		return false
@@ -61,6 +60,14 @@ func (h *PageHandler) mayReadNativeWithoutComment(ctx context.Context, wsID stri
 	}
 	folder, err := h.folderACLVerdictFor(ctx, rec, viewer)
 	return err == nil && folder.read
+}
+
+// mayReadNativePrivate answers who may reach a native document beyond its shared
+// version: Edit authority, or the workspace administrator read rule, which on a
+// private Page is wider than Edit and stays audited. Read and Comment grantees
+// get the shared preview and nothing else.
+func (h *PageHandler) mayReadNativePrivate(ctx context.Context, wsID, userID, role string, rec *pageRecord) bool {
+	return workspaceArtifactReader(role) || h.mayEditSpec(ctx, wsID, userID, role, rec)
 }
 
 func (h *PageHandler) artifactCommentVersion(ctx context.Context, tx *sql.Tx, k artifacts.VersionKey, human string) (int64, error) {
@@ -113,6 +120,11 @@ func (h *PageHandler) artifactProjectCommentAuthority(r *http.Request, k artifac
 		}
 		rec, err := h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
 		if err != nil || !h.mayCommentPage(ctx, k.WorkspaceID, user.ID, role, rec) {
+			return "", errArtifactProjectAccess
+		}
+		// The administrator read of private output (PRD §5) passes the read
+		// authority above; feedback on it stays with its custodian.
+		if rec.PrivateAudience && rec.OwnerUserID != user.ID {
 			return "", errArtifactProjectAccess
 		}
 		version, err := h.artifactCommentVersion(ctx, tx, k, user.ID)

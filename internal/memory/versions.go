@@ -224,7 +224,7 @@ func LogVersions(ctx context.Context, db *sql.DB, workspaceID, path string, limi
 		return nil, fmt.Errorf("query memory_versions: %w", err)
 	}
 	defer rows.Close()
-	var out []VersionEntry
+	out := []VersionEntry{}
 	for rows.Next() {
 		var v VersionEntry
 		if err := rows.Scan(&v.ID, &v.Path, &v.Tier, &v.Sha256, &v.Bytes,

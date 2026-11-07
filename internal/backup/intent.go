@@ -57,6 +57,8 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"artifact_versions":      IntentInclude, // all retained whole-project manifests
 
 	"mooring_authority_generations":  IntentExcludeRuntime, // target-local non-ABA tombstones never travel or reset in portable restore
+	"workspace_member_retired_ids":   IntentExcludeRuntime, // target-local tombstones: a restored member row must meet them, not reset them
+	"page_grant_retired_issuances":   IntentExcludeRuntime, // target-local tombstones: a restored grant must meet them, not reset them
 	"mooring_delivery_gates":         IntentExcludeRuntime,
 	"mooring_delivery_barriers":      IntentExcludeRuntime,
 	"mooring_collab_documents":       IntentInclude, // durable collaboration state; no runtime capabilities
@@ -77,8 +79,9 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"mooring_edit_lease_workspaces": IntentExcludeRuntime, // issued target fences outlive Page deletion
 	"mooring_edit_lease_requests":   IntentExcludeRuntime,
 
-	"craft_native_documents": IntentInclude, // immutable native compatibility pins, never runtime authority
-	"craft_native_proposals": IntentInclude, // reviewable document DATA; accept re-checks live rights and lease
+	"craft_native_documents":        IntentInclude,        // immutable native compatibility pins, never runtime authority
+	"craft_native_proposals":        IntentInclude,        // reviewable document DATA; accept re-checks live rights and lease
+	"craft_native_retired_attempts": IntentExcludeRuntime, // fences in-flight save attempts of live admissions; never portable
 
 	// Workbook content and immutable receipts travel; live authority does not.
 	"gridcraft_heads":        IntentInclude,
@@ -389,6 +392,9 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"webhook_deliveries": IntentExcludeRuntime,
 	// Receipt identities refer to this instance's pipeline runtime history.
 	"routine_webhook_receipts": IntentExcludeRuntime,
+	// Signal delivery outcomes hold the sender's delivery ids and the run ids of
+	// this instance; both only mean something against its own runtime history.
+	"pipeline_signal_deliveries": IntentExcludeRuntime,
 	// Undelivered chat turns waiting for their session. These ARE user words,
 	// which is the argument for including them — but they are addressed to a
 	// live session and a work item that do not survive the restore, so a

@@ -196,6 +196,76 @@ func TestAcceptance_PagePanelHistoryAndPublicationFence(t *testing.T) {
 		t.Fatalf("an unknown panel: %v %s", err, out)
 	}
 
+	// #4867, PRD §5: the same two CLI reads by a workspace ADMIN who is not
+	// the custodian of a private Page. The ADMIN reads the declared actions
+	// (told it cannot dispatch them) and the panel history, each read audited
+	// before it is served; the dispatch is refused as if the panel did not
+	// exist. A plain MEMBER is refused the reads with the same not-found.
+	runAs := func(user string, args ...string) (string, error) {
+		userToken := "crewship_cli_panelhistory_" + user
+		if _, err := db.Exec(`INSERT OR IGNORE INTO users(id,email,full_name) VALUES(?,?,?)`, user, user+"@example.invalid", user); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := db.Exec(`INSERT OR IGNORE INTO cli_tokens(id,user_id,name,token_hash,created_at) VALUES(?,?,'test',?,datetime('now'))`, user+"-token", user, sha256HexToken(userToken)); err != nil {
+			t.Fatal(err)
+		}
+		userCfg := filepath.Join(t.TempDir(), user+".yaml")
+		if err := os.WriteFile(userCfg, []byte("server: "+srv.URL+"\nworkspace: "+ws+"\ntoken: "+userToken+"\nformat: json\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command(binary, args...)
+		cmd.Env = append(os.Environ(), "CREWSHIP_CONFIG="+userCfg, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=", "NO_COLOR=1")
+		out, err := cmd.CombinedOutput()
+		return string(out), err
+	}
+	for _, q := range []string{
+		`INSERT INTO users(id,email,full_name) VALUES('panel-history-admin','panel-history-admin@example.invalid','Admin')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('panel-history-admin-m','cpanelhistoryws00000','panel-history-admin','ADMIN')`,
+		`INSERT INTO users(id,email,full_name) VALUES('panel-history-plain','panel-history-plain@example.invalid','Member')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('panel-history-plain-m','cpanelhistoryws00000','panel-history-plain','MEMBER')`,
+		`INSERT INTO crew_members(id,crew_id,user_id,role) VALUES('panel-history-plain-c','panel-history-crew','panel-history-plain','MEMBER')`,
+		`UPDATE pages SET private_audience=1, owner_user_id='panel-history-owner' WHERE id='` + pageID + `'`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%s: %v", q, err)
+		}
+	}
+	privateReads := func() int {
+		var n int
+		if err := db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='artifact.private_owner_accessed' AND user_id='panel-history-admin' AND entity_id=?`, pageID).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	got, err := runAs("panel-history-admin", "page", "actions", "health/mysql")
+	if err != nil || !strings.Contains(got, `"refresh"`) || !strings.Contains(got, `"can_dispatch": false`) && !strings.Contains(got, `"can_dispatch":false`) {
+		t.Fatalf("ADMIN page actions on a private Page: %v %s", err, got)
+	}
+	if n := privateReads(); n != 1 {
+		t.Fatalf("ADMIN actions read wrote %d audits, want 1", n)
+	}
+	if got, err = runAs("panel-history-admin", "page", "project", "panel-history", "health", "mysql", "--publication", "1"); err != nil || !strings.Contains(got, `"sequence"`) {
+		t.Fatalf("ADMIN panel-history on a private Page: %v %s", err, got)
+	}
+	if n := privateReads(); n != 2 {
+		t.Fatalf("ADMIN history read wrote %d audits in total, want 2", n)
+	}
+	if got, err = runAs("panel-history-admin", "page", "action", "health/mysql", "refresh"); err == nil || !strings.Contains(strings.ToLower(got), "not found") && !strings.Contains(got, "no panel") {
+		t.Fatalf("ADMIN dispatched on a private Page it only reads: %v %s", err, got)
+	}
+	var pending int
+	if err := db.QueryRow(`SELECT count(*) FROM pending_runs`).Scan(&pending); err != nil || pending != 0 {
+		t.Fatalf("refused ADMIN dispatch queued %d runs: %v", pending, err)
+	}
+	for _, args := range [][]string{{"page", "actions", "health/mysql"}, {"page", "project", "panel-history", "health", "mysql", "--publication", "1"}} {
+		if out, err := runAs("panel-history-plain", args...); err == nil || strings.Contains(out, "refresh") || strings.Contains(out, `"sequence"`) {
+			t.Fatalf("MEMBER in the panel crew read a private Page panel through %v: %v %s", args, err, out)
+		}
+	}
+	if _, err := db.Exec(`UPDATE pages SET private_audience=0 WHERE id=?`, pageID); err != nil {
+		t.Fatal(err)
+	}
+
 	// A second revision, so the draft is a candidate that differs from what
 	// is live rather than `candidate_matches_live`.
 	style := filepath.Join(directory, "src", "style.css")

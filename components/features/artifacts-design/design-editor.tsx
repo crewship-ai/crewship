@@ -2,19 +2,21 @@
 
 import { useEffect, useRef, useState, type PointerEvent } from "react"
 import dynamic from "next/dynamic"
-import { Download, Frame, ImagePlus, MousePointer2, Plus, Save, Square, Trash2, Type } from "lucide-react"
+import { Download, Frame, ImagePlus, MousePointer2, Play, Plus, Save, Square, Trash2, Type } from "lucide-react"
 import * as Y from "yjs"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactDraft, artifactDraftRevision } from "@/lib/artifact-drafts"
-import { artifactsDesign } from "@/lib/feature-flags"
+import { artifactsDesign, artifactsDesignPrototype } from "@/lib/feature-flags"
 import { Button } from "@/components/ui/button"
 import { CreateSurface, CreateSurfaceBody, CreateSurfaceField, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { apiFetch } from "@/lib/api-fetch"
 import { Input } from "@/components/ui/input"
 import { useDesign } from "./use-design"
 import { readablePeerFill } from "./peer-colors"
-import { removeDesignNode, safeImageSource, upsertDesignNode, type DesignNode, type DesignNodeType } from "./design-document"
+import { designLinkTarget, designScreenOf, removeDesignNode, restoreDesignConflict, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignConflict, type DesignNode, type DesignNodeType } from "./design-document"
+import { DesignNodeShape } from "./design-node-shape"
+import { DesignPrototypePlayer } from "./design-prototype-player"
 
 function encodedDesignState(doc: Y.Doc,maxBytes=Infinity) {
  const state=Y.encodeStateAsUpdate(doc)
@@ -65,6 +67,11 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
  const [imageURL, setImageURL] = useState("")
  const [panel, setPanel] = useState<"properties" | "history">("properties")
  const canvas = useRef<SVGSVGElement>(null)
+ const prototype = artifactsDesignPrototype()
+ const [playing, setPlaying] = useState<string | null>(null)
+ const playButton = useRef<HTMLButtonElement>(null)
+ const wasPlaying = useRef(false)
+ useEffect(() => { if (wasPlaying.current && !playing) playButton.current?.focus(); wasPlaying.current = Boolean(playing) }, [playing])
  const drag = useRef<{ id: string; startX: number; startY: number; x: number; y: number } | null>(null)
  const selected = design.nodes.find(node => node.id === selectedId)
  const frames = design.nodes.filter(node => node.type === "frame")
@@ -119,6 +126,13 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   upsertDesignNode(design.doc, { id: drag.current.id, x: Math.round(drag.current.x + cursor.x - drag.current.startX), y: Math.round(drag.current.y + cursor.y - drag.current.startY) })
  }
  const endDrag = () => { drag.current = null }
+ // Links are edited only through the live document, and only by editors.
+ const setLink = (target: string) => { if (selected && design.doc && design.editable) setDesignNodeLink(design.doc, selected.id, target || null) }
+ const play = () => {
+  const start = selected ? designScreenOf(design.nodes, selected) : undefined
+  const first = start ?? frames[0]?.id
+  if (prototype && first) setPlaying(first)
+ }
  if (!artifactsDesign()) return <p className="p-6" role="status">Design is not enabled.</p>
  if (design.readRevoked) return <p className="p-6" role="alert">Page read access was removed. The local draft has been deleted where this browser could reach it.</p>
  if (design.query.isError) return <p className="p-6 text-destructive" role="alert">{design.query.error.message}</p>
@@ -187,9 +201,10 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   <header className="flex flex-wrap items-center gap-3 border-b px-4 py-3">
    <Frame className="size-5" aria-hidden="true" />
    <h1 className="mr-auto truncate font-semibold">{slug} <span className="ml-2 text-xs font-normal text-muted-foreground">Design</span></h1>
-   <span role="status" className="text-xs text-muted-foreground">{version ? `Version ${version}` : historyFull ? "History full · changes kept in this browser" : design.connection === "connected" ? design.dirty ? "Live · changes saved as you work" : "Live · up to date" : design.connection === "denied" ? "Access changed · reopen to continue" : design.connection === "rejected" ? "The server refused changes made in this browser (too large or invalid) · they will not sync" : design.connection === "connecting" ? "Connecting…" : "Offline · changes kept in this browser"}</span>
+   <span role="status" className="text-xs text-muted-foreground">{version ? `Version ${version}` : historyFull ? "History full · changes kept in this browser" : design.unsynced && data.can_edit === false ? "Jen pro čtení · neodeslané změny zůstaly v tomto prohlížeči a vrátí se, až budete moci znovu upravovat" : design.connection === "connected" ? design.unsynced ? "Live · sending changes…" : !design.editable ? "Connected · read only" : design.dirty ? "Live · changes saved as you work" : "Live · up to date" : design.connection === "denied" ? "Access changed · reopen to continue" : design.connection === "rejected" ? "The server refused changes made in this browser (too large or invalid) · they will not sync" : design.connection === "connecting" ? "Connecting…" : "Offline · changes kept in this browser"}</span>
    {!design.editable && <span className="rounded bg-muted px-2 py-1 text-xs">{version ? "History" : "Read only"}</span>}
    <div className="flex -space-x-1" aria-label="People on this canvas">{design.peers.map(peer => <span key={peer.clientId} title={peer.name} className="flex size-7 items-center justify-center rounded-full border-2 border-background text-xs font-medium text-white" style={{ backgroundColor: readablePeerFill(peer.color) }}>{peer.name.slice(0, 2).toUpperCase()}</span>)}</div>
+   {prototype && frames.length > 0 && <Button ref={playButton} variant="outline" onClick={play}><Play className="size-4" />Play</Button>}
    <Button variant="outline" onClick={() => setAccessOpen(true)}>Access</Button>
    <Button variant="outline" onClick={() => setPanel(panel === "history" ? "properties" : "history")}>History{viewedVersion ? ` · v${viewedVersion}` : ""}</Button>
    {design.editable && <Button disabled={design.save.isPending || design.connection !== "connected"} onClick={() => design.save.mutate("Saved from Design editor")}><Save className="size-4" /> Save version</Button>}
@@ -198,6 +213,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
   {continued?.scope===continueScope&&<div role="status" className="border-b px-4 py-3 text-sm"><p>A new Design contains the copied canvas. This original canvas, its history and your unsent feedback remain here.</p><a className="underline" href={`/artifacts/${encodeURIComponent(continued.page)}?workspace_id=${encodeURIComponent(workspaceId)}`} target="_blank" rel="noopener noreferrer">Open new Design</a></div>}
   {failure && !historyFull && <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">{failure.message}</p>}
   {design.connection==="quota"&&!historyFull&&<p role="alert" className="border-b px-4 py-2 text-sm">Storage capacity is full. Your changes are kept in this browser and nothing was deleted. Save a version to open the recovery choices.</p>}
+  {design.conflicts.map((conflict, index) => <DesignConflictNotice key={`${conflict.id}-${index}`} conflict={conflict} canRestore={design.editable && Boolean(design.doc)} onRestore={() => { if (design.doc) restoreDesignConflict(design.doc, conflict); design.dismissConflict(conflict) }} onDismiss={() => design.dismissConflict(conflict)} />)}
   {design.draftError && <p role="alert" className="border-b px-4 py-2 text-sm">Browser draft storage is unavailable or full. Keep this window open until connected and save a version.</p>}
   <div className="flex min-h-0 flex-1 flex-col md:flex-row">
    <aside className="flex max-h-40 shrink-0 flex-col overflow-auto border-b md:max-h-none md:w-48 md:border-b-0 md:border-r" aria-label="Layers">
@@ -211,7 +227,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
     <div className="z-10 flex flex-wrap items-center gap-1 border-b bg-background px-3 py-2" aria-label="Design tools">
      <Button variant="ghost" size="sm" title="Select and move"><MousePointer2 className="size-4" /><span className="sr-only">Select and move</span></Button>
      {design.editable && <><Button variant="outline" size="sm" onClick={() => add("frame")}><Plus className="size-4" />Screen</Button><Button variant="ghost" size="sm" onClick={() => add("rect")}><Square className="size-4" />Rectangle</Button><Button variant="ghost" size="sm" onClick={() => add("text")}><Type className="size-4" />Text</Button><Button variant="ghost" size="sm" onClick={() => add("image")}><ImagePlus className="size-4" />Image</Button></>}
-     <span className="ml-auto text-xs text-muted-foreground">{selected ? selected.name || selected.type : design.editable ? "Drag to move · edit in Properties" : "Follow changes live"}</span>
+     <span className="ml-auto text-xs text-muted-foreground">{selected ? selected.name || selected.type : design.editable ? "Drag to move · edit in Properties" : "View canvas"}</span>
     </div>
     <div className="min-h-0 flex-1 overflow-auto bg-muted/40" aria-label="Design canvas viewport">
      <svg ref={canvas} role="img" aria-label="Design canvas" width={width} height={height} className="touch-none" onPointerMove={move} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerLeave={() => design.setCursor(null)} onPointerDown={() => setSelectedId(null)}>
@@ -220,10 +236,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
       {[...frames, ...design.nodes.filter(node => node.type !== "frame")].map(node => {
        const { x, y } = position(node)
        const w = Math.max(1, Number(node.width) || 1), h = Math.max(1, Number(node.height) || 1)
-       const image = node.type === "image" ? safeImageSource(node.src) : undefined
        return <g key={node.id} data-design-node={node.id} data-node-type={node.type} data-node-name={node.name} transform={`translate(${x},${y})`} onPointerDown={event => beginDrag(event, node)} style={{ cursor: design.editable ? "move" : "pointer" }}>
         {node.type === "frame" && <text x="0" y="-10" fontSize="12" fill="currentColor" className="text-muted-foreground">{node.name || "Screen"}</text>}
-        {node.type === "text" ? <><rect width={w} height={h} fill="transparent" /><text x="0" y="22" fill={node.fill || "#172554"} fontSize="20" fontFamily="system-ui, sans-serif">{String(node.text ?? "").split("\n").map((line, index) => <tspan key={index} x="0" dy={index ? "1.3em" : "0"}>{line}</tspan>)}</text></> : node.type === "image" ? image ? <image href={image} width={w} height={h} preserveAspectRatio="xMidYMid slice" /> : <><rect width={w} height={h} fill="#e2e8f0" rx="4" /><text x="12" y="28" fill="#64748b" fontSize="14">Set an image URL in Properties</text></> : <rect width={w} height={h} fill={node.fill || "#ffffff"} rx={node.type === "frame" ? 0 : 6} stroke={node.type === "frame" ? "#cbd5e1" : "none"} />}
+        <DesignNodeShape node={node} width={w} height={h} />
         {selectedId === node.id && <rect width={w} height={h} fill="none" stroke="#2563eb" strokeWidth="2" pointerEvents="none" />}
        </g>
       })}
@@ -235,9 +250,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
     {panel === "history" ? <>
      <h2 className="mb-3 text-sm font-semibold">History</h2>
      {Boolean(design.versions.data?.shared_version) && <a className="mb-3 inline-block text-xs underline" target="_blank" rel="noopener noreferrer" href={`/artifacts?design=1&item=${encodeURIComponent(slug)}&version=${design.versions.data!.shared_version}&workspace_id=${encodeURIComponent(workspaceId)}`}>Open shared version {design.versions.data!.shared_version}</a>}
-     <Button className="mb-3 w-full" variant={version ? "outline" : "secondary"} onClick={() => setVersion(undefined)}>Live canvas</Button>
+     <Button className="mb-3 w-full" variant={version ? "outline" : "secondary"} onClick={() => setVersion(undefined)}>{data.can_edit ? "Live canvas" : "Current view"}</Button>
      {design.versions.isError && <p role="alert" className="text-sm text-destructive">{design.versions.error.message}</p>}
-     {design.versions.data?.versions.map(item => <div key={item.version} className="mb-3 rounded border p-3 text-xs"><button className="w-full text-left" onClick={() => setVersion(item.version)}><span className="font-medium">Version {item.version}</span>{item.version === design.versions.data?.shared_version && <span className="ml-2 text-muted-foreground">Shared</span>}<p className="mt-1 text-muted-foreground">{item.message || "Design checkpoint"}</p>{item.created_at && <p className="mt-1 text-muted-foreground">{new Date(item.created_at).toLocaleString()}</p>}</button>{data.can_edit && <div className="mt-2 flex gap-2"><Button size="sm" variant="outline" disabled={design.restore.isPending} onClick={() => design.restore.mutate(item.version, { onSuccess: () => setVersion(undefined) })}>Restore</Button><Button size="sm" variant="ghost" disabled={design.share.isPending} onClick={() => design.share.mutate(item.version)}>Share</Button></div>}</div>)}
+     {design.versions.data?.versions.map(item => <div key={item.version} className="mb-3 rounded border p-3 text-xs"><button className="w-full text-left" onClick={() => setVersion(item.version)}><span className="font-medium">Version {item.version}</span>{item.version === design.versions.data?.shared_version && <span className="ml-2 text-muted-foreground">Shared</span>}<p className="mt-1 text-muted-foreground">{item.message || "Design checkpoint"}</p>{item.created_at && <p className="mt-1 text-muted-foreground">{new Date(item.created_at).toLocaleString()}</p>}</button>{data.can_edit && <div className="mt-2 flex gap-2"><Button size="sm" variant="outline" disabled={design.restore.isPending} onClick={() => design.restore.mutate(item.version, { onSuccess: () => setVersion(undefined) })}>Restore</Button>{data.can_share === true && <Button size="sm" variant="ghost" disabled={design.share.isPending} onClick={() => design.share.mutate(item.version)}>Share</Button>}</div>}</div>)}
     </> : <>
      <h2 className="mb-4 text-sm font-semibold">Properties</h2>
      {selected ? <div className="space-y-3">
@@ -247,6 +262,10 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
       {selected.type === "text" && <Field label="Text"><textarea aria-label="Text content" maxLength={100000} className="min-h-24 w-full rounded border bg-background p-2 text-sm" value={selected.text ?? ""} disabled={!design.editable} onChange={event => patch({ text: event.target.value })} /></Field>}
       {selected.type === "image" && <Field label="Image URL"><Input aria-label="Image URL" placeholder="https://…" value={selected.src ?? ""} disabled={!design.editable} onChange={event => { setImageURL(event.target.value); patch({ src: event.target.value }) }} /><p className="mt-1 text-xs text-muted-foreground">HTTPS image or embedded PNG, JPEG, WebP, GIF.</p></Field>}
       {selected.type !== "frame" && <Field label="Screen"><select aria-label="Parent screen" className="h-9 w-full rounded border bg-background px-2 text-sm coarse:h-[44px]" value={selected.parentId ?? ""} disabled={!design.editable} onChange={event => patch({ parentId: event.target.value })}><option value="">On canvas</option>{frames.map(frame => <option key={frame.id} value={frame.id}>{frame.name || "Screen"}</option>)}</select></Field>}
+      {prototype && selected.type !== "frame" && (() => {
+       const link = designLinkTarget(design.nodes, selected)
+       return <Field label="Link to screen"><select aria-label="Link to screen" className="h-9 w-full rounded border bg-background px-2 text-sm coarse:h-[44px]" value={link.kind === "none" ? "" : link.kind === "screen" ? link.screen.id : link.target} disabled={!design.editable} onChange={event => setLink(event.target.value)}><option value="">No link</option>{frames.map(frame => <option key={frame.id} value={frame.id}>{frame.name || "Screen"}</option>)}{link.kind === "missing" && <option value={link.target} disabled>Deleted screen</option>}</select>{link.kind === "missing" && <p className="mt-1 text-xs text-warn">The linked screen was deleted. In Play this layer does nothing{design.editable ? "; choose another screen or No link." : "."}</p>}{link.kind !== "missing" && <p className="mt-1 text-xs text-muted-foreground">In Play, clicking this layer opens the screen.</p>}</Field>
+      })()}
       {design.editable && <Button variant="ghost" className="w-full text-destructive" onClick={() => { if (design.doc) removeDesignNode(design.doc, selected.id); setSelectedId(null) }}><Trash2 className="size-4" />Delete {selected.type === "frame" ? "screen and layers" : "layer"}</Button>}
      </div> : <p className="text-sm text-muted-foreground">Select a screen or layer to see its properties.{design.editable && " Add your first screen using the toolbar."}</p>}
     </>}
@@ -275,10 +294,29 @@ export function DesignEditor({ workspaceId, slug, initialVersion }: { workspaceI
    </aside>
   </div>
   <CreateSurface open={continueOpen} onOpenChange={setContinueOpen} size="sm" onSubmit={()=>{if(!continuing&&continueName.trim())void continueDesign()}}><CreateSurfaceHeader title="Continue in a new Design" description="Create a copy of this canvas with fresh history. The original canvas and unsent feedback stay in this tab." onClose={()=>setContinueOpen(false)} /><CreateSurfaceBody><CreateSurfaceField label="New Design name" htmlFor="continued-design-name"><Input id="continued-design-name" value={continueName} maxLength={200} onChange={event=>setContinueName(event.target.value)} /></CreateSurfaceField>{continueError&&<p role="alert" className="text-destructive">{continueError}</p>}</CreateSurfaceBody><CreateSurfaceFooter onCancel={()=>setContinueOpen(false)} guardCancel={false} primaryLabel={continuing?"Creating…":"Create new Design"} onPrimary={()=>{void continueDesign()}} primaryDisabled={continuing||!continueName.trim()} /></CreateSurface>
+  {prototype && playing && <DesignPrototypePlayer key={playing} nodes={design.nodes} startScreenId={playing} onClose={() => setPlaying(null)} />}
   {accessOpen && <DesignAccessDialog workspaceId={workspaceId} slug={slug} onClose={() => setAccessOpen(false)} />}
  </section>
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
  return <label className="block text-xs text-muted-foreground"><span className="mb-1.5 block">{label}</span>{children}</label>
+}
+
+/** Two people changed one text from a stale canvas and only one text stayed on it. */
+function DesignConflictNotice({ conflict, canRestore, onRestore, onDismiss }: { conflict: DesignConflict; canRestore: boolean; onRestore: () => void; onDismiss: () => void }) {
+ const [copy, setCopy] = useState<"" | "copied" | "failed">("")
+ const lost = conflict.kept === "mine" ? conflict.theirs : conflict.mine
+ const copyText = () => { void navigator.clipboard.writeText(lost).then(() => setCopy("copied"), () => setCopy("failed")) }
+ return <div role="alert" className="space-y-2 border-b px-4 py-3 text-sm">
+  <p><b>Konflikt úprav: text vrstvy „{conflict.name}“ změnili dva lidé.</b></p>
+  <p>{conflict.left === undefined ? "Vrstva je mezitím smazaná. Její text je jen tady v tomto prohlížeči:" : conflict.kept === "mine" ? "Na plátně zůstal váš text. Text druhého člověka byl přepsán a v historii zůstává, jen pokud byl uložen ve verzi. Tady je:" : "Na plátně zůstal text druhého člověka. Váš text se neuložil a je jen tady v tomto prohlížeči:"}</p>
+  <blockquote className="max-h-32 overflow-auto whitespace-pre-wrap rounded border bg-muted p-2">{lost}</blockquote>
+  <div className="flex flex-wrap items-center gap-2">
+   <Button variant="outline" size="sm" disabled={!canRestore} onClick={onRestore}>Obnovit tento text</Button>
+   <Button variant="outline" size="sm" onClick={copyText}>Kopírovat text</Button>
+   <Button variant="ghost" size="sm" onClick={onDismiss}>Zavřít upozornění</Button>
+   {copy && <span className="text-xs text-muted-foreground">{copy === "copied" ? "Text je zkopírovaný." : "Kopírování se nepovedlo, označte text ručně."}</span>}
+  </div>
+ </div>
 }

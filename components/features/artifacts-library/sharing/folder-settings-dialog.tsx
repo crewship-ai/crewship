@@ -42,7 +42,7 @@ export function FolderSettingsDialog({ workspaceId, folder, open, onOpenChange }
   const initial = seed?.scope === scope ? seed.settings : null
   const close = () => onOpenChange(false)
   // The kit's form surface (dialogs-through-kit guard). The form owns the body and the footer once the read has settled.
-  return <CreateSurface open={open} onOpenChange={onOpenChange} size="md">
+  return <CreateSurface open={open} onOpenChange={onOpenChange} size="md" restoreOpenerFocus>
     <CreateSurfaceHeader icon={FolderCog} title="Folder settings" description={folder.name} onClose={close} />
     {initial && !settings.error
       ? <SettingsForm key={scope} workspaceId={workspaceId} folder={folder} initial={initial} capabilities={capabilities} onClose={close} />

@@ -12,12 +12,30 @@ import (
 
 var errCraftNativeAccess = errors.New("native Craft access denied")
 
+// errCraftNativeShareOwner refuses a share from someone who may edit but does
+// not own the Page. They already hold a session, so the refusal reveals nothing.
+var errCraftNativeShareOwner = errors.New("only the page owner may share a version")
+
+// craftNativeShareIntentKey marks the authorization of a shared-pin write.
+type craftNativeShareIntentKey struct{}
+
+// craftNativeMayShare is PRD §5's "sdílet verzi smí jen vlastník" over a proof
+// read in the caller's transaction. Owner is the person named on the Page. Edit
+// rights, a folder ACL and the workspace OWNER/ADMIN roles never qualify, and a
+// crew-owned Page names no person, so nobody shares it, as on Project and Design.
+func craftNativeMayShare(proof craftNativeProof, entry *craftNativeSession) bool {
+	return proof.record != nil && proof.record.OwnerUserID != "" && proof.record.OwnerUserID == entry.source.UserID
+}
+
 type craftNativeProof struct {
 	workspaceEpoch, memberID string
 	memberRevision           int64
 	expiry                   time.Time
 	record                   *pageRecord
 	application              string
+	// privateRead is current authority over everything but the shared pin:
+	// latest bytes, history and proposals. Read and Comment never carry it.
+	privateRead bool
 }
 
 // Canonical Page policy, evaluated in the caller's protected SQL transaction.
@@ -82,6 +100,7 @@ func (m *craftNativeHTTP) pageAuthorityForView(ctx context.Context, tx *sql.Tx, 
 	}
 	result.record = rec
 	result.expiry = expiry
+	result.privateRead = write || m.pages.mayReadNativePrivate(ctx, scope.WorkspaceID, source.UserID, role, rec)
 	return result, nil
 }
 

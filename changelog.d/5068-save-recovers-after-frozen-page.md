@@ -1,0 +1,1 @@
+- Fixed: a Word or Sheet save that outlives its deadline on a frozen page no longer waits for someone to press "Ověřit výsledek". The editor asks the server by itself, resends nothing, and the button returns the keyboard to the document.

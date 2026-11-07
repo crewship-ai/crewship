@@ -7,9 +7,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -25,11 +27,41 @@ import (
 	"github.com/crewship-ai/crewship/internal/restrictedworkflow"
 )
 
+// Bound each fixture response independently of the overall Go test timeout.
+// A worker regression that floods output must fail rather than exhaust CI.
+type boundedLiveTextScanner struct {
+	t             *testing.T
+	scanner       *bufio.Scanner
+	body          io.ReadCloser
+	frames, bytes int
+}
+
+func (s *boundedLiveTextScanner) Scan() bool {
+	s.t.Helper()
+	if !s.scanner.Scan() {
+		if err := s.scanner.Err(); err != nil {
+			s.t.Errorf("production stream read: %v", err)
+		}
+		return false
+	}
+	s.frames++
+	s.bytes += len(s.scanner.Bytes()) + 1
+	if s.frames > 256 || s.bytes > 256<<10 {
+		_ = s.body.Close()
+		s.t.Fatal("production stream exceeded fixture frame/byte limit")
+	}
+	return true
+}
+func (s *boundedLiveTextScanner) Text() string { return s.scanner.Text() }
+func (s *boundedLiveTextScanner) Err() error   { return s.scanner.Err() }
+
 func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	image := os.Getenv("CREWSHIP_RESTRICTED_PRODUCTION_IMAGE")
 	if image == "" {
 		t.Fatal("explicit restrictedruntime_live acceptance requires an owned production worker image")
 	}
+	testCtx, cancelTest := context.WithTimeout(t.Context(), 2*time.Minute)
+	defer cancelTest()
 	setTestEncryptionKey(t)
 	db := setupTestDB(t)
 	owner := seedTestUser(t, db)
@@ -75,6 +107,8 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 
 	execOrFatal(t, db, `INSERT INTO budget_limits(id,workspace_id,scope_kind,scope_id,window,limit_usd,mode) VALUES('text-live-cap',?,'workspace',?,'month',100,'hard')`, workspace, workspace)
 	var calls atomic.Int64
+	shutdownProvider := make(chan struct{})
+	clientCancelled := make(chan struct{}, 1)
 	release := make(chan struct{})
 	groupRelease := make(chan struct{})
 	defer func() {
@@ -136,6 +170,8 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 			case <-groupRelease:
 			case <-req.Context().Done():
 				return
+			case <-shutdownProvider:
+				return
 			}
 		}
 		if strings.Contains(body.Input, "REVOKE_DURING_STREAM") {
@@ -143,18 +179,63 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 			case <-release:
 			case <-req.Context().Done():
 				return
+			case <-shutdownProvider:
+				return
 			}
+		}
+		if strings.Contains(body.Input, "CANCEL_DURING_STREAM") {
+			select {
+			case <-req.Context().Done():
+				select {
+				case clientCancelled <- struct{}{}:
+				default:
+				}
+			case <-shutdownProvider:
+			}
+			return
 		}
 		fmt.Fprint(w, "data: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\",\"model\":\"gpt-5-mini\",\"usage\":{\"input_tokens\":20,\"output_tokens\":5,\"total_tokens\":25,\"input_tokens_details\":{\"cached_tokens\":0}}}}\n\n")
 	}))
 	defer upstream.Close()
 	authority := restricteddispatch.Authority{Store: store}
-	manager, err := restrictedruntime.New(filepath.Join(t.TempDir(), "runtime"), restrictedruntime.Docker{Image: image}, authority, authority, restrictedruntime.Limits{MemoryBytes: 128 << 20, NanoCPUs: 500000000, PIDs: 32})
+	// Preserve the manager's owner/attempt records if termination cannot be
+	// confirmed; a shared development host must not lose its recovery handle.
+	runtimeDir, err := os.MkdirTemp("", "crewship-text-http-live-")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer manager.Close()
-	if err = manager.Reconcile(t.Context()); err != nil {
+	manager, err := restrictedruntime.New(runtimeDir, restrictedruntime.Docker{Image: image}, authority, authority, restrictedruntime.Limits{MemoryBytes: 128 << 20, NanoCPUs: 500000000, PIDs: 32})
+	if err != nil {
+		_ = os.RemoveAll(runtimeDir) // New has not admitted any worker yet.
+		t.Fatal(err)
+	}
+	defer func() {
+		clean := true
+		if err := manager.Close(); err != nil {
+			t.Errorf("owned production runtime cleanup: %v", err)
+			clean = false
+		}
+		owner, err := os.ReadFile(filepath.Join(runtimeDir, "owner"))
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		ids, err := exec.CommandContext(cleanupCtx, "docker", "ps", "-aq", "--filter", "label=ai.crewship.restricted.owner="+string(owner)).Output()
+		if err != nil || strings.TrimSpace(string(ids)) != "" {
+			t.Errorf("owned production containers remain or absence unconfirmed: %v", err)
+			clean = false
+		}
+		if clean {
+			if err := os.RemoveAll(runtimeDir); err != nil {
+				t.Errorf("remove confirmed empty owned runtime state: %v", err)
+			}
+		} else {
+			t.Logf("owned runtime recovery state retained at %s", runtimeDir)
+		}
+	}()
+	if err = manager.Reconcile(testCtx); err != nil {
 		t.Fatal(err)
 	}
 	if err = restrictedruntime.InstallAcceptanceTLS(manager, upstream); err != nil {
@@ -173,10 +254,18 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	router.SetRestrictedWorkflow(workflow)
 	server := httptest.NewServer(router)
 	defer server.Close()
+	defer cancelTest() // cancel before server.Close, including failed reads
+	defer close(shutdownProvider)
+	streamScanner := func(body io.ReadCloser) *boundedLiveTextScanner {
+		t.Cleanup(func() { _ = body.Close() })
+		scanner := bufio.NewScanner(body)
+		scanner.Buffer(make([]byte, 4096), 64<<10)
+		return &boundedLiveTextScanner{t: t, scanner: scanner, body: body}
+	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	request := func(user, chat, content string) *http.Response {
 		body, _ := json.Marshal(map[string]string{"content": content})
-		req, err := http.NewRequestWithContext(context.Background(), http.MethodPost, server.URL+"/api/v1/chats/"+chat+"/restricted-run?workspace_id="+workspace, strings.NewReader(string(body)))
+		req, err := http.NewRequestWithContext(testCtx, http.MethodPost, server.URL+"/api/v1/chats/"+chat+"/restricted-run?workspace_id="+workspace, strings.NewReader(string(body)))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -189,7 +278,7 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	}
 	for _, user := range []string{"text-h1", "text-h2", "text-h1"} {
 		resp := request(user, user+"-chat", "CANARY_"+user)
-		scan := bufio.NewScanner(resp.Body)
+		scan := streamScanner(resp.Body)
 		done := false
 		for scan.Scan() {
 			if strings.Contains(scan.Text(), `"type":"done"`) {
@@ -206,7 +295,7 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	execOrFatal(t, db, `INSERT INTO chat_participants(chat_id,user_id,role) VALUES('text-group','text-h2','member')`)
 	for _, turn := range []struct{ user, content string }{{"text-h1", "GROUP_FIRST"}, {"text-h2", "GROUP_SECOND"}} {
 		response := request(turn.user, "text-group", turn.content)
-		scanner := bufio.NewScanner(response.Body)
+		scanner := streamScanner(response.Body)
 		complete := false
 		for scanner.Scan() {
 			if strings.Contains(scanner.Text(), `"type":"done"`) {
@@ -225,7 +314,7 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 		}
 	}
 	groupResp := request("text-h1", "text-group", "GROUP_EPOCH_STREAM")
-	groupScanner := bufio.NewScanner(groupResp.Body)
+	groupScanner := streamScanner(groupResp.Body)
 	if !groupScanner.Scan() || !strings.Contains(groupScanner.Text(), `"type":"text"`) {
 		t.Fatal("group text absent")
 	}
@@ -249,7 +338,7 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 		t.Fatal("foreign request reached provider")
 	}
 	resp = request("text-h1", "text-h1-chat", "REVOKE_DURING_STREAM")
-	scan := bufio.NewScanner(resp.Body)
+	scan := streamScanner(resp.Body)
 	if !scan.Scan() || !strings.Contains(scan.Text(), `"type":"text"`) {
 		t.Fatal("missing positive pre-revocation text")
 	}
@@ -268,7 +357,7 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	}
 	resp.Body.Close()
 	resp = request("text-h2", "text-h2-chat", "CANARY_text-h2")
-	scan = bufio.NewScanner(resp.Body)
+	scan = streamScanner(resp.Body)
 	done := false
 	for scan.Scan() {
 		if strings.Contains(scan.Text(), `"type":"done"`) {
@@ -279,6 +368,33 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	if !done {
 		t.Fatal("H2 affected by H1 revocation")
 	}
+	// Client cancellation must reach the actual provider and stop its stream;
+	// fixture cleanup confirms owned worker termination separately below.
+	cancelCtx, cancelRequest := context.WithCancel(testCtx)
+	defer cancelRequest()
+	cancelReq, err := http.NewRequestWithContext(cancelCtx, http.MethodPost, server.URL+"/api/v1/chats/text-h2-chat/restricted-run?workspace_id="+workspace, strings.NewReader(`{"content":"CANCEL_DURING_STREAM CANARY_text-h2"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cancelReq.Header.Set("Authorization", "Bearer "+tokens["text-h2"])
+	cancelResp, err := client.Do(cancelReq)
+	if err != nil {
+		cancelRequest()
+		t.Fatal(err)
+	}
+	cancelScanner := streamScanner(cancelResp.Body)
+	if !cancelScanner.Scan() || !strings.Contains(cancelScanner.Text(), `"type":"text"`) {
+		cancelRequest()
+		t.Fatal("cancellation fixture never received live text")
+	}
+	cancelRequest()
+	_ = cancelResp.Body.Close()
+	select {
+	case <-clientCancelled:
+	case <-time.After(5 * time.Second):
+		t.Fatal("client cancellation did not stop the production provider stream")
+	}
+
 	// A fresh run-only ordinary CLI context reaches the same production worker,
 	// without acquiring conversational permissions or importing the prior chat.
 	member, err = store.Membership(t.Context(), "text-h2", workspace)
@@ -289,7 +405,7 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 		t.Fatal(err)
 	}
 	cliRequest := func(path, body string) *http.Response {
-		req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, server.URL+path+"?workspace_id="+workspace, strings.NewReader(body))
+		req, err := http.NewRequestWithContext(testCtx, http.MethodPost, server.URL+path+"?workspace_id="+workspace, strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -309,7 +425,7 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	}
 	created.Body.Close()
 	runResp := cliRequest("/api/v1/chats/"+contextRow.ID+"/restricted-cli-run", `{"content":"CANARY_text-h2 fresh cli run"}`)
-	scan = bufio.NewScanner(runResp.Body)
+	scan = streamScanner(runResp.Body)
 	done = false
 	for scan.Scan() {
 		if strings.Contains(scan.Text(), `"type":"done"`) {
@@ -331,12 +447,13 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = store.Replace(t.Context(), owner, user, workspace, "restricted", m, []access.Right{{Kind: "agent", ID: "text-agent", Operation: "run"}}); err != nil {
+		// The action capability does not share a routine: grant this exact fixture.
+		if _, err = store.Replace(t.Context(), owner, user, workspace, "restricted", m, []access.Right{{Kind: "routine", ID: "live-private", Operation: "run"}, {Kind: "agent", ID: "text-agent", Operation: "run"}}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	workflowRequest := func(user, method, path, body string) *http.Response {
-		req, err := http.NewRequestWithContext(t.Context(), method, server.URL+path+"?workspace_id="+workspace, strings.NewReader(body))
+		req, err := http.NewRequestWithContext(testCtx, method, server.URL+path+"?workspace_id="+workspace, strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -358,7 +475,7 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 		}
 		response.Body.Close()
 		receipts[user] = receipt.ID
-		if worked, err := workflow.DispatchNext(t.Context()); !worked || err != nil {
+		if worked, err := workflow.DispatchNext(testCtx); !worked || err != nil {
 			t.Fatalf("production workflow %s %v %v", user, worked, err)
 		}
 		response = workflowRequest(user, http.MethodGet, "/api/v1/workspaces/"+workspace+"/restricted-routine-runs/"+receipt.ID, "")
@@ -383,7 +500,7 @@ func TestLiveRestrictedTextRouterProductionWorker(t *testing.T) {
 	queued.Body.Close()
 	beforeQueued := calls.Load()
 	execOrFatal(t, db, `UPDATE pipelines SET definition_json=? WHERE id='live-private'`, strings.Replace(recipe, "Continue", "Changed", 1))
-	if worked, err := workflow.DispatchNext(t.Context()); !worked || err == nil || calls.Load() != beforeQueued {
+	if worked, err := workflow.DispatchNext(testCtx); !worked || err == nil || calls.Load() != beforeQueued {
 		t.Fatalf("revoked queue reached production worker %v %v calls%d->%d", worked, err, beforeQueued, calls.Load())
 	}
 	for _, table := range []string{"pipeline_runs", "pending_runs"} {

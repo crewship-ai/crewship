@@ -307,20 +307,28 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// + connected accounts grouped by user_id). Two literal path segments after
 	// /integrations so it never collides with the /{integrationId} wildcard.
 	composioH := NewComposioHandler(r.db, r.logger, r.composioConfig)
+	// openapi: responses 200,400,401,403,502
 	r.mux.Handle("GET /api/v1/integrations/composio/inventory", authed(wsCtx(http.HandlerFunc(composioH.ListInventory))))
+	// openapi: responses 200,400,401,403,502
 	r.mux.Handle("GET /api/v1/integrations/composio/toolkits", authed(wsCtx(http.HandlerFunc(composioH.ListToolkits))))
+	// openapi: responses 200,400,401,403,502
 	r.mux.Handle("GET /api/v1/integrations/composio/tools", authed(wsCtx(http.HandlerFunc(composioH.ListTools))))
+	// openapi: responses 200,400,401,403,502
 	r.mux.Handle("GET /api/v1/integrations/composio/triggers", authed(wsCtx(http.HandlerFunc(composioH.ListTriggerTypes))))
+	// openapi: responses 200,400,401,403,502
 	r.mux.Handle("GET /api/v1/integrations/composio/triggers/active", authed(wsCtx(http.HandlerFunc(composioH.ListActiveTriggers))))
+	// openapi: responses 200,400,401,403,502
 	r.authedMut("POST", "/api/v1/integrations/composio/triggers", roleManage, composioH.CreateTrigger)
 	r.mux.Handle("GET /api/v1/integrations/composio/settings", authed(wsCtx(http.HandlerFunc(composioH.GetSettings))))
 	r.authedMut("PUT", "/api/v1/integrations/composio/settings", roleManage, composioH.UpsertSettings)
 	r.authedMut("DELETE", "/api/v1/integrations/composio/settings", roleManage, composioH.DeleteSettings)
+	// openapi: responses 200,400,401,403,502
 	r.authedMut("POST", "/api/v1/integrations/composio/connect", roleManage, composioH.Connect)
 	// Default connector — inspect (read) / provision (manage) the workspace-wide
 	// default Composio MCP server every agent inherits when
 	// COMPOSIO_DEFAULT_CONNECTOR is ON and the agent has no per-agent binding.
 	r.mux.Handle("GET /api/v1/integrations/composio/default", authed(wsCtx(http.HandlerFunc(composioH.GetDefault))))
+	// openapi: responses 200,400,401,403,500,502
 	r.authedMut("PUT", "/api/v1/integrations/composio/default", roleManage, composioH.SetDefault)
 	// Agent access binding — assign a Composio user (its connected accounts/
 	// tools) to a specific agent, persisting the credential + workspace MCP
@@ -330,8 +338,11 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("DELETE", "/api/v1/integrations/composio/agents/{agentId}/bind", roleManage, composioH.UnbindAgent)
 	// Connected-account management — revoke/refresh/delete a Composio connected
 	// account (manage-gated; proxies the matching Composio lifecycle call).
+	// openapi: responses 204,400,401,403,502
 	r.authedMut("POST", "/api/v1/integrations/composio/accounts/{accountId}/revoke", roleManage, composioH.RevokeAccount)
+	// openapi: responses 204,400,401,403,502
 	r.authedMut("POST", "/api/v1/integrations/composio/accounts/{accountId}/refresh", roleManage, composioH.RefreshAccount)
+	// openapi: responses 204,400,401,403,502
 	r.authedMut("DELETE", "/api/v1/integrations/composio/accounts/{accountId}", roleManage, composioH.DeleteAccount)
 	// Connectors — curated manifest catalog + install flow. List/Get are
 	// catalog browse (auth only, no workspace context); Verify/Install
@@ -355,6 +366,10 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// here would 403 capability-granted MANAGERs/MEMBERs before the handler
 	// could honour the grant.
 	r.authedMut("POST", "/api/v1/credentials/{credentialId}/rotate", roleInline, creds.Rotate)
+	// Human-approved hosts (#5045). PUT is OWNER/ADMIN and the handler also
+	// refuses anything that is not a person; see credential_allowed_hosts.go.
+	r.mux.Handle("GET /api/v1/credentials/{credentialId}/allowed-hosts", authed(wsCtx(http.HandlerFunc(creds.GetAllowedHosts))))
+	r.authedMut("PUT", "/api/v1/credentials/{credentialId}/allowed-hosts", roleManage, creds.SetAllowedHosts)
 	r.mux.Handle("GET /api/v1/credentials/{credentialId}/rotations", authed(wsCtx(http.HandlerFunc(creds.ListRotations))))
 	r.authedMut("DELETE", "/api/v1/credential-rotations/{rotationId}", roleInline, creds.CancelRotation)
 	// Per-tool granularity (Cursor parity, CONNECTIONS.md §3.1)
@@ -439,6 +454,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// rotate mints + returns the new value exactly once. Gate is inline
 	// (canEditAgent) — same as Update.
 	r.authedMut("POST", "/api/v1/agents/{agentId}/webhook-secret/rotate", roleInline, agents.RotateWebhookSecret)
+	r.authedMut("DELETE", "/api/v1/agents/{agentId}/webhook-secret/previous", roleInline, agents.RevokePreviousWebhookSecret)
 
 	// Persisted avatar (#1297). GET is readable by any workspace member —
 	// rosters render each other — while PUT/DELETE take the same inline
@@ -665,16 +681,22 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.authedMut("DELETE", "/api/v1/workspaces/{workspaceId}/skills/{skillId}", roleManage, skills.Delete)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/archive", roleManage, skills.Archive)
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/restore", roleManage, skills.Restore)
+	// openapi: responses 200,403,404,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/lock", roleManage, skills.Lock)
+	// openapi: responses 200,403,404,500
+	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/{skillId}/unlock", roleManage, skills.Unlock)
 	skillGen := NewSkillGenerateHandler(r.db, r.logger)
 	// Same stash-for-reuse pattern as creds above — the internal
 	// /api/v1/internal/skills/generate adapter shares the instance
 	// (per-workspace LLM credential cache must not fork).
 	r.skillGenHandler = skillGen
+	skillGen.SetJournal(r.Journal())
 	// Path param name MUST match what the wsCtx middleware reads — the
 	// pattern is {workspaceId} everywhere else in the API, and changing
 	// it broke the workspace lookup on this route in the prior commit.
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/generate", roleInline, skillGen.Generate)
 	skillBulk := NewSkillBulkImportHandler(r.db, r.logger, r.skillGitImportPolicy)
+	skillBulk.SetJournal(r.Journal())
 	r.authedMut("POST", "/api/v1/workspaces/{workspaceId}/skills/bulk-import", roleCreate, skillBulk.Import)
 
 	// Devcontainer feature catalog (auth required, no workspace context needed).

@@ -403,3 +403,25 @@ func TestPageCatalogQueryHiddenRowsNeverCounted(t *testing.T) {
 		t.Fatalf("owner private total%d status%d", total, status)
 	}
 }
+
+// #4471 on top of #4839: an OWNER or ADMIN whose filtered window is empty has
+// still had every private candidate's name, kind and owner consumed by the
+// filters, so each one is audited before the count is released. Auditing only
+// the released rows would leave this read unrecorded.
+func TestPageCatalogQueryEmptyWindowAuditsConsumedPrivateCandidates(t *testing.T) {
+	for _, role := range []string{"OWNER", "ADMIN"} {
+		for _, query := range []string{"q=Created&limit=1&offset=999", "q=does-not-match&limit=1&offset=999", "kind=sheet&limit=1"} {
+			t.Run(role+"/"+query, func(t *testing.T) {
+				h, ws, custodian, page := privateMetadataFixture(t)
+				execOrFatal(t, h.db, `UPDATE workspace_members SET role=? WHERE workspace_id=? AND user_id='ptadmin'`, role, ws)
+				rows, _, status := catalogQuery(t, h, ws, "ptadmin", role, query)
+				if status != 200 || len(rows) != 0 {
+					t.Fatalf("empty filtered window status%d rows%+v", status, rows)
+				}
+				if got := privateMetadataAuditCount(t, h, ws, page, "ptadmin", custodian); got != 1 {
+					t.Fatalf("%s filtered read consumed private candidate without custody audit: count%d", role, got)
+				}
+			})
+		}
+	}
+}

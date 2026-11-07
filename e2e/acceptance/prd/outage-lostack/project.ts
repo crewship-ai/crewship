@@ -88,7 +88,7 @@ export async function postVersion(api: APIRequestContext, ref: ProjectRef, baseV
   return { status: res.status(), body: (await res.json().catch(() => null)) as { version?: number; error?: string } | null }
 }
 
-export const projectURL = (ref: ProjectRef) => `/pages/${ref.slug}${q(ref.workspaceId, { artifact: "1" })}`
+export const projectURL = (ref: ProjectRef) => `/pages/${ref.slug}${q(ref.workspaceId, { artifact: "1", edit: "1" })}`
 
 /** Pins the QA workspace for the signed-in person before the app boots. */
 export async function pinWorkspace(context: BrowserContext, api: APIRequestContext, workspaceId: string): Promise<void> {

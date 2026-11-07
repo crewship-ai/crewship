@@ -56,6 +56,7 @@ public contract here. Superseded a spec? Move it to
 
 ## Artifacts
 
+- [Mooring implementation profiles](mooring-profiles.md): current SDK/client entrypoints, distinct concurrency and recovery guarantees, activation and qualification limits.
 - [Artifact version store](artifacts-version-store.md): immutable versions with
   `base_version` compare-and-swap, durability, quotas, retention, restore and share.
 - [Design Yjs authority](artifacts-design-yjs.md): server-held live Yjs canvas,

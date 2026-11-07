@@ -200,13 +200,13 @@ func TestAcceptance_PageFoldersLifecycle(t *testing.T) {
 	}
 	// The confirmation names the workspace in words: the subject has no
 	// reference, and "to workspace/." is a sentence with a hole in it.
-	if out := must("page", "grant", "health", "--workspace", "--level", "read"); strings.Contains(out, "workspace/") {
+	if out := must("page", "grant", "health", "--everyone", "--level", "read"); strings.Contains(out, "workspace/") {
 		t.Fatalf("workspace grant confirmation: %s", out)
 	}
-	if out, err := run("page", "grant", "health", "--workspace", "--level", "produce"); err == nil || !strings.Contains(out, "produce") {
+	if out, err := run("page", "grant", "health", "--everyone", "--level", "produce"); err == nil || !strings.Contains(out, "produce") {
 		t.Fatalf("a produce grant to the workspace was accepted: %v %s", err, out)
 	}
-	must("page", "revoke", "health", "--workspace")
+	must("page", "revoke", "health", "--everyone")
 	must("page", "move", "health", "health-2", "--unfiled")
 	must("page", "delete", "health-2", "--yes")
 	must("page", "folder", "delete", "ops-board", "--yes")

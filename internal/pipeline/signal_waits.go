@@ -28,6 +28,16 @@ type SignalWaitStore interface {
 	// ArmWithTimeout preserves the first arm's deadline, including on resume.
 	ArmWithTimeout(ctx context.Context, workspaceID, runID, stepID, eventType string, timeout time.Duration) (time.Time, error)
 
+	// ArmMatching is ArmWithTimeout plus the wait's rendered event_filter and
+	// correlation key, stored with the row in the same statement so no delivery
+	// can see the wait without them. The first arm wins on resume.
+	ArmMatching(ctx context.Context, workspaceID, runID, stepID, eventType, filter, correlationKey string, timeout time.Duration) (time.Time, error)
+
+	// DeliverCorrelated persists payload against pending waits in workspaceID
+	// of runs of pipelineID whose event type and correlation key match, and
+	// returns the claimed run ids. An empty key never matches.
+	DeliverCorrelated(ctx context.Context, workspaceID, pipelineID, eventType, correlationKey, payload string) (runIDs []string, err error)
+
 	Status(ctx context.Context, runID, stepID string) (string, error)
 	Expired(ctx context.Context, runID, stepID string) (bool, error)
 
@@ -90,15 +100,20 @@ func (s *SQLSignalWaitStore) Arm(ctx context.Context, workspaceID, runID, stepID
 // ArmWithTimeout is idempotent even across retries/restarts. For pre-deadline
 // schema rows, recover from the original created_at rather than from now.
 func (s *SQLSignalWaitStore) ArmWithTimeout(ctx context.Context, workspaceID, runID, stepID, eventType string, timeout time.Duration) (time.Time, error) {
+	return s.ArmMatching(ctx, workspaceID, runID, stepID, eventType, "", "", timeout)
+}
+
+func (s *SQLSignalWaitStore) ArmMatching(ctx context.Context, workspaceID, runID, stepID, eventType, filter, correlationKey string, timeout time.Duration) (time.Time, error) {
 	if timeout <= 0 {
 		timeout = time.Hour
 	}
 	now := time.Now().UTC()
 	_, err := s.db.ExecContext(ctx, `
-INSERT INTO pipeline_signal_waits (id, workspace_id, run_id, step_id, event_type, status, created_at, timeout_at)
-VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+INSERT INTO pipeline_signal_waits (id, workspace_id, run_id, step_id, event_type, status, created_at, timeout_at, event_filter, correlation_key)
+VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?, ?)
 ON CONFLICT (run_id, step_id) DO NOTHING`,
-		"sigwait_"+runID+"_"+stepID, workspaceID, runID, stepID, eventType, tsformat.Format(now), tsformat.Format(now.Add(timeout)))
+		"sigwait_"+runID+"_"+stepID, workspaceID, runID, stepID, eventType, tsformat.Format(now), tsformat.Format(now.Add(timeout)),
+		nullStr(filter), nullStr(correlationKey))
 	if err != nil {
 		return time.Time{}, fmt.Errorf("signal_waits: arm: %w", err)
 	}
@@ -139,27 +154,106 @@ func (s *SQLSignalWaitStore) Status(ctx context.Context, runID, stepID string) (
 	return status, err
 }
 
-func (s *SQLSignalWaitStore) Deliver(ctx context.Context, runID, eventType, payload string) (bool, error) {
-	res, err := s.db.ExecContext(ctx, `
+// claimableWait is the shared predicate for a wait a delivery may claim: still
+// pending, inside its deadline, and its run not terminal.
+const claimableWait = `status = 'pending'
+      AND (timeout_at IS NULL OR timeout_at > strftime('%Y-%m-%dT%H:%M:%f000000Z','now'))
+      AND NOT EXISTS (SELECT 1 FROM pipeline_runs r WHERE r.id = pipeline_signal_waits.run_id AND r.status IN ('completed','failed','cancelled','interrupted','dry_run'))`
+
+// claimMatching claims up to limit pending waits selected by where/args whose
+// stored event_filter accepts payload, oldest first, and returns their run ids
+// (one entry per claimed row). A wait whose filter rejects the payload is left
+// pending, so the signal is neither consumed by it nor lost for other waits.
+// Each claim is its own guarded UPDATE, so concurrent deliveries partition the
+// rows and never claim one twice.
+func (s *SQLSignalWaitStore) claimMatching(ctx context.Context, where string, args []any, payload string, limit int) ([]string, error) {
+	return claimMatchingOn(ctx, s.db, where, args, payload, limit)
+}
+
+// claimMatchingOn is claimMatching against a db or an open transaction, so a
+// caller can commit the claims together with a receipt.
+func claimMatchingOn(ctx context.Context, x sqlExecQuerier, where string, args []any, payload string, limit int) ([]string, error) {
+	rows, err := x.QueryContext(ctx, `SELECT id, run_id, COALESCE(event_filter,'') FROM pipeline_signal_waits
+ WHERE `+where+` AND `+claimableWait+` ORDER BY created_at ASC, id ASC LIMIT ?`, append(args, maxTopicFanout)...)
+	if err != nil {
+		return nil, err
+	}
+	type cand struct{ id, run, filter string }
+	var cands []cand
+	for rows.Next() {
+		var c cand
+		if err := rows.Scan(&c.id, &c.run, &c.filter); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		cands = append(cands, c)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return nil, err
+	}
+	rows.Close()
+
+	var claimed []string
+	for _, c := range cands {
+		if len(claimed) >= limit {
+			break
+		}
+		if c.filter != "" && !EventFilterMatches(c.filter, payload) {
+			continue
+		}
+		res, err := x.ExecContext(ctx, `
 UPDATE pipeline_signal_waits
 SET status = 'delivered', payload = ?, delivered_at = strftime('%Y-%m-%dT%H:%M:%f000000Z','now')
-WHERE id = (
-    SELECT id FROM pipeline_signal_waits
-    WHERE run_id = ? AND event_type = ? AND status = 'pending'
-      AND (timeout_at IS NULL OR timeout_at > strftime('%Y-%m-%dT%H:%M:%f000000Z','now'))
-      AND NOT EXISTS (SELECT 1 FROM pipeline_runs r WHERE r.id = pipeline_signal_waits.run_id AND r.status IN ('completed','failed','cancelled','interrupted','dry_run'))
-    ORDER BY created_at ASC LIMIT 1
-)`,
-		payload, runID, eventType,
-	)
+WHERE id = ? AND `+claimableWait, payload, c.id)
+		if err != nil {
+			return claimed, err
+		}
+		if n, _ := res.RowsAffected(); n > 0 {
+			claimed = append(claimed, c.run)
+		}
+	}
+	return claimed, nil
+}
+
+// Deliver claims the oldest pending wait of the run that matches the event
+// type and whose event_filter accepts the payload.
+func (s *SQLSignalWaitStore) Deliver(ctx context.Context, runID, eventType, payload string) (bool, error) {
+	claimed, err := s.claimMatching(ctx, `run_id = ? AND event_type = ?`, []any{runID, eventType}, payload, 1)
 	if err != nil {
 		return false, fmt.Errorf("signal_waits: deliver: %w", err)
 	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, fmt.Errorf("signal_waits: deliver rows: %w", err)
+	return len(claimed) > 0, nil
+}
+
+func (s *SQLSignalWaitStore) DeliverCorrelated(ctx context.Context, workspaceID, pipelineID, eventType, correlationKey, payload string) ([]string, error) {
+	return deliverCorrelatedOn(ctx, s.db, workspaceID, pipelineID, eventType, correlationKey, payload)
+}
+
+func deliverCorrelatedOn(ctx context.Context, x sqlExecQuerier, workspaceID, pipelineID, eventType, correlationKey, payload string) ([]string, error) {
+	if workspaceID == "" || pipelineID == "" || eventType == "" || correlationKey == "" {
+		return nil, nil
 	}
-	return n > 0, nil
+	claimed, err := claimMatchingOn(ctx, x,
+		`workspace_id = ? AND event_type = ? AND correlation_key = ?
+ AND run_id IN (SELECT id FROM pipeline_runs WHERE workspace_id = ? AND pipeline_id = ?)`,
+		[]any{workspaceID, eventType, correlationKey, workspaceID, pipelineID}, payload, maxTopicFanout)
+	if err != nil {
+		return dedupeStrings(claimed), fmt.Errorf("signal_waits: deliver correlated: %w", err)
+	}
+	return dedupeStrings(claimed), nil
+}
+
+func dedupeStrings(in []string) []string {
+	seen := make(map[string]bool, len(in))
+	out := make([]string, 0, len(in))
+	for _, v := range in {
+		if !seen[v] {
+			seen[v] = true
+			out = append(out, v)
+		}
+	}
+	return out
 }
 
 // maxTopicFanout bounds one DeliverTopic call. The loop below terminates on
@@ -180,50 +274,20 @@ func (s *SQLSignalWaitStore) DeliverTopic(ctx context.Context, workspaceID, even
 	if workspaceID == "" || eventType == "" {
 		return nil, fmt.Errorf("signal_waits: deliver topic: workspace_id and event_type are required")
 	}
-	runIDs := make([]string, 0, 4)
-	seen := make(map[string]bool, 4)
-	for i := 0; i < maxTopicFanout; i++ {
-		// One row per statement, claimed by the same discipline Deliver
-		// uses: the UPDATE's own WHERE requires status='pending', so the
-		// row transition IS the claim and two concurrent callers cannot
-		// both take it. Draining one row at a time (rather than a single
-		// multi-row UPDATE) keeps each claim a self-contained statement,
-		// which is what makes the concurrent case partition cleanly
-		// instead of depending on how the driver streams a RETURNING
-		// cursor while the write lock is held.
-		var runID string
-		err := s.db.QueryRowContext(ctx, `
-UPDATE pipeline_signal_waits
-SET status = 'delivered', payload = ?, delivered_at = strftime('%Y-%m-%dT%H:%M:%f000000Z','now')
-WHERE id = (
-    SELECT id FROM pipeline_signal_waits
-    WHERE workspace_id = ? AND event_type = ? AND status = 'pending'
-      AND (timeout_at IS NULL OR timeout_at > strftime('%Y-%m-%dT%H:%M:%f000000Z','now'))
-      AND NOT EXISTS (SELECT 1 FROM pipeline_runs r WHERE r.id = pipeline_signal_waits.run_id AND r.status IN ('completed','failed','cancelled','interrupted','dry_run'))
-    ORDER BY created_at ASC LIMIT 1
-)
-RETURNING run_id`,
-			payload, workspaceID, eventType,
-		).Scan(&runID)
-		if errors.Is(err, sql.ErrNoRows) {
-			return runIDs, nil
-		}
-		if err != nil {
-			// Partial progress is real progress: return what was already
-			// claimed so the caller resumes those runs rather than
-			// leaving them delivered-but-parked.
-			return runIDs, fmt.Errorf("signal_waits: deliver topic: %w", err)
-		}
-		// A run can hold more than one pending wait (two branches parked
-		// on the same event). Each row is claimed, but the run is woken
-		// once — resuming the same run twice is the double-execution this
-		// whole claim discipline exists to prevent.
-		if !seen[runID] {
-			seen[runID] = true
-			runIDs = append(runIDs, runID)
-		}
+	claimed, err := s.claimMatching(ctx, `workspace_id = ? AND event_type = ?`, []any{workspaceID, eventType}, payload, maxTopicFanout)
+	// A run can hold more than one pending wait (two branches parked on the
+	// same event). Each row is claimed, but the run is woken once — resuming
+	// the same run twice is the double-execution this claim discipline exists
+	// to prevent. Partial progress is returned with the error so the caller
+	// resumes what was claimed.
+	runIDs := dedupeStrings(claimed)
+	if err != nil {
+		return runIDs, fmt.Errorf("signal_waits: deliver topic: %w", err)
 	}
-	return runIDs, ErrTopicFanoutTruncated
+	if len(claimed) >= maxTopicFanout {
+		return runIDs, ErrTopicFanoutTruncated
+	}
+	return runIDs, nil
 }
 
 func (s *SQLSignalWaitStore) ConsumeDelivered(ctx context.Context, runID, stepID string) (string, bool, error) {

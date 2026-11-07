@@ -24,6 +24,7 @@
     "test:e2e:ui": "playwright test --ui",
     "test:e2e:update": "playwright test --update-snapshots",
     "acceptance:prd": "node e2e/acceptance/prd/run.mjs",
+    "acceptance:draft-revocation": "node e2e/acceptance/draft-revocation/run.mjs",
     "smoke": "node e2e/smoke.mjs",
     "smoke:create-agent": "node e2e/smoke-create-agent.mjs",
     "db:generate": "dotenv -- prisma generate",
@@ -106,7 +107,7 @@
     "@tiptap/react": "3.32.1",
     "@tiptap/starter-kit": "3.32.1",
     "@tiptap/suggestion": "3.32.1",
-    "@tiptap/y-tiptap": "3.0.10",
+    "@tiptap/y-tiptap": "3.0.11",
     "@types/turndown": "^5.0.6",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/addon-web-links": "^0.12.0",
@@ -127,9 +128,9 @@
     "highlight.js": "^11.12.0",
     "lib0": "0.2.119",
     "lowlight": "^3.3.0",
-    "lucide-react": "^1.64.0",
+    "lucide-react": "^1.65.0",
     "marked": "^18.1.2",
-    "motion": "14.6.0",
+    "motion": "14.8.0",
     "nanoid": "^6.0.2",
     "next": "^16.4.3",
     "next-intl": "^4.14.9",
@@ -189,8 +190,11 @@
       "postcss>nanoid": "^3.3.18",
       "@prisma/config>deepmerge-ts": "^8.0.0",
       "prisma>mysql2": "^3.23.1",
-      "ajv>fast-uri": "^4.1.5",
-      "source-map-js": "1.2.2"
+      "ajv>fast-uri": "^4.2.3",
+      "source-map-js": "1.2.2",
+      "glob": "14.0.2",
+      "minimatch": "11.0.1",
+      "katex": "0.18.2"
     }
   },
   "devDependencies": {

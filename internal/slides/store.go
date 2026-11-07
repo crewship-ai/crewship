@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 )
 
 var ErrInvalid = errors.New("invalid Slides mutation")
@@ -254,6 +256,11 @@ func (s *Store) write(ctx context.Context, tx *sql.Tx, key Key, current State, d
 		return result, fmt.Errorf("%w: image attachment guard required", ErrInvalid)
 	}
 	if err = s.quota(ctx, tx, key, len(canonical)); err != nil {
+		return result, err
+	}
+	// Same free-disk admission as native Craft writes, before the first row:
+	// the head and the immutable revision each store the canonical deck.
+	if err = storageheadroom.Check(ctx, tx, 2*int64(len(canonical))); err != nil {
 		return result, err
 	}
 	revision, order := current.Revision+1, current.OrderVersion

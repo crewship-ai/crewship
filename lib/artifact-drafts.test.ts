@@ -3,7 +3,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 // Lane/storage tests use an identity cipher; actual cryptography and admission
 // are exercised in local-draft-seal and the real-browser retention tests.
 vi.mock("./local-draft-seal", () => ({
- createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
+ // The real cipher asks /pages/@<page>/draft-key, which accepts only this Page identity.
+ createLocalDraftCipher: async (scope: { page: string }) => { if (!/^[A-Za-z0-9_-]{1,128}$/.test(scope.page)) throw new Error("draft-key 400: immutable Page reference required"); return { seal: async (text: string) => text, open: async (text: string) => text, close() {} } },
  forgetLocalDraftPage() {}, isSealedLocalDraft: () => true,
  LocalDraftReadRevoked: class extends Error {},
 }))
@@ -279,4 +280,212 @@ it("capture tolerates a localStorage getter that throws", async () => {
     expect(drafts.captureLegacyLocalDrafts()).toEqual([])
     expect(() => drafts.removeCapturedLegacyLocalDrafts([{ key: "crewship-design:alice", text: "x" }])).not.toThrow()
   } finally { if (original) Object.defineProperty(globalThis, "localStorage", original) }
+})
+
+it("G4 r4 blocker 2: an older failed write never overwrites a later successful merge when the lane retires", async () => {
+  const store = durableStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("wordcraft-pending", "alice", "w", "page_1")!
+  store.disk.set(key, "BASE")
+  // The write fails everywhere (IndexedDB and the localStorage fallback): the lane keeps it as failed.
+  store.put.mockImplementationOnce(async () => { throw new Error("quota") })
+  vi.mocked(localStorage.setItem).mockImplementationOnce(() => { throw new Error("quota") })
+  await expect(drafts.writeArtifactDraft(key, "OLD")).rejects.toThrow()
+  // Storage recovered: a stop merges its originals into the stored draft.
+  await expect(drafts.mergeArtifactDraft(key, existing => `${existing}+NEW`)).resolves.toBe("BASE+NEW")
+  expect(store.disk.get(key)).toBe("BASE+NEW")
+  // Identity retirement must not replay the older failed value over the merge.
+  await drafts.suspendOtherArtifactDrafts("bob")
+  expect(store.disk.get(key)).toBe("BASE+NEW")
+})
+
+// G4 B17: a draft that only reached the localStorage fallback (IndexedDB refused the write)
+// must still disappear when the person saves, discards or signs out.
+function failingStore() {
+  const store = durableStore()
+  store.put.mockImplementation(async () => { throw new Error("IndexedDB refused") })
+  // Like the real IndexedDB store: a revision read that succeeds (nothing stored).
+  return Object.assign(store, { read: async (row: Row) => { const text = store.disk.get(JSON.stringify(row)); return text === undefined ? undefined : { text } } })
+}
+it("removes the localStorage fallback when a saved or discarded draft is cleared (G4 B17)", async () => {
+  const drafts = await load(); drafts.setArtifactDraftStore(failingStore())
+  const key = drafts.artifactDraftKey("artifact-source", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "typed")
+  expect(local.get("artifact-source:alice:w:page")).toBe("typed")
+  await drafts.clearArtifactDraft(key, "typed", drafts.artifactDraftRevision(key))
+  expect(local.has("artifact-source:alice:w:page")).toBe(false)
+  await expect(drafts.readArtifactDraft(key)).resolves.toBe("")
+})
+it("keeps a newer fallback copy when an older save acknowledgement clears (G4 B17)", async () => {
+  const drafts = await load(); drafts.setArtifactDraftStore(failingStore())
+  const key = drafts.artifactDraftKey("artifact-source", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "first")
+  const revision = drafts.artifactDraftRevision(key)
+  await drafts.writeArtifactDraft(key, "second")
+  await drafts.clearArtifactDraft(key, "first", revision)
+  expect(local.get("artifact-source:alice:w:page")).toBe("second")
+})
+it("includes sealed localStorage fallback copies in the sign-out capture only when asked (G4 B17)", async () => {
+  const drafts = await load()
+  local.set("artifact-comment:alice:w:page", "sealed-fallback")
+  Object.defineProperty(localStorage, "length", { configurable: true, value: 0 })
+  const keys = vi.spyOn(Object, "keys").mockImplementation(((target: object) => target === localStorage ? [...local.keys()] : Reflect.ownKeys(target).filter((k): k is string => typeof k === "string")) as typeof Object.keys)
+  try {
+    expect(drafts.captureLegacyLocalDrafts("alice")).toEqual([])
+    const captured = drafts.captureLegacyLocalDrafts("alice", true)
+    expect(captured).toEqual([{ key: "artifact-comment:alice:w:page", text: "sealed-fallback" }])
+    drafts.removeCapturedLegacyLocalDrafts(captured)
+    expect(local.has("artifact-comment:alice:w:page")).toBe(false)
+  } finally { keys.mockRestore() }
+})
+
+it("loads a draft from IndexedDB while the localStorage getter throws (G4 B18)", async () => {
+  const store = durableStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("design-canvas", "alice", "w", "page")!
+  store.disk.set(JSON.stringify(["alice", "design-canvas", "w", "page"]), "from disk")
+  const original = Object.getOwnPropertyDescriptor(globalThis, "localStorage")
+  Object.defineProperty(globalThis, "localStorage", { configurable: true, get() { throw new DOMException("blocked site storage", "SecurityError") } })
+  try {
+    await expect(drafts.loadArtifactDraft(key)).resolves.toBe("from disk")
+  } finally { if (original) Object.defineProperty(globalThis, "localStorage", original) }
+})
+
+// G4 B22: two tabs share one draft key; an older tab's cancel/send must not delete the newer tab's text.
+it("does not let an older tab's clear delete a newer tab's draft (G4 B22, mitigated by revision-guarded clear)", async () => {
+  const disk = new Map<string, { text: string; revision?: string }>()
+  const store = {
+    capture: async () => [], purge: async () => {},
+    get: async (row: Row) => disk.get(JSON.stringify(row))?.text,
+    read: async (row: Row) => disk.get(JSON.stringify(row)),
+    put: async (row: Row, text: string, revision?: string) => { disk.set(JSON.stringify(row), { text, revision }) },
+    delete: async (row: Row) => { disk.delete(JSON.stringify(row)) },
+    removeCaptured: async (rows: { row: Row; revision: string | null }[]) => { for (const r of rows) if (disk.get(JSON.stringify(r.row))?.revision === r.revision) disk.delete(JSON.stringify(r.row)) },
+  }
+  const tabA = await load(); tabA.setArtifactDraftStore(store)
+  const key = tabA.artifactDraftKey("artifact-viewer-comment", "alice", "w", "page")!
+  await tabA.writeArtifactDraft(key, "older")
+  const revision = tabA.artifactDraftRevision(key)
+  const tabB = await load(); tabB.setArtifactDraftStore(store)
+  await tabB.writeArtifactDraft(key, "newer")
+  await tabA.clearArtifactDraft(key, "older", revision)
+  expect(disk.get(JSON.stringify(["alice", "artifact-viewer-comment", "w", "page"]))?.text).toBe("newer")
+})
+
+// Codex #4690 B2: an older revision already in IndexedDB must not come back once the newer fallback copy is cleared.
+it("clearing a fallback copy also removes the older IndexedDB revision it replaced (Codex #4690 B2)", async () => {
+  const disk = new Map<string, { text: string; revision?: string }>()
+  let refuse = false
+  const store = {
+    capture: async () => [], purge: async () => {},
+    get: async (row: Row) => disk.get(JSON.stringify(row))?.text,
+    read: async (row: Row) => disk.get(JSON.stringify(row)),
+    put: async (row: Row, text: string, revision?: string) => { if (refuse) throw new Error("IndexedDB refused"); disk.set(JSON.stringify(row), { text, revision }) },
+    delete: async (row: Row) => { disk.delete(JSON.stringify(row)) },
+    removeCaptured: async (rows: { row: Row; revision: string | null }[]) => { for (const r of rows) if (disk.get(JSON.stringify(r.row))?.revision === r.revision) disk.delete(JSON.stringify(r.row)) },
+  }
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "older A")
+  refuse = true
+  await drafts.writeArtifactDraft(key, "newer B")
+  expect(local.get("artifact-comment:alice:w:page")).toBe("newer B")
+  await drafts.clearArtifactDraft(key, "newer B", drafts.artifactDraftRevision(key))
+  expect(local.has("artifact-comment:alice:w:page")).toBe(false)
+  expect(disk.has(JSON.stringify(["alice", "artifact-comment", "w", "page"]))).toBe(false)
+  await expect(drafts.readArtifactDraft(key)).resolves.toBe("")
+})
+
+function revisionStore() {
+  const disk = new Map<string, { text: string; revision?: string }>()
+  const store = {
+    disk, refuse: false as boolean, beforeRefuse: undefined as undefined | (() => void), removeFails: false as boolean,
+    capture: async () => [], purge: async () => {},
+    get: async (row: Row) => disk.get(JSON.stringify(row))?.text,
+    read: async (row: Row) => disk.get(JSON.stringify(row)),
+    put: async (row: Row, text: string, revision?: string) => { if (store.refuse) { store.beforeRefuse?.(); throw new Error("IndexedDB refused") } disk.set(JSON.stringify(row), { text, revision }) },
+    delete: async (row: Row) => { disk.delete(JSON.stringify(row)) },
+    removeCaptured: async (rows: { row: Row; revision: string | null }[]) => { if (store.removeFails) throw new Error("IndexedDB delete failed"); for (const r of rows) if (disk.get(JSON.stringify(r.row))?.revision === r.revision) disk.delete(JSON.stringify(r.row)) },
+  }
+  return store
+}
+const ROW = JSON.stringify(["alice", "artifact-comment", "w", "page"])
+
+it("a newer draft another tab stored while this tab's write failed survives clearing this tab's fallback (Codex #4690 r2 B1)", async () => {
+  const store = revisionStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "older A")
+  store.refuse = true
+  // Tab B's newer write lands in IndexedDB while this tab's put is failing.
+  store.beforeRefuse = () => { store.disk.set(ROW, { text: "tab B newer", revision: "rev-b" }); store.beforeRefuse = undefined }
+  await drafts.writeArtifactDraft(key, "this tab")
+  await drafts.clearArtifactDraft(key, "this tab", drafts.artifactDraftRevision(key))
+  expect(store.disk.get(ROW)?.text).toBe("tab B newer")
+})
+
+it("a failed IndexedDB delete keeps the newer fallback copy instead of resurrecting the older revision (Codex #4690 r2 B2)", async () => {
+  const store = revisionStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "older A")
+  store.refuse = true
+  await drafts.writeArtifactDraft(key, "newer B")
+  store.removeFails = true
+  await drafts.clearArtifactDraft(key, "newer B", drafts.artifactDraftRevision(key)).catch(() => {})
+  expect(local.get("artifact-comment:alice:w:page")).toBe("newer B")
+  await expect(drafts.readArtifactDraft(key)).resolves.toBe("newer B")
+})
+
+it("an unknown superseded revision keeps the fallback copy: IndexedDB A, fallback B, read and put fail, clear, reopen offers B (Codex #4690 r3)", async () => {
+  const store = revisionStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "older A")
+  const read = store.read
+  store.read = async () => { throw new Error("IndexedDB read failed") }
+  store.refuse = true
+  await drafts.writeArtifactDraft(key, "newer B")
+  await drafts.clearArtifactDraft(key, "newer B", drafts.artifactDraftRevision(key))
+  // IndexedDB works again; the older revision must not be what reopening finds.
+  store.read = read; store.refuse = false
+  expect(local.get("artifact-comment:alice:w:page")).toBe("newer B")
+  const reopened = await load(); reopened.setArtifactDraftStore(store)
+  await expect(reopened.readArtifactDraft(key)).resolves.toBe("newer B")
+})
+
+it("a verified read revocation still removes a fallback copy whose superseded revision is unknown (Codex #4690 r3)", async () => {
+  const store = revisionStore()
+  const drafts = await load(); drafts.setArtifactDraftStore(store)
+  const key = drafts.artifactDraftKey("artifact-comment", "alice", "w", "page")!
+  await drafts.writeArtifactDraft(key, "older A")
+  store.read = async () => { throw new Error("IndexedDB read failed") }
+  store.refuse = true
+  await drafts.writeArtifactDraft(key, "newer B")
+  await drafts.purgeLocalDraftPage({ human: "alice", workspace: "w", page: "page" })
+  expect(local.has("artifact-comment:alice:w:page")).toBe(false)
+})
+
+it("retires an admitted capture when the draft is loaded again: a store or clear must not load", async () => {
+ const store = durableStore()
+ const drafts = await load()
+ drafts.setArtifactDraftStore(store as never)
+ const key = drafts.artifactDraftKey("design-canvas", "alice", "w", "page")!
+ await drafts.loadArtifactDraft(key)
+ const capture = drafts.admittedArtifactDraftMerge(key, () => "captured", parts => parts.join(""))
+ await expect(capture()).resolves.toBe("captured")
+ await drafts.loadArtifactDraft(key)
+ await expect(capture()).rejects.toThrow("no longer signed in")
+})
+
+it("merges an admitted capture into what the row holds", async () => {
+ const store = durableStore()
+ const drafts = await load()
+ drafts.setArtifactDraftStore(store as never)
+ const key = drafts.artifactDraftKey("design-canvas", "alice", "w", "page")!
+ await drafts.writeArtifactDraft(key, "other tab")
+ await drafts.loadArtifactDraft(key)
+ const capture = drafts.admittedArtifactDraftMerge(key, existing => `${existing}+mine`, parts => parts.join("|"))
+ await expect(capture()).resolves.toBe("other tab+mine")
+ await expect(drafts.loadArtifactDraft(key)).resolves.toBe("other tab+mine")
 })

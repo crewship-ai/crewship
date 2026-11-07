@@ -119,7 +119,6 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusUnauthorized, "Unauthorized")
 		return
 	}
-
 	var req credentialRotateRequest
 	if err := readJSON(r, &req); err != nil {
 		replyError(w, http.StatusBadRequest, "Invalid JSON body")
@@ -233,6 +232,17 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 			h.logger.Warn("rotate tx rollback", "error", rbErr)
 		}
 	}()
+
+	// The credential.rotate grant does not reach the workspace judge's own
+	// credential: binding it takes OWNER/ADMIN, so replacing it does too. The
+	// internal adapter stamps ADMIN, so it passes the caller's real role.
+	writeRole := role
+	if actual, ok := r.Context().Value(ctxCredentialWriteRole{}).(string); ok {
+		writeRole = actual
+	}
+	if !canRole(writeRole, "manage") && !h.allowGovernanceCredentialWrite(w, r, tx, credID) {
+		return
+	}
 
 	// #1053: grace_seconds=0 means "no overlap" — the caller explicitly wants
 	// no fallback window, so the old ciphertext must not be retained at rest.

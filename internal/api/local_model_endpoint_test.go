@@ -50,7 +50,7 @@ func TestResolveLocalModelEndpoint_Precedence(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := resolveLocalModelEndpoint(context.Background(), db, logger, wsID, tc.assigned)
+			got := resolveLocalModelEndpoint(context.Background(), db, logger, "", wsID, tc.assigned)
 			if got.BaseURL != tc.want {
 				t.Errorf("resolveLocalModelEndpoint.BaseURL = %q, want %q", got.BaseURL, tc.want)
 			}
@@ -66,7 +66,7 @@ func TestResolveLocalModelEndpoint_NoneConfigured(t *testing.T) {
 	const wsID = "ws-empty"
 	mustExec(t, db, `INSERT INTO workspaces (id, name, slug) VALUES (?, 'E', 'e')`, wsID)
 
-	if got := resolveLocalModelEndpoint(context.Background(), db, logger, wsID, nil); got.BaseURL != "" {
+	if got := resolveLocalModelEndpoint(context.Background(), db, logger, "", wsID, nil); got.BaseURL != "" {
 		t.Errorf("expected empty (env fallback), got %q", got.BaseURL)
 	}
 }
@@ -90,7 +90,7 @@ func TestResolveLocalModelEndpoint_SkipsMalformedStored(t *testing.T) {
 		VALUES ('cr-bad', ?, 'bad', ?, 'ENDPOINT_URL', 'OLLAMA', 'ACTIVE', 'u1')`,
 		wsID, enc)
 
-	if got := resolveLocalModelEndpoint(context.Background(), db, logger, wsID, nil); got.BaseURL != "" {
+	if got := resolveLocalModelEndpoint(context.Background(), db, logger, "", wsID, nil); got.BaseURL != "" {
 		t.Errorf("expected malformed stored URL skipped, got %q", got.BaseURL)
 	}
 }
@@ -115,5 +115,26 @@ func TestDecryptEndpointURLForRead(t *testing.T) {
 	}
 	if got := decryptEndpointURLForRead(CredTypeEndpointURL, "", logger); got != nil {
 		t.Errorf("empty value → nil, got %v", *got)
+	}
+}
+
+// #5045: the workspace-default branch reads the vault directly, so it must
+// ask the host gate itself. A host-bound ENDPOINT_URL the crew boundary does
+// not satisfy must not reach a run, neither as the base URL nor as the key.
+func TestResolveLocalModelEndpoint_WorkspaceDefaultHonoursHostGate(t *testing.T) {
+	for _, tc := range hostBoundCases {
+		t.Run(tc.name, func(t *testing.T) {
+			db, wsID, _ := seedHostBoundRig(t, tc.mode, tc.domains, tc.hosts)
+			execOrFatal(t, db, `DELETE FROM agent_credentials`)
+			execOrFatal(t, db, `UPDATE credentials SET type = 'ENDPOINT_URL', encrypted_value = ? WHERE id = 'hb-cred'`,
+				mustEncrypt(t, `{"baseURL":"https://ep.example.com/v1","apiKey":"sk-endpoint-key"}`))
+			got := resolveLocalModelEndpoint(t.Context(), db, discardLogger(), "hb-agent", wsID, nil)
+			if has := got.BaseURL != "" && got.APIKey == "sk-endpoint-key"; has != tc.deliver {
+				t.Fatalf("workspace-default endpoint delivered = %v, want %v (%+v)", has, tc.deliver, got)
+			}
+			if !tc.deliver && (got.BaseURL != "" || got.APIKey != "") {
+				t.Fatalf("withheld endpoint leaked: %+v", got)
+			}
+		})
 	}
 }

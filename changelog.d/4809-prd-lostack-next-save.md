@@ -1,0 +1,1 @@
+- **PRD acceptance harness: the lost-ack rows check the save that follows the reconciliation (#4809).** The next-save check accepted the reconciled version's "Uloženo" label, which was still on screen, so the Sheet row could fail although the product saved the next version correctly. It now waits for a newer version.

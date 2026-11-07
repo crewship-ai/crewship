@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"sort"
@@ -170,6 +171,12 @@ func (p *Provisioner) ensureImage(ctx context.Context, ref string) error {
 func (p *Provisioner) resolveFeatures(ctx context.Context, cfg *Config) ([]*ResolvedFeature, map[string]map[string]any, error) {
 	if len(cfg.Features) == 0 {
 		return nil, nil, nil
+	}
+	// A provisioner built without a downloader (tests pass nil) must fail the
+	// job, not dereference nil in a download goroutine and kill the process
+	// (#4742).
+	if p.downloader == nil {
+		return nil, nil, errors.New("devcontainer features are declared but no feature downloader is configured")
 	}
 
 	// Sort feature refs for deterministic download order.

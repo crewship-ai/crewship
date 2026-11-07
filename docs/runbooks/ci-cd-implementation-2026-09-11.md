@@ -19,9 +19,14 @@ checksum. Workers validate it independently and give every test its own copy wit
 the existing pragmas and cleanup. An invalid import fails rather than falling
 back to local migration. The aggregate verifies the original successful bootstrap
 test events and adds its whole package duration exactly once to the six worker
-package durations for the existing 2300-second baseline / 1.6x erosion alarm.
-All migration work and package setup/cleanup remain measured; the 4600-second
-hang deadline remains unchanged.
+package durations. That combined metric has its own measured baseline (median
+4166 s over 46 main push runs, 2026-11-03 to 2026-11-05) and an explicit
+5200-second erosion alarm (`RACE_COMBINED_ALARM_SECONDS`), failing main pushes
+and warning on pull requests and the merge queue. The 2300-second unsplit
+package runtime from 2026-09-14 now only sets the per-partition 4600-second hang
+deadline and the bootstrap deadline (`RACE_API_TIMEOUT_BASIS_SECONDS`); the
+alarm never feeds a timeout. All migration work and package setup/cleanup remain
+measured.
 Artifacts stay in separate directories. `CI Result` requires workers and the
 aggregate, and no failed worker cancels the others. Six partitions also keep
 each test-selection argument under Linux's per-argument size limit; unexpected

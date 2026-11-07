@@ -33,6 +33,7 @@ variable is on shows nothing until the server reports the feature available.
 | Dashboard with live data | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`; also `NEXT_PUBLIC_ARTIFACTS_LIBRARY` for the library route | `artifact_projects` and `artifact_dashboard_data` | — |
 | Slides artifact preview and PDF export | `NEXT_PUBLIC_ARTIFACT_SLIDES` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`; also `NEXT_PUBLIC_ARTIFACTS_LIBRARY` for the library route | `artifact_projects` and `artifact_slides` | — |
 | Design canvas | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | `artifacts_design` | — |
+| Design prototype playback (**Play**, **Link to screen**) | `NEXT_PUBLIC_ARTIFACTS_DESIGN` and `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | `artifacts_design` | — |
 | Craft edit lease bar and draft recovery in chat | `NEXT_PUBLIC_CHAT_CRAFT_LEASE` | — | `craft_native.enabled` with a Word or Sheet profile |
 | Native Craft Word or Sheet editor at `/pages/craft/editor` and **New Doc** for native documents | — | — | `craft_native.enabled` with a qualified profile for that application |
 | Creating a Word document (Docs) | — | — | `documents.enabled` |
@@ -52,18 +53,22 @@ the old overview leads there too.
 
 These flags are stored in the database. Each one is created by a migration with
 its instance default **off**, so upgrading an existing instance never turns a
-surface on. A migration that runs again leaves a changed default alone.
+surface on. A migration that runs again leaves a changed default alone. The one
+exception is `artifact_projects`: Projects are a supported default, and a later
+migration turns its instance default **on** unless an administrator had already
+changed it (see [Turning Projects off](#turning-projects-off)).
 
 | Key | Instance default | Turns on | Also needs |
 |---|---|---|---|
-| `artifact_projects` | off | Multi-screen HTML artifact projects with immutable versions and anchored comments, their availability check, and the artifact project cards in chat | — |
+| `artifact_projects` | **on** | Multi-screen HTML artifact projects with immutable versions and anchored comments, their availability check, and the artifact project cards in chat | — |
 | `artifact_dashboard_data` | off | Dashboard datasets and reader-scoped data for Dashboard artifacts | `artifact_projects` |
 | `artifact_slides` | off | Read-only Slides projections of an artifact version and vector PDF export | `artifact_projects` |
 | `artifacts_design` | off | Collaborative Design artifacts | — |
 | `gridcraft_editor` | off | Live workbook editing: editor sessions, cell edits and the commits feed | Instance switches `gridcraft.enabled` and `gridcraft.editor_enabled` |
 
-A workspace override wins over the instance default. A key that does not exist
-reads as off. The flag check reads only the on/off value: the `percentage`
+The server resolves a flag in this order: the server environment bypass forces
+it on, then a workspace override wins, then the instance default applies. A key
+that does not exist reads as off. The flag check reads only the on/off value: the `percentage`
 column shown by `crewship feature-flag list` does not change the result for
 these keys.
 
@@ -71,8 +76,8 @@ Turn a flag on for the current workspace (OWNER or ADMIN). Select the
 workspace with `--workspace <workspace-id>` or `CREWSHIP_WORKSPACE`:
 
 ```bash
-crewship feature-flag enable artifact_projects
 crewship feature-flag enable artifact_slides
+crewship feature-flag enable artifact_dashboard_data
 ```
 
 Return the workspace to the instance default, or turn it off explicitly:
@@ -100,6 +105,42 @@ The same operations are available as `PUT` and `DELETE`
 `/api/v1/feature-flags/{key}/override` and `PATCH /api/v1/feature-flags/{key}`.
 See [`crewship feature-flag`](/cli/feature-flag) and the
 [Feature flags API](/api-reference/feature-flags).
+
+### Turning Projects off
+
+`artifact_projects` is on by default. Turning it off hides Projects; it does not
+delete them. While it is off, the project routes answer `404`
+(`artifact projects are not enabled`) and
+`crewship page artifact availability` reports `{"enabled": false}`. Turning it
+back on shows the existing projects and versions again.
+
+For one workspace (OWNER or ADMIN of that workspace):
+
+```bash
+crewship feature-flag disable artifact_projects --workspace <workspace-id>
+crewship feature-flag inherit artifact_projects --workspace <workspace-id>   # back to the instance default
+```
+
+For every workspace without an override (instance administrator):
+
+```bash
+crewship feature-flag update artifact_projects --enabled=false
+crewship feature-flag update artifact_projects --enabled                     # on again
+```
+
+A workspace override wins over the instance default in both directions, so a
+workspace that ran `enable` stays on after the instance default goes off.
+`CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` forces Projects on for every workspace
+and overrides both; leave it unset to let the flags decide.
+
+**Upgrading from an earlier release.** Migration
+`20261105094324_artifact_projects_default_on` turns the instance default on only
+where the flag is still the untouched seed from
+`20261027175100_artifact_project_comments`. If an administrator ever changed the
+instance flag (`crewship feature-flag update`, `PATCH
+/api/v1/feature-flags/artifact_projects` or a manifest apply), or deleted or
+recreated it, the upgrade keeps that choice. Workspace overrides are not
+touched: a workspace that was turned off stays off.
 
 ### Server environment bypasses
 
@@ -286,6 +327,7 @@ only when its value is exactly `true`.
 | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` | off | Live data previews in Dashboard artifacts, inside the library or the chat and Page viewer. No data requests while off. |
 | `NEXT_PUBLIC_ARTIFACT_SLIDES` | off | Slides previews of artifact versions, inside the library or the chat and Page viewer |
 | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | off | The Design canvas |
+| `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | off | Prototype playback of linked Design screens: the **Play** button and the **Link to screen** field. Needs `NEXT_PUBLIC_ARTIFACTS_DESIGN`. |
 | `NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM` | off | Read-only Design System token preview in the artifact viewer |
 | `NEXT_PUBLIC_SLIDES_EDITOR` | off | The native Slides editor on a Page that has Slides. Edits stay a local draft. |
 | `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS` | off | Development only. Leave off: the server does not serve the revert and proposal endpoints this client calls. |
@@ -322,7 +364,7 @@ crewship feature-flag list
 ```text
 KEY                      DEFAULT  WORKSPACE  EFFECTIVE
 artifact_dashboard_data  off      on         on
-artifact_projects        off      on         on
+artifact_projects        on       inherit    on
 artifact_slides          off      on         on
 artifacts_design         off      on         on
 gridcraft_editor         off      inherit    off
@@ -377,9 +419,11 @@ flag enabled; `doc status` does not certify the legacy worker service.
 
 ## Upgrades
 
-The flags on this page arrive through ordinary migrations and start off. After
-an upgrade, nothing changes for users until you enable the flags, set the
-startup switches and deploy a UI build with the matching variables.
+The flags on this page arrive through ordinary migrations and start off, except
+`artifact_projects`, whose instance default an upgrade turns on unless an
+administrator had changed it (see [Turning Projects off](#turning-projects-off)).
+For the other surfaces, nothing changes for users until you enable the flags,
+set the startup switches and deploy a UI build with the matching variables.
 
 To roll a surface back, undo it in the layer that turned it on. Stored
 artifacts stay in the database in every case.

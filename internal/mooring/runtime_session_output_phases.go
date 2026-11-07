@@ -11,11 +11,18 @@ import (
 // transport bookkeeping only: it authenticates no recipient or Saved outcome.
 // Exactly the Pending/terminal-receipt pair may share an original outer ID;
 // arbitrary message kinds, recipients or changed membership gain no namespace.
-func correlatedParticipantOutputPhases(first, second []byte) bool {
+// rotated may excuse the gate alone; every other outer field must still match.
+func correlatedParticipantOutputPhases(first, second []byte, rotated func(older, newer protocol.SessionParticipantOutput) bool) bool {
 	var a, b protocol.SessionParticipantOutput
 	if json.Unmarshal(first, &a) != nil || json.Unmarshal(second, &b) != nil ||
 		string(a.Type) != "session_participant_output" || a.Type != b.Type {
 		return false
+	}
+	if a.GateID != b.GateID {
+		if !rotated(a, b) {
+			return false
+		}
+		a.GateID = b.GateID
 	}
 	aMessage, bMessage := a.Message, b.Message
 	a.Message, b.Message = nil, nil
@@ -53,6 +60,32 @@ func correlatedParticipantOutputPhases(first, second []byte) bool {
 		}
 	}
 	return true
+}
+
+// Caller holds s.mu.
+func (s *SessionRuntime) outputPhasesCorrelatedLocked(first, second []byte) bool {
+	return correlatedParticipantOutputPhases(first, second, s.outputGateRotatedLocked)
+}
+
+// A rotation can overtake a Pending still queued for the old gate, so its receipt
+// arrives on the new gate. Only a chain this runtime recorded bridges the two, and
+// the new gate comes from the observed ticket: the receipt can reach this reader
+// before the host has captured Joined. This names no recipient and grants nothing.
+func (s *SessionRuntime) outputGateRotatedLocked(older, newer protocol.SessionParticipantOutput) bool {
+	for st := range s.participantStates {
+		if st.gate != string(older.GateID) || !st.left || !s.participantStateLocked(st) {
+			continue
+		}
+		for next := st.successor; next != nil && s.participantStateLocked(next); next = next.successor {
+			if next.ticket.GateID == newer.GateID && next.open.ConnectionRef == older.ConnectionRef {
+				return true
+			}
+			if !next.left {
+				break
+			}
+		}
+	}
+	return false
 }
 
 // Completion/retirement releases only this borrowed token. Its complementary

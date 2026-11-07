@@ -10,7 +10,7 @@ import { apiAs, createQaWorkspace, loginStorageState, deleteQaWorkspace, provisi
 import { takeTrackedPages } from "./created"
 import { outputPaths, readPrdEnv, type PrdAccount, type PrdEnv, type PrdMode, type PrdRole } from "./env"
 import type { RunInfo } from "./global-setup"
-import { PRD_EVIDENCE } from "./requirements"
+import { PRD_EVIDENCE, PRD_NOTE } from "./requirements"
 import { slug } from "./report.mjs"
 
 export { expect }
@@ -133,6 +133,11 @@ export class PrdScenario {
    * attaches it; the first evidence file becomes the row's evidence path.
    * Objects are written as JSON. Never pass credentials or cookies.
    */
+  /** One line for this row in summary.md, for what a pass would otherwise hide. */
+  note(text: string): void {
+    this.testInfo.annotations.push({ type: PRD_NOTE, description: text })
+  }
+
   async evidence(name: string, data: unknown): Promise<string> {
     const scenario = path.basename(this.testInfo.file).replace(/\.acceptance\.ts$/, "")
     const dir = path.join(outputPaths(this.env.outputDir).evidence, slug(scenario), slug(this.testInfo.title))

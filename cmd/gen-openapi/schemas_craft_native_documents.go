@@ -26,8 +26,14 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 		return map[string]any{"workspaceId": str(), "pageId": str(), "applicationId": map[string]any{"type": "string", "enum": []string{"wordcraft", "gridcraft"}}, "enginePin": pin(), "sessionId": str(), "generation": version(false), "baseVersion": version(false), "editorRevision": map[string]any{"type": "string", "minLength": 1, "maxLength": 256, "description": "Opaque snapshot revision/RPC correlation binding, at most 256 UTF-8 bytes."}, "contentHash": hash(), "bytes": bytes(), "targetVersion": version(false)}
 	}
 	required := []string{"workspaceId", "pageId", "applicationId", "enginePin", "sessionId", "generation", "baseVersion"}
-	snapshot := obj(properties(), append(append([]string{}, required...), "editorRevision", "contentHash", "bytes")...)
-	reconcile := obj(properties(), append(append([]string{}, required...), "editorRevision", "contentHash")...)
+	// attemptId identifies one save attempt so a reconcile can retire it (#4899).
+	attempt := func() map[string]any {
+		p := properties()
+		p["attemptId"] = map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$", "description": "Optional client nonce of one save attempt. Reconcile with it, by the live lease holder, answers 410 when version base+1 is not this attempt and retires the attempt, so it can never commit later; a save of a retired attempt is refused with 409. Without the live lease or beyond 8 retired attempts per page nothing is recorded and reconcile answers 409 (unconfirmed)."}
+		return p
+	}
+	snapshot := obj(attempt(), append(append([]string{}, required...), "editorRevision", "contentHash", "bytes")...)
+	reconcile := obj(attempt(), append(append([]string{}, required...), "editorRevision", "contentHash")...)
 	restore := obj(properties(), append(append([]string{}, required...), "targetVersion")...)
 	receipt := properties()
 	delete(receipt, "bytes")
@@ -37,6 +43,7 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	receipt["durability"] = map[string]any{"type": "string", "enum": []string{"node"}}
 	receipt["issuedBy"] = map[string]any{"type": "string", "enum": []string{"crewship"}}
 	receipt["phase"] = map[string]any{"type": "string", "enum": []string{"committed"}}
+	receipt["unchanged"] = map[string]any{"type": "boolean", "enum": []bool{true}, "description": "No version was created: version equals baseVersion, which already holds this snapshot."}
 	receiptRequired := append(append([]string{}, required...), "editorRevision", "contentHash", "version", "candidateHash", "durability", "issuedBy", "phase")
 	quota := obj(map[string]any{"usedBytes": version(true), "limitBytes": version(false), "warning": map[string]any{"type": "boolean"}, "level": map[string]any{"type": "string", "enum": []string{"none", "near", "critical", "full"}}, "retention": str()}, "usedBytes", "limitBytes", "warning", "retention")
 	document := obj(map[string]any{"version": version(false), "bytes": bytes(), "applicationId": properties()["applicationId"], "enginePin": pin(), "editorBundle": pin(), "editorURL": str(), "quota": ref("NativeCraftDocumentQuota")}, "version", "bytes", "applicationId", "enginePin", "editorBundle", "editorURL", "quota")
@@ -65,6 +72,13 @@ func craftNativeDocumentSchemaCatalog() (map[string]DomainSchema, map[string]any
 	add("POST", "/import", "NativeCraftSnapshotRequest", "NativeCraftSnapshotReceipt")
 	add("POST", "/reconcile", "NativeCraftReconcileRequest", "NativeCraftSnapshotReceipt")
 	add("POST", "/restore", "NativeCraftRestoreRequest", "NativeCraftRestoreReceipt")
+	author := obj(map[string]any{"actorId": map[string]any{"type": "string", "description": "Recorded actor, `user:<id>`, `agent:<id>` or a system actor."}, "kind": map[string]any{"type": "string", "enum": []string{"human", "agent", "system"}}, "displayName": str()}, "actorId", "kind", "displayName")
+	schemas["NativeCraftVersionAuthor"] = author
+	schemas["NativeCraftVersion"] = obj(map[string]any{"version": version(false), "createdAt": str(), "author": ref("NativeCraftVersionAuthor"), "restoredFrom": version(false), "current": map[string]any{"type": "boolean", "description": "True only for the newest version, the one the editor opens."}}, "version", "createdAt", "author", "current")
+	schemas["NativeCraftVersionList"] = obj(map[string]any{"currentVersion": version(false), "versions": map[string]any{"type": "array", "maxItems": 200, "description": "Newest first. Metadata only; never document bytes.", "items": ref("NativeCraftVersion")}, "truncated": map[string]any{"type": "boolean", "description": "True when older versions exist beyond this listing. They stay stored and restorable."}}, "currentVersion", "versions", "truncated")
+	add("GET", "/versions", "", "NativeCraftVersionList")
+	schemas["NativeCraftVersionDocument"] = obj(map[string]any{"version": version(false), "currentVersion": version(false), "current": map[string]any{"type": "boolean", "description": "True when this version is the current head."}, "createdAt": str(), "author": ref("NativeCraftVersionAuthor"), "restoredFrom": version(false), "applicationId": properties()["applicationId"], "enginePin": pin(), "editorBundle": pin(), "editorURL": str(), "bytes": bytes()}, "version", "currentVersion", "current", "createdAt", "author", "applicationId", "enginePin", "editorBundle", "editorURL", "bytes")
+	add("GET", "/versions/{version}", "", "NativeCraftVersionDocument")
 	session := map[string]any{"name": "X-Craft-Session", "in": "header", "required": true, "schema": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "description": "Private original-human admission for this exact Page."}
 	proposals := "/api/v1/pages/{slug}/craft/proposals"
 	routes["GET "+proposals] = DomainSchema{NoRequest: true, Response: ref("NativeCraftProposalList"), SuccessStatuses: []string{"200"}, Parameters: []map[string]any{session}}

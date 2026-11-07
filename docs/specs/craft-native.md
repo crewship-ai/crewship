@@ -32,7 +32,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, can_edit: boolean, preview_enabled: boolean, agents_enabled: boolean}`, 200. |
 | POST | `/api/v1/pages/{slug}/craft/sessions` | `{}`. | `session_token`, public `session_id`, `application_id`, `page_id`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Separately refreshed original authentication; no body consumed. | `{renewed: boolean}`, 200. |
-| GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header. | Lease status described below, 200. |
+| GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header; Page read or Edit. | Lease status described below, 200. |
 | POST | `/api/v1/pages/{slug}/craft/lease` | `{}`; acquire when free. | Lease status, 200. |
 | POST | `/api/v1/pages/{slug}/craft/lease/acquire` | `{}`; explicit acquisition alias. | Lease status, 200. |
 | POST | `/api/v1/pages/{slug}/craft/lease/renew` | `{generation: "1"}`. | Lease status, 200. |
@@ -41,13 +41,13 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 | POST | `/api/v1/pages/{slug}/craft/lease/handoff` | `{generation: "1", request_id: "public-request-id"}`. | New holder's lease status, 200. |
 | GET | `/api/v1/pages/{slug}/craft/events` | Craft admission header; keep the connection open. | `text/event-stream`: `lease` status or `session_retired` metadata; 200. |
 | POST | `/api/v1/pages/{slug}/craft/initialize` | Existing empty personal Page owner, original human `pages:write`; Qualified Word or Grid native bytes. | Atomic native profile, lease and version1, with private admission, 201. |
-| GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header. | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
+| GET | `/api/v1/pages/{slug}/craft/document` | Craft admission header; private read (see Shared previews). | Complete base64 native bytes, version and pinned editor/engine metadata, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Bound whole snapshot described below. | Exact committed snapshot receipt, 200. |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Same whole snapshot contract; existing explicit native Page only. | Exact committed snapshot receipt, 200. |
-| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash; no blind retry. Current write rights and the original admission; the original lease may have expired or moved. | Original pinned commit receipt,200; never an arbitrary latest head. |
+| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Exact original snapshot binding and hash, plus the attempt's `attemptId`; no blind retry. Current write rights and the original admission; the original lease may have expired or moved. | Original pinned commit receipt,200; never an arbitrary latest head. 410 when base+1 is not this attempt: the attempt is retired and can never commit. |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Current binding and targetVersion. | New committed version and node durability, 200. |
-| GET | `/api/v1/pages/{slug}/craft/proposals` | Craft admission header; Page read. | `{proposals: [...]}` open and decided agent proposals, 200. |
-| GET | `/api/v1/pages/{slug}/craft/proposals/{proposalID}` | Craft admission header; `ncp_` id. | `{proposal, bytes, content_hash, engine_pin}` candidate, 200; 404 when absent. |
+| GET | `/api/v1/pages/{slug}/craft/proposals` | Craft admission header; private read. | `{proposals: [...]}` open and decided agent proposals, 200. |
+| GET | `/api/v1/pages/{slug}/craft/proposals/{proposalID}` | Craft admission header; private read; `ncp_` id. | `{proposal, bytes, content_hash, engine_pin}` candidate, 200; 404 when absent. |
 | POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/accept` | `{generation: "1"}` of this admission's lease; Page write. | `{proposal, receipt}` with the new committed version, 200; 409 `stale` when the content changed after base. |
 | POST | `/api/v1/pages/{slug}/craft/proposals/{proposalID}/reject` | `{}`; Page write, no lease. | Rejected proposal, 200; 409 when already decided. |
 
@@ -65,6 +65,37 @@ unconfirmed attempt once before retiring; a proven commit and an identical
 fresh capture leave no recovery draft, anything else stays offered for
 comparison. The expired generation still cannot save.
 
+Every save carries a fresh opaque `attemptId` (8–64 of `[A-Za-z0-9_-]`), and
+reconcile sends the lost attempt's id. When version base+1 is not exactly that
+attempt, reconcile records the attempt in `craft_native_retired_attempts`
+inside the same writer-fenced transaction and answers **410**: it did not
+commit and never will. A save of a retired attempt is refused (409) inside its
+own publication transaction, so a request still validating when reconcile
+answered cannot publish afterwards (#4899). Only the current live lease holder
+(that session and generation) can retire, because only it could still publish
+the attempt; every retirement first deletes rows whose lease is no longer live
+(a lapsed generation can never become live again) or whose base version is
+older than the current document head (the base-version fence permanently
+refuses those saves). A page keeps at most 8 rows. Without an `attemptId`,
+without the live lease, or at that limit nothing is recorded and reconcile answers 409: the outcome stays unconfirmed, the
+editor sends nothing and may ask again later. After a 410 the editor resumes with a fresh
+capture at the same base and always sends it: it never treats bytes equal to
+its old baseline as already saved, because that baseline is no longer proof of
+the head. The server's base fence then decides between a new version, an
+`unchanged` answer and a visible conflict with the draft kept. The editor runs the same reconcile by
+itself after 2, 10 and 30 seconds and then every minute until the outcome is
+known, when the browser reports it is back online, and on "Ověřit výsledek",
+which also returns the keyboard to the document. A reconcile resends nothing.
+
+Restore answers 404 to the lease holder when the target does not exist.
+
+The snapshot message binds the session, so `crewship craft connect` can
+reconcile only on the connection that made the save; the admission token never
+leaves that process. From a new process the original snapshot fails the local
+session check, a rewritten one stays unconfirmed (409), and a new holder's 410 covers only its own session's attempts. Recovery after losing
+the process reads base+1 from the version history and compares its hash and
+author with the local candidate.
+
 Renew/release require `{generation: "1"}`. Handoff requires
 `{generation: "1", request_id: "public-request-id"}`. Other lease mutations use
 `{}`. Generations are canonical positive decimal **strings**, never JavaScript
@@ -80,6 +111,93 @@ persist acquisition wall time, and renewal time must not impersonate it.
 Competing acquisition and stale generations return 409. A handoff advances the
 server generation; a late renew or write from the old connection is rejected.
 Neither a display name nor a public request ID establishes write authority.
+
+## Native editor startup authority and deadlines
+
+A fresh admission starts its authority/lease metadata stream before document
+fetch and iframe import. While a frame bootstraps, lease events update its
+advisory view without starting concurrent reader refreshes; one catch-up refresh
+runs afterwards if needed. A delayed lease HTTP response cannot replace a
+newer streamed lease observation, although successful current-admission proof
+is still mandatory. If an in-flight lease read overlaps a metadata observation,
+write custody must be confirmed by both; neither source's grant overrides the
+other's denial. For the same confirmed custody, the fresh HTTP expiry is used
+rather than an already expired queued event. Await continuations do not
+republish an older proof over subsequent metadata. Read retirement removes the frame and revokes the held
+private journal. An open journal purges its scope; a closed journal may erase
+only its own persisted row, and a pure viewer has no private journal to purge.
+A terminal monitor failure, including invalid lease metadata, is uncertainty,
+not an authoritative Read purge.
+It hides content and recovery controls before awaiting capture, retaining the
+exact uncaptured frame/journal if capture fails. Engine failure does not exempt
+the remaining admission monitor from this retirement. Explicit Read retirement
+still revokes the held journal. Temporary metadata transport retries remain
+bounded, admission-specific and mutation-free; they are not Read revocations.
+Write or other
+admission retirement during bootstrap ends that attempt without automatically
+reopening or acquiring another session.
+
+The frame is hidden and inert until the native snapshot/open/snapshot identity
+barrier completes and a fresh lease read verifies the original admission's
+current credential, Page rights and authority epoch. Cancellation, a replaced
+admission or changed person/Page/workspace cannot reveal an old completion. Reader
+refresh results (including failures) also belong to their original runtime:
+a pending old read cannot stop a successor writer, acquisition or capture,
+even when the admission client has not changed.
+When a retired writer opens a fresh read admission, its previous frame and
+recovery/comparison controls stay hidden until that admission is verified; a
+refused admission retains confirmed rows without exposing them or reviving
+callbacks from the old session.
+If capturing a retired writer fails, its exact native frame and journal remain
+held, hidden and inert while reading is unconfirmed. A fresh monitored read
+admission may reveal that same frozen buffer and enable a local download; it
+never imports a new document, acquires custody or revives the old writer.
+Failure hides it again and offers an explicit bounded read recheck. Auth
+suspension is terminal for this mount, including during capture or read reopen;
+only a new authorized mount can proceed. Explicit read retirement still removes
+the frame and revokes the held journal. No copy is downloaded after its read
+authority or scope has changed.
+
+| Transition | Required authority and effect |
+| --- | --- |
+| New scope → starting | Fresh admission; monitor before document delivery; hidden inert frame. |
+| Starting → readable | Snapshot/open/snapshot identity barrier and successful original-admission proof; current scope/client/session; no cancellation. |
+| Readable → writable | Current lease generation, fresh proof, draft custody and confirmed native access change; never from a retained buffer. |
+| Writer → retiring | Input frozen; finish capture/reconciliation before transfer; no premature Saved. |
+| Retired writer → fresh reader | Old writer stays retired; hide content during fresh monitored admission and proof. |
+| Failed capture → retained buffer | Keep exact inert frame/journal; reveal/copy only with fresh monitored read proof; no import or write. |
+| Monitor failure → disconnected | Cancel opening; remove captured reader or hide uncaptured buffer; retain confirmed rows without claiming latest changes captured. |
+| Any live state → read retired | Hide/remove immediately; revoke held journal; no late response or download may reveal content. |
+| Any live state → auth suspended / scope closed | Hide immediately; fence old callbacks; suspension waits for capture and rejects if unconfirmed; no successor admission in this mount. |
+
+Acquiring write still requires the separate current lease/generation checks,
+confirmed native access change and draft custody; startup never acknowledges a
+save. A disconnected status claims a retained draft only after a confirmed
+local capture, not merely because bootstrap once completed.
+
+Fresh admission/document loading and acquisition have a 60-second overall
+deadline. Handoff applies that deadline from the moment the previous writer
+confirmed its final save/capture and retired, so it covers the transfer request,
+its proof and the reader mount; it never times out a live writer's uncaptured
+buffer. How long a holder may leave a request unanswered has no deadline: custody
+moves only by the holder's choice, loss of connection, revocation or closing.
+Each new
+frame has a 50-second overall deadline, including its final authority read;
+inside it, the frame has 20 seconds for verified read-only ready and each of the
+at most three import RPCs keeps its 10-second deadline, including snapshot
+hashing. The connection deadline ends at ready instead of overlapping the
+finite import sequence. Neither metadata events nor progress reset these caps.
+A timeout advises explicit reload for a fresh attempt, without replaying an
+import, mutation or save. Existing captured drafts are not erased on a generic
+timeout or disconnection; only proven read loss authorizes their purge. Proof is
+a `session_retired` event with `draft: "purge"`, sent only while the credential
+is current, or `403 draft_read_revoked` from `draft-key` with
+`operation: "check"`, which the host requests after a refused admission and each
+entry requests whenever it does not open the editor. Losing Edit is not read loss,
+down to Comment: Comment keeps the shared version, so a refused admission alone
+erases nothing. An ended credential retires the stream with
+`draft: "retain"`. Stages and bounds: [Private browser draft
+recovery](pages.md#when-a-draft-is-erased-native-and-project).
 
 ## Shared previews and edit capability
 
@@ -98,15 +216,36 @@ are checked in the same protected transaction as the shared pin. No private
 latest version, history, quota, admission or custody metadata is returned. A
 missing shared pin returns 404, denied access 403 and disabled/unqualified
 profiles 503; there is no fallback to the latest bytes. `preview_enabled` in
-availability advertises this separately from the existing native observer path.
+availability advertises this separately from observer admission.
 The default editor entry requires both `enabled === true` and `can_edit === true`
 before mounting the editor host. `can_edit` checks current original-credential
 and Page write authority in the same transaction as the other availability
 fields. Read and Comment instead mount the shared preview only when
 `preview_enabled === true`, without opening a Craft session; missing or truthy
-nonboolean edit capabilities grant no host access. The legacy explicit Read
-observer API remains compatible, while Comment alone never opens an editor
-admission or receives private latest native bytes.
+nonboolean edit capabilities grant no host access.
+
+### Read and Comment reach only the shared version
+
+The shared preview is the only native content a Read or Comment grantee reaches.
+Everything else needs **private read**: current Edit authority, or the workspace
+OWNER/ADMIN read rule, which on a private Page is wider than Edit and stays
+audited. That covers `GET .../craft/document`, `GET .../craft/document/versions`,
+`GET .../craft/document/versions/{version}` (the shared version included: its
+route is the preview), `GET .../craft/proposals` and
+`GET .../craft/proposals/{id}`. Private read is checked in the read's own
+protected transaction, so an admission that lost Edit stops reading at once. A
+refusal is 403, the status the preview uses for denied access, and it comes
+before the `craft_version_history` flag answers. The `pages:write` token scope is
+not required: a read-only token of a person with Edit keeps private read.
+
+Explicit Read still opens an observer admission, and Comment alone does not. That
+admission carries custody status only: `GET .../craft/lease`,
+`GET .../craft/events` and `POST .../craft/sessions/reauthorize`. Lease status
+names the holder and states the generation, expiry and the reader's own
+`can_edit` and `can_write`, both false; it carries no version, history or bytes.
+Handoff requests are only listed for the holder. `availability.enabled` keeps
+meaning "may open an admission", which is why the default editor entry also
+requires `can_edit`.
 
 ### Revocation of a shared preview (push)
 
@@ -144,6 +283,11 @@ within about 5 s.
 `targetVersion` (canonical positive decimal strings for generations/versions).
 It publishes an existing committed version with current write authority, the
 current lease generation and latest-version CAS inside the same transaction.
+Only the Page's owner may publish (PRD §5): the transaction also checks that the
+caller's original credential is `pages.owner_user_id`, and anyone else gets 403
+`only the page owner may share a version`, whatever their Edit grant, folder ACL
+or workspace role. A crew-owned Page names no person, so nobody can publish it
+until a person owns it again. The lease response reports this as `can_share`.
 The same transaction records the original human actor, selected version and
 Page in the authorization audit and journal. Unsupported or failed audit writes
 roll back publication. It cannot create content or grant access. Rejected publication preserves both
@@ -178,6 +322,47 @@ membership revision and the original credential are still checked live on
 every operation and stream heartbeat. A fresh read admission is separate from
 reacquisition.
 
+`session_retired` carries `reason: "write_revoked"` (with `draft: "retain"`)
+only when, at retirement, the same original credential still passes the Page
+read check and the Page write check is explicitly denied. Every other
+retirement keeps `reason: "authority_changed"`. The reason is advisory text for
+the person; it authorizes nothing (#4348). The retired admission, its token and
+its lease generation stay dead: every write path (save, import, restore,
+reconcile, share, lease mutations, proposal acceptance) refuses it, and a later
+re-grant does not revive it. On `write_revoked` the browser retires local
+writing exactly as on lease loss (input frozen, the unsaved buffer captured to
+the private journal, never sent), closes the old client and requests one fresh
+admission, which the server grants only after a fresh read check. With a
+confirmed capture, a person who keeps private read (an administrator on a
+private Page) reads the current version, sees the same read-only editor a
+non-holder sees and is offered the captured draft for compare or copy. A Read
+grantee is refused the private read (403 on an otherwise valid admission): the
+frame is removed and the draft stays sealed and offered to nobody, because a
+shared version gives no right to unpublished content; that admission keeps the
+event stream open for lease status only. It returns only if private read does. Server comparisons and
+proposals leave the page and its state as soon as write is retired, a request
+still pending then is discarded, and a comparison needs private read again
+before it asks the server. If the admission retires or the stream drops without
+a read-loss event, the host opens a fresh one, so a later read loss still
+reaches it; a reload opens the shared preview. With unconfirmed capture the
+admission only verifies and monitors reading of the same frozen buffer; it never
+imports over it or revives its writer, and a refused read keeps that buffer
+hidden. An uncaptured buffer may use an explicit bounded read recheck, not a
+background retry loop. Any other refused fresh admission hides content without
+purging confirmed rows and is not retried; a privacy retirement (sign-out,
+another person) still erases the draft and the recovery and comparison
+material.
+A later read loss on the fresh admission stops delivery
+like any other (`draft: "purge"`). That purge also erases the draft row the
+retired write journal persisted, even though that journal is already closed:
+a closed handle still refuses a Page-wide purge (it must never erase a fresh
+mount's draft), so it deletes exactly its own row by its full key
+(`eraseOwnRow`). Work still in flight from the replaced admission, such as a
+pending document read, is ignored when it completes and never stops the
+fresh read-only view. Comment-only access is not native read
+access, so an Edit to Comment downgrade gets no fresh admission, but it is not
+read loss: the draft stays and the editor keeps asking `draft-key` about the Page.
+
 Original expired or revoked credentials never regain an old admission. Explicit
 reauthorization accepts only a separately authenticated newer expiry for the same
 still-live identity and epoch. It never extends an already exhausted boot-time
@@ -200,7 +385,9 @@ several seconds for cleanup. Planned credential rotation keeps its separate
 short handoff grace. A valid lease on a stream shorter than five seconds does
 not reset the recovery budget. Invalid metadata, authorization
 refusal and explicit session retirement are terminal. Exhaustion uses the
-existing draft-retaining disconnection path. Closing the client cancels both
+existing draft-retaining disconnection path. A periodic or recovery
+reauthorization has a 30-second deadline, the interval between attempts; missing
+it counts as a failed attempt. Closing the client cancels both
 the stream and a coalesced periodic/recovery authorization. No save, custody
 mutation or new admission is replayed by this recovery.
 
@@ -269,7 +456,47 @@ base binding, gives the exact successor `version`, matching `candidateHash`,
 `issuedBy: "crewship"`, `durability: "node"` and `phase: "committed"`. Only this
 receipt acknowledges Saved. Reconcile sends the original attempt metadata; it
 may return that same pinned commit after another version exists. A lost ACK
-does not authorize replaying a save. Restore supplies the current binding and
+does not authorize replaying a save.
+
+A repeat never writes (#5075). These are two separate checks on the server:
+
+- **Attempt idempotence.** A save whose base+1 is already this same identified
+  attempt (its `attemptId`, revision, actor and bytes) gets that original receipt
+  back, even when the head has moved on. The snapshot message of the committed
+  version stores the `attemptId`, because retirement rows are pruned. Another
+  attempt with the same revision and bytes is not a repeat: it gets the 409, and
+  its reconcile answers 410 or stays unconfirmed. A version with the same
+  revision and bytes but no stored id (older than this rule, or saved without
+  one) proves neither a named commit nor its absence: a named reconcile answers
+  409 and retires nothing, and a named repeat gets the 409. Only a reconcile that
+  names no attempt, which asks about the snapshot, is answered from revision and
+  hash. A client caught mid-save across the upgrade therefore stays unconfirmed
+  until it reloads; it writes nothing.
+- **Content equality.** A fresh attempt whose base is the head and whose bytes
+  equal the head creates no version and charges no quota. The receipt has
+  `unchanged: true` and `version` equal to `baseVersion`; lease, write rights,
+  retired-attempt and hash checks all run first. Equality with an older version
+  does not count, and another attempt at an older base stays a 409.
+
+A client from before this change rejects `version` equal to `baseVersion` as an
+invalid receipt and shows the result as unconfirmed until reload; it cannot
+create a duplicate. The agent tool gets the same `unchanged` receipt for a
+change that leaves the document as it is.
+
+Ctrl+S decides in the browser first. With content and native state equal to the
+confirmed baseline at the current base it sends no save: it retires the local
+recovery row and acknowledges the engine with a locally built `unchanged`
+confirmation for that exact snapshot, at the confirmed version. The editor port
+matches it to the snapshot's own proof and hash, and accepts it only at or above
+the last acknowledged version. An untouched rendition of the opened document
+counts as that version. Equal bytes with another native state still go to the
+server, which decides. While a save is unconfirmed, Ctrl+S first runs one
+reconcile: a proven commit becomes the baseline and is judged as above, a 410
+lets it send a fresh attempt under the base fence, and anything else fails the
+press with nothing sent. A failed row retirement fails the press and keeps the
+row; the editor retries once and then delivers the owed confirmation.
+
+Restore supplies the current binding and
 `targetVersion`, producing a new version rather than replacing history.
 
 Read returns `version`, base64 `bytes`, `applicationId`, `enginePin`,
@@ -293,7 +520,11 @@ admission before accepting work.
 An authenticated human with current Page write access may send
 `POST /api/v1/pages/{slug}/craft/tasks?workspace_id=…` with exactly
 `{chat_id, message_id, whole_document: true}`. The message must be that human's
-persisted original user message in the actual registered agent's chat. The host
+persisted original user message in the actual registered agent's chat, saved
+as a native Craft instruction in a private chat that human created: such a
+message started no turn. An ordinary turn or a group chat message is refused,
+because the first has already reached agent logs and the journal and the second
+is shown to people without Page access. The host
 captures original credential/authority epochs, the whole-document consent and
 immutable work input. A confirmed original provider exec and matching current
 work attempt are required before the actual run credential can access the
@@ -301,9 +532,11 @@ native document. An ordinary run, a database row, an old grant, or a claimed
 actor/mandate is insufficient. Repeating the same message/Page/agent cannot
 launch another task; a new task needs a new original message and consent.
 
-The normal human CLI uses the same explicit consent and Page authority:
+The normal human CLI uses the same explicit consent, Page authority and
+instruction send:
 
 ```sh
+crewship craft task instruction AGENT "TEXT" --workspace WORKSPACE
 crewship craft task start @PAGE --chat-id CHAT --message-id MESSAGE --whole-document --workspace WORKSPACE
 crewship craft task status @PAGE WORK_ID --workspace WORKSPACE
 crewship craft task stop @PAGE --workspace WORKSPACE
@@ -313,6 +546,38 @@ crewship craft task stop @PAGE --workspace WORKSPACE
 by default. These human commands do not use the native editor session or agent
 credentials. Stop reports the actual cancellation/termination fields, rather
 than assuming the process has stopped. Mutations are not replayed on failure.
+
+The native editor offers the same start in the browser ("Upravit agentem")
+without any further endpoint. It appears only when `/craft/availability` answers
+a literal true for `agents_enabled` and `can_edit`, and never while the host is
+read-only, retired, blocked on an uncaptured draft or retiring its write. The
+person picks an agent, writes the instruction and ticks "Agent smí upravit celý
+dokument"; nothing is created before that deliberate action and consent is never
+remembered for a later start. Starting opens a new private chat with that agent
+(`POST /api/v1/agents/{agentId}/chats`) and sends the instruction with the normal
+chat client, marked `metadata.native_craft_instruction: true`. That literal flag
+persists and echoes the message but starts no chat turn, so the instruction
+reaches no ordinary run, agent log or other member's diagnostics; the flag cannot
+be combined with Page context, an ask form or a document intent. Once the echo
+has named the persisted `message_id` and the send has settled with `done`, the
+editor sends the task request above exactly once. An end of the attempt
+invalidates it synchronously, so a host that retires in the same render neither
+sends nor posts. Any refusal or lost reply is reported and not repeated, because
+a message can launch only one task. The chat itself stays ordinary: a later
+message the person writes there starts a normal turn, whose history leaves the
+instruction out so the agent cannot repeat it into its logs. The instruction is
+also left out of the Keeper judge's prompt, the operator model, conversation
+search and shared chats. The transcript alone keeps it, for the chat's audience. Whatever copies a
+transcript into a new send keeps the classification and stops: `chat retry`, `retry`, `copy-prompt`, the browser's
+Regenerate and Edit and resend refuse a marked message, and `recap`, the `history --prompts` preview, the `export`
+bundle's `prompt.md` and the "from this conversation" action forms leave it out.
+Offset and limit on the default read count only the messages it returns. A person who retypes the text sends an
+ordinary turn.
+The outcome appears in the task status panel, and `craft_task_id` is added to the
+URL. A document a person holds is started the same way: admission does not
+consult the lease, the run's `craft_acquire` gets 409 and it records a proposal,
+which the status names. The control refuses to start while an agent holds the
+lease, because that run's refusal has no defined proposal route.
 
 The accepted response is `{work_id, status: "queued"}`, HTTP 202. It is not proof
 of execution or a save. The same original human can inspect
@@ -469,8 +734,9 @@ A proposal is a successful task outcome: the work item and run succeed with
 own session counts. A different run may reuse a client `request_id`; it records
 its own proposal instead of adopting an earlier run's candidate.
 
-A person with an admitted session reviews them (`GET .../craft/proposals`,
-candidate bytes at `GET .../craft/proposals/{id}`) and decides once. Accept is
+A person with an admitted session and private read reviews them
+(`GET .../craft/proposals`, candidate bytes at `GET .../craft/proposals/{id}`)
+and decides once. Accept is
 the person's own fenced save: Page write rights, the immutable profile, this
 admission's lease generation, base == latest and the open state are checked and
 the version and decision commit in one transaction. The editor saves the

@@ -7,16 +7,17 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/dispatch"
 	"net/http"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/dispatch"
 	"github.com/crewship-ai/crewship/internal/hooks"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -114,7 +115,13 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// independent of workspace_id above. A bound ws-A token could pass the
 	// workspace check while pointing crew_id/chat_id at ws-B rows, so prove
 	// both belong to the bound workspace before dispatching the sub-agent.
-	if !assertBoundCrewWorkspaceDB(w, r, h.db, h.logger, &body.CrewID) {
+	//
+	// crew_id is the TARGET crew (the sidecar forwards /assign's "crew"). A
+	// crew-bound token is about who is calling, so it is enforced on the
+	// assigning chat and agent below; the target only has to be in the bound
+	// workspace here, and the crew-link check further down decides whether
+	// the caller may reach it (#4845).
+	if !assertAssignmentTargetCrewDB(w, r, h.db, h.logger, body.CrewID) {
 		return
 	}
 	if !assertBoundChatWorkspaceDB(w, r, h.db, h.logger, body.ChatID) {
@@ -150,6 +157,8 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "lookup assigner crew for connection check", err)
 		return
 	}
+	chatCrewID := assignerCrewID
+	actorNamed, actorCrew := false, ""
 
 	// The ACTING agent (#1754). A crew shares one sidecar, so the chat's agent
 	// is only ever the one that booted it; the sidecar resolves who actually
@@ -176,8 +185,31 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		assignedByID = body.ActorAgentID
+		actorNamed, actorCrew = true, actorCrewID
 		if actorCrewID != "" {
 			assignerCrewID = actorCrewID
+		}
+	}
+
+	// A crew-bound token speaks for its own crew only (#1222, #4845). Three
+	// things must be that crew before the crew link below is evaluated:
+	//   - the acting agent, when one is named. A crewless or foreign actor
+	//     would otherwise be the identity the delegation caps measure;
+	//   - the chat, unless the server derived it from source_run_id. A
+	//     sub-agent running an assignment keeps its lead's chat, which may
+	//     belong to a linked crew (delegationExecutionChat proved that run);
+	//   - the effective assigner, i.e. the actor's crew, else the chat's crew.
+	if boundCrew := InternalTokenCrewFromContext(r.Context()); boundCrew != "" {
+		chatServerDerived := body.SourceRunID != ""
+		if (actorNamed && actorCrew != boundCrew) ||
+			(!chatServerDerived && chatCrewID != boundCrew) ||
+			assignerCrewID != boundCrew {
+			h.logger.Warn("internal API assignment refused: caller outside the token's crew",
+				"token_crew", boundCrew, "chat_crew", chatCrewID, "actor_crew", actorCrew,
+				"chat_server_derived", chatServerDerived, "chat_id", body.ChatID)
+			replyError(w, http.StatusForbidden,
+				"assigning chat or agent is outside the crew bound to the internal token")
+			return
 		}
 	}
 
@@ -258,6 +290,24 @@ func (h *AssignmentHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !connected {
+			// Attribute the receipt only after the caller, workspace and source
+			// run were verified. Keep task text out of the refusal audit record.
+			if _, emitErr := h.journal.Emit(r.Context(), journal.Entry{
+				WorkspaceID: body.WorkspaceID, CrewID: assignerCrewID,
+				AgentID: assignedByID, TraceID: body.SourceRunID,
+				Type: journal.EntryAssignmentRefused, Severity: journal.SeverityWarn,
+				ActorType: journal.ActorAgent, ActorID: assignedByID,
+				Summary: "assignment refused: crews are not connected",
+				Payload: map[string]any{
+					"reason": "crews_not_connected", "http_status": http.StatusForbidden,
+					"source_crew_id": assignerCrewID, "target_crew_id": body.CrewID,
+					"target_slug": body.TargetSlug,
+					"task_sha256": fmt.Sprintf("%x", sha256.Sum256([]byte(body.Task))),
+				},
+				Refs: map[string]any{"chat_id": body.ChatID},
+			}); emitErr != nil {
+				h.logger.Warn("assignment refusal journal emit failed", "error", emitErr)
+			}
 			writeJSON(w, http.StatusForbidden, map[string]string{
 				"error": "crews are not connected — create a crew connection first",
 			})
@@ -1188,11 +1238,7 @@ func (h *AssignmentHandler) runAssignment(
 			return requestWebhookCreation(gateCtx, h.orch, location, execution.launch)
 		}
 	}
-	req.OnExecTerminal = func(code int) {
-		if execution := ownedAssignmentExecution(ctx); execution != nil {
-			execution.exitCode = &code
-		}
-	}
+	bindAssignmentExitObservers(ctx, &req)
 	req.OnExecStarted = func(execID string) {
 		if execID == "" {
 			return

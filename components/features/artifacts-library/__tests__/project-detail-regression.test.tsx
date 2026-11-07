@@ -198,3 +198,8 @@ it.each(["true", "false"])("routes explicit server-typed Slides with flag %s whi
     }
   } finally { vi.unstubAllEnvs() }
 })
+
+it("opens the version an address pins (a shared-version link), not Latest (#4995)", () => {
+  render(withQuery(<ArtifactsLibrary workspaceId="workspace-1" item="page-1" version={2} onSelect={vi.fn()} />))
+  expect(state.version).toBe(2)
+})

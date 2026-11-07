@@ -263,11 +263,11 @@ func TestNativeProposalAcceptAfterUnchangedSaveApplies(t *testing.T) {
 		t.Fatal(err)
 	}
 	accepted, receipt, err := s.AcceptProposal(t.Context(), l, p.ID)
-	if err != nil || accepted.State != "accepted" || accepted.ResultVersion != 3 || receipt.Version != "3" || receipt.BaseVersion != "2" {
+	if err != nil || accepted.State != "accepted" || accepted.ResultVersion != 2 || receipt.Version != "2" || receipt.BaseVersion != "1" {
 		t.Fatalf("unchanged save made the proposal stale: %+v %+v %v", accepted, receipt, err)
 	}
 	state, _ := s.Read(t.Context(), scope)
-	if state.LatestVersion != 3 || string(state.Manifest.Files["document.json"].Content) != `{"v":"agent"}` {
+	if state.LatestVersion != 2 || string(state.Manifest.Files["document.json"].Content) != `{"v":"agent"}` {
 		t.Fatalf("accepted content missing: %+v", state)
 	}
 }
@@ -292,7 +292,7 @@ func TestNativeProposalSupersedingKeepsProposalsOverUnchangedContent(t *testing.
 		t.Fatal(err)
 	}
 	*acting = nativeProposalAgent
-	if _, err = s.Propose(t.Context(), scope, 2, "p2", "", []byte(`{"v":"p2"}`)); err != nil {
+	if _, err = s.Propose(t.Context(), scope, 1, "p2", "", []byte(`{"v":"p2"}`)); err != nil {
 		t.Fatal(err)
 	}
 	*acting = human
@@ -329,7 +329,7 @@ func TestNativeProposalAcceptSurvivesConcurrentUnchangedSave(t *testing.T) {
 		}
 	}
 	accepted, receipt, err := s.AcceptProposal(t.Context(), l, p.ID)
-	if err != nil || accepted.State != "accepted" || accepted.ResultVersion != 3 || receipt.Version != "3" {
+	if err != nil || accepted.State != "accepted" || accepted.ResultVersion != 2 || receipt.Version != "2" {
 		t.Fatalf("identical concurrent save made the proposal stale: %+v %+v %v", accepted, receipt, err)
 	}
 }

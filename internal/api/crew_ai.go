@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
@@ -141,7 +142,7 @@ func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, errNoActiveAnthropicCredential) {
 			h.logger.Warn("no LLM credential for crew AI suggest", "workspace", wsID)
 			writeProblem(w, r, http.StatusUnprocessableEntity,
-				"No Anthropic API key found. Add a credential of type API_KEY / provider ANTHROPIC in Settings → Credentials. Note: Claude Code OAuth tokens cannot be used here — a plain API key (sk-ant-api*) is required.")
+				"No Anthropic API key found. Add a credential of type API_KEY / provider ANTHROPIC in Settings → Credentials. A key bound to hosts that do not include api.anthropic.com is not used. Note: Claude Code OAuth tokens cannot be used here — a plain API key (sk-ant-api*) is required.")
 			return
 		}
 		h.logger.Error("load LLM provider for crew AI suggest", "workspace", wsID, "error", err)
@@ -160,23 +161,28 @@ func (h *CrewAIHandler) Suggest(w http.ResponseWriter, r *http.Request) {
 }
 
 // getLLMProvider fetches the first active Anthropic API_KEY for the workspace
-// and returns an llm.Provider ready to use.
+// and returns an llm.Provider ready to use. A key a person bound to hosts that
+// do not include api.anthropic.com is never sent there (#5045); like skill
+// generation, only the oldest key is considered, so such a key fails closed.
 func (h *CrewAIHandler) getLLMProvider(ctx context.Context, wsID string) (llm.Provider, error) {
-	var encryptedValue string
+	var encryptedValue, allowedHosts string
 	err := h.db.QueryRowContext(ctx, `
-		SELECT encrypted_value FROM credentials
+		SELECT encrypted_value, COALESCE(allowed_hosts, '[]') FROM credentials
 		WHERE workspace_id = ?
 		  AND provider = 'ANTHROPIC'
 		  AND type = 'API_KEY'
 		  AND status = 'ACTIVE'
 		  AND deleted_at IS NULL
 		ORDER BY created_at ASC
-		LIMIT 1`, wsID).Scan(&encryptedValue)
+		LIMIT 1`, wsID).Scan(&encryptedValue, &allowedHosts)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errNoActiveAnthropicCredential
 		}
 		return nil, fmt.Errorf("query credential: %w", err)
+	}
+	if !credhostgate.PermitsHost(allowedHosts, anthropicAPIHost) {
+		return nil, fmt.Errorf("%w: key is bound to other hosts", errNoActiveAnthropicCredential)
 	}
 	plain, err := encryption.Decrypt(encryptedValue)
 	if err != nil {

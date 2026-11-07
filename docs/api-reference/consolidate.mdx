@@ -160,6 +160,7 @@ curl -H "Authorization: Bearer $TOKEN" \
 | 404 | Unknown `{id}`, or proposal belongs to a different workspace (same 404 -- no existence leak). |
 | 410 | Proposal row exists but the `.proposed/proposal-*.md` file is missing on disk (deleted out-of-band; recoverable by re-running the consolidator). |
 | 413 | Proposal markdown or canonical file exceeds the 8 MB read cap (DoS guard). |
+| 422 | The proposal markdown or canonical `learned-*.md` is not a regular file (a symlink, or under a symlinked directory). Nothing of it is read. |
 | 500 | Read error other than not-found, or diff builder failure. |
 
 ### Approve proposal
@@ -210,7 +211,7 @@ curl -X POST -H "Authorization: Bearer $TOKEN" \
 | 403 | Authenticated but not `OWNER`/`ADMIN`. |
 | 404 | Unknown `{id}`, or proposal belongs to a different workspace (same 404 -- no existence leak). |
 | 409 | Proposal already decided (`approved` or `rejected`); idempotent retry is rejected so the body is not re-merged. |
-| 500 | Canonical append failed, DB transition failed, or unexpected lookup error. |
+| 500 | Canonical append failed (including a proposal or canonical file that is not a regular file -- these are never followed through a symlink), DB transition failed, or unexpected lookup error. The row stays `pending`. |
 
 ### Reject proposal
 

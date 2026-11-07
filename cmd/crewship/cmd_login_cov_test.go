@@ -187,43 +187,7 @@ func TestLoginWithToken_RefusesMalformedExistingConfig(t *testing.T) {
 	}
 }
 
-// ─── loginWithGoogle ────────────────────────────────────────────────
-
-func TestLoginWithGoogle_NotConfigured(t *testing.T) {
-	tempCLIConfig(t)
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnGet("/api/v1/auth/google/status", clitest.JSONResponse(200, map[string]bool{"enabled": false}))
-
-	err := loginWithGoogle(stub.URL())
-	if err == nil || !strings.Contains(err.Error(), "not configured") {
-		t.Errorf("got %v", err)
-	}
-}
-
-func TestLoginWithGoogle_StatusErrors(t *testing.T) {
-	tempCLIConfig(t)
-
-	// Transport failure.
-	if err := loginWithGoogle("http://127.0.0.1:1"); err == nil || !strings.Contains(err.Error(), "contact server") {
-		t.Errorf("transport: got %v", err)
-	}
-
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-
-	// API error envelope.
-	stub.OnGet("/api/v1/auth/google/status", clitest.ErrorResponse(500, "down"))
-	if err := loginWithGoogle(stub.URL()); err == nil || !strings.Contains(err.Error(), "google status") {
-		t.Errorf("status error: got %v", err)
-	}
-
-	// Unparseable body.
-	stub.OnGet("/api/v1/auth/google/status", clitest.TextResponse(200, "not json"))
-	if err := loginWithGoogle(stub.URL()); err == nil || !strings.Contains(err.Error(), "parse google status") {
-		t.Errorf("parse error: got %v", err)
-	}
-}
+// Unavailable Google-mode side effects are covered in cmd_login_google_disabled_test.go.
 
 // ─── login command dispatch + whoami ────────────────────────────────
 
@@ -448,50 +412,6 @@ func swapStdin(t *testing.T, content string) {
 	})
 }
 
-func TestLoginWithGoogle_FullFlowWithPastedToken(t *testing.T) {
-	tempCLIConfig(t)
-	t.Setenv("PATH", "/nonexistent") // browserOpen("open", …) must fail, not launch a browser
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnGet("/api/v1/auth/google/status", clitest.JSONResponse(200, map[string]bool{"enabled": true}))
-	stub.OnGet("/api/v1/auth/cli-token/validate", clitest.JSONResponse(200, map[string]string{"user_id": "u1"}))
-
-	swapStdin(t, "pasted-google-tok\n")
-	out := captureStdoutCovCli2(t, func() {
-		if err := loginWithGoogle(stub.URL()); err != nil {
-			t.Errorf("loginWithGoogle: %v", err)
-		}
-	})
-	if !strings.Contains(out, stub.URL()+"/api/v1/auth/google/redirect") {
-		t.Errorf("auth URL missing from output:\n%s", out)
-	}
-	if !strings.Contains(out, "Could not auto-open browser") {
-		t.Errorf("expected manual-open fallback note:\n%s", out)
-	}
-	cfg, err := cli.LoadConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.Token != "pasted-google-tok" {
-		t.Errorf("pasted token not stored, cfg=%+v", cfg)
-	}
-}
-
-func TestLoginWithGoogle_EmptyPastedToken(t *testing.T) {
-	tempCLIConfig(t)
-	t.Setenv("PATH", "/nonexistent")
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnGet("/api/v1/auth/google/status", clitest.JSONResponse(200, map[string]bool{"enabled": true}))
-
-	swapStdin(t, "   \n")
-	_ = captureStdoutCovCli2(t, func() {
-		if err := loginWithGoogle(stub.URL()); err == nil || !strings.Contains(err.Error(), "no token entered") {
-			t.Errorf("got %v", err)
-		}
-	})
-}
-
 func TestLoginInteractive_PasswordReadFailsOffTTY(t *testing.T) {
 	tempCLIConfig(t)
 	// Email comes from the swapped os.Stdin pipe; the password read uses
@@ -519,7 +439,7 @@ func TestLoginCmd_DispatchesGoogleAndInteractive(t *testing.T) {
 
 	// --google route.
 	loginPairFlag, loginTokenFlag, loginGoogleFlag = false, "", true
-	if err := loginCmd.RunE(loginCmd, nil); err == nil || !strings.Contains(err.Error(), "not configured") {
+	if err := loginCmd.RunE(loginCmd, nil); err == nil || !strings.Contains(err.Error(), "Google sign-in is unavailable") {
 		t.Errorf("google dispatch: got %v", err)
 	}
 
@@ -631,20 +551,4 @@ func TestLoginWithToken_SaveConfigError(t *testing.T) {
 	if err := loginWithToken(stub.URL(), "tok"); err == nil || !strings.Contains(err.Error(), "save config") {
 		t.Errorf("got %v", err)
 	}
-}
-
-func TestLoginWithGoogle_TokenReadEOF(t *testing.T) {
-	tempCLIConfig(t)
-	t.Setenv("PATH", "/nonexistent")
-	stub := clitest.NewStubServer()
-	defer stub.Close()
-	stub.OnGet("/api/v1/auth/google/status", clitest.JSONResponse(200, map[string]bool{"enabled": true}))
-
-	// Pipe closed without a newline → ReadString returns EOF.
-	swapStdin(t, "")
-	_ = captureStdoutCovCli2(t, func() {
-		if err := loginWithGoogle(stub.URL()); err == nil || !strings.Contains(err.Error(), "read token") {
-			t.Errorf("got %v", err)
-		}
-	})
 }

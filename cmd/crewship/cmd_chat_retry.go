@@ -137,6 +137,13 @@ func resendToChat(cmd *cobra.Command, client *cli.Client, chatID, agentID, conte
 	return runStream(streamServerURL(), wsToken, agentID, agentID, chatID, content, quiet, md, nil, 0)
 }
 
+// isNativeCraftInstruction names a message the chat's audience may read but
+// that must not reach an agent as an ordinary turn or prompt.
+func isNativeCraftInstruction(message map[string]any) bool {
+	marked, _ := message["native_craft_instruction"].(bool)
+	return marked
+}
+
 func transcriptAgentID(messages []map[string]any) string {
 	for i := len(messages) - 1; i >= 0; i-- {
 		if id, _ := messages[i]["agent_id"].(string); id != "" {
@@ -193,6 +200,9 @@ Examples:
 		}
 		if last == nil {
 			return fmt.Errorf("chat %s has no message of yours to retry", chatID)
+		}
+		if isNativeCraftInstruction(last) {
+			return fmt.Errorf("the last message of chat %s is a saved native Craft instruction, which runs only through `crewship craft task start`; a resend would make it an ordinary agent turn", chatID)
 		}
 		content, slug := retryContent(last)
 		if strings.TrimSpace(content) == "" {

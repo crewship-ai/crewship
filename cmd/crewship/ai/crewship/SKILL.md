@@ -97,11 +97,12 @@ operations through `crewship_search` (for example `artifact versions`). The
 bundled workspace skill `crewship-artifacts` has the authoring rules for
 Project manifests, Dashboard bindings and the Slides profile.
 
-Every kind is off by default. Check before you plan the work:
+Project is on by default unless an admin turned it off; every other kind is
+off by default. Check before you plan the work:
 
 | Kind | Must be enabled | CLI | Tools in a live agent run |
 |---|---|---|---|
-| Project | workspace flag `artifact_projects` | `page artifact` | `artifact_create`, `artifact_versions`, `artifact_publish`, `artifact_restore`, `artifact_comments`, `artifact_reply` |
+| Project | workspace flag `artifact_projects` (on by default) | `page artifact` | `artifact_create`, `artifact_versions`, `artifact_publish`, `artifact_restore`, `artifact_comments`, `artifact_reply` |
 | Dashboard | `artifact_projects` and `artifact_dashboard_data` | `page artifact data` | `artifact_data_collections`, `artifact_data_read`, `artifact_data_batch` |
 | Slides | `artifact_projects` and `artifact_slides` | `page artifact slides`, `export-pdf` | `artifact_slides_read`, `artifact_export_pdf` |
 | Design | workspace flag `artifacts_design` | `page design` | `design_get`, `design_apply`, `design_snapshot`, `design_versions`, `design_restore` |
@@ -187,8 +188,21 @@ resolve the comment or grant access.
 
 ### Design
 
-`crewship page design get <slug>` reads the live canvas (`--version <n>` reads
-a retained snapshot). `apply <slug> --file changes.json` takes
+`crewship page design get <slug>` reads the currently permitted view
+(`--version <n>` selects a permitted retained snapshot). For people, current
+Edit permission plus a current browser session, or both CLI `pages:read` and
+`pages:write` scopes (or `pages:*`, `*`, or an unscoped full-role token) plus Edit permission, permits live reads; non-admin owners/Edit grantees narrowed to `pages:read` are shared-only,
+with 404 before a shared pin exists. Separately authorized workspace OWNER/ADMIN
+reads include latest/history with audit for foreign Designs and never turn a
+read-scoped credential into write authority.
+
+For a live agent, CLI routes through the original MCP/run principal and exact
+Page mandate. Current run/crew policy, original human authority and the
+original human credential required for run consent are checked; a human CLI
+read-scope rule must not be applied to an agent credential. Missing/revoked
+mandates are refused, not replaced by a saved human profile. Check `can_edit`
+before editing; the tool's availability alone grants no access.
+`apply <slug> --file changes.json` takes
 `{"operations":[...],"message":"..."}` with 1-500 operations: `upsert` a
 `node` (id, type `frame|rect|text|image`, name, x, y, width, height, fill,
 optional parentId, text, src), `delete` an `id`, or `reorder` with `order`.
@@ -197,7 +211,7 @@ and touch only the nodes you mean to change. Every successful `apply` already
 saves a retained version; do not add a snapshot afterwards. Use `snapshot
 <slug> --message "..."` only to retain the current live canvas separately,
 for example after human browser edits. `versions` and `restore --version <n>`
-work as for Projects. When a person sent a Design comment to your run, the
+work as for Projects, except that Design `restore` takes no `--base-version`. When a person sent a Design comment to your run, the
 `apply` that changes the node records the answer on the version it creates; a
 `snapshot` does not answer it. Creating a Design, `share`, `comment` and `agent`
 (connecting a private chat) are for people.

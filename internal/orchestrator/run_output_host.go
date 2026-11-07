@@ -187,7 +187,7 @@ func (o *Orchestrator) probeHostRun(ctx context.Context, run RunState, stop bool
 		if snapshot.Result.Reason == "exited" {
 			return stop, nil
 		}
-		if absent, err := o.containerRuntimeAbsent(ctx, run.ContainerID); err == nil && absent {
+		if o.forcedHostEndConfirmed(ctx, run, snapshot) {
 			return stop, nil
 		}
 		if stop {
@@ -335,11 +335,8 @@ func (o *Orchestrator) AcknowledgeRetainedRunResult(ctx context.Context, run Run
 	if !actual.Complete || actual.Sequence != snapshot.Sequence || actual.Result == nil || *actual.Result != *snapshot.Result {
 		return errors.New("retained terminal acknowledgement mismatched source")
 	}
-	if snapshot.Result.Reason != "exited" {
-		absent, err := o.containerRuntimeAbsent(ctx, run.ContainerID)
-		if err != nil || !absent {
-			return fmt.Errorf("%w: forced process end lacks whole-runtime absence", ErrHostCaptureUnconfirmed)
-		}
+	if snapshot.Result.Reason != "exited" && !o.forcedHostEndConfirmed(ctx, run, snapshot) {
+		return fmt.Errorf("%w: forced process end lacks whole-runtime absence or a stop receipt", ErrHostCaptureUnconfirmed)
 	}
 	status := ""
 	if len(authoritativeStatus) > 1 {
@@ -460,4 +457,59 @@ func (o *Orchestrator) CollectRetainedRun(ctx context.Context, run RunState, cut
 		return json.Marshal(current)
 	})
 	return err == nil, err
+}
+
+// RetainedEndConfirmed reports whether a complete retained capture proves the
+// execution left nothing running: the main process exited on its own, or a
+// forced end (cancel, output limit, output error) is backed by whole-runtime
+// absence or a whole-tree stop receipt. Settling work from a capture requires
+// it, exactly like every other retained settlement path.
+func (o *Orchestrator) RetainedEndConfirmed(ctx context.Context, run RunState, snapshot runoutput.Snapshot) bool {
+	if snapshot.Result == nil {
+		return false
+	}
+	return snapshot.Result.Reason == "exited" || o.forcedHostEndConfirmed(ctx, run, snapshot)
+}
+
+// forcedHostEndConfirmed reports whether a retained run that did not exit on
+// its own provably left nothing it still parents running. Whole-runtime
+// absence always counts.
+// A run CaptureHost ended through the provider's stop (cancellation, deadline,
+// output cap or capture error) also counts when that stop recorded that the
+// leader's whole process tree (its session and every descendant) was killed
+// and the execution itself was terminal (runoutput.RecordHostStopConfirmed).
+// That receipt is bound to the execution identity recorded at launch, so a
+// shared, long-lived container no longer has to disappear before such a run
+// can settle (#4774, #4824). The reason only says why the stop happened; the
+// receipt is what proves its effect.
+func (o *Orchestrator) forcedHostEndConfirmed(ctx context.Context, run RunState, snapshot runoutput.Snapshot) bool {
+	if absent, err := o.containerRuntimeAbsent(ctx, run.ContainerID); err == nil && absent {
+		return true
+	}
+	if snapshot.Result == nil || !providerStoppedReason(snapshot.Result.Reason) {
+		return false
+	}
+	directory, err := o.validatedHostRunDirectory(run)
+	if err != nil {
+		return false
+	}
+	identity, err := runoutput.ReadHostIdentity(directory)
+	if err != nil || identity.ContainerID != run.ContainerID || identity.ExecID == "" || (run.ExecID != "" && identity.ExecID != run.ExecID) ||
+		run.Output == nil || !identity.Deadline.Equal(run.Output.Deadline) {
+		return false
+	}
+	confirmed, err := runoutput.HostStopConfirmed(directory, identity.ExecID)
+	return err == nil && confirmed
+}
+
+// providerStoppedReason reports whether CaptureHost records reason only after it
+// asked the provider to stop the execution (runoutput.CaptureHost: the output
+// cap and a capture error cancel the run context, which stops the execution
+// exactly like a deadline or cancellation does).
+func providerStoppedReason(reason string) bool {
+	switch reason {
+	case "execution_cancelled", "output_limit", "output_error":
+		return true
+	}
+	return false
 }

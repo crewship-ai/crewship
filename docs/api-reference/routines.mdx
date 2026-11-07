@@ -114,7 +114,11 @@ requires `cron_expr`:
 }
 ```
 
-`catchup_policy` is `once`, `all`, or `skip`. A wake pipeline must be a
+`catchup_policy` is `once`, `all`, or `skip`. Optional `spread_seconds` (default
+`0`, off) offsets each fire by a stable per-schedule value in
+`[0, spread_seconds)`; spread plus the 30 second scheduler poll must not exceed the shortest cron interval, otherwise `400`.
+`next_run_at` in the response includes the offset and `next_occurrence_at` is
+the unshifted cron time (both only differ when a spread is set). A wake pipeline must be a
 different routine whose DSL declares `agentless: true`. Invalid cron, timezone,
 target, wake references, or JSON is `400`; so is a preset the target recipe
 rejects, or a pin to a version the routine never archived, on create, on a

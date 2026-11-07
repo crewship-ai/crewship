@@ -251,9 +251,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Free slug from soft-deleted agents so the UNIQUE constraint doesn't block re-creation.
-	if _, err := h.db.ExecContext(r.Context(),
-		"UPDATE agents SET slug = slug || '_deleted_' || id WHERE workspace_id = ? AND slug = ? AND deleted_at IS NOT NULL",
-		workspaceID, req.Slug); err != nil {
+	if err := freeDeletedAgentSlug(r.Context(), h.db, workspaceID, req.Slug); err != nil {
 		h.logger.Warn("free deleted agent slug", "slug", req.Slug, "error", err)
 	}
 
@@ -355,27 +353,29 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// callers in crew_templates.go, captain_tools_mutate.go, internal_status.go).
 
 	writeJSON(w, http.StatusCreated, agentResponse{
-		ID:             agentID,
-		CrewID:         req.CrewID,
-		WorkspaceID:    workspaceID,
-		Name:           req.Name,
-		Slug:           req.Slug,
-		Description:    req.Description,
-		RoleTitle:      req.RoleTitle,
-		AgentRole:      req.AgentRole,
-		LeadMode:       leadMode,
-		Status:         "IDLE",
-		CLIAdapter:     req.CLIAdapter,
-		LLMProvider:    req.LLMProvider,
-		LLMModel:       req.LLMModel,
-		SystemPrompt:   req.SystemPrompt,
-		AvatarSeed:     req.AvatarSeed,
-		AvatarStyle:    req.AvatarStyle,
-		TimeoutSeconds: req.TimeoutSeconds,
-		ToolProfile:    req.ToolProfile,
-		MemoryEnabled:  req.MemoryEnabled,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID: agentID,
+		// The insert leaves this to the column default.
+		RestrictedExecutionProfile: "disabled",
+		CrewID:                     req.CrewID,
+		WorkspaceID:                workspaceID,
+		Name:                       req.Name,
+		Slug:                       req.Slug,
+		Description:                req.Description,
+		RoleTitle:                  req.RoleTitle,
+		AgentRole:                  req.AgentRole,
+		LeadMode:                   leadMode,
+		Status:                     "IDLE",
+		CLIAdapter:                 req.CLIAdapter,
+		LLMProvider:                req.LLMProvider,
+		LLMModel:                   req.LLMModel,
+		SystemPrompt:               req.SystemPrompt,
+		AvatarSeed:                 req.AvatarSeed,
+		AvatarStyle:                req.AvatarStyle,
+		TimeoutSeconds:             req.TimeoutSeconds,
+		ToolProfile:                req.ToolProfile,
+		MemoryEnabled:              req.MemoryEnabled,
+		CreatedAt:                  now,
+		UpdatedAt:                  now,
 	})
 
 	h.broadcastAgentEvent("agent.created", workspaceID, map[string]string{

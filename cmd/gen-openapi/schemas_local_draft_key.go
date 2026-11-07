@@ -14,10 +14,12 @@ func localDraftKeySchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"LocalDraftKeyRequest": map[string]any{"oneOf": []any{
 			object(map[string]any{"human": human, "operation": literal("wrap"), "key": key, "envelope": literal("")}, "human", "operation", "key"),
 			object(map[string]any{"human": human, "operation": literal("unwrap"), "envelope": envelope, "key": literal("")}, "human", "operation", "envelope"),
-		}, "description": "At most 4 KiB JSON; requires a current human credential and current read of the immutable Page."},
+			object(map[string]any{"human": human, "operation": literal("check"), "key": literal(""), "envelope": literal("")}, "human", "operation"),
+		}, "description": "At most 4 KiB JSON; requires a current human credential and current read of the immutable Page. check handles no key and answers the same read question."},
 		"LocalDraftKeyResponse": map[string]any{"oneOf": []any{
 			object(map[string]any{"envelope": envelope}, "envelope"),
 			object(map[string]any{"key": key}, "key"),
+			object(map[string]any{"readable": map[string]any{"type": "boolean", "enum": []bool{true}}}, "readable"),
 		}},
 	}
 	routes := map[string]DomainSchema{"POST /api/v1/pages/{slug}/draft-key": {

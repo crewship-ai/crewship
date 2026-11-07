@@ -3,11 +3,22 @@ import { LIBRARY_KINDS, repeatedSeries, type LibraryItem, type LibraryKind } fro
 /** The places the panel offers. Empty, Clean up, Test items and Archive only show; changes go through a previewed bulk action, and nothing is deleted. */
 export type LibraryView = "home" | "all" | "attention" | "opened" | "mine" | "favorites" | "empty" | "series" | "test" | "archive"
 
-/** What only this person knows: when they last opened each item, and what they starred. Kept per user. */
+/** What only this person knows: when they last opened each item, what they starred and what they made here. Kept per user. */
 export interface Personal {
   opened?: ReadonlyMap<string, number>
   favorites?: ReadonlySet<string>
+  /** Slugs this person created from New artifact; a blank one of these is still theirs to find. */
+  created?: ReadonlySet<string>
 }
+
+/**
+ * Blank legacy storage stays out of the default views, but not a blank the
+ * person made here and still owns: the library's own Page with panels starts
+ * empty, and hiding it would lose what they just created. Ownership is the
+ * server's (`reach` owner), so a slug another person now holds stays hidden.
+ */
+export const hiddenAsEmpty = (item: LibraryItem, personal: Personal = {}) =>
+  item.empty && !(item.ownerLabel === "You" && personal.created?.has(item.slug) === true)
 
 export type Access = "private" | "open"
 export type VersionState = "shared" | "unshared" | "unversioned"
@@ -100,7 +111,7 @@ export function matches(item: LibraryItem, filters: LibraryFilters, skip?: "kind
 /** What a view holds before filters: empty, test and archived items each only in their own view. */
 export function inView(items: LibraryItem[], view: LibraryView, personal: Personal = {}): LibraryItem[] {
   const kept = items.filter(item => !item.archived)
-  const live = kept.filter(item => !item.empty && !item.test)
+  const live = kept.filter(item => !hiddenAsEmpty(item, personal) && !item.test)
   switch (view) {
     case "archive": return items.filter(item => item.archived)
     case "test": return kept.filter(item => item.test)

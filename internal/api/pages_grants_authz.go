@@ -58,6 +58,19 @@ package api
 // is NOT NULL and cascades on user delete (the migration), so their rows are
 // gone before this query runs. NOT NULL is §7.1b rule 1 in the schema — only a
 // human issues a grant — and the cascade is the same rule's second half.
+//
+// A LOST STANDING IS FINAL (#5069). The owner's decision: "Grant zaniká, pokud
+// vydavatel ztratí oprávnění potřebné k jeho udělení. Obnovení role starý grant
+// neoživí. Nové udělení je nová operace." So a grant is live while its issuer
+// has had standing without a break since it was issued, which a read alone
+// cannot tell: demote then promote with no read between leaves nothing to see.
+// The standing rule therefore lives in the view page_grant_verdicts, and the
+// triggers of migration page_grant_retirement ask it in the transaction of every
+// change to one of its inputs and set page_grants.retired_at. That is the rule at
+// the top of this file with the same absence of a window: no job, no read, and no
+// code path has to remember it. retired_at is cleared only by issuing the grant
+// again. Folder ACLs are outside this rule: their set_by_user_id is audit, not
+// authority.
 
 import (
 	"context"
@@ -125,7 +138,11 @@ type pageGrantRecord struct {
 	// longer a member. Live is the whole rule above, decided in SQL.
 	IssuerRole               string
 	IssuerAccountUnavailable bool
-	Live                     bool
+	// IssuerStanding is the view's verdict today. Retired means the issuer lost
+	// standing since this grant was issued; only issuing it again clears that.
+	IssuerStanding bool
+	Retired        bool
+	Live           bool
 	// WorkbookInert marks a write grant on a workbook Page that the current
 	// owner did not issue to a user: it names no editor and reaches nothing.
 	WorkbookInert bool
@@ -143,6 +160,9 @@ type pageGrantRecord struct {
 func (g pageGrantRecord) inertReason() string {
 	if g.Live {
 		return ""
+	}
+	if g.Retired && g.IssuerStanding {
+		return "the human who issued it lost standing after issuing it, which ended this grant; it must be issued again"
 	}
 	if g.WorkbookInert {
 		return "on a workbook page only a user write grant issued by the current owner (workbook share) names an editor"
@@ -251,10 +271,11 @@ func (g pageGrantRecord) grant() pageGrant {
 // pageID is empty, on every page in the workspace — with its use-time verdict
 // attached, keyed by page id. It is the single reader of page_grants.
 //
-// The CASE is the rule documented at the top of this file. It is expressed in
-// the statement rather than in Go so that no caller can load grants without
-// also loading the verdict — a Go-side helper is one `if` away from being
-// forgotten, and the forgotten `if` is the escalation.
+// The rule documented at the top of this file is the CASE in the view
+// page_grant_verdicts. It is expressed in SQL rather than in Go so that no
+// caller can load grants without also loading the verdict — a Go-side helper is
+// one `if` away from being forgotten, and the forgotten `if` is the escalation —
+// and so that the retirement triggers ask the same definition.
 //
 // WHY THE WHOLE-WORKSPACE FORM EXISTS. PageHandler.List has to decide
 // reachability for every page it returns (see pageReachRule). Asking this
@@ -265,33 +286,13 @@ func (g pageGrantRecord) grant() pageGrant {
 // statement, one CASE, one definition of live, two entry points.
 func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID string) (map[string][]pageGrantRecord, error) {
 	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
-		SELECT g.page_id, g.subject_type, g.subject_id, g.level, COALESCE(g.panel_ids, ''),
-		       g.granted_by_user_id, g.granted_at,
-		       COALESCE(wm.role, ''),
-               (actor.id IS NULL OR actor.suspended_at IS NOT NULL OR COALESCE(wm.access_mode,'')<>'trusted' OR EXISTS(SELECT 1 FROM workspace_members ceiling WHERE ceiling.user_id=g.granted_by_user_id AND ceiling.access_mode='restricted')),
-		       (g.level = 'write' AND EXISTS(SELECT 1 FROM gridcraft_heads gh WHERE gh.page_id = p.id)
-		         AND (g.subject_type <> 'user' OR p.owner_user_id IS NULL OR g.granted_by_user_id <> p.owner_user_id)),
-		       CASE
-		         WHEN g.level = 'write' AND EXISTS(SELECT 1 FROM gridcraft_heads gh WHERE gh.page_id = p.id)
-		              AND (g.subject_type <> 'user' OR p.owner_user_id IS NULL OR g.granted_by_user_id <> p.owner_user_id) THEN 0
-		         WHEN wm.user_id IS NULL                                THEN 0
-                 WHEN (actor.id IS NULL OR actor.suspended_at IS NOT NULL OR COALESCE(wm.access_mode,'')<>'trusted' OR EXISTS(SELECT 1 FROM workspace_members ceiling WHERE ceiling.user_id=g.granted_by_user_id AND ceiling.access_mode='restricted')) THEN 0
-		         WHEN wm.role IN ('OWNER', 'ADMIN')                     THEN 1
-		         WHEN p.owner_user_id IS NOT NULL
-		              AND g.granted_by_user_id = p.owner_user_id        THEN 1
-		         WHEN p.owner_crew_id IS NOT NULL AND EXISTS (
-		              SELECT 1 FROM crew_members cm
-		               WHERE cm.crew_id = p.owner_crew_id AND cm.user_id = g.granted_by_user_id) THEN 1
-		         ELSE 0
-		       END
-		FROM page_grants g
-		JOIN pages p ON p.id = g.page_id
-		LEFT JOIN workspace_members wm
-		       ON wm.user_id = g.granted_by_user_id AND wm.workspace_id = ?
-        LEFT JOIN users actor ON actor.id=g.granted_by_user_id
-		WHERE p.workspace_id = ? AND (? = '' OR g.page_id = ?)
-		ORDER BY g.subject_type, g.subject_id, g.level`,
-		wsID, wsID, pageID, pageID)
+		SELECT page_id, subject_type, subject_id, level, COALESCE(panel_ids, ''),
+		       granted_by_user_id, granted_at, issuer_role, issuer_unavailable,
+		       workbook_inert, issuer_standing, retired_at IS NOT NULL
+		FROM page_grant_verdicts
+		WHERE workspace_id = ? AND (? = '' OR page_id = ?)
+		ORDER BY subject_type, subject_id, level`,
+		wsID, pageID, pageID)
 	if err != nil {
 		return nil, err
 	}
@@ -301,12 +302,12 @@ func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID s
 	for rows.Next() {
 		var g pageGrantRecord
 		var onPage, panelIDs string
-		var live int
 		if err := rows.Scan(&onPage, &g.SubjectType, &g.SubjectID, &g.Level, &panelIDs,
-			&g.GrantedBy, &g.GrantedAt, &g.IssuerRole, &g.IssuerAccountUnavailable, &g.WorkbookInert, &live); err != nil {
+			&g.GrantedBy, &g.GrantedAt, &g.IssuerRole, &g.IssuerAccountUnavailable, &g.WorkbookInert,
+			&g.IssuerStanding, &g.Retired); err != nil {
 			return nil, err
 		}
-		g.Live = live == 1
+		g.Live = g.IssuerStanding && !g.Retired
 		if strings.TrimSpace(panelIDs) != "" {
 			var ids []string
 			if err := json.Unmarshal([]byte(panelIDs), &ids); err != nil {

@@ -9,6 +9,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -186,6 +187,75 @@ func TestAcceptance_IssueResult_ThroughTheCLI(t *testing.T) {
 	}
 	if strings.Contains(out, "Belongs to IW-2") {
 		t.Errorf("the foreign run's result leaked:\n%s", out)
+	}
+}
+
+// The harness must open a result rather than searching the deliberately
+// bounded run-list preview. Exercise the actual router and binary boundary.
+func TestAcceptance_IssueResult_LongOutputThroughTheCLI(t *testing.T) {
+	cfgPath, db := startIssueWorkAcceptanceServer(t)
+	const code = "VERIFIED-FIXTURE"
+	full := strings.Repeat("prefix ", 40) + "Read actual fixture: " + code
+	if _, err := db.Exec(`UPDATE assignments SET result_summary=? WHERE id='iw-run-1'`, full); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE agents SET slug='morgan' WHERE id='iw-agent'`); err != nil {
+		t.Fatal(err)
+	}
+	// Assignment identity and journal identity are intentionally different.
+	if _, err := db.Exec(`INSERT INTO journal_entries
+  (id,workspace_id,agent_id,mission_id,ts,entry_type,severity,actor_type,summary,payload,refs,trace_id)
+  VALUES ('iw-result-start',?,'iw-agent','iw-mission','2026-11-04T00:00:00Z','run.started','info','orchestrator','run started',
+  '{"assignment_id":"iw-run-1"}','{}','iw-journal-run')`, issueWorkAcceptanceWorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	out, err := runIssueWorkCLI(t, cfgPath, "issue", "runs", "IW-1", "--format", "json")
+	if err != nil {
+		t.Fatalf("list runs failed: %v", err)
+	}
+	var runs []struct {
+		ID            string `json:"id"`
+		RunID         string `json:"run_id"`
+		AgentSlug     string `json:"agent_slug"`
+		Status        string `json:"status"`
+		ResultSummary string `json:"result_summary"`
+	}
+	if err := json.Unmarshal([]byte(out), &runs); err != nil {
+		t.Fatalf("decode run list: %v", err)
+	}
+	var assignment, trace string
+	for _, run := range runs {
+		if run.ID == "iw-run-1" {
+			if run.AgentSlug != "morgan" || run.Status != "COMPLETED" || run.RunID != "iw-journal-run" || run.ID == run.RunID {
+				t.Fatal("run list lost agent/status/assignment versus journal identities")
+			}
+			if run.ResultSummary != full[:200]+"…" || strings.Contains(run.ResultSummary, code) {
+				t.Fatal("list must remain a bounded preview without the later code")
+			}
+			assignment, trace = run.ID, run.RunID
+		}
+	}
+	if assignment == "" {
+		t.Fatal("completed fixture assignment absent from run list")
+	}
+	out, err = runIssueWorkCLI(t, cfgPath, "issue", "result", "IW-1", assignment, "--format", "json")
+	if err != nil {
+		t.Fatalf("open actual assignment result: %v", err)
+	}
+	var result struct {
+		Status  string `json:"status"`
+		Outcome string `json:"outcome"`
+		Summary string `json:"result_summary"`
+	}
+	if err := json.Unmarshal([]byte(out), &result); err != nil {
+		t.Fatalf("decode full result: %v", err)
+	}
+	if result.Status != "COMPLETED" || result.Outcome != "SUCCEEDED" || result.Summary != full || !strings.Contains(result.Summary, code) {
+		t.Fatal("full result did not retain the completed assignment and complete grounded fixture output")
+	}
+	out, err = runIssueWorkCLI(t, cfgPath, "issue", "result", "IW-1", trace, "--format", "json")
+	if err == nil || strings.Contains(out, code) {
+		t.Fatal("journal trace must not substitute for assignment ID or reveal its result")
 	}
 }
 

@@ -102,7 +102,7 @@ it("creates an empty Page with allow_empty and puts it in the chosen folder", as
   fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "sales" } })
   name("Overdue invoices")
   fireEvent.click(create())
-  await waitFor(() => expect(onCreated).toHaveBeenCalledWith("overdue-invoices"))
+  await waitFor(() => expect(onCreated).toHaveBeenCalledWith("overdue-invoices", "p1"))
   const [url, init] = m.fetch.mock.calls[0]
   expect(url).toBe("/api/v1/pages?workspace_id=ws1")
   expect(JSON.parse(init.body)).toEqual({ name: "Overdue invoices", slug: "overdue-invoices", panels: [], allow_empty: true })
@@ -146,7 +146,7 @@ it("keeps a created Page when filing fails and offers to open it", async () => {
   expect(await screen.findByRole("alert")).toHaveTextContent("Monitor was created but not put in Sales: folder changed")
   expect(onCreated).not.toHaveBeenCalled()
   fireEvent.click(screen.getByRole("button", { name: "Open it" }))
-  expect(onCreated).toHaveBeenCalledWith("monitor")
+  expect(onCreated).toHaveBeenCalledWith("monitor", "p1")
   expect(m.fetch).toHaveBeenCalledTimes(1)
 })
 
@@ -155,7 +155,8 @@ it("creates a native Sheet through the shared creation with the sheet format", a
   const { onCreated } = mount({ defaultKind: "sheet" })
   name("Price model")
   fireEvent.click(create())
-  await waitFor(() => expect(onCreated).toHaveBeenCalledWith("price-model"))
+  // With its ID it opens at /artifacts/<id> at once, never first by slug (#4902).
+  await waitFor(() => expect(onCreated).toHaveBeenCalledWith("price-model", "w1"))
   expect(m.wordCreate).toHaveBeenCalledWith({ name: "Price model", slug: "price-model", format: "sheet" })
   expect(m.createWorkbook).not.toHaveBeenCalled()
 })
@@ -169,14 +170,15 @@ it("keeps Sheet disabled while the profile is not confirmed", () => {
 
 it("warns about the same name and kind in the folder and opens the existing one", () => {
   m.pages = [
-    page({ slug: "brief", name: "Partner Brief", artifact_kind: "word", has_document: true, folder: { slug: "sales", name: "Sales" } }),
+    { ...page({ slug: "brief", name: "Partner Brief", artifact_kind: "word", has_document: true, folder: { slug: "sales", name: "Sales" } }), immutablePageId: "page-real-brief" },
     page({ slug: "brief-sheet", name: "Partner brief", has_workbook: true, folder: { slug: "sales", name: "Sales" } }),
   ]
+  expect(m.pages[0]).toMatchObject({ id: "brief", immutablePageId: "page-real-brief" })
   const { onCreated, onOpenChange } = mount({ defaultKind: "word", defaultFolderSlug: "sales" })
   name("partner brief")
   expect(screen.getByText(/already exists here/)).toHaveTextContent("Partner Brief already exists here")
   fireEvent.click(screen.getByRole("button", { name: "Open it" }))
-  expect(onCreated).toHaveBeenCalledWith("brief")
+  expect(onCreated).toHaveBeenCalledWith("brief", "page-real-brief")
   expect(onOpenChange).toHaveBeenCalledWith(false)
   cleanup()
   mount({ defaultKind: "word" })
@@ -232,8 +234,23 @@ it("creates a Design through its canvas endpoint while preserving the shared fol
   const { onCreated } = mount({ defaultKind: "design", defaultFolderSlug: "sales" })
   name("Checkout")
   fireEvent.click(create())
-  await waitFor(() => expect(onCreated).toHaveBeenCalledWith("checkout"))
+  await waitFor(() => expect(onCreated).toHaveBeenCalledWith("checkout", "canvas-id"))
   expect(m.fetch).toHaveBeenCalledWith("/api/v1/pages/design?workspace_id=ws1", expect.objectContaining({ method: "POST", body: JSON.stringify({ name: "Checkout", slug: "checkout" }) }))
   expect(m.addPage).toHaveBeenCalledWith(expect.objectContaining({ folder: "sales", page: "checkout", pagesVersion: 0 }))
   expect(m.wordCreate).not.toHaveBeenCalled()
+})
+
+it("returns focus to the New artifact button that opened it once the library unmounts the dialog", async () => {
+  // The library mounts the dialog only while it is open and has no Radix trigger,
+  // so without restoreOpenerFocus Escape left keyboard focus on <body>.
+  const opener = document.createElement("button")
+  opener.textContent = "New artifact"
+  document.body.append(opener)
+  opener.focus()
+  const client = new QueryClient()
+  const { unmount } = render(<QueryClientProvider client={client}><NewArtifactDialog workspaceId="ws1" open onOpenChange={vi.fn()} onCreated={vi.fn()} /></QueryClientProvider>)
+  expect(document.activeElement).not.toBe(opener)
+  unmount()
+  await waitFor(() => expect(document.activeElement).toBe(opener))
+  opener.remove()
 })

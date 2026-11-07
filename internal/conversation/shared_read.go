@@ -81,6 +81,9 @@ func (s *Store) ReadShared(ctx context.Context, sessionID string, maxBytes int64
 		if err := json.Unmarshal(line, &msg); err != nil {
 			return nil, fmt.Errorf("decode shared transcript row %d: %w", rows, err)
 		}
+		if msg.NativeCraftInstruction {
+			continue
+		}
 		messages = append(messages, msg)
 	}
 	if err := ctx.Err(); err != nil {

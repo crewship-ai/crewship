@@ -9,14 +9,27 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
 
-// runStopProcessCommand stops one provider-identified process. It does not
-// establish descendant ownership or prove that the whole run has stopped.
+// stopConfirmedExit is the helper's exit status when the leader and every
+// process it started (by session and by parentage) were frozen, killed and
+// each confirmed exited on its pidfd. The provider reads the exec's exit code,
+// which no other process in the container can forge, and only then records a
+// stop-confirmed receipt for the execution (#4774). 0 still means only the
+// exact process was killed, which is what older helpers report.
+const stopConfirmedExit = 10
+
+// runStopProcessCommand stops one provider-identified process. When that
+// process leads its own session (a docker exec process does), it also stops
+// every process in that session and every descendant of the leader, including
+// descendants that moved to their own session, and exits stopConfirmedExit
+// once all of them are confirmed gone.
 func runStopProcessCommand(args []string, diagnostics io.Writer) int {
 	fs := flag.NewFlagSet("run-stop-process", flag.ContinueOnError)
 	fs.SetOutput(diagnostics)
@@ -40,9 +53,13 @@ func runStopProcessCommand(args []string, diagnostics io.Writer) int {
 		fmt.Fprintln(diagnostics, "exact process identity required")
 		return 125
 	}
-	if err := stopExactProcess(*pid, *start); err != nil {
+	confirmed, err := stopExactTree(*pid, *start, diagnostics)
+	if err != nil {
 		fmt.Fprintln(diagnostics, "exact process stop unconfirmed:", err)
 		return 125
+	}
+	if confirmed {
+		return stopConfirmedExit
 	}
 	return 0
 }
@@ -78,20 +95,376 @@ func probeExactProcessSupport(output io.Writer) error {
 	return err
 }
 
-func stopExactProcess(pid int, start uint64) error {
+// stopBudget bounds the whole stop, so it finishes inside the provider's
+// wait for the helper.
+const stopBudget = 3 * time.Second
+
+// afterLeaderStopped runs between the leader's SIGSTOP and the first scan.
+// Tests use it to make a still-running member exit inside that window.
+var afterLeaderStopped func()
+
+// finalScanEnumerated runs in the final scan after /proc was listed and
+// before any process stat is read. Tests use it to fork and exit there.
+var finalScanEnumerated func()
+
+// treeMember is one process held by pidfd while the leader's tree is stopped.
+type treeMember struct {
+	pid     int
+	fd      int
+	start   uint64
+	session int
+	pgrp    int
+}
+
+// stopExactTree authenticates the leader (pidfd, namespace, start time) and
+// signals it with SIGKILL in every outcome that reports success. If the leader
+// heads its own session, everything it started is frozen first: members are
+// the processes in its session plus every descendant by parent PID (Claude
+// Code, for one, runs each shell command in a new session). Each is pinned
+// with a pidfd, re-verified and sent SIGSTOP, repeatedly, until two
+// consecutive /proc scans find the same members and every thread of each one
+// stopped or gone. Stopped processes cannot fork, so the set is then closed.
+// Every member and the leader are killed, and each thread group's exit is
+// confirmed on its pidfd. confirmed is true only then.
+//
+// While the leader is alive (stopped, not reaped) its PID, and therefore the
+// session ID, cannot be reused by an unrelated session.
+//
+// A member can exit before a scan reads it (also between the leader's SIGSTOP
+// and the first scan), and a child of it that left the session is then
+// reparented out of the tree, where neither ancestry nor session finds it
+// (#4797). The helper is a separate exec, not an ancestor of the run, so it
+// cannot become the run's subreaper; the run shares the container's cgroup, so
+// there is no per-run freezer either. Instead the final check relies on how
+// the kernel reparents: an orphan of the tree is adopted only by a subreaper
+// among the leader's ancestors in this PID namespace or by its init, started
+// no earlier than the leader, and sits in a session created inside the run,
+// which no older adopter can belong to. Any such live process blocks
+// confirmation. That includes an unrelated process with the same shape (for
+// example another execution's daemon started meanwhile): the helper cannot
+// tell them apart, so the stop stays unconfirmed rather than risk a survivor.
+func stopExactTree(pid int, start uint64, diagnostics io.Writer) (confirmed bool, err error) {
 	if pid < 2 || start == 0 {
-		return errors.New("invalid process identity")
+		return false, errors.New("invalid process identity")
 	}
-	// Hold the kernel process reference before reading /proc. PID reuse between
-	// verification and signalling cannot redirect the signal to a new process.
-	fd, err := unix.PidfdOpen(pid, 0)
+	deadline := time.Now().Add(stopBudget)
+	leader, err := unix.PidfdOpen(pid, 0)
 	if err != nil {
-		return err
+		return false, err
 	}
-	defer unix.Close(fd)
-	// The daemon supplied a PID mapped into this container. Authenticate the
-	// namespace here, where the UID1001 helper can read its UID1001 target's
-	// proc metadata without granting the host controller ptrace capabilities.
+	defer unix.Close(leader)
+	if err := verifyHelperNamespace(pid); err != nil {
+		return false, err
+	}
+	stat, err := readProcessStat(pid)
+	if err != nil {
+		return false, err
+	}
+	if stat.start != start {
+		return false, errors.New("process start time changed")
+	}
+	if stat.session != pid {
+		// Not a session leader: only the exact process is ours to stop.
+		return false, unix.PidfdSendSignal(leader, unix.SIGKILL, nil, 0)
+	}
+	members := map[int]treeMember{}
+	defer func() {
+		for _, m := range members {
+			unix.Close(m.fd)
+		}
+	}()
+	killAll := func() {
+		for _, m := range members {
+			_ = unix.PidfdSendSignal(m.fd, unix.SIGKILL, nil, 0)
+		}
+		_ = unix.PidfdSendSignal(leader, unix.SIGKILL, nil, 0)
+	}
+	unconfirmed := func(format string, args ...any) (bool, error) {
+		killAll()
+		fmt.Fprintf(diagnostics, format+"\n", args...)
+		return false, nil
+	}
+	if err := unix.PidfdSendSignal(leader, unix.SIGSTOP, nil, 0); err != nil {
+		return false, err
+	}
+	// Recorded while the leader is alive: its ancestor chain can only shrink
+	// afterwards, so every later adopter of an orphan of the tree is in it.
+	adopters, err := orphanAdoptersOf(pid)
+	if err != nil {
+		return unconfirmed("leader ancestry unreadable: %v", err)
+	}
+	if afterLeaderStopped != nil {
+		afterLeaderStopped()
+	}
+	settledScans := 0
+	previous := ""
+	for settledScans < 2 {
+		if time.Now().After(deadline) {
+			return unconfirmed("process tree did not settle")
+		}
+		procs, scanErr := scanProcesses()
+		if scanErr != nil {
+			return unconfirmed("process scan failed: %v", scanErr)
+		}
+		tree := treeOf(pid, procs)
+		settled := true
+		for _, member := range tree {
+			held, ok := members[member.pid]
+			if ok && held.start != member.start {
+				// The pinned process exited and its PID was reused.
+				if !pidfdExited(held.fd) {
+					return unconfirmed("tree member identity changed: %d", member.pid)
+				}
+				unix.Close(held.fd)
+				delete(members, member.pid)
+				ok = false
+			}
+			if !ok {
+				fd, openErr := unix.PidfdOpen(member.pid, 0)
+				if errors.Is(openErr, unix.ESRCH) {
+					settled = false
+					continue
+				}
+				if openErr != nil {
+					return unconfirmed("tree member unpinned: %v", openErr)
+				}
+				// Re-verify after pinning: the PID may have been recycled
+				// between the scan and pidfd_open; only a verified member is
+				// ever signalled.
+				again, statErr := readProcessStat(member.pid)
+				if statErr != nil || again.start != member.start {
+					unix.Close(fd)
+					settled = false
+					continue
+				}
+				held = treeMember{pid: member.pid, fd: fd, start: again.start, session: again.session, pgrp: again.pgrp}
+				members[member.pid] = held
+				settled = false
+			}
+		}
+		// Every pinned member, including one that dropped out of the tree
+		// since it was pinned, is stopped again on every scan (repeating
+		// SIGSTOP is harmless) and must be fully stopped or exited.
+		for _, held := range members {
+			if pidfdExited(held.fd) {
+				continue
+			}
+			if sigErr := unix.PidfdSendSignal(held.fd, unix.SIGSTOP, nil, 0); sigErr != nil && !errors.Is(sigErr, unix.ESRCH) {
+				return unconfirmed("tree member not stoppable: %v", sigErr)
+			}
+			if !allThreadsStopped(held.pid) {
+				settled = false
+			}
+		}
+		if !pidfdExited(leader) && !allThreadsStopped(pid) {
+			settled = false
+		}
+		key := treeKey(tree)
+		if settled && (settledScans == 0 || key == previous) {
+			settledScans++
+		} else {
+			settledScans = 0
+		}
+		previous = key
+		if settledScans < 2 {
+			time.Sleep(5 * time.Millisecond)
+		}
+	}
+	killAll()
+	for _, m := range members {
+		if !waitPidfdExit(m.fd, time.Until(deadline)) {
+			fmt.Fprintln(diagnostics, "tree member exit unconfirmed:", m.pid)
+			return false, nil
+		}
+	}
+	if !waitPidfdExit(leader, time.Until(deadline)) {
+		fmt.Fprintln(diagnostics, "leader exit unconfirmed")
+		return false, nil
+	}
+	// Backstop: nothing may still run in the leader's or a member's session
+	// or process group, or as a child of any killed process.
+	procs, err := closedProcessScan(deadline)
+	if err != nil {
+		fmt.Fprintln(diagnostics, "final process scan failed:", err)
+		return false, nil
+	}
+	sessions := map[int]bool{pid: true}
+	parents := map[int]bool{pid: true}
+	for _, m := range members {
+		parents[m.pid] = true
+		sessions[m.session] = true
+		sessions[m.pgrp] = true
+	}
+	byPID := make(map[int]processStat, len(procs))
+	for _, p := range procs {
+		byPID[p.pid] = p
+	}
+	for _, p := range procs {
+		if processDead(p) {
+			continue
+		}
+		if sessions[p.session] || sessions[p.pgrp] || parents[p.ppid] {
+			fmt.Fprintln(diagnostics, "process survived the tree stop:", p.pid)
+			return false, nil
+		}
+		if p.pid != pid && mayBeOrphanOfTree(p, byPID, adopters, start) {
+			fmt.Fprintln(diagnostics, "process possibly orphaned from the tree survived the stop:", p.pid)
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+// orphanAdoptersOf is orphanAdopters; tests running in the host's PID
+// namespace replace it so the test process stands in for a container init.
+var orphanAdoptersOf = orphanAdopters
+
+// orphanAdopters returns every process that can adopt an orphan of leader's
+// tree: this namespace's init and each ancestor of leader inside the
+// namespace (any of them may be a child subreaper, which no other process can
+// observe). A docker exec leader's parent lies outside the container's
+// namespace (PPID 0), so there it is only init.
+func orphanAdopters(leader int) (map[int]bool, error) {
+	var lastErr error
+	for attempt := 0; attempt < 3; attempt++ {
+		adopters := map[int]bool{1: true}
+		stat, err := readProcessStat(leader)
+		if err != nil {
+			return nil, err
+		}
+		complete := true
+		for p := stat.ppid; p > 1 && !adopters[p]; {
+			adopters[p] = true
+			ancestor, readErr := readProcessStat(p)
+			if readErr != nil {
+				// The ancestor exited and the leader moved up the chain;
+				// walk it again.
+				complete, lastErr = false, readErr
+				break
+			}
+			p = ancestor.ppid
+		}
+		if complete {
+			return adopters, nil
+		}
+	}
+	return nil, lastErr
+}
+
+// mayBeOrphanOfTree reports whether p could be a process of the stopped tree
+// that was reparented away from it: adopted by an orphan adopter, started no
+// earlier than the leader, and in a session other than its adopter's. An
+// orphan's session was created by a process of the run, which the older
+// adopter cannot have joined, and two live sessions never share an ID. A
+// process forked by the adopter itself keeps the adopter's session. An adopter
+// missing from the scan proves nothing, so p then counts as an orphan.
+func mayBeOrphanOfTree(p processStat, byPID map[int]processStat, adopters map[int]bool, leaderStart uint64) bool {
+	if !adopters[p.ppid] || p.start < leaderStart {
+		return false
+	}
+	adopter, ok := byPID[p.ppid]
+	return !ok || adopter.session != p.session
+}
+
+// singleThreaded reports whether pid has at most one task left (a zombie main
+// thread whose thread group has otherwise exited).
+func singleThreaded(pid int) bool {
+	tasks, err := os.ReadDir(fmt.Sprintf("/proc/%d/task", pid))
+	if errors.Is(err, os.ErrNotExist) {
+		return true
+	}
+	return err == nil && len(tasks) <= 1
+}
+
+// treeOf returns the processes in leader's session and every descendant of
+// leader by parent PID, excluding leader itself.
+func treeOf(leader int, procs []processStat) []processStat {
+	children := map[int][]processStat{}
+	for _, p := range procs {
+		children[p.ppid] = append(children[p.ppid], p)
+	}
+	seen := map[int]bool{leader: true}
+	var out []processStat
+	queue := []int{leader}
+	for len(queue) > 0 {
+		parent := queue[0]
+		queue = queue[1:]
+		for _, child := range children[parent] {
+			if !seen[child.pid] {
+				seen[child.pid] = true
+				out = append(out, child)
+				queue = append(queue, child.pid)
+			}
+		}
+	}
+	for _, p := range procs {
+		if p.session == leader && !seen[p.pid] {
+			seen[p.pid] = true
+			out = append(out, p)
+			queue = append(queue, p.pid)
+		}
+	}
+	// Descendants of session members outside the leader's own lineage.
+	for len(queue) > 0 {
+		parent := queue[0]
+		queue = queue[1:]
+		for _, child := range children[parent] {
+			if !seen[child.pid] {
+				seen[child.pid] = true
+				out = append(out, child)
+				queue = append(queue, child.pid)
+			}
+		}
+	}
+	return out
+}
+
+func treeKey(tree []processStat) string {
+	ids := make([]string, 0, len(tree))
+	for _, p := range tree {
+		ids = append(ids, strconv.Itoa(p.pid)+":"+strconv.FormatUint(p.start, 10))
+	}
+	sort.Strings(ids)
+	return strings.Join(ids, ",")
+}
+
+// pidfdExited reports whether the pinned thread group has fully exited. A
+// pidfd becomes readable only once every thread is gone, so a process whose
+// main thread exited while others still run is not reported as exited.
+func pidfdExited(fd int) bool {
+	fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+	n, err := unix.Poll(fds, 0)
+	return err == nil && n == 1
+}
+
+// allThreadsStopped reports whether every thread of pid is stopped or dead.
+// The process state letter alone describes only the main thread.
+func allThreadsStopped(pid int) bool {
+	tasks, err := os.ReadDir(fmt.Sprintf("/proc/%d/task", pid))
+	if err != nil {
+		return false
+	}
+	for _, task := range tasks {
+		data, readErr := os.ReadFile(fmt.Sprintf("/proc/%d/task/%s/stat", pid, task.Name()))
+		if readErr != nil {
+			// A task that vanished mid-listing may have been replaced by a
+			// new one: not settled, rescan.
+			return false
+		}
+		end := strings.LastIndexByte(string(data), ')')
+		if end < 0 || end+2 >= len(data) {
+			return false
+		}
+		switch data[end+2] {
+		case 'T', 't', 'Z', 'X':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func verifyHelperNamespace(pid int) error {
 	targetNamespace, err := os.Stat(fmt.Sprintf("/proc/%d/ns/pid", pid))
 	if err != nil {
 		return err
@@ -103,14 +476,213 @@ func stopExactProcess(pid int, start uint64) error {
 	if !os.SameFile(targetNamespace, ownNamespace) {
 		return errors.New("process is outside helper PID namespace")
 	}
-	observed, err := processStartTicks(pid)
+	return nil
+}
+
+// waitPidfdExit reports whether the pinned process exited (a pidfd becomes
+// readable at exit, zombie or reaped) within the timeout.
+func waitPidfdExit(fd int, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for {
+		remaining := time.Until(deadline)
+		if remaining < 0 {
+			remaining = 0
+		}
+		fds := []unix.PollFd{{Fd: int32(fd), Events: unix.POLLIN}}
+		n, err := unix.Poll(fds, int(remaining.Milliseconds())+1)
+		if err == unix.EINTR {
+			continue
+		}
+		if err == nil && n == 1 {
+			return true
+		}
+		if err != nil || remaining == 0 || time.Now().After(deadline) {
+			return false
+		}
+	}
+}
+
+type processStat struct {
+	pid     int
+	ppid    int
+	pgrp    int
+	state   byte
+	session int
+	start   uint64
+}
+
+func readProcessStat(pid int) (processStat, error) {
+	data, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
 	if err != nil {
-		return err
+		return processStat{}, err
 	}
-	if observed != start {
-		return errors.New("process start time changed")
+	end := strings.LastIndexByte(string(data), ')')
+	if end < 0 {
+		return processStat{}, errors.New("invalid process stat")
 	}
-	return unix.PidfdSendSignal(fd, unix.SIGKILL, nil, 0)
+	fields := strings.Fields(string(data[end+1:]))
+	if len(fields) < 20 || len(fields[0]) != 1 {
+		return processStat{}, errors.New("short process stat")
+	}
+	ppid, err := strconv.Atoi(fields[1])
+	if err != nil {
+		return processStat{}, errors.New("invalid parent process")
+	}
+	pgrp, err := strconv.Atoi(fields[2])
+	if err != nil {
+		return processStat{}, errors.New("invalid process group")
+	}
+	session, err := strconv.Atoi(fields[3])
+	if err != nil {
+		return processStat{}, errors.New("invalid process session")
+	}
+	start, err := strconv.ParseUint(fields[19], 10, 64)
+	if err != nil || start == 0 {
+		return processStat{}, errors.New("invalid process start time")
+	}
+	return processStat{pid: pid, ppid: ppid, pgrp: pgrp, state: fields[0][0], session: session, start: start}, nil
+}
+
+// closedProcessScan returns a /proc scan that is a complete picture of the
+// namespace, retrying until one is or deadline passes. A single scan is not:
+// a process can fork after /proc was listed and exit before its stat is read,
+// and then neither it nor its child appears (#4797). A scan counts only when
+//   - no PID was allocated in this namespace while it ran (the last PID in
+//     /proc/loadavg did not move), so every process alive at its end was
+//     alive throughout and was listed and read alive; and
+//   - every live process's parent is in it and alive, so no process was read
+//     before its parent exited and it was reparented.
+//
+// The last PID could only come back to the same value after pid_max
+// allocations; a scan is accepted only within pid_max/4 microseconds (at most
+// 250ms), which would take four PID allocations every microsecond.
+func closedProcessScan(deadline time.Time) ([]processStat, error) {
+	limit := 250 * time.Millisecond
+	pidMax, err := readPIDMax()
+	if err != nil {
+		return nil, err
+	}
+	if bound := time.Duration(pidMax/4) * time.Microsecond; bound < limit {
+		limit = bound
+	}
+	for {
+		before, err := lastAllocatedPID()
+		if err != nil {
+			return nil, err
+		}
+		began := time.Now()
+		pids, err := listProcessIDs()
+		if err != nil {
+			return nil, err
+		}
+		if finalScanEnumerated != nil {
+			finalScanEnumerated()
+		}
+		procs, err := readProcessStats(pids)
+		if err != nil {
+			return nil, err
+		}
+		after, err := lastAllocatedPID()
+		if err != nil {
+			return nil, err
+		}
+		if before == after && time.Since(began) < limit && parentsPresent(procs) {
+			return procs, nil
+		}
+		if time.Now().After(deadline) {
+			return nil, errors.New("no scan without concurrent process creation or exit")
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+func processDead(p processStat) bool {
+	return p.state == 'X' || (p.state == 'Z' && singleThreaded(p.pid))
+}
+
+// parentsPresent reports whether every live process's parent (other than one
+// outside the namespace, PPID 0) was read alive in the same scan.
+func parentsPresent(procs []processStat) bool {
+	byPID := make(map[int]processStat, len(procs))
+	for _, p := range procs {
+		byPID[p.pid] = p
+	}
+	for _, p := range procs {
+		if p.ppid == 0 || processDead(p) {
+			continue
+		}
+		parent, ok := byPID[p.ppid]
+		if !ok || processDead(parent) {
+			return false
+		}
+	}
+	return true
+}
+
+// lastAllocatedPID is the last PID allocated in the reader's PID namespace.
+func lastAllocatedPID() (int, error) {
+	data, err := os.ReadFile("/proc/loadavg")
+	if err != nil {
+		return 0, err
+	}
+	fields := strings.Fields(string(data))
+	if len(fields) != 5 {
+		return 0, errors.New("invalid /proc/loadavg")
+	}
+	return strconv.Atoi(fields[4])
+}
+
+func readPIDMax() (int, error) {
+	data, err := os.ReadFile("/proc/sys/kernel/pid_max")
+	if err != nil {
+		return 0, err
+	}
+	value, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil || value < 300 {
+		return 0, errors.New("invalid pid_max")
+	}
+	return value, nil
+}
+
+// scanProcesses lists every process in this PID namespace. Processes that
+// vanish mid-scan are skipped.
+func scanProcesses() ([]processStat, error) {
+	pids, err := listProcessIDs()
+	if err != nil {
+		return nil, err
+	}
+	return readProcessStats(pids)
+}
+
+func listProcessIDs() ([]int, error) {
+	entries, err := os.ReadDir("/proc")
+	if err != nil {
+		return nil, err
+	}
+	var pids []int
+	for _, entry := range entries {
+		pid, convErr := strconv.Atoi(entry.Name())
+		if convErr != nil || pid < 1 {
+			continue
+		}
+		pids = append(pids, pid)
+	}
+	return pids, nil
+}
+
+func readProcessStats(pids []int) ([]processStat, error) {
+	var out []processStat
+	for _, pid := range pids {
+		stat, statErr := readProcessStat(pid)
+		if statErr != nil {
+			if errors.Is(statErr, os.ErrNotExist) || errors.Is(statErr, unix.ESRCH) {
+				continue
+			}
+			return nil, statErr
+		}
+		out = append(out, stat)
+	}
+	return out, nil
 }
 
 func processStartTicks(pid int) (uint64, error) {

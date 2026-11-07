@@ -34,7 +34,18 @@ for (const { application, label } of APPLICATIONS) {
         const log: Record<string, unknown> = { application, mode: prd.mode, appSha: prd.appSha, workspaceId: ws.id, pageId: doc.pageId, saves: SOAK_SAVES }
 
         const marker = `prd-soak-final-${Date.now().toString(36)}`
-        const body = bigDocument(application, null)
+        // Every save carries new content: an identical save at the head creates no
+        // version (#5075). One fixed-width counter in the last block changes per save.
+        const COUNTER = "prd-soak-save-000000"
+        const body = bigDocument(application, COUNTER)
+        const counterAt = body.indexOf(COUNTER)
+        expect(counterAt, "the counter is in the document").toBeGreaterThan(0)
+        expect(body.indexOf(COUNTER, counterAt + 1), "the counter appears once").toBe(-1)
+        const nth = (i: number) => {
+          const b = Buffer.from(body)
+          b.write(`prd-soak-save-${String(i).padStart(6, "0")}`, counterAt, "utf8")
+          return b
+        }
         const last = bigDocument(application, marker)
         expect(body.length, "native state above 4 MiB").toBeGreaterThan(4 * 1024 * 1024)
         expect(body.length).toBeGreaterThan(MIN_NATIVE_BYTES - 1)
@@ -72,7 +83,7 @@ for (const { application, label } of APPLICATIONS) {
             const renewed = await doc.leaseOp(api, session, "renew", { generation })
             expect(renewed.status(), `renew the lease before save ${i}`).toBe(200)
           }
-          const bytes = i === SOAK_SAVES ? last : body
+          const bytes = i === SOAK_SAVES ? last : nth(i)
           const res = await doc.save(api, session, { generation, baseVersion: version, enginePin: head.enginePin, bytes, editorRevision: `prd-soak-${i}` })
           if (res.status() !== 200) throw new Error(`save ${i}/${SOAK_SAVES} on version ${version}: HTTP ${res.status()} ${(await res.text()).slice(0, 300)}`)
           const receipt = (await res.json()) as { version: string; phase: string }

@@ -23,7 +23,11 @@ const HELP = `Usage: pnpm acceptance:prd [--origin URL] [--quick|--full] [--outp
   --rc SHA       RC gate: fail unless every ID in required-ids.json passed in full mode on this app SHA
                  and its canonical origin (rows of this run plus --merge and --manual)
   --merge PATH   with --rc: earlier run directory or summary.json to merge (repeatable)
-  --manual FILE  with --rc: manual-rows.json (id, result, appSha, evidence, recordedAt)
+  --manual FILE  with --rc: manual-rows.json (id, result, appSha, evidence, recordedAt, checks);
+                 only IDs with allowManual, and every check in manualChecks must be true
+  --carryover F  with --rc: carryover.json (id, fromSha, paths, engines {from, rc}); the row keeps
+                 its own SHA and passes only if git diff --stat fromSha RC over paths + sharedPaths
+                 is empty and the engine pins match; alwaysRerun rows never carry over
   --origin-map M with --rc: canonical origins, craft=URL,artifacts=URL (or $PRD_RC_ORIGINS)
   --required F   with --rc: required-ids file (default required-ids.json)
   --cleanup      delete leftovers of earlier runs and exit: workspaces prd-qa-* named "PRD acceptance …",
@@ -104,7 +108,8 @@ if (args.rc) {
   const required = loadRequired(args.required ?? DEFAULT_REQUIRED, args.originMap)
   const all = [...rows, ...args.merge.flatMap(readRunRows)]
   if (args.manual) all.push(...manualToRows(JSON.parse(fs.readFileSync(args.manual, "utf8")), required))
-  const gate = evaluateRequired(all, required, { rc: args.rc })
+  const carryover = args.carryover ? JSON.parse(fs.readFileSync(args.carryover, "utf8")) : []
+  const gate = evaluateRequired(all, required, { rc: args.rc, carryover })
   fs.writeFileSync(path.join(outputDir, "rc-gate.json"), JSON.stringify(gate, null, 2) + "\n")
   console.log(`\n${formatGate(gate)}`)
   gateOk = gate.ok

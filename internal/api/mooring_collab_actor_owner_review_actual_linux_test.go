@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -67,6 +68,18 @@ func TestReviewActualActorLateOwnerCannotSaveOrRunLaterSubmit(t *testing.T) {
 		release := make(chan struct{})
 		done := make(chan error, 1)
 		var calls, ownerDenied, saved atomic.Int32
+		// The joined child renews its delivery gate every 250ms (gate/8). An
+		// unhandled delivery_renew stops the pump and closes the transport, so
+		// the test answers it with the real SQL gate renewal and waits for one
+		// before sending, instead of racing the first renewal (#4837).
+		renewed := make(chan struct{})
+		var renewedOnce sync.Once
+		// Once the owner is released, hold renewals until the late submit has
+		// been decided so the denial below is the owner check, not a renewal.
+		// renewing orders an in-flight renewal before the release.
+		var renewing sync.Mutex
+		releasing := make(chan struct{})
+		decided := make(chan struct{})
 		pump, err := newCollaborationSessionPump(f.cell.runtime, collaborationSessionPumpHandlers{
 			Submit: func(bound context.Context, submit protocol.SessionSubmitBatch) (protocol.SessionCommitResult, error) {
 				if calls.Add(1) != 1 {
@@ -78,12 +91,36 @@ func TestReviewActualActorLateOwnerCannotSaveOrRunLaterSubmit(t *testing.T) {
 				case <-bound.Done():
 					return protocol.SessionCommitResult{}, bound.Err()
 				}
+				renewing.Lock()
+				close(releasing)
+				renewing.Unlock()
+				defer close(decided)
 				if e := f.cell.owners.Release(bound, f.owner); e != nil {
 					return protocol.SessionCommitResult{}, e
 				}
 				result, cuts, e := committer.submitWithCuts(bound, submit)
 				if e != nil && len(result.Receipt.Changes) == 0 && len(cuts) == 0 {
 					ownerDenied.Store(1)
+				}
+				return result, e
+			},
+			Delivery: func(bound context.Context, request protocol.DeliveryRenew) (protocol.DeliveryGrant, error) {
+				renewing.Lock()
+				select {
+				case <-releasing:
+					renewing.Unlock()
+					select {
+					case <-decided:
+					case <-bound.Done():
+						return protocol.DeliveryGrant{}, bound.Err()
+					}
+					return f.joined.renewDelivery(bound, f.humans, f.owner, request)
+				default:
+				}
+				defer renewing.Unlock()
+				result, e := f.joined.renewDelivery(bound, f.humans, f.owner, request)
+				if e == nil {
+					renewedOnce.Do(func() { close(renewed) })
 				}
 				return result, e
 			},
@@ -125,6 +162,11 @@ func TestReviewActualActorLateOwnerCannotSaveOrRunLaterSubmit(t *testing.T) {
 			if e := f.cell.runtime.SendParticipantInput(ctx, f.cell.activation, protocol.SessionParticipantInput{Type: "session_participant_input", RequestID: protocol.Identifier("private-" + id), ControlProfile: mooring.PrivateSessionProfile, Scope: f.opening.Scope, SessionID: f.opening.SessionID, RuntimeRef: f.opening.RuntimeRef, Fence: f.opening.Fence, ConnectionRef: f.opening.ConnectionRef, ParticipantRef: protocol.Identifier(f.joined.admission.participant), GateID: protocol.Identifier(f.joined.gate.GateID), PermissionVersion: protocol.Counter(f.joined.gate.PermissionVersion), Message: inner}); e != nil {
 				t.Fatal(e)
 			}
+		}
+		select {
+		case <-renewed:
+		case <-ctx.Done():
+			t.Fatal("no actual delivery renewal", ctx.Err())
 		}
 		send(a, "review-a")
 		select {
