@@ -843,6 +843,26 @@ func (d *Dispatcher) shutdownAttempt(live *liveAttempt, runDone <-chan error) {
 	stopCtx, stopCancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
 	stopped, stopErr := d.runtime.Stop(stopCtx, live.locator)
 	stopCancel()
+	if stopErr == nil && !stopped {
+		// An accepted stop request whose effect only the run's own return can
+		// prove. A protected host-captured run answers this way (#5081): the
+		// stop helper ends the process tree, then the capture records the
+		// terminal result and Run returns. Wait for that return within the
+		// grace before giving up; nothing here infers that the runtime ended.
+		// Local supervision stays live meanwhile, or cancelling it would end
+		// the observation the terminal result arrives through.
+		grace := time.NewTimer(d.cfg.StopGrace)
+		select {
+		case runErr := <-runDone:
+			grace.Stop()
+			live.cancel()
+			settleCtx, settleCancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)
+			defer settleCancel()
+			d.settle(settleCtx, live, runErr)
+			return
+		case <-grace.C:
+		}
+	}
 	live.cancel()
 	// The stop deadline may be exhausted. Persist with a fresh bounded context.
 	ctx, cancel := context.WithTimeout(context.Background(), d.cfg.StopGrace)

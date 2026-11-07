@@ -131,3 +131,56 @@ func TestRetainedResultRecoveryReplacesOnlyIncompleteObservation(t *testing.T) {
 		})
 	}
 }
+
+// A server shutdown that could not confirm the stop leaves the same question a
+// lost lease does: did the execution end, and how. When the protected capture
+// later answers it, recovery settles the attempt from that capture; the
+// shutdown reason alone never does (#5081). Other reasons keep their owners.
+func TestRetainedResultRecoveryAcceptsUnconfirmedShutdownPark(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		reason func(runID string) string
+		accept bool
+	}{
+		{"stop unconfirmed", func(id string) string {
+			return "server shutdown: runtime stop could not be confirmed at agent-run:" + id
+		}, true},
+		{"outcome not returned", func(string) string { return "server shutdown: runtime stopped but its outcome was not returned" }, true},
+		{"another locator", func(string) string { return "server shutdown: runtime stop could not be confirmed at agent-run:other" }, false},
+		{"operator reason", func(string) string { return "cancel requested and the runtime is still alive" }, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s, db, _ := newTestStore(t)
+			r := accept(t, s, db, backgroundReq("agent"))
+			a, err := s.Claim(t.Context(), ClaimOptions{LeaseOwner: "stopped"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := s.MarkStarting(t.Context(), r.WorkID, a.RunID, a.Generation, "agent-run:"+a.RunID); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Transition(t.Context(), TransitionRequest{WorkID: r.WorkID, RunID: a.RunID, Generation: a.Generation, To: StateNeedsReconciliation, Reason: tc.reason(a.RunID)}); err != nil {
+				t.Fatal(err)
+			}
+			zero := 0
+			_, err = s.RecoverRetainedResult(t.Context(), a.RunID, RunResult{ExitCode: &zero}, true)
+			if tc.accept != (err == nil) {
+				t.Fatalf("accept=%v err=%v", tc.accept, err)
+			}
+			if !tc.accept && !errors.Is(err, ErrNotBound) {
+				t.Fatalf("refusal is not a binding refusal: %v", err)
+			}
+			item, err := s.Get(t.Context(), r.WorkID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := StateNeedsReconciliation
+			if tc.accept {
+				want = StateSucceeded
+			}
+			if item.State != want {
+				t.Fatalf("state=%s want %s", item.State, want)
+			}
+		})
+	}
+}
