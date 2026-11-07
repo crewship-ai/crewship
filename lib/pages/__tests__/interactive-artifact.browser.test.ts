@@ -39,6 +39,12 @@ const POLL = `<title>Lunch poll</title>
   probe.origin = self.origin
   probe.port = typeof window.__crewshipPagesPort
   const show = () => { document.getElementById("probe").textContent = JSON.stringify(probe) }
+  // The nonce is readable here; it must not authorize a script from any URL.
+  const leak = document.createElement("script")
+  leak.nonce = document.currentScript.nonce
+  leak.src = "${RUNTIME}/exfil.js?d=" + encodeURIComponent(document.title)
+  document.head.append(leak)
+  import("${RUNTIME}/exfil.mjs?d=import").catch(() => {})
   fetch("${STUDIO}/api/v1/auth/me", { credentials: "include" }).then(() => { probe.fetch = "reached" }, e => { probe.fetch = "blocked:" + e.name }).finally(show)
   async function refresh() {
     const votes = await crewship.data.get("votes")
@@ -59,19 +65,19 @@ const POLL = `<title>Lunch poll</title>
 </script>`
 
 type Doc = { version: number; value: { count: number } }
-interface Fixture { page: Page; store: Map<string, Doc>; apiCookies: string[]; frameApiCalls: number }
+interface Fixture { page: Page; store: Map<string, Doc>; apiCookies: string[]; frameApiCalls: number; runtimeRequests: string[] }
 
 async function withStudio(run: (fixture: Fixture) => Promise<void>) {
   expect(existsSync(chromium.executablePath())).toBe(true)
   const module = buildSync({ entryPoints: [`${process.cwd()}/lib/pages/interactive-artifact.ts`], bundle: true, write: false, format: "iife", globalName: "interactive", platform: "browser", tsconfig: `${process.cwd()}/tsconfig.json` }).outputFiles[0].text
   const runtime = runtimeDocument()
   const browser = await chromium.launch({ headless: true })
-  const fixture: Fixture = { page: undefined as unknown as Page, store: new Map(), apiCookies: [], frameApiCalls: 0 }
+  const fixture: Fixture = { page: undefined as unknown as Page, store: new Map(), apiCookies: [], frameApiCalls: 0, runtimeRequests: [] }
   try {
     const context = await browser.newContext()
     await context.route(`${RUNTIME}/**`, route => route.request().url() === BOOTSTRAP
       ? route.fulfill({ body: runtime.html, contentType: "text/html; charset=utf-8", headers: { "Content-Security-Policy": runtime.csp, "Cross-Origin-Embedder-Policy": "credentialless", "Origin-Agent-Cluster": "?1", "Referrer-Policy": "no-referrer" } })
-      : route.fulfill({ status: 404 }))
+      : (fixture.runtimeRequests.push(route.request().url()), route.fulfill({ status: 200, contentType: "text/javascript", body: "" })))
     // A stand-in for the data endpoints with the same wire shape and ifVersion rule.
     await context.route(`${STUDIO}/api/**`, async (route: Route) => {
       const request = route.request(), url = new URL(request.url())
@@ -159,6 +165,8 @@ it("runs artifact script in the isolated runtime, shares data through the broker
   expect(apiCookies.length).toBeGreaterThan(0)
   expect(apiCookies.every(cookie => cookie.includes("crewship_session=s3cret"))).toBe(true)
   expect(fixture.frameApiCalls).toBe(0)
+  // No script was fetched from any URL, even with the bootstrap nonce.
+  expect(fixture.runtimeRequests).toEqual([])
   expect(await page.textContent("#secret")).toBe("parent-secret")
 }), 60_000)
 
