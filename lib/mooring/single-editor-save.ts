@@ -18,7 +18,7 @@ export class NativeSaveError extends Error {
   constructor(readonly reason: NativeSaveFailure) { super(reason) }
 }
 export interface NativeSaveState {
-  /** `revoked` is terminal: read access was removed and the journal purged. */
+  /** `revoked` is terminal: read access was removed and a journal purge was requested (best effort, not awaited). */
   phase: "idle" | "dirty" | "saving" | "saved" | "draft" | "uncertain" | "read-only" | "stopped" | "revoked"
   dirty: boolean
   reason?: string
