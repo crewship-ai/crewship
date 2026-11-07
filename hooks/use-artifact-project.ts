@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useMutation, useQuery, useQueryClient, type MutateOptions } from "@tanstack/react-query"
 import type { ArtifactOrigin } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
@@ -102,7 +102,22 @@ export function useArtifactProject(workspace: string, slug: string, version?: nu
    throw error
   } finally {scope.controllers.delete(controller);signal?.removeEventListener("abort",abort)}
  }
- const query = useQuery({ queryKey: [...key, version ?? "latest",scope.id], enabled: Boolean(human && workspace && slug), retry: false, gcTime: 0, refetchInterval: 15_000, queryFn: ({signal}) => request<ArtifactProjectSnapshot>(version ? `?version=${version}` : "",undefined,signal) })
+ // Which return a request started under, so that only a request started after it counts.
+ const readGeneration=useRef(0),answeredRead=useRef(0)
+ const query = useQuery({ queryKey: [...key, version ?? "latest",scope.id], enabled: Boolean(human && workspace && slug), retry: false, gcTime: 0, refetchInterval: 15_000, queryFn: async ({signal}) => {
+  const asked=readGeneration.current,answer=await request<ArtifactProjectSnapshot>(version ? `?version=${version}` : "",undefined,signal)
+  answeredRead.current=asked
+  return answer
+ } })
+ const refetch=query.refetch,keyText=JSON.stringify([...key, version ?? "latest",scope.id])
+ // With no data yet a refetch would join a request already running, so that one goes first.
+ const readAfter=useCallback(async(generation:number)=>{
+  readGeneration.current=generation
+  const queryKey=JSON.parse(keyText) as unknown[]
+  if(client.getQueryData(queryKey)===undefined)await client.cancelQueries({queryKey,exact:true})
+  const result=await refetch({cancelRefetch:true})
+  return result.isSuccess&&!result.isFetching&&answeredRead.current===generation
+ },[client,keyText,refetch])
  const invalidate = () => { if(valid())void client.invalidateQueries({ queryKey: key }) }
  const restore = useScopedProjectMutation<{version:number;base_version:number}>(scope,valid,body=>request("/restore",body),invalidate)
  const share = useScopedProjectMutation<{version:number;base_version:number}>(scope,valid,body=>request("/share",body),invalidate)
@@ -119,7 +134,7 @@ export function useArtifactProject(workspace: string, slug: string, version?: nu
   }
  },invalidate)
  const comment = useScopedProjectMutation<ArtifactAnchor & {text:string;send_to_agent:boolean},ArtifactComment>(scope,valid,body=>request("/comments",body),invalidate)
- return { query:refusal?.scope===scope?{...query,isError:true,error:refusal.error}:query,restore,share,save,comment }
+ return { query:refusal?.scope===scope?{...query,isError:true,error:refusal.error}:query,readAfter,restore,share,save,comment }
 }
 
 export function sameProjectFiles(saved:{version:number;entrypoint:string;files:ArtifactFile[]},body:ArtifactProjectSave):boolean{

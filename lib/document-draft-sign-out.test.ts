@@ -89,3 +89,71 @@ it.skipIf(!ready)("a sign-in clears only an intent older than its own request, s
   return {after:await ids(),laterStays}`)
  expect(out).toEqual({after:["native:b"],laterStays:[]})
 })
+
+const refusingOpen=`const refuseOpen=async(action)=>{const open=IDBFactory.prototype.open;IDBFactory.prototype.open=function(){throw new DOMException("refused","UnknownError")};try{return await action()}finally{IDBFactory.prototype.open=open}};const intentFails=c=>refuseOpen(()=>q.recordSignOut("alice",roots(c)).then(()=>false,()=>true))`
+it.skipIf(!ready)("a failed intent write still rejects, and a holder writing after it stores nothing",async()=>{
+ const left=await inBrowser<{failed:boolean;after:string[]}>(`${refusingOpen};await put("native:a");const c=await q.captureDocumentDrafts("alice");const failed=await intentFails(c);await q.removeCapturedDocumentDrafts(c);await put("native:a",true);return {failed,after:await ids()}`)
+ expect(left).toEqual({failed:true,after:[]})
+})
+it.skipIf(!ready)("a final write landing before the failed intent is swept at the next mount, and the intent reaches the store",async()=>{
+ const left=await inBrowser<{before:string[];after:string[];moved:boolean}>(`${refusingOpen};await put("native:a");const c=await q.captureDocumentDrafts("alice");await put("native:a",true);await intentFails(c);await q.removeCapturedDocumentDrafts(c);const before=await ids();await q.sweepSignOuts();return {before,after:await ids(),moved:localStorage.length===0}`)
+ expect(left).toEqual({before:["native:a"],after:[],moved:true})
+})
+it.skipIf(!ready)("genuine later work survives a failed intent",async()=>{
+ const left=await inBrowser<string[]>(`${refusingOpen};await put("native:a");const c=await q.captureDocumentDrafts("alice");await intentFails(c);await q.removeCapturedDocumentDrafts(c);await put("native:a");await put("native:a",true);await q.sweepSignOuts();return ids()`)
+ expect(left).toEqual(["native:a"])
+})
+it.skipIf(!ready)("a sign-in ends an older failed intent, and a sign-out after that sign-in outlives it",async()=>{
+ const left=await inBrowser<{older:string[];newer:string[]}>(`${refusingOpen};
+  await put("native:a");let c=await q.captureDocumentDrafts("alice");await intentFails(c);await q.removeCapturedDocumentDrafts(c);
+  await q.clearSignOut("alice",Date.now()+1000);await put("native:a",true);const older=await ids();
+  c=await q.captureDocumentDrafts("alice");await intentFails(c);await q.removeCapturedDocumentDrafts(c);
+  await q.clearSignOut("alice",0);await put("native:a",true);return {older,newer:await ids()}`)
+ expect(left).toEqual({older:["native:a"],newer:[]})
+})
+it.skipIf(!ready)("a transfer of an older record leaves a newer confirmation that the store refused, through a concurrent sign-in",async()=>{
+ const left=await inBrowser<{pending:string[];failed:boolean;after:string[]}>(`${refusingOpen};
+  await put("native:a");const c=await q.captureDocumentDrafts("alice");await intentFails(c);await q.removeCapturedDocumentDrafts(c);
+  await new Promise(done=>setTimeout(done,5));const signIn=Date.now();await new Promise(done=>setTimeout(done,5));
+  // While the old record is in its store transaction, another tab confirms a newer sign-out whose write is refused.
+  const put_=IDBObjectStore.prototype.put;let failed=false,newer
+  IDBObjectStore.prototype.put=function(value){IDBObjectStore.prototype.put=put_;newer=intentFails(c);return put_.call(this,value)}
+  await q.clearSignOut("alice",signIn);failed=await newer
+  const pending=q.pendingSignOutRoots("alice");await put("native:a",true);return {pending,failed,after:await ids()}`)
+ expect(left.failed).toBe(true);expect(left.pending).toHaveLength(1);expect(left.after).toEqual([])
+})
+it.skipIf(!ready)("merging into the store keeps the newer confirmation time, so a sign-in between them does not end it",async()=>{
+ const left=await inBrowser<string[]>(`
+  await put("native:a");const c=await confirm();await q.removeCapturedDocumentDrafts(c);
+  await new Promise(done=>setTimeout(done,5));const signIn=Date.now();await new Promise(done=>setTimeout(done,5));
+  await q.recordSignOut("alice",roots(c));
+  localStorage.setItem("crewship.sign-out-intent:old",JSON.stringify({human:"alice",at:1,roots:roots(c)}));
+  await q.clearSignOut("alice",signIn);await put("native:a",true);return ids()`)
+ expect(left).toEqual([])
+})
+it.skipIf(!ready)("a confirmation after a refused one stores both root sets and their newest time, before its record goes",async()=>{
+ const left=await inBrowser<{after:string[];pending:string[]}>(`${refusingOpen};
+  await put("native:a");await put("native:b");const c=await q.captureDocumentDrafts("alice");
+  const a=c.filter(r=>JSON.parse(r.key[1])[2]==="native:a"),b=c.filter(r=>JSON.parse(r.key[1])[2]==="native:b");
+  await intentFails(a);await q.recordSignOut("alice",roots(b));await q.removeCapturedDocumentDrafts(c);
+  const pending=q.pendingSignOutRoots("alice");await put("native:a",true);await q.sweepSignOuts();return {after:await ids(),pending}`)
+ expect(left).toEqual({after:[],pending:[]})
+})
+it.skipIf(!ready)("another tab confirming between a transfer's last look and its removal keeps its record",async()=>{
+ const left=await inBrowser<{pending:string[];after:string[]}>(`${refusingOpen};
+  await put("native:a");const c=await q.captureDocumentDrafts("alice");await intentFails(c);await q.removeCapturedDocumentDrafts(c);
+  await new Promise(done=>setTimeout(done,5));const signIn=Date.now();await new Promise(done=>setTimeout(done,5));
+  // The other tab runs in the gap: right after this tab's last read, or right before its removal.
+  let armed=false,newer;const other=()=>{if(!armed)return;armed=false;const open=IDBFactory.prototype.open;IDBFactory.prototype.open=function(){throw new DOMException("refused","UnknownError")};newer=q.recordSignOut("alice",roots(c)).catch(()=>{});IDBFactory.prototype.open=open}
+  const {getItem,removeItem}=Storage.prototype,put_=IDBObjectStore.prototype.put
+  IDBObjectStore.prototype.put=function(value){IDBObjectStore.prototype.put=put_;const asked=put_.call(this,value);armed=true;return asked}
+  Storage.prototype.getItem=function(key){const value=getItem.call(this,key);if(String(key).startsWith("crewship.sign-out-intent:"))other();return value}
+  Storage.prototype.removeItem=function(key){other();return removeItem.call(this,key)}
+  await q.clearSignOut("alice",signIn);await newer;Storage.prototype.getItem=getItem;Storage.prototype.removeItem=removeItem
+  const pending=q.pendingSignOutRoots("alice");await put("native:a",true);return {pending,after:await ids()}`)
+ expect(left.pending).toHaveLength(1);expect(left.after).toEqual([])
+})
+it.skipIf(!ready)("with both stores refusing, the intent write still only rejects",async()=>{
+ const failed=await inBrowser<boolean>(`${refusingOpen};await put("native:a");const c=await q.captureDocumentDrafts("alice");Storage.prototype.setItem=()=>{throw new DOMException("full","QuotaExceededError")};return intentFails(c)`)
+ expect(failed).toBe(true)
+})

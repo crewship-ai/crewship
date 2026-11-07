@@ -44,7 +44,7 @@ export interface SingleEditorSaveOptions {
   sessionId: string
   journal: NativeDraftJournal
   engine: {
-    snapshot(signal: AbortSignal, requestId?: string): Promise<{ bytes: Uint8Array; editorRevision: string; nativeState?: string }>
+    snapshot(signal: AbortSignal, requestId?: string): Promise<{ bytes: Uint8Array; editorRevision: string; nativeState?: string; revision?: string }>
     validate(draft: NativeDraft, signal: AbortSignal): Promise<void>
   }
   transport: {
@@ -70,6 +70,15 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   const idleMs = options.idleMs ?? 300, timeoutMs = options.timeoutMs ?? 10_000
   if (!Number.isFinite(idleMs) || idleMs < 1 || idleMs > 5000 || !Number.isFinite(timeoutMs) || timeoutMs < 1 || timeoutMs > 60_000) throw new Error("invalid_save_deadline")
   let active = true, writable = true, dirty = false, edits = 0, baseVersion = options.baseVersion
+  // While access is being confirmed, input cannot be seen by whoever types it, so it
+  // is not work to keep yet. A hold asks for one capture of what came before, sends
+  // nothing, and a snapshot reaches the row only if it is proven older than held input.
+  let held = false, heldAt = 0, preReturn: Promise<unknown> = Promise.resolve()
+  // The engine's own order, as arrival does not show it: a Word answer overtakes nothing,
+  // a Sheet export is answered before its change notice and can raise the revision itself.
+  let lastRevision: string | undefined, heldRevision: string | undefined, firstHeldRevision: string | undefined
+  // Every edit up to this count is in a durable row, or was clean at a hold.
+  let keptEdits = 0
   let blocked: string | undefined, latest: Prepared | undefined, unconfirmed: Prepared | undefined
   let confirmed: { nativeState: string | undefined; contentHash: string; version: string; seeded?: boolean; mountedState?: string } | undefined
   let pending: { attempt: Prepared; abort: AbortController; done: Promise<void> } | undefined
@@ -120,10 +129,17 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     }, () => {})
     : Promise.resolve()
   emit("idle")
+  const heldInput = () => held && edits > heldAt
+  const sheetOrder = (revision: string) => BigInt(revision.slice(revision.lastIndexOf(":") + 1))
+  // Holds everything before this hold, not merely nothing of what came during it.
+  const hasWorkBeforeHold = (revision: string | undefined) => revision !== undefined && heldRevision !== undefined && (revision === heldRevision
+    || options.applicationId === "gridcraft" && sheetOrder(revision) >= sheetOrder(heldRevision))
+  const beforeHeldInput = (revision: string | undefined) => !heldInput() || revision !== undefined && (revision === heldRevision
+    || options.applicationId === "gridcraft" && firstHeldRevision !== undefined && sheetOrder(revision) < sheetOrder(firstHeldRevision))
   function schedule() {
     clearTimeout(timer)
     const token = ++nextAutosave
-    if (active) timer = setTimeout(() => { if (token === nextAutosave) void save(undefined, token) }, idleMs)
+    if (active && !held) timer = setTimeout(() => { if (token === nextAutosave) void save(undefined, token) }, idleMs)
   }
   // A local storage fence is retried: the next capture either persists (which
   // lifts it) or fails visibly again. Server and authority fences never are.
@@ -294,7 +310,8 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     draftWrites = writing.catch(() => {})
     return writing
   }
-  function save(requestId?: string, autosaveToken?: number, hostFlush = false): Promise<void> {
+  function save(requestId?: string, autosaveToken?: number, hostFlush = false, localOnly = false): Promise<void> {
+    if (held) return Promise.reject(new Error("native_save_held"))
     const manual = requestId !== undefined || hostFlush
     // A press of Ctrl+S: Word's carries a ticket, Sheet's has none. Revocation's
     // own capture also arrives here, but it can no longer reach the transport.
@@ -309,17 +326,19 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // A newer idle request supersedes queued autosaves, but never an active
       // snapshot or an explicit manual ticket. Capture locally even while the
       // transport is pending/uncertain; those fences apply only to sending.
-      if (!active || autosaveToken !== undefined && autosaveToken !== nextAutosave) return
+      if (!active || heldInput() || autosaveToken !== undefined && autosaveToken !== nextAutosave) return
       const epoch = edits
       dirty = true
       let stage = "engine"
       try {
         const snapshot = await options.engine.snapshot(lifetime.signal, requestId)
-        if (!active) return
+        if (!active || !beforeHeldInput(snapshot.revision)) return
+        const proven = heldInput() && hasWorkBeforeHold(snapshot.revision) ? heldAt : epoch
         const draft: NativeDraft = { applicationId: options.applicationId, enginePin: options.enginePin, sessionId: options.sessionId, generation: options.generation, baseVersion, editorRevision: snapshot.editorRevision, bytes: snapshot.bytes.slice() }
         if (!validNativeDraft(draft)) throw new Error("invalid_native_snapshot")
         stage = "storage"
         await persistDraft(draft, sequence)
+        keptEdits = Math.max(keptEdits, proven)
         if (!active) return
         stage = "engine"
         await options.engine.validate({ ...draft, bytes: draft.bytes.slice() }, lifetime.signal)
@@ -339,10 +358,11 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     const ready = preparing.finally(() => { preparingCount-- })
     preparations = ready.then(() => {}, () => {})
     const sending = ready.then(async attempt => {
+      if (localOnly) { scheduleIfNeeded(); return }
       if (!attempt || !active) { if (manual) throw new Error(active ? "native_snapshot_failed" : "native_session_retired"); return }
       // A manual ticket owns this exact prepared snapshot. Wait for the bounded
       // transport, but never replay a queued ticket after an unknown ACK.
-      const unavailable = () => !active ? "native_session_retired" : !writable ? "write_revoked" : blocked ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
+      const unavailable = () => !active ? "native_session_retired" : !writable ? "write_revoked" : held ? "native_save_held" : blocked ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
       let lookedUp = false
       for (;;) {
         if (manual) while (pending && active && writable && !blocked && !unconfirmed) await pending.done
@@ -350,7 +370,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         // once, and resends nothing. A proven commit becomes the baseline judged
         // below; a retired attempt makes this capture a fresh save under the base
         // fence; anything else stays unconfirmed and fails below, unsent (#5075).
-        if (explicit && !lookedUp && active && writable && !blocked && unconfirmed && options.transport.reconcile) {
+        if (explicit && !lookedUp && active && writable && !held && !blocked && unconfirmed && options.transport.reconcile) {
           lookedUp = true
           if (pending) await pending.done
           else await transmit(unconfirmed, true)
@@ -461,7 +481,7 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
     // keep it as the unconfirmed attempt for proveLost to reconcile.
     if (pending && !unconfirmed) unconfirmed = pending.attempt
     writable = false; blocked = "write_revoked"; clearTimeout(timer); clearTimeout(reconcileTimer); pending?.abort.abort()
-    const sequence = nextPreparation + 1
+    const sequence = nextPreparation + 1, heldEdits = held ? heldAt : undefined
     writeRetirement = new Promise<boolean>(resolve => {
       let finished = false
       const finish = (captured: boolean) => {
@@ -473,8 +493,9 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       const deadline = setTimeout(() => finish(false), timeoutMs)
       lifetime.signal.addEventListener("abort", abort, { once: true })
       if (lifetime.signal.aborted) { abort(); return }
-      void save().then(async () => {
-        const captured = active && lastPersistedSequence >= sequence
+      // Lost during a hold, the capture from before it is the draft; the buffer is not.
+      void (heldEdits !== undefined ? preReturn : save()).then(async () => {
+        const captured = active && (heldEdits !== undefined ? keptEdits >= heldEdits : lastPersistedSequence >= sequence)
         if (captured && !finished) { clearTimeout(deadline); await proveLost(); await retireUntouched(); await retireOwed() }
         finish(captured)
       }, () => finish(false))
@@ -525,7 +546,30 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
   }
   function revokeRead() { stop(); unregister(); return options.journal.revokeRead() }
   return {
-    edited() { if (!active) return; edits++; dirty = true; emit(writable ? "dirty" : "read-only"); schedule() },
+    edited(revision?: string) {
+      if (!active) return
+      if (held) firstHeldRevision ??= revision
+      lastRevision = revision
+      edits++; dirty = true; emit(writable ? "dirty" : "read-only"); schedule()
+    },
+    // A hidden tab takes no keys, so this copy is clean. It is no barrier: a tab can
+    // freeze before it finishes, and retirement still asks what reached the journal.
+    captureLocal() { return active && writable && dirty && !held ? save(undefined, undefined, false, true).catch(() => {}) : Promise.resolve() },
+    hold() {
+      if (!writable || held) return
+      clearTimeout(timer)
+      if (!dirty) keptEdits = edits
+      // In this turn, ahead of any key: save() refuses once the hold is on.
+      preReturn = keptEdits < edits ? save(undefined, ++nextAutosave).catch(() => {}) : Promise.resolve()
+      held = true; heldAt = edits; heldRevision = lastRevision; firstHeldRevision = undefined
+    },
+    release() {
+      const typed = heldInput()
+      held = false
+      // Local, whatever the transport is doing: the send fences stay where they are.
+      if (typed && writable) void save(undefined, ++nextAutosave).catch(() => {})
+      else scheduleIfNeeded()
+    },
     save: (requestId?: string) => save(requestId),
     // Host transfer flush waits for pending transport without claiming a native Ctrl+S ticket.
     async flush() { await save(undefined, undefined, true); await waitForCleanSaved() },

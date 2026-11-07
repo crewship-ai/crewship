@@ -72,6 +72,8 @@ describe('retired draft rendered state',()=>{
  })
 })
 
+// Off screen but still rendering while a capture runs; hidden after it (#5060).
+const unseen=(frame:HTMLElement|null)=>frame?.style.visibility==='hidden'||frame?.style.opacity==='0'
 describe('native Word host authority and persistence',()=>{
  it('confirms a handoff request only after the server reply and clears it for a new lease generation',async()=>{
   const held={...ownedLease,mine:false,can_write:false,holder:otherPerson}
@@ -216,7 +218,7 @@ describe('native Word host authority and persistence',()=>{
   try{
    if(failure==='invalid-lease')await act(async()=>stream?.('lease',{mine:'invalid'}))
    else await act(async()=>monitor.reject(Error('terminal monitor fault')))
-   expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveStyle({visibility:'hidden'});expect(frame).toHaveAttribute('inert')
+   expect(document.querySelector('iframe')).toBe(frame);expect(unseen(frame)).toBe(true);expect(frame).toHaveAttribute('inert')
    expect(journal.persist).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()
   }finally{await act(async()=>capture.resolve({bytes:new TextEncoder().encode('{"body":["retained QA buffer"]}'),editorRevision:'terminal-capture',documentId:'doc'}))}
   await waitFor(()=>expect(journal.persist).toHaveBeenCalled())
@@ -236,7 +238,7 @@ describe('native Word host authority and persistence',()=>{
    act(()=>options.onChanged('buffer-before-export','doc'));await waitFor(()=>expect(port.snapshot).toHaveBeenCalled())
    if(failure==='stream')await act(async()=>monitor.reject(Error('terminal monitor fault')))
    else{client.reauthorize.mockRejectedValue(Error('authority unconfirmed'));await act(async()=>vi.advanceTimersByTimeAsync(30001))}
-   expect(frame).toHaveStyle({visibility:'hidden'})
+   expect(unseen(frame)).toBe(true)
    act(()=>options.onExport?.({name:'late.docx',bytes:new Uint8Array([80,75,3,4])}))
    expect(download).not.toHaveBeenCalled()
   }finally{download.mockRestore();await act(async()=>capture.resolve({bytes:new TextEncoder().encode('{"body":["retained"]}'),editorRevision:'terminal-capture',documentId:'doc'}));vi.useRealTimers()}
@@ -374,7 +376,7 @@ describe('native Word host authority and persistence',()=>{
    act(back)
    act(()=>{void authSuspend!().catch(()=>{})})
    await act(async()=>answer.resolve({version:'1',bytes:new Uint8Array()}))
-   expect(frame).toHaveStyle({visibility:'hidden'});expect(download()).not.toBeInTheDocument()
+   expect(unseen(frame)).toBe(true);expect(download()).not.toBeInTheDocument()
    expect(second.read.mock.calls[0][0].aborted).toBe(true)
   })
   it('a download started before the return is dropped even after read comes back',async()=>{
@@ -433,7 +435,7 @@ describe('native Word host authority and persistence',()=>{
   port.snapshot.mockReturnValue(snapshot.promise);journal.persist.mockRejectedValue(Error('storage unavailable'))
   act(()=>{portOptions.at(-1)!.onChanged('pending','doc');stream?.('session_retired',{draft:'retain',reason:'write_revoked'})})
   let suspended!:Promise<unknown>;act(()=>{suspended=authSuspend!().catch(cause=>cause)})
-  expect(frame).toHaveStyle({visibility:'hidden'})
+  expect(unseen(frame)).toBe(true)
   await act(async()=>{snapshot.resolve({bytes:new TextEncoder().encode('{"body":["pending"]}'),editorRevision:'pending',documentId:'doc'});expect(await suspended).toEqual(Error('native_auth_draft_capture_unconfirmed'))})
   expect(m.createClient).toHaveBeenCalledOnce();expect(document.querySelector('iframe')).toBe(frame);expect(frame).toHaveAttribute('inert');expect(frame).toHaveStyle({visibility:'hidden'});expect(journal.revokeRead).not.toHaveBeenCalled();expect(port.close).not.toHaveBeenCalled();expect(screen.queryByText('Uloženo')).not.toBeInTheDocument()
  })

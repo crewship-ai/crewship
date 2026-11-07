@@ -1,4 +1,4 @@
-import { isSignOutRow, signOutRowKey } from "./document-draft-sign-out"
+import { isSignOutRow, pendingSignOutRoots, signOutRowKey } from "./document-draft-sign-out"
 import { isSealedLocalDraft } from "./local-draft-seal"
 
 /** Private, browser-local recovery journal. It never grants replay authority. */
@@ -151,7 +151,7 @@ export async function openDocumentDrafts(human: string, workspace: string, page:
         intent.onsuccess = () => {
           const root: string | undefined = previous.result?.finalRoot ?? previous.result?.revision ?? ownRoots.get(row)
           // The person already confirmed erasing this chain: nothing to keep.
-          if (root && intent.result?.roots?.includes(root)) { store.delete(key); return }
+          if (root && (intent.result?.roots?.includes(root) || pendingSignOutRoots(human).includes(root))) { store.delete(key); return }
           ownRoots.set(row, root ?? revision)
           store.put({ key, draft, revision, ...(root ? { finalRoot: root } : {}) })
         }

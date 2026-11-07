@@ -210,6 +210,19 @@ for (const app of ["wordcraft", "gridcraft"] as const) describe(app, () => {
     } finally { await r.controller.close() }
   })
 
+  it("a press during a return check looks nothing up and sends nothing", async () => {
+    const r = fixture(app)
+    try {
+      r.script.push("lose-reply")
+      r.edit(2); await uncertain(r)
+      r.controller.hold()
+      await press(r, app).catch(() => {})
+      expect(r.lookups).toHaveLength(0)
+      expect(r.requests).toHaveLength(1)
+      r.controller.release()
+    } finally { await r.controller.close() }
+  })
+
   it("an unconfirmed save that committed: the press looks it up, sends nothing and confirms it", async () => {
     const r = fixture(app)
     try {

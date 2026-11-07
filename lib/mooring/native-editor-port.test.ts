@@ -49,7 +49,7 @@ it.each(["wordcraft", "gridcraft"] as const)("binds %s only after correlated asy
   expect(request.type).toBe(applicationId === "wordcraft" ? "wordcraft:snapshot" : "gridcraft:export-native")
   expect(request.requestId).toMatch(/^[0-9a-f-]{36}$/)
   reply(r, request)
-  expect(await snapshot).toEqual({ bytes, documentId: "bound", editorRevision: expect.stringContaining(`snapshot:${request.requestId}:`), ...(applicationId === "wordcraft" ? { nativeState: expect.stringMatching(/^[a-f0-9]{64}$/) } : {}) })
+  expect(await snapshot).toEqual({ bytes, documentId: "bound", revision: expect.any(String), editorRevision: expect.stringContaining(`snapshot:${request.requestId}:`), ...(applicationId === "wordcraft" ? { nativeState: expect.stringMatching(/^[a-f0-9]{64}$/) } : {}) })
   expect(r.frame.postMessage).toHaveBeenCalledTimes(1); r.adapter.close()
 })
 it("rejects snapshots before bootstrap and does not treat changed as import completion", async () => {
