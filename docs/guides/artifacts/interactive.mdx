@@ -1,0 +1,221 @@
+---
+title: Interactive artifacts
+description: "Let a Project run its own JavaScript in an isolated frame and keep shared data, such as a poll or a task list, that every viewer sees."
+stability: experimental
+tag: Experimental
+---
+
+An **interactive artifact** is a Project whose HTML runs its own scripts. A
+poll, a checklist or a small task board can read and change shared data
+collections. The data is kept with the artifact, so it is still there after a
+reload, and everyone who opens the artifact sees the same state.
+
+The scripts never run on the Crewship site and never receive a Crewship
+credential. They run in a sandboxed frame on the separate application domain
+that Page applications use. The only way they can reach data is a small
+runtime, `window.crewship`. The viewer's browser passes each call on to the
+server, and the server applies the same permissions as for the viewer's own
+requests.
+
+<Note>
+Interactive artifacts are off by default. All of the following must be on:
+
+| Switch | Kind | What it does |
+|---|---|---|
+| `artifact_projects` | Workspace flag | Project artifacts, the base an interactive artifact is built on. |
+| `artifact_dashboard_data` | Workspace flag | The data collections the scripts read and write. |
+| `artifact_interactive` | Workspace flag | Runs the scripts of a Project that contains `interactive.json`. |
+| `CREWSHIP_PAGE_RUNTIME_ORIGIN` | Server setting | The separate application domain the scripts run on, the same one [Page applications](/guides/pages-apps-operations) use. |
+| `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` | Web build variable | The Artifacts library at `/artifacts`, where you open the artifact. |
+| `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true` | Web build variable | Project previews in the library. |
+
+A workspace owner or admin turns on the flags with
+`crewship feature-flag enable artifact_projects`,
+`crewship feature-flag enable artifact_dashboard_data` and
+`crewship feature-flag enable artifact_interactive` (see
+[feature-flag](/cli/feature-flag)). An operator can turn the last one on for
+every workspace with `CREWSHIP_ARTIFACT_INTERACTIVE_ENABLED=true`.
+
+With `artifact_interactive` off, nothing changes: a Project that contains
+`interactive.json` opens as an ordinary, script-free preview.
+</Note>
+
+## How an interactive artifact is put together
+
+An interactive artifact is a Project with two extra JSON files:
+
+| File | Content | Purpose |
+|---|---|---|
+| `interactive.json` | `{"schema_version":1}` | Marks the Project as interactive. Other fields are refused, and the Project then opens as an ordinary preview. |
+| `dashboard.json` | `{"schema_version":1,"collections":["votes"]}` | Declares the collections the scripts may use, exactly as for a [Dashboard](/guides/artifacts/dashboard#how-a-dashboard-is-put-together). |
+
+The HTML screens hold the markup, inline `<style>` and inline `<script>`
+elements. Scripts run in document order; `type="module"` is supported. CSS
+files of the Project apply to every screen. Links to other screens do nothing
+inside a running screen; switch screens with the bar above the preview, or
+build the page as one screen that changes its own content.
+
+```html
+<!-- index.html -->
+<title>Lunch poll</title>
+<h1 id="artifact-title">Lunch poll</h1>
+<p>Pizza: <strong id="count">…</strong></p>
+<button id="vote" type="button">Vote for pizza</button>
+<p id="status"></p>
+<script>
+  async function load() {
+    const votes = await crewship.data.get("votes")
+    const pizza = votes.documents.find(doc => doc.id === "pizza")
+    document.getElementById("count").textContent = pizza ? pizza.value.count : 0
+    return pizza
+  }
+  document.getElementById("vote").addEventListener("click", async () => {
+    const pizza = await load()
+    try {
+      await crewship.data.batch("votes", [{
+        id: "pizza",
+        ifVersion: pizza ? pizza.version : 0,
+        value: { count: (pizza ? pizza.value.count : 0) + 1 },
+      }])
+    } catch (error) {
+      document.getElementById("status").textContent = error.message
+    }
+    await load()
+  })
+  load()
+</script>
+```
+
+## Create one
+
+Ask an agent for a Project as described in
+[Projects](/guides/artifacts/project#create-a-project), and say that it should
+be interactive, include `interactive.json` and `dashboard.json`, and keep
+its state in the declared collections. From the command line, put all files in
+one manifest and create the Project:
+
+```bash
+crewship page artifact create lunch-poll --name "Lunch poll" --file manifest.json
+```
+
+```json
+{"entrypoint":"index.html","files":[
+  {"path":"index.html","media_type":"text/html","content":"<h1 id=\"artifact-title\">Lunch poll</h1>…"},
+  {"path":"interactive.json","media_type":"application/json","content":"{\"schema_version\":1}"},
+  {"path":"dashboard.json","media_type":"application/json","content":"{\"schema_version\":1,\"collections\":[\"votes\"]}"}
+]}
+```
+
+To check that the server treats it as interactive, run
+`crewship page artifact get lunch-poll`. With every switch on, the output has an
+`interactive` object with `runtime_url` (the separate application domain;
+empty when none is configured) and the declared `collections`. Without it the
+Project opens as an ordinary preview.
+
+## Open it
+
+<Steps>
+  <Step title="Open the artifact">
+    Open **Artifacts**, select the Project and click **Open**. The address is
+    `/artifacts/<id>`.
+  </Step>
+  <Step title="Use it">
+    **Preview** shows *Loading interactive artifact…* until the page's
+    scripts have started, then the page itself. Clicks and typing go to the
+    page.
+  </Step>
+  <Step title="Comment on it">
+    Press **Select** to comment on an element. While Select is on, the preview
+    shows the screen without running its scripts, so comments anchor to
+    stable markup. Turn **Select** off to use the page again.
+  </Step>
+</Steps>
+
+A second person sees the same data when they open the artifact. A page that
+wants to show other people's changes calls `crewship.data.get` again, for
+example on a button or a timer; the runtime does not push changes.
+
+## The runtime: `window.crewship`
+
+Every call returns a promise. A refused call rejects with an `Error` whose
+`code` is one of `invalid`, `forbidden`, `conflict`, `limit` or `unavailable`.
+
+| Call | Returns |
+|---|---|
+| `crewship.data.get(collection)` | `{collection, documents}`. Each document has `id`, `version`, `value` (a JSON object), `updated_at` and `source_label` (**You**, **Agent**, **Contributor** or **Former contributor**). |
+| `crewship.data.list()` | `{collections: [{name, documents}]}` for the declared collections that hold data. |
+| `crewship.data.batch(collection, documents)` | Writes 1–50 documents `{id, ifVersion, value}` all or nothing, then returns the written documents with their new versions (not the rest of the collection; call `get` for that). Use the `version` you read as `ifVersion`, or `0` for a new document. |
+| `crewship.viewer()` | `{name}`: the viewer's display name. Nothing else about the viewer reaches the page. |
+
+There is no delete; write a value such as `{"done": true}` instead.
+
+A `conflict` means someone wrote the document after you read it. Nothing was
+overwritten. Read again, decide, and write with the new version. Do not retry
+the same write.
+
+## Who can do what
+
+Each call is made with the viewer's own session. The server decides with the
+same rules as for [Dashboard data](/guides/artifacts/dashboard#who-sees-which-data):
+
+| Person | Version shown | Read data | Write data |
+|---|---|---|---|
+| Owner | Latest | Yes | Yes |
+| Someone with edit access | Latest | Yes | No: the server accepts data writes from the owner only today |
+| Someone with read or comment access | Shared version | Yes, collections of the shared version | No |
+
+When the viewer has no edit access, or is looking at an older version, the
+browser refuses `crewship.data.batch` itself with `forbidden` before anything
+is sent. People without access to the artifact cannot open it at all.
+
+## What the page can and cannot do
+
+The page runs in a frame with `sandbox="allow-scripts"` on a separate site,
+under a policy that blocks network access.
+
+| The page can | The page cannot |
+|---|---|
+| Run inline scripts and modules, change its own DOM, use `data:` and `blob:` images | Read Crewship cookies, storage or the surrounding page; its origin is opaque (`"null"`) |
+| Call `window.crewship` | Call `fetch`, `XMLHttpRequest` or WebSocket, load remote scripts, styles, fonts or frames; `<script src>` is dropped |
+| Ask for data the viewer may read | Choose another user, artifact or collection; only collections declared in `dashboard.json` are accepted |
+
+If the page navigates its frame away, the viewer stops it with *The artifact
+navigated away from its verified document and was stopped.*
+
+<Warning>
+Treat an interactive artifact like code you run. It can read every collection
+it declares that you can read, and it shows you whatever it wants. A script can
+still send data out by navigating its own frame to another address (the
+viewer then stops it), so open interactive artifacts only from authors you
+trust, as you would a Page application.
+</Warning>
+
+## Limits
+
+| Limit | Value |
+|---|---|
+| One screen's HTML and the Project CSS | 2 MiB together |
+| One request to the runtime | 1 MiB of documents plus 8 KiB |
+| Requests waiting for a reply | 4 per frame |
+| One response | 16 MiB |
+| Data | The [Dashboard limits](/guides/artifacts/dashboard#limits): 256 KiB per document, 50 documents and 1 MiB per batch, 4096 documents and 8 MiB per collection, 32 collections |
+| Browser | Desktop Chrome or Edge, as for Page applications |
+
+## Messages you may see
+
+| Message | Meaning and what to do |
+|---|---|
+| *Interactive artifacts need a separate application domain.* | The server has no `CREWSHIP_PAGE_RUNTIME_ORIGIN` for this address, or it is on the same site as Crewship. An operator sets a separate domain. |
+| *The artifact did not finish loading. Reload to retry.* | The page did not start within 20 seconds. |
+| *This screen exceeds the 2 MiB interactive limit.* | Ask the agent to make the screen smaller. |
+| `You can read this artifact but not change its data.` (`forbidden`) | You have no edit access, or you are viewing an older version. |
+| `A document changed. Read it again before writing; nothing was overwritten.` (`conflict`) | Read again and write with the new version. |
+| `This collection is not declared in dashboard.json.` (`invalid`) | Add the collection to `dashboard.json` in a new version. |
+
+## Related
+
+- [Dashboards](/guides/artifacts/dashboard): the same collections, bound to
+  HTML without scripts.
+- [`crewship page artifact data`](/cli/page#dashboard-data-disabled-by-default):
+  read and write the collections from the command line.
+- [Projects](/guides/artifacts/project)

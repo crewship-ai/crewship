@@ -36,6 +36,7 @@ vi.mock("../../projects/use-artifact-project-data", () => ({
 
 vi.mock("../artifact-dashboard-preview", () => ({ ArtifactDashboardPreview: () => <div>Bound dashboard</div> }))
 vi.mock("../artifact-slides-preview", () => ({ ArtifactSlidesPreview: () => <div>Typed slides preview</div> }))
+vi.mock("../artifact-interactive-preview", () => ({ ArtifactInteractivePreview: (props: { canWrite: boolean; codeVersion: number }) => <div>Interactive runtime canWrite={String(props.canWrite)} v{props.codeVersion}</div> }))
 
 import { ArtifactViewerPanel, commentQueueChip } from "../artifact-viewer-panel"
 
@@ -780,4 +781,28 @@ it("links the chat viewer to the artifact's own address in Artifacts only with t
     render(<ArtifactViewerPanel variant="library" />)
     expect(screen.queryByRole("link", { name: /Open in Artifacts/ })).toBeNull()
   } finally { vi.unstubAllEnvs() }
+})
+
+it("keeps the inert preview for an interactive.json Project when the server sends no runtime (flag off)", async () => {
+  const snapshot = snap()
+  snapshot.manifest.files.push({ path: "interactive.json", media_type: "application/json", content: '{"schema_version":1}' })
+  state.snapshot.data = snapshot
+  render(<ArtifactViewerPanel />)
+  expect(screen.queryByText(/Interactive runtime/)).toBeNull()
+  expect(screen.getByTitle(/Preview of/)).toHaveAttribute("srcdoc")
+})
+
+it("runs an interactive artifact only when the server advertises its runtime, and keeps Select on the inert preview", async () => {
+  state.snapshot.data = Object.assign(snap(), { interactive: { runtime_url: "https://pages.example.net/api/v1/pages/runtime/bootstrap", development_same_origin: false, collections: ["votes"] } })
+  render(<ArtifactViewerPanel />)
+  expect(screen.getByText(/Interactive runtime canWrite=true/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button", { name: "Select" }))
+  expect(screen.queryByText(/Interactive runtime/)).toBeNull()
+  expect(screen.getByTitle(/Preview of/)).toHaveAttribute("srcdoc")
+})
+
+it("gives a reader of an interactive artifact a read-only broker", async () => {
+  state.snapshot.data = Object.assign(snap({ can_write: false }), { interactive: { runtime_url: "https://pages.example.net/api/v1/pages/runtime/bootstrap", development_same_origin: false, collections: ["votes"] } })
+  render(<ArtifactViewerPanel />)
+  expect(screen.getByText(/Interactive runtime canWrite=false/)).toBeInTheDocument()
 })
