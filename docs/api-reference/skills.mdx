@@ -432,7 +432,8 @@ workspace that uses the skill. The caller must be an instance administrator, hol
 the `OWNER` or `ADMIN` role in the workspace in the path, and use a person's
 credential (a session or a full-access CLI token). Scoped CLI tokens, even with
 `instance:admin`, run tokens, sidecar tokens and agent identities get `403`.
-Assigning a skill to agents grants nothing here.
+Assigning a skill to agents grants nothing here. Restoring a workspace backup
+never brings a lock back.
 
 **Response:** `200 OK`
 

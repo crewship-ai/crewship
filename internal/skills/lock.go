@@ -16,8 +16,8 @@ type LockedError struct {
 }
 
 func (e *LockedError) Error() string {
-	return fmt.Sprintf("skill %q is locked against rewrites by its curator; "+
-		"unlock it (crewship skill unlock %s) before changing its content", e.Slug, e.Slug)
+	return fmt.Sprintf("skill %q is locked against rewrites; an instance administrator "+
+		"must unlock it (crewship skill unlock %s) before its content can change", e.Slug, e.Slug)
 }
 
 // IsLocked reports whether err is, or wraps, a *LockedError.

@@ -278,7 +278,7 @@ for an already-archived skill is not a change this call made.
 
 ## `crewship skill lock` / `unlock`
 
-Lock a skill you curated so nothing autonomous rewrites it.
+Lock a skill so nothing autonomous rewrites it.
 
 ```bash
 crewship skill lock <slug-or-id>
@@ -304,7 +304,7 @@ and the request must name a workspace where they hold the `OWNER` or `ADMIN`
 role. Assigning a skill to your agents gives no right to lock it, even when no
 other workspace uses it. Scoped CLI tokens (even with `instance:admin`), run
 tokens, sidecar tokens and agent identities are refused with `403`, and so are
-bundled skills.
+bundled skills. Restoring a workspace backup never brings a lock back.
 Skills are unlocked by default. `skill list` shows a `LOCKED` column and
 `skill get` a `Locked` row; JSON output carries `locked`.
 

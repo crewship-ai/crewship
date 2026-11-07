@@ -27,9 +27,8 @@ func (s *lockJournalSink) Emit(_ context.Context, e journal.Entry) (string, erro
 }
 func (s *lockJournalSink) Flush(context.Context) error { return nil }
 
-// Real CLI process -> real router: a curator locks a skill, an autonomous
-// rewrite is refused with an error naming the lock, the lock shows in list and
-// get, and unlocking lets the write through again (#5045).
+// Real CLI process -> real router: a workspace owner who is not an instance
+// administrator cannot lock a skill, even one only their agents hold (#5045).
 func TestAcceptance_SkillLockRefusesAWorkspaceOwner(t *testing.T) {
 	rig, db := startFidelityServer(t, "fid-ws", "fid-owner", append(append([]string{}, fidelityBaseSeed...),
 		`INSERT INTO skills(id,name,slug,display_name,source,lifecycle_state,content) VALUES('sk-lk','lk-skill','lk-skill','LK','CUSTOM','active','# original')`,
@@ -49,6 +48,9 @@ func TestAcceptance_SkillLockRefusesAWorkspaceOwner(t *testing.T) {
 	}
 }
 
+// Real CLI process -> real router: an instance administrator locks a skill, an
+// autonomous rewrite is refused with an error naming the lock, the lock shows in
+// list and get, and unlocking lets the write through again (#5045).
 func TestAcceptance_SkillLockBlocksRewrites(t *testing.T) {
 	sink := &lockJournalSink{}
 	rig, db := startFidelityServer(t, "fid-ws", "fid-owner", append(append([]string{}, fidelityBaseSeed...),

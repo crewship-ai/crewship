@@ -279,8 +279,6 @@ func lockTestJSONString(s string) string {
 	return string(b)
 }
 
-// The catalog row is shared by every workspace: a bundled skill or one held
-// only by another workspace's agents cannot be locked or unlocked here.
 // The catalog is shared by the whole instance and records no owner, so nothing
 // a workspace can do to itself earns the right to lock: assigning a skill to
 // its own agents, even as the only holder, gives a workspace owner no authority

@@ -83,7 +83,7 @@ Examples:
 var skillLockCmd = &cobra.Command{
 	Use:   "lock <skill-slug-or-id>",
 	Short: "Lock a skill against autonomous rewrites",
-	Long: `Lock a skill you curated. While it is locked no agent, sidecar tool,
+	Long: `Lock a skill against autonomous rewrites. While it is locked no agent, sidecar tool,
 memory consolidation, generation or proposed-skill approval can change its
 content, bundled re-seeds leave it alone, and the lifecycle sweep never moves
 it to stale or archived. A blocked write fails with an error naming the lock
@@ -106,7 +106,8 @@ var skillUnlockCmd = &cobra.Command{
 	Use:   "unlock <skill-slug-or-id>",
 	Short: "Lift a skill's lock",
 	Long: `Unlock a skill so imports, proposals and the lifecycle sweep may change it
-again. Needs a signed-in person with the OWNER or ADMIN role.
+again. Needs an instance administrator who is OWNER or ADMIN of the workspace,
+using a session or a full-access CLI token.
 
 Examples:
   crewship skill unlock my-skill`,

@@ -1427,6 +1427,17 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				if table == credentialsTable && k == allowedHostsColumn {
 					val = normalizeRestoredAllowedHosts(val)
 				}
+				// #5045: a skill lock is an instance administrator's
+				// decision over a row every workspace shares, so a
+				// workspace bundle never brings one back.
+				if table == "skills" {
+					switch k {
+					case "locked":
+						val = 0
+					case "locked_by", "locked_at":
+						val = nil
+					}
+				}
 				cols = append(cols, quoteIdent(k))
 				placeholders = append(placeholders, "?")
 				args = append(args, val)
