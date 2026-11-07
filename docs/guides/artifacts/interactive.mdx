@@ -165,6 +165,10 @@ same rules as for [Dashboard data](/guides/artifacts/dashboard#who-sees-which-da
 | Someone with edit access | Latest | Yes | Yes, at the latest version only |
 | Someone with read or comment access | Shared version | Yes, collections of the shared version | No |
 
+A workspace owner or admin can also read the data of any version of the
+artifact; each such read is recorded in the audit log. Writing still needs
+ownership or edit access.
+
 Interactive data is not stricter than Dashboard data: an editor's script can
 change the shared collections just as the editor can from the CLI. Give edit
 access only to people you trust to change that data.
