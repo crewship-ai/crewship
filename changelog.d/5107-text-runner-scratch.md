@@ -1,0 +1,1 @@
+- Text worker: the restricted runner image is built from an empty base. It no longer carries alpine packages, so the critical zlib match (CVE-2026-4738) and the musl/openssl findings are gone (#5103).

@@ -112,6 +112,16 @@ The bar at the top of the editor shows who holds the lease:
    **Neuložený koncept** (Unsaved draft), then **Ukládám…** (Saving…), then
    **Uloženo · verze N** (Saved · version N).
 
+Editing starts only once this browser can keep a private copy of your draft.
+If the browser's storage is slow, the editor tries to open it up to three
+times. If it still can't, editing doesn't start: the editor gives the lease
+back, the bar returns to **Volné**, and an alert says *Úložiště konceptu v
+tomto prohlížeči se nepodařilo otevřít, proto úpravy nezačaly. Dokument je
+znovu volný* ("This browser's draft storage could not be opened, so editing
+did not start. The document is free again"). Choose **Převzít úpravy** to try
+again. If the lease could not be given back, the alert says so; choose
+**Uvolnit úpravy** or reload the page.
+
 While you hold the lease, the editor renews it in the background. If you close
 the tab or lose the connection, the lease runs out by itself after about 15
 seconds. A server restart invalidates editor admissions; reopen the editor and recheck

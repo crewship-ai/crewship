@@ -1,6 +1,10 @@
 # Build the static runner with CGO_ENABLED=0 and pass it in this build context.
-# Pin BASE to an approved content digest in production deployments.
-ARG BASE=alpine@sha256:294b683cb724975bec92580e1e685676bd4b50bda910ddb8c51d4cabeaec77e6
+# The runner is the only program the image runs: the text worker executes
+# /opt/crewship-runner directly and talks plain HTTP to the loopback broker, so
+# it needs no shell, libc, CA bundle or package manager. An empty base carries
+# no distribution packages to patch (#5103: zlib/musl/openssl from alpine).
+# A deployment that overrides BASE takes ownership of that image's packages.
+ARG BASE=scratch
 FROM ${BASE}
 COPY crewship-restricted-runner /opt/crewship-runner
 USER 1001:1001
