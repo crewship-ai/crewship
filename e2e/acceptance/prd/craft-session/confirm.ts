@@ -125,6 +125,24 @@ export function hourInterruptions(verifications: readonly VerifyPress[], stalls:
 // bytes, #5075); one sent after the press is the forced save. Requests are told
 // apart by their place in the ops trail (instrument() appends each request when it
 // is sent), so `opsAtPress` (the trail length right before the press) is the cut.
+//
+// The limit: a request sent after the press is not proof that the press caused it.
+// An autosave already being prepared when the key goes out (snapshot, local draft,
+// validation) sends its request after the press, and the request carries no trigger.
+// A committing request sent within PRESS_AMBIGUITY_MS after the press is therefore
+// "unattributed" and counted as an ambiguous save: neither an autosave nor a forced save.
+
+/**
+ * How long after a press an autosave that was already being prepared can still send
+ * its request. The editor prepares a save in three steps, each bounded by its own
+ * 10 s deadline and nothing shorter: the engine snapshot RPC and the validation RPC
+ * (lib/mooring/native-editor-port.ts, `timeoutMs` 10_000 per request) and the local
+ * draft write (lib/mooring/single-editor-save.ts, journalStep, `timeoutMs` 10_000);
+ * the SHA-256 digest after them is in-memory. Preparations run one after another, so
+ * a capture under way at the press can send up to 3 x 10 s later. Typical captures are
+ * far faster, but the code promises no shorter bound, so the window is the bound.
+ */
+export const PRESS_AMBIGUITY_MS = 30_000
 
 /** A save/reconcile request as instrument() records it. */
 export interface AccountedOp {
@@ -146,6 +164,8 @@ export interface SaveWait {
   pressed: boolean
   /** The ops trail length right before the press (only when pressed). */
   opsAtPress?: number
+  /** When the press was dispatched (only when pressed). */
+  pressedAt?: string
   /** The new version the wait ended with, or null when none came. */
   version: string | null
   /** False when the wait threw (a closed page, a keyboard error). */
@@ -157,7 +177,9 @@ export interface SaveWait {
  * committed the version), "confirm-only" (the version was committed by a request
  * sent before the press: an autosave the press only confirmed), "no-version" (no
  * new version followed), "unattributed" (a version followed, but no answered save in
- * the trail carries it), "incomplete" (the wait was interrupted after the press).
+ * the trail carries it, or the committing request was sent within PRESS_AMBIGUITY_MS
+ * after the press, when an autosave prepared before the press cannot be told from the
+ * forced save), "incomplete" (the wait was interrupted after the press).
  */
 export type PressOutcome = "new-save" | "confirm-only" | "no-version" | "unattributed" | "incomplete"
 
@@ -183,13 +205,28 @@ export function producerOf(ops: readonly AccountedOp[], version: string): Accoun
   return ops.find((o) => o.kind === "save" && o.status === 200 && o.version === version)
 }
 
+/** A press's outcome, and the committing request when it is an ambiguous save (sent within PRESS_AMBIGUITY_MS after the press). */
+export interface PressAttribution {
+  outcome: PressOutcome
+  ambiguousOp?: number
+}
+
 /** Classifies a press by the request that committed the version that followed it. */
-export function pressOutcome(press: { opsAtPress: number; version: string | null; completed: boolean }, ops: readonly AccountedOp[]): PressOutcome {
-  if (!press.completed) return "incomplete"
-  if (press.version === null) return "no-version"
+export function attributePress(press: { opsAtPress: number; pressedAt?: string; version: string | null; completed: boolean }, ops: readonly AccountedOp[]): PressAttribution {
+  if (!press.completed) return { outcome: "incomplete" }
+  if (press.version === null) return { outcome: "no-version" }
   const producer = producerOf(ops, press.version)
-  if (!producer) return "unattributed"
-  return producer.n > press.opsAtPress ? "new-save" : "confirm-only"
+  if (!producer) return { outcome: "unattributed" }
+  if (producer.n <= press.opsAtPress) return { outcome: "confirm-only" }
+  const sent = producer.sentAt ? Date.parse(producer.sentAt) : NaN
+  const pressed = press.pressedAt ? Date.parse(press.pressedAt) : NaN
+  // Without both times the request cannot be placed after the window.
+  if (Number.isNaN(sent) || Number.isNaN(pressed) || sent - pressed <= PRESS_AMBIGUITY_MS) return { outcome: "unattributed", ambiguousOp: producer.n }
+  return { outcome: "new-save" }
+}
+
+export function pressOutcome(press: { opsAtPress: number; pressedAt?: string; version: string | null; completed: boolean }, ops: readonly AccountedOp[]): PressOutcome {
+  return attributePress(press, ops).outcome
 }
 
 /** Records a press at dispatch: the event is in the evidence before the key goes out. */
@@ -204,7 +241,7 @@ export function finishPress(event: ForcedCtrlS, ops: readonly AccountedOp[], res
   event.endedAt = endedAt
   event.version = result.version
   event.newVersion = result.version !== null
-  event.outcome = pressOutcome({ opsAtPress: event.opsAtPress, version: result.version, completed: result.completed }, ops)
+  event.outcome = pressOutcome({ opsAtPress: event.opsAtPress, pressedAt: event.at, version: result.version, completed: result.completed }, ops)
 }
 
 /**
@@ -215,23 +252,25 @@ export function finishPress(event: ForcedCtrlS, ops: readonly AccountedOp[], res
 export async function trackedSaveWait(
   rec: { saveWaits: SaveWait[]; forcedCtrlS: ForcedCtrlS[] },
   ops: readonly AccountedOp[],
-  p: { cycle: number | "warmup"; reason: string },
+  p: { cycle: number | "warmup"; reason: string; now?: () => Date },
   wait: (onPress: () => void) => Promise<{ version: string | undefined }>,
 ): Promise<string | undefined> {
-  const w: SaveWait = { cycle: p.cycle, at: new Date().toISOString(), endedAt: null, pressed: false, version: null, completed: false }
+  const now = () => (p.now ? p.now() : new Date()).toISOString()
+  const w: SaveWait = { cycle: p.cycle, at: now(), endedAt: null, pressed: false, version: null, completed: false }
   rec.saveWaits.push(w)
   let event: ForcedCtrlS | undefined
   try {
     const r = await wait(() => {
       w.pressed = true
       w.opsAtPress = ops.length
-      event = startPress(rec.forcedCtrlS, { cycle: p.cycle, site: "save-wait", reason: p.reason, opsAtPress: ops.length })
+      w.pressedAt = now()
+      event = startPress(rec.forcedCtrlS, { cycle: p.cycle, site: "save-wait", reason: p.reason, opsAtPress: ops.length, at: w.pressedAt })
     })
     w.version = r.version ?? null
     w.completed = true
     return r.version
   } finally {
-    w.endedAt = new Date().toISOString()
+    w.endedAt = now()
     if (event) finishPress(event, ops, { version: w.version, completed: w.completed }, w.endedAt)
   }
 }
@@ -239,12 +278,13 @@ export async function trackedSaveWait(
 /**
  * Where a wait's version came from: "autosave" (no press), "late-autosave" (pressed,
  * but the committing request was sent before the press), "forced" (sent after the
- * press), "unattributed", or "none" (no version).
+ * press and outside PRESS_AMBIGUITY_MS), "unattributed" (no answered save carries the
+ * version, or the request was sent within the window), or "none" (no version).
  */
 export function waitOrigin(w: SaveWait, ops: readonly AccountedOp[]): "autosave" | "late-autosave" | "forced" | "unattributed" | "none" {
   if (w.version === null) return "none"
   if (!w.pressed) return "autosave"
-  const o = pressOutcome({ opsAtPress: w.opsAtPress ?? 0, version: w.version, completed: true }, ops)
+  const o = pressOutcome({ opsAtPress: w.opsAtPress ?? 0, pressedAt: w.pressedAt, version: w.version, completed: true }, ops)
   return o === "new-save" ? "forced" : o === "confirm-only" ? "late-autosave" : "unattributed"
 }
 
@@ -260,6 +300,13 @@ export interface SaveAccounting {
   /** Of the autosaves: those acknowledged only after the harness had pressed Ctrl+S. */
   lateAutosaves: number
   forcedCtrlS: number
+  /**
+   * Committing save requests sent within PRESS_AMBIGUITY_MS after a forced press: an
+   * autosave prepared before the press or the forced save, the trail cannot tell. Neither
+   * an autosave nor a forced save.
+   */
+  ambiguousSaves: number
+  ambiguousSaveOps: number[]
   /** Presses by outcome (PressOutcome). */
   forcedCtrlSOutcomes: Record<PressOutcome, number>
   forcedCtrlSEvents: ForcedCtrlS[]
@@ -277,6 +324,7 @@ export interface SaveAccounting {
 export const SAVE_ACCOUNTING_DESCRIPTION =
   "autosaves: save waits whose version was committed by a save request sent before any forced press (lateAutosaves: of those, acknowledged after the press); " +
   "forcedCtrlS: Control+s pressed by the harness (no new version within 4 s, or the Word table cell not in the head after 4 s with status Neuložený koncept), by outcome new-save / confirm-only / no-version / unattributed / incomplete; " +
+  "ambiguousSaves: committing save requests sent within 30 s after a forced press (an autosave prepared before the press cannot be told from the forced save), neither autosaves nor forced saves; " +
   "editorReconciles: reconcile requests sent outside every press window; reconcilesDuringPressWait: reconcile requests sent between a press (Ctrl+S or Ověřit výsledek) and 2 s after its wait, cause unknown; " +
   "verifyPresses: Ověřit výsledek presses. Accounting only, not a gate."
 
@@ -293,10 +341,19 @@ export function saveAccounting(input: {
   const autosaves = origins.filter((o) => o === "autosave").length + lateAutosaves
   // Re-classified with the final trail: a reply that arrived after the wait ended counts.
   // An interrupted press (or one still running) stays "incomplete".
-  const events: ForcedCtrlS[] = forced.map((e) => ({
-    ...e,
-    outcome: e.endedAt === null || e.outcome === "incomplete" ? "incomplete" : pressOutcome({ opsAtPress: e.opsAtPress, version: e.version, completed: true }, ops),
-  }))
+  const ambiguous = new Set<number>()
+  for (const w of waits) {
+    if (!w.pressed || w.version === null) continue
+    const a = attributePress({ opsAtPress: w.opsAtPress ?? 0, pressedAt: w.pressedAt, version: w.version, completed: true }, ops)
+    if (a.ambiguousOp !== undefined) ambiguous.add(a.ambiguousOp)
+  }
+  const events: ForcedCtrlS[] = forced.map((e) => {
+    if (e.endedAt === null || e.outcome === "incomplete") return { ...e, outcome: "incomplete" }
+    const a = attributePress({ opsAtPress: e.opsAtPress, pressedAt: e.at, version: e.version, completed: true }, ops)
+    if (a.ambiguousOp !== undefined) ambiguous.add(a.ambiguousOp)
+    return { ...e, outcome: a.outcome }
+  })
+  const ambiguousSaveOps = [...ambiguous].sort((x, y) => x - y)
   const forcedCtrlSOutcomes: Record<PressOutcome, number> = { "new-save": 0, "confirm-only": 0, "no-version": 0, unattributed: 0, incomplete: 0 }
   for (const e of events) forcedCtrlSOutcomes[e.outcome]++
   const windows = [
@@ -316,12 +373,15 @@ export function saveAccounting(input: {
   const note =
     `autosave ${counts.autosaves}×${lateAutosaves ? ` (${lateAutosaves} acknowledged after a forced press)` : ""}, ` +
     `forced Ctrl+S ${counts.forcedCtrlS}×${detail.length ? ` (${detail.join(", ")})` : ""}, ` +
+    (ambiguousSaveOps.length ? `ambiguous save (sent within ${PRESS_AMBIGUITY_MS / 1000} s after a forced press) ${ambiguousSaveOps.length}×, ` : "") +
     `automatic reconcile ${counts.editorReconciles}×, ` +
     (reconcilesDuringPressWaitOps.length ? `reconcile during a press wait (cause unknown) ${reconcilesDuringPressWaitOps.length}×, ` : "") +
     `Ověřit výsledek ${counts.verifyPresses}×.`
   return {
     ...counts,
     lateAutosaves,
+    ambiguousSaves: ambiguousSaveOps.length,
+    ambiguousSaveOps,
     forcedCtrlSOutcomes,
     forcedCtrlSEvents: events,
     editorReconcileOps,

@@ -165,6 +165,19 @@ records the trail length at dispatch (`opsAtPress`).
   after the press committed the version), `confirm-only` (an earlier autosave
   did), `no-version`, `unattributed` (no answered save carries the version), or
   `incomplete` (the wait was interrupted after the press).
+- `ambiguousSaves` / `ambiguousSaveOps`: committing save requests sent within
+  30 s after a forced press. They are counted neither as autosaves nor as
+  forced saves, and their press's outcome is `unattributed`.
+
+The limit, plainly: the harness cannot see what triggered a save request. An
+autosave that was already being prepared when Ctrl+S went out (engine snapshot,
+local draft write, validation) sends its request after the press, exactly like
+the forced save would. The editor bounds each of those three steps by its own
+10 s deadline and promises nothing shorter, so any committing request within
+30 s after the press is reported as ambiguous. In practice this means most
+forced presses that are followed by a save come out `unattributed`; `new-save`
+is claimed only for a request sent more than 30 s after the press. The count of
+presses (`forcedCtrlS`) is exact either way.
 - `editorReconciles` / `editorReconcileOps`: reconcile requests sent outside
   every press window. `reconcilesDuringPressWait` / `...Ops`: reconcile requests
   sent between a press (Ctrl+S or "Ověřit výsledek") and 2 s after the end of
@@ -176,7 +189,7 @@ records the trail length at dispatch (`opsAtPress`).
 The raw records are in `chain.json` as `saveWaits` and `forcedCtrlS`. The row's
 note starts with the same counts, e.g. "autosave 57×, forced Ctrl+S 6×,
 automatic reconcile 0×, Ověřit výsledek 0×", with the late autosaves, press
-outcomes and cause-unknown reconciles added when there are any. This is
+outcomes, ambiguous saves and cause-unknown reconciles added when there are any. This is
 accounting, not a gate: a forced Ctrl+S never fails the row; the server head
 still decides whether a cycle's typing was saved.
 

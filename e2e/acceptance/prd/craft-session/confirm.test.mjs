@@ -2,7 +2,7 @@
 // (also run by e2e/acceptance/prd/report.test.mjs, the PRD runner step in CI)
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { PAGE_STALLS_DESCRIPTION, finishPress, hourInterruptions, isUnconfirmedStatus, pressOutcome, producerOf, saveAccounting, startPress, trackedSaveWait, waitOrigin, lastCommittedSave, pageStalls, verifyDue, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
+import { PAGE_STALLS_DESCRIPTION, PRESS_AMBIGUITY_MS, finishPress, hourInterruptions, isUnconfirmedStatus, pressOutcome, producerOf, saveAccounting, startPress, trackedSaveWait, waitOrigin, lastCommittedSave, pageStalls, verifyDue, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
 
 const word = (paras) => JSON.stringify({ body: paras.map((text) => ({ kind: "para", text, runs: [{ len: text.length }] })) })
 const C = "HOURf9vyrC010"
@@ -218,10 +218,12 @@ const rec = (n, s) => ({ n, kind: "reconcile", sentAt: at(s), status: 200 })
 const autoWait = (cycle, s, version) => ({ cycle, at: at(s), endedAt: at(s + 1), pressed: false, version, completed: true })
 const accountingOf = (timeline) => saveAccounting({ waits: [], forced: [], ops: [], verifications: [], ...timeline })
 
-/** Runs trackedSaveWait with a fake wait: `script(onPress, ops)` plays the timeline. */
+/** Runs trackedSaveWait with a fake wait and a fake clock: `script(onPress, ops, clock)` plays the timeline. */
 async function playWait(ops, cycle, script) {
   const recd = { saveWaits: [], forcedCtrlS: [] }
-  const result = await trackedSaveWait(recd, ops, { cycle, reason: "no autosave within 4 s" }, (onPress) => script(onPress, ops)).then((v) => ({ v }), (e) => ({ e }))
+  const clock = { s: 0 }
+  const now = () => new Date(at(clock.s))
+  const result = await trackedSaveWait(recd, ops, { cycle, reason: "no autosave within 4 s", now }, (onPress) => script(onPress, ops, clock)).then((v) => ({ v }), (e) => ({ e }))
   return { recd, result }
 }
 
@@ -247,16 +249,41 @@ test("an autosave acknowledged after the 4 s cutoff stays an autosave; Ctrl+S on
   assert.match(a.note, /^autosave 1× \(1 acknowledged after a forced press\), forced Ctrl\+S 1× \(1 confirm-only\)/)
 })
 
-test("a save sent after the press is the forced save", async () => {
+test("an autosave that was preparing at the press and sends 100 ms after it is unattributed, not forced", async () => {
+  // The capture started before the press (snapshot, draft write, validation) and its
+  // request leaves at 4.1 s, 100 ms after Ctrl+S at 4 s: the trail cannot tell it from the forced save.
   const ops = []
-  const { recd } = await playWait(ops, 3, async (onPress) => {
+  const { recd } = await playWait(ops, 3, async (onPress, ops, clock) => {
+    clock.s = 4
     onPress()
     ops.push(save(1, 4.1, "6"))
+    clock.s = 5
+    return { version: "6" }
+  })
+  assert.equal(PRESS_AMBIGUITY_MS, 30_000)
+  const a = accountingOf({ waits: recd.saveWaits, forced: recd.forcedCtrlS, ops })
+  assert.deepEqual([a.autosaves, a.ambiguousSaves, a.ambiguousSaveOps, a.forcedCtrlSOutcomes["new-save"], a.forcedCtrlSOutcomes.unattributed], [0, 1, [1], 0, 1])
+  assert.equal(waitOrigin(recd.saveWaits[0], ops), "unattributed")
+  assert.equal(recd.forcedCtrlS[0].outcome, "unattributed")
+  assert.match(a.note, /forced Ctrl\+S 1× \(1 unattributed\), ambiguous save \(sent within 30 s after a forced press\) 1×, automatic reconcile/)
+})
+
+test("a save sent well after the ambiguity window stays the forced save", async () => {
+  const ops = []
+  const { recd } = await playWait(ops, 3, async (onPress, ops, clock) => {
+    clock.s = 4
+    onPress()
+    ops.push(save(1, 40, "6"))
+    clock.s = 41
     return { version: "6" }
   })
   const a = accountingOf({ waits: recd.saveWaits, forced: recd.forcedCtrlS, ops })
-  assert.deepEqual([a.autosaves, a.forcedCtrlS, a.forcedCtrlSOutcomes["new-save"]], [0, 1, 1])
+  assert.deepEqual([a.autosaves, a.ambiguousSaves, a.forcedCtrlS, a.forcedCtrlSOutcomes["new-save"]], [0, 0, 1, 1])
   assert.equal(waitOrigin(recd.saveWaits[0], ops), "forced")
+  assert.doesNotMatch(a.note, /ambiguous save/)
+  // The edge: exactly at the window is still ambiguous; a request without a time is too.
+  assert.equal(pressOutcome({ opsAtPress: 0, pressedAt: at(4), version: "6", completed: true }, [save(1, 34, "6")]), "unattributed")
+  assert.equal(pressOutcome({ opsAtPress: 0, pressedAt: at(4), version: "6", completed: true }, [{ n: 1, kind: "save", status: 200, version: "6" }]), "unattributed")
 })
 
 test("a repeat save after the press that answers the autosave's version does not take its origin", () => {
@@ -326,9 +353,9 @@ test("saveAccounting of a clean hour: every save automatic, nothing forced", () 
 })
 
 test("hourInterruptions puts the save accounting first in the row's note", () => {
-  const ops = [save(1, 1, "2"), save(2, 35, "3")]
-  const forced = [{ cycle: 1, at: at(34), site: "save-wait", reason: "x", opsAtPress: 1, endedAt: at(36), newVersion: true, version: "3", outcome: "new-save" }]
-  const waits = [autoWait(0, 1, "2"), { cycle: 1, at: at(30), endedAt: at(36), pressed: true, opsAtPress: 1, version: "3", completed: true }]
+  const ops = [save(1, 1, "2"), save(2, 40, "3")]
+  const forced = [{ cycle: 1, at: at(4), site: "save-wait", reason: "x", opsAtPress: 1, endedAt: at(41), newVersion: true, version: "3", outcome: "new-save" }]
+  const waits = [autoWait(0, 1, "2"), { cycle: 1, at: at(0), endedAt: at(41), pressed: true, opsAtPress: 1, pressedAt: at(4), version: "3", completed: true }]
   const r = hourInterruptions([], [], accountingOf({ waits, forced, ops }))
   assert.match(r.note, /^autosave 1×, forced Ctrl\+S 1× \(1 new-save\), automatic reconcile 0×, Ověřit výsledek 0×\. Ověřit výsledek pressed 0 times/)
 })
