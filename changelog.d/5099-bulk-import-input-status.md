@@ -1,0 +1,1 @@
+- **Bulk skill import answered 502 Bad Gateway for a git URL it refused (#5097).** A non-HTTPS, localhost, private-IP or credential-bearing `git_url` was rejected before any clone, yet reported as an upstream failure. It now answers 400 with the reason; a missing or outdated server Git and clone failures stay 502.
