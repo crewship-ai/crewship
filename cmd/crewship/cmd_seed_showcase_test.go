@@ -19,21 +19,78 @@ import (
 // A 64-hex session value built at run time, so no literal resembles a credential.
 var showcaseTestToken = strings.Repeat("5a", 32)
 
-// showcaseServer is a fake of the handful of routes the showcase phase uses.
-// Each knob turns one capability off the way a real server refuses it.
-type showcaseServer struct {
-	wordNative, gridNative bool
-	initializeStatus       int            // 0 = 201
-	flagStatus             int            // 0 = 200
-	artifactStatus         map[string]int // slug -> refusal status
-	designStatus           int            // 0 = 201
-	existing               map[string]bool
+const showcaseTestWS = "cshowcasewsabcdefghi"
 
+// showcaseKnobs turn one capability off the way a real server refuses it.
+type showcaseKnobs struct {
+	wordNative, gridNative bool
+	statusCode             int            // documents/status; 0 = 200
+	initializeStatus       int            // 0 = 201
+	flagStatus             int            // override PUT; 0 = 200
+	artifactStatus         map[string]int // slug -> create refusal
+	dataStatus             int            // data batch POST; 0 = 200
+	designStatus           int            // design create; 0 = 201
+	designOpsStatus        int            // design operations; 0 = 200
+}
+
+type fakeShowcasePage struct {
+	native   string
+	artifact bool
+	design   bool
+	panels   int
+	data     map[string]int
+	nodes    int
+}
+
+type fakeShowcaseFlag struct {
+	enabled  bool
+	override *bool
+}
+
+// showcaseServer is a stateful fake of the routes the showcase phase uses, so
+// a second run sees what the first one left behind.
+type showcaseServer struct {
 	mu       *sync.Mutex
+	knobs    showcaseKnobs
+	pages    map[string]*fakeShowcasePage
+	flags    map[string]*fakeShowcaseFlag
 	calls    []string
-	pages    map[string]map[string]any
 	released map[string]string // slug -> generation
 	session  map[string]bool   // slug -> X-Craft-Session matched on release
+}
+
+func newShowcaseServer(k showcaseKnobs) *showcaseServer {
+	s := &showcaseServer{mu: &sync.Mutex{}, knobs: k, pages: map[string]*fakeShowcasePage{},
+		flags: map[string]*fakeShowcaseFlag{}, released: map[string]string{}, session: map[string]bool{}}
+	for _, key := range seeddata.ShowcaseFeatureFlags {
+		if key != "craft_version_history" { // undefined on a fresh install
+			s.flags[key] = &fakeShowcaseFlag{}
+		}
+	}
+	return s
+}
+
+func (s *showcaseServer) setKnobs(k showcaseKnobs) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.knobs, s.calls = k, nil
+}
+
+// fill makes every catalogue slug hold complete content.
+func (s *showcaseServer) fill() {
+	for _, c := range seeddata.ShowcaseCrafts {
+		s.pages[c.Slug] = &fakeShowcasePage{native: c.Application}
+	}
+	for _, a := range seeddata.ShowcaseArtifacts {
+		p := &fakeShowcasePage{artifact: true, data: map[string]int{}}
+		for _, d := range a.Data {
+			p.data[d.Collection] = 3
+		}
+		s.pages[a.Slug] = p
+	}
+	for _, d := range seeddata.ShowcaseDesigns {
+		s.pages[d.Slug] = &fakeShowcasePage{design: true, nodes: 4}
+	}
 }
 
 func (s *showcaseServer) handler(t *testing.T) http.Handler {
@@ -42,9 +99,10 @@ func (s *showcaseServer) handler(t *testing.T) http.Handler {
 		path := r.URL.Path
 		s.mu.Lock()
 		defer s.mu.Unlock()
+		k := s.knobs
 		s.calls = append(s.calls, r.Method+" "+path)
-		if r.URL.Query().Get("workspace_id") != "cshowcasewsabcdefghi" {
-			t.Errorf("%s %s without workspace_id", r.Method, path)
+		if r.URL.Query().Get("workspace_id") != showcaseTestWS {
+			t.Errorf("%s %s outside the seeded workspace (workspace_id=%q)", r.Method, path, r.URL.Query().Get("workspace_id"))
 		}
 		reply := func(status int, body any) {
 			w.Header().Set("Content-Type", "application/json")
@@ -54,14 +112,45 @@ func (s *showcaseServer) handler(t *testing.T) http.Handler {
 		refuse := func(status int) { reply(status, map[string]string{"error": "refused by test"}) }
 		switch {
 		case r.Method == "GET" && path == "/api/v1/documents/status":
-			reply(200, map[string]bool{"enabled": true, "wordcraft_native": s.wordNative, "gridcraft_native": s.gridNative})
-		case r.Method == "POST" && path == "/api/v1/feature-flags":
-			reply(409, map[string]string{"error": "exists"})
-		case r.Method == "PUT" && strings.HasPrefix(path, "/api/v1/feature-flags/"):
-			if s.flagStatus != 0 {
-				refuse(s.flagStatus)
+			if k.statusCode != 0 {
+				refuse(k.statusCode)
 				return
 			}
+			reply(200, map[string]bool{"enabled": true, "wordcraft_native": k.wordNative, "gridcraft_native": k.gridNative})
+		case r.Method == "GET" && path == "/api/v1/feature-flags":
+			var list []map[string]any
+			for key, f := range s.flags {
+				item := map[string]any{"key": key, "enabled": f.enabled}
+				if f.override != nil {
+					item["override_enabled"] = *f.override
+				}
+				list = append(list, item)
+			}
+			reply(200, list)
+		case r.Method == "POST" && path == "/api/v1/feature-flags":
+			var body struct {
+				Key     string `json:"key"`
+				Enabled bool   `json:"enabled"`
+			}
+			_ = json.Unmarshal(raw, &body)
+			if body.Enabled {
+				t.Errorf("flag %s defined ON instance-wide; the seed may only define it OFF", body.Key)
+			}
+			if _, ok := s.flags[body.Key]; ok {
+				refuse(409)
+				return
+			}
+			s.flags[body.Key] = &fakeShowcaseFlag{}
+			reply(201, map[string]any{"key": body.Key})
+		case r.Method == "PUT" && strings.HasPrefix(path, "/api/v1/feature-flags/") && strings.HasSuffix(path, "/override"):
+			key := strings.TrimSuffix(strings.TrimPrefix(path, "/api/v1/feature-flags/"), "/override")
+			f, ok := s.flags[key]
+			if k.flagStatus != 0 || !ok {
+				refuse(map[bool]int{true: k.flagStatus, false: 404}[k.flagStatus != 0])
+				return
+			}
+			on := true
+			f.override = &on
 			reply(200, map[string]bool{"enabled": true})
 		case r.Method == "POST" && path == "/api/v1/pages":
 			var body map[string]any
@@ -69,44 +158,48 @@ func (s *showcaseServer) handler(t *testing.T) http.Handler {
 			if body["allow_empty"] != true {
 				t.Errorf("craft page %v created without allow_empty", body["slug"])
 			}
-			s.pages[body["slug"].(string)] = body
+			s.pages[body["slug"].(string)] = &fakeShowcasePage{}
 			reply(201, map[string]any{"slug": body["slug"]})
 		case r.Method == "POST" && path == "/api/v1/pages/artifacts":
 			var body map[string]any
 			_ = json.Unmarshal(raw, &body)
 			slug, _ := body["slug"].(string)
-			if st := s.artifactStatus[slug]; st != 0 {
+			if st := k.artifactStatus[slug]; st != 0 {
 				refuse(st)
 				return
 			}
 			if body["name"] == "" || body["entrypoint"] == nil || body["files"] == nil {
 				t.Errorf("artifact %s: incomplete manifest %v", slug, body)
 			}
-			s.pages[slug] = body
+			s.pages[slug] = &fakeShowcasePage{artifact: true, data: map[string]int{}}
 			reply(201, map[string]any{"slug": slug, "version": 1})
 		case r.Method == "POST" && path == "/api/v1/pages/design":
-			if s.designStatus != 0 {
-				refuse(s.designStatus)
+			if k.designStatus != 0 {
+				refuse(k.designStatus)
 				return
 			}
 			var body map[string]any
 			_ = json.Unmarshal(raw, &body)
-			s.pages[body["slug"].(string)] = body
+			s.pages[body["slug"].(string)] = &fakeShowcasePage{design: true}
 			reply(201, body)
 		case strings.HasPrefix(path, "/api/v1/pages/"):
-			rest := strings.TrimPrefix(path, "/api/v1/pages/")
-			slug, tail, _ := strings.Cut(rest, "/")
+			slug, tail, _ := strings.Cut(strings.TrimPrefix(path, "/api/v1/pages/"), "/")
+			p := s.pages[slug]
+			if p == nil {
+				refuse(404)
+				return
+			}
 			switch {
 			case r.Method == "GET" && tail == "":
-				if s.existing[slug] {
-					reply(200, map[string]string{"slug": slug})
+				panels := make([]any, p.panels)
+				reply(200, map[string]any{"slug": slug, "native_craft_application": p.native, "has_artifact_project": p.artifact, "panels": panels})
+			case r.Method == "POST" && tail == "craft/initialize":
+				if k.initializeStatus != 0 {
+					refuse(k.initializeStatus)
 					return
 				}
-				refuse(404)
-			case r.Method == "POST" && tail == "craft/initialize":
-				if s.initializeStatus != 0 {
-					refuse(s.initializeStatus)
-					return
+				if p.native != "" || p.artifact || p.design || p.panels > 0 {
+					t.Errorf("initialize %s on a Page that already holds content", slug)
 				}
 				var body struct {
 					Application string `json:"application_id"`
@@ -115,6 +208,7 @@ func (s *showcaseServer) handler(t *testing.T) http.Handler {
 				if err := json.Unmarshal(raw, &body); err != nil || len(body.Bytes) == 0 || !json.Valid(body.Bytes) {
 					t.Errorf("initialize %s: bytes are not the native JSON document", slug)
 				}
+				p.native = body.Application
 				reply(201, map[string]string{"session_token": showcaseTestToken, "session_id": "sess-" + slug,
 					"application_id": body.Application, "page_id": "pg-" + slug, "generation": "3", "version": "1"})
 			case r.Method == "POST" && tail == "craft/lease/release":
@@ -123,12 +217,43 @@ func (s *showcaseServer) handler(t *testing.T) http.Handler {
 				s.released[slug] = body["generation"]
 				s.session[slug] = r.Header.Get("X-Craft-Session") == showcaseTestToken
 				reply(200, map[string]any{})
-			case r.Method == "POST" && strings.HasPrefix(tail, "artifact/data/"):
-				if _, err := artifacts.DecodeDataBatch(raw); err != nil {
+			case strings.HasPrefix(tail, "artifact/data/"):
+				coll := strings.TrimPrefix(tail, "artifact/data/")
+				if r.Method == "GET" {
+					if r.URL.Query().Get("version") != "1" {
+						t.Errorf("data read %s without the batch's code version", path)
+					}
+					reply(200, map[string]any{"documents": make([]map[string]any, p.data[coll])})
+					return
+				}
+				if k.dataStatus != 0 {
+					refuse(k.dataStatus)
+					return
+				}
+				batch, err := artifacts.DecodeDataBatch(raw)
+				if err != nil {
 					t.Errorf("data batch %s: %v", path, err)
 				}
+				if p.data[coll] > 0 {
+					t.Errorf("data batch %s over existing documents", path)
+				}
+				p.data[coll] = len(batch.Documents)
 				reply(200, map[string]any{})
+			case r.Method == "GET" && tail == "design":
+				reply(200, map[string]any{"can_edit": true, "nodes": make([]map[string]any, p.nodes)})
 			case r.Method == "POST" && tail == "design/operations":
+				if k.designOpsStatus != 0 {
+					refuse(k.designOpsStatus)
+					return
+				}
+				if p.nodes > 0 {
+					t.Errorf("design operations applied over %d existing layers", p.nodes)
+				}
+				var ops struct {
+					Operations []json.RawMessage `json:"operations"`
+				}
+				_ = json.Unmarshal(raw, &ops)
+				p.nodes = len(ops.Operations)
 				reply(200, map[string]any{})
 			case r.Method == "POST" && tail == "design/snapshots":
 				reply(201, map[string]any{"version": 1})
@@ -143,160 +268,169 @@ func (s *showcaseServer) handler(t *testing.T) http.Handler {
 	})
 }
 
-func (s *showcaseServer) count(prefix string) int {
+func (s *showcaseServer) count(match func(string) bool) int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	n := 0
 	for _, c := range s.calls {
-		if strings.HasPrefix(c, prefix) {
+		if match(c) {
 			n++
 		}
 	}
 	return n
 }
 
-func (s *showcaseServer) exact(call string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	n := 0
-	for _, c := range s.calls {
-		if c == call {
-			n++
-		}
-	}
-	return n
+func exactly(call string) func(string) bool { return func(c string) bool { return c == call } }
+func postSuffix(suffix string) func(string) bool {
+	return func(c string) bool { return strings.HasPrefix(c, "POST ") && strings.HasSuffix(c, suffix) }
+}
+func prefixed(prefix string) func(string) bool {
+	return func(c string) bool { return strings.HasPrefix(c, prefix) }
 }
 
-func (s *showcaseServer) countSuffix(method, suffix string) int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	n := 0
-	for _, c := range s.calls {
-		if strings.HasPrefix(c, method+" ") && strings.HasSuffix(c, suffix) {
-			n++
-		}
-	}
-	return n
+// showcaseWant is one run's expected outcome and request counts.
+type showcaseWant struct {
+	stats                                                                                 showcaseStats
+	pageCreates, initializes, releases, artifactCreates, dataWrites, designOps, overrides int
+	lines                                                                                 []string
 }
 
-func allShowcaseSlugs() map[string]bool {
-	out := map[string]bool{}
-	for _, c := range seeddata.ShowcaseCrafts {
-		out[c.Slug] = true
+func runShowcaseOnce(t *testing.T, s *showcaseServer, url string, want showcaseWant) {
+	t.Helper()
+	var out bytes.Buffer
+	stats, err := seedShowcase(context.Background(), cli.NewClient(url, "tok", showcaseTestWS), &out)
+	if err != nil {
+		t.Fatalf("seedShowcase returned %v; the phase is fail-soft\n%s", err, out.String())
 	}
-	for _, a := range seeddata.ShowcaseArtifacts {
-		out[a.Slug] = true
+	if stats != want.stats {
+		t.Errorf("stats = %+v, want %+v\n%s", stats, want.stats, out.String())
 	}
-	for _, d := range seeddata.ShowcaseDesigns {
-		out[d.Slug] = true
+	checks := []struct {
+		what      string
+		got, want int
+	}{
+		{"page creates", s.count(exactly("POST /api/v1/pages")), want.pageCreates},
+		{"initializes", s.count(postSuffix("/craft/initialize")), want.initializes},
+		{"lease releases", s.count(postSuffix("/craft/lease/release")), want.releases},
+		{"artifact creates", s.count(exactly("POST /api/v1/pages/artifacts")), want.artifactCreates},
+		{"data writes", s.count(func(c string) bool { return strings.HasPrefix(c, "POST ") && strings.Contains(c, "/artifact/data/") }), want.dataWrites},
+		{"design operations", s.count(postSuffix("/design/operations")), want.designOps},
+		{"flag overrides", s.count(prefixed("PUT /api/v1/feature-flags/")), want.overrides},
 	}
-	return out
+	for _, c := range checks {
+		if c.got != c.want {
+			t.Errorf("%s = %d, want %d\ncalls: %v", c.what, c.got, c.want, s.calls)
+		}
+	}
+	for _, line := range want.lines {
+		if !strings.Contains(out.String(), line) {
+			t.Errorf("output lacks %q\n%s", line, out.String())
+		}
+	}
+	for slug, gen := range s.released {
+		if gen != "3" || !s.session[slug] {
+			t.Errorf("%s: release sent generation %q, session header ok=%v; want the admission's generation and token", slug, gen, s.session[slug])
+		}
+	}
+	if strings.Contains(out.String(), showcaseTestToken) {
+		t.Error("the native session token was printed")
+	}
 }
+
+var allOn = showcaseKnobs{wordNative: true, gridNative: true}
 
 func TestSeedShowcase_Phase(t *testing.T) {
 	t.Parallel()
+	full := showcaseWant{stats: showcaseStats{Created: 12}, pageCreates: 7, initializes: 7, releases: 7,
+		artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 7,
+		lines: []string{"+ feature flag craft_version_history enabled for workspace " + showcaseTestWS, "+ obchodni-nabidka"}}
 	cases := []struct {
-		name   string
-		server showcaseServer
-		want   showcaseStats
-		// expected request counts
-		pageCreates, initializes, releases, artifactCreates, dataBatches, designOps, snapshots int
+		name  string
+		setup func(*showcaseServer)
+		runs  []showcaseKnobs
+		want  []showcaseWant
 	}{
+		{name: "everything available", runs: []showcaseKnobs{allOn}, want: []showcaseWant{full}},
 		{
-			name:        "everything available",
-			server:      showcaseServer{wordNative: true, gridNative: true},
-			want:        showcaseStats{Created: 12},
-			pageCreates: 7, initializes: 7, releases: 7, artifactCreates: 4, dataBatches: 2, designOps: 1, snapshots: 1,
+			name: "native craft unavailable skips documents only", runs: []showcaseKnobs{{}},
+			want: []showcaseWant{{stats: showcaseStats{Created: 5, Unavailable: 7}, artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 7,
+				lines: []string{"= obchodni-nabidka: skipped (native Word (WordCraft) is not available on this server)"}}},
 		},
 		{
-			name:            "native craft unavailable skips documents only",
-			server:          showcaseServer{},
-			want:            showcaseStats{Created: 5, Unavailable: 7},
-			artifactCreates: 4, dataBatches: 2, designOps: 1, snapshots: 1,
+			name: "status check failure is not reported as unavailable", runs: []showcaseKnobs{{statusCode: 500}},
+			want: []showcaseWant{{stats: showcaseStats{Created: 5, Unavailable: 7}, artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 7,
+				lines: []string{"= pipeline-q4: skipped (native document status check failed: 500"}}},
 		},
 		{
-			name:        "gridcraft unavailable skips sheets only",
-			server:      showcaseServer{wordNative: true},
-			want:        showcaseStats{Created: 9, Unavailable: 3},
-			pageCreates: 4, initializes: 4, releases: 4, artifactCreates: 4, dataBatches: 2, designOps: 1, snapshots: 1,
+			name: "gridcraft unavailable skips sheets only", runs: []showcaseKnobs{{wordNative: true}},
+			want: []showcaseWant{{stats: showcaseStats{Created: 9, Unavailable: 3}, pageCreates: 4, initializes: 4, releases: 4,
+				artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 7}},
 		},
 		{
-			name:        "initialize refused is per item",
-			server:      showcaseServer{wordNative: true, gridNative: true, initializeStatus: 503},
-			want:        showcaseStats{Created: 5, Unavailable: 7},
-			pageCreates: 7, initializes: 7, artifactCreates: 4, dataBatches: 2, designOps: 1, snapshots: 1,
+			name: "slides flag off skips the deck only", runs: []showcaseKnobs{{artifactStatus: map[string]int{"prodejni-prezentace": 404}}},
+			want: []showcaseWant{{stats: showcaseStats{Created: 4, Unavailable: 8}, artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 7}},
 		},
 		{
-			name:            "slides flag off skips the deck only",
-			server:          showcaseServer{artifactStatus: map[string]int{"prodejni-prezentace": 404}},
-			want:            showcaseStats{Created: 4, Unavailable: 8},
-			artifactCreates: 4, dataBatches: 2, designOps: 1, snapshots: 1,
+			name: "design disabled skips the canvas", runs: []showcaseKnobs{{designStatus: 404}},
+			want: []showcaseWant{{stats: showcaseStats{Created: 4, Unavailable: 8}, artifactCreates: 4, dataWrites: 2, overrides: 7}},
 		},
 		{
-			name:            "dashboard and poll refused are per item",
-			server:          showcaseServer{artifactStatus: map[string]int{"obchod-dashboard": 404, "hlasovani-akce": 404}},
-			want:            showcaseStats{Created: 3, Unavailable: 9},
-			artifactCreates: 4, designOps: 1, snapshots: 1,
+			name: "design layers refused is incomplete, not created", runs: []showcaseKnobs{{designOpsStatus: 422}},
+			want: []showcaseWant{{stats: showcaseStats{Created: 4, Incomplete: 1, Unavailable: 7}, artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 7,
+				lines: []string{"! landing-page: incomplete (canvas created, layers refused"}}},
 		},
 		{
-			name:            "design disabled skips the canvas",
-			server:          showcaseServer{designStatus: 404},
-			want:            showcaseStats{Created: 4, Unavailable: 8},
-			artifactCreates: 4, dataBatches: 2,
+			name: "feature flags forbidden does not stop the phase", runs: []showcaseKnobs{{flagStatus: 403}},
+			want: []showcaseWant{{stats: showcaseStats{Created: 5, Unavailable: 7}, artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 7,
+				lines: []string{"! showcase feature flags not enabled: "}}},
 		},
 		{
-			name:            "feature flags forbidden does not stop the phase",
-			server:          showcaseServer{flagStatus: 403},
-			want:            showcaseStats{Created: 5, Unavailable: 7},
-			artifactCreates: 4, dataBatches: 2, designOps: 1, snapshots: 1,
+			name: "a workspace that switched a flag off keeps it off",
+			setup: func(s *showcaseServer) {
+				off := false
+				s.flags["artifact_slides"].override = &off
+				s.flags["gridcraft_editor"].enabled = true
+			},
+			runs: []showcaseKnobs{allOn},
+			want: []showcaseWant{{stats: showcaseStats{Created: 12}, pageCreates: 7, initializes: 7, releases: 7,
+				artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 5,
+				lines: []string{"= feature flags left off (this workspace disabled them): artifact_slides"}}},
 		},
 		{
-			name:   "existing slugs are skipped",
-			server: showcaseServer{wordNative: true, gridNative: true, existing: allShowcaseSlugs()},
-			want:   showcaseStats{Skipped: 12},
+			name: "existing content is never touched", setup: func(s *showcaseServer) { s.fill() },
+			runs: []showcaseKnobs{allOn},
+			want: []showcaseWant{{stats: showcaseStats{Skipped: 12}, overrides: 7}},
+		},
+		{
+			// P2-1: a refused step is retried by the next run, which finishes
+			// the item instead of skipping its slug forever.
+			name: "refused steps are completed by the next run",
+			runs: []showcaseKnobs{
+				{wordNative: true, gridNative: true, initializeStatus: 503, dataStatus: 503, designOpsStatus: 503},
+				allOn,
+				allOn,
+			},
+			want: []showcaseWant{
+				{stats: showcaseStats{Created: 2, Incomplete: 10}, pageCreates: 7, initializes: 7, artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 7,
+					lines: []string{"! obchodni-nabidka: incomplete (native Word (WordCraft) refused initialization", "! obchod-dashboard: incomplete (data pipeline not written"}},
+				{stats: showcaseStats{Completed: 10, Skipped: 2}, initializes: 7, releases: 7, dataWrites: 2, designOps: 1,
+					lines: []string{"+ obchodni-nabidka: completed (an earlier seed left it incomplete)"}},
+				{stats: showcaseStats{Skipped: 12}},
+			},
 		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			s := tc.server
-			s.pages, s.released, s.session = map[string]map[string]any{}, map[string]string{}, map[string]bool{}
-			s.mu = &sync.Mutex{}
+			s := newShowcaseServer(tc.runs[0])
+			if tc.setup != nil {
+				tc.setup(s)
+			}
 			srv := httptest.NewServer(s.handler(t))
 			defer srv.Close()
-			var out bytes.Buffer
-			stats, err := seedShowcase(context.Background(), cli.NewClient(srv.URL, "tok", "cshowcasewsabcdefghi"), &out)
-			if err != nil {
-				t.Fatalf("seedShowcase returned %v; the phase is fail-soft\n%s", err, out.String())
-			}
-			if stats != tc.want {
-				t.Errorf("stats = %+v, want %+v\n%s", stats, tc.want, out.String())
-			}
-			checks := []struct {
-				what      string
-				got, want int
-			}{
-				{"page creates", s.exact("POST /api/v1/pages"), tc.pageCreates},
-				{"initializes", s.countSuffix("POST", "/craft/initialize"), tc.initializes},
-				{"lease releases", s.countSuffix("POST", "/craft/lease/release"), tc.releases},
-				{"artifact creates", s.count("POST /api/v1/pages/artifacts"), tc.artifactCreates},
-				{"data batches", s.count("POST /api/v1/pages/obchod-dashboard/artifact/data/") + s.count("POST /api/v1/pages/hlasovani-akce/artifact/data/"), tc.dataBatches},
-				{"design operations", s.countSuffix("POST", "/design/operations"), tc.designOps},
-				{"design snapshots", s.countSuffix("POST", "/design/snapshots"), tc.snapshots},
-				{"flag overrides", s.count("PUT /api/v1/feature-flags/"), len(seeddata.ShowcaseFeatureFlags)},
-			}
-			for _, c := range checks {
-				if c.got != c.want {
-					t.Errorf("%s = %d, want %d\ncalls: %v", c.what, c.got, c.want, s.calls)
-				}
-			}
-			for slug, gen := range s.released {
-				if gen != "3" || !s.session[slug] {
-					t.Errorf("%s: release sent generation %q, session header ok=%v; want the admission's generation and token", slug, gen, s.session[slug])
-				}
-			}
-			if strings.Contains(out.String(), showcaseTestToken) {
-				t.Error("the native session token was printed")
+			for i, knobs := range tc.runs {
+				s.setKnobs(knobs)
+				runShowcaseOnce(t, s, srv.URL, tc.want[i])
 			}
 		})
 	}
@@ -306,12 +440,10 @@ func TestSeedShowcase_Phase(t *testing.T) {
 // has no instance-wide definition on a fresh install.
 func TestSeedShowcase_CreatesFlagDefinitionBeforeOverride(t *testing.T) {
 	t.Parallel()
-	s := showcaseServer{}
-	s.pages, s.released, s.session = map[string]map[string]any{}, map[string]string{}, map[string]bool{}
-	s.mu = &sync.Mutex{}
+	s := newShowcaseServer(showcaseKnobs{})
 	srv := httptest.NewServer(s.handler(t))
 	defer srv.Close()
-	if _, err := seedShowcase(context.Background(), cli.NewClient(srv.URL, "tok", "cshowcasewsabcdefghi"), io.Discard); err != nil {
+	if _, err := seedShowcase(context.Background(), cli.NewClient(srv.URL, "tok", showcaseTestWS), io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	created, overridden := -1, -1
@@ -332,7 +464,7 @@ func TestSeedShowcase_CancelledContext(t *testing.T) {
 	t.Parallel()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if _, err := seedShowcase(ctx, cli.NewClient("http://127.0.0.1:1", "tok", "cshowcasewsabcdefghi"), io.Discard); err != context.Canceled {
+	if _, err := seedShowcase(ctx, cli.NewClient("http://127.0.0.1:1", "tok", showcaseTestWS), io.Discard); err != context.Canceled {
 		t.Errorf("err = %v, want context.Canceled", err)
 	}
 }
@@ -412,5 +544,41 @@ func TestSeedShowcase_SkipFlagRegistered(t *testing.T) {
 	}
 	if !found {
 		t.Error("--skip-showcase is a default-phase flag and must be refused together with --ui-tour")
+	}
+}
+
+// P3-4: the flag gates the phase inside runSeed, not just in flag parsing.
+func TestRunSeed_SkipShowcaseGatesThePhase(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		skip     string
+		wantHits bool
+	}{
+		{"default runs the showcase", "false", true},
+		{"--skip-showcase leaves it out", "true", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := covSeedStub(t)
+			covSetupRunSeed(t, s)
+			covSetFlag(t, seedCmd, "skip-issues", "true")
+			covSetFlag(t, seedCmd, "skip-showcase", tc.skip)
+			out, err := covCaptureStdout(t, func() error { return seedCmd.RunE(seedCmd, nil) })
+			if err != nil {
+				t.Fatalf("runSeed: %v\n%s", err, out)
+			}
+			hits := 0
+			for _, c := range s.Calls() {
+				if c.Path == "/api/v1/documents/status" || strings.HasPrefix(c.Path, "/api/v1/feature-flags") ||
+					c.Path == "/api/v1/pages/artifacts" || c.Path == "/api/v1/pages/design" {
+					hits++
+				}
+			}
+			if (hits > 0) != tc.wantHits {
+				t.Errorf("showcase requests = %d, want any=%v\n%s", hits, tc.wantHits, out)
+			}
+			if got := strings.Contains(out, "Creating showcase documents and artifacts..."); got != tc.wantHits {
+				t.Errorf("showcase banner printed = %v, want %v", got, tc.wantHits)
+			}
+		})
 	}
 }

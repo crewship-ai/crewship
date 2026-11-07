@@ -329,7 +329,7 @@ satisfies a pack's `env` gate.
 | Schedules | The normal seed creates no cron schedules. Create one explicitly after checking a routine, or use `crewship digest enable` for the workspace digest. | — |
 | 10. Issues | One TODO Issue per story plus the Crewship Lab issue, with their projects and labels (unless `--skip-issues`) | Fatal |
 | 10c. Pages | Six Pages (one per story, Crewship Lab, live monitor), their story folders and visual identity, demo payloads, then one run of every routine a panel names as producer | Fatal on spec, non-fatal per run |
-| 10d. Showcase (unless `--skip-showcase`) | Turns on the artifact and Craft workspace flags, then creates four native Word documents, three native Sheets, a dashboard with data, a poll, an ROI calculator, a Slides deck and a Design canvas — see [below](#showcase-documents-and-artifacts) | Non-fatal per item: an unavailable capability skips that item with one line |
+| 10d. Showcase (unless `--skip-showcase`) | Turns on the artifact and Craft feature flags for the seeded workspace, then creates four native Word documents, three native Sheets, a dashboard with data, a poll, an ROI calculator, a Slides deck and a Design canvas — see [below](#showcase-documents-and-artifacts) | Non-fatal per item: an unavailable capability skips that item with one line; a step refused part-way is finished by the next seed |
 | 10b. Wait for provisioning | If `--wait-provision`, blocks until images are ready, then refreshes the Crewship Lab telemetry once the Ops sidecar exists | Fatal in sync mode, deferred otherwise |
 | 10c. Backup self-test | If `--test-backup`, full round-trip on one crew | Fatal |
 | 11. Summary | Prints `Seed complete: N crews, M agents` | — |
@@ -359,23 +359,36 @@ seeds it too; `--skip-showcase` leaves it out.
 | `prodejni-prezentace` | Prezentace: Crewship pro vaši firmu | Slides | `crewship page artifact create` |
 | `landing-page` | Design: Landing page Crewship | Design | `crewship page design create` + `apply` + `snapshot` |
 
-Before the items, the phase enables the workspace flags `artifact_projects`,
-`artifact_slides`, `artifact_interactive`, `artifact_dashboard_data`,
-`artifacts_design`, `gridcraft_editor` and `craft_version_history` (creating the
-`craft_version_history` definition first when the instance has none). Setting a
-flag needs an instance administrator; when that is refused the phase prints one
-line and continues.
+Before the items, the phase enables seven feature flags **for the seeded
+workspace only** — the one the seed bootstrapped or the one selected for the
+`--server` profile: `artifact_projects`, `artifact_slides`,
+`artifact_interactive`, `artifact_dashboard_data`, `artifacts_design`,
+`gridcraft_editor` and `craft_version_history`. Each is a per-workspace
+override (`PUT /api/v1/feature-flags/{key}/override`), which needs workspace
+`OWNER` or `ADMIN`; no instance default is changed. Each flag actually turned on
+is printed (`+ feature flag <key> enabled for workspace <id>`); a flag already on
+is left alone, and a flag this workspace has explicitly switched off stays off
+and is listed. The one instance-wide write is the `craft_version_history`
+definition, created **off** when the instance has none — that needs an instance
+administrator. Refusals print one line and the phase continues.
 
 Behaviour:
 
-- **Idempotent by slug.** An item whose Page already exists is reported as
-  already present and left untouched, so a re-seed never overwrites a document
-  somebody has edited.
+- **Idempotent by slug.** An item whose Page already holds content is reported
+  as already present and left untouched, so a re-seed never overwrites a
+  document somebody has edited.
+- **Self-completing.** A step refused part-way leaves the item *incomplete*,
+  reported as such (`! <slug>: incomplete (...)`), and the next seed finishes
+  exactly that step: an empty Page whose native initialization was refused is
+  initialized, a dashboard collection that is still empty at code version 1
+  gets its data, and a Design canvas with no layers gets them. Anything holding
+  content is not touched.
 - **Fail-soft per capability.** Native Word or Sheet is skipped without creating
-  a Page when `GET /api/v1/documents/status` does not report that engine; an
-  artifact or Design refused by its flag or by artifact storage is skipped with
-  the server's own sentence. If native initialization itself is refused after
-  the Page was created, the empty Page is kept and reported.
+  a Page when `GET /api/v1/documents/status` does not report that engine; if
+  that check itself fails, the line says so (`native document status check
+  failed`) rather than claiming the engine is missing. An artifact or Design
+  refused by its flag or by artifact storage is skipped with the server's own
+  sentence.
 - **No lingering edit lease.** Native initialization opens a session holding the
   edit lease; the seed releases it straight away, so the first person to open a
   document is not asked to take it over. The session token is never printed.
