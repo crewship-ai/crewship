@@ -8,9 +8,11 @@ if [[ "$(uname -s)" != Linux ]]; then
 fi
 restricted_build_dir=$(mktemp -d /tmp/crewship-restricted-runtime-build.XXXXXX)
 trap 'rm -rf "$restricted_build_dir"' EXIT
-restricted_base=${CREWSHIP_RESTRICTED_RUNTIME_BASE:-$(docker image inspect alpine:3 --format '{{index .RepoDigests 0}}')}
-if [[ ! "$restricted_base" =~ @sha256:[a-f0-9]{64}$ ]]; then
-  echo "Set CREWSHIP_RESTRICTED_RUNTIME_BASE to an approved local image digest." >&2
+# The runner is static and needs no distribution packages (#5103). An override
+# must name an approved image by digest; that image's packages are then yours.
+restricted_base=${CREWSHIP_RESTRICTED_RUNTIME_BASE:-scratch}
+if [[ "$restricted_base" != scratch && ! "$restricted_base" =~ @sha256:[a-f0-9]{64}$ ]]; then
+  echo "Set CREWSHIP_RESTRICTED_RUNTIME_BASE to scratch or an approved local image digest." >&2
   exit 1
 fi
 restricted_commit=$(scripts/build-stamp.sh commit)

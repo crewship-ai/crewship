@@ -234,7 +234,7 @@ provider-backed Guest acceptance.
 The manual `Text Worker Release` workflow (`text-worker-release.yml`) prepares
 a Linux/amd64 `responses_text` image from the exact main source after CI,
 Security and CodeQL succeed on that commit. Preparation produces the static
-runner, pinned base recipe, runner SHA-256, source/profile identity and Go/project
+runner, an empty-base (`scratch`) recipe with no distribution packages, runner SHA-256, source/profile identity and Go/project
 license texts. It refuses an existing output directory.
 
 Publication is off by default. An explicitly authorized `publish=true` dispatch

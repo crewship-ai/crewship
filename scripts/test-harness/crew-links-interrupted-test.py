@@ -126,12 +126,15 @@ class TimeoutProcessTests(unittest.TestCase):
       printf 'restore\\n' >> "$TRACE"
     fi
     rm -f "$state/unlinked"; exit 0 ;;''')
-        text = text.replace('    tag="$(grep -oE', '''    if [ -e "$state/unlinked" ]; then
-      printf 'blocked\\n' >> "$TRACE"
-      printf '%s\\n' "$$" > "$state/blocked-pid"
-      sleep 60
-    fi
-    tag="$(grep -oE''')
+        # The owned negative request is the direct owner turn (#5086).
+        needle = '      case "$XLINK_MODE" in neg-hangs|neg-failed) exit 1 ;; esac'
+        self.assertEqual(text.count(needle), 1)
+        text = text.replace(needle, '''      if [ -e "$state/unlinked" ]; then
+        printf 'blocked\\n' >> "$TRACE"
+        printf '%s\\n' "$$" > "$state/blocked-pid"
+        sleep 60
+      fi
+''' + needle)
         text = text.replace('  *" issue comments "*|*" issue get "*) exit 0 ;;', '''  *" issue get "*)
     id="${args##* issue get }"; id="${id%% *}"
     printf '{"id":"owned-%s","identifier":"%s","description":"SECRET-CANARY"}\\n' "$id" "$id"; exit 0 ;;
@@ -196,7 +199,7 @@ class TimeoutProcessTests(unittest.TestCase):
                     value = json.loads(receipt.read_bytes())
                     self.assertEqual(value["original_exit_status"], 143)
                     self.assertTrue(value["complete"])
-                    self.assertEqual(value["owned_issue_count"], 3)
+                    self.assertEqual(value["owned_issue_count"], 2)  # Ops record + positive issue; the negative half is a chat turn
                     self.assertEqual(trace.read_text().splitlines(), ["blocked", "receipt-before-restore", "restore"])
                     self.assertFalse((state/"unlinked").exists())
                 finally:
@@ -219,7 +222,7 @@ class TimeoutProcessTests(unittest.TestCase):
             value = json.loads(receipt.read_bytes())
             self.assertEqual(value["original_exit_status"], 143)
             self.assertTrue(value["complete"])
-            self.assertEqual(value["owned_issue_count"], 3)
+            self.assertEqual(value["owned_issue_count"], 2)  # Ops record + positive issue; the negative half is a chat turn
             self.assertEqual(value["capture_stage"], "before_topology_restore")
             self.assertNotIn("SECRET-CANARY", receipt.read_text())
             events = trace.read_text().splitlines()
