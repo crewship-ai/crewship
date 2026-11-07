@@ -6,10 +6,10 @@ import { readFacts } from "../craft-lease/sheet-workbook"
 import { captureAdmission, traceCraft, type CraftCall } from "../craft-lease/helpers"
 import type { PrdScenario } from "../fixtures"
 import * as N from "../outage-lostack/native"
-import { holdsAll, inspectDrafts, newTyping, offerEvidence, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines, type DraftOffer } from "./draft"
+import { holdsAll, inspectDrafts, newTyping, offerEvidence, placeCaret, saveByAutosaveOrKeyReport, typedMarkers, typeLines, type DraftOffer } from "./draft"
 import { checkDraftCopies, checkLines, holdsAnyLine, lineLedger, type LineCheck } from "./lines"
 import { present, sha256, wordFacts } from "./facts"
-import { VERIFY_AFTER_MS, isUnconfirmedStatus, verifyDue, type VerifyPress, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, pendingReplies, sentSince, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
+import { VERIFY_AFTER_MS, isUnconfirmedStatus, verifyDue, type VerifyPress, type ForcedCtrlS, type SaveWait, finishPress, startPress, trackedSaveWait, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, pendingReplies, sentSince, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
 import type { RestartRecord } from "./restart"
 import { restartNote } from "./restart-outcome"
 
@@ -25,8 +25,12 @@ export interface SessionInput {
   trail: CraftCall[]
   /** What the person did and when (filled while the session runs, so a failed run still shows it). */
   steps: Array<{ atMs: number; step: string }>
-  /** The per-cycle evidence chain, the checkpoints, every "Ověřit výsledek" press and the restart (filled while the session runs, so a failed run still shows them). */
-  evidence: { chain: CycleChain[]; checkpoints: Checkpoint[]; verifications: VerifyPress[]; restart: RestartRecord | null }
+  /**
+   * The per-cycle evidence chain, the checkpoints, every "Ověřit výsledek" press, every save
+   * wait and every Ctrl+S the harness pressed (save accounting, confirm.ts) and the restart
+   * (filled while the session runs, so a failed run still shows them).
+   */
+  evidence: { chain: CycleChain[]; checkpoints: Checkpoint[]; verifications: VerifyPress[]; saveWaits: SaveWait[]; forcedCtrlS: ForcedCtrlS[]; restart: RestartRecord | null }
   minutes: number
   restart(why: string): Promise<RestartRecord>
 }
@@ -144,7 +148,7 @@ interface Driver {
   /** One cycle of work; returns the markers it typed (the session then confirms them on the server). */
   work(page: Page, f: Frame, cycle: number, frac: number, hooks: CycleHooks): Promise<string[]>
   /** Optional first action that proves the freshly opened editor takes input: the save label it saw and the markers it typed. */
-  warmup?(page: Page, f: Frame, after: string): Promise<{ label: string | undefined; typed: string[] }>
+  warmup?(page: Page, f: Frame, after: string, save: (page: Page, after: string) => Promise<string | undefined>): Promise<{ label: string | undefined; typed: string[] }>
   /** The table step's cell text, reported in the evidence chain (Word). */
   cell?: string
   /** Problems found in the saved document (empty when it holds everything the session did). */
@@ -152,6 +156,15 @@ interface Driver {
 }
 
 const newer = (a: string, b: string | undefined) => (b !== undefined && BigInt(b) > BigInt(a) ? b : a)
+
+/**
+ * saveByAutosaveOrKey with the save accounting (confirm.ts, trackedSaveWait): the wait is
+ * recorded when it starts, a forced Ctrl+S when it is dispatched, and both are closed
+ * even when the wait throws. Same waits and timeouts; returns the version only.
+ */
+function recordedSave(input: SessionInput, page: Page, after: string, cycle: number | "warmup", context = ""): Promise<string | undefined> {
+  return trackedSaveWait(input.evidence, input.ops, { cycle, reason: `no autosave within 4 s (no "Uloženo · verze" newer than ${after})${context}` }, (onPress) => saveByAutosaveOrKeyReport(page, after, onPress))
+}
 
 const CYCLE_MS = (minutes: number) => Math.round(Math.min(60_000, Math.max(20_000, (minutes * 60_000) / 12)))
 
@@ -225,7 +238,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
         for (const limit = Date.now() + 15_000; isUnconfirmedStatus(await N.status(page)) && Date.now() < limit; ) await N.pause(250)
         const reconcile = ops.slice(opsAt).find((o) => o.kind === "reconcile")
         const statusAfter = (await N.status(page)).slice(0, 60)
-        input.evidence.verifications.push({ cycle, firstSeenAt: new Date(since).toISOString(), pressedAt, unconfirmedForMs: Date.now() - since, statusAfter, reconcile: reconcile ? { status: reconcile.status, version: reconcile.version, failed: reconcile.failed } : null })
+        input.evidence.verifications.push({ cycle, firstSeenAt: new Date(since).toISOString(), pressedAt, unconfirmedForMs: Date.now() - since, statusAfter, reconcile: reconcile ? { status: reconcile.status, version: reconcile.version, failed: reconcile.failed } : null, waitEndedAt: new Date().toISOString() })
         note(`cycle ${cycle}: pressed Ověřit výsledek after ${Date.now() - since} ms: ${statusAfter}`)
         return true
       }
@@ -241,7 +254,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     let warm: CycleConfirmation | undefined
     for (let attempt = 0; attempt < 3 && !warm?.confirmed; attempt++) {
       f = await N.frameOf(page, d.app)
-      const w = await d.warmup(page, f, lastVersion)
+      const w = await d.warmup(page, f, lastVersion, (p, after) => recordedSave(input, p, after, "warmup"))
       warm = await confirmTyped(w.typed, lastVersion, w.label)
       lastVersion = newer(newer(lastVersion, w.label), warm.version)
     }
@@ -282,8 +295,8 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     // save when it comes; press Ctrl+S only when it does not. After an autosave
     // Ctrl+S sends nothing and confirms the saved version (#5075).
     await verifyIfUnconfirmed(n)
-    let label = await saveByAutosaveOrKey(page, baseline)
-    if (await verifyIfUnconfirmed(n)) label = (await saveByAutosaveOrKey(page, newer(baseline, label))) ?? label
+    let label = await recordedSave(input, page, baseline, n)
+    if (await verifyIfUnconfirmed(n)) label = (await recordedSave(input, page, newer(baseline, label), n, ", after an Ověřit výsledek press")) ?? label
     // The server is the judge, also when the label moved (#4871).
     const c = await confirmTyped(typed, baseline, label)
     lastVersion = newer(newer(baseline, label), c.version)
@@ -487,17 +500,32 @@ export function wordSession(input: SessionInput) {
   let tableRuns = 0
   // Did the cell text reach a table cell of the server head? The editor saves 300 ms
   // after the last keystroke; an unsaved draft gets Ctrl+S once, as in saveByAutosaveOrKey.
-  const cellSaved = async (page: Page): Promise<boolean> => {
-    let pressed = false
-    for (const start = Date.now(); Date.now() - start < 15_000; ) {
-      if (cellInTable((await readHeadText(input.api, input.ref)).text, m.cell)) return true
-      if (!pressed && Date.now() - start > 4_000 && /^Neuložený koncept/.test(await N.status(page))) {
-        pressed = true
-        await page.keyboard.press("Control+s")
+  // The press is recorded in the save accounting (confirm.ts), with whether a newer head followed.
+  const cellSaved = async (page: Page, cycle: number): Promise<boolean> => {
+    let forced: { event: ForcedCtrlS; headVersion: string } | undefined
+    let newerHead: string | null = null
+    let completed = false
+    try {
+      for (const start = Date.now(); Date.now() - start < 15_000; ) {
+        const head = await readHeadText(input.api, input.ref)
+        if (forced && newerHead === null && BigInt(head.version) > BigInt(forced.headVersion)) newerHead = head.version
+        if (cellInTable(head.text, m.cell)) {
+          completed = true
+          return true
+        }
+        if (!forced && Date.now() - start > 4_000 && /^Neuložený koncept/.test(await N.status(page))) {
+          // In the evidence from the dispatch on: a press whose wait is cut short stays "incomplete".
+          const event = startPress(input.evidence.forcedCtrlS, { cycle, site: "table-cell", reason: `table cell text not in a table cell of the server head v${head.version} after 4 s, status Neuložený koncept`, opsAtPress: input.ops.length })
+          forced = { event, headVersion: head.version }
+          await page.keyboard.press("Control+s")
+        }
+        await N.pause(1_000)
       }
-      await N.pause(1_000)
+      completed = true
+      return false
+    } finally {
+      if (forced) finishPress(forced.event, input.ops, { version: newerHead, completed })
     }
-    return false
   }
   const driver: Driver = {
     app: "wordcraft",
@@ -578,7 +606,7 @@ export function wordSession(input: SessionInput) {
         // The person types into the new table at once. Where the text went is decided by
         // the saved document (a table cell of the server head), right here in the step.
         await kb.type(cellText)
-        let landed = await cellSaved(page)
+        let landed = await cellSaved(page, cycle)
         let damaged = await audit("typing right after the 2x2 insert")
         if (landed) step("table: the cell text reached a table cell right after the 2x2 insert")
         else {
@@ -592,7 +620,7 @@ export function wordSession(input: SessionInput) {
             // caret where the insert put it (WordCraft #1093), i.e. in the new table.
             await click(WORD_UI.insertTab)
             await kb.type(cellText)
-            landed = await cellSaved(page)
+            landed = await cellSaved(page, cycle)
             damaged = await audit("typing after the focus came back through the ribbon")
             await shot(`table-c${cycle}-after-refocus`).catch(() => {})
             step(landed ? "table: the cell text reached a table cell after the focus came back through the ribbon" : "table: the cell text is not in a table cell also after the focus came back through the ribbon")
@@ -657,12 +685,12 @@ export function sheetSession(input: SessionInput) {
   }
   const driver: Driver = {
     app: "gridcraft",
-    async warmup(page, f, after) {
+    async warmup(page, f, after, save) {
       await f.locator("canvas").first().click({ position: { x: 54, y: 240 } })
       await goto(page, f, "Z1")
       await page.keyboard.type(`HOUR${tag}WARM`, { delay: 8 })
       await page.keyboard.press("Enter")
-      return { label: await saveByAutosaveOrKey(page, after), typed: [`HOUR${tag}WARM`] }
+      return { label: await save(page, after), typed: [`HOUR${tag}WARM`] }
     },
     async work(page, f, cycle, frac, { step, shot, beforeTyping }) {
       const kb = page.keyboard

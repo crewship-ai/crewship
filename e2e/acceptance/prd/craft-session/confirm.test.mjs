@@ -2,7 +2,7 @@
 // (also run by e2e/acceptance/prd/report.test.mjs, the PRD runner step in CI)
 import assert from "node:assert/strict"
 import { test } from "node:test"
-import { hourInterruptions, isUnconfirmedStatus, lastCommittedSave, pageStalls, verifyDue, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
+import { PAGE_STALLS_DESCRIPTION, finishPress, hourInterruptions, isUnconfirmedStatus, pressOutcome, producerOf, saveAccounting, startPress, trackedSaveWait, waitOrigin, lastCommittedSave, pageStalls, verifyDue, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, labelVersion, markerReport, pendingReplies, sentSince, splitBy, tableRunsLeft } from "./confirm.ts"
 
 const word = (paras) => JSON.stringify({ body: paras.map((text) => ({ kind: "para", text, runs: [{ len: text.length }] })) })
 const C = "HOURf9vyrC010"
@@ -183,7 +183,7 @@ test("gaps in the page's polling are reported as stalls", () => {
   assert.deepEqual(pageStalls(trail), [{ from: "2026-11-06T09:47:05.000Z", to: "2026-11-06T09:47:45.000Z", gapMs: 40_000 }])
 })
 
-test("hourInterruptions does not count an overlap twice and names the longest stall", () => {
+test("hourInterruptions does not count an overlap twice and names the longest interruption", () => {
   const at = (s) => new Date(Date.UTC(2026, 10, 6, 10, 0, s)).toISOString()
   const stalls = [{ from: at(0), to: at(30), gapMs: 30_000 }, { from: at(40), to: at(55), gapMs: 15_000 }]
   const presses = [{ cycle: 1, firstSeenAt: at(10), pressedAt: at(35), unconfirmedForMs: 25_000, statusAfter: "", reconcile: null }]
@@ -191,11 +191,144 @@ test("hourInterruptions does not count an overlap twice and names the longest st
   assert.equal(r.presses, 1)
   assert.equal(r.interruptedMs, 50_000)
   assert.equal(r.longestStallMs, 35_000)
-  assert.match(r.note, /pressed 1 times, interrupted 50 s in total, longest stall 35 s\. Saving did not recover by itself/)
+  assert.equal(r.pollGaps, 2)
+  assert.match(r.note, /pressed 1 times, interrupted 50 s in total \(page-poll gaps and unconfirmed spells\), longest interruption 35 s; 2 page-poll gap\(s\) of at least 10 s/)
+  assert.match(r.note, /not a measured renderer or input stall\)\. Saving did not recover by itself/)
+  // The note does not claim that the page froze.
+  assert.doesNotMatch(r.note, /longest stall|page stall/)
 })
 
 test("hourInterruptions reports a clean hour as zero, without the warning", () => {
   const r = hourInterruptions([], [])
   assert.deepEqual([r.presses, r.interruptedMs, r.longestStallMs], [0, 0, 0])
-  assert.equal(r.note, "Ověřit výsledek pressed 0 times, interrupted 0 s in total, longest stall 0 s.")
+  assert.equal(r.note, `Ověřit výsledek pressed 0 times, interrupted 0 s in total (page-poll gaps and unconfirmed spells), longest interruption 0 s; 0 page-poll gap(s) of at least 10 s (${PAGE_STALLS_DESCRIPTION}).`)
+})
+
+test("the page-stall description says what was measured and what was not", () => {
+  assert.match(PAGE_STALLS_DESCRIPTION, /craft\/proposals/)
+  assert.match(PAGE_STALLS_DESCRIPTION, /not a measured renderer or input stall/)
+})
+
+// Save accounting: how each save of an hour row happened. The timelines below are what
+// instrument() and the session record: ops in the order they were sent, presses with the
+// trail length at dispatch.
+const at = (s) => new Date(Date.UTC(2026, 10, 7, 10, 0, 0, s * 1000)).toISOString()
+const save = (n, s, version, status = 200) => ({ n, kind: "save", sentAt: at(s), status, version })
+const rec = (n, s) => ({ n, kind: "reconcile", sentAt: at(s), status: 200 })
+const autoWait = (cycle, s, version) => ({ cycle, at: at(s), endedAt: at(s + 1), pressed: false, version, completed: true })
+const accountingOf = (timeline) => saveAccounting({ waits: [], forced: [], ops: [], verifications: [], ...timeline })
+
+/** Runs trackedSaveWait with a fake wait: `script(onPress, ops)` plays the timeline. */
+async function playWait(ops, cycle, script) {
+  const recd = { saveWaits: [], forcedCtrlS: [] }
+  const result = await trackedSaveWait(recd, ops, { cycle, reason: "no autosave within 4 s" }, (onPress) => script(onPress, ops)).then((v) => ({ v }), (e) => ({ e }))
+  return { recd, result }
+}
+
+test("an autosave acknowledged after the 4 s cutoff stays an autosave; Ctrl+S only confirmed it", async () => {
+  // Save 1 is sent at 0.3 s; its reply (v5) lands at 4.5 s, after the harness pressed at 4 s.
+  // The press sends no save: the editor already holds those bytes (#5075).
+  const ops = []
+  const { recd, result } = await playWait(ops, 0, async (onPress) => {
+    ops.push(save(1, 0.3, undefined, undefined))
+    onPress()
+    ops[0].status = 200
+    ops[0].version = "5"
+    return { version: "5" }
+  })
+  assert.equal(result.v, "5")
+  const a = accountingOf({ waits: recd.saveWaits, forced: recd.forcedCtrlS, ops })
+  assert.equal(a.autosaves, 1)
+  assert.equal(a.lateAutosaves, 1)
+  assert.equal(a.forcedCtrlS, 1)
+  assert.equal(a.forcedCtrlSEvents[0].outcome, "confirm-only")
+  assert.equal(a.forcedCtrlSEvents[0].newVersion, true)
+  assert.equal(waitOrigin(recd.saveWaits[0], ops), "late-autosave")
+  assert.match(a.note, /^autosave 1× \(1 acknowledged after a forced press\), forced Ctrl\+S 1× \(1 confirm-only\)/)
+})
+
+test("a save sent after the press is the forced save", async () => {
+  const ops = []
+  const { recd } = await playWait(ops, 3, async (onPress) => {
+    onPress()
+    ops.push(save(1, 4.1, "6"))
+    return { version: "6" }
+  })
+  const a = accountingOf({ waits: recd.saveWaits, forced: recd.forcedCtrlS, ops })
+  assert.deepEqual([a.autosaves, a.forcedCtrlS, a.forcedCtrlSOutcomes["new-save"]], [0, 1, 1])
+  assert.equal(waitOrigin(recd.saveWaits[0], ops), "forced")
+})
+
+test("a repeat save after the press that answers the autosave's version does not take its origin", () => {
+  // #5075: identical bytes answer the existing version; the first save carrying it committed it.
+  const ops = [save(1, 0.3, "7"), save(2, 4.2, "7")]
+  assert.equal(producerOf(ops, "7").n, 1)
+  assert.equal(pressOutcome({ opsAtPress: 1, version: "7", completed: true }, ops), "confirm-only")
+  assert.equal(pressOutcome({ opsAtPress: 1, version: null, completed: true }, ops), "no-version")
+  assert.equal(pressOutcome({ opsAtPress: 1, version: "8", completed: true }, ops), "unattributed")
+})
+
+test("a wait interrupted after the press leaves an explicit incomplete event in the evidence", async () => {
+  const ops = []
+  let seenAtDispatch = -1
+  const recd = { saveWaits: [], forcedCtrlS: [] }
+  const p = trackedSaveWait(recd, ops, { cycle: 4, reason: "no autosave within 4 s" }, async (onPress) => {
+    onPress()
+    seenAtDispatch = recd.forcedCtrlS.length
+    throw new Error("Target page, context or browser has been closed")
+  })
+  await assert.rejects(p, /has been closed/)
+  // The event existed when the key went out, and survives the throw.
+  assert.equal(seenAtDispatch, 1)
+  const [e] = recd.forcedCtrlS
+  assert.equal(e.outcome, "incomplete")
+  assert.notEqual(e.endedAt, null)
+  assert.deepEqual([recd.saveWaits[0].completed, recd.saveWaits[0].pressed], [false, true])
+  const a = accountingOf({ waits: recd.saveWaits, forced: recd.forcedCtrlS, ops })
+  assert.deepEqual([a.forcedCtrlS, a.forcedCtrlSOutcomes.incomplete, a.autosaves], [1, 1, 0])
+})
+
+test("startPress and finishPress keep a table-cell press that saw no newer head as no-version", () => {
+  const forced = []
+  const e = startPress(forced, { cycle: 2, site: "table-cell", reason: "table cell text not in a table cell", opsAtPress: 0, at: at(10) })
+  assert.equal(forced[0].outcome, "incomplete")
+  finishPress(e, [], { version: null, completed: true }, at(21))
+  assert.deepEqual([e.outcome, e.newVersion, e.endedAt], ["no-version", false, at(21)])
+})
+
+test("an automatic reconcile retry during a press wait is reported as cause unknown, not as press-caused", () => {
+  // The editor's own reconcile timer fires at 20 s and 40 s while the harness waits after
+  // a Ctrl+S pressed at 4 s (the wait ends at 64 s); the network trail cannot tell them apart.
+  const forced = [{ cycle: 1, at: at(4), site: "save-wait", reason: "x", opsAtPress: 0, endedAt: at(64), newVersion: false, version: null, outcome: "no-version" }]
+  const ops = [rec(1, 20), rec(2, 40), rec(3, 200)]
+  const a = accountingOf({ forced, ops })
+  assert.deepEqual(a.reconcilesDuringPressWaitOps, [1, 2])
+  assert.deepEqual(a.editorReconcileOps, [3])
+  assert.match(a.note, /automatic reconcile 1×, reconcile during a press wait \(cause unknown\) 2×, Ověřit výsledek 0×\.$/)
+})
+
+test("a press-triggered reconcile sent just after its wait ended is not counted as automatic", () => {
+  // Ověřit výsledek at 30 s, the session stopped waiting at 45 s, the request left at 46 s.
+  const verifications = [{ cycle: 3, firstSeenAt: at(10), pressedAt: at(30), unconfirmedForMs: 20_000, statusAfter: "", reconcile: null, waitEndedAt: at(45) }]
+  const a = accountingOf({ verifications, ops: [rec(1, 46), rec(2, 90)] })
+  assert.deepEqual([a.reconcilesDuringPressWaitOps, a.editorReconcileOps, a.verifyPresses], [[1], [2], 1])
+  // A press recorded without its wait end still gets a window (15 s).
+  const legacy = accountingOf({ verifications: [{ ...verifications[0], waitEndedAt: undefined }], ops: [rec(1, 44), rec(2, 60)] })
+  assert.deepEqual([legacy.reconcilesDuringPressWaitOps, legacy.editorReconcileOps], [[1], [2]])
+})
+
+test("saveAccounting of a clean hour: every save automatic, nothing forced", () => {
+  const ops = [save(1, 1, "2"), save(2, 31, "3")]
+  const a = accountingOf({ waits: [autoWait(0, 1, "2"), autoWait(1, 31, "3")], ops })
+  assert.deepEqual([a.autosaves, a.lateAutosaves, a.forcedCtrlS, a.editorReconciles, a.reconcilesDuringPressWait, a.verifyPresses], [2, 0, 0, 0, 0, 0])
+  assert.equal(a.note, "autosave 2×, forced Ctrl+S 0×, automatic reconcile 0×, Ověřit výsledek 0×.")
+  assert.match(a.description, /not a gate/)
+})
+
+test("hourInterruptions puts the save accounting first in the row's note", () => {
+  const ops = [save(1, 1, "2"), save(2, 35, "3")]
+  const forced = [{ cycle: 1, at: at(34), site: "save-wait", reason: "x", opsAtPress: 1, endedAt: at(36), newVersion: true, version: "3", outcome: "new-save" }]
+  const waits = [autoWait(0, 1, "2"), { cycle: 1, at: at(30), endedAt: at(36), pressed: true, opsAtPress: 1, version: "3", completed: true }]
+  const r = hourInterruptions([], [], accountingOf({ waits, forced, ops }))
+  assert.match(r.note, /^autosave 1×, forced Ctrl\+S 1× \(1 new-save\), automatic reconcile 0×, Ověřit výsledek 0×\. Ověřit výsledek pressed 0 times/)
 })
