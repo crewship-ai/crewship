@@ -137,6 +137,13 @@ Write or other
 admission retirement during bootstrap ends that attempt without automatically
 reopening or acquiring another session.
 
+In the save lifecycle (`lib/mooring/single-editor-save.ts`), read loss is
+terminal: a save or reconcile refused with `read_revoked`, or the host's
+`revokeRead()`, stops the lifecycle with the state `revoked` (never `stopped`,
+which an ordinary close or identity retirement reports) and purges the journal.
+The refusal wins over the write fence, so a write retirement that meets it
+reports no capture, and a pending Ctrl+S or flush rejects with `read_revoked`.
+
 The frame is hidden and inert until the native snapshot/open/snapshot identity
 barrier completes and a fresh lease read verifies the original admission's
 current credential, Page rights and authority epoch. Cancellation, a replaced

@@ -175,7 +175,7 @@ it.each(["write", "read", "close"] as const)("flush rejects %s retirement while 
   r.onSnapshot = () => { if (r.captures === 1) r.controller.edited() }
   r.confirm.mockImplementationOnce(originalConfirm).mockImplementationOnce(async draft => { entered.resolve(); await release.promise; await originalConfirm(draft) })
   const flush = r.controller.flush()
-  const rejected = expect(flush).rejects.toThrow(retirement === "write" ? "write_revoked" : "native_session_retired")
+  const rejected = expect(flush).rejects.toThrow(retirement === "write" ? "write_revoked" : retirement === "read" ? "read_revoked" : "native_session_retired")
   try {
     await entered.promise
     const retired = retirement === "write" ? r.controller.revokeWrite() : retirement === "read" ? r.controller.revokeRead() : r.controller.close()
