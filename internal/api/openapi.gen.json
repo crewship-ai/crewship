@@ -145671,7 +145671,7 @@
             "content": {
               "text/html": {
                 "schema": {
-                  "description": "One self-contained HTML document of the selected immutable version: every screen as a section, absolutely positioned layers, escaped text, embedded raster data: images, prototype links as in-page anchors, no script and no network references. Deterministic per version.",
+                  "description": "One self-contained HTML document of the selected immutable version: every screen as a section, absolutely positioned layers, escaped text, embedded raster data: images, prototype links as in-page anchors, no script and no network references. Apart from the Design's current name in the title and heading, deterministic per version.",
                   "type": "string"
                 }
               }

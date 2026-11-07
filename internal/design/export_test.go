@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"strings"
 	"testing"
@@ -109,23 +110,29 @@ func TestRenderHTMLIsDeterministicAndBounded(t *testing.T) {
 	}
 }
 
-// naiveExportGeometry is the per-node ancestor walk the renderer used before
-// #4745's review: correct, but quadratic on deep parentId chains.
-func naiveExportGeometry(nodes []*exportNode, byID map[string]*exportNode) map[string]exportPlacement {
+// playerGeometry ports the prototype player's geometry: position() in
+// design-prototype-player.tsx (recursive, a revisited node returns its own
+// offset) and designScreenOf() in design-document.ts. It is quadratic on deep
+// chains, which is why the renderer does not use it.
+func playerGeometry(nodes []*exportNode, byID map[string]*exportNode) map[string]exportPlacement {
+	var position func(node *exportNode, seen map[string]bool) (float64, float64)
+	position = func(node *exportNode, seen map[string]bool) (float64, float64) {
+		if seen[node.ID] {
+			return node.X, node.Y
+		}
+		seen[node.ID] = true
+		var ox, oy float64
+		if parent := byID[node.ParentID]; node.ParentID != "" && parent != nil {
+			ox, oy = position(parent, seen)
+		}
+		return ox + node.X, oy + node.Y
+	}
 	out := map[string]exportPlacement{}
 	for _, node := range nodes {
 		var at exportPlacement
+		at.x, at.y = position(node, map[string]bool{})
 		seen := map[string]bool{}
-		for current := node; current != nil && !seen[current.ID]; current = byID[current.ParentID] {
-			seen[current.ID] = true
-			at.x += current.X
-			at.y += current.Y
-			if current.ParentID == "" {
-				break
-			}
-		}
-		seen = map[string]bool{}
-		for current := node; current != nil && !seen[current.ID]; current = byID[current.ParentID] {
+		for current := node; current != nil && !seen[current.ID]; {
 			if current.Type == "frame" {
 				at.screen = current.ID
 				break
@@ -134,15 +141,28 @@ func naiveExportGeometry(nodes []*exportNode, byID map[string]*exportNode) map[s
 			if current.ParentID == "" {
 				break
 			}
+			current = byID[current.ParentID]
 		}
 		out[node.ID] = at
 	}
 	return out
 }
 
-// The linear geometry must place every layer exactly where the ancestor walk
-// did, including missing parents and parentId cycles with and without frames.
-func TestExportGeometryMatchesAncestorWalk(t *testing.T) {
+func reachesCycle(node *exportNode, byID map[string]*exportNode) bool {
+	seen := map[string]bool{}
+	for current := node; current != nil && current.ParentID != ""; current = byID[current.ParentID] {
+		if seen[current.ID] {
+			return true
+		}
+		seen[current.ID] = true
+	}
+	return false
+}
+
+// The linear geometry must place every layer exactly where the prototype
+// player does, including missing parents and parentId cycles with and
+// without frames, and with fractional offsets outside cycles.
+func TestExportGeometryMatchesPrototypePlayer(t *testing.T) {
 	random := rand.New(rand.NewSource(4745))
 	types := []string{"frame", "rect", "text", "image"}
 	for round := 0; round < 400; round++ {
@@ -150,7 +170,7 @@ func TestExportGeometryMatchesAncestorWalk(t *testing.T) {
 		nodes := make([]*exportNode, count)
 		byID := map[string]*exportNode{}
 		for i := range nodes {
-			nodes[i] = &exportNode{ID: fmt.Sprint("n", i), Type: types[random.Intn(len(types))], X: float64(random.Intn(50)), Y: float64(random.Intn(50))}
+			nodes[i] = &exportNode{ID: fmt.Sprint("n", i), Type: types[random.Intn(len(types))], X: float64(random.Intn(50)) / 10, Y: float64(random.Intn(50)) / 10}
 			byID[nodes[i].ID] = nodes[i]
 		}
 		for _, node := range nodes {
@@ -163,11 +183,41 @@ func TestExportGeometryMatchesAncestorWalk(t *testing.T) {
 			}
 		}
 		random.Shuffle(len(nodes), func(i, j int) { nodes[i], nodes[j] = nodes[j], nodes[i] })
-		want, got := naiveExportGeometry(nodes, byID), exportGeometry(nodes, byID)
+		want, got := playerGeometry(nodes, byID), exportGeometry(nodes, byID)
 		for _, node := range nodes {
-			if want[node.ID] != got[node.ID] {
-				t.Fatalf("round %d node %s: got %+v, want %+v", round, node.ID, got[node.ID], want[node.ID])
+			w, g := want[node.ID], got[node.ID]
+			if w == g {
+				continue
 			}
+			// Above a cycle the sum is regrouped (the cycle total is shared), so
+			// only rounding may differ there; everywhere else it is exact.
+			if !reachesCycle(node, byID) || w.screen != g.screen || math.Abs(w.x-g.x) > 1e-9 || math.Abs(w.y-g.y) > 1e-9 {
+				t.Fatalf("round %d node %s: got %+v, want %+v", round, node.ID, g, w)
+			}
+		}
+	}
+}
+
+// A frame inside a parentId cycle (the engine accepts one) is placed as the
+// player places it: F=100 and R=20 make F 220 and R 140, so R is drawn at -80.
+func TestExportGeometryCycleWithFrameMatchesPlayer(t *testing.T) {
+	f := &exportNode{ID: "F", Type: "frame", ParentID: "R", X: 100}
+	r := &exportNode{ID: "R", Type: "rect", ParentID: "F", X: 20}
+	byID := map[string]*exportNode{"F": f, "R": r}
+	got := exportGeometry([]*exportNode{f, r}, byID)
+	if got["F"] != (exportPlacement{x: 220, screen: "F"}) || got["R"] != (exportPlacement{x: 140, screen: "F"}) {
+		t.Fatalf("cycle geometry %+v", got)
+	}
+	// Fractional offsets add up in the player's order (parent first).
+	a := &exportNode{ID: "a", Type: "frame", X: 0.3}
+	b := &exportNode{ID: "b", Type: "rect", ParentID: "a", X: 0.2}
+	c := &exportNode{ID: "c", Type: "rect", ParentID: "b", X: 0.1}
+	nodes := []*exportNode{c, b, a}
+	byID = map[string]*exportNode{"a": a, "b": b, "c": c}
+	want, have := playerGeometry(nodes, byID), exportGeometry(nodes, byID)
+	for _, node := range nodes {
+		if want[node.ID] != have[node.ID] {
+			t.Fatalf("%s: got %+v, want %+v", node.ID, have[node.ID], want[node.ID])
 		}
 	}
 }

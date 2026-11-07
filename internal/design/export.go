@@ -142,11 +142,11 @@ type exportPlacement struct {
 }
 
 // exportGeometry resolves every node's absolute position (its own offset plus
-// every distinct ancestor's, following parentId) and its nearest screen (the
-// node itself when it is a frame, else its nearest frame ancestor), exactly
-// as the prototype player does, in time linear in the number of nodes. Each
-// walk stops at a resolved node, a missing parent or a cycle; every node in a
-// parentId cycle gets the sum of the cycle and the cycle's next frame.
+// its ancestors', following parentId, added in the player's order) and its
+// nearest screen (the node itself when it is a frame, else its nearest frame
+// ancestor), as the prototype player does (design-prototype-player.tsx
+// position, design-document.ts designScreenOf), in time linear in the number
+// of nodes. Each walk stops at a resolved node, a missing parent or a cycle.
 func exportGeometry(nodes []*exportNode, byID map[string]*exportNode) map[string]exportPlacement {
 	placed := make(map[string]exportPlacement, len(nodes))
 	for _, start := range nodes {
@@ -177,23 +177,30 @@ func exportGeometry(nodes []*exportNode, byID map[string]*exportNode) map[string
 		}
 		end := len(path)
 		if cycleAt >= 0 {
-			// Every member of the cycle sums the whole cycle once. Its screen is
-			// the first frame met walking up from that member, if any.
+			// The prototype player stops a parentId cycle where it meets a node
+			// a second time and counts that node's own offset again, so a cycle
+			// member sits at the sum of the whole cycle plus its own offset. Its
+			// screen is the first frame met walking up from it (one backward
+			// lap around the cycle, twice, finds it for every member). Sharing
+			// the cycle total keeps this linear; positions in and above a cycle
+			// may differ from the player's by floating-point rounding only.
 			cycle := path[cycleAt:]
 			var sx, sy float64
 			for _, node := range cycle {
 				sx += node.X
 				sy += node.Y
 			}
-			for i, node := range cycle {
-				screen := ""
-				for k := range cycle {
-					if candidate := cycle[(i+k)%len(cycle)]; candidate.Type == "frame" {
-						screen = candidate.ID
-						break
-					}
+			screens := make([]string, len(cycle))
+			next := ""
+			for k := 2*len(cycle) - 1; k >= 0; k-- {
+				i := k % len(cycle)
+				if cycle[i].Type == "frame" {
+					next = cycle[i].ID
 				}
-				placed[node.ID] = exportPlacement{x: sx, y: sy, screen: screen}
+				screens[i] = next
+			}
+			for i, node := range cycle {
+				placed[node.ID] = exportPlacement{x: sx + node.X, y: sy + node.Y, screen: screens[i]}
 			}
 			end = cycleAt
 			base = placed[path[cycleAt].ID]
