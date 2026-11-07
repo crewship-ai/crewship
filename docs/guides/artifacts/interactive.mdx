@@ -28,6 +28,7 @@ Interactive artifacts are off by default. All of the following must be on:
 | `CREWSHIP_PAGE_RUNTIME_ORIGIN` | Server setting | The separate application domain the scripts run on, the same one [Page applications](/guides/pages-apps-operations) use. |
 | `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` | Web build variable | The Artifacts library at `/artifacts`, where you open the artifact. |
 | `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true` | Web build variable | Project previews in the library. |
+| `NEXT_PUBLIC_ARTIFACT_DASHBOARDS=true` | Web build variable | Dashboard views in the library. An interactive Project contains `dashboard.json`, so the library lists it as a Dashboard; without this variable it shows no viewer, only the link to open it in Pages, where it is a static preview. |
 
 A workspace owner or admin turns on the flags with
 `crewship feature-flag enable artifact_projects`,
@@ -161,8 +162,12 @@ same rules as for [Dashboard data](/guides/artifacts/dashboard#who-sees-which-da
 | Person | Version shown | Read data | Write data |
 |---|---|---|---|
 | Owner | Latest | Yes | Yes |
-| Someone with edit access | Latest | Yes | No: the server accepts data writes from the owner only today |
+| Someone with edit access | Latest | Yes | Yes, at the latest version only |
 | Someone with read or comment access | Shared version | Yes, collections of the shared version | No |
+
+Interactive data is not stricter than Dashboard data: an editor's script can
+change the shared collections just as the editor can from the CLI. Give edit
+access only to people you trust to change that data.
 
 When the viewer has no edit access, or is looking at an older version, the
 browser refuses `crewship.data.batch` itself with `forbidden` before anything

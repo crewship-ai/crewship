@@ -1,6 +1,6 @@
 import { apiFetch } from "@/lib/api-fetch"
 import type {
-  ArtifactComment, ArtifactCommentReply, ArtifactCommentStatus, ArtifactErrorCode, ArtifactFile, ArtifactManifest,
+  ArtifactComment, ArtifactCommentReply, ArtifactCommentStatus, ArtifactErrorCode, ArtifactFile, ArtifactInteractiveRuntime, ArtifactManifest,
   ArtifactProjectSnapshot, ArtifactQuota, ArtifactVersionInfo, CreateArtifactCommentBody,
 } from "./types"
 
@@ -135,6 +135,12 @@ function parseQuota(raw: unknown): ArtifactQuota | undefined {
   return { used_bytes: raw.used_bytes, limit_bytes: raw.limit_bytes, warning: raw.warning, ...(str(raw.retention) ? { retention: raw.retention } : {}) }
 }
 
+/** The runtime the server advertises for an interactive Project; anything not in that exact shape is dropped. */
+function parseInteractive(raw: unknown): ArtifactInteractiveRuntime | undefined {
+  if (!object(raw) || !str(raw.runtime_url) || typeof raw.development_same_origin !== "boolean" || !Array.isArray(raw.collections) || !raw.collections.every(str)) return undefined
+  return { runtime_url: raw.runtime_url, development_same_origin: raw.development_same_origin, collections: [...raw.collections] }
+}
+
 /** Validates the required fields and drops any optional one with the wrong type, so the UI never renders a guess. */
 export function parseArtifactProject(raw: unknown): ArtifactProjectSnapshot | null {
   if (!object(raw) || !str(raw.page_id) || !raw.page_id || typeof raw.can_write !== "boolean" || !int(raw.latest_version) || !int(raw.shared_version)) return null
@@ -142,9 +148,11 @@ export function parseArtifactProject(raw: unknown): ArtifactProjectSnapshot | nu
   if (!manifest) return null
   const origin = raw.origin === null ? null : object(raw.origin) && str(raw.origin.chat_id) && str(raw.origin.agent_id) ? { chat_id: raw.origin.chat_id, agent_id: raw.origin.agent_id } : undefined
   const quota = parseQuota(raw.quota)
+  const interactive = parseInteractive(raw.interactive)
   return {
     page_id: raw.page_id,
     ...(raw.artifact_kind === "slides" ? { artifact_kind: "slides" as const } : {}),
+    ...(interactive ? { interactive } : {}),
     ...(str(raw.name) && raw.name.trim() ? { name: raw.name } : {}),
     ...(str(raw.slug) && raw.slug ? { slug: raw.slug } : {}),
     ...(origin !== undefined ? { origin } : {}),
