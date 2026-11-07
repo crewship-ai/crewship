@@ -302,7 +302,8 @@ The only explicit publication path is the experimental workbook share
 it names editors as owner-issued user `write` grants. Workbook contents remain
 limited to the owner, those editors, and the audited workspace OWNER. Generic
 write grants are refused on a workbook Page, and a write grant not issued by
-its current owner is inert. Deleting, renaming, rolling back, moving into or out
+its current owner is inert; one that custody moved away from its issuer stays
+ended if custody returns. Deleting, renaming, rolling back, moving into or out
 of a folder and reading spec versions of a workbook Page remain owner-only,
 because workbooks have no backup; deleting also needs a current human
 credential. A workbook is a human-only private output for departure and
@@ -472,7 +473,8 @@ is offered.
 **The invariant that makes this safe: an agent's authority is a subset of the authorising human's,
 never a superset.** A grant to an agent is evaluated against the granting human's own rights at
 use time, not at grant time — if that human loses access to a crew, every agent grant they issued
-narrows with them. Without this rule, "grant my agent access" is a privilege-escalation primitive.
+narrows with them, and a grant whose issuer lost standing does not return with it.
+Without this rule, "grant my agent access" is a privilege-escalation primitive.
 
 **Agent identity comes from the token, never from the request body.** The sidecar already
 overwrites caller-supplied identity fields with the token-derived one
@@ -488,7 +490,8 @@ and page owner/ADMIN/OWNER authority under the writer fence. A journal failure,
 ignored insert, altered final grant or failed commit rolls back the mutation;
 notifications follow the successful commit. Existing Page events retain their
 actor, subject, level and panel fields and add `previous_grant` / `grant` stored
-row snapshots (`null` at creation/removal respectively). These snapshots remain
+row snapshots (`null` at creation/removal respectively; a snapshot of a retired
+grant adds `retired_at`). These snapshots remain
 canonical audit data: the common GET/SSE/WS serializer omits only these two new
 keys, preserves the previous public event fields and never rewrites the stored
 payload. Reissuing still records
@@ -918,11 +921,12 @@ page_public_tokens(id, page_id, token_hash, password_hash NULL, expires_at NOT N
   -- expires_at NOT NULL: every public link expires (rule 4)
 
 page_grants(page_id, subject_type, subject_id, level, panel_ids NULL,
-            granted_by_user_id, granted_at)
+            granted_by_user_id, granted_at, retired_at NULL)
   PRIMARY KEY(page_id, subject_type, subject_id, level)
   -- subject_type ∈ {user, crew, agent};  level ∈ {read, produce, write}
   -- panel_ids: JSON array, only meaningful for level = produce (NULL = all panels)
   -- granted_by_user_id is NOT NULL: only a human issues a grant (§7.1b rule 1)
+  -- retired_at: the issuer lost standing; cleared only by issuing the grant again
 ```
 
 JSON-in-TEXT is the house style (`migrate_consts_v109_member_capabilities.go:22-24`), and size
@@ -1403,6 +1407,8 @@ are not required to build, test or use the product.
 
 
 A Page grant issuer must also have an active trusted account and no restricted membership anywhere. Every non-NULL suspension value, including an empty string, makes its Page shares inactive at use time. Existing membership/ownership/crew conditions remain required; the administrative grants list preserves inactive metadata and explains account unavailability.
+
+A grant ends when its issuer loses the authority needed to issue it. Restoring the role does not revive the old grant; a new grant is a new operation (#5069). Retirement is recorded in `page_grants.retired_at` in the transaction of the change that removed the standing, whether that is a role, membership, access mode, suspension, crew membership or Page ownership change, so no read is needed between a loss and a return. Standing is one definition, the view `page_grant_verdicts`, read by both the authorization path and the retirement triggers. A change that keeps standing, such as ADMIN to OWNER, or a demotion of a Page owner who keeps the Page, retires nothing. A retired grant stays in the grants list, inactive, and revoke removes it; issuing it again clears the marker and journals like any other grant. Comment grants and workbook editor grants are Page grants and follow the same rule. Folder ACLs do not: `set_by_user_id` is audit, not authority. Retirement also closes the editor sessions of a workbook grant in the same transaction, so a reissue cannot revive a session opened on the old grant. A restore keeps the marker, and the target remembers each retired issuance in `page_grant_retired_issuances`, which survives revoke and reissue and is excluded from backups: a replacing restore of an earlier bundle does not bring back an issuance retired on that target, while a new issuance is unaffected: its `granted_at` is moved to the first second no retired issuance of that page, subject, level and issuer holds. Every imported grant is judged on arrival against the target's standing, whether or not the bundle carries memberships; an issuer unknown on the target retires it. Erasure and deletion of a person remove what names them.
 
 
 ### Folder membership event privacy

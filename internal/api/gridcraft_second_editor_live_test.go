@@ -2,12 +2,14 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/appengine"
+	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
 
@@ -205,4 +207,143 @@ func TestGridCraftWriterToAuditorOwnerChangeClosesOnlyAffectedEditor(t *testing.
 	wantCode(t, f.do(ann, "GET", first+q, ""), 200, "auditor retains read")
 	wantCode(t, f.do(ann, "POST", first+"/sessions"+q, `{"session_id":"`+affected.SessionID+`"}`), 404, "auditor cannot reuse editor ticket")
 	wantCode(t, f.do(ann, "POST", second+"/sessions"+q, `{"session_id":"`+unaffected.SessionID+`"}`), 200, "unrelated editor stays live")
+}
+
+// A workbook ticket is opened on a grant, so it ends with that grant (#5069).
+// Nothing reads or subscribes between the steps, so only the transaction that
+// retires the grant can close the ticket; reissuing must not bring it back.
+func TestGridCraftTicketDoesNotReturnWithAReissuedGrant(t *testing.T) {
+	for _, test := range []struct {
+		name  string
+		cycle []string
+	}{
+		{name: "owner suspended and reactivated", cycle: []string{
+			`UPDATE users SET suspended_at='2026-11-06T10:00:00Z' WHERE id='ann'`,
+			`UPDATE users SET suspended_at=NULL WHERE id='ann'`,
+		}},
+		{name: "custody away and back", cycle: []string{
+			`UPDATE pages SET owner_user_id='bob' WHERE id='live-shared'`,
+			`UPDATE pages SET owner_user_id='ann' WHERE id='live-shared'`,
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			f := gridcraftInstanceFixture(t)
+			f.r.RegisterGridCraft(appengine.Options{Enabled: true, Editor: true}, gridcraftCellsEngine{})
+			setGridCraftEditorFlag(t, f, "ws-old", true)
+			seedInstanceUser(t, f.db, "ann", "ann@ex.com", "ws-old", "MEMBER")
+			seedInstanceUser(t, f.db, "bob", "bob@ex.com", "ws-old", "MEMBER")
+			ann := mintTokenFor(t, f.db, "ann", "workbookann000000000000000")
+			bob := mintTokenFor(t, f.db, "bob", "workbookbob000000000000000")
+			q := "?workspace_id=ws-old"
+			base := liveWorkbook(t, f, ann, "ann", "live-shared")
+			wantCode(t, f.do(ann, "POST", base+"/editors"+q, `{"editor":"bob@ex.com","publish":true}`), 200, "share")
+			editor := openEditorSession(t, f, bob, base)
+			mine := openEditorSession(t, f, ann, base)
+
+			for _, step := range test.cycle {
+				mustExec(t, f.db, step)
+			}
+			var closed int
+			if err := f.db.QueryRow(`SELECT count(*) FROM gridcraft_sessions WHERE session_id=? AND closed_at IS NOT NULL`, editor.SessionID).Scan(&closed); err != nil || closed != 1 {
+				t.Fatalf("retirement left the editor's ticket open: %d %v", closed, err)
+			}
+			wantCode(t, f.do(ann, "POST", base+"/editors"+q, `{"editor":"bob@ex.com"}`), 200, "same owner shares again")
+			wantError(t, f.do(bob, "POST", base+"/sessions"+q, `{"session_id":"`+editor.SessionID+`"}`), 409, "editor_session_expired", "old ticket after reissue")
+			wantCode(t, f.do(bob, "POST", base+"/edits"+q, cellEdit(editor.SessionID, 1, 1, "D4", "old-ticket")), 409, "old ticket cannot edit")
+			if fresh := openEditorSession(t, f, bob, base); fresh.SessionID == editor.SessionID {
+				t.Fatal("the new grant did not open a new ticket")
+			}
+			var ownerClosed int
+			if err := f.db.QueryRow(`SELECT count(*) FROM gridcraft_sessions WHERE session_id=? AND closed_at IS NOT NULL`, mine.SessionID).Scan(&ownerClosed); err != nil || ownerClosed != 0 {
+				t.Fatalf("the owner's own ticket holds no grant, closed=%d %v", ownerClosed, err)
+			}
+		})
+	}
+}
+
+// issueWithinOneSecond runs loss and reissue inside one wall-clock second, the
+// only window in which a new issuance could take the old one's granted_at. It
+// starts on a fresh second and retries if a slow step crossed into the next.
+func issueWithinOneSecond(t *testing.T, issue func(), lose func(), reissue func()) {
+	t.Helper()
+	for attempt := 0; attempt < 5; attempt++ {
+		time.Sleep(time.Until(time.Now().Truncate(time.Second).Add(time.Second + 5*time.Millisecond)))
+		start := time.Now().Unix()
+		issue()
+		lose()
+		reissue()
+		if time.Now().Unix() == start {
+			return
+		}
+	}
+	t.Log("the host never finished the three steps inside one second; the assertions below still hold")
+}
+
+// Retirement and a same-owner reissue in one second with the real clock: the
+// new grant is a new operation and an unrelated backup must not retire it.
+func TestPageGrantReissuedInTheSameSecondSurvivesRestore(t *testing.T) {
+	f := gridcraftInstanceFixture(t)
+	seedInstanceUser(t, f.db, "bob", "bob@ex.com", "ws-old", "MEMBER")
+	wmSeedPage(t, f.db, "ws-old", "same-second", "same-second", "Page", "boss", "")
+	q := "?workspace_id=ws-old"
+	grants := "/api/v1/pages/same-second/grants" + q
+	body := `{"subject_type":"user","subject":"bob@ex.com","level":"read"}`
+	var old string
+	issueWithinOneSecond(t, func() {
+		mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='same-second'`)
+		wantCode(t, f.do(f.wsAdmin, "PUT", grants, body), 200, "issue")
+		if err := f.db.QueryRow(`SELECT granted_at FROM page_grants WHERE page_id='same-second'`).Scan(&old); err != nil {
+			t.Fatal(err)
+		}
+	}, func() {
+		mustExec(t, f.db, `UPDATE workspace_members SET role='VIEWER' WHERE workspace_id='ws-old' AND user_id='wsadmin'`)
+		mustExec(t, f.db, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id='ws-old' AND user_id='wsadmin'`)
+	}, func() {
+		wantCode(t, f.do(f.wsAdmin, "PUT", grants, body), 200, "reissue")
+	})
+	var issued string
+	if err := f.db.QueryRow(`SELECT granted_at FROM page_grants WHERE page_id='same-second' AND retired_at IS NULL`).Scan(&issued); err != nil {
+		t.Fatal(err)
+	}
+	if issued == old {
+		t.Errorf("the new issuance took the retired one's granted_at %s", issued)
+	}
+	dump, err := backup.DumpWorkspace(t.Context(), f.db, "ws-old")
+	if err != nil {
+		t.Fatal(err)
+	}
+	slug := dump.Tables["workspaces"][0]["slug"].(string)
+	if _, err := backup.RestoreDumpTxHooks(t.Context(), f.db, dump, &backup.RestoreDumpHooks{PreInsert: func(ctx context.Context, tx *sql.Tx) error {
+		_, err := backup.ReplaceWorkspaceContents(ctx, tx, "ws-old", slug)
+		return err
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	var live int
+	if err := f.db.QueryRow(`SELECT count(*) FROM page_grants WHERE page_id='same-second' AND retired_at IS NULL`).Scan(&live); err != nil || live != 1 {
+		t.Fatalf("a replacing restore retired a new issuance that never lost standing: live=%d %v", live, err)
+	}
+}
+
+// The workbook write path shares the rule: a same-second reissue is not the
+// issuance the tombstone remembers.
+func TestWorkbookShareInTheSameSecondIsANewIssuance(t *testing.T) {
+	f := gridcraftInstanceFixture(t)
+	f.r.RegisterGridCraft(appengine.Options{Enabled: true, Editor: true}, gridcraftCellsEngine{})
+	seedInstanceUser(t, f.db, "ann", "ann@ex.com", "ws-old", "MEMBER")
+	seedInstanceUser(t, f.db, "bob", "bob@ex.com", "ws-old", "MEMBER")
+	ann := mintTokenFor(t, f.db, "ann", "workbookann000000000000000")
+	base := liveWorkbook(t, f, ann, "ann", "same-second-book")
+	q := "?workspace_id=ws-old"
+	wantCode(t, f.do(ann, "POST", base+"/editors"+q, `{"editor":"bob@ex.com","publish":true}`), 200, "publish")
+	cycle := func() {
+		mustExec(t, f.db, `UPDATE users SET suspended_at='2026-11-06T10:00:00Z' WHERE id='ann'`)
+		mustExec(t, f.db, `UPDATE users SET suspended_at=NULL WHERE id='ann'`)
+	}
+	share := func() { wantCode(t, f.do(ann, "POST", base+"/editors"+q, `{"editor":"bob@ex.com"}`), 200, "share") }
+	issueWithinOneSecond(t, share, cycle, share)
+	var matched int
+	if err := f.db.QueryRow(`SELECT count(*) FROM page_grants g JOIN page_grant_retired_issuances t ON t.page_id=g.page_id AND t.subject_type=g.subject_type AND t.subject_id=g.subject_id AND t.level=g.level AND t.granted_by_user_id=g.granted_by_user_id AND t.granted_at=g.granted_at WHERE g.page_id='same-second-book'`).Scan(&matched); err != nil || matched != 0 {
+		t.Fatalf("the new grant carries a retired issuance's identity: %d %v", matched, err)
+	}
 }

@@ -237,6 +237,8 @@ func TestMigratePages_TablesAndColumns(t *testing.T) {
 				// §7.1b rule 1: only a human issues a grant.
 				{name: "granted_by_user_id", notNull: true},
 				{name: "granted_at", notNull: true},
+				// #5069: set when the issuer loses standing, cleared only by issuing again.
+				{name: "retired_at"},
 			},
 		},
 		{

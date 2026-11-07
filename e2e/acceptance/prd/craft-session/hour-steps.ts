@@ -9,8 +9,9 @@ import * as N from "../outage-lostack/native"
 import { holdsAll, inspectDrafts, newTyping, offerEvidence, placeCaret, saveByAutosaveOrKey, typedMarkers, typeLines, type DraftOffer } from "./draft"
 import { checkDraftCopies, checkLines, holdsAnyLine, lineLedger, type LineCheck } from "./lines"
 import { present, sha256, wordFacts } from "./facts"
-import { auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, pendingReplies, sentSince, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
+import { VERIFY_AFTER_MS, isUnconfirmedStatus, verifyDue, type VerifyPress, auditStep, baselineBefore, cellInTable, confirmCycle, describeAudit, holdsMarker, markerReport, pendingReplies, sentSince, tableRunsLeft, type CycleConfirmation, type MarkerReport } from "./confirm"
 import type { RestartRecord } from "./restart"
+import { restartNote } from "./restart-outcome"
 
 export type SessionKind = "wordcraft" | "gridcraft"
 
@@ -24,8 +25,8 @@ export interface SessionInput {
   trail: CraftCall[]
   /** What the person did and when (filled while the session runs, so a failed run still shows it). */
   steps: Array<{ atMs: number; step: string }>
-  /** The per-cycle evidence chain and the checkpoints (filled while the session runs, so a failed run still shows them). */
-  evidence: { chain: CycleChain[]; checkpoints: Checkpoint[] }
+  /** The per-cycle evidence chain, the checkpoints, every "Ověřit výsledek" press and the restart (filled while the session runs, so a failed run still shows them). */
+  evidence: { chain: CycleChain[]; checkpoints: Checkpoint[]; verifications: VerifyPress[]; restart: RestartRecord | null }
   minutes: number
   restart(why: string): Promise<RestartRecord>
 }
@@ -208,6 +209,30 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     lastHead = head
     return confirmCycle({ typed, baseline, label, head })
   }
+  // A stalled renderer leaves "Výsledek nepotvrzen" and the editor then sends nothing. Do
+  // what a person does once it stays past the deadline, and keep the record. It never
+  // counts as a save: confirmTyped below reads the server.
+  const verifyIfUnconfirmed = async (cycle: number): Promise<boolean> => {
+    let since: number | undefined
+    for (const end = Date.now() + VERIFY_AFTER_MS + 5_000; Date.now() < end; ) {
+      const status = await N.status(page)
+      if (!isUnconfirmedStatus(status)) return false
+      since ??= Date.now()
+      if (verifyDue(status, since, Date.now())) {
+        const pressedAt = new Date().toISOString()
+        const opsAt = ops.length
+        await page.getByRole("button", { name: "Ověřit výsledek", exact: true }).click()
+        for (const limit = Date.now() + 15_000; isUnconfirmedStatus(await N.status(page)) && Date.now() < limit; ) await N.pause(250)
+        const reconcile = ops.slice(opsAt).find((o) => o.kind === "reconcile")
+        const statusAfter = (await N.status(page)).slice(0, 60)
+        input.evidence.verifications.push({ cycle, firstSeenAt: new Date(since).toISOString(), pressedAt, unconfirmedForMs: Date.now() - since, statusAfter, reconcile: reconcile ? { status: reconcile.status, version: reconcile.version, failed: reconcile.failed } : null })
+        note(`cycle ${cycle}: pressed Ověřit výsledek after ${Date.now() - since} ms: ${statusAfter}`)
+        return true
+      }
+      await N.pause(500)
+    }
+    return false
+  }
   await N.openEditor(page, ref)
   let f = await N.acquire(page, d.app)
   note("editor open, editing")
@@ -256,7 +281,9 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     // The editor saves by itself 300 ms after the last keystroke. Take that
     // save when it comes; press Ctrl+S only when it does not (Ctrl+S always
     // sends, so after an autosave it would store identical bytes again).
-    const label = await saveByAutosaveOrKey(page, baseline)
+    await verifyIfUnconfirmed(n)
+    let label = await saveByAutosaveOrKey(page, baseline)
+    if (await verifyIfUnconfirmed(n)) label = (await saveByAutosaveOrKey(page, newer(baseline, label))) ?? label
     // The server is the judge, also when the label moved (#4871).
     const c = await confirmTyped(typed, baseline, label)
     lastVersion = newer(newer(baseline, label), c.version)
@@ -316,6 +343,8 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
   if (progress.accepted.length === 0) failures.push(`no line was typed before the restart; typing progress: ${JSON.stringify(progress)}`)
   note("restart")
   restart = await input.restart(`half time of the ${minutes}-minute session`)
+  input.evidence.restart = restart
+  note(restartNote(restart))
   note("server back")
   const typedLines = await typing
   // Every line the editor took (also during the restart) must survive, saved or in the draft.

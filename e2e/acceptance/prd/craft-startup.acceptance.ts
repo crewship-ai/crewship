@@ -29,17 +29,20 @@ function watchFrame(page: Page) {
   const samples: Array<{ at: number; visible: boolean; present: boolean }> = []
   const started = Date.now()
   let running = true
+  const sample = async () => {
+    const state = await page
+      .evaluate(() => {
+        const frame = document.querySelector("iframe")
+        if (!frame) return { present: false, visible: false }
+        const style = getComputedStyle(frame)
+        return { present: true, visible: style.visibility !== "hidden" && !frame.hasAttribute("inert") }
+      })
+      .catch(() => ({ present: false, visible: false }))
+    samples.push({ at: Date.now() - started, ...state })
+  }
   const loop = (async () => {
     while (running) {
-      const state = await page
-        .evaluate(() => {
-          const frame = document.querySelector("iframe")
-          if (!frame) return { present: false, visible: false }
-          const style = getComputedStyle(frame)
-          return { present: true, visible: style.visibility !== "hidden" && !frame.hasAttribute("inert") }
-        })
-        .catch(() => ({ present: false, visible: false }))
-      samples.push({ at: Date.now() - started, ...state })
+      await sample()
       await pause(100)
     }
   })()
@@ -49,6 +52,9 @@ function watchFrame(page: Page) {
     stop: async () => {
       running = false
       await loop
+      // The take button enables in the same step that reveals the frame, so the last
+      // periodic sample can predate the reveal. Look once more before judging.
+      await sample()
     },
   }
 }

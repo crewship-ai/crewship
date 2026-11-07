@@ -90,7 +90,7 @@ func (h *PageHandler) workbookHumanAccess(ctx context.Context, workspace, pageID
 	}
 	if _, err := h.liveContentHumanRole(ctx, workspace, rec.OwnerUserID); err == nil {
 		var editor bool
-		if h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM page_grants WHERE page_id=? AND subject_type='user' AND subject_id=? AND level='write' AND granted_by_user_id=?)`, rec.ID, userID, rec.OwnerUserID).Scan(&editor) == nil && editor {
+		if h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM page_grants WHERE page_id=? AND subject_type='user' AND subject_id=? AND level='write' AND granted_by_user_id=? AND retired_at IS NULL)`, rec.ID, userID, rec.OwnerUserID).Scan(&editor) == nil && editor {
 			return rec, workbookEditor, nil
 		}
 	}

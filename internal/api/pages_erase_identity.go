@@ -197,6 +197,14 @@ func (h *AdminGDPRHandler) erasePagesIdentity(ctx context.Context, actionID, act
 	}
 	out.GrantsRemoved = int(n)
 	out.revoked = append(out.revoked, grants...)
+	// The memory of a retired issuance names the same two people, and it lives
+	// outside page_grants so that revoke and restore cannot reach it.
+	if _, err = tx.ExecContext(ctx, `
+		DELETE FROM page_grant_retired_issuances
+		 WHERE workspace_id = ? AND (granted_by_user_id = ? OR (subject_type = 'user' AND subject_id = ?))`,
+		wsID, targetID, targetID); err != nil {
+		return pageIdentityErasure{}, fmt.Errorf("remove retired page grant issuances: %w", err)
+	}
 
 	// 3) page_public_tokens — revoke by removal. Every live /p/{token} link
 	// the subject published stops resolving at once.

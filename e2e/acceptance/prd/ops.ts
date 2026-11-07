@@ -11,6 +11,7 @@
 //                         in this folder answers it from the operator's shell.
 //   PRD_RESTART_NOTE_FILE optional file; one line (time, reason) is appended
 //                         before every restart
+import { restartOutcome } from "./craft-session/restart-outcome"
 import { execFileSync } from "node:child_process"
 import * as fs from "node:fs"
 import * as os from "node:os"
@@ -62,7 +63,13 @@ export async function restartServer(origin: string, reason: string): Promise<{ c
   const cmd = restartCommand()
   const handshake = restartHandshake()
   if (!cmd && !handshake) throw new Error("PRD_RESTART_COMMAND or PRD_RESTART_HANDSHAKE is not set")
-  const uptimeBefore = await uptimeSeconds(origin)
+  // Taken before the command: without it no later measurement proves a new process.
+  let uptimeBefore: number | null = null
+  for (let i = 0; i < 6 && uptimeBefore === null; i++) {
+    if (i) await pause(5_000)
+    uptimeBefore = await uptimeSeconds(origin)
+  }
+  if (uptimeBefore === null) throw new Error("environment: no /healthz uptime before the restart, so no restart was attempted and it proves nothing")
   const label = cmd ? cmd.join(" ") : `handshake ${handshake}`
   const note = process.env.PRD_RESTART_NOTE_FILE?.trim()
   if (note) fs.appendFileSync(note, `- ${new Date().toISOString()} restart (${label}): ${reason}\n`)
@@ -91,7 +98,7 @@ export async function restartServer(origin: string, reason: string): Promise<{ c
   const deadline = Date.now() + 3 * 60_000
   for (;;) {
     const up = await uptimeSeconds(origin)
-    if (up !== null && (uptimeBefore === null || up < uptimeBefore)) return { command: label, ms: Date.now() - t0, uptimeBefore, uptimeAfter: up }
+    if (up !== null && restartOutcome("ok", uptimeBefore, up).kind === "restarted") return { command: label, ms: Date.now() - t0, uptimeBefore, uptimeAfter: up }
     if (Date.now() > deadline) throw new Error("no restarted server answered /healthz within 3 minutes")
     await pause(1_000)
   }

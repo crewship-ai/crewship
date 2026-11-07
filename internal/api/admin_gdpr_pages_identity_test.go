@@ -1036,3 +1036,24 @@ func TestGDPRErasure_RevocationsAreJournalled(t *testing.T) {
 		t.Errorf("webhook entry reports a live token as already revoked: %v", hook.Payload)
 	}
 }
+
+// The memory of a retired grant lives outside page_grants, and it names people.
+func TestGDPRErasure_RetiredGrantMemoryNoLongerNamesSubject(t *testing.T) {
+	r := pagesIdentitySetup(t)
+	for _, ws := range []string{pidWSA, pidWSB} {
+		for i, row := range [][2]string{{"user", r.userID}, {"crew", "someone"}} {
+			mustExec(t, r.db, `INSERT INTO page_grant_retired_issuances(workspace_id,page_id,subject_type,subject_id,level,granted_by_user_id,granted_at,retired_at) VALUES(?,?,?,?,'read',?,'2026-01-01','2026-01-02')`,
+				ws, ws+"-page", row[0], row[1], []string{r.other, r.userID}[i])
+		}
+	}
+	r.erase(t, pidWSA)
+	count := func(ws string) (n int) {
+		if err := r.db.QueryRow(`SELECT count(*) FROM page_grant_retired_issuances WHERE workspace_id=?`, ws).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	if a, b := count(pidWSA), count(pidWSB); a != 0 || b != 2 {
+		t.Fatalf("retired issuances after erasure: erased workspace %d, other workspace %d", a, b)
+	}
+}

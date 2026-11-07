@@ -1564,6 +1564,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	if err := reconcileRestoredIssueOutbox(ctx, tx); err != nil {
 		return stats, fmt.Errorf("backup: reconcile durable issue audit delivery: %w", err)
 	}
+	if err := retireRestoredPageGrants(ctx, tx, dump); err != nil {
+		return stats, fmt.Errorf("backup: retire restored page grants: %w", err)
+	}
 	if err := assertNoFKViolationsTx(ctx, tx); err != nil {
 		return stats, err
 	}

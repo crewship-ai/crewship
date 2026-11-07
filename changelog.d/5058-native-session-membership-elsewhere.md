@@ -1,0 +1,1 @@
+- **An open Word or Sheet editor stopped saving with "native Craft access denied" when its user created or joined another workspace.** A new trusted membership no longer retires that user's native sessions elsewhere. A restricted membership still does, and removals are unchanged.

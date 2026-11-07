@@ -195,7 +195,7 @@ func openTestDB(t *testing.T) *sql.DB {
 			workspace_id TEXT NOT NULL
 		);
 		CREATE TABLE gridcraft_heads (page_id TEXT PRIMARY KEY);
-		CREATE TABLE page_grants (page_id TEXT, subject_type TEXT, subject_id TEXT, level TEXT, granted_by_user_id TEXT);
+		CREATE TABLE page_grants (page_id TEXT, subject_type TEXT, subject_id TEXT, level TEXT, granted_by_user_id TEXT, retired_at TEXT);
 	`
 	if _, err := db.Exec(schema); err != nil {
 		t.Fatalf("schema: %v", err)
