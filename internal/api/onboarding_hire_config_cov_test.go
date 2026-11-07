@@ -1080,12 +1080,12 @@ func TestCovOHCResolveOAuthAccessTokens_Append(t *testing.T) {
 	req := httptest.NewRequest("GET", "/x", nil)
 
 	// Only a _CLIENT_ID entry → append access token.
-	out := h.resolveOAuthAccessTokens(req, []mcpCredEntry{{ID: "cr-oa", EnvVar: "GOOGLE_CLIENT_ID", Type: "OAUTH2"}})
+	out := h.resolveOAuthAccessTokens(req, "agent-x", []mcpCredEntry{{ID: "cr-oa", EnvVar: "GOOGLE_CLIENT_ID", Type: "OAUTH2"}})
 	if len(out) != 2 {
 		t.Fatalf("len = %d, want 2 (orig + access token)", len(out))
 	}
 	// No OAUTH2 cred → unchanged.
-	out2 := h.resolveOAuthAccessTokens(req, []mcpCredEntry{{ID: "x", EnvVar: "API_KEY", Type: "API_KEY"}})
+	out2 := h.resolveOAuthAccessTokens(req, "agent-x", []mcpCredEntry{{ID: "x", EnvVar: "API_KEY", Type: "API_KEY"}})
 	if len(out2) != 1 {
 		t.Errorf("non-oauth len = %d, want 1 (unchanged)", len(out2))
 	}

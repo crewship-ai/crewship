@@ -376,9 +376,9 @@ Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
 | Suite | Validates |
 |---|---|
 | `test-first-projects.sh` | Executes every command printed by `docs/guides/first-projects.mdx`: creates a crew and agent, writes shared output, assigns a credential, recalls crew memory, scaffolds and validates a routine, and reads the Journal. Requires a seeded instance and a provider credential for the agent-backed rungs. |
-| `test-memory.sh` | agent recalls a nonce fact in a **fresh session**; a **crew-tier** fact is readable by a peer in the same crew; it does **not** leak cross-crew; **pins** are always available; `memory search`/`status` corroborate. `--soak N` re-checks durability over N minutes. |
-| `test-delegation.sh` | a **lead delegates** a subtask to a peer and reports the result back (corroborated by a new peer chat session); a lead **hires an ephemeral** specialist (or it lands as an approval waitpoint under guided autonomy). |
-| `test-crew-links.sh` | a **crew link** is real: the graph lists no links to deleted crews, a lead's sidecar reports the crews it can reach, delegation **across** a live link lands in the other crew, and the same delegation is **refused** once the link is removed (then restored). |
+| `test-memory.sh` | agent recalls a nonce fact in a **fresh session**; the **crew lead records a crew decision** handed to it as an issue and a peer in the same crew reads it; a **non-lead** given the same issue does **not** write `CREW.md`, and a bare chat request with no crew record behind it leaves `CREW.md` unchanged (negative); the fact does **not** leak cross-crew; an ops decision issue is **pinned** and always available; the server memory inventory corroborates each write. `--soak N` re-checks durability over N minutes. |
+| `test-delegation.sh` | a **lead delegates** an issue's task to a peer, proven only by a tagged `assignment.created` and its joined successful `assignment.completed`; any path without that proof fails; a lead **hires an ephemeral** specialist (or it lands as an approval waitpoint under guided autonomy). |
+| `test-crew-links.sh` | a **crew link** is real: the graph lists no links to deleted crews, a lead's sidecar reports the crews it can reach, a release issue makes the lead **assign across** a live link (a tag-correlated `assignment.created` for the other crew, then `assignment.completed`), and once the link is removed the lead's run on the same kind of issue **runs to an end with no work reaching the other crew** (then restored). The server's `crews are not connected` refusal is not journaled, so the lead's account of it is printed as information, never counted as a pass. |
 | `test-crew-lifecycle.sh` | the **crew container lifecycle** a definitions deploy walks: `crew start` is **idempotent** and `container-status` then reports **running**; a running crew accepts an **overwrite** of a shared-tree file it owns (byte-for-byte, not just "the name is listed"); `crew stop` genuinely stops it and is idempotent; a stopped crew **refuses** the overwrite and the refusal **names `crewship crew start`** rather than the wrong turn (`crew provision`, which builds an image and starts nothing). §5 restores the crew and is **xfail**: `stop → stop → refused-write → start` reproducibly leaves the container `exited` (143). Needs a crew whose container has already run — **dev-VM only**, and in `run-all.sh` but in no nightly tier. |
 | `test-notifications.sh` | a routine **run completes** (exit code + records status); the **completion event** is observable via `routine watch --once`; a **failed run** surfaces a `failed_run` inbox item (best-effort). |
 | `test-inbox.sh` | the **inbox as a decision surface**: fires `approval-gate-demo` to mint a REAL waitpoint, asserts the row carries the fields the UI renders (`timeout_at` for the countdown, `pipeline_run_id` for run progress, `blocking`, `target_role`), approves it through the **source** endpoint and proves the row is `resolved` server-side — the cascade the UI depends on and must never duplicate. Also dismisses a message and checks `resolved_action` + `resolved_by_user_id` are recorded, and that the kind vocabulary the UI codes against is the one in the data. |
@@ -412,6 +412,64 @@ Override any of: `CREWSHIP` (binary path — absolute, or relative to your cwd),
 > `WITH_KEEPER_SECURITY=1 ./run-all.sh`. Design + the full test catalog (T1–T13,
 > which findings each maps to) live in
 > `.claude/context/notes/keeper-adversarial-test-suite-2026-07-12.md`.
+
+## Grounded probes and failure evidence
+
+The seeded leads act on their crew's records, not on a chat line that calls
+itself a probe: in the 2026-11-03 stage gauntlets they refused bare
+"integration probe" asks as possible injection, so a refusal looked like a
+product failure. Positive scenarios therefore hand the work over the way a
+human would — an issue delegated to the agent, started with `crewship issue
+start`, awaited through `crewship issue runs` (`issue_work` in `lib.sh`). A
+refusal is never a pass of a positive scenario; it stays a separate negative
+check, and a negative only counts when its run actually ended. A LEAD
+delegate gets no mission task: `issue start` runs lead planning with LEAD
+privileges and the crew sidecar — the run meant to write `CREW.md` or
+`/assign` across a link (the intent; the non-lead negative checks whether a
+non-lead run can write anyway) — and `issue runs` labels it `source=delegation`.
+`issue_work` therefore awaits the delegate's own run, `task` or `delegation`,
+and never another agent's or a mention's. The spec each scenario rests on:
+
+| Scenario | Positive (issue) | Negative | Spec |
+|---|---|---|---|
+| Crew memory | lead `alex` writes `CREW.md` (tier=CREW), `sam` reads it | non-lead `sam` gets the same issue → no write; bare ask → no write | `docs/guides/agent-memory.mdx` ("Only the lead writes"), `internal/sidecar/server.go` (crew engine for the lead only) |
+| Pins | `morgan` pins an on-call code | — | `docs/guides/agent-memory.mdx` (pins) |
+| Crew links | `alex` assigns to `morgan` over the link via `/assign` with `crew`; the assignment completes | unlinked: the lead's run ends and nothing lands for `morgan` (the 403 itself leaves no server record) | `docs/guides/orchestration.mdx` "Cross-Crew Work", `internal/api/assignments_run.go` |
+| Credential escalation | `morgan` raises a CREDENTIAL escalation named by the issue, no value | keeper deny path (`test-keeper-audit-integrity.sh` §4) | `docs/guides/credentials.mdx` "Asking a human for a credential" |
+
+**Evidence before a reseed (#4874).** Opt-in per suite
+(`keep_failure_evidence`; memory, crew-links, credentials and keeper-audit do;
+suites holding real tokens in their own arrays do not). When such a suite fails and
+`HARNESS_DETAIL_DIR` is set (the stage gauntlet sets it to a `0700`
+directory under its run, covered by the report retention), `finish` writes
+`<suite>/failures.txt`, the chat list and every transcript started during the
+suite for each agent it talked to, and each issue it opened with its runs —
+all `0600` under `umask 077`. Values registered with `register_secret` are
+replaced by `[REDACTED]` before anything is written. The failure-evidence collector fetches and writes nothing for a passing suite,
+or when `HARNESS_DETAIL_DIR` is unset. These files stay
+on the host; do not attach them to public issues.
+
+**Minimal crew-link success receipt (#4975).** When all crew-link checks pass
+and `HARNESS_DETAIL_DIR` is configured, the suite also writes
+`test-crew-links/success-receipt.v1.json` there, before temporary-state cleanup
+and any fixture reset. This is a small, source-pinned observation receipt:
+assignment/issue/journal-run joins, completion outcomes, hashes of the exact
+full result and expected fixture code, and the matched server refusal's
+actor/trace/crew/403 metadata. It contains no model reply, task, raw code,
+credential, or transcript, and is never printed to the harness log. It is not
+a server-signed attestation and cannot recover discarded response text.
+
+The existing stage caller supplies `INGEST_SHA`, `SCAN_RUN_ID`, optionally the
+matching `STAGE_RUN_ID`, and `CREWSHIP_WORKSPACE`. The writer requires Python3,
+checks the source SHA and exact committed harness files, and requires an existing
+absolute, owner-only `0700` detail directory with no symlink components. It
+creates the suite directory `0700` and receipt `0600`, syncing and publishing
+without replacing an existing file. The receipt inherits the existing private
+report retention. Standalone runs without a detail directory keep their previous
+behavior. A configured receipt/projection failure makes the gate fail; it does
+not retry work or fetch new transcripts. Functional predicates and polling stay unchanged; a successful suite keeps its
+nine functional assertions, while a retention failure adds one named failure. The receipt is projected from the API responses
+already inspected, with no extra API or model requests.
 
 ## Design notes
 

@@ -101,6 +101,9 @@ func validateStepEgress(st Step) error {
 			if st.Wait.EventType == "" {
 				return fmt.Errorf("pipeline: step %q (wait event) missing event_type", st.ID)
 			}
+			if err := ValidateEventFilter(st.Wait.EventFilter); err != nil {
+				return fmt.Errorf("pipeline: step %q (wait event): %w", st.ID, err)
+			}
 		default:
 			return fmt.Errorf("pipeline: step %q (wait) kind %q invalid (allowed: approval datetime event)", st.ID, st.Wait.Kind)
 		}

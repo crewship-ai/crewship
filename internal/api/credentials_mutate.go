@@ -1171,6 +1171,10 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "begin tx (update credential)", err)
 		return
 	}
+	if !canRole(role, "manage") && !h.allowGovernanceCredentialWrite(w, r, tx, credID) {
+		tx.Rollback()
+		return
+	}
 
 	if !ub.Empty() {
 		query, args := ub.Build("credentials", "id = ? AND workspace_id = ?", credID, workspaceID)

@@ -1,10 +1,10 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
-const state = vi.hoisted(() => ({ user: "h1", workspace: "w1", send: vi.fn(), fetch: vi.fn(), documents: false }))
+const state = vi.hoisted(() => ({ user: "h1", workspace: "w1", send: vi.fn(), fetch: vi.fn(), documents: false, role: "OWNER", capabilities: [] as string[] }))
 vi.mock("@/hooks/use-chat", () => ({ useChat: () => ({ turns: [], sendMessage: state.send, stopGeneration: vi.fn(), regenerateLastTurn: vi.fn(), editAndResend: vi.fn(), loadHistory: vi.fn(), markHistoryUnavailable: vi.fn(), markHistoryDenied: vi.fn(), resubscribeSession: vi.fn(), isStreaming: false, connectionStatus: "connected" }) }))
 vi.mock("@/hooks/use-auth", () => ({ useSession: () => ({ data: { user: { id: state.user } } }), useSessionSafe: () => ({ data: { user: { id: state.user } } }) }))
-vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: state.workspace, loading: false }) }))
+vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: state.workspace, workspaces: [{ id: state.workspace, currentUserAccessMode: "trusted" }], role: state.role, capabilities: state.capabilities, loading: false, error: null }) }))
 vi.mock("@/lib/api-fetch", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/api-fetch")>(), apiFetch: state.fetch }))
 vi.mock("../right-panel", () => ({ RightPanel: () => null }))
 vi.mock("../right-rail", () => ({ RightRail: () => null }))
@@ -21,7 +21,7 @@ import { ChatPanel } from "../chat-panel"
 
 beforeEach(() => {
   vi.clearAllMocks()
-  state.user = "h1"; state.workspace = "w1"; state.documents = false
+  state.user = "h1"; state.workspace = "w1"; state.documents = false; state.role = "OWNER"; state.capabilities = []
   state.send.mockReturnValue(true)
   state.fetch.mockImplementation(async (url: string) => ({ ok: true, status: 200, json: async () => {
     if (url.includes("documents/status")) return { enabled: state.documents }
@@ -86,6 +86,20 @@ describe("document creation availability in the chat panel", () => {
     expect(screen.queryByText("Document creation offered")).toBeNull()
     view.rerender(<ChatPanel agentId="agent" sessionId="chat1" agentName="Native" agentSlug="native" mobilePanel={mobilePanel} sessionKind="routine" />)
     expect(screen.queryByText("Document creation offered")).toBeNull()
+  })
+  it("does not offer creation to a member who may not create Pages, as the server refuses it (#4534)", async () => {
+    state.documents = true
+    state.role = "VIEWER"
+    const view = render(<ChatPanel agentId="agent" sessionId="chat1" agentName="Native" agentSlug="native" />)
+    await screen.findByRole("checkbox")
+    await waitFor(() => expect(state.fetch.mock.calls.some(([url]) => String(url).includes("documents/status"))).toBe(true))
+    // Let the availability answer land: an available service alone must not offer it.
+    await new Promise(resolve => setTimeout(resolve, 50))
+    expect(screen.queryByText("Document creation offered")).toBeNull()
+    // page.create grants it without a creating role, as on the server.
+    state.capabilities = ["page.create"]
+    view.rerender(<ChatPanel agentId="agent" sessionId="chat1" agentName="Native" agentSlug="native" />)
+    await screen.findByText("Document creation offered")
   })
   it("does not offer creation when the service is unavailable", async () => {
     render(<ChatPanel agentId="agent" sessionId="chat1" agentName="Native" agentSlug="native" />)

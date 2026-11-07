@@ -23,7 +23,7 @@
 #   8. journal hash-chain tamper-evidence: `journal verify` is OK on a healthy
 #      journal and DETECTS an out-of-band row mutation (issue #1369).
 #   9. keeper decisions are append-only: `keeper history` shows every transition,
-#      1-based and gap-free, starting at PENDING, tail matching the current
+#      1-based and gap-free, a raised request starting at PENDING, tail matching the current
 #      decision, each with a recorded actor (issue #1369).
 #  10. an authorised priority edit does NOT break the chain — pin, verify, revert,
 #      verify (issue #1369). The raw-DB-flip half needs CREWSHIP_DB on dev2.
@@ -31,11 +31,15 @@
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
+keep_failure_evidence  # #4874: keep transcripts of a failing run before the gauntlet reseed
 
 preflight
 
 # shellcheck source=owned-escalation.sh
 source "$HERE/owned-escalation.sh"
+# shellcheck source=keeper-ledger.sh
+source "$HERE/keeper-ledger.sh"
+register_secret harness-placeholder-not-a-real-token; register_secret audit-v1; register_secret audit-v2  # keep it out of failure evidence (#4874)
 
 AGENT="${AGENT:-morgan}"
 CREW="${CREW:-ops}"
@@ -99,9 +103,12 @@ fi
 section "3. A granted escalation is resolvable + leaves a trace (approve)"
 # ─────────────────────────────────────────────────────────────────────────────
 ESC="HARNESS_ESC_$(nonce PG | tr '-' '_')"
+# The previous suite or section may still hold this agent until its timed-out
+# turn settles (#4842); a 429 there is correct, so wait instead of racing it.
+wait_agent_free "$AGENT"
 info "Driving ${AGENT} to raise a credential escalation for ${ESC} ..."
-if ! ask_agent "$AGENT" "You need a ${ESC} API token to read the synthetic pager service's status for this authorized integration probe. Raise a CREDENTIAL escalation with metadata.name exactly ${ESC} and that read-only purpose, without a secret value. Do not contact any external service." >/dev/null; then
-  _fail "approval probe agent run completed"
+if ! esc_work="$(request_credential_via_issue "$CREW" "$AGENT" "$ESC")"; then
+  _fail "approval probe issue reached an escalation or an end" "${esc_work:-the issue could not be created or started}"
 fi
 
 if have jq; then
@@ -127,27 +134,36 @@ fi
 section "4. A denied escalation is recorded as such (deny path)"
 # ─────────────────────────────────────────────────────────────────────────────
 ESC2="HARNESS_ESCDENY_$(nonce DN | tr '-' '_')"
+# The previous suite or section may still hold this agent until its timed-out
+# turn settles (#4842); a 429 there is correct, so wait instead of racing it.
+wait_agent_free "$AGENT"
 info "Driving ${AGENT} to raise a second escalation for ${ESC2}, then DENY it …"
-if ! ask_agent "$AGENT" "You need a ${ESC2} API token to read the synthetic pager service's status for this authorized integration probe. Raise a CREDENTIAL escalation with metadata.name exactly ${ESC2} and that read-only purpose, without a secret value. Do not contact any external service." >/dev/null; then
-  _fail "denial probe agent run completed"
+if ! esc_work="$(request_credential_via_issue "$CREW" "$AGENT" "$ESC2")"; then
+  _fail "denial probe issue reached an escalation or an end" "${esc_work:-the issue could not be created or started}"
 fi
 if have jq; then
   detect2="owned_pending_escalation '$CREW' '$AGENT' '$ESC2'"
   if poll_until "second escalation appears (PENDING)" 60 "$detect2"; then
     id2="$(owned_pending_escalation "$CREW" "$AGENT" "$ESC2")"
-    if [[ -n "$id2" ]] && cs escalation resolve "$id2" --action reject --resolution "denied by audit harness" >/dev/null 2>&1; then
+    if [[ -z "$id2" ]]; then
+      _fail "deny exact owned escalation" "the owned request is absent or ambiguous"
+    elif deny_err="$(deny_credential_escalation "$id2")"; then
       if cs escalation list --crew "$CREW" --format json | jq -e --arg id "$id2" 'any(.[]; .id == $id and .status == "RESOLVED" and .action == "reject")' >/dev/null; then
         _pass "exact owned escalation records RESOLVED/reject"
       else
         _fail "exact owned escalation records RESOLVED/reject"
       fi
     else
-      _fail "deny exact owned escalation" "owned request absent or resolution failed"
+      _fail "deny exact owned escalation" "reject of $id2 failed: $deny_err"
     fi
   fi
 else
   skip "escalation deny assertions" "jq missing"
 fi
+
+# The denial resumes the parked run; let it end so the next suite that drives
+# this agent is not refused for capacity.
+wait_agent_free "$AGENT"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "5. Keeper bookkeeping + model fields are exposed"
@@ -263,28 +279,29 @@ section "9. Keeper decisions are append-only (issue #1369)"
 # keeper_requests is written PENDING then UPDATEd in place, so on its own it
 # cannot show that a request was pending or whether a decision was rewritten.
 # Every transition is now appended to keeper_request_events, surfaced by
-# `crewship keeper history`. Assert: the history exists for a real request, it
-# starts at PENDING, it ends where the current-state log says it ended, and the
-# actor of each transition is recorded.
+# `crewship keeper history`. Assert: the history of a raised request starts at
+# PENDING, it ends where the current-state log says it ended, and the actor of
+# each transition is recorded. A verdict written already decided holds exactly
+# one terminal transition, which is asserted separately.
 if ! cs keeper history --help >/dev/null 2>&1; then
   skip "keeper decision history" "installed crewship has no 'keeper history' command — rebuild"
 elif ! have jq; then
   skip "keeper decision history" "jq missing"
 else
-  req_json="$(cs keeper requests --limit 20 --format json 2>/dev/null)"
-  # Prefer a DECIDED request: a still-pending one legitimately has one transition.
-  req_id="$(printf '%s' "$req_json" | jq -r \
-    'first(.[] | select((.decision // "") != "" and (.decision // "") != "PENDING")) | .id // empty')"
+  # The server caps a page at 200. Phase-2 verdicts can fill a short window.
+  req_json="$(cs keeper requests --limit 200 --format json 2>/dev/null)"
+  req_id="$(keeper_pick_raised_request "$req_json")"
+  shot_id="$(keeper_pick_one_shot_request "$req_json")"
 
   if [[ -z "$req_id" ]]; then
-    skip "keeper decision history" "no decided keeper request in the recent log — drive one (assign a SECRET and run a keeper execute) then re-run"
+    skip "keeper history of a raised request" "no decided access or execute request in the recent log, so PENDING-first is unproven here — drive one (assign a SECRET and run a keeper execute) then re-run"
   else
     hist="$(cs keeper history "$req_id" --format json 2>/dev/null)"
     n_ev="$(printf '%s' "$hist" | jq 'length' 2>/dev/null || echo 0)"
-    if [[ "${n_ev:-0}" -ge 1 ]]; then
+    if [[ "${n_ev:-0}" -ge 2 ]]; then
       _pass "keeper history for $req_id has $n_ev transition(s)"
     else
-      _fail "keeper history is non-empty" "0 transitions for a decided request $req_id"
+      _fail "a decided request has PENDING and its decision" "${n_ev:-0} transitions for $req_id"
     fi
 
     # seq must be 1-based and monotonic — a gap is itself the tamper signal.
@@ -314,13 +331,25 @@ else
       _fail "every transition records an actor_type" \
         "got $(printf '%s' "$hist" | jq -c '[.[].actor_type]')"
     fi
+  fi
 
-    # Cross-workspace / unknown ids must be indistinguishable and never 500.
-    if cs keeper history "kpr_does_not_exist_$(nonce X | tr '-' '_')" >/dev/null 2>&1; then
-      _pass "unknown request id returns an empty history, not an error"
-    else
-      _fail "unknown request id returns an empty history" "the command errored"
-    fi
+  # A verdict written already decided holds exactly that one transition: a second
+  # row, or a state other than the projection, means the history was rewritten.
+  if [[ -z "$shot_id" ]]; then
+    skip "keeper history of a one-shot verdict" "no Phase-2 verdict or suppression in the recent log"
+  else
+    shot_hist="$(cs keeper history "$shot_id" --format json 2>/dev/null)"
+    shot_decision="$(printf '%s' "$req_json" | jq -r --arg id "$shot_id" \
+      'first(.[] | select(.id==$id)) | .decision // ""')"
+    assert_eq "one-shot verdict $shot_id is one terminal transition" "1:1:$shot_decision" \
+      "$(printf '%s' "$shot_hist" | jq -r 'if type == "array" and length > 0 then "\(length):\(.[0].seq):\(.[0].state)" else "none" end' 2>/dev/null)"
+  fi
+
+  # Cross-workspace / unknown ids must be indistinguishable and never 500.
+  if cs keeper history "kpr_does_not_exist_$(nonce X | tr '-' '_')" >/dev/null 2>&1; then
+    _pass "unknown request id returns an empty history, not an error"
+  else
+    _fail "unknown request id returns an empty history" "the command errored"
   fi
 
   cat <<'EOF_APPENDONLY_NOTE'

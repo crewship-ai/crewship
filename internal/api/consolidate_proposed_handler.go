@@ -35,6 +35,10 @@ type ProposedHandler struct {
 	// canonical file write just doesn't record a memory_versions
 	// row). Wired via SetBlobRoot from router_orchestration.go.
 	blobRoot string
+	// storageBasePath is the trusted storage root the crew memory trees
+	// live under. Proposal and canonical files are read beneath it with
+	// symlinks refused at every component. Wired via SetStorageBasePath.
+	storageBasePath string
 }
 
 func NewProposedHandler(db *sql.DB, logger *slog.Logger) *ProposedHandler {
@@ -53,6 +57,12 @@ func NewProposedHandler(db *sql.DB, logger *slog.Logger) *ProposedHandler {
 // mounted; the value is read on each Approve.
 func (h *ProposedHandler) SetBlobRoot(root string) {
 	h.blobRoot = root
+}
+
+// SetStorageBasePath pins the storage root that staged proposal files are
+// read beneath. Empty keeps the final-component no-follow guard only.
+func (h *ProposedHandler) SetStorageBasePath(base string) {
+	h.storageBasePath = base
 }
 
 // SetJournal wires the production emitter once the Router has one.
@@ -107,7 +117,7 @@ func (h *ProposedHandler) Approve(w http.ResponseWriter, r *http.Request) {
 	}
 
 	res, err := consolidate.ApproveProposal(r.Context(), h.db, h.journal, h.logger, proposalID, user.ID,
-		consolidate.ApprovalOptions{BlobRoot: h.blobRoot})
+		consolidate.ApprovalOptions{BlobRoot: h.blobRoot, StorageRoot: h.storageBasePath})
 	if err != nil {
 		h.mapDecisionError(w, err, "approve")
 		return

@@ -69,7 +69,7 @@ func TestMemoryRecoveryRefusesUnavailableLedger(t *testing.T) {
 	if _, err := loadOperation(t.Context(), f.db, "ws_test", f.auditPath, "op"); err == nil {
 		t.Fatal("closed operation treated as missing")
 	}
-	if err := confirmMutation(t.Context(), f.db, f.req("op", OpAppend, "x"), "id", 1, "hash", 1, MutateResult{}); err == nil {
+	if _, err := confirmMutation(t.Context(), f.db, f.req("op", OpAppend, "x"), "id", nil, 1, "hash", 1); err == nil {
 		t.Fatal("closed ledger confirmed mutation")
 	}
 	if n, c, err := RecoverPending(t.Context(), f.db, f.blobRoot); err == nil || n != 0 || c != 0 {

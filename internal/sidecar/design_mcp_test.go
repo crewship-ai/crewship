@@ -60,3 +60,26 @@ func TestDesignMCPBoundsNestingBeforeRecursiveDecoder(t *testing.T) {
 		t.Fatalf("unbounded recursive tool argument: %v", err)
 	}
 }
+
+// Agents express prototype links (#4449) through the same design_apply path as
+// every other node field: the catalog names linkTo and the packet forwards it
+// unchanged to the host, where the Yjs engine validates it.
+func TestDesignMCPCarriesPrototypeLinks(t *testing.T) {
+	var apply *memoryMCPToolDescriptor
+	for _, tool := range designMCPCatalog() {
+		if tool.Name == "design_apply" {
+			apply = &tool
+		}
+	}
+	if apply == nil || !strings.Contains(apply.Description, "linkTo") || !strings.Contains(string(apply.InputSchema), "linkTo") {
+		t.Fatalf("design_apply does not document prototype links: %+v", apply)
+	}
+	raw := `{"slug":"demo","operations":[{"op":"upsert","node":{"id":"next","linkTo":"checkout"}},{"op":"upsert","node":{"id":"back","linkTo":""}}]}`
+	packet, handled, err := designMCPPacket("design_apply", []byte(raw))
+	if !handled || err != nil {
+		t.Fatalf("link operations refused: handled=%v err=%v", handled, err)
+	}
+	if !strings.Contains(string(packet), `"linkTo":"checkout"`) || !strings.Contains(string(packet), `"linkTo":""`) {
+		t.Fatalf("link fields not forwarded: %s", packet)
+	}
+}

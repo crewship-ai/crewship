@@ -120,6 +120,21 @@ func TestErrorResponses_DeclareTheShapeTheHandlerWrites(t *testing.T) {
 	}
 }
 
+// composioGatewayError answers through writeProblem from inside a helper, so a
+// scan of the handler body alone would document the {"error"} envelope.
+func TestErrorResponses_ComposioGatewayFailureIsAProblem(t *testing.T) {
+	doc := loadSpec(t)
+	for _, path := range []string{"inventory", "toolkits", "triggers", "triggers/active"} {
+		content := errorContentOf(t, doc, "/api/v1/integrations/composio/"+path, "get", "502")
+		media, _ := content["application/json"].(map[string]any)
+		schema, _ := media["schema"].(map[string]any)
+		properties, _ := schema["properties"].(map[string]any)
+		if _, ok := properties["detail"]; !ok {
+			t.Errorf("GET %s 502 must be RFC 7807: %v", path, schema)
+		}
+	}
+}
+
 func keysOf(m map[string]any) []string {
 	out := make([]string, 0, len(m))
 	for k := range m {

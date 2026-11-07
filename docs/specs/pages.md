@@ -302,7 +302,8 @@ The only explicit publication path is the experimental workbook share
 it names editors as owner-issued user `write` grants. Workbook contents remain
 limited to the owner, those editors, and the audited workspace OWNER. Generic
 write grants are refused on a workbook Page, and a write grant not issued by
-its current owner is inert. Deleting, renaming, rolling back, moving into or out
+its current owner is inert; one that custody moved away from its issuer stays
+ended if custody returns. Deleting, renaming, rolling back, moving into or out
 of a folder and reading spec versions of a workbook Page remain owner-only,
 because workbooks have no backup; deleting also needs a current human
 credential. A workbook is a human-only private output for departure and
@@ -445,9 +446,9 @@ Artifact comments retain their actual human author and immutable shared-version
 anchor. Creating feedback does not dispatch an owner run or borrow the owner's
 credentials. Processing another member's feedback requires a fresh explicit
 owner message in the owner's private chat and the existing live run admission.
-Native Craft comment-only observer access remains denied until its independent
-shared snapshot and feedback contract is implemented; ordinary native read and
-write paths retain their existing semantics.
+Native Craft comment-only observer access stays denied. Read and Comment
+grantees reach only the shared native version; latest bytes, history and proposals
+need Edit or the workspace OWNER/ADMIN read rule (`docs/specs/craft-native.md`).
 
 Catalog state is independent of content and access. `created_by_test` is an
 explicit server-stored, creation-only boolean with no name-based backfill;
@@ -472,7 +473,8 @@ is offered.
 **The invariant that makes this safe: an agent's authority is a subset of the authorising human's,
 never a superset.** A grant to an agent is evaluated against the granting human's own rights at
 use time, not at grant time — if that human loses access to a crew, every agent grant they issued
-narrows with them. Without this rule, "grant my agent access" is a privilege-escalation primitive.
+narrows with them, and a grant whose issuer lost standing does not return with it.
+Without this rule, "grant my agent access" is a privilege-escalation primitive.
 
 **Agent identity comes from the token, never from the request body.** The sidecar already
 overwrites caller-supplied identity fields with the token-derived one
@@ -488,7 +490,8 @@ and page owner/ADMIN/OWNER authority under the writer fence. A journal failure,
 ignored insert, altered final grant or failed commit rolls back the mutation;
 notifications follow the successful commit. Existing Page events retain their
 actor, subject, level and panel fields and add `previous_grant` / `grant` stored
-row snapshots (`null` at creation/removal respectively). These snapshots remain
+row snapshots (`null` at creation/removal respectively; a snapshot of a retired
+grant adds `retired_at`). These snapshots remain
 canonical audit data: the common GET/SSE/WS serializer omits only these two new
 keys, preserves the previous public event fields and never rewrites the stored
 payload. Reissuing still records
@@ -918,11 +921,12 @@ page_public_tokens(id, page_id, token_hash, password_hash NULL, expires_at NOT N
   -- expires_at NOT NULL: every public link expires (rule 4)
 
 page_grants(page_id, subject_type, subject_id, level, panel_ids NULL,
-            granted_by_user_id, granted_at)
+            granted_by_user_id, granted_at, retired_at NULL)
   PRIMARY KEY(page_id, subject_type, subject_id, level)
   -- subject_type ∈ {user, crew, agent};  level ∈ {read, produce, write}
   -- panel_ids: JSON array, only meaningful for level = produce (NULL = all panels)
   -- granted_by_user_id is NOT NULL: only a human issues a grant (§7.1b rule 1)
+  -- retired_at: the issuer lost standing; cleared only by issuing the grant again
 ```
 
 JSON-in-TEXT is the house style (`migrate_consts_v109_member_capabilities.go:22-24`), and size
@@ -1404,6 +1408,8 @@ are not required to build, test or use the product.
 
 A Page grant issuer must also have an active trusted account and no restricted membership anywhere. Every non-NULL suspension value, including an empty string, makes its Page shares inactive at use time. Existing membership/ownership/crew conditions remain required; the administrative grants list preserves inactive metadata and explains account unavailability.
 
+A grant ends when its issuer loses the authority needed to issue it. Restoring the role does not revive the old grant; a new grant is a new operation (#5069). Retirement is recorded in `page_grants.retired_at` in the transaction of the change that removed the standing, whether that is a role, membership, access mode, suspension, crew membership or Page ownership change, so no read is needed between a loss and a return. Standing is one definition, the view `page_grant_verdicts`, read by both the authorization path and the retirement triggers. A change that keeps standing, such as ADMIN to OWNER, or a demotion of a Page owner who keeps the Page, retires nothing. A retired grant stays in the grants list, inactive, and revoke removes it; issuing it again clears the marker and journals like any other grant. Comment grants and workbook editor grants are Page grants and follow the same rule. Folder ACLs do not: `set_by_user_id` is audit, not authority. Retirement also closes the editor sessions of a workbook grant in the same transaction, so a reissue cannot revive a session opened on the old grant. A restore keeps the marker, and the target remembers each retired issuance in `page_grant_retired_issuances`, which survives revoke and reissue and is excluded from backups: a replacing restore of an earlier bundle does not bring back an issuance retired on that target, while a new issuance is unaffected: its `granted_at` is moved to the first second no retired issuance of that page, subject, level and issuer holds. Every imported grant is judged on arrival against the target's standing, whether or not the bundle carries memberships; an issuer unknown on the target retires it. Erasure and deletion of a person remove what names them.
+
 
 ### Folder membership event privacy
 
@@ -1431,18 +1437,181 @@ an immutable Page ID and human identity as their recovery scope. New durable
 payloads are encrypted in the browser. Recovery obtains a key envelope through
 a fresh authenticated Page-read check; an expired session retains the copy and
 does not authorize releasing it to another identity. Bound legacy records are
-migrated before entering an editor. Unbound slug records are never replayed.
+migrated before entering an editor. Unbound slug records (Project source and
+comment drafts from builds before Page-ID keys) are never replayed
+automatically: the project editor shows the signed-in person's own copy as an
+older draft that may belong to another Page, and adopts it only on an explicit
+choice, into an empty Page-ID draft (a compare-and-set in one IndexedDB transaction;
+a draft another tab stored meanwhile is kept, and so is the slug copy).
 
 A positively verified loss of current Page read erases reachable local drafts;
 a network failure, expired cookie, or loss of Edit alone does not prove that
 loss. Offline clients cannot promise immediate deletion. Deferred deletion
 compares the captured revision, preserving a later replacement.
 
+#### When a draft is erased: Native and Project
+
+A local draft is erased only on explicit sign-out and on proven loss of read of
+the Page. It survives an expired sign-in. This rule covers two scopes: native Word
+and Sheet drafts (the journal in `lib/mooring/native-draft.ts`) and Project source
+and comment drafts (`lib/artifact-drafts.ts`). Text documents and Design have their
+own paths and are not part of this table.
+
+Three things can be read, and they are lost separately:
+
+- **Latest content**: the current native document or Project source, its history
+  and proposals. It needs Edit, or the administrator read rule.
+- **The shared version**: the pinned version. Read and Comment reach only this, and
+  only when a version is pinned.
+- **The Page**: Read, Comment, Edit or a folder ACL entry reaches it, with or without
+  a pin. A private Page is reached only by its private audience. A Project is
+  private until its first share, so a grant alone reaches no unshared Project.
+
+Only losing the Page erases a draft. Losing Edit takes latest content away, at any
+level down to Comment: the person keeps the same shared version, or the same
+absence of one, and the draft stays. Native admission refuses Comment, but a refused
+admission is not proof.
+
+"Proven" means a `403 draft_read_revoked` from `draft-key` or, on an open native
+editor, a `session_retired` event with `draft: "purge"`. The event says `purge` only
+while the person's credential is still current and the same read `draft-key` asks
+refuses them, so native admission or application eligibility never erases, and a
+restricted private custodian keeps the draft. A `readable: true` answer or a
+delivered shared version supersedes every older proof still on the wire for that
+Page in that tab. From the moment an editor holding a kept draft asks for a
+replacement admission, it asks `draft-key` every 30 seconds, one request at a time,
+until it unmounts, signs out or erases. So Comment to none is found without a
+reload, even if that admission never finishes.
+Native
+asks `draft-key` with `operation: "check"`; Project asks `wrap`. Both ask the same
+read question, canonical Page visibility. A native draft is asked about after a
+refused or unavailable admission and on any entry short of the editor (preview,
+read-only, refused or failed availability, or a workspace gone from the directory).
+A proof that arrives late still erases the revisions captured when it was asked,
+unless read was confirmed after it was asked. A later confirmation (fresh read,
+admission, reauthorization or stream event, in this tab) supersedes it for good: it
+closes no key and revokes no journal.
+
+| Event | Latest content | Shared version | Native (Word, Sheet) | Project |
+|---|---|---|---|---|
+| Explicit sign-out, confirmed | Unchanged | Unchanged | Captured revisions erased | Captured revisions erased |
+| Sign-out cancelled or not acknowledged by the server | Unchanged | Unchanged | Kept | Kept |
+| Sign-in expired, or session ended elsewhere | Unchanged | Unchanged | Kept, sealed; content hidden | Kept, sealed |
+| 401 | Unchanged | Unchanged | Kept | Kept |
+| Generic 403, 404, 5xx, network failure | Unknown | Unknown | Kept; content hidden, nothing offered until a fresh admission | Kept; a 403 or 404 asks `draft-key` for proof |
+| Edit to Read | Lost | Readable if pinned | Kept, sealed; nothing offered, because read of the shared version gives no right to unpublished content | Kept |
+| Edit to Comment, or Read to Comment | Lost | Readable if pinned | Kept, sealed; admission is refused, so the editor offers nothing and points to the shared version | Kept |
+| Folder ACL loses write, keeps read | Lost | Readable if pinned | As Edit to Read | Kept |
+| Comment, Read or Edit removed, no other reach | Lost | Lost | Erased | Erased |
+| Private audience excludes the person | Lost | Lost | Erased | Erased |
+| Workspace membership removed | Lost | Lost | Erased | Erased |
+| Page deleted | Lost | Lost | Erased | Erased |
+| Another person signs in, same browser | Not theirs | Not theirs | Sealed rows kept, unreadable to them; recovery needs the original person | Same |
+| Offline | Unknown | Unknown | Kept; see below | Kept; see below |
+
+Unsealed legacy plaintext copies are the exception to surviving expiry: they do
+not qualify for retention and are removed at any identity change.
+
+Erasing happens where this browser can reach the row. A draft whose Page ID the
+browser no longer learns, because nothing opens that Page again, stays sealed:
+its key is refused, so it cannot be read, but it is not erased.
+
+Revocation has three separate stages on an open native editor, and each has its
+own bound:
+
+1. **Delivery.** The server rechecks every 5 seconds
+   (`craftNativeEventInterval`), so a healthy stream delivers within that
+   interval plus transit. With a silent stream, the 30-second reauthorization
+   delivers the refusal. Each attempt has a deadline equal to that interval, so
+   with both silent the editor concludes it is unconfirmed within 60 seconds
+   (`NATIVE_DETECTION_BOUND_MS`).
+2. **Client reaction.** On a purge event the frame is removed and the draft
+   offer withdrawn in the same turn; the draft is then erased. On a refusal or
+   a missed deadline content is hidden and the offer withdrawn at once. A refusal
+   alone erases nothing; the editor then asks `draft-key` for proof. An editor being
+   captured turns transparent first and is hidden only after the capture, because
+   full Chromium stops rendering a `visibility:hidden` frame and an engine that
+   answers on an animation frame would never give up its last changes.
+3. **Reconnect.** Nothing is read or offered before a fresh admission. A refused
+   admission triggers the same proof request and offers nothing. Back online, an
+   existing offer is withdrawn first and returns only with a fresh read of the
+   latest content. A tab returning from hidden or frozen (`visibilitychange`,
+   `pageshow`) does the same at once, without waiting for a timer. A live editor
+   leaves the screen in that same turn, before the browser paints: its frame turns
+   transparent and leaves the pointer and the accessibility tree, and keeps rendering
+   for a capture. The engine keeps its focus, its selection and any cell being typed,
+   so a return costs no typing position; a blur, `inert` or a read-only flip would
+   lose them for good. A tab going hidden takes no keys, so it stores a local copy then,
+   through the save queue, and that row is the draft before the return. A return with
+   work not yet in a row asks for a local capture too, and nothing
+   is sent until the read answers. Input during the check stays out of the journal, and
+   a snapshot reaches it only if the engine's revision proves it older than that input,
+   whatever order the messages arrive in. If the read confirms Edit, the typing carries on and is captured whatever
+   the transport is doing. If Edit is lost instead, that capture is the draft and
+   whatever was typed unseen is dropped. A capture that did not finish keeps the
+   editor's buffer and reports a failed capture, as any retirement does.
+   One loss remains, a stated limit: an engine export is not atomic with its request, so
+   a key pressed while it runs lands in the snapshot, and no clean copy then exists.
+   Losing work needs all three at once: the capture on hide never finished, a key
+   arrived inside the export after the return, and Edit was lost during that check. The
+   measured export on a thawed tab took up to about one second in Word. A return from
+   the network has no hide: the row then covers everything up to the last idle autosave
+   (300 ms), offline included, because capture does not need the transport, so only the
+   last moments of continuous typing depend on the capture at the return.
+   Only a read asked after the return shows it again, and every return
+   starts a new generation that earlier answers cannot satisfy: an admission or
+   reader refresh still running at a return neither reveals a frame nor restores
+   an offer, and cannot cancel that read. An unclear answer, or a read with no
+   answer within 10 seconds, leaves it off screen and asks again after 5 seconds,
+   and after one second the page says it is checking access. A frozen editor frame leaves the same way, with
+   its download, and a pending download is dropped; only a fresh read of the latest
+   content restores them, and the buffer stays until read loss is proven. The
+   60-second bound is detection, not an access condition.
+
+An offline browser cannot learn of a revocation, so delivery has not happened
+and no bound applies. It keeps the draft, and on reconnect it follows stage 3.
+These bounds hold while the page's timers run; a browser may throttle a hidden
+tab. Content already delivered cannot be recalled.
+
+A Project tab has no stream. Its 15-second refresh delivers a 403 or 404, which
+removes cached content and asks `draft-key` for proof. The browser pauses that
+refresh in a hidden tab, so a return reads at once. Until a read asked after the
+return answers, the source draft and the comment draft are off screen, in the same
+turn. Returns are counted, not timed, so a clock cannot decide
+which read answered one, and a read that fails or never settles is asked again after
+10 seconds. These fields stay mounted, transparent and inert, and take no input until
+then; focus and selection come back with that read, and after a second the page says
+it is checking access.
+
+A kept draft is offered only by the current right to its content, not by access to the
+shared Page, and the same before a reload and after one. A person reduced to Read or
+Comment keeps the draft sealed and is offered nothing, in Word, Sheet and Project; a
+refused read or an unclear one offers nothing either, whatever `draft-key` says. The
+draft comes back when a read says this person may edit that content again. An expired
+session is not lost read: it keeps the draft and offers it to the same person after
+sign-in.
+
 Before an authentication transition unmounts an editor, admitted local writes
 must drain. Failed capture, unavailable storage, and an over-limit Design draft
 keep the live model mounted behind recovery UI and block navigation. Explicit
 sign-out warns before deleting persistent recovery copies and deletes only the
-revisions covered by that confirmation. Later writes remain for recovery.
+revisions covered by that confirmation, plus the exact revision this tab's own
+suspended native editor made from one of them. Later writes remain for recovery,
+including another tab's. A retiring editor's capture keeps the root revision of its
+chain, and a real edit starts a new chain, so confirming any revision confirms the
+root. After the server acknowledges sign-out and before any cleanup, the browser
+stores those roots beside the rows. A final capture reads them in its own transaction
+and stores nothing for a confirmed root, and every provider mount erases what such a
+tab left behind. Local storage holds the same roots from before that write until the
+row exists, so a refused or timed-out write cannot leave a later capture standing: a
+final capture reads them too, and the next sweep moves them to the row. Each confirmation
+has its own local storage key and is never rewritten. A move stores it, then removes
+only that key, so a confirmation another tab adds at any moment stays, and the row keeps the newest time, so a
+sign-in clears only what is older than its request. Only if both
+stores refuse is there no record; the sign-out still completes. Only a sign-in the server accepted clears that person's intent, and only if the intent is older than that sign-in's request; a session answer or a signed-out mount does not,
+since another tab may still be retiring. The sign-out broadcast only makes tabs look
+sooner. An unsaved edit the editor never stored before retiring is part of its
+capture, and goes with it.
 Recovery does not replay native snapshot saves, custody operations or agent
 dispatch. Design resumes standard CRDT synchronization only after fresh
 same-person Edit admission; read-only viewers do not restore a writer canvas.
@@ -1605,6 +1774,9 @@ that original human after a fresh current-read check under the SQL writer fence.
 All responses use `Cache-Control: no-store`. A stale client identity is refused
 before creating a key envelope; an account switch cannot rebind the draft.
 Slugs cannot alias an old draft.
+
+`{"human":"<expected-human-id>","operation":"check"}` returns `{"readable":true}`
+or the same refusal, judged by the same canonical Page read. It handles no key.
 
 A 403 with `code: "draft_read_revoked"` is positive evidence for deleting that
 Page's local draft. `draft_identity_mismatch`, generic 403, 400 (unavailable or

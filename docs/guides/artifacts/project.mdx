@@ -13,11 +13,11 @@ publishes a new version and answers your comment. Every save is a numbered
 version; nothing in the history is deleted automatically.
 
 <Note>
-Projects are off by default. Each surface on this page needs these switches:
+Projects are on by default. Each surface on this page needs these switches:
 
 | Surface | Needs |
 | --- | --- |
-| Projects at all (create, view, comment, agent tools) | Workspace flag `artifact_projects`: `crewship feature-flag enable artifact_projects`. An operator can turn it on for every workspace with `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true`. |
+| Projects at all (create, view, comment, agent tools) | Workspace flag `artifact_projects`, on by default. A workspace manager can turn it off with `crewship feature-flag disable artifact_projects`; `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` forces it on for every workspace. |
 | **New artifact** › **Project** and the Project preview in **Artifacts** | Build-time `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` and `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true`. The default production build sets `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=false`. |
 | Project cards and the side viewer in chat | Build-time `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true` |
 | **Create artifact project** in a chat | Workspace flag `artifact_projects` only |
@@ -34,7 +34,7 @@ for one message.
 
 ### Before you start
 
-- The workspace flag `artifact_projects` is on (see the note above).
+- The workspace flag `artifact_projects` is on (the default; see the note above).
 - You have an agent that can run: it has a model set. Its chat shows "Model not
   set" otherwise, and nothing is created.
 - The workspace artifact policy is on and lists that agent's crew. A workspace
@@ -71,7 +71,7 @@ You can also skip the dialog: in any private chat with an agent, turn on
 People with permission to create pages can also create a Project from the
 command line, without an agent, by supplying all files in one manifest:
 `crewship page artifact create <slug> --name "<name>" --file manifest.json`.
-See [Artifact projects in the CLI reference](/cli/page#artifact-projects-disabled-by-default).
+See [Artifact projects in the CLI reference](/cli/page#artifact-projects-enabled-by-default).
 A Project created this way has no source chat, so its comments are saved but
 cannot be sent to an agent.
 
@@ -98,8 +98,8 @@ a screen. The entry file comes first, then the others in file-name order.
 - A screen is named after its `<title>` when every screen has a different title
   of at most 24 characters. Otherwise it is named after the file, so
   `detail.html` shows as **Detail** and `faq.html` as **FAQ**.
-- Up to four screens show as buttons. With more, a narrow window shows a
-  **Screen** drop-down instead.
+- Up to four screens show as buttons. With more, a viewer narrower than
+  448 px shows a **Screen** drop-down instead.
 - Links between screens work inside the preview. Clicking
   `<a href="settings.html">` on one screen opens the **Settings** screen.
   Links to anything outside the Project do nothing.
@@ -300,7 +300,9 @@ does not check it):
   selection instead of guessing.
 
 Limits per Project: up to 256 files and 32 MiB per version, and 256 MiB of
-history in total. The viewer warns before the history is full.
+history in total. The viewer warns before the history is full. An agent saves
+a version in one tool call of at most 1 MiB, so a version it writes is smaller
+than the 32 MiB per-version limit.
 
 ## Who sees what
 

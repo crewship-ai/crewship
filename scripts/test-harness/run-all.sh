@@ -78,16 +78,37 @@ tests=(test-memory.sh test-delegation.sh test-crew-links.sh test-crew-lifecycle.
 [[ "${WITH_ATTACK_SURFACE:-0}" == "1" ]] && tests+=(test-attack-surface.sh)
 [[ "${WITH_REDTEAM_INSIDER:-0}" == "1" ]] && tests+=(test-redteam-insider.sh)
 
+active_suite=""
+# Wait only for the registered suite, so its bounded signal evidence/restore
+# finishes before the outer scanner records124 and begins its normal reseed.
+# shellcheck disable=SC2317
+stop_active_suite() {
+  local original="$1" signal="$2" child
+  trap '' TERM INT
+  for child in $(jobs -pr); do
+    if [[ "$child" == "$active_suite" ]]; then kill -s "$signal" "$child" 2>/dev/null || true; fi
+  done
+  [[ -z "$active_suite" ]] || wait "$active_suite" 2>/dev/null || true
+  exit "$original"
+}
+trap 'stop_active_suite 143 TERM' TERM
+trap 'stop_active_suite 130 INT' INT
+
 declare -a results=()
 overall=0
 for t in "${tests[@]}"; do
   printf '\n\033[1m############ %s ############\033[0m\n' "$t"
-  if bash "$HERE/$t"; then
+  # Non-job-control Bash backgrounds inherit ignored INT/QUIT. Reset those
+  # before exec so the suite can preserve130 through its explicit INT trap.
+  python3 -c 'import os,signal,sys; signal.signal(signal.SIGINT,signal.SIG_DFL); signal.signal(signal.SIGQUIT,signal.SIG_DFL); os.execvp("bash",["bash",sys.argv[1]])' "$HERE/$t" <&0 &
+  active_suite=$!
+  if wait "$active_suite"; then
     results+=("✓ $t")
   else
     results+=("✗ $t")
     overall=1
   fi
+  active_suite=""
 done
 
 printf '\n\033[1m################ HARNESS SUMMARY ################\033[0m\n'

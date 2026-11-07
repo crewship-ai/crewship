@@ -2,6 +2,8 @@ import { apiFetch,tryRefresh,type RefreshResult } from "../api-fetch"
 import {getAuthMode} from "../server-base"
 import {validNativeDraft,validNativeVersion} from "./native-draft"
 import {NativeSaveError,type NativeSaveRequest} from "./single-editor-save"
+import {NATIVE_REAUTHORIZE_DEADLINE_MS} from "./native-revocation-bounds"
+import {parseNativeRestoreReceipt,parseNativeVersionDocument,parseNativeVersionList,type NativeRestoreReceipt,type NativeRestoreRequest,type NativeVersionDocument,type NativeVersionList} from "./native-versions"
 
 export interface NativeDocumentClientOptions {
  workspaceId:string;pageId:string;fetch?:typeof fetch
@@ -37,13 +39,19 @@ export interface NativeDocumentClient {
  proposalBytes(id:string,signal:AbortSignal):Promise<Uint8Array>
  /** Accept is this admission's own fenced save; a "stale" result changed nothing. */
  decideProposal(id:string,decision:'accept'|'reject',generation:string|undefined,signal:AbortSignal):Promise<NativeProposal>
+ /** Read-only history under this admission's Read authority; null while the workspace flag is off (404). */
+ versions(signal:AbortSignal):Promise<NativeVersionList|null>
+ /** One saved version's bytes under this admission's Read authority, read-only; never a lease or a write. */
+ version(version:string,signal:AbortSignal):Promise<NativeVersionDocument>
+ /** The existing fenced restore: holder, generation and base version, like a save. Appends a new version. */
+ restore(request:NativeRestoreRequest,signal:AbortSignal):Promise<NativeRestoreReceipt>
  save(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  reconcile(request: NativeSaveRequest,signal: AbortSignal): Promise<unknown>
  close(): void
 }
 // Only network I/O and explicitly temporary HTTP failures can reconnect.
 // Invalid metadata, changed authority and callback failures remain terminal.
-class NativeMetadataTransportError extends Error {}
+export class NativeMetadataTransportError extends Error {}
 const identifier=(value:unknown):value is string=>typeof value==="string"&&value.length>0&&value.length<=256&&!value.includes("\0")
 const nativeBase64=(bytes:Uint8Array)=>{
  let binary="";for(let i=0;i<bytes.length;i+=32768)binary+=String.fromCharCode(...bytes.subarray(i,i+32768));return btoa(binary)
@@ -89,6 +97,8 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
   if(!validNativeDraft(request)||request.baseVersion==="0"||request.workspaceId!==options.workspaceId||request.pageId!==options.pageId||request.sessionId!==sessionId||request.applicationId!==applicationId||!/^sha256:[a-f0-9]{64}$/.test(request.contentHash))throw new Error("invalid_native_snapshot_binding")
   const response=await send(`${base}document/${operation}?${query}`,{method:"POST",cache:"no-store",signal,headers:{"Content-Type":"application/json","X-Craft-Session":token!},body:JSON.stringify({...request,bytes:nativeBase64(request.bytes)})})
   ready()
+  // Only reconcile answers 410: the server retired that attempt; it never commits (#4899).
+  if(operation==="reconcile"&&response.status===410)throw new NativeSaveError("absent")
   if(response.status===409)throw new NativeSaveError("conflict")
   if(response.status===413)throw new NativeSaveError("quota")
   // A refused bearer or write is insufficient evidence to erase readable data.
@@ -150,6 +160,8 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    const abort=()=>controller.abort(originalSignal.reason)
    originalSignal.addEventListener('abort',abort,{once:true});if(originalSignal.aborted)abort()
    signal=controller.signal
+   // No answer counts as a failed attempt: a stalled request must not hide a revocation.
+   const deadline=setTimeout(()=>controller.abort(new NativeMetadataTransportError('native_reauthorization_deadline')),NATIVE_REAUTHORIZE_DEADLINE_MS)
    const operation=(async()=>{
    ready();await freshCookie(signal);ready()
    let response:Response
@@ -179,6 +191,7 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    })
    reauthorizing=pending
    try{return await pending}finally{
+    clearTimeout(deadline)
     originalSignal.removeEventListener('abort',abort)
     if(reauthorizing===pending)reauthorizing=undefined
     if(reauthorizeAbort===controller)reauthorizeAbort=undefined
@@ -271,6 +284,8 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    ready()
    const response=await send(`${base}document?${query}`,{method:"GET",cache:"no-store",signal,headers:{"X-Craft-Session":token!}})
    ready()
+   // The admission stays valid: 403 here means no private read, not read loss.
+   if(response.status===403)throw new Error("native_private_read_refused")
    if(!response.ok)throw new Error("native_document_unavailable")
    const value:unknown=await response.json();ready()
    if(!value||typeof value!=="object")throw new Error("invalid_native_document")
@@ -308,6 +323,34 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    if(response.status===401||response.status===403)throw new NativeSaveError('write_revoked')
    if(!response.ok||!proposal)throw new Error('native_proposal_unconfirmed')
    return proposal
+  },
+  async versions(signal){
+   ready();const response=await send(`${base}document/versions?${query}`,{method:'GET',cache:'no-store',signal,headers:{'X-Craft-Session':token!}})
+   ready();if(response.status===404)return null
+   if(!response.ok)throw new Error('native_versions_unavailable')
+   const list=parseNativeVersionList(await response.json());ready()
+   if(!list)throw new Error('invalid_native_versions')
+   return list
+  },
+  async version(version,signal){
+   ready();if(!validNativeVersion(version)||version==='0')throw new Error('invalid_native_version')
+   const response=await send(`${base}document/versions/${version}?${query}`,{method:'GET',cache:'no-store',signal,headers:{'X-Craft-Session':token!}})
+   ready();if(!response.ok)throw new Error('native_version_unavailable')
+   const document=parseNativeVersionDocument(await response.json(),version);ready()
+   if(!document)throw new Error('invalid_native_version')
+   return document
+  },
+  async restore(request,signal){
+   ready()
+   if(!request||Object.keys(request).length!==8||request.workspaceId!==options.workspaceId||request.pageId!==options.pageId||request.applicationId!==applicationId||request.sessionId!==sessionId||!/^[a-f0-9]{64}$/.test(request.enginePin)||![request.generation,request.baseVersion,request.targetVersion].every(v=>validNativeVersion(v)&&v!=='0'))throw new Error('invalid_native_restore_binding')
+   const response=await send(`${base}document/restore?${query}`,{method:'POST',cache:'no-store',signal,headers:{'Content-Type':'application/json','X-Craft-Session':token!},body:JSON.stringify({...request})})
+   ready()
+   if(response.status===409)throw new NativeSaveError('conflict')
+   if(response.status===401||response.status===403)throw new NativeSaveError('write_revoked')
+   if(!response.ok)throw new Error('native_restore_unconfirmed')
+   const receipt=parseNativeRestoreReceipt(await response.json());ready()
+   if(!receipt||BigInt(receipt.version)!==BigInt(request.baseVersion)+1n)throw new Error('native_restore_unconfirmed')
+   return receipt
   },
   save:(request,signal)=>mutate("save",request,signal),
   reconcile:(request,signal)=>mutate("reconcile",request,signal),

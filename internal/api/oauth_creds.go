@@ -7,6 +7,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -35,11 +36,15 @@ type oauthCredConfig struct {
 
 // generateOAuthState produces a hex-encoded 16-byte random state token.
 
+// loadOAuthCredential reads a credential's OAuth config. A credential that was
+// never set up for OAuth has NULL OAuth columns; they load as empty strings so
+// the handlers answer "missing OAuth configuration" (400) instead of failing
+// the scan with a 500 (#4906).
 func (h *OAuthHandler) loadOAuthCredential(ctx context.Context, credID, wsID string) (*oauthCredConfig, error) {
 	var clientID, clientSecretEnc, authURL, tokenURL, scopes, resource, issuer string
 	err := h.db.QueryRowContext(ctx, `
-		SELECT oauth_client_id, COALESCE(oauth_client_secret_enc, ''),
-			oauth_auth_url, oauth_token_url, COALESCE(oauth_scopes, ''),
+		SELECT COALESCE(oauth_client_id, ''), COALESCE(oauth_client_secret_enc, ''),
+			COALESCE(oauth_auth_url, ''), COALESCE(oauth_token_url, ''), COALESCE(oauth_scopes, ''),
 			COALESCE(oauth_resource, ''), COALESCE(oauth_issuer, '')
 		FROM credentials WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		credID, wsID).Scan(&clientID, &clientSecretEnc, &authURL, &tokenURL, &scopes, &resource, &issuer)
@@ -91,17 +96,27 @@ func (h *OAuthHandler) storeOAuthTokens(ctx context.Context, credID string, resp
 		expiresAt = time.Now().Add(time.Duration(resp.ExpiresIn) * time.Second).UTC().Format(time.RFC3339)
 	}
 
-	_, err = h.db.ExecContext(ctx, `
+	// An OAuth grant can finish after the credential was bound as the governance
+	// model. The condition sits in the UPDATE so the check and the write are one
+	// step; a person's OAuth flow never replaces that value (#5024).
+	res, err := h.db.ExecContext(ctx, `
 		UPDATE credentials SET
 			encrypted_value = ?,
 			oauth_refresh_token_enc = CASE WHEN ? != '' THEN ? ELSE oauth_refresh_token_enc END,
 			oauth_token_expires_at = ?,
 			status = 'ACTIVE',
 			updated_at = datetime('now')
-		WHERE id = ?`,
+		WHERE id = ?
+		  AND NOT EXISTS (SELECT 1 FROM keeper_governance_settings g
+		                   WHERE g.gov_model_credential_id = credentials.id)`,
 		encAccessToken, encRefreshToken, encRefreshToken, expiresAt, credID)
 	if err != nil {
 		return fmt.Errorf("update credentials: %w", err)
+	}
+	if n, err := res.RowsAffected(); err == nil && n == 0 {
+		if bound, err := credentialGovernanceBound(ctx, h.db, credID); err != nil || bound {
+			return errors.New("the governance model credential cannot be replaced through OAuth")
+		}
 	}
 	return nil
 }

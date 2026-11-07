@@ -4,26 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"io"
-	"log/slog"
-	"path/filepath"
 	"strings"
 	"testing"
 
-	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 func TestDocumentAdapterLifecycleAndLiveAuthority(t *testing.T) {
 	ctx := t.Context()
-	db, err := database.Open(filepath.Join(t.TempDir(), "adapter.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = db.Close() })
-	if err = database.Migrate(ctx, db.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-		t.Fatal(err)
-	}
+	db := durableMigratedDB(t)
+	var err error
 	for _, query := range []string{
 		`INSERT INTO users(id,email) VALUES('owner','owner@example.test')`,
 		`INSERT INTO workspaces(id,name,slug) VALUES('ws','Workspace','ws')`,

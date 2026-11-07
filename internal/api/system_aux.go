@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/config"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/llm"
 )
@@ -297,6 +298,11 @@ func isSelfHosted(provider string) bool {
 	return strings.EqualFold(provider, "ollama")
 }
 
+// auxProbeClient is shared so repeated probes reuse one transport. It dials the
+// judge endpoint as the judge does: hard-blocked addresses fail, redirects are
+// answered, not followed.
+var auxProbeClient = httpsafe.TrustedEndpointClient(probeBudget)
+
 // reachOllama reports whether an Ollama server answers at base. Any HTTP
 // response counts as reachable: a 404 still proves something is listening
 // and speaking HTTP, which is the question being asked. Only a transport
@@ -310,7 +316,7 @@ func reachOllama(ctx context.Context, base string) (bool, string) {
 	if err != nil {
 		return false, "malformed model server url: " + err.Error()
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := auxProbeClient.Do(req)
 	if err != nil {
 		return false, "no response from " + base
 	}

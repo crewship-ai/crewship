@@ -18,11 +18,11 @@ it.skipIf(!existsSync(chromium.executablePath()))("continues a full-history canv
    const doc = new Y.Doc();
    upsertDesignNode(doc,{id:"local",type:"text",text:"Unsaved canvas",x:0,y:0,width:200,height:40});
    const mutation={mutate(){},mutateAsync:async()=>({version:1}),isPending:false,error:null};
-   window.designFixture={query:{data:{page_id:"source",can_edit:true,can_comment:true,latest_version:1},isError:false},comments:{data:{comments:[]}},versions:{data:{versions:[{version:1}]}},doc,nodes:designNodes(doc),peers:[],connection:"connected",editable:true,dirty:true,draftError:false,save:{...mutation,error:Object.assign(new Error("History full"),{status:413})},restore:mutation,share:mutation,comment:mutation,connectAgent:mutation,setCursor(){}};
+   window.designFixture={conflicts:[],dismissConflict(){},query:{data:{page_id:"source",can_edit:true,can_comment:true,latest_version:1},isError:false},comments:{data:{comments:[]}},versions:{data:{versions:[{version:1}]}},doc,nodes:designNodes(doc),peers:[],connection:"connected",editable:true,dirty:true,draftError:false,save:{...mutation,error:Object.assign(new Error("History full"),{status:413})},restore:mutation,share:mutation,comment:mutation,connectAgent:mutation,setCursor(){}};
    createRoot(document.getElementById("root")).render(<DesignEditor workspaceId="ws" slug="original"/>);
   ` },
   bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
-  define: { "process.env.NODE_ENV": '"production"', "process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN": '"true"' },
+  define: { "process.env.NODE_ENV": '"production"', "process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN": '"true"', "process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE": '"false"' },
   plugins: [{ name: "editor-fixtures", setup(builder) {
    builder.onResolve({ filter: /^(next\/dynamic|@\/hooks\/(use-auth|use-artifact-agent-dispatch)|\.\/use-design)$/ }, args => ({ path: args.path, namespace: "fixture" }))
    builder.onLoad({ filter: /.*/, namespace: "fixture" }, args => ({ contents:

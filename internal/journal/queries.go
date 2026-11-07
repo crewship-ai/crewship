@@ -4,11 +4,15 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 	"unicode"
 )
+
+// ErrInvalidCursor identifies malformed client pagination input, distinct from storage errors.
+var ErrInvalidCursor = errors.New("journal: bad cursor")
 
 // Query filters List and Stream reads. Zero fields are omitted from the
 // resulting WHERE clause so "give me everything in workspace W" is just
@@ -286,7 +290,7 @@ func List(ctx context.Context, db *sql.DB, q Query) ([]Entry, string, error) {
 	if q.Cursor != "" {
 		cTS, cID, err := decodeCursor(q.Cursor)
 		if err != nil {
-			return nil, "", fmt.Errorf("journal: bad cursor: %w", err)
+			return nil, "", fmt.Errorf("%w: %v", ErrInvalidCursor, err)
 		}
 		// Strict < on (ts, id) keeps pagination monotonic when many entries
 		// share a millisecond timestamp.

@@ -187,6 +187,14 @@ export function humanizeEntry(e: JournalEntry): RunActivityRow | null {
         meta: joinMeta(formatDurationPrecise(num(p, "duration_ms"))),
       }
 
+    case "assignment.refused":
+      return {
+        ...base,
+        tone: "warn",
+        title: "Assignment refused",
+        detail: e.summary || "The server denied the assignment.",
+      }
+
     case "run.recovered_stop":
       return {
         ...base,

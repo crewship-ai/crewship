@@ -67,6 +67,8 @@ type SkippedSkill struct {
 	Path   string
 	Slug   string
 	Reason string
+	// Locked marks a skip caused by a curator's content lock (#5045).
+	Locked bool
 }
 
 // BulkImport walks a git repo or local directory tree for SKILL.md
@@ -82,9 +84,9 @@ type SkippedSkill struct {
 func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*BulkImportResult, error) {
 	switch {
 	case req.GitURL == "" && req.LocalPath == "":
-		return nil, fmt.Errorf("bulk import requires git_url or local_path")
+		return nil, inputError(fmt.Errorf("bulk import requires git_url or local_path"))
 	case req.GitURL != "" && req.LocalPath != "":
-		return nil, fmt.Errorf("bulk import accepts git_url or local_path, not both")
+		return nil, inputError(fmt.Errorf("bulk import accepts git_url or local_path, not both"))
 	}
 
 	root := req.LocalPath
@@ -97,7 +99,7 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 
 		if req.GitRef != "" {
 			if err := validateGitRef(req.GitRef); err != nil {
-				return nil, err
+				return nil, inputError(err)
 			}
 		}
 		plan, err := planGitClone(ctx, req.GitURL, imp.gitPolicy, nil)
@@ -230,6 +232,7 @@ func (imp *Importer) BulkImport(ctx context.Context, req BulkImportRequest) (*Bu
 			out.Skipped = append(out.Skipped, SkippedSkill{
 				Path: p, Slug: parsed.Meta.Name,
 				Reason: "upsert: " + importErr.Error(),
+				Locked: IsLocked(importErr),
 			})
 			return nil
 		}

@@ -279,6 +279,8 @@ func NewWebhookHandler(
 	// body-only or plaintext-secret delivery. Read locally from the agents
 	// table (this process owns the DB) rather than over the internal IPC hop.
 	wh.handler.SetRequireTimestampLookup(wh.lookupRequireTimestamp)
+	// Rotation overlap: the replaced secret keeps verifying until its expiry.
+	wh.handler.SetPreviousSecretLookup(wh.lookupPreviousSecret, wh.auditPreviousSecretUse)
 	return wh
 }
 
@@ -375,6 +377,62 @@ func (h *WebhookHandler) lookupSecret(ctx context.Context, crewID, agentID strin
 			"agent_id", agentID, "error", decErr)
 	}
 	return plain, nil
+}
+
+// previousSecretOpen reports whether a stored overlap expiry is still in the
+// future at now. The window ends strictly at the expiry instant; an empty,
+// unparseable or past value is closed (fail closed).
+func previousSecretOpen(expiresAt string, now time.Time) bool {
+	t, err := time.Parse(time.RFC3339Nano, expiresAt)
+	if err != nil {
+		return false
+	}
+	return now.Before(t)
+}
+
+// lookupPreviousSecret returns the agent's previous webhook secret while its
+// rotation overlap is open, "" otherwise. Any decryption problem yields ""
+// (unlike the current secret, nothing is passed through as-is).
+func (h *WebhookHandler) lookupPreviousSecret(ctx context.Context, crewID, agentID string) (string, error) {
+	if h.db == nil {
+		return "", nil
+	}
+	query := `SELECT previous_webhook_secret, previous_webhook_secret_expires_at FROM agents WHERE id = ? AND deleted_at IS NULL`
+	args := []any{agentID}
+	if crewID != "" {
+		query += " AND crew_id = ?"
+		args = append(args, crewID)
+	}
+	var secret, expires sql.NullString
+	err := h.db.QueryRowContext(ctx, query, args...).Scan(&secret, &expires)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("previous webhook secret lookup: %w", err)
+	}
+	if !secret.Valid || secret.String == "" || !expires.Valid || !previousSecretOpen(expires.String, time.Now()) {
+		return "", nil
+	}
+	plain, decErr := encryption.DecryptIfEncrypted(secret.String)
+	if decErr != nil {
+		return "", nil
+	}
+	return plain, nil
+}
+
+// auditPreviousSecretUse records an overlap verification in audit_logs so an
+// operator can tell when every sender has moved to the new secret.
+func (h *WebhookHandler) auditPreviousSecretUse(ctx context.Context, crewID, agentID, scheme string) {
+	if h.db == nil {
+		return
+	}
+	var workspaceID string
+	if err := h.db.QueryRowContext(ctx, `SELECT workspace_id FROM agents WHERE id = ?`, agentID).Scan(&workspaceID); err != nil || workspaceID == "" {
+		return
+	}
+	WriteAuditLog(ctx, h.db, nil, "agent.webhook_previous_secret.used", "AGENT", agentID, "", workspaceID,
+		map[string]interface{}{"scheme": scheme})
 }
 
 // webhookIdempotencyKey resolves the dedup key for a webhook delivery.

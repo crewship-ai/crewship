@@ -285,6 +285,8 @@ never re-displayed on a reload.
 
 The response contains the freshly minted `webhook_secret` exactly once — store it in the external system (GitHub/Grafana/… webhook config) immediately. Deliveries signed with the previous secret are rejected as soon as the rotation lands. Rotation requires agent-edit rights (OWNER/ADMIN, or MANAGER for agents they created).
 
+To let the sender migrate without downtime, send `{"previous_secret_ttl_seconds": N}` (`0`, the default, or `60` to `604800`, i.e. 7 days; anything else is `400`) or run `crewship agent rotate-webhook-secret <agent> --previous-secret-ttl 24h`. During that window both the new and the replaced secret verify (HMAC, timestamped HMAC and the legacy `X-Webhook-Secret`), in constant time. The replaced secret is encrypted at rest, never returned (the response only carries `previous_secret_expires_at`), and stops strictly at that instant. Rotating again during an overlap replaces the remembered secret, so at most two secrets are valid. End the window early with `DELETE /api/v1/agents/{agentId}/webhook-secret/previous` (`crewship agent revoke-previous-webhook-secret <agent>`). Each delivery verified with the previous secret is audited as `agent.webhook_previous_secret.used`.
+
 `GET /api/v1/agents/{agentId}` and the `GET /api/v1/agents` list expose only a `webhook_secret_set` boolean so clients can tell whether a secret is configured; the plaintext is never returned after the reveal.
 
 <Note>
@@ -331,7 +333,7 @@ is `403`.
 
 ### Rotating the signing secret
 
-`PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` with `{"rotate_secret": true}` mints a new signing secret and shows it once; the old one stops working at once. Add `"rotate_grace_seconds"` (`0`, `3600`, `86400` or `604800`; only together with `rotate_secret`, anything else is `400`) to keep the replaced secret valid for that long. While the window is open the response carries `previous_secret_expires_at`; the old secret itself is never returned. Both the body-only and the timestamped signature, and the GitHub profile, accept either secret inside the window. A second rotation replaces the remembered secret, so only the one just replaced survives.
+`PATCH /api/v1/workspaces/{workspaceId}/pipeline-webhooks/{webhookId}` with `{"rotate_secret": true}` mints a new signing secret and shows it once; the old one stops working at once. Add `"rotate_grace_seconds"` (`0`, or `60` to `604800`; only together with `rotate_secret`, anything else is `400`) to keep the replaced secret valid for that long. While the window is open the response carries `previous_secret_expires_at`; the old secret itself is never returned. Both the body-only and the timestamped signature, and the GitHub profile, accept either secret inside the window. A second rotation replaces the remembered secret, so only the one just replaced survives. `{"revoke_previous_secret": true}` ends the window early (it cannot be combined with `rotate_secret`). Every delivery verified with the previous secret is audited as `webhook.previous_secret.used`.
 
 ### Test a mapping
 

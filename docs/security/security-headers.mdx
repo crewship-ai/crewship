@@ -1,6 +1,6 @@
 ---
 title: "Rate Limiting & Security Headers"
-description: "Per-IP HTTP rate limits on auth and API routes, standard security response headers, and single-use OAuth state tokens with 15-minute expiry."
+description: "Per-IP HTTP rate limits, security response headers, disabled Google sign-in, and state handling for credential-provider OAuth."
 icon: "lock"
 stability: experimental
 tag: Experimental
@@ -15,7 +15,8 @@ Code of record:
 - `internal/api/middleware.go` — `SecurityHeaders`.
 - `internal/api/ratelimit.go` — `RateLimiter`, `extractIP`.
 - `internal/api/router.go` — middleware composition and route buckets.
-- `internal/api/auth_google.go` + `internal/api/oauth.go` — OAuth state lifecycle.
+- `internal/api/router_auth.go` — disabled Google sign-in and retained status metadata.
+- `internal/api/oauth_flow.go`, `internal/api/oauth_creds.go`, `internal/api/oauth.go` — credential-provider OAuth state lifecycle.
 
 ## Security response headers
 
@@ -42,11 +43,17 @@ Code of record:
 
 | Path | CSP value |
 |---|---|
-| SPA UI (anything outside `/api/`, `/healthz`, `/readyz`, `/metrics`, `/ws`, `/ws/terminal`, `/exposed/`) | `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://logos.composio.dev; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` |
+| SPA UI (anything outside `/api/`, `/healthz`, `/readyz`, `/metrics`, `/ws`, `/ws/terminal`, `/exposed/`) | `default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://logos.composio.dev; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'` |
 | API / health / WebSocket | `default-src 'none'; frame-ancestors 'none'; base-uri 'none'` (reapplied by `api.SecurityHeaders` inside the API router so the lockdown survives even if the outer wrapper is bypassed) |
 | `/exposed/` (port-exposed user apps) | **No CSP header** — and no HSTS / COEP / CORP either. Upstream owns its own policy; the reverse proxy does not stamp ours on arbitrary HTML/JS. |
 
 The SPA `img-src` allows one extra host, `https://logos.composio.dev`, which serves the managed-integration brand logos (Gmail, GitHub, Slack, …) shown in the connector catalog — scoped to that one host, not a blanket `https:`.
+
+The SPA's style/font sources are same-origin (`style-src 'self' 'unsafe-inline'`
+and `font-src 'self' data:`), not external Google Fonts. Asset allowlists and
+provider brand logos do not enable Google user sign-in or register OAuth
+login routes. Credential-provider OAuth, including connections to Google APIs,
+is a separate flow.
 
 <Note>
   HSTS **is** set (`max-age=31536000; includeSubDomains`) on every non-`/exposed/` response, so a browser that reaches Crewship over HTTPS is pinned to it for a year. `preload` is omitted on purpose. For plain-HTTP dev the header is inert (browsers ignore HSTS delivered over HTTP). When you terminate TLS at a reverse proxy in front of Crewship, the header still rides through; there is nothing extra to configure at the proxy.
@@ -177,29 +184,46 @@ Right-to-left parsing defeats the append-style proxy spoof: with nginx's default
 
 ## OAuth CSRF state
 
-Both the Google sign-in flow (`internal/api/auth_google.go`) and the credential OAuth connector flow (`internal/api/oauth.go`) store an opaque state token in the `oauth_states` table at the start of the round-trip and consume it atomically on callback.
+Google user sign-in is disabled: its redirect and callback routes are not
+registered, even with Google client settings present. The retained status
+metadata always reports disabled. The unregistered `auth_google.go` handler
+must not be treated as an active login flow or as evidence for the current
+credential-connector contract.
 
-Guarantees:
+The supported credential-provider flow creates state for an existing OAuth
+credential and consumes it on callback. It connects a provider credential;
+it does not sign a person into Crewship.
 
-- **Single-use** — the callback uses `DELETE … RETURNING` to read and remove the row in one statement. A replayed `?state=…` returns `400 Invalid or expired state`.
-- **15-minute expiry** — the callback rejects any state whose `created_at` is older than 15 minutes with `400 OAuth state expired`. The OAuth connector flow also sweeps expired rows on each new request (`DELETE FROM oauth_states WHERE created_at < datetime('now', '-15 minutes')`).
-- **Fail closed on parse error** — unreadable timestamps are treated as invalid rather than allowed through.
-- **PKCE** — the credential-connector flow additionally stores a PKCE `code_verifier` alongside the state for the token-exchange step.
-- **Safe redirect allowlist** — Google sign-in passes the caller's `?redirect=` through `isSafeRedirect` before storing, so a bad actor cannot smuggle in an open-redirect target via the state row.
+State handling in `oauth_flow.go` and `oauth_creds.go`:
+
+- **Single-use** — the callback consumes the row with `DELETE … RETURNING`;
+  a missing or previously consumed state returns `400 Invalid or expired state token`.
+- **Age check (Callback only)** — the callback rejects a state older than
+  15 minutes only when its stored creation time can be parsed successfully.
+  Normal stored creation times use the supported format; this check does
+  not give the other connection modes a uniform 15-minute expiration.
+- **PKCE** — the verifier is encrypted before storage and read for the code
+  exchange. This is separate from the disabled Google sign-in handler.
+
+Manual `Exchange` consumes a provided stored state only when no code verifier
+was supplied; that branch does not check the state's age. `Initiate` and
+auto-connect attempt cleanup of old SQL state rows when creating another SQL
+state. Loopback keeps its state separately in memory, outside that SQL
+cleanup. Do not rely on a uniform 15-minute state lifetime across these
+connection modes.
 
 ### State lifecycle
 
 ```
-POST /api/auth/google/start
-  → generate 32 random bytes (256-bit), base64url-encode
-  → INSERT INTO oauth_states (state, redirect_uri, [code_verifier])
-  → 307 redirect to provider with ?state=<token>
+POST /api/v1/oauth/initiate (authorized credential connection)
+  → generate 32 random bytes of state, represented as hex
+  → INSERT oauth_states with credential/workspace context and encrypted PKCE verifier
+  → return auth_url and state as JSON; the client opens the provider URL
 
-GET /api/auth/google/callback?state=<token>&code=<code>
-  → DELETE FROM oauth_states WHERE state = ? RETURNING redirect_uri, created_at
-  → if row missing              → 400 Invalid or expired state
-  → if created_at > 15 min ago  → 400 OAuth state expired
-  → otherwise exchange code and sign the user in
+GET /api/v1/oauth/callback?state=<token>&code=<code>
+  → DELETE … RETURNING the credential context, verifier, and creation time
+  → reject missing state or a parsed creation time older than 15 minutes
+  → exchange the provider code and update the existing credential
 ```
 
 ## Reviewing behaviour in practice
@@ -207,8 +231,8 @@ GET /api/auth/google/callback?state=<token>&code=<code>
 | Symptom | Likely cause |
 |---|---|
 | `429 Too Many Requests` on `/api/auth/login` after 10 attempts | Auth rate limiter (10 req/min). Retry after 60 s or behind a different IP. |
-| `400 OAuth state expired` after leaving the sign-in tab open | State row older than 15 minutes. Retry from the start. |
-| `400 Invalid or expired state` on back-button replay | State row already consumed — single-use. |
+| `400 OAuth state expired` in the credential-connection tab | Callback rejected a successfully parsed creation time older than 15 minutes. This is Callback's check, not a uniform age limit for manual Exchange or loopback. Restart the credential connection. |
+| `400 Invalid or expired state token` from the credential callback on back-button replay | Callback could not find the state row, for example because it was already consumed. Restart the credential connection. |
 | Legitimate internal caller rate-limited | Request hit the `/api/*` bucket because it was not sent under `/api/v1/internal/*`. Fix the route prefix; internal callers go through `X-Internal-Token` auth. |
 | `crewship seed` / template import 429s mid-run | Should not happen with a valid CLI token — the authenticated-CLI exemption (#1333) covers this. If it still 429s, confirm the CLI is actually sending `Authorization: Bearer crewship_cli_…`/`crewship_admin_…` and that the token isn't revoked/expired. `CREWSHIP_RATELIMIT_DISABLED` is no longer needed for seeding. |
 

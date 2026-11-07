@@ -283,12 +283,25 @@ These are off by default and intended for operators debugging performance.
 | `RESEND_API_KEY` | (unset — recovery emails disabled) | Resend API key for transactional email delivery. When unset, password-recovery flows surface a "configure RESEND_API_KEY or share the reset link manually" message instead of sending. |
 | `RESEND_FROM` | (unset — required together with API key) | `From:` address used for outbound recovery emails (e.g. `Crewship <recovery@example.com>`). |
 
-## Google sign-in (optional)
+## Google sign-in compatibility settings (disabled)
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `GOOGLE_CLIENT_ID` | (unset — Google sign-in disabled) | OAuth 2.0 client ID for the "Sign in with Google" flow. Loaded via `applyEnvOverrides` in `internal/config/config.go`. |
-| `GOOGLE_CLIENT_SECRET` | (unset) | OAuth client secret paired with the client ID. Required when `GOOGLE_CLIENT_ID` is set. |
+| `GOOGLE_CLIENT_ID` | (unset) | Retained compatibility value loaded into `auth.google_client_id`. Setting it does not enable Google sign-in: its redirect and callback routes are deliberately unregistered. |
+| `GOOGLE_CLIENT_SECRET` | (unset) | Retained compatibility value paired with the client ID. Neither value enables Google sign-in, even when both are set. |
+
+The retained Google sign-in status endpoint always reports `enabled: false`,
+regardless of these settings. Credential-provider OAuth connections and the
+Gemini grant-refresh settings below are separate features, not switches for
+Crewship user sign-in.
+
+## Imported Gemini grant refresh
+
+These live server-side settings configure refresh of imported Gemini CLI
+grants. They are separate from the disabled Crewship Google sign-in settings.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
 | `CREWSHIP_GEMINI_OAUTH_CLIENT_ID` | (unset — imported Gemini grant refresh disabled) | Server-only OAuth client ID matching the client that issued an imported Gemini CLI grant. Separate from Crewship web sign-in. Configure together with its client secret and restart the server. |
 | `CREWSHIP_GEMINI_OAUTH_CLIENT_SECRET` | (unset) | Server-only secret for that Gemini OAuth client. Never put it in browser configuration or agent credentials. Crewship does not bundle or automatically download an upstream client's identity. |
 
@@ -961,6 +974,6 @@ computation is still running. Limits are per process, not shared across replicas
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CREWSHIP_ARTIFACT_PROJECTS_ENABLED` | `false` | Enable the artifact project pilot for an isolated installation. Workspace `artifact_projects` feature flags also enable it. Existing creation policy, current credentials and Page access still apply. |
+| `CREWSHIP_ARTIFACT_PROJECTS_ENABLED` | unset | `true` forces artifact projects on for every workspace, over any workspace override or instance default. Unset or `false` does not turn them off: the `artifact_projects` feature flag decides, and it is on by default (see [Turning Projects off](/configuration/artifacts#turning-projects-off)). Existing creation policy, current credentials and Page access still apply. |
 | `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED` | `false` | Enable Dashboard collection data API and original-run tools. Requires artifact projects; workspace `artifact_dashboard_data` also enables it. Current Page authority and code-manifest collection declarations still apply. |
 | `CREWSHIP_ARTIFACT_INTERACTIVE_ENABLED` | `false` | Enable interactive artifacts: Project scripts run in the Page runtime (`CREWSHIP_PAGE_RUNTIME_ORIGIN`) and reach Dashboard collections through a broker. Requires artifact projects and Dashboard data; workspace `artifact_interactive` also enables it. See [Interactive artifacts](/guides/artifacts/interactive). |

@@ -4,12 +4,16 @@ import (
 	"context"
 	"database/sql"
 	"database/sql/driver"
+	"errors"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+
+	"modernc.org/sqlite"
+	sqlite3 "modernc.org/sqlite/lib"
 )
 
 // Bound lock-contention fixtures at SQLite itself: modernc's native busy
@@ -56,10 +60,42 @@ func TestPrivateMetadataReadWALWriterContention(t *testing.T) {
 				pagesCreateWith(t, h, ws, user, pagesReachBody(slug, "lookout"))
 			}
 			original := h.db
-			h.db = privateMetadataBoundedPool(t, original)
+			path := reviewDBPath(t, original)
+			uri := url.URL{Scheme: "file", Path: path}
+			dsn := uri.String() + "?_pragma=busy_timeout(100)&_pragma=foreign_keys(ON)&_txlock=immediate"
+			var mu sync.Mutex
+			type beginAttempt struct {
+				readOnly bool
+				err      error
+			}
+			var begins []beginAttempt
+			connector := &privateMetadataBeginConnector{
+				inner: &reviewHookConnector{inner: original.Driver(), dsn: dsn, hook: &reviewQueryHook{}},
+				after: func(opts driver.TxOptions, err error) {
+					mu.Lock()
+					defer mu.Unlock()
+					begins = append(begins, beginAttempt{readOnly: opts.ReadOnly, err: err})
+				},
+			}
+			observed := sql.OpenDB(connector)
+			defer observed.Close()
+			h.db = observed
 			defer func() { h.db = original }()
-			path := reviewDBPath(t, h.db)
-			other, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(100)&_pragma=foreign_keys(ON)&_txlock=immediate")
+			if reviewDBPath(t, observed) != path {
+				t.Fatal("observed pool opened a different native database")
+			}
+			var mode string
+			if err := observed.QueryRowContext(t.Context(), `PRAGMA journal_mode`).Scan(&mode); err != nil || mode != "wal" {
+				t.Fatalf("reader fixture requires actual WAL file mode: %q %v", mode, err)
+			}
+			unlocked, err := observed.BeginTx(t.Context(), nil)
+			if err != nil {
+				t.Fatalf("uncontended native writer control: %v", err)
+			}
+			if err := unlocked.Rollback(); err != nil {
+				t.Fatal(err)
+			}
+			other, err := sql.Open("sqlite", dsn)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -69,20 +105,55 @@ func TestPrivateMetadataReadWALWriterContention(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer tx.Rollback()
+			// A real second writer must fail at SQLite while this transaction
+			// stays held. This calibrates the lock independently of HTTP latency.
+			probe, err := observed.BeginTx(t.Context(), nil)
+			if probe != nil {
+				_ = probe.Rollback()
+			}
+			if t.Context().Err() != nil || !privateMetadataSQLiteBusy(err) {
+				t.Fatalf("native writer control: want SQLITE_BUSY with live context, got %v (context %v)", err, t.Context().Err())
+			}
 			for _, route := range privateMetadataRoutes {
 				t.Run(route.name, func(t *testing.T) {
-					request := pagesRequest(t, "GET", "/api/v1/pages/"+slug+route.path, ws, custodian, "OWNER", "")
+					target := "/api/v1/pages/" + slug + route.path
 					if route.path == "subject" {
-						request = pagesRequest(t, "GET", "/api/v1/pages/access?subject=user:"+custodian, ws, custodian, "OWNER", "")
+						target = "/api/v1/pages/access?subject=user:" + custodian
 					}
-					ctx, cancel := context.WithTimeout(request.Context(), 100*time.Millisecond)
-					defer cancel()
-					request = request.WithContext(ctx)
+					// This is a lock-semantics test, not a 100ms request SLA.
+					// SQLite still bounds a contended writer with busy_timeout(100).
+					request := withWorkspaceUser(httptest.NewRequestWithContext(t.Context(), "GET", target, nil), custodian, ws, "OWNER")
 					request.SetPathValue("slug", slug)
+					mu.Lock()
+					begins = nil
+					mu.Unlock()
 					out := httptest.NewRecorder()
 					route.handler(h, out, request)
+					if request.Context().Err() != nil {
+						t.Fatalf("lock result came from a cancelled request: %v", request.Context().Err())
+					}
+					mu.Lock()
+					attempts := append([]beginAttempt(nil), begins...)
+					mu.Unlock()
+					reads, writers := 0, 0
+					for _, begin := range attempts {
+						if begin.readOnly {
+							reads++
+							if begin.err != nil {
+								t.Fatalf("WAL reader failed to begin: %v", begin.err)
+							}
+							continue
+						}
+						writers++
+						if !private || !privateMetadataSQLiteBusy(begin.err) {
+							t.Fatalf("unexpected writer attempt: private=%v, error=%v", private, begin.err)
+						}
+					}
+					if reads == 0 || (private && writers == 0) {
+						t.Fatalf("missing native transaction proof: readers=%d writers=%d private=%v", reads, writers, private)
+					}
 					if !private && out.Code != 200 {
-						t.Fatalf("ordinary read acquired writer lock: %d %s", out.Code, out.Body.String())
+						t.Fatalf("ordinary WAL read failed: %d %s", out.Code, out.Body.String())
 					}
 					if private && (out.Code != 500 || strings.Contains(out.Body.String(), "Created report")) {
 						t.Fatalf("private writer contention must fail without bytes: %d %s", out.Code, out.Body.String())
@@ -91,6 +162,11 @@ func TestPrivateMetadataReadWALWriterContention(t *testing.T) {
 			}
 		})
 	}
+}
+
+func privateMetadataSQLiteBusy(err error) bool {
+	var native *sqlite.Error
+	return errors.As(err, &native) && native.Code()&0xff == sqlite3.SQLITE_BUSY
 }
 
 func TestPrivateMetadataReadCustodySnapshot(t *testing.T) {
@@ -179,6 +255,7 @@ func TestPrivateSubjectAccessLateAuditDeletion(t *testing.T) {
 type privateMetadataBeginConnector struct {
 	inner  *reviewHookConnector
 	before func()
+	after  func(driver.TxOptions, error)
 	once   sync.Once
 }
 
@@ -197,10 +274,14 @@ type privateMetadataBeginConn struct {
 }
 
 func (c *privateMetadataBeginConn) BeginTx(ctx context.Context, opts driver.TxOptions) (driver.Tx, error) {
-	if !opts.ReadOnly {
+	if !opts.ReadOnly && c.owner.before != nil {
 		c.owner.once.Do(c.owner.before)
 	}
-	return c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
+	tx, err := c.Conn.(driver.ConnBeginTx).BeginTx(ctx, opts)
+	if c.owner.after != nil {
+		c.owner.after(opts, err)
+	}
+	return tx, err
 }
 func TestPrivateMetadataReadFreshWriterAuthority(t *testing.T) {
 	for _, mutation := range []string{"custody", "owner-demotion"} {
@@ -217,7 +298,7 @@ func TestPrivateMetadataReadFreshWriterAuthority(t *testing.T) {
 				if mutation == "custody" {
 					execOrFatal(t, original, `UPDATE pages SET owner_user_id=? WHERE id=?`, custodian, page)
 				} else {
-					execOrFatal(t, original, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id='ptadmin'`, ws)
+					execOrFatal(t, original, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id='ptadmin'`, ws)
 				}
 			}
 			hooked := sql.OpenDB(c)
@@ -266,7 +347,8 @@ func TestPrivateMetadataAuthorityBeforeWriter(t *testing.T) {
 	}{
 		{"custodian", "", "MEMBER", true},
 		{"workspace-owner", "ptadmin", "OWNER", true},
-		{"nonowner-admin", "ptadmin", "OWNER", false},
+		{"workspace-admin", "ptadmin", "ADMIN", true}, // PRD §5 (#4825)
+		{"stale-member", "ptadmin", "OWNER", false},
 	} {
 		t.Run(who.name, func(t *testing.T) {
 			h, ws, custodian, _ := privateMetadataFixture(t)
@@ -275,9 +357,12 @@ func TestPrivateMetadataAuthorityBeforeWriter(t *testing.T) {
 				user = custodian
 			}
 			original := h.db
+			if who.role == "ADMIN" {
+				execOrFatal(t, original, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id='ptadmin'`, ws)
+			}
 			if !who.allowed {
 				// Keep stale OWNER request context: only fresh stored standing counts.
-				execOrFatal(t, original, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id='ptadmin'`, ws)
+				execOrFatal(t, original, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id='ptadmin'`, ws)
 			}
 			writerBegins := 0
 			c := &privateMetadataBeginConnector{inner: &reviewHookConnector{inner: original.Driver(), dsn: reviewDBPath(t, original) + "?_pragma=busy_timeout(100)&_pragma=foreign_keys(ON)&_txlock=immediate", hook: &reviewQueryHook{}}}

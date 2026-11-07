@@ -87,6 +87,9 @@ func newChatParityStub(t *testing.T) *chatParityStub {
 			case s.gotFrame <- f:
 			default:
 			}
+			if f.Type == "ping" {
+				_ = websocket.Message.Send(conn, `{"type":"pong"}`)
+			}
 			if hook != nil && !hook(conn, f) {
 				return
 			}

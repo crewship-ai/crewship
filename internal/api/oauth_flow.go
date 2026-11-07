@@ -193,7 +193,11 @@ func (h *OAuthHandler) Callback(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Exchange code for tokens (with PKCE verifier if present)
-	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, code, redirectURI, codeVerifier, cred.Resource)
+	tokenResp, err := exchangeOAuthCodeGated(r.Context(), h.db, credentialID, cred.TokenURL, cred.ClientID, cred.ClientSecret, code, redirectURI, codeVerifier, cred.Resource)
+	if errors.Is(err, errTokenEndpointNotApproved) {
+		replyError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		h.logger.Error("OAuth token exchange failed", "error", err, "credential_id", credentialID)
 		replyError(w, http.StatusBadGateway, "Token exchange failed")
@@ -298,6 +302,10 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if cred.ClientID == "" || cred.TokenURL == "" {
+		replyError(w, http.StatusBadRequest, "Credential missing OAuth configuration")
+		return
+	}
 
 	// Exchange code for tokens (with PKCE verifier if available)
 	//
@@ -307,7 +315,11 @@ func (h *OAuthHandler) Exchange(w http.ResponseWriter, r *http.Request) {
 	// 9207 validation is only enforced on the Callback/Loopback paths that
 	// see the full authorization response. Documented as a known gap in the
 	// PR rather than silently declared fixed.
-	tokenResp, err := exchangeOAuthCode(r.Context(), cred.TokenURL, cred.ClientID, cred.ClientSecret, req.Code, redirectURI, codeVerifier, cred.Resource)
+	tokenResp, err := exchangeOAuthCodeGated(r.Context(), h.db, req.CredentialID, cred.TokenURL, cred.ClientID, cred.ClientSecret, req.Code, redirectURI, codeVerifier, cred.Resource)
+	if errors.Is(err, errTokenEndpointNotApproved) {
+		replyError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		h.logger.Error("OAuth manual code exchange failed", "error", err, "credential_id", req.CredentialID)
 		replyError(w, http.StatusBadGateway, "Token exchange failed")
@@ -457,7 +469,7 @@ func (h *OAuthHandler) runLoopbackServer(
 		}
 
 		// Exchange code for tokens (with PKCE verifier)
-		tokenResp, err := exchangeOAuthCode(r.Context(), tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier, resource)
+		tokenResp, err := exchangeOAuthCodeGated(r.Context(), h.db, credentialID, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier, resource)
 		if err != nil {
 			h.logger.Error("OAuth loopback token exchange", "error", err, "credential_id", credentialID)
 			w.Header().Set("Content-Type", "text/html")

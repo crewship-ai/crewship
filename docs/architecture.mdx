@@ -425,9 +425,11 @@ version store inside the Crewship database. Every save is a new immutable
 version; files are stored once per artifact by content hash. Each artifact has
 two heads: the **latest version**, which the owner and editors work on, and
 the **shared version**. For Projects (including Dashboard and Slides),
-readers other than the owner and editors see only the shared version. Design
-REST reads without a version parameter expose the live canvas to authorized
-readers; its explicit version reads restrict non-editors to the shared version.
+readers other than the owner and editors see only the shared version.
+Shared-only Design readers also receive the shared snapshot and presence,
+without live document updates. Design live reads require Edit authority or
+the separately audited administrative read path; shared-only history reads
+remain limited to the shared version.
 How a write
 is guarded depends on the type. A project write (and a Dashboard data batch)
 must name the `base_version` it started from; a Craft save names its lease
@@ -498,9 +500,10 @@ for the agent.
 
 ### Switches
 
-Every artifact family is off by default. Workspace flags (`artifact_projects`,
-`artifact_dashboard_data`, `artifact_slides`, `artifacts_design`) are turned on
-with `crewship feature-flag enable <key>`. Craft needs the server switch
+Projects (`artifact_projects`) are on by default and can be turned off per
+workspace or instance-wide. Every other artifact family is off by default: the
+workspace flags `artifact_dashboard_data`, `artifact_slides` and
+`artifacts_design` are turned on with `crewship feature-flag enable <key>`. Craft needs the server switch
 `CREWSHIP_CRAFT_NATIVE_ENABLED`, and Craft agent tasks also need
 `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED`. The web UI additionally needs
 build-time `NEXT_PUBLIC_*` variables, such as `NEXT_PUBLIC_ARTIFACTS_LIBRARY`

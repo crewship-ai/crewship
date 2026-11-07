@@ -90,6 +90,8 @@ export interface Op {
   sentAt: string
   baseVersion?: string
   contentHash?: string
+  /** SHA-256 of the request body as sent (the snapshot the editor sent, for the evidence chain). */
+  bodySha256?: string
   status?: number
   version?: string
   phase?: string
@@ -108,7 +110,8 @@ export function instrument(ctx: BrowserContext): Op[] {
     try {
       body = req.postDataJSON()
     } catch {}
-    const op: Op = { n: ops.length + 1, kind, sentAt: new Date().toISOString(), baseVersion: body?.baseVersion === undefined ? undefined : String(body.baseVersion), contentHash: body?.contentHash }
+    const raw = req.postDataBuffer()
+    const op: Op = { n: ops.length + 1, kind, sentAt: new Date().toISOString(), baseVersion: body?.baseVersion === undefined ? undefined : String(body.baseVersion), contentHash: body?.contentHash, bodySha256: raw ? sha256(raw) : undefined }
     ops.push(op)
     byReq.set(req, op)
   })
@@ -204,11 +207,12 @@ export async function typeMarker(page: Page, f: Frame, app: NativeApp, text: str
 }
 
 /** Waits for "Uloženo · verze N" and returns N. */
-export async function waitSaved(page: Page, timeout = 30_000): Promise<string | undefined> {
+/** Waits for "Uloženo · verze N"; with `after`, only for N newer than it (an older save's label stays on screen). */
+export async function waitSaved(page: Page, timeout = 30_000, after?: string): Promise<string | undefined> {
   const end = Date.now() + timeout
   while (Date.now() < end) {
     const m = (await status(page)).match(/^Uloženo · verze (\d+)/)
-    if (m) return m[1]
+    if (m && (after === undefined || BigInt(m[1]) > BigInt(after))) return m[1]
     await pause(100)
   }
   return undefined

@@ -706,7 +706,7 @@ it("retires an acknowledged agent comment when send permission changes while Edi
 it("offers only editors an escaped unpinned source editor link", async () =>{
  state.target={slug:"a/b ?&"}
  render(<ArtifactViewerPanel variant="library" />)
- expect(screen.getByRole("link",{name:"Edit source"})).toHaveAttribute("href","/pages/a%2Fb%20%3F%26?artifact=1&workspace_id=ws1")
+ expect(screen.getByRole("link",{name:"Edit source"})).toHaveAttribute("href","/pages/a%2Fb%20%3F%26?artifact=1&edit=1&workspace_id=ws1")
  cleanup();state.snapshot.data=snap({can_write:false});render(<ArtifactViewerPanel variant="library" />)
  expect(screen.queryByRole("link",{name:"Edit source"})).toBeNull()
 })

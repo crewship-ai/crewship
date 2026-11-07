@@ -11,9 +11,15 @@ export const RELEASE_FLAGS = [
   "NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT",
   "NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS",
   "NEXT_PUBLIC_CHAT_CRAFT_LEASE",
+  "NEXT_PUBLIC_ARTIFACTS_DESIGN",
+] as const
+
+// Later milestones stay off in every profile until they pass their own
+// acceptance: Dashboard is milestone C, Slides and Design System milestone D of the PRD.
+export const UNACCEPTED_FLAGS = [
   "NEXT_PUBLIC_ARTIFACT_DASHBOARDS",
   "NEXT_PUBLIC_ARTIFACT_SLIDES",
-  "NEXT_PUBLIC_ARTIFACTS_DESIGN",
+  "NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM",
 ] as const
 
 export type BuildProfile = { name: "main" | "release"; env: Record<string, string | undefined> }

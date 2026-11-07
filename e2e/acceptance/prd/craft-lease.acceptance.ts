@@ -9,7 +9,10 @@
 // through the editor's lease bar on a deployed instance with native bundles.
 import { loginStorageState } from "./auth"
 import { captureAdmission, isCraft, nativeProfile, PEER_NAME, peerApi, requireNative, traceCraft, type CraftCall } from "./craft-lease/helpers"
-import { APPLICATIONS, NativePage, sessionUserId, type Admission, type LeaseView } from "./craft-lease/native"
+import { APPLICATIONS, markedDocument, NativePage, sessionUserId, type Admission, type LeaseView } from "./craft-lease/native"
+import { headText, inspectDrafts, placeCaret, newTyping, typedMarkers, typeLines, waitForDraftOffer } from "./craft-session/draft"
+import { checkDraftCopies, checkNoLines, lineLedger, type LineCheck } from "./craft-session/lines"
+import * as editor from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
 
 /**
@@ -74,15 +77,23 @@ for (const { application, label } of APPLICATIONS) {
 
           // The holder saves; a non-holder save under the holder's generation is refused.
           const v1 = await doc.document(request, owner)
-          const bytes = Buffer.from(v1.bytes, "base64")
-          const ownerSave = await doc.save(request, owner, { generation: gOwner!, baseVersion: v1.version, enginePin: v1.enginePin, bytes, editorRevision: `prd-owner-${Date.now()}` })
+          // Each write carries its own content: an identical save at the head
+          // creates no version (#5075), and a fenced write must be one that
+          // would otherwise have counted.
+          const content = (who: string) => markedDocument(application, `PRD lease ${who} ${Date.now()}`)
+          const ownerBytes = content("owner")
+          expect(ownerBytes.toString("base64"), "the holder's save changes the content").not.toBe(v1.bytes)
+          const ownerSave = await doc.save(request, owner, { generation: gOwner!, baseVersion: v1.version, enginePin: v1.enginePin, bytes: ownerBytes, editorRevision: `prd-owner-${Date.now()}` })
           expect(ownerSave.status(), "the holder saves").toBe(200)
           const v2 = (await ownerSave.json()) as { version: string; phase: string }
           expect(v2.phase).toBe("committed")
           expect(BigInt(v2.version)).toBeGreaterThan(BigInt(v1.version))
-          const intruder = await doc.save(peerCtx, other, { generation: gOwner!, baseVersion: v2.version, enginePin: v1.enginePin, bytes, editorRevision: `prd-intruder-${Date.now()}` })
+          expect((await doc.document(request, owner)).bytes, "the new version holds the holder's content").toBe(ownerBytes.toString("base64"))
+          const intruder = await doc.save(peerCtx, other, { generation: gOwner!, baseVersion: v2.version, enginePin: v1.enginePin, bytes: content("intruder"), editorRevision: `prd-intruder-${Date.now()}` })
           expect(intruder.status(), "a non-holder cannot save under the holder's generation").toBe(409)
-          expect((await doc.document(peerCtx, other)).version).toBe(v2.version)
+          const afterIntruder = await doc.document(peerCtx, other)
+          expect(afterIntruder.version).toBe(v2.version)
+          expect(afterIntruder.bytes, "the refused write changed nothing").toBe(ownerBytes.toString("base64"))
 
           // Request and handoff.
           const requested = await doc.leaseOp(peerCtx, other, "request-handoff")
@@ -110,7 +121,7 @@ for (const { application, label } of APPLICATIONS) {
 
           // The retired generation is fenced: save, renew and release all 409, nothing changes.
           const head = await doc.document(peerCtx, other)
-          const stale = await doc.save(request, owner, { generation: gOwner!, baseVersion: head.version, enginePin: head.enginePin, bytes, editorRevision: `prd-stale-${Date.now()}` })
+          const stale = await doc.save(request, owner, { generation: gOwner!, baseVersion: head.version, enginePin: head.enginePin, bytes: content("stale"), editorRevision: `prd-stale-${Date.now()}` })
           expect(stale.status(), "stale-generation save").toBe(409)
           const staleRenew = await doc.leaseOp(request, owner, "renew", { generation: gOwner! })
           expect(staleRenew.status(), "stale-generation renew").toBe(409)
@@ -124,10 +135,12 @@ for (const { application, label } of APPLICATIONS) {
           log.stale = { save: stale.status(), renew: staleRenew.status(), release: staleRelease.status(), reacquire: ownerReacquire.status(), versionUnchanged: unchanged.version }
 
           // The new holder saves and releases; the document is free again.
-          const peerSave = await doc.save(peerCtx, other, { generation: gPeer!, baseVersion: head.version, enginePin: head.enginePin, bytes, editorRevision: `prd-peer-${Date.now()}` })
+          const peerBytes = content("peer")
+          const peerSave = await doc.save(peerCtx, other, { generation: gPeer!, baseVersion: head.version, enginePin: head.enginePin, bytes: peerBytes, editorRevision: `prd-peer-${Date.now()}` })
           expect(peerSave.status(), "the new holder saves").toBe(200)
           const v3 = (await peerSave.json()) as { version: string }
           expect(BigInt(v3.version)).toBeGreaterThan(BigInt(head.version))
+          expect((await doc.document(peerCtx, other)).bytes, "the new holder's version holds its content").toBe(peerBytes.toString("base64"))
           const released = await doc.leaseOp(peerCtx, other, "release", { generation: gPeer! })
           expect(released.status()).toBe(200)
           expect(((await released.json()) as LeaseView).holder).toBeNull()
@@ -229,6 +242,127 @@ for (const { application, label } of APPLICATIONS) {
         } finally {
           // On failure the editor calls are the first evidence: which request
           // ended the session is what a red row has to explain.
+          if (trail.length) await prd.evidence(passed ? "craft-calls.json" : "failure-craft-calls.json", trail).catch(() => {})
+          for (const c of cleanup.reverse()) await c().catch(() => {})
+        }
+      },
+    )
+
+    test(
+      `${label}: a late write is refused and the unsaved draft is kept`,
+      { annotation: REQ[application].stale },
+      async ({ prd, request }) => {
+        prd.requireFull("needs the deployed native editor bundles")
+        test.setTimeout(10 * 60_000)
+        const cleanup: Array<() => Promise<void>> = []
+        const trail: CraftCall[] = []
+        let passed = false
+        try {
+          const ws = await prd.qaWorkspace()
+          const doc = await NativePage.create(request, ws.id, application, `PRD lease draft ${label}`)
+          await requireNative(prd, request, doc)
+          const { peer, api: peerCtx } = await peerApi(prd, cleanup)
+          await doc.grant(request, peer.userId, "write")
+          const ownerAccount = prd.env.accounts.owner
+          expect(ownerAccount, "owner account").toBeTruthy()
+          const ownerContext = await prd.browserContext(await loginStorageState(prd.origin, ownerAccount!))
+          const page = await ownerContext.newPage()
+          page.setDefaultTimeout(60_000)
+          traceCraft(page, "owner", trail)
+          const admission = captureAdmission(page)
+          await page.goto(doc.editorPath)
+          await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
+
+          // The owner holds the editor and has typed work that is not saved.
+          const LATE = `PRDLATE${Date.now().toString(36)}`
+          await editor.acquire(page, application)
+          // The editor's own admission (bound to this browser's login): the
+          // lease belongs to that session, not to the person's other sessions.
+          const ownAdmission = admission.current()
+          expect(ownAdmission, "the owner's editor was admitted").toBeTruthy()
+          const held = await doc.lease(ownerContext.request, ownAdmission!)
+          expect(held.mine, "the owner holds the editor").toBe(true)
+          const generation = held.generation!
+          const before = await headText(request, doc)
+          const savesBefore = trail.filter((c) => c.path === "craft/document/save" && c.status === 200).length
+
+          // The owner keeps typing (no pause long enough for the autosave) and,
+          // in the middle of it, the custody moves without the owner's editor
+          // flushing: the peer's request is handed over by a call that does not
+          // go through the editor.
+          await placeCaret(page, application, 7)
+          const progress = newTyping()
+          const typing = typeLines(page, LATE, 8, 40, 120, progress)
+          await expect
+            .poll(() => progress.accepted.length, { timeout: 30_000, message: `lines were typed before the handoff` })
+            .toBeGreaterThan(0)
+            .catch((e: unknown) => {
+              throw new Error(`no accepted line before the handoff; typing progress at failure: ${JSON.stringify(progress)}`, { cause: e })
+            })
+          const observer = await doc.session(peerCtx)
+          const ask = await doc.leaseOp(peerCtx, observer, "request-handoff")
+          expect(ask.status()).toBe(201)
+          const requestId = ((await ask.json()) as { request_id: string }).request_id
+          const moved = await doc.leaseOp(ownerContext.request, ownAdmission!, "handoff", { generation, request_id: requestId })
+          expect(moved.status(), `custody moved: ${(await moved.text()).slice(0, 200)}`).toBe(200)
+          await typing
+          // Every line the editor took (also after the request, until it turned read-only) must be in the draft.
+          const typedBefore = typedMarkers(LATE, progress.accepted)
+          // Per line: typed, accepted, then found once and in order in each draft; the server holds none (craft-session/lines.ts).
+          const ledger = lineLedger(LATE, progress)
+          const lineChecks: LineCheck[] = []
+          const expectLines = async (c: LineCheck, what: string) => {
+            lineChecks.push(c)
+            await prd.evidence("lines.json", { ledger, checks: lineChecks })
+            expect(c.problems, what).toEqual([])
+          }
+          const offered = await waitForDraftOffer(page, 60_000)
+
+          // The late write under the retired generation is refused and the draft stays.
+          const head = await doc.document(ownerContext.request, ownAdmission!).catch(async () => doc.document(request, await doc.session(request)))
+          const late = await doc.save(ownerContext.request, ownAdmission!, {
+            generation, baseVersion: head.version, enginePin: head.enginePin, bytes: Buffer.from(head.bytes, "base64"), editorRevision: `prd-ui-late-${Date.now()}`,
+          })
+          expect(late.status(), "the late write under the retired generation").toBe(409)
+          const after = await headText(request, doc)
+          expect(after.version, "the late write created no version").toBe(before.version)
+          expect(after.text).not.toContain(`${LATE}-0`)
+          await expectLines(checkNoLines(ledger, after.text, `server head v${after.version} after the handoff`), "no typed line was saved under the retired generation")
+          const editorSaves = trail.filter((c) => c.path === "craft/document/save" && c.status === 200).length - savesBefore
+          expect(editorSaves, "the editor saved nothing under the retired generation").toBe(0)
+          const kept = await inspectDrafts(page, typedBefore)
+          // Record the per-line check (lines.json) before any verdict on this copy.
+          await expectLines(checkDraftCopies(ledger, kept.texts, "draft offered after the handoff"), "the offered draft holds every line the editor took, once and in order")
+          expect(kept.hasMarker.some(Boolean), `the offered draft holds all ${typedBefore.length} lines the editor took`).toBe(true)
+          const shots: Record<string, Buffer> = { "owner-draft-offered.png": await page.screenshot({ fullPage: true }) }
+
+          // After a reload the draft is offered again once the owner takes the
+          // editor back (a draft is never imported into a read-only view), and
+          // nothing is saved on the way.
+          const peerView = await doc.lease(peerCtx, observer)
+          expect(peerView.mine, "the peer holds the editor now").toBe(true)
+          expect((await doc.leaseOp(peerCtx, observer, "release", { generation: peerView.generation! })).status(), "the peer releases").toBe(200)
+          await page.reload()
+          await editor.frameOf(page, application)
+          await editor.takeButton(page).click()
+          await page.getByRole("status").filter({ hasText: "Připraveno k úpravám" }).first().waitFor({ timeout: 60_000 })
+          await waitForDraftOffer(page, 60_000)
+          const reloaded = await inspectDrafts(page, typedBefore)
+          // Record the per-line check (lines.json) before any verdict on this copy.
+          await expectLines(checkDraftCopies(ledger, reloaded.texts, "draft offered after the reload"), "the draft offered after a reload holds every line, once and in order")
+          expect(reloaded.hasMarker.some(Boolean), "the draft with every line is still offered after a reload").toBe(true)
+          const headReloaded = await headText(request, doc)
+          expect(headReloaded.text, "the reload saved nothing").not.toContain(`${LATE}-0`)
+          await expectLines(checkNoLines(ledger, headReloaded.text, `server head v${headReloaded.version} after the reload`), "the reload saved no typed line")
+
+          await prd.evidence("result.json", {
+            application, mode: prd.mode, appSha: prd.appSha, workspaceId: ws.id, pageId: doc.pageId,
+            lateWrite: late.status(), versionUnchanged: after.version, draftOffered: offered, draftHasWork: kept.hasMarker, acceptedLines: progress.accepted, typingStoppedBy: progress.stoppedBy ?? null, afterReload: reloaded.rows,
+            lines: { ledger, checks: lineChecks },
+          })
+          for (const [name, png] of Object.entries(shots)) await prd.evidence(name, png)
+          passed = true
+        } finally {
           if (trail.length) await prd.evidence(passed ? "craft-calls.json" : "failure-craft-calls.json", trail).catch(() => {})
           for (const c of cleanup.reverse()) await c().catch(() => {})
         }

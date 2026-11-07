@@ -285,3 +285,47 @@ func TestProviderRejectsStructuredSecretInsteadOfForwardingIt(t *testing.T) {
 		}
 	}
 }
+
+// #5045: the broker sends the pinned key only to the provider host, so a
+// host-bound key is usable only when its approved hosts name that host.
+func TestProviderHostBoundKeyRequiresApprovedProviderHost(t *testing.T) {
+	for _, tc := range []struct {
+		name, hosts string
+		ok          bool
+	}{
+		{"unbound", "[]", true},
+		{"approved provider host", `["api.openai.com"]`, true},
+		{"wildcard covering provider host", `["*.openai.com"]`, true},
+		{"different host", `["api.example.net"]`, false},
+		{"unreadable list", `not-json`, false},
+		{"invalid entry", `["*"]`, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			a := providerFixture(t)
+			permitProviderDelegation(t, a)
+			if _, err := a.Store.DB.ExecContext(t.Context(), `UPDATE credentials SET allowed_hosts=? WHERE id='key'`, tc.hosts); err != nil {
+				t.Fatal(err)
+			}
+			h, _, err := a.PrepareResponses(t.Context(), "h1", "w", "a", "c1", "", []access.Right{{Kind: "agent", ID: "a", Operation: "delegate"}}, 64, command("/bin/true"))
+			if !tc.ok {
+				if err == nil {
+					t.Fatal("host-bound key admitted for a host it does not approve")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.BrokerSecret(t.Context(), h, "key"); err != nil {
+				t.Fatal(err)
+			}
+			// Binding the key after admission must also stop the release.
+			if _, err := a.Store.DB.ExecContext(t.Context(), `UPDATE credentials SET allowed_hosts='["api.example.net"]' WHERE id='key'`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := a.BrokerSecret(t.Context(), h, "key"); err == nil {
+				t.Fatal("key released after it was bound to other hosts")
+			}
+		})
+	}
+}

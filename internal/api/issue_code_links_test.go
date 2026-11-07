@@ -849,3 +849,42 @@ func TestCodeLink_AgentRead_FencesUntrustedTitle(t *testing.T) {
 		t.Errorf("the URL should not be fenced: %q", got.URL)
 	}
 }
+
+// #5045: a host-bound credential is used only when its approved hosts cover
+// the host the token is really sent to. For github.com that is api.github.com,
+// never the pasted host.
+func TestResolveCodeLinkCredential_HostBound(t *testing.T) {
+	cases := []struct {
+		name, hosts string
+		want        bool
+	}{
+		{"unbound unchanged", ``, true},
+		{"real API host approved", `["api.github.com"]`, true},
+		{"wildcard covers the real API host", `["*.github.com"]`, true},
+		{"pasted host alone does not approve the API host", `["github.com"]`, false},
+		{"other host refused", `["gitlab.com"]`, false},
+		{"unreadable refused", `not-json`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newCodeLinkFixture(t)
+			f.seedGitCredential(t, "cred-gh", "github", "GITHUB", "", "ghp_saas")
+			if tc.hosts != "" {
+				if _, err := f.db.Exec(`UPDATE credentials SET allowed_hosts = ? WHERE id = 'cred-gh'`, tc.hosts); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := resolveCodeLinkCredential(context.Background(), f.db, f.wsID, f.crewID,
+				gitlink.ProviderGitHub, "github.com")
+			if tc.want {
+				if err != nil || got.token != "ghp_saas" {
+					t.Fatalf("got (%q, %v), want the token", got.token, err)
+				}
+				return
+			}
+			if !errors.Is(err, errNoCodeLinkCredential) || got.token != "" {
+				t.Fatalf("got (%q, %v), want errNoCodeLinkCredential and no token", got.token, err)
+			}
+		})
+	}
+}

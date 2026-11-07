@@ -38,7 +38,7 @@ func newPageDesignCommand() *cobra.Command {
 	cmd.AddCommand(create)
 	for _, action := range []string{"get", "versions", "comments"} {
 		action := action
-		child := &cobra.Command{Use: action + " <slug>", Args: cobra.ExactArgs(1), Short: "Read current canvas or retained versions", RunE: func(cmd *cobra.Command, args []string) error {
+		child := &cobra.Command{Use: action + " <slug>", Args: cobra.ExactArgs(1), Short: "Read the Design view or versions permitted by current authority", RunE: func(cmd *cobra.Command, args []string) error {
 			endpoint := "/api/v1/pages/" + pagePathEscape(args[0]) + "/design"
 			if action != "get" {
 				endpoint += "/" + action
@@ -55,13 +55,14 @@ func newPageDesignCommand() *cobra.Command {
 			return artifactCLIRequest(cmd, "GET", endpoint, nil)
 		}}
 		if action == "get" {
-			child.Flags().Int64("version", 0, "Retained snapshot version; 0 reads the live canvas")
+			child.Flags().Int64("version", 0, "Retained version; 0 reads the currently permitted view (shared pin or authorized live canvas)")
 		}
 		cmd.AddCommand(child)
 	}
 	apply := &cobra.Command{Use: "apply <slug>", Args: cobra.ExactArgs(1), Short: "Apply node upserts, deletions or order changes to the live Yjs document", Long: `Apply a JSON object with operations and optional message. An upsert contains a node
 with id, type (frame, rect, text, image), name, x, y, width, height, fill and optional
-parentId, text or src. Delete uses {"op":"delete","id":"node-id"}; reorder uses
+parentId, text, src or linkTo. linkTo is the ID of the screen (frame) that a click
+on this layer opens in prototype playback; "" removes the link. Delete uses {"op":"delete","id":"node-id"}; reorder uses
 {"op":"reorder","order":["frame-id","node-id"]}. Preserve IDs of existing nodes.
 The API applies these edits even when no browser has the canvas open.`, RunE: func(cmd *cobra.Command, args []string) error {
 		body, err := readDesignCLIChanges(cmd)
@@ -185,7 +186,15 @@ func init() { pageCmd.AddCommand(newPageDesignCommand()) }
 // watch exposes the standard binary transport without inventing a second sync
 // format. Consumers receive the original y-protocols frames as base64 NDJSON.
 func newPageDesignWatchCommand() *cobra.Command {
-	cmd := &cobra.Command{Use: "watch <slug>", Args: cobra.ExactArgs(1), Short: "Watch standard Yjs sync and awareness frames as base64 NDJSON", RunE: func(cmd *cobra.Command, args []string) error {
+	cmd := &cobra.Command{Use: "watch <slug>", Args: cobra.ExactArgs(1), Short: "Watch permitted Yjs sync and awareness frames as base64 NDJSON", Long: `Watch the Design view permitted by current human authority. Current Edit authority
+requires both pages:read and pages:write (or pages:*, *, or an unscoped full-role token) plus Edit permission for CLI callers;
+separately authorized workspace OWNER/ADMIN readers can read live with audit for
+foreign Designs. Non-admin Page owners and Edit grantees narrowed to pages:read are
+shared-only: a shared snapshot and presence, without live document updates.
+Before a shared pin exists, upgrade/presence can succeed but the initial sync
+closes with 1008 Design permissions changed. A --count limit can finish on
+presence frames before watch observes that close.
+Live agent runs use design_get under their exact run mandate, not human watch.`, RunE: func(cmd *cobra.Command, args []string) error {
 		if os.Getenv("CREWSHIP_AGENT_TOKEN") != "" {
 			return fmt.Errorf("live agents read Design through design_get; websocket watch requires human authentication")
 		}

@@ -61,6 +61,13 @@ func remainingExecutionDomainSchemaCatalog() map[string]DomainSchema {
 	})
 	memoryDoc := obj(map[string]any{"path": str(), "tier": str(), "scope": str(), "title": str(), "tags": arr(str()), "sources": arr(str()), "body": str()})
 	memoryEntry := anyObject()
+	// setLifecycle writes RFC 7807 itself, one call below the routed handler,
+	// while the workspace gate ahead of it answers {"error"}.
+	skillLifecycleSchema := DomainSchema{
+		NoRequest:     true,
+		ErrorMedia:    []string{"application/json"},
+		ErrorResponse: map[string]any{"oneOf": []any{errorSchema(), problemSchema()}},
+	}
 
 	return map[string]DomainSchema{
 		"GET /api/v1/workspaces/{workspaceId}/pipelines/calendar.ics": {Response: str(), ResponseMedia: []string{"text/calendar"}, SuccessStatuses: []string{"200"}, SuccessHeaders: map[string]any{
@@ -69,8 +76,11 @@ func remainingExecutionDomainSchemaCatalog() map[string]DomainSchema {
 		}},
 		// Release and skill lifecycle actions read only authenticated/path context.
 		"POST /api/v1/agents/{agentId}/release":                          {NoRequest: true},
-		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive": {NoRequest: true},
-		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore": {NoRequest: true},
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/archive": skillLifecycleSchema,
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/restore": skillLifecycleSchema,
+		// Lock state changes read only path context and echo the new state.
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/lock":   skillLockRoute(),
+		"POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/unlock": skillLockRoute(),
 
 		"GET /api/v1/recipes":                                              {Response: arr(recipe)},
 		"GET /api/v1/recipes/{slug}":                                       {Response: recipe},
@@ -121,5 +131,29 @@ func remainingExecutionDomainSchemaCatalog() map[string]DomainSchema {
 		"POST /api/v1/workspaces/{workspaceId}/skills/bulk-import":         {Request: obj(map[string]any{"git_url": str(), "git_ref": str(), "paths": arr(str()), "vendor": str(), "allow_unsafe_license": boolean(), "dry_run": boolean()}), Response: obj(map[string]any{"source": str(), "total_found": integer(), "total_imported": integer(), "imported": arr(obj(map[string]any{"skill_id": str(), "slug": str(), "created": boolean()})), "skipped": arr(obj(map[string]any{"path": str(), "slug": str(), "reason": str()})), "truncated": boolean()})},
 		"GET /api/v1/admin/legacy-resources":                               {Response: anyObject()},
 		"POST /api/v1/admin/prune-legacy-resources":                        {Response: anyObject()},
+	}
+}
+
+// skillLockRoute: both verbs share one handler the generator cannot read through
+// a method value. Role guards reply {error}; the handler replies Problem Details.
+func skillLockRoute() DomainSchema {
+	return DomainSchema{
+		NoRequest:     true,
+		Response:      skillLockState(),
+		ErrorMedia:    []string{"application/json"},
+		ErrorResponse: map[string]any{"anyOf": []any{errorSchema(), problemSchema()}},
+	}
+}
+
+func skillLockState() map[string]any {
+	str := map[string]any{"type": "string"}
+	return map[string]any{
+		"type": "object",
+		"properties": map[string]any{
+			"skill_id": str,
+			"slug":     str,
+			"locked":   map[string]any{"type": "boolean"},
+		},
+		"required": []string{"skill_id", "slug", "locked"},
 	}
 }

@@ -69,7 +69,7 @@ func (h *PageHandler) projectPage(w http.ResponseWriter, r *http.Request) (*page
 		h.refusePageAction(w, r, rec, "reading or editing project sources requires page edit permission", "page not found")
 		return nil, false
 	}
-	if readOnly && !h.auditPrivateOwnerAccess(w, r, rec) {
+	if readOnly && !h.auditWholeArrangementRead(w, r, rec, false) {
 		return nil, false
 	}
 	if h.projectStore == nil {
@@ -121,7 +121,7 @@ func (h *PageHandler) getProject(w http.ResponseWriter, r *http.Request, sourceO
 		writeJSON(w, 200, projectSource(d))
 		return
 	}
-	if !h.requireProjectDefinitions(w, r, &d.Definition) {
+	if !h.requireProjectDefinitions(w, r, &d.Definition) || !h.auditDefinitionPanelsRead(w, r, rec, &d.Definition) {
 		return
 	}
 	writeJSON(w, 200, d)

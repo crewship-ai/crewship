@@ -575,7 +575,20 @@ func (r *Router) auxProvider(slot llm.Slot, cache *auxProviderCache, what, conse
 	// it belongs in the fingerprint: repointing a slot at a different
 	// subscription has to rebuild, not reuse a client authenticated with the
 	// key the operator just moved away from.
+	//
+	// Bounded: this resolves the key on the first call rather than at boot,
+	// and a wedged database must not hang a run's teardown — nor hold this lock
+	// for longer than the deadline.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	credID := r.keeperAuxSettings.CredentialFor(string(slot))
+	// Checked on every call: a cache hit must not keep spending a key that has
+	// since been bound to approved hosts. Dropping the id changes the
+	// fingerprint, so the slot rebuilds on the server's own key.
+	withheld := !auxCredentialUsable(ctx, r.db, credID)
+	if withheld {
+		credID = ""
+	}
 	fpr := aux.Provider + "|" + aux.Model + "|" + ollamaBase + "|" + credID
 
 	cache.mu.Lock()
@@ -588,11 +601,10 @@ func (r *Router) auxProvider(slot llm.Slot, cache *auxProviderCache, what, conse
 		return cache.provider, cache.model, aux.Timeout
 	}
 
-	// Bounded: this resolves the key on the first call rather than at boot,
-	// and a wedged database must not hang a run's teardown — nor hold this lock
-	// for longer than the deadline.
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	if withheld {
+		r.logger.Warn("keeper: evaluator credential is bound to approved hosts; the slot falls back to the server's own key",
+			"provider", aux.Provider, "model", aux.Model)
+	}
 	provider, err := buildAuxWithCredential(ctx, aux, ollamaBase, credID, NewAuxCredentialLookup(r.db), r.logger)
 	if err != nil {
 		r.dropAuxProviderLocked(cache, what+" provider build failed; "+consequence, err)

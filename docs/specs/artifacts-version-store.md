@@ -46,6 +46,10 @@ A manifest lists every file path with its media type and content hash. Files
 with identical bytes are stored once per artifact, so an unchanged file costs
 nothing in a new version.
 
+A native Craft save goes through `ApplyChanged`: when its base is the head and
+the head already holds exactly its files, nothing is written or charged and the
+receipt names the head. An earlier version with the same content does not count.
+
 The family is fixed by the first publication. A later attempt to write the same
 artifact through another family is refused, and the database refuses to change
 `content_type` in place.
@@ -135,6 +139,24 @@ When the aggregate budget is full, routes answer `413` with code
 version, blob or proposal is written, every confirmed version is kept, and
 reads stay available. Nothing is deleted to make room. A Design live socket
 closes with code `4009` and the browser keeps its local changes.
+
+The free-disk reserve is checked inside the same writer transaction, before
+the first row is written, by every write that grows stored content: artifact
+versions and restores, native proposals, Design, Dashboard data, and the
+legacy document (initialize, edit, checkpoint, checkpoint restore, schema
+upgrade) and Slides writes, GridCraft workbook writes (checked before the
+engine runs and again with the real candidate at commit), and Mooring writes
+(legacy JSON document create and commands, collaboration initialize, task
+registration and batch commits, WordCraft command create and commits). When
+free disk would drop below the reserve, the write is refused with the same
+`413` `artifact_storage_quota` response (a live collaboration socket closes
+with the shared storage-full code) and writes nothing. GridCraft and Mooring
+collaboration probe again after the engine with the rows they really persist;
+this includes a terminal rejection from the engine, which is then not recorded:
+the client gets the storage refusal and keeps the change as a draft. Reads, exact retries of
+confirmed requests, document lease renewal, the Mooring owner lease (acquire,
+renew, release) and task cancellation stay available, so an open session keeps
+its draft and saves it once space returns.
 
 The per-Page proposal budget (`MaxProposalBytes`) stays separate from human
 history: running out of proposal space never blocks a human save and is not

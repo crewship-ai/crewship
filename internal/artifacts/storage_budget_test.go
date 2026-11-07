@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 )
 
 func TestVersionStoreWorkspaceBudgetCombinesPagesAndRetainsConfirmedHistory(t *testing.T) {
@@ -360,10 +362,10 @@ func storageSeedQuery(t *testing.T) string {
 
 const storageMigrationFile = "20261030224950_artifact_aggregate_storage_budget.sql"
 
-// B9: legacy document, Slides and restore writers do not call
-// CheckStorageHeadroom (the free-disk probe) because documents and slides sit
-// below this package. Their LOGICAL admission still holds: the SQL triggers
-// charge every row and abort once the workspace or the instance is full.
+// B9: legacy document and Slides writers sit below this package and call the
+// shared free-disk probe (storageheadroom.Check) directly; see their own
+// package tests. Their LOGICAL admission is the SQL triggers, which charge
+// every row and abort once the workspace or the instance is full.
 func TestStorageBudgetTriggersAbortLegacyWritersWithoutHeadroomProbe(t *testing.T) {
 	for _, tc := range []struct{ name, stmt string }{
 		{"documents", `INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES('ws','legacy-b9',3,zeroblob(4096),x'7b7d')`},
@@ -381,5 +383,46 @@ func TestStorageBudgetTriggersAbortLegacyWritersWithoutHeadroomProbe(t *testing.
 				t.Fatalf("legacy writer was admitted past the workspace limit: %v", err)
 			}
 		})
+	}
+}
+
+// B9 (#4826): version restore was already admitted (writeTransaction consumes
+// the upload and calls CheckStorageHeadroom before publish). This pins it: a
+// restore below the free-disk reserve is the aggregate storage refusal, writes
+// no version and moves no accounting; the legacy free-disk sentinel maps to
+// the same refusal so every HTTP surface answers identically.
+func TestVersionRestoreBelowFreeDiskReserveIsStorageRefusal(t *testing.T) {
+	s, k, a, db := versionFixture(t, VersionOptions{})
+	if _, err := s.Apply(t.Context(), k, versionRequest(0, "first"), a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Apply(t.Context(), k, versionRequest(1, "second"), a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE artifact_storage_global SET min_free_bytes=? WHERE id=1`, int64(1)<<62); err != nil {
+		t.Fatal(err)
+	}
+	var beforeUsed, beforeVersions int64
+	if err := db.QueryRow(`SELECT (SELECT used_bytes+reserved_bytes FROM artifact_storage_global),(SELECT count(*) FROM artifact_versions)`).Scan(&beforeUsed, &beforeVersions); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Restore(t.Context(), k, 2, 1, a); !errors.Is(err, ErrStorageQuota) {
+		t.Fatalf("restore admitted below the free-disk reserve: %v", err)
+	}
+	var afterUsed, afterVersions int64
+	if err := db.QueryRow(`SELECT (SELECT used_bytes+reserved_bytes FROM artifact_storage_global),(SELECT count(*) FROM artifact_versions)`).Scan(&afterUsed, &afterVersions); err != nil {
+		t.Fatal(err)
+	}
+	if afterUsed != beforeUsed || afterVersions != beforeVersions {
+		t.Fatalf("refused restore wrote: used %d->%d versions %d->%d", beforeUsed, afterUsed, beforeVersions, afterVersions)
+	}
+	if _, err := db.Exec(`UPDATE artifact_storage_global SET min_free_bytes=0 WHERE id=1`); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := s.Restore(t.Context(), k, 2, 1, a); err != nil || v.Version != 3 {
+		t.Fatalf("restore after space returned %+v %v", v, err)
+	}
+	if err := StorageBudgetError(storageheadroom.ErrInsufficient); !errors.Is(err, ErrStorageQuota) || !errors.Is(err, ErrVersionQuota) {
+		t.Fatalf("free-disk sentinel is not the aggregate storage refusal: %v", err)
 	}
 }

@@ -1,0 +1,1 @@
+- **Crew-link acceptance could reject a completed delegation.** It now checks the full result of the matched assignment when the verification code is beyond the run-list preview.

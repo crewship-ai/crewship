@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net"
 	"net/http"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
@@ -361,6 +363,32 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 		replyInternalError(w, h.logger, "rows iteration (internal credentials)", err)
 		return
 	}
+	// #5045: this listing is what the crew sidecar's reaper reconciles its
+	// in-memory copy against, so a host-bound credential the crew no longer
+	// satisfies (hosts tightened, allowlist narrowed, network mode changed) is
+	// left out and the sidecar drops it on its next sweep. A check that cannot
+	// be answered fails the request: the reaper then keeps what it has rather
+	// than reaping everything.
+	if crewID != "" && !includeValues && len(result) > 0 {
+		ids := make([]string, len(result))
+		for i, c := range result {
+			ids[i] = c.ID
+		}
+		withheld, werr := credhostgate.WithholdsForCrew(r.Context(), h.db, crewID, ids)
+		if werr != nil {
+			replyInternalError(w, h.logger, "internal credentials: host-bound check", werr)
+			return
+		}
+		if len(withheld) > 0 {
+			kept := result[:0]
+			for _, c := range result {
+				if _, drop := withheld[c.ID]; !drop {
+					kept = append(kept, c)
+				}
+			}
+			result = kept
+		}
+	}
 	if result == nil {
 		result = []credResult{}
 	}
@@ -429,6 +457,27 @@ func (h *InternalHandler) UpdateCredentialStatus(w http.ResponseWriter, r *http.
 		return
 	}
 	defer tx.Rollback()
+
+	// This route serves the health and OAuth workers. Neither has a reason to
+	// put a new value into the governance model credential or to move it out of
+	// REVOKED or an unapproved state; both decide where the workspace judge
+	// connects (#5024).
+	bound, err := credentialGovernanceBound(r.Context(), tx, credID)
+	if err != nil {
+		replyInternalError(w, h.logger, "check governance credential binding", err)
+		return
+	}
+	if bound {
+		var current string
+		if err := tx.QueryRowContext(r.Context(), "SELECT status FROM credentials WHERE "+where, whereArgs...).Scan(&current); err != nil && !errors.Is(err, sql.ErrNoRows) {
+			replyInternalError(w, h.logger, "load credential status", err)
+			return
+		}
+		if body.AccessToken != nil || body.RefreshToken != nil || (body.Status != current && (current == "REVOKED" || current == "PENDING_APPROVAL" || current == credentialStatusRequested)) {
+			replyError(w, http.StatusForbidden, msgGovernanceCredential)
+			return
+		}
+	}
 
 	result, err := tx.ExecContext(r.Context(),
 		"UPDATE credentials SET status = ?, last_checked_at = ?, updated_at = ? WHERE "+where,

@@ -1,0 +1,88 @@
+name: API race diagnostics (manual only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      shard:
+        description: Existing API partition to profile (not a new budget sample)
+        type: choice
+        options: ['0', '1', '2', '3', '4', '5']
+        required: true
+        default: '0'
+      allocations:
+        description: Also collect sampled allocation stacks (no heap contents)
+        type: boolean
+        required: true
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: '1.27.3'
+
+# No push, PR, queue or schedule trigger; no required aggregate or gate change.
+concurrency:
+  group: api-race-diagnostics-${{ github.run_id }}
+  cancel-in-progress: false
+
+jobs:
+  template:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Build this run's genuine race migration template
+        run: python3 scripts/ci/api-race-shard.py bootstrap .ci-api-template 4600
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: diagnostic-api-template-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ci-api-template/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  profile:
+    needs: template
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.ref_protected
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: ./.github/actions/setup-go-embed
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: diagnostic-api-template-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .ci-api-template/
+      - name: Profile one unchanged race partition
+        env:
+          PROFILE_SHARD: ${{ inputs.shard }}
+          PROFILE_ALLOCATIONS: ${{ inputs.allocations }}
+        run: |
+          set -euo pipefail
+          python3 scripts/ci/api-race-profile.py --shard "$PROFILE_SHARD" --allocations "$PROFILE_ALLOCATIONS" --bootstrap .ci-api-template --output .ci-api-profile
+      - name: Retain public synthetic-test stacks and bounded provenance only
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: diagnostic-api-profile-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .ci-api-profile/*.pprof
+            .ci-api-profile/*.txt
+            .ci-api-profile/profile-receipt.json
+            .ci-results/api-race-shard.json
+          include-hidden-files: true
+          if-no-files-found: warn
+          retention-days: 7

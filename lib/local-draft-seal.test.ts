@@ -65,3 +65,16 @@ it("never revives an old cipher when the same identity returns before an expiry 
   finishLocalDraftIdentity(null) // superseded by the new login
   await expect(a.open(sealed, "source")).rejects.toThrow()
 })
+
+// Codex #4836 round 1 B1: no unauthenticated record may ever be opened. A
+// tagged record relabelled (format switched, tag stripped) or a record whose
+// purpose was changed must be refused.
+it("refuses a tagged record downgraded to an untagged format", async () => {
+  const a = await createLocalDraftCipher(scope), sealed = JSON.parse(await a.seal("private source", "source"))
+  const raw = atob(sealed.ciphertext), stripped = btoa(raw.slice(0, raw.length - 16))
+  for (const format of ["crewship-local-draft-instant-v1", "crewship-local-draft-v0", "plain"]) {
+    const forged = JSON.stringify({ format, envelope: sealed.envelope, iv: sealed.iv, purpose: "source", ciphertext: stripped })
+    await expect(a.open(forged, "source")).rejects.toThrow()
+    await expect(a.open(forged, "comment")).rejects.toThrow()
+  }
+})

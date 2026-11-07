@@ -68,6 +68,8 @@ const (
 	EntryAssignmentDone   EntryType = "assignment.completed"
 	EntryAssignmentFail   EntryType = "assignment.failed"
 	EntryAssignmentCancel EntryType = "assignment.cancelled"
+	// EntryAssignmentRefused records an attempted delegation denied before admission.
+	EntryAssignmentRefused EntryType = "assignment.refused"
 	// EntryAssignmentHardStop records one Tier 2 hard-termination attempt
 	// (PRD-ISSUES-AND-ROUTINES-2026 §10.3, work package B7): what was
 	// signalled (container_id, exec_id, pid, signal — TERM then, if still
@@ -565,6 +567,13 @@ const (
 	// archives unused skills on its own and does not emit these).
 	EntrySkillArchived EntryType = "skill.archived"
 	EntrySkillRestored EntryType = "skill.restored"
+	// EntrySkillLocked / EntrySkillUnlocked fire when a person locks a skill
+	// against autonomous rewrites or lifts the lock. EntrySkillWriteBlocked
+	// fires when a write path (import, proposal, generation, promotion) is
+	// refused because the skill is locked (#5045).
+	EntrySkillLocked       EntryType = "skill.locked"
+	EntrySkillUnlocked     EntryType = "skill.unlocked"
+	EntrySkillWriteBlocked EntryType = "skill.write_blocked"
 	// EntrySkillInvoked fires when an agent actually calls one of its
 	// assigned skills (matched on the orchestrator tool-call hot path).
 	// Payload carries `skill_id`, `skill_slug`, `agent_id`, `tool_name`,

@@ -70,7 +70,7 @@ export function LibraryPanel({ items, folders, filters, personal, onFiltersChang
   const narrowFolder = (folder: string | null) => set({ folder, ...(HIDDEN_VIEWS.has(filters.view) ? { view: "all" as const } : {}) })
   const counts = facetCounts(items, filters.view === "home" ? { ...filters, view: "all" } : filters, personal)
   const viewCount = (view: LibraryView) => inView(items, view, personal).length
-  const folderCount = (slug: string) => inView(items, "all").filter(item => (item.folder?.slug ?? "") === slug).length
+  const folderCount = (slug: string) => inView(items, "all", personal).filter(item => (item.folder?.slug ?? "") === slug).length
   const unfiled = folderCount("")
   const active = activeFacetCount(filters)
 

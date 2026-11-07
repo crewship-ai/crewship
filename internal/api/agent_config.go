@@ -1,10 +1,12 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/composio"
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
@@ -225,7 +228,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	// entirely when blocked — creds is already nil and there's no point
 	// paying for the DB round-trip just to discard the result.
 	if !blockPrivilegedCreds {
-		creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, data.wsID, creds,
+		creds = h.autoResolveMCPCredentialsGated(r.Context(), agentID, data.wsID, creds,
 			data.crewMCPConfigJSON.String, data.agentMCPConfigJSON.String)
 	}
 
@@ -279,7 +282,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 			}
 		}
 		if len(envJsons) > 0 && !blockPrivilegedCreds {
-			creds = autoResolveMCPCredentials(r.Context(), h.db, h.logger, data.wsID, creds, envJsons...)
+			creds = h.autoResolveMCPCredentialsGated(r.Context(), agentID, data.wsID, creds, envJsons...)
 		}
 	}
 
@@ -287,7 +290,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	// also include the access token so the orchestrator can write tokens.json.
 	// Skipped when blocked, same reasoning as above.
 	if !blockPrivilegedCreds {
-		creds = h.resolveOAuthAccessTokens(r, creds)
+		creds = h.resolveOAuthAccessTokens(r, agentID, creds)
 	}
 
 	// [KEEPER] section — credential access control instructions
@@ -463,7 +466,7 @@ func (h *InternalHandler) resolveAgentConfigWithOpener(w http.ResponseWriter, r 
 	// case the orchestrator applies the deprecated env fallback. api_key/headers
 	// carry optional auth for an authenticated endpoint and travel only on this
 	// internal resolve channel (never on a user-facing read path).
-	localEndpoint := resolveLocalModelEndpoint(r.Context(), h.db, h.logger, data.wsID, creds)
+	localEndpoint := resolveLocalModelEndpoint(r.Context(), h.db, h.logger, agentID, data.wsID, creds)
 	resp["local_model_base_url"] = localEndpoint.BaseURL
 	if localEndpoint.APIKey != "" {
 		resp["local_model_api_key"] = localEndpoint.APIKey
@@ -946,9 +949,48 @@ func (h *InternalHandler) resolveAgentCredentials(r *http.Request, agentID strin
 	return creds, nil
 }
 
+// dropHostBoundCreds removes every entry whose credential is host-bound and not
+// deliverable to agentID's crew (#5045). It uses the shared credhostgate rule;
+// an entry without an ID or any lookup failure is dropped (fail closed) only
+// when it names a credential, so unbound credentials are unaffected.
+func dropHostBoundCreds(ctx context.Context, db sqlQuerier, logger *slog.Logger, agentID string, creds []mcpCredEntry) []mcpCredEntry {
+	if len(creds) == 0 {
+		return creds
+	}
+	seen := map[string]bool{}
+	var ids []string
+	for _, c := range creds {
+		if c.ID != "" && !seen[c.ID] {
+			seen[c.ID] = true
+			ids = append(ids, c.ID)
+		}
+	}
+	ok := credhostgate.DeliverableMany(ctx, db, agentID, ids)
+	kept := make([]mcpCredEntry, 0, len(creds))
+	for _, c := range creds {
+		if c.ID != "" && !ok[c.ID] {
+			logger.Warn("host-bound credential withheld from agent config", "agent_id", agentID, "credential_id", c.ID)
+			continue
+		}
+		kept = append(kept, c)
+	}
+	return kept
+}
+
+// autoResolveMCPCredentialsGated is autoResolveMCPCredentials followed by the
+// host-bound check, so a ${VAR} reference cannot pull a host-bound credential
+// around the delivery gate.
+func (h *InternalHandler) autoResolveMCPCredentialsGated(ctx context.Context, agentID, wsID string, creds []mcpCredEntry, configs ...string) []mcpCredEntry {
+	creds = autoResolveMCPCredentials(ctx, h.db, h.logger, wsID, creds, configs...)
+	return dropHostBoundCreds(ctx, h.db, h.logger, agentID, creds)
+}
+
 // resolveOAuthAccessTokens ensures OAUTH2 credentials include their access tokens
 // so the orchestrator can write tokens.json.
-func (h *InternalHandler) resolveOAuthAccessTokens(r *http.Request, creds []mcpCredEntry) []mcpCredEntry {
+func (h *InternalHandler) resolveOAuthAccessTokens(r *http.Request, agentID string, creds []mcpCredEntry) []mcpCredEntry {
+	// #5045: never mint an access-token entry for a host-bound credential the
+	// agent's crew boundary does not satisfy.
+	creds = dropHostBoundCreds(r.Context(), h.db, h.logger, agentID, creds)
 	// credID -> the delivering grant's lease deadline, so the synthesized access
 	// token entry inherits the same #1373 lease as the client_id/client_secret
 	// entries it was derived from. Without this the derived entry would look like
@@ -1432,6 +1474,18 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 	}
 	credTokens := make(map[string]string) // credID -> plaintext
 	if len(credIDs) > 0 {
+		// #5045: host-bound credentials the crew boundary does not satisfy are
+		// not bound to the MCP server; the server then looks unbound.
+		allowed := credhostgate.DeliverableMany(r.Context(), h.db, agentID, credIDs)
+		kept := credIDs[:0:0]
+		for _, id := range credIDs {
+			if allowed[id] {
+				kept = append(kept, id)
+			}
+		}
+		credIDs = kept
+	}
+	if len(credIDs) > 0 {
 		placeholders := make([]string, len(credIDs))
 		args := make([]interface{}, len(credIDs))
 		for i, id := range credIDs {
@@ -1527,7 +1581,7 @@ func (h *InternalHandler) resolveAgentMCPServers(r *http.Request, data *agentCon
 			}
 		}
 		if !hasComposioBinding {
-			if entry, ok := h.buildDefaultComposioEntry(r, data.wsID, defaultSrvID, defaultUserID); ok {
+			if entry, ok := h.buildDefaultComposioEntry(r, agentID, data.wsID, defaultSrvID, defaultUserID); ok {
 				mcpServers = append(mcpServers, entry)
 			}
 		}
@@ -1600,21 +1654,26 @@ func (h *InternalHandler) attachToolBindings(r *http.Request, servers []mcpServe
 // agent-config hot path. Any failure (missing key, decrypt error) logs and
 // returns ok=false so the agent still resolves without the default rather than
 // failing the whole config.
-func (h *InternalHandler) buildDefaultComposioEntry(r *http.Request, wsID, serverID, userID string) (mcpServerEntry, bool) {
+func (h *InternalHandler) buildDefaultComposioEntry(r *http.Request, agentID, wsID, serverID, userID string) (mcpServerEntry, bool) {
 	if serverID == "" || userID == "" {
 		return mcpServerEntry{}, false
 	}
-	var encVal string
+	var credID, encVal string
 	err := h.db.QueryRowContext(r.Context(),
-		`SELECT encrypted_value FROM credentials
+		`SELECT id, encrypted_value FROM credentials
 		 WHERE workspace_id = ? AND name = ? AND deleted_at IS NULL AND status = 'ACTIVE'`,
-		wsID, composioManagedKeyName).Scan(&encVal)
+		wsID, composioManagedKeyName).Scan(&credID, &encVal)
 	if err != nil {
 		if !errors.Is(err, sql.ErrNoRows) {
 			h.logger.Warn("default composio: read managed key", "workspace_id", wsID, "error", err)
 		} else {
 			h.logger.Warn("default composio: managed key missing", "workspace_id", wsID)
 		}
+		return mcpServerEntry{}, false
+	}
+	// #5045: the managed key is delivered to the sidecar as CredToken.
+	if ok, why := credhostgate.Deliverable(r.Context(), h.db, agentID, credID); !ok {
+		h.logger.Warn("default composio: managed key withheld (host-bound)", "credential_id", credID, "reason", why)
 		return mcpServerEntry{}, false
 	}
 	token, derr := decryptCredential(encVal)

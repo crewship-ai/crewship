@@ -22,6 +22,24 @@ describe("library filters", () => {
     expect(filter({ view: "empty" })).toEqual(["blank"])
   })
 
+  // #4898: the library's own dialog makes a blank Page and opens it; the person
+  // who made it must still find it in the default views and by search.
+  it("keeps a blank item the caller created and owns in the default views, never another person's", () => {
+    const blanks = libraryItems([
+      page({ slug: "mine-new", name: "UX walkthrough page" }),
+      page({ slug: "mine-old", name: "Old blank" }),
+      page({ slug: "theirs", name: "UX walkthrough other", owner: "user/u2", reach: ["role"] }),
+    ].map(toPageView))
+    const personal = { created: new Set(["mine-new", "theirs"]), opened: new Map([["mine-new", 2], ["mine-old", 1]]) }
+    const view = (over: Partial<LibraryFilters>) => applyFilters(blanks, { ...EMPTY_FILTERS, view: "all", ...over }, personal).map(item => item.slug)
+    expect(view({})).toEqual(["mine-new"])
+    expect(view({ q: "walkthrough" })).toEqual(["mine-new"])
+    expect(view({ view: "mine" })).toEqual(["mine-new"])
+    expect(view({ view: "opened" })).toEqual(["mine-new"])
+    expect(view({ view: "empty" }).sort()).toEqual(["mine-new", "mine-old", "theirs"])
+    expect(applyFilters(blanks, { ...EMPTY_FILTERS, view: "all" }).map(item => item.slug)).toEqual([])
+  })
+
   it("shows archived items only in Archive and test items only in Test items, deleting nothing", () => {
     const state = withLibraryState(items, { archived: new Set(["site", "blank"]), test: new Set(["smoke-1", "smoke-2"]), moved: new Map([["brief", { slug: "sales", name: "Sales" }]]) })
     const view = (v: LibraryFilters["view"]) => applyFilters(state, { ...EMPTY_FILTERS, view: v }).map(item => item.slug)

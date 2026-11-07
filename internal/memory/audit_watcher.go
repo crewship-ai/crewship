@@ -138,6 +138,10 @@ type AuditWatcherConfig struct {
 	// crew provision doesn't burn a poll storm.
 	DeferredBootInterval time.Duration
 
+	// emitInitialSnapshot is enabled only when this boot observed no crews root.
+	// It catches writes made before deferred watcher initialization completes.
+	emitInitialSnapshot bool
+
 	// watchHooks is forwarded to WatchConfig.hooks (test seam only).
 	watchHooks fsnotifyHooks
 }
@@ -202,6 +206,10 @@ func waitForRootThenWatch(ctx context.Context, db *sql.DB, j journal.Emitter, cf
 		case <-t.C:
 			if _, err := os.Stat(root); err == nil {
 				logger.Info("memory audit watcher: crews root now present, starting watcher", "root", root)
+				// The root was absent when StartAuditWatcher ran; writes can
+				// precede fsnotify registration and the first poll baseline.
+				// Reuse that first snapshot as catch-up only for this path.
+				cfg.emitInitialSnapshot = true
 				runAuditWatcher(ctx, db, j, cfg, root, logger)
 				return
 			}
@@ -263,11 +271,12 @@ func auditWatchConfig(cfg AuditWatcherConfig, logger *slog.Logger) WatchConfig {
 		poll = defaultAuditPollFallback
 	}
 	return WatchConfig{
-		UseFsnotify:  true,
-		Debounce:     cfg.DebounceInterval,
-		PollInterval: poll,
-		Logger:       logger,
-		hooks:        cfg.watchHooks,
+		EmitInitialSnapshot: cfg.emitInitialSnapshot,
+		UseFsnotify:         true,
+		Debounce:            cfg.DebounceInterval,
+		PollInterval:        poll,
+		Logger:              logger,
+		hooks:               cfg.watchHooks,
 	}
 }
 

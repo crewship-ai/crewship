@@ -108,6 +108,10 @@ type LifecycleSnapshot struct {
 	// Counted at the SQL layer so the pure function doesn't have to
 	// reason about expiry.
 	ActiveAssignments int
+	// Locked is true when an instance administrator locked the skill against autonomous
+	// rewrites (#5045). A locked skill is held exactly where it is: the
+	// sweep never moves it to stale or archived.
+	Locked bool
 	// Now is the reference clock. Plumbed in so tests can drive the
 	// timer-based transitions deterministically.
 	Now time.Time
@@ -154,6 +158,16 @@ func EvaluateTransition(s LifecycleSnapshot) Transition {
 				Next:   LifecycleActive,
 				Reason: fmt.Sprintf("active assignment present (%d agent(s)); assignment trumps usage timer", s.ActiveAssignments),
 			}
+		}
+		return Transition{Next: LifecycleActive}
+	}
+
+	// A locked skill is deliberately kept by an instance administrator: hold its state,
+	// the same way an assignment does, rather than aging it out.
+	if s.Locked {
+		switch s.Current {
+		case LifecycleActive, LifecycleStale, LifecycleArchived:
+			return Transition{Next: s.Current}
 		}
 		return Transition{Next: LifecycleActive}
 	}

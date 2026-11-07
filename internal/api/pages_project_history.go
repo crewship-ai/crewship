@@ -167,7 +167,7 @@ func (h *PageHandler) getProjectRevision(w http.ResponseWriter, r *http.Request,
 		writeJSON(w, 200, projectSource(d))
 		return
 	}
-	if !h.requireProjectDefinitions(w, r, &d.Definition) {
+	if !h.requireProjectDefinitions(w, r, &d.Definition) || !h.auditDefinitionPanelsRead(w, r, rec, &d.Definition) {
 		return
 	}
 	writeJSON(w, 200, d)

@@ -44,6 +44,9 @@ type craftNativeSnapshotBody struct {
 	ContentHash    string `json:"contentHash"`
 	Bytes          []byte `json:"bytes"`
 	TargetVersion  string `json:"targetVersion"`
+	// AttemptID is an optional client nonce for one save attempt; reconcile
+	// with it can retire an attempt that did not commit (#4899).
+	AttemptID string `json:"attemptId"`
 }
 
 func craftNativeVersion(raw string) (int64, error) {
@@ -62,6 +65,7 @@ func (d *craftNativeDocumentsHTTP) bind(r *http.Request) (*http.Request, *craftN
 	if err != nil {
 		return nil, nil, nil, zero, err
 	}
+	bound = bound.WithContext(context.WithValue(bound.Context(), craftNativeReadCaptureKey{}, &craftNativeReadCapture{}))
 	entry, _ := bound.Context().Value(craftNativeContextKey{}).(*craftNativeSession)
 	profile, ok := d.applications[entry.application]
 	if !ok || profile.Store.Application != entry.application {
@@ -82,7 +86,9 @@ func craftNativeDocumentError(w http.ResponseWriter, err error) {
 		replyError(w, 503, "native documents unavailable")
 	case errors.Is(err, artifacts.ErrVersionQuota):
 		replyError(w, 413, "native history quota reached; existing versions retained")
-	case errors.Is(err, mooring.ErrEditLeaseBusy), errors.Is(err, mooring.ErrEditLeaseStale), errors.Is(err, artifacts.ErrVersionConflict), errors.Is(err, mooring.ErrNativeUnconfirmed):
+	case errors.Is(err, mooring.ErrNativeAttemptAbsent):
+		replyError(w, 410, "native save attempt did not commit and never will; save the current draft again")
+	case errors.Is(err, mooring.ErrEditLeaseBusy), errors.Is(err, mooring.ErrEditLeaseStale), errors.Is(err, artifacts.ErrVersionConflict), errors.Is(err, mooring.ErrNativeUnconfirmed), errors.Is(err, mooring.ErrNativeAttemptRetired), errors.Is(err, mooring.ErrNativeRetirementLimit):
 		replyError(w, 409, "native document or lease changed; keep the local draft")
 	case errors.Is(err, mooring.ErrNativeValidation), errors.Is(err, mooring.ErrInvalid), errors.Is(err, artifacts.ErrVersionInvalid):
 		replyError(w, 422, "invalid native document")
@@ -90,6 +96,30 @@ func craftNativeDocumentError(w http.ResponseWriter, err error) {
 		craftNativeHTTPError(w, err)
 	}
 }
+
+// craftNativeReadCapture holds the Page record that the human read authority
+// (authorizeNative, intent "read") authorized inside the engine transaction
+// that read the content. bind installs one per request.
+type craftNativeReadCaptureKey struct{}
+type craftNativeReadCapture struct{ record *pageRecord }
+
+// auditRead applies PRD §5's administrator read audit at the response
+// boundary of a native Craft content read, outside the engine transaction:
+// another custodian's private document, or an ordinary one reached only
+// through the workspace OWNER/ADMIN role. The decision uses the custodian
+// captured in the read's own transaction, never a later lookup: a custody
+// transfer to the reader after the read must not skip the audit. A failed
+// audit, or a read without a captured record, releases nothing.
+func (d *craftNativeDocumentsHTTP) auditRead(w http.ResponseWriter, r *http.Request, entry *craftNativeSession) bool {
+	capture, _ := r.Context().Value(craftNativeReadCaptureKey{}).(*craftNativeReadCapture)
+	if capture == nil || capture.record == nil || capture.record.ID != entry.scope.ArtifactID {
+		craftNativeDocumentError(w, errCraftNativeAccess)
+		return false
+	}
+	privateReadAuditSeam(entry.scope.ArtifactID)
+	return d.human.pages.auditPrivateOwnerAccess(w, r, capture.record)
+}
+
 func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.Request) {
 	r, entry, s, profile, err := d.bind(r)
 	if err != nil {
@@ -99,6 +129,9 @@ func (d *craftNativeDocumentsHTTP) readSnapshot(w http.ResponseWriter, r *http.R
 	state, err := s.Read(r.Context(), entry.scope)
 	if err != nil {
 		craftNativeDocumentError(w, err)
+		return
+	}
+	if !d.auditRead(w, r, entry) {
 		return
 	}
 	file, ok := state.Manifest.Files["document.json"]
@@ -163,14 +196,14 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http
 	w.Header().Set("Cache-Control", "no-store")
 	switch operation {
 	case "save":
-		receipt, e := s.SaveSnapshot(r.Context(), lease, base, body.EditorRevision, body.ContentHash, body.Bytes)
+		receipt, e := s.SaveAttempt(r.Context(), lease, base, body.EditorRevision, body.ContentHash, body.Bytes, body.AttemptID)
 		if e != nil {
 			craftNativeDocumentError(w, e)
 			return
 		}
 		writeJSON(w, 200, receipt)
 	case "reconcile":
-		receipt, e := s.ReconcileSnapshot(r.Context(), lease, base, body.EditorRevision, body.ContentHash)
+		receipt, e := s.ReconcileAttempt(r.Context(), lease, base, body.EditorRevision, body.ContentHash, body.AttemptID)
 		if e != nil {
 			craftNativeDocumentError(w, e)
 			return
@@ -183,6 +216,11 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http
 			return
 		}
 		receipt, e := s.Restore(r.Context(), lease, base, target)
+		if errors.Is(e, artifacts.ErrVersionNotFound) {
+			// Write and lease authority ran first, so only the holder learns this.
+			replyError(w, 404, "native version not found")
+			return
+		}
 		if e != nil {
 			craftNativeDocumentError(w, e)
 			return

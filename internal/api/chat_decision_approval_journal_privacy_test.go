@@ -151,15 +151,30 @@ func TestVerifiedApprovalSSEIgnoresHiddenResumeWatermark(t *testing.T) {
 	}
 	execOrFatal(t, d.f.h.db, `INSERT INTO users(id,email) VALUES('sse-hidden-approval','sse-hidden-approval@example.test')`)
 	execOrFatal(t, d.f.h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('sse-hidden-approval-member',?,'sse-hidden-approval','MEMBER')`, d.f.workspace)
-	ctx, cancel := context.WithTimeout(t.Context(), 150*time.Millisecond)
+	// The stream ends once its replay is flushed, not after a fixed 150ms: on a
+	// loaded -race runner that deadline expired before the replay was written
+	// and the body came back empty (#4711). The bound only guards a hang.
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
 	defer cancel()
 	req := withWorkspaceUser(httptest.NewRequest("GET", "/journal/stream?entry_type=approval.requested", nil), "sse-hidden-approval", d.f.workspace, "MEMBER").WithContext(context.WithValue(ctx, ctxWorkspaceID, d.f.workspace))
 	// Preserve the authenticated principal when attaching the cancellation.
 	req = withWorkspaceUser(req, "sse-hidden-approval", d.f.workspace, "MEMBER")
 	req.Header.Set("Last-Event-ID", privateEntry)
 	rr := httptest.NewRecorder()
-	NewJournalHandler(d.f.h.db, newTestLogger(), nil).Stream(rr, req)
+	NewJournalHandler(d.f.h.db, newTestLogger(), nil).Stream(cancelAfterReplay{rr, cancel}, req)
 	if rr.Code != 200 || !strings.Contains(rr.Body.String(), legacy) || strings.Contains(rr.Body.String(), private) || strings.Contains(rr.Body.String(), "Hidden later approval") {
 		t.Fatalf("hidden SSE resume affected visible history%d %s", rr.Code, rr.Body.String())
 	}
+}
+
+// cancelAfterReplay ends a journal stream at its first flush, which the
+// handler issues once the seed replay is written and before it goes live.
+type cancelAfterReplay struct {
+	*httptest.ResponseRecorder
+	cancel context.CancelFunc
+}
+
+func (w cancelAfterReplay) Flush() {
+	w.ResponseRecorder.Flush()
+	w.cancel()
 }

@@ -45,11 +45,21 @@ After validating the live PR or queue target, each execution first writes a
 `pending` status to that exact head. It then inspects controls and validates any
 administrator exception. A same-head retry with invalid controls or refused
 permission therefore replaces an older green with pending; it cannot reuse the
-old successful report. Final success/failure is written only after a second live
-identity check. If GitHub is unavailable before target validation or rejects the
+old successful report. A final decision is written only after a second live
+identity check. If an automatic run stops after its pending write, it replaces
+pending with a fixed `failure` on that exact head, so a merge group fails at once
+instead of waiting for the queue timeout. Rerun the failed run or enqueue the PR
+again to evaluate again; this bypasses nothing. A refused dispatch stays pending, so it cannot eject a
+group. GitHub API errors that look transient are retried three times per run and
+can never produce success; reads stop after 240 seconds so the job limit leaves
+room for the final status. A finished inspection keeps its report:
+`status_publication` is `confirmed`, or `unknown` when GitHub never confirmed the
+status write, so check the head's status before relying on that report. If GitHub is unavailable before target validation or rejects the
 pending write, the job cannot revoke an older successful status. That residual
 is explicit: the base-SHA Actions job failure alone does not invalidate a
-head-SHA commit status. Inspect the linked run; this shared-App operational
+head-SHA commit status. A job killed by its timeout cannot write the failure
+either, so its status stays pending; a cancelled run writes it when the runner
+interrupts the script, but not if the runner force-kills it first. Inspect the linked run; this shared-App operational
 guard does not establish the stronger independently controlled status boundary
 needed to eliminate every stale-status or spoofing path.
 

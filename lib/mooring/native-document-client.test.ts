@@ -2,7 +2,8 @@
 import { describe,it,expect,vi } from "vitest"
 import {createServer,type Server} from "node:http"
 import type {AddressInfo} from "node:net"
-import {createNativeDocumentClient} from "./native-document-client"
+import {createNativeDocumentClient,NativeMetadataTransportError} from "./native-document-client"
+import {NATIVE_REAUTHORIZE_DEADLINE_MS} from "./native-revocation-bounds"
 import {NativeSaveError,type NativeSaveRequest} from "./single-editor-save"
 const signal=()=>new AbortController().signal
 const request:NativeSaveRequest={workspaceId:"ws",pageId:"page",applicationId:"wordcraft",enginePin:"e".repeat(64),baseVersion:"9007199254740993",generation:"9007199254740995",sessionId:"public-session",editorRevision:"10:47:3",contentHash:"sha256:"+"a".repeat(64),bytes:new Uint8Array([0,128,255])}
@@ -20,6 +21,14 @@ describe("native document client",()=>{
   expect(String(calls[1].init?.body)).not.toContain("b".repeat(64))
   client.close();await expect(client.save(request,signal())).rejects.toThrow()
   expect(calls).toHaveLength(2)
+ })
+ it("reports a refused private read apart from an unavailable document",async()=>{
+  const opened=()=>new Response(JSON.stringify({session_token:"a".repeat(64),session_id:"session",application_id:"wordcraft",page_id:"page"}),{status:201})
+  for(const [status,message] of [[403,"native_private_read_refused"],[503,"native_document_unavailable"]] as const){
+   const send=vi.fn(async(url:RequestInfo|URL)=>String(url).includes("sessions")?opened():new Response("{}",{status}))
+   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send as unknown as typeof fetch});await client.open(signal())
+   await expect(client.read(signal())).rejects.toThrow(message)
+  }
  })
  it("does not retry unknown save outcomes or turn a generic403 into read revocation",async()=>{
   const send=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({session_token:"b".repeat(64),session_id:"public-session",application_id:"wordcraft",page_id:"page"}))).mockRejectedValueOnce(new Error("connection lost")).mockResolvedValueOnce(new Response('{}',{status:403}))
@@ -59,6 +68,18 @@ describe("native mounted lifecycle",()=>{
 
 describe("native authorized metadata stream",()=>{
  const admission=()=>new Response(JSON.stringify({session_token:"b".repeat(64),session_id:"public-session",application_id:"wordcraft",page_id:"page"}))
+ it("ends a reauthorization that never answers at its deadline, as a transport failure",async()=>{
+  vi.useFakeTimers()
+  try{
+   const send=vi.fn().mockResolvedValueOnce(admission()).mockImplementationOnce((_:unknown,init:RequestInit)=>new Promise((_,reject)=>init.signal?.addEventListener("abort",()=>reject(init.signal!.reason))))
+   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal())
+   let settled=false
+   const attempt=client.reauthorize(signal()).catch((error:unknown)=>{settled=true;return error})
+   await vi.advanceTimersByTimeAsync(NATIVE_REAUTHORIZE_DEADLINE_MS-1);expect(settled).toBe(false)
+   await vi.advanceTimersByTimeAsync(1)
+   expect(await attempt).toBeInstanceOf(NativeMetadataTransportError)
+  }finally{vi.useRealTimers()}
+ })
  it("decodes split SSE metadata with the closure bearer and no mutation retry",async()=>{
   const text='event: lease\ndata: {"generation":"9007199254740995","holder":null}\n\nevent: session_retired\ndata: {"delivery":"stopped","reason":"authority_changed","draft":"purge"}\n\n'
   const stream=new ReadableStream<Uint8Array>({start(c){for(const part of [text.slice(0,17),text.slice(17,43),text.slice(43)])c.enqueue(new TextEncoder().encode(part));c.close()}})
@@ -157,5 +178,18 @@ describe('native shared preview publication',()=>{
   else send.mockResolvedValueOnce(new Response(reason==='wrong-version'?JSON.stringify({version:'1',durability:'node',issuedBy:'crewship',phase:'shared'}):'{}',{status:reason==='wrong-version'?200:Number(reason)}))
   const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page',fetch:send});await client.open(signal())
   await expect(client.share(share,signal())).rejects.toThrow();expect(send).toHaveBeenCalledTimes(2)
+ })
+})
+
+describe("native save attempt retirement (#4899)",()=>{
+ const admission=()=>new Response(JSON.stringify({session_token:"b".repeat(64),session_id:"public-session",application_id:"wordcraft",page_id:"page"}))
+ it("maps only a reconcile 410 to absent and sends the attempt id",async()=>{
+  const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(new Response('{}',{status:410})).mockResolvedValueOnce(new Response('{}',{status:410}))
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal())
+  const attempt={...request,attemptId:"attempt-0001"}
+  await expect(client.reconcile(attempt,signal())).rejects.toMatchObject({reason:"absent"})
+  expect(JSON.parse(String(send.mock.calls[1][1].body)).attemptId).toBe("attempt-0001")
+  // A save never reports absent; 410 there stays an unconfirmed outcome.
+  const saving=client.save(attempt,signal());await expect(saving).rejects.toThrow("native_snapshot_unconfirmed");await expect(saving).rejects.not.toBeInstanceOf(NativeSaveError)
  })
 })

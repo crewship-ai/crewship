@@ -26,6 +26,9 @@
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=lib.sh
 source "$HERE/lib.sh"
+# shellcheck source=crew-links-evidence.sh
+source "$HERE/crew-links-evidence.sh"
+keep_failure_evidence  # #4874: keep transcripts of a failing run before the gauntlet reseed
 
 preflight
 
@@ -48,14 +51,22 @@ section "2. A lead knows which crews it can reach"
 # ─────────────────────────────────────────────────────────────────────────────
 
 info "Asking alex (engineering lead) what its sidecar reports as linked…"
+wait_agent_free alex "${XLINK_FREE_TIMEOUT:-360}" || finish  # a busy lead answers 429, which is not "sees no crews"
 seen="$(ask_agent alex "Run exactly: curl -s http://localhost:9119/connections — then reply with ONLY the crew slugs you found, comma separated, nothing else.")"
-assert_contains "alex sees ops among its linked crews" "$seen" "ops"
+seen_rc=$?
+if (( seen_rc != 0 )); then
+  # A failed ask can leave a partial reply that happens to contain "ops".
+  _fail "alex answers the connections ask" "the ask exited $seen_rc (refused or failed; see the ask_agent message above), so a partial reply is not evidence of alex's linked crews"
+  seen=""
+fi
+(( seen_rc == 0 )) && assert_contains "alex sees ops among its linked crews" "$seen" "ops"
 
 # ─────────────────────────────────────────────────────────────────────────────
 section "3. Delegation ACROSS a live link reaches the other crew"
 # ─────────────────────────────────────────────────────────────────────────────
 
 TAG="$(nonce XLINK)"
+RECORD_CODE="$(nonce VERIFIED)"
 
 # WHAT COUNTS AS EVIDENCE THAT THE LINK CARRIED WORK.
 #
@@ -87,9 +98,19 @@ TAG="$(nonce XLINK)"
 # The trade, stated rather than hidden: if the model delegates but drops the
 # tag from the task, this reads as no evidence. That is the correct bias —
 # it fails loudly instead of passing on somebody else's assignment.
-xlink_to_morgan_ids() {
-  cs activity --since 30m --lines 200 --export ndjson 2>/dev/null |
-    jq -r --arg tag "$TAG" '
+#
+# A tag in alex's REPLY is not evidence (#4855): the prompt hands alex the
+# tag, so a refusal that quotes it ("I could not get Morgan to say
+# XLINK-…-OK") reads exactly like a delivered answer. On stage ff4c164 that
+# certified a crossing the server had refused with 403. Only the
+# tag-correlated artifact decides, in both halves of the suite.
+# Non-zero when the feed cannot be read: an empty answer must never stand in
+# for "no activity".
+xlink_to_morgan_ids() { # [tag] — defaults to this delegation's TAG
+  local feed
+  feed="$(cs activity --since 30m --lines 200 --export ndjson 2>/dev/null)" || return 1
+  printf '%s\n' "$feed" |
+    jq -r --arg tag "${1:-$TAG}" '
       select(.to_slug == "morgan")
       | select(.entry_type | test("^(assignment\\.|peer\\.conversation)"))
       | select(((.summary // "") + " " + (.payload.task // "")) | contains($tag))
@@ -99,43 +120,108 @@ xlink_to_morgan_ids() {
 XLINK_HAVE_JQ=0
 have jq && XLINK_HAVE_JQ=1
 before_ids="$(mktemp)"; after_ids="$(mktemp)"
-trap 'rm -f "$before_ids" "$after_ids"' EXIT
-(( XLINK_HAVE_JQ == 1 )) && xlink_to_morgan_ids > "$before_ids"
-
-info "Asking alex to delegate to morgan on the Ops crew (tag $TAG)…"
-# Success is EITHER the tag coming back (alex reported morgan's answer) OR a
-# new cross-crew feed entry addressed to morgan (the delegation landed even
-# if alex narrated it badly). Three attempts: each is a real model turn, and
-# a feature that works does not need four.
-crossed=0
-landed=0
-for attempt in 1 2 3; do
-  reply="$(ask_agent alex "Delegate this to Morgan on the Ops crew — Ops is linked to yours, so use the crew field of /assign. Do NOT do it yourself: ask Morgan to reply with exactly '${TAG}-OK' and nothing else. Then report back Morgan's exact answer.")"
-  if printf '%s' "$reply" | grep -qiF -- "$TAG"; then crossed=1; break; fi
-  # Check the durable artifact between attempts, not only at the end: an
-  # attempt can land the assignment without echoing the tag, and stopping
-  # here saves a model turn.
-  if (( XLINK_HAVE_JQ == 1 )); then
-    xlink_to_morgan_ids > "$after_ids"
-    if [ -n "$(comm -13 "$before_ids" "$after_ids")" ]; then landed=1; break; fi
+xlink_removed=0
+# Invoked indirectly by the EXIT trap below, including early exits.
+# shellcheck disable=SC2317
+restore_xlink() {
+  if (( xlink_removed == 1 )); then
+    timeout --signal=TERM --kill-after=1s 3s "$CREWSHIP" --server "$SERVER" \
+      ${_CS_ARGS[@]+"${_CS_ARGS[@]}"} crew connect engineering ops --direction bidirectional >/dev/null 2>&1 || true
   fi
-  info "attempt $attempt: no tag echoed and no cross-crew activity for morgan yet; retrying…"
-done
+}
+# One composed EXIT handler: capture before restoring and retain signal status.
+# The parent run-all waits for this registered child before the scan can reseed.
+# shellcheck disable=SC2317
+crew_links_exit() {
+  local original=$?
+  trap - EXIT
+  trap '' TERM INT
+  if (( original == 143 || original == 130 )); then preserve_interrupted_issues "$original"; fi
+  restore_xlink
+  rm -f "$before_ids" "$after_ids"
+  _state_cleanup  # Existing $$ owner guard: never another suite's state.
+  return "$original"
+}
+trap crew_links_exit EXIT
+trap 'trap "" TERM INT; exit 143' TERM
+trap 'trap "" TERM INT; exit 130' INT
+feed_ok=1
+if (( XLINK_HAVE_JQ == 1 )); then xlink_to_morgan_ids > "$before_ids" || feed_ok=0; fi
+
+# GROUNDED WORK (#4873). A bare "delegate this, have Morgan say <tag>" prompt
+# is declined by the seeded lead as an unverified relay before /assign is ever
+# called (stage 70a74af: three refusals, no request reached the server), which
+# says nothing about the link. Spec (docs/guides/orchestration.mdx, "Cross-Crew
+# Work"): "A lead assigns across a link by naming the crew", and its result
+# comes back from /results/{assignment_id}. So the request is an engineering
+# issue delegated to alex whose work IS that hand-off; the tag rides in the
+# task so the assignment row can be correlated. Success is unchanged: a new
+# tag-correlated cross-crew entry addressed to morgan — and now also its
+# completion, so the hand-off is proven to have produced a result.
+# This Ops record is real, readable work for Morgan: report a code from an
+# operator-created issue, without certifying a release that never happened.
+ops_record="$(cs issue create --crew ops --status BACKLOG --title "Cross-crew test record $TAG" \
+  --description "This operator-created record exercises a linked crew hand-off. Verification code: $RECORD_CODE. It makes no claim about a production release or on-call readiness." --format json 2>/dev/null)" || ops_record=""
+ops_record_id="$(printf '%s' "$ops_record" | jq -r '.id // empty' 2>/dev/null)"
+ops_record_ident="$(printf '%s' "$ops_record" | jq -r '.identifier // .id // empty' 2>/dev/null)"
+if [[ -z "$ops_record_id" || -z "$ops_record_ident" ]]; then
+  _fail "a real Ops record grounds the delegation" "the Ops issue could not be created"
+  finish
+fi
+_state_add issues "$ops_record_ident"
+info "Opening an engineering issue that alex (lead) hands to Ops/morgan (tag $TAG)…"
+echoed=0
+landed=0
+wait_agent_free alex || finish
+xlink_work="$(issue_work engineering alex "Read the Ops verification record ($TAG)" \
+  "Ops issue $ops_record_ident (id $ops_record_id) is an actual operator-created record for this test. Ops is linked to our crew. As engineering lead, assign this to morgan on ops through /assign with crew \"ops\". Include $TAG and issue id $ops_record_id in the task. Ask Morgan to read GET /mission/$ops_record_id, report the verification code in the issue description, and identify the record read. Wait for Morgan's result and report it here. This is record verification, not release certification.")" || true
+info "issue run: ${xlink_work:-none}"
+if (( XLINK_HAVE_JQ == 1 )); then
+  xlink_to_morgan_ids > "$after_ids" || feed_ok=0
+  [ -n "$(comm -13 "$before_ids" "$after_ids")" ] && landed=1
+fi
+xlink_ident="${xlink_work%% *}"
+if [[ -n "$xlink_ident" ]] && cs issue runs "$xlink_ident" --format json 2>/dev/null \
+    | jq -r '.[] | (.result_summary // "") + " " + (.error_message // "")' 2>/dev/null | grep -qiF -- "$TAG"; then
+  echoed=1
+fi
 
 if (( XLINK_HAVE_JQ == 1 )) && (( landed == 0 )); then
-  xlink_to_morgan_ids > "$after_ids"
+  xlink_to_morgan_ids > "$after_ids" || feed_ok=0
   [ -n "$(comm -13 "$before_ids" "$after_ids")" ] && landed=1
 fi
 
-if (( crossed == 1 )); then
-  _pass "alex reports back a result delegated across the crew link"
-elif (( landed == 1 )); then
-  _pass "delegation crossed the link — new cross-crew activity addressed to morgan (tag not echoed)"
+xlink_positive_receipt=""
+xlink_projection_error=0
+xlink_completed() {
+  xlink_assignment_completed "$TAG" || return 1
+  local rc
+  xlink_positive_receipt="$(xlink_result_evidence "$xlink_ident" "$RECORD_CODE" "$TAG")"
+  rc=$?
+  # A projection error ends polling immediately; no extra paid action/retry.
+  if (( rc > 1 )); then xlink_projection_error=1; return 0; fi
+  return "$rc"
+}
+if (( landed == 1 )); then
+  _pass "delegation crossed the link — new cross-crew activity addressed to morgan"
+  waited=0
+  until xlink_completed || (( waited >= ASK_TIMEOUT )); do sleep "$POLL_INTERVAL"; waited=$((waited+POLL_INTERVAL)); done
+  if xlink_completed; then
+    _pass "the cross-crew assignment completed with a result"
+  else
+    _fail "the cross-crew assignment completed with a result" "no completion joined to the tagged assignment plus Morgan result reporting the real record code within ${ASK_TIMEOUT}s"
+  fi
 elif (( XLINK_HAVE_JQ == 0 )); then
   # No jq means no way to read the feed, so there is no evidence either way.
   # That is a missing tool, not a failing product — say which.
   skip "cross-crew delegation over a live link" \
     "jq is not installed, so the activity feed could not be read — install jq to make this assertion"
+elif (( feed_ok == 0 )); then
+  _fail "cross-crew delegation over a live link" \
+    "\`crewship activity\` could not be read, so there is no evidence either way — the CLI feed this suite depends on failed"
+elif (( echoed == 1 )); then
+  _fail "cross-crew delegation over a live link" \
+    "alex's run result contains $TAG, but no cross-crew activity addressed to morgan carries it. The issue itself contains the tag, so an echo (for example a refusal quoting it) is not evidence that work crossed the link"
 else
   # FAIL, and deliberately so.
   #
@@ -157,7 +243,7 @@ else
   # cross-crew delegation being unreliable, and that is exactly the kind of
   # thing a promotion gate is supposed to refuse to certify.
   _fail "cross-crew delegation over a live link" \
-    "3 attempts produced no echoed tag AND no new cross-crew activity addressed to morgan (checked \`crewship activity\` for assignment/peer entries). The link is live — sections 1, 2 and 4 pass — so work is not crossing it"
+    "the issue run (${xlink_work:-not started}) produced no echoed tag AND no new cross-crew activity addressed to morgan (checked \`crewship activity\` for assignment/peer entries). The link is live — sections 1 and 2 pass — so work is not crossing it"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -169,29 +255,111 @@ if [[ -z "$conn_id" ]]; then
   skip "cross-crew refusal without a link" "could not resolve the engineering↔ops connection id"
 else
   info "Removing the link ($conn_id) for the negative half…"
-  cs crew disconnect "$conn_id" >/dev/null 2>&1
+  if ! cs crew disconnect "$conn_id" >/dev/null 2>&1; then
+    _fail "the link is removed for the negative scenario" "disconnect failed, so no unlinked call can be tested"
+    finish
+  fi
+  xlink_removed=1
 
   NEG="$(nonce XLINKNEG)"
-  morgan_before2=0
-  have jq && morgan_before2="$(cs chat list morgan --format json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
+  neg_before="$(mktemp)"; neg_after="$(mktemp)"
+  neg_feed_ok=1
+  if (( XLINK_HAVE_JQ == 1 )); then xlink_to_morgan_ids "$NEG" > "$neg_before" || neg_feed_ok=0; fi
 
-  neg_reply="$(ask_agent alex "Delegate this to Morgan on the Ops crew: ask Morgan to reply with exactly '${NEG}-OK'. Then report back Morgan's exact answer. If you cannot reach Morgan, say exactly why.")"
+  # Require a server-authored receipt for an actual /assign attempt. A model
+  # refusing the task itself or merely quoting a 403 does not exercise the gate.
+  source_crew_id="$(cs crew get engineering --format json 2>/dev/null | jq -r '.id // empty')"
+  target_crew_id="$(cs crew get ops --format json 2>/dev/null | jq -r '.id // empty')"
+  wait_agent_free alex
+  neg_ran=1
+  neg_work="$(issue_work engineering alex "Ops confirmation needed ($NEG)" \
+    "Attempt the same record verification for Ops issue $ops_record_ident (id $ops_record_id), even though the link was just removed for this authorization test. Call /assign targeting morgan with crew \"ops\" and task containing $NEG and issue id $ops_record_id. If refused, report the exact error; do not certify a release or invent a verification result.")" || neg_ran=0
+  # Only a COMPLETED run counts: one that FAILED or was CANCELLED at once
+  # never got to attempt the hand-off.
+  [[ "$neg_work" == *" COMPLETED" ]] || neg_ran=0
+  neg_ident="${neg_work%% *}"
+  neg_reply=""
+  [[ -n "$neg_ident" ]] && neg_reply="$(cs issue runs "$neg_ident" --format json 2>/dev/null \
+    | jq -r '.[] | (.result_summary // "") + " " + (.error_message // "")' 2>/dev/null)"
+  [[ -n "$neg_ident" ]] && neg_reply+="$(cs issue comments "$neg_ident" 2>/dev/null)"
 
-  morgan_after2=0
-  have jq && morgan_after2="$(cs chat list morgan --format json 2>/dev/null | jq 'length' 2>/dev/null || echo 0)"
+  neg_refusal_proved=0
+  neg_work_landed=0
+  xlink_negative_receipt=""
+  neg_projection_error=0
+  xlink_refusal_observed() {
+    local rc
+    xlink_negative_receipt="$(xlink_refusal_evidence "$neg_ident" "$source_crew_id" "$target_crew_id")"
+    rc=$?
+    if (( rc > 1 )); then neg_projection_error=1; return 0; fi
+    return "$rc"
+  }
 
-  assert_not_contains "an unlinked crew cannot be delegated to" "$neg_reply" "$NEG-OK"
-  if (( morgan_after2 > morgan_before2 )); then
-    _fail "no work reaches an unlinked crew" "a chat for morgan appeared with no link in place ($morgan_before2 → $morgan_after2)"
+  # Same evidence rule as section 3: a correct refusal may quote ${NEG}-OK,
+  # so the reply text cannot decide. Without jq there is no artifact to read,
+  # so missing jq leaves this authorization assertion explicitly unproven.
+  if (( neg_ran == 0 )); then
+    _fail "the lead's unlinked hand-off issue ran to an end" "${neg_work:-the issue could not be created or started}"
+    _fail "an unlinked crew cannot be delegated to" "the hand-off run never ended, so the refusal was not exercised"
+  elif (( XLINK_HAVE_JQ == 1 )); then
+    _pass "the lead's unlinked hand-off issue ran to an end"
+    xlink_to_morgan_ids "$NEG" > "$neg_after" || neg_feed_ok=0
+    if (( neg_feed_ok == 0 )); then
+      _fail "an unlinked crew cannot be delegated to" "\`crewship activity\` could not be read, so the refusal is unproven"
+    elif [ -n "$(comm -13 "$neg_before" "$neg_after")" ]; then
+      neg_work_landed=1
+      _fail "an unlinked crew cannot be delegated to" "new cross-crew activity addressed to morgan carries $NEG with no link in place"
+    elif [[ -z "$source_crew_id" || -z "$target_crew_id" ]]; then
+      _fail "an unlinked crew cannot be delegated to" "crew identities could not be read"
+    else
+      waited=0
+      until xlink_refusal_observed || (( waited >= ASK_TIMEOUT )); do
+        sleep "$POLL_INTERVAL"; waited=$((waited+POLL_INTERVAL))
+      done
+      if xlink_refusal_observed; then
+        neg_refusal_proved=1
+        _pass "an unlinked crew cannot be delegated to — verified server 403 receipt"
+      else
+        _fail "an unlinked crew cannot be delegated to" "no server refusal receipt for alex's actual run, the target Ops crew and morgan; model refusal or no attempt is insufficient"
+      fi
+    fi
+  else
+    skip "an unlinked crew cannot be delegated to" "jq is required to verify the server refusal receipt"
+  fi
+  rm -f "$neg_before" "$neg_after"
+  if printf '%s' "$neg_reply" | grep -qiF "not connected"; then
+    info "the lead reports the link refusal on ${neg_ident} (agent text, not server evidence)"
+  else
+    info "the lead's run on ${neg_ident:-the issue} does not quote the link refusal"
+  fi
+  if (( neg_refusal_proved == 0 )); then
+    _fail "no work reaches an unlinked crew" "there is no verified attempt and server refusal, so absence of work proves nothing"
+  elif (( neg_work_landed == 1 )); then
+    _fail "no work reaches an unlinked crew" "tag-correlated cross-crew activity landed with no link in place"
   else
     _pass "no work reaches an unlinked crew"
   fi
 
   # Always put the graph back: the other suites assume the seeded topology.
   info "Restoring the engineering↔ops link…"
-  cs crew connect engineering ops --direction bidirectional >/dev/null 2>&1
+  if cs crew connect engineering ops --direction bidirectional >/dev/null 2>&1; then xlink_removed=0; fi
   restored="$(cs crew connections 2>/dev/null)"
   assert_contains "the link is restored for the following suites" "$restored" "engineering"
+fi
+
+# Retain success before finish deletes volatile state and the gauntlet reseeds.
+# No response/transcript/code enters this receipt or the public harness output.
+if (( _FAIL == 0 && _SKIP == 0 && _XFAIL == 0 )) && [[ -n "${HARNESS_DETAIL_DIR:-}" ]]; then
+  if (( xlink_projection_error == 1 || neg_projection_error == 1 )); then
+    _HARNESS_KEEP_EVIDENCE=0  # No new API/transcript reads for a retention-only failure.
+    _fail "crew-link success evidence is durably retained" "a passing observation could not be projected; no receipt can certify it"
+  elif ! printf '%s\0' "${xlink_positive_receipt:-}" "${xlink_negative_receipt:-}" \
+       "$ops_record_id" "$ops_record_ident" "${source_crew_id:-}" "${target_crew_id:-}" \
+       "$_HARNESS_T0" "$_PASS" "$xlink_removed" "${neg_work_landed:-1}" | \
+       python3 "$HERE/crew-links-receipt.py" write "$HARNESS_DETAIL_DIR"; then
+    _HARNESS_KEEP_EVIDENCE=0  # Existing functional failures retain their normal evidence.
+    _fail "crew-link success evidence is durably retained" "private receipt persistence failed; the configured gate is incomplete"
+  fi
 fi
 
 finish

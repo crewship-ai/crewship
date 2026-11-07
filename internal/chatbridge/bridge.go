@@ -590,6 +590,15 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return errors.New("artifact project admission unavailable")
 	}
 	msgOpt.ArtifactProjectIntent = artifactProject
+	// Refused before persistence: each of these other purposes expects a run.
+	instructionOnly, err := nativeCraftInstruction(msgOpt.Metadata)
+	if err == nil && instructionOnly && (hasPage || askEnvelope != nil || documentCreation != nil || documentIteration != nil || artifactProject != nil) {
+		err = errNativeCraftInstruction
+	}
+	if err != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: "Native Craft instruction is invalid"})
+		return err
+	}
 	// Replay the original human submission after provisioning; server Page
 	// context is rebuilt only after current form and access checks run again.
 	originalContent := content
@@ -687,13 +696,14 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// persistence; its UI suppresses the duplicate optimistic turn.
 	persistUserMsg := func() error {
 		message := conversation.Message{
-			ID:           triggerMessageID,
-			AgentID:      info.AgentID,
-			Role:         conversation.RoleUser,
-			Content:      content,
-			Metadata:     userMsgMetadata,
-			AuthorUserID: userID,
-			Timestamp:    time.Now().UTC(),
+			ID:                     triggerMessageID,
+			AgentID:                info.AgentID,
+			Role:                   conversation.RoleUser,
+			Content:                content,
+			Metadata:               userMsgMetadata,
+			AuthorUserID:           userID,
+			Timestamp:              time.Now().UTC(),
+			NativeCraftInstruction: instructionOnly,
 		}
 		if documentCreation != nil {
 			return b.convStore.AppendDocumentCreation(ctx, chatID, message, *documentCreation, info.HumanAuthority)
@@ -714,6 +724,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	broadcastUserMsg := func() {
 		metadata := map[string]any{"author_user_id": userID, "message_id": triggerMessageID}
+		if instructionOnly {
+			metadata[NativeCraftInstructionMetadataKey] = true
+		}
 		if askEnvelope != nil {
 			metadata["ask_submission_id"] = askEnvelope.SubmissionID
 		}
@@ -742,8 +755,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	// image build or container start. In a group chat the agent stays silent
 	// unless @mentioned; the human line is still persisted + broadcast + counted
 	// so the shared transcript records it, and a clean "done" settles the
-	// sender's UI. Private (1:1) chats always respond.
-	if !ShouldAgentRespond(info.Visibility, content, info.AgentSlug) {
+	// sender's UI. Private (1:1) chats always respond, except a native Craft
+	// instruction, which only records the message its explicit task binds to.
+	if instructionOnly || !ShouldAgentRespond(info.Visibility, content, info.AgentSlug) {
 		if err := persistUserMsg(); err != nil {
 			b.logger.Error("failed to persist user message", "error", err)
 			streamFn(ws.ChatEvent{Type: "error", Content: "failed to save message"})
@@ -1305,6 +1319,9 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	}
 	ctx = runauthority.WithTriggerMessage(ctx, triggerMessageID)
 	ctx = chataudience.WithReceipt(ctx, info.HumanAuthority)
+	if info.HumanAuthority != nil && runauthority.OriginIDFromContext(ctx) == "" {
+		ctx = WithHostChatWorkAdmission(ctx)
+	}
 	if err := b.resolver.CreateRun(ctx, runID, info.AgentID, chatID, info.WorkspaceID, "USER", runMeta); err != nil {
 		b.logger.Error("failed to create durable run record", "error", err)
 		streamFn(ws.ChatEvent{Type: "error", Content: "failed to start a durable run"})
@@ -1332,13 +1349,24 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	var observedTerminalAfterStop bool
 	req.ObservedTerminalAfterStop = func() { observedTerminalAfterStop = true }
 	req.CapturedExit = func(at string) { capturedCompletedAt = at }
-	runErr := b.orch.RunAgent(ctx, req, handler)
+	runCtx, chatWork := b.bindHostChatWork(ctx, &req, runID)
+	defer chatWork.Close()
+	runErr := b.orch.RunAgent(runCtx, req, handler)
+	chatWork.Stop()
+	// Settlement keeps the turn's own context. Only a work-item stop that was
+	// delivered before the run returned, and that the run reported, makes
+	// the stopped run context the one settlement branches on (#4799).
+	if runErr != nil && chatWork.StopDelivered() {
+		ctx = runCtx
+	}
 	if observedTerminalAfterStop {
 		terminalCtx, terminalCancel := context.WithTimeout(context.WithoutCancel(ctx), ledgerWriteTimeout)
 		defer terminalCancel()
 		ctx = terminalCtx
 	}
+
 	updateRun := func(ctx context.Context, id, status string, exitCode *int, message *string, metadata map[string]interface{}) error {
+		ctx = chatWork.completionContext(ctx, runErr)
 		if capturedCompletedAt == "" {
 			return b.resolver.UpdateRun(ctx, id, status, exitCode, message, metadata)
 		}
@@ -1408,6 +1436,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 				if errors.Is(runErr, orchestrator.ErrHostCaptureUnconfirmed) {
 					reason = "host_capture_unconfirmed"
 				}
+				if chatWork != nil {
+					message := "host observer ended without confirmed process exit"
+					// This parks custody for protected retained-output recovery; the
+					// API refuses terminal projection until actual exit is recovered.
+					_ = updateRun(cleanCtx, runID, "FAILED", nil, &message, terminalRunMeta(startedAt, acc, nil))
+				}
 				b.logger.Warn("chat observer ended without a confirmed execution outcome; leaving the run nonterminal",
 					"chat_id", chatID, "run_id", runID, "error", runErr)
 				// End only this observer stream. Protected retained output owns
@@ -1430,7 +1464,7 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 			var confirmedStatus string
 			var terminalErr error
 			if updater, ok := b.resolver.(RunOutcomeUpdater); ok {
-				confirmedStatus, terminalErr = updater.UpdateRunOutcome(cleanCtx, runID, "CANCELLED", nil, &cancelMsg, meta, capturedCompletedAt)
+				confirmedStatus, terminalErr = updater.UpdateRunOutcome(chatWork.completionContext(cleanCtx, runErr), runID, "CANCELLED", nil, &cancelMsg, meta, capturedCompletedAt)
 			} else {
 				// A legacy resolver can record the request but cannot attest
 				// that idempotency/work projection actually chose CANCELLED.

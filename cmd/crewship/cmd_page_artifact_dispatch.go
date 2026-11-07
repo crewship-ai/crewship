@@ -130,7 +130,7 @@ func artifactCommentDispatch(cmd *cobra.Command, kind, slug string, body any, ti
 // artifactCommentPrompt is the viewer's exact instruction text.
 func artifactCommentPrompt(kind, page string, c artifactQueuedComment) string {
 	if kind == "design" {
-		return fmt.Sprintf("Update Design @%s according to comment %s: %s. Selected node: %s, original version: %d. Use design_get, design_apply, then design_snapshot to save a new version. Preserve concurrent changes and report the confirmed version.", page, c.ID, c.Text, c.Selector, c.Version)
+		return fmt.Sprintf("Update Design @%s according to comment %s: %s. Selected node: %s, original version: %d. Use design_get, then design_apply; a successful design_apply already saves the new version and answers the comment, so do not call design_snapshot afterwards. Preserve concurrent changes and report the confirmed version.", page, c.ID, c.Text, c.Selector, c.Version)
 	}
 	return fmt.Sprintf("Update the artifact project according to this exact comment. Page: @%s. Base version: %d. File: %s. Element: %s. Selected text: %s\nRequested change: %s\nPublish a new version with base_version %d, then reply to comment %s with the new version and what changed. If the anchor no longer matches, ask for clarification.", page, c.Version, c.Path, c.Selector, c.Quote, c.Text, c.Version, c.ID)
 }

@@ -33,6 +33,10 @@ An operator can instead set `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` in the
 server environment. That turns the server side on for every workspace on the
 instance, regardless of the workspace flag.
 
+Prototype playback of linked screens has its own build-time variable,
+`NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE=true`, on top of the two switches above;
+see [Play a prototype](#play-a-prototype).
+
 The `artifacts_design` flag is independent of `artifact_projects`, the flag for
 Project artifacts. You can turn Design on without Projects.
 
@@ -63,10 +67,12 @@ Design; they can only edit one that a person made.
    **Start with** offers only **Blank canvas**.
 5. Click **Create and edit**.
 
-Without a folder, a new Design is visible only to you until you share it. If you
-choose a **Folder**, the Design is added to that folder, and the dialog shows
-**People with access to** the folder: everyone who can open the folder can open
-the Design. Crewship saves the empty canvas as version 1.
+Without a folder, a new Design is visible only to you until you share it, apart
+from workspace owners and admins, who can read and edit every Design. Their
+access to a Design they do not own is recorded in the audit log. If you choose a
+**Folder**, the Design is added to that folder, and the dialog shows **People
+with access to** the folder: everyone who can open the folder can open the
+Design. Crewship saves the empty canvas as version 1.
 
 <Note>
   After **Create and edit**, the library can show **This artifact is not
@@ -97,9 +103,12 @@ The status in the header tells you where your changes are:
 | Status | Meaning |
 |---|---|
 | **Connecting…** | The editor is opening the live connection. |
-| **Live · up to date** | Connected, and you have no unsaved changes. |
+| **Connected · read only** | Connected without edit authority. Shared-only readers see the shared snapshot and presence; separately authorized administrators can read the latest canvas with audit. |
+| **Live · sending changes…** | Connected, and the server has not confirmed your latest changes yet. They stay in this browser until it does. |
+| **Live · up to date** | Connected, the server holds your changes, and you have no unsaved version changes. |
 | **Live · changes saved as you work** | Connected. You have changes since the last version you saved; they are sent as you work. |
 | **Offline · changes kept in this browser** | The connection dropped. Keep the window open; the editor reconnects and sends your changes. |
+| **Jen pro čtení · neodeslané změny zůstaly v tomto prohlížeči…** | You lost the write right with changes that never reached the server. They stay in this browser, and they return and sync when you can edit again and reopen the Design. |
 | **Access changed · reopen to continue** | Your access or session changed. Reopen the Design. |
 
 People with read access see a **Read only** badge next to the status.
@@ -125,10 +134,89 @@ People with read access see a **Read only** badge next to the status.
 5. To remove the selection, click **Delete layer**. Deleting a screen with
    **Delete screen and layers** also removes every layer inside it.
 
-Every change goes to the other people on the canvas as you make it. The editor
-also keeps a copy of your unsaved canvas in this browser, so a crash or a lost
+Live updates reach the people authorized to view the live canvas. Shared-only
+readers keep seeing the shared version. The editor also keeps a copy of your unsaved canvas in this browser, so a crash or a lost
 connection does not discard it. If browser storage is full or blocked, the
 editor says so; keep the window open until it is connected and save a version.
+
+### When two people change one text
+
+Your changes count as sent only once the server has confirmed them. Until then
+someone else can change the same text layer: while you are offline, or in the
+moment between your edit and the confirmation. Only one text stays on the
+canvas, and the choice follows the sync order, not the time. Crewship shows a
+**Konflikt úprav** notice to the person whose browser sees both, with the text
+that lost, whichever side it came from. **Kopírovat text** copies it.
+**Obnovit tento text** brings it back:
+
+- If the layer still shows the text the merge left, only the text changes. Its
+  position, size, colour, name and link stay as they are now.
+- If someone changed the text after the conflict, nothing is replaced. The lost
+  text lands in a new layer below, named **(obnovený text)**.
+- If the layer was deleted, it comes back as it was.
+
+The notice is kept encrypted in this browser and survives a reload until you
+close it, in every tab of the same person. When your text stayed on the canvas,
+the other person's text is in the history only if it was saved in a version, so
+the notice shows it too.
+
+Only the text of a layer is compared. Position, size, colour and layer name stay
+last-writer-wins. Unconfirmed work and the canvas it was made from are kept in
+this browser, so the comparison also works after a reload, a lost write right or
+a new connection.
+
+## Play a prototype
+
+<Note>
+  Prototype playback is off by default. It appears only in a web UI built with
+  both `NEXT_PUBLIC_ARTIFACTS_DESIGN=true` and
+  `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE=true`. Without the second variable
+  the editor shows no **Play** button and no **Link to screen** field, and links
+  already stored on a canvas are kept but do nothing.
+</Note>
+
+You can link a layer on one screen to another screen and click through the
+screens as a prototype.
+
+**Link a layer to a screen** (needs **write** access):
+
+1. Select a rectangle, text or image layer, for example a **Next** button on
+   **Screen 1**.
+2. In **Properties**, choose the target in **Link to screen**, for example
+   **Screen 2**.
+3. To remove the link, choose **No link**.
+
+The link is part of the canvas: people authorized for live reads see it
+immediately; shared-only readers see it on a new read or reopen after the
+owner shares a version containing it. Sharing does not push replacement
+document state to an already-open shared-only socket. It is saved in versions, and **Restore** brings back the links
+of that version. Screens cannot
+be linked themselves; link a layer inside the screen. People with **read** or
+**Comment** access see the link but cannot change it.
+
+**Play the prototype** (any access level, including **read**):
+
+1. Optionally select a screen or a layer inside it to start there. Without a
+   selection, playback starts on the first screen.
+2. Click **Play** in the header. The screen opens on its own, without the
+   editor around it.
+3. Click a linked layer, or move to it with **Tab** and press **Enter** or
+   **Space**, to open its target screen.
+4. Click **Back** to return to the previous screen.
+5. Press **Esc** or click **Exit** to leave playback. Focus returns to **Play**.
+
+Playback only shows the canvas. Nothing you click in it changes the Design,
+creates a version or is seen by other people.
+
+If a layer links to a screen that was deleted, **Link to screen** shows
+**Deleted screen** and the hint *The linked screen was deleted*. In playback the
+layer has a dashed outline, clicking it does nothing, and the bar above the
+screen says that the linked screen was deleted. Choose another target or
+**No link** to fix it. If the screen you are viewing is deleted while you play,
+playback says so; go **Back** or **Exit**.
+
+Agents and the CLI set the same link with the `linkTo` node field; see
+[Command line](#command-line).
 
 ## Save versions
 
@@ -152,15 +240,18 @@ canvas with a number and a message.
    and the canvas cannot be edited.
 3. Click **Restore** under a version to bring it back. Crewship saves the
    restored canvas as a new version on top of the history, so nothing is
-   overwritten, and everyone on the canvas sees it immediately.
-4. Click **Live canvas** to return to the editable canvas.
+   overwritten. Live readers receive the change; shared-only readers keep seeing
+   the shared version until the owner shares another one.
+4. Click **Live canvas** to return to the editable canvas. Without edit authority,
+   the button says **Current view** and returns to the view your access permits.
 
 **Restore** and **Share** are shown only to people who can edit the Design.
 
 ## Share a version with readers
 
-Readers do not see your working history. They see the live canvas and the one
-version that the owner has shared.
+Shared-only readers see the version the owner has shared, not the live canvas
+or other working versions. They can still see presence on the canvas. Until a version is shared,
+ordinary Read grantees cannot open the Design (the API returns 404).
 
 1. Open **History**.
 2. Click **Share** under the version you want readers to see. Only the owner of
@@ -191,20 +282,25 @@ the Design:
 2. Choose the subject: a **user**, a **crew**, an **agent** or
    **Everyone in this workspace**. For a user, enter their email address.
 3. Choose the level and click **Grant**:
-   - **read** follows the live canvas and sees the shared version.
+   - **read** shows the shared snapshot and presence, without live canvas edits.
    - **write** can change the canvas, save versions and restore them.
 4. To remove access, click **Revoke** next to the grant.
 
-Only the owner or a workspace administrator can change access. Changes take
-effect immediately: a person whose access is removed is disconnected from the
-canvas. Grants for agents do not give an agent permission to run tasks; that is
+Only the owner or a workspace administrator can change access. Workspace
+owners and admins can also open and edit every Design, including a private
+one nobody shared with them. Each time, an entry with the action
+`design.workspace_admin_accessed` is written to the workspace audit log. The
+same audited read applies to every other artifact type (see
+[Sharing and access](/guides/artifacts/sharing-and-access#workspace-owners-and-admins)).
+Changes to access apply to new requests immediately. A person whose access is removed is disconnected
+from the open canvas within a few seconds. Grants for agents do not give an agent permission to run tasks; that is
 controlled separately.
 
 ## What a reader sees
 
-A person with **read** access who opens the Design sees:
+A person with shared-only **read** access who opens the Design sees:
 
-- the live canvas, with a **Read only** badge and **Follow changes live** in the
+- the shared snapshot, with a **Read only** badge and **View canvas** in the
   toolbar,
 - the cursors and initials of the people editing,
 - in **History**, only the shared version,
@@ -229,6 +325,14 @@ draft stays in this browser if you close the Design.
 
 The owner can connect one of their private agent chats. Comments then go to
 that agent, which changes the canvas and answers in the comment.
+
+Before you start, a workspace owner or admin must allow the agent's crew in the
+[agent publishing policy](/cli/artifacts#agent-publishing-policy): the policy
+must be enabled and list the crew. Otherwise sending is refused with "This
+agent's crew is not allowed to create artifact projects in this workspace"
+(the wording says projects, but the check also covers Designs). Give the agent
+the `crewship-design` skill as well; see
+[Give the agent its playbook](/guides/artifacts#give-the-agent-its-playbook).
 
 1. Open the private chat with the agent you want to use. Its address has the
    form `/chat/<agent>?session=<chat-id>`. Copy the value of the `session`
@@ -264,7 +368,7 @@ person who connected the chat.
 | Message | What happened | What to do |
 |---|---|---|
 | `Design changed; reload and reapply` | Someone else changed or saved the canvas between reading and writing it, or a comment points at a version that is no longer the latest. | Reload the Design and repeat the change or comment. |
-| `Design capacity is full; existing work is retained` | The Design's version history is full, or the workspace has reached its limit of pages and artifacts. Nothing was lost. | Delete artifacts you no longer need, or ask an administrator. |
+| `Design capacity is full; existing work is retained` | This Design's version history is full, or the workspace or server artifact storage budget is used up. Nothing was lost. | Delete artifacts you no longer need (this frees storage budget, not this Design's history) or ask an administrator to raise the limit. A workspace at its page limit answers `pages_limit` instead. |
 | `current Design edit permission required` | You lack edit access, or you tried to share or connect a chat without being the owner. | Ask the owner for **write** access. |
 | `design not found` | The Design does not exist, you cannot see it, or `artifacts_design` is off for the workspace. | Check the address, your access and the flag. |
 | `Design engine is unavailable; changes are not acknowledged` | The server could not process the canvas. | Keep the window open and try again; your changes stay in the browser. |
@@ -282,3 +386,14 @@ The same actions are available from the CLI under `crewship page design`:
 `create`, `get`, `versions`, `apply`, `snapshot`, `restore`, `share`,
 `comments`, `comment`, `agent` and `watch`. Run
 `crewship page design --help` for the details.
+
+A prototype link is the optional `linkTo` field of a layer: the ID of the
+target screen. `""` removes it. For example, link the layer `next` to the screen
+`checkout`:
+
+```bash
+echo '{"operations":[{"op":"upsert","node":{"id":"next","linkTo":"checkout"}}],"message":"Link Next to Checkout"}' \
+  | crewship page design apply checkout-flow --file -
+```
+
+Agents use the same field in `design_apply`.

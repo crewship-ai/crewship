@@ -48,6 +48,7 @@ var workspaceTablesNotBundled = map[string]string{
 	"artifact_storage_workspaces":      "target-local capacity counters; restored payload rows recharge them through triggers",
 	"artifact_project_message_intents": "original-message run authority requires fresh admission after restore",
 	"artifact_project_run_consents":    "live original-run Page permissions cannot travel in a bundle",
+	"page_grant_retired_issuances":     "target-local memory of retired grants must survive logical replacement; a bundle must neither reset it nor bring a copy",
 	"mooring_authority_generations":    "target-local non-ABA author generations must survive logical replacement; portable bundles cannot reset them",
 	"mooring_delivery_gates":           "runtime delivery admission requires fresh identity after portable restore",
 	"mooring_delivery_barriers":        "runtime read-revocation barriers belong to source installation",
@@ -70,6 +71,7 @@ var workspaceTablesNotBundled = map[string]string{
 	"attempt_project_inputs":            "attempt-specific native input capabilities must not replay after restore",
 
 	"mooring_edit_leases":           "editor capabilities belong to their installation; retain target-local generation tombstones",
+	"craft_native_retired_attempts": "fences in-flight save attempts of live editor admissions; those requests never survive a restore",
 	"mooring_edit_lease_workspaces": "target-local issuance fences survive Page deletion; restore must not replace their workspace",
 
 	// --- Migration artefacts / archives (derived, never read by the app) ---
@@ -89,23 +91,24 @@ var workspaceTablesNotBundled = map[string]string{
 	"notification_deliveries": "delivery log for notification_channels (which DO ride the bundle); operational, not config",
 
 	// --- Runtime state that regenerates on restore ---
-	"agent_status":             "live agent status; every agent boots IDLE on the restored instance",
-	"keeper_request_events":    "per-instance keeper decision history (projection of keeper_requests)",
-	"memory_mutations":         "mutation ledger tied to idempotency keys of operations that do not travel; content and versions round-trip via memory_versions",
-	"memory_revisions":         "revision anchors; a restored workspace reads cleanly at revision 0 and re-anchors on first write",
-	"provider_device_logins":   "device-approval polling sessions owned by this process; never resume one on another instance",
-	"routine_webhook_receipts": "receipt identities refer to this instance's pipeline runtime history",
-	"session_mailbox":          "undelivered chat turns addressed to a live session that does not survive the restore; delivered ones are in workspace_conversation_messages",
-	"chat_read_shares":         "short-lived bearer links to a live chat; restoring token hashes would revive access in a copied workspace",
-	"webhook_deliveries":       "inbound delivery ledger incl. raw request bodies; dedup keys only mean something against work_items, which do not travel",
-	"work_items":               "durable work queue; a restored bundle carrying queued work would RUN it again in the copy",
-	"crew_messages":            "cross-crew message delivery log",
-	"escalations":              "keeper escalation history",
-	"mcp_tool_calls":           "MCP call telemetry",
-	"oauth_states":             "OAuth CSRF nonces; ephemeral",
-	"peer_conversations":       "sidecar peer Q&A history",
-	"pipeline_run_idempotency": "dispatch dedup keys; runtime",
-	"pipeline_signal_waits":    "in-flight signal waits; runtime",
+	"agent_status":               "live agent status; every agent boots IDLE on the restored instance",
+	"keeper_request_events":      "per-instance keeper decision history (projection of keeper_requests)",
+	"memory_mutations":           "mutation ledger tied to idempotency keys of operations that do not travel; content and versions round-trip via memory_versions",
+	"memory_revisions":           "revision anchors; a restored workspace reads cleanly at revision 0 and re-anchors on first write",
+	"provider_device_logins":     "device-approval polling sessions owned by this process; never resume one on another instance",
+	"routine_webhook_receipts":   "receipt identities refer to this instance's pipeline runtime history",
+	"pipeline_signal_deliveries": "signal delivery ids and run ids refer to this instance's pipeline runtime history",
+	"session_mailbox":            "undelivered chat turns addressed to a live session that does not survive the restore; delivered ones are in workspace_conversation_messages",
+	"chat_read_shares":           "short-lived bearer links to a live chat; restoring token hashes would revive access in a copied workspace",
+	"webhook_deliveries":         "inbound delivery ledger incl. raw request bodies; dedup keys only mean something against work_items, which do not travel",
+	"work_items":                 "durable work queue; a restored bundle carrying queued work would RUN it again in the copy",
+	"crew_messages":              "cross-crew message delivery log",
+	"escalations":                "keeper escalation history",
+	"mcp_tool_calls":             "MCP call telemetry",
+	"oauth_states":               "OAuth CSRF nonces; ephemeral",
+	"peer_conversations":         "sidecar peer Q&A history",
+	"pipeline_run_idempotency":   "dispatch dedup keys; runtime",
+	"pipeline_signal_waits":      "in-flight signal waits; runtime",
 }
 
 // schemaTables returns every non-mechanical table in the migrated schema.

@@ -116,7 +116,7 @@ func (h *PipelineHandler) SignalRun(w http.ResponseWriter, r *http.Request) {
 		liveDelivered = h.signals.Signal(runID, body.EventType, body.Payload)
 	}
 	if !armed && !liveDelivered {
-		replyError(w, http.StatusNotFound, "no run waiting on that event (run not at the wait step, or wrong event_type)")
+		replyError(w, http.StatusNotFound, "no run waiting on that event (run not at the wait step, wrong event_type, or event_filter did not match)")
 		return
 	}
 	if armed {

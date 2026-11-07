@@ -20,6 +20,7 @@ import {
 import { StatusPill } from "@/components/ui/status-pill"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
+import { historyMetadata, isNativeCraftInstruction } from "@/lib/native-craft-instruction"
 import { encodeApiPathSegment, requireApiPathSegment } from "@/lib/api-path-segment"
 
 import {
@@ -74,6 +75,7 @@ import { DocumentResultCards } from "./document-result-cards"
 import type { ViewerTarget } from "./artifact-viewer/types"
 import { SavedDocumentPanel } from "./artifacts/saved-document-panel"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
+import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
 import { ArtifactContextCards, type OpenLinked } from "./artifact-context/artifact-context-cards"
 import { ArtifactLibraryHost } from "./artifact-context/artifact-library-host"
 import { LinkedArtifactPanel, type LinkedActive } from "./artifact-context/linked-artifact-panel"
@@ -361,6 +363,8 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   const session = useSession()
   const currentUserId = session.data?.user?.id ?? null
   const documentsAvailability = useDocumentsAvailability(currentUserId ? workspaceId ?? "" : "")
+  // The server admits a chat-created document only for a role or page.create (#4534).
+  const mayCreatePages = usePageCreationAccess(workspaceId ?? "")
   const artifactProjectAvailable = useArtifactProjectAvailability(currentUserId ? workspaceId ?? "" : "", agentId)
   const artifactScope = JSON.stringify([currentUserId, workspaceId, agentId, sessionId])
   const artifactContextNonce = useRef(0)
@@ -602,6 +606,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
       checkpoint?: unknown
       run_id?: string
       ts: string
+      native_craft_instruction?: boolean
       // The server has always returned this and this type has never named it,
       // so every reload dropped it here — the last hop of a chain that is
       // otherwise complete. An ask-form submission carries its envelope
@@ -687,7 +692,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         checkpoint: checkpointSchema.safeParse(m.checkpoint).data,
         runId: m.run_id,
         timestamp: new Date(m.ts),
-        metadata: m.metadata,
+        metadata: historyMetadata(m),
       })))
       setHistoryLoading(false)
     }
@@ -1117,6 +1122,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   // Rows that would be no-ops on THIS conversation right now. Static
   // classification (does the capability exist at all?) lives in the palette;
   // this is the part only the host can know.
+  const lastUserIsInstruction = isNativeCraftInstruction(turns.findLast((t) => t.role === "user"))
   const slashDisabledCommands = useMemo<Record<string, string>>(() => {
     const out: Record<string, string> = {}
     if (turns.length === 0) {
@@ -1126,9 +1132,11 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
       out.export = "Nothing to export yet"
     } else if (isStreaming) {
       out.regenerate = "Wait for the reply to finish"
+    } else if (lastUserIsInstruction) {
+      out.regenerate = "A saved Craft instruction starts from the document"
     }
     return out
-  }, [turns.length, isStreaming])
+  }, [turns.length, isStreaming, lastUserIsInstruction])
 
   // The server-driven action the user picked, if any. The panel owns the
   // modal (not the palette) because the form pre-fills from the conversation.
@@ -1141,7 +1149,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
    *  that no field is named after). */
   const slashActionPreFill = useMemo<Record<string, string>>(() => {
     const transcript = turns
-      .filter((t) => t.role === "user" || t.role === "assistant")
+      .filter((t) => (t.role === "user" || t.role === "assistant") && !isNativeCraftInstruction(t))
       .slice(-6)
       .map((t) => {
         const text = t.parts.filter((p) => p.type === "text").map((p) => p.content).join("\n").trim()
@@ -1442,7 +1450,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
       animateAfter={animateAfter}
       onCopy={handleCopy}
       onFileClick={openFilePreview}
-      onRegenerate={canChat && !isStreaming ? regenerateWithPin : undefined}
+      onRegenerate={canChat && !isStreaming && !lastUserIsInstruction ? regenerateWithPin : undefined}
       onEditUserMessage={canChat && !isStreaming ? editAndResendWithPin : undefined}
       resolveAuthorName={resolveAuthorName}
       resolveAskProvenance={resolveAskProvenance}
@@ -1488,7 +1496,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
               onCopy={handleCopy}
               onFileClick={openFilePreview}
               isLastAssistant={turn.role === "assistant" && idx === turns.length - 1}
-              onRegenerate={canChat && turn.role === "assistant" && idx === turns.length - 1 && !isStreaming ? regenerateWithPin : undefined}
+              onRegenerate={canChat && turn.role === "assistant" && idx === turns.length - 1 && !isStreaming && !lastUserIsInstruction ? regenerateWithPin : undefined}
               onEditUserMessage={canChat && !isStreaming ? editAndResendWithPin : undefined}
               animateAfter={animateAfter}
               agentId={agentId}
@@ -1615,7 +1623,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
-          documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           sendRefusal={sendRefusal}
           variant="mobile"
@@ -1756,7 +1764,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
-          documentCreationEnabled={documentsAvailability.data === true && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
           sendRefusal={sendRefusal}
           variant="desktop"

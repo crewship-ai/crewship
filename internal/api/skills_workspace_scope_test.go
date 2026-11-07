@@ -126,6 +126,8 @@ func TestSkillsList_AgentDataScopedToWorkspace(t *testing.T) {
 			wantAgents: map[string][]string{f.skillID: nil, f.otherSkillID: {f.agentB}}},
 		{name: "installed=1 from B excludes A's skill", ws: f.wsB, query: "?installed=1",
 			wantPresent: []string{f.otherSkillID}, wantAbsent: []string{f.skillID}},
+		{name: "installed=true from B excludes A's skill", ws: f.wsB, query: "?installed=true",
+			wantPresent: []string{f.otherSkillID}, wantAbsent: []string{f.skillID}},
 		{name: "installed=1 from A excludes B's skill", ws: f.wsA, query: "?installed=1",
 			wantPresent: []string{f.skillID}, wantAbsent: []string{f.otherSkillID}},
 		{name: "installed_for_agent_id of another workspace's agent returns nothing", ws: f.wsB,

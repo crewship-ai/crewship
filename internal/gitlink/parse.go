@@ -331,6 +331,18 @@ func (r Ref) APIEndpointFor(host string) string {
 	}
 }
 
+// APIHost is the host a Fetch for the given provider and vetted host really
+// contacts, port included. It is derived from APIEndpointFor so the two cannot
+// disagree; it differs from host on the SaaS forges (github.com sends to
+// api.github.com, www.gitlab.com to gitlab.com).
+func APIHost(p Provider, host string) string {
+	u, err := url.Parse(Ref{Provider: p}.APIEndpointFor(host))
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
+
 // ── helpers ─────────────────────────────────────────────────────────────
 
 // normalizeHost drops a port that merely restates the scheme's default.

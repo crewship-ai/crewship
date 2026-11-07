@@ -102,6 +102,8 @@ func remainingAuthIntegrationsSchemaCatalog() (map[string]DomainSchema, map[stri
 		"GET /api/v1/credentials/default-env-var":                     {Response: object(map[string]any{"env_var": nullable(str()), "testable": boolean()})},
 		"GET /api/v1/credentials/reveal-policy":                       {Response: object(map[string]any{"workspace_id": str(), "enabled": boolean()})},
 		"PUT /api/v1/credentials/reveal-policy":                       {Request: ref("RemainingRevealPolicyRequest"), Response: object(map[string]any{"workspace_id": str(), "enabled": boolean()})},
+		"GET /api/v1/credentials/{credentialId}/allowed-hosts":        {Response: object(map[string]any{"credential_id": str(), "allowed_hosts": array(str()), "note": str()})},
+		"PUT /api/v1/credentials/{credentialId}/allowed-hosts":        {Request: request(map[string]any{"allowed_hosts": array(str())}, "allowed_hosts"), Response: object(map[string]any{"credential_id": str(), "allowed_hosts": array(str()), "previous": array(str()), "note": str()})},
 		"PUT /api/v1/credentials/{credentialId}/sensitivity":          {Request: ref("RemainingCredentialSensitivityRequest"), Response: object(map[string]any{"credential_id": str(), "sensitivity": str(), "previous": str()})},
 	}
 	return routes, components

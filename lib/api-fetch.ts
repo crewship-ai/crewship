@@ -283,13 +283,44 @@ let refreshInflight: Promise<RefreshOutcome> | null = null
  *  see a transport error instead of an indefinite spinner. */
 const REFRESH_TIMEOUT_MS = 10_000
 
+/** A refresh rotates the refresh token, and its response carries the only
+ *  copy of the new one: the server answers a second use of the old token as
+ *  a replay and revokes the session (nextauth.go RefreshToken). The cookie
+ *  jar is shared by every tab of the origin, but `refreshInflight` above
+ *  single-flights only within one document.
+ *
+ *  - Tabs: the round trip runs under an exclusive Web Lock, held until the
+ *    response (and so its Set-Cookie) has arrived. A refresh in another tab
+ *    waits and then presents the rotated token. Without the Locks API it runs
+ *    unlocked, exactly as before.
+ *  - A document replaced mid-refresh: the request is `keepalive`, so the
+ *    browser completes it and stores its cookies after the page is gone. The
+ *    lock is released at unload, so a new document that refreshes before that
+ *    response lands can still collide; the known trigger (the library opening
+ *    a just-created artifact by slug, mounting the editor, then reloading as
+ *    /artifacts/<id>) is removed in the library. Closing the remaining window
+ *    needs the server (a bounded reuse window), an owner decision (#4902). */
+export const REFRESH_LOCK = "crewship-auth-refresh"
+/** Bound on waiting for another tab's refresh; its own request aborts at REFRESH_TIMEOUT_MS. */
+const REFRESH_LOCK_WAIT_MS = 2 * REFRESH_TIMEOUT_MS
+
+interface LockManagerLike {
+  request<T>(name: string, options: { mode: "exclusive"; signal?: AbortSignal }, run: () => Promise<T>): Promise<T>
+}
+
+function refreshLocks(): LockManagerLike | null {
+  if (typeof navigator === "undefined") return null
+  const locks = (navigator as Navigator & { locks?: LockManagerLike }).locks
+  return locks && typeof locks.request === "function" ? locks : null
+}
+
 export async function tryRefresh(): Promise<RefreshResult> {
   return (await refreshShared()).result
 }
 
 function refreshShared(): Promise<RefreshOutcome> {
   if (refreshInflight) return refreshInflight
-  const promise = (async (): Promise<RefreshOutcome> => {
+  const roundTrip = async (): Promise<RefreshOutcome> => {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), REFRESH_TIMEOUT_MS)
     try {
@@ -301,6 +332,7 @@ function refreshShared(): Promise<RefreshOutcome> {
         credentials: "include",
         headers: { Accept: "application/json" },
         signal: controller.signal,
+        keepalive: true,
       })
       if (r.ok) return { result: "ok", reason: null }
       // Only a 401 from the refresh endpoint is "your session is gone".
@@ -317,7 +349,28 @@ function refreshShared(): Promise<RefreshOutcome> {
     } finally {
       clearTimeout(timer)
     }
-  })()
+  }
+  const locks = refreshLocks()
+  const promise: Promise<RefreshOutcome> = locks
+    ? (async () => {
+        // The wait for another tab is bounded separately; the round trip's
+        // own timeout starts once this tab holds the lock.
+        const wait = new AbortController()
+        const timer = setTimeout(() => wait.abort(), REFRESH_LOCK_WAIT_MS)
+        try {
+          return await locks.request(REFRESH_LOCK, { mode: "exclusive", signal: wait.signal }, () => {
+            clearTimeout(timer)
+            return roundTrip()
+          })
+        } catch {
+          // The lock was not granted in time: nothing was sent, so the
+          // cookies are untouched. Transient, like a refresh that timed out.
+          return { result: "retryable_failed", reason: null }
+        } finally {
+          clearTimeout(timer)
+        }
+      })()
+    : roundTrip()
   refreshInflight = promise
   promise.finally(() => {
     if (refreshInflight === promise) refreshInflight = null

@@ -8,7 +8,7 @@ afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers() })
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 const receipt = (r: NativeSaveRequest) => ({ durability: "node", issuedBy: "crewship", phase: "committed", candidateHash: r.contentHash, workspaceId: r.workspaceId, pageId: r.pageId, applicationId: r.applicationId, enginePin: r.enginePin, generation: r.generation, sessionId: r.sessionId, baseVersion: r.baseVersion, editorRevision: r.editorRevision, contentHash: r.contentHash, version: (BigInt(r.baseVersion) + 1n).toString() })
 function rig(baseVersion = "1", generation = "1") {
-  const journal = { persist: vi.fn().mockResolvedValue(undefined), confirm: vi.fn().mockResolvedValue(undefined), recovery: vi.fn().mockResolvedValue([]), onRetire: vi.fn(() => () => {}), close: vi.fn().mockResolvedValue(undefined), revokeRead: vi.fn().mockResolvedValue(undefined) } satisfies NativeDraftJournal
+  const journal = { persist: vi.fn().mockResolvedValue(undefined), confirm: vi.fn().mockResolvedValue(undefined), recovery: vi.fn().mockResolvedValue([]), onRetire: vi.fn(() => () => {}), close: vi.fn().mockResolvedValue(undefined), revokeRead: vi.fn().mockResolvedValue(undefined), discardRecovered: vi.fn().mockResolvedValue(undefined) } satisfies NativeDraftJournal
   const engine = { snapshot: vi.fn().mockResolvedValue({ bytes: new Uint8Array([1, 2]), editorRevision: "doc:1:0" }), validate: vi.fn().mockResolvedValue(undefined) }
   const transport = { save: vi.fn(async (r: NativeSaveRequest) => receipt(r)), reconcile: vi.fn(async (r: NativeSaveRequest) => receipt(r)) }
   const state = vi.fn(), onReceipt = vi.fn()
@@ -302,7 +302,7 @@ it("forwards two manual RPC ticket IDs to separate fresh snapshots", async () =>
 })
 it("retains the second manual RPC snapshot through a delayed first ACK and ACKs each exact ticket", async () => {
   const r = rig(), firstACK = deferred<ReturnType<typeof receipt>>()
-  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new Uint8Array([1, 2]), editorRevision: `rpc:${args[1]}` }))
+  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new TextEncoder().encode(String(args[1])), editorRevision: `rpc:${args[1]}` }))
   r.transport.save.mockReturnValueOnce(firstACK.promise)
   const first = r.controller.save("ticket-one")
   await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce())
@@ -318,7 +318,7 @@ it("retains the second manual RPC snapshot through a delayed first ACK and ACKs 
 })
 it("bounds concurrent manual RPC saves without a lifetime save cap", async () => {
   const r = rig(), firstACK = deferred<ReturnType<typeof receipt>>()
-  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new Uint8Array([1, 2]), editorRevision: `rpc:${args[1]}` }))
+  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new TextEncoder().encode(String(args[1])), editorRevision: `rpc:${args[1]}` }))
   r.transport.save.mockReturnValueOnce(firstACK.promise)
   const saves = Array.from({ length: 4 }, (_, i) => r.controller.save(`ticket-${i}`))
   saves.forEach(save => { void save.catch(() => {}) })
@@ -336,16 +336,19 @@ it("retains unsent manual RPC drafts after unknown ACK and requires explicit rec
   await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce())
   const second = r.controller.save("ticket-second"); void second.catch(() => {})
   await vi.waitFor(() => expect(r.journal.persist).toHaveBeenCalledTimes(2))
+  // The waiting ticket looks the original up first (#5075); the server can't tell yet.
+  r.transport.reconcile.mockRejectedValue(new Error("offline"))
   firstACK.resolve(receipt(r.transport.save.mock.calls[0][0]))
   await expect(first).rejects.toThrow("unconfirmed")
   await expect(second).rejects.toThrow("unconfirmed")
+  expect(r.transport.reconcile).toHaveBeenCalledOnce()
   expect(r.transport.save).toHaveBeenCalledOnce(); expect(r.onReceipt).not.toHaveBeenCalled()
   expect(r.journal.confirm).not.toHaveBeenCalled(); await r.controller.close()
 })
 it("does not overwrite a newer durable draft when a waiting manual RPC snapshot rebases", async () => {
   const r = rig(), firstACK = deferred<ReturnType<typeof receipt>>()
   let recovery: { editorRevision: string; baseVersion: string } | undefined
-  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new Uint8Array([1, 2]), editorRevision: `rpc:${args[1] ?? "newer-auto"}` }))
+  r.engine.snapshot.mockImplementation(async (...args: unknown[]) => ({ bytes: new TextEncoder().encode(String(args[1])), editorRevision: `rpc:${args[1] ?? "newer-auto"}` }))
   r.journal.persist.mockImplementation(async (draft: NativeDraft) => { recovery = { editorRevision: draft.editorRevision, baseVersion: draft.baseVersion } })
   r.journal.confirm.mockImplementation(async (draft: NativeDraft) => { if (recovery?.editorRevision === draft.editorRevision && recovery.baseVersion === draft.baseVersion) recovery = undefined })
   r.transport.save.mockReturnValueOnce(firstACK.promise)
@@ -501,5 +504,83 @@ it("keeps the captured draft for comparison when the lost acknowledgement cannot
   expect(r.transport.reconcile).toHaveBeenCalledOnce()
   expect(r.journal.confirm).not.toHaveBeenCalled()
   expect(r.transport.save).toHaveBeenCalledOnce()
+  await r.controller.close()
+})
+
+// Write and read revoked together: the fresh capture is journaled, then the
+// lost save's reconcile reports read loss. It takes the same purge path as a
+// save that reports read_revoked; any other reconcile error keeps the draft.
+it.each([
+  ["after an uncertain save", false],
+  ["for a save still in flight", true],
+] as const)("purges the journal when reconcile reports read_revoked during write revocation (%s)", async (_case, inFlight) => {
+  const r = rig()
+  if (inFlight) r.transport.save.mockImplementationOnce(() => new Promise(() => {}))
+  else r.transport.save.mockRejectedValueOnce(new Error("lost ACK"))
+  r.transport.reconcile.mockRejectedValueOnce(new NativeSaveError("read_revoked"))
+  if (inFlight) { void r.controller.save(); await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledOnce()) }
+  else await r.controller.save()
+  const captured = await r.controller.revokeWrite()
+  expect(r.transport.reconcile).toHaveBeenCalledOnce()
+  // The fresh capture was journaled before reconcile; read loss must erase it.
+  expect(r.journal.persist.mock.invocationCallOrder.at(-1)!).toBeLessThan(r.transport.reconcile.mock.invocationCallOrder[0])
+  expect(r.journal.revokeRead).toHaveBeenCalledOnce()
+  // A purged capture is no capture: the host must not hand it off or list it.
+  expect(captured).toBe(false)
+  expect(r.journal.confirm).not.toHaveBeenCalled()
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "stopped" }))
+  await r.controller.close()
+})
+
+it("a write refusal from reconcile during write revocation keeps the captured draft", async () => {
+  const r = rig()
+  r.transport.save.mockRejectedValueOnce(new Error("lost ACK"))
+  r.transport.reconcile.mockRejectedValueOnce(new NativeSaveError("write_revoked"))
+  await r.controller.save()
+  await expect(r.controller.revokeWrite()).resolves.toBe(true)
+  expect(r.journal.revokeRead).not.toHaveBeenCalled()
+  expect(r.journal.confirm).not.toHaveBeenCalled()
+  await r.controller.close()
+})
+
+it("releases a saved document as clean: a final capture of the confirmed bytes is that version (#5089)", async () => {
+  const r = rig()
+  r.controller.edited()
+  await r.controller.save()
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  expect(await r.controller.revokeWrite()).toBe(true)
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "read-only", dirty: false }))
+  // The journal must not keep the final capture as a draft to offer on the next open.
+  expect(r.journal.persist).toHaveBeenCalledTimes(2)
+  expect(r.journal.confirm).toHaveBeenCalledTimes(2)
+  expect(r.journal.confirm).toHaveBeenLastCalledWith(expect.objectContaining({ baseVersion: "2" }))
+  await r.controller.close()
+})
+
+it("keeps a final capture with other bytes as a draft after a save (#5089)", async () => {
+  const r = rig()
+  r.controller.edited()
+  await r.controller.save()
+  r.engine.snapshot.mockResolvedValueOnce({ bytes: new Uint8Array([9]), editorRevision: "doc:1:1" })
+  r.controller.edited("doc:1:1")
+  const confirms = r.journal.confirm.mock.calls.length
+  expect(await r.controller.revokeWrite()).toBe(true)
+  expect(r.journal.confirm).toHaveBeenCalledTimes(confirms)
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "read-only", dirty: true }))
+  await r.controller.close()
+})
+
+it("keeps the draft when the save before a release was never confirmed (#5089)", async () => {
+  const r = rig()
+  r.controller.edited()
+  r.transport.save.mockRejectedValueOnce(new Error("lost ACK"))
+  await r.controller.save()
+  const confirms = r.journal.confirm.mock.calls.length
+  r.transport.reconcile.mockRejectedValue(new Error("offline"))
+  await r.controller.revokeWrite()
+  expect(r.journal.confirm).toHaveBeenCalledTimes(confirms)
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "read-only", dirty: true }))
   await r.controller.close()
 })

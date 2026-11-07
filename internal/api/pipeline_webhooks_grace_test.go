@@ -120,3 +120,41 @@ func TestWebhookGrace_TimestampedAndSecondRotation(t *testing.T) {
 		t.Error("timestamped signature with the secret before last must fail")
 	}
 }
+
+// A rotation whose previous-secret write fails must not leave an older
+// previous secret valid while the audit says there was no overlap: the
+// rotation is atomic, so it either fully applies or does not apply at all.
+func TestUpdateWebhook_RotateIsAtomicWhenPreviousSecretWriteFails(t *testing.T) {
+	for _, grace := range []string{`0`, `3600`} {
+		t.Run("grace "+grace, func(t *testing.T) {
+			h, db, userID, wsID := webhookHandlerRig(t)
+			seedWebhookPipeline(t, db, wsID, "pw-atomic", "atomic-pipe")
+			wh := seedWebhookRow(t, db, wsID, "pw-atomic", "original-secret", true)
+			store := pipeline.NewWebhookStore(db)
+			until := time.Now().UTC().Add(time.Hour)
+			if err := store.SetPreviousSecret(t.Context(), wh.ID, "older-secret", &until); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`CREATE TRIGGER fail_prev BEFORE UPDATE OF previous_signing_secret ON pipeline_webhooks
+				BEGIN SELECT RAISE(ABORT, 'injected'); END`); err != nil {
+				t.Fatal(err)
+			}
+			req := withWorkspaceUser(httptest.NewRequest("PATCH",
+				"/api/v1/workspaces/"+wsID+"/pipeline-webhooks/"+wh.ID,
+				strings.NewReader(`{"rotate_secret":true,"rotate_grace_seconds":`+grace+`}`)), userID, wsID, "OWNER")
+			req.SetPathValue("webhookId", wh.ID)
+			rr := httptest.NewRecorder()
+			h.UpdateWebhook(rr, req)
+			if rr.Code == http.StatusOK {
+				t.Fatalf("rotation reported success although the previous secret could not be recorded: %s", rr.Body.String())
+			}
+			cur, err := store.GetByID(t.Context(), wh.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cur.SigningSecret != "original-secret" {
+				t.Fatalf("a failed rotation changed the signing secret to %q", cur.SigningSecret)
+			}
+		})
+	}
+}

@@ -5,7 +5,11 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"strings"
+	"time"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/keepercfg"
 	"github.com/crewship-ai/crewship/internal/llm"
 )
@@ -56,11 +60,11 @@ func NewAuxCredentialLookup(db *sql.DB) keepercfg.AuxCredentialLookup {
 			return "", fmt.Errorf("evaluator credential lookup: empty credential id")
 		}
 
-		var encrypted, credType, credProvider string
+		var encrypted, credType, credProvider, allowedHosts string
 		err := db.QueryRowContext(ctx, `
-			SELECT encrypted_value, type, COALESCE(provider, '') FROM credentials
+			SELECT encrypted_value, type, COALESCE(provider, ''), COALESCE(allowed_hosts, '[]') FROM credentials
 			WHERE id = ? AND status = 'ACTIVE' AND deleted_at IS NULL`,
-			credentialID).Scan(&encrypted, &credType, &credProvider)
+			credentialID).Scan(&encrypted, &credType, &credProvider, &allowedHosts)
 		if err == sql.ErrNoRows {
 			return "", fmt.Errorf("evaluator credential %q is not found, inactive, or revoked", credentialID)
 		}
@@ -69,6 +73,12 @@ func NewAuxCredentialLookup(db *sql.DB) keepercfg.AuxCredentialLookup {
 		}
 		if credType != string(CredTypeAPIKey) {
 			return "", fmt.Errorf("evaluator credential %q is a %s; an evaluator needs an API_KEY", credentialID, credType)
+		}
+		// An agent's tool calls drive the evaluators and the destination is not
+		// known here, so a host-bound credential cannot serve as an evaluator key
+		// (#5045). The slot degrades to the server's own key.
+		if _, bound, _ := credhostgate.Bound(allowedHosts); bound {
+			return "", fmt.Errorf("evaluator credential %q is bound to approved hosts and is withheld", credentialID)
 		}
 
 		dec, err := decryptCredential(encrypted)
@@ -94,6 +104,9 @@ func NewAuxCredentialLookup(db *sql.DB) keepercfg.AuxCredentialLookup {
 	}
 }
 
+// auxOllamaTimeout matches the request timeout of the plain Ollama client.
+const auxOllamaTimeout = 300 * time.Second
+
 // buildAuxWithCredential builds one aux-slot provider, sourcing its key from the
 // named vault credential when there is one.
 //
@@ -114,6 +127,11 @@ func buildAuxWithCredential(
 	lookup keepercfg.AuxCredentialLookup,
 	logger *slog.Logger,
 ) (llm.Provider, error) {
+	// The base handed in here is the runtime-settable judge endpoint, so it dials
+	// through the same trusted client as every other reader of that value.
+	if ollamaBase != "" && strings.EqualFold(strings.TrimSpace(m.Provider), keepercfg.ProviderOllama) {
+		return llm.NewOllamaWithClient(ollamaBase, m.Model, httpsafe.TrustedEndpointClient(auxOllamaTimeout)), nil
+	}
 	var apiKey string
 	if lookup != nil && credentialID != "" && m.Provider != keepercfg.ProviderOllama {
 		key, err := lookup(ctx, credentialID)
@@ -146,11 +164,11 @@ func newAuxCredentialCheck(db *sql.DB) func(ctx context.Context, workspaceID, cr
 			return fmt.Errorf("a workspace is required to choose a credential")
 		}
 
-		var credType string
+		var credType, allowedHosts string
 		err := db.QueryRowContext(ctx, `
-			SELECT type FROM credentials
+			SELECT type, COALESCE(allowed_hosts, '[]') FROM credentials
 			WHERE id = ? AND workspace_id = ? AND status = 'ACTIVE' AND deleted_at IS NULL`,
-			credentialID, workspaceID).Scan(&credType)
+			credentialID, workspaceID).Scan(&credType, &allowedHosts)
 		if err == sql.ErrNoRows {
 			return fmt.Errorf("no active credential %q in this workspace — evaluators can only spend a key this workspace holds", credentialID)
 		}
@@ -160,6 +178,29 @@ func newAuxCredentialCheck(db *sql.DB) func(ctx context.Context, workspaceID, cr
 		if credType != string(CredTypeAPIKey) {
 			return fmt.Errorf("credential %q is a %s — an evaluator needs an API_KEY", credentialID, credType)
 		}
+		if _, bound, _ := credhostgate.Bound(allowedHosts); bound {
+			return fmt.Errorf("credential %q is bound to approved hosts — an evaluator cannot use it", credentialID)
+		}
 		return nil
 	}
+}
+
+// auxCredentialUsable reports whether a pinned evaluator key may still be spent:
+// no key is pinned, or the key carries no approved hosts. A slot that caches its
+// client checks this on every call, so binding a key takes effect without a
+// restart (#5045). A failed read withholds.
+func auxCredentialUsable(ctx context.Context, db *sql.DB, credentialID string) bool {
+	if credentialID == "" {
+		return true
+	}
+	if db == nil {
+		return false
+	}
+	var allowedHosts string
+	if err := db.QueryRowContext(ctx,
+		`SELECT COALESCE(allowed_hosts, '[]') FROM credentials WHERE id = ?`, credentialID).Scan(&allowedHosts); err != nil {
+		return false
+	}
+	_, bound, _ := credhostgate.Bound(allowedHosts)
+	return !bound
 }

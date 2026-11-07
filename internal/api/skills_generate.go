@@ -13,7 +13,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/llm"
 	"github.com/crewship-ai/crewship/internal/skills"
 )
@@ -23,15 +25,26 @@ import (
 // the result back as a fresh row with source='GENERATED'. The user can then
 // edit the body via the skills detail page or re-import a hand-tuned version.
 type SkillGenerateHandler struct {
-	db     *sql.DB
-	logger *slog.Logger
+	db      *sql.DB
+	logger  *slog.Logger
+	journal journal.Emitter
+}
+
+// SetJournal wires the emitter that records generation attempts refused by a
+// skill's content lock. Nil keeps the no-op default.
+func (h *SkillGenerateHandler) SetJournal(j journal.Emitter) {
+	if j == nil {
+		h.journal = noopEmitter{}
+		return
+	}
+	h.journal = j
 }
 
 // NewSkillGenerateHandler wires the handler against an open *sql.DB. Workspace
 // resolution and credential decryption are done per-request to honour the
 // "credentials are workspace-scoped" rule from the keeper architecture notes.
 func NewSkillGenerateHandler(db *sql.DB, logger *slog.Logger) *SkillGenerateHandler {
-	return &SkillGenerateHandler{db: db, logger: logger}
+	return &SkillGenerateHandler{db: db, logger: logger, journal: noopEmitter{}}
 }
 
 type skillGenerateRequest struct {
@@ -146,6 +159,14 @@ func (h *SkillGenerateHandler) Generate(w http.ResponseWriter, r *http.Request) 
 		// CLI command, smart enough to write a usable SKILL.md without the
 		// Opus tax.
 		model = llm.DefaultModel("anthropic")
+	}
+
+	// A locked skill is never regenerated; refuse before spending an LLM call.
+	if lockErr := skills.CheckUnlocked(r.Context(), h.db, body.Slug); lockErr != nil {
+		actor, actorID := skillWriteActor(r)
+		if refuseLockedSkill(w, r, h.journal, wsID, "", actor, actorID, "generate", lockErr) {
+			return
+		}
 	}
 
 	rawSkill, ok := h.produceSkillMD(w, r, wsID, body.Slug, body.Prompt, model)
@@ -298,8 +319,11 @@ func nullableString(v interface{}) string {
 	return s
 }
 
+// anthropicAPIHost is where llm.NewAnthropic sends the key.
+const anthropicAPIHost = "api.anthropic.com"
+
 func (h *SkillGenerateHandler) resolveAnthropicProvider(ctx context.Context, wsID string) (llm.Provider, error) {
-	var encryptedValue string
+	var encryptedValue, allowedHosts string
 	// Strict API_KEY only — the AI_CLI_TOKEN type stores an OAuth
 	// bearer issued by the Claude Code auth flow, which is a
 	// different shape from the x-api-key the Messages API expects.
@@ -308,19 +332,23 @@ func (h *SkillGenerateHandler) resolveAnthropicProvider(ctx context.Context, wsI
 	// Better to fail at the credential lookup with a clear error
 	// telling the user to add a real API key.
 	err := h.db.QueryRowContext(ctx, `
-		SELECT encrypted_value FROM credentials
+		SELECT encrypted_value, COALESCE(allowed_hosts, '[]') FROM credentials
 		WHERE workspace_id = ?
 		  AND provider = 'ANTHROPIC'
 		  AND type = 'API_KEY'
 		  AND status = 'ACTIVE'
 		  AND deleted_at IS NULL
 		ORDER BY created_at ASC
-		LIMIT 1`, wsID).Scan(&encryptedValue)
+		LIMIT 1`, wsID).Scan(&encryptedValue, &allowedHosts)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, errNoActiveAnthropicCredential
 		}
 		return nil, fmt.Errorf("query credential: %w", err)
+	}
+	// An agent can reach this path through the sidecar.
+	if !credhostgate.PermitsHost(allowedHosts, anthropicAPIHost) {
+		return nil, fmt.Errorf("%w: key is bound to other hosts", errNoActiveAnthropicCredential)
 	}
 	plain, err := encryption.Decrypt(encryptedValue)
 	if err != nil {

@@ -51,6 +51,14 @@ const routineReceiptSweepBatch = 500
 func SweepRoutineWebhookReceipts(ctx context.Context, db *sql.DB, now time.Time) (int64, error) {
 	cutoff := tsformat.Format(now.UTC())
 	var total int64
+	// Signal delivery rows are pruned per webhook on delivery, which never
+	// happens again for a deleted webhook or workspace; age them out here.
+	if res, err := db.ExecContext(ctx, `DELETE FROM pipeline_signal_deliveries WHERE received_at < ?`,
+		tsformat.Format(now.UTC().Add(-SignalDeliveryRetention))); err != nil {
+		return total, fmt.Errorf("sweep signal deliveries: %w", err)
+	} else if n, err := res.RowsAffected(); err == nil {
+		total += n
+	}
 	for {
 		// Between batches: step out of a closing quiet window.
 		if err := quiesce.Yield(ctx); err != nil {

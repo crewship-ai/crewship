@@ -14,6 +14,7 @@
 // browser's offline switch; the native outage uses a local CONNECT proxy that
 // severs every tunnel, including the editor's lease event stream.
 import type { TestInfo } from "@playwright/test"
+import { lastCommittedSave } from "./craft-session/confirm"
 import { expect, prdRequirement, test } from "./fixtures"
 import { disposeActors, isolatedActor } from "./outage-lostack/actor"
 import * as N from "./outage-lostack/native"
@@ -256,7 +257,10 @@ test.describe("outage and lost acknowledgement", () => {
             await f.locator("canvas").first().click({ position: app === "wordcraft" ? { x: 678, y: 324 } : { x: 54, y: 240 } })
             await N.typeMarker(page, f, app, M.M4, "A4")
             await page.keyboard.press("Control+s")
-            next = await N.waitSaved(page)
+            next = await N.waitSaved(page, 30_000, saved)
+            // An autosave may still be landing: Ctrl+S waits for it and adds no second version.
+            await N.pause(2_000)
+            next = (await N.waitSaved(page, 5_000, saved)) ?? next
             afterNext = await N.uiState(page)
             await N.release(page).catch(() => {})
           }
@@ -269,6 +273,7 @@ test.describe("outage and lost acknowledgement", () => {
           const resavedLost = afterLoss.filter((o) => o.kind === "save" && o.contentHash === lost[0]?.serverHash)
           const firstNext = afterLoss.find((o) => o.kind === "save" && o.status === 200 && o.contentHash !== lost[0]?.serverHash)
           const identicalRepeats = repeatedSaves(ops)
+          prd.note(`Extra versions of identical bytes: ${identicalRepeats.length}.`)
           await prd.evidence("result.json", {
             appSha: prd.appSha,
             app,
@@ -297,7 +302,11 @@ test.describe("outage and lost acknowledgement", () => {
           const successor = String(BigInt(lost[0].serverVersion!) + 1n)
           expect.soft(resavedLost.map((o) => ({ base: o.baseVersion, status: o.status, version: o.version })), "the reconciled save is not saved again as a duplicate version").toEqual([])
           expect.soft(firstNext && { base: firstNext.baseVersion, version: firstNext.version }, "the next save builds on the reconciled version (no duplicate)").toEqual({ base: lost[0].serverVersion, version: successor })
-          expect.soft(next, "the editor confirms the next save").toBe(successor)
+          // Owner's decision (#5075): Ctrl+S without a content change creates no new
+          // version. Autosave then Ctrl+S on the same bytes must leave one version.
+          expect.soft(identicalRepeats, "no extra version of identical bytes").toEqual([])
+          expect.soft(next, "the editor confirms the last committed save").toBe(lastCommittedSave(ops))
+          expect.soft(fin.version, "the head is the last committed save").toBe(lastCommittedSave(ops))
           expect(fin.text.includes(M.M1) && fin.text.includes(M.M2) && fin.text.includes(M.M4), "no data loss").toBe(true)
         } finally {
           await ctx.close()
@@ -410,6 +419,8 @@ test.describe("outage and lost acknowledgement", () => {
             identicalRepeats: repeatedSaves(ops),
             ops,
           })
+          prd.note(`Extra versions of identical bytes: ${repeatedSaves(ops).length}.`)
+          expect.soft(repeatedSaves(ops), "no extra version of identical bytes").toEqual([])
 
           expect(lost[0]?.serverStatus, "the cut-off save committed on the server").toBe(200)
           expect(headAfterOutage.text.includes(M.M1) && headAfterOutage.text.includes(M.M2), "no data loss").toBe(true)
@@ -440,8 +451,14 @@ test.afterEach(disposeActors)
 function repeatedSaves(ops: N.Op[]): { n: number; baseVersion?: string; version?: string }[] {
   let prev: string | undefined
   const out: { n: number; baseVersion?: string; version?: string }[] = []
+  // A reconciliation reports a version that already exists: it is no new commit.
+  const seen = new Set<string>()
   for (const o of ops) {
     if (o.status !== 200 || !o.contentHash) continue
+    if (o.version) {
+      if (seen.has(o.version)) continue
+      seen.add(o.version)
+    }
     if (o.contentHash === prev) out.push({ n: o.n, baseVersion: o.baseVersion, version: o.version })
     prev = o.contentHash
   }

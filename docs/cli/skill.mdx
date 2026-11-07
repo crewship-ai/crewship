@@ -32,6 +32,7 @@ crewship skill <subcommand> [flags]
 | `delete` | Remove a skill from the workspace registry. |
 | `archive` | Move a skill to the Archived view (hidden from the library and pickers). |
 | `restore` | Bring an archived skill back to active. |
+| `lock` / `unlock` | Hold a skill against autonomous rewrites, or lift the hold. |
 | `assign` | Attach a skill to one agent, several agents, or a whole crew. |
 | `unassign` | Detach the same way. |
 | `proposed list` | List skills auto-promoted from memory awaiting operator approval. |
@@ -274,6 +275,39 @@ With `--format json|yaml|ndjson` both print the server's answer,
 for an already-archived skill is not a change this call made.
 
 ---
+
+## `crewship skill lock` / `unlock`
+
+Lock a skill so nothing autonomous rewrites it.
+
+```bash
+crewship skill lock <slug-or-id>
+crewship skill unlock <slug-or-id>
+```
+
+While a skill is locked:
+
+- Delete is refused too (HTTP `423`, `skill.write_blocked`), so delete plus
+  re-import cannot get around the lock.
+- No import, bulk import, generation, agent-authored proposal, proposed-skill
+  approval, memory consolidation promotion or bundled re-seed changes its
+  content. Each refuses with an error naming the lock (HTTP `423`) and writes
+  a `skill.write_blocked` journal entry. Unlock the skill first to change it.
+- The lifecycle sweep never moves it to `stale` or `archived`, the same way an
+  assigned skill is held. A person who can manage skills can still
+  archive or restore it by hand: the lock guards against autonomous rewrites,
+  not manual housekeeping.
+
+Skills are one catalog shared by the whole instance, and a lock applies to every
+workspace that uses the skill. Only an instance administrator can lock or unlock,
+and the request must name a workspace where they hold the `OWNER` or `ADMIN`
+role. Assigning a skill to your agents gives no right to lock it, even when no
+other workspace uses it. Scoped CLI tokens (even with `instance:admin`), run
+tokens, sidecar tokens and agent identities are refused with `403`, and so are
+bundled skills. Restoring a workspace backup never brings a lock back; an instance
+administrator locks the skill again afterwards if it should stay locked.
+Skills are unlocked by default. `skill list` shows a `LOCKED` column and
+`skill get` a `Locked` row; JSON output carries `locked`.
 
 ## `crewship skill assign`
 

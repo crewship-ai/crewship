@@ -24,6 +24,8 @@ Most read endpoints accept a session or CLI token with workspace membership. Wri
 | `DELETE` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}`](#delete-skill) | Delete a non-bundled skill |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}/archive`](#archive-and-restore-a-skill) | Move a skill to the Archived view |
 | `POST` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}/restore`](#archive-and-restore-a-skill) | Bring an archived skill back |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}/lock`](#lock-and-unlock-a-skill) | Lock a skill against autonomous rewrites |
+| `POST` | [`/api/v1/workspaces/{workspaceId}/skills/{skillId}/unlock`](#lock-and-unlock-a-skill) | Lift the lock |
 | `GET` | [`/api/v1/skills/proposed`](#list-proposed-skills) | List memory-proposed skills |
 | `POST` | [`/api/v1/skills/proposed/approve`](#approve-proposed-skill) | Approve a proposed skill |
 | `POST` | [`/api/v1/skills/proposed/reject`](#reject-proposed-skill) | Reject a proposed skill |
@@ -160,6 +162,8 @@ filters) only sees the caller's workspace.
 | `scan_status` | string | Security scan status |
 | `description_quality` | string? | Description quality rating |
 | `lifecycle_state` | string | Curator sweep verdict: `active`, `stale`, `archived` or `deprecated` |
+| `locked` | boolean | `true` while an instance administrator holds the skill against autonomous rewrites |
+| `locked_at` | string? | When the skill was locked; null when unlocked |
 | `needs_credentials` | string[] | Env-var names the skill expects an agent to hold (decoded `credential_requirements`); `[]` when none |
 | `usage` | object | This workspace's invocations: `uses_7d`, `uses_30d`, `errors_7d`, `errors_30d` (non-zero exit), `uses_total`, `last_used_at` (null when never used) |
 | `installed_on` | array? | Agents of the caller's workspace holding the skill, with crew info and `missing_credentials` (the `needs_credentials` the agent is not delivered at run start). Omitted when no agent of the workspace holds it |
@@ -348,9 +352,9 @@ Walks a remote git repository for `SKILL.md` files and upserts each through the 
 
 | Status | Condition |
 |---|---|
-| `400` | Invalid JSON, missing `git_url`, or missing `workspaceId` path value |
+| `400` | Invalid JSON, missing `git_url`, missing `workspaceId` path value, or a `git_url`/`git_ref` rejected before any clone (not HTTPS, `localhost`, private/internal IP, embedded user-info, invalid host or port, unsafe ref) |
 | `403` | Insufficient role |
-| `502` | Validation rejected (private/internal IP, malformed URL) or git clone failed |
+| `502` | The server's Git is missing or too old, DNS resolution of the host failed, or the git clone failed |
 
 ---
 
@@ -405,6 +409,43 @@ A restored skill is still judged by the sweep: when no agent holds it and nobody
 | `403` | Insufficient role |
 | `404` | Skill not found |
 | `409` | The skill is `deprecated` (terminal) |
+
+---
+
+### Lock and Unlock a Skill
+
+```
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/lock
+POST /api/v1/workspaces/{workspaceId}/skills/{skillId}/unlock
+```
+
+While locked, import, bulk import, generation, agent-authored proposals,
+proposed-skill approval, memory consolidation promotion and bundled re-seeds
+refuse to change the skill's content and answer `423 Locked` with a detail
+naming the lock; each blocked attempt is journaled as `skill.write_blocked`.
+The lifecycle sweep never moves a locked skill to `stale` or `archived`.
+Repeating a lock or unlock you are allowed to make changes nothing. A change emits
+`skill.locked` / `skill.unlocked`.
+
+Skills are one catalog shared by the whole instance, and a lock applies to every
+workspace that uses the skill. The caller must be an instance administrator, hold
+the `OWNER` or `ADMIN` role in the workspace in the path, and use a person's
+credential (a session or a full-access CLI token). Scoped CLI tokens, even with
+`instance:admin`, run tokens, sidecar tokens and agent identities get `403`.
+Assigning a skill to agents grants nothing here. Restoring a workspace backup
+never brings a lock back, so after restoring a bundle an instance administrator
+locks the skill again if it should stay locked.
+
+**Response:** `200 OK`
+
+```json
+{ "skill_id": "skill_abc", "slug": "deploy-checks", "locked": true }
+```
+
+| Status | Condition |
+|---|---|
+| `403` | Not an instance administrator, insufficient workspace role, a scoped or non-human credential, or a bundled skill |
+| `404` | Skill not found |
 
 ---
 
@@ -489,7 +530,7 @@ Imports the staged SKILL.md through the canonical skills importer (same path as 
 | `400` | Invalid JSON, missing `crew_id`/`file_name`, or unsafe `file_name` |
 | `403` | Insufficient role |
 | `404` | Crew not found, or staged file missing |
-| `422` | Staged content failed the importer (frontmatter malformed, license rejected) |
+| `422` | Staged content failed the importer (frontmatter malformed, license rejected), or the staged entry is not a regular file (a symlink, or under a symlinked directory; it is not read) |
 | `503` | Server has no crew-memory root configured |
 
 ### Reject Proposed Skill

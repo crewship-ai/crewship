@@ -335,7 +335,7 @@ func (s *SessionRuntime) readLoop() {
 			// concurrently. All other global-ID reuse stays a protocol error.
 			entry := s.child[previous[0]]
 			paired := len(previous) == 1 && entry != nil && entry.kind == header.kind &&
-				correlatedParticipantOutputPhases(entry.bytes, normalized)
+				s.outputPhasesCorrelatedLocked(entry.bytes, normalized)
 			if !paired {
 				s.mu.Unlock()
 				s.fail(ErrSessionRuntime)

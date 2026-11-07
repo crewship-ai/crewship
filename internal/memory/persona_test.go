@@ -1,6 +1,7 @@
 package memory
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -85,7 +86,7 @@ func TestPersonaCapEnforced(t *testing.T) {
 func TestPersonaEmptyRejected(t *testing.T) {
 	dir := t.TempDir()
 	p := PersonaPaths{AgentDir: dir}
-	if err := WritePersona(p, PersonaAgent, "   \n\t"); err == nil {
+	if err := WritePersona(p, PersonaAgent, "   \n\t"); !errors.Is(err, ErrPersonaEmpty) {
 		t.Errorf("expected empty-content rejection")
 	}
 }

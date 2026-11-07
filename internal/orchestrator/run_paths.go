@@ -366,7 +366,18 @@ func (o *Orchestrator) StopRunAt(ctx context.Context, location RunLocation) (boo
 		if stateErr != nil {
 			return false, stateErr
 		}
-		return o.probeHostRun(ctx, run, true)
+		stopped, err := o.probeHostRun(ctx, run, true)
+		if err != nil {
+			// A removed (or dead) container cannot hold the run, and it also
+			// cannot be inspected: the provider's ExecInspect then fails and
+			// surfaces as an identity error. As on the tmux path below, an
+			// authoritative container inspect settles it; any other inspect
+			// failure stays an error.
+			if absent, inspectErr := o.containerRuntimeAbsent(ctx, containerID); inspectErr == nil && absent {
+				return true, nil
+			}
+		}
+		return stopped, err
 	}
 	session := TmuxSessionName(agentSlug, runID)
 	directProbe, err := o.managedRunProbeFromState(location, run, stateErr, true)

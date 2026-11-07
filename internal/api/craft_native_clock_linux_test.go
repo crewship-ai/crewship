@@ -80,8 +80,9 @@ func TestCraftNativeHTTPHeartbeatRenewsServerSideAndStopsOnReadLoss(t *testing.T
 		t.Fatal("server heartbeat failed to extend lease", before, after, err)
 	}
 	mustExec(t, f.db, `UPDATE user_sessions SET revoked_at='2026-10-27T00:00:00Z' WHERE id='native-source'`)
-	if retired := next(); retired["delivery"] != "stopped" || retired["draft"] != "purge" {
-		t.Fatal("read loss did not stop delivery and request purge", retired)
+	// A revoked session stops delivery; it proves nothing about Page read.
+	if retired := next(); retired["delivery"] != "stopped" || retired["draft"] != "retain" {
+		t.Fatal("revoked session did not stop delivery and retain the draft", retired)
 	}
 }
 

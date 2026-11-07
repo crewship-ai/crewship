@@ -28,8 +28,9 @@ the place to build on.
 
 ## Feature switches
 
-Everything on this page is off by default. A route family answers only when
-its switch is on for the workspace (or for the whole server).
+Projects are on by default; every other family on this page is off by
+default. A route family answers only when its switch is on for the workspace
+(or for the whole server).
 
 | Family | Workspace flag | Server-wide switch | Behaviour when off |
 |---|---|---|---|
@@ -37,7 +38,7 @@ its switch is on for the workspace (or for the whole server).
 | Dashboard data | `artifact_dashboard_data`, plus `artifact_projects` | `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true` | `404` "dashboard data is disabled" |
 | Slides projection and PDF | `artifact_slides`, plus `artifact_projects` | `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true` | `404` |
 | Design | `artifacts_design` (independent of `artifact_projects`) | `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true` | `404` "design not found" |
-| Craft (native Word and Sheet) | none | `CREWSHIP_CRAFT_NATIVE_ENABLED=true` (YAML `craft_native.enabled`) | Mutations return `503` "native Craft unavailable" |
+| Craft (native Word and Sheet) | none | `CREWSHIP_CRAFT_NATIVE_ENABLED=true` (YAML `craft_native.enabled`), plus a qualified Word or Sheet profile for a usable editor | Mutations return `503` "native Craft unavailable" |
 | Craft agent tasks | none | `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true`, in addition to Craft | `503` "native Craft agents unavailable" |
 
 Turn a workspace flag on with
@@ -85,7 +86,7 @@ comments.
 | Project | Add a comment | The owner, someone with write access, or a person with a `comment` grant | `pages:write` |
 | Project | Reply to a comment | The owner only | `pages:write` |
 | Dashboard | Write data | The owner only | `pages:write` |
-| Design | Read and version history | Anyone the Design is shared with reads it; everyone with write access also gets the full version history. REST reads without `version` return the live canvas; explicit version reads by non-editors are restricted to the shared version | `pages:read` |
+| Design | Read and version history | Shared-only readers receive the shared snapshot and only that retained version. Live reads and full retained history require Edit authority or the separately audited administrative read path | `pages:read` |
 | Design | Apply changes, save a snapshot, restore | The owner, or someone with write access | `pages:write` |
 | Design | Add a comment | The owner, someone with write access, or a person with a `comment` grant | `pages:write` |
 | Design | Share a version | The owner only | `pages:write` |
@@ -111,10 +112,11 @@ nothing in history is deleted. Each family guards its writes differently.
   returns `409 artifact_version_conflict`.
 - **Shared version.** The latest version and the shared version are separate.
   For Project, Dashboard and Slides, the owner and editors read latest; other
-  readers get the shared version. Design’s REST `get` without a `version`
-  parameter returns the live canvas to an authorized reader; explicitly
-  selecting a retained version restricts a non-editor to the shared version.
-  Its read-only WebSocket clients can receive live updates but cannot write.
+  readers get the shared version. Shared-only Design readers receive the shared
+  snapshot on REST and WebSocket reads, even without an explicit `version`,
+  plus presence. Live reads and document broadcasts require Edit authority or
+  the separately audited administrative read path. Read-only credentials do
+  not gain write authority.
 - **Dashboard data** is versioned per JSON document. Each write in a batch
   carries `ifVersion` (`0` creates the document), and the batch names the
   project's current `base_version`. One stale `ifVersion` fails the whole batch
@@ -205,7 +207,15 @@ A Dashboard is a project whose version declares JSON collections.
 |---|---|---|
 | GET | `/api/v1/pages/{slug}/artifact/data` | List the declared collections |
 | GET | `/api/v1/pages/{slug}/artifact/data/{collection}` | Read a collection's documents with `version`, `updated_at`, `source_label` and `source_kind` |
-| POST | `/api/v1/pages/{slug}/artifact/data/{collection}` | Write a batch of documents with `ifVersion` |
+| POST | `/api/v1/pages/{slug}/artifact/data/{collection}` | Write a batch of documents with `ifVersion` (owner or Edit share, latest version only) |
+
+Writing needs the same authority as saving a version: the owner, the owner's
+consented agent run, or a human with a current Edit share or inherited folder
+write. A workspace role without a grant (ADMIN included) does not write, and an
+agent run acts only for the owner. `base_version` must
+be the latest version, otherwise `409`. Read and Comment shares get `403`; a
+caller who cannot see the Dashboard gets `404`. Each written document records
+the writer as its `updated_by`, which the API projects as `source_label`.
 
 ### Slides
 
@@ -253,11 +263,13 @@ documented in [`crewship craft`](/cli/craft).
 | POST | `/api/v1/pages/{slug}/craft/initialize` | Create the first version of an empty document |
 | GET | `/api/v1/pages/{slug}/craft/preview` | Read-only preview of the shared version |
 | GET | `/api/v1/pages/{slug}/craft/document` | Document bytes, version and quota |
+| GET | `/api/v1/pages/{slug}/craft/document/versions` | Version history, newest first (needs the `craft_version_history` workspace flag) |
+| GET | `/api/v1/pages/{slug}/craft/document/versions/{version}` | One saved version's bytes and metadata, read-only, same rights and admin audit as the document read (needs the `craft_version_history` workspace flag) |
 | POST | `/api/v1/pages/{slug}/craft/document/save` | Save a new version |
 | POST | `/api/v1/pages/{slug}/craft/document/import` | Import a file as a new version |
 | POST | `/api/v1/pages/{slug}/craft/document/restore` | Restore an old version |
-| POST | `/api/v1/pages/{slug}/craft/document/share` | Share a version |
-| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Confirm whether an earlier save was stored |
+| POST | `/api/v1/pages/{slug}/craft/document/share` | Share a version. Page owner only; Edit rights or a workspace role get 403 |
+| POST | `/api/v1/pages/{slug}/craft/document/reconcile` | Confirm whether an earlier save was stored. With the save's `attemptId`, 410 means it did not commit and is retired: it can never commit later, so save the current draft again |
 | POST | `/api/v1/pages/{slug}/craft/tasks` | Start an agent task on the document |
 | GET | `/api/v1/pages/{slug}/craft/tasks/{workID}` | Agent task status |
 | POST | `/api/v1/pages/{slug}/craft/tasks/cancel` | Stop the agent task |

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/journal"
 )
 
@@ -216,5 +217,43 @@ func TestCovCT2_DeployCrewTemplate_LoadTemplateDBError(t *testing.T) {
 		wsID, "anything", "Crew", "", deployOverrides{}); err == nil ||
 		!strings.Contains(err.Error(), "load template") {
 		t.Fatalf("err = %v, want load template failure", err)
+	}
+}
+
+// A soft-deleted crew keeps its slug, so the slug check must not be the last word.
+func TestDeployReusesSlugOfDeletedCrew(t *testing.T) {
+	h, userID, wsID := covCT2Fixture(t)
+	covCT2SeedTemplate(t, h, wsID, "covct2-reuse", "covct2-reuse",
+		`[{"name":"A","slug":"a","agent_role":"AGENT"}]`)
+	execOrFatal(t, h.db, `INSERT INTO crews (id, workspace_id, name, slug, network_mode, deleted_at, created_at, updated_at)
+		VALUES ('deleted-crew', ?, 'Crew Two', 'crew-two', ?, '2026-11-06T00:00:00Z', '2026-11-06T00:00:00Z', '2026-11-06T00:00:00Z')`, wsID, database.DefaultCrewNetworkMode)
+	rr := covCT2Deploy(h, userID, wsID, "covct2-reuse", "Crew Two")
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	var slug string
+	if err := h.db.QueryRow(`SELECT slug FROM crews WHERE id='deleted-crew'`).Scan(&slug); err != nil || slug != "crew-two_deleted_deleted-crew" {
+		t.Fatalf("deleted crew slug = %q, %v", slug, err)
+	}
+}
+
+// A redeploy after a real delete also meets the agents of the first deploy,
+// whose tombstones hold the crew-suffixed agent slugs.
+func TestDeployReusesAgentSlugsOfDeletedCrew(t *testing.T) {
+	h, userID, wsID := covCT2Fixture(t)
+	covCT2SeedTemplate(t, h, wsID, "covct2-again", "covct2-again",
+		`[{"name":"A","slug":"a","agent_role":"AGENT"}]`)
+	if rr := covCT2Deploy(h, userID, wsID, "covct2-again", "Crew Three"); rr.Code != http.StatusCreated {
+		t.Fatalf("first deploy = %d; body=%s", rr.Code, rr.Body.String())
+	}
+	execOrFatal(t, h.db, `UPDATE crews SET deleted_at='2026-11-06T00:00:00Z' WHERE workspace_id=? AND slug='crew-three'`, wsID)
+	execOrFatal(t, h.db, `UPDATE agents SET deleted_at='2026-11-06T00:00:00Z' WHERE workspace_id=? AND slug='a-crew-three'`, wsID)
+	rr := covCT2Deploy(h, userID, wsID, "covct2-again", "Crew Three")
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("redeploy = %d, want 201; body=%s", rr.Code, rr.Body.String())
+	}
+	var live int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM agents WHERE workspace_id=? AND slug='a-crew-three' AND deleted_at IS NULL`, wsID).Scan(&live); err != nil || live != 1 {
+		t.Fatalf("live agents on the slug = %d, %v", live, err)
 	}
 }

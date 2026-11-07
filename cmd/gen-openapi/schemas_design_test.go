@@ -81,16 +81,20 @@ func TestDesignSchemasValidateNodePatchesAndExactReceipts(t *testing.T) {
 		t.Fatal(err)
 	}
 	fixtures := []struct{ schema, good, bad string }{
+		// The engine rejects an order entry that is not a node ID, and IDs stop at
+		// 128 characters. Unbounded entries documented a 65 MB request as valid
+		// shape, far past the 4 MiB the handler reads.
+		{"DesignOperationsRequest", `{"operations":[{"op":"reorder","order":["screen"]}]}`, `{"operations":[{"op":"reorder","order":["` + strings.Repeat("a", 129) + `"]}]}`},
 		{"DesignOperationsRequest", `{"operations":[{"op":"upsert","node":{"id":"existing","fill":"#2563eb"}}]}`, `{"operations":[{"op":"execute","command":"arbitrary"}]}`},
 		{"DesignNode", `{"id":"screen","type":"frame","x":0,"y":0,"width":360,"height":640}`, `{"id":"screen","type":"script","x":0,"y":0,"width":360,"height":640}`},
 		{"DesignVersionReceipt", `{"version":2,"actor":"user"}`, `{"Version":2,"Actor":"user"}`},
 		{"DesignCreateRequest", `{"slug":"checkout","name":"Checkout","created_by_test":true}`, `{"slug":"checkout","name":"Checkout","actor":"forged"}`},
 		{"DesignCreateRequest", `{"slug":"continued","name":"Continued","source_page_id":"page","expected_human":"alice","initial_state":"AAA="}`, `{"slug":"continued","name":"Continued","source_page_id":17,"expected_human":"alice","initial_state":"AAA="}`},
-		{"DesignSnapshot", `{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":false,"can_comment":false,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Reader"}}`, `{"page_id":"page","nodes":[]}`},
+		{"DesignSnapshot", `{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":false,"can_share":false,"can_comment":false,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Reader"}}`, `{"page_id":"page","nodes":[]}`},
 	}
 	for _, fixture := range fixtures {
 		t.Run(fixture.schema, func(t *testing.T) {
-			schema := compileAt(t, raw, "/components/schemas/"+fixture.schema)
+			schema := compileOAS30At(t, raw, "/components/schemas/"+fixture.schema)
 			var good, bad any
 			if err = json.Unmarshal([]byte(fixture.good), &good); err != nil {
 				t.Fatal(err)
@@ -98,10 +102,10 @@ func TestDesignSchemasValidateNodePatchesAndExactReceipts(t *testing.T) {
 			if err = json.Unmarshal([]byte(fixture.bad), &bad); err != nil {
 				t.Fatal(err)
 			}
-			if err = schema.Validate(good); err != nil {
+			if err = schema.VisitJSON(good); err != nil {
 				t.Fatalf("valid wire shape refused: %v", err)
 			}
-			if schema.Validate(bad) == nil {
+			if schema.VisitJSON(bad) == nil {
 				t.Fatal("invalid wire shape accepted")
 			}
 		})
@@ -113,21 +117,21 @@ func TestDesignAuthorityRevisionIsRequiredOpaqueString(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schema := compileAt(t, raw, "/components/schemas/DesignSnapshot")
+	schema := compileOAS30At(t, raw, "/components/schemas/DesignSnapshot")
 	var body map[string]any
-	err = json.Unmarshal([]byte(`{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":true,"can_comment":true,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Owner"}}`), &body)
+	err = json.Unmarshal([]byte(`{"page_id":"page","authority_revision":"9007199254740993","origin":null,"can_edit":true,"can_share":true,"can_comment":true,"nodes":[],"order":[],"version":1,"latest_version":1,"shared_version":0,"actor":{"id":"user","name":"Owner"}}`), &body)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err = schema.Validate(body); err != nil {
+	if err = schema.VisitJSON(body); err != nil {
 		t.Fatalf("opaque policy revision refused: %v", err)
 	}
 	delete(body, "authority_revision")
-	if schema.Validate(body) == nil {
+	if schema.VisitJSON(body) == nil {
 		t.Fatal("missing authority revision accepted")
 	}
 	body["authority_revision"] = float64(2)
-	if schema.Validate(body) == nil {
+	if schema.VisitJSON(body) == nil {
 		t.Fatal("numeric policy revision accepted")
 	}
 }

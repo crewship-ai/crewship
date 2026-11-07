@@ -35,6 +35,9 @@ type tokenResponse struct {
 var oauthTokenClient = &http.Client{
 	Timeout:   15 * time.Second,
 	Transport: ssrfSafeTransport(),
+	// A 307/308 would replay the body (client secret, refresh token, code)
+	// to wherever the endpoint points, past the approved-hosts check (#5045).
+	CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 }
 
 // exchangeOAuthCode performs the authorization_code token exchange.
@@ -160,6 +163,11 @@ func refreshExpiringTokens(ctx context.Context, db *sql.DB, hub *ws.Hub, logger 
 			continue
 		}
 		if refreshToken == "" {
+			continue
+		}
+
+		if !oauthTokenEndpointPermitted(ctx, db, id, tokenURL) {
+			logger.Warn("OAuth token not refreshed: token endpoint is not an approved host", "credential_id", id)
 			continue
 		}
 

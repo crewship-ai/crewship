@@ -3,6 +3,7 @@
 
 export const PRD_REQUIREMENT = "prd-requirement"
 export const PRD_EVIDENCE = "prd-evidence"
+export const PRD_NOTE = "prd-note"
 
 export interface PrdRequirement {
   /** Stable short id, e.g. "B.project.version" or "§7.3". */

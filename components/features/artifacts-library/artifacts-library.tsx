@@ -17,7 +17,7 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { formatRelativeShort } from "@/lib/time"
-import { artifactDashboards, artifactSlides, artifactsDesign, pagesOpenArtifacts } from "@/lib/feature-flags"
+import { artifactsDesign, pagesOpenArtifacts } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
 import { ArtifactViewerProvider } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
@@ -31,14 +31,14 @@ import { useArtifactCapabilities } from "@/components/features/chat/artifact-con
 import { NewArtifactDialog } from "./new-artifact-dialog"
 import { ArtifactPageContent } from "./page-content"
 import { ArtifactNativeEditor } from "./native-editor"
-import { kindLabel, libraryItems, withLibraryState, type LibraryItem, type LibraryKind } from "./library-items"
+import { kindLabel, libraryItems, openInPagesHref, viewsProjectInline, withLibraryState, type LibraryItem, type LibraryKind } from "./library-items"
 import { sharingKeys, useSharingApi } from "./sharing/sharing-api"
 import { ShareDialog } from "./sharing/share-dialog"
 import { AccessTab } from "./sharing/access-tab"
 import { FolderSettingsDialog } from "./sharing/folder-settings-dialog"
 import { BulkBar, MoveToFolderDialog } from "./sharing/bulk-actions"
 import {
-  applyFilters, EMPTY_FILTERS, groupItems, inView, needsAttention, sortItems, versioned,
+  applyFilters, EMPTY_FILTERS, groupItems, hiddenAsEmpty, inView, needsAttention, sortItems, versioned,
   type GroupKey, type LibraryFilters, type Personal, type SortKey,
 } from "./library-filter"
 import { LibraryPanel } from "./library-panel"
@@ -189,7 +189,7 @@ function LibraryHome({ items, creatable, personal, onNew, onOpen, onShow, peeked
   items: LibraryItem[]; creatable: ArtifactKindKey[]; personal: Personal
   onNew: (kind: ArtifactKindKey) => void; onOpen: (slug: string) => void; onShow: (view: "all" | "opened") => void; peeked?: string | null
 }) {
-  const visible = items.filter(item => !item.empty)
+  const visible = items.filter(item => !hiddenAsEmpty(item, personal))
   const attention = visible.filter(needsAttention).slice(0, 5)
   const opened = inView(items, "opened", personal)
   // Each item once on Home: what waits on its owner is not repeated below.
@@ -229,11 +229,8 @@ function LibraryHome({ items, creatable, personal, onNew, onOpen, onShow, peeked
   </div>
 }
 
-function OpenInPages({ workspaceId, item }: { workspaceId: string; item: LibraryItem }) {
-  const query = new URLSearchParams({ workspace_id: workspaceId })
-  if (item.projectBacked) query.set("artifact", "1")
-  const reference = item.projectBacked && item.pageId ? "@" + item.pageId : item.slug
-  const href = `/pages/${encodeURIComponent(reference)}?${query}`
+function OpenInPages({ workspaceId, item, version }: { workspaceId: string; item: LibraryItem; version?: number }) {
+  const href = openInPagesHref(workspaceId, item, version)
   return <Button asChild size="sm" variant="outline" className="coarse:min-h-[44px]">
     <a href={href}>{item.kind === "page" ? "Open page" : "Open in Pages"}<ExternalLink aria-hidden /></a>
   </Button>
@@ -314,13 +311,13 @@ const DETAIL_HINT: Partial<Record<LibraryKind, string>> = {
 }
 
 /** One artifact: a project shows its history in the project viewer, a native Word or Sheet its edit lock. */
-function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavorite }: {
-  workspaceId: string; item: LibraryItem; folders: { slug: string; name: string }[]; onBack: () => void; favorite: boolean; onFavorite: () => void
+function ArtifactDetail({ workspaceId, item, version, folders, onBack, favorite, onFavorite }: {
+  workspaceId: string; item: LibraryItem; version?: number; folders: { slug: string; name: string }[]; onBack: () => void; favorite: boolean; onFavorite: () => void
 }) {
   const [tab, setTab] = useState<"content" | "access">("content")
   const [dialog, setDialog] = useState<"share" | "move" | null>(null)
   const projects = useArtifactProjectsAvailable(workspaceId)
-  const projectPreview = item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides()) && projects
+  const projectPreview = viewsProjectInline(item) && projects
   // A Page shows its own content here, with the views Pages draws; it names itself in its breadcrumb.
   const pageContent = item.kind === "page" && item.pageId
   const inline = projectPreview || pageContent
@@ -334,7 +331,8 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
   const [legacyRead, setLegacyRead] = useState<string>()
   const legacyWord = item.kind === "word" && !item.native
   const pagesOpensIt = !(pagesOpenArtifacts() && legacyWord && legacyRead !== "ready")
-  const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const }), [item.slug])
+  // A pinned address (a shared-version link) opens that version, not Latest.
+  const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const, ...(version === undefined ? {} : { version }) }), [item.slug, version])
   return <div className="flex min-h-0 flex-1 flex-col gap-3">
     <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
       <Button type="button" variant="ghost" size="sm" className="-ml-2 coarse:min-h-[44px]" onClick={onBack}><ArrowLeft aria-hidden />All artifacts</Button>
@@ -358,7 +356,7 @@ function ArtifactDetail({ workspaceId, item, folders, onBack, favorite, onFavori
         <h1 className="truncate text-xl font-semibold">{item.name}</h1>
         <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><KindBadge kind={item.kind} /><StateChips item={item} /><span>{meta(item)}</span></p>
       </div>
-      {item.kind !== "design" && !nativeEditor && pagesOpensIt && <OpenInPages workspaceId={workspaceId} item={item} />}
+      {item.kind !== "design" && !nativeEditor && pagesOpensIt && <OpenInPages workspaceId={workspaceId} item={item} version={version} />}
     </header>}
     {dialog === "share" && <ShareDialog workspaceId={workspaceId} item={item} open onOpenChange={open => { if (!open) setDialog(null) }} />}
     {dialog === "move" && <MoveToFolderDialog workspaceId={workspaceId} item={item} folders={folders} open
@@ -516,6 +514,8 @@ interface ArtifactsLibraryProps {
   workspaceId: string
   /** The open artifact's immutable page ID, or null for the library. Kept in the URL by the route. */
   item: string | null
+  /** A code version the address pins (`?version=N`, e.g. a shared-version link); the open project shows it instead of Latest. */
+  version?: number
   /** `item` is a slug from a link made before IDs (or an item that has no ID). It never matches an ID. */
   bySlug?: boolean
   /** Opens an artifact by its ID; one without an ID opens by `slug`. Null returns to the list. */
@@ -533,7 +533,7 @@ interface ArtifactsLibraryProps {
  * searches, filters and switches views; Home offers what can be made. Empty
  * items and repeated runs have their own views and are never deleted here.
  */
-export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanonical, filters: controlled, onFiltersChange }: ArtifactsLibraryProps) {
+export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect, onCanonical, filters: controlled, onFiltersChange }: ArtifactsLibraryProps) {
   const { pages, loading, error, refresh } = usePages(workspaceId, undefined, CATALOG)
   const { folders } = usePageFolders(workspaceId)
   const caps = useArtifactCapabilities(workspaceId)
@@ -559,10 +559,13 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
   // Per person, synced across devices: what they opened and what they starred. Never shared with others.
   const [recent, setRecent] = useUserPreference<{ slug: string; at: number }[]>(`artifacts.${workspaceId}.recentlyOpened`, [])
   const [favorites, setFavorites] = useUserPreference<string[]>(`artifacts.${workspaceId}.favorites`, [])
+  // What this person made from New artifact: a blank Page they just created is still theirs to find.
+  const [madeHere, setMadeHere] = useUserPreference<string[]>(`artifacts.${workspaceId}.created`, [])
   const personal = useMemo<Personal>(() => ({
     opened: new Map(Array.isArray(recent) ? recent.filter(entry => typeof entry?.slug === "string" && Number.isFinite(entry?.at)).map(entry => [entry.slug, entry.at]) : []),
     favorites: new Set(Array.isArray(favorites) ? favorites.filter(slug => typeof slug === "string") : []),
-  }), [recent, favorites])
+    created: new Set(Array.isArray(madeHere) ? madeHere.filter(slug => typeof slug === "string") : []),
+  }), [recent, favorites, madeHere])
   // An ID address fails closed: it never falls back to a slug, which another artifact may hold now.
   const selected = item === null ? null : items.find(entry => bySlug ? entry.slug === item : entry.pageId === item) ?? null
   const canonical = bySlug ? selected?.pageId : undefined
@@ -603,16 +606,21 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
   if (loading) content = <div aria-label="Loading artifacts"><PageLoading variant="cards" /></div>
   else if (error && !items.length) content = <PageError title="Artifacts could not be loaded" onRetry={refresh} retryLabel="Try again" />
   else if (item !== null) {
-    content = selected ? <ArtifactDetail key={selected.slug} workspaceId={workspaceId} item={selected} folders={folderChoices} onBack={() => onSelect(null)}
+    content = selected ? <ArtifactDetail key={selected.slug} workspaceId={workspaceId} item={selected} version={version} folders={folderChoices} onBack={() => onSelect(null)}
       favorite={personal.favorites?.has(selected.slug) ?? false} onFavorite={() => toggleFavorite(selected.slug)} />
       : <div className="grid gap-2 text-sm">
         <p>This artifact is not available.</p>
         <div><Button type="button" size="sm" variant="outline" onClick={() => onSelect(null)}><ArrowLeft aria-hidden />All artifacts</Button></div>
       </div>
-  } else if (!inView(items, "all").length && !VIEW_NOTE[filters.view]) {
+  } else if (!inView(items, "all", personal).length && !VIEW_NOTE[filters.view]) {
+    // Blank items are only hidden, never gone: say where they are.
+    const blank = inView(items, "empty", personal).length
     content = <PageEmpty icon={Library} title="No artifacts yet"
-      description="Ask an agent in Chat to make a project or a dashboard, or start a document here."
-      primary={creatable.length ? { label: "New artifact", icon: Plus, onClick: () => setNewKind(null) } : undefined} />
+      description={blank
+        ? `${blank === 1 ? "1 blank item is" : `${blank} blank items are`} in Empty. Ask an agent in Chat to make a project or a dashboard, or start a document here.`
+        : "Ask an agent in Chat to make a project or a dashboard, or start a document here."}
+      primary={creatable.length ? { label: "New artifact", icon: Plus, onClick: () => setNewKind(null) } : undefined}
+      secondary={blank ? { label: `Show empty (${blank})`, onClick: () => setFilters({ ...EMPTY_FILTERS, view: "empty" }) } : undefined} />
   } else if (filters.view === "home") {
     content = <LibraryHome items={items} creatable={creatable} personal={personal} onNew={kind => setNewKind(kind)} onOpen={pick}
       onShow={view => setFilters({ ...filters, view })} peeked={peeked?.slug} />
@@ -675,9 +683,17 @@ export function ArtifactsLibrary({ workspaceId, item, bySlug, onSelect, onCanoni
       </>}
     </div>
     {folderSettings && <FolderSettingsDialog workspaceId={workspaceId} folder={folderSettings} open onOpenChange={open => { if (!open) setFolderSettings(null) }} />}
-    {/* A just-created artifact is not in the list yet: it opens by slug and the route moves to its ID once it resolves. */}
+    {/* A just-created artifact is not in the list yet. With its ID it opens at /artifacts/<id> at once: opening it by
+        slug first mounted the editor (whose admission refreshes the session) right before the exported build reloaded
+        the page as /artifacts/<id>, losing that refresh's cookies and signing the person out (#4902). */}
     {newKind !== undefined && <NewArtifactDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setNewKind(undefined) }}
       defaultKind={newKind ?? undefined} defaultFolderSlug={filters.folder || undefined}
-      onCreated={slug => { setNewKind(undefined); refresh(); if (slug) onSelect(null, slug) }} />}
+      onCreated={(slug, id) => {
+        setNewKind(undefined)
+        if (slug) setMadeHere([slug, ...(Array.isArray(madeHere) ? madeHere : []).filter(entry => entry !== slug)].slice(0, 50))
+        refresh()
+        if (id) onSelect(id)
+        else if (slug) onSelect(null, slug)
+      }} />}
   </div>
 }

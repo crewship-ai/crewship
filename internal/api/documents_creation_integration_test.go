@@ -300,7 +300,13 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		}
 		for _, args := range [][]string{{"page", "get", created.Slug}, {"doc", "read", created.Slug}, {"page", "get", "@" + created.PageID}, {"doc", "read", "@" + created.PageID}, {"doc", "checkpoints", "@" + created.PageID}} {
 			out, err := invoke(args...)
-			if role == "OWNER" {
+			// PRD §5 (#4825): the workspace ADMIN reads the private document
+			// too, audited, exactly like the OWNER.
+			if role == "ADMIN" {
+				if err != nil || args[0] == "page" && !bytes.Contains(out, []byte("Launch plan")) || args[1] == "checkpoints" && !bytes.Contains(out, []byte(`"checkpoints"`)) {
+					t.Fatalf("ADMIN actual CLI %v: %v %s", args, err, out)
+				}
+			} else if role == "OWNER" {
 				if err != nil {
 					t.Fatalf("OWNER actual CLI %v: %v %s", args, err, out)
 				}
@@ -329,7 +335,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		if err != nil {
 			t.Fatalf("actual CLI catalog: %v %s", err, out)
 		}
-		if bytes.Contains(out, []byte(created.Slug)) != (role == "OWNER") {
+		if bytes.Contains(out, []byte(created.Slug)) != (role == "OWNER" || role == "ADMIN") {
 			t.Fatalf("%s catalog audience: %s", role, out)
 		}
 		if role == "ADMIN" || role == "OWNER" {
@@ -348,6 +354,10 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 	var ownerAccessCount int
 	if err := h.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE entity_id=? AND action='artifact.private_owner_accessed' AND user_id='managed-private-OWNER'`, created.PageID).Scan(&ownerAccessCount); err != nil || ownerAccessCount < 2 {
 		t.Fatalf("real CLI OWNER reads not audited: %d %v", ownerAccessCount, err)
+	}
+	var adminAccessCount int
+	if err := h.db.QueryRow(`SELECT count(*) FROM audit_logs WHERE entity_id=? AND action='artifact.private_owner_accessed' AND user_id='managed-private-ADMIN'`, created.PageID).Scan(&adminAccessCount); err != nil || adminAccessCount < 5 {
+		t.Fatalf("real CLI ADMIN reads not audited: %d %v", adminAccessCount, err)
 	}
 	raw, status, err := request(host.URL, "GET", "/api/v1/pages/"+created.Slug+"/document", human, "", nil)
 	var saved DocumentStateResponse

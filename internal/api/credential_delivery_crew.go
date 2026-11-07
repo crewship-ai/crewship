@@ -36,6 +36,7 @@ import (
 	"database/sql"
 	"fmt"
 
+	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"github.com/crewship-ai/crewship/internal/encryption"
 )
 
@@ -70,7 +71,8 @@ var crewDeliveredCredentialsSQL = fmt.Sprintf(`
 
 	SELECT rb.slot          AS env_var_name,
 	       c.encrypted_value AS encrypted_value,
-	       rb.spec           AS source_rank
+	       rb.spec           AS source_rank,
+	       c.id              AS credential_id
 	FROM resolved_bindings rb
 	JOIN credentials c ON c.id = rb.credential_id
 	WHERE c.deleted_at IS NULL AND c.status = 'ACTIVE'
@@ -80,7 +82,8 @@ var crewDeliveredCredentialsSQL = fmt.Sprintf(`
 
 	SELECT c.name           AS env_var_name,
 	       c.encrypted_value AS encrypted_value,
-	       %d                AS source_rank
+	       %d                AS source_rank,
+	       c.id              AS credential_id
 	FROM crew_scope s
 	JOIN credential_crews cc ON cc.crew_id = s.crew_id
 	JOIN credentials c ON c.id = cc.credential_id
@@ -111,27 +114,48 @@ func loadCrewDeliveredEnv(ctx context.Context, db *sql.DB, crewID string) (map[s
 	if err != nil {
 		return nil, fmt.Errorf("query crew delivered credentials: %w", err)
 	}
-	defer rows.Close()
+	type crewRow struct{ envVar, encrypted, credID string }
+	var all []crewRow
 	for rows.Next() {
-		var envVar, encrypted string
+		var r crewRow
 		var rank int
-		if err := rows.Scan(&envVar, &encrypted, &rank); err != nil {
+		if err := rows.Scan(&r.envVar, &r.encrypted, &rank, &r.credID); err != nil {
+			rows.Close()
 			return nil, fmt.Errorf("scan crew delivered credential: %w", err)
 		}
-		if envVar == "" {
+		all = append(all, r)
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return nil, err
+	}
+	// #5045: a host-bound credential reaches a service only when this crew's
+	// egress allowlist covers its approved hosts. Unknown policy withholds.
+	ids := make([]string, 0, len(all))
+	for _, r := range all {
+		ids = append(ids, r.credID)
+	}
+	withheld := map[string]bool{}
+	allowed := credhostgate.DeliverableManyForCrew(ctx, db, crewID, ids)
+	for _, r := range all {
+		if r.envVar == "" {
 			continue
 		}
-		if _, taken := out[envVar]; taken {
+		// A withheld winner still occupies its name: letting a lower-ranked
+		// credential fill the slot would substitute a different secret.
+		if _, taken := out[r.envVar]; taken || withheld[r.envVar] {
 			continue
 		}
-		plain, err := encryption.Decrypt(encrypted)
+		if !allowed[r.credID] {
+			withheld[r.envVar] = true
+			continue
+		}
+		plain, err := encryption.Decrypt(r.encrypted)
 		if err != nil || isPendingSentinel(plain) {
 			continue
 		}
-		out[envVar] = plain
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+		out[r.envVar] = plain
 	}
 	return out, nil
 }

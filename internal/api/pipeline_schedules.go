@@ -41,7 +41,16 @@ type scheduleResponse struct {
 	LastRunAt        *time.Time     `json:"last_run_at,omitempty"`
 	LastStatus       string         `json:"last_status,omitempty"`
 	LastRunID        string         `json:"last_run_id,omitempty"`
-	NextRunAt        *time.Time     `json:"next_run_at,omitempty"`
+	// NextRunAt is when the schedule will actually be picked up next: the
+	// nominal cron occurrence plus the stable spread offset (when a spread is
+	// set). NextOccurrenceAt is the nominal cron occurrence itself, present
+	// only for a schedule with a spread; it is what the run's identity uses.
+	NextRunAt        *time.Time `json:"next_run_at,omitempty"`
+	NextOccurrenceAt *time.Time `json:"next_occurrence_at,omitempty"`
+	// SpreadSeconds is the fire-time spread window; SpreadOffsetSeconds this
+	// schedule's stable offset inside it. Both omitted while the spread is off.
+	SpreadSeconds       int `json:"spread_seconds,omitempty"`
+	SpreadOffsetSeconds int `json:"spread_offset_seconds,omitempty"`
 	// Wake gate — see pipeline.Schedule. WakeInputs is always a real
 	// object (like Inputs) so callers don't branch on null; the
 	// telemetry fields are omitted while zero to keep ungated
@@ -79,6 +88,15 @@ type scheduleResponse struct {
 	UpdatedAt  time.Time `json:"updated_at"`
 }
 
+// nominalNextRun is the unshifted cron occurrence, reported only when a spread
+// makes it differ from the displayed next_run_at.
+func nominalNextRun(s *pipeline.Schedule) *time.Time {
+	if s.SpreadSeconds <= 0 {
+		return nil
+	}
+	return s.NextRunAt
+}
+
 func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlug string) scheduleResponse {
 	var inputs map[string]any
 	if s.InputsJSON != "" {
@@ -114,7 +132,10 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		LastRunAt:              s.LastRunAt,
 		LastStatus:             s.LastStatus,
 		LastRunID:              s.LastRunID,
-		NextRunAt:              s.NextRunAt,
+		NextRunAt:              s.EffectiveNextRunAt(),
+		NextOccurrenceAt:       nominalNextRun(s),
+		SpreadSeconds:          s.SpreadSeconds,
+		SpreadOffsetSeconds:    s.SpreadOffsetSeconds,
 		WakePipelineID:         s.WakePipelineID,
 		WakePipelineSlug:       wakeSlug,
 		WakeInputs:             wakeInputs,
@@ -160,6 +181,11 @@ type scheduleRequestBody struct {
 	// existing value (same absent-keeps-existing convention as the wake
 	// gate fields above).
 	CatchupPolicy string `json:"catchup_policy,omitempty"`
+	// SpreadSeconds offsets the fire time by a stable per-schedule value in
+	// [0, spread_seconds) so schedules sharing a cron do not all fire in the
+	// same second. 0 = off. Pointer so PATCH can tell "absent — keep" from an
+	// explicit 0 that clears it. Must be less than the cron interval.
+	SpreadSeconds *int `json:"spread_seconds,omitempty"`
 	// MaxConsecutiveFailures overrides the circuit breaker's trip
 	// threshold (#1405). Pointer so PATCH can distinguish "absent — keep
 	// the existing/default threshold" from an explicit override. nil or
@@ -365,6 +391,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		WakeInputs:             body.WakeInputs,
 		WakeFailClosed:         body.WakeFailClosed != nil && *body.WakeFailClosed,
 		CatchupPolicy:          body.CatchupPolicy,
+		SpreadSeconds:          derefInt(body.SpreadSeconds),
 		MaxConsecutiveFailures: maxFailures,
 	}
 	saved, err := h.schedules.SaveValidated(r.Context(), in)
@@ -677,6 +704,10 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		}
 	}
 
+	spreadSeconds := existing.SpreadSeconds
+	if body.SpreadSeconds != nil {
+		spreadSeconds = *body.SpreadSeconds
+	}
 	maxFailures := 0
 	if body.MaxConsecutiveFailures != nil {
 		maxFailures = *body.MaxConsecutiveFailures
@@ -696,6 +727,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		WakeInputs:             wakeInputs,
 		WakeFailClosed:         wakeFailClosed,
 		CatchupPolicy:          catchupPolicy,
+		SpreadSeconds:          spreadSeconds,
 		MaxConsecutiveFailures: maxFailures,
 	}
 	saved, err := h.schedules.SaveValidated(r.Context(), in)
@@ -1083,4 +1115,11 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, res)
+}
+
+func derefInt(p *int) int {
+	if p == nil {
+		return 0
+	}
+	return *p
 }

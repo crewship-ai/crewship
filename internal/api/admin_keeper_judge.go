@@ -513,7 +513,7 @@ func (h *AdminKeeperJudgeHandler) Models(w http.ResponseWriter, r *http.Request)
 	root, err := judgeRoot(endpointArg)
 	if err != nil {
 		writeJSON(w, http.StatusOK, judgeModelsResponse{
-			Endpoint: endpointArg, Error: err.Error(), Suggestions: judgeSuggestions(r)})
+			Endpoint: endpointArg, Models: []string{}, Error: err.Error(), Suggestions: judgeSuggestions(r)})
 		return
 	}
 
@@ -522,7 +522,7 @@ func (h *AdminKeeperJudgeHandler) Models(w http.ResponseWriter, r *http.Request)
 	models, err := llm.NewOllamaWithClient(root, "", httpsafe.TrustedEndpointClient(15*time.Second)).ListModels(ctx)
 	if err != nil {
 		writeJSON(w, http.StatusOK, judgeModelsResponse{
-			Endpoint: root, Error: judgeReachHint(root, err), Suggestions: judgeSuggestions(r)})
+			Endpoint: root, Models: []string{}, Error: judgeReachHint(root, err), Suggestions: judgeSuggestions(r)})
 		return
 	}
 	names := make([]string, 0, len(models))

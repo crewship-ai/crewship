@@ -1,0 +1,1 @@
+- **Word and Sheet documents failed to open in full Chromium with "Dokument nelze bezpečně otevřít".** The editor frame was `visibility:hidden` during startup, where the browser stops animation frames and the engine never answered. It now stays unseen and noninteractive with opacity and `inert`, and keeps rendering.

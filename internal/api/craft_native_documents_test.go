@@ -89,6 +89,9 @@ func TestCraftNativeDocumentsWholeVersionAndExactLostACK(t *testing.T) {
 	}
 	newer["baseVersion"] = "2"
 	newer["editorRevision"] = "10:48:3"
+	newerRaw := []byte(`{"v":3}`)
+	newer["bytes"] = newerRaw
+	newer["contentHash"] = fmt.Sprintf("sha256:%x", sha256.Sum256(newerRaw))
 	if w := craftNativeDocumentCall(t, d, ctx, token, "save", newer); w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
 	}
@@ -96,6 +99,45 @@ func TestCraftNativeDocumentsWholeVersionAndExactLostACK(t *testing.T) {
 	var receipt mooring.NativeSaveReceipt
 	if err := json.Unmarshal(confirmed.Body.Bytes(), &receipt); confirmed.Code != 200 || err != nil || receipt != first {
 		t.Fatalf("wrong reconciled version: %d %+v %v", confirmed.Code, receipt, err)
+	}
+}
+
+// #5075: on the wire a repeat reports `unchanged` at the same version; the
+// exact committed request gets its own receipt back.
+func TestCraftNativeDocumentsIdenticalSaveCreatesNothing(t *testing.T) {
+	_, _, d, ctx, token, _, body := craftNativeDocumentsFixture(t)
+	saved := craftNativeDocumentCall(t, d, ctx, token, "save", body)
+	if saved.Code != 200 {
+		t.Fatal(saved.Code, saved.Body)
+	}
+	if strings.Contains(saved.Body.String(), "unchanged") {
+		t.Fatalf("a committed save reported unchanged: %s", saved.Body)
+	}
+	repeat := craftNativeDocumentCall(t, d, ctx, token, "save", body)
+	if repeat.Code != 200 || repeat.Body.String() != saved.Body.String() {
+		t.Fatalf("exact repeat: %d %s, want %s", repeat.Code, repeat.Body, saved.Body)
+	}
+	fresh := make(map[string]any)
+	for k, v := range body {
+		fresh[k] = v
+	}
+	fresh["baseVersion"] = "2"
+	fresh["editorRevision"] = "10:48:3"
+	noop := craftNativeDocumentCall(t, d, ctx, token, "save", fresh)
+	var receipt struct {
+		Version     string `json:"version"`
+		BaseVersion string `json:"baseVersion"`
+		Unchanged   bool   `json:"unchanged"`
+	}
+	if err := json.Unmarshal(noop.Body.Bytes(), &receipt); noop.Code != 200 || err != nil || !receipt.Unchanged || receipt.Version != "2" || receipt.BaseVersion != "2" {
+		t.Fatalf("fresh identical save: %d %s %v", noop.Code, noop.Body, err)
+	}
+	read := craftNativeDocumentCall(t, d, ctx, token, "read", nil)
+	var opened struct {
+		Version string `json:"version"`
+	}
+	if err := json.Unmarshal(read.Body.Bytes(), &opened); err != nil || opened.Version != "2" {
+		t.Fatalf("head after repeats: %s %v", read.Body, err)
 	}
 }
 func TestCraftNativeDocumentsAllMutationsRejectAnotherTab(t *testing.T) {

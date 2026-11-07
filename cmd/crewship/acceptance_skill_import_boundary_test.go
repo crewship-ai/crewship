@@ -94,8 +94,8 @@ func TestAcceptance_SkillRepoRejectsLoopbackBeforeGit(t *testing.T) {
 	if imports.Load() != 1 {
 		t.Fatalf("real CLI made %d import requests, want1; output %s", imports.Load(), out)
 	}
-	if got := importStatus.Load(); got != http.StatusBadGateway {
-		t.Fatalf("actual importer HTTP status %d, want502; output %s", got, out)
+	if got := importStatus.Load(); got != http.StatusBadRequest {
+		t.Fatalf("actual importer HTTP status %d, want 400 for a rejected URL (#5097); output %s", got, out)
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("forbidden localhost-dot import reached owned Git subprocess (marker error %v); output %s", err, out)

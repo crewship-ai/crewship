@@ -87,6 +87,10 @@ func (s *Store) InitRequestTx(ctx context.Context, t *sql.Tx, k Key, id, fingerp
 		if n >= s.opts.MaxDocuments {
 			return ErrQuota
 		}
+		// Document head plus its initial checkpoint.
+		if err := admitDisk(ctx, t, 2*len(snap), 2*len(p)); err != nil {
+			return err
+		}
 		_, err = t.ExecContext(ctx, "INSERT INTO documents(workspace_id,page_id,schema_version,snapshot,projection) VALUES(?,?,?,?,?)", k.WorkspaceID, k.PageID, schema, snap, []byte(p))
 		if err != nil {
 			return err

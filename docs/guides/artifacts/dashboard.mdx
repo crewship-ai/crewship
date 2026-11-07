@@ -13,22 +13,21 @@ version for every change. Every value on screen carries its source: who last
 wrote it and when.
 
 <Note>
-Dashboards are off by default. All of the following must be on:
+Dashboards are off by default. All of the following must be on
+(`artifact_projects` already is, unless someone turned it off):
 
 | Switch | Kind | What it does |
 |---|---|---|
-| `artifact_projects` | Workspace flag | Project artifacts, the base every Dashboard is built on. |
+| `artifact_projects` | Workspace flag | Project artifacts, the base every Dashboard is built on. On by default. |
 | `artifact_dashboard_data` | Workspace flag | The data collections and the **Dashboard** kind in the library. |
 | `NEXT_PUBLIC_ARTIFACT_DASHBOARDS=true` | Web build variable | The live Dashboard preview in the browser. |
 | `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` | Web build variable | The Artifacts library at `/artifacts`, where you open a Dashboard. |
 | `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true` | Web build variable | Project previews in the library and the project kinds (including **Dashboard**) under **New artifact**. The default production build sets it to `false`. |
 
-A workspace owner or admin turns on the workspace flags with
-`crewship feature-flag enable artifact_projects` and
+A workspace owner or admin turns on the data flag with
 `crewship feature-flag enable artifact_dashboard_data` (see
-[feature-flag](/cli/feature-flag)). An operator can switch them on for every
-workspace instead with `CREWSHIP_ARTIFACT_PROJECTS_ENABLED=true` and
-`CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true`. The `NEXT_PUBLIC_*` variables
+[feature-flag](/cli/feature-flag)). An operator can switch it on for every
+workspace instead with `CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED=true`. The `NEXT_PUBLIC_*` variables
 are read when the web app is built, so changing them needs a rebuild.
 
 When `NEXT_PUBLIC_ARTIFACT_DASHBOARDS` is off, the app requests no data, and
@@ -187,9 +186,17 @@ header, or `latest_version` in the output of
 
 ## Update the data
 
-Only the Dashboard's owner can change its data, either directly from the CLI or
-through an agent run started on the owner's behalf. A data change never
-publishes a new version of the layout.
+The Dashboard's owner and anyone with **Edit** access (an Edit share on the
+Dashboard, or write access to its folder) can change its data, either directly
+from the CLI or (for the owner) through an agent run started on the owner's
+behalf. Read and Comment access stay read-only, and a workspace role alone,
+ADMIN included, does not grant writes. A Dashboard with a private audience
+stays closed even to an Edit share. Writes always target
+the latest layout version: a batch whose `base_version` names any other
+version, including the shared one, fails with `409` and nothing is written. Each
+document records who wrote it, so the source line shows **You** to the writer
+and **Contributor** to everyone else. A data change never publishes a new
+version of the layout.
 
 <Steps>
   <Step title="Read the current versions">
@@ -233,8 +240,9 @@ reference is in [`crewship page`](/cli/page#dashboard-data-disabled-by-default).
 | Person | Layout version shown | Collections they can read | Can write data |
 |---|---|---|---|
 | Owner | Latest | All declared by that version | Yes |
-| Someone with edit access | Latest | All declared by that version | No |
-| Everyone else with access | Shared version only | Only those declared by the shared version | No |
+| Someone with edit access | Latest | All declared by that version | Yes, at the latest version only |
+| Everyone else with access (Read or Comment) | Shared version only | Only those declared by the shared version | No (`403`) |
+| Not a member, or the Dashboard is not shared with them | — | None | No (`404`, the Dashboard looks absent) |
 
 Collections belong to the artifact, not to a version, so a value written once
 appears in every version that declares its collection. A collection that a

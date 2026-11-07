@@ -47,8 +47,8 @@ exception in the other direction: it prints YAML unless you ask for
 | `set <slug>/<panel> --data -` | Push a panel's data — the single write path |
 | `actions <slug>/<panel>` | List the actions a panel declares, and the routine each one runs |
 | `action <slug>/<panel> <action-id>` | Dispatch a declared action |
-| `grant <slug> --user\|--crew\|--agent <subject>\|--workspace --level <level>` | Grant read, comment, produce, or write on a page |
-| `share <slug> --user\|--crew <subject>\|--workspace --level read\|comment\|write` | Share inside the workspace; Comment never grants edit or execution authority |
+| `grant <slug> --user\|--crew\|--agent <subject>\|--everyone --level <level>` | Grant read, comment, produce, or write on a page |
+| `share <slug> --user\|--crew <subject>\|--everyone --level read\|comment\|write` | Share inside the workspace; Comment never grants edit or execution authority |
 | `archive <page> --dry-run --pages-version <n>` | Preview removal from default lists without deleting content |
 | `unarchive <page> --dry-run --pages-version <n>` | Preview restoration to default lists |
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
@@ -255,14 +255,14 @@ review. The artifact spelling is an alias of the same Page API.
 
 Share with an existing workspace member, crew or the entire workspace using
 `PUT /api/v1/pages/{slug}/grants`. This human command uses the existing live
-issuer authorization. A grant is immediately inert after its issuer loses
-standing. It offers no guest or expiry options and cannot grant agent Produce.
+issuer authorization. A grant ends immediately when its issuer loses standing
+and does not return with it; share again to issue a new one. It offers no guest or expiry options and cannot grant agent Produce.
 
 | Flag | Description |
 |---|---|
 | `--user <member>` | Existing member email or ID. |
 | `--crew <crew>` | Existing crew slug or ID. |
-| `--workspace` | All current human workspace members. |
+| `--everyone` | All current human workspace members. |
 | `--level <read\|comment\|write>` | Human sharing capability; Comment grants feedback only. |
 
 ## `crewship page get <slug>`
@@ -711,6 +711,15 @@ the page's **stored spec** — the same list the server resolves a click against
 answers `404`, the same answer an unknown panel gives, so an action list is
 never an existence oracle for somebody else's crew.
 
+The response's `can_dispatch` says whether [`page action`](#crewship-page-action)
+would admit you as a caller: dispatching needs MANAGER or above and, on a
+private Page, its owner or the workspace owner. It is `false` for a member,
+and for a workspace admin who reads another member's private Page: the admin reads the actions (and, through
+`crewship page project panel-history`, the panel's history), each read is
+written to the audit log as `artifact.private_owner_accessed`, but dispatching
+answers `404`. The table output then ends with a note instead of the dispatch
+hint. Only the Page's owner and the workspace owner dispatch on a private Page.
+
 Only `call` actions reach the server. A `link` navigates to an internal entity
 (`issue`, `run`, `page`, `agent`) and the renderer builds the address — there is
 no URL field anywhere in the schema and there will not be one. A `toggle` is
@@ -877,7 +886,7 @@ crewship page grant fleet-201 --user  ops@example.com --level write
 | `--user <email>` | Grant to a human user |
 | `--crew <slug>` | Grant to a crew |
 | `--agent <slug>` | Grant to an agent |
-| `--workspace` | Grant to everyone in the workspace — every current human member, never an agent. `read` or `write` only; `produce` names a producer, and everyone is not one. |
+| `--everyone` | Grant to everyone in the workspace — every current human member, including anyone who joins later, never an agent. `read`, `comment` or `write`; `produce` names a producer, and everyone is not one. On an artifact, `read` and `comment` reach only the shared version, `write` reaches the latest version, and none of them lets a member share a version. A guest and a non-member gain nothing on a Word, Sheet, project or Design. A private artifact refuses the grant with exit `5`. |
 | `--level <read\|comment\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs) |
 | `--panels <id,id,...>` | Restricts a `produce` grant to these panel ids. Omitted = every panel the subject is otherwise eligible to write. Only meaningful for `--level produce`. |
 
@@ -904,17 +913,26 @@ crewship page revoke fleet-201 --agent devops-bot
 Removes a grant, journalled as `page.grant_removed`.
 
 `revoke` takes the same subject flags as `grant` — `--user`, `--crew`,
-`--agent`, `--workspace` — plus an optional `--level`. Omit the level and every level that
+`--agent`, `--everyone` — plus an optional `--level`. Omit the level and every level that
 subject holds is withdrawn at once.
+
+On `grant`, `share` and `revoke`, `--workspace <slug>` is the global workspace
+selector, as on every other command. The subject "everyone in the workspace"
+is `--everyone`. The old boolean `--workspace` subject is refused with exit 2,
+and so is any value the old flag accepted (`--workspace=false`, `-w 1` and the
+like), so these commands cannot select a workspace literally named `true`,
+`false`, `t`, `f`, `0` or `1`.
 
 <Note>
   A grant can also stop working without being revoked. It is live only while
   the human who issued it still has the reach they granted from: leave the
   workspace, lose ADMIN, or be removed from the page's owning crew, and every
   grant you issued narrows with you. The row stays — `page grants` shows it as
-  inert, with the reason — so you can see what would come back if that person's
-  access were restored. Revoking is how you remove a grant; this is how one
-  stops being borrowed authority nobody is accountable for any more.
+  inert, with the reason — but it does not come back if that person's access is
+  restored. Grant it again and it is a new grant with its own journal entry. A
+  change that keeps standing, such as ADMIN to OWNER, ends nothing. Revoking is
+  how you remove a grant; this is how one stops being borrowed authority nobody
+  is accountable for any more.
 </Note>
 
 ---
@@ -2089,9 +2107,11 @@ the existing panel API/`page.write` path independently of source edits.
 Private Page custodians retain version, export and project read access when restricted elsewhere. Other workspace OWNER reads remain audited; grants do not widen private audiences.
 
 
-## Artifact projects (disabled by default)
+## Artifact projects (enabled by default)
 
-The `artifact_projects` feature flag enables a private multi-screen HTML pilot.
+The `artifact_projects` feature flag enables private multi-screen HTML
+projects. It is on by default; a workspace manager turns it off with
+`crewship feature-flag disable artifact_projects`.
 An artifact project has its own atomic file history; it does not convert an
 existing Page, document or application. Every publish supplies all files and
 checks the latest manifest version. Conflicts preserve the existing versions;
@@ -2243,7 +2263,9 @@ and element text. This request preserves `409` without retrying a newer version:
 crewship page artifact comment demo --version 1 --path index.html --selector '#artifact-heading' --quote 'Current title' --text 'Make this title shorter' --send-to-agent
 ```
 
-Omit `--send-to-agent` to store only the comment. Queuing a task does not confirm
+Omit `--send-to-agent` to store only the comment. There is no idempotency key: a
+retry after a lost reply stores a second comment, so read `page artifact comments`
+first. Queuing a task does not confirm
 agent delivery. A protected agent invocation cannot fall back to a saved human
 profile to create the comment. `page artifact comments` remains the read command.
 
@@ -2409,8 +2431,15 @@ crewship page design create checkout --name "Checkout"
 
 ### `crewship page design get <slug>`
 
-Read the live nodes and order. Optional `--version` selects a positive retained
-snapshot; zero reads the live canvas. A reader can select only its shared pin.
+Read nodes and order authorized for the caller. Without `--version` (or with
+zero), callers with current Edit permission and both CLI `pages:read` and
+`pages:write` scopes (or `pages:*`, `*`, or an unscoped full-role token), and separately authorized workspace OWNER/ADMIN
+readers see the latest canvas; ordinary Read grantees see only the shared pin.
+Positive `--version` selects a retained snapshot; shared-only readers can select only
+the shared pin and receive 404 until one is shared. Foreign administrator
+access is audited. Non-admin Page owners and Edit grantees narrowed to `pages:read`
+credentials are also shared-only. A read-scoped credential never grants write
+authority.
 
 ```bash
 crewship page design get checkout --version 1
@@ -2418,8 +2447,13 @@ crewship page design get checkout --version 1
 
 ### `crewship page design versions <slug>`
 
-List authorized retained snapshots. Editors see history; readers see their
-shared version. This command has no additional flags.
+List authorized retained snapshots. Current Edit permission and a credential
+covering both `pages:read` and `pages:write` (explicitly, through `pages:*` or
+`*`, or as an unscoped full-role token) permit history reads. Separately
+authorized workspace OWNER/ADMIN readers can also read history. Shared-only
+callers, including non-admin Page owners and Edit grantees narrowed to `pages:read`,
+see only the shared version and receive 404 before a pin exists. Foreign
+administrator access is audited. This command has no additional flags.
 
 ### `crewship page design apply <slug>`
 
@@ -2437,6 +2471,9 @@ crewship page design apply checkout --file changes.json
 
 Save the live document as a retained version. Optional `--message` describes the
 version. The `save` alias performs the same operation.
+
+Every run writes a new version, even on an unchanged canvas, and there is no
+idempotency key. After a lost reply, read `page design versions` before retrying.
 
 ```bash
 crewship page design snapshot checkout --message "Cart layout"
@@ -2493,13 +2530,22 @@ crewship page design agent checkout --chat-id private-chat-id
 
 ### `crewship page design watch <slug>`
 
-Watch standard binary Yjs frames encoded as base64 rows. Optional `--count`
+Watch permitted binary Yjs frames encoded as base64 rows. Current Edit
+permission plus both CLI `pages:read` and `pages:write` scopes (or `pages:*`, `*`, or an unscoped full-role token) or separately
+authorized workspace OWNER/ADMIN access permits live reads, with foreign
+administrator access audited. Non-admin Page owners/Edit grantees narrowed to
+`pages:read` are shared-only: shared snapshot and presence, without live
+document updates. Before a pin exists, upgrade/presence can succeed but the
+initial sync closes with 1008 `Design permissions changed`. This is an error
+if `watch` reaches the close; `--count` can finish on presence frames first. Optional `--count`
 stops after that many binary frames; zero watches until interrupted. JSON and
 NDJSON output use one row per frame; YAML uses one document per frame. This
 stream requires human authentication and the normal server-host credential guard.
 Optional `--authority-revision` (the `authority_revision` from `page design get`)
 admits the socket only if the workspace's grants have not changed since that
 read; a changed revision is refused (exit `4`) instead of replaying the canvas.
+Without edit rights the stream sends the shared version and never the live
+canvas; with no shared version it closes with exit `1`.
 
 ```bash
 crewship page design watch checkout --count 1
@@ -2520,7 +2566,9 @@ crewship page draft-key @PAGE_ID --file - --format json
 
 `--file` is required. The bounded JSON input is
 `{"human":"EXPECTED_USER_ID","operation":"wrap","key":"BASE64_32_BYTE_KEY"}`
-or `{"human":"EXPECTED_USER_ID","operation":"unwrap","envelope":"VERSIONED_ENVELOPE"}`.
+or `{"human":"EXPECTED_USER_ID","operation":"unwrap","envelope":"VERSIONED_ENVELOPE"}`,
+or `{"human":"EXPECTED_USER_ID","operation":"check"}`, which handles no key and
+answers `{"readable":true}` or the refusal below, using the same Page read.
 Keep input files private. Output contains the protected envelope or recovered key;
 only direct it to a trusted destination. Agent runs cannot substitute a saved
 human profile. An unavailable service does not mean that a local draft may be

@@ -38,9 +38,13 @@ Who can do what:
   create, update, delete     instance administrator who is also OWNER or
                              ADMIN of the selected workspace
 
-Workspace flags for Artifacts (all default off; turn on per workspace with
-"crewship feature-flag enable <key>"):
-  artifact_projects          multi-screen HTML Project artifacts
+Workspace flags for Artifacts. artifact_projects is on by default: turn it
+off for one workspace with "crewship feature-flag disable artifact_projects",
+or for every workspace without an override with "crewship feature-flag update
+artifact_projects --enabled=false". An upgrade keeps an instance default an
+administrator already changed. The others are off by default; turn them on
+per workspace with "crewship feature-flag enable <key>":
+  artifact_projects          multi-screen HTML Project artifacts (default on)
   artifact_dashboard_data    Dashboard datasets; also needs artifact_projects
   artifact_slides            Slides views and PDF export; also needs
                              artifact_projects

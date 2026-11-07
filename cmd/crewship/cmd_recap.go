@@ -52,7 +52,15 @@ Examples:
 		if err := getJSON(client, path, &body); err != nil {
 			return err
 		}
-		if len(body.Messages) == 0 {
+		// The transcript becomes an ordinary agent prompt, which a saved native
+		// Craft instruction never is.
+		messages := make([]map[string]any, 0, len(body.Messages))
+		for _, m := range body.Messages {
+			if !isNativeCraftInstruction(m) {
+				messages = append(messages, m)
+			}
+		}
+		if len(messages) == 0 {
 			return fmt.Errorf("chat %s has no messages", chatID)
 		}
 
@@ -61,8 +69,8 @@ Examples:
 		// summary. Role labels are normalised to keep the prompt token
 		// budget tight.
 		var sb strings.Builder
-		fmt.Fprintf(&sb, "Transcript (%d turns):\n\n", len(body.Messages))
-		for _, m := range body.Messages {
+		fmt.Fprintf(&sb, "Transcript (%d turns):\n\n", len(messages))
+		for _, m := range messages {
 			role, _ := m["role"].(string)
 			content, _ := m["content"].(string)
 			role = strings.ToLower(strings.TrimSpace(role))

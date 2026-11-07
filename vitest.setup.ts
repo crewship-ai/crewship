@@ -1,6 +1,7 @@
 import { expect, afterEach, vi } from 'vitest'
 import { cleanup, configure } from '@testing-library/react'
 import * as matchers from '@testing-library/jest-dom/matchers'
+import { supportsFlags } from 'motion'
 
 // findBy*/waitFor ceiling. The 1 s default timed out unrelated tests under
 // full parallel load (lib/__tests__/testing-library-wait.test.ts).
@@ -111,6 +112,21 @@ if (typeof globalThis.Animation === 'function') {
     return cancel.call(this)
   }
 }
+
+// happy-dom never fires onfinish for a constructed, startTime-driven Animation.
+//
+// From 14.7 motion groups an element's transform values (x, y, scale, ...)
+// into one WAAPI animation it builds as `new Animation(new KeyframeEffect())`,
+// starts by setting `startTime`, and completes from `onfinish`. happy-dom
+// accepts all of that but never advances or finishes such an animation, so an
+// AnimatePresence exit that moves x never completes and the element stays in
+// the DOM (#4488, #4763). Real browsers finish it; this is a test-DOM gap.
+//
+// motion only groups transforms where `linear()` easing is supported, and
+// exposes `supportsFlags` for test suites to set those capabilities. Declaring
+// no `linear()` support keeps transforms on motion's JS frameloop, as they
+// were through 14.6. Guarded by __tests__/vitest-setup-motion-transform.test.tsx.
+supportsFlags.linearEasing = false
 
 // happy-dom's window is 1024 px wide, which Harbor 2 (#3358) treats as a
 // tablet: the SecondaryPanel then starts closed and floats (COM-05, #3481).
