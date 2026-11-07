@@ -94,7 +94,9 @@ function scriptedServer(){
 let server:ReturnType<typeof scriptedServer>,options:NativeEditorPortOptions[],journal:{persist:ReturnType<typeof vi.fn>,confirm:ReturnType<typeof vi.fn>,recovery:ReturnType<typeof vi.fn>,discardRecovered:ReturnType<typeof vi.fn>,onRetire:ReturnType<typeof vi.fn>,close:ReturnType<typeof vi.fn>,revokeRead:ReturnType<typeof vi.fn>,eraseOwnRow:ReturnType<typeof vi.fn>}
 const recovered={draft:{applicationId:'wordcraft',enginePin:'a'.repeat(64),sessionId:'old',generation:'1',baseVersion:'1',editorRevision:'old',bytes:new Uint8Array([99])},actions:['compare','copy'] as const}
 const frame=()=>document.querySelector('iframe') as HTMLIFrameElement|null
-const contentVisible=()=>{const f=frame();return Boolean(f&&f.style.visibility!=='hidden')}
+// The host conceals a frame by opacity first (#5060, #5073); visibility follows only after
+// the write capture, which hashes with real crypto that fake time does not move.
+const contentVisible=()=>{const f=frame();return Boolean(f&&f.style.visibility!=='hidden'&&f.style.opacity!=='0')}
 const offered=()=>screen.queryAllByRole('button',{name:'Kopie konceptu'}).length>0
 /** An unconfirmed edit is captured locally while the network is already gone. */
 async function editWhileOffline(){
@@ -159,9 +161,21 @@ describe('healthy stream',()=>{
  it('a retained retirement (sign-in ended) hides content and keeps the draft',async()=>{
   await opened()
   server.state='signed-out'
-  server.push('session_retired',{delivery:'stopped',reason:'authority_changed',draft:'retain'})
-  await advance(1)
-  expect(contentVisible()).toBe(false);expect(offered()).toBe(false)
+  // Hold the capture's hash, so the event's own turn is checked and not a race with it.
+  let release=()=>{}
+  const held=new Promise<void>(resolve=>{release=resolve})
+  const digest=crypto.subtle.digest.bind(crypto.subtle)
+  const hashing=vi.spyOn(crypto.subtle,'digest').mockImplementation(async(...args)=>{await held;return digest(...args)})
+  try{
+   server.push('session_retired',{delivery:'stopped',reason:'authority_changed',draft:'retain'})
+   await advance(1)
+   expect(hashing).toHaveBeenCalled()
+   expect(contentVisible()).toBe(false);expect(offered()).toBe(false)
+  }finally{release();hashing.mockRestore()}
+  // Once captured, the frame is hidden or gone, never shown again.
+  const retired=()=>{const f=frame();return !f||f.style.visibility==='hidden'}
+  await settle(retired)
+  expect(retired()).toBe(true);expect(contentVisible()).toBe(false)
   await advance(5*60_000)
   expect(journal.revokeRead).not.toHaveBeenCalled();expect(m.purge).not.toHaveBeenCalled();expect(offered()).toBe(false)
  })
