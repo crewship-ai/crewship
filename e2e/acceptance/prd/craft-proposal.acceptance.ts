@@ -498,8 +498,7 @@ class AgentFlow {
     const lease = await this.doc.lease(admission)
     expect(lease.body.holder?.kind, "the person holds the editor before the agent starts").toBe("human")
     const sent = await sendInstruction(this.page, this.request, this.agent, this.chatId, this.ownerUserId, instruction)
-    // The chat turn acknowledges; the explicit native task does the edit.
-    await this.page.waitForTimeout(15_000)
+    // The send records the instruction only; the explicit native task does the edit.
     const startedAt = new Date()
     const start = await this.doc.startTask(this.chatId, sent.messageId)
     expect(start.status, `start native task: ${JSON.stringify(start.body).slice(0, 200)}`).toBeLessThan(300)

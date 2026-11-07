@@ -833,7 +833,7 @@ test.describe("role matrix", () => {
 
   test(
     "losing the write right on a Project with an unsaved source draft: nothing is lost",
-    { annotation: prdRequirement("role.project.revoke-draft", "Write right withdrawn with a Project source draft open: the save is refused, the draft stays visible, nothing reaches the server and it comes back with the right") },
+    { annotation: prdRequirement("role.project.revoke-draft", "Write right withdrawn with a Project source draft open: the save is refused, the draft is kept in this browser and offered to nobody while the right is gone, nothing reaches the server and it comes back with the right") },
     async ({ prd, request }) => {
       const ws = await prd.qaWorkspace()
       await enableProjects(request, ws.id)
@@ -852,15 +852,18 @@ test.describe("role matrix", () => {
       expect(typed).toContain(MARK)
       await box.fill(typed)
       await expect(who.page.getByText(/Kept in this browser until you save or discard/)).toBeVisible()
-      await pause(1_000)
+      await expect.poll(() => storedSourceDrafts(who.page, who.userId, ws.id), { timeout: 15_000, message: "the probe sees the draft while the person may edit" }).toBeGreaterThan(0)
 
       await revoke(request, ws.id, slug, who.userId, "write")
       const save = who.page.waitForResponse((r) => r.request().method() === "POST" && r.url().includes("/artifact/versions"), { timeout: 10_000 }).catch(() => null)
       await who.page.getByRole("button", { name: "Save project", exact: true }).click({ timeout: 5_000 }).catch(() => {})
       const refused = await save
-      const recovery = who.page.getByRole("textbox", { name: "Source recovery draft" })
-      await expect(recovery, "the draft stays on screen after the right went").toBeVisible({ timeout: TAB_LOSES_ACCESS_MS })
-      const shown = await recovery.inputValue()
+      // Keeping a draft and showing it are separate (#5073): an open tab is no
+      // right of its own, so the draft leaves the screen in this tab exactly as
+      // it stays off after a reload, and the browser keeps it for the right.
+      await expect.poll(async () => (await who.page.locator("body").innerText()).includes(MARK) || (await who.page.locator("textarea").evaluateAll((els, mark) => els.some((el) => (el as HTMLTextAreaElement).value.includes(mark)), MARK)), { timeout: TAB_LOSES_ACCESS_MS, message: "the draft leaves the screen once the right went" }).toBe(false)
+      const recoveryFields = await who.page.getByRole("textbox", { name: "Source recovery draft" }).count()
+      const kept = await storedSourceDrafts(who.page, who.userId, ws.id)
       const messages = await visibleMessages(who.page)
       await who.page.screenshot({ path: test.info().outputPath("draft-after-revoke.png"), fullPage: true })
       const mid = await snapshot(request, ws.id, slug)
@@ -878,11 +881,12 @@ test.describe("role matrix", () => {
       const stored = after.manifest.files.find((f) => f.path === "index.html")?.content ?? ""
       await prd.evidence("result.json", {
         mode: prd.mode, appSha: prd.appSha, workspace: ws.id, slug, saveAfterRevoke: refused?.status() ?? "not sent, the page had already gone read-only",
-        draftVisible: shown.includes(MARK), messages, midLatest: mid.latest_version, restoredIdentical: back === typed, resavedStatus, latest: after.latest_version, storedHasDraft: stored.includes(MARK),
+        draftOnScreen: false, recoveryFields, keptInBrowser: kept, messages, midLatest: mid.latest_version, restoredIdentical: back === typed, resavedStatus, latest: after.latest_version, storedHasDraft: stored.includes(MARK),
       })
       if (refused) expect(REFUSED, `the late save → ${refused.status()}`).toContain(refused.status())
-      expect(shown, "the visible draft holds the typed text").toContain(MARK)
-      if (refused) expect(messages.join(" | "), "the refusal is a sentence, not the API's error").toContain("Nemáte oprávnění tuto změnu uložit")
+      expect(recoveryFields, "no recovery field offers the draft without the right").toBe(0)
+      expect(kept, "the draft is kept in this browser").toBeGreaterThan(0)
+      if (refused) expect(messages.join(" | "), "the refusal is a sentence that says the draft is kept").toContain("Nemáte oprávnění tuto změnu uložit. Váš koncept zůstává v tomto prohlížeči.")
       expect(mid.latest_version, "nothing reached the server").toBe(1)
       expect(back, "the restored draft is what the person typed").toBe(typed)
       expect(resavedStatus, "with the right back the draft saves").toBe(200)
