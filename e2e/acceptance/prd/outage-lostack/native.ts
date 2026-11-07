@@ -95,6 +95,8 @@ export interface Op {
   status?: number
   version?: string
   phase?: string
+  /** The save answer's #5075 flag: no version was created. */
+  unchanged?: boolean
   failed?: string
 }
 
@@ -121,9 +123,10 @@ export function instrument(ctx: BrowserContext): Op[] {
     op.status = res.status()
     void res
       .json()
-      .then((b: { version?: unknown; phase?: string }) => {
+      .then((b: { version?: unknown; phase?: string; unchanged?: unknown }) => {
         op.version = b?.version === undefined ? undefined : String(b.version)
         op.phase = b?.phase
+        if (b?.unchanged === true) op.unchanged = true
       })
       .catch(() => {})
   })
