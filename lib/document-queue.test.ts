@@ -45,3 +45,39 @@ it.skipIf(!existsSync(chromium.executablePath()))("isolates durable drafts by hu
   expect(result.remaining.map(row=>row.id)).toEqual(["another-tab"])
  }finally{await browser.close()}
 })
+
+// #5104: a take-over that gives up on an open must not keep this Page's lock
+// or IDB connection, or the next attempt and other tabs find storage taken.
+it.skipIf(!existsSync(chromium.executablePath()))("a cancelled exclusive open releases the Page lock for the next open",async()=>{
+ const browser=await chromium.launch({headless:true})
+ try{
+  const page=await browser.newPage()
+  await page.route("https://document-queue.test/**",route=>route.fulfill({body:"<!doctype html><title>Document journal</title>",contentType:"text/html"}))
+  await page.goto("https://document-queue.test")
+  const {outputFiles}=buildSync({entryPoints:[`${process.cwd()}/lib/document-queue.ts`],bundle:true,write:false,platform:"browser",format:"iife",globalName:"documentQueue"})
+  await page.addScriptTag({content:outputFiles[0].text})
+  const result=await page.evaluate(async()=>{
+   const {openDocumentDrafts}= (window as unknown as {documentQueue: typeof import("./document-queue")}).documentQueue
+   const outcome=async(p:Promise<unknown>)=>p.then(()=>"opened",(e:Error)=>e.constructor.name)
+   const before=new AbortController();before.abort()
+   const preAborted=await outcome(openDocumentDrafts("alice","w","page",{requireExclusive:true,signal:before.signal}))
+   // Abort while the lock request is still pending and while IDB opens.
+   const early=new AbortController(),pending=openDocumentDrafts("alice","w","page",{requireExclusive:true,signal:early.signal})
+   early.abort()
+   const abortedEarly=await outcome(pending)
+   const late=new AbortController(),opening=openDocumentDrafts("alice","w","page",{requireExclusive:true,signal:late.signal})
+   await new Promise(resolve=>setTimeout(resolve,0))
+   late.abort()
+   const abortedLate=await outcome(opening)
+   const held=await navigator.locks.query()
+   const next=await openDocumentDrafts("alice","w","page",{requireExclusive:true})
+   const exclusive=next.exclusive;next.close()
+   return {preAborted,abortedEarly,abortedLate,heldAfterAborts:(held.held??[]).length,exclusive}
+  })
+  expect(result.preAborted).toBe("DocumentStorageError")
+  expect(result.abortedEarly).toBe("DocumentStorageError")
+  // Either the abort won, or the open had already finished; never a stuck lock.
+  expect(["DocumentStorageError","opened"]).toContain(result.abortedLate)
+  expect(result.exclusive).toBe(true)
+ }finally{await browser.close()}
+})

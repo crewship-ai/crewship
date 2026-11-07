@@ -61,7 +61,7 @@ function decode(snapshot: string): NativeDraft | null {
 
 /** Existing private IDB journal, with a separate row per mounted tab. Recovery
  * is data for compare/copy only; it never creates a write or adopts a lease. */
-export async function openNativeDraftJournal(scope: { human: string; workspace: string; page: string; applicationId: string }): Promise<NativeDraftJournal> {
+export async function openNativeDraftJournal(scope: { human: string; workspace: string; page: string; applicationId: string }, options?: { signal?: AbortSignal }): Promise<NativeDraftJournal> {
   scope = { ...scope }
   if (![scope.human, scope.workspace, scope.page, scope.applicationId].every(identifier)) throw fail()
   const id = `native:${crypto.randomUUID()}`
@@ -90,7 +90,7 @@ export async function openNativeDraftJournal(scope: { human: string; workspace: 
   unregister = registerDocumentDraftWriter(scope.human, close, { storage: true, hasDraft: () => current !== undefined })
   try {
     if (!active) throw fail()
-    opening = openDocumentDrafts(scope.human, scope.workspace, scope.page, { maxDraftBytes: MAX_ENCODED_BYTES, requireExclusive: true })
+    opening = openDocumentDrafts(scope.human, scope.workspace, scope.page, { maxDraftBytes: MAX_ENCODED_BYTES, requireExclusive: true, signal: options?.signal })
     store = await opening
     if (!active || !store.exclusive) { closeStore(); throw fail() }
   } catch (error) { active = false; unregister(); closeStore(); throw error }

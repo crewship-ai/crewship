@@ -24,8 +24,8 @@ type Closable = { close(): Promise<void> | void }
  * nothing more is opened and an opened journal is closed.
  */
 export async function openJournalWithRetry<J extends Closable>(
-  open: () => Promise<J>,
-  options: { alive: () => boolean; attempts?: number; backoffMs?: readonly number[]; attemptMs?: number; sleep?: (ms: number) => Promise<void> },
+  open: (signal: AbortSignal) => Promise<J>,
+  options: { alive: () => boolean; signal?: AbortSignal; attempts?: number; backoffMs?: readonly number[]; attemptMs?: number; sleep?: (ms: number) => Promise<void> },
 ): Promise<J> {
   const attempts = options.attempts ?? JOURNAL_OPEN_ATTEMPTS
   const backoff = options.backoffMs ?? JOURNAL_OPEN_BACKOFF_MS
@@ -34,17 +34,23 @@ export async function openJournalWithRetry<J extends Closable>(
   let last: unknown
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (attempt > 0) await sleep(backoff[Math.min(attempt - 1, backoff.length - 1)] ?? 0)
-    if (!options.alive()) throw new JournalOpenAbandoned()
+    if (!options.alive() || options.signal?.aborted) throw new JournalOpenAbandoned()
+    // Each attempt is cancelled when it misses its deadline or the editor goes
+    // away, so the storage layer releases its lock, IDB connection and key request.
+    const attemptAbort = new AbortController()
+    const follow = () => attemptAbort.abort()
+    options.signal?.addEventListener("abort", follow, { once: true })
     try {
-      const journal = await bounded(open(), attemptMs)
-      if (!options.alive()) { await Promise.resolve(journal.close()).catch(() => {}); throw new JournalOpenAbandoned() }
+      const journal = await bounded(open(attemptAbort.signal), attemptMs, attemptAbort)
+      if (!options.alive() || options.signal?.aborted) { await Promise.resolve(journal.close()).catch(() => {}); throw new JournalOpenAbandoned() }
       return journal
     } catch (cause) {
+      if (options.signal?.aborted) throw new JournalOpenAbandoned()
       if (cause instanceof JournalOpenAbandoned) throw cause
       last = cause
       // Another tab of this browser is the active writer: a retry cannot help.
       if (cause instanceof DocumentStorageBusy) break
-    }
+    } finally { options.signal?.removeEventListener("abort", follow) }
   }
   throw last instanceof Error ? last : new Error("journal_open_failed")
 }
@@ -53,10 +59,10 @@ class AttemptExpired extends Error {
   constructor() { super("journal_open_attempt_expired") }
 }
 
-function bounded<J extends Closable>(opening: Promise<J>, ms: number): Promise<J> {
+function bounded<J extends Closable>(opening: Promise<J>, ms: number, attempt: AbortController): Promise<J> {
   return new Promise<J>((resolve, reject) => {
     let settled = false
-    const timer = setTimeout(() => { settled = true; reject(new AttemptExpired()) }, ms)
+    const timer = setTimeout(() => { settled = true; attempt.abort(); reject(new AttemptExpired()) }, ms)
     opening.then(
       journal => {
         // Arrived after the deadline: nobody will use it.
@@ -65,5 +71,7 @@ function bounded<J extends Closable>(opening: Promise<J>, ms: number): Promise<J
       },
       cause => { if (settled) return; settled = true; clearTimeout(timer); reject(cause) },
     )
+    // An opener that ignores its signal still settles this attempt at once.
+    attempt.signal.addEventListener("abort", () => { if (settled) return; settled = true; clearTimeout(timer); reject(new AttemptExpired()) }, { once: true })
   })
 }

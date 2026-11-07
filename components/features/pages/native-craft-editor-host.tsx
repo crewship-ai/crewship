@@ -25,6 +25,11 @@ interface Lease extends NativeCraftLeaseView {expires_at: string|null}
 const vacant:Lease={can_edit:false,holder:null,mine:false,generation:null,can_write:false,acquired_at:null,expires_at:null,handoff_requested_by:[]}
 const object=(v:unknown):v is Record<string,unknown>=>Boolean(v)&&typeof v==='object'&&!Array.isArray(v)
 const text=(v:unknown):v is string=>typeof v==='string'&&v.length>0&&v.length<=512&&!v.includes('\0')
+/** A take-over that failed: the stage it reached and, when it never became
+ * writable, whether its fresh lease was given back (#5104). */
+class AcquireFailure extends Error {
+ constructor(readonly stage:string,readonly released:boolean|undefined,readonly inner:unknown){super(inner instanceof Error?inner.message:'acquire_failed')}
+}
 /** What a person reads after a take-over that never became writable. */
 function acquireFailure(stage:string,released:boolean):string{
  const what=stage==='journal'||stage==='recovery'?'Úložiště konceptu v tomto prohlížeči se nepodařilo otevřít, proto úpravy nezačaly.':'Převzetí úprav se nedokončilo.'
@@ -717,17 +722,18 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    if(initializing||r&&!r.ready)readerRefreshNeeded=true
    else if(!transition)await refreshReader()
   }
-  // What a failed take-over reached. The one message on screen covers them all.
-  let acquireStage='lease'
-  // Set when a take-over that never became writable gave its fresh lease back
-  // (true) or tried and could not confirm that (false).
-  let acquireReleased:boolean|undefined
+  // One take-over at a time (#5104): a later one must never meet the cleanup of
+  // an earlier one, which could otherwise release the same-session generation.
+  let acquiring=false
   async function acquire(){
-   acquireStage='lease';acquireReleased=undefined
+   if(acquiring)throw new AcquireFailure('busy',undefined,Error('acquire_in_progress'))
    // Startup limits must never detach a writer's uncaptured buffer.
    if(current&&(current.writable||current.blocked||!current.nativeReadOnly))throw Error('unsaved_editor_replacement')
+   acquiring=true
+   // What this take-over reached; the one message on screen covers them all.
+   let acquireStage='lease'
    const startup=armAdmissionDeadline()
-   let taken:string|undefined
+   let taken:string|undefined,mounted:Runtime|undefined,opened:NativeDraftJournal|undefined
    try{
    const response=leaseView(await client.leaseAction('acquire',{},lifetime.signal))
    const proof=await currentLease(client,lifetime.signal)
@@ -737,11 +743,11 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    acquireStage='read'
    const snapshot=await client.read(lifetime.signal)
    acquireStage='mount'
-   const r=await mountEditor(snapshot,proof.generation!)
+   const r=await mountEditor(snapshot,proof.generation!);mounted=r
    acquireStage='journal'
    // A slow browser store gets a bounded number of attempts; a late answer
    // of an abandoned attempt is closed and never unlocks this editor (#5104).
-   const journal=await openJournalWithRetry(()=>openNativeDraftJournal({human:humanId,workspace:workspaceId,page:pageId,applicationId:snapshot.applicationId}),{alive:()=>live(r)&&!lifetime.signal.aborted})
+   const journal=await openJournalWithRetry(signal=>openNativeDraftJournal({human:humanId,workspace:workspaceId,page:pageId,applicationId:snapshot.applicationId},{signal}),{alive:()=>live(r),signal:lifetime.signal});opened=journal
    if(!live(r)){await journal.close();return}
    acquireStage='recovery'
    r.journal=journal;privacyJournal=journal;const recovery=await retireCommitted(journal,await journal.recovery(),snapshot.bytes);if(!live(r)){await journal.close();return}offerRecoveries(recovery)
@@ -780,13 +786,20 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    }
    r.transferSaved=false;r.writable=true;setOwnsEditor(true);resumeViewing(r);display(r)
    }catch(cause){
-    // The editor never became writable, so nothing uncaptured is at stake:
-    // give the fresh lease back instead of holding a document nobody can
-    // edit. The release is fenced by this generation and cannot touch a
-    // later holder.
-    if(taken&&!dead&&(acquireStage==='read'||acquireStage==='mount'||acquireStage==='journal'||acquireStage==='recovery'))acquireReleased=await releaseUnused(taken)
-    throw cause
-   }finally{finishAdmission(startup)}
+    let released:boolean|undefined
+    if(acquireStage==='read'||acquireStage==='mount'||acquireStage==='journal'||acquireStage==='recovery'){
+     // A journal this take-over opened but never wrote through gives up its
+     // exclusive custody now. privacyJournal keeps the closed handle, whose
+     // retirement erases only its own row (#4348).
+     if(opened){if(mounted?.journal===opened)mounted.journal=undefined;await opened.close().catch(()=>{})}
+     // The editor never became writable, so nothing uncaptured is at stake:
+     // give the fresh lease back instead of holding a document nobody can
+     // edit. The release is fenced by holder and this generation; take-overs
+     // are serialized, and no writable editor of this tab may exist.
+     if(taken&&!dead&&!current?.writable)released=await releaseUnused(taken)
+    }
+    throw new AcquireFailure(acquireStage,released,cause)
+   }finally{acquiring=false;finishAdmission(startup)}
   }
   async function releaseUnused(generation:string):Promise<boolean>{
    try{
@@ -844,7 +857,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
    }finally{transition=false;if(!dead){setBusy(false);setHistoryKey(n=>n+1)}}
   })()}}
   control.current=(action,body)=>{
-   if(dead||networkRetired||transition||viewNow.can_edit!==true||!current?.ready)return
+   if(dead||networkRetired||transition||viewNow.can_edit!==true||!current?.ready||(action==='acquire'&&acquiring))return
    transition=true;setBusy(true);setError(undefined)
    let handoffConfirmed=false
    void(async()=>{
@@ -881,14 +894,14 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
     await observeLease(await currentLease(client,lifetime.signal))
    })().catch(async(cause:unknown)=>{
     // Codes only: no document content reaches these messages.
-    if(action==='acquire')console.warn(`native_acquire_failed stage=${acquireStage} error=${(cause instanceof Error?cause.message:'unknown').slice(0,80)}`)
+    if(action==='acquire'){const reached=cause instanceof AcquireFailure?cause.stage:'lease',inner=cause instanceof AcquireFailure?cause.inner:cause;console.warn(`native_acquire_failed stage=${reached} error=${(inner instanceof Error?inner.message:'unknown').slice(0,80)}`)}
     if(dead||nativeFailed)return
     const r=current
     if(r&&(action==='handoff'||action==='release')){
      if(r.writable&&owns(viewNow,r.generation)&&r.phase?.phase!=='read-only')resumeViewing(r)
      else if(!r.nativeReadOnly)await retireWrite(r).catch(()=>stop('Přístup editoru se nepotvrdil.'))
     }
-    if(!dead){setError(action==='acquire'&&acquireReleased!==undefined?acquireFailure(acquireStage,acquireReleased):handoffConfirmed?'Žádost byla odeslána, ale aktuální stav úprav nelze načíst. Koncept zůstává zachován.':'Výsledek akce nebyl potvrzen. Koncept zůstává zachován.');setSavedVersion(undefined)}
+    if(!dead){setError(cause instanceof AcquireFailure&&cause.released!==undefined?acquireFailure(cause.stage,cause.released):handoffConfirmed?'Žádost byla odeslána, ale aktuální stav úprav nelze načíst. Koncept zůstává zachován.':'Výsledek akce nebyl potvrzen. Koncept zůstává zachován.');setSavedVersion(undefined)}
    }).finally(()=>{transition=false;if(!dead){setBusy(false);catchUpReader()}})
   }
   const initialStartup=armAdmissionDeadline()

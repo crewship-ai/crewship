@@ -56,6 +56,28 @@ describe("openJournalWithRetry (#5104)", () => {
     expect(open).toHaveBeenCalledTimes(2)
   })
 
+  it("a missed deadline aborts that attempt's signal, so the storage layer lets go", async () => {
+    vi.useFakeTimers()
+    const signals: AbortSignal[] = [], j = journal()
+    const open = vi.fn().mockImplementationOnce((signal: AbortSignal) => { signals.push(signal); return new Promise(() => {}) }).mockImplementationOnce(async (signal: AbortSignal) => { signals.push(signal); return j })
+    const result = openJournalWithRetry(open, { alive: () => true, attemptMs: 5000, backoffMs: [500] })
+    await vi.advanceTimersByTimeAsync(5500)
+    await expect(result).resolves.toBe(j)
+    expect(signals[0].aborted).toBe(true)
+    expect(signals[1].aborted).toBe(false)
+  })
+
+  it("an editor that goes away aborts the attempt in flight and opens nothing more", async () => {
+    const editor = new AbortController(), signals: AbortSignal[] = []
+    const open = vi.fn().mockImplementation((signal: AbortSignal) => { signals.push(signal); return new Promise((_, reject) => signal.addEventListener("abort", () => reject(new DocumentStorageError("aborted")))) })
+    const result = openJournalWithRetry(open, { alive: () => !editor.signal.aborted, signal: editor.signal, sleep: noSleep })
+    await Promise.resolve()
+    editor.abort()
+    await expect(result).rejects.toBeInstanceOf(JournalOpenAbandoned)
+    expect(signals[0].aborted).toBe(true)
+    expect(open).toHaveBeenCalledOnce()
+  })
+
   it("a late journal after the last attempt failed is closed and the failure stands", async () => {
     vi.useFakeTimers()
     const late = deferred<ReturnType<typeof journal>>(), j = journal()
