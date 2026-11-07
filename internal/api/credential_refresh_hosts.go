@@ -10,18 +10,32 @@ import (
 	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
-// Refreshing a token sends a credential's refresh token (and, for OAuth2, its
-// client secret) to a token endpoint. For a host-bound credential (#5045) that
-// endpoint must be one of the approved hosts; otherwise the refresh is skipped
-// and the stored token stays as it is until it expires.
+// Refreshing a token, or exchanging an authorization code, sends a
+// credential's secrets (refresh token, client secret, code and PKCE verifier)
+// to a token endpoint. For a host-bound credential (#5045) that endpoint must
+// be one of the approved hosts; otherwise the refresh is skipped and the
+// stored token stays as it is until it expires, and an exchange is refused.
 
 // errRefreshHostNotApproved: the login is bound to hosts that do not include
 // its provider's token endpoint.
 var errRefreshHostNotApproved = errors.New("this login is bound to approved hosts that do not include its token endpoint, so it is not refreshed")
 
-// oauthRefreshPermitted reports whether credID's approved hosts cover the host
-// of tokenURL. Any lookup or parse failure denies.
-func oauthRefreshPermitted(ctx context.Context, db *sql.DB, credID, tokenURL string) bool {
+// errTokenEndpointNotApproved: an OAuth2 credential is bound to approved hosts
+// that do not include its token URL.
+var errTokenEndpointNotApproved = errors.New("this credential is bound to approved hosts that do not include its token URL")
+
+// exchangeOAuthCodeGated is the only way the OAuth flow exchanges a code: it
+// refuses a host-bound credential whose approved hosts do not cover tokenURL.
+func exchangeOAuthCodeGated(ctx context.Context, db *sql.DB, credID, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier, resource string) (*tokenResponse, error) {
+	if !oauthTokenEndpointPermitted(ctx, db, credID, tokenURL) {
+		return nil, errTokenEndpointNotApproved
+	}
+	return exchangeOAuthCode(ctx, tokenURL, clientID, clientSecret, code, redirectURI, codeVerifier, resource)
+}
+
+// oauthTokenEndpointPermitted reports whether credID's approved hosts cover
+// the host of tokenURL. Any lookup or parse failure denies.
+func oauthTokenEndpointPermitted(ctx context.Context, db *sql.DB, credID, tokenURL string) bool {
 	var allowed string
 	if err := db.QueryRowContext(ctx,
 		`SELECT COALESCE(allowed_hosts, '[]') FROM credentials WHERE id = ?`, credID).Scan(&allowed); err != nil {
