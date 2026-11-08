@@ -21,12 +21,14 @@
  * reason there is nowhere for one to come from.
  */
 
+import { artifactsLibrary } from "@/lib/feature-flags"
 import { ENTITY_REF_KINDS, type EntityRef, type EntityRefKind } from "./types"
 
 export const ENTITY_ROUTES: Record<EntityRefKind, (id: string) => string> = {
   issue: (id) => `/issues/${id}`,
   run: (id) => `/activity?run=${id}`,
-  page: (id) => `/pages/${id}`,
+  // The id arrives encoded; the library opens it by slug and moves to its ID address.
+  page: (id) => artifactsLibrary() ? `/artifacts?item=${id}` : `/pages/${id}`,
   // Both of these land on plain /crews on purpose, and dropping the id is the
   // point rather than a shortcut.
   //

@@ -4,9 +4,9 @@ import type { AccessMode } from "@/hooks/use-access-mode"
 import { toPageView, type WirePage } from "@/hooks/use-pages"
 
 // /pages/<slug> hands one page to its Artifacts detail whenever the library is
-// on (#5129); reference links, edit addresses and anything that cannot be
-// resolved to an ID stay on Pages. A restricted member moves to their
-// Artifacts catalog by address alone (#5132).
+// on (#5129); its editor addresses open the editor inside that detail. Single-page
+// reference links and anything that cannot be resolved to an ID stay on Pages.
+// A restricted member moves to their Artifacts catalog by address alone (#5132).
 const state = vi.hoisted(() => ({
   query: "workspace_id=ws1", slug: "brief", access: "trusted" as AccessMode, replace: vi.fn(), read: vi.fn(),
   wire: null as Record<string, unknown> | null, loading: false, error: null as string | null, denied: false, session: "authenticated" as string,
@@ -44,6 +44,8 @@ it.each([
   ["a native Sheet", { artifact_kind: "sheet", has_workbook: true }],
   ["a panel Page", {}],
   ["a versioned project", { artifact_kind: "project" }],
+  ["an older workbook", { has_workbook: true }],
+  ["an older deck", { has_slides: true }],
 ])("replaces /pages/<slug> with the Artifacts detail of %s, keeping the workspace", (_name, extra) => {
   state.wire = wire(extra)
   render(<PageDetailClient />)
@@ -60,7 +62,19 @@ it("stays on Pages without reading the page when the library is off", () => {
   expect(screen.getByText("Pages view brief")).toBeTruthy()
 })
 
-it.each(["ref=abc", "mode=edit"])("keeps an address with %s on Pages", param => {
+it.each([
+  ["the panel editor", "mode=edit", "/artifacts/page-brief?workspace_id=ws1&edit=1"],
+  ["the panel editor on a section", "mode=edit&section=access", "/artifacts/page-brief?workspace_id=ws1&edit=1"],
+  ["edit=1", "edit=1", "/artifacts/page-brief?workspace_id=ws1&edit=1"],
+])("opens %s inside the Artifacts frame", (_name, param, target) => {
+  state.wire = wire()
+  state.query = `workspace_id=ws1&${param}`
+  render(<PageDetailClient />)
+  expect(state.replace).toHaveBeenCalledWith(target)
+  expect(screen.queryByText(/Pages view/)).toBeNull()
+})
+
+it.each(["ref=abc", "mode=preview"])("keeps an address with %s on Pages", param => {
   state.query = `workspace_id=ws1&${param}`
   render(<PageDetailClient />)
   expect(state.read).not.toHaveBeenCalled()
@@ -97,7 +111,6 @@ it.each([
   ["the read is refused", () => { state.denied = true }],
   ["the read fails", () => { state.error = "Pages unavailable" }],
   ["the page has no valid ID", () => { state.wire = wire({ id: "not a valid id!" }) }],
-  ["the page is an older Craft the detail cannot open", () => { state.wire = wire({ has_workbook: true }) }],
   ["nobody is signed in", () => { state.session = "unauthenticated"; state.loading = true }],
 ])("fails closed and stays on Pages when %s", (_name, setup) => {
   setup()

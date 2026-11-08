@@ -4,7 +4,7 @@
 // Dashboard, App static and interactive, Slides, Design, Word, Sheet) with its title menu, status chip,
 // the lock in the chip's popover (Request edit, Take over editing), the Agent drawer offering only Ask,
 // and the Info drawer; a project's comment, new version and restore; and the New artifact dialog.
-// Flags follow the release build profile (e2e/build-profile.ts RELEASE_FLAGS). Every Pages, artifact,
+// Flags follow the release build profile (e2e/build-profile.ts RELEASE_FLAGS and ALWAYS_ON_FLAGS). Every Pages, artifact,
 // document and Craft request goes to in-memory mocks; anything else fails the run. Two hooks are
 // stand-ins: the Design socket (artifacts-library.design-fixture.ts) and the native Craft host
 // (artifacts-library.craft-host-fixture.tsx). No live instance, provider or credentials are used.
@@ -305,26 +305,25 @@ try {
     const closeStatus = async () => { await page.keyboard.press("Escape"); await statusPopover.waitFor({ state: "detached" }) }
     const lockControls = page.getByRole("toolbar", { name: "Document editing" })
 
-    // Only a typed Dashboard and a legacy deck still link to their full view, because their in-frame
-    // views wait behind NEXT_PUBLIC_ARTIFACT_DASHBOARDS / NEXT_PUBLIC_ARTIFACT_SLIDES, which no
-    // build profile turns on yet (artifact-detail.tsx `fullView`). Everything else opens in place.
+    // Every kind opens in place: nothing links out to /pages (owner, 8 Nov 2026). A typed Dashboard
+    // whose own view waits behind NEXT_PUBLIC_ARTIFACT_DASHBOARDS opens in the generic project viewer;
+    // a legacy deck shows its saved slides read-only while NEXT_PUBLIC_SLIDES_EDITOR is off.
     const KIND_VIEWS = [
       { name: "Launch notes", kind: "docs", slug: "launch-notes", status: "Live", shot: "07-docs" },
       { name: "Weekly competitor report", kind: "dashboard", slug: "weekly-competitor-report", status: "Stale · 1 panel", shot: "07-dashboard" },
-      { name: "Sales pipeline", kind: "dashboard", slug: "sales-pipeline", fullView: "/pages/%40page-pipeline?workspace_id=ws-fixture&artifact=1", shot: "07-dashboard-typed" },
-      { name: "Field survey", kind: "app", slug: "field-survey", status: "Can't run here", shot: "07-app-interactive" },
-      { name: "Q3 board deck", kind: "slides", slug: "q3-board-deck", fullView: "/pages/q3-board-deck?workspace_id=ws-fixture", shot: "07-slides" },
+      { name: "Sales pipeline", kind: "dashboard", slug: "sales-pipeline", viewer: true, shot: "07-dashboard-typed" },
+      { name: "Field survey", kind: "app", slug: "field-survey", status: "Can't run here", viewer: true, shot: "07-app-interactive" },
+      { name: "Q3 board deck", kind: "slides", slug: "q3-board-deck", shot: "07-slides" },
       { name: "Launch landing", kind: "design", slug: "launch-landing", status: "Live", shot: "07-design" },
       { name: "Partner brief", kind: "word", slug: "partner-brief", status: "Jana Nováková is editing", shot: "07-word" },
       { name: "Price model", kind: "sheet", slug: "price-model", status: "Free to edit", shot: "07-sheet" },
     ]
     for (const entry of KIND_VIEWS) {
       await openItem(entry.name, entry.kind, entry.status)
-      const fullView = page.getByRole("link", { name: "Open full view" })
-      if (entry.fullView) assert.equal(await fullView.getAttribute("href"), entry.fullView, `${entry.name} links to its full view`)
-      else assert.equal(await fullView.count(), 0, `${entry.name} opens in place`)
-      assert.equal(await page.getByText(/Open in Pages|Open page\b/).count(), 0, `${entry.name}: the frame never offers Open in Pages`)
-      assert.equal(await viewer.count(), entry.kind === "app" ? 1 : 0, `${entry.name}: a project viewer only for a project`)
+      assert.equal(await page.getByRole("link", { name: "Open full view" }).count(), 0, `${entry.name} opens in place`)
+      assert.equal(await page.getByText(/Open full view|Open in Pages|Open page\b/).count(), 0, `${entry.name}: the frame never offers a way out to Pages`)
+      assert.equal(await page.locator('a[href^="/pages"]').count(), 0, `${entry.name}: no link into /pages`)
+      assert.equal(await viewer.count(), entry.viewer ? 1 : 0, `${entry.name}: a project viewer only for a project`)
       assert.equal(await lockControls.count(), 0, `${entry.name}: no lock bar outside the status chip`)
       await noEmptyPanels(entry.name)
 
@@ -343,6 +342,20 @@ try {
         // A legacy panel Page shows its own panels here (#4483), with the stale one marked.
         await page.getByRole("heading", { name: "Weekly competitor report", level: 1, exact: true }).waitFor()
         await page.getByText("Share of voice", { exact: true }).waitFor()
+        // The frame is its only header: no second breadcrumb, no @id, no raw owner id.
+        const body = page.locator("[data-artifact-stage]")
+        assert.equal(await body.getByText("@page-weekly").count(), 0, "no raw page reference inside the frame")
+        assert.equal(await body.getByText("fixture-human").count(), 0, "no raw person id inside the frame")
+        assert.equal(await body.getByRole("button", { name: "All artifacts" }).count(), 0, "no second back link inside the frame")
+      }
+      if (entry.name === "Sales pipeline") {
+        await page.getByTitle("Artifact preview").or(page.locator('section[aria-label="Artifact viewer"] iframe')).first().waitFor()
+      }
+      if (entry.name === "Q3 board deck") {
+        // The saved deck, read-only: its slides as the canvas draws them, nothing to edit.
+        const deck = page.getByRole("region", { name: "Saved deck" })
+        await deck.getByText(/^Slide 1 of \d+$/).waitFor()
+        assert.equal(await deck.getByRole("button").count(), 0, "the saved deck is read-only")
       }
       if (entry.kind === "app") {
         // Interactive, but no isolated runtime origin here: it says so and loads nothing.
@@ -350,6 +363,7 @@ try {
         await page.getByRole("group", { name: "Capabilities" }).getByLabel(/^Data: .*responses/).waitFor()
         await stage.getByRole("alert").getByText("This app can't run here yet").waitFor()
         assert.equal(await stage.locator("iframe").count(), 0, "an app that cannot run loads no frame")
+        assert.equal(await stage.getByText("Runs isolated").count(), 0, "an app that cannot run never says it runs isolated")
       }
       if (entry.kind === "design") {
         await page.getByRole("region", { name: "Design editor" }).getByRole("img", { name: "Design canvas" }).waitFor()
@@ -378,6 +392,7 @@ try {
         await shot("07-word-status")
         await closeStatus()
         const agent = await agentAsk(entry.slug, "What is still open?")
+        assert.equal(await agent.getByRole("textbox", { name: "What should the agent do?" }).getAttribute("placeholder"), "Ask about this document…")
         await noSideways("agent drawer")
         await shot("07-word-agent")
         await closeDrawer(agent)

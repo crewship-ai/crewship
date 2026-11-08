@@ -134,7 +134,8 @@ describe("the navigation is defined once", () => {
 })
 
 
-it("names the shared destination Artifacts while preserving existing Page links",()=>{
-  expect(flatten().find(item=>item.href==="/pages")?.title).toBe("Artifacts")
-  expect(flatten().filter(item=>item.href==="/pages")).toHaveLength(1)
+it("opens Artifacts in the library and never offers Pages",()=>{
+  expect(flatten().find(item=>item.href==="/artifacts")?.title).toBe("Artifacts")
+  expect(flatten().filter(item=>item.href==="/artifacts")).toHaveLength(1)
+  expect(flatten().filter(item=>item.href.startsWith("/pages")||item.title==="Pages")).toEqual([])
 })

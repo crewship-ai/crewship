@@ -192,8 +192,11 @@ it.each(["true", "false"])("routes explicit server-typed Slides with flag %s whi
       expect(screen.queryByRole("textbox", { name: "Comment on the slide" })).toBeNull()
       expect(screen.getByRole("button", { name: /^Status:/ })).toHaveAttribute("data-status", "readonly")
     } else {
-      expect(screen.queryByTestId("library-slides")).toBeNull()
-      expect(screen.getByRole("link", { name: "Open full view" })).toBeInTheDocument()
+      // Its own Slides view is switched off: the generic project viewer shows it in the frame, never a link to Pages.
+      expect(document.querySelector('[data-artifact-frame="slides"]')).not.toBeNull()
+      expect(screen.queryByRole("link", { name: "Open full view" })).toBeNull()
+      expect(document.querySelector('a[href^="/pages"]')).toBeNull()
+      expect(screen.queryByRole("textbox", { name: "Comment on the slide" })).toBeNull()
     }
   } finally { vi.unstubAllEnvs() }
 })

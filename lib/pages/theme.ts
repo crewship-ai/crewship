@@ -1,6 +1,6 @@
 /**
  * The Crewship palette — what every Page wears until a workspace admin picks
- * something else (Settings › General › Pages appearance). It is the product's
+ * something else (Settings › General › Artifacts appearance). It is the product's
  * own dark theme: brand blue on the near-black ground, the same values as
  * app/globals.css `.dark`. A workspace that never customised stores `{}` and
  * so always follows this, including future changes to it. The Page starter's

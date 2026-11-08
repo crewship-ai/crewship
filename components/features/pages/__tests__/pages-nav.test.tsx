@@ -62,14 +62,14 @@ describe("Artifacts in the nav rail", () => {
     expect(items).toEqual(["Issues", "Routines", "Artifacts", "Calendar"])
   })
 
-  it("points it at /pages", () => {
+  it("points it at /artifacts, never /pages", () => {
     render(
       <SidebarProvider>
         <AppSidebar />
       </SidebarProvider>,
     )
     const link = within(planGroup()).getByRole("link", { name: "Artifacts" })
-    expect(link.getAttribute("href")).toBe("/pages")
+    expect(link.getAttribute("href")).toBe("/artifacts")
   })
 
   it("takes its icon from CONCEPT_ICON, not from a second opinion", () => {

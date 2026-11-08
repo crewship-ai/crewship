@@ -1,5 +1,5 @@
 import type { PageFolderRef, PageView } from "@/hooks/use-pages"
-import { artifactDashboards, artifactSlides } from "@/lib/feature-flags"
+import { artifactsDesign } from "@/lib/feature-flags"
 
 /**
  * The kinds the library shows: each has a backend that stores and opens it.
@@ -133,31 +133,27 @@ export function versionPin(raw: string | null | undefined): number | undefined {
  * version: what the API returns for create, share and restore (#4995) and
  * where an old /pages/<slug>?artifact=1 link moves.
  */
-export function artifactsProjectHref(id: string, workspaceId: string, version?: number): string {
+export function artifactsProjectHref(id: string, workspaceId: string, version?: number, edit?: boolean): string {
   const query = new URLSearchParams({ workspace_id: workspaceId })
   if (version !== undefined) query.set("version", String(version))
+  if (edit) query.set("edit", "1")
   return `/artifacts/${encodeURIComponent(id)}?${query}`
 }
 
-/** The Pages address of an item; a project keeps the version its address pins. */
-export function openInPagesHref(workspaceId: string, item: Pick<LibraryItem, "slug" | "pageId" | "projectBacked">, version?: number): string {
-  const query = new URLSearchParams({ workspace_id: workspaceId })
-  if (item.projectBacked) {
-    query.set("artifact", "1")
-    if (version !== undefined) query.set("version", String(version))
-  }
-  const reference = item.projectBacked && item.pageId ? "@" + item.pageId : item.slug
-  return `/pages/${encodeURIComponent(reference)}?${query}`
+/**
+ * Whether the Artifacts frame opens this item as a versioned project: an App,
+ * a Dashboard or Slides. Every one of them opens in the frame, in its kind's
+ * view or, while that view's build switch is off, in the project's own
+ * read-only view; never on Pages. A Design is a project too, but opens in
+ * its canvas behind its own switch.
+ */
+export function opensAsProject(item: Pick<LibraryItem, "projectBacked" | "kind">): boolean {
+  return item.projectBacked && item.kind !== "design"
 }
 
-/**
- * Whether the Artifacts detail shows this versioned item in its own project
- * viewer (a Project, and a Dashboard or Slides behind their build switches).
- * The same rule decides whether an old /pages/<slug>?artifact=1 link moves to
- * Artifacts: anything else keeps opening on Pages.
- */
-export function viewsProjectInline(item: LibraryItem): boolean {
-  return item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides())
+/** Whether the Artifacts frame opens this item at all; a Design only behind its switch. */
+export function opensInArtifacts(item: Pick<LibraryItem, "kind">): boolean {
+  return item.kind !== "design" || artifactsDesign()
 }
 
 export function withLibraryState(items: LibraryItem[], state: {

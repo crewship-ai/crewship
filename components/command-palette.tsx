@@ -209,17 +209,26 @@ function toPageResults(body: unknown): PageResult[] | null {
     .filter((p) => p.view.slug !== "")
 }
 
-/** `/pages/<slug>` for a page, the same encoding the Pages surfaces use. */
+/**
+ * `/artifacts?item=<slug>` for a saved item: the Artifacts library opens it
+ * and moves to its immutable ID address. Pages is never a destination
+ * (owner, 8 Nov 2026).
+ */
 function pageHref(slug: string): string {
-  return `/pages/${encodeURIComponent(slug)}`
+  return `/artifacts?${new URLSearchParams({ item: slug })}`
 }
 
 /**
- * The slug a Recent row points at, or null when the row is not a page deep
- * link. Anything under `/pages/<slug>` counts, a `?tab=` included; the
- * Navigation row's `/pages` is the index, not a page, and is not checked.
+ * The slug a Recent row points at, or null when the row is not an item deep
+ * link: `/artifacts?item=<slug>`, or `/pages/<slug>` (a `?tab=` included)
+ * saved before Artifacts was the only home. The `/artifacts` and old `/pages`
+ * index rows are not items and are not checked.
  */
 function pageSlugOfHref(href: string): string | null {
+  if (/^\/artifacts(?:[?#]|$)/.test(href)) {
+    const query = href.split("#")[0].split("?")[1]
+    return query === undefined ? null : new URLSearchParams(query).get("item")
+  }
   const m = /^\/pages\/([^/?#]+)/.exec(href)
   if (!m) return null
   try {
@@ -227,6 +236,11 @@ function pageSlugOfHref(href: string): string | null {
   } catch {
     return null
   }
+}
+
+/** A Recent row saved before Artifacts was the only home: the old Pages index is the library now. */
+function currentEntry<T extends { href: string; label: string }>(entry: T): T {
+  return /^\/pages(?:[?#]|$)/.test(entry.href) ? { ...entry, href: "/artifacts", label: "Artifacts" } : entry
 }
 
 const PROVIDER_LABELS: Record<string, string> = {
@@ -250,7 +264,7 @@ const NAV_ITEMS: Array<{ title: string; href: string; icon: typeof Network; keyw
   // The Journal is Activity now (F-02): typing "journal" lands here.
   { title: "Activity", href: "/activity", icon: Activity, keywords: ["runs", "traces", "journal", "audit"] },
   { title: "Routines", href: "/routines", icon: CalendarClock, keywords: ["pipelines"] },
-  { title: "Artifacts", href: "/pages", icon: LayoutTemplate, keywords: ["pages", "dashboards", "panels"] },
+  { title: "Artifacts", href: "/artifacts", icon: LayoutTemplate, keywords: ["pages", "dashboards", "panels"] },
   { title: "Integrations", href: "/integrations", icon: Plug, keywords: ["mcp", "notifications", "channels"] },
   { title: "Skills", href: "/skills", icon: Zap, keywords: [] },
   { title: "Credentials", href: "/credentials", icon: Key, keywords: ["secrets", "tokens"] },
@@ -553,15 +567,17 @@ export function CommandPalette({ open, onOpenChange, initialQuery }: CommandPale
     for (const entry of recent) {
       const slug = pageSlugOfHref(entry.href)
       if (slug === null) {
-        rows.push(entry)
+        rows.push(currentEntry(entry))
         continue
       }
       if (!pagesLoaded) continue
       const page = bySlug.get(slug)
       if (!page) continue
-      rows.push({ ...entry, label: page.view.name })
+      // An old /pages row opens at the item's Artifacts address now.
+      rows.push({ ...entry, href: pageHref(slug), label: page.view.name, group: "Artifacts" })
     }
-    return rows
+    // An old and a new address of the same place collapse into one row.
+    return rows.filter((row, index) => rows.findIndex((other) => other.href === row.href) === index)
   }, [recent, pages, pagesLoaded])
 
   // A closed palette keeps no query: the next ⌘K opens on a clean field, and

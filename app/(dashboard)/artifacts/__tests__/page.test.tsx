@@ -29,11 +29,13 @@ vi.mock("@/hooks/use-pages", async importOriginal => {
   }
 })
 vi.mock("@/components/features/artifacts-library/artifacts-library", () => ({
-  ArtifactsLibrary: ({ workspaceId, item, version, bySlug, onSelect, onCanonical, filters, onFiltersChange }: {
+  ArtifactsLibrary: ({ workspaceId, item, version, bySlug, onSelect, onCanonical, filters, onFiltersChange, edit, onEditChange }: {
     workspaceId: string; item: string | null; version?: number; bySlug?: boolean; onSelect: (id: string | null, slug?: string) => void
     onCanonical: (id: string) => void; filters: { view: string; q: string }; onFiltersChange: (next: unknown) => void
+    edit?: boolean; onEditChange?: (edit: boolean) => void
   }) =>
-    <div data-testid="library" data-ws={workspaceId} data-item={item ?? ""} data-version={version ?? ""} data-by-slug={String(Boolean(bySlug))} data-view={filters.view} data-q={filters.q}>
+    <div data-testid="library" data-ws={workspaceId} data-item={item ?? ""} data-version={version ?? ""} data-by-slug={String(Boolean(bySlug))} data-view={filters.view} data-q={filters.q} data-edit={String(Boolean(edit))}>
+      <button onClick={() => onEditChange?.(true)}>start editing</button><button onClick={() => onEditChange?.(false)}>stop editing</button>
       <button onClick={() => onSelect("page-site")}>pick</button><button onClick={() => onSelect(null)}>back</button>
       <button onClick={() => onSelect(null, "no-id")}>pick without ID</button><button onClick={() => onCanonical("page-brief")}>resolved</button>
       <button onClick={() => onFiltersChange({ ...filters, view: "all", q: "kind:word" })}>search</button>
@@ -230,4 +232,38 @@ it("without the library refuses an unavailable workspace link instead of moving 
   render(<ArtifactRoute />)
   expect(nav.replace).not.toHaveBeenCalled()
   expect(screen.getByRole("alert")).toHaveTextContent("Artifacts unavailable.")
+})
+
+describe("the editor inside the frame (?edit=1)", () => {
+  it("opens the open artifact's editor from its address, never on the library itself", () => {
+    at("/artifacts/page-site")
+    nav.params = new URLSearchParams("workspace_id=ws1&edit=1")
+    render(<ArtifactRoute />)
+    expect(screen.getByTestId("library").dataset).toMatchObject({ item: "page-site", edit: "true" })
+    cleanup()
+    at("/artifacts")
+    render(<ArtifactsPage />)
+    expect(screen.getByTestId("library").dataset.edit).toBe("false")
+  })
+
+  it("keeps edit=1 in step with the frame, replacing the entry", () => {
+    at("/artifacts/page-site")
+    nav.params = new URLSearchParams("workspace_id=ws1&version=2")
+    render(<ArtifactRoute />)
+    fireEvent.click(screen.getByText("start editing"))
+    expect(nav.replace).toHaveBeenLastCalledWith("/artifacts/page-site?workspace_id=ws1&version=2&edit=1")
+    cleanup()
+    nav.params = new URLSearchParams("workspace_id=ws1&version=2&edit=1")
+    render(<ArtifactRoute />)
+    fireEvent.click(screen.getByText("stop editing"))
+    expect(nav.replace).toHaveBeenLastCalledWith("/artifacts/page-site?workspace_id=ws1&version=2")
+    expect(nav.push).not.toHaveBeenCalled()
+  })
+
+  it("keeps edit=1 when a slug link moves to the ID address", () => {
+    nav.params = new URLSearchParams("workspace_id=ws1&item=brief&edit=1")
+    render(<ArtifactsPage />)
+    fireEvent.click(screen.getByText("resolved"))
+    expect(nav.replace).toHaveBeenLastCalledWith("/artifacts/page-brief?workspace_id=ws1&edit=1")
+  })
 })

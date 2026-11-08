@@ -59,6 +59,21 @@ vi.mock("@/components/features/chat/artifact-context/craft/craft-lock-bar", () =
 }))
 
 vi.mock("../page-content", () => ({ ArtifactPageContent: ({ pageId }: { pageId: string }) => <div data-testid="page-content" data-page={pageId} /> }))
+// The bodies Pages used to draw, now hosted in the frame (owner, 8 Nov 2026): stand-ins that show what they were given.
+const hosted = vi.hoisted(() => ({ canWrite: false }))
+vi.mock("@/components/features/pages/artifact-project", async () => {
+  const { useEffect } = await import("react")
+  return { ArtifactProject: ({ slug, initialVersion, hosted: host }: { slug: string; initialVersion?: number; hosted?: { readOnly: boolean; versionHref: (v: number) => string; onCanWrite?: (w: boolean) => void } }) => {
+    useEffect(() => { host?.onCanWrite?.(hosted.canWrite) }, [host])
+    return <div data-testid="project-view" data-slug={slug} data-version={initialVersion ?? ""} data-read-only={String(host?.readOnly)} data-shared-href={host?.versionHref(2)} />
+  } }
+})
+vi.mock("../edit/frame-page-editor", () => ({ FramePageEditor: ({ pageId, onLeave }: { pageId: string; onLeave: (reason: "done" | "deleted") => void }) =>
+  <div data-testid="page-editor" data-page={pageId}><button type="button" onClick={() => onLeave("done")}>Back to view</button></div> }))
+vi.mock("../kinds/legacy/legacy-views", () => ({
+  LegacyDeckBody: ({ pageId }: { pageId: string }) => <div data-testid="legacy-deck" data-page={pageId} />,
+  LegacyWorkbookBody: ({ pageId }: { pageId: string }) => <div data-testid="legacy-workbook" data-page={pageId} />,
+}))
 vi.mock("../sharing/share-dialog", () => ({ ShareDialog: ({ item }: { item: { name: string } }) => <div role="dialog" aria-label={`Share ${item.name}`} /> }))
 vi.mock("../sharing/access-tab", () => ({ AccessTab: ({ item }: { item: { name: string } }) => <section aria-label={`Access to ${item.name}`} /> }))
 vi.mock("../sharing/folder-settings-dialog", () => ({ FolderSettingsDialog: ({ folder }: { folder: { name: string } }) => <div role="dialog" aria-label={`Settings for ${folder.name}`} /> }))
@@ -380,13 +395,62 @@ it("a project detail opens the project preview", () => {
   expect(state.select).toHaveBeenCalledWith(null)
 })
 
-it("without the project surface the detail links to the Page instead of a dead viewer", () => {
+it("without the project surface the project opens read-only in the frame, never as a link to Pages", () => {
   state.projectsOn = false
   state.item = "page-site"
-  renderLibrary()
+  const { container } = renderLibrary()
   expect(screen.queryByTestId("viewer-panel")).toBeNull()
-  expect(screen.getByRole("link", { name: "Open full view" }).getAttribute("href")).toBe("/pages/%40page-site?workspace_id=ws1&artifact=1")
-  expect(screen.queryByText(/Open in Pages/)).toBeNull()
+  expect(screen.getByTestId("project-view").dataset).toMatchObject({ slug: "@page-site", readOnly: "true", sharedHref: "/artifacts/page-site?workspace_id=ws1&version=2" })
+  expect(screen.queryByRole("link", { name: /Open full view|Open in Pages|Open page/ })).toBeNull()
+  expect(container.querySelector('a[href^="/pages"]')).toBeNull()
+  expect(screen.getByRole("button", { name: "Status: Read-only" })).toBeTruthy()
+})
+
+it("offers Edit source on a read-only project only to someone who may write, and opens the source editor in the frame", async () => {
+  state.projectsOn = false
+  state.item = "page-site"
+  hosted.canWrite = true
+  const onEdit = vi.fn()
+  try {
+    render(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} onEditChange={onEdit} />))
+    await openTitleMenu("Pricing site")
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Edit source/ }))
+    expect(onEdit).toHaveBeenCalledWith(true)
+    expect(screen.getByTestId("project-view").dataset.readOnly).toBe("false")
+  } finally { hosted.canWrite = false }
+  cleanup()
+  renderLibrary()
+  await openTitleMenu("Pricing site")
+  await screen.findByRole("menuitem", { name: /Move to folder/ })
+  expect(screen.queryByRole("menuitem", { name: /Edit source/ })).toBeNull()
+})
+
+it.each([true, false])("?edit=1 opens the App source editor inside the frame (project viewer %s)", projectsOn => {
+  state.projectsOn = projectsOn
+  render(withQuery(<ArtifactsLibrary workspaceId="ws1" item="page-site" version={3} onSelect={state.select} edit />))
+  expect(screen.getByTestId("project-view").dataset).toMatchObject({ slug: "@page-site", readOnly: "false", version: "3" })
+  expect(screen.queryByTestId("viewer-panel")).toBeNull()
+})
+
+it("?edit=1 opens the panel editor inside the frame, and Done editing returns to the view", async () => {
+  const onEdit = vi.fn()
+  render(withQuery(<ArtifactsLibrary workspaceId="ws1" item="page-weekly" onSelect={state.select} edit onEditChange={onEdit} />))
+  expect(screen.getByTestId("page-editor").dataset.page).toBe("page-weekly")
+  expect(screen.queryByTestId("page-content")).toBeNull()
+  await openTitleMenu("Weekly report")
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Done editing/ }))
+  expect(onEdit).toHaveBeenLastCalledWith(false)
+  expect(screen.getByTestId("page-content").dataset.page).toBe("page-weekly")
+})
+
+it("a panel Page offers Edit, which opens its editor in place", async () => {
+  state.item = "page-weekly"
+  renderLibrary()
+  await openTitleMenu("Weekly report")
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^Edit$/ }))
+  expect(screen.getByTestId("page-editor").dataset.page).toBe("page-weekly")
+  fireEvent.click(screen.getByRole("button", { name: "Back to view" }))
+  expect(screen.getByTestId("page-content")).toBeTruthy()
 })
 
 it("a native Word detail shows its edit lock by Page reference", () => {
@@ -422,9 +486,10 @@ it("a native Word whose service is down says the service is down", () => {
   expect(screen.getByRole("status")).toHaveTextContent("The document service is not answering right now")
 })
 
-it("other kinds do not read a document", () => {
+it("other kinds do not read a document; an older workbook shows its own preview in the frame", () => {
   state.item = "page-model"
   renderLibrary()
+  expect(screen.getByTestId("legacy-workbook").dataset.page).toBe("page-model")
   expect(screen.queryByRole("region", { name: /saved version/ })).toBeNull()
   expect(state.reads.every(read => !read.enabled)).toBe(true)
 })
@@ -528,22 +593,35 @@ it.each(["project", "dashboard", "slides"] as const)("keeps %s routed through it
   expect(state.select).toHaveBeenLastCalledWith("owner-page")
   state.item = "owner-page"
   view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
-  expect(screen.getByRole("link", { name: "Open full view" })).toHaveAttribute("href", "/pages/%40owner-page?workspace_id=ws1&artifact=1")
+  // Its own project view, read-only, inside the frame: never the old panels and never a link out.
+  expect(screen.getByTestId("project-view").dataset).toMatchObject({ slug: "@owner-page", readOnly: "true" })
+  expect(screen.queryByRole("link", { name: /Open full view/ })).toBeNull()
   expect(screen.queryByTestId("viewer-panel")).toBeNull()
 })
 
-it.each(["word", "sheet"] as const)("preserves the existing reader link for native %s", artifact_kind => {
-  state.pages = [wire({ id: "native-page", slug: "saved-native", name: "Native document", artifact_kind })]
-  state.projectsOn = false; state.item = "native-page"
+it.each(["dashboard", "slides"] as const)("opens a %s in the generic project viewer while its own view is switched off", artifact_kind => {
+  state.pages = [wire({ id: "typed-page", slug: "typed", name: "Typed artifact", artifact_kind })]
+  state.item = "typed-page"
   renderLibrary()
-  expect(screen.getByRole("link", { name: "Open full view" })).toHaveAttribute("href", "/pages/saved-native?workspace_id=ws1")
+  expect(screen.getByTestId("viewer-panel")).toBeTruthy()
+  expect(screen.queryByRole("link", { name: /Open full view/ })).toBeNull()
 })
 
-it("keeps legacy Slides in their existing Page reader", () => {
+it.each(["word", "sheet"] as const)("never links a native %s out to Pages", artifact_kind => {
+  state.pages = [wire({ id: "native-page", slug: "saved-native", name: "Native document", artifact_kind })]
+  state.projectsOn = false; state.item = "native-page"
+  const { container } = renderLibrary()
+  expect(screen.queryByRole("link", { name: /Open full view/ })).toBeNull()
+  expect(container.querySelector('a[href^="/pages"]')).toBeNull()
+})
+
+it("shows a legacy deck in the frame, never in its old Page reader", () => {
   state.pages = [wire({ id: "legacy-page", slug: "legacy-slides", name: "Legacy deck", has_slides: true })]
   state.item = "legacy-page"
-  renderLibrary()
-  expect(screen.getByRole("link", { name: "Open full view" })).toHaveAttribute("href", "/pages/legacy-slides?workspace_id=ws1")
+  const { container } = renderLibrary()
+  expect(screen.getByTestId("legacy-deck").dataset.page).toBe("legacy-page")
+  expect(screen.queryByRole("link", { name: /Open full view/ })).toBeNull()
+  expect(container.querySelector('a[href^="/pages"]')).toBeNull()
 })
 
 it("J and K move between items, Enter opens, Escape leaves the detail, never from a field", () => {

@@ -14,6 +14,7 @@ import {
   Trash2,
 } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
+import { artifactsRefHref } from "@/components/features/chat/artifact-context/artifacts-href"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
 import { Switch } from "@/components/ui/switch"
@@ -169,7 +170,7 @@ export function IncomingWebhooksView({
                 <Link
                   href={
                     target.kind === "page"
-                      ? `/pages/${encodeURIComponent(target.slug)}`
+                      ? artifactsRefHref(null, target.slug, `/pages/${encodeURIComponent(target.slug)}`)
                       : target.kind === "agent"
                         ? `/activity?walk=agent:${encodeURIComponent(target.id)}`
                         : `/activity?pipeline=${encodeURIComponent(target.slug)}`

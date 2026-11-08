@@ -26,17 +26,19 @@ export interface KindDef {
   accent: AccentName
   /** One line, in the reader's words. */
   description: string
+  /** What one of them is called in a sentence, lower case: "Ask about this document…". */
+  noun: string
   family: KindFamily
 }
 
 export const KINDS: Record<ArtifactKind, KindDef> = {
-  docs: { id: "docs", label: "Docs", plural: "Docs", icon: NotebookText, accent: "indigo", family: "Artifact", description: "Write together, live. Page or Canvas, with live embeds." },
-  dashboard: { id: "dashboard", label: "Dashboard", plural: "Dashboards", icon: ChartColumn, accent: "blue", family: "Artifact", description: "Declared data views that routines keep fresh." },
-  slides: { id: "slides", label: "Slides", plural: "Slides", icon: Presentation, accent: "orange", family: "Artifact", description: "A deck you present or export." },
-  design: { id: "design", label: "Design", plural: "Designs", icon: PenTool, accent: "rose", family: "Artifact", description: "Artboards and libraries. A design system is a library." },
-  app: { id: "app", label: "App", plural: "Apps", icon: AppWindow, accent: "purple", family: "Artifact", description: "HTML you can run: from a static site to a tool with capabilities." },
-  word: { id: "word", label: "Word", plural: "Word", icon: FileText, accent: "sky", family: "Craft", description: "A .docx file with one editor at a time." },
-  sheet: { id: "sheet", label: "Sheet", plural: "Sheets", icon: FileSpreadsheet, accent: "green", family: "Craft", description: "An .xlsx file with one editor at a time." },
+  docs: { id: "docs", label: "Docs", plural: "Docs", icon: NotebookText, accent: "indigo", family: "Artifact", noun: "document", description: "Write together, live. Page or Canvas, with live embeds." },
+  dashboard: { id: "dashboard", label: "Dashboard", plural: "Dashboards", icon: ChartColumn, accent: "blue", family: "Artifact", noun: "dashboard", description: "Declared data views that routines keep fresh." },
+  slides: { id: "slides", label: "Slides", plural: "Slides", icon: Presentation, accent: "orange", family: "Artifact", noun: "deck", description: "A deck you present or export." },
+  design: { id: "design", label: "Design", plural: "Designs", icon: PenTool, accent: "rose", family: "Artifact", noun: "design", description: "Artboards and libraries. A design system is a library." },
+  app: { id: "app", label: "App", plural: "Apps", icon: AppWindow, accent: "purple", family: "Artifact", noun: "app", description: "HTML you can run: from a static site to a tool with capabilities." },
+  word: { id: "word", label: "Word", plural: "Word", icon: FileText, accent: "sky", family: "Craft", noun: "document", description: "A .docx file with one editor at a time." },
+  sheet: { id: "sheet", label: "Sheet", plural: "Sheets", icon: FileSpreadsheet, accent: "green", family: "Craft", noun: "sheet", description: "An .xlsx file with one editor at a time." },
 }
 
 /** Display order: the Artifact family first, then Craft. */

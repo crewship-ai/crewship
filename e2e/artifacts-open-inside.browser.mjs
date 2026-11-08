@@ -110,7 +110,7 @@ try {
   await projectContent()
   await page.waitForURL(url => url.pathname === "/artifacts/page-site")
   await page.goto(`${origin}/artifacts/pricing-site`)
-  await page.getByText("This artifact is not available.").waitFor()
+  await page.getByText("This artifact doesn’t exist").waitFor()
   step("legacy ?item= link")
 
   // 6. Leaving the detail returns to the library at /artifacts.

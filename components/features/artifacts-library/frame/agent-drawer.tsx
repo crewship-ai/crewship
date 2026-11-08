@@ -30,10 +30,11 @@ export function agentModes(support: AgentSupport, registered: { propose: boolean
  * artifact as context; Propose and Edit are the kind's own path (a send, or a
  * form it mounts with <ArtifactAgentMode>).
  */
-export function AgentDrawer({ support, canEdit, kindLabel, registered, modeTarget }: {
+export function AgentDrawer({ support, canEdit, kindNoun, registered, modeTarget }: {
   support: AgentSupport
   canEdit: boolean
-  kindLabel: string
+  /** The kind in a sentence, lower case (kinds.ts `noun`): "document", "sheet". */
+  kindNoun: string
   registered: { propose: boolean; edit: boolean }
   /** Where a registered mode's form renders. */
   modeTarget: (mode: "propose" | "edit") => (node: HTMLDivElement | null) => void
@@ -44,7 +45,7 @@ export function AgentDrawer({ support, canEdit, kindLabel, registered, modeTarge
   const [chosen, setMode] = React.useState<AgentMode | undefined>(first)
   // A mode whose backend withdrew while open falls back to the first one left.
   const mode = chosen && modes.includes(chosen) && permitted(chosen) ? chosen : first
-  const scopes = support.scopes ?? [{ id: "all", label: `Whole ${kindLabel.toLowerCase()}` }]
+  const scopes = support.scopes ?? [{ id: "all", label: `Whole ${kindNoun}` }]
   const [scope, setScope] = React.useState(scopes[0].id)
   const [prompt, setPrompt] = React.useState("")
   const [sending, setSending] = React.useState(false)
@@ -73,7 +74,7 @@ export function AgentDrawer({ support, canEdit, kindLabel, registered, modeTarge
         {scopes.map(entry => <button key={entry.id} type="button" aria-pressed={scope === entry.id} onClick={() => setScope(entry.id)}
           className={cn("rounded-full border px-2.5 py-0.5 text-xs transition-colors coarse:min-h-[44px]", scope === entry.id ? "border-primary/40 bg-primary/12 text-primary-hover" : "hover:bg-accent")}>{entry.label}</button>)}
       </div>}
-      <Textarea aria-label="What should the agent do?" placeholder={mode === "ask" ? `Ask about this ${kindLabel.toLowerCase()}…` : "What should the agent change?"}
+      <Textarea aria-label="What should the agent do?" placeholder={mode === "ask" ? `Ask about this ${kindNoun}…` : "What should the agent change?"}
         value={prompt} onChange={event => setPrompt(event.target.value)} className="min-h-20 text-sm" />
       {support.suggestions && support.suggestions.length > 0 && <div className="flex flex-wrap gap-1.5" aria-label="Suggestions">
         {support.suggestions.map(text => <button key={text} type="button" onClick={() => setPrompt(text)}

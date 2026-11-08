@@ -2,11 +2,18 @@ import { readFileSync } from "node:fs"
 import { parseEnv } from "node:util"
 
 // The checked-in .env.production is the single build profile. main ships the
-// "main" profile (every experimental surface off, Artifacts nav on /pages); a
-// shared dev release commit switches it to "release" and nothing else, so the
-// same tests verify either build instead of being ignored on the release.
-export const RELEASE_FLAGS = [
+// "main" profile (every experimental surface off); a shared dev release commit
+// switches it to "release" and nothing else, so the same tests verify either
+// build instead of being ignored on the release.
+
+// On in every profile. The Artifacts library is the only home of saved work:
+// users never see Pages, on main as on a release (owner, 8 Nov 2026). The
+// /api/v1/pages API and its data model stay as they are.
+export const ALWAYS_ON_FLAGS = [
   "NEXT_PUBLIC_ARTIFACTS_LIBRARY",
+] as const
+
+export const RELEASE_FLAGS = [
   "NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT",
   "NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS",
   "NEXT_PUBLIC_CHAT_CRAFT_LEASE",

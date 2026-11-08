@@ -1,13 +1,12 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { readFileSync } from "node:fs"
 import { parseEnv } from "node:util"
-import { buildProfile, refTargetsMain, RELEASE_FLAGS, UNACCEPTED_FLAGS } from "../../e2e/build-profile"
+import { ALWAYS_ON_FLAGS, buildProfile, refTargetsMain, RELEASE_FLAGS, UNACCEPTED_FLAGS } from "../../e2e/build-profile"
 import { artifactDesignSystem, artifactSlides, artifactsLibrary, artifactsServerCatalog, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations } from "@/lib/feature-flags"
 
 describe.each([
   ["NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", chatArtifactProjects],
   ["NEXT_PUBLIC_CHAT_CRAFT_LEASE", chatCraftLease],
-  ["NEXT_PUBLIC_ARTIFACTS_LIBRARY", artifactsLibrary],
 ] as const)("production %s", (name, enabled) => {
   afterEach(() => vi.unstubAllEnvs())
 
@@ -20,6 +19,28 @@ describe.each([
   it("allows an explicit build-time opt-in", () => {
     vi.stubEnv(name, "true")
     expect(enabled()).toBe(true)
+  })
+})
+
+// The owner's decision (8 Nov 2026): Pages does not exist for users, on main
+// as on a release. The library is on in the checked-in profile, whichever it is.
+describe("production NEXT_PUBLIC_ARTIFACTS_LIBRARY", () => {
+  afterEach(() => vi.unstubAllEnvs())
+
+  it("is on in the checked-in build profile, main or release", () => {
+    const profile = buildProfile()
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", profile.env.NEXT_PUBLIC_ARTIFACTS_LIBRARY)
+    expect(artifactsLibrary()).toBe(true)
+  })
+
+  it("is an always-on flag, never a release flag", () => {
+    expect(ALWAYS_ON_FLAGS).toContain("NEXT_PUBLIC_ARTIFACTS_LIBRARY")
+    expect(RELEASE_FLAGS as readonly string[]).not.toContain("NEXT_PUBLIC_ARTIFACTS_LIBRARY")
+  })
+
+  it("still reads only a literal true", () => {
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "1")
+    expect(artifactsLibrary()).toBe(false)
   })
 })
 
@@ -112,6 +133,17 @@ describe("build profile", () => {
     const profile = buildProfile()
     for (const flag of RELEASE_FLAGS) expect(profile.env[flag] === "true", flag).toBe(profile.name === "release")
     expect(profile.env.NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK).not.toBe("true")
+  })
+  it("turns every always-on flag on in both profiles", () => {
+    const profile = buildProfile()
+    for (const flag of ALWAYS_ON_FLAGS) expect(profile.env[flag], flag).toBe("true")
+    expect(ALWAYS_ON_FLAGS.filter(flag => (RELEASE_FLAGS as readonly string[]).includes(flag) || (UNACCEPTED_FLAGS as readonly string[]).includes(flag))).toEqual([])
+  })
+  it("a release commit switches only the profile and the release flags, so the library stays on", () => {
+    const file = readFileSync(".env.production", "utf8")
+    const release = parseEnv(file.replace(/^CREWSHIP_BUILD_PROFILE=.*$/m, "CREWSHIP_BUILD_PROFILE=release")
+      + RELEASE_FLAGS.map(flag => `\n${flag}=true`).join(""))
+    for (const flag of ALWAYS_ON_FLAGS) expect(release[flag], flag).toBe("true")
   })
   it("keeps unaccepted milestones off in every profile", () => {
     const profile = buildProfile()

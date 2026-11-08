@@ -40,6 +40,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (path === "/api/v1/pages/%40page-brief" && method === "GET") return json({ id: "page-brief", slug: "partner-brief", name: "Partner brief", has_document: true })
   if (path === "/api/v1/pages/%40page-brief/document" && method === "GET") return json({ page_id: "page-brief", schema: 3, rev: 2, content: {
     type: "doc", content: [{ type: "paragraph", attrs: { id: "p1" }, content: [{ type: "text", text: "Three partners, one launch date." }] }] } })
+  // A slug used as an ID address: the server knows no artifact with that ID.
+  if (path === "/api/v1/pages/%40pricing-site" && method === "GET") return new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: { "content-type": "application/json" } })
   const response = /^\/api\/v1\/pages\/pricing-site\/(?:artifact|craft)\b/.test(path) || path === "/api/v1/pages/artifacts/availability" ? project.handle(url, init) : undefined
   if (response) return response
   window.__unmocked.push(`${method} ${url}`)

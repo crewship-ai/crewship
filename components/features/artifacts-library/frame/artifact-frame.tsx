@@ -236,7 +236,7 @@ export function ArtifactFrame({ name, kind, folder, caps, onHome, href, onShare,
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto">
           {hasAgent && <div hidden={open !== "agent"} data-pane="agent">
-            <AgentDrawer support={caps.agent ?? {}} canEdit={caps.canEdit} kindLabel={KINDS[kind.kind].label} registered={registered}
+            <AgentDrawer support={caps.agent ?? {}} canEdit={caps.canEdit} kindNoun={KINDS[kind.kind].noun} registered={registered}
               modeTarget={mode => paneRef(`agent:${mode}`)} />
           </div>}
           {[...sections.values()].filter(meta => !meta.hidden).map(meta => <div key={meta.id} ref={paneRef(meta.id)} hidden={open !== meta.id} data-pane={meta.id} />)}

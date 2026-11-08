@@ -7,10 +7,9 @@ import { buildProfile } from "./build-profile"
 // not return to it. Every /api request is answered here; the spec needs only
 // the static export (served by e2e/serve-restricted-ui.mjs).
 //
-// The checked-in main profile builds without the library, where the old link
-// keeps opening on Pages. Set NEXT_PUBLIC_ARTIFACTS_LIBRARY=true for both the
-// build and this run to verify the release behaviour.
-const library = process.env.NEXT_PUBLIC_ARTIFACTS_LIBRARY === "true" || buildProfile().name === "release"
+// The library is on in every checked-in build profile (ALWAYS_ON_FLAGS); a
+// build made with NEXT_PUBLIC_ARTIFACTS_LIBRARY=false keeps the old link on Pages.
+const library = process.env.NEXT_PUBLIC_ARTIFACTS_LIBRARY === "true" || buildProfile().env.NEXT_PUBLIC_ARTIFACTS_LIBRARY === "true"
 
 const WORKSPACE = { id: "ws-a", name: "Alpha", slug: "alpha", currentUserRole: "OWNER" }
 const PAGE = { id: "page-brief", slug: "q4-brief", name: "Q4 brief", owner: "user/u-t", reach: ["owner"], updated_at: "2026-11-08T08:00:00Z" }

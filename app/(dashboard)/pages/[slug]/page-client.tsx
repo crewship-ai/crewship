@@ -45,9 +45,10 @@ export function PageDetailClient() {
     ? <ArtifactProject key={`${workspaceId}:${slug}:${initialVersion ?? "latest"}`} workspaceId={workspaceId} slug={slug} initialVersion={initialVersion} />
     : <PagesLayout workspaceId={workspaceId} slug={slug} {...(initialVersion === undefined ? {} : { initialArtifactVersion: initialVersion })} />
   // With the library on, a page opens at its one address, /artifacts/<id>
-  // (#5129): a plain, @<id>, project (#4995) or pinned link resolves to it.
-  // The Pages editor, the project source editor and anything that does not
-  // resolve stay here. The decision is taken once for the entry address.
+  // (#5129): a plain, @<id>, project (#4995) or pinned link resolves to it,
+  // and the Pages editor (`mode=edit`) and project source editor
+  // (`artifact=1&edit=1`) open inside it at `?edit=1`. Anything that does not
+  // resolve stays here. The decision is taken once for the entry address.
   const target = legacyPagesTarget(`/pages/${encodeURIComponent(slug)}`, search.toString(), { workspaceId, library: artifactsLibrary(), trusted: accessMode === "trusted" })
   if (target.to !== "resolve") return view
   return <LegacyPagesRedirect key={project ? `${workspaceId}:${slug}` : undefined} target={target}>{view}</LegacyPagesRedirect>

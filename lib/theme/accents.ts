@@ -108,7 +108,7 @@ export function isAccentId(value: unknown): value is AccentId {
 }
 
 /**
- * The workspace's own brand colour (Settings › General › Pages appearance ›
+ * The workspace's own brand colour (Settings › General › Artifacts appearance ›
  * Brand accent) as the accent. Not a preset: it has no block in accents.css.
  * Its tokens are derived from the admin's colour at runtime
  * (lib/theme/derive-accent.ts) and painted by a <style> element that

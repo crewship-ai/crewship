@@ -50,6 +50,16 @@ describe("kindOf", () => {
     expect(Object.values(KINDS).map(entry => entry.label).join(" ")).not.toMatch(/\bPages?\b/)
   })
 
+  it("gives every kind a lower-case noun for sentences, never Page", () => {
+    for (const kind of KIND_ORDER) {
+      expect(KINDS[kind].noun).toMatch(/^[a-z]+$/)
+      expect(KINDS[kind].noun).not.toMatch(/^pages?$/)
+    }
+    expect(KINDS.docs.noun).toBe("document")
+    expect(KINDS.word.noun).toBe("document")
+    expect(KINDS.sheet.noun).toBe("sheet")
+  })
+
   it("groups the registry into Artifact and Craft families", () => {
     expect(KIND_ORDER.filter(kind => KINDS[kind].family === "Artifact")).toEqual(["docs", "dashboard", "slides", "design", "app"])
     expect(KIND_ORDER.filter(kind => KINDS[kind].family === "Craft")).toEqual(["word", "sheet"])
