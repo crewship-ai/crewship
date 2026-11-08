@@ -18,7 +18,7 @@ import { KindThumb } from "./kind-thumb"
 
 /** The existing creation flow behind each kind, first live one wins. Docs has none yet, so it is not offered. */
 export const CREATE_FLOW: Record<ArtifactKind, readonly ArtifactKindKey[]> = {
-  docs: [], dashboard: ["dashboard"], slides: ["slides"], design: ["design"], app: ["project", "page"], word: ["word"], sheet: ["sheet"],
+  docs: ["docs"], dashboard: ["dashboard"], slides: ["slides"], design: ["design"], app: ["project", "page"], word: ["word"], sheet: ["sheet"],
 }
 
 export function creatableUiKinds(creatable: readonly ArtifactKindKey[]): { kind: ArtifactKind; flow: ArtifactKindKey }[] {

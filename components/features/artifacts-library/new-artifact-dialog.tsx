@@ -137,8 +137,10 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   const duplicate = trimmed && kind ? pages.find(p => artifactKindOfPage(p) === kind.key && (p.folder?.slug ?? "") === (folder?.slug ?? "") && p.name.trim().toLowerCase() === trimmed.toLowerCase()) : undefined
 
   const create = useMutation<Created, Error, ArtifactKindEntry>({ mutationFn: async k => {
-    if (k.key === "word" || k.key === "sheet") {
-      const doc = await word.create.mutateAsync(k.key === "word" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: word.wordFormat } : { name: trimmed, slug: freeSlug(trimmed, "sheet", pages), format: "sheet" })
+    if (k.key === "word" || k.key === "sheet" || k.key === "docs") {
+      const doc = await word.create.mutateAsync(k.key === "word" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: word.wordFormat }
+        : k.key === "docs" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: "doc" }
+        : { name: trimmed, slug: freeSlug(trimmed, "sheet", pages), format: "sheet" })
       return { slug: doc.slug, pagesVersion: doc.pagesVersion, ...(doc.nativePageId ? { id: doc.nativePageId } : {}) }
     }
     const intent = pageIntent.current ??= { slug: freeSlug(trimmed, k.key === "design" ? "design" : "page", pages) }
@@ -189,8 +191,8 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
 
   const canSubmit = Boolean(kind) && !busy && (created ? true
     : handoff ? start === "tmpl" || Boolean(prompt.trim() || trimmed)
-    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && word.wordFormatAvailable)) && (kind?.key !== "sheet" || (word.allowed && word.availability.gridcraftNative === true)))
-  const primaryLabel = created ? "Open it" : handoff ? "Continue in chat" : busy ? "Creating…" : word.retrying && (kind?.key === "word" || kind?.key === "sheet") ? "Retry initialization" : kind?.make === "panels" ? "Create page" : "Create and edit"
+    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && word.wordFormatAvailable)) && (kind?.key !== "sheet" || (word.allowed && word.availability.gridcraftNative === true)) && (kind?.key !== "docs" || (word.allowed && word.availability.data === true)))
+  const primaryLabel = created ? "Open it" : handoff ? "Continue in chat" : busy ? "Creating…" : word.retrying && (kind?.key === "word" || kind?.key === "sheet" || kind?.key === "docs") ? "Retry initialization" : kind?.make === "panels" ? "Create page" : "Create and edit"
   const refusal = created ? `${created.name} was created but not put in ${created.folder}: ${created.error}` : create.error?.message ?? null
 
   return <CreateSurface open size="lg" restoreOpenerFocus restoreFocusTo={opener} onOpenChange={next => { if (!next) close() }} onSubmit={() => { if (canSubmit) void submit() }} ariaLabel="New artifact">
@@ -250,12 +252,13 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
         {start === "blank" && <p className="text-micro text-muted-foreground-soft">{kind.make === "panels"
           ? "An empty Page. Crews add panels on their next run."
           : kind.make === "canvas" ? "A shared canvas with live presence and retained versions."
+          : kind.key === "docs" ? "A blank document. Share it to write together."
           : `Opens with you holding the lock. Nobody else sees it until you share a version.`}</p>}
       </>}
     </CreateSurfaceBody>
     <CreateSurfaceRefusal message={refusal} />
     <CreateSurfaceFooter
-      hint={kind?.make === "canvas" ? "Collaborative canvas · versions" : kind?.make === "edit" ? "One editor at a time · versions" : kind?.make === "panels" ? "Panels · no versions" : "Versions · comments for the agent"}
+      hint={kind?.key === "docs" ? "Write together · versions" : kind?.make === "canvas" ? "Collaborative canvas · versions" : kind?.make === "edit" ? "One editor at a time · versions" : kind?.make === "panels" ? "Panels · no versions" : "Versions · comments for the agent"}
       onCancel={busy ? undefined : close} guardCancel={false}
       primaryLabel={primaryLabel} primaryDisabled={!canSubmit} busy={busy} onPrimary={() => void submit()} />
   </CreateSurface>

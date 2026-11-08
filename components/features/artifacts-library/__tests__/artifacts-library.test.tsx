@@ -260,10 +260,19 @@ it("offers New artifact in the bar, on Home and in the empty state to a member w
   expect(screen.getAllByRole("button", { name: "New artifact" })).toHaveLength(1)
   fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
   for (const name of ["New App", "New Dashboard", "New Slides"]) expect(screen.getByRole("button", { name })).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "New Docs" })).toBeNull()
   view.unmount()
   state.pages = []
   renderLibrary()
   expect(screen.getAllByRole("button", { name: "New artifact" })).toHaveLength(2)
+})
+
+it("offers New Docs once the server confirms the Doc format, opening the dialog on Docs (#5153)", () => {
+  state.caps = { docs: true }
+  renderLibrary()
+  fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
+  fireEvent.click(screen.getByRole("button", { name: "New Docs" }))
+  expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("docs")
 })
 
 it("a just-created artifact opens by its slug, never as an ID, so it does not land on not available", () => {

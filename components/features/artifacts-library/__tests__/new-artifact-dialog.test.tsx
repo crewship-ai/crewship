@@ -7,7 +7,7 @@ import type { ArtifactCapabilities } from "@/components/features/chat/artifact-c
 
 const m = vi.hoisted(() => ({
   fetch: vi.fn(), push: vi.fn(), addPage: vi.fn(), wordCreate: vi.fn(), createWorkbook: vi.fn(),
-  caps: {} as ArtifactCapabilities, gridcraft: true, pages: [] as PageView[], folders: [] as PageFolderView[],
+  caps: {} as ArtifactCapabilities, gridcraft: true, docData: true, pages: [] as PageView[], folders: [] as PageFolderView[],
 }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: m.fetch, broadcastSessionExpired: vi.fn() }))
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push: m.push }) }))
@@ -19,7 +19,7 @@ vi.mock("@/hooks/use-page-folders", async importOriginal => ({
   usePageFolderMutations: () => ({ addPage: { mutateAsync: m.addPage } }),
 }))
 vi.mock("@/components/features/pages/use-word-document-creation", () => ({
-  useWordDocumentCreation: () => ({ allowed: true, formatAvailable: true, wordFormat: "native", wordFormatAvailable: true, availability: { gridcraftNative: m.gridcraft }, frozen: false, retrying: false, create: { mutateAsync: m.wordCreate, isPending: false } }),
+  useWordDocumentCreation: () => ({ allowed: true, formatAvailable: true, wordFormat: "native", wordFormatAvailable: true, availability: { gridcraftNative: m.gridcraft, data: m.docData }, frozen: false, retrying: false, create: { mutateAsync: m.wordCreate, isPending: false } }),
 }))
 vi.mock("@/lib/workbooks/create", () => ({ createWorkbook: m.createWorkbook }))
 
@@ -35,6 +35,7 @@ const response = (value: unknown, status = 200) => Promise.resolve({ ok: status 
 beforeEach(() => {
   m.caps = { ...ALL }
   m.gridcraft = true
+  m.docData = true
   m.pages = []
   m.folders = [folder("sales", "Sales"), folder("board", "Board", { canAcceptPages: false })]
   for (const f of [m.fetch, m.push, m.addPage, m.wordCreate, m.createWorkbook]) f.mockReset()
@@ -253,4 +254,25 @@ it("returns focus to the New artifact button that opened it once the library unm
   unmount()
   await waitFor(() => expect(document.activeElement).toBe(opener))
   opener.remove()
+})
+
+// G03 (#5153): Docs is offered in New artifact and creates the collaborative Doc format.
+it("creates Docs in the Doc format and opens it by its address", async () => {
+  m.caps = { ...ALL, docs: true, words: false }
+  m.wordCreate.mockResolvedValue({ slug: "team-notes", pagesVersion: 0 })
+  const { onCreated } = mount({ defaultKind: "docs" })
+  expect(kinds().map(b => b.getAttribute("data-kind"))).toEqual(["project", "dashboard", "page", "docs", "sheet", "slides"])
+  expect(screen.getByRole("button", { name: /^Docs/ })).toHaveAttribute("aria-pressed", "true")
+  name("Team notes")
+  fireEvent.click(create())
+  await waitFor(() => expect(onCreated).toHaveBeenCalledWith("team-notes"))
+  expect(m.wordCreate).toHaveBeenCalledWith({ name: "Team notes", slug: "team-notes", format: "doc" })
+})
+
+it("does not create Docs until the server confirms the Doc format", () => {
+  m.caps = { ...ALL, docs: true, words: false }
+  m.docData = false
+  mount({ defaultKind: "docs" })
+  name("Team notes")
+  expect(create()).toBeDisabled()
 })
