@@ -39,7 +39,7 @@ describe("proposal review", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reject proposal" }))
     expect(c.reject).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole("button", { name: "Confirm reject" }))
-    await waitFor(() => expect(c.reject).toHaveBeenCalledWith("pr1", expect.any(String)))
+    await waitFor(() => expect(c.reject).toHaveBeenCalledWith("pr1", expect.any(Number), expect.any(String)))
   })
   it("a conflict refuses the whole proposal and says nothing was applied", async () => {
     const c = client({ accept: vi.fn().mockResolvedValue({ status: "conflict" }) }); const onAccepted = await open(c, true, 7)

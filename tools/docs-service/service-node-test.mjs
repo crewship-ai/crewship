@@ -882,3 +882,114 @@ test('comments, replies and resolve are closed human requests anchored by the en
     assert.equal(model.acquisitions, 0); assert.equal(model.commits, 0);
   } finally { await f.close(); }
 });
+
+test('schema4 agents propose without changing content; a human accepts exactly the proposal and formatting round-trips', async () => {
+  const model = authorityModel(), proposals = new Map();
+  const bold = { type: 'bold', attrs: {} }, italic = { type: 'italic', attrs: {} }, strike = { type: 'strike', attrs: {} };
+  const body = { type: 'doc', content: [
+    { type: 'paragraph', attrs: { id: 'lead' }, content: [{ type: 'text', text: 'Keep ' }, { type: 'text', text: 'bold', marks: [bold] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'gone', marks: [strike] }, { type: 'text', text: ' words.' }] },
+    { type: 'codeBlock', attrs: { id: 'code', language: 'python' }, content: [{ type: 'text', text: 'print("hi")' }] },
+    { type: 'blockquote', attrs: { id: 'quote' }, content: [{ type: 'paragraph', attrs: { id: 'quote-p' }, content: [{ type: 'text', text: 'Quoted', marks: [italic] }] }] },
+    { type: 'taskList', attrs: { id: 'tasks' }, content: [{ type: 'taskItem', attrs: { id: 'done', checked: true }, content: [{ type: 'paragraph', attrs: { id: 'done-p' }, content: [{ type: 'text', text: 'Ship it' }] }] }] },
+  ] };
+  const doc = create(body, 4); model.state = { ...model.state, schema: 4, snapshot: snapshot(doc) }; doc.destroy();
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'propose') {
+      assert.ok(req.headers.authorization.startsWith('Bearer agtv2.'));
+      const before = data.semantic.rich.before, after = data.semantic.rich.after;
+      const find = (node, id) => node.attrs?.id === id ? node : (node.content ?? []).map(child => find(child, id)).find(Boolean);
+      proposals.set(data.id, { id: data.id, actor: 'agent:a:r', run_id: 'r', target: data.target, base_hash: data.ifHashes[data.target], text: data.semantic.text, generation: data.generation, base_rev: data.ifRev, status: 'open', created_at: 'now', base_content: find(before, data.target), proposed_content: find(after, data.target) });
+      return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, actor: 'agent:a:r', kind: 'proposal' };
+    }
+    if (op === 'proposals') return [...proposals.values()].map(({ base_content: _b, proposed_content: _p, ...p }) => p);
+    if (op === 'proposal') { const p = proposals.get(data.id); if (!p) { res.writeHead(404); return { error: 'proposal not found' }; } return p; }
+    if (op === 'proposal-reject') { proposals.get(data.proposal).status = 'rejected'; return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, kind: 'proposal-reject' }; }
+    if (op === 'commit' && data.proposal) proposals.get(data.proposal).status = 'accepted';
+    return model.handle(op, data, req, res);
+  });
+  await f.start();
+  try {
+    const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
+    const state = (await read(f)).body, lead = state.outline.find(b => b.id === 'lead');
+    const request = { id: 'proposal-1', schema: 4, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target: 'lead', ifHash: lead.hash, text: 'Keep bold and gone words, now revised.' };
+    for (const bad of [{ ...request, extra: 1 }, { ...request, text: undefined }]) assert.equal((await call(f.socket, '/v1/documents/p/propose', JSON.parse(JSON.stringify(bad)), agent)).status, 400);
+    assert.equal((await call(f.socket, '/v1/documents/p/propose', request)).status, 403, 'a human session never proposes as an agent');
+    assert.equal((await call(f.socket, '/v1/documents/p/propose', { ...request, ifHash: '0'.repeat(64) }, agent)).status, 409);
+    assert.equal((await call(f.socket, '/v1/documents/p/propose', { ...request, target: 'code', ifHash: state.outline.find(b => b.id === 'code').hash }, agent)).status, 400, 'code blocks stay outside agent admission');
+    const proposed = await call(f.socket, '/v1/documents/p/propose', request, agent);
+    assert.equal(proposed.status, 200); assert.equal(proposed.body.kind, 'proposal');
+    assert.equal(model.commits, 0); assert.equal(model.acquisitions, 0); assert.equal(model.state.rev, state.rev);
+    const sent = proposals.get('proposal-1');
+    assert.deepEqual(sent.base_content, body.content[0]);
+    assert.deepEqual(sent.proposed_content.content.slice(0, 2), [{ type: 'text', text: 'Keep ' }, { type: 'text', text: 'bold', marks: [bold] }]);
+    assert.equal((await call(f.socket, '/v1/documents/p/proposals', {}, agent)).status, 403);
+    const listed = (await call(f.socket, '/v1/documents/p/proposals', {})).body.proposals;
+    assert.equal(listed.length, 1); assert.equal(listed[0].status, 'open');
+    const detail = (await call(f.socket, '/v1/documents/p/proposal', { proposal: 'proposal-1' })).body;
+    assert.deepEqual(detail.base_content, body.content[0]);
+    // A decision is human, closed and against the head the reviewer saw.
+    const decision = { id: 'accept-1', proposal: 'proposal-1', ifRev: state.rev };
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', decision, agent)).status, 403);
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', { ...decision, extra: 1 })).status, 400);
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', { ...decision, ifRev: state.rev - 1 })).status, 409);
+    const accepted = await call(f.socket, '/v1/documents/p/proposal-accept', decision);
+    assert.equal(accepted.status, 200); assert.equal(model.commits, 1);
+    const commit = model.seen.find(entry => entry.op === 'commit').data;
+    assert.equal(commit.kind, 'human'); assert.equal(commit.proposal, 'proposal-1'); assert.deepEqual(commit.ifHashes, { lead: lead.hash });
+    const after = (await read(f)).body;
+    assert.deepEqual(after.content.content.slice(1), body.content.slice(1), 'code language, quote and task list are untouched');
+    assert.deepEqual(after.content.content[0].content.slice(0, 3), body.content[0].content.slice(0, 3));
+    assert.equal(after.content.content[0].content.map(part => part.text).join(''), request.text);
+    assert.equal(after.content.content[0].content.find(part => part.text === 'gone')?.marks?.[0]?.type, 'strike');
+    assert.deepEqual(after.content.content[0], detail.proposed_content, 'the accepted block is exactly the reviewed proposal');
+    // The exact decision retries to its receipt; a second accept is refused.
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', decision)).body.duplicate, true);
+    assert.equal(model.commits, 1);
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', { ...decision, id: 'accept-2', ifRev: after.rev })).status, 409);
+  } finally { await f.close(); }
+});
+
+test('schema4 proposals go stale when their target changes and are rejected without a content write', async () => {
+  const model = authorityModel(), proposals = new Map();
+  const doc = create({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'a' }, content: [{ type: 'text', text: 'Alpha' }] }, { type: 'paragraph', attrs: { id: 'b' }, content: [{ type: 'text', text: 'Beta' }] }] }, 4);
+  model.state = { ...model.state, schema: 4, snapshot: snapshot(doc) }; doc.destroy();
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'propose') { proposals.set(data.id, { id: data.id, actor: 'agent:a:r', target: data.target, base_hash: data.ifHashes[data.target], text: data.semantic.text, generation: data.generation, base_rev: data.ifRev, status: 'open', created_at: 'now' }); return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, kind: 'proposal' }; }
+    if (op === 'proposals') return [...proposals.values()];
+    if (op === 'proposal') return proposals.get(data.id);
+    if (op === 'proposal-reject') { proposals.get(data.proposal).status = 'rejected'; return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, kind: 'proposal-reject' }; }
+    return model.handle(op, data, req, res);
+  });
+  await f.start();
+  try {
+    const agent = { Authorization: 'Bearer agtv2.synthetic-run' }, state = (await read(f)).body;
+    const hash = id => state.outline.find(b => b.id === id).hash;
+    for (const [id, target] of [['p-a', 'a'], ['p-b', 'b']]) assert.equal((await call(f.socket, '/v1/documents/p/propose', { id, schema: 4, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target, ifHash: hash(target), text: target + ' changed' }, agent)).status, 200);
+    // A human edits block a directly: the proposal on a is stale, b stays open.
+    const human = await call(f.socket, '/v1/documents/p/patch', { id: 'human-edit', schema: 4, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target: 'a', ifHash: hash('a'), text: 'Alpha by hand' });
+    assert.equal(human.status, 200);
+    const now = (await read(f)).body;
+    const listed = Object.fromEntries((await call(f.socket, '/v1/documents/p/proposals', {})).body.proposals.map(p => [p.id, p.status]));
+    assert.deepEqual(listed, { 'p-a': 'stale', 'p-b': 'open' });
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-a', proposal: 'p-a', ifRev: now.rev })).status, 409);
+    const commits = model.commits;
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-reject', { id: 'reject-b', proposal: 'p-b', ifRev: now.rev })).status, 200);
+    assert.equal(model.commits, commits); assert.equal(proposals.get('p-b').status, 'rejected');
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-reject', { id: 'reject-b2', proposal: 'p-b', ifRev: now.rev })).status, 409);
+  } finally { await f.close(); }
+});
+
+test('schema3 documents refuse proposals; agent patch and checkpoint paths are unchanged', async () => {
+  const model = authorityModel();
+  const doc = create({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'a' }, content: [{ type: 'text', text: 'Alpha' }] }] }, 3);
+  model.state = { ...model.state, schema: 3, snapshot: snapshot(doc) }; doc.destroy();
+  const f = await fixture(model.handle); await f.start();
+  try {
+    const state = (await read(f)).body, hash = state.outline[0].hash;
+    const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
+    assert.equal((await call(f.socket, '/v1/documents/p/propose', { id: 'p3', schema: 3, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target: 'a', ifHash: hash, text: 'x' }, agent)).status, 409);
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'acc3', proposal: 'p3', ifRev: state.rev })).status, 409);
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'd3', schema: 3, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target: 'a', ifHash: hash, text: 'Alpha two' }, agent)).status, 200);
+    assert.equal(model.commits, 1);
+  } finally { await f.close(); }
+});

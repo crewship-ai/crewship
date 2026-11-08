@@ -24,7 +24,9 @@ type DocumentDraftTarget struct {
 	Hash   string  `json:"hash"`
 }
 type DocumentDraftView struct {
-	PageID     string                `json:"page_id"`
+	PageID string `json:"page_id"`
+	// Mode "propose" is a schema-4 mandate: prepare builds a proposal packet.
+	Mode       string                `json:"mode,omitempty"`
 	Schema     int                   `json:"schema"`
 	Rev        int64                 `json:"rev"`
 	Generation int64                 `json:"generation"`
@@ -155,6 +157,9 @@ func PrepareDocumentDraft(raw []byte) (DocumentDraftPacket, error) {
 		return DocumentDraftPacket{}, err
 	}
 	v := in.View
+	if v.Mode != "" {
+		return DocumentDraftPacket{}, errors.New("this run may only propose; use doc draft prepare, then doc draft propose")
+	}
 	if v.Schema != 3 || v.Rev < 0 || v.Rev == math.MaxInt64 || v.Generation < 0 || !draftID.MatchString(v.PageID) || v.Epoch == "" || len(v.Epoch) > 2048 || !draftID.MatchString(in.MutationID) || !draftID.MatchString(in.MutationID+"-checkpoint") || !draftID.MatchString(in.Target) {
 		return DocumentDraftPacket{}, errors.New("invalid original draft view or mutation identity")
 	}
@@ -179,6 +184,143 @@ func PrepareDocumentDraft(raw []byte) (DocumentDraftPacket, error) {
 	}
 	return p, nil
 }
+
+// PrepareDocumentDraftOrProposal prepares the packet the view's mode admits:
+// a direct draft packet, or a proposal packet on a propose-mode view.
+func PrepareDocumentDraftOrProposal(raw []byte) (any, error) {
+	var probe struct {
+		View struct {
+			Mode string `json:"mode"`
+		} `json:"view"`
+	}
+	if json.Unmarshal(raw, &probe) == nil && probe.View.Mode == "propose" {
+		return PrepareDocumentProposal(raw)
+	}
+	return PrepareDocumentDraft(raw)
+}
+
+// DocumentProposalPacket is one immutable proposal on a schema-4 document.
+// It changes nothing until a human accepts it.
+type DocumentProposalPacket struct {
+	Generation int64              `json:"generation"`
+	Proposal   DocumentDraftPatch `json:"proposal"`
+}
+
+// PrepareDocumentProposal builds a proposal packet from a propose-mode view.
+func PrepareDocumentProposal(raw []byte) (DocumentProposalPacket, error) {
+	var in DocumentDraftPrepare
+	if err := DecodeDocumentDraft(raw, &in); err != nil {
+		return DocumentProposalPacket{}, err
+	}
+	if err := requiredDraftFields(raw, "view", "target", "text", "mutation_id"); err != nil {
+		return DocumentProposalPacket{}, err
+	}
+	var outer map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &outer)
+	if len(outer["view"]) > 64<<10 {
+		return DocumentProposalPacket{}, errors.New("draft view exceeds 64 KiB")
+	}
+	if err := requiredDraftFields(outer["view"], "page_id", "mode", "schema", "rev", "generation", "epoch", "targets"); err != nil {
+		return DocumentProposalPacket{}, err
+	}
+	v := in.View
+	if v.Mode != "propose" || v.Schema != 4 || v.Rev < 0 || v.Rev == math.MaxInt64 || v.Generation < 0 || !draftID.MatchString(v.PageID) || v.Epoch == "" || len(v.Epoch) > 2048 || !draftID.MatchString(in.MutationID) || !draftID.MatchString(in.Target) || len(in.Text) > 100000 {
+		return DocumentProposalPacket{}, errors.New("invalid original propose view or proposal identity")
+	}
+	hash := ""
+	seen := map[string]bool{}
+	for _, t := range v.Targets {
+		if seen[t.ID] || !draftID.MatchString(t.ID) || !draftHash.MatchString(t.Hash) || (t.Type != "paragraph" && t.Type != "heading") {
+			return DocumentProposalPacket{}, errors.New("unsupported or ambiguous draft target")
+		}
+		seen[t.ID] = true
+		if t.ID == in.Target {
+			hash = t.Hash
+		}
+	}
+	if hash == "" {
+		return DocumentProposalPacket{}, errors.New("target is outside this run's mandate")
+	}
+	p := DocumentProposalPacket{Generation: v.Generation, Proposal: DocumentDraftPatch{ID: in.MutationID, Schema: 4, PageID: v.PageID, Epoch: v.Epoch, IfRev: v.Rev, Target: in.Target, IfHash: hash, Text: in.Text}}
+	rawPacket, _ := json.Marshal(p)
+	if len(rawPacket)+64 > 64<<10 {
+		return DocumentProposalPacket{}, errors.New("prepared packet exceeds 64 KiB response limit")
+	}
+	return p, nil
+}
+
+// ParseDocumentProposalPacket accepts a bare or prepared proposal packet.
+func ParseDocumentProposalPacket(raw []byte) (DocumentProposalPacket, error) {
+	var fields map[string]json.RawMessage
+	if err := DecodeDocumentDraft(raw, &fields); err != nil {
+		return DocumentProposalPacket{}, err
+	}
+	if _, wrapped := fields["packet"]; wrapped {
+		var prepared struct {
+			Status string          `json:"status"`
+			Packet json.RawMessage `json:"packet"`
+		}
+		if err := DecodeDocumentDraft(raw, &prepared); err != nil || prepared.Status != "prepared_unsaved" {
+			return DocumentProposalPacket{}, errors.New("invalid prepared proposal wrapper")
+		}
+		raw = prepared.Packet
+	}
+	var p DocumentProposalPacket
+	if err := DecodeDocumentDraft(raw, &p); err != nil {
+		return p, err
+	}
+	if err := requiredDraftFields(raw, "generation", "proposal"); err != nil {
+		return p, err
+	}
+	var obj map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &obj)
+	if err := requiredDraftFields(obj["proposal"], "id", "schema", "page_id", "epoch", "ifRev", "target", "ifHash", "text"); err != nil {
+		return p, err
+	}
+	a := p.Proposal
+	if p.Generation < 0 || a.Schema != 4 || !draftID.MatchString(a.ID) || !draftID.MatchString(a.PageID) || !draftID.MatchString(a.Target) || !draftHash.MatchString(a.IfHash) || a.Epoch == "" || len(a.Epoch) > 2048 || a.IfRev < 0 || a.IfRev == math.MaxInt64 {
+		return p, errors.New("inconsistent immutable proposal packet")
+	}
+	return p, nil
+}
+
+// ApplyDocumentProposal sends one immutable proposal. "proposed" means it is
+// stored for human review; the document itself is unchanged.
+func ApplyDocumentProposal(p DocumentProposalPacket, exchange DocumentDraftExchange) (DocumentDraftOutcome, error) {
+	out := DocumentDraftOutcome{Status: "outcome_unknown"}
+	rawPacket, _ := json.Marshal(p)
+	if _, err := ParseDocumentProposalPacket(rawPacket); err != nil {
+		out.Error = err.Error()
+		return out, err
+	}
+	body, _ := json.Marshal(map[string]any{"operation": "propose", "generation": p.Generation, "request": p.Proposal})
+	status, raw, err := exchange(http.MethodPost, body)
+	if err != nil {
+		out.Error = "proposal outcome unknown; retain the exact packet for retry"
+		return out, errors.New(out.Error)
+	}
+	if len(raw) > 64<<10 || !json.Valid(raw) {
+		out.Error = "invalid bounded proposal response; retain the exact packet"
+		return out, errors.New(out.Error)
+	}
+	if status < 200 || status >= 300 {
+		out.Error = fmt.Sprintf("proposal HTTP%d denied or unavailable; retain the exact packet", status)
+		return out, errors.New(out.Error)
+	}
+	var receipt struct {
+		ID    string `json:"id"`
+		Rev   int64  `json:"rev"`
+		Epoch string `json:"epoch"`
+		Kind  string `json:"kind"`
+	}
+	if json.Unmarshal(raw, &receipt) != nil || receipt.ID != p.Proposal.ID || receipt.Rev != p.Proposal.IfRev || receipt.Epoch != p.Proposal.Epoch || receipt.Kind != "proposal" {
+		out.Error = "proposal receipt does not confirm this packet"
+		return out, errors.New(out.Error)
+	}
+	out.Status, out.Patch = "proposed", raw
+	return out, nil
+}
+
 func ParseDocumentDraftPacket(raw []byte) (DocumentDraftPacket, error) {
 	var fields map[string]json.RawMessage
 	if err := DecodeDocumentDraft(raw, &fields); err != nil {
