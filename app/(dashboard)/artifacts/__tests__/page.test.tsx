@@ -1,10 +1,26 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react"
-import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const nav = vi.hoisted(() => ({ linkUnavailable: false, params: new URLSearchParams("workspace_id=ws1"), replace: vi.fn(), push: vi.fn() }))
+const nav = vi.hoisted(() => ({
+  linkUnavailable: false, params: new URLSearchParams("workspace_id=ws1"), replace: vi.fn(), push: vi.fn(), access: "trusted" as string,
+  read: vi.fn(), wire: null as Record<string, unknown> | null, loading: false, denied: false, catalog: vi.fn(),
+}))
 // Like the static export: every ID is served the "_" shell and useParams() keeps returning it.
 vi.mock("next/navigation", () => ({ useSearchParams: () => nav.params, useParams: () => ({ id: "_" }), usePathname: () => window.location.pathname, useRouter: () => ({ replace: nav.replace, push: nav.push }) }))
 vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: "ws1", loading: false, linkUnavailable: nav.linkUnavailable }) }))
+vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => nav.access }))
+vi.mock("@/components/features/pages/restricted-pages", () => ({ RestrictedPages: ({ workspaceId }: { workspaceId: string }) => { nav.catalog(workspaceId); return <p>Restricted pages</p> } }))
+vi.mock("@/hooks/use-pages", async importOriginal => {
+  const original = await importOriginal<typeof import("@/hooks/use-pages")>()
+  return {
+    ...original,
+    usePage: (...args: unknown[]) => {
+      nav.read(...args)
+      const page = nav.wire && !nav.denied ? original.toPageView(nav.wire as never) : null
+      return { page, raw: page ? nav.wire : null, loading: nav.loading, error: nav.denied ? "denied" : null, accessDenied: nav.denied, notFound: false, live: "live" }
+    },
+  }
+})
 vi.mock("@/components/features/artifacts-library/artifacts-library", () => ({
   ArtifactsLibrary: ({ workspaceId, item, version, bySlug, onSelect, onCanonical, filters, onFiltersChange }: {
     workspaceId: string; item: string | null; version?: number; bySlug?: boolean; onSelect: (id: string | null, slug?: string) => void
@@ -23,7 +39,7 @@ import ArtifactsPage from "../page"
 import ArtifactRoute from "../[id]/page"
 
 const at = (path: string) => window.history.replaceState(null, "", path)
-beforeEach(() => { nav.linkUnavailable = false; at("/artifacts"); nav.params = new URLSearchParams("workspace_id=ws1"); nav.replace.mockReset(); nav.push.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true") })
+beforeEach(() => { Object.assign(nav, { access: "trusted", wire: null, loading: false, denied: false }); nav.read.mockReset(); nav.catalog.mockReset(); nav.linkUnavailable = false; at("/artifacts"); nav.params = new URLSearchParams("workspace_id=ws1"); nav.replace.mockReset(); nav.push.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true") })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 it("with the flag off sends saved links to Pages", () => {
@@ -112,12 +128,83 @@ it("opens the version a project link pins, and only for that artifact", () => {
   expect(screen.getByTestId("library").dataset.version).toBe("")
 })
 
+const wire = (extra: Record<string, unknown> = {}) => ({ id: "page-site", slug: "site", name: "Site", owner: "user/u1", reach: ["owner"], ...extra })
+
 it("without the library keeps a project link's identity, workspace and pin on Pages", () => {
   vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "false")
+  nav.wire = wire({ artifact_kind: "project" })
   nav.params = new URLSearchParams("workspace_id=ws1&version=2")
   at("/artifacts/page-site")
   render(<ArtifactRoute />)
+  expect(nav.read).toHaveBeenCalledWith("ws1", "@page-site")
   expect(nav.replace).toHaveBeenCalledWith("/pages/%40page-site?workspace_id=ws1&artifact=1&version=2")
+})
+
+// #5129: generated links name /artifacts/<id> for every kind; a build without
+// the library opens each in its own Pages detail, never the project viewer.
+it.each([
+  ["a native Word", { artifact_kind: "word", has_document: true, native_craft_application: "wordcraft" }],
+  ["a native Sheet", { artifact_kind: "sheet", has_workbook: true }],
+  ["a panel Page", {}],
+])("without the library opens %s at its Pages detail", (_name, extra) => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "false")
+  nav.wire = wire(extra)
+  at("/artifacts/page-site")
+  render(<ArtifactRoute />)
+  expect(nav.replace).toHaveBeenCalledWith("/pages/%40page-site?workspace_id=ws1")
+})
+
+it("without the library a refused read still lands on the Pages detail, which answers it", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "false")
+  nav.denied = true
+  at("/artifacts/page-site")
+  render(<ArtifactRoute />)
+  expect(nav.replace).toHaveBeenCalledWith("/pages/%40page-site?workspace_id=ws1")
+})
+
+it("without the library waits for the page before choosing a Pages address", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "false")
+  nav.loading = true
+  at("/artifacts/page-site")
+  render(<ArtifactRoute />)
+  expect(nav.replace).not.toHaveBeenCalled()
+})
+
+// Restricted member regression (#5129): the shell keeps /artifacts closed to a
+// restricted session; were this route mounted anyway, every /artifacts address
+// renders nothing, reads no page and redirects nowhere, with or without the library.
+describe.each(["true", "false"])("a restricted member with the library %s", library => {
+  it.each([
+    ["the library", "/artifacts", "workspace_id=ws1"],
+    ["an artifact", "/artifacts/page-site", "workspace_id=ws1"],
+    ["a pinned artifact", "/artifacts/page-site", "workspace_id=ws1&version=2"],
+    ["a slug link", "/artifacts", "workspace_id=ws1&item=site"],
+    ["a shared Design", "/artifacts", "workspace_id=ws1&design=1&item=wireframe"],
+  ])("sees and reads nothing at %s", (_name, path, query) => {
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", library)
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true")
+    nav.access = "restricted"
+    nav.params = new URLSearchParams(query)
+    at(path)
+    const view = render(path === "/artifacts" ? <ArtifactsPage /> : <ArtifactRoute />)
+    expect(view.container.textContent).toBe("")
+    expect(nav.catalog).not.toHaveBeenCalled()
+    expect(screen.queryByTestId("library")).toBeNull()
+    expect(screen.queryByTestId("design")).toBeNull()
+    expect(nav.read).not.toHaveBeenCalled()
+    expect(nav.replace).not.toHaveBeenCalled()
+    expect(nav.push).not.toHaveBeenCalled()
+  })
+})
+
+it("decides nothing and reads nothing before the access mode is known", () => {
+  nav.access = "loading"
+  at("/artifacts/page-site")
+  render(<ArtifactRoute />)
+  expect(screen.queryByTestId("library")).toBeNull()
+  expect(screen.queryByText("Restricted pages")).toBeNull()
+  expect(nav.read).not.toHaveBeenCalled()
+  expect(nav.replace).not.toHaveBeenCalled()
 })
 
 it("without the library refuses an unavailable workspace link instead of moving it to Pages", () => {

@@ -2,7 +2,7 @@ import { describe, it, expect, vi, afterEach } from "vitest"
 import { readFileSync } from "node:fs"
 import { parseEnv } from "node:util"
 import { buildProfile, refTargetsMain, RELEASE_FLAGS, UNACCEPTED_FLAGS } from "../../e2e/build-profile"
-import { artifactDesignSystem, artifactSlides, artifactsLibrary, artifactsServerCatalog, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations, pagesOpenArtifacts } from "@/lib/feature-flags"
+import { artifactDesignSystem, artifactSlides, artifactsLibrary, artifactsServerCatalog, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations } from "@/lib/feature-flags"
 
 describe.each([
   ["NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", chatArtifactProjects],
@@ -20,25 +20,6 @@ describe.each([
   it("allows an explicit build-time opt-in", () => {
     vi.stubEnv(name, "true")
     expect(enabled()).toBe(true)
-  })
-})
-
-describe("pagesOpenArtifacts", () => {
-  afterEach(() => vi.unstubAllEnvs())
-
-  it("follows the checked-in build profile", () => {
-    const profile = buildProfile()
-    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", profile.env.NEXT_PUBLIC_ARTIFACTS_LIBRARY)
-    vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", profile.env.NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS)
-    expect(pagesOpenArtifacts()).toBe(profile.name === "release")
-  })
-
-  it("needs the library itself as well as its own opt-in", () => {
-    vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "true")
-    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "false")
-    expect(pagesOpenArtifacts()).toBe(false)
-    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
-    expect(pagesOpenArtifacts()).toBe(true)
   })
 })
 

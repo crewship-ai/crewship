@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 
@@ -57,7 +57,6 @@ beforeEach(() => {
   state.fetch.mockReset()
   state.pages = [page({ artifact_kind: "word", has_document: true, artifact_shared_version: 2, native_craft_application: "wordcraft" })]
   vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
-  vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "true")
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
@@ -138,24 +137,6 @@ it("an old-editor Word that still reads keeps a full-view link, where its editor
   open()
   expect(screen.getByText("saved preview")).toBeInTheDocument()
   expect(screen.getByRole("link", { name: /Open full view/ })).toHaveAttribute("href", "/pages/brief?workspace_id=ws1")
-})
-
-it("with the switch off an old-editor Word keeps its full-view link as before", () => {
-  vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "false")
-  state.pages = [page({ has_document: true })]
-  state.read = "unavailable"
-  open()
-  expect(screen.getByRole("link", { name: /Open full view/ })).toBeInTheDocument()
-})
-
-it("is unchanged with the single-home switch off: lock bar, preview and the full-view link", async () => {
-  vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "false")
-  open()
-  expect(screen.getByTestId("lock-bar")).toBeInTheDocument()
-  expect(screen.getByRole("link", { name: /Open full view/ })).toBeInTheDocument()
-  await waitFor(() => expect(screen.getByText("saved preview")).toBeInTheDocument())
-  expect(state.fetch).not.toHaveBeenCalled()
-  expect(screen.queryByTestId("native-host")).toBeNull()
 })
 
 it.each([

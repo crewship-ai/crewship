@@ -68,6 +68,14 @@ type artifactProjectCreate struct {
 	Message       string                `json:"message"`
 }
 
+// artifactCanonicalURL is the one address of any artifact (#5129): its
+// Artifacts detail by immutable page ID, in its workspace. Documents, projects
+// and every other generated link use it; old /pages addresses still open,
+// because the web app moves them here.
+func artifactCanonicalURL(pageID, workspaceID string) string {
+	return artifactProjectURL(pageID, workspaceID, 0)
+}
+
 // artifactProjectURL is where a project response sends a person: its
 // Artifacts detail by immutable page ID (#4995), in the workspace it belongs
 // to. A positive version pins that version (a share link opens the shared

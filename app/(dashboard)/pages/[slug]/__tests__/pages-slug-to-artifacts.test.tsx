@@ -3,16 +3,17 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { AccessMode } from "@/hooks/use-access-mode"
 import { toPageView, type WirePage } from "@/hooks/use-pages"
 
-// /pages/<slug> hands one page to its Artifacts detail behind the same switch
-// as the overview; reference links, pins, edit addresses, restricted members
-// and anything that cannot be resolved to an ID stay on Pages.
+// /pages/<slug> hands one page to its Artifacts detail whenever the library is
+// on (#5129); reference links, edit addresses, restricted members and anything
+// that cannot be resolved to an ID stay on Pages.
 const state = vi.hoisted(() => ({
   query: "workspace_id=ws1", slug: "brief", access: "trusted" as AccessMode, replace: vi.fn(), read: vi.fn(),
   wire: null as Record<string, unknown> | null, loading: false, error: null as string | null, denied: false, session: "authenticated" as string,
+  workspace: "ws1",
 }))
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(state.query), useRouter: () => ({ replace: state.replace, push: vi.fn() }) }))
 vi.mock("@/lib/use-url-segment", () => ({ useUrlSegment: () => state.slug }))
-vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: "ws1", loading: false, linkUnavailable: false }) }))
+vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: state.workspace, loading: false, linkUnavailable: false }) }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => state.access }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: state.session, data: state.session === "authenticated" ? { user: { id: "u1" } } : null }) }))
 vi.mock("@/components/features/restricted/access-notice", () => ({ useAccessContext: () => ({}) }))
@@ -33,10 +34,9 @@ import { PageDetailClient } from "../page-client"
 const wire = (extra: Record<string, unknown> = {}) => ({ id: "page-brief", slug: "brief", name: "Brief", owner: "user/u1", reach: ["owner"], ...extra })
 
 beforeEach(() => {
-  Object.assign(state, { query: "workspace_id=ws1", slug: "brief", access: "trusted", wire: wire({ artifact_kind: "word", has_document: true }), loading: false, error: null, denied: false, session: "authenticated" })
+  Object.assign(state, { workspace: "ws1", query: "workspace_id=ws1", slug: "brief", access: "trusted", wire: wire({ artifact_kind: "word", has_document: true }), loading: false, error: null, denied: false, session: "authenticated" })
   state.replace.mockReset(); state.read.mockReset()
   vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
-  vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "true")
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
@@ -53,18 +53,15 @@ it.each([
   expect(screen.queryByText(/Pages view/)).toBeNull()
 })
 
-it.each([
-  ["the switch is off", () => vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "false")],
-  ["the library itself is off", () => vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "false")],
-])("stays on Pages without reading the page when %s", (_name, setup) => {
-  setup()
+it("stays on Pages without reading the page when the library is off", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "false")
   render(<PageDetailClient />)
   expect(state.read).not.toHaveBeenCalled()
   expect(state.replace).not.toHaveBeenCalled()
   expect(screen.getByText("Pages view brief")).toBeTruthy()
 })
 
-it.each(["ref=abc", "version=2", "mode=edit"])("keeps an address with %s on Pages", param => {
+it.each(["ref=abc", "mode=edit"])("keeps an address with %s on Pages", param => {
   state.query = `workspace_id=ws1&${param}`
   render(<PageDetailClient />)
   expect(state.read).not.toHaveBeenCalled()
@@ -72,11 +69,28 @@ it.each(["ref=abc", "version=2", "mode=edit"])("keeps an address with %s on Page
   expect(screen.getByText("Pages view brief")).toBeTruthy()
 })
 
-it("keeps restricted members on their Pages catalog", () => {
+it.each(["workspace_id=ws1", "artifact=1&version=2&workspace_id=ws1", "version=2&workspace_id=ws1"])("keeps restricted members on their Pages catalog without reading the page (%s)", query => {
   state.access = "restricted"
+  state.query = query
   render(<PageDetailClient />)
+  expect(state.read).not.toHaveBeenCalled()
   expect(state.replace).not.toHaveBeenCalled()
   expect(screen.getByText("Restricted pages")).toBeTruthy()
+})
+
+it("moves a pinned project address without artifact=1 to the pinned Artifacts detail", () => {
+  vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "true")
+  state.wire = wire({ artifact_kind: "project" })
+  state.query = "version=2&workspace_id=ws1"
+  render(<PageDetailClient />)
+  expect(state.replace).toHaveBeenCalledWith("/artifacts/page-brief?workspace_id=ws1&version=2")
+})
+
+it("keeps a pinned address of a kind without a project viewer on Pages", () => {
+  state.query = "version=2&workspace_id=ws1"
+  render(<PageDetailClient />)
+  expect(state.replace).not.toHaveBeenCalled()
+  expect(screen.getByText("Pages view brief")).toBeTruthy()
 })
 
 it.each([
@@ -109,4 +123,18 @@ it("decides once: navigating to another page inside Pages does not redirect", ()
   view.rerender(<PageDetailClient />)
   expect(state.replace).not.toHaveBeenCalled()
   expect(screen.getByText("Pages view other")).toBeTruthy()
+})
+
+it("follows a workspace switch while the page read is pending", () => {
+  state.loading = true
+  state.wire = null
+  const view = render(<PageDetailClient />)
+  expect(state.read).toHaveBeenLastCalledWith("ws1", "brief")
+  state.workspace = "ws2"
+  state.loading = false
+  state.wire = wire({ artifact_kind: "word", has_document: true })
+  view.rerender(<PageDetailClient />)
+  expect(state.read).toHaveBeenLastCalledWith("ws2", "brief")
+  expect(state.replace).toHaveBeenCalledWith("/artifacts/page-brief?workspace_id=ws2")
+  expect(state.replace).not.toHaveBeenCalledWith("/artifacts/page-brief?workspace_id=ws1")
 })

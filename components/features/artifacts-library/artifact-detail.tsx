@@ -10,7 +10,7 @@ import { useDocumentViewerRead } from "@/hooks/use-document-viewer-read"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import type { NativeCraftHostStatus } from "@/components/features/pages/native-craft-editor-host"
 import { formatRelativeShort } from "@/lib/time"
-import { artifactsDesign, pagesOpenArtifacts } from "@/lib/feature-flags"
+import { artifactsDesign, artifactsLibrary } from "@/lib/feature-flags"
 import { ArtifactViewerProvider } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
 import { ArtifactViewerPanel } from "@/components/features/chat/artifact-context/viewer/artifact-viewer-panel"
@@ -48,7 +48,7 @@ function WordPreview({ workspaceId, item, onStatus }: { workspaceId: string; ite
       // A Word without a version head is from the old editor, which this environment no longer runs.
       : !item.native ? "This document is from an older version of the editor and does not open here. Nothing was changed."
         : read.status === "unavailable" ? "The document service is not answering right now, so there is no preview. Nothing was changed."
-          : pagesOpenArtifacts() ? "The document preview could not be loaded. Nothing was changed." : "The document preview could not be loaded. The full view shows it."}
+          : artifactsLibrary() ? "The document preview could not be loaded. Nothing was changed." : "The document preview could not be loaded. The full view shows it."}
   </p>
   return <div className="rounded-card border bg-card">
     <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} />
@@ -161,13 +161,13 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   const pageContent = item.kind === "page" && Boolean(item.pageId)
   // Behind the single-home switch a native Word or Sheet is edited here, in the
   // one Craft editor and its lease; /pages/<slug> sends it back here.
-  const nativeEditor = pagesOpenArtifacts() && item.native && (item.kind === "word" || item.kind === "sheet") && Boolean(item.pageId)
+  const nativeEditor = artifactsLibrary() && item.native && (item.kind === "word" || item.kind === "sheet") && Boolean(item.pageId)
   // An old-editor Word opens elsewhere only in the old editor, which reads the
   // same saved document as the preview here; behind the switch the link stays
   // only once that read succeeds.
   const [legacyRead, setLegacyRead] = useState<string>()
   const legacyWord = item.kind === "word" && !item.native
-  const fullViewOpens = !(pagesOpenArtifacts() && legacyWord && legacyRead !== "ready")
+  const fullViewOpens = !(artifactsLibrary() && legacyWord && legacyRead !== "ready")
   const inline = projectPreview || pageContent || design
   const fullView = !inline && item.kind !== "design" && !nativeEditor && fullViewOpens
   // A pinned address (a shared-version link) opens that version, not Latest.

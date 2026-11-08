@@ -8,6 +8,9 @@ vi.mock('next/navigation',()=>({useSearchParams:()=>m.params}))
 vi.mock('@/hooks/use-auth',()=>({useSession:()=>m.session}))
 vi.mock('@/hooks/use-page-workspace',()=>({usePageWorkspace:()=>m.workspace}))
 vi.mock('@/lib/api-fetch',()=>({apiFetch:m.fetch}))
+const r=vi.hoisted(()=>({access:'trusted' as string}))
+vi.mock('@/hooks/use-access-mode',()=>({useAccessMode:()=>r.access}))
+vi.mock('@/components/features/artifacts-library/legacy-pages-redirect',()=>({LegacyPagesRedirect:({target,children}:{target:{reference:string;workspaceId:string};children:unknown})=><div data-testid="resolve" data-reference={target.reference} data-ws={target.workspaceId}>{children as never}</div>}))
 vi.mock('../native-craft-editor-host',()=>({NativeCraftEditorHost:(props:unknown)=>{m.host(props);return <div>Full native Word</div>}}))
 vi.mock('../native-craft-preview',()=>({NativeCraftPreview:(props:unknown)=>{m.preview(props);return <div>Shared native preview</div>}}))
 const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve}}
@@ -62,4 +65,19 @@ it('does not open either surface when legacy enabled lacks explicit edit and pre
  m.fetch.mockResolvedValue(new Response(JSON.stringify({enabled:true})))
  render(<CraftPage/>);await screen.findByText('Nativní editor není zapnutý.')
  expect(m.host).not.toHaveBeenCalled();expect(m.preview).not.toHaveBeenCalled()
+})
+
+// #5129: with the library on, a trusted session opens the document at its
+// Artifacts detail; a restricted session and the library-off build keep this route.
+it('with the library on resolves a trusted session to the Artifacts detail, keeping this editor as the fallback',async()=>{
+ vi.stubEnv('NEXT_PUBLIC_ARTIFACTS_LIBRARY','true');r.access='trusted'
+ render(<CraftPage/>)
+ expect(screen.getByTestId('resolve').dataset).toMatchObject({reference:'@p',ws:'w'})
+ await screen.findByText('Full native Word')
+})
+it.each([['restricted','true'],['trusted','false']])('keeps a %s session with the library %s on this route',async(access,library)=>{
+ vi.stubEnv('NEXT_PUBLIC_ARTIFACTS_LIBRARY',library);r.access=access
+ render(<CraftPage/>)
+ expect(screen.queryByTestId('resolve')).toBeNull()
+ await screen.findByText('Full native Word')
 })

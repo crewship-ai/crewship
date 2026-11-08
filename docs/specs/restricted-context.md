@@ -40,6 +40,8 @@ The web app follows the same rule (#2861):
 - **Mixed membership.** A member restricted in workspace A and trusted in B
   sees the restricted screens in B as well: `/routines` shows private
   routines and `/pages` (and `/pages/<slug>`) shows declared Page actions.
+  A restricted session is never redirected from `/pages` to `/artifacts`
+  (#5129); `/artifacts` stays outside its surfaces.
 - **Access changes while open.** The app re-reads the workspace list every
   60 seconds while the tab is visible and when it becomes visible again; an
   unchanged answer changes nothing. Turning restricted closes the socket and

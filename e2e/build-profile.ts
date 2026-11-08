@@ -7,7 +7,6 @@ import { parseEnv } from "node:util"
 // same tests verify either build instead of being ignored on the release.
 export const RELEASE_FLAGS = [
   "NEXT_PUBLIC_ARTIFACTS_LIBRARY",
-  "NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS",
   "NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT",
   "NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS",
   "NEXT_PUBLIC_CHAT_CRAFT_LEASE",

@@ -634,3 +634,37 @@ for (const width of [1280, 390]) {
     }
   })
 }
+
+// #5129: old Pages links move to /artifacts/<id> for a trusted session once the
+// library is on. A restricted member is never moved and sees exactly what they
+// saw before: their Page actions catalog on every /pages address, no Page
+// detail read (GET /api/v1/pages/{slug} is not on the allowlist), and
+// /artifacts outside their access.
+test("restricted member with old Pages links and a canonical link sees nothing new", async ({ page }) => {
+  const forbidden: string[] = []
+  await page.route("**/api/**", async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname
+    const key = `${request.method()} ${path}`
+    if (!ALLOWED.some((re) => re.test(key))) {
+      forbidden.push(key)
+      return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Resource not found" }) })
+    }
+    let body: unknown = []
+    if (path === "/api/auth/session") body = { user: { id: "u-r", name: "Rita", email: "rita@example.test" }, expires: "2099-01-01T00:00:00Z" }
+    else if (path === "/api/auth/csrf") body = { csrfToken: "t" }
+    else if (path === "/api/v1/workspaces") body = ROWS
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+  })
+  for (const link of ["/pages?workspace_id=ws-a", "/pages/brief?workspace_id=ws-a", "/pages/%40page-brief?workspace_id=ws-a", "/pages/brief?artifact=1&version=2&workspace_id=ws-a", "/pages?ref=page-brief&workspace_id=ws-a"]) {
+    await page.goto(link)
+    await expect(page.getByText("No Page actions shared with you yet")).toBeVisible()
+    await page.waitForTimeout(1_000)
+    expect(new URL(page.url()).pathname, link).toMatch(/^\/pages(\/|$)/)
+  }
+  await page.goto("/artifacts/page-brief?workspace_id=ws-a")
+  await expect(page.getByText(/isn’t part of your access/)).toBeVisible()
+  await page.waitForTimeout(1_000)
+  expect(new URL(page.url()).pathname).toBe("/artifacts/page-brief")
+  expect(forbidden).toEqual([])
+})

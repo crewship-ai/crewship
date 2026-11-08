@@ -59,7 +59,8 @@ variable; the `url` that commands return, `/artifacts/<page-id>?workspace_id=<wo
 opens the artifact in the web app. Older `/pages/<slug>?artifact=1` links
 still work: with the Artifacts library in the build they redirect to
 `/artifacts/<page-id>` with the same workspace and version; without it they
-open the Pages project viewer.
+open the Pages project viewer. `crewship doc create` returns the same
+canonical `url` for a new document.
 
 Credentials and roles:
 

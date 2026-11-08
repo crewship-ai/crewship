@@ -1,14 +1,16 @@
 "use client"
 
-import { useEffect } from "react"
+import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import dynamic from "next/dynamic"
 import { Skeleton } from "@/components/ui/skeleton"
 import { usePageWorkspace } from "@/hooks/use-page-workspace"
+import { useAccessMode } from "@/hooks/use-access-mode"
+import { usePage } from "@/hooks/use-pages"
 import { artifactsDesign, artifactsLibrary } from "@/lib/feature-flags"
 import { ArtifactsLibrary } from "./artifacts-library"
 import { filtersFromParams, filtersToParams } from "./library-filter"
-import { versionPin } from "./library-items"
+import { libraryItems, versionPin } from "./library-items"
 
 const DesignEditor = dynamic(() => import("@/components/features/artifacts-design/design-editor").then(module => module.DesignEditor), { ssr: false })
 
@@ -29,30 +31,33 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
   const design = artifactsDesign()
   const enabled = artifactsLibrary() || design
   const { workspaceId, loading, linkUnavailable } = usePageWorkspace()
+  // Session-level: one restricted membership restricts every request (#2861).
+  const accessMode = useAccessMode()
   const workspaceQuery = new URLSearchParams()
   const linked = params?.get("workspace_id")
   if (linked) workspaceQuery.set("workspace_id", linked)
 
   const pinned = versionPin(params?.get("version"))
+  // A restricted member sees nothing here, exactly as before (#5129): the
+  // shell does not open /artifacts for them (lib/restricted-surfaces.ts maps
+  // their Page actions to /pages only) and the library reads
+  // (GET /api/v1/pages, GET /api/v1/pages/{slug}) are outside the restricted
+  // allowlist. Should the shell ever mount this route for such a session, it
+  // still reads, opens and redirects nothing.
+  const restricted = accessMode === "restricted"
+  // Without the library an ID address opens on Pages; its kind decides how.
+  const resolveOnPages = !enabled && !restricted && accessMode !== "loading" && Boolean(item) && !bySlug
   useEffect(() => {
-    if (enabled || loading || linkUnavailable) return
+    if (enabled || loading || linkUnavailable || restricted || accessMode === "loading" || resolveOnPages) return
     // The static export has no server redirect; a saved link still lands on Pages.
-    // An artifact address keeps its identity and pin there: links the API
-    // returns for projects open in the Pages project viewer of a build without
-    // the library.
-    if (item && !bySlug) {
-      const query = new URLSearchParams(workspaceQuery)
-      query.set("artifact", "1")
-      if (pinned !== undefined) query.set("version", String(pinned))
-      router.replace(`/pages/${encodeURIComponent("@" + item)}?${query}`)
-      return
-    }
     router.replace(`/pages${workspaceQuery.size ? `?${workspaceQuery}` : ""}`)
-  }, [enabled, loading, linkUnavailable]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled, loading, linkUnavailable, restricted, accessMode, resolveOnPages]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (linkUnavailable) return <p className="p-6" role="alert">Artifacts unavailable.</p>
+  if (loading || !workspaceId || accessMode === "loading") return enabled || resolveOnPages ? <Skeleton className="m-6 h-12" /> : null
+  if (restricted) return null
+  if (resolveOnPages) return <OpenOnPages workspaceId={workspaceId} id={item!} version={pinned} workspaceQuery={workspaceQuery} />
   if (!enabled) return null
-  if (loading || !workspaceId) return <Skeleton className="m-6 h-12" />
 
   const filters = filtersFromParams(params)
   const select = (id: string | null, slug?: string) => {
@@ -72,4 +77,27 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
   const designSlug = design && params?.get("design") === "1" ? params.get("item") : null
   if (designSlug) return <div className="h-full p-4"><DesignEditor workspaceId={workspaceId} slug={designSlug} initialVersion={pinned} /></div>
   return <ArtifactsLibrary workspaceId={workspaceId} item={item} version={item ? pinned : undefined} bySlug={bySlug} onSelect={select} onCanonical={canonical} filters={filters} onFiltersChange={filter} />
+}
+
+/**
+ * /artifacts/<id> in a build without the library: the canonical address
+ * every generated link uses opens on Pages. A versioned project opens in the
+ * Pages project viewer with its pin (`artifact=1`); every other kind in its
+ * Pages detail. The kind comes from the same page read Pages makes; a refused
+ * or failed read goes to the plain Pages detail, which answers it itself.
+ */
+function OpenOnPages({ workspaceId, id, version, workspaceQuery }: { workspaceId: string; id: string; version?: number; workspaceQuery: URLSearchParams }) {
+  const router = useRouter()
+  const [entry] = useState(id)
+  const detail = usePage(workspaceId, "@" + entry)
+  const settled = Boolean(detail.error || detail.accessDenied) || !detail.loading
+  const project = settled && !detail.error && !detail.accessDenied && detail.page ? libraryItems([detail.page])[0].projectBacked : false
+  useEffect(() => {
+    if (!settled) return
+    const query = new URLSearchParams(workspaceQuery)
+    if (project) query.set("artifact", "1")
+    if (version !== undefined) query.set("version", String(version))
+    router.replace(`/pages/${encodeURIComponent("@" + entry)}${query.size ? `?${query}` : ""}`)
+  }, [settled]) // eslint-disable-line react-hooks/exhaustive-deps
+  return <Skeleton className="m-6 h-12" />
 }

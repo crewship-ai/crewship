@@ -8,9 +8,24 @@ import {apiFetch} from "@/lib/api-fetch"
 import {NativeCraftPreview} from "@/components/features/pages/native-craft-preview"
 import {NativeCraftEditorHost} from "@/components/features/pages/native-craft-editor-host"
 import {verifyNativeReadLoss} from "@/lib/mooring/native-read-loss"
+import {useAccessMode} from "@/hooks/use-access-mode"
+import {artifactsLibrary} from "@/lib/feature-flags"
+import {legacyPagesTarget} from "@/components/features/artifacts-library/legacy-pages-url"
+import {LegacyPagesRedirect} from "@/components/features/artifacts-library/legacy-pages-redirect"
 
 interface Availability {scope:string;state:"loading"|"enabled"|"preview"|"disabled"|"error"}
-export default function CraftPage(){return <Suspense fallback={<p className="p-6">Připojuji…</p>}><NativeWordEntry/></Suspense>}
+export default function CraftPage(){return <Suspense fallback={<p className="p-6">Připojuji…</p>}><CraftEntry/></Suspense>}
+// With the library on, a trusted session opens the document in its Artifacts
+// detail, /artifacts/<id>, which mounts this same editor host (#5129). Any
+// address that does not resolve, and every restricted session, keeps this route.
+// The build-time flag never changes at runtime, so the branch is stable.
+function CraftEntry(){return artifactsLibrary()?<CraftEntryWithLibrary/>:<NativeWordEntry/>}
+function CraftEntryWithLibrary(){
+ const params=useSearchParams(),workspace=usePageWorkspace(),accessMode=useAccessMode()
+ if(workspace.loading||accessMode==='loading')return <p className="p-6">Připojuji…</p>
+ const target=workspace.workspaceId&&!workspace.linkUnavailable?legacyPagesTarget('/pages/craft/editor',params?.toString()??'',{workspaceId:workspace.workspaceId,library:true,trusted:accessMode==='trusted'}):null
+ return target?.to==='resolve'?<LegacyPagesRedirect target={target}><NativeWordEntry/></LegacyPagesRedirect>:<NativeWordEntry/>
+}
 function NativeWordEntry(){
  const params=useSearchParams(),session=useSession(),workspace=usePageWorkspace()
  const pages=params?.getAll('page_id')??[],workspaces=params?.getAll('workspace_id')??[]

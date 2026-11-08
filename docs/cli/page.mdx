@@ -2073,7 +2073,8 @@ optional pinned build image described in the Pages Apps build profile.
 2. Call `page_project` with `operation: "init"`, `slug` and
    `expected_revision: 0` to create the supported React/TypeScript starter.
 3. Use `operation: "read"` to inspect the current revision, file list, Page
-   definition, the page's path in the browser (`page_path`) and exact
+   definition, the page's address in the browser (`page_path`, the canonical
+   `/artifacts/<page-id>?workspace_id=<id>`) and exact
    `@crewship/pages` SDK source. Add `path`
    to read one source file. The starter imports `src/style.css`; arbitrary
    design can be written in TSX/CSS within the supported dependency profile.

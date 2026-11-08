@@ -62,18 +62,17 @@ use **New Doc** in the older view when that view is available.
 The older Pages view still has a **New Doc** button whose **Format** field
 offers **Word** and **Sheet**. It opens at `/pages` on your Crewship address
 (for example `https://crewship.example.com/pages`), but only when
-`/pages` does not redirect to Artifacts. It redirects when both build flags
-`NEXT_PUBLIC_ARTIFACTS_LIBRARY` and `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` are
-`true`; then there is no place in the app to create a Sheet.
+`/pages` does not redirect to Artifacts. It redirects when the build flag
+`NEXT_PUBLIC_ARTIFACTS_LIBRARY` is `true`; then there is no place in the app to
+create a Sheet.
 
 ## Open the editor
 
-Open the native Word document or Sheet in **Artifacts**. With both build flags
-`NEXT_PUBLIC_ARTIFACTS_LIBRARY` and `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` enabled,
-the Craft editor opens inside the detail when the server confirms editing is
+Open the native Word document or Sheet in **Artifacts**. With the build flag
+`NEXT_PUBLIC_ARTIFACTS_LIBRARY` enabled, the Craft editor opens inside the detail when the server confirms editing is
 available. Follow [Take over editing](#take-over-editing) in that editor. In this
-mode there is no full-view link, and `/pages/<slug>` leads back to
-the artifact detail. Readers without edit access get the shared preview.
+mode there is no full-view link, and `/pages/<slug>` and
+`/pages/craft/editor?page_id=<id>` lead to the artifact detail. Readers without edit access get the shared preview.
 
 Outside that mode, Word detail shows the saved version read-only. With the
 lock bar enabled, a bar above it shows:
