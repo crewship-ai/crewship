@@ -25,6 +25,7 @@ import { openInPagesHref, viewsProjectInline, type LibraryItem } from "./library
 import { versioned } from "./library-filter"
 import { KINDS, kindOf, kindText } from "./kinds"
 import { KindBadge, KindTile } from "./kind-tile"
+import { DocsBody, type DocsFrameReport } from "./kinds/docs/docs-view"
 import { ShareDialog } from "./sharing/share-dialog"
 import { AccessTab } from "./sharing/access-tab"
 import { MoveToFolderDialog } from "./sharing/bulk-actions"
@@ -168,7 +169,10 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   const [legacyRead, setLegacyRead] = useState<string>()
   const legacyWord = item.kind === "word" && !item.native
   const fullViewOpens = !(artifactsLibrary() && legacyWord && legacyRead !== "ready")
-  const inline = projectPreview || pageContent || design
+  // Behind the same switch a Docs page (a native Tiptap/Yjs document) opens in its Docs view here; Canvas has no backend yet.
+  const docsPage = artifactsLibrary() && resolved.kind === "docs" && resolved.mode !== "canvas" && Boolean(item.pageId)
+  const [docs, setDocs] = useState<DocsFrameReport | null>(null)
+  const inline = projectPreview || pageContent || design || docsPage
   const fullView = !inline && item.kind !== "design" && !nativeEditor && fullViewOpens
   // A pinned address (a shared-version link) opens that version, not Latest.
   const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const, ...(version === undefined ? {} : { version }) }), [item.slug, version])
@@ -182,8 +186,8 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   ]
   const caps: FrameCapabilities = {
     access: "ok",
-    canEdit: nativeEditor && availability === "enabled" ? craft?.canEdit === true : false,
-    status: nativeStatus ?? catalogStatus(item),
+    canEdit: nativeEditor && availability === "enabled" ? craft?.canEdit === true : docsPage ? docs?.canEdit === true : false,
+    status: docsPage ? docs?.status ?? null : nativeStatus ?? catalogStatus(item),
     agent: {
       ask: { chatHref: prompt => chatAskHref(workspaceId, item.slug, prompt) },
       permission: "The agent reads this artifact with your access. Ask changes nothing.",
@@ -198,6 +202,8 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
     <div className="flex min-h-[520px] flex-1 overflow-hidden"><ArtifactViewerPanel variant="library" /></div>
   </ArtifactViewerProvider>
   else if (pageContent) body = <ArtifactPageContent workspaceId={workspaceId} pageId={item.pageId!} onBack={onBack} />
+  else if (docsPage) body = <DocsBody workspaceId={workspaceId} item={item} onFrame={setDocs}
+    fallback={documentColumn(<WordPreview workspaceId={workspaceId} item={item} />)} />
   else if (nativeEditor) body = <div className="flex min-h-0 flex-1 flex-col">
     {item.kind === "word" && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
     {/* Without the editor here there is none elsewhere either: the fallback offers no Edit, only the saved version. */}
@@ -222,7 +228,8 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
 
   return <ArtifactFrame name={item.name} kind={resolved} folder={item.folder?.name ?? null} caps={caps} onHome={onBack}
     href={item.pageId ? `/artifacts/${encodeURIComponent(item.pageId)}` : undefined} onShare={() => setDialog("share")}
-    statusFoot={item.kind === "word" || item.kind === "sheet" ? "One editor at a time. The lock is a server lease and ends when the tab closes." : `${KINDS[resolved.kind].label}${item.sharedVersion ? ` · shared v${item.sharedVersion}` : ""}${item.ownerLabel ? ` · owned by ${item.ownerLabel}` : ""}`}
+    statusActions={docsPage ? docs?.statusActions : undefined}
+    statusFoot={docsPage && docs?.statusFoot ? docs.statusFoot : item.kind === "word" || item.kind === "sheet" ? "One editor at a time. The lock is a server lease and ends when the tab closes." : `${KINDS[resolved.kind].label}${item.sharedVersion ? ` · shared v${item.sharedVersion}` : ""}${item.ownerLabel ? ` · owned by ${item.ownerLabel}` : ""}`}
     info={<ArtifactInfo workspaceId={workspaceId} item={item} onShare={() => setDialog("share")} />}>
     {body}
     {dialog === "share" && <ShareDialog workspaceId={workspaceId} item={item} open onOpenChange={open => { if (!open) setDialog(null) }} />}

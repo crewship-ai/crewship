@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 
@@ -124,19 +124,31 @@ it("a native Word whose saved preview fails does not point to Pages, which sends
   expect(screen.queryByText(/Open in Pages|Open full view/)).toBeNull()
 })
 
-it.each(["unavailable", "error"])("an old-editor Word whose document answers %s has no Open in Pages: Pages reads the same document", status => {
+it.each(["unavailable", "error"])("a Docs page the documents service does not admit, whose saved read answers %s, says so and links nowhere", async status => {
   state.pages = [page({ has_document: true })]
+  state.availability = { enabled: false }
   state.read = status
   open()
-  expect(screen.getByText(/older version of the editor/)).toBeInTheDocument()
+  expect(await screen.findByText(/older version of the editor/)).toBeInTheDocument()
   expect(screen.queryByRole("link", { name: /Open in Pages|Open full view/ })).toBeNull()
 })
 
-it("an old-editor Word that still reads keeps a full-view link, where its editor opens it", () => {
+it("a Docs page the documents service does not admit shows its saved version, read-only", async () => {
+  state.pages = [page({ has_document: true })]
+  state.availability = { enabled: false }
+  open()
+  expect(await screen.findByText("saved preview")).toBeInTheDocument()
+  expect(screen.queryByLabelText("Document editor")).toBeNull()
+  expect(screen.queryByRole("link", { name: /Open full view/ })).toBeNull()
+})
+
+it("a Docs page the documents service admits opens its live document session here, not a preview or a link to Pages", async () => {
   state.pages = [page({ has_document: true })]
   open()
-  expect(screen.getByText("saved preview")).toBeInTheDocument()
-  expect(screen.getByRole("link", { name: /Open full view/ })).toHaveAttribute("href", "/pages/brief?workspace_id=ws1")
+  await waitFor(() => expect(state.fetch).toHaveBeenCalledWith("/api/v1/pages/%40page-brief/document?workspace_id=ws1"))
+  expect(state.fetch).toHaveBeenCalledWith("/api/v1/documents/status?workspace_id=ws1")
+  expect(screen.queryByText("saved preview")).toBeNull()
+  expect(screen.queryByRole("link", { name: /Open in Pages|Open full view/ })).toBeNull()
 })
 
 it.each([
@@ -147,6 +159,7 @@ it.each([
 ])("never mounts the native editor for %s", (_name, extra) => {
   state.pages = [page(extra)]
   open()
-  expect(state.fetch).not.toHaveBeenCalled()
+  // A Docs page asks the documents service, never the Craft availability.
+  expect(state.fetch).not.toHaveBeenCalledWith(expect.stringContaining("/craft/availability"))
   expect(screen.queryByTestId("native-host")).toBeNull()
 })
