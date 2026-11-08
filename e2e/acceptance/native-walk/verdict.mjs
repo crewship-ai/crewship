@@ -23,14 +23,14 @@ export const SCENARIOS = [
     id: "walk.word",
     app: "wordcraft",
     test: "Native walk Word",
-    title: "A short Word working cycle in full Chromium: typing, ribbon styles, autosave, ctrl+s, reload, a lost save reply and release, without pressing \"Ověřit výsledek\"",
+    title: "A short Word working cycle in full Chromium: typing, ribbon styles, autosave, ctrl+s, reload, a lost save reply and release, without pressing \"Check the result\"",
     steps: ["open and take the editor", "home tab", "type text", "enter, more text", "heading from the ribbon", "style from the ribbon", "bold", ...AFTER_INPUT],
   },
   {
     id: "walk.sheet",
     app: "gridcraft",
     test: "Native walk Sheet",
-    title: "A short Sheet working cycle in full Chromium: cell entry, autosave, ctrl+s, reload, a lost save reply and release, without pressing \"Ověřit výsledek\"",
+    title: "A short Sheet working cycle in full Chromium: cell entry, autosave, ctrl+s, reload, a lost save reply and release, without pressing \"Check the result\"",
     steps: ["open and take the editor", "type in a cell, enter", "next cell after enter", "third cell after enter", ...AFTER_INPUT],
   },
 ]
@@ -181,7 +181,7 @@ export function checkEvidence(scenario, evidence, { rc, origin, chrome, runId })
   }
   for (const s of steps) {
     if (!scenario.steps.includes(s?.name)) problems.push(`unexpected step "${s?.name}"`)
-    if (s?.verifyPresses !== 0) problems.push(`step "${s?.name}": "Ověřit výsledek" pressed ${JSON.stringify(s?.verifyPresses)} times`)
+    if (s?.verifyPresses !== 0) problems.push(`step "${s?.name}": "Check the result" pressed ${JSON.stringify(s?.verifyPresses)} times`)
   }
   problems.push(...versionProblems(evidence))
   const history = historyCheck(evidence)

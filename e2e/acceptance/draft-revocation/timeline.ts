@@ -15,7 +15,7 @@ export interface Sample {
   inert: boolean
   /** The Project source: the editor, the read-only recovery field, the kept-draft offer, or none. */
   source: "editor" | "recovery" | "offer" | "none"
-  /** A native kept draft is on offer ("Místní koncept · verze"). */
+  /** A native kept draft is on offer ("Local draft · version"). */
   offer: boolean
   status: string
 }
@@ -41,7 +41,7 @@ export const recordTimeline = () => {
       frame: !style ? "none" as const : style.visibility === "hidden" ? "hidden" as const : style.opacity === "0" ? "transparent" as const : "shown" as const,
       inert: frame?.hasAttribute("inert") ?? false,
       source: has("Source file") ? "editor" as const : has("Source recovery draft") ? "recovery" as const : restore ? "offer" as const : "none" as const,
-      offer: Array.from(document.querySelectorAll("span")).some((s) => s.textContent?.startsWith("Místní koncept · verze")),
+      offer: Array.from(document.querySelectorAll("span")).some((s) => s.textContent?.startsWith("Local draft · version")),
       status: document.querySelector('[role="status"]')?.textContent?.slice(0, 60) ?? "",
     }
   }

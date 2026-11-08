@@ -13,6 +13,7 @@ import { peerApi, requireNative, traceCraft, type CraftCall } from "./craft-leas
 import { APPLICATIONS, NativePage, parseEvents, sessionUserId } from "./craft-lease/native"
 import { pause } from "./drafts-crash/crash"
 import { expect, prdRequirement, test } from "./fixtures"
+import { lockButton } from "./craft-session/frame"
 
 const REQ = {
   wordcraft: prdRequirement("A.craft.read-revoked", "Word: when a reader loses read access the event stream stops, no content is delivered and the editor shows it"),
@@ -138,9 +139,9 @@ for (const { application, label } of APPLICATIONS) {
           page.setDefaultTimeout(60_000)
           traceCraft(page, "reader", trail)
           await page.goto(doc.editorPath)
-          await expect(page.getByRole("status").filter({ hasText: `Sdílený náhled · verze ${version}` }).first()).toBeVisible({ timeout: 90_000 })
+          await expect(page.getByRole("status").filter({ hasText: `Shared preview · version ${version}` }).first()).toBeVisible({ timeout: 90_000 })
           await expect(page.locator("iframe"), "the read-only editor with the content is shown").toHaveCount(1, { timeout: 90_000 })
-          expect(await page.getByRole("button", { name: "Převzít úpravy", exact: true }).count(), "a reader cannot take the editor").toBe(0)
+          expect(await (await lockButton(page, "Take over editing", 10_000)).count(), "a reader cannot take the editor").toBe(0)
           expect(trail.some((c) => c.path === "craft/sessions"), "a reader opens no editor admission").toBe(false)
           const shots: Record<string, Buffer> = { "reader-open.png": await page.screenshot({ fullPage: true }) }
           const revokedAt = Date.now()
@@ -149,7 +150,7 @@ for (const { application, label } of APPLICATIONS) {
           // The server pushes "re-check access" to this reader only; the preview
           // rereads at once and removes the content as soon as the read is
           // refused (the 30 s timer and focus/online rereads are the fallback).
-          await expect(page.getByRole("alert").filter({ hasText: "Sdílený náhled není dostupný" }).first(), "the preview says access is gone").toBeVisible({ timeout: PREVIEW_REMOVED_WITHIN_MS })
+          await expect(page.getByRole("alert").filter({ hasText: "Shared preview is not available" }).first(), "the preview says access is gone").toBeVisible({ timeout: PREVIEW_REMOVED_WITHIN_MS })
           await expect(page.locator("iframe"), "the document content is removed from the page").toHaveCount(0, { timeout: 1_000 })
           await expect(page.locator("canvas")).toHaveCount(0)
           const shownAfterMs = Date.now() - revokedAt

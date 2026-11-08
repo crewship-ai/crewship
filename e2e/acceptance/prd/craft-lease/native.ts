@@ -146,7 +146,7 @@ export class NativePage {
 
   /**
    * Initializes version 1 exactly like the New Doc dialog and releases the
-   * creation custody, so the document starts free ("Volné"). Returns false
+   * creation custody, so the document starts free ("Free"). Returns false
    * when the server has no native editor profile (HTTP 503).
    */
   async initialize(owner: APIRequestContext): Promise<boolean> {
@@ -232,7 +232,7 @@ export class NativePage {
 
   /**
    * Publishes the current committed version as the shared preview, as the
-   * editor's "Publikovat náhled" does: the holder takes custody, shares the
+   * editor's "Publish preview" does: the holder takes custody, shares the
    * head version and releases. Read and Comment people see only this version.
    */
   async publishPreview(owner: APIRequestContext): Promise<string> {

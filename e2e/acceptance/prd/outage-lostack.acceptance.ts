@@ -19,6 +19,7 @@ import { expect, prdRequirement, test } from "./fixtures"
 import { disposeActors, isolatedActor } from "./outage-lostack/actor"
 import * as N from "./outage-lostack/native"
 import * as P from "./outage-lostack/project"
+import { lockButton } from "./craft-session/frame"
 
 const OUTAGE_MS = Number(process.env.PRD_OUTAGE_MS ?? 6_000)
 
@@ -240,13 +241,13 @@ test.describe("outage and lost acknowledgement", () => {
             await N.pause(1_000)
             const s = await N.uiState(page)
             timeline.push(s)
-            saved = s.status.match(/^Uloženo · verze (\d+)/)?.[1]
+            saved = s.status.match(/^Saved · version (\d+)/)?.[1]
             if (saved) reconciledBy = "automatic"
           }
           const headUncertain = await N.readHead(request, ref)
           const savesWhileUncertain = ops.slice(opsAtLoss).filter((o) => o.kind === "save").length
-          if (!saved && (await page.getByRole("button", { name: "Ověřit výsledek", exact: true }).count())) {
-            await page.getByRole("button", { name: "Ověřit výsledek", exact: true }).click()
+          if (!saved && (await page.getByRole("button", { name: "Check the result", exact: true }).count())) {
+            await page.getByRole("button", { name: "Check the result", exact: true }).click()
             saved = await N.waitSaved(page, 15_000)
             if (saved) reconciledBy = "verify"
           }
@@ -298,7 +299,7 @@ test.describe("outage and lost acknowledgement", () => {
           expect(lost[0]?.serverStatus, "the lost save committed on the server").toBe(200)
           expect(headUncertain.version).toBe(lost[0].serverVersion)
           expect(savesWhileUncertain, "nothing is re-saved while the result is unconfirmed").toBe(0)
-          expect(saved, "the editor confirms the exact server version (automatically or via Ověřit výsledek)").toBe(lost[0].serverVersion)
+          expect(saved, "the editor confirms the exact server version (automatically or via Check the result)").toBe(lost[0].serverVersion)
           const successor = String(BigInt(lost[0].serverVersion!) + 1n)
           expect.soft(resavedLost.map((o) => ({ base: o.baseVersion, status: o.status, version: o.version })), "the reconciled save is not saved again as a duplicate version").toEqual([])
           expect.soft(firstNext && { base: firstNext.baseVersion, version: firstNext.version }, "the next save builds on the reconciled version (no duplicate)").toEqual({ base: lost[0].serverVersion, version: successor })
@@ -362,11 +363,11 @@ test.describe("outage and lost acknowledgement", () => {
             await N.pause(1_000)
             const s = await N.uiState(page)
             timeline.push(s)
-            reconciled = s.status.match(/^Uloženo · verze (\d+)/)?.[1]
+            reconciled = s.status.match(/^Saved · version (\d+)/)?.[1]
           }
           let reconciledBy: "automatic" | "verify" | null = reconciled ? "automatic" : null
-          if (!reconciled && (await page.getByRole("button", { name: "Ověřit výsledek", exact: true }).count())) {
-            await page.getByRole("button", { name: "Ověřit výsledek", exact: true }).click()
+          if (!reconciled && (await page.getByRole("button", { name: "Check the result", exact: true }).count())) {
+            await page.getByRole("button", { name: "Check the result", exact: true }).click()
             reconciled = await N.waitSaved(page, 15_000)
             if (reconciled) reconciledBy = "verify"
           }
@@ -380,9 +381,10 @@ test.describe("outage and lost acknowledgement", () => {
           await N.openEditor(page, ref)
           await N.frameOf(page, app)
           await N.pause(1_500)
-          if (await page.getByRole("button", { name: "Převzít úpravy", exact: true }).count()) {
-            await page.getByRole("button", { name: "Převzít úpravy", exact: true }).click()
-            await page.getByRole("status").filter({ hasText: "Připraveno k úpravám" }).first().waitFor({ timeout: 30_000 }).catch(() => {})
+          const take = await lockButton(page, "Take over editing", 5_000)
+          if (await take.count()) {
+            await take.click()
+            await page.getByRole("status").filter({ hasText: "Ready to edit" }).first().waitFor({ timeout: 30_000 }).catch(() => {})
             await N.pause(3_000)
           }
           const reopened = await N.uiState(page)

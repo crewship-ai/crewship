@@ -1,6 +1,6 @@
 // PRD §7 A4: an agent edits a free (unlocked) Word or Sheet document. A person
 // who has the same document open in the browser sees who is editing
-// ("Upravuje <agent>") while the agent holds the editor, and once the agent has
+// ("<agent> is editing") while the agent holds the editor, and once the agent has
 // finished the person sees the change: the editor reads the new version and the
 // bar is free again.
 //
@@ -11,10 +11,11 @@ import { randomUUID } from "node:crypto"
 import { barSeen, findAgent, openChat, redact, sendInstruction, sheetInstruction, waitForTask, watchBar, wordInstruction } from "./craft-proposal/agent"
 import { createNativePage, deletePage, sheetCell, wordText } from "./craft-proposal/native"
 import { expect, prdRequirement, test } from "./fixtures"
+import { lockControls } from "./craft-session/frame"
 
 const REQ = {
-  wordcraft: prdRequirement("A.craft.agent.free-edit-word", "Word: an agent edits a free document; the person in the browser sees \"Upravuje <agent>\", then the change and the new version"),
-  gridcraft: prdRequirement("A.craft.agent.free-edit-sheet", "Sheet: an agent edits a free document; the person in the browser sees \"Upravuje <agent>\", then the change and the new version"),
+  wordcraft: prdRequirement("A.craft.agent.free-edit-word", "Word: an agent edits a free document; the person in the browser sees \"<agent> is editing\", then the change and the new version"),
+  gridcraft: prdRequirement("A.craft.agent.free-edit-sheet", "Sheet: an agent edits a free document; the person in the browser sees \"<agent> is editing\", then the change and the new version"),
 } as const
 
 for (const app of ["wordcraft", "gridcraft"] as const) {
@@ -54,8 +55,8 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
               .catch(() => {})
           })
           await page.goto(doc.editorPath())
-          const bar = page.getByRole("toolbar", { name: "Úpravy dokumentu" })
-          await expect(bar).toContainText("Volné", { timeout: 90_000 })
+          const bar = await lockControls(page, 90_000)
+          await expect(bar).toContainText("Free", { timeout: 90_000 })
           await watchBar(page)
 
           const instruction = app === "wordcraft" ? wordInstruction(marker) : sheetInstruction("B2", marker)
@@ -67,11 +68,11 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
           const has = (d: Record<string, unknown>) => (app === "wordcraft" ? wordText(d).includes(marker) : sheetCell(d, 1, 1) === marker)
           const events = (task.events ?? []).map((e) => ({ operation: e.operation, status: e.status, holder_kind: e.holder_kind, error: e.error }))
 
-          // The person's bar went free -> "Upravuje <agent>" -> free, and the editor read the new version.
-          await expect(bar).toContainText("Volné", { timeout: 60_000 })
+          // The person's bar went free -> "<agent> is editing" -> free, and the editor read the new version.
+          await expect(bar).toContainText("Free", { timeout: 60_000 })
           await expect.poll(() => reads.some((r) => r.version === after.version && r.hasMarker), { timeout: 60_000, message: "the person's editor reads the new version" }).toBe(true)
           const seen = await barSeen(page)
-          const holderTexts = seen.filter((s) => s.text.includes("Upravuje")).map((s) => s.text)
+          const holderTexts = seen.filter((s) => s.text.includes(" is editing")).map((s) => s.text)
           await prd.evidence(`${app}-free-edit.json`, redact({
             app, mode: prd.mode, appSha: prd.appSha, agent: agent.name, taskState: task.state, events,
             before: before.version, after: after.version, barTimeline: seen.map((s) => ({ atMs: s.at - seen[0].at, text: s.text })),
@@ -84,7 +85,7 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
           expect(events.some((e) => e.operation === "acquire" && e.status === 409), "the free document needed no proposal").toBe(false)
           expect(BigInt(after.version) > BigInt(before.version), "the agent's edit is a new version").toBe(true)
           expect(has(after.doc), "the agent's change is in the document").toBe(true)
-          expect(holderTexts.some((t) => t.includes(`Upravuje ${agent.name}`)), `the person saw "Upravuje ${agent.name}" (saw: ${JSON.stringify(seen.map((s) => s.text))})`).toBe(true)
+          expect(holderTexts.some((t) => t.includes(`${agent.name} is editing`)), `the person saw "${agent.name} is editing" (saw: ${JSON.stringify(seen.map((s) => s.text))})`).toBe(true)
         } finally {
           await page.goto("about:blank").catch(() => {})
           const status = await deletePage(request, agent.workspaceId, doc.pageId)

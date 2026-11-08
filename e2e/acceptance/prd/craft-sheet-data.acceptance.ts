@@ -11,6 +11,7 @@ import { NativePage, sessionUserId, type LeaseView } from "./craft-lease/native"
 import { EXPECTED_CELLS, EXPECTED_SHEETS, EXPECTED_DATE_SYSTEM, readFacts, richWorkbook } from "./craft-lease/sheet-workbook"
 import * as native from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
+import { lockButton } from "./craft-session/frame"
 
 const REQ = prdRequirement("A.craft.sheet.data-roundtrip", "Sheet: date, Bool, Text, numbers, formulas, formats and multiple sheets survive save, reload and reopen")
 
@@ -91,7 +92,7 @@ test.describe("Sheet data classes", () => {
         await page.reload()
         await native.frameOf(page, "gridcraft")
         // A visible canvas precedes document bootstrap; the take control only follows a completed open.
-        await expect(page.getByRole("button", { name: "Převzít úpravy", exact: true }), "the edited workbook finished opening").toBeEnabled({ timeout: 45_000 })
+        await expect(await lockButton(page, "Take over editing", 45_000), "the edited workbook finished opening").toBeEnabled({ timeout: 45_000 })
         const reopened = await native.readNative(request, ws.id, doc.pageId)
         expect(reopened.version, "reopening does not change the edited version").toBe(edited.version)
         expect((await page.getByRole("alert").allInnerTexts()).filter(Boolean), "the edited workbook reopens without an error").toEqual([])

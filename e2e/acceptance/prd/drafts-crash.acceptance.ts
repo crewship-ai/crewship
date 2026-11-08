@@ -377,10 +377,10 @@ test.describe("drafts after a crash", () => {
             await native.frameOf(b, app)
             r.reopened = await native.uiState(b)
             const t0 = Date.now()
-            await expect(native.takeButton(b)).toBeVisible({ timeout: 5 * 60_000 })
+            await expect(await native.takeButton(b, 5 * 60_000)).toBeVisible({ timeout: 5 * 60_000 })
             r.takeAvailableAfterMs = Date.now() - t0
-            await native.takeButton(b).click()
-            await b.getByRole("status").filter({ hasText: "Připraveno k úpravám" }).first().waitFor({ timeout: 60_000 }).catch(() => {})
+            await (await native.takeButton(b)).click()
+            await b.getByRole("status").filter({ hasText: "Ready to edit" }).first().waitFor({ timeout: 60_000 }).catch(() => {})
             await pause(3000)
             r.reacquired = await native.uiState(b)
             await b.screenshot({ path: test.info().outputPath(`${app}-draft-offered.png`) })
@@ -409,7 +409,7 @@ test.describe("drafts after a crash", () => {
             const otherHead = await native.readNative(otherApi, ws.id, created.pageId)
             r.otherHead = { version: otherHead.version, hash: otherHead.hash, hasMC2: otherHead.raw.includes(MC2) }
             expect.soft((r.otherUser as { recoveries: string[] }).recoveries, `${app}: the other person is offered no draft`).toEqual([])
-            expect.soft((r.otherUser as { buttons: string[] }).buttons.filter((t) => /Porovnat|Kopie konceptu/.test(t)), `${app}: no draft actions for the other person`).toEqual([])
+            expect.soft((r.otherUser as { buttons: string[] }).buttons.filter((t) => /Compare|Keep a copy/.test(t)), `${app}: no draft actions for the other person`).toEqual([])
             expect.soft(otherHead.raw.includes(MC2), `${app}: the other person cannot read the unsaved edit`).toBe(false)
             await otherCtx.close()
 

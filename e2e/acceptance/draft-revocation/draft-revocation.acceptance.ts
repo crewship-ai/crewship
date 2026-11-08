@@ -36,7 +36,7 @@ const BOUND = {
   /** From a tab's return until a change made while it was away has taken effect. */
   returnMs: 5_000,
 }
-const REFUSED = /Právo upravovat bylo odebráno/
+const REFUSED = /Edit access was removed/
 const LEVELS = ["read", "comment"] as const
 /** Share of the area that is not background: below this it is blank or one colour. */
 const MIN_CONTENT = 0.0005
@@ -212,7 +212,7 @@ async function newTab(context: BrowserContext): Promise<Page> {
 async function open(context: BrowserContext, origin: string, doc: NativePage, workspace: string): Promise<Page> {
   const page = await newTab(context)
   await page.goto(new URL(editorURL(doc.pageId, workspace), origin).href)
-  await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
+  await page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor({ timeout: 90_000 })
   return page
 }
 
@@ -380,7 +380,7 @@ for (const { application, label } of APPLICATIONS) {
         const t0 = Date.now()
         const t1 = await until("delivery", async () => (await retired(f.page)).length > 0, BOUND.deliveryMs + 5_000)
         const frame = (await retired(f.page))[0]
-        await until("the editor says Edit is gone", async () => (await f.page.getByRole("alert").filter({ hasText: REFUSED }).count()) > 0 || (await f.page.getByRole("status").filter({ hasText: /Pouze čtení/ }).count()) > 0, 30_000)
+        await until("the editor says Edit is gone", async () => (await f.page.getByRole("alert").filter({ hasText: REFUSED }).count()) > 0 || (await f.page.getByRole("status").filter({ hasText: /Read-only/ }).count()) > 0, 30_000)
         // Long enough for any late proof to have acted.
         await pause(15_000)
         const after = await draftRows(f.page, f.doc.pageId)
@@ -389,7 +389,7 @@ for (const { application, label } of APPLICATIONS) {
         expect(after, "the draft is kept").toBeGreaterThan(0)
         expect(await recoveryRows(f.page).count(), "a kept draft is offered to nobody").toBe(0)
         await f.page.reload({ waitUntil: "domcontentloaded" })
-        await f.page.getByRole("status").filter({ hasText: /Pouze čtení/ }).first().waitFor({ timeout: 90_000 }).catch(() => {})
+        await f.page.getByRole("status").filter({ hasText: /Read-only/ }).first().waitFor({ timeout: 90_000 }).catch(() => {})
         await pause(3_000)
         expect(await recoveryRows(f.page).count(), "and nothing after a reload").toBe(0)
         expect(await draftRows(f.page, f.doc.pageId), "the draft survives the reload").toBeGreaterThan(0)
@@ -448,7 +448,7 @@ for (const { application, label } of APPLICATIONS) {
       const after = await draftRows(f.page, f.doc.pageId)
       await signIn(f.page, f, editorURL(f.doc.pageId, f.workspace))
       // The journal opens with the editor, so a kept draft comes back on taking it.
-      await takeButton(f.page).click({ timeout: 90_000 })
+      await (await takeButton(f.page, 90_000)).click({ timeout: 90_000 })
       const offered = await recoveryRows(f.page).first().waitFor({ timeout: 60_000 }).then(() => Date.now(), () => 0)
       await prd.evidence("timing.json", { rows, after, frame, endedMs: ended - t0, url: f.page.url().replace(/\?.*/, ""), offeredAfterLogin: offered > 0, takeOver })
       expect(frame?.draft ?? "retain", "the stream never says purge").toBe("retain")
@@ -610,12 +610,12 @@ for (const { application, label } of APPLICATIONS) {
       await thaw(cdp)
       const returned = Date.now()
       await f.page.bringToFront()
-      await until("the editor says Edit is gone", async () => (await f.page.getByRole("alert").filter({ hasText: REFUSED }).count()) > 0 || (await f.page.getByRole("status").filter({ hasText: /Pouze čtení/ }).count()) > 0, 30_000)
+      await until("the editor says Edit is gone", async () => (await f.page.getByRole("alert").filter({ hasText: REFUSED }).count()) > 0 || (await f.page.getByRole("status").filter({ hasText: /Read-only/ }).count()) > 0, 30_000)
       await pause(3_000)
       const after = await draftRows(f.page, f.doc.pageId)
       const { steps } = await sinceReturn(f.page, returned - 2_000)
       await prd.evidence("timeline.json", { rows, after, steps })
-      const editable = painted(steps).filter((s) => s.frame === "shown" && !s.status.includes("Pouze čtení"))
+      const editable = painted(steps).filter((s) => s.frame === "shown" && !s.status.includes("Read-only"))
       expect(editable, "a painted frame showed the held editor").toEqual([])
       expect(steps.filter((s) => s.offer), "a kept draft is offered to nobody").toEqual([])
       expect(after, "the draft is kept").toBeGreaterThan(0)
@@ -638,18 +638,18 @@ for (const { application, label } of APPLICATIONS) {
       await prd.evidence("timeline.json", { rows, hiddenFor, focusBefore: before, focusAfter: await focused(), pixels, steps })
       expect(painted(steps).at(-1)?.frame, "the last painted frame shows the editor").toBe("shown")
       expect(await focused(), "focus stays in the editor").toBe(before)
-      expect(await f.page.getByRole("status").filter({ hasText: /Neuložený koncept|Připraveno k úpravám|Ukládám/ }).count(), "the editor is still writable").toBeGreaterThan(0)
+      expect(await f.page.getByRole("status").filter({ hasText: /Unsaved draft|Ready to edit|Saving/ }).count(), "the editor is still writable").toBeGreaterThan(0)
       expect(kept, "the draft is kept").toBeGreaterThan(0)
       expect(await contentHidden(f.page), "the editor is shown").toBe(false)
-      // The work goes on from the keyboard alone: no click, no Ověřit výsledek.
+      // The work goes on from the keyboard alone: no click, no Check the result.
       const next = `NEXT${Date.now().toString(36)}`
       await f.releaseSaves()
       const head = await typeOn(f, next, request)
       const version = await waitSaved(f.page, 60_000)
-      await prd.evidence("continued.json", { version: head.version, shownVersion: version, marker: head.raw.includes(f.marker), next: head.raw.includes(next), verify: await f.page.getByRole("button", { name: "Ověřit výsledek", exact: true }).count() })
+      await prd.evidence("continued.json", { version: head.version, shownVersion: version, marker: head.raw.includes(f.marker), next: head.raw.includes(next), verify: await f.page.getByRole("button", { name: "Check the result", exact: true }).count() })
       expect(head.raw, "the work from before the return reached the server").toContain(f.marker)
       expect(head.raw, "the work typed after the return reached the server").toContain(next)
-      expect(await f.page.getByRole("button", { name: "Ověřit výsledek", exact: true }).count(), "nothing had to be confirmed by hand").toBe(0)
+      expect(await f.page.getByRole("button", { name: "Check the result", exact: true }).count(), "nothing had to be confirmed by hand").toBe(0)
     })
 
     test(`${label}: typing cut off by a return goes on after it`, { annotation: prdRequirement(id("return-mid-typing"), `${label}: text still being typed when the tab leaves is there after a slow return, and the keyboard goes on from it`) }, async ({ prd, request }) => {
@@ -694,7 +694,7 @@ for (const { application, label } of APPLICATIONS) {
       const log = (await engineLog(f.page) as unknown[]).slice(-16)
       await f.doc.grant(request, f.peer.userId, "write")
       await f.page.reload({ waitUntil: "domcontentloaded" })
-      await f.page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
+      await f.page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor({ timeout: 90_000 })
       await acquire(f.page, application)
       await recoveryRows(f.page).first().waitFor({ timeout: 30_000 })
       const drafts = await compareDrafts(f.page, [f.marker, tail])
@@ -728,7 +728,7 @@ for (const { application, label } of APPLICATIONS) {
       const log = await engineLog(f.page)
       await f.doc.grant(request, f.peer.userId, "write")
       await f.page.reload({ waitUntil: "domcontentloaded" })
-      await f.page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
+      await f.page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor({ timeout: 90_000 })
       await acquire(f.page, application)
       await recoveryRows(f.page).first().waitFor({ timeout: 30_000 })
       const drafts = await compareDrafts(f.page, [tail])
@@ -746,7 +746,7 @@ for (const { application, label } of APPLICATIONS) {
       await f.page.keyboard.type(during)
       await f.page.keyboard.press("Enter")
       await pause(1_500)
-      const notice = await f.page.getByText("Ověřuji přístup…").count()
+      const notice = await f.page.getByText("Checking access…").count()
       await release()
       await until("the editor is shown again", async () => !(await contentHidden(f.page)), BOUND.returnMs + 15_000)
       await rendered(prd, f.page.locator('iframe[title$=" editor"]'), "after-check")

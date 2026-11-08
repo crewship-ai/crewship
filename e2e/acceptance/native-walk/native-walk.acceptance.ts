@@ -15,6 +15,7 @@ import { expect, prdRequirement, test, type PrdScenario } from "../prd/fixtures"
 import { disposeActors, isolatedActor } from "../prd/outage-lostack/actor"
 import * as N from "../prd/outage-lostack/native"
 import { EVIDENCE_FILE, HISTORY_NOT_ENABLED, SCENARIOS } from "./verdict.mjs"
+import { lockButton } from "../prd/craft-session/frame"
 
 const CONFIRM_MS = 30_000 // a save the status must confirm
 const RECOVER_MS = 60_000 // an unconfirmed result must clear by itself within this
@@ -25,7 +26,7 @@ const WALK_MS = 9 * 60_000
 const RENDER_MS = 15_000
 const LEASE_MS = 90_000 // the server caps a lease TTL at one minute
 const BLANK_DOMINANT = 0.998 // share of the commonest colour at which the area counts as blank
-const VERIFY = "Ověřit výsledek"
+const VERIFY = "Check the result"
 // At the 1440x1000 viewport, in the editor frame.
 const WORD_UI = { homeTab: { x: 76, y: 53 }, heading1: { x: 918, y: 94 }, noSpacing: { x: 844, y: 94 } }
 const BODY = { wordcraft: { x: 200, y: 215, width: 800, height: 480 }, gridcraft: { x: 60, y: 215, width: 800, height: 300 } }
@@ -317,7 +318,7 @@ for (const scenario of SCENARIOS) {
           const st = await N.status(page)
           const h1 = await settle()
           const shown = labelVersion(st)
-          const said = (await collect()).status.find((x) => x.at >= pressAt && /^Uloženo/.test(x.s))
+          const said = (await collect()).status.find((x) => x.at >= pressAt && /^Saved/.test(x.s))
           r.confirmationMs = ack ? ack - pressAt : said ? said.at - pressAt : null
           r.note = { before: h0.version, head: h1.version, label: shown ?? null, ack: ack !== undefined, sent: ops.slice(n0).map((o) => ({ kind: o.kind, status: o.status, version: o.version, base: o.baseVersion })) }
           check(await pressSeen(pressAt), "the press never reached the editor")
@@ -329,14 +330,14 @@ for (const scenario of SCENARIOS) {
           const h0 = await settle()
           const s = Date.now()
           await page.reload({ waitUntil: "domcontentloaded" })
-          await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor()
+          await page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor()
           const h1 = await N.readHead(api, ref)
           check(h1.version === h0.version && h1.hash === h0.hash, `reload changed the server document: v${h0.version} to v${h1.version}`)
           checkContent(h1, "after reload")
           // The closed page's lease outlives it for up to its TTL; the lease bar says so while it counts down.
-          const take = page.getByRole("button", { name: "Převzít úpravy", exact: true })
-          const waiting = page.getByRole("status").filter({ hasText: /Pokud jste ji zavřeli|Čekám na uvolnění/ })
-          const ready = () => page.getByRole("status").filter({ hasText: /^Připraveno k úpravám/ }).count()
+          const take = await lockButton(page, "Take over editing", 10_000)
+          const waiting = page.getByRole("status").filter({ hasText: /If you closed or reloaded it|Waiting for the other tab/ })
+          const ready = () => page.getByRole("status").filter({ hasText: /^Ready to edit/ }).count()
           for (const end = Date.now() + LEASE_MS; Date.now() < end && !(await ready()) && ((await waiting.count()) > 0 || !(await take.count())); ) await N.pause(200)
           const waitedMs = Date.now() - s
           if (await ready()) {
@@ -344,7 +345,7 @@ for (const scenario of SCENARIOS) {
             await f.locator("canvas").first().click({ position: app === "wordcraft" ? { x: 678, y: 324 } : { x: 54, y: 240 } })
           } else f = await N.acquire(page, app)
           const st = await N.status(page)
-          check(/^Připraveno k úpravám/.test(st), `status after reload is "${st.slice(0, 50)}", not ready`)
+          check(/^Ready to edit/.test(st), `status after reload is "${st.slice(0, 50)}", not ready`)
           r.confirmationMs = Date.now() - s
           const box = await page.locator(`iframe[title="${app === "wordcraft" ? "WordCraft" : "GridCraft"} editor"]`).boundingBox()
           if (!box) throw new Error("no editor frame box")
@@ -459,16 +460,16 @@ for (const scenario of SCENARIOS) {
           await page.waitForTimeout(5_000)
           const after = (await page.getByRole("status").allInnerTexts().catch(() => [] as string[])).join(" ")
           out.statusAfterRelease = after.slice(0, 200)
-          check(!after.includes("Neuložený koncept"), `status after a release of a saved document: ${after.slice(0, 120)}`)
+          check(!after.includes("Unsaved draft"), `status after a release of a saved document: ${after.slice(0, 120)}`)
           // The reloaded page must be the editor itself, not an error page with no offer on it.
           const reloaded = await page.reload({ waitUntil: "domcontentloaded" })
           out.finalReloadStatus = reloaded?.status() ?? null
           check(reloaded !== null && reloaded.ok(), `final reload answered ${reloaded?.status() ?? "nothing"}`)
-          const editorBack = await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 }).then(() => true, () => false)
+          const editorBack = await page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor({ timeout: 90_000 }).then(() => true, () => false)
           out.editorAfterFinalReload = editorBack
           check(editorBack, "the editor did not come back after the final reload")
           await page.waitForTimeout(25_000)
-          const offers = await page.getByText("Místní koncept", { exact: false }).count().catch(() => -1)
+          const offers = await page.getByText("Local draft", { exact: false }).count().catch(() => -1)
           out.draftOffersAfterRelease = offers
           check(offers === 0, `draft offered after a release of a saved document: ${offers}`)
           headAfterReload = (await N.readHead(api, ref)).version

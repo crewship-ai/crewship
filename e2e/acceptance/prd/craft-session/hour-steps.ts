@@ -26,7 +26,7 @@ export interface SessionInput {
   /** What the person did and when (filled while the session runs, so a failed run still shows it). */
   steps: Array<{ atMs: number; step: string }>
   /**
-   * The per-cycle evidence chain, the checkpoints, every "Ověřit výsledek" press, every save
+   * The per-cycle evidence chain, the checkpoints, every "Check the result" press, every save
    * wait and every Ctrl+S the harness pressed (save accounting, confirm.ts) and the restart
    * (filled while the session runs, so a failed run still shows them).
    */
@@ -163,7 +163,7 @@ const newer = (a: string, b: string | undefined) => (b !== undefined && BigInt(b
  * even when the wait throws. Same waits and timeouts; returns the version only.
  */
 function recordedSave(input: SessionInput, page: Page, after: string, cycle: number | "warmup", context = ""): Promise<string | undefined> {
-  return trackedSaveWait(input.evidence, input.ops, { cycle, reason: `no autosave within 4 s (no "Uloženo · verze" newer than ${after})${context}` }, (onPress) => saveByAutosaveOrKeyReport(page, after, onPress))
+  return trackedSaveWait(input.evidence, input.ops, { cycle, reason: `no autosave within 4 s (no "Saved · version" newer than ${after})${context}` }, (onPress) => saveByAutosaveOrKeyReport(page, after, onPress))
 }
 
 const CYCLE_MS = (minutes: number) => Math.round(Math.min(60_000, Math.max(20_000, (minutes * 60_000) / 12)))
@@ -222,7 +222,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     lastHead = head
     return confirmCycle({ typed, baseline, label, head })
   }
-  // A stalled renderer leaves "Výsledek nepotvrzen" and the editor then sends nothing. Do
+  // A stalled renderer leaves "Result not confirmed" and the editor then sends nothing. Do
   // what a person does once it stays past the deadline, and keep the record. It never
   // counts as a save: confirmTyped below reads the server.
   const verifyIfUnconfirmed = async (cycle: number): Promise<boolean> => {
@@ -237,7 +237,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
         const v = startVerify(input.evidence.verifications, { cycle, firstSeenAt: new Date(since).toISOString(), opsAtPress: opsAt })
         let statusAfter = ""
         try {
-          await page.getByRole("button", { name: "Ověřit výsledek", exact: true }).click()
+          await page.getByRole("button", { name: "Check the result", exact: true }).click()
           for (const limit = Date.now() + 15_000; isUnconfirmedStatus(await N.status(page)) && Date.now() < limit; ) await N.pause(250)
           const reconcile = ops.slice(opsAt).find((o) => o.kind === "reconcile")
           statusAfter = (await N.status(page)).slice(0, 60)
@@ -246,7 +246,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
           v.statusAfter = `interrupted: ${String(e).slice(0, 80)}`
           throw e
         }
-        note(`cycle ${cycle}: pressed Ověřit výsledek after ${Date.now() - since} ms: ${statusAfter}`)
+        note(`cycle ${cycle}: pressed Check the result after ${Date.now() - since} ms: ${statusAfter}`)
         return true
       }
       await N.pause(500)
@@ -282,7 +282,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
       shot: async (name) => void (await prd.evidence(`step-${name}.png`, await page.screenshot())),
       beforeTyping: async () => {
         // Let a save of an earlier step finish so its version becomes the baseline.
-        for (const end = Date.now() + 5_000; /^Ukládám/.test(await N.status(page)) && Date.now() < end; ) await N.pause(150)
+        for (const end = Date.now() + 5_000; /^Saving/.test(await N.status(page)) && Date.now() < end; ) await N.pause(150)
         baseline = baselineBefore(lastVersion, await N.status(page))
       },
       fail: (problem) => failures.push(`cycle ${n}: ${problem}`),
@@ -303,7 +303,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     // Ctrl+S sends nothing and confirms the saved version (#5075).
     await verifyIfUnconfirmed(n)
     let label = await recordedSave(input, page, baseline, n)
-    if (await verifyIfUnconfirmed(n)) label = (await recordedSave(input, page, newer(baseline, label), n, ", after an Ověřit výsledek press")) ?? label
+    if (await verifyIfUnconfirmed(n)) label = (await recordedSave(input, page, newer(baseline, label), n, ", after an Check the result press")) ?? label
     // The server is the judge, also when the label moved (#4871).
     const c = await confirmTyped(typed, baseline, label)
     lastVersion = newer(newer(baseline, label), c.version)
@@ -324,7 +324,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     const ui = await N.uiState(page)
     note(`cycle ${n}: ${ui.status.slice(0, 40)}${c.confirmed ? ` · server v${c.version} holds the typing` : " · NOT on the server"}`)
     if (ui.alerts.length) failures.push(`cycle ${cycles}: the editor shows an alert: ${ui.alerts.join(" | ").slice(0, 200)}`)
-    if (/Pouze čtení|odpojen/.test(ui.status)) {
+    if (/Read-only|disconnected/.test(ui.status)) {
       await prd.evidence("failure-not-editable.png", await page.screenshot({ fullPage: true })).catch(() => {})
       throw new Error(`cycle ${cycles}: the editor is no longer editable (${ui.status.slice(0, 60)})`)
     }
@@ -384,7 +384,7 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
     await N.pause(2_000)
     timeline.push(await N.uiState(page))
     const last = timeline.at(-1)!
-    if (last.recoveries.length || last.alerts.length || /odpojen|Uloženo/.test(last.status)) break
+    if (last.recoveries.length || last.alerts.length || /disconnected|Saved/.test(last.status)) break
   }
   const sentByEditor = ops.slice(savesBefore).filter((o) => o.kind === "save")
   const after = await readHeadText(api, ref)
@@ -524,9 +524,9 @@ export function wordSession(input: SessionInput) {
           completed = true
           return true
         }
-        if (!forced && Date.now() - start > 4_000 && /^Neuložený koncept/.test(await N.status(page))) {
+        if (!forced && Date.now() - start > 4_000 && /^Unsaved draft/.test(await N.status(page))) {
           // In the evidence from the dispatch on: a press whose wait is cut short stays "incomplete".
-          const event = startPress(input.evidence.forcedCtrlS, { cycle, site: "table-cell", reason: `table cell text not in a table cell of the server head v${head.version} after 4 s, status Neuložený koncept`, opsAtPress: input.ops.length })
+          const event = startPress(input.evidence.forcedCtrlS, { cycle, site: "table-cell", reason: `table cell text not in a table cell of the server head v${head.version} after 4 s, status Unsaved draft`, opsAtPress: input.ops.length })
           forced = { event, headVersion: head.version }
           await page.keyboard.press("Control+s")
         }

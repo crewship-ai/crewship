@@ -73,8 +73,8 @@ test("formatTable escapes backslashes so a trailing backslash cannot swallow the
 
 test("formatNotes gives a row's notes a line of their own and stays away when there are none", () => {
   assert.deepEqual(formatNotes([row()]), [])
-  const lines = formatNotes([row({ requirement: "A.hour", test: "Word", notes: ["Ověřit výsledek pressed 3 times."] })])
-  assert.deepEqual(lines, ["## Row notes", "", "- A.hour › Word: Ověřit výsledek pressed 3 times.", ""])
+  const lines = formatNotes([row({ requirement: "A.hour", test: "Word", notes: ["Check the result pressed 3 times."] })])
+  assert.deepEqual(lines, ["## Row notes", "", "- A.hour › Word: Check the result pressed 3 times.", ""])
 })
 
 test("readRows + writeSummary round-trip", () => {
