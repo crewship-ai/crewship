@@ -369,7 +369,7 @@ var allOn = showcaseKnobs{wordNative: true, gridNative: true}
 
 // mirrorSlugPrefix marks the mirrored reference artifacts each
 // seeddata/mirror_<slug>.go appends to the catalogue (showcase/mirror).
-const mirrorSlugPrefix = "ref-" // used by the per-mirror tests
+const mirrorSlugPrefix = "ref-"
 
 // showcaseCoreOnly runs a test against the core catalogue: mirrored reference
 // copies (ref-*) register from their own files with their own tests, so the
@@ -381,7 +381,7 @@ func showcaseCoreOnly(t *testing.T) {
 	t.Cleanup(func() {
 		seeddata.ShowcaseCrafts, seeddata.ShowcaseArtifacts, seeddata.ShowcaseDesigns = crafts, arts, designs
 	})
-	core := func(slug string) bool { return !strings.HasPrefix(slug, "ref-") }
+	core := func(slug string) bool { return !strings.HasPrefix(slug, mirrorSlugPrefix) }
 	seeddata.ShowcaseCrafts = nil
 	for _, c := range crafts {
 		if core(c.Slug) {
