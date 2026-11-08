@@ -611,8 +611,9 @@ func TestSeedShowcase_RunsTheQakfMirror(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if stats.Created != 1 || stats.Skipped != 12 || s.inits != 1 {
-		t.Errorf("stats %+v, initializes %d; want the mirror created next to 12 present items\n%s", stats, s.inits, out.String())
+	present := len(seeddata.ShowcaseCrafts) + len(seeddata.ShowcaseArtifacts) + len(seeddata.ShowcaseDesigns)
+	if stats.Created != 1 || stats.Skipped != present || s.inits != 1 {
+		t.Errorf("stats %+v, initializes %d; want the mirror created next to %d present items\n%s", stats, s.inits, present, out.String())
 	}
 	if !strings.Contains(out.String(), "+ "+seeddata.MirrorQakfDoc.Slug) {
 		t.Errorf("no created line for the mirror\n%s", out.String())

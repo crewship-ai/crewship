@@ -131,12 +131,12 @@ func seedShowcaseMirrorQakf(client *cli.Client, out io.Writer) showcaseOutcome {
 
 // mirrorQakfThread is one entry of threads.json.
 type mirrorQakfThread struct {
-	ID    string `json:"id"`
-	Block string `json:"block"`
-	From  int    `json:"from"`
-	To    int    `json:"to"`
-	Quote string `json:"quote"`
-	Text  string `json:"text"`
+	ID    string `json:"id" yaml:"id"`
+	Block string `json:"block" yaml:"block"`
+	From  int    `json:"from" yaml:"from"`
+	To    int    `json:"to" yaml:"to"`
+	Quote string `json:"quote" yaml:"quote"`
+	Text  string `json:"text" yaml:"text"`
 }
 
 func mirrorQakfThreads() ([]mirrorQakfThread, error) {
@@ -158,15 +158,15 @@ func seedMirrorQakfThreads(client *cli.Client, slug string) (int, error) {
 	base := "/api/v1/pages/" + pagePathEscape(slug) + "/document"
 	raw, err := seedShowcaseGet(client, base)
 	var doc struct {
-		Schema     int    `json:"schema"`
-		Rev        int64  `json:"rev"`
-		Epoch      string `json:"epoch"`
-		PageID     string `json:"page_id"`
-		CanComment bool   `json:"can_comment"`
+		Schema     int    `json:"schema" yaml:"schema"`
+		Rev        int64  `json:"rev" yaml:"rev"`
+		Epoch      string `json:"epoch" yaml:"epoch"`
+		PageID     string `json:"page_id" yaml:"page_id"`
+		CanComment bool   `json:"can_comment" yaml:"can_comment"`
 		Outline    []struct {
-			ID   string `json:"id"`
-			Text string `json:"text"`
-		} `json:"outline"`
+			ID   string `json:"id" yaml:"id"`
+			Text string `json:"text" yaml:"text"`
+		} `json:"outline" yaml:"outline"`
 	}
 	if err == nil {
 		err = json.Unmarshal(raw, &doc)
@@ -180,8 +180,8 @@ func seedMirrorQakfThreads(client *cli.Client, slug string) (int, error) {
 	raw, err = seedShowcaseGet(client, base+"/comments")
 	var listing struct {
 		Comments []struct {
-			ID string `json:"id"`
-		} `json:"comments"`
+			ID string `json:"id" yaml:"id"`
+		} `json:"comments" yaml:"comments"`
 	}
 	if err == nil {
 		err = json.Unmarshal(raw, &listing)
