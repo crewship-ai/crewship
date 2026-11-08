@@ -1,0 +1,229 @@
+<meta name="dash-one-writer">
+<style>
+.cx{font-family:var(--font-anthropic-sans);display:flex;flex-direction:column;gap:var(--cds-gap-lg)}
+.cx-head h1{font-family:var(--font-anthropic-serif);font-weight:400;font-size:var(--cds-font-size-title);margin:0}
+.cx-head p{color:var(--color-fg-muted);margin:var(--cds-gap-xs) 0 0}
+.cx-head b{color:var(--color-fg)}
+.cx-bar{display:flex;gap:var(--cds-gap-sm);align-items:center;flex-wrap:wrap;font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.cx-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,11rem),1fr));gap:var(--cds-gap-md)}
+.cx-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,22rem),1fr));gap:var(--cds-gap-md)}
+.cx-card{background:var(--color-panel);border:1px solid var(--color-border-line);border-radius:var(--cds-radius);padding:var(--cds-pad-lg)}
+.cx-tile .lbl{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+.cx-tile .num{font-family:var(--font-anthropic-serif);font-weight:400;font-size:var(--cds-font-size-title);font-variant-numeric:tabular-nums;margin-top:var(--cds-gap-xs);min-height:1.2em}
+.cx-card h2{font-size:var(--cds-font-size-heading);font-weight:var(--cds-font-weight-medium);margin:0}
+.cx-card .note{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted);margin:var(--cds-gap-xs) 0 var(--cds-gap-md)}
+.cx-chart{position:relative;min-height:260px}
+.cx-tip{position:absolute;pointer-events:none;background:var(--cds-surface-popover);border:1px solid var(--cds-border);border-radius:var(--cds-radius);box-shadow:var(--cds-shadow-popover);padding:var(--cds-pad-xs) var(--cds-pad-sm);font-size:var(--cds-font-size-caption);white-space:nowrap}
+.cx-tip .d{color:var(--cds-text-secondary)}
+table.cx-t{width:100%;border-collapse:collapse;font-variant-numeric:tabular-nums;font-size:var(--cds-font-size-body)}
+.cx-t th,.cx-t td{text-align:left;padding:var(--cds-pad-xs) var(--cds-pad-sm);border-bottom:1px solid var(--color-border-line)}
+.cx-t th{font-weight:var(--cds-font-weight-medium);color:var(--color-fg-muted);font-size:var(--cds-font-size-caption)}
+.cx-t th:not(:first-child),.cx-t td:not(:first-child){text-align:right}
+.cx-t tbody tr{cursor:pointer}
+.cx-t tbody tr:hover td{background:var(--color-bg)}
+.cx-t tr.on td{font-weight:600}
+.cx-reset{font:inherit;background:none;border:1px solid var(--color-border-line);border-radius:var(--cds-radius);padding:var(--cds-pad-xs) var(--cds-pad-sm);color:var(--color-fg);cursor:pointer}
+.cx details{font-size:var(--cds-font-size-caption);color:var(--color-fg-muted)}
+[data-dash-source-state=refreshing]{opacity:.5;transition:opacity var(--cds-dur-slow)}
+[data-dash-source-state=empty]{color:transparent}
+</style>
+<div class="cx">
+  <header class="cx-head" id="prehled">
+    <h1>Template Crewship Dashboard</h1>
+    <p>V posledním týdnu crew dokončila <b data-draw="last">—</b> úkolů, <b data-draw="delta">—</b> proti týdnu předtím.</p>
+  </header>
+  <div class="cx-bar">
+    <label for="cx-crew">Crew</label>
+    <select id="cx-crew" class="dash-select cx-crew" aria-label="Crew">
+      <option value="">Všechny crew</option>
+      <option value="Research">Research</option>
+      <option value="Frontend">Frontend</option>
+      <option value="Ops">Ops</option>
+    </select>
+    <button class="cx-reset" type="button">Reset</button>
+    <span>Posledních 6 týdnů · ukázková data</span>
+  </div>
+  <section class="cx-tiles" id="kpi">
+    <div class="cx-card cx-tile"><div class="lbl">Dokončené úkoly</div><div class="num" data-draw="kpi-done">—</div></div>
+    <div class="cx-card cx-tile"><div class="lbl">Úspěšnost</div><div class="num" data-draw="kpi-rate">—</div></div>
+    <div class="cx-card cx-tile"><div class="lbl">Náklady na tokeny</div><div class="num" data-draw="kpi-cost">—</div></div>
+    <div class="cx-card cx-tile"><div class="lbl">Cena za úkol</div><div class="num" data-draw="kpi-cpt">—</div></div>
+  </section>
+  <section class="cx-grid">
+    <div class="cx-card" id="graf">
+      <h2>Dokončené úkoly po týdnech</h2>
+      <p class="note">Najeď na sloupec pro detail. Zvýrazněný je poslední týden.</p>
+      <div class="cx-chart" data-draw="chart" data-source="weekly">—</div>
+    </div>
+    <div class="cx-card" id="tabulka">
+      <h2>Crew vedle sebe</h2>
+      <p class="note">Klikni na řádek a celý dashboard se přefiltruje na tu crew.</p>
+      <table class="cx-t" data-source="totals" data-row-key="crew">
+        <thead><tr><th data-field="crew">Crew</th><th data-field="done">Hotovo</th><th data-field="failed">Selhalo</th><th data-field="rate">Úspěšnost</th><th data-field="cost_usd">Náklady</th></tr></thead>
+        <tbody data-draw="rows"></tbody>
+      </table>
+    </div>
+  </section>
+  <details>
+    <summary>Co tu je a co ne</summary>
+    <p>Úspěšnost = hotové úkoly / (hotové + selhané). Cena za úkol = náklady na tokeny / hotové úkoly.</p>
+    <p>Čísla jsou vymyšlená ukázková data pro test. Živá data by šla napojit z Crewship API přes konektor.</p>
+  </details>
+</div>
+<script>
+  window.cxAll = 'Celkem';
+  window.cxPick = () => dash.params().crew || window.cxAll;
+  window.cxNum = new Intl.NumberFormat('cs-CZ');
+  window.cxPct = new Intl.NumberFormat('cs-CZ', {style: 'percent', maximumFractionDigits: 1});
+  window.cxUsd = new Intl.NumberFormat('cs-CZ', {style: 'currency', currency: 'USD', maximumFractionDigits: 0});
+  window.cxUsd2 = new Intl.NumberFormat('cs-CZ', {style: 'currency', currency: 'USD', maximumFractionDigits: 2});
+  window.cxDay = (w) => `${Number(w.slice(8, 10))}. ${Number(w.slice(5, 7))}.`;
+
+  dash.calc('totals', {
+    inputs: ['tasks'],
+    title: 'Součty podle crew',
+    description: 'Hotové a selhané úkoly, náklady, úspěšnost a cena za úkol za 6 týdnů, pro každou crew i celkem.',
+    fn: (tasks) => {
+      const sum = (rows) => {
+        const done = rows.reduce((s, r) => s + Number(r.done), 0);
+        const failed = rows.reduce((s, r) => s + Number(r.failed), 0);
+        const cost = rows.reduce((s, r) => s + Number(r.cost_usd), 0);
+        return {done, failed, cost_usd: Math.round(cost * 100) / 100, rate: done / (done + failed), cost_per_task: cost / done};
+      };
+      const crews = [...new Set(tasks.map((r) => r.crew))];
+      return [...crews.map((crew) => ({crew, ...sum(tasks.filter((r) => r.crew === crew))})), {crew: 'Celkem', ...sum(tasks)}];
+    },
+  });
+
+  dash.calc('weekly', {
+    inputs: ['tasks'],
+    title: 'Hotové úkoly po týdnech',
+    description: 'Součet hotových úkolů za týden a změna proti týdnu předtím, pro každou crew i celkem.',
+    fn: (tasks) => {
+      const sums = new Map();
+      for (const r of tasks) {
+        for (const crew of [r.crew, 'Celkem']) {
+          const k = crew + '|' + r.week;
+          sums.set(k, (sums.get(k) || 0) + Number(r.done));
+        }
+      }
+      const rows = [...sums].map(([k, done]) => ({crew: k.split('|')[0], week: k.split('|')[1], done}));
+      rows.sort((a, b) => (a.crew + a.week < b.crew + b.week ? -1 : 1));
+      return rows.map((r, i) => {
+        const prev = rows.at(i - 1);
+        return {...r, change: i > 0 && prev.crew === r.crew ? r.done - prev.done : null};
+      });
+    },
+  });
+
+  const cxMark = (el, source, field, where, text) => {
+    const s = document.createElement('span');
+    s.dataset.source = source;
+    s.dataset.field = field;
+    s.dataset.where = where;
+    s.textContent = text;
+    el.replaceChildren(s);
+  };
+
+  const cxKpi = (name, field, show) => dash.draw(name, (el) => {
+    const t = dash.data('totals');
+    el.classList.toggle('dash-skeleton', t.status === 'loading');
+    if (t.status !== 'ok') { el.textContent = '—'; return; }
+    const crew = window.cxPick();
+    const row = t.data.find((r) => r.crew === crew);
+    if (!row) { el.textContent = '—'; return; }
+    cxMark(el, 'totals', field, 'crew=' + encodeURIComponent(crew), show(row));
+  });
+  cxKpi('kpi-done', 'done', (r) => window.cxNum.format(r.done));
+  cxKpi('kpi-rate', 'rate', (r) => window.cxPct.format(r.rate));
+  cxKpi('kpi-cost', 'cost_usd', (r) => window.cxUsd.format(r.cost_usd));
+  cxKpi('kpi-cpt', 'cost_per_task', (r) => window.cxUsd2.format(r.cost_per_task));
+
+  const cxLast = () => {
+    const w = dash.data('weekly');
+    if (w.status !== 'ok') return null;
+    const crew = window.cxPick();
+    return w.data.filter((r) => r.crew === crew).at(-1) || null;
+  };
+  dash.draw('last', (el) => {
+    const r = cxLast();
+    if (!r) { el.textContent = '—'; return; }
+    cxMark(el, 'weekly', 'done', `crew=${encodeURIComponent(r.crew)}&week=${r.week}`, window.cxNum.format(r.done));
+  });
+  dash.draw('delta', (el) => {
+    const r = cxLast();
+    if (!r || r.change === null) { el.textContent = '—'; el.style.color = ''; return; }
+    cxMark(el, 'weekly', 'change', `crew=${encodeURIComponent(r.crew)}&week=${r.week}`, (r.change > 0 ? '+' : '') + window.cxNum.format(r.change));
+    el.style.color = r.change >= 0 ? 'var(--color-ok)' : 'var(--color-bad)';
+  });
+
+  dash.draw('chart', (el) => {
+    const w = dash.data('weekly');
+    el.classList.toggle('dash-skeleton', w.status === 'loading');
+    if (w.status !== 'ok') { el.textContent = '—'; return; }
+    el.replaceChildren();
+    const crew = window.cxPick();
+    const rows = w.data.filter((r) => r.crew === crew);
+    if (!rows.length) { el.textContent = '—'; return; }
+    const W = Math.max(280, el.clientWidth), H = 260, mt = 24, mr = 8, mb = 28, ml = 32;
+    const x = d3.scaleBand(rows.map((r) => r.week), [ml, W - mr]).padding(0.3);
+    const y = d3.scaleLinear([0, d3.max(rows, (r) => r.done)], [H - mb, mt]).nice();
+    const bw = Math.min(32, x.bandwidth());
+    const last = rows.at(-1);
+    const svg = d3.select(el).append('svg').attr('width', '100%').attr('viewBox', `0 0 ${W} ${H}`).attr('role', 'img').attr('aria-label', 'Dokončené úkoly po týdnech');
+    const g = svg.append('g');
+    for (const t of y.ticks(4)) {
+      g.append('line').attr('x1', ml).attr('x2', W - mr).attr('y1', y(t)).attr('y2', y(t)).style('stroke', t === 0 ? 'var(--cds-chart-axis)' : 'var(--cds-chart-grid)');
+      g.append('text').attr('x', ml - 6).attr('y', y(t) + 4).attr('text-anchor', 'end').style('fill', 'var(--color-fg-muted)').style('font-size', 'var(--cds-font-size-caption)').text(window.cxNum.format(t));
+    }
+    const tip = d3.select(el).append('div').attr('class', 'cx-tip').style('display', 'none');
+    for (const r of rows) {
+      const cx = x(r.week) + x.bandwidth() / 2;
+      const bar = svg.append('rect').attr('x', cx - bw / 2).attr('y', y(r.done)).attr('width', bw).attr('height', y(0) - y(r.done)).attr('rx', 4)
+        .style('fill', r === last ? dash.colors[0] : 'var(--cds-chart-muted)');
+      svg.append('text').attr('x', cx).attr('y', y(r.done) - 6).attr('text-anchor', 'middle').style('fill', 'var(--color-fg)').style('font-size', 'var(--cds-font-size-caption)').style('font-weight', r === last ? 600 : 400).text(window.cxNum.format(r.done));
+      svg.append('text').attr('x', cx).attr('y', H - 8).attr('text-anchor', 'middle').style('fill', 'var(--color-fg-muted)').style('font-size', 'var(--cds-font-size-caption)').text(window.cxDay(r.week));
+      bar.on('mouseenter', () => {
+        tip.style('display', 'block').html('');
+        tip.append('div').attr('class', 'd').text('Týden od ' + window.cxDay(r.week));
+        tip.append('div').text(window.cxNum.format(r.done) + ' hotových úkolů' + (r.change === null ? '' : ` (${r.change > 0 ? '+' : ''}${r.change})`));
+        const left = Math.min(Math.max(0, (cx / W) * el.clientWidth - 70), el.clientWidth - 160);
+        tip.style('left', left + 'px').style('top', '0px');
+      }).on('mouseleave', () => tip.style('display', 'none'));
+    }
+  });
+
+  dash.draw('rows', (tb) => {
+    const t = dash.data('totals');
+    tb.replaceChildren();
+    if (t.status !== 'ok') return;
+    const crew = window.cxPick();
+    for (const r of t.data.filter((d) => d.crew !== window.cxAll)) {
+      const tr = document.createElement('tr');
+      tr.dataset.key = r.crew;
+      if (r.crew === crew) tr.className = 'on';
+      for (const v of [r.crew, window.cxNum.format(r.done), window.cxNum.format(r.failed), window.cxPct.format(r.rate), window.cxUsd.format(r.cost_usd)]) {
+        const td = document.createElement('td');
+        td.textContent = v;
+        tr.append(td);
+      }
+      tb.append(tr);
+    }
+  });
+
+  for (const tb of document.querySelectorAll('.cx-t')) {
+    tb.addEventListener('click', (event) => {
+      const row = event.target.closest('tr[data-key]');
+      if (row) dash.setParams({crew: row.dataset.key === dash.params().crew ? '' : row.dataset.key});
+    });
+  }
+  for (const sel of document.querySelectorAll('.cx-crew')) {
+    sel.addEventListener('change', () => dash.setParams({crew: sel.value}));
+  }
+  for (const b of document.querySelectorAll('.cx-reset')) {
+    b.addEventListener('click', () => dash.resetParams());
+  }
+  dash.onData(() => {
+    for (const sel of document.querySelectorAll('.cx-crew')) sel.value = dash.params().crew || '';
+  });
+</script>
