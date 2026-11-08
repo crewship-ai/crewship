@@ -269,14 +269,26 @@ describe("one selected slide for the viewer, its link and Present (#5150)", () =
   })
 })
 
-/** Same-origin channels in one test: a message reaches every other channel of that name. */
+/**
+ * Same-origin channels in one test. Like the browser's, delivery is asynchronous: messages wait
+ * until `deliver()`, so several quick moves can be in flight at once.
+ */
 class FakeChannel {
   static open = new Set<FakeChannel>()
+  static queue: { to: FakeChannel; data: unknown }[] = []
+  static async deliver() {
+    await act(async () => {
+      while (FakeChannel.queue.length) {
+        const { to, data } = FakeChannel.queue.shift()!
+        if (FakeChannel.open.has(to)) { to.received.push(data); to.onmessage?.({ data } as MessageEvent) }
+      }
+    })
+  }
   onmessage: ((event: MessageEvent) => void) | null = null
   received: unknown[] = []
   constructor(readonly name: string) { FakeChannel.open.add(this) }
   postMessage(data: unknown) {
-    for (const peer of FakeChannel.open) if (peer !== this && peer.name === this.name) { peer.received.push(data); act(() => { peer.onmessage?.({ data } as MessageEvent) }) }
+    for (const peer of FakeChannel.open) if (peer !== this && peer.name === this.name) FakeChannel.queue.push({ to: peer, data: structuredClone(data) })
   }
   close() { FakeChannel.open.delete(this) }
 }
@@ -284,60 +296,96 @@ class FakeChannel {
 describe("Presenter view in its own window (#5151)", () => {
   const SESSION = "0123456789abcdef01234567"
   let opened: ReturnType<typeof vi.fn>
+  let popup: { opener: unknown }
   beforeEach(() => {
     state.projection = threeSlides()
-    FakeChannel.open.clear()
+    FakeChannel.open.clear(); FakeChannel.queue = []
     vi.stubGlobal("BroadcastChannel", FakeChannel)
-    opened = vi.fn(() => null)
+    popup = { opener: window }
+    opened = vi.fn(() => popup)
     vi.stubGlobal("open", opened)
   })
   afterEach(() => { vi.unstubAllGlobals() })
   const peer = (session = SESSION) => new FakeChannel(`crewship-slides-presenter:${session}`)
+  const sessionOf = () => /presenter=([0-9a-f]{24})/.exec(opened.mock.calls[0][0] as string)![1]
+  const slides = (channel: FakeChannel) => channel.received.filter(message => (message as { kind: string }).kind === "slide")
 
   it("opens the presenter window on the current slide and presents here without notes", async () => {
     await mount()
     fireEvent.click(within(screen.getByRole("navigation", { name: "Slide thumbnails" })).getByRole("button", { name: "Slide 2" }))
+    // Notes were open in the viewer: the audience screen closes them.
+    fireEvent.click(within(slot("nav")).getByRole("button", { name: "Speaker notes" }))
     fireEvent.click(within(slot("output")).getByRole("button", { name: "Presenter view" }))
     expect(opened).toHaveBeenCalledOnce()
-    const [url, target, features] = opened.mock.calls[0] as [string, string, string]
+    const [url, target] = opened.mock.calls[0] as [string, string]
     expect(url).toMatch(/^\/artifacts\/page\?workspace_id=workspace&presenter=[0-9a-f]{24}#slide-details$/)
     expect(target).toMatch(/^crewship-presenter-[0-9a-f]{24}$/)
-    expect(features).toContain("noopener")
+    expect(popup.opener).toBeNull()
     const dialog = screen.getByRole("dialog", { name: "Present slides" })
     expect(within(dialog).getByText("2 / 3")).toBeInTheDocument()
-    expect(dialog).not.toHaveTextContent("Thank the board")
-    expect(dialog).not.toHaveTextContent("Opening note")
+    expect(within(dialog).getByRole("button", { name: "Full screen" })).toBeInTheDocument()
+    expect(screen.queryByRole("complementary", { name: "Speaker notes" })).toBeNull()
+    expect(document.body).not.toHaveTextContent("Thank the board")
+    expect(document.body).not.toHaveTextContent("Opening note")
   })
 
-  it("follows its presenter window and tells it when the presentation ends", async () => {
+  it("says so when the browser blocks the presenter window, and does not present", async () => {
+    opened.mockReturnValue(null)
     await mount()
     fireEvent.click(within(slot("output")).getByRole("button", { name: "Presenter view" }))
-    const session = /presenter=([0-9a-f]{24})/.exec(opened.mock.calls[0][0] as string)![1]
-    const presenter = peer(session), stranger = peer("ffffffffffffffffffffffff")
+    expect(screen.getByRole("alert")).toHaveTextContent("Your browser blocked the presenter window. Allow pop-ups for this site and try again.")
+    expect(screen.queryByRole("dialog")).toBeNull()
+  })
+
+  it("follows quick presenter moves without sending them back, and only its own session", async () => {
+    await mount()
+    fireEvent.click(within(slot("output")).getByRole("button", { name: "Presenter view" }))
+    const presenter = peer(sessionOf()), stranger = peer("ffffffffffffffffffffffff")
+    await FakeChannel.deliver()
+    presenter.received = []
     const dialog = screen.getByRole("dialog", { name: "Present slides" })
+    // Two moves in flight before the audience hears either.
+    presenter.postMessage({ kind: "slide", id: "details" })
     presenter.postMessage({ kind: "slide", id: "closing" })
+    await FakeChannel.deliver()
     expect(within(dialog).getByText("3 / 3")).toBeInTheDocument()
+    expect(slides(presenter)).toEqual([])
     presenter.postMessage({ kind: "slide", id: "missing" })
     stranger.postMessage({ kind: "slide", id: "intro" })
+    await FakeChannel.deliver()
     expect(within(dialog).getByText("3 / 3")).toBeInTheDocument()
+    // A move made here is sent once.
     fireEvent.keyDown(dialog, { key: "ArrowLeft" })
-    expect(presenter.received.at(-1)).toEqual({ kind: "slide", id: "details" })
-    presenter.postMessage({ kind: "slide", id: "closing" })
-    fireEvent.keyDown(dialog, { key: "ArrowLeft" })
-    presenter.postMessage({ kind: "slide", id: "closing" })
-    expect(within(dialog).getByText("3 / 3")).toBeInTheDocument()
+    await FakeChannel.deliver()
+    expect(slides(presenter)).toEqual([{ kind: "slide", id: "details" }])
     fireEvent.keyDown(dialog, { key: "Escape" })
+    await FakeChannel.deliver()
     expect(presenter.received.at(-1)).toEqual({ kind: "end" })
     expect(stranger.received).toEqual([])
-    expect(shown3()).toBe("3 / 3")
+    expect(shown3()).toBe("2 / 3")
   })
 
-  it("ends here when the presenter window ends the presentation", async () => {
+  it("ends here when the presenter window ends or closes, and a later Present starts where the viewer is", async () => {
     await mount()
     fireEvent.click(within(slot("output")).getByRole("button", { name: "Presenter view" }))
-    const session = /presenter=([0-9a-f]{24})/.exec(opened.mock.calls[0][0] as string)![1]
-    peer(session).postMessage({ kind: "end" })
+    const presenter = peer(sessionOf())
+    presenter.postMessage({ kind: "slide", id: "closing" })
+    presenter.postMessage({ kind: "end" })
+    await FakeChannel.deliver()
     expect(screen.queryByRole("dialog", { name: "Present slides" })).toBeNull()
+    expect(shown3()).toBe("3 / 3")
+    fireEvent.keyDown(document.body, { key: "Home" })
+    fireEvent.click(within(slot("output")).getByRole("button", { name: "Present" }))
+    expect(within(screen.getByRole("dialog", { name: "Present slides" })).getByText("1 / 3")).toBeInTheDocument()
+  })
+
+  it("tells the presenter window when this window closes", async () => {
+    await mount()
+    fireEvent.click(within(slot("output")).getByRole("button", { name: "Presenter view" }))
+    const presenter = peer(sessionOf())
+    window.dispatchEvent(new Event("pagehide"))
+    await FakeChannel.deliver()
+    expect(presenter.received.at(-1)).toEqual({ kind: "end" })
   })
 
   it("is the presenter window: current and next slide, notes and timer, driving the audience", async () => {
@@ -349,13 +397,21 @@ describe("Presenter view in its own window (#5151)", () => {
     expect(within(view).getByRole("region", { name: "Next slide" })).toBeInTheDocument()
     expect(within(view).getByLabelText("Elapsed time")).toHaveTextContent("00:00")
     fireEvent.click(within(view).getByRole("button", { name: "Next slide" }))
+    await FakeChannel.deliver()
     expect(audience.received.at(-1)).toEqual({ kind: "slide", id: "details" })
     fireEvent.keyDown(view, { key: "End" })
     expect(within(view).getByRole("region", { name: "Speaker notes" })).toHaveTextContent("Thank the board")
     expect(within(view).getByRole("region", { name: "Next slide" })).toHaveTextContent("End of the deck.")
     audience.postMessage({ kind: "slide", id: "intro" })
+    await FakeChannel.deliver()
     expect(within(view).getByText("1 / 3")).toBeInTheDocument()
+    // Focus stays inside the view.
+    const buttons = within(view).getAllByRole("button").filter(button => !(button as HTMLButtonElement).disabled)
+    buttons.at(-1)!.focus()
+    fireEvent.keyDown(buttons.at(-1)!, { key: "Tab" })
+    expect(document.activeElement).toBe(buttons[0])
     audience.postMessage({ kind: "end" })
+    await FakeChannel.deliver()
     expect(within(view).getByRole("status")).toHaveTextContent("The presentation ended. You can close this window.")
   })
 

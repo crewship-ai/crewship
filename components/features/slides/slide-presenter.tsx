@@ -69,15 +69,24 @@ export function SlidePresenterView({ deck, slideId, onSelect, onEnd, ended }: { 
   const [start, setStart] = React.useState(() => Date.now())
   const [now, setNow] = React.useState(start)
   React.useEffect(() => {
+    if (ended) return
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
-  }, [])
+  }, [ended])
   const root = React.useRef<HTMLDivElement>(null)
   React.useEffect(() => { root.current?.focus() }, [])
   const go = (position: number) => onSelect(order[Math.max(0, Math.min(order.length - 1, position))])
   return <div ref={root} role="dialog" aria-modal="true" aria-label="Presenter view" tabIndex={-1} data-presenter-view
     className="fixed inset-0 z-50 grid grid-rows-[auto_1fr_auto] gap-3 bg-background p-4 text-foreground outline-none"
     onKeyDown={event => {
+      if (event.key === "Tab") {
+        // Modal: focus stays among this view's controls.
+        const buttons = Array.from(root.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [])
+        const first = buttons[0], last = buttons.at(-1)
+        if (event.shiftKey && (document.activeElement === first || document.activeElement === root.current)) { event.preventDefault(); last?.focus() }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
+        return
+      }
       if ((event.target as HTMLElement).closest("input,textarea,select,[contenteditable=true]")) return
       const next = ["ArrowRight", "PageDown"].includes(event.key) ? index + 1 : ["ArrowLeft", "PageUp"].includes(event.key) ? index - 1
         : event.key === "Home" ? 0 : event.key === "End" ? order.length - 1 : null
