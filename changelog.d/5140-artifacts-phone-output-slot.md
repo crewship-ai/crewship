@@ -1,0 +1,1 @@
+- **On a phone, an open artifact's download, source and present buttons no longer cover its text.** The frame floated the output slot over the reading area (most visibly in the Design Library); it now sits top right in one row with the view controls, which scroll sideways when they need more room.
