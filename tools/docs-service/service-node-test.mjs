@@ -6,7 +6,7 @@ import { mkdtemp, copyFile, appendFile, writeFile, readFile, stat, lstat, chmod,
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startService, PROTOCOL } from './service.mjs';
 import { RICH_VERSION, create, snapshot, initialJSON, outline, load, validate, anchor, find, encode } from './schema.mjs';
@@ -293,10 +293,13 @@ async function crashedSocket(path) {
   await once(crashed, 'exit');
   assert.ok((await lstat(path)).isSocket());
 }
+// Reclaiming needs the Linux startup lock; other platforms refuse any path.
+const linux = process.platform === 'linux';
 test('a socket left by a killed engine is reclaimed by its replacement; other paths stay refused', { timeout: 10000 }, async () => {
   const model = authorityModel(), f = await fixture(model.handle);
   try {
     await crashedSocket(f.socket);
+    if (!linux) { await assert.rejects(f.start(), /already exists/); assert.ok((await lstat(f.socket)).isSocket()); assert.equal(model.recoveries, 0); return; }
     await f.start();
     assert.equal(model.recoveries, 1); assert.equal((await read(f)).status, 200);
   } finally { await f.close(); }
@@ -307,18 +310,20 @@ test('a socket left by a killed engine is reclaimed by its replacement; other pa
     assert.equal(await readFile(other.socket, 'utf8'), 'not a socket');
   } finally { await other.close(); }
 });
-test('concurrent replacements of a killed engine: exactly one reclaims, binds and recovers', { timeout: 10000 }, async () => {
+test('concurrent replacements of a killed engine, also through a directory alias: exactly one reclaims, binds and recovers', { timeout: 10000, skip: !linux && 'startup lock is Linux-only' }, async () => {
   const model = authorityModel(), f = await fixture(model.handle);
-  const paths = { socket: f.socket, authoritySocket: f.authoritySocket, tokenFile: f.tokenFile };
+  const alias = join(await mkdtemp(join(tmpdir(), 'docs-alias-')), 'd');
+  await symlink(dirname(f.socket), alias);
+  const through = path => ({ socket: path, authoritySocket: f.authoritySocket, tokenFile: f.tokenFile });
   let started = [];
   try {
     await crashedSocket(f.socket);
-    const results = await Promise.allSettled(Array.from({ length: 4 }, () => startService(paths)));
+    const results = await Promise.allSettled([f.socket, join(alias, basename(f.socket))].flatMap(path => [startService(through(path)), startService(through(path))]));
     started = results.filter(result => result.status === 'fulfilled').map(result => result.value);
     assert.equal(started.length, 1);
     for (const result of results.filter(result => result.status === 'rejected')) assert.match(result.reason.message, /already exists/);
     assert.equal(model.recoveries, 1); assert.equal((await read(f)).status, 200);
-  } finally { await Promise.all(started.map(service => service.close())); await f.close(); }
+  } finally { await Promise.all(started.map(service => service.close())); await rm(dirname(alias), { recursive: true }); await f.close(); }
 });
 test('recovery gates all admission and failure closes its socket; a fresh boot can retry', async () => {
   const entered = deferred(), proceed = deferred(); let reject = true, boots = [];

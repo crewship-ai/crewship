@@ -1,9 +1,9 @@
 import http from 'node:http';
 import { creationDocument } from './create-document.mjs';
-import { readFile, chmod, lstat, unlink } from 'node:fs/promises';
+import { readFile, chmod, lstat, stat, unlink } from 'node:fs/promises';
 import net from 'node:net';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
-import { isAbsolute, normalize } from 'node:path';
+import { basename, dirname, isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
 import { VERSION, RICH_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
@@ -40,13 +40,15 @@ async function verifyTargets(doc, targets, version = VERSION) {
   }
   return verified;
 }
-// Startup custody of one configured socket path is serialized by a Linux
-// abstract-namespace listener named from that path. The kernel releases it when
+// Startup custody of one socket is serialized by a Linux abstract-namespace
+// listener named from the socket's parent directory identity (device and
+// inode, so path aliases share it) and basename. The kernel releases it when
 // its process exits, including SIGKILL, and an engine holds it while it lives.
 async function holdStartupLock(socket) {
   if (process.platform !== 'linux') return undefined;
+  const parent = await stat(dirname(socket), { bigint: true });
   const lock = net.createServer();
-  const name = '\0crewship-docs-' + createHash('sha256').update(socket).digest('hex').slice(0, 40);
+  const name = '\0crewship-docs-' + createHash('sha256').update(`${parent.dev}:${parent.ino}:${basename(socket)}`).digest('hex').slice(0, 40);
   await new Promise((resolve, reject) => {
     lock.once('error', error => reject(error.code === 'EADDRINUSE' ? new Error('service socket already exists') : error));
     lock.listen(name, resolve);
