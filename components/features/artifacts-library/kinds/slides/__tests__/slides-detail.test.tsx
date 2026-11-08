@@ -210,6 +210,13 @@ describe("one selected slide for the viewer, its link and Present (#5150)", () =
     const box = screen.getByRole("textbox", { name: "Comment on the slide" })
     fireEvent.keyDown(box, { key: "ArrowRight" })
     expect(shown()).toBe("2 / 3")
+    // A button in the drawer keeps PageDown/End for scrolling its list.
+    const select = screen.getByRole("button", { name: "Select on the slide" })
+    expect(fireEvent.keyDown(select, { key: "End" })).toBe(true)
+    expect(shown()).toBe("2 / 3")
+    // The frame's slot buttons and the filmstrip are the deck's own controls.
+    fireEvent.keyDown(within(slot("nav")).getByRole("button", { name: "All slides" }), { key: "ArrowRight" })
+    expect(shown()).toBe("3 / 3")
   })
 
   it("leaves Present on the last slide shown: 2 → 3 → Escape stays on 3", async () => {
@@ -232,10 +239,13 @@ describe("one selected slide for the viewer, its link and Present (#5150)", () =
     const dialog = screen.getByRole("dialog", { name: "Present slides" })
     fireEvent.keyDown(dialog, { key: "ArrowLeft" })
     expect(within(dialog).getByText("1 / 3")).toBeInTheDocument()
+    // One key, one step: the viewer's own keys do not move the slide under the presentation too.
+    fireEvent.keyDown(dialog, { key: "ArrowRight" })
+    expect(within(dialog).getByText("2 / 3")).toBeInTheDocument()
+    expect(shown()).toBe("2 / 3")
     fireEvent.keyDown(dialog, { key: "End" })
     fireEvent.keyDown(dialog, { key: "ArrowRight" })
     expect(within(dialog).getByText("3 / 3")).toBeInTheDocument()
-    // The viewer's own keys do not move the slide under the presentation twice.
     expect(shown()).toBe("3 / 3")
     fireEvent.click(within(dialog).getByRole("button", { name: "Close presentation" }))
     expect(shown()).toBe("3 / 3")

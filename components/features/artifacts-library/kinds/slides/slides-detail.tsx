@@ -110,8 +110,10 @@ function useBox(ref: React.RefObject<HTMLElement | null>) {
   return box
 }
 
-/** Focus in these keeps its own keys: typing, menus, dialogs and other composite widgets. */
-const VIEWER_KEYS_IGNORED = "input,textarea,select,[contenteditable]:not([contenteditable=false]),[role=dialog],[role=menu],[role=menubar],[role=listbox],[role=tablist],[role=radiogroup],[role=slider],[role=textbox],[role=grid],[role=tree]"
+/** Focus in these keeps its own keys: typing, menus, dialogs and other composite widgets. The frame's slot toolbars have no arrow-key roving, so they are the deck's own controls. */
+const VIEWER_KEYS_IGNORED = "input,textarea,select,[contenteditable]:not([contenteditable=false]),[role=dialog],[role=menu],[role=menubar],[role=listbox],[role=option],[role=combobox],[role=spinbutton],[role=tablist],[role=radiogroup],[role=slider],[role=textbox],[role=grid],[role=tree]"
+/** The viewer's keys act from the page itself, the deck and the frame's slots; never from a drawer, whose lists scroll with them. */
+const VIEWER_KEYS_FROM = "[data-slides-deck],[data-artifact-slot]"
 
 const SLIDE_LINK = /^#slide-([A-Za-z][A-Za-z0-9_-]{0,63})$/
 
@@ -131,7 +133,9 @@ function useSlideLink(order: readonly string[], slideId: string | undefined, sel
   React.useEffect(() => {
     if (!slideId || typeof window === "undefined") return
     const hash = `#slide-${slideId}`
-    if (window.location.hash !== hash) window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}${hash}`)
+    // `null` state, as Next's App Router expects: it then records the address with the fragment,
+    // so its own later updates (refresh, replace) keep the slide link.
+    if (window.location.hash !== hash) window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}${hash}`)
   }, [slideId])
   const follow = React.useRef(select); follow.current = select
   React.useEffect(() => {
@@ -202,7 +206,7 @@ function SlidesStage({ projection, codeVersion, download, data, workspaceId, slu
     const onKey = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
       const target = event.target instanceof Element ? event.target : null
-      if (target?.closest(VIEWER_KEYS_IGNORED)) return
+      if (target && target !== document.body && target !== document.documentElement && (!target.closest(VIEWER_KEYS_FROM) || target.closest(VIEWER_KEYS_IGNORED))) return
       const last = deck.slide_order.length - 1
       const next = event.key === "ArrowRight" || event.key === "PageDown" ? index + 1 : event.key === "ArrowLeft" || event.key === "PageUp" ? index - 1
         : event.key === "Home" ? 0 : event.key === "End" ? last : null
@@ -238,7 +242,7 @@ function SlidesStage({ projection, codeVersion, download, data, workspaceId, slu
     finally { if (mounted.current) setPdfPending(false) }
   }
   const count = `${index + 1} / ${deck.slide_order.length}`
-  return <section aria-label="Slides" data-slides-layout={phone ? "phone" : "wide"} className="artifact-slides relative flex min-h-0 flex-1 flex-col bg-muted/40">
+  return <section aria-label="Slides" data-slides-deck data-slides-layout={phone ? "phone" : "wide"} className="artifact-slides relative flex min-h-0 flex-1 flex-col bg-muted/40">
     {(pdfError || selectionError || overflow.length > 0) && <div className={cn("relative z-[11] mx-3 grid gap-1 rounded-card border bg-card px-3 py-2 text-sm", phone ? "mt-16" : "mt-14")}>
       {pdfError && <p role="alert">{pdfError}</p>}
       {selectionError && <p role="status">{selectionError}</p>}
