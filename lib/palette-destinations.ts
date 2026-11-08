@@ -106,7 +106,7 @@ const ENTRIES: Entry[] = [
   settingsCard("sounds", "Notification sounds", "Notification sounds", Volume2, ["sound", "do not disturb", "dnd", "volume", "mute"]),
   settingsCard("general", "General", "Identity", Building2, ["workspace name", "workspace logo", "slug", "agent language", "rename workspace"]),
   settingsCard("general", "General", "Usage", Gauge, ["counts", "agent avatars", "store missing avatars"]),
-  settingsCard("general", "General", "Pages appearance", Palette, ["theme", "pages colours", "pages colors", "branding"]),
+  settingsCard("general", "General", "Artifacts appearance", Palette, ["theme", "pages colours", "pages colors", "branding"]),
   settingsCard("general", "General", "Privileged credentials", ShieldAlert, ["security", "privileged", "fail closed"]),
   settingsCard("general", "General", "Danger zone", Trash2, ["delete workspace", "remove workspace"], (ctx) => isOwner(ctx.role)),
   // Members is a page of its own (/settings/members), not a card in a tab.
@@ -150,7 +150,7 @@ const ENTRIES: Entry[] = [
   { id: "int:endpoints", title: "Triggers", trail: "Integrations", href: "/integrations?space=triggers", icon: Webhook, keywords: ["webhook endpoints", "inbound", "trigger url"] },
   { id: "int:incoming-routine", title: "Triggers that start routines", trail: "Integrations › Triggers", href: "/integrations?space=triggers&starts=routine", icon: Webhook, keywords: ["routine webhook"] },
   { id: "int:incoming-agent", title: "Triggers that start agents", trail: "Integrations › Triggers", href: "/integrations?space=triggers&starts=agent", icon: Webhook, keywords: ["agent webhook"] },
-  { id: "int:incoming-page", title: "Triggers that feed pages", trail: "Integrations › Triggers", href: "/integrations?space=triggers&starts=page", icon: Webhook, keywords: ["page webhook", "page data"] },
+  { id: "int:incoming-page", title: "Triggers that feed artifacts", trail: "Integrations › Triggers", href: "/integrations?space=triggers&starts=page", icon: Webhook, keywords: ["page webhook", "page data"] },
   { id: "int:catalog", title: "App catalog", trail: "Integrations › Tools", href: "/integrations?space=tools&view=catalog", icon: Plug, keywords: ["apps", "install integration", "connectors", "marketplace"] },
   { id: "int:accounts", title: "Connected apps", trail: "Integrations › Tools", href: "/integrations?space=tools", icon: Plug, keywords: ["oauth", "sign in", "github", "google", "accounts"] },
   { id: "int:agents", title: "Agent access to tools", trail: "Integrations › Tools", href: "/integrations?space=tools", icon: Plug, keywords: ["agent access", "tool permissions"] },

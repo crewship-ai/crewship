@@ -1,9 +1,8 @@
 import { roleAtLeast } from "@/lib/routine-governance"
-import { restrictedHome, restrictedPathAllowed, type RestrictedSurface } from "@/lib/restricted-surfaces"
+import { RESTRICTED_SURFACE_PATHS, restrictedHome, restrictedPathAllowed, type RestrictedSurface } from "@/lib/restricted-surfaces"
 import type { LucideIcon } from "lucide-react"
 
 import { CONCEPT_ICON } from "@/lib/concept-icons"
-import { artifactsLibrary } from "@/lib/feature-flags"
 
 /**
  * The application's navigation, defined once.
@@ -46,8 +45,9 @@ export interface NavSection {
  * does it and with what). Settings and Admin live in the sidebar footer with
  * the sidebar mode and the user menu. Marketplace — announced, never built —
  * is gone. The Journal is part of Activity (F-02): its admin-only views are
- * gated there and old /journal links redirect. "Vault" is the label of Credentials (same route); /pages is labelled
- * "Artifacts" as v67 draws it (the Artifacts delivery on main renamed it).
+ * gated there and old /journal links redirect. "Vault" is the label of Credentials (same route). Artifacts
+ * is the library at /artifacts in every build; Pages is never a destination
+ * (owner, 8 Nov 2026), and an old /pages link redirects there.
  */
 export const navSections: NavSection[] = [
   {
@@ -66,7 +66,7 @@ export const navSections: NavSection[] = [
     items: [
       { title: "Issues", href: "/issues", icon: CONCEPT_ICON.issues },
       { title: "Routines", href: "/routines", icon: CONCEPT_ICON.routines },
-      { title: "Artifacts", href: artifactsLibrary() ? "/artifacts" : "/pages", icon: CONCEPT_ICON.pages },
+      { title: "Artifacts", href: "/artifacts", icon: CONCEPT_ICON.pages },
       // F-01: the item arrives with the Calendar page itself (ODCH-12), last
       // in Work as SHL-01 orders it.
       { title: "Calendar", href: "/calendar", icon: CONCEPT_ICON.calendar },
@@ -124,7 +124,17 @@ export function visibleNavItems(viewer: NavViewer, sections: NavSection[] = navS
 
 /** One section's rows for this person. */
 export function visibleItems(items: NavItem[], { role, instanceAdmin, surfaces }: NavViewer): NavItem[] {
-  return items.filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
+  return items.map((item) => surfaces ? forRestricted(item) : item)
+    .filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
+}
+
+/**
+ * A restricted (Guest) session keeps its saved-work surface exactly where
+ * lib/restricted-surfaces.ts puts it; this file never decides that on its
+ * own. Once that surface is /artifacts too, this is a no-op.
+ */
+function forRestricted(item: NavItem): NavItem {
+  return item.href === "/artifacts" ? { ...item, href: RESTRICTED_SURFACE_PATHS.pages } : item
 }
 
 /**

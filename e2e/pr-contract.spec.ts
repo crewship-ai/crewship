@@ -289,8 +289,8 @@ test.describe("PR browser contract subset — phone", () => {
       await expect(sheet.getByText(label, { exact: true })).toBeVisible()
     }
     await expect(sheet.getByText("Journal", { exact: true })).toHaveCount(0)
-    // The release build profile moves the Artifacts nav to the library.
-    await expect(sheet.getByRole("link", { name: "Artifacts", exact: true })).toHaveAttribute("href", buildProfile().name === "release" ? "/artifacts" : "/pages")
+    // The Artifacts nav opens the library in every build profile; Pages is never a destination.
+    await expect(sheet.getByRole("link", { name: "Artifacts", exact: true })).toHaveAttribute("href", "/artifacts")
 
     // Back closes it in place rather than leaving the page underneath.
     const before = new URL(page.url()).pathname
@@ -398,8 +398,8 @@ test.describe("PR browser contract subset: saved Document preview fixture", () =
       await page.goto(`/chat/${encodeURIComponent(agent.slug)}?session=${chatId}`)
       const card = page.getByRole("link", { name: "Open document Creation fixture title" })
       await expect(card).toBeVisible({ timeout: 20_000 })
-      // The release profile turns the Artifacts library on: chat then links saved items there.
-      const release = buildProfile().name === "release"
+      // The Artifacts library is on in every profile: chat links saved items there.
+      const release = buildProfile().env.NEXT_PUBLIC_ARTIFACTS_LIBRARY === "true"
       const itemHref = release
         ? `/artifacts/${encodeURIComponent(pageId)}?workspace_id=${encodeURIComponent(workspaceId)}`
         : `/pages?ref=${encodeURIComponent(pageId)}&workspace_id=${encodeURIComponent(workspaceId)}`

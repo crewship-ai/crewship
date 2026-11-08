@@ -116,7 +116,7 @@ describe("AppearanceSection", () => {
     cleanup()
     workspaceHex = "#E11D48"
     render(<AppearanceSection />)
-    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent("The workspace brand colour from General › Pages appearance")
+    expect(screen.getByTestId("workspace-accent-hint")).toHaveTextContent("The workspace brand colour from General › Artifacts appearance")
     fireEvent.click(screen.getByRole("radio", { name: "Team colour" }))
     expect(document.documentElement.dataset.accent).toBe("workspace")
   })

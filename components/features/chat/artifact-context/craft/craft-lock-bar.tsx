@@ -16,6 +16,7 @@ interface CraftLockBarProps { workspaceId: string; slug: string; onEdit: () => v
  */
 export function craftEditorHref(workspaceId: string, slug: string): string {
   if (artifactsLibrary() && slug.startsWith("@")) return canonicalArtifactHref(slug.slice(1), workspaceId)
+  if (artifactsLibrary()) return `/artifacts?${new URLSearchParams({ item: slug, workspace_id: workspaceId })}`
   return slug.startsWith("@")
     ? `/pages/craft/editor?${new URLSearchParams({ page_id: slug.slice(1), workspace_id: workspaceId })}`
     : `/pages/${encodeURIComponent(slug)}?${new URLSearchParams({ workspace_id: workspaceId })}`

@@ -201,10 +201,10 @@ function TeamColourRow({ hex, value, onChange }: { hex: string | null | undefine
       data-testid="workspace-accent-hint"
       label="Team colour"
       description={hex
-        ? "The workspace brand colour from General › Pages appearance"
+        ? "The workspace brand colour from General › Artifacts appearance"
         : checked
-          ? "This workspace has no brand colour yet, so Blue shows. An admin can set one in General › Pages appearance."
-          : "An admin can set a brand colour in General › Pages appearance."}
+          ? "This workspace has no brand colour yet, so Blue shows. An admin can set one in General › Artifacts appearance."
+          : "An admin can set a brand colour in General › Artifacts appearance."}
     >
       <span
         aria-hidden

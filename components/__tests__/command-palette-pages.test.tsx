@@ -107,13 +107,13 @@ function pagesCalls() {
 }
 
 describe("⌘K — Pages group", () => {
-  it("lists the pages the server authorised, each opening /pages/<slug>", async () => {
+  it("lists the pages the server authorised, each opening in Artifacts, never on /pages", async () => {
     ANSWERS["/api/v1/pages"] = { ok: true, body: [page({ slug: "fleet", name: "Fleet board" })] }
     openPalette()
     const g = await group(/^artifacts$/i)
     const row = within(g).getByRole("option")
     expect(row).toHaveTextContent("Fleet board")
-    expect(row).toHaveAttribute("data-href", "/pages/fleet")
+    expect(row).toHaveAttribute("data-href", "/artifacts?item=fleet")
     // The generic destination is still there, in its own group.
     const nav = await group(/go to/i)
     expect(within(nav).getByText("Artifacts")).toBeInTheDocument()
@@ -123,7 +123,7 @@ describe("⌘K — Pages group", () => {
     ANSWERS["/api/v1/pages"] = { ok: true, body: [page({ slug: "q&a/2026 sít", name: "Q&A" })] }
     openPalette()
     const g = await group(/^artifacts$/i)
-    expect(within(g).getByRole("option")).toHaveAttribute("data-href", `/pages/${encodeURIComponent("q&a/2026 sít")}`)
+    expect(within(g).getByRole("option")).toHaveAttribute("data-href", `/artifacts?${new URLSearchParams({ item: "q&a/2026 sít" })}`)
   })
 
   it("keeps two pages with the same name apart by folder and by crew", async () => {
@@ -163,7 +163,7 @@ describe("⌘K — Pages group", () => {
     expect(rows).toHaveLength(2)
     expect(rows[0].querySelector('[data-slot="page-glyph"][data-icon="rocket"][data-color="violet"]')).toBeInTheDocument()
     expect(rows[0]).toHaveTextContent("app")
-    expect(rows[1]).toHaveAttribute("data-href", "/pages/draft")
+    expect(rows[1]).toHaveAttribute("data-href", "/artifacts?item=draft")
   })
 
   it("asks for the whole index — no limit, the caller's workspace", async () => {
@@ -180,10 +180,10 @@ describe("⌘K — Pages group", () => {
     openPalette()
     const g = await group(/^artifacts$/i)
     fireEvent.click(within(g).getByRole("option"))
-    expect(h.push).toHaveBeenCalledWith("/pages/fleet")
+    expect(h.push).toHaveBeenCalledWith("/artifacts?item=fleet")
     expect(vi.mocked(localStorage.setItem)).toHaveBeenCalledWith(
       "crewship.palette.recent:u-alice:ws-A",
-      JSON.stringify([{ href: "/pages/fleet", label: "Fleet board", group: "Artifacts" }]),
+      JSON.stringify([{ href: "/artifacts?item=fleet", label: "Fleet board", group: "Artifacts" }]),
     )
 
     h.push.mockReset()
@@ -194,7 +194,7 @@ describe("⌘K — Pages group", () => {
     fireEvent.change(input, { target: { value: "fleet board" } })
     await waitFor(() => expect(within(g2).getByRole("option")).toHaveAttribute("aria-selected", "true"))
     fireEvent.keyDown(input, { key: "Enter" })
-    expect(h.push).toHaveBeenCalledWith("/pages/fleet")
+    expect(h.push).toHaveBeenCalledWith("/artifacts?item=fleet")
   })
 })
 
@@ -250,7 +250,12 @@ describe("⌘K — Recent page rows are checked against the authorised list", ()
     expect(screen.queryByText("Revoked page")).not.toBeInTheDocument()
     // Rows that are not page deep links are not subject to the check.
     expect(within(recent).getByText("Rewrite the README")).toBeInTheDocument()
-    expect(within(recent).getAllByRole("option").some((r) => r.getAttribute("data-href") === "/pages")).toBe(true)
+    // Rows saved before Artifacts was the only home open there now: no /pages address is left.
+    const hrefs = within(recent).getAllByRole("option").map((r) => r.getAttribute("data-href"))
+    expect(hrefs).toContain("/artifacts?item=fleet")
+    expect(hrefs).toContain("/artifacts")
+    expect(hrefs.filter((href) => href?.startsWith("/pages"))).toEqual([])
+    expect(within(recent).queryByText("Pages")).not.toBeInTheDocument()
     // One list request certified all of them — never one per row.
     expect(pagesCalls()).toHaveLength(1)
   })
@@ -358,7 +363,7 @@ describe("⌘K — identity and workspace changes", () => {
     const g = await group(/^artifacts$/i)
     expect(screen.queryByText("Somebody's issue")).not.toBeInTheDocument()
     fireEvent.click(within(g).getByRole("option"))
-    expect(h.push).toHaveBeenCalledWith("/pages/fleet")
+    expect(h.push).toHaveBeenCalledWith("/artifacts?item=fleet")
     expect(vi.mocked(localStorage.setItem)).not.toHaveBeenCalled()
   })
 })

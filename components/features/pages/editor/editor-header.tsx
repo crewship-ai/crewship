@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { DetailCard, Pill, StatStrip, type StatItem } from "@/components/ui/detail"
 import { formatDateTime } from "@/lib/time"
 import { cn } from "@/lib/utils"
-import type { PageCapabilities } from "@/lib/pages/editor-contract"
+import { pageAddress, type PageCapabilities } from "@/lib/pages/editor-contract"
 import { toPageFolderRef, toPanelState, worstPanelState } from "@/hooks/use-pages"
 import { pagePanelCount, toPageOwner, type WirePageDetail } from "@/hooks/use-page-grants"
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
@@ -181,7 +181,7 @@ export function PageDetailsStrip({ slug, page }: { slug: string; page: WirePageD
     // changed, not when data last arrived. The next item is the data.
     { label: "Spec changed", value: when(page?.updated_at) },
     { label: "Last data", value: when(page?.last_produced_at) },
-    { label: "Address", value: `/pages/${slug}`, mono: true },
+    { label: "Address", value: pageAddress(slug, page?.id), mono: true },
     { label: "Panels", value: panelCount },
   ]
   return (

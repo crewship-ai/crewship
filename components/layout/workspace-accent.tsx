@@ -16,7 +16,7 @@ const HEX = /^#[0-9a-f]{6}$/i
  * The current workspace's brand colour, null when its admin never set one,
  * undefined while that is not known yet.
  *
- * Read from `pages_theme.accent` (Settings › General › Pages appearance), the
+ * Read from `pages_theme.accent` (Settings › General › Artifacts appearance), the
  * one brand colour a workspace already stores. Absent `pages_theme` means
  * "never customised"; the Pages default palette is not a brand and is not
  * offered as one.

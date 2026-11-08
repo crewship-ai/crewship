@@ -18,6 +18,7 @@ import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactD
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { cn } from "@/lib/utils"
 import { artifactDashboards, artifactDesignSystem, artifactsLibrary } from "@/lib/feature-flags"
+import { artifactsEditHref, artifactsItemHref } from "../artifacts-href"
 import { parseDashboardManifest } from "@/lib/pages/artifact-dashboard"
 import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { useArtifactViewer, type ArtifactViewerTarget } from "../projects/artifact-viewer-context"
@@ -30,7 +31,6 @@ import { ArtifactSlidesPreview } from "./artifact-slides-preview"
 import { ArtifactDesignSystemPreview } from "@/components/features/artifacts/design-system/design-system-preview"
 import { hasDesignSystemFile } from "@/components/features/artifacts/design-system/manifest"
 import { isValidAnchorSelector, screenLabel, screenLabels } from "./element-select"
-import { artifactsItemHref } from "../artifacts-href"
 
 export type ArtifactViewerVariant = "pane" | "fullscreen" | "library"
 
@@ -560,13 +560,15 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
       </div>
     </PopoverContent>
   </Popover>
+  // The App source editor opens inside the artifact's own frame, /artifacts/<id>?edit=1 (never Pages).
+  const editSourceHref = artifactsEditHref(workspaceId, data.page_id, `/pages/${encodeURIComponent(target.slug)}?${new URLSearchParams({artifact:"1",edit:"1",workspace_id:workspaceId})}`)
   const toolbar = <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b px-3 py-2">
     {!library && <Segmented ariaLabel="Version" size="xs" value={versionValue} options={versionOptions} onChange={pickVersion} />}
     {!library && versions.length > 0 && <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5" aria-pressed={historyOpen} onClick={() => setHistoryOpen(open => !open)}>
       <Clock className="size-3.5" aria-hidden />History
     </Button>}
     <div className="flex-1" />
-    {canWrite && <Link className="inline-flex items-center px-2 text-sm underline coarse:min-h-[44px]" href={`/pages/${encodeURIComponent(target.slug)}?${new URLSearchParams({artifact:"1",edit:"1",workspace_id:workspaceId})}`}>Edit source</Link>}
+    {canWrite && <Link className="inline-flex items-center px-2 text-sm underline coarse:min-h-[44px]" href={editSourceHref}>Edit source</Link>}
     {shareControl}
   </div>
 
@@ -742,7 +744,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
       history, queue: <div ref={queueRef} tabIndex={-1} role="region" aria-label="Comment queue" className="focus-visible:outline-none">{queueItems}</div>,
       sendBar: sendBar || null, waiting: waitingCount,
       share: shareControl || null,
-      editSourceHref: canWrite ? `/pages/${encodeURIComponent(target.slug)}?${new URLSearchParams({artifact:"1",edit:"1",workspace_id:workspaceId})}` : null,
+      editSourceHref: canWrite ? editSourceHref : null,
     })
     if (laidOut !== undefined) return laidOut
   }

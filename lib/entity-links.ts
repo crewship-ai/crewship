@@ -6,6 +6,8 @@
  * crew. A link built here cannot point at a route that does not exist, and
  * when a route moves it moves in one place.
  */
+import { artifactsLibrary } from "@/lib/feature-flags"
+
 const enc = encodeURIComponent
 
 export type EntityRef =
@@ -62,7 +64,8 @@ export function entityHref(ref: EntityRef): string {
       // id (it resolves them through the workspace lookup).
       return withQuery("/activity", { crew: ref.crewSlug, agent: ref.agentSlug, mission: ref.missionId, run: ref.traceId })
     case "page":
-      return `/pages/${enc(ref.slug)}`
+      // Saved items live in Artifacts; the library opens a slug and moves to its ID address.
+      return artifactsLibrary() ? withQuery("/artifacts", { item: ref.slug }) : `/pages/${enc(ref.slug)}`
     case "credential":
       return withQuery("/credentials", { id: ref.id })
     case "credentials":

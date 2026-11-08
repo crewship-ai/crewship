@@ -1,3 +1,5 @@
+import { artifactsLibrary } from "@/lib/feature-flags"
+
 /**
  * The Pages editor's shared vocabulary.
  *
@@ -631,4 +633,14 @@ export const SAVE_EFFECT_NOTE: Readonly<Record<SaveEffect, string>> = {
   build: "Building produces a preview of the candidate. It does not publish anything.",
   publication: "Publishing replaces the live application and its definition.",
   "immediate-grant": "This is written on its own, immediately. It is never part of a publication.",
+}
+
+/**
+ * The address the editor shows and copies for this Page: its one Artifacts
+ * address, `/artifacts/<id>`, once the library is on and the id is known.
+ * Pages is never shown to users (owner, 8 Nov 2026).
+ */
+export function pageAddress(slug: string, pageId: string | null | undefined): string {
+  const id = typeof pageId === "string" ? pageId.trim() : ""
+  return artifactsLibrary() && id ? `/artifacts/${encodeURIComponent(id)}` : `/pages/${slug}`
 }

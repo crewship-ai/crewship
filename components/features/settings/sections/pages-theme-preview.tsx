@@ -16,7 +16,7 @@ const LABELS: Record<keyof PageTheme, string> = {
 }
 
 /**
- * Settings › General › Pages appearance › Preview.
+ * Settings › General › Artifacts appearance › Preview.
  *
  * A non-modal panel over the right half of the screen: the settings stay
  * usable beside it, and the palette strip at the top edits the same draft the
