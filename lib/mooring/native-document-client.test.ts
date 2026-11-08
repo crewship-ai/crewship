@@ -60,6 +60,12 @@ describe("native mounted lifecycle",()=>{
   expect(String(send.mock.calls[1][0])).toContain("document?workspace_id=ws")
   expect(new Headers(send.mock.calls[1][1].headers).get("X-Craft-Session")).toBe("b".repeat(64))
  })
+ it.each([["critical","critical"],["full","full"],["bogus",undefined]] as const)("passes the quota level %s through only when it is known",async(level,expected)=>{
+  const snapshot={version:"2",bytes:"AID/",applicationId:"wordcraft",enginePin:"e".repeat(64),editorBundle:"a".repeat(64),editorURL:"/editors/wordcraft/b/"+"a".repeat(64)+"/index.html",quota:{usedBytes:"96",limitBytes:"100",warning:true,level,retention:"keep-all"}}
+  const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(new Response(JSON.stringify(snapshot)))
+  const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal())
+  expect((await client.read(signal())).quota.level).toBe(expected)
+ })
  it("never promotes a malformed snapshot or mismatched application",async()=>{
   const send=vi.fn().mockResolvedValueOnce(admission()).mockResolvedValueOnce(new Response(JSON.stringify({version:2,bytes:"AID/",applicationId:"gridcraft"})))
   const client=createNativeDocumentClient({workspaceId:"ws",pageId:"page",fetch:send});await client.open(signal());await expect(client.read(signal())).rejects.toThrow("invalid_native_document")

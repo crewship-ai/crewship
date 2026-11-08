@@ -9,6 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **A full storage quota no longer blocks saving a Word or Sheet document for the rest of the session (#5124).** After a refused save the editor keeps the changes and says they are not yet saved on the server; **Uložit znovu** in the alert or Ctrl+S sends them again, and once space is freed they are saved as a new version. Autosave still never retries a quota refusal by itself, and no version is deleted. The status line now tells 95 % (*historie je téměř plná*) and a full history apart from 80 %.
 - **Releasing a saved Word or Sheet document no longer shows an unsaved draft (#5089).** A final capture with the exact bytes of the last confirmed save now counts as that version, so the status stays honest, the leave guard releases and no copy waits in the browser to be offered later.
 - **Deleting an agent stops its runs whose container is already gone (#5050).** A protected host run in a removed container stayed pending and held on to its work; it now counts as stopped. Any other inspect failure still reports an error.
 - ⚠️ **Behaviour change: only OWNER or ADMIN can change the governance model credential (#5024).** PATCH, rotate, escalation answers, OAuth completion and internal token writes refuse a bound credential for narrower roles, and `credential.rotate` no longer reaches it. Binding now needs an active credential.

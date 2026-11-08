@@ -369,16 +369,23 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       if (!attempt || !active) { if (manual) throw active ? new Error("native_snapshot_failed") : retired(); return }
       // A manual ticket owns this exact prepared snapshot. Wait for the bounded
       // transport, but never replay a queued ticket after an unknown ACK.
-      const unavailable = () => readRevoked ? "read_revoked" : !active ? "native_session_retired" : !writable ? "write_revoked" : held ? "native_save_held" : blocked ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
+      // A full quota refused one save; it is no fence for a press. Nothing
+      // committed, so Ctrl+S or "Uložit znovu" asks the server again at the
+      // same base: once space is free it saves this draft (#5124). The fence
+      // itself lifts only when this press actually transmits (or proves the
+      // content already committed), so a press stopped by a hold or another
+      // fence leaves autosave refused. Autosave never retries a quota refusal.
+      const fence = () => explicit && blocked === "quota" ? undefined : blocked
+      const unavailable = () => readRevoked ? "read_revoked" : !active ? "native_session_retired" : !writable ? "write_revoked" : held ? "native_save_held" : fence() ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
       const refused = (reason: string) => reason === "read_revoked" ? new NativeSaveError("read_revoked") : new Error(reason)
       let lookedUp = false
       for (;;) {
-        if (manual) while (pending && active && writable && !blocked && !unconfirmed) await pending.done
+        if (manual) while (pending && active && writable && !fence() && !unconfirmed) await pending.done
         // Ctrl+S during an unknown outcome first asks about the original attempt,
         // once, and resends nothing. A proven commit becomes the baseline judged
         // below; a retired attempt makes this capture a fresh save under the base
         // fence; anything else stays unconfirmed and fails below, unsent (#5075).
-        if (explicit && !lookedUp && active && writable && !held && !blocked && unconfirmed && options.transport.reconcile) {
+        if (explicit && !lookedUp && active && writable && !held && !fence() && unconfirmed && options.transport.reconcile) {
           lookedUp = true
           if (pending) await pending.done
           else await transmit(unconfirmed, true)
@@ -437,13 +444,25 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
         const owed = owedReceipt
         if (owed && owed.version === baseline.version && (owed.unchanged || owed.contentHash === baseline.contentHash)) { owedReceipt = undefined; deliver(owed) }
         if (confirmation) deliver(confirmation)
+        if (blocked === "quota") blocked = undefined
         dirty = newerThan(attempt) || latest?.nativeState !== attempt.nativeState
         emit(dirty ? "dirty" : "saved")
         scheduleIfNeeded()
         return
       }
+      // Seeding or a row retirement was awaited: check every fence again.
+      if (blocked === "quota") {
+        if (unavailable()) {
+          emit(!writable ? "read-only" : unconfirmed ? "uncertain" : "draft", blocked)
+          if (manual) throw refused(unavailable()!)
+          return
+        }
+        blocked = undefined
+      }
       await transmit(attempt, false)
-      if (manual && unavailable()) throw refused(unavailable()!)
+      // This press's own refusal (a new quota one included) fails its ticket.
+      const outcome = unavailable() ?? blocked
+      if (manual && outcome) throw refused(outcome)
     })
     return manual ? sending.finally(() => { manualCount--; scheduleIfNeeded(); notifyStateWaiters() }) : sending
   }

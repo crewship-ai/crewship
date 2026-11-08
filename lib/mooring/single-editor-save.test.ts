@@ -139,10 +139,78 @@ it.each([["0", "1"], ["9007199254740993", "9007199254740994"]])("checks the exac
 it.each(["conflict", "quota"] as const)("preserves drafts on %s and does not automatically retry", async reason => {
   const r = rig()
   r.transport.save.mockRejectedValueOnce(new NativeSaveError(reason))
-  await r.controller.save()
-  await r.controller.save()
+  r.controller.edited()
+  await vi.waitFor(() => expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "draft", reason })))
+  r.controller.edited()
+  await new Promise(resolve => setTimeout(resolve, 80))
   expect(r.journal.confirm).not.toHaveBeenCalled()
   expect(r.transport.save).toHaveBeenCalledOnce()
+  await r.controller.close()
+})
+
+it("an explicit save after a conflict still sends nothing", async () => {
+  const r = rig()
+  r.transport.save.mockRejectedValueOnce(new NativeSaveError("conflict"))
+  await r.controller.save()
+  await r.controller.save()
+  await expect(r.controller.save("ticket")).rejects.toThrow("conflict")
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  await r.controller.close()
+})
+
+// #5124: a full quota used to block every save until the editor closed, so work
+// typed meanwhile lived only in this browser. An explicit save (Ctrl+S or
+// "Uložit znovu") asks the server again; once space is free it commits.
+it.each([undefined, "ticket"])("an explicit save (%s) retries a quota refusal and commits once space is free", async requestId => {
+  const r = rig()
+  r.transport.save.mockRejectedValueOnce(new NativeSaveError("quota")).mockRejectedValueOnce(new NativeSaveError("quota"))
+  await r.controller.save()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "draft", dirty: true, reason: "quota" }))
+  // Still full: refused again, the draft stays in the journal and nothing is confirmed.
+  if (requestId) await expect(r.controller.save(requestId)).rejects.toThrow("quota"); else await r.controller.save()
+  expect(r.transport.save).toHaveBeenCalledTimes(2)
+  expect(r.journal.confirm).not.toHaveBeenCalled()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "draft", dirty: true, reason: "quota" }))
+  // Space freed: the same press commits the newest draft at the unchanged base.
+  r.engine.snapshot.mockResolvedValue({ bytes: new Uint8Array([7, 7]), editorRevision: "doc:2:0" })
+  r.controller.edited()
+  await r.controller.save(requestId)
+  expect(r.transport.save).toHaveBeenCalledTimes(3)
+  expect(r.transport.save.mock.calls[2][0]).toMatchObject({ baseVersion: "1", editorRevision: "doc:2:0", bytes: new Uint8Array([7, 7]) })
+  expect(r.journal.confirm).toHaveBeenCalledOnce()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "saved", dirty: false }))
+  // Autosave works again after the commit.
+  r.engine.snapshot.mockResolvedValue({ bytes: new Uint8Array([8]), editorRevision: "doc:3:0" })
+  r.controller.edited()
+  await vi.waitFor(() => expect(r.transport.save).toHaveBeenCalledTimes(4))
+  await r.controller.close()
+})
+
+it("a local-only capture never lifts a quota refusal", async () => {
+  const r = rig()
+  r.transport.save.mockRejectedValueOnce(new NativeSaveError("quota"))
+  await r.controller.save()
+  r.controller.edited()
+  await r.controller.captureLocal()
+  await new Promise(resolve => setTimeout(resolve, 80))
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  await r.controller.close()
+})
+
+it("a press stopped by a hold leaves a quota refusal fenced for autosave", async () => {
+  const r = rig(), capture = deferred<{ bytes: Uint8Array; editorRevision: string }>()
+  r.transport.save.mockRejectedValueOnce(new NativeSaveError("quota"))
+  await r.controller.save()
+  r.engine.snapshot.mockReturnValueOnce(capture.promise)
+  const press = r.controller.save()
+  await vi.waitFor(() => expect(r.engine.snapshot).toHaveBeenCalledTimes(2))
+  r.controller.hold()
+  capture.resolve({ bytes: new Uint8Array([4]), editorRevision: "doc:2:0" })
+  await press
+  r.controller.release()
+  await new Promise(resolve => setTimeout(resolve, 80))
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "draft", reason: "quota" }))
   await r.controller.close()
 })
 
