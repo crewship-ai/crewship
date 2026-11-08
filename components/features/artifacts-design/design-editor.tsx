@@ -109,6 +109,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  useEffect(() => { if (wasPlaying.current && !playing) playButton.current?.focus(); wasPlaying.current = Boolean(playing) }, [playing])
  const drag = useRef<{ id: string; startX: number; startY: number; x: number; y: number } | null>(null)
  const selected = design.nodes.find(node => node.id === selectedId)
+ // Others see which layer this person has selected (awareness only, never the document).
+ const shareSelection = useRef(design.setSelection); shareSelection.current = design.setSelection
+ useEffect(() => { shareSelection.current?.(selected ? selected.id : null) }, [selected?.id]) // eslint-disable-line react-hooks/exhaustive-deps -- the ID is the whole input
  const frames = design.nodes.filter(node => node.type === "frame")
  const selectedFrame = selected?.type === "frame" ? selected.id : selected?.parentId
  const position = (node: DesignNode, seen = new Set<string>()): { x: number; y: number } => {
@@ -321,6 +324,17 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     {node.type === "frame" && <text x="0" y="-10" fontSize={12 / Math.min(1, scale)} fill="currentColor" className="text-muted-foreground">{node.name || "Screen"}</text>}
     <DesignNodeShape node={node} width={w} height={h} />
     {selectedId === node.id && <rect width={w} height={h} fill="none" stroke="#2563eb" strokeWidth={2 / scale} pointerEvents="none" />}
+   </g>
+  })}
+  {design.peers.filter(peer => peer.selection).map(peer => {
+   const node = design.nodes.find(item => item.id === peer.selection)
+   if (!node) return null
+   const { x, y } = position(node)
+   const w = Math.max(1, Number(node.width) || 1), h = Math.max(1, Number(node.height) || 1)
+   const label = peer.name.slice(0, 22)
+   return <g key={`selection-${peer.clientId}`} data-peer-selection={node.id} transform={`translate(${x},${y})`} pointerEvents="none" aria-label={`${peer.name} selected ${node.name || node.type}`}>
+    <rect width={w} height={h} fill="none" stroke={peer.color} strokeWidth={2 / scale} strokeDasharray={`${6 / scale} ${4 / scale}`} />
+    <g transform={`translate(0,${-22 / scale - 2 / scale})${scale === 1 ? "" : ` scale(${1 / scale})`}`}><rect width={Math.min(160, label.length * 7 + 12)} height="18" rx="3" fill={readablePeerFill(peer.color)} /><text x="6" y="13" fontSize="11" fill="white">{label}</text></g>
    </g>
   })}
   {design.peers.filter(peer => peer.cursor).map(peer => <g key={peer.clientId} transform={`translate(${peer.cursor!.x},${peer.cursor!.y})${scale === 1 ? "" : ` scale(${1 / scale})`}`} pointerEvents="none" aria-label={`${peer.name} cursor`}><path d="M0 0 L0 20 L5 15 L9 24 L13 22 L9 13 L17 13 Z" fill={peer.color} stroke="white" /><rect x="16" y="18" width={Math.min(160, peer.name.length * 7 + 16)} height="22" rx="4" fill={readablePeerFill(peer.color)} /><text x="24" y="33" fontSize="12" fill="white">{peer.name.slice(0, 22)}</text></g>)}
