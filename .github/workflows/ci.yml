@@ -922,6 +922,13 @@ jobs:
       - name: Require actual managed Document creation through the CLI
         timeout-minutes: 6
         run: python3 scripts/ci/document-create-acceptance.py
+      # #5136: the #5130 durability proof (lost acks, engine crash, stale
+      # engine fences, crashed-socket reclaim) was opt-in only, so no CI run
+      # executed it. It reuses this lane's Node 24 and frozen docs-service and
+      # writes its Go JSON events and measurements into the evidence below.
+      - name: Require Document durability across a real engine crash through the CLI
+        timeout-minutes: 6
+        run: python3 scripts/ci/document-create-acceptance.py --scenario durability
       - name: Preserve Pages test evidence
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7

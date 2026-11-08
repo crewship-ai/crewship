@@ -155,6 +155,39 @@ class WorkflowContracts(unittest.TestCase):
         self.assertLess(lane.index('bash scripts/test-pages-apps.sh'), lane.index('node-version: 24.21.0'))
         self.assertLess(lane.index('document-create-acceptance.py'), lane.index('Preserve Pages test evidence'))
 
+    def test_document_durability_executes_in_the_required_pages_lane(self):
+        # #5136: the #5130 proof was opt-in only and no CI run executed it.
+        ci = self.text('ci.yml')
+        lane = self.job(ci, 'pages-apps')
+        name = 'Require Document durability across a real engine crash through the CLI'
+        step = self.step(lane, name)
+        self.assertIn('run: python3 scripts/ci/document-create-acceptance.py --scenario durability\n', step)
+        self.assertIn('timeout-minutes: 6\n', step)
+        for weakening in ('if:', 'continue-on-error', 'env:'):
+            self.assertNotIn(weakening, step)
+        # It reuses the lane's Node 24 and frozen engine, after the create
+        # scenario, and its evidence is preserved even when it fails.
+        self.assertLess(lane.index('node-version: 24.21.0'), lane.index(name))
+        self.assertLess(lane.index('pnpm --dir tools/docs-service install --frozen-lockfile'), lane.index(name))
+        self.assertLess(lane.index('Require actual managed Document creation through the CLI'), lane.index(name))
+        self.assertLess(lane.index(name), lane.index('Preserve Pages test evidence'))
+        preserve = self.step(lane, 'Preserve Pages test evidence')
+        self.assertIn('if: always()', preserve)
+        self.assertIn('path: /tmp/crewship-pages-ci\n', preserve)
+        runner = (ROOT / 'scripts/ci/document-create-acceptance.py').read_text()
+        self.assertIn("EVIDENCE_DIR = Path('/tmp/crewship-pages-ci')", runner)
+        # The lane is part of the required CI Result.
+        result = self.job(ci, 'result')
+        self.assertIn('pages-apps', re.search(r'needs: \[([^\]]*)\]', result).group(1).split(', '))
+        inventory = json.loads((ROOT / 'scripts/ci/required-inventory.json').read_text())
+        self.assertIn('pages-apps', json.dumps(inventory))
+        # The runner selects exactly this opt-in test and build tag.
+        test = (ROOT / 'cmd/crewship/acceptance_doc_durability_test.go').read_text()
+        self.assertRegex(test.splitlines()[0], r'^//go:build .*\bdocs_foundation\b')
+        self.assertIn('func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T)', test)
+        self.assertIn('os.Getenv("TEST_DOCUMENT_DURABILITY") != "1"', test)
+        self.assertIn('os.Getenv("TEST_DOCUMENT_DURABILITY_EVIDENCE")', test)
+
     def test_osv_covers_every_shipped_npm_lockfile(self):
         security = self.text('security.yml')
         osv = self.job(security, 'osv-scan')
