@@ -114,6 +114,34 @@ The status in the header tells you where your changes are:
 
 People with read access see a **Read only** badge next to the status.
 
+## Move around the canvas
+
+Panning and zooming change only your own view. They are not saved in the
+Design, not in History, and the other people on the canvas keep their own view.
+Readers can pan and zoom too.
+
+| To | Mouse or trackpad | Touch |
+|---|---|---|
+| Pan | Drag with the right or middle button, hold **Space** and drag, scroll the wheel (**Shift** + wheel scrolls sideways), or scroll with two fingers on a trackpad | Drag one finger on an empty part of the canvas |
+| Zoom around the pointer | **Ctrl** + wheel (**Cmd** + wheel on a Mac), or pinch on a trackpad | Pinch with two fingers |
+| Zoom in steps, fit | **Zoom in**, **Zoom out** and **Fit** in the artifact bar | Same |
+| Move a layer | Drag it with the left button | Drag it with one finger |
+| Clear the selection | Click an empty part of the canvas | Tap an empty part of the canvas |
+
+A pan never moves or selects a layer, also when the drag starts on one. Inside
+the canvas the browser's context menu does not open, so a right-button drag
+ends cleanly; everywhere else it works as usual. A press that travels less than
+3 pixels is a click: it selects the layer without changing it.
+
+With the canvas focused, **+** and **−** zoom, **Shift + 1** fits, **Shift + 0**
+goes to 100 % and the arrow keys pan. **Escape** cancels a drag or pan in
+progress and puts the layer or the view back where it started; with nothing in
+progress it clears the selection. Switching to another window, or the browser
+cancelling the pointer, does the same as **Escape**.
+
+**Next artboard** and **Previous artboard** bring the artboard to the top left
+at the current zoom. On a phone, **Fit** fits the artboard's width.
+
 ## Add and edit layers
 
 1. Click **Screen** to add a 360 × 640 screen. Further screens line up to the
@@ -121,7 +149,8 @@ People with read access see a **Read only** badge next to the status.
 2. With a screen selected, click **Rectangle**, **Text** or **Image**. The new
    layer goes into the selected screen, or into the first screen if none is
    selected.
-3. Drag a layer on the canvas to move it.
+3. Drag a layer on the canvas with the left button to move it; see
+   [Move around the canvas](#move-around-the-canvas).
 4. Change the selected layer in **Properties**:
    - **Name** as shown in the **Screens** list.
    - **X**, **Y**, **W** and **H** in pixels. Positions of layers are relative
