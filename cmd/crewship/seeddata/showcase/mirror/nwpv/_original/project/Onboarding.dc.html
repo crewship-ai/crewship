@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – onboarding</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#B85E1F}a:hover{color:#8C4512}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #0F1F33; color: #F4F1EA; font-family: 'IBM Plex Sans', Arial, sans-serif; display: flex; flex-direction: column; padding: 32px 24px 32px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; color: #BFCBD8">KROK {{ num }} / 3</div>
+<button onClick="{{ skip }}" style="min-height: 44px; padding: 0 12px; border: none; background: transparent; color: #BFCBD8; font: 600 15px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer">Přeskočit</button>
+</div>
+<div style="flex: 1; display: flex; flex-direction: column; justify-content: center; gap: 28px">
+<div style="width: 200px; height: 200px; border-radius: 40px; background: #16304F; display: flex; align-items: center; justify-content: center; align-self: center">
+<sc-if value="{{ s1 }}" hint-placeholder-val="{{ true }}"><svg aria-hidden="true" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#E8833A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"></circle><circle cx="17" cy="9" r="2.5"></circle><path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6"></path><path d="M15 14.2c.6-.1 1.3-.2 2-.2 2.8 0 5 2.2 5 5"></path></svg></sc-if>
+<sc-if value="{{ s2 }}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#E8833A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M8 8h8M8 12h8M8 16h5"></path></svg></sc-if>
+<sc-if value="{{ s3 }}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="96" height="96" viewBox="0 0 24 24" fill="none" stroke="#E8833A" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"></circle><path d="M8 12.5l2.5 2.5L16 9.5"></path></svg></sc-if>
+</div>
+<div style="display: flex; flex-direction: column; gap: 12px; text-align: center">
+<h1 style="margin: 0; font-size: 28px; line-height: 34px; font-weight: 700">{{ title }}</h1>
+<p style="margin: 0; font-size: 16px; line-height: 24px; color: #BFCBD8">{{ body }}</p>
+</div>
+<div style="display: flex; gap: 8px; justify-content: center">
+<sc-for list="{{ dots }}" as="d" hint-placeholder-count="3"><div style="height: 8px; border-radius: 4px; width: {{ d.w }}; background: {{ d.bg }}"></div></sc-for>
+</div>
+</div>
+<div style="display: flex; gap: 12px">
+<sc-if value="{{ canBack }}" hint-placeholder-val="{{ false }}"><button onClick="{{ back }}" style="width: 100px; height: 52px; border: 1px solid #2A4566; border-radius: 14px; background: transparent; color: #F4F1EA; font: 600 16px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer">Zpět</button></sc-if>
+<button onClick="{{ next }}" style="flex: 1; height: 52px; border: none; border-radius: 14px; background: {{ accent }}; color: #0F1F33; font: 600 16px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer">{{ nextLabel }}</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#E8833A","options":["#E8833A","#3FA7A0","#6C8CFF","#E8C547"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { step: 0 };
+  }
+  renderVals() {
+    const accent = this.props.accent ?? '#E8833A';
+    const step = this.state.step;
+    const steps = [
+      { title: 'Sestav si crew', body: 'Vyber agenty a role. Crew pracuje jako tým, ty jen zadáváš a schvaluješ.' },
+      { title: 'Zadej úkol', body: 'Popiš cíl a termín, přidej odkazy nebo soubory. Crew si práci rozdělí sama.' },
+      { title: 'Schval výsledek', body: 'Dostaneš upozornění, zkontroluješ výstup a jedním klepnutím ho pošleš dál.' }
+    ];
+    return {
+      accent,
+      num: step + 1,
+      title: steps[step].title,
+      body: steps[step].body,
+      s1: step === 0, s2: step === 1, s3: step === 2,
+      canBack: step > 0,
+      nextLabel: step === 2 ? 'Začít' : 'Dál',
+      dots: steps.map((_, i) => ({ w: i === step ? '28px' : '8px', bg: i === step ? accent : '#2A4566' })),
+      next: () => this.setState({ step: step === 2 ? 0 : step + 1 }),
+      back: () => this.setState({ step: Math.max(0, step - 1) }),
+      skip: () => this.setState({ step: 2 })
+    };
+  }
+}
+</script>
+</body>
+</html>

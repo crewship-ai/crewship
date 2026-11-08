@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – seznam crew</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#B85E1F}a:hover{color:#8C4512}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F4F1EA; font-family: 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33; display: flex; flex-direction: column">
+<div style="background: #0F1F33; color: #F4F1EA; padding: 32px 20px 20px; display: flex; flex-direction: column; gap: 16px">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<div style="font-size: 26px; font-weight: 700">Crewship</div>
+<button aria-label="Nastavení" style="width: 44px; height: 44px; border: 1px solid #2A4566; border-radius: 12px; background: transparent; color: #F4F1EA; display: flex; align-items: center; justify-content: center; cursor: pointer"><svg aria-hidden="true" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"></path></svg></button>
+</div>
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; color: #BFCBD8">3 crew · 38 úkolů tento týden</div>
+<div style="display: flex; gap: 8px; background: #16304F; padding: 4px; border-radius: 14px">
+<button onClick="{{ showActive }}" style="flex: 1; height: 44px; border: none; border-radius: 10px; font: 600 15px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer; background: {{ activeBg }}; color: {{ activeFg }}">Aktivní</button>
+<button onClick="{{ showDone }}" style="flex: 1; height: 44px; border: none; border-radius: 10px; font: 600 15px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer; background: {{ doneBg }}; color: {{ doneFg }}">Hotové</button>
+</div>
+</div>
+<div style="flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 12px; overflow: auto">
+<sc-for list="{{ crews }}" as="c" hint-placeholder-count="3">
+<a href="Detail.dc.html" style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 8px; color: #0F1F33; text-decoration: none">
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px">
+<div style="font-size: 17px; font-weight: 600">{{ c.name }}</div>
+<div style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: {{ c.pillBg }}; color: {{ c.pillFg }}">{{ c.status }}</div>
+</div>
+<div style="font-size: 14px; color: #4A5568">{{ c.task }}</div>
+<div style="height: 6px; background: #ECE6DA; border-radius: 3px; overflow: hidden"><div style="height: 6px; border-radius: 3px; width: {{ c.width }}; background: {{ c.bar }}"></div></div>
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #5A6472">{{ c.meta }}</div>
+</a>
+</sc-for>
+</div>
+<div style="padding: 16px 20px 28px">
+<button style="width: 100%; height: 52px; border: none; border-radius: 14px; font: 600 16px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer; background: {{ accent }}; color: #0F1F33">+ Nová crew</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#E8833A","options":["#E8833A","#3FA7A0","#6C8CFF","#E8C547"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'active' };
+  }
+  renderVals() {
+    const accent = this.props.accent ?? '#E8833A';
+    const active = this.state.tab === 'active';
+    const live = [
+      { name: 'Research', status: 'Pracuje', task: 'Rešerše konkurence pro Q4', pct: 0.62, meta: '4 agenti · 12 min' },
+      { name: 'Frontend', status: 'Review', task: 'Redesign stránky Artifacts', pct: 0.9, meta: '3 agenti · čeká na schválení' },
+      { name: 'Ops', status: 'Pracuje', task: 'Kontrola nasazení na stage', pct: 0.35, meta: '2 agenti · 4 min' }
+    ];
+    const done = [
+      { name: 'Research', status: 'Hotovo', task: 'Souhrn rozhovorů se zákazníky', pct: 1, meta: 'včera · 41 min' },
+      { name: 'Frontend', status: 'Hotovo', task: 'Dark mode pro dashboard', pct: 1, meta: 'po · 1 h 12 min' }
+    ];
+    const pill = (s) => s === 'Review' ? ['#FCE9D9', '#8C4512'] : s === 'Hotovo' ? ['#DDEFE6', '#1F5E40'] : ['#E1E9F3', '#1E3A5F'];
+    const crews = (active ? live : done).map((c) => ({
+      ...c,
+      width: Math.round(c.pct * 100) + '%',
+      bar: c.pct === 1 ? '#2F8A5B' : accent,
+      pillBg: pill(c.status)[0],
+      pillFg: pill(c.status)[1]
+    }));
+    return {
+      accent,
+      crews,
+      activeBg: active ? '#F4F1EA' : 'transparent',
+      activeFg: active ? '#0F1F33' : '#BFCBD8',
+      doneBg: active ? 'transparent' : '#F4F1EA',
+      doneFg: active ? '#BFCBD8' : '#0F1F33',
+      showActive: () => this.setState({ tab: 'active' }),
+      showDone: () => this.setState({ tab: 'done' })
+    };
+  }
+}
+</script>
+</body>
+</html>

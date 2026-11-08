@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – desktopová aplikace</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#B85E1F}a:hover{color:#8C4512}
+</style>
+</helmet>
+<div style="box-sizing: border-box; min-height: 800px; padding: 40px 24px; background: {{ t.desk }}; font-family: 'IBM Plex Sans', Arial, sans-serif; color: {{ t.ink }}">
+<div style="max-width: 1200px; margin: 0 auto; border-radius: 14px; overflow: hidden; border: 1px solid {{ t.line }}; background: {{ t.panel }}; box-shadow: 0 24px 60px rgba(8, 16, 28, .28)">
+<div style="height: 44px; display: flex; align-items: center; gap: 8px; padding: 0 16px; background: {{ t.bar }}; border-bottom: 1px solid {{ t.line }}">
+<div style="width: 12px; height: 12px; border-radius: 6px; background: #E5605A"></div>
+<div style="width: 12px; height: 12px; border-radius: 6px; background: #E7B13F"></div>
+<div style="width: 12px; height: 12px; border-radius: 6px; background: #5CB85C"></div>
+<div style="flex: 1; text-align: center; font-size: 13px; font-weight: 600; color: {{ t.muted }}">Crewship — Research</div>
+<div style="width: 52px"></div>
+</div>
+<div style="display: flex; flex-wrap: wrap; min-height: 640px">
+<div style="flex: 1 1 200px; max-width: 240px; box-sizing: border-box; padding: 16px 12px; background: {{ t.side }}; border-right: 1px solid {{ t.line }}; display: flex; flex-direction: column; gap: 4px">
+<div style="font-size: 11px; font-weight: 600; letter-spacing: 1px; color: {{ t.muted }}; padding: 8px 10px">PRÁCE</div>
+<a href="#" style="display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border-radius: 8px; text-decoration: none; background: {{ accent }}; color: #0F1F33; font-size: 14px; font-weight: 600"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"></circle><path d="M3 19c0-3.3 2.7-6 6-6s6 2.7 6 6"></path></svg>Crew</a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border-radius: 8px; text-decoration: none; color: {{ t.ink }}; font-size: 14px"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M8 8h8M8 12h8"></path></svg>Úkoly</a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border-radius: 8px; text-decoration: none; color: {{ t.ink }}; font-size: 14px"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"></path></svg>Metriky</a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 0 10px; border-radius: 8px; text-decoration: none; color: {{ t.ink }}; font-size: 14px"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"></path></svg>Artefakty</a>
+<div style="font-size: 11px; font-weight: 600; letter-spacing: 1px; color: {{ t.muted }}; padding: 16px 10px 8px">PROSTŘEDÍ</div>
+<div style="display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 10px; font-size: 14px"><div style="width: 8px; height: 8px; border-radius: 4px; background: #2F8A5B"></div>dev1</div>
+<div style="display: flex; align-items: center; gap: 10px; min-height: 32px; padding: 0 10px; font-size: 14px"><div style="width: 8px; height: 8px; border-radius: 4px; background: #2F8A5B"></div>stage</div>
+</div>
+<div style="flex: 999 1 560px; min-width: 0; display: flex; flex-direction: column">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid {{ t.line }}">
+<div style="font-size: 20px; font-weight: 700; flex: 1 1 auto">Research</div>
+<label style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; border: 1px solid {{ t.line }}; border-radius: 8px; background: {{ t.field }}; min-width: 200px"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"></circle><path d="M20 20l-3.5-3.5"></path></svg><span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Hledat</span><input placeholder="Hledat úkoly" style="border: none; outline: none; background: transparent; color: {{ t.ink }}; font: 14px 'IBM Plex Sans', Arial, sans-serif; width: 100%"></label>
+<button style="height: 36px; padding: 0 14px; border: none; border-radius: 8px; background: {{ accent }}; color: #0F1F33; font: 600 14px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer">Nový úkol</button>
+</div>
+<div style="display: flex; flex-wrap: wrap; flex: 1">
+<div style="flex: 999 1 380px; min-width: 0; padding: 12px; display: flex; flex-direction: column; gap: 6px">
+<div style="display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 10px; background: {{ t.sel }}"><div style="width: 8px; height: 8px; border-radius: 4px; background: {{ accent }}"></div><div style="flex: 1; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 15px; font-weight: 600">Rešerše konkurence pro Q4</div><div style="font-size: 13px; color: {{ t.muted }}">Scout, Analyst · 62 %</div></div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: {{ t.muted }}">12 min</div></div>
+<div style="display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 10px"><div style="width: 8px; height: 8px; border-radius: 4px; background: #2F8A5B"></div><div style="flex: 1; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 15px; font-weight: 600">Souhrn rozhovorů se zákazníky</div><div style="font-size: 13px; color: {{ t.muted }}">Writer · hotovo</div></div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: {{ t.muted }}">včera</div></div>
+<div style="display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 10px"><div style="width: 8px; height: 8px; border-radius: 4px; background: #2F8A5B"></div><div style="flex: 1; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 15px; font-weight: 600">Ceník pěti konkurentů</div><div style="font-size: 13px; color: {{ t.muted }}">Analyst · hotovo</div></div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: {{ t.muted }}">po</div></div>
+<div style="display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 10px"><div style="width: 8px; height: 8px; border-radius: 4px; background: #6B7A8C"></div><div style="flex: 1; display: flex; flex-direction: column; gap: 2px"><div style="font-size: 15px; font-weight: 600">Přehled trhu v DACH</div><div style="font-size: 13px; color: {{ t.muted }}">čeká ve frontě</div></div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: {{ t.muted }}">—</div></div>
+</div>
+<div style="flex: 1 1 260px; box-sizing: border-box; padding: 20px; border-left: 1px solid {{ t.line }}; display: flex; flex-direction: column; gap: 14px">
+<div style="font-size: 11px; font-weight: 600; letter-spacing: 1px; color: {{ t.muted }}">INSPEKTOR</div>
+<div style="font-size: 17px; font-weight: 600">Rešerše konkurence pro Q4</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; font-size: 13px">
+<div style="color: {{ t.muted }}">Stav</div><div>Pracuje</div>
+<div style="color: {{ t.muted }}">Termín</div><div>14. 11.</div>
+<div style="color: {{ t.muted }}">Agenti</div><div>4</div>
+<div style="color: {{ t.muted }}">Náklady</div><div>$9,40</div>
+</div>
+<div style="height: 6px; background: {{ t.line }}; border-radius: 3px; overflow: hidden"><div style="height: 6px; width: 62%; border-radius: 3px; background: {{ accent }}"></div></div>
+<p style="margin: 0; font-size: 13px; line-height: 20px; color: {{ t.muted }}">Třísloupcové rozložení: postranní panel, seznam a inspektor. V úzkém okně se sloupce složí pod sebe.</p>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark":{"editor":"boolean","default":false},"accent":{"editor":"color","default":"#E8833A","options":["#E8833A","#3FA7A0","#6C8CFF","#E8C547"]},"$preview":{"width":1280,"height":800}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const dark = this.props.dark ?? false;
+    const t = dark
+      ? { desk: '#08111D', panel: '#0F1F33', bar: '#13253C', side: '#0B1726', line: '#2A4566', ink: '#F4F1EA', muted: '#BFCBD8', field: '#0B1726', sel: '#16304F' }
+      : { desk: '#D9D3C6', panel: '#FFFDF8', bar: '#F4F1EA', side: '#F4F1EA', line: '#E2DCCF', ink: '#0F1F33', muted: '#4A5568', field: '#FFFFFF', sel: '#F1EBDF' };
+    return { t, accent: this.props.accent ?? '#E8833A' };
+  }
+}
+</script>
+</body>
+</html>

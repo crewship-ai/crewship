@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – e-mail s týdenním reportem</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#B85E1F}a:hover{color:#8C4512}
+</style>
+</helmet>
+<div style="width: 600px; height: 1100px; box-sizing: border-box; background: #ECE6DA; padding: 24px; font-family: 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33; display: flex; flex-direction: column; gap: 16px">
+<div style="font-size: 13px; color: #4A5568; display: flex; flex-direction: column; gap: 2px">
+<div><b>Od:</b> Crewship &lt;report@crewship.example&gt;</div>
+<div><b>Předmět:</b> Týdenní report crew · 41. týden</div>
+</div>
+<div style="background: #FFFDF8; border-radius: 16px; overflow: hidden; display: flex; flex-direction: column">
+<div style="background: #0F1F33; color: #F4F1EA; padding: 32px; display: flex; flex-direction: column; gap: 8px">
+<div style="font-size: 22px; font-weight: 700">Crewship</div>
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; color: #BFCBD8">TÝDENNÍ REPORT · 6.–12. 10. 2026</div>
+</div>
+<div style="padding: 32px; display: flex; flex-direction: column; gap: 24px">
+<h1 style="margin: 0; font-size: 28px; line-height: 34px; font-weight: 700">Ahoj Pavle, crew tento týden dokončily 98 úkolů.</h1>
+<p style="margin: 0; font-size: 16px; line-height: 25px; color: #253246">Ukázková data. Níže je souhrn po crew a jedna věc, která čeká na tvoje schválení.</p>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+<div style="background: #F4F1EA; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 13px; color: #4A5568">Hotovo</div><div style="font-size: 26px; font-weight: 700">98</div></div>
+<div style="background: #F4F1EA; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 13px; color: #4A5568">Chyby</div><div style="font-size: 26px; font-weight: 700">6</div></div>
+<div style="background: #F4F1EA; border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 13px; color: #4A5568">Náklady</div><div style="font-size: 26px; font-weight: 700">$70</div></div>
+</div>
+<div style="display: flex; flex-direction: column">
+<div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E2DCCF; font-size: 15px"><span>Support</span><span style="font-family: 'JetBrains Mono', 'Courier New', monospace">42 hotovo</span></div>
+<div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E2DCCF; font-size: 15px"><span>Frontend</span><span style="font-family: 'JetBrains Mono', 'Courier New', monospace">31 hotovo</span></div>
+<div style="display: flex; justify-content: space-between; padding: 12px 0; border-bottom: 1px solid #E2DCCF; font-size: 15px"><span>Research</span><span style="font-family: 'JetBrains Mono', 'Courier New', monospace">25 hotovo</span></div>
+</div>
+<div style="background: #FCE9D9; border-radius: 12px; padding: 16px; font-size: 15px; line-height: 23px; color: #5A2E0C"><b>Čeká na tebe:</b> Frontend · Redesign stránky Artifacts je hotový na 90 % a čeká na schválení.</div>
+<a href="https://crewship.example" style="display: block; text-align: center; padding: 16px; border-radius: 12px; background: {{ accent }}; color: #0F1F33; font-size: 16px; font-weight: 600; text-decoration: none">Otevřít Crewship</a>
+</div>
+</div>
+<div style="font-size: 12px; line-height: 18px; color: #4A5568; text-align: center">Tento e-mail dostáváš, protože máš zapnuté týdenní reporty. <a href="#">Odhlásit</a></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#E8833A","options":["#E8833A","#3FA7A0","#6C8CFF","#E8C547"]},"$preview":{"width":600,"height":1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#E8833A' };
+  }
+}
+</script>
+</body>
+</html>
