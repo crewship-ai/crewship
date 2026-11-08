@@ -10,6 +10,7 @@ import { createRoot } from "react-dom/client"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { ArtifactsLibrary } from "../components/features/artifacts-library/artifacts-library"
 import { createArtifactMockServer, type ArtifactMockServer } from "../components/features/chat/artifact-context/projects/mock-server"
+import { documentSchema } from "../lib/documents/schema"
 import type { ArtifactFile } from "../components/features/chat/artifact-context/projects/types"
 
 const WORKSPACE = "ws-fixture"
@@ -46,9 +47,30 @@ const LIST = [
   row({ id: "page-deck", slug: "q3-board-deck", name: "Q3 board deck", has_slides: true, slides_schema: 1, updated_at: ago(60 * 80) }),
   row({ id: "page-support", slug: "q3-support-summary", name: "Q3 support summary", artifact_kind: "project", private_audience: true, updated_at: ago(60 * 100) }),
   row({ id: "page-calc", slug: "pricing-calculator", name: "Pricing calculator", has_application: true, updated_at: ago(30) }),
+  // A Docs page: a document without a version head (has_document, no typed kind).
+  row({ id: "page-launch", slug: "launch-notes", name: "Launch notes", has_document: true, updated_at: ago(60 * 110) }),
+  // An interactive App: a project that publishes an application (interactive.json).
+  row({ id: "page-survey", slug: "field-survey", name: "Field survey", artifact_kind: "project", has_application: true, artifact_shared_version: 1, updated_at: ago(60 * 120) }),
+  // A Design canvas; its live document is the use-design stand-in (artifacts-library.design-fixture.ts).
+  row({ id: "page-design", slug: "launch-landing", name: "Launch landing", artifact_kind: "design", updated_at: ago(60 * 130) }),
 ]
 // The private project's mock: a single unshared version.
 mocks["q3-support-summary"] = createArtifactMockServer({ slug: "q3-support-summary", name: "Q3 support summary", entrypoint: "plans.html", files: site(1), message: "First draft" })
+
+// The interactive App: the server advertises its runtime, but this installation has no separate
+// application domain (runtime_url ""), so the frame must say it cannot run and load nothing.
+mocks["field-survey"] = createArtifactMockServer({ slug: "field-survey", name: "Field survey", entrypoint: "index.html",
+  files: [html("index.html", "Survey", `<h1>Field survey</h1><form><label>Store <input name="store"></label></form>`), { path: "interactive.json", media_type: "application/json", content: JSON.stringify({ collections: ["responses"] }) }], message: "Survey form" })
+mocks["field-survey"].state.sharedVersion = 1
+const INTERACTIVE: Record<string, unknown> = { "field-survey": { runtime_url: "", development_same_origin: false, collections: ["responses"] } }
+
+const LAUNCH = { type: "doc", content: [
+  { type: "heading", attrs: { id: "h1", level: 2 }, content: [{ type: "text", text: "Summary" }] },
+  { type: "paragraph", attrs: { id: "l1" }, content: [{ type: "text", text: "The launch moves to Tuesday. Support has the new FAQ; sales has the pricing sheet." }] },
+  { type: "heading", attrs: { id: "h2", level: 2 }, content: [{ type: "text", text: "Open questions" }] },
+  { type: "paragraph", attrs: { id: "l2" }, content: [{ type: "text", text: "Who announces the partner programme, and when?" }] },
+] }
+const LAUNCH_SNAPSHOT = documentSchema.snapshot(documentSchema.create(LAUNCH, 3))
 
 declare global { interface Window { __unmocked: string[]; __project: ArtifactMockServer; __agentPublish: () => number } }
 window.__unmocked = []
@@ -85,6 +107,14 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       { type: "paragraph", attrs: { id: "p1" }, content: [{ type: "text", text: "Partner brief" }] },
       { type: "paragraph", attrs: { id: "p2" }, content: [{ type: "text", text: "Three partners, one launch date and the open questions for each." }] },
     ] } })
+  // Native Word and Sheet: the server admits the editor and this person may edit (the lock is the host's).
+  if (/^\/api\/v1\/pages\/%40page-(brief|model)\/craft\/availability$/.test(path) && method === "GET") return json({ enabled: true, can_edit: true })
+  // The Docs page: its metadata, and the confirmed document the live editor opens (rev, epoch and a
+  // Yjs snapshot of schema 3, as the documents service answers). Nothing is ever written back here.
+  if (path === "/api/v1/pages/%40page-launch" && method === "GET") return json({ id: "page-launch", slug: "launch-notes", name: "Launch notes", has_document: true })
+  if (path === "/api/v1/pages/%40page-launch/document" && method === "GET") return json({ page_id: "page-launch", schema: 3, rev: 2, epoch: "fixture-epoch", can_write: true, snapshot: LAUNCH_SNAPSHOT, content: LAUNCH })
+  if (path === "/api/v1/pages/%40page-launch/document/comments" && method === "GET") return json({ comments: [], can_comment: false })
+  if (path === "/api/v1/pages/%40page-launch/document/requests" && method === "GET") return json({ requests: [], can_dispatch: false, eligible_chats: [] })
   // The private comment draft's key service (lib/local-draft-seal): an in-memory stand-in that
   // wraps a key as its own envelope. It only lets the fixture's drafts seal; nothing is secret here.
   if (/^\/api\/v1\/pages\/[^/]+\/draft-key$/.test(path) && method === "POST") {
@@ -100,7 +130,8 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   // shared mock predates those fields, so the fixture says yes where the person can write.
   if (response && method === "GET" && /\/artifact$/.test(path) && response.headers.get("content-type")?.includes("json")) {
     const body = await response.clone().json()
-    if (body && typeof body === "object" && "can_write" in body && !("can_send_to_agent" in body)) return json({ ...body, can_send_to_agent: body.can_write === true, can_restore: body.can_write === true, can_share: body.can_write === true })
+    const interactive = INTERACTIVE[decodeURIComponent(slug ?? "")]
+    if (body && typeof body === "object" && "can_write" in body && !("can_send_to_agent" in body)) return json({ ...body, can_send_to_agent: body.can_write === true, can_restore: body.can_write === true, can_share: body.can_write === true, ...(interactive ? { interactive } : {}) })
   }
   if (response) return response
   if (path === "/bundle.js") return realFetch(input, init)
