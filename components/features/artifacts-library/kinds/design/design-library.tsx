@@ -114,7 +114,7 @@ export function LibraryView({ system, version, source }: { system: DesignSystem;
             <span className="absolute bottom-2 left-3 text-5xl font-semibold text-white mix-blend-difference">Aa</span>
           </div>
           <div className="grid content-center gap-1.5 p-5">
-            <small className="font-mono text-xs uppercase tracking-wide text-muted-foreground">Library · v{version}</small>
+            <small className="text-xs text-muted-foreground">Library · v{version}</small>
             <h1 className="text-2xl font-semibold">{system.name ?? "Design system"}</h1>
             <p className="text-sm text-muted-foreground">{system.colors.length} colors · {system.typography.length} text styles · {system.spacing.length} spacing steps · {system.radii.length} radii{system.components.length ? ` · ${system.components.length} components` : ""}</p>
           </div>

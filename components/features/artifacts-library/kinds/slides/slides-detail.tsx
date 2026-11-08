@@ -248,7 +248,7 @@ function SlidesStage({ projection, codeVersion, download, data, workspaceId, slu
     <ArtifactSlot name="viewport" label="Zoom">
       <ArtifactTool icon={ZoomOut} label="Zoom out" disabled={grid} onClick={() => step(-1)} />
       <button type="button" aria-label="Fit the slide" aria-pressed={zoom === "fit"} disabled={grid} onClick={() => setZoom("fit")}
-        className="h-[30px] min-w-12 rounded-[var(--radius-row)] px-1.5 font-mono text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40">{zoom === "fit" ? "Fit" : `${Math.round(scale * 100)} %`}</button>
+        className="h-[30px] min-w-[48px] rounded-[var(--radius-row)] px-1.5 font-mono text-xs text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-40">{zoom === "fit" ? "Fit" : `${Math.round(scale * 100)} %`}</button>
       <ArtifactTool icon={ZoomIn} label="Zoom in" disabled={grid} onClick={() => step(1)} />
     </ArtifactSlot>
     <ArtifactSlot name="nav" label="Slides">

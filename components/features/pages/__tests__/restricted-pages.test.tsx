@@ -6,7 +6,7 @@ import PagesPage from "@/app/(dashboard)/pages/page"
 import { answerConfirm, mountConfirmHost } from "@/components/ui/__tests__/confirm-test-utils"
 
 const api = vi.hoisted(() => vi.fn())
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: api }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: api, broadcastSessionExpired: vi.fn() }))
 const workspace = vi.hoisted(() => ({ mode: "restricted" }))
 vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/hooks/use-workspace")>(),
