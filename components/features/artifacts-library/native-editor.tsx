@@ -9,26 +9,44 @@ import { verifyNativeReadLoss } from "@/lib/mooring/native-read-loss"
 import { NativeCraftEditorHost, type NativeCraftHostStatus } from "@/components/features/pages/native-craft-editor-host"
 import { NativeCraftPreview } from "@/components/features/pages/native-craft-preview"
 import { NativeCraftReaderHistory } from "@/components/features/pages/native-craft-reader-history"
-import { ArtifactAgentMode, ArtifactDrawerSection } from "./frame"
+import { ArtifactAgentMode, ArtifactDrawerSection, useArtifactFrame } from "./frame"
 
 /** History lives in the frame's drawer, never as a row above the editor (#5132). */
-const inHistory = (node: ReactNode) => <ArtifactDrawerSection tab="history" label="History" icon={History}>{node}</ArtifactDrawerSection>
-/** The Craft agent task is the Edit mode of the Agent drawer, mounted only once the server admits agents. */
-const asEditMode = (form: ReactNode) => <ArtifactAgentMode mode="edit">{form}</ArtifactAgentMode>
+const inHistory = (node: ReactNode, presence?: ReactNode) => <ArtifactDrawerSection tab="history" label="History" icon={History}>{presence}{node}</ArtifactDrawerSection>
+/**
+ * The Craft agent task is the Edit mode of the Agent drawer, mounted only once
+ * the server admits agents. Its form (and the agent directory it reads) mounts
+ * the first time the Agent tab opens, never just because the artifact opened.
+ */
+const asEditMode = (form: ReactNode) => <ArtifactAgentMode mode="edit"><OnceAgentOpened>{form}</OnceAgentOpened></ArtifactAgentMode>
+
+function OnceAgentOpened({ children }: { children: ReactNode }) {
+  const frame = useArtifactFrame()
+  const [seen, setSeen] = useState(false)
+  const opened = frame === null || frame.drawerTab === "agent"
+  useEffect(() => { if (opened) setSeen(true) }, [opened])
+  return seen || opened ? <>{children}</> : null
+}
 
 type State = "loading" | "enabled" | "preview" | "readonly" | "disabled" | "error"
 
 /**
  * A native Word or Sheet opens inside its Artifacts detail: the same
- * single-editor host /pages/craft/editor mounts, with its lease bar (who edits
- * now, ask for the handoff). The server's availability answer decides, exactly
+ * single-editor host /pages/craft/editor mounts; its lock controls (who edits
+ * now, ask for the handoff) sit in the frame's status popover. The server's availability answer decides, exactly
  * as on that route; without a confirmed editor or preview the detail keeps
  * what it showed before (`fallback`) under a notice that says why, and
  * nothing is opened or written. An unconfirmed answer can be asked again.
  */
 export type NativeAvailability = State
 
-export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, onAvailability }: { workspaceId: string; pageId: string; fallback: ReactNode
+export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, onAvailability, placeLease, editorHidden, historyPresence }: { workspaceId: string; pageId: string; fallback: ReactNode
+  /** Where the lock controls render: the frame's status popover. */
+  placeLease?: (controls: ReactNode) => ReactNode
+  /** The body shows a reflowed read-only view instead of the editor surface (Word on a phone). */
+  editorHidden?: boolean
+  /** Rendered inside the History tab while it exists, so the body knows it can open it. */
+  historyPresence?: ReactNode
   /** The host's save and lock state, for the frame's status chip. */
   onStatus?: (status: NativeCraftHostStatus) => void
   /** The server's availability answer (editor, preview, read-only…). */
@@ -64,12 +82,12 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, 
   if (!scope || !humanId) return <>{fallback}</>
   if (state === "loading") return <p role="status" className="p-4 text-sm text-muted-foreground">Connecting…</p>
   // The host's UI and draft journal are remounted for every person and document.
-  if (state === "enabled") return <div data-testid="native-editor" className="flex min-h-[520px] flex-1 flex-col overflow-hidden">
+  if (state === "enabled") return <div data-testid="native-editor" className={editorHidden ? "flex flex-col" : "flex min-h-[520px] flex-1 flex-col overflow-hidden"}>
     <NativeCraftEditorHost key={scope} workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled
-      placeHistory={inHistory} placeAgentStart={asEditMode} onStatus={onStatus} />
+      placeHistory={node => inHistory(node, historyPresence)} placeAgentStart={asEditMode} onStatus={onStatus} placeLease={placeLease} editorHidden={editorHidden} />
   </div>
   if (state === "preview") return <div className="flex min-h-[520px] flex-1 flex-col overflow-hidden">
-    {inHistory(<NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />)}
+    {inHistory(<NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} embedded />, historyPresence)}
     <NativeCraftPreview key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />
   </div>
   return <>
@@ -79,7 +97,7 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, 
     </p> : <p role="status" className="text-sm text-muted-foreground">
       {state === "readonly" ? "You can read this document but not edit it." : "Editing is not available here right now."}
     </p>}
-    {state === "readonly" && inHistory(<NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />)}
+    {state === "readonly" && inHistory(<NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} embedded />, historyPresence)}
     {fallback}
   </>
 }

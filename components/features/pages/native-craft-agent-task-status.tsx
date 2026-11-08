@@ -57,15 +57,15 @@ export function NativeCraftAgentTaskStatus({workspaceId,pageId,humanId,enabled=f
   return()=>{active=false;clearTimeout(timer);call?.abort();window.removeEventListener(AUTH_EVENT,retire)}
  },[key,enabled,humanId,workspaceId,pageId,workId])
  if(!enabled||value?.key!==key||!value.selected)return null
- if(value.error||!value.task)return <p role="alert" className="border-b px-3 py-2 text-sm">Stav úlohy agenta není dostupný.</p>
- const task=value.task,states:Record<string,string>={queued:'Úloha agenta čeká',starting:'Agent se spouští',running:'Agent pracuje',succeeded:'Úloha agenta dokončena',failed:'Úloha agenta skončila chybou',cancelled:'Úloha agenta zrušena',needs_reconciliation:'Výsledek úlohy se ověřuje'}
+ if(value.error||!value.task)return <p role="alert" className="border-b px-3 py-2 text-sm">The agent task status is not available.</p>
+ const task=value.task,states:Record<string,string>={queued:'Agent task queued',starting:'Agent is starting',running:'Agent is working',succeeded:'Agent task finished',failed:'Agent task failed',cancelled:'Agent task cancelled',needs_reconciliation:'Checking the task result'}
  const lastAcquire=task.events.findLast(event=>event.operation==='acquire')
  const humanBusy=lastAcquire?.status===409&&lastAcquire.holder_kind==='human'
- return <aside aria-label="Úloha agenta v dokumentu" className="border-b px-3 py-2 text-sm" aria-live="polite">
-  <p>{states[task.state]??'Stav úlohy se ověřuje'}</p>
-  {humanBusy&&<p>Agent nepřevzal úpravy: dokument upravoval člověk.</p>}
-  {(task.uncertain||task.inflight)&&<p>Výsledek zápisu se ověřuje.</p>}
-  {task.proposal&&<p>Agent připravil návrh ke schválení.</p>}
-  {task.version&&<p>Poslední potvrzená verze {task.version}</p>}
+ return <aside aria-label="Agent task in the document" className="border-b px-3 py-2 text-sm" aria-live="polite">
+  <p>{states[task.state]??'Checking the task status'}</p>
+  {humanBusy&&<p>The agent did not take over editing: a person was editing the document.</p>}
+  {(task.uncertain||task.inflight)&&<p>Checking the result of the write.</p>}
+  {task.proposal&&<p>The agent prepared a proposal for review.</p>}
+  {task.version&&<p>Last confirmed version {task.version}</p>}
  </aside>
 }

@@ -19,7 +19,8 @@ import { readLocalDraft, type LocalDraft } from "@/components/features/chat/arti
 import { LocalDraftBanner } from "@/components/features/chat/artifact-context/craft/local-draft-banner"
 import { ArtifactFrame, craftFrameStatus, type FrameAction, type FrameCapabilities, type FrameStatus } from "./frame"
 import { ArtifactPageContent } from "./page-content"
-import { ArtifactNativeEditor, type NativeAvailability } from "./native-editor"
+import type { NativeAvailability } from "./native-editor"
+import { CRAFT_LOCK_RULE, CraftBody, useCraftLeaseTarget } from "./kinds/craft/craft-body"
 import { ProjectKindView } from "./kinds/project-kind-view"
 import type { KindReport } from "./kinds/project-parts"
 import { openInPagesHref, viewsProjectInline, type LibraryItem } from "./library-items"
@@ -160,6 +161,7 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   const [availability, setAvailability] = useState<NativeAvailability>()
   // Status, edit right, presence and actions a kind body reports (Design, Slides).
   const [kindFrame, setKindFrame] = useState<KindFrameReport | null>(null)
+  const craftLease = useCraftLeaseTarget()
   const projects = useArtifactProjectsAvailable(workspaceId)
   const projectPreview = viewsProjectInline(item) && projects
   // An App or Dashboard project lays itself out in the frame and reports its chip and edit right.
@@ -220,7 +222,7 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   else if (nativeEditor) body = <div className="flex min-h-0 flex-1 flex-col">
     {item.kind === "word" && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
     {/* Without the editor here there is none elsewhere either: the fallback offers no Edit, only the saved version. */}
-    <ArtifactNativeEditor workspaceId={workspaceId} pageId={item.pageId!} onStatus={setCraft} onAvailability={setAvailability}
+    <CraftBody workspaceId={workspaceId} item={item} craft={craft} onStatus={setCraft} onAvailability={setAvailability} placeLease={craftLease.place}
       fallback={item.kind === "word" && !item.empty ? documentColumn(<WordPreview workspaceId={workspaceId} item={item} />) : null} />
   </div>
   else body = documentColumn(<>
@@ -241,8 +243,8 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
 
   return <ArtifactFrame name={item.name} kind={kindFrame?.kind ?? resolved} folder={item.folder?.name ?? null} caps={caps} onHome={onBack}
     href={item.pageId ? `/artifacts/${encodeURIComponent(item.pageId)}` : undefined} onShare={() => setDialog("share")} presence={kindFrame?.presence}
-    statusActions={docsPage ? docs?.statusActions : undefined}
-    statusFoot={docsPage && docs?.statusFoot ? docs.statusFoot : item.kind === "word" || item.kind === "sheet" ? "One editor at a time. The lock is a server lease and ends when the tab closes." : `${KINDS[resolved.kind].label}${item.sharedVersion ? ` · shared v${item.sharedVersion}` : ""}${item.ownerLabel ? ` · owned by ${item.ownerLabel}` : ""}`}
+    statusActions={docsPage ? docs?.statusActions : nativeEditor ? craftLease.statusActions : undefined}
+    statusFoot={docsPage && docs?.statusFoot ? docs.statusFoot : item.kind === "word" || item.kind === "sheet" ? CRAFT_LOCK_RULE : `${KINDS[resolved.kind].label}${item.sharedVersion ? ` · shared v${item.sharedVersion}` : ""}${item.ownerLabel ? ` · owned by ${item.ownerLabel}` : ""}`}
     info={<ArtifactInfo workspaceId={workspaceId} item={item} onShare={() => setDialog("share")} />}>
     {body}
     {dialog === "share" && <ShareDialog workspaceId={workspaceId} item={item} open onOpenChange={open => { if (!open) setDialog(null) }} />}

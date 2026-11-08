@@ -76,7 +76,7 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       for (let i = 0; i < 30; i++) {
         await N.pause(2_000)
         timeline.push(await N.uiState(page))
-        if (timeline.at(-1)!.recoveries.length || /Uloženo/.test(timeline.at(-1)!.status)) break
+        if (timeline.at(-1)!.recoveries.length || /Saved/.test(timeline.at(-1)!.status)) break
       }
       const savesWithoutPerson = ops.slice(savesBefore).filter((o) => o.kind === "save")
       const headAfter = await N.readHead(request, ref)

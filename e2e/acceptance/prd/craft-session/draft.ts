@@ -1,4 +1,4 @@
-// Shared checks of the native editor's unsaved-draft offer ("Místní koncept"),
+// Shared checks of the native editor's unsaved-draft offer ("Local draft"),
 // used by the stale-generation, write-revoked and restart rows. Nothing here
 // saves or changes a document; it only reads what the editor shows and what
 // the server holds.
@@ -10,7 +10,7 @@ import { pause, status } from "../outage-lostack/native"
 import { editorTakesInput } from "./lines"
 
 export interface DraftOffer {
-  /** The offered rows, e.g. "Místní koncept · verze 3". */
+  /** The offered rows, e.g. "Local draft · version 3". */
   rows: string[]
   /** For each offered row: does the draft text contain every marker. */
   hasMarker: boolean[]
@@ -23,8 +23,8 @@ export interface DraftOffer {
 /**
  * Progress of a typeLines() stream. `typed` counts lines (text + Enter) sent;
  * `accepted` lists the lines the editor provably took: it took input both
- * before and after the line (lines.ts, editorTakesInput: status "Pouze čtení"
- * or "odpojen", or a custody toolbar naming another holder or "Pouze čtení",
+ * before and after the line (lines.ts, editorTakesInput: status "Read-only"
+ * or "disconnected", or a custody toolbar naming another holder or "Read-only",
  * means it no longer takes input). Every accepted line must survive, saved or in
  * the draft, including lines typed while a restart or handoff was in flight.
  */
@@ -57,7 +57,9 @@ const editorState = async (page: Page): Promise<EditorState | null> => {
   // Both reads at once: the gap between lines must stay below the autosave delay.
   const [status, custody] = await Promise.all([
     page.getByRole("status").first().innerText({ timeout: 2_000 }).catch(() => null),
-    page.getByRole("toolbar", { name: "Úpravy dokumentu" }).first().innerText({ timeout: 2_000 }).catch(() => null),
+    page.getByRole("toolbar", { name: "Document editing" }).first().innerText({ timeout: 2_000 }).catch(() => null)
+      // In the Artifacts frame the toolbar is in the closed status popover (#5132); the chip names the holder instead.
+      .then(async (bar) => bar ?? (await page.locator("button[data-status]").first().evaluate((chip) => `chip:${chip.getAttribute("data-status")} ${chip.getAttribute("aria-label") ?? ""}`, null, { timeout: 2_000 }).catch(() => null))),
   ])
   return status === null ? null : { status, custody }
 }
@@ -73,10 +75,10 @@ export function holdsAll(text: string, markers: string[]): boolean {
 /**
  * Looks into every offered draft and reports whether every marker is in it
  * (pass all lines typed before the disturbance, so a partly lost draft fails). While
- * the editor is connected "Porovnat" shows the draft beside the server version.
+ * the editor is connected "Compare" shows the draft beside the server version.
  * An editor whose connection was ended (a revoked right, a restart) cannot read
  * the server version, so the comparison never opens; the draft is then taken
- * out with "Kopie konceptu" (a file download), which needs no server.
+ * out with "Keep a copy" (a file download), which needs no server.
  */
 export async function inspectDrafts(page: Page, marker: string | string[]): Promise<DraftOffer> {
   const markers = typeof marker === "string" ? [marker] : marker
@@ -87,18 +89,18 @@ export async function inspectDrafts(page: Page, marker: string | string[]): Prom
   const texts: string[] = []
   for (let i = 0; i < rows.length; i++) {
     const row = recoveryRows(page).nth(i).locator("..")
-    await row.getByRole("button", { name: "Porovnat", exact: true }).click()
-    const serverBox = page.locator('textarea[aria-label="Serverová verze"]')
+    await row.getByRole("button", { name: "Compare", exact: true }).click()
+    const serverBox = page.locator('textarea[aria-label="Server version"]')
     const opened = await serverBox.waitFor({ timeout: 10_000 }).then(() => true, () => false)
     if (opened) {
       serverHasMarker.push(holdsAll(await serverBox.inputValue(), markers))
-      const draft = await page.locator('textarea[aria-label="Místní koncept"]').inputValue()
+      const draft = await page.locator('textarea[aria-label="Local draft"]').inputValue()
       texts.push(draft)
       hasMarker.push(holdsAll(draft, markers))
-      await page.getByRole("button", { name: "Zavřít porovnání", exact: true }).click()
+      await page.getByRole("button", { name: "Close comparison", exact: true }).click()
     } else {
       const download = page.waitForEvent("download", { timeout: 20_000 })
-      await row.getByRole("button", { name: "Kopie konceptu", exact: true }).click()
+      await row.getByRole("button", { name: "Keep a copy", exact: true }).click()
       const file = await (await download).path()
       serverHasMarker.push(false)
       const draft = await readFile(file, "utf8")
@@ -192,11 +194,11 @@ export async function typeLines(page: Page, prefix: string, lines: number, delay
   return progress.typed
 }
 
-/** Waits for "Uloženo · verze N" with N newer than `after` (the label of an older save stays on screen). */
+/** Waits for "Saved · version N" with N newer than `after` (the label of an older save stays on screen). */
 export async function savedAfter(page: Page, after: string, timeout: number): Promise<string | undefined> {
   const end = Date.now() + timeout
   while (Date.now() < end) {
-    const v = (await status(page)).match(/^Uloženo · verze (\d+)/)?.[1]
+    const v = (await status(page)).match(/^Saved · version (\d+)/)?.[1]
     if (v && BigInt(v) > BigInt(after)) return v
     await pause(150)
   }

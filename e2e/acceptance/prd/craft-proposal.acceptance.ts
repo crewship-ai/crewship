@@ -25,9 +25,10 @@ import {
 } from "./craft-proposal/native"
 import { frameOf, typeMarker } from "./drafts-crash/native"
 import { expect, prdRequirement, test, type PrdScenario } from "./fixtures"
+import { lockButton } from "./craft-session/frame"
 
 const UNKNOWN_PROPOSAL = "ncp_000000000000000000000000"
-const STALE_MESSAGE = "Dokument se po přípravě návrhu změnil"
+const STALE_MESSAGE = "The document changed after the proposal was prepared"
 
 /** Creates a native page or skips the test when the origin has no native engines. */
 async function nativeOrSkip(
@@ -263,11 +264,11 @@ test.describe("craft proposal", () => {
           expect(has(candidate.doc!), "the proposal carries the requested change").toBe(true)
 
           const group = await flow.banner(p.before.version)
-          await group.getByRole("button", { name: "Porovnat", exact: true }).click()
-          const server = page.getByRole("textbox", { name: "Serverová verze" })
+          await group.getByRole("button", { name: "Compare", exact: true }).click()
+          const server = page.getByRole("textbox", { name: "Server version" })
           await server.waitFor()
           const proposalBox = page.getByRole("textbox", {
-            name: `Návrh ${flow.agent.name} nad verzí ${p.before.version}`,
+            name: `Proposal by ${flow.agent.name} on version ${p.before.version}`,
             exact: true,
           })
           const compare = {
@@ -277,7 +278,7 @@ test.describe("craft proposal", () => {
           await prd.evidence(`${app}-compare.png`, await page.screenshot({ fullPage: true }))
 
           const acceptRes = page.waitForResponse((r) => r.url().includes(`/proposals/${p.proposal.id}/accept`), { timeout: 60_000 })
-          await group.getByRole("button", { name: "Přijmout", exact: true }).click()
+          await group.getByRole("button", { name: "Accept", exact: true }).click()
           const ar = await acceptRes
           const ab = (await ar.json().catch(() => ({}))) as {
             receipt?: { version?: string; sessionId?: string }
@@ -308,7 +309,7 @@ test.describe("craft proposal", () => {
           })
           expect(compare.server, "server side of the comparison does not have the change").toBe(false)
           expect(compare.proposal, "proposal side of the comparison has the change").toBe(true)
-          expect(ar.status(), `UI Přijmout must apply the proposal (alert: ${alert.join(" | ")})`).toBe(200)
+          expect(ar.status(), `UI Accept must apply the proposal (alert: ${alert.join(" | ")})`).toBe(200)
           expect(BigInt(post.version) > BigInt(p.before.version), "accept writes a new version").toBe(true)
           expect(post.hash, "new version is exactly the proposal bytes").toBe(candidate.contentHash)
           expect(ab.receipt?.version).toBe(post.version)
@@ -339,7 +340,7 @@ test.describe("craft proposal", () => {
           const p1 = await flow.propose(instruct(m1), "reject")
           const g1 = await flow.banner(p1.before.version)
           const rejectRes = page.waitForResponse((r) => r.url().includes(`/proposals/${p1.proposal.id}/reject`), { timeout: 60_000 })
-          await g1.getByRole("button", { name: "Odmítnout", exact: true }).click()
+          await g1.getByRole("button", { name: "Reject", exact: true }).click()
           const rr = await rejectRes
           const afterReject = await flow.doc.head()
           const fin1 = await flow.proposalState(p1.proposal.id)
@@ -378,7 +379,7 @@ test.describe("craft proposal", () => {
           expect(has(humanSave.doc, human)).toBe(true)
           const g2 = await flow.banner(p2.before.version)
           const acceptRes = page.waitForResponse((r) => r.url().includes(`/proposals/${p2.proposal.id}/accept`), { timeout: 60_000 })
-          await g2.getByRole("button", { name: "Přijmout", exact: true }).click()
+          await g2.getByRole("button", { name: "Accept", exact: true }).click()
           const ar = await acceptRes
           const message = page.getByRole("alert").filter({ hasText: STALE_MESSAGE })
           await message.waitFor({ timeout: 20_000 })
@@ -466,19 +467,19 @@ class AgentFlow {
   async hold(): Promise<void> {
     this.page.setDefaultTimeout(45_000)
     await this.page.goto(this.doc.editorPath())
-    await this.status("Pouze čtení").waitFor({ timeout: 90_000 })
-    await this.page.getByRole("button", { name: "Převzít úpravy", exact: true }).click()
-    await this.status("Připraveno k úpravám").waitFor()
+    await this.status("Read-only").waitFor({ timeout: 90_000 })
+    await (await lockButton(this.page, "Take over editing")).click()
+    await this.status("Ready to edit").waitFor()
   }
 
   group(baseVersion: string) {
-    return this.page.getByRole("group", { name: `Návrh ${this.agent.name}` }).filter({ hasText: new RegExp(`nad verzí ${baseVersion}(?!\\d)`) })
+    return this.page.getByRole("group", { name: `Proposal by ${this.agent.name}` }).filter({ hasText: new RegExp(`on version ${baseVersion}(?!\\d)`) })
   }
 
   async banner(baseVersion: string) {
     const g = this.group(baseVersion)
     await g.waitFor({ timeout: 30_000 })
-    expect(await g.innerText()).toContain(`${this.agent.name} připravil návrh nad verzí ${baseVersion}`)
+    expect(await g.innerText()).toContain(`${this.agent.name} prepared a proposal on version ${baseVersion}`)
     return g
   }
 
@@ -577,13 +578,10 @@ class AgentFlow {
 
   async dispose(): Promise<void> {
     try {
-      const release = this.page.getByRole("button", {
-        name: "Uvolnit úpravy",
-        exact: true,
-      })
+      const release = await lockButton(this.page, "Hand back", 5_000)
       if (await release.count()) {
         await release.click()
-        await this.status("Pouze čtení").waitFor({ timeout: 30_000 })
+        await this.status("Read-only").waitFor({ timeout: 30_000 })
       }
     } catch {
       // The page is deleted below either way.

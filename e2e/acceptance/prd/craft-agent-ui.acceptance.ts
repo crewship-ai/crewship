@@ -1,4 +1,4 @@
-// PRD §7 A (#5003): the browser control "Upravit agentem" on a native Word
+// PRD §7 A (#5003): the browser control "Edit with an agent" on a native Word
 // document and Sheet. Everything the person does goes through the page, with no
 // chat socket of the harness: they open the control, pick the agent, write the
 // instruction, tick the consent and start. On a free document the agent edits
@@ -21,20 +21,21 @@ import { barSeen, findAgent, redact, sheetInstruction, waitForTask, watchBar, wo
 import { createNativePage, deletePage, sheetCell, wordText, type NativeApp, type NativePage } from "./craft-proposal/native"
 import { frameOf } from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
+import { agentControl, lockButton, lockControls } from "./craft-session/frame"
 
 /** Goes through the whole control and returns the task the page started. Fails with what the control said. */
 async function startFromControl(page: Page, agent: SeededAgent, instruction: string): Promise<{ workId: string; held: boolean }> {
-  const control = page.getByRole("group", { name: "Úprava agentem" })
-  await control.getByRole("button", { name: "Upravit agentem", exact: true }).click({ timeout: 60_000 })
+  // The toggle above the editor on /pages/craft/editor; the Agent drawer's Edit mode in the Artifacts frame (#5132).
+  const control = await agentControl(page, 60_000)
   const picker = control.getByRole("combobox", { name: "Agent" })
   await expect(picker.locator(`option[value="${agent.id}"]`), `the picker offers ${agent.name}`).toHaveCount(1, { timeout: 30_000 })
   await picker.selectOption(agent.id)
-  await control.getByRole("textbox", { name: "Zadání pro agenta" }).fill(instruction)
-  const start = control.getByRole("button", { name: "Spustit agenta", exact: true })
+  await control.getByRole("textbox", { name: "Instruction for the agent" }).fill(instruction)
+  const start = control.getByRole("button", { name: "Start agent", exact: true })
   await expect(start, "no start without consent").toBeDisabled()
-  await control.getByRole("checkbox", { name: "Agent smí upravit celý dokument" }).check()
+  await control.getByRole("checkbox", { name: "The agent may edit the whole document" }).check()
   await expect(start, "the start opens with agent, instruction and consent").toBeEnabled()
-  const held = await control.getByText("Agent ho nezmění, jen připraví návrh ke schválení.").isVisible()
+  const held = await control.getByText("The agent will not change it; it prepares a proposal for review.").isVisible()
 
   const created = page.waitForResponse((r) => r.request().method() === "POST" && new URL(r.url()).pathname.endsWith("/craft/tasks"), { timeout: 60_000 })
   const refused = control.getByRole("alert").waitFor({ timeout: 60_000 }).then(() => control.getByRole("alert").innerText())
@@ -55,7 +56,7 @@ async function reloadAndRead(page: Page, app: NativeApp, has: (doc: Record<strin
   await page.reload()
   const loaded = await read
   const body = (await loaded.json().catch(() => ({}))) as { version?: string | number; bytes?: string }
-  await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
+  await page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor({ timeout: 90_000 })
   await frameOf(page, app)
   const frame = page.locator('iframe[title$=" editor"]')
   await expect(frame, "the reloaded editor is on screen").toBeVisible()
@@ -68,7 +69,7 @@ const eventsOf = (task: { events?: Array<{ operation?: string; status?: number; 
 
 /** The panel the page shows for the task it started, or what stands in its place. */
 async function taskPanel(page: Page, expected: string): Promise<{ text: string; alerts: string[] }> {
-  const panel = page.getByRole("complementary", { name: "Úloha agenta v dokumentu" })
+  const panel = page.getByRole("complementary", { name: "Agent task in the document" })
   await panel.getByText(expected).waitFor({ timeout: 20_000 }).catch(() => {})
   return { text: await panel.innerText({ timeout: 1_000 }).catch(() => ""), alerts: await alertsOn(page) }
 }
@@ -83,7 +84,7 @@ test.describe("craft-agent-ui", () => {
 
     test(
       `${label}: a person starts the agent from the page on a free document and sees the result after reload`,
-      { annotation: prdRequirement(`A.craft.agent-ui.${label.toLowerCase()}.free`, `${label}: Upravit agentem on a free document: the status shows the agent editing and the page shows the agent's new version after reload`) },
+      { annotation: prdRequirement(`A.craft.agent-ui.${label.toLowerCase()}.free`, `${label}: Edit with an agent on a free document: the status shows the agent editing and the page shows the agent's new version after reload`) },
       async ({ prd, request, page }) => {
         const seeded = prd.requireAgent()
         test.setTimeout(15 * 60_000)
@@ -101,20 +102,20 @@ test.describe("craft-agent-ui", () => {
 
           page.setDefaultTimeout(60_000)
           await page.goto(doc.editorPath())
-          const bar = page.getByRole("toolbar", { name: "Úpravy dokumentu" })
-          await expect(bar).toContainText("Volné", { timeout: 90_000 })
+          const bar = await lockControls(page, 90_000)
+          await expect(bar).toContainText("Free", { timeout: 90_000 })
           await watchBar(page)
 
           const { workId, held } = await startFromControl(page, agent, instruct(marker))
           const task = await waitForTask(doc, workId)
           const after = await doc.head()
           const events = eventsOf(task)
-          await expect(bar, "the document is free again").toContainText("Volné", { timeout: 60_000 })
+          await expect(bar, "the document is free again").toContainText("Free", { timeout: 60_000 })
           const seen = await barSeen(page)
-          const panel = await taskPanel(page, "Úloha agenta dokončena")
+          const panel = await taskPanel(page, "Agent task finished")
           await prd.evidence(`${app}-after-agent.png`, await page.screenshot({ fullPage: true }))
           const shown = await reloadAndRead(page, app, carries(marker))
-          await expect(bar).toContainText("Volné", { timeout: 90_000 })
+          await expect(bar).toContainText("Free", { timeout: 90_000 })
           const alerts = await alertsOn(page)
           await prd.evidence(`${app}-reloaded.png`, await page.screenshot({ fullPage: true }))
           await prd.evidence(`${app}-free.json`, redact({
@@ -125,7 +126,7 @@ test.describe("craft-agent-ui", () => {
           expect(held, "a free document shows no proposal warning").toBe(false)
           expect(task.state, `the agent task ends well (events ${JSON.stringify(events)})`).toBe("succeeded")
           expect(events.some((e) => e.operation === "apply" && e.status === 200), "the agent wrote directly to the free document").toBe(true)
-          expect(seen.some((s) => s.text.includes(`Upravuje ${agent.name}`)), `the status showed the agent editing (saw ${JSON.stringify(seen.map((s) => s.text))})`).toBe(true)
+          expect(seen.some((s) => s.text.includes(`${agent.name} is editing`)), `the status showed the agent editing (saw ${JSON.stringify(seen.map((s) => s.text))})`).toBe(true)
           expect(BigInt(after.version), "the agent's edit is a new version").toBe(BigInt(before.version) + 1n)
           expect(carries(marker)(after.doc), "the new version carries the change").toBe(true)
           expect(shown.status, "the reloaded page reads the document").toBe(200)
@@ -133,7 +134,7 @@ test.describe("craft-agent-ui", () => {
           expect(shown.hasChange, "the document the page renders carries the change").toBe(true)
           expect(alerts.join(" | "), "the reloaded page shows no alert").toBe("")
           expect(panel.alerts.join(" | "), "the page shows no alert about the finished task").toBe("")
-          expect(panel.text, "the page says the task finished").toContain("Úloha agenta dokončena")
+          expect(panel.text, "the page says the task finished").toContain("Agent task finished")
         } finally {
           await page.goto("about:blank").catch(() => {})
           const status = await deletePage(request, agent.workspaceId, doc.pageId)
@@ -144,7 +145,7 @@ test.describe("craft-agent-ui", () => {
 
     test(
       `${label}: a person who holds the document starts the agent and accepts its proposal`,
-      { annotation: prdRequirement(`A.craft.agent-ui.${label.toLowerCase()}.proposal`, `${label}: Upravit agentem on a document the person holds: the document stays unchanged, the proposal is shown and accepting it writes the new version`) },
+      { annotation: prdRequirement(`A.craft.agent-ui.${label.toLowerCase()}.proposal`, `${label}: Edit with an agent on a document the person holds: the document stays unchanged, the proposal is shown and accepting it writes the new version`) },
       async ({ prd, request, page }) => {
         const seeded = prd.requireAgent()
         test.setTimeout(15 * 60_000)
@@ -165,9 +166,9 @@ test.describe("craft-agent-ui", () => {
           page.setDefaultTimeout(60_000)
           await page.goto(doc.editorPath())
           const status = (text: string) => page.getByRole("status").filter({ hasText: text })
-          await status("Pouze čtení").waitFor({ timeout: 90_000 })
-          await page.getByRole("button", { name: "Převzít úpravy", exact: true }).click()
-          await status("Připraveno k úpravám").waitFor()
+          await status("Read-only").waitFor({ timeout: 90_000 })
+          await (await lockButton(page, "Take over editing")).click()
+          await status("Ready to edit").waitFor()
 
           const before = await doc.head()
           const marker = `PRDUIHELD${label.toUpperCase()}_${randomUUID().slice(0, 8)}`
@@ -185,19 +186,19 @@ test.describe("craft-agent-ui", () => {
           expect(unchanged.version, "the document stays unchanged until the person decides").toBe(before.version)
           expect(proposal, "the agent recorded a proposal over the version it read").toBeTruthy()
 
-          const group = page.getByRole("group", { name: `Návrh ${agent.name}` }).filter({ hasText: new RegExp(`nad verzí ${before.version}(?!\\d)`) })
+          const group = page.getByRole("group", { name: `Proposal by ${agent.name}` }).filter({ hasText: new RegExp(`on version ${before.version}(?!\\d)`) })
           await group.waitFor({ timeout: 60_000 })
-          expect(await group.innerText()).toContain(`${agent.name} připravil návrh nad verzí ${before.version}`)
-          const panel = await taskPanel(page, "Agent připravil návrh ke schválení")
+          expect(await group.innerText()).toContain(`${agent.name} prepared a proposal on version ${before.version}`)
+          const panel = await taskPanel(page, "The agent prepared a proposal for review")
           await prd.evidence(`${app}-proposal-shown.png`, await page.screenshot({ fullPage: true }))
-          await group.getByRole("button", { name: "Porovnat", exact: true }).click()
+          await group.getByRole("button", { name: "Compare", exact: true }).click()
           const compare = {
-            server: (await page.getByRole("textbox", { name: "Serverová verze" }).inputValue()).includes(marker),
-            proposal: (await page.getByRole("textbox", { name: `Návrh ${agent.name} nad verzí ${before.version}`, exact: true }).inputValue()).includes(marker),
+            server: (await page.getByRole("textbox", { name: "Server version" }).inputValue()).includes(marker),
+            proposal: (await page.getByRole("textbox", { name: `Proposal by ${agent.name} on version ${before.version}`, exact: true }).inputValue()).includes(marker),
           }
           await prd.evidence(`${app}-compare.png`, await page.screenshot({ fullPage: true }))
           const accepted = page.waitForResponse((r) => r.url().includes(`/proposals/${proposal!.id}/accept`), { timeout: 60_000 })
-          await group.getByRole("button", { name: "Přijmout", exact: true }).click()
+          await group.getByRole("button", { name: "Accept", exact: true }).click()
           const answer = await accepted
           const receipt = (await answer.json().catch(() => ({}))) as { receipt?: { version?: string; sessionId?: string }; error?: string }
           const after = await doc.head()
@@ -218,9 +219,9 @@ test.describe("craft-agent-ui", () => {
           expect(shown.hasChange, "the document the page renders carries the change").toBe(true)
           // Last, so every result above still reports: the page has to say what became of the task it started.
           expect(panel.alerts.join(" | "), "the page shows no alert about the finished task").toBe("")
-          expect(panel.text, "the page says the agent prepared a proposal").toContain("Agent připravil návrh ke schválení")
+          expect(panel.text, "the page says the agent prepared a proposal").toContain("The agent prepared a proposal for review")
         } finally {
-          const release = page.getByRole("button", { name: "Uvolnit úpravy", exact: true })
+          const release = await lockButton(page, "Hand back", 5_000)
           if (await release.count().catch(() => 0)) await release.click().catch(() => {})
           await page.goto("about:blank").catch(() => {})
           const status = await deletePage(request, agent.workspaceId, doc.pageId)
@@ -231,7 +232,7 @@ test.describe("craft-agent-ui", () => {
 
     test(
       `${label}: a person with Read never gets the control, a person with Edit on the same document does`,
-      { annotation: prdRequirement(`A.craft.agent-ui.${label.toLowerCase()}.read-absent`, `${label}: Upravit agentem is absent for a Read grantee and present for a write grantee on the same document`) },
+      { annotation: prdRequirement(`A.craft.agent-ui.${label.toLowerCase()}.read-absent`, `${label}: Edit with an agent is absent for a Read grantee and present for a write grantee on the same document`) },
       async ({ prd, request }) => {
         prd.requireFull("needs the seeded origin with agents enabled")
         const ws = await prd.qaWorkspace()
@@ -251,28 +252,28 @@ test.describe("craft-agent-ui", () => {
         }
         const availability = async (who: Page) =>
           (await (await who.context().request.get(`/api/v1/pages/${encodeURIComponent("@" + doc.pageId)}/craft/availability?workspace_id=${encodeURIComponent(ws.id)}`)).json()) as { agents_enabled?: boolean; can_edit?: boolean }
-        const controlsOn = async (who: Page) => (await who.getByText("Upravit agentem").count()) + (await who.getByRole("group", { name: "Úprava agentem" }).count())
+        const controlsOn = async (who: Page) => (await who.getByText("Edit with an agent").count()) + (await who.getByRole("group", { name: "Edit with an agent" }).count())
 
         // A Read person gets the shared preview, not the live editor. First the
         // state with nothing published, then the real document.
         const readerPage = await person(reader.account)
         await readerPage.goto(doc.editorPath)
-        await expect(readerPage.getByText("Sdílený náhled zatím není publikovaný.").first(), "nothing is published yet").toBeVisible({ timeout: 90_000 })
+        await expect(readerPage.getByText("The shared preview is not published yet.").first(), "nothing is published yet").toBeVisible({ timeout: 90_000 })
         const unpublished = await controlsOn(readerPage)
 
         const version = await doc.publishPreview(request)
         await readerPage.reload()
-        await expect(readerPage.getByRole("status").filter({ hasText: `Sdílený náhled · verze ${version}` }).first(), "the Read person sees the published version").toBeVisible({ timeout: 90_000 })
+        await expect(readerPage.getByRole("status").filter({ hasText: `Shared preview · version ${version}` }).first(), "the Read person sees the published version").toBeVisible({ timeout: 90_000 })
         await expect(readerPage.locator("iframe"), "the document itself is on the page").toHaveCount(1, { timeout: 90_000 })
 
         // Only now the positive control, so the reader's wait outlasts the one that finds the control.
         const writerPage = await person(writer.account)
         await writerPage.goto(doc.editorPath)
-        await writerPage.getByRole("status").filter({ hasText: "Pouze čtení" }).waitFor({ timeout: 90_000 })
-        await expect(writerPage.getByRole("button", { name: "Upravit agentem", exact: true }), "the write grantee has the control, so its absence below means something").toBeVisible({ timeout: 60_000 })
+        await writerPage.getByRole("status").filter({ hasText: "Read-only" }).waitFor({ timeout: 90_000 })
+        await expect((await agentControl(writerPage, 60_000)).getByRole("combobox", { name: "Agent" }), "the write grantee has the control, so its absence below means something").toBeVisible({ timeout: 60_000 })
 
         const published = await controlsOn(readerPage)
-        const takes = await readerPage.getByRole("button", { name: "Převzít úpravy", exact: true }).count()
+        const takes = await (await lockButton(readerPage, "Take over editing", 10_000)).count()
         const access = { writer: await availability(writerPage), reader: await availability(readerPage) }
         await prd.evidence(`${app}-read.png`, await readerPage.screenshot({ fullPage: true }))
         await prd.evidence(`${app}-edit.png`, await writerPage.screenshot({ fullPage: true }))

@@ -1,5 +1,5 @@
 // PRD A: native Word and Sheet editor lease. Exactly one person edits at a
-// time; everyone sees who ("Upravuje X"); custody passes only by an explicit
+// time; everyone sees who ("X is editing"); custody passes only by an explicit
 // request and handoff; and a write under a retired generation is refused (409)
 // without touching the document.
 //
@@ -14,6 +14,7 @@ import { headText, inspectDrafts, placeCaret, newTyping, typedMarkers, typeLines
 import { checkDraftCopies, checkNoLines, lineLedger, type LineCheck } from "./craft-session/lines"
 import * as editor from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
+import { lockControls } from "./craft-session/frame"
 
 /**
  * Requirements per application. Word keeps the original ids; Sheet has its own
@@ -21,12 +22,12 @@ import { expect, prdRequirement, test } from "./fixtures"
  */
 const REQ = {
   wordcraft: {
-    holder: prdRequirement("A.craft.lease.holder", "Word: everyone sees who holds the editor (\"Upravuje X\"); a second person cannot take it"),
+    holder: prdRequirement("A.craft.lease.holder", "Word: everyone sees who holds the editor (\"X is editing\"); a second person cannot take it"),
     handoff: prdRequirement("A.craft.lease.handoff", "Word: custody passes only through request and handoff; the new holder can save"),
     stale: prdRequirement("A.craft.lease.stale-generation", "Word: a write under a retired generation is refused (409) and the document stays unchanged"),
   },
   gridcraft: {
-    holder: prdRequirement("A.craft.lease.holder-sheet", "Sheet: everyone sees who holds the editor (\"Upravuje X\"); a second person cannot take it"),
+    holder: prdRequirement("A.craft.lease.holder-sheet", "Sheet: everyone sees who holds the editor (\"X is editing\"); a second person cannot take it"),
     handoff: prdRequirement("A.craft.lease.handoff-sheet", "Sheet: custody passes only through request and handoff; the new holder can save"),
     stale: prdRequirement("A.craft.lease.stale-generation-sheet", "Sheet: a write under a retired generation is refused (409) and the document stays unchanged"),
   },
@@ -73,7 +74,7 @@ for (const { application, label } of APPLICATIONS) {
           expect(seenByPeer.can_write).toBe(false)
           const peerAcquire = await doc.leaseOp(peerCtx, other, "acquire")
           expect(peerAcquire.status(), "a second person cannot take a held lease").toBe(409)
-          log.holder = { shownToPeer: `Upravuje ${seenByPeer.holder?.display_name}`, peerAcquire: peerAcquire.status() }
+          log.holder = { shownToPeer: `${seenByPeer.holder?.display_name} is editing`, peerAcquire: peerAcquire.status() }
 
           // The holder saves; a non-holder save under the holder's generation is refused.
           const v1 = await doc.document(request, owner)
@@ -117,7 +118,7 @@ for (const { application, label } of APPLICATIONS) {
           expect(gPeer).not.toBe(gOwner)
           const ownerSees = await doc.lease(request, owner)
           expect(ownerSees.holder?.display_name).toBe(PEER_NAME)
-          log.handoff = { requestSeenByHolder: true, from: gOwner, to: gPeer, shownToOwner: `Upravuje ${ownerSees.holder?.display_name}` }
+          log.handoff = { requestSeenByHolder: true, from: gOwner, to: gPeer, shownToOwner: `${ownerSees.holder?.display_name} is editing` }
 
           // The retired generation is fenced: save, renew and release all 409, nothing changes.
           const head = await doc.document(peerCtx, other)
@@ -184,32 +185,33 @@ for (const { application, label } of APPLICATIONS) {
           peerPage.setDefaultTimeout(60_000)
           traceCraft(peerPage, "peer", trail)
           await peerPage.goto(doc.editorPath)
-          const ownerBar = page.getByRole("toolbar", { name: "Úpravy dokumentu" })
-          const peerBar = peerPage.getByRole("toolbar", { name: "Úpravy dokumentu" })
-          await expect(ownerBar).toContainText("Volné", { timeout: 60_000 })
-          await expect(peerBar).toContainText("Volné", { timeout: 60_000 })
+          // In the Artifacts frame the lock controls are in the status popover (#5132); each page keeps its own open.
+          const ownerBar = await lockControls(page)
+          const peerBar = await lockControls(peerPage)
+          await expect(ownerBar).toContainText("Free", { timeout: 60_000 })
+          await expect(peerBar).toContainText("Free", { timeout: 60_000 })
 
-          // Owner takes the editor; the peer sees "Upravuje <owner>".
+          // Owner takes the editor; the peer sees "<owner> is editing".
           const acquiredRes = page.waitForResponse((r) => isCraft(r, "lease/acquire") && r.status() === 200)
-          await ownerBar.getByRole("button", { name: "Převzít úpravy", exact: true }).click()
+          await ownerBar.getByRole("button", { name: "Take over editing", exact: true }).click()
           const gOwner = ((await (await acquiredRes).json()) as LeaseView).generation
-          await expect(ownerBar.getByRole("button", { name: "Uvolnit úpravy", exact: true })).toBeVisible()
+          await expect(ownerBar.getByRole("button", { name: "Hand back", exact: true })).toBeVisible()
           const observer = await doc.session(peerCtx)
           const held = await doc.lease(peerCtx, observer)
           expect(held.holder?.actor_id).toBe(`user:${ownerId}`)
-          await expect(peerBar).toContainText(`Upravuje ${held.holder?.display_name}`, { timeout: 30_000 })
-          await expect(peerBar.getByRole("button", { name: "Převzít úpravy", exact: true })).toHaveCount(0)
+          await expect(peerBar).toContainText(`${held.holder?.display_name} is editing`, { timeout: 30_000 })
+          await expect(peerBar.getByRole("button", { name: "Take over editing", exact: true })).toHaveCount(0)
           const shots: Record<string, Buffer> = { "peer-sees-owner.png": await peerPage.screenshot({ fullPage: true }) }
 
           // Peer asks; owner hands over.
-          await peerBar.getByRole("button", { name: "Požádat o předání", exact: true }).click()
-          const handTo = ownerBar.getByRole("button", { name: `Předat uživateli ${PEER_NAME}`, exact: true })
+          await peerBar.getByRole("button", { name: "Request edit", exact: true }).click()
+          const handTo = ownerBar.getByRole("button", { name: `Hand over to ${PEER_NAME}`, exact: true })
           await expect(handTo).toBeVisible({ timeout: 30_000 })
           const handoffRes = page.waitForResponse((r) => isCraft(r, "lease/handoff"))
           await handTo.click()
           expect((await handoffRes).status()).toBe(200)
-          await expect(ownerBar).toContainText(`Upravuje ${PEER_NAME}`, { timeout: 30_000 })
-          await expect(peerBar.getByRole("button", { name: "Uvolnit úpravy", exact: true })).toBeVisible({ timeout: 30_000 })
+          await expect(ownerBar).toContainText(`${PEER_NAME} is editing`, { timeout: 30_000 })
+          await expect(peerBar.getByRole("button", { name: "Hand back", exact: true })).toBeVisible({ timeout: 30_000 })
           shots["owner-sees-peer.png"] = await page.screenshot({ fullPage: true })
 
           // The owner's browser admission under the retired generation is refused.
@@ -225,16 +227,16 @@ for (const { application, label } of APPLICATIONS) {
           expect(after.bytes).toBe(head.bytes)
 
           // Peer binds the editor and releases it; both see it free.
-          const bind = peerPage.getByRole("button", { name: "Převzít úpravy", exact: true })
+          const bind = peerPage.getByRole("button", { name: "Take over editing", exact: true })
           if (await bind.isVisible()) await bind.click()
           const releaseRes = peerPage.waitForResponse((r) => isCraft(r, "lease/release"))
-          await peerBar.getByRole("button", { name: "Uvolnit úpravy", exact: true }).click()
+          await peerBar.getByRole("button", { name: "Hand back", exact: true }).click()
           expect((await releaseRes).status()).toBe(200)
-          await expect(ownerBar).toContainText("Volné", { timeout: 30_000 })
+          await expect(ownerBar).toContainText("Free", { timeout: 30_000 })
 
           await prd.evidence("result.json", {
             application, mode: prd.mode, appSha: prd.appSha, workspaceId: ws.id, pageId: doc.pageId,
-            peerSaw: `Upravuje ${held.holder?.display_name}`, ownerSaw: `Upravuje ${PEER_NAME}`,
+            peerSaw: `${held.holder?.display_name} is editing`, ownerSaw: `${PEER_NAME} is editing`,
             ownerGeneration: gOwner, staleSave: stale.status(), versionUnchanged: after.version, releasedByPeer: true,
           })
           for (const [name, png] of Object.entries(shots)) await prd.evidence(name, png)
@@ -271,7 +273,7 @@ for (const { application, label } of APPLICATIONS) {
           traceCraft(page, "owner", trail)
           const admission = captureAdmission(page)
           await page.goto(doc.editorPath)
-          await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
+          await page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor({ timeout: 90_000 })
 
           // The owner holds the editor and has typed work that is not saved.
           const LATE = `PRDLATE${Date.now().toString(36)}`
@@ -344,8 +346,8 @@ for (const { application, label } of APPLICATIONS) {
           expect((await doc.leaseOp(peerCtx, observer, "release", { generation: peerView.generation! })).status(), "the peer releases").toBe(200)
           await page.reload()
           await editor.frameOf(page, application)
-          await editor.takeButton(page).click()
-          await page.getByRole("status").filter({ hasText: "Připraveno k úpravám" }).first().waitFor({ timeout: 60_000 })
+          await (await editor.takeButton(page)).click()
+          await page.getByRole("status").filter({ hasText: "Ready to edit" }).first().waitFor({ timeout: 60_000 })
           await waitForDraftOffer(page, 60_000)
           const reloaded = await inspectDrafts(page, typedBefore)
           // Record the per-line check (lines.json) before any verdict on this copy.

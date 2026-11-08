@@ -9,9 +9,10 @@ import { peerApi, requireNative } from "./craft-lease/helpers"
 import { APPLICATIONS, NativePage } from "./craft-lease/native"
 import { pause } from "./drafts-crash/crash"
 import { expect, prdRequirement, test } from "./fixtures"
+import { lockButton } from "./craft-session/frame"
 
-const TAKE = "Převzít úpravy"
-const REFUSED = "Editor se bezpečně nepřipojil"
+const TAKE = "Take over editing"
+const REFUSED = "The editor did not connect safely"
 
 /** Holds the engine's document, as a slow network or a loaded machine would. */
 async function delayEngine(page: Page, ms: number): Promise<{ held(): number }> {
@@ -73,7 +74,7 @@ for (const { application, label } of APPLICATIONS) {
         const frame = watchFrame(page)
         const started = Date.now()
         await page.goto(doc.editorPath)
-        await expect(page.getByRole("button", { name: TAKE, exact: true })).toBeEnabled({ timeout: 45_000 })
+        await expect(await lockButton(page, TAKE, 45_000)).toBeEnabled({ timeout: 45_000 })
         const openedAfterMs = Date.now() - started
         await frame.stop()
         expect(engine.held(), "the engine really was delayed").toBeGreaterThan(0)
@@ -97,7 +98,7 @@ for (const { application, label } of APPLICATIONS) {
         await expect(page.getByText(REFUSED).first()).toBeVisible({ timeout: 35_000 })
         await frame.stop()
         expect(frame.firstVisible(), "no frame is ever shown").toBeNull()
-        await expect(page.getByRole("button", { name: TAKE, exact: true })).toHaveCount(0)
+        await expect(await lockButton(page, TAKE, 10_000)).toHaveCount(0)
         await prd.evidence("result.json", { application, appSha: prd.appSha, samples: frame.samples.length })
       },
     )
@@ -124,8 +125,8 @@ for (const { application, label } of APPLICATIONS) {
           await pause(35_000)
           await frame.stop()
           expect(frame.firstVisible(), "the frame is never shown after the right is withdrawn").toBeNull()
-          await expect(page.getByRole("button", { name: TAKE, exact: true })).toHaveCount(0)
-          await expect(page.getByRole("button", { name: /Stáhnout|Kopie konceptu/ })).toHaveCount(0)
+          await expect(await lockButton(page, TAKE, 10_000)).toHaveCount(0)
+          await expect(page.getByRole("button", { name: /Download|Keep a copy/ })).toHaveCount(0)
           await prd.evidence("result.json", { application, appSha: prd.appSha, samples: frame.samples.length, framePresentAtEnd: frame.samples.at(-1)?.present })
         } finally {
           for (const c of cleanup.reverse()) await c().catch(() => {})

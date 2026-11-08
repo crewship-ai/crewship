@@ -14,7 +14,7 @@ interface Props {
  humanId:string;workspaceId:string;pageId:string
  /** Another authorized read-only source (a saved version); default is the shared pin. Every recheck calls it again, so a refusal removes the content. */
  read?:(signal:AbortSignal)=>Promise<NativePreviewSnapshot>
- /** Visible name of what is shown, e.g. "Náhled verze 3"; default "Sdílený náhled". */
+ /** Visible name of what is shown, e.g. "Preview of version 3"; default "Shared preview". */
  label?:string
 }
 /** A different identity/scope removes the old frame synchronously in React's
@@ -23,7 +23,7 @@ export function NativeCraftPreview(props:Props){
  const [attempt,setAttempt]=React.useState(0)
  return <PreviewSession key={JSON.stringify([props.humanId,props.workspaceId,props.pageId,attempt])} {...props} retry={()=>setAttempt(n=>n+1)}/>
 }
-function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Sdílený náhled'}:Props&{retry:()=>void}){
+function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Shared preview'}:Props&{retry:()=>void}){
  const reader=React.useRef(source);reader.current=source
  const mount=React.useRef<HTMLDivElement>(null)
  const [version,setVersion]=React.useState<string>(),[error,setError]=React.useState<string>()
@@ -40,7 +40,7 @@ function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Sd�
   const fail=(cause?:unknown)=>{
    if(dead)return
    dead=true;abort.abort();clearTimeout(readDeadline);clearInterval(poll);clearFrame();setVersion(undefined)
-   setError(!reader.current&&cause instanceof NativePreviewError&&cause.status===404?'Sdílený náhled zatím není publikovaný.':`${label} není dostupný. Přístup se nepotvrdil.`)
+   setError(!reader.current&&cause instanceof NativePreviewError&&cause.status===404?'The shared preview is not published yet.':`${label} is not available. Access was not confirmed.`)
   }
   const unregister=registerDocumentDraftWriter(humanId,async()=>fail())
   function show(snapshot:NativePreviewSnapshot){
@@ -61,7 +61,7 @@ function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Sd�
    // No draft journal, write transition, save API, or custody callback exists.
    const ownPort=createNativeEditorPort({applicationId:snapshot.applicationId,enginePin:snapshot.enginePin,bundle:snapshot.editorBundle,frame:frame.contentWindow,scope:{workspaceId,pageId,baseVersion:snapshot.version,generation:'1',sessionId:`preview:${crypto.randomUUID()}`},requireAccessProtocol:true,
     onChanged(){if(frame===mountedFrame&&ready)fail()},
-    onSaveRequest(request){if(frame===mountedFrame&&request.requestId)port?.saveFailed(request.requestId,`${label} je pouze pro čtení.`)},
+    onSaveRequest(request){if(frame===mountedFrame&&request.requestId)port?.saveFailed(request.requestId,`${label} is read-only.`)},
     onExport(file){if(!dead&&frame===mountedFrame)try{downloadNativeExport(file)}catch{fail()}},
     onError(){if(frame===mountedFrame)fail()},
     onReady(){void Promise.resolve().then(async()=>{
@@ -97,5 +97,5 @@ function PreviewSession({humanId,workspaceId,pageId,retry,read:source,label='Sd�
   void read()
   return()=>{dead=true;recheck.current=()=>{};abort.abort();clearTimeout(readDeadline);clearInterval(poll);unregister();clearFrame();window.removeEventListener('message',message);window.removeEventListener('focus',focus);window.removeEventListener('online',focus)}
  },[humanId,workspaceId,pageId,label])
- return <section className="flex h-full min-h-96 flex-col"><p className="p-3" role={error?'alert':'status'}>{error??(version?`${label} · verze ${version}`:(source?`${label} · načítám…`:'Načítám sdílený náhled…'))}</p>{error&&<button type="button" className="self-start rounded border px-3 py-2 coarse:min-h-[44px]" onClick={retry}>Znovu načíst náhled</button>}<div ref={mount} className="relative min-h-80 flex-1"/></section>
+ return <section className="flex h-full min-h-96 flex-col"><p className="p-3" role={error?'alert':'status'}>{error??(version?`${label} · version ${version}`:(source?`${label} · loading…`:'Loading the shared preview…'))}</p>{error&&<button type="button" className="self-start rounded border px-3 py-2 coarse:min-h-[44px]" onClick={retry}>Reload the preview</button>}<div ref={mount} className="relative min-h-80 flex-1"/></section>
 }

@@ -28,7 +28,7 @@ const INSTRUCTION_ONLY={native_craft_instruction:true}
 /** No run follows this send, so only its delivery can stall. */
 const DELIVERY_LIMIT_MS=30_000
 const MAX_INSTRUCTION=4000
-const NOT_CREATED='Úloha nevznikla.'
+const NOT_CREATED='No task was created.'
 
 /** Availability is Page-scoped and re-read each time the host allows a start. */
 export function NativeCraftAgentStart(props:NativeCraftAgentStartProps){
@@ -54,8 +54,10 @@ export function NativeCraftAgentStart(props:NativeCraftAgentStartProps){
 /** One deliberate start: a new chat, the person's persisted message without a
  * chat turn, then the unchanged task contract bound to that message. Nothing is
  * ever replayed. */
-function AgentStartForm({workspaceId,pageId,humanId,enabled,holder=null,onStarted}:NativeCraftAgentStartProps){
- const [open,setOpen]=React.useState(false),[agentId,setAgentId]=React.useState(''),[text,setText]=React.useState(''),[consent,setConsent]=React.useState(false)
+function AgentStartForm({workspaceId,pageId,humanId,enabled,holder=null,onStarted,place}:NativeCraftAgentStartProps){
+ // Placed in a drawer (the Artifacts Agent tab), the form is the content itself: no toggle to open it.
+ const placed=Boolean(place)
+ const [open,setOpen]=React.useState(placed),[agentId,setAgentId]=React.useState(''),[text,setText]=React.useState(''),[consent,setConsent]=React.useState(false)
  const [preparing,setPreparing]=React.useState(false),[attempt,setAttempt]=React.useState<Attempt>(),[error,setError]=React.useState<string>()
  const directory=useWorkspaceAgentDirectory(open?workspaceId:undefined)
  // Synchronous guards: a second press and a re-render must not start or post twice.
@@ -74,44 +76,44 @@ function AgentStartForm({workspaceId,pageId,humanId,enabled,holder=null,onStarte
  const chat=useChat({workspaceId,sessionId:attempt?.chatId??'',currentUserId:humanId,wsUrl:base?`${base}/ws`:'',getToken,realtimeEnabled:Boolean(attempt),canSend:Boolean(attempt),executionProfile:attempt?'trusted':'pending',
   // The server assigns this id only after it persisted the message.
   onOwnMessageSaved(content,metadata){setAttempt(current=>current?.sent&&!current.messageId&&content===current.content&&id(metadata?.message_id)?{...current,messageId:metadata.message_id}:current)},
-  onSendRefused(){if(claimed.current)finish(`Agent teď nepřijímá zadání. ${NOT_CREATED}`)},
+  onSendRefused(){if(claimed.current)finish(`The agent is not accepting instructions right now. ${NOT_CREATED}`)},
  })
  const {connectionStatus,isStreaming,markHistoryUnavailable,sendMessage}=chat
  React.useEffect(()=>()=>call.current?.abort(),[])
  // The host retired this start. A message may already be in the chat, but no task follows it.
  React.useEffect(()=>{
   if(enabled||!claimed.current||posted.current)return
-  call.current?.abort();finish(`Spuštění agenta bylo přerušeno. ${NOT_CREATED}`)
+  call.current?.abort();finish(`Starting the agent was interrupted. ${NOT_CREATED}`)
  },[enabled,finish])
  React.useEffect(()=>{
   if(!enabled||!attempt||attempt.life!==lifetime.current||attempt.sent||connectionStatus!=='connected')return
   // This control renders no transcript; the sequenced echo must still be applied.
   markHistoryUnavailable()
-  if(sendMessage(attempt.content,INSTRUCTION_ONLY)===false){finish(`Zadání se nepodařilo odeslat. ${NOT_CREATED}`);return}
+  if(sendMessage(attempt.content,INSTRUCTION_ONLY)===false){finish(`The instruction could not be sent. ${NOT_CREATED}`);return}
   setAttempt(current=>current&&{...current,sent:true})
  },[enabled,attempt,connectionStatus,markHistoryUnavailable,sendMessage,finish])
  const chatId=attempt?.chatId
  React.useEffect(()=>{
   if(!chatId)return
-  const timer=setTimeout(()=>{if(!posted.current)finish(`Zadání se nepodařilo potvrdit. ${NOT_CREATED}`)},DELIVERY_LIMIT_MS)
+  const timer=setTimeout(()=>{if(!posted.current)finish(`The instruction could not be confirmed. ${NOT_CREATED}`)},DELIVERY_LIMIT_MS)
   return()=>clearTimeout(timer)
  },[chatId,finish])
  // The server's done settles the send; the task binds what its echo named.
  React.useEffect(()=>{
   if(!enabled||!attempt?.sent||attempt.life!==lifetime.current||isStreaming||posted.current)return
-  if(!attempt.messageId){finish(`Zadání se v chatu neuložilo. ${NOT_CREATED}`);return}
+  if(!attempt.messageId){finish(`The instruction was not saved in the chat. ${NOT_CREATED}`);return}
   posted.current=true
   const abort=new AbortController();call.current=abort
   void(async()=>{
-   let message='Spuštění úlohy nebylo potvrzeno.'
+   let message='Starting the task was not confirmed.'
    try{
     const response=await apiFetch(`/api/v1/pages/${encodeURIComponent('@'+pageId)}/craft/tasks?${new URLSearchParams({workspace_id:workspaceId})}`,{method:'POST',cache:'no-store',redirect:'error',skipRefresh:true,signal:abort.signal,headers:JSON_HEADERS,body:JSON.stringify({chat_id:attempt.chatId,message_id:attempt.messageId,whole_document:true})})
-    if(response.status===403)message=`Tento agent nesmí dokument upravovat. ${NOT_CREATED}`
-    else if(response.status===503)message=`Agenti teď nejsou dostupní. ${NOT_CREATED}`
+    if(response.status===403)message=`This agent may not edit the document. ${NOT_CREATED}`
+    else if(response.status===503)message=`Agents are not available right now. ${NOT_CREATED}`
     const body:unknown=response.status===202?await response.json():null
     if(object(body)&&id(body.work_id)){
      if(abort.signal.aborted)return
-     setText('');setOpen(false);finish();onStarted(body.work_id);return
+     setText('');setOpen(placed);finish();onStarted(body.work_id);return
     }
    }catch{/* Reported below; a lost reply is never sent again. */}
    if(!abort.signal.aborted)finish(message)
@@ -136,29 +138,29 @@ function AgentStartForm({workspaceId,pageId,humanId,enabled,holder=null,onStarte
    if(!object(mode)||mode.mode!=='trusted')throw Error('native_agent_chat_not_trusted')
    if(abort.signal.aborted||life!==lifetime.current)return
    setPreparing(false);setAttempt({life,chatId:body.id,content:instruction,sent:false})
-  }catch{if(!abort.signal.aborted)finish(`Chat s agentem se nepodařilo připravit. ${NOT_CREATED}`)}
+  }catch{if(!abort.signal.aborted)finish(`The chat with the agent could not be prepared. ${NOT_CREATED}`)}
  }
  if(!enabled)return null
- return <div role="group" aria-label="Úprava agentem" className="space-y-2 border-b px-3 py-2 text-sm">
-  {!open&&<Button size="sm" variant="outline" onClick={()=>setOpen(true)}>Upravit agentem</Button>}
+ return <div role="group" aria-label="Edit with an agent" className={placed?"space-y-2 text-sm":"space-y-2 border-b px-3 py-2 text-sm"}>
+  {!open&&!placed&&<Button size="sm" variant="outline" onClick={()=>setOpen(true)}>Edit with an agent</Button>}
   {open&&<>
    <label className="flex items-center gap-2">Agent
     <select aria-label="Agent" className="rounded-md border bg-background px-2 py-1" value={agentId} disabled={pending} onChange={event=>setAgentId(event.target.value)}>
-     <option value="">Vyberte agenta</option>
+     <option value="">Choose an agent</option>
      {directory.agents?.map(agent=><option key={agent.id} value={agent.id}>{agent.name}</option>)}
     </select>
    </label>
-   {directory.error&&!directory.agents&&<p role="alert">Seznam agentů se nepodařilo načíst.</p>}
-   <Textarea aria-label="Zadání pro agenta" placeholder="Co má agent v dokumentu udělat?" maxLength={MAX_INSTRUCTION} value={text} disabled={pending} onChange={event=>setText(event.target.value)}/>
-   {holder==='human'&&<p className="text-muted-foreground">Dokument teď někdo upravuje. Agent ho nezmění, jen připraví návrh ke schválení.</p>}
-   {agentHolds&&<p className="text-muted-foreground">Dokument právě upravuje agent. Další úlohu spustíte, až skončí.</p>}
-   <label className="flex items-center gap-2"><input type="checkbox" checked={consent} disabled={pending} onChange={event=>setConsent(event.target.checked)}/>Agent smí upravit celý dokument</label>
-   <p className="text-muted-foreground">Zadání se uloží do nového chatu s agentem a úprava začne hned potom.</p>
+   {directory.error&&!directory.agents&&<p role="alert">The agent list could not be loaded.</p>}
+   <Textarea aria-label="Instruction for the agent" placeholder="What should the agent do in the document?" maxLength={MAX_INSTRUCTION} value={text} disabled={pending} onChange={event=>setText(event.target.value)}/>
+   {holder==='human'&&<p className="text-muted-foreground">Someone is editing the document now. The agent will not change it; it prepares a proposal for review.</p>}
+   {agentHolds&&<p className="text-muted-foreground">An agent is editing the document. You can start another task when it finishes.</p>}
+   <label className="flex items-center gap-2"><input type="checkbox" checked={consent} disabled={pending} onChange={event=>setConsent(event.target.checked)}/>The agent may edit the whole document</label>
+   <p className="text-muted-foreground">The instruction is saved in a new chat with the agent and editing starts right after.</p>
    <div className="flex gap-2">
-    <Button size="sm" disabled={!ready} onClick={()=>void start()}>Spustit agenta</Button>
-    <Button size="sm" variant="outline" disabled={pending} onClick={()=>setOpen(false)}>Zrušit</Button>
+    <Button size="sm" disabled={!ready} onClick={()=>void start()}>Start agent</Button>
+    {!placed&&<Button size="sm" variant="outline" disabled={pending} onClick={()=>setOpen(false)}>Cancel</Button>}
    </div>
-   {pending&&<p role="status">Ukládám zadání…</p>}
+   {pending&&<p role="status">Saving the instruction…</p>}
   </>}
   {error&&<p role="alert">{error}</p>}
  </div>

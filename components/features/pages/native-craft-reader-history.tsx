@@ -23,10 +23,10 @@ import { NativeCraftVersionHistory } from "./native-craft-version-history"
  * the authorized listing. Any refusal or failure retires the history: the list,
  * times and names leave the DOM and the admission is dropped.
  */
-export function NativeCraftReaderHistory({ humanId, workspaceId, pageId }: { humanId: string; workspaceId: string; pageId: string }) {
-  return <ReaderHistorySession key={JSON.stringify([humanId, workspaceId, pageId])} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />
+export function NativeCraftReaderHistory({ humanId, workspaceId, pageId, embedded }: { humanId: string; workspaceId: string; pageId: string; /** In a drawer tab: always open, plain-language entries. */ embedded?: boolean }) {
+  return <ReaderHistorySession key={JSON.stringify([humanId, workspaceId, pageId])} humanId={humanId} workspaceId={workspaceId} pageId={pageId} embedded={embedded} />
 }
-function ReaderHistorySession({ humanId, workspaceId, pageId }: { humanId: string; workspaceId: string; pageId: string }) {
+function ReaderHistorySession({ humanId, workspaceId, pageId, embedded }: { humanId: string; workspaceId: string; pageId: string; embedded?: boolean }) {
   const client = React.useMemo(() => createNativeDocumentClient({ workspaceId, pageId }), [workspaceId, pageId])
   const [retired, setRetired] = React.useState(false), [tick, setTick] = React.useState(0)
   const dead = React.useRef(false), opened = React.useRef<Promise<unknown>>(undefined)
@@ -73,5 +73,5 @@ function ReaderHistorySession({ humanId, workspaceId, pageId }: { humanId: strin
   }, [client, retire])
   const scope = React.useMemo(() => ({ humanId, workspaceId, pageId }), [humanId, workspaceId, pageId])
   if (retired) return null
-  return <NativeCraftVersionHistory load={load} loadVersion={loadVersion} scope={scope} refreshKey={tick} canRestore={false} restoreHint="Obnovit verzi může jen ten, kdo dokument právě upravuje." />
+  return <NativeCraftVersionHistory load={load} loadVersion={loadVersion} scope={scope} refreshKey={tick} canRestore={false} restoreHint="Only the person editing the document now can restore a version." embedded={embedded} />
 }

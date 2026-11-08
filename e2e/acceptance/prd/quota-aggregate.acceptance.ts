@@ -19,7 +19,7 @@ import { ownerLogin, SharedWorkspace } from "./quota/workspace"
 const MiB = 1 << 20
 const LOWERED_WORKSPACE_LIMIT = MiB // the smallest limit the product accepts
 const HEADROOM = 24 * 1024 // less than one native save (an empty Word document is 55 KB)
-const MESSAGE = "Kapacita úložiště neumožňuje další uložení"
+const MESSAGE = "Storage is full, so nothing more can be saved"
 
 interface WorkspaceUsage {
   used_bytes: number
