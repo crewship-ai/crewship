@@ -51,6 +51,8 @@ credentials the page never sees. Adding a data source to Pages is a scripting jo
 connector engineering job.
 
 **Name.** One noun everywhere: `kind: Page`, route `/pages`, CLI `crewship page`, table `pages`.
+With the Artifacts library in the web build, the browser address of a Page is
+`/artifacts/<page-id>` instead (§9b.7); the API routes, CLI and table keep the name.
 The design artefact used three ("Sails" in the rail, `kind: Surface`, `crewship surface set`); {/* docs-inventory: ignore — names the rejected kind, not a shipped one */}
 that must not survive into the implementation.
 
@@ -909,6 +911,71 @@ work, not a thing they build once. Icon comes from `CONCEPT_ICON`, pinned by
 Filter popover · card shell · stat tile · empty state · the "no data" glyph · toast surface ·
 confirm dialog · run-progress rail. Every one of them exists; each re-invention is a new way for
 the same control to behave differently, which is the exact debt #1776 is tracking.
+
+### 9b.7 Addresses — one canonical URL per artifact
+
+Every Page has one browser address, `/artifacts/<page-id>?workspace_id=<id>`
+(issue #5129), with `&version=N` for a pinned project version. `<page-id>` is
+the immutable ID, so a renamed or reused slug never changes what a link opens.
+The server generates only this form: the document creation `url`, the project
+`url` (#4995) and the agent project tool's `page_path`.
+
+The static export has no server redirect. `/artifacts/[id]` is exported once
+as `/artifacts/_.html`, the Go binary serves it for every ID, and the client
+reads the ID from `window.location` (`useUrlSegment`), as `/pages/[slug]` does.
+
+With `NEXT_PUBLIC_ARTIFACTS_LIBRARY` in the build, the client maps every old
+address with `legacyPagesTarget`
+(`components/features/artifacts-library/legacy-pages-url.ts`), resolves the
+reference with the same page read Pages makes and calls `router.replace`:
+
+| Old address | Target |
+|---|---|
+| `/pages[?…]` | `/artifacts[?…]` |
+| `/pages?ref=<id>&workspace_id=<ws>` | resolve `@<id>` |
+| `/pages/<slug>`, `/pages/@<id>` | resolve the slug or `@<id>` |
+| `/pages/<slug>?artifact=1[&version=N]`, `/pages/<slug>?version=N` | resolve as a project; moves only to a project viewer the detail has |
+| `/pages/craft/editor?page_id=<id>&workspace_id=<ws>` | resolve `@<id>`; the detail mounts the same editor host |
+
+It fails closed: `?mode=edit`, `?artifact=1&edit=1`, a malformed or
+cross-workspace reference, a refused or failed read and a kind the Artifacts
+detail cannot open keep the Pages view. The decision is made once for the
+entry address, so navigation inside Pages never tears down an open editor.
+
+A restricted session has no Pages screen (#5132). Its one surface, the
+server's `pages` surface (`internal/api/restricted_surfaces.go`), is
+`/artifacts` (`lib/restricted-surfaces.ts`), with or without
+`NEXT_PUBLIC_ARTIFACTS_LIBRARY`. There `ArtifactsRoute` renders only
+`RestrictedArtifacts`: the artifacts that have declared actions shared with
+the member, and those actions. It sends exactly the requests the Page actions
+catalog sent at `/pages`: `GET /api/v1/workspaces/{id}/restricted-pages`, the
+publication-bound action `POST` and its own run poll. It never mounts the
+library, the detail or Design, because `GET /api/v1/pages` and
+`GET /api/v1/pages/{slug}` are not on the restricted allowlist.
+
+| Restricted address | Shows |
+|---|---|
+| `/artifacts` | the granted artifacts, each with its action count |
+| `/artifacts?item=<slug>` | that artifact's actions, if the catalog lists it; otherwise the access gate |
+| `/artifacts/<id>` | the access gate, decided without a request: the catalog names artifacts by slug only, so an ID never proves a grant |
+
+The gate reads "This artifact isn’t part of your access". It never names the
+address or any artifact. An artifact listed without actions was never shown
+before and is not shown now.
+
+Old `/pages` addresses stay mountable for the surface only so that they can
+move (`restricted-artifacts-url.ts`, by address alone, with `router.replace`).
+`/pages[?…]` and a malformed `?ref=` go to `/artifacts`. `/pages/<slug>` goes
+to `/artifacts?item=<slug>`, and `/pages/@<id>` or `?ref=<id>` to
+`/artifacts/<id>`. `/pages/craft/editor?page_id=<id>` goes to `/artifacts/<id>`
+without mounting the editor host (its availability read is not allowlisted);
+it first runs the same local read-loss proof, whose only request is the
+allowlisted `draft-key`. Only `workspace_id` is kept. Permissions are
+unchanged, and the server remains authoritative.
+
+Without the library, `/artifacts/<id>` resolves the kind and opens
+`/pages/@<id>?artifact=1[&version=N]` for a project and `/pages/@<id>` for any
+other kind. `/p/<token>` is a separate public route and is unchanged.
 
 ## 10. Data model
 

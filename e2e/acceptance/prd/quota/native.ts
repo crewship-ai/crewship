@@ -5,6 +5,7 @@ import { expect, type APIRequestContext, type Frame, type Page } from "@playwrig
 import * as fs from "node:fs"
 import { emptyGridCraftNativeDocument } from "../../../../lib/mooring/gridcraft-empty"
 import { trackPage } from "../created"
+import { lockButton } from "../craft-session/frame"
 
 export type NativeApp = "wordcraft" | "gridcraft"
 export const NATIVE_APPS: ReadonlyArray<{ app: NativeApp; label: "Word" | "Sheet"; frameTitle: string }> = [
@@ -72,11 +73,17 @@ const CLICK: Record<NativeApp, { x: number; y: number }> = { wordcraft: { x: 678
 
 export async function openEditor(page: Page, pageId: string, ws: string): Promise<void> {
   await page.goto(editorURL(pageId, ws))
-  await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
+  await page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor({ timeout: 90_000 })
 }
 
 export async function statusText(page: Page): Promise<string> {
   return (await page.getByRole("status").allInnerTexts()).map((s) => s.trim()).join(" | ")
+}
+
+/** The history budget the editor's status line carries as data (#5132: raw bytes are no longer printed). */
+export async function quotaData(page: Page): Promise<{ used: string | null; limit: string | null }> {
+  const status = page.locator("[role=status][data-quota-used]").first()
+  return { used: await status.getAttribute("data-quota-used"), limit: await status.getAttribute("data-quota-limit") }
 }
 
 async function frameOf(page: Page, frameTitle: string): Promise<Frame> {
@@ -90,10 +97,10 @@ async function barrier(f: Frame) {
   await f.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))).catch(() => {})
 }
 
-/** Takes the editing lease ("Převzít úpravy") and focuses the document. */
+/** Takes the editing lease ("Take over editing") and focuses the document. */
 export async function acquire(page: Page, app: NativeApp, frameTitle: string): Promise<Frame> {
-  await page.getByRole("button", { name: "Převzít úpravy", exact: true }).click()
-  await page.getByRole("status").filter({ hasText: "Připraveno k úpravám" }).first().waitFor({ timeout: 60_000 })
+  await (await lockButton(page, "Take over editing")).click()
+  await page.getByRole("status").filter({ hasText: "Ready to edit" }).first().waitFor({ timeout: 60_000 })
   const f = await frameOf(page, frameTitle)
   await pause(800)
   await f.locator("canvas").first().click({ position: CLICK[app] })

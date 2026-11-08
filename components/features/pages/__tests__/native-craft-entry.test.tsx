@@ -4,10 +4,14 @@ import {APP_ROUTE_PATTERNS,isKnownAppPath} from '@/lib/app-routes'
 import CraftPage from '@/app/(dashboard)/pages/craft/editor/page'
 const m=vi.hoisted(()=>({readLoss:vi.fn(),host:vi.fn(),preview:vi.fn(),fetch:vi.fn(),params:new URLSearchParams('workspace_id=w&page_id=p'),workspace:{workspaceId:'w',loading:false,linkUnavailable:false},session:{status:'authenticated',data:{user:{id:'human'}}}}))
 vi.mock('@/lib/mooring/native-read-loss',()=>({verifyNativeReadLoss:m.readLoss}))
-vi.mock('next/navigation',()=>({useSearchParams:()=>m.params}))
+const nav=vi.hoisted(()=>({replace:vi.fn()}))
+vi.mock('next/navigation',()=>({useSearchParams:()=>m.params,useRouter:()=>({replace:nav.replace,push:vi.fn()})}))
 vi.mock('@/hooks/use-auth',()=>({useSession:()=>m.session}))
 vi.mock('@/hooks/use-page-workspace',()=>({usePageWorkspace:()=>m.workspace}))
 vi.mock('@/lib/api-fetch',()=>({apiFetch:m.fetch}))
+const r=vi.hoisted(()=>({access:'trusted' as string}))
+vi.mock('@/hooks/use-access-mode',()=>({useAccessMode:()=>r.access}))
+vi.mock('@/components/features/artifacts-library/legacy-pages-redirect',()=>({LegacyPagesRedirect:({target,children}:{target:{reference:string;workspaceId:string};children:unknown})=><div data-testid="resolve" data-reference={target.reference} data-ws={target.workspaceId}>{children as never}</div>}))
 vi.mock('../native-craft-editor-host',()=>({NativeCraftEditorHost:(props:unknown)=>{m.host(props);return <div>Full native Word</div>}}))
 vi.mock('../native-craft-preview',()=>({NativeCraftPreview:(props:unknown)=>{m.preview(props);return <div>Shared native preview</div>}}))
 const deferred=<T,>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return {promise,resolve}}
@@ -34,7 +38,7 @@ it('asks for proof when the workspace left the directory, from the link\'s own s
  finally{m.workspace={workspaceId:'w',loading:false,linkUnavailable:false}}
 })
 it('mounts one full host only after authenticated page-scoped server availability even with no build flag',async()=>{render(<CraftPage/>);expect(m.host).not.toHaveBeenCalled();await screen.findByText('Full native Word');expect(m.fetch).toHaveBeenCalledWith('/api/v1/pages/%40p/craft/availability?workspace_id=w',expect.objectContaining({signal:expect.any(AbortSignal),cache:'no-store'}));expect(m.host).toHaveBeenCalledWith(expect.objectContaining({workspaceId:'w',pageId:'p',humanId:'human',enabled:true}))})
-it('keeps the server default false off even if an old frontend build flag is true',async()=>{vi.stubEnv('NEXT_PUBLIC_CRAFT_NATIVE_ENABLED','true');m.fetch.mockResolvedValue(availability(false));render(<CraftPage/>);await screen.findByText('Nativní editor není zapnutý.');expect(m.fetch).toHaveBeenCalledOnce();expect(m.host).not.toHaveBeenCalled()})
+it('keeps the server default false off even if an old frontend build flag is true',async()=>{vi.stubEnv('NEXT_PUBLIC_CRAFT_NATIVE_ENABLED','true');m.fetch.mockResolvedValue(availability(false));render(<CraftPage/>);await screen.findByText('The native editor is not turned on.');expect(m.fetch).toHaveBeenCalledOnce();expect(m.host).not.toHaveBeenCalled()})
 it('never mounts or admits a host after an unavailable or forbidden availability response',async()=>{m.fetch.mockResolvedValue(new Response(null,{status:403}));render(<CraftPage/>);await screen.findByRole('alert');expect(m.host).not.toHaveBeenCalled()})
 it('aborts and ignores a stale enabled result after a page scope change whose availability is forbidden',async()=>{const first=deferred<Response>();m.fetch.mockReturnValueOnce(first.promise).mockResolvedValueOnce(new Response(null,{status:403}));const mounted=render(<CraftPage/>);await waitFor(()=>expect(m.fetch).toHaveBeenCalledOnce());const signal=m.fetch.mock.calls[0][1].signal as AbortSignal;m.params=new URLSearchParams('workspace_id=w&page_id=q');mounted.rerender(<CraftPage/>);await screen.findByRole('alert');expect(signal.aborted).toBe(true);await act(async()=>first.resolve(availability(true)));expect(m.host).not.toHaveBeenCalled();expect(m.fetch.mock.calls[1][0]).toBe('/api/v1/pages/%40q/craft/availability?workspace_id=w')})
 it('immediately unmounts the old host while a different human scope is pending or refused',async()=>{const second=deferred<Response>();m.fetch.mockResolvedValueOnce(availability(true)).mockReturnValueOnce(second.promise);const mounted=render(<CraftPage/>);await screen.findByText('Full native Word');m.session={status:'authenticated',data:{user:{id:'another-human'}}};mounted.rerender(<CraftPage/>);expect(screen.queryByText('Full native Word')).not.toBeInTheDocument();await act(async()=>second.resolve(new Response(null,{status:403})));await screen.findByRole('alert');expect(screen.queryByText('Full native Word')).not.toBeInTheDocument()})
@@ -49,7 +53,7 @@ it('routes Comment to shared preview only when the server explicitly permits it'
 })
 it('does not infer preview permission from a truthy nonboolean field',async()=>{
  m.fetch.mockResolvedValue(new Response(JSON.stringify({enabled:false,preview_enabled:'true'})))
- render(<CraftPage/>);await screen.findByText('Nativní editor není zapnutý.')
+ render(<CraftPage/>);await screen.findByText('The native editor is not turned on.')
  expect(m.host).not.toHaveBeenCalled();expect(m.preview).not.toHaveBeenCalled()
 })
 
@@ -60,6 +64,31 @@ it.each([false,undefined,'true'])('routes a legacy enabled observer with can_edi
 })
 it('does not open either surface when legacy enabled lacks explicit edit and preview permission',async()=>{
  m.fetch.mockResolvedValue(new Response(JSON.stringify({enabled:true})))
- render(<CraftPage/>);await screen.findByText('Nativní editor není zapnutý.')
+ render(<CraftPage/>);await screen.findByText('The native editor is not turned on.')
  expect(m.host).not.toHaveBeenCalled();expect(m.preview).not.toHaveBeenCalled()
+})
+
+// #5129: with the library on, a trusted session opens the document at its
+// Artifacts detail; a restricted session and the library-off build keep this route.
+it('with the library on resolves a trusted session to the Artifacts detail, keeping this editor as the fallback',async()=>{
+ vi.stubEnv('NEXT_PUBLIC_ARTIFACTS_LIBRARY','true');r.access='trusted'
+ render(<CraftPage/>)
+ expect(screen.getByTestId('resolve').dataset).toMatchObject({reference:'@p',ws:'w'})
+ await screen.findByText('Full native Word')
+})
+it('keeps a trusted session with the library off on this route',async()=>{
+ vi.stubEnv('NEXT_PUBLIC_ARTIFACTS_LIBRARY','false');r.access='trusted'
+ render(<CraftPage/>)
+ expect(screen.queryByTestId('resolve')).toBeNull()
+ await screen.findByText('Full native Word')
+})
+// #5132: a restricted member's surface is /artifacts; the old editor address
+// is replaced there and the native editor never mounts.
+it.each(['true','false'])('replaces a restricted session at the old editor address with /artifacts (library %s)',async(library)=>{
+ vi.stubEnv('NEXT_PUBLIC_ARTIFACTS_LIBRARY',library);r.access='restricted';nav.replace.mockClear()
+ window.history.replaceState(null,'','/pages/craft/editor?page_id=p')
+ render(<CraftPage/>)
+ await vi.waitFor(()=>expect(nav.replace).toHaveBeenCalledWith('/artifacts/p'))
+ expect(screen.queryByTestId('resolve')).toBeNull()
+ expect(m.host).not.toHaveBeenCalled()
 })

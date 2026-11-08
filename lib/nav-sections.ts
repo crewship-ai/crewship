@@ -1,9 +1,8 @@
 import { roleAtLeast } from "@/lib/routine-governance"
-import { restrictedHome, restrictedPathAllowed, type RestrictedSurface } from "@/lib/restricted-surfaces"
+import { RESTRICTED_LEGACY_PATHS, RESTRICTED_SURFACE_PATHS, restrictedHome, restrictedPathAllowed, type RestrictedSurface } from "@/lib/restricted-surfaces"
 import type { LucideIcon } from "lucide-react"
 
 import { CONCEPT_ICON } from "@/lib/concept-icons"
-import { artifactsLibrary } from "@/lib/feature-flags"
 
 /**
  * The application's navigation, defined once.
@@ -46,8 +45,9 @@ export interface NavSection {
  * does it and with what). Settings and Admin live in the sidebar footer with
  * the sidebar mode and the user menu. Marketplace — announced, never built —
  * is gone. The Journal is part of Activity (F-02): its admin-only views are
- * gated there and old /journal links redirect. "Vault" is the label of Credentials (same route); /pages is labelled
- * "Artifacts" as v67 draws it (the Artifacts delivery on main renamed it).
+ * gated there and old /journal links redirect. "Vault" is the label of Credentials (same route). Artifacts
+ * is the library at /artifacts in every build; Pages is never a destination
+ * (owner, 8 Nov 2026), and an old /pages link redirects there.
  */
 export const navSections: NavSection[] = [
   {
@@ -66,7 +66,7 @@ export const navSections: NavSection[] = [
     items: [
       { title: "Issues", href: "/issues", icon: CONCEPT_ICON.issues },
       { title: "Routines", href: "/routines", icon: CONCEPT_ICON.routines },
-      { title: "Artifacts", href: artifactsLibrary() ? "/artifacts" : "/pages", icon: CONCEPT_ICON.pages },
+      { title: "Artifacts", href: "/artifacts", icon: CONCEPT_ICON.pages },
       // F-01: the item arrives with the Calendar page itself (ODCH-12), last
       // in Work as SHL-01 orders it.
       { title: "Calendar", href: "/calendar", icon: CONCEPT_ICON.calendar },
@@ -124,7 +124,19 @@ export function visibleNavItems(viewer: NavViewer, sections: NavSection[] = navS
 
 /** One section's rows for this person. */
 export function visibleItems(items: NavItem[], { role, instanceAdmin, surfaces }: NavViewer): NavItem[] {
-  return items.filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
+  return items.flatMap((item) => {
+    if (isHiddenForRole(item, role, instanceAdmin)) return []
+    if (!surfaces) return [item]
+    const shown = restrictedDestination(item)
+    return restrictedPathAllowed(shown.href, surfaces) ? [shown] : []
+  })
+}
+
+/** A restricted session's row points at the surface's screen, never at an old
+ *  address: Artifacts is /artifacts whatever the build's library flag (#5132). */
+function restrictedDestination(item: NavItem): NavItem {
+  const surface = (Object.keys(RESTRICTED_LEGACY_PATHS) as RestrictedSurface[]).find((s) => RESTRICTED_LEGACY_PATHS[s] === item.href)
+  return surface ? { ...item, href: RESTRICTED_SURFACE_PATHS[surface] } : item
 }
 
 /**

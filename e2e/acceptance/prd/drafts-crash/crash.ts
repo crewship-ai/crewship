@@ -299,7 +299,8 @@ export async function typeViewerComment(page: Page, text: string): Promise<void>
 
 /** Selects the heading in the viewer preview; returns a function that types the unsent comment. */
 export async function prepareViewerComment(page: Page): Promise<(text: string) => Promise<void>> {
-  await page.getByRole("button", { name: "Select", exact: true }).click()
+  // The Artifacts frame names it Add a comment (#5132); a chat pane keeps Select.
+  await page.getByRole("button", { name: /^(Add a comment|Select)$/ }).click()
   await previewFrame(page).locator("#qa-head").click()
   const form = page.locator('form[aria-label="New comment"]')
   await expect(form).toBeVisible({ timeout: 15_000 })

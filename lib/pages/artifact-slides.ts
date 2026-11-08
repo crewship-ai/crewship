@@ -1,5 +1,5 @@
 import type { SlideDeck } from "@/lib/slides/model"
-import { isNativeSlideDeck } from "@/components/features/slides/native-model"
+import { isRenderableSlideDeck } from "@/components/features/slides/native-model"
 import { artifactSlides } from "@/lib/feature-flags"
 
 export interface ArtifactSlideAnchor { slide_id: string; path: string; selector: string; quote: string }
@@ -19,7 +19,7 @@ const id = (value: string) => /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(value)
 
 /** Defensive admission of the server's typed projection; source HTML is never parsed or rendered here. */
 export function parseArtifactSlides(value: unknown, pageId: string): ArtifactSlidesProjection | null {
-  if (!object(value) || !fields(value, ["deck", "anchors"]) || !isNativeSlideDeck(value.deck) || !object(value.anchors)) return null
+  if (!object(value) || !fields(value, ["deck", "anchors"]) || !isRenderableSlideDeck(value.deck) || !object(value.anchors)) return null
   const deck = value.deck
   if (deck.deck_id !== pageId || deck.width !== 1920 || deck.height !== 1080 || deck.theme.font_family !== "Go Regular") return null
   const elements = new Map<string, { slide: string; type: string }>()
@@ -27,7 +27,8 @@ export function parseArtifactSlides(value: unknown, pageId: string): ArtifactSli
     if (!id(slide.id) || slide.elements.length > 200 || Array.from(slide.notes).length > 4000) return null
     for (const element of slide.elements) {
       if (!id(element.id)) return null
-      if (element.type === "text" && element.text.font_family !== "Go Regular" || element.type === "table" && element.table.font_family !== "Go Regular") return null
+      // Schema 1 is Go Regular only; schema 3 admits the bundled faces (checked by the deck gate).
+      if (deck.schema_version !== 3 && (element.type === "text" && element.text.font_family !== "Go Regular" || element.type === "table" && element.table.font_family !== "Go Regular")) return null
       elements.set(element.id, { slide: slide.id, type: element.type })
     }
   }

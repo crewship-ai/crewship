@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="cs">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Template Crewship Design System</title>
+<style>
+:root{--surface:#F4F1EA;--panel:#FFFDF8;--ink:#0F1F33;--ink-muted:#4A5568;--line:#E2DCCF;--deep:#0F1F33;--deck:#16304F;--signal:#E8833A;--ink-on-signal:#0F1F33;--signal-text:#B85E1F;--ok:#1F5E40;--ok-tint:#DDEFE6}
+@media (prefers-color-scheme: dark){:root{--surface:#0B1726;--panel:#13253C;--ink:#F4F1EA;--ink-muted:#BFCBD8;--line:#2A4566;--deep:#16304F;--deck:#1E3E63;--signal:#F0954F;--ink-on-signal:#0F1F33;--signal-text:#F0954F;--ok:#7FD1A6;--ok-tint:#173A2A}}
+</style>
+<!-- @dsCard height=320 -->
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;700&display=swap">
+<style>
+  html, body { margin: 0; background: var(--surface); }
+  .cv { position: relative; width: 960px; height: 320px; background: var(--surface); overflow: hidden; }
+  .cv svg { position: absolute; left: 0; top: 0; }
+  .deep { fill: var(--deep); }
+  .deck { fill: var(--deck); }
+  .signal { fill: var(--signal); }
+  .panel { fill: var(--panel); }
+  .line { fill: var(--line); }
+  .dot { fill: var(--surface); fill-opacity: .35; }
+  .name { position: absolute; left: 48px; top: 136px; width: 864px; font: 700 64px/.95 "IBM Plex Sans", Arial, sans-serif; color: var(--ink); margin: 0; }
+  .tag { position: absolute; left: 48px; top: 272px; width: 440px; font: 400 14px/1.3 "IBM Plex Sans", Arial, sans-serif; color: var(--ink-muted); margin: 0; }
+</style>
+<div class="cv">
+  <!--
+    blocks: deep 432×112, deck 208×112, signal 160×112, panel 160×112 on a line hairline
+    arrangement: top band, a strip of unequal flush bands (name too wide for the 440px zone)
+    pattern: dot grid at space-4 pitch over deep — README: technical, mono, 4px grid
+    steps/radii: space-4 (16) pitch, space-6 (24) insets; square band, flush like the app header
+  -->
+  <svg width="960" height="320" viewBox="0 0 960 320" aria-hidden="true">
+    <rect class="deep" x="0" y="0" width="432" height="112"></rect>
+    <rect class="deck" x="432" y="0" width="208" height="112"></rect>
+    <rect class="signal" x="640" y="0" width="160" height="112"></rect>
+    <rect class="line" x="800" y="0" width="160" height="112"></rect>
+    <rect class="panel" x="801" y="0" width="159" height="111"></rect>
+    <g>
+      <circle class="dot" cx="48" cy="32" r="2"></circle><circle class="dot" cx="64" cy="32" r="2"></circle><circle class="dot" cx="80" cy="32" r="2"></circle><circle class="dot" cx="96" cy="32" r="2"></circle><circle class="dot" cx="112" cy="32" r="2"></circle><circle class="dot" cx="128" cy="32" r="2"></circle><circle class="dot" cx="144" cy="32" r="2"></circle><circle class="dot" cx="160" cy="32" r="2"></circle>
+      <circle class="dot" cx="48" cy="48" r="2"></circle><circle class="dot" cx="64" cy="48" r="2"></circle><circle class="dot" cx="80" cy="48" r="2"></circle><circle class="dot" cx="96" cy="48" r="2"></circle><circle class="dot" cx="112" cy="48" r="2"></circle><circle class="dot" cx="128" cy="48" r="2"></circle><circle class="dot" cx="144" cy="48" r="2"></circle><circle class="dot" cx="160" cy="48" r="2"></circle>
+      <circle class="dot" cx="48" cy="64" r="2"></circle><circle class="dot" cx="64" cy="64" r="2"></circle><circle class="dot" cx="80" cy="64" r="2"></circle><circle class="dot" cx="96" cy="64" r="2"></circle><circle class="dot" cx="112" cy="64" r="2"></circle><circle class="dot" cx="128" cy="64" r="2"></circle><circle class="dot" cx="144" cy="64" r="2"></circle><circle class="dot" cx="160" cy="64" r="2"></circle>
+      <circle class="dot" cx="48" cy="80" r="2"></circle><circle class="dot" cx="64" cy="80" r="2"></circle><circle class="dot" cx="80" cy="80" r="2"></circle><circle class="dot" cx="96" cy="80" r="2"></circle><circle class="dot" cx="112" cy="80" r="2"></circle><circle class="dot" cx="128" cy="80" r="2"></circle><circle class="dot" cx="144" cy="80" r="2"></circle><circle class="dot" cx="160" cy="80" r="2"></circle>
+    </g>
+  </svg>
+  <p class="name">Template Crewship<br>Design System</p>
+  <p class="tag">Noční moře, jedna signální oranžová, klidná technika.</p>
+</div>

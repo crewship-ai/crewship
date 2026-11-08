@@ -1,5 +1,6 @@
 "use client"
-import { AlertCircle, Archive, Clock, Copy, FlaskConical, Folder, FolderOpen, Home, Inbox, Library, Star, User } from "lucide-react"
+import { AlertCircle, Archive, Clock, Copy, FlaskConical, Folder, FolderOpen, Home, Inbox, Library, Pin, PinOff, Star, User } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { PanelSpaces } from "@/components/layout/panel-spaces"
 import {
   SidebarActiveChip, SidebarActiveChips, SidebarFilterButton, SidebarRow, SidebarSearch, SidebarSection, SidebarToolbar,
@@ -7,8 +8,8 @@ import {
 import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
 import type { PageFolderView } from "@/hooks/use-page-folders"
 import { FolderGlyph } from "@/components/features/pages/folder-glyph"
-import { KIND_ACCENT, KIND_ICON } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
 import { kindLabel, LIBRARY_KINDS, type LibraryItem } from "./library-items"
+import { kindAccent, KINDS, kindOf } from "./kinds"
 import {
   activeFacetCount, EMPTY_FILTERS, facetCounts, inView, OWNER_NONE,
   type Access, type LibraryFilters, type LibraryView, type Personal, type VersionState,
@@ -54,12 +55,14 @@ function toggle<T extends string>(list: T[], value: T): T[] {
  */
 const HIDDEN_VIEWS = new Set<LibraryView>(["home", "series", "test", "empty", "archive"])
 
-export function LibraryPanel({ items, folders, filters, personal, onFiltersChange }: {
+export function LibraryPanel({ items, folders, filters, personal, onFiltersChange, pin }: {
   items: LibraryItem[]
   personal: Personal
   folders: PageFolderView[]
   filters: LibraryFilters
   onFiltersChange: (next: LibraryFilters) => void
+  /** While an artifact is open the panel steps aside; pinned, it stays open beside every artifact. */
+  pin?: { pinned: boolean; onToggle: () => void }
 }) {
   const facets = useSidebarFacets()
   const set = (patch: Partial<LibraryFilters>) => onFiltersChange({ ...filters, ...patch })
@@ -89,14 +92,21 @@ export function LibraryPanel({ items, folders, filters, personal, onFiltersChang
           placeholder="Search artifacts…" aria-label="Search artifacts" />
       </div>
       <SidebarFilterButton activeCount={active} {...facets.triggerProps}>Filter</SidebarFilterButton>
+      {pin && <Button type="button" variant="ghost" size="icon-sm" aria-pressed={pin.pinned} onClick={pin.onToggle}
+        aria-label={pin.pinned ? "Let the panel close when an artifact opens" : "Keep the panel open beside artifacts"}
+        title={pin.pinned ? "Unpin panel" : "Pin panel open"} className="coarse:min-h-[44px] coarse:min-w-[44px]">
+        {pin.pinned ? <PinOff aria-hidden className="size-3.5" /> : <Pin aria-hidden className="size-3.5" />}
+      </Button>}
     </SidebarToolbar>
 
     <SidebarFacetBlock {...facets.blockProps} label="Filter artifacts" activeCount={active}
       onClear={() => onFiltersChange({ ...EMPTY_FILTERS, view: filters.view, q: filters.q })}>
       <SidebarInlineFacet label="Kind" limit={5} allLabel={`+${Math.max(0, counts.kinds.length - 5)} more`}
         values={counts.kinds.map(([kind, n]) => {
-          const Icon = KIND_ICON[kind]
-          return { value: kind, label: LIBRARY_KINDS.find(entry => entry.kind === kind)!.plural, count: n, icon: <Icon className={`size-3.5 shrink-0 ${KIND_ACCENT[kind].fg}`} aria-hidden /> }
+          // The storage kind wears the registry kind it maps to (a native Word or Sheet; a legacy doc is Docs).
+          const shown = kindOf({ kind, native: kind === "word" || kind === "sheet" }).kind
+          const Icon = KINDS[shown].icon
+          return { value: kind, label: LIBRARY_KINDS.find(entry => entry.kind === kind)!.plural, count: n, icon: <Icon className={`size-3.5 shrink-0 ${kindAccent(shown).fg}`} aria-hidden /> }
         })}
         selected={filters.kinds} onToggle={kind => narrow({ kinds: toggle(filters.kinds, kind as LibraryItem["kind"]) })} onClear={() => set({ kinds: [] })} />
       <SidebarInlineFacet label="Who can open" values={counts.access.map(([access, n]) => ({ value: access, label: ACCESS_LABEL[access], count: n }))}

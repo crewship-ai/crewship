@@ -23,7 +23,6 @@ The library is off by default. Each part of it is switched on separately:
 | Slide decks in the viewer, and creating one | the project switches above, plus build-time `NEXT_PUBLIC_ARTIFACT_SLIDES=true`, and the workspace flag `artifact_slides` (or `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true`). Without the server switch, a slide deck is listed as a Project. |
 | Designs: listing, creating and the canvas | build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN=true`, and the workspace flag `artifacts_design` (or `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true`) |
 | The Craft lease bar for Word in the detail view | build-time `NEXT_PUBLIC_CHAT_CRAFT_LEASE=true` |
-| `/pages` opening the library instead of the Pages overview | build-time `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true` (only with the library on) |
 
 The default production build sets none of these to `true`. Enable a workspace
 flag with `crewship feature-flag enable <key>`; see
@@ -37,21 +36,29 @@ on its own also serves `/artifacts`.
 Each artifact holds one kind of content. The kind decides what opens it and
 whether it has versions.
 
-| Kind | What it is | Versions | Made by |
-|---|---|---|---|
-| Project | Screens that link together: a multi-file HTML project | Yes | An agent, from chat |
-| Dashboard | Numbers and tables agents keep current | Yes | An agent, from chat |
-| Page | A Page with panels: monitors and queues that crews fill. See [Pages](/guides/pages). | No | You, as an empty Page |
-| Word | A document that one person edits at a time | Yes (native documents) | You, or an agent from chat |
-| Sheet | A workbook with formulas | Yes (native workbooks) | Listed in the library. You can't create one here yet. |
-| Slides | A deck you can present | Yes | An agent, from chat |
-| Design | A shared canvas with screens | Yes | You, as a blank canvas |
+The library groups kinds as **Artifacts** (many people at once) and **Craft**
+(one editor at a time).
+
+| Kind | Family | What it is | Versions | Made by |
+|---|---|---|---|---|
+| Docs | Artifact | A shared document or canvas (board) | Yes | An agent, from chat |
+| Dashboard | Artifact | Numbers and tables agents keep current | Yes | An agent, from chat |
+| Slides | Artifact | A deck you can present | Yes | An agent, from chat |
+| Design | Artifact | A shared canvas with screens; a design system shows as **Design · Library** | Yes | You, as a blank canvas |
+| App | Artifact | HTML you can run. **App · Static** is a multi-file HTML project or a Page with panels (monitors and queues that crews fill, see [Pages](/guides/pages)); an App with an application runs it | Projects: yes. Pages with panels: no | An agent from chat, or you as an empty Page |
+| Word | Craft | A document that one person edits at a time | Yes (native documents) | You, or an agent from chat |
+| Sheet | Craft | A workbook with formulas | Yes (native workbooks) | Listed in the library. You can't create one here yet. |
+
+The **Kind** filter in the side panel still lists how an item is stored:
+**Static app** (a project), **App** (a Page with panels), Dashboard, Word,
+Sheet, Slides and Design. `kind:project` and `kind:page` keep working in
+search.
 
 Each item in the library shows its version state:
 
 - **Shared vN**: people with access see version N.
 - **Not shared**: the artifact has versions, but none is shared yet.
-- No chip: the kind has no versions, such as a Page with panels.
+- No chip: the kind has no versions, such as an App made from a Page with panels.
 
 Other chips mark an item as **Private**, **Empty**, **Test** or **Archived**.
 
@@ -59,15 +66,33 @@ Other chips mark an item as **Private**, **Empty**, **Test** or **Archived**.
 
 1. In the sidebar, under **Work**, click **Artifacts**.
 2. The library opens on **Home**:
-   - **Make something** lists the kinds you can create here.
-   - **Not shared yet** lists up to five artifacts that have versions but no
-     shared version.
-   - **Recently opened** shows what you opened last. Before you open
-     anything, this section is called **Recent** and shows what changed
-     most recently.
+   - **Needs attention** lists up to six artifacts that need you, by one
+     fixed rule (below). It is hidden when nothing does.
+   - Below it, every artifact in view (all of them, or the folder you
+     picked) as a **Grid** of cards or a **Table**. Kind chips above the list
+     (**All**, **Docs**, **Apps**, **Word** and so on, each with a count)
+     narrow it to one kind.
 3. On the left, the side panel has a search box, a **Filter** button, the
    main lists (**Home**, **All artifacts**, **Needs attention**,
    **Recently opened**), then **Views** and **Folders**.
+
+### The Needs attention rule
+
+An artifact needs attention when one of these is true, checked in this order:
+
+1. **Your recovered draft**: this browser kept unsaved edits to a native Word
+   document after its edit lock was lost. Only you see it, and only in this
+   browser.
+2. **Refresh failed**: at least one of its panels failed to refresh and keeps
+   its last confirmed data.
+3. **Data is stale**: at least one panel is past its refresh window, and you
+   own the artifact.
+
+Archived and test-made items never need attention. "Not shared yet" is not a
+reason. The list shows drafts first, then failed refreshes, then stale data,
+newest first within each, and stops at six. A proposal waiting for review or
+another person holding the edit lock shows in the open artifact's status chip
+instead. The rule lives in `components/features/artifacts-library/attention.ts`.
 
 An empty workspace shows **No artifacts yet** with a **New artifact** button.
 If the workspace holds only blank items, the message says how many are in
@@ -170,39 +195,65 @@ still work and move to the ID address. To go back to the list, click
 
 ### What the detail view shows
 
-The top row has **All artifacts**, a **Content** / **Access** switch,
-**Share**, **Move to folder** and a star (**Add to favorites**). **Access**
-shows who can open the artifact and why. **Share** and **Move to folder**
-change that.
+Every kind opens in the same frame. The folder panel steps aside while an
+artifact is open; the pin button at the top of the panel keeps it open
+beside every artifact.
 
-**Content** depends on the kind:
+- **The header** reads `Artifacts › folder › name`. Click the folder (or
+  **All artifacts**) to go back. The name opens the **artifact menu**, which
+  holds every action: **Share…**, **Copy link**, **Move to folder…**, **Add
+  to favorites**, **Version history** where the kind has one, and **Info**.
+  An action you can't use stays in the menu, greyed out, with the reason
+  under it.
+- **The status chip** beside the name says what is happening, for example
+  **Saving…**, **Saved · v4**, **Jana is editing**, **Read-only** or **Stale ·
+  1 panel**. Click it for details. **Saved** appears only after the server
+  confirms the version. A kind with no live signal shows no chip.
+- **The right side of the header** has **Agent**, **Comments** and
+  **History** (each where the kind supports it) and **Share**.
+- **The drawer** on the right holds the kind's own tabs plus **Agent**,
+  **Comments**, **History** and **Info**. **Info** shows the kind, version,
+  owner, folder, link and who can open the artifact and why. On a tablet the
+  drawer covers the right side; on a phone it fills the screen.
+- **Agent** offers only what the server supports for that kind. **Ask** opens
+  chat with the artifact as context and your request as an unsent draft.
+  **Edit** appears for a native Word or Sheet when the server allows agent
+  tasks and you can edit; it starts the Craft agent task. With no agent path
+  at all, there is no **Agent** button.
+
+On a phone the header shows only the back button, the name and the status
+chip, with **Agent**, **Comments** and **⋯** (the artifact menu).
+
+The body depends on the kind:
 
 - **Project**, **Dashboard**, **Slides**: the artifact viewer, with the tabs
   **Preview**, **History** and **Comments** and a version switch in its
   header. See [Versions](#versions).
 - **Design**: the design canvas.
 - **Page**: the Page's panels, shown in the detail view.
-- **Native Word and Sheet**, with both `NEXT_PUBLIC_ARTIFACTS_LIBRARY` and
-  `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` enabled: the Craft editor opens inside
+- **Native Word and Sheet**, with `NEXT_PUBLIC_ARTIFACTS_LIBRARY` enabled: the Craft editor opens inside
   the detail when the server confirms editing is available. Readers without
-  edit access get the shared preview. This mode has no **Open in Pages**
-  button; `/pages/<slug>` leads back to the artifact detail.
+  edit access get the shared preview. This mode has no full-view link;
+  `/pages/<slug>` leads back to the artifact detail. Version history opens in
+  the drawer.
 - **Word** outside that mode: a read-only preview of the saved version, with
-  **Open in Pages** in its header. When the Craft lease bar is enabled, it
-  shows who holds the lease and offers **Edit** in a new tab.
+  **Open full view**. When the Craft lease bar is enabled, it shows who holds
+  the lease and offers **Edit** in a new tab.
 - **Sheet** outside that mode, and project kinds whose viewer is switched
-  off: the name, kind and state, with **Open in Pages**.
+  off: the name, kind and state, with **Open full view**.
 
-If the artifact no longer exists, or you can't open it, the library shows
-**This artifact is not available.** or **This artifact isn't available**.
-The message never says which: an archived artifact and a private one look the
-same.
+If an address does not open, the frame says what the server answered:
+**Sign in to open this artifact**, **You don’t have access** or **This
+artifact doesn’t exist**, each with **Back to Artifacts**. Nothing of the
+artifact is shown behind these pages. If the server gives no clear answer,
+the library shows **This artifact is not available.**
 
 ## Create an artifact
 
-1. Click **New artifact** in the top bar, or a kind under **Make something**
-   on Home.
-2. In **New artifact**, pick a kind. Kinds that this workspace can't create
+1. Click **New artifact** in the top bar. A menu lists what you can make,
+   grouped **Artifacts** and **Craft · one editor at a time**. Pick a kind;
+   **App** starts a project.
+2. In the **New artifact** dialog you can still change the kind. Kinds that this workspace can't create
    are listed under **Coming**. **Word** is offered when the server confirms a
    document format, native Word (`wordcraft_native`) included; **Sheet** when
    it confirms native Sheet (`gridcraft_native`).
@@ -229,9 +280,9 @@ folder, it starts as **People with access to** that folder.
 
 Who can create: an Owner, Admin or Manager, or a member with the
 `page.create` capability. The server checks this on every create. A member
-who can't create, such as a Viewer, doesn't see **New artifact** in the bar,
-on **Home** or in the empty library; this includes Project, Dashboard and
-Slide deck, which an agent makes for you.
+who can't create, such as a Viewer, doesn't see **New artifact** in the bar
+or in the empty library; this includes Project, Dashboard and Slide deck,
+which an agent makes for you.
 
 ## Versions
 
@@ -352,8 +403,8 @@ archived items, except a blank item you created yourself.
 | You see | Why | What to do |
 |---|---|---|
 | **Artifacts** in the sidebar opens `/pages` | The build was made without `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` | Rebuild the web app with the flag |
-| A project shows only its name and **Open in Pages** | The project viewer is off: `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` is not `true`, or the server reports projects unavailable for this workspace | Set the build flag; if `artifact_projects` was turned off, run `crewship feature-flag inherit artifact_projects` (or `enable`) |
-| **Make something** lacks a kind | That kind's build flag or workspace switch is off, or you can't create artifacts | See the table at the top of this page |
+| A project shows only its name and **Open full view** | The project viewer is off: `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS` is not `true`, or the server reports projects unavailable for this workspace | Set the build flag; if `artifact_projects` was turned off, run `crewship feature-flag inherit artifact_projects` (or `enable`) |
+| The **New artifact** menu lacks a kind | That kind's build flag or workspace switch is off, or you can't create artifacts | See the table at the top of this page |
 | **This artifact isn't available** | The artifact was archived, or you are not allowed to see that version | Ask the owner to share it with you |
 | **Saving is paused** | The history or a single version reached its limit | Ask an agent to make the artifact smaller, or save a copy |
 

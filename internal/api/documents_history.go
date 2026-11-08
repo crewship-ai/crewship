@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"regexp"
+
+	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 var documentCheckpointID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,128}$`)
@@ -99,7 +101,7 @@ func (h *PageHandler) serveDocumentHistory(w http.ResponseWriter, r *http.Reques
 		replyError(w, 502, "invalid document checkpoint response")
 		return
 	}
-	if value.Schema < 1 || value.Schema > 3 {
+	if value.Schema < 1 || value.Schema > documents.LatestSchema {
 		replyError(w, 409, "unsupported document checkpoint schema")
 		return
 	}

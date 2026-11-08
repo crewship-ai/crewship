@@ -50,7 +50,7 @@ test.describe("craft agent edit", () => {
           // The person watches read-only; they never take the editor.
           page.setDefaultTimeout(45_000)
           await page.goto(doc.editorPath())
-          await page.getByRole("status").filter({ hasText: "Pouze čtení" }).waitFor({ timeout: 90_000 })
+          await page.getByRole("status").filter({ hasText: "Read-only" }).waitFor({ timeout: 90_000 })
 
           const who = await request.get("/api/auth/session")
           const ownerUserId = ((await who.json()) as { user: { id: string } }).user.id
@@ -81,12 +81,12 @@ test.describe("craft agent edit", () => {
             version: String(loadedBody.version),
             hasMarker: app === "wordcraft" ? wordText(loadedDoc).includes(marker) : sheetCell(loadedDoc, 1, 1) === marker,
           }
-          await page.getByRole("status").filter({ hasText: "Pouze čtení" }).waitFor({ timeout: 90_000 })
+          await page.getByRole("status").filter({ hasText: "Read-only" }).waitFor({ timeout: 90_000 })
           const alerts = await page
             .getByRole("alert")
             .allInnerTexts()
             .catch(() => [] as string[])
-          const draftOffered = await page.getByText(/Neuložený koncept|Koncept zůstává/).count()
+          const draftOffered = await page.getByText(/Unsaved draft|The draft stays/).count()
           await prd.evidence(`${app}-agent-edit-reloaded.png`, await page.screenshot({ fullPage: true }))
           await prd.evidence(
             `${app}-agent-edit.json`,

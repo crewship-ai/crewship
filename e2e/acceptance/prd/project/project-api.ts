@@ -185,7 +185,8 @@ export async function openProject(page: Page, workspaceId: string, slug: string)
 }
 
 export async function openHistory(page: Page) {
-  await page.getByRole("tab", { name: /History/ }).click()
+  // History is a drawer tab of the Artifacts frame (#5132).
+  await page.getByRole("group", { name: "Artifact" }).getByRole("button", { name: "History", exact: true }).click()
   const history = page.getByRole("region", { name: "Version history" })
   await expect(history).toBeVisible()
   return history
@@ -201,7 +202,7 @@ export function historyRow(page: Page, version: number) {
 
 /** Selects the hero element in the preview and fills the comment composer. */
 export async function commentOnHero(page: Page, text: string, version: number): Promise<string> {
-  await page.getByRole("button", { name: "Select", exact: true }).click()
+  await page.getByRole("button", { name: "Add a comment", exact: true }).click()
   await preview(page).locator(HERO).click()
   const form = page.getByRole("form", { name: "New comment" })
   await expect(form).toBeVisible()

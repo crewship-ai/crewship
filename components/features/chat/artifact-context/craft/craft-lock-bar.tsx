@@ -2,13 +2,21 @@
 import { Check, ExternalLink, Lock, Pencil } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { artifactsLibrary } from "@/lib/feature-flags"
+import { canonicalArtifactHref } from "@/components/features/artifacts-library/legacy-pages-url"
 import { useCraftLeaseState } from "./use-craft-lease"
 import type { CraftLeaseHolder } from "../projects/types"
 
 interface CraftLockBarProps { workspaceId: string; slug: string; onEdit: () => void }
 
-/** The route that mounts the editor: an `@<page id>` reference opens the native Craft editor, a slug its Page. */
+/**
+ * The route that mounts the editor: an `@<page id>` reference opens the native
+ * Craft editor, a slug its Page. With the library on the editor lives in the
+ * artifact's detail, at its one address (#5129).
+ */
 export function craftEditorHref(workspaceId: string, slug: string): string {
+  if (artifactsLibrary() && slug.startsWith("@")) return canonicalArtifactHref(slug.slice(1), workspaceId)
+  if (artifactsLibrary()) return `/artifacts?${new URLSearchParams({ item: slug, workspace_id: workspaceId })}`
   return slug.startsWith("@")
     ? `/pages/craft/editor?${new URLSearchParams({ page_id: slug.slice(1), workspace_id: workspaceId })}`
     : `/pages/${encodeURIComponent(slug)}?${new URLSearchParams({ workspace_id: workspaceId })}`

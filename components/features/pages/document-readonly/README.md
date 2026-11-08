@@ -1,6 +1,6 @@
 # Read-only Document body
 
-`DocumentReadonly` accepts `schema: 2 | 3`, `content: unknown` and a caller-supplied
+`DocumentReadonly` accepts `schema: 2 | 3 | 4`, `content: unknown` and a caller-supplied
 `accessibleLabel`. It validates the entire closed Document JSON before rendering
 semantic DOM through ProseMirror's `DOMSerializer`. It never creates an editor,
 Yjs document, transaction, lease or network request, and never parses HTML strings.

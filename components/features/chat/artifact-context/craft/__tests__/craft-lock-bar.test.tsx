@@ -121,6 +121,14 @@ it("a Page reference opens the native Craft editor", () => {
   expect(craftEditorHref("ws 1", "@page1")).toBe("/pages/craft/editor?page_id=page1&workspace_id=ws+1")
 })
 
+it("with the library on a Page reference and a slug both open in Artifacts, never on /pages", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
+  try {
+    expect(craftEditorHref("ws 1", "@page1")).toBe("/artifacts/page1?workspace_id=ws+1")
+    expect(craftEditorHref("ws1", "brief")).toBe("/artifacts?item=brief&workspace_id=ws1")
+  } finally { vi.unstubAllEnvs() }
+})
+
 it("announces holder changes politely", () => {
   state.lease = lease({ holder: pavel })
   render(<CraftLockBar workspaceId="w" slug="doc" onEdit={() => {}} />)

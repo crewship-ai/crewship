@@ -77,8 +77,20 @@ func TestPageProjectAgentWorkflowIdentityPolicyAndCAS(t *testing.T) {
 	if w := call("init", 0, nil, ws); w.Code != 200 {
 		t.Fatal(w.Body.String())
 	}
-	if w := call("read", 0, nil, ws); w.Code != 200 || !strings.Contains(w.Body.String(), "runAction") || !strings.Contains(w.Body.String(), "/pages/health") {
+	if w := call("read", 0, nil, ws); w.Code != 200 || !strings.Contains(w.Body.String(), "runAction") {
 		t.Fatalf("authoring contract missing: %s", w.Body.String())
+	} else {
+		// #5129: the browser address an agent reports is the canonical one.
+		var pageID string
+		if err := h.db.QueryRow(`SELECT id FROM pages WHERE workspace_id=? AND slug='health'`, ws).Scan(&pageID); err != nil {
+			t.Fatal(err)
+		}
+		var read struct {
+			PagePath string `json:"page_path"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &read); err != nil || read.PagePath != artifactCanonicalURL(pageID, ws) {
+			t.Fatalf("page_path %q, want %q (%v)", read.PagePath, artifactCanonicalURL(pageID, ws), err)
+		}
 	}
 	if w := call("read", 0, map[string]any{"target_crew_slug": "eng-pages"}, ws); w.Code != 403 {
 		t.Fatalf("ordinary crew delegation allowed: %s", w.Body.String())

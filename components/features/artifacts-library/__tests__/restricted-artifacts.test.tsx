@@ -1,19 +1,22 @@
 import React from "react"
 import { afterEach, expect, it, vi } from "vitest"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
-import { RestrictedPages } from "../restricted-pages"
+import { RestrictedArtifacts } from "../restricted-artifacts"
 import PagesPage from "@/app/(dashboard)/pages/page"
 import { answerConfirm, mountConfirmHost } from "@/components/ui/__tests__/confirm-test-utils"
 
 const api = vi.hoisted(() => vi.fn())
-vi.mock("@/lib/api-fetch", () => ({ apiFetch: api }))
+vi.mock("@/lib/api-fetch", () => ({ apiFetch: api, broadcastSessionExpired: vi.fn() }))
 const workspace = vi.hoisted(() => ({ mode: "restricted" }))
 vi.mock("@/hooks/use-workspace", async (importOriginal) => ({
   ...await importOriginal<typeof import("@/hooks/use-workspace")>(),
   useWorkspace: () => ({ workspaceId: "workspace", workspace: { currentUserAccessMode: workspace.mode }, workspaces: [{ id: "workspace", currentUserAccessMode: workspace.mode }], loading: false }),
 }))
-vi.mock("../pages-layout", () => ({ PagesLayout: () => <div>Trusted Page editor</div> }))
-afterEach(() => { cleanup(); api.mockReset(); vi.restoreAllMocks();  workspace.mode = "restricted" })
+vi.mock("@/components/features/pages/pages-layout", () => ({ PagesLayout: () => <div>Trusted Page editor</div> }))
+const nav = vi.hoisted(() => ({ replace: vi.fn() }))
+vi.mock("next/navigation", () => ({ useRouter: () => ({ replace: nav.replace, push: vi.fn() }), useSearchParams: () => new URLSearchParams(), usePathname: () => window.location.pathname }))
+function Allowed() { return <RestrictedArtifacts workspaceId="workspace" focus="allowed" hrefFor={slug => `/artifacts?item=${slug}`} homeHref="/artifacts" /> }
+afterEach(() => { cleanup(); api.mockReset(); nav.replace.mockReset(); vi.restoreAllMocks();  workspace.mode = "restricted" })
 const catalog = [{ slug: "allowed", name: "Allowed Page", publication: 7, actions: [{ intent_hash: "frozen-intent", panel_id: "panel", id: "work", label: "Allowed action", inputs: [{ name: "task", type: "text", required: true }], confirm: { title: "Confirm work", body: "Run this declared action?" } }] }]
 const key = JSON.stringify(["allowed", "panel", "work"])
 function response(body: unknown, status = 200) { return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } }) }
@@ -26,8 +29,8 @@ it("submits a publication-bound declared action after host confirmation and poll
     if (url.endsWith("/restricted-routine-runs/private-run")) return response({ run_id: "private-run", status: "completed", step_outputs: { answer: "OWN_PAGE_RESULT" } })
     throw new Error("Unexpected shared request")
   })
-  render(<RestrictedPages workspaceId="workspace" />)
-  await screen.findByRole("option", { name: "Allowed Page — Allowed action" })
+  render(<Allowed />)
+  await screen.findByRole("option", { name: "Allowed action" })
   fireEvent.change(screen.getByRole("combobox", { name: "Action" }), { target: { value: key } })
   fireEvent.change(screen.getByRole("textbox", { name: "task" }), { target: { value: "private input" } })
   fireEvent.click(screen.getByRole("button", { name: "Run action" }))
@@ -47,8 +50,8 @@ it("sends nothing when the declared action is not confirmed", async () => {
     if (url.endsWith("/restricted-pages")) return response(catalog)
     throw new Error("Unexpected request")
   })
-  render(<RestrictedPages workspaceId="workspace" />)
-  await screen.findByRole("option", { name: "Allowed Page — Allowed action" })
+  render(<Allowed />)
+  await screen.findByRole("option", { name: "Allowed action" })
   fireEvent.change(screen.getByRole("combobox", { name: "Action" }), { target: { value: key } })
   fireEvent.change(screen.getByRole("textbox", { name: "task" }), { target: { value: "private input" } })
   fireEvent.click(screen.getByRole("button", { name: "Run action" }))
@@ -67,8 +70,8 @@ it("retries the same frozen Page admission and clears a revoked private result",
     if (url.endsWith("/restricted-routine-runs/private-run")) { if (++polls === 1) return response({ run_id: "private-run", status: "running", step_outputs: { answer: "REVOKED_PAGE_RESULT" } }); return response({ error: "unavailable" }, 404) }
     throw new Error("Unexpected shared request")
   })
-  render(<RestrictedPages workspaceId="workspace" />)
-  await screen.findByRole("option", { name: "Allowed Page — Allowed action" })
+  render(<Allowed />)
+  await screen.findByRole("option", { name: "Allowed action" })
   fireEvent.change(screen.getByRole("combobox", { name: "Action" }), { target: { value: key } })
   fireEvent.change(screen.getByRole("textbox", { name: "task" }), { target: { value: "private input" } })
   fireEvent.click(screen.getByRole("button", { name: "Run action" }))
@@ -83,13 +86,82 @@ it("retries the same frozen Page admission and clears a revoked private result",
   expect(submits[0][1].headers["Idempotency-Key"]).toBe(submits[1][1].headers["Idempotency-Key"])
 })
 
-it("ordinary Pages automatically selects the server membership mode", async () => {
+it("ordinary Pages moves a restricted member to Artifacts and keeps the trusted editor", async () => {
+  window.history.replaceState(null, "", "/pages")
   api.mockResolvedValue(response([]))
   render(<PagesPage />)
-  await screen.findByText("No Page actions are available with your current access.")
+  expect(nav.replace).toHaveBeenCalledWith("/artifacts")
+  expect(api).not.toHaveBeenCalled()
   expect(screen.queryByText("Trusted Page editor")).toBeNull()
   cleanup()
   workspace.mode = "trusted"
   render(<PagesPage />)
   expect(screen.getByText("Trusted Page editor")).toBeTruthy()
+})
+
+it("names neither a missing artifact nor the catalog behind the gate", async () => {
+  api.mockImplementation(async (url: string) => {
+    if (url.endsWith("/restricted-pages")) return response(catalog)
+    throw new Error("Unexpected request")
+  })
+  render(<RestrictedArtifacts workspaceId="workspace" focus="secret-brief" hrefFor={slug => `/artifacts?item=${slug}`} homeHref="/artifacts?workspace_id=workspace" />)
+  expect(await screen.findByText("This artifact isn’t part of your access")).toBeTruthy()
+  expect(document.body.textContent).not.toMatch(/secret-brief|Allowed Page|Allowed action/)
+  expect(screen.getByRole("link", { name: "Go to Artifacts" }).getAttribute("href")).toBe("/artifacts?workspace_id=workspace")
+})
+
+const at = (focus: string) => <RestrictedArtifacts workspaceId="workspace" focus={focus} hrefFor={slug => `/artifacts?item=${slug}`} homeHref="/artifacts" />
+const two = [...catalog, { slug: "other", name: "Other", actions: [{ intent_hash: "o", panel_id: "panel", id: "go", label: "Other action", inputs: [] }] }]
+const otherKey = JSON.stringify(["other", "panel", "go"])
+
+it("a pending action on one artifact neither locks nor lands on the next one", async () => {
+  mountConfirmHost()
+  let finish: (value: Response) => void = () => {}
+  api.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/restricted-pages")) return response(two)
+    if (init?.method === "POST") return new Promise<Response>(resolve => { finish = resolve })
+    throw new Error("Unexpected request")
+  })
+  const view = render(at("allowed"))
+  await screen.findByRole("option", { name: "Allowed action" })
+  fireEvent.change(screen.getByRole("combobox", { name: "Action" }), { target: { value: key } })
+  fireEvent.change(screen.getByRole("textbox", { name: "task" }), { target: { value: "x" } })
+  fireEvent.click(screen.getByRole("button", { name: "Run action" }))
+  await answerConfirm("Run action")
+  await screen.findByRole("button", { name: "Submitting…" })
+  // Same instance, another artifact: the URL changed under it.
+  view.rerender(at("other"))
+  await screen.findByRole("option", { name: "Other action" })
+  expect(screen.getByRole("combobox", { name: "Action" })).toBeEnabled()
+  finish(response({ run_id: "late-run", status: "SCHEDULED" }, 202))
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(screen.queryByText(/Status:/)).toBeNull()
+  expect(screen.getByRole("combobox", { name: "Action" })).toBeEnabled()
+  fireEvent.change(screen.getByRole("combobox", { name: "Action" }), { target: { value: otherKey } })
+  expect(screen.getByRole("button", { name: "Run action" })).toBeEnabled()
+})
+
+it("a confirmation accepted after moving to another artifact sends nothing and leaves no retry behind", async () => {
+  mountConfirmHost()
+  const posts: string[] = []
+  api.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/restricted-pages")) return response(two)
+    if (init?.method === "POST") { posts.push(url); return response({ run_id: "run", status: "completed" }, 202) }
+    throw new Error("Unexpected request")
+  })
+  const view = render(at("allowed"))
+  await screen.findByRole("option", { name: "Allowed action" })
+  fireEvent.change(screen.getByRole("combobox", { name: "Action" }), { target: { value: key } })
+  fireEvent.change(screen.getByRole("textbox", { name: "task" }), { target: { value: "x" } })
+  fireEvent.click(screen.getByRole("button", { name: "Run action" }))
+  await screen.findByRole("alertdialog", { name: "Confirm work" })
+  view.rerender(at("other"))
+  await answerConfirm("Run action")
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(posts).toEqual([])
+  await screen.findByRole("option", { name: "Other action" })
+  fireEvent.change(screen.getByRole("combobox", { name: "Action" }), { target: { value: otherKey } })
+  expect(screen.queryByRole("button", { name: "Retry request" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Run action" }))
+  await waitFor(() => expect(posts).toEqual(["/api/v1/pages/other/panels/panel/actions/go?workspace_id=workspace"]))
 })

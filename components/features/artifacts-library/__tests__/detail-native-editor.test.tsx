@@ -57,7 +57,6 @@ beforeEach(() => {
   state.fetch.mockReset()
   state.pages = [page({ artifact_kind: "word", has_document: true, artifact_shared_version: 2, native_craft_application: "wordcraft" })]
   vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
-  vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "true")
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
@@ -70,7 +69,7 @@ it.each([
   const host = await screen.findByTestId("native-host")
   expect(state.fetch).toHaveBeenCalledWith("/api/v1/pages/%40page-brief/craft/availability?workspace_id=ws1")
   expect(host.dataset).toMatchObject({ workspace: "ws1", page: "page-brief", human: "u1", enabled: "true" })
-  expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
+  expect(screen.queryByRole("link", { name: /Open in Pages|Open full view/ })).toBeNull()
   expect(screen.queryByTestId("lock-bar")).toBeNull()
   expect(screen.queryByText("saved preview")).toBeNull()
 })
@@ -93,8 +92,8 @@ it.each([
   expect(await screen.findByText(notice)).toBeInTheDocument()
   expect(screen.getByText("saved preview")).toBeInTheDocument()
   expect(screen.queryByTestId("lock-bar")).toBeNull()
-  expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
-  expect(screen.queryByText(/Open in Pages/)).toBeNull()
+  expect(screen.queryByRole("link", { name: /Open in Pages|Open full view/ })).toBeNull()
+  expect(screen.queryByText(/Open in Pages|Open full view/)).toBeNull()
   expect(screen.queryByTestId("native-host")).toBeNull()
 })
 
@@ -114,7 +113,7 @@ it("a native Sheet whose editor is off says so instead of an empty detail", asyn
   state.availability = { enabled: false }
   open()
   expect(await screen.findByText("Editing is not available here right now.")).toBeInTheDocument()
-  expect(screen.queryByText(/Open in Pages/)).toBeNull()
+  expect(screen.queryByText(/Open in Pages|Open full view/)).toBeNull()
 })
 
 it("a native Word whose saved preview fails does not point to Pages, which sends it back here", async () => {
@@ -122,40 +121,34 @@ it("a native Word whose saved preview fails does not point to Pages, which sends
   state.read = "error"
   open()
   expect(await screen.findByText(/The document preview could not be loaded\./)).toBeInTheDocument()
-  expect(screen.queryByText(/Open in Pages/)).toBeNull()
+  expect(screen.queryByText(/Open in Pages|Open full view/)).toBeNull()
 })
 
-it.each(["unavailable", "error"])("an old-editor Word whose document answers %s has no Open in Pages: Pages reads the same document", status => {
+it.each(["unavailable", "error"])("a Docs page the documents service does not admit, whose saved read answers %s, says so and links nowhere", async status => {
   state.pages = [page({ has_document: true })]
+  state.availability = { enabled: false }
   state.read = status
   open()
-  expect(screen.getByText(/older version of the editor/)).toBeInTheDocument()
-  expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
+  expect(await screen.findByText(/older version of the editor/)).toBeInTheDocument()
+  expect(screen.queryByRole("link", { name: /Open in Pages|Open full view/ })).toBeNull()
 })
 
-it("an old-editor Word that still reads keeps Open in Pages, where its editor opens it", () => {
+it("a Docs page the documents service does not admit shows its saved version, read-only", async () => {
+  state.pages = [page({ has_document: true })]
+  state.availability = { enabled: false }
+  open()
+  expect(await screen.findByText("saved preview")).toBeInTheDocument()
+  expect(screen.queryByLabelText("Document editor")).toBeNull()
+  expect(screen.queryByRole("link", { name: /Open full view/ })).toBeNull()
+})
+
+it("a Docs page the documents service admits opens its live document session here, not a preview or a link to Pages", async () => {
   state.pages = [page({ has_document: true })]
   open()
-  expect(screen.getByText("saved preview")).toBeInTheDocument()
-  expect(screen.getByRole("link", { name: /Open in Pages/ })).toHaveAttribute("href", "/pages/brief?workspace_id=ws1")
-})
-
-it("with the switch off an old-editor Word keeps Open in Pages as before", () => {
-  vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "false")
-  state.pages = [page({ has_document: true })]
-  state.read = "unavailable"
-  open()
-  expect(screen.getByRole("link", { name: /Open in Pages/ })).toBeInTheDocument()
-})
-
-it("is unchanged with the single-home switch off: lock bar, preview and Open in Pages", async () => {
-  vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "false")
-  open()
-  expect(screen.getByTestId("lock-bar")).toBeInTheDocument()
-  expect(screen.getByRole("link", { name: /Open in Pages/ })).toBeInTheDocument()
-  await waitFor(() => expect(screen.getByText("saved preview")).toBeInTheDocument())
-  expect(state.fetch).not.toHaveBeenCalled()
-  expect(screen.queryByTestId("native-host")).toBeNull()
+  await waitFor(() => expect(state.fetch).toHaveBeenCalledWith("/api/v1/pages/%40page-brief/document?workspace_id=ws1"))
+  expect(state.fetch).toHaveBeenCalledWith("/api/v1/documents/status?workspace_id=ws1")
+  expect(screen.queryByText("saved preview")).toBeNull()
+  expect(screen.queryByRole("link", { name: /Open in Pages|Open full view/ })).toBeNull()
 })
 
 it.each([
@@ -166,6 +159,7 @@ it.each([
 ])("never mounts the native editor for %s", (_name, extra) => {
   state.pages = [page(extra)]
   open()
-  expect(state.fetch).not.toHaveBeenCalled()
+  // A Docs page asks the documents service, never the Craft availability.
+  expect(state.fetch).not.toHaveBeenCalledWith(expect.stringContaining("/craft/availability"))
   expect(screen.queryByTestId("native-host")).toBeNull()
 })

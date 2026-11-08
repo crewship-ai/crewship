@@ -39,6 +39,14 @@ func (r *Router) registerDocumentRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/initialize", roleInline, p.MutateDocument)
 	// openapi: responses 200,400,401,403,404,409,413,422,429,500,502,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/patch", roleInline, p.MutateDocument)
+	// Anchored discussion. Reading follows document read authority; writing
+	// needs Comment authority (Edit, or a Comment/Edit grant) in the authority.
+	// openapi: responses 200,400,401,403,404,409,429,500,502,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/document/comments", authed(wsCtx(http.HandlerFunc(p.GetDocument))))
+	// openapi: responses 200,400,401,403,404,409,413,429,500,502,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/document/comments", roleInline, p.MutateDocument)
+	// openapi: responses 200,400,401,403,404,409,413,429,500,502,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/document/comments/resolve", roleInline, p.MutateDocument)
 }
 
 // This advertises release assets only. Initialization and every later content

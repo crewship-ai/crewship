@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startService, PROTOCOL } from './service.mjs';
-import { RICH_VERSION, create, snapshot, initialJSON, outline, load, validate, anchor, find, encode } from './schema.mjs';
+import { RICH_VERSION, LATEST_VERSION, create, snapshot, initialJSON, outline, load, validate, anchor, find, encode } from './schema.mjs';
 const secret = 'a'.repeat(48);
 function call(socket, path, data, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -44,8 +44,8 @@ function authorityModel() {
   const model = { state: initialState(), receipts: new Map(), seen: [], boots: new Set(), recoveries: 0, acquisitions: 0, releases: 0, commits: 0, checkpoints: 0, checkpointStates: new Map(), restores: 0, compatible: true, rejectCommit: false, revoked: new Set(), readOnly: new Set() };
   model.handle = async (op, data, req, res) => {
     model.seen.push({ op, data, bearer: req.headers.authorization });
-    if (op === 'recover') { assert.equal(typeof data.boot, 'string'); if (!model.boots.has(data.boot)) { model.boots.add(data.boot); model.recoveries++; model.state.generation++; model.state.epoch++; } return { recovered: true, protocol: PROTOCOL, schema: RICH_VERSION }; }
-    if (op === 'ready') return { protocol: model.compatible ? PROTOCOL : 99, schema: RICH_VERSION };
+    if (op === 'recover') { assert.equal(typeof data.boot, 'string'); if (!model.boots.has(data.boot)) { model.boots.add(data.boot); model.recoveries++; model.state.generation++; model.state.epoch++; } return { recovered: true, protocol: PROTOCOL, schema: LATEST_VERSION }; }
+    if (op === 'ready') return { protocol: model.compatible ? PROTOCOL : 99, schema: LATEST_VERSION };
     assert.ok(req.headers.authorization?.startsWith('Bearer '));
     if (model.revoked.has(req.headers.authorization)) { res.writeHead(403); return { error: 'revoked principal' }; }
     if (op === 'state') return model.state;
@@ -61,7 +61,7 @@ function authorityModel() {
       assert.equal(data.leaseOwner.length, 36); assert.ok(data.update); model.commits++;
       model.state = { ...model.state, schema: data.schema, rev: model.state.rev + 1, snapshot: data.snapshot };
     } else if (op === 'checkpoint') { model.checkpoints++; model.checkpointStates.set(data.id,{schema:model.state.schema,snapshot:model.state.snapshot}); }
-    else if (op === 'upgrade') { assert.equal(data.schema,model.state.schema); assert.equal(data.targetSchema,RICH_VERSION); assert.equal(data.ifRev,model.state.rev); assert.equal(data.generation,model.state.generation); model.state = {...model.state,schema:RICH_VERSION,rev:model.state.rev+1,epoch:model.state.epoch+1,generation:model.state.generation+1}; }
+    else if (op === 'upgrade') { assert.equal(data.schema,model.state.schema); assert.equal(data.targetSchema,LATEST_VERSION); assert.equal(data.ifRev,model.state.rev); assert.equal(data.generation,model.state.generation); model.state = {...model.state,schema:LATEST_VERSION,rev:model.state.rev+1,epoch:model.state.epoch+1,generation:model.state.generation+1}; }
     else if (op === 'restore') { model.restores++; const source=model.checkpointStates.get(data.checkpoint)??model.state; model.state = { ...model.state,schema:source.schema,snapshot:source.snapshot, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1 }; }
     const receipt = { id: data.id, rev: model.state.rev, epoch: model.state.epoch, fingerprint: data.fingerprint };
     model.receipts.set(data.id, receipt); return receipt;
@@ -136,7 +136,7 @@ test('Unix service validates transport and acknowledges only durable receipts', 
   const model = authorityModel(), f = await fixture(model.handle); await f.start();
   try {
     assert.equal((await stat(f.socket)).mode & 0o777, 0o600);
-    assert.equal((await call(f.socket, '/health/ready')).body.schema, RICH_VERSION);
+    assert.equal((await call(f.socket, '/health/ready')).body.schema, LATEST_VERSION);
     assert.equal((await call(f.socket, '/health/live', undefined, { 'X-Crewship-Docs-Service': 'bad' })).status, 403);
     const state = (await read(f)).body; assert.equal(typeof state.epoch, 'string');
     const request = patchRequest(state, 'one');
@@ -151,7 +151,7 @@ test('Unix service validates transport and acknowledges only durable receipts', 
 });
 test('initialization bootstraps without document state or lease', async () => {
   const seen = []; const f = await fixture((op, data, req, res) => {
-    seen.push(op); if (op === 'recover') return { recovered: true, protocol: PROTOCOL, schema: RICH_VERSION };
+    seen.push(op); if (op === 'recover') return { recovered: true, protocol: PROTOCOL, schema: LATEST_VERSION };
     if (op === 'receipt') { res.writeHead(404); return { error: 'not found' }; }
     assert.equal(op, 'initialize'); assert.equal(data.schema, 2); assert.ok(data.snapshot); return { rev: 1, epoch: 0 };
   }); await f.start();
@@ -263,8 +263,8 @@ test('checkpoint and restore retry receipts survive generation changes; readines
 test('blocked persistence bounds document queue and drain waits for all failed acknowledgements', async () => {
   const blocked = deferred(), started = deferred(); let calls = 0;
   const f = await fixture(async (op, data, req, res) => {
-    if (op === 'recover') return { recovered: true, protocol: PROTOCOL, schema: RICH_VERSION };
-    if (op === 'ready') return { protocol: PROTOCOL, schema: RICH_VERSION };
+    if (op === 'recover') return { recovered: true, protocol: PROTOCOL, schema: LATEST_VERSION };
+    if (op === 'ready') return { protocol: PROTOCOL, schema: LATEST_VERSION };
     calls++; started.resolve(); await blocked.promise; res.writeHead(503); return { error: 'controlled persistence failure' };
   }); await f.start(); const pending = [];
   try {
@@ -328,7 +328,7 @@ test('concurrent replacements of a killed engine, also through a directory alias
 test('recovery gates all admission and failure closes its socket; a fresh boot can retry', async () => {
   const entered = deferred(), proceed = deferred(); let reject = true, boots = [];
   const f = await fixture(async (op, data, req, res) => {
-    if (op === 'recover') { boots.push(data.boot); entered.resolve(); await proceed.promise; if (reject) { res.writeHead(503); return { error: 'recovery failed' }; } return { recovered: true, protocol: PROTOCOL, schema: RICH_VERSION }; }
+    if (op === 'recover') { boots.push(data.boot); entered.resolve(); await proceed.promise; if (reject) { res.writeHead(503); return { error: 'recovery failed' }; } return { recovered: true, protocol: PROTOCOL, schema: LATEST_VERSION }; }
     assert.fail('recovery must gate document authority calls');
   });
   const starting = f.start(); const rejected = assert.rejects(starting, /recovery failed/);
@@ -442,8 +442,8 @@ test('slow incomplete bodies consume bounded admission while health remains resp
 test('drain aborts existing body readers and promptly closes new incomplete requests while persistence waits', { timeout: 10000 }, async () => {
   const blocked = deferred(), entered = deferred();
   const f = await fixture(async (op, data, req, res) => {
-    if (op === 'recover') return { recovered: true, protocol: PROTOCOL, schema: RICH_VERSION };
-    if (op === 'ready') return { protocol: PROTOCOL, schema: RICH_VERSION };
+    if (op === 'recover') return { recovered: true, protocol: PROTOCOL, schema: LATEST_VERSION };
+    if (op === 'ready') return { protocol: PROTOCOL, schema: LATEST_VERSION };
     entered.resolve(); await blocked.promise; res.writeHead(503); return { error: 'controlled persistence failure' };
   }); await f.start();
   const held = [];
@@ -520,8 +520,8 @@ test('public comment responses resolve spans without exposing the private anchor
 });
 
 test('startup rejects missing, old or future Go content capability before admitting documents', async () => {
- for (const schema of [undefined, 2, 4]) {
-  const f = await fixture((op,data) => { assert.equal(op,'recover'); assert.equal(data.schema,RICH_VERSION); return {recovered:true,protocol:PROTOCOL,...(schema === undefined ? {} : {schema})}; });
+ for (const schema of [undefined, 2, 3, 5]) {
+  const f = await fixture((op,data) => { assert.equal(op,'recover'); assert.equal(data.schema,LATEST_VERSION); return {recovered:true,protocol:PROTOCOL,...(schema === undefined ? {} : {schema})}; });
   try { await assert.rejects(f.start(),/compatible engine recovery/); await assert.rejects(call(f.socket,'/v1/documents/p/read',{})); } finally { await f.close(); }
  }
 });
@@ -529,11 +529,11 @@ test('startup rejects missing, old or future Go content capability before admitt
 test('explicit human upgrade binds original Page/revision, preserves bytes and retries without reapplying', async () => {
  const model=authorityModel(),f=await fixture(model.handle);await f.start();
  try {
-  const before=(await read(f)).body,request={id:'explicit-three',schema:2,target_schema:3,page_id:'p',epoch:before.epoch,ifRev:before.rev};
-  for(const changed of [{...request,page_id:'foreign'},{...request,ifRev:before.rev-1},{...request,target_schema:4},{...request,update:'forged'}])assert.equal((await call(f.socket,'/v1/documents/p/upgrade',changed)).status,409);
+  const before=(await read(f)).body,request={id:'explicit-three',schema:2,target_schema:4,page_id:'p',epoch:before.epoch,ifRev:before.rev};
+  for(const changed of [{...request,page_id:'foreign'},{...request,ifRev:before.rev-1},{...request,target_schema:3},{...request,update:'forged'}])assert.equal((await call(f.socket,'/v1/documents/p/upgrade',changed)).status,409);
   assert.equal((await call(f.socket,'/v1/documents/p/upgrade',request,{Authorization:'Bearer agtv2.synthetic'})).status,403);
-  const receipt=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(receipt.status,200);assert.equal(receipt.body.schema,3);assert.equal(model.state.snapshot,before.snapshot);assert.equal(model.state.rev,before.rev+1);
-  const after=(await read(f)).body;assert.equal(after.schema,3);assert.notEqual(after.epoch,before.epoch);assert.deepEqual(after.content,before.content);
+  const receipt=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(receipt.status,200);assert.equal(receipt.body.schema,4);assert.equal(model.state.snapshot,before.snapshot);assert.equal(model.state.rev,before.rev+1);
+  const after=(await read(f)).body;assert.equal(after.schema,4);assert.notEqual(after.epoch,before.epoch);assert.deepEqual(after.content,before.content);
   const retry=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(retry.status,200);assert.equal(retry.body.rev,receipt.body.rev);assert.equal(retry.body.duplicate,true);assert.equal(model.seen.filter(x=>x.op==='upgrade').length,1);
   model.revoked.add('Bearer human');assert.equal((await call(f.socket,'/v1/documents/p/upgrade',request)).status,403);assert.equal(model.state.rev,before.rev+1);
  } finally {await f.close()}
@@ -541,24 +541,24 @@ test('explicit human upgrade binds original Page/revision, preserves bytes and r
 test('schema3 raw human marks are versioned; old clients and unqualified semantic clients fail closed',async()=>{
  const model=authorityModel(),f=await fixture(model.handle);await f.start();
  try {
-  const before=(await read(f)).body;const upgrade={id:'upgrade-marks',schema:2,target_schema:3,page_id:'p',epoch:before.epoch,ifRev:before.rev};assert.equal((await call(f.socket,'/v1/documents/p/upgrade',upgrade)).status,200);
+  const before=(await read(f)).body;const upgrade={id:'upgrade-marks',schema:2,target_schema:4,page_id:'p',epoch:before.epoch,ifRev:before.rev};assert.equal((await call(f.socket,'/v1/documents/p/upgrade',upgrade)).status,200);
   const current=(await read(f)).body,doc=load(current.snapshot),vector=Y.encodeStateVector(doc);find(doc,'intro').toArray()[0].format(0,8,{link:{href:'https://example.invalid/'}});const update=encode(Y.encodeStateAsUpdate(doc,vector));doc.destroy();
   assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'old-client',schema:2,epoch:current.epoch,kind:'human',update})).status,409);assert.equal(model.commits,0);
   assert.equal((await call(f.socket,'/v1/documents/p/verify-targets',{base_rev:current.rev,targets:[]})).status,400);
-  assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'raw-agent',schema:3,page_id:'p',epoch:current.epoch,kind:'human',update},{Authorization:'Bearer agtv2.synthetic'})).status,403);assert.equal(model.commits,0);
-  assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'foreign-page',schema:3,page_id:'foreign',epoch:current.epoch,kind:'human',update})).status,409);
-  const saved=await call(f.socket,'/v1/documents/p/patch',{id:'human-link',schema:3,page_id:'p',epoch:current.epoch,kind:'human',update});assert.equal(saved.status,200);const rich=(await read(f)).body;assert.equal(rich.schema,3);assert.equal(rich.content.content.find(node=>node.attrs?.id==='intro').content[0].marks[0].attrs.href,'https://example.invalid/');
+  assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'raw-agent',schema:4,page_id:'p',epoch:current.epoch,kind:'human',update},{Authorization:'Bearer agtv2.synthetic'})).status,403);assert.equal(model.commits,0);
+  assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'foreign-page',schema:4,page_id:'foreign',epoch:current.epoch,kind:'human',update})).status,409);
+  const saved=await call(f.socket,'/v1/documents/p/patch',{id:'human-link',schema:4,page_id:'p',epoch:current.epoch,kind:'human',update});assert.equal(saved.status,200);const rich=(await read(f)).body;assert.equal(rich.schema,4);assert.equal(rich.content.content.find(node=>node.attrs?.id==='intro').content[0].marks[0].attrs.href,'https://example.invalid/');
  }finally{await f.close()}
 });
 test('mixed schema checkpoint read and restore use the actual source version without a silent upgrade',async()=>{
  const model=authorityModel(),f=await fixture(model.handle);await f.start();
  try {
   const old=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{id:'legacy-checkpoint',schema:2,epoch:old.epoch,ifRev:old.rev})).status,200);
-  assert.equal((await call(f.socket,'/v1/documents/p/upgrade',{id:'mixed-upgrade',schema:2,target_schema:3,page_id:'p',epoch:old.epoch,ifRev:old.rev})).status,200);
-  const current=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{id:'rich-checkpoint',schema:3,page_id:'p',epoch:current.epoch,ifRev:current.rev})).status,200);
-  const request={id:'restore-legacy',schema:3,page_id:'p',epoch:current.epoch,ifRev:current.rev,checkpoint:'legacy-checkpoint'};const restored=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(restored.status,200);const head=(await read(f)).body;assert.equal(head.schema,2);assert.notEqual(head.epoch,current.epoch);assert.equal(head.snapshot,old.snapshot);
+  assert.equal((await call(f.socket,'/v1/documents/p/upgrade',{id:'mixed-upgrade',schema:2,target_schema:4,page_id:'p',epoch:old.epoch,ifRev:old.rev})).status,200);
+  const current=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{id:'rich-checkpoint',schema:4,page_id:'p',epoch:current.epoch,ifRev:current.rev})).status,200);
+  const request={id:'restore-legacy',schema:4,page_id:'p',epoch:current.epoch,ifRev:current.rev,checkpoint:'legacy-checkpoint'};const restored=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(restored.status,200);const head=(await read(f)).body;assert.equal(head.schema,2);assert.notEqual(head.epoch,current.epoch);assert.equal(head.snapshot,old.snapshot);
   const retry=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(retry.status,200);assert.equal(retry.body.schema,2);assert.equal(retry.body.rev,restored.body.rev);assert.equal(retry.body.duplicate,true);assert.equal(model.restores,1);
-  const pinned=await call(f.socket,'/v1/documents/p/checkpoint-read',{checkpoint:'rich-checkpoint'});assert.equal(pinned.status,200);assert.equal(pinned.body.schema,3);
+  const pinned=await call(f.socket,'/v1/documents/p/checkpoint-read',{checkpoint:'rich-checkpoint'});assert.equal(pinned.status,200);assert.equal(pinned.body.schema,4);
  }finally{await f.close()}
 });
 
@@ -566,12 +566,12 @@ test('mixed schema checkpoint read and restore use the actual source version wit
 test('WRITE to READ downgrade permits original receipt but never a fresh upgrade',async()=>{
  const model=authorityModel(),f=await fixture(model.handle);await f.start();
  try{
- const old=(await read(f)).body;const request={id:'readable-upgrade',schema:2,target_schema:3,page_id:'p',epoch:old.epoch,ifRev:old.rev};
+ const old=(await read(f)).body;const request={id:'readable-upgrade',schema:2,target_schema:4,page_id:'p',epoch:old.epoch,ifRev:old.rev};
  const original=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(original.status,200);
- const rich=(await read(f)).body;await call(f.socket,'/v1/documents/p/checkpoint',{id:'readable-rich',schema:3,page_id:'p',epoch:rich.epoch,ifRev:rich.rev});
+ const rich=(await read(f)).body;await call(f.socket,'/v1/documents/p/checkpoint',{id:'readable-rich',schema:4,page_id:'p',epoch:rich.epoch,ifRev:rich.rev});
  // A later confirmed restore changes the head, not the original receipt.
  model.state={...model.state,schema:2,rev:model.state.rev+1,snapshot:old.snapshot};model.readOnly.add('Bearer human');
- const rev=model.state.rev;const retry=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(retry.status,200);assert.equal(retry.body.duplicate,true);assert.equal(retry.body.rev,original.body.rev);assert.equal(retry.body.schema,3);assert.equal(model.state.rev,rev);
+ const rev=model.state.rev;const retry=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(retry.status,200);assert.equal(retry.body.duplicate,true);assert.equal(retry.body.rev,original.body.rev);assert.equal(retry.body.schema,4);assert.equal(model.state.rev,rev);
  const current=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/upgrade',{...request,id:'fresh-read-only',epoch:current.epoch,ifRev:current.rev})).status,403);assert.equal(model.state.rev,rev);
  model.revoked.add('Bearer human');assert.equal((await call(f.socket,'/v1/documents/p/upgrade',request)).status,403);
  }finally{await f.close()}
@@ -811,4 +811,74 @@ test('invalid live or retained position migration updates never reach durable co
       assert.deepEqual({ ...model.state, epoch: before.epoch }, before);
     } finally { await f.close(); }
   }
+});
+
+test('schema4 initialize is human-only, Page-bound and exports formatting to Markdown', async () => {
+  const model = authorityModel();
+  const body = { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'p4' }, content: [{ type: 'text', text: 'bold', marks: [{ type: 'bold', attrs: {} }] }] }, { type: 'codeBlock', attrs: { id: 'c4', language: 'go' }, content: [{ type: 'text', text: 'x := 1' }] }] };
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'initialize') { model.state = { ...model.state, schema: data.schema, snapshot: data.snapshot, rev: 0 }; return model.state; }
+    return model.handle(op, data, req, res);
+  });
+  try {
+    await f.start();
+    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, body })).status, 409);
+    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, page_id: 'p', body }, { Authorization: 'Bearer agtv2.synthetic' })).status, 403);
+    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-five', schema: 5, page_id: 'p', body })).status, 400);
+    const bad = structuredClone(body); bad.content[1].attrs.language = 'Go<script>';
+    assert.notEqual((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-bad', schema: 4, page_id: 'p', body: bad })).status, 200);
+    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, page_id: 'p', body })).status, 200);
+    const state = (await read(f)).body;
+    assert.equal(state.schema, 4); assert.deepEqual(state.content, body);
+    const exported = await call(f.socket, '/v1/documents/p/export', {});
+    assert.equal(exported.body.markdown, '**bold**\n\n```go\nx := 1\n```\n');
+  } finally { await f.close(); }
+});
+
+test('schema3 documents upgrade to 4 explicitly; schema4 cannot upgrade again', async () => {
+  const model = authorityModel();
+  const doc = create({ type: 'doc', content: [{ type: 'codeBlock', attrs: { id: 'c' }, content: [{ type: 'text', text: 'x' }] }] }, 3);
+  model.state = { ...model.state, schema: 3, snapshot: snapshot(doc) }; doc.destroy();
+  const f = await fixture(model.handle); await f.start();
+  try {
+    const before = (await read(f)).body, request = { id: 'three-to-four', schema: 3, target_schema: 4, page_id: 'p', epoch: before.epoch, ifRev: before.rev };
+    const receipt = await call(f.socket, '/v1/documents/p/upgrade', request);
+    assert.equal(receipt.status, 200); assert.equal(receipt.body.schema, 4); assert.equal(model.state.snapshot, before.snapshot);
+    const after = (await read(f)).body; assert.equal(after.schema, 4); assert.deepEqual(after.content, before.content); assert.deepEqual(after.outline, before.outline);
+    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', { ...request, id: 'four-again', schema: 4, epoch: after.epoch, ifRev: after.rev })).status, 409);
+  } finally { await f.close(); }
+});
+
+test('comments, replies and resolve are closed human requests anchored by the engine', async () => {
+  const model = authorityModel(), stored = [];
+  const doc = create({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'q' }, content: [{ type: 'text', text: 'Bloky kódu' }] }] }, 4);
+  model.state = { ...model.state, schema: 4, snapshot: snapshot(doc) }; doc.destroy();
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'comment') { stored.push({ id: data.id, body: data.body, parent: data.parent, anchor: data.anchor, actor: 'user:human', rev: data.ifRev, version: 1, resolved: false, created_at: 'now' }); return { id: data.id, rev: data.ifRev, epoch: 1, kind: 'comment' }; }
+    if (op === 'resolve') { const c = stored.find(x => x.id === data.comment); c.resolved = data.resolved; c.version++; return { id: data.id, rev: data.ifRev, epoch: 1, kind: 'resolve' }; }
+    if (op === 'comments') return stored.map(c => c.parent ? { ...c, anchor: undefined } : c);
+    return model.handle(op, data, req, res);
+  });
+  await f.start();
+  try {
+    const state = (await read(f)).body, base = { schema: 4, page_id: 'p', epoch: state.epoch, ifRev: state.rev };
+    const root = { ...base, id: 'thread-1', block: 'q', from: 0, to: 5, text: 'Ukázka komentáře' };
+    for (const bad of [{ ...root, text: '' }, { ...root, text: ' ' }, { ...root, extra: 1 }, { ...root, block: undefined }, { ...root, from: 3, to: 3 }, { ...root, block: 'missing' }]) {
+      assert.equal((await call(f.socket, '/v1/documents/p/comment', JSON.parse(JSON.stringify(bad)))).status, 400, JSON.stringify(bad));
+    }
+    assert.equal((await call(f.socket, '/v1/documents/p/comment', { ...root, ifRev: state.rev - 1 })).status, 409);
+    assert.equal((await call(f.socket, '/v1/documents/p/comment', { ...root, page_id: 'other' })).status, 409);
+    assert.equal((await call(f.socket, '/v1/documents/p/comment', root, { Authorization: 'Bearer agtv2.synthetic' })).status, 403);
+    assert.equal((await call(f.socket, '/v1/documents/p/comment', root)).status, 200);
+    assert.equal(stored[0].anchor.quote, 'Bloky'); assert.equal(stored[0].anchor.block, 'q');
+    assert.equal((await call(f.socket, '/v1/documents/p/comment', { ...base, id: 'reply-1', parent: 'thread-1', block: 'q', text: 'x' })).status, 400);
+    assert.equal((await call(f.socket, '/v1/documents/p/comment', { ...base, id: 'reply-1', parent: 'thread-1', text: 'Odpověď' })).status, 200);
+    assert.equal(stored[1].anchor, undefined); assert.equal(stored[1].parent, 'thread-1');
+    assert.equal((await call(f.socket, '/v1/documents/p/resolve', { ...base, id: 'resolve-1', comment: 'thread-1', version: 1, resolved: 'yes' })).status, 400);
+    assert.equal((await call(f.socket, '/v1/documents/p/resolve', { ...base, id: 'resolve-1', comment: 'thread-1', version: 1, resolved: true })).status, 200);
+    const listed = (await call(f.socket, '/v1/documents/p/comments', {})).body.comments;
+    assert.equal(listed[0].status, 'resolved'); assert.equal(listed[0].quote, 'Bloky'); assert.equal(listed[0].from, 0); assert.equal(listed[0].to, 5);
+    assert.equal(listed[1].parent, 'thread-1'); assert.equal(listed[1].anchor, undefined); assert.equal(listed[1].status, undefined);
+    assert.equal(model.acquisitions, 0); assert.equal(model.commits, 0);
+  } finally { await f.close(); }
 });

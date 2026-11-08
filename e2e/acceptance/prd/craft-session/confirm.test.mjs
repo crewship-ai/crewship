@@ -9,7 +9,7 @@ const C = "HOURf9vyrC010"
 const typed = [C, `${C}B`]
 
 // RC-4 (#4871): the table step saved v13 and v14 before cycle 10 typed; the typing never
-// reached the document, yet "Uloženo · verze 14" counted as the cycle's save.
+// reached the document, yet "Saved · version 14" counted as the cycle's save.
 test("a label that moved 12 -> 14 before the typing does not confirm markers the server lacks", () => {
   const head = { version: "14", text: word(["HOURf9vyrC009", "HOURf9vyrC009B", ""]) }
   const c = confirmCycle({ typed, baseline: "12", label: "14", head })
@@ -37,7 +37,7 @@ test("only the B line on the server does not confirm the cycle line", () => {
 test("no shown save and no markers on the server is not confirmed", () => {
   const c = confirmCycle({ typed, baseline: "14", label: undefined, head: { version: "14", text: word(["x"]) } })
   assert.equal(c.confirmed, false)
-  assert.match(c.problem, /no save newer than verze 14 was shown/)
+  assert.match(c.problem, /no save newer than version 14 was shown/)
 })
 
 test("a cycle that typed nothing is never confirmed", () => {
@@ -45,11 +45,11 @@ test("a cycle that typed nothing is never confirmed", () => {
 })
 
 test("the baseline takes saves of the steps earlier in the cycle", () => {
-  assert.equal(labelVersion("Uloženo · verze 14"), "14")
-  assert.equal(labelVersion("Neuložený koncept"), undefined)
-  assert.equal(baselineBefore("12", "Uloženo · verze 14"), "14")
-  assert.equal(baselineBefore("12", "Ukládám…"), "12")
-  assert.equal(baselineBefore("15", "Uloženo · verze 14"), "15")
+  assert.equal(labelVersion("Saved · version 14"), "14")
+  assert.equal(labelVersion("Unsaved draft"), undefined)
+  assert.equal(baselineBefore("12", "Saved · version 14"), "14")
+  assert.equal(baselineBefore("12", "Saving…"), "12")
+  assert.equal(baselineBefore("15", "Saved · version 14"), "15")
 })
 
 test("markers match as whole tokens", () => {
@@ -164,12 +164,12 @@ test("the editor is compared with the last committed save, not the next version"
   assert.equal(lastCommittedSave([{ kind: "save" }, { kind: "reconcile", status: 200, version: "4" }]), undefined)
 })
 
-test("Ověřit výsledek is due only for that status and only past the deadline", () => {
-  const s = "Výsledek nepotvrzenHistorie 26300 / 17179869184 B"
+test("Check the result is due only for that status and only past the deadline", () => {
+  const s = "Result not confirmedHistory 26300 / 17179869184 B"
   assert.equal(isUnconfirmedStatus(s), true)
   assert.equal(verifyDue(s, 1_000, 15_999), false)
   assert.equal(verifyDue(s, 1_000, 16_000), true)
-  assert.equal(verifyDue("Uloženo · verze 3", 1_000, 99_000), false)
+  assert.equal(verifyDue("Saved · version 3", 1_000, 99_000), false)
 })
 
 test("a press does not make a cycle confirmed: the server's head decides", () => {
@@ -201,7 +201,7 @@ test("hourInterruptions does not count an overlap twice and names the longest in
 test("hourInterruptions reports a clean hour as zero, without the warning", () => {
   const r = hourInterruptions([], [])
   assert.deepEqual([r.presses, r.interruptedMs, r.longestStallMs], [0, 0, 0])
-  assert.equal(r.note, `Ověřit výsledek pressed 0 times, interrupted 0 s in total (page-poll gaps and unconfirmed spells), longest interruption 0 s; 0 page-poll gap(s) of at least 10 s (${PAGE_STALLS_DESCRIPTION}).`)
+  assert.equal(r.note, `Check the result pressed 0 times, interrupted 0 s in total (page-poll gaps and unconfirmed spells), longest interruption 0 s; 0 page-poll gap(s) of at least 10 s (${PAGE_STALLS_DESCRIPTION}).`)
 })
 
 test("the page-stall description says what was measured and what was not", () => {
@@ -243,7 +243,7 @@ test("an autosave acknowledged after the 4 s cutoff stays an autosave; Ctrl+S on
   assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin, a.forcedCtrlS], [1, 1, 0, 1])
   assert.equal(a.forcedCtrlSEvents[0].outcome, "confirm-only")
   assert.equal(a.forcedCtrlSEvents[0].newVersion, true)
-  assert.match(a.note, /^forced Ctrl\+S 1×, Ověřit výsledek 0×; server-confirmed writes 1× = autosave 1× \+ origin unknown 0×, press outcomes 1 confirm-only/)
+  assert.match(a.note, /^forced Ctrl\+S 1×, Check the result 0×; server-confirmed writes 1× = autosave 1× \+ origin unknown 0×, press outcomes 1 confirm-only/)
 })
 
 test("an autosave that was preparing at the press and sends 100 ms after it is unknown, not forced", async () => {
@@ -319,7 +319,7 @@ test("an automatic reconcile retry during a press wait is reported as cause unkn
 })
 
 test("a press-triggered reconcile sent just after its wait ended is not counted as automatic", () => {
-  // Ověřit výsledek at 30 s, the session stopped waiting at 45 s, the request left at 46 s.
+  // Check the result at 30 s, the session stopped waiting at 45 s, the request left at 46 s.
   const verifications = [{ cycle: 3, firstSeenAt: at(10), pressedAt: at(30), unconfirmedForMs: 20_000, statusAfter: "", reconcile: null, waitEndedAt: at(45) }]
   const a = accountingOf({ verifications, ops: [rec(1, 46), rec(2, 90)] })
   assert.deepEqual([a.reconcilesDuringPressWaitOps, a.editorReconcileOps, a.verifyPresses], [[1], [2], 1])
@@ -332,7 +332,7 @@ test("saveAccounting of a clean hour: every save automatic, nothing forced", () 
   const ops = [save(1, 1, "2"), save(2, 31, "3")]
   const a = accountingOf({ waits: [autoWait(0, 1, "2"), autoWait(1, 31, "3")], ops })
   assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin, a.forcedCtrlS, a.releases, a.editorReconciles, a.reconcilesDuringPressWait, a.verifyPresses], [2, 2, 0, 0, 0, 0, 0, 0])
-  assert.equal(a.note, "forced Ctrl+S 0×, Ověřit výsledek 0×; server-confirmed writes 2× = autosave 2× + origin unknown 0×, automatic reconcile 0×.")
+  assert.equal(a.note, "forced Ctrl+S 0×, Check the result 0×; server-confirmed writes 2× = autosave 2× + origin unknown 0×, automatic reconcile 0×.")
   assert.match(a.description, /not a gate/)
   assert.match(a.description, /cannot tell a forced save from an autosave/)
 })
@@ -342,7 +342,7 @@ test("hourInterruptions puts the save accounting first in the row's note", () =>
   const forced = [{ cycle: 1, at: at(4), site: "save-wait", reason: "x", opsAtPress: 1, endedAt: at(41), newVersion: true, version: "3", outcome: "unattributed" }]
   const waits = [autoWait(0, 1, "2"), { cycle: 1, at: at(0), endedAt: at(41), pressed: true, opsAtPress: 1, pressedAt: at(4), version: "3", completed: true }]
   const r = hourInterruptions([], [], accountingOf({ waits, forced, ops, releases: [{ at: at(50), opsAt: 2 }] }))
-  assert.match(r.note, /^forced Ctrl\+S 1×, Ověřit výsledek 0×, release 1×; server-confirmed writes 2× = autosave 1× \+ origin unknown 1× \(.*\), press outcomes 1 unattributed, automatic reconcile 0×\. Ověřit výsledek pressed 0 times/)
+  assert.match(r.note, /^forced Ctrl\+S 1×, Check the result 0×, release 1×; server-confirmed writes 2× = autosave 1× \+ origin unknown 1× \(.*\), press outcomes 1 unattributed, automatic reconcile 0×\. Check the result pressed 0 times/)
 })
 
 // #5112: the accounting counts server-confirmed writes, once each, not save waits. The
@@ -438,13 +438,13 @@ test("#5112: every server-confirmed write lands in exactly one bucket", () => {
   }
 })
 
-test("#5112 review: a fresh save after an Ověřit výsledek press is unknown, not an autosave", () => {
+test("#5112 review: a fresh save after an Check the result press is unknown, not an autosave", () => {
   // The reconcile at 21 s proves the attempt absent; the editor then sends a fresh save at 22 s.
   const verifications = [{ cycle: 4, firstSeenAt: at(5), pressedAt: at(20), unconfirmedForMs: 15_000, statusAfter: "", reconcile: null, waitEndedAt: at(30), opsAtPress: 1 }]
   const ops = [{ ...save(1, 3, undefined, undefined), ...snap("5", "aa"), failed: "timeout" }, { ...rec(2, 21), ...snap("5", "aa"), status: 409 }, { ...save(3, 22, "6"), ...snap("5", "ab") }]
   const a = accountingOf({ verifications, ops })
   assert.deepEqual([a.committedWrites, a.autosaves, a.unknownOrigin], [1, 0, 1])
-  assert.match(a.writes[0].reason, /Ověřit výsledek/)
+  assert.match(a.writes[0].reason, /Check the result/)
   // A press recorded without its trail cut is placed by time.
   const legacy = accountingOf({ verifications: [{ ...verifications[0], opsAtPress: undefined }], ops })
   assert.equal(legacy.unknownOrigin, 1)
@@ -476,7 +476,7 @@ test("#5112 review 2: a later repeat of the same attempt may have committed; the
   assert.equal(a.forcedCtrlSEvents[0].outcome, "unattributed")
 })
 
-test("#5112 review 2: startVerify records an Ověřit výsledek press before the click", () => {
+test("#5112 review 2: startVerify records an Check the result press before the click", () => {
   const verifications = []
   const v = startVerify(verifications, { cycle: 3, firstSeenAt: at(5), opsAtPress: 1, at: at(20) })
   assert.deepEqual([verifications.length, v.waitEndedAt, v.opsAtPress, v.unconfirmedForMs], [1, undefined, 1, 15_000])

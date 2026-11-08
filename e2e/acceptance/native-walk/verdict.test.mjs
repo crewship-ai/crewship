@@ -24,7 +24,7 @@ function walkEvidence(s, over = {}) {
   const steps = s.steps.map((name) => {
     const before = String(v)
     if (!["open and take the editor", "home tab", "ctrl+s without a change", "reload", "final"].includes(name)) v++
-    return { name, verifyPresses: 0, versionBefore: before, versionAfter: String(v), inputMs: 10, confirmationMs: 10, longestStallMs: 5, status: "Uloženo" }
+    return { name, verifyPresses: 0, versionBefore: before, versionAfter: String(v), inputMs: 10, confirmationMs: 10, longestStallMs: 5, status: "Saved" }
   })
   const receipts = Array.from({ length: v - 1 }, (_, i) => String(i + 2))
   const lostAt = steps.find((x) => x.name === "lost reply").versionAfter
@@ -119,7 +119,7 @@ const cases = [
   { name: "a step is missing", input: withEvidence("walk.word", (e) => ({ ...e, steps: e.steps.filter((s) => s.name !== "lost reply") })), want: "FAIL", reason: /step "lost reply" recorded 0 times/ },
   { name: "a step is repeated", input: withEvidence("walk.sheet", (e) => ({ ...e, steps: [...e.steps, e.steps.at(-1)] })), want: "FAIL", reason: /step "final" recorded 2 times/ },
   { name: "an unknown step", input: withEvidence("walk.sheet", (e) => ({ ...e, steps: [...e.steps, { ...e.steps.at(-1), name: "extra" }] })), want: "FAIL", reason: /unexpected step "extra"/ },
-  { name: "\"Ověřit výsledek\" was pressed", input: withEvidence("walk.word", (e) => ({ ...e, steps: e.steps.map((s) => (s.name === "lost reply" ? { ...s, verifyPresses: 1 } : s)) })), want: "FAIL", reason: /pressed 1 times/ },
+  { name: "\"Check the result\" was pressed", input: withEvidence("walk.word", (e) => ({ ...e, steps: e.steps.map((s) => (s.name === "lost reply" ? { ...s, verifyPresses: 1 } : s)) })), want: "FAIL", reason: /pressed 1 times/ },
   { name: "a step did not record its presses", input: withEvidence("walk.word", (e) => ({ ...e, steps: e.steps.map((s, i) => (i === 0 ? { ...s, verifyPresses: undefined } : s)) })), want: "FAIL", reason: /pressed undefined times/ },
   { name: "no version record", input: withEvidence("walk.word", (e) => ({ ...e, versions: undefined })), want: "FAIL", reason: /no version record/ },
   { name: "a gap in the receipts", input: withEvidence("walk.word", (e) => ({ ...e, versions: { ...e.versions, receipts: e.versions.receipts.filter((r) => r !== "4") } })), want: "FAIL", reason: /not contiguous/ },

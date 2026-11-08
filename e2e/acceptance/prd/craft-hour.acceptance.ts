@@ -50,7 +50,7 @@ for (const { app, label } of KINDS) {
     async ({ prd, browser }) => {
       prd.requireFull(`native ${label} needs a deployment with native engines`)
       // Word is driven through a canvas ribbon, and on r5 the editor drops to read-only
-      // ("Pouze čtení" + a local draft) while the person keeps typing during an autosave in
+      // ("Read-only" + a local draft) while the person keeps typing during an autosave in
       // flight (see docs/development/prd-acceptance.md, "Manual walkthrough"). Until that is
       // fixed the Word row is a manual row; PRD_HOUR_WORD_AUTOMATED=1 runs the automation anyway.
       test.skip(app === "wordcraft" && process.env.PRD_HOUR_WORD_AUTOMATED !== "1", "A.craft.session.hour-word is a manual row (mode=manual): not reliably automatable, see the manual walkthrough in docs/development/prd-acceptance.md")

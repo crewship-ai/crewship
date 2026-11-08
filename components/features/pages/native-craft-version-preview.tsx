@@ -9,8 +9,8 @@ const NativeCraftPreview = React.lazy(() => import("./native-craft-preview").the
 
 /** A saved version in the isolated native editor frame, read-only; every access recheck re-reads it. */
 export function NativeCraftVersionFramePreview({ version, read, scope }: NativeCraftVersionPreviewProps) {
-  if (!scope) return <p role="alert">Náhled není dostupný.</p>
-  return <React.Suspense fallback={<p role="status">Náhled verze {version} · načítám…</p>}>
-    <NativeCraftPreview humanId={scope.humanId} workspaceId={scope.workspaceId} pageId={scope.pageId} label={`Náhled verze ${version}`} read={read} />
+  if (!scope) return <p role="alert">Preview not available.</p>
+  return <React.Suspense fallback={<p role="status">Preview of version {version} · loading…</p>}>
+    <NativeCraftPreview humanId={scope.humanId} workspaceId={scope.workspaceId} pageId={scope.pageId} label={`Preview of version ${version}`} read={read} />
   </React.Suspense>
 }

@@ -134,8 +134,8 @@ func TestLayoutPreservesGlyphInkAtFrameEdges(t *testing.T) {
 	if err := pdf.AddTTFFontData(fontFamily, goregular.TTF); err != nil {
 		t.Fatal(err)
 	}
-	l := layout{pdf: pdf, widths: make(map[int]map[rune]float64)}
-	p, err := l.text(context.Background(), "j", 160, "#111111", "left", 0, 0, 100, 300)
+	l := layout{pdf: pdf, faces: map[string]*faceMetrics{}}
+	p, err := l.text(context.Background(), "j", textStyle{face: fontFamily, size: 160, color: "#111111", align: "left"}, 0, 0, 100, 300)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { DetailCard } from "@/components/ui/detail"
 import { cn } from "@/lib/utils"
 import { formatRelativeTime } from "@/lib/time"
-import type { PageCapabilities } from "@/lib/pages/editor-contract"
+import { pageAddress, type PageCapabilities } from "@/lib/pages/editor-contract"
 import { toPageFolderRef } from "@/hooks/use-pages"
 import { toPageOwner, type WirePageDetail } from "@/hooks/use-page-grants"
 import { PAGE_STATE_META } from "@/components/features/pages/page-state"
@@ -48,7 +48,7 @@ export function PropertiesCard({ workspaceId, slug, page, capabilities }: Proper
             not a Page in no folder; the row is drawn only when the answer
             exists (#2527). */}
         {page?.folder !== undefined && <FolderRow workspaceId={workspaceId} slug={slug} page={page} />}
-        <AddressRow slug={slug} />
+        <AddressRow slug={slug} pageId={page?.id} />
         <Row icon={UserCircle2} label="Owner">
           {owner ? (
             <>
@@ -126,8 +126,8 @@ function FolderRow({ workspaceId, slug, page }: { workspaceId: string; slug: str
   )
 }
 
-function AddressRow({ slug }: { slug: string }) {
-  const address = `/pages/${slug}`
+function AddressRow({ slug, pageId }: { slug: string; pageId?: string | null }) {
+  const address = pageAddress(slug, pageId)
   const [copied, setCopied] = React.useState<"idle" | "done" | "refused">("idle")
 
   const copy = async () => {

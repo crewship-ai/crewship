@@ -1,6 +1,6 @@
 /**
  * An accent derived from one colour — the workspace's brand colour
- * (Settings › General › Pages appearance › Brand accent).
+ * (Settings › General › Artifacts appearance › Brand accent).
  *
  * A preset accent in app/styles/accents.css is seven hand-tuned tokens per
  * mode, each pinned to WCAG AA by lib/__tests__/theme-contrast.test.ts. A

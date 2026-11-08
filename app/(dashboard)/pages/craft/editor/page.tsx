@@ -8,9 +8,36 @@ import {apiFetch} from "@/lib/api-fetch"
 import {NativeCraftPreview} from "@/components/features/pages/native-craft-preview"
 import {NativeCraftEditorHost} from "@/components/features/pages/native-craft-editor-host"
 import {verifyNativeReadLoss} from "@/lib/mooring/native-read-loss"
+import {useAccessMode} from "@/hooks/use-access-mode"
+import {artifactsLibrary} from "@/lib/feature-flags"
+import {legacyPagesTarget} from "@/components/features/artifacts-library/legacy-pages-url"
+import {LegacyPagesRedirect} from "@/components/features/artifacts-library/legacy-pages-redirect"
+import {RestrictedPagesRedirect} from "@/components/features/artifacts-library/restricted-pages-redirect"
 
 interface Availability {scope:string;state:"loading"|"enabled"|"preview"|"disabled"|"error"}
-export default function CraftPage(){return <Suspense fallback={<p className="p-6">Připojuji…</p>}><NativeWordEntry/></Suspense>}
+export default function CraftPage(){return <Suspense fallback={<p className="p-6">Connecting…</p>}><CraftEntry/></Suspense>}
+// With the library on, a trusted session opens the document in its Artifacts
+// detail, /artifacts/<id>, which mounts this same editor host (#5129). Any
+// address that does not resolve, and every restricted session, keeps this route.
+// The build-time flag never changes at runtime, so the branch is stable.
+// A restricted session never mounts the editor host (its availability read is
+// outside the restricted allowlist): it moves to /artifacts/<id> (#5132), after
+// the same read-loss proof the host ran when admission failed (draft-key only).
+function CraftEntry(){const accessMode=useAccessMode();if(accessMode==='restricted')return <RestrictedCraftEntry/>;return artifactsLibrary()?<CraftEntryWithLibrary/>:<NativeWordEntry/>}
+function RestrictedCraftEntry(){
+ const params=useSearchParams(),session=useSession(),workspace=usePageWorkspace()
+ if(session.status==='loading'||workspace.loading)return <p className="p-6">Connecting…</p>
+ const pages=params?.getAll('page_id')??[],workspaces=params?.getAll('workspace_id')??[]
+ const human=session.status==='authenticated'?session.data?.user.id:undefined,page=pages[0],linked=workspaces[0]
+ const scope=human&&pages.length===1&&page&&page.length<=256&&!page.includes('\0')&&workspaces.length===1&&linked?{human,workspace:linked,page}:null
+ return <RestrictedPagesRedirect before={()=>{if(scope)void verifyNativeReadLoss(scope).catch(()=>{})}}/>
+}
+function CraftEntryWithLibrary(){
+ const params=useSearchParams(),workspace=usePageWorkspace(),accessMode=useAccessMode()
+ if(workspace.loading||accessMode==='loading')return <p className="p-6">Connecting…</p>
+ const target=workspace.workspaceId&&!workspace.linkUnavailable?legacyPagesTarget('/pages/craft/editor',params?.toString()??'',{workspaceId:workspace.workspaceId,library:true,trusted:accessMode==='trusted'}):null
+ return target?.to==='resolve'?<LegacyPagesRedirect target={target}><NativeWordEntry/></LegacyPagesRedirect>:<NativeWordEntry/>
+}
 function NativeWordEntry(){
  const params=useSearchParams(),session=useSession(),workspace=usePageWorkspace()
  const pages=params?.getAll('page_id')??[],workspaces=params?.getAll('workspace_id')??[]
@@ -46,14 +73,14 @@ function NativeWordEntry(){
   }).catch(()=>{if(!abort.signal.aborted){setAvailability({scope,state:'error'});proveReadLoss()}})
   return()=>abort.abort()
  },[scope,request,humanId,workspaceId,pageId])
- if(loading)return <p className="p-6">Připojuji…</p>
- if(!valid)return <p role="alert" className="p-6">Dokument není dostupný.</p>
+ if(loading)return <p className="p-6">Connecting…</p>
+ if(!valid)return <p role="alert" className="p-6">The document is not available.</p>
  // A previous page or human's result can never authorize this render, even
  // before effect cleanup or when a transport ignores AbortSignal.
- if(availability?.scope!==scope||availability.state==='loading')return <p className="p-6">Připojuji…</p>
- if(availability.state==='error')return <p role="alert" className="p-6">Dostupnost editoru nebyla potvrzena.</p>
+ if(availability?.scope!==scope||availability.state==='loading')return <p className="p-6">Connecting…</p>
+ if(availability.state==='error')return <p role="alert" className="p-6">Editor availability was not confirmed.</p>
  if(availability.state==='preview')return <NativeCraftPreview key={scope!} humanId={humanId!} workspaceId={workspaceId!} pageId={pageId}/>
- if(availability.state!=='enabled')return <p className="p-6">Nativní editor není zapnutý.</p>
+ if(availability.state!=='enabled')return <p className="p-6">The native editor is not turned on.</p>
  // The host's local UI and journal lifecycle must be remounted for every
  // identity/document scope; recovery data is never carried into a new scope.
  return <NativeCraftEditorHost key={scope!} workspaceId={workspaceId!} pageId={pageId} humanId={humanId!} enabled/>

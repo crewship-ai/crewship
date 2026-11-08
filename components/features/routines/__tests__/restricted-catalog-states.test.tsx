@@ -3,7 +3,7 @@ import React from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { cleanup, render, screen } from "@testing-library/react"
 import { RestrictedRoutines } from "../restricted-routines"
-import { RestrictedPages } from "@/components/features/pages/restricted-pages"
+import { RestrictedArtifacts } from "@/components/features/artifacts-library/restricted-artifacts"
 
 // #2877: loading, empty, unavailable and runtime-missing are four exclusive
 // states in both private catalogs — never two messages at once — and the
@@ -14,9 +14,14 @@ afterEach(() => { cleanup(); api.mockReset() })
 
 const runtimeSentence = /Private execution isn't installed on this server/
 
+// A restricted member's Artifacts home (#5132): the granted artifacts as links.
+function RestrictedArtifactsHome({ workspaceId }: { workspaceId: string }) {
+  return <RestrictedArtifacts workspaceId={workspaceId} focus={null} hrefFor={slug => `/artifacts?item=${slug}`} homeHref="/artifacts" />
+}
+
 const screens = [
   { name: "routines", Component: RestrictedRoutines, loading: "Loading routines…", empty: "No routines can currently be run with your access. Shared definitions appear above.", unavailable: "Routine catalog unavailable.", item: [{ slug: "allowed", name: "Allowed routine", definition_hash: "h", execution_hash: "e", inputs: [] }], option: "Allowed routine", optionRole: "radio" as const },
-  { name: "Pages", Component: RestrictedPages, loading: "Loading Page actions…", empty: "No Page actions are available with your current access.", unavailable: "Page actions unavailable.", item: [{ slug: "p", name: "Page", actions: [{ intent_hash: "i", panel_id: "panel", id: "go", label: "Go", inputs: [] }] }], option: "Page — Go", optionRole: "option" as const },
+  { name: "Artifacts", Component: RestrictedArtifactsHome, loading: "Loading artifacts…", empty: "No artifact actions are available with your current access.", unavailable: "Artifacts unavailable.", item: [{ slug: "p", name: "Brief", actions: [{ intent_hash: "i", panel_id: "panel", id: "go", label: "Go", inputs: [] }] }], option: "Brief", optionRole: "link" as const },
 ]
 
 function json(body: unknown, status: number) { return new Response(JSON.stringify(body), { status }) }

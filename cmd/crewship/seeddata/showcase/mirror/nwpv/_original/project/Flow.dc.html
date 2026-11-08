@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – user flow</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#B85E1F}a:hover{color:#8C4512}
+</style>
+</helmet>
+<div style="position: relative; width: 1488px; height: 560px; background: #F4F1EA; font-family: 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33; font-size: 16px; line-height: 24px">
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 264px; top: 256px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #6B7A8C; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-1" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B7A8C" stroke="none" style="stroke: none; fill: #6B7A8C; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-1)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 536px; top: 256px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #6B7A8C; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-2" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B7A8C" stroke="none" style="stroke: none; fill: #6B7A8C; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-2)"></path></svg>
+<svg width="8" height="83" viewBox="0 0 8 83" preserveAspectRatio="none" style="position: absolute; left: 444px; top: 316px; width: 8px; height: 83px; overflow: visible; fill: none; stroke: #6B7A8C; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-3" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B7A8C" stroke="none" style="stroke: none; fill: #6B7A8C; fill: context-stroke"/></marker></defs><path d="M 4 0 L 4 79" marker-end="url(#dc-arrow-head-filled-3)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 832px; top: 256px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #6B7A8C; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-4" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B7A8C" stroke="none" style="stroke: none; fill: #6B7A8C; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-4)"></path></svg>
+<svg width="480" height="8" viewBox="0 0 480 8" preserveAspectRatio="none" style="position: absolute; left: 548px; top: 432px; width: 480px; height: 8px; overflow: visible; fill: none; stroke: #6B7A8C; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><path d="M 0 4 L 480 4"></path></svg>
+<svg width="8" height="139" viewBox="0 0 8 139" preserveAspectRatio="none" style="position: absolute; left: 1024px; top: 297px; width: 8px; height: 139px; overflow: visible; fill: none; stroke: #6B7A8C; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-5" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B7A8C" stroke="none" style="stroke: none; fill: #6B7A8C; fill: context-stroke"/></marker></defs><path d="M 4 139 L 4 4" marker-end="url(#dc-arrow-head-filled-5)"></path></svg>
+<svg width="95" height="8" viewBox="0 0 95 8" preserveAspectRatio="none" style="position: absolute; left: 1128px; top: 256px; width: 95px; height: 8px; overflow: visible; fill: none; stroke: #6B7A8C; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round"><defs><marker id="dc-arrow-head-filled-6" orient="auto" markerWidth="5" markerHeight="5" refX="2" refY="2" overflow="visible"><path d="M0 0 L4 2 L0 4 Z" fill="#6B7A8C" stroke="none" style="stroke: none; fill: #6B7A8C; fill: context-stroke"/></marker></defs><path d="M 0 4 L 91 4" marker-end="url(#dc-arrow-head-filled-6)"></path></svg>
+<div style="position: absolute; left: 64px; top: 64px; font-size: 28px; line-height: 34px; font-weight: 700">User flow: první spuštění aplikace</div>
+<div style="position: absolute; left: 64px; top: 110px; font-size: 15px; color: #4A5568">Boxy jdou přetáhnout a texty přepsat; šipky jsou samostatné prvky.</div>
+<div style="position: absolute; left: 64px; top: 224px; width: 200px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #0F1F33; color: #F4F1EA; border-radius: 12px; font-weight: 600">Otevře aplikaci</div>
+<div style="position: absolute; left: 360px; top: 204px; width: 176px; height: 112px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #FCE9D9; clip-path: polygon(50% 0, 100% 50%, 50% 100%, 0 50%); font-weight: 600">Má účet?</div>
+<div style="position: absolute; left: 632px; top: 224px; width: 200px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 12px"><span><b>Onboarding</b><br>3 kroky</span></div>
+<div style="position: absolute; left: 348px; top: 400px; width: 200px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 12px"><span><b>Přihlášení</b><br>e-mail nebo SSO</span></div>
+<div style="position: absolute; left: 928px; top: 224px; width: 200px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 12px"><span><b>Seznam crew</b><br>Aktivní / Hotové</span></div>
+<div style="position: absolute; left: 1224px; top: 224px; width: 200px; height: 72px; box-sizing: border-box; padding: 8px; display: flex; align-items: center; justify-content: center; text-align: center; background: #DDEFE6; color: #1F5E40; border-radius: 12px"><span><b>Detail crew</b><br>schválit / vrátit</span></div>
+<div style="position: absolute; left: 556px; top: 232px; width: 28px; text-align: center; font-size: 13px; line-height: 16px; color: #4A5568">ne</div>
+<div style="position: absolute; left: 460px; top: 328px; width: 32px; text-align: center; font-size: 13px; line-height: 16px; color: #4A5568">ano</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1488,"height":560}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>

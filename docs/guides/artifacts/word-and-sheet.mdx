@@ -18,8 +18,7 @@ save becomes a new **version**.
 
 - **Instance switch (required):** the operator starts the server with
   `CREWSHIP_CRAFT_NATIVE_ENABLED=true` and a qualified Word or Sheet editor
-  profile. Without it, the native editor page shows *Nativní editor není zapnutý*
-  ("The native editor is not enabled"). The separate Docs backend may still
+  profile. Without it, the native editor page shows *The native editor is not turned on*. The separate Docs backend may still
   offer Word creation.
 - **Agent tasks** also need `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true` on the
   server, and the workspace's agent artifact policy must be enabled and list the
@@ -62,18 +61,46 @@ use **New Doc** in the older view when that view is available.
 The older Pages view still has a **New Doc** button whose **Format** field
 offers **Word** and **Sheet**. It opens at `/pages` on your Crewship address
 (for example `https://crewship.example.com/pages`), but only when
-`/pages` does not redirect to Artifacts. It redirects when both build flags
-`NEXT_PUBLIC_ARTIFACTS_LIBRARY` and `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` are
-`true`; then there is no place in the app to create a Sheet.
+`/pages` does not redirect to Artifacts. It redirects when the build flag
+`NEXT_PUBLIC_ARTIFACTS_LIBRARY` is `true`; then there is no place in the app to
+create a Sheet.
 
 ## Open the editor
 
-Open the native Word document or Sheet in **Artifacts**. With both build flags
-`NEXT_PUBLIC_ARTIFACTS_LIBRARY` and `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` enabled,
-the Craft editor opens inside the detail when the server confirms editing is
+Open the native Word document or Sheet in **Artifacts**. With the build flag
+`NEXT_PUBLIC_ARTIFACTS_LIBRARY` enabled, the Craft editor opens inside the detail when the server confirms editing is
 available. Follow [Take over editing](#take-over-editing) in that editor. In this
-mode there is no **Open in Pages** button, and `/pages/<slug>` leads back to
-the artifact detail. Readers without edit access get the shared preview.
+mode there is no full-view link, and `/pages/<slug>` and
+`/pages/craft/editor?page_id=<id>` lead to the artifact detail. Readers without edit access get the shared preview.
+
+### In the Artifacts frame
+
+Inside the artifact detail the editor's controls sit where every artifact keeps
+them:
+
+- **The lock is in the status chip.** The chip next to the name says who can
+  edit right now: **Free to edit**, ***name* is editing**, **You are editing**,
+  **Proposal waiting**, **Recovered draft** or **Read-only**. Select it to see
+  who holds the lock and since when, and the lock actions this page describes
+  below: **Take over editing**, **Request edit**, **Hand back** and
+  **Hand over to *name***. There is no separate lock bar above the editor.
+- **History** is a tab of the right panel. The pill at the top left shows the
+  artifact's name and the version you see (for example **v5 · Latest**); select
+  it to open the History tab.
+- **Agent → Edit** in the right panel starts the Craft agent task, when the
+  server allows agents and you can edit. **Ask** opens the chat with the
+  document as context and changes nothing.
+- A waiting proposal or a recovered draft appears as one banner above the
+  editor with its actions (**Compare**, **Keep a copy**, and **Accept** or
+  **Reject** for a proposal).
+- The editor's own ribbon, sheet tabs and export stay inside the editor.
+- **On a phone**, a Word document opens as read-only, reflowed text. To edit,
+  select the status chip and choose **Take over editing**; the editor replaces
+  the text while you hold the lock. A Sheet opens in its editor, which scrolls
+  inside itself.
+
+The rest of this page names the controls as they read on the dedicated editor
+route; in the frame they are the same buttons in the places above.
 
 Outside that mode, Word detail shows the saved version read-only. With the
 lock bar enabled, a bar above it shows:
@@ -83,17 +110,16 @@ lock bar enabled, a bar above it shows:
 - **Editing: *name*** · *you see a read-only preview*, with **Request edit**.
   When an agent holds the lease, its name is followed by **(agent)**.
 
-Choose **Edit** to open an editor in a new tab, or **Open in Pages** to open
+Choose **Edit** to open an editor in a new tab, or **Open full view** to open
 one in this tab. Without the lock bar, or for a Sheet outside the inline mode,
-use **Open in Pages**.
+use **Open full view**.
 
 A document result in chat has the same bar in its side panel. There, **Edit**
 also opens the editor in a new tab. Chat never takes the lease itself.
 
 People who can read the document but not edit it don't get the editor. They
-see the last shared version, labelled *Sdílený náhled · verze N* ("Shared
-preview · version N"), or *Sdílený náhled zatím není publikovaný* ("The shared
-preview has not been published yet").
+see the last shared version, labelled *Shared preview · version N* ("Shared
+preview · version N"), or *The shared preview is not published yet*.
 
 ## Take over editing
 
@@ -101,26 +127,25 @@ The bar at the top of the editor shows who holds the lease:
 
 | Bar text | Meaning |
 |---|---|
-| **Volné** | Free: nobody is editing. |
-| **Upravuje *name*** | *Name* is editing. An agent shows its name, or **Agent**. |
-| **Pouze čtení** | Read only: you can't edit here right now, for example after the connection ended. |
+| **Free** | Nobody is editing. |
+| ***name* is editing** | *Name* is editing. An agent shows its name, or **Agent**. |
+| **Read-only** | You can't edit here right now, for example after the connection ended. |
 
-1. When the bar says **Volné**, choose **Převzít úpravy** (Take over editing).
-2. The bar changes to **Upravuje *your name***, and the status line under it
-   reads **Připraveno k úpravám** (Ready to edit).
+1. When the bar says **Free**, choose **Take over editing**.
+2. The bar changes to ***your name* is editing**, and the status line under it
+   reads **Ready to edit**.
 3. Type. Your edits are saved automatically a moment after you stop:
-   **Neuložený koncept** (Unsaved draft), then **Ukládám…** (Saving…), then
-   **Uloženo · verze N** (Saved · version N).
+   **Unsaved draft**, then **Saving…**, then
+   **Saved · version N**.
 
 Editing starts only once this browser can keep a private copy of your draft.
 If the browser's storage is slow, the editor tries to open it up to three
 times. If it still can't, editing doesn't start: the editor gives the lease
-back, the bar returns to **Volné**, and an alert says *Úložiště konceptu v
-tomto prohlížeči se nepodařilo otevřít, proto úpravy nezačaly. Dokument je
-znovu volný* ("This browser's draft storage could not be opened, so editing
-did not start. The document is free again"). Choose **Převzít úpravy** to try
+back, the bar returns to **Free**, and an alert says *The draft storage in this
+browser could not be opened, so editing did not start. The document is free
+again*. Choose **Take over editing** to try
 again. If the lease could not be given back, the alert says so; choose
-**Uvolnit úpravy** or reload the page.
+**Hand back** or reload the page.
 
 While you hold the lease, the editor renews it in the background. If you close
 the tab or lose the connection, the lease runs out by itself after about 15
@@ -131,40 +156,39 @@ old lease read as free.
 
 ### Release editing
 
-Choose **Uvolnit úpravy** (Release editing). The editor saves your last
-change first, then switches to read-only and the bar shows **Volné**. If you
+Choose **Hand back**. The editor saves your last
+change first, then switches to read-only and the bar shows **Free**. If you
 changed nothing since you took over, no new version is written, even though
 the Word editor rewrites a document into its own form when it opens it. The
 same holds for a handoff and for accepting an agent's proposal, so a proposal
 made over the version you opened still applies. If that
-final save can't be confirmed, nothing is released, and you see *Výsledek akce
-nebyl potvrzen. Koncept zůstává zachován.* ("The result of the action was not
-confirmed. The draft is kept.").
+final save can't be confirmed, nothing is released, and you see *The result of the action was not
+confirmed. The draft is kept.*
 
 ## Ask for a handoff
 
 When someone else is editing:
 
-1. Open the editor and keep that tab open. Choose **Požádat o předání**
-   (Ask for handoff) there. The request is bound to this editor session.
-   Once the server confirms it, **Žádost odeslána** (Request sent) and a waiting
+1. Open the editor and keep that tab open. Choose **Request edit**
+   there. The request is bound to this editor session.
+   Once the server confirms it, **Request sent** and a waiting
    message appear; the request button stays disabled for that holder and lease
    generation. This confirms the request, not editing access. If the next status
    read fails, the confirmation remains and a separate message explains that the
    current editing status could not be read.
 2. The editor of the person holding the lease shows a button
-   **Předat uživateli *your name*** (Hand over to *your name*).
+   **Hand over to *your name*** (Hand over to *your name*).
 3. When they choose it, their last change is saved and their editor becomes
    read-only. The lease is now yours: in your editor the bar changes to
-   **Upravuje *your name***, with **Uvolnit úpravy**, and a
-   **Převzít úpravy** button appears under the bar.
-4. Choose that **Převzít úpravy** to start typing. You don't wait for the bar
-   to show **Volné**; the lease is already yours. The editor loads the latest
+   ***your name* is editing**, with **Hand back**, and a
+   **Take over editing** button appears under the bar.
+4. Choose that **Take over editing** to start typing. You don't wait for the bar
+   to show **Free**; the lease is already yours. The editor loads the latest
    saved version first.
 
 An agent holder does not perform this human handoff flow. Its confirmation says
 that the request was recorded and that the agent does not hand over on its own.
-**Zastavit agenta** (Stop agent) appears only when the server authorizes you to
+**Stop agent** appears only when the server authorizes you to
 stop that agent; recording a handoff request does not grant this permission.
 
 The holder doesn't get a decline button: if they never hand over, your
@@ -190,7 +214,7 @@ explicit whole-document consent. Agent tasks need
 `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true`, a qualified private native agent
 runtime on the server, and your current edit rights on the document. The two
 startup switches alone do not supply that runtime. Before starting, finish
-your save and choose **Uvolnit úpravy** so the human editor no longer renews
+your save and choose **Hand back** so the human editor no longer renews
 the lease; a task cannot take it away from a person.
 
 1. Collect four IDs:
@@ -221,22 +245,21 @@ the lease; a task cannot take it away from a person.
 
    | Panel text | Meaning |
    |---|---|
-   | Úloha agenta čeká | The task is queued. |
-   | Agent se spouští | The agent is starting. |
-   | Agent pracuje | The agent is working. |
-   | Úloha agenta dokončena | The task finished. |
-   | Úloha agenta skončila chybou | The task failed. |
-   | Úloha agenta zrušena | The task was cancelled. |
-   | Výsledek úlohy se ověřuje | The outcome is still being checked. |
+   | Agent task queued | The task is queued. |
+   | Agent is starting | The agent is starting. |
+   | Agent is working | The agent is working. |
+   | Agent task finished | The task finished. |
+   | Agent task failed | The task failed. |
+   | Agent task cancelled | The task was cancelled. |
+   | Checking the task result | The outcome is still being checked. |
 
-   *Agent nepřevzal úpravy: dokument upravoval člověk* means the agent couldn't
-   take the lease because a person was editing. *Poslední potvrzená verze N*
+   *The agent did not take over editing: a person was editing the document* means the agent couldn't
+   take the lease because a person was editing. *Last confirmed version N*
    names the last version the agent saved.
-4. While the agent holds the lease, the bar shows **Upravuje *agent name***
-   and, if you may stop it, **Zastavit agenta** (Stop agent). Choose it to
-   withdraw the agent's write access. The result is *Agent zastaven* (Agent
-   stopped), or *Zápis agenta zastaven · ukončení běhu se ověřuje* (Agent
-   writes stopped, run shutdown still being checked).
+4. While the agent holds the lease, the bar shows ***agent name* is editing**
+   and, if you may stop it, **Stop agent**. Choose it to
+   withdraw the agent's write access. The result is *Agent stopped*, or
+   *Agent writing stopped · checking that the run ended*.
 
 The CLI equivalents are `crewship craft task status @<page-id> <work-id>` and
 `crewship craft task stop @<page-id>`. Stopping an agent never takes the lease
@@ -249,9 +272,9 @@ An admitted agent task saves confirmed versions directly.
 People with Read or Comment access see only the version you publish, through
 every route: not the latest save, not older versions and not agent proposals.
 
-1. While you hold the lease, choose **Publikovat náhled** (Publish preview).
+1. While you hold the lease, choose **Publish preview**.
 2. The editor saves your last change, then shows
-   **Sdílený náhled · verze N** (Shared preview · version N).
+   **Shared preview · version N**.
 
 Publishing selects an already saved version. If the save can't be confirmed
 first, nothing is published, and the editor says so.
@@ -265,7 +288,7 @@ content again as a new version on top.
 Ctrl+S without a change adds no version and uses no quota: the editor confirms
 the version it already has. If the last save's result is unknown, Ctrl+S first
 asks the server about that save and sends nothing until it knows. If the server
-can't tell yet, you keep seeing *Výsledek nepotvrzen*.
+can't tell yet, you keep seeing *Result not confirmed*.
 
 <Note>
 The history is off by default. An instance administrator defines the flag
@@ -278,14 +301,18 @@ switch above is still required.
 ### See the versions
 
 1. Open the native Word document or Sheet in **Artifacts** (`/artifacts/<id>`).
-2. Choose **Historie verzí (N)** (Version history) above the editor. A
+2. Choose **Version history (N)** above the editor. In the Artifacts frame,
+   open the **History** tab of the right panel instead (or the version pill at
+   the top left). A
    workspace owner or admin who reads the document without the editor finds it
    above the shared preview or the read-only detail. People with only Read or
    Comment access don't get the history: they see the shared version alone.
-3. Each row shows **Verze N** (Version N), when it was saved and who saved it:
+3. Each row shows **Version N**, when it was saved and who saved it:
    a person by name, an agent as *name* **(agent)**. The version the editor
-   opens is marked **aktuální** (current). A restored version adds
-   *obnovena z verze M* ("restored from version M").
+   opens is marked **current**. A restored version adds
+   *restored from version M*. In the Artifacts History tab each row reads as a
+   sentence instead, for example *Saved by Jana* or *Pavel restored version 2*,
+   with **vN** and **Latest** on the current one.
 
 Anyone who can read the document sees the list. People with comment-only
 access, and people outside the workspace, don't. The list shows the latest
@@ -293,12 +320,12 @@ access, and people outside the workspace, don't. The list shows the latest
 
 ### Preview and compare a version
 
-Next to each version, **Náhled** (Preview) opens that version read-only in
+Next to each version, **Preview** opens that version read-only in
 the same editor, below the list; nothing you do there is saved. Next to each
-older version, **Porovnat** (Compare) shows it against the current version:
+older version, **Compare** shows it against the current version:
 how many lines were added and removed, each changed line, and both versions
 side by side. Both are available to everyone who can see the list, and both
-close with **Zavřít** (Close) or <kbd>Esc</kbd>, which returns focus to the
+close with **Close** or <kbd>Esc</kbd>, which returns focus to the
 button you came from.
 
 A workspace owner or admin who reads another member's document, its history
@@ -310,23 +337,21 @@ disappears together with the list.
 
 You need edit rights **and** the lease in this editor.
 
-1. Choose **Převzít úpravy** (Take over editing) if you don't hold the lease
-   yet. Until then, **Obnovit** (Restore) is disabled and the panel says
-   *Pro obnovení verze převezměte úpravy.* ("Take over editing to restore a
-   version."). It stays disabled for anyone who reads without edit rights.
-2. In **Historie verzí**, choose **Obnovit** next to the version you want.
-3. Confirm with **Obnovit jako novou verzi** (Restore as a new version), or
-   **Zrušit** (Cancel).
+1. Choose **Take over editing** if you don't hold the lease
+   yet. Until then, **Restore** is disabled and the panel says
+   *Take over editing to restore a version.* It stays disabled for anyone who reads without edit rights.
+2. In **Version history**, choose **Restore** next to the version you want.
+3. Confirm with **Restore as a new version**, or
+   **Cancel**.
 4. The editor saves your last change first, then stores the old content as a
    new version, N+1, and reopens on it. The list now shows that version as
-   **aktuální**, with *obnovena z verze M*. All earlier versions are still
+   **current**, with *restored from version M*. All earlier versions are still
    listed.
 
 The restore uses the same checks as a save: your lease, its generation and
 the version you last saw. If someone else changed the document or the lease
-moved on, nothing is restored and the editor shows *Obnovení verze nebylo
-potvrzeno. Dokument i místní koncept zůstávají zachovány.* ("The restore was
-not confirmed. The document and the local draft are kept.").
+moved on, nothing is restored and the editor shows *Restoring the version was not
+confirmed. The document and the local draft are kept.*
 
 From the CLI, `crewship craft versions <page>` lists the same history and
 `crewship craft version <page> <version> --output FILE` saves one version's
@@ -344,46 +369,44 @@ your lease ends, editing stops. The bar or the status line shows one of:
 
 | Text | Meaning |
 |---|---|
-| Výsledek nepotvrzen | The last save's result is unknown. Choose **Ověřit výsledek** (Check result) to ask the server. |
-| Pouze čtení · místní koncept zachován | This session cannot write; your draft is kept in this browser. The lease may still name you. |
-| Koncept zůstává v tomto editoru | The draft couldn't be captured safely; it stays in the open editor. Don't close the tab yet. |
-| Editor odpojen · koncept zachován | The editor disconnected; the draft is kept. |
-| Neuložený koncept · úložiště prohlížeče neodpovědělo | This browser's storage didn't answer in time. Editing continues; your next edit or Ctrl+S saves again (after a save the server already confirmed, the editor also retries once by itself). Nothing is sent until the browser copy is written. |
+| Result not confirmed | The last save's result is unknown. Choose **Check the result** to ask the server. |
+| Read-only · local draft kept | This session cannot write; your draft is kept in this browser. The lease may still name you. |
+| The draft stays in this editor | The draft couldn't be captured safely; it stays in the open editor. Don't close the tab yet. |
+| Editor disconnected · draft kept | The editor disconnected; the draft is kept. |
+| Unsaved draft · browser storage did not respond | This browser's storage didn't answer in time. Editing continues; your next edit or Ctrl+S saves again (after a save the server already confirmed, the editor also retries once by itself). Nothing is sent until the browser copy is written. |
 
 **After a crash or a closed tab:**
 
-1. Open the document's editor again and choose **Převzít úpravy**. If someone
+1. Open the document's editor again and choose **Take over editing**. If someone
    else took over in the meantime, wait for them or ask for a handoff first.
-2. Each kept draft appears as **Místní koncept · verze N** (Local draft, based
-   on version N).
-3. Choose **Porovnat** (Compare) to see the server version and your draft side
-   by side. The header says whether they hold *shodná data* (the same data) or
-   *odlišná data* (different data).
-4. Choose **Kopie konceptu** (Draft copy) to download the draft as a
+2. Each kept draft appears as **Local draft · version N**, in one banner
+   above the editor.
+3. Choose **Compare** to see the server version and your draft side
+   by side. The header says whether they hold *identical data* or
+   *different data*.
+4. Choose **Keep a copy** to download the draft as a
    `wordcraft-recovery.json` or `gridcraft-recovery.json` file, then carry over
    what you need by hand.
 
 The editor never loads an old draft over the current version. Drafts are
 private to you in this browser. They are deleted when you sign out, when
 someone else signs in in this browser, or when your read access ends; the
-editor then shows *Přístup ke čtení byl odebrán* ("Read access was removed").
+editor then shows *Read access was removed*.
 The same browser-copy rules as for Docs apply; see
 [Document save state](/guides/document-drafts).
 
 ## When the history is full
 
 Every saved version is kept. Each Word document or Sheet has its own history
-budget, 16 GiB. The status line shows how much is used, for example
-*Historie 1288490188 / 17179869184 B*. From 80 % it adds
-*blíží se limit* ("nearing the limit"), from 95 % *historie je téměř plná*
-("history almost full") and at the limit *historie je plná* ("history full").
+budget, 16 GiB. The status line warns as it fills: from 80 % it adds
+*Version history is nearing its limit*, from 95 % *Version history is almost
+full* and at the limit *Version history is full*.
 
 When a save would go over the budget of the document, the workspace or the
 instance, the server refuses it and keeps every existing version. The status
-line stays on **Neuložený koncept**, and an alert appears under it:
-*Kapacita úložiště neumožňuje další uložení. Změny zatím nejsou uložené na
-serveru.* ("Storage capacity does not allow another save. Your changes are not
-yet saved on the server."). The editor keeps your changes, the draft stays in
+line stays on **Unsaved draft**, and an alert appears under it:
+*Storage is full, so nothing more can be saved. Your changes are not saved on
+the server yet.* The editor keeps your changes, the draft stays in
 this browser and every earlier version is kept.
 
 Autosave doesn't retry on its own. To keep your work:
@@ -391,10 +414,10 @@ Autosave doesn't retry on its own. To keep your work:
 1. Leave the editor open and keep working if you like.
 2. Once space is freed (for example an instance administrator raises the
    workspace limit with `crewship admin instance artifact-storage set`),
-   choose **Uložit znovu** (Save again) in the alert or press Ctrl+S. The
+   choose **Save again** in the alert or press Ctrl+S. The
    editor sends the current content as a new version; if storage is still
    full, the alert stays and nothing is lost.
-3. To be safe, choose **Stáhnout koncept** (Download draft). You get the
+3. To be safe, choose **Download draft**. You get the
    current content of the editor as a `wordcraft-recovery.json` or
    `gridcraft-recovery.json` file. You can also export from the editor itself.
 
@@ -404,7 +427,7 @@ download the draft and carry on in a new document (see
 [Create a Word document or a Sheet](#create-a-word-document-or-a-sheet)).
 
 The draft also stays in this browser. When you open the editor again, it is
-offered as a **Místní koncept** row, as after a crash.
+offered as a **Local draft** row, as after a crash.
 
 ## Related
 

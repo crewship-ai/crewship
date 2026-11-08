@@ -8,7 +8,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"net/url"
 
 	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/crewship-ai/crewship/internal/policy"
@@ -177,7 +176,7 @@ func (h *PageHandler) InternalProject(w http.ResponseWriter, r *http.Request) {
 				data, _ := f.Bytes()
 				files = append(files, map[string]any{"path": f.Path, "encoding": f.Encoding, "bytes": len(data)})
 			}
-			writeJSON(w, 200, map[string]any{"revision": draft.Revision, "digest": draft.Digest, "git_commit": draft.GitCommit, "files": files, "profile": pageprofile.Contract(), "sdk": map[string]string{"module": "@crewship/pages", "source": pageprofile.SDKSource()}, "pages_theme": h.workspacePagesTheme(r), "definition": draft.Definition, "page_path": "/pages/" + url.PathEscape(rec.Slug)})
+			writeJSON(w, 200, map[string]any{"revision": draft.Revision, "digest": draft.Digest, "git_commit": draft.GitCommit, "files": files, "profile": pageprofile.Contract(), "sdk": map[string]string{"module": "@crewship/pages", "source": pageprofile.SDKSource()}, "pages_theme": h.workspacePagesTheme(r), "definition": draft.Definition, "page_path": artifactCanonicalURL(rec.ID, req.WorkspaceID)})
 			return
 		}
 		if req.ExpectedRevision == nil || *req.ExpectedRevision != draft.Revision {

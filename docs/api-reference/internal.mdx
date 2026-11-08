@@ -674,7 +674,7 @@ A field sent with an operation it does not apply to is `400` ("fields do not app
 | Operation | Effect | Response |
 |---|---|---|
 | `init` | Creates the supported React/TypeScript starter as revision 1. `409` on an existing project — never use it to reset one. | The project write result. |
-| `read` | Inspect the draft. | `{revision, digest, git_commit, files[{path, encoding, bytes}], profile, sdk{module, source}, pages_theme, definition, page_path}`; with `path`, `{revision, file}`. `404` when the Page has no project yet or the file does not exist. |
+| `read` | Inspect the draft. | `{revision, digest, git_commit, files[{path, encoding, bytes}], profile, sdk{module, source}, pages_theme, definition, page_path}`; with `path`, `{revision, file}`. `page_path` is the Page's canonical browser address, `/artifacts/<page-id>?workspace_id=<id>`. `404` when the Page has no project yet or the file does not exist. |
 | `save` | Apply replacements and deletions atomically as a new revision, with a Git checkpoint. | The project write result. `409` when `expected_revision` is stale. |
 | `build` | Start the offline compiler on the current revision. One build runs per instance; a busy worker refuses. | Build identity. |
 | `status` | Poll the build: `running`, `ready`, `failed` or `interrupted`, with diagnostics but without the compiled JavaScript. | The preview/status document. |

@@ -50,7 +50,7 @@ test("a dropped Sheet cell fails; the grid is read row by row", () => {
 test("the last line lost while the editor turned read-only fails once a copy held it", () => {
   // The r3 blind spot: line 3 typed as the status turned "odpojen", so status
   // alone does not prove it; the draft in the open editor held it.
-  const ledger = lineLedger(P, { typed: 4, accepted: [0, 1, 2], stoppedBy: "Editor odpojen · koncept zachován" })
+  const ledger = lineLedger(P, { typed: 4, accepted: [0, 1, 2], stoppedBy: "Editor disconnected · draft kept" })
   assert.deepEqual(checkLines(ledger, word(lines(4)), "draft in the open editor").problems, [])
   const c = checkLines(ledger, word(lines(3)), "draft after the reload")
   assert.equal(c.problems.length, 1)
@@ -65,7 +65,7 @@ test("an unproven line is required when a later line is in the copy", () => {
 })
 
 test("an unproven last line that no copy ever held is not required", () => {
-  const ledger = lineLedger(P, { typed: 4, accepted: [0, 1, 2], stoppedBy: "Pouze čtení" })
+  const ledger = lineLedger(P, { typed: 4, accepted: [0, 1, 2], stoppedBy: "Read-only" })
   assert.deepEqual(checkLines(ledger, word(lines(3)), "draft").problems, [])
 })
 
@@ -90,7 +90,7 @@ test("a line that was never typed fails; the line in flight may be there once", 
 
 test("X-1 is not read from X-10, and a cut last line is not a second X-1", () => {
   assert.deepEqual(foundLines(P, word([`${P}-10`])).found, [10])
-  const ledger = lineLedger(P, { typed: 13, accepted: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], stoppedBy: "Pouze čtení" })
+  const ledger = lineLedger(P, { typed: 13, accepted: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], stoppedBy: "Read-only" })
   // Line 12 was cut after "PRDLINE-1" when the editor turned read-only.
   assert.deepEqual(evaluateLines(ledger, word([...lines(12), `${P}-1`]), "draft").problems, [])
   // Without a stop, the same text is a doubled line.
@@ -122,7 +122,7 @@ test("plain text (a non-native copy) is still checked", () => {
 
 test("a line held by any offered draft is required in later copies, not only the first draft's lines", () => {
   // Review r1 #1: both drafts pass, only the second proves the unproven line 3.
-  const ledger = lineLedger(P, { typed: 4, accepted: [0, 1, 2], stoppedBy: "Editor odpojen · koncept zachován" })
+  const ledger = lineLedger(P, { typed: 4, accepted: [0, 1, 2], stoppedBy: "Editor disconnected · draft kept" })
   assert.deepEqual(checkDraftCopies(ledger, [word(lines(3)), word(lines(4))], "drafts in the open editor").problems, [])
   const c = checkDraftCopies(ledger, [word(lines(3))], "draft offered after the reload")
   assert.equal(c.problems.length, 1, c.problems.join("\n"))
@@ -140,31 +140,35 @@ test("the line in flight, once seen, is required in later copies", () => {
 
 test("a cut-line reading never excuses a real duplicate", () => {
   // Review r2: line 12 is complete, so a trailing X-1 is a second X-1, not a cut X-12.
-  const ledger = lineLedger(P, { typed: 13, accepted: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], stoppedBy: "Pouze čtení" })
+  const ledger = lineLedger(P, { typed: 13, accepted: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], stoppedBy: "Read-only" })
   const c = evaluateLines(ledger, word([...lines(13), `${P}-1`]), "draft")
   assert.ok(c.problems.some((p) => /holds PRDLINE-1 2 times/.test(p)), c.problems.join("\n"))
   // The cut must be the final paragraph: a second X-1 followed by more text is a duplicate.
   const notLast = evaluateLines(ledger, word([...lines(12), `${P}-1`, "after"]), "draft")
   assert.ok(notLast.problems.some((p) => /holds PRDLINE-1 2 times/.test(p)), notLast.problems.join("\n"))
   // An accepted last line cannot be cut: the editor still took input after it.
-  const acceptedLast = lineLedger(P, { typed: 13, accepted: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], stoppedBy: "Pouze čtení" })
+  const acceptedLast = lineLedger(P, { typed: 13, accepted: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12], stoppedBy: "Read-only" })
   assert.ok(evaluateLines(acceptedLast, word([...lines(12), `${P}-1`]), "draft").problems.length > 0)
 })
 
-test("a dirty editor that lost custody does not take input although its status reads Neuložený koncept", () => {
+test("a dirty editor that lost custody does not take input although its status reads Unsaved draft", () => {
   // G3 RC-3 (e3f048555) stale-generation rows: after the handoff the status stayed
-  // "Neuložený koncept" and only the toolbar showed the peer; every later line was
+  // "Unsaved draft" and only the toolbar showed the peer; every later line was
   // counted as accepted although the editor showed only the first lines.
-  assert.equal(editorTakesInput("Neuložený koncept Historie 4714 / 17179869184 B", "Upravuje PRD Lease Peer Požádat o předání"), false)
-  assert.equal(editorTakesInput("Neuložený koncept", "Upravuje PRD QA owner Pouze čtení · místní koncept zachován"), false)
-  assert.equal(editorTakesInput("Neuložený koncept", "Upravuje PRD QA owner Pouze čtení"), false)
+  assert.equal(editorTakesInput("Unsaved draft History 4714 / 17179869184 B", "PRD Lease Peer is editing Request edit"), false)
+  assert.equal(editorTakesInput("Unsaved draft", "PRD QA owner is editing Read-only · local draft kept"), false)
+  assert.equal(editorTakesInput("Unsaved draft", "PRD QA owner is editing Read-only"), false)
   // Explicit read-only or disconnected status still ends input.
-  assert.equal(editorTakesInput("Pouze čtení", "Upravuje PRD QA owner Uvolnit úpravy"), false)
-  assert.equal(editorTakesInput("Spojení odpojeno", null), false)
+  assert.equal(editorTakesInput("Read-only", "PRD QA owner is editing Hand back"), false)
+  assert.equal(editorTakesInput("Editor disconnected", null), false)
+  // In the Artifacts frame the status chip stands in for the closed popover's toolbar (#5132).
+  assert.equal(editorTakesInput("Unsaved draft", "chip:held Status: PRD Lease Peer is editing"), false)
+  assert.equal(editorTakesInput("Unsaved draft", "chip:agent Status: Scout is editing"), false)
 })
 
 test("an editor that holds custody takes input; an unreadable toolbar leaves the status to decide", () => {
-  assert.equal(editorTakesInput("Neuložený koncept", "Upravuje PRD QA owner Uvolnit úpravy"), true)
-  assert.equal(editorTakesInput("Připraveno k úpravám", "Upravuje PRD QA owner Uvolnit úpravy Předat uživateli PRD Lease Peer"), true)
-  assert.equal(editorTakesInput("Uloženo · verze 3", null), true)
+  assert.equal(editorTakesInput("Unsaved draft", "PRD QA owner is editing Hand back"), true)
+  assert.equal(editorTakesInput("Ready to edit", "PRD QA owner is editing Hand back Hand over to PRD Lease Peer"), true)
+  assert.equal(editorTakesInput("Saved · version 3", null), true)
+  assert.equal(editorTakesInput("Unsaved draft", "chip:unconfirmed Status: Not confirmed yet"), true)
 })

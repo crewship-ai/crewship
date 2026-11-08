@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – nová crew, formulář</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#B85E1F}a:hover{color:#8C4512}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F4F1EA; font-family: 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33; display: flex; flex-direction: column; padding: 32px 20px 28px; gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; font-weight: 600; letter-spacing: 2px; color: #B85E1F">NOVÁ CREW</div>
+<h1 style="margin: 0; font-size: 28px; font-weight: 700">Základní údaje</h1>
+</div>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Název crew
+<input value="{{ name }}" onChange="{{ setName }}" placeholder="např. Research" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: {{ nameBorder }}; border-radius: 14px; background: #FFFFFF; font: 16px 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33">
+<span style="font-weight: 400; color: {{ nameHintColor }}">{{ nameHint }}</span>
+</label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">E-mail pro reporty
+<input value="{{ email }}" onChange="{{ setEmail }}" placeholder="jmeno@firma.cz" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: {{ emailBorder }}; border-radius: 14px; background: #FFFFFF; font: 16px 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33">
+<span style="font-weight: 400; color: {{ emailHintColor }}">{{ emailHint }}</span>
+</label>
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="font-size: 14px; font-weight: 600">Velikost</div>
+<div style="display: flex; gap: 8px">
+<sc-for list="{{ sizes }}" as="s" hint-placeholder-count="3">
+<button onClick="{{ s.pick }}" style="flex: 1; height: 44px; border-radius: 12px; border: {{ s.border }}; background: {{ s.bg }}; color: #0F1F33; font: 600 15px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer">{{ s.label }}</button>
+</sc-for>
+</div>
+</div>
+<label style="display: flex; align-items: center; gap: 12px; min-height: 44px; font-size: 15px"><input type="checkbox" checked="{{ notify }}" onChange="{{ toggleNotify }}" style="width: 22px; height: 22px; accent-color: #0F1F33">Upozornit mě, až crew skončí</label>
+<div style="flex: 1"></div>
+<sc-if value="{{ sent }}" hint-placeholder-val="{{ false }}">
+<div style="background: #DDEFE6; color: #1F5E40; border-radius: 14px; padding: 14px; font-size: 15px; font-weight: 600">Crew {{ name }} je založená.</div>
+</sc-if>
+<button onClick="{{ submit }}" disabled="{{ invalid }}" style="height: 52px; border: none; border-radius: 14px; font: 600 16px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer; background: {{ submitBg }}; color: {{ submitFg }}">Založit crew</button>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { name: '', email: '', size: 1, notify: true, sent: false };
+  }
+  renderVals() {
+    const st = this.state;
+    const nameOk = st.name.trim().length >= 2;
+    const emailOk = /^[^@\s]+@[^@\s]+\.[a-z]{2,}$/i.test(st.email);
+    const touchedName = st.name.length > 0;
+    const touchedEmail = st.email.length > 0;
+    const invalid = !(nameOk && emailOk);
+    const border = (ok, touched) => !touched ? '1px solid #C9C1B1' : ok ? '2px solid #1F5E40' : '2px solid #B3261E';
+    const labels = ['Malá', 'Střední', 'Velká'];
+    return {
+      name: st.name,
+      email: st.email,
+      notify: st.notify,
+      sent: st.sent,
+      invalid,
+      nameBorder: border(nameOk, touchedName),
+      emailBorder: border(emailOk, touchedEmail),
+      nameHint: !touchedName ? 'Aspoň 2 znaky.' : nameOk ? 'V pořádku.' : 'Ještě aspoň jeden znak.',
+      nameHintColor: !touchedName ? '#4A5568' : nameOk ? '#1F5E40' : '#B3261E',
+      emailHint: !touchedEmail ? 'Sem přijde týdenní report.' : emailOk ? 'V pořádku.' : 'Zkontroluj tvar adresy, např. jmeno@firma.cz.',
+      emailHintColor: !touchedEmail ? '#4A5568' : emailOk ? '#1F5E40' : '#B3261E',
+      submitBg: invalid ? '#E2DCCF' : '#E8833A',
+      submitFg: invalid ? '#5A6472' : '#0F1F33',
+      sizes: labels.map((label, i) => ({
+        label,
+        bg: st.size === i ? '#FFFFFF' : 'transparent',
+        border: st.size === i ? '2px solid #0F1F33' : '1px solid #C9C1B1',
+        pick: () => this.setState({ size: i })
+      })),
+      setName: (e) => this.setState({ name: e.target.value, sent: false }),
+      setEmail: (e) => this.setState({ email: e.target.value, sent: false }),
+      toggleNotify: () => this.setState({ notify: !st.notify }),
+      submit: () => { if (!invalid) this.setState({ sent: true }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

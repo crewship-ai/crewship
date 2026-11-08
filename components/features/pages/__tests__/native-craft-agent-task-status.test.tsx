@@ -25,12 +25,12 @@ describe('native agent task private projection',()=>{
   window.history.replaceState(null,'','/')
   m.fetch.mockResolvedValue(response(payload({work_id:'started'})));render(<NativeCraftAgentTaskStatus {...scope} workId="started"/>);await flush()
   expect(m.fetch).toHaveBeenCalledWith('/api/v1/pages/%40page/craft/tasks/started?workspace_id=workspace',expect.anything())
-  expect(screen.getByText('Agent pracuje')).toBeInTheDocument()
+  expect(screen.getByText('Agent is working')).toBeInTheDocument()
  })
  it('says a run ended in a proposal rather than a saved version',async()=>{
   m.fetch.mockResolvedValue(response(payload({state:'succeeded',outcome:'proposal',proposal_id:'proposal'})));render(<NativeCraftAgentTaskStatus {...scope}/>);await flush()
-  expect(screen.getByText('Agent připravil návrh ke schválení.')).toBeInTheDocument()
-  expect(screen.queryByText(/Poslední potvrzená verze/)).toBeNull()
+  expect(screen.getByText('The agent prepared a proposal for review.')).toBeInTheDocument()
+  expect(screen.queryByText(/Last confirmed version/)).toBeNull()
  })
  it('refuses an unknown outcome',async()=>{
   m.fetch.mockResolvedValue(response(payload({outcome:'published'})));render(<NativeCraftAgentTaskStatus {...scope}/>);await flush()
@@ -39,7 +39,7 @@ describe('native agent task private projection',()=>{
  it('fetches only the selected scoped task and displays exact Node receipt version',async()=>{
   m.fetch.mockResolvedValue(response(payload({last_committed_receipt:receipt})));render(<NativeCraftAgentTaskStatus {...scope}/>);await flush()
   expect(m.fetch).toHaveBeenCalledWith('/api/v1/pages/%40page/craft/tasks/work?workspace_id=workspace',expect.objectContaining({method:'GET',cache:'no-store',redirect:'error',skipRefresh:true,signal:expect.any(AbortSignal)}))
-  expect(screen.getByText('Poslední potvrzená verze 9007199254740995')).toBeInTheDocument()
+  expect(screen.getByText('Last confirmed version 9007199254740995')).toBeInTheDocument()
  })
  it.each([
   {name:'wrong work',body:payload({work_id:'other',last_committed_receipt:receipt})},
@@ -52,17 +52,17 @@ describe('native agent task private projection',()=>{
   {name:'numeric version',body:payload({last_committed_receipt:{...receipt,version:2}})},
  ])('refuses $name without saved-version claim',async({body})=>{
   m.fetch.mockResolvedValue(response(body));render(<NativeCraftAgentTaskStatus {...scope}/>);await flush()
-  expect(screen.getByRole('alert')).toBeInTheDocument();expect(screen.queryByText(/Poslední potvrzená verze/)).toBeNull()
+  expect(screen.getByRole('alert')).toBeInTheDocument();expect(screen.queryByText(/Last confirmed version/)).toBeNull()
  })
  it('describes actual human acquire refusal in past tense and clears it after a later acquire succeeds',async()=>{
   m.fetch.mockResolvedValue(response(payload({events:[{operation:'acquire',status:409,holder_kind:'human'}]})));render(<NativeCraftAgentTaskStatus {...scope}/>);await flush()
-  expect(screen.getByText(/Agent nepřevzal úpravy/)).toBeInTheDocument();expect(screen.queryByText(/právě upravuje/)).toBeNull()
+  expect(screen.getByText(/The agent did not take over editing/)).toBeInTheDocument();expect(screen.queryByText(/is editing the document/)).toBeNull()
   m.fetch.mockResolvedValue(response(payload({events:[{operation:'acquire',status:409,holder_kind:'human'},{operation:'acquire',status:200}]})));await tick()
-  expect(screen.queryByText(/nepřevzal|nemůže upravovat/)).toBeNull()
+  expect(screen.queryByText(/did not take over|cannot edit/)).toBeNull()
  })
  it.each([{operation:'read',status:409,holder_kind:'human'},{operation:'acquire',status:409,holder_kind:'agent'},{operation:'acquire',status:409}])('does not invent human refusal from $operation/$holder_kind',async(event)=>{
   m.fetch.mockResolvedValue(response(payload({events:[event]})));render(<NativeCraftAgentTaskStatus {...scope}/>);await flush()
-  expect(screen.queryByText(/člověk|nemůže|nepřevzal/)).toBeNull()
+  expect(screen.queryByText(/a person|cannot|did not take over/)).toBeNull()
  })
  it('auth retirement hides private state and an ignored abort response cannot restore it',async()=>{
   m.fetch.mockResolvedValueOnce(response(payload({last_committed_receipt:receipt})));const old=deferred<Response>();m.fetch.mockReturnValueOnce(old.promise)
@@ -79,8 +79,8 @@ describe('native agent task private projection',()=>{
   const old=deferred<Response>(),fresh=deferred<Response>();m.fetch.mockReturnValueOnce(old.promise).mockReturnValueOnce(fresh.promise)
   const view=render(<NativeCraftAgentTaskStatus {...scope}/>);view.rerender(<NativeCraftAgentTaskStatus {...scope} {...{[field]:'other'}}/>);expect(screen.queryByRole('complementary')).toBeNull()
   const freshReceipt={...receipt,workspaceId:field==='workspaceId'?'other':scope.workspaceId,pageId:field==='pageId'?'other':scope.pageId,version:'2'}
-  await act(async()=>fresh.resolve(response(payload({last_committed_receipt:freshReceipt}))));expect(screen.getByText('Poslední potvrzená verze 2')).toBeInTheDocument()
-  await act(async()=>old.resolve(response(payload({last_committed_receipt:receipt}))));expect(screen.queryByText(/9007199254740995/)).toBeNull();expect(screen.getByText('Poslední potvrzená verze 2')).toBeInTheDocument()
+  await act(async()=>fresh.resolve(response(payload({last_committed_receipt:freshReceipt}))));expect(screen.getByText('Last confirmed version 2')).toBeInTheDocument()
+  await act(async()=>old.resolve(response(payload({last_committed_receipt:receipt}))));expect(screen.queryByText(/9007199254740995/)).toBeNull();expect(screen.getByText('Last confirmed version 2')).toBeInTheDocument()
  })
  it('a newly selected work query cannot keep the old private task on rerender',async()=>{
   m.fetch.mockResolvedValueOnce(response(payload({last_committed_receipt:receipt})));const next=deferred<Response>();m.fetch.mockReturnValueOnce(next.promise)
@@ -89,7 +89,7 @@ describe('native agent task private projection',()=>{
  })
  it('may retry a transient network failure while hiding the old private result',async()=>{
   m.fetch.mockResolvedValueOnce(response(payload({last_committed_receipt:receipt}))).mockRejectedValueOnce(new TypeError('network')).mockResolvedValue(response(payload({last_committed_receipt:{...receipt,version:'2'}})))
-  render(<NativeCraftAgentTaskStatus {...scope}/>);await flush();await tick();expect(screen.getByRole('alert')).toBeInTheDocument();expect(screen.queryByText(/9007199254740995/)).toBeNull();await tick();expect(screen.getByText('Poslední potvrzená verze 2')).toBeInTheDocument()
+  render(<NativeCraftAgentTaskStatus {...scope}/>);await flush();await tick();expect(screen.getByRole('alert')).toBeInTheDocument();expect(screen.queryByText(/9007199254740995/)).toBeNull();await tick();expect(screen.getByText('Last confirmed version 2')).toBeInTheDocument()
  })
  it('re-enabling the same scope cannot resurrect its pre-disconnection private receipt',async()=>{
   m.fetch.mockResolvedValueOnce(response(payload({last_committed_receipt:receipt}))).mockReturnValue(new Promise<Response>(()=>{}))
@@ -108,7 +108,7 @@ describe('native agent task private projection',()=>{
  })
  it('shows the proposal outcome after a run that proposed',async()=>{
   m.fetch.mockResolvedValue(response(payload({state:'succeeded',outcome:'proposal',events:[{operation:'acquire',status:409,holder_kind:'human'},{operation:'read',status:200},{operation:'propose',status:201}]})));render(<NativeCraftAgentTaskStatus {...scope}/>);await flush()
-  expect(screen.getByText('Agent připravil návrh ke schválení.')).toBeInTheDocument()
-  expect(screen.queryByText('Stav úlohy agenta není dostupný.')).toBeNull()
+  expect(screen.getByText('The agent prepared a proposal for review.')).toBeInTheDocument()
+  expect(screen.queryByText('The agent task status is not available.')).toBeNull()
  })
 })

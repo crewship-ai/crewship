@@ -122,7 +122,7 @@ func TestLegacyDocumentWritesRefuseBelowFreeDiskReserve(t *testing.T) {
 			return e
 		}},
 		{"upgrade", func(f headroomFixture) error {
-			_, e := f.store.UpgradeRequest(ctx, f.other, f.otherLease, "low-disk-upgrade", "upgrade", 2, 3, 0, &f.generation, allow)
+			_, e := f.store.UpgradeRequest(ctx, f.other, f.otherLease, "low-disk-upgrade", "upgrade", 2, LatestSchema, 0, &f.generation, allow)
 			return e
 		}},
 	} {

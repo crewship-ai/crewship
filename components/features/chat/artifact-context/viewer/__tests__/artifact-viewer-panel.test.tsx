@@ -704,6 +704,13 @@ it("retires an acknowledged agent comment when send permission changes while Edi
  await act(async()=>success(comment({task_id:"task"})))
  expect(send).not.toHaveBeenCalled()
 })
+it("opens the source editor inside the artifact's frame, never on /pages, with the library on", () =>{
+ vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY","true")
+ try {
+  render(<ArtifactViewerPanel variant="library" />)
+  expect(screen.getByRole("link",{name:"Edit source"})).toHaveAttribute("href","/artifacts/p1?workspace_id=ws1&edit=1")
+ } finally { vi.unstubAllEnvs() }
+})
 it("offers only editors an escaped unpinned source editor link", async () =>{
  state.target={slug:"a/b ?&"}
  render(<ArtifactViewerPanel variant="library" />)

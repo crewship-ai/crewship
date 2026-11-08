@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url"
 import { emptyGridCraftNativeDocument } from "../../../../lib/mooring/gridcraft-empty"
 import { pause } from "./crash"
 import { trackPage } from "../created"
+import { lockButton } from "../craft-session/frame"
 
 export type NativeApp = "wordcraft" | "gridcraft"
 
@@ -64,7 +65,7 @@ const CLICK: Record<NativeApp, { x: number; y: number }> = { wordcraft: { x: 678
 
 export async function openEditor(page: Page, pageId: string, ws: string): Promise<void> {
   await page.goto(editorURL(pageId, ws))
-  await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
+  await page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor({ timeout: 90_000 })
 }
 
 export async function frameOf(page: Page, app: NativeApp): Promise<Frame> {
@@ -79,11 +80,12 @@ async function barrier(page: Page, app: NativeApp) {
   await f.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))))
 }
 
-export const takeButton = (page: Page) => page.getByRole("button", { name: "Převzít úpravy", exact: true })
+/** "Take over editing", after opening the frame's status popover when the page keeps the lock there (#5132). */
+export const takeButton = (page: Page, timeout?: number) => lockButton(page, "Take over editing", timeout)
 
 export async function acquire(page: Page, app: NativeApp): Promise<Frame> {
-  await takeButton(page).click()
-  await page.getByRole("status").filter({ hasText: "Připraveno k úpravám" }).first().waitFor({ timeout: 60_000 })
+  await (await takeButton(page)).click()
+  await page.getByRole("status").filter({ hasText: "Ready to edit" }).first().waitFor({ timeout: 60_000 })
   const f = await frameOf(page, app)
   await pause(800)
   await f.locator("canvas").first().click({ position: CLICK[app] })
@@ -92,8 +94,8 @@ export async function acquire(page: Page, app: NativeApp): Promise<Frame> {
 }
 
 export async function release(page: Page): Promise<void> {
-  await page.getByRole("button", { name: "Uvolnit úpravy", exact: true }).click()
-  await page.getByRole("status").filter({ hasText: "Pouze čtení" }).first().waitFor({ timeout: 60_000 })
+  await (await lockButton(page, "Hand back")).click()
+  await page.getByRole("status").filter({ hasText: "Read-only" }).first().waitFor({ timeout: 60_000 })
 }
 
 /** Types `text` as a new paragraph (Word) or into cell A{row} of the first sheet (Sheet). */
@@ -120,33 +122,33 @@ export async function typeMarker(page: Page, f: Frame, app: NativeApp, text: str
   await barrier(page, app).catch(() => {})
 }
 
-/** Waits for "Uloženo · verze N" and returns N. */
+/** Waits for "Saved · version N" and returns N. */
 export async function waitSaved(page: Page, timeout = 30_000): Promise<string> {
   const end = Date.now() + timeout
   while (Date.now() < end) {
     const s = await page.getByRole("status").first().innerText().catch(() => "")
-    const m = /^Uloženo · verze (\d+)/.exec(s)
+    const m = /^Saved · version (\d+)/.exec(s)
     if (m) return m[1]
     await pause(100)
   }
   throw new Error("the editor never reported a saved version")
 }
 
-export const recoveryRows = (page: Page) => page.getByText(/^Místní koncept · verze/)
+export const recoveryRows = (page: Page) => page.getByText(/^Local draft · version/)
 
 /** Opens each offered draft's comparison and returns what the two sides contain. */
 export async function compareDrafts(page: Page, markers: string[]) {
   const rows = await recoveryRows(page).allInnerTexts()
   const out: Array<{ row: string; caption: string; draftHash: string; serverHash: string; draft: Record<string, boolean>; server: Record<string, boolean> }> = []
   for (let i = 0; i < rows.length; i++) {
-    await recoveryRows(page).nth(i).locator("..").getByRole("button", { name: "Porovnat", exact: true }).click()
-    const serverBox = page.locator('textarea[aria-label="Serverová verze"]')
+    await recoveryRows(page).nth(i).locator("..").getByRole("button", { name: "Compare", exact: true }).click()
+    const serverBox = page.locator('textarea[aria-label="Server version"]')
     await serverBox.waitFor({ timeout: 30_000 })
     const server = await serverBox.inputValue()
-    const draft = await page.locator('textarea[aria-label="Místní koncept"]').inputValue()
+    const draft = await page.locator('textarea[aria-label="Local draft"]').inputValue()
     const has = (text: string) => Object.fromEntries(markers.map((m) => [m, text.includes(m)]))
-    out.push({ row: rows[i], caption: await page.getByText(/^Serverová verze \d+ a /).innerText(), draftHash: sha256(draft), serverHash: sha256(server), draft: has(draft), server: has(server) })
-    await page.getByRole("button", { name: "Zavřít porovnání", exact: true }).click()
+    out.push({ row: rows[i], caption: await page.getByText(/^Server version \d+ a /).innerText(), draftHash: sha256(draft), serverHash: sha256(server), draft: has(draft), server: has(server) })
+    await page.getByRole("button", { name: "Close comparison", exact: true }).click()
   }
   return out
 }
@@ -158,6 +160,6 @@ export async function uiState(page: Page) {
     status: await page.getByRole("status").first().innerText().catch(() => "?"),
     alerts: (await page.getByRole("alert").allInnerTexts().catch(() => [] as string[])).filter(Boolean),
     recoveries: await recoveryRows(page).allInnerTexts().catch(() => [] as string[]),
-    buttons: buttons.filter((t) => /Převzít|Uvolnit|Předat|Požádat|Ověřit|Porovnat|Kopie|Zavřít|Stáhnout/.test(t)),
+    buttons: buttons.filter((t) => /Take over|Hand back|Hand over|Request|Ask the other|Check|Compare|Keep a copy|Close|Download/.test(t)),
   }
 }

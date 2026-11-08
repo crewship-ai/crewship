@@ -6,17 +6,17 @@ describe("native Craft agent stop",()=>{
  it("shows the actual agent and lets the authorized human stop its mandate",()=>{
   const stop=vi.fn(),onAction=vi.fn()
   render(<NativeCraftLeaseBar view={view} mayEdit onAction={onAction} onStopAgent={stop}/>)
-  expect(screen.getByText(/Upravuje Jamie/)).toBeInTheDocument()
-  fireEvent.click(screen.getByRole("button",{name:"Zastavit agenta"}))
+  expect(screen.getByText(/Jamie is editing/)).toBeInTheDocument()
+  fireEvent.click(screen.getByRole("button",{name:"Stop agent"}))
   expect(stop).toHaveBeenCalledOnce();expect(onAction).not.toHaveBeenCalled()
   expect(screen.queryByText(/private-id/)).not.toBeInTheDocument()
  })
  it.each([{...view,can_stop_agent:false},{...view,holder:{actor_id:"user:human",display_name:"Pavel",kind:"human" as const}}])("does not offer stop for another grant or human holder",state=>{
   render(<NativeCraftLeaseBar view={state} mayEdit onAction={vi.fn()} onStopAgent={vi.fn()}/>)
-  expect(screen.queryByRole("button",{name:"Zastavit agenta"})).not.toBeInTheDocument()
+  expect(screen.queryByRole("button",{name:"Stop agent"})).not.toBeInTheDocument()
  })
  it("keeps a pending stop from starting a second mutation",()=>{
   render(<NativeCraftLeaseBar view={view} mayEdit pending onAction={vi.fn()} onStopAgent={vi.fn()}/>)
-  expect(screen.getByRole("button",{name:"Zastavit agenta"})).toBeDisabled()
+  expect(screen.getByRole("button",{name:"Stop agent"})).toBeDisabled()
  })
 })

@@ -136,20 +136,12 @@ export function chatCraftLease(): boolean {
 /**
  * Gates the Artifacts library at /artifacts: a gallery of versioned projects,
  * Word, Sheet, Slides and dashboards with their shared version and a project
- * history detail. Default OFF; /artifacts sends saved links to /pages.
+ * history detail. It is also the single home (#5129): with it on, an old
+ * /pages address opens its artifact at /artifacts/<id>. Default OFF;
+ * /artifacts then sends saved links to /pages.
  */
 export function artifactsLibrary(): boolean {
   return process.env.NEXT_PUBLIC_ARTIFACTS_LIBRARY === "true"
-}
-
-/**
- * Makes the Artifacts library the single home: /pages and /pages/<slug> open
- * it, and a native Word or Sheet is edited in its detail. Only with the
- * library itself on; reference links, pinned versions, restricted members and
- * kinds only Pages opens stay on Pages. Default OFF.
- */
-export function pagesOpenArtifacts(): boolean {
-  return artifactsLibrary() && process.env.NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS === "true"
 }
 
 /**

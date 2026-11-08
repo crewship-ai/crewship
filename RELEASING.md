@@ -95,7 +95,7 @@ The profile separates three things that must not be read as one:
 
 | Surface | Production default (`main`) | Shared dev release | Accepted |
 |---|---|---|---|
-| Artifacts library, Pages opening in Artifacts, chat artifact context and projects, Craft lease, Design | off | on (`RELEASE_FLAGS`) | only on the exact release SHA whose `VALIDACE` records milestones A and B |
+| Artifacts library (which also moves old Pages addresses to `/artifacts/<id>`), chat artifact context and projects, Craft lease, Design | off | on (`RELEASE_FLAGS`) | only on the exact release SHA whose `VALIDACE` records milestones A and B |
 | Dashboard (milestone C) | off | off (`UNACCEPTED_FLAGS`) | no |
 | Slides and Design System (milestone D) | off | off (`UNACCEPTED_FLAGS`) | no |
 

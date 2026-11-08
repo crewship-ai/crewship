@@ -17,12 +17,13 @@
 // editor took input after it).
 
 // The status line alone cannot tell that the editor stopped taking input: the
-// host shows "Neuložený koncept" whenever the editor holds unsaved work, also
+// host shows "Unsaved draft" whenever the editor holds unsaved work, also
 // after its write custody is gone (native-craft-editor-host.tsx: dirty wins
-// over writable). The custody toolbar ("Úpravy dokumentu") says it explicitly:
-// "Požádat o předání" (someone else holds the editor) or "Pouze čtení".
-const STATUS_NOT_EDITABLE = /Pouze čtení|odpojen/
-const CUSTODY_NOT_EDITABLE = /Požádat o předání|Pouze čtení/
+// over writable). The custody toolbar ("Document editing") says it explicitly:
+// "Request edit" (someone else holds the editor) or "Read-only".
+const STATUS_NOT_EDITABLE = /Read-only|disconnected/
+// In the Artifacts frame the chip stands in for the toolbar: "chip:held …", "chip:agent …" or "chip:readonly …".
+const CUSTODY_NOT_EDITABLE = /Request edit|Read-only|^chip:(held|agent|readonly)\b/
 
 /**
  * Does the editor take input, judged from its status line and the text of its

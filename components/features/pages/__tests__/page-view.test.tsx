@@ -168,3 +168,33 @@ describe("PageView", () => {
     expect(container.querySelectorAll("[data-slot='skeleton']").length).toBe(3)
   })
 })
+
+// Inside the Artifacts frame the frame names the artifact, its owner and the
+// way back; the view draws no second breadcrumb, no `@id` and no owner reference.
+describe("PageView hosted in the Artifacts frame", () => {
+  beforeEach(cleanup)
+
+  it("draws no breadcrumb bar, back link, slug or owner reference", () => {
+    const owned = toPageView({ ...WIRE, owner: "user/fixture-human", panels: (WIRE.panels as Exclude<WirePage["panels"], number | null | undefined>).map(panel => ({ ...panel, state: "fresh" as const })) })
+    renderPage({ page: owned, slug: "@cpage1", hosted: true, backLabel: "All artifacts" })
+    expect(screen.queryByRole("button", { name: /All artifacts/ })).toBeNull()
+    expect(screen.queryByText("@cpage1")).toBeNull()
+    expect(screen.queryByText("fixture-human")).toBeNull()
+    expect(screen.queryByTestId("page-owner-link")).toBeNull()
+    // The page's own content still renders.
+    expect(screen.getAllByText("Jede to?").length).toBeGreaterThan(0)
+  })
+
+  it("keeps naming who has never pushed", () => {
+    const waiting = toPageView({ ...WIRE, panels: (WIRE.panels as Exclude<WirePage["panels"], number | null | undefined>).map(panel => panel.id === "uptime" ? { ...panel, producer: "routine/uptime-sweep" } : panel) })
+    renderPage({ page: waiting, hosted: true })
+    expect(screen.queryByRole("button", { name: /Back to pages/ })).toBeNull()
+    expect(screen.getByTestId("page-silent-producers")).toBeTruthy()
+  })
+
+  it("still draws the breadcrumb on its own", () => {
+    renderPage()
+    expect(screen.getByRole("button", { name: /Back to pages/ })).toBeTruthy()
+    expect(screen.getByText("fleet-201", { selector: ".type-page-stamp" })).toBeTruthy()
+  })
+})

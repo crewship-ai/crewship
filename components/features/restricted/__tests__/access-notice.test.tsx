@@ -27,6 +27,14 @@ describe("AccessNotice", () => {
     expect(screen.getByText("viewer@example.com")).toBeTruthy()
   })
 
+  // #5132: the server's pages surface is the member's Artifacts screen, never "Pages".
+  it("names the pages surface Artifacts and links it to /artifacts", () => {
+    render(<AccessNotice kind="no-access" title="No routines shared with you yet" description="None." context={{ ...context, surfaces: ["routines", "pages"] }} current="routines" />)
+    expect(screen.getByRole("link", { name: /^Artifacts/ }).getAttribute("href")).toBe("/artifacts")
+    expect(screen.getByRole("link", { name: "Go to Artifacts" }).getAttribute("href")).toBe("/artifacts")
+    expect(document.body.textContent).not.toMatch(/\bPages?\b/)
+  })
+
   it("offers a retry and no way out for a failed load", () => {
     const retry = vi.fn()
     render(<AccessNotice kind="unavailable" title="Routine catalog unavailable." description="Could not load." onRetry={retry} />)

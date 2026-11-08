@@ -20,7 +20,7 @@ const closed = (value: unknown, keys: string[]): value is Record<string, unknown
 const nonempty = (value: string) => typeof value === "string" && value.trim().length > 0
 const revision = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0
 const schemaNumber = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 1
-const supported = (value: number): value is 2 | 3 => value === 2 || value === 3
+const supported = (value: number): value is 2 | 3 | 4 => value === 2 || value === 3 || value === 4
 class HistoryFailure extends Error {
   constructor(readonly status: "denied" | "unavailable" | "error") { super("Document history unavailable") }
 }
@@ -183,7 +183,7 @@ export function useDocumentHistoryRestore(input: RestoreScope) {
       if (current.current !== captured.key) return
       if (!object(receipt) || receipt.page_id !== captured.packet.page_id || receipt.id !== captured.packet.id || receipt.rev !== captured.packet.ifRev + 1
         || receipt.kind !== "restore" || typeof receipt.epoch !== "string" || !receipt.epoch || receipt.epoch === captured.packet.epoch || receipt.epoch.length > 256
-        || (receipt.schema !== undefined && (typeof receipt.schema !== "number" || ![1, 2, 3].includes(receipt.schema)))) throw new Error("unconfirmed restore")
+        || (receipt.schema !== undefined && (typeof receipt.schema !== "number" || ![1, 2, 3, 4].includes(receipt.schema)))) throw new Error("unconfirmed restore")
       request.current = undefined
       setResult({ key: captured.key, status: "idle" })
       latest.current.onRestored()

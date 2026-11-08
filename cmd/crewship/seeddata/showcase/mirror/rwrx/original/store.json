@@ -1,0 +1,28 @@
+{
+  "dash/meta": {
+    "lang": "cs",
+    "title": "Template Crewship Dashboard"
+  },
+  "dash/params": {
+    "crew": ""
+  },
+  "datasets/tasks": {
+    "description": "Ukázková data vymyšlená pro test: 3 crew × 6 týdnů, hotové a selhané úkoly a náklady v USD.",
+    "edit": {
+      "at": "2026-11-07T12:10:00Z",
+      "via": "claude"
+    },
+    "fixed": true,
+    "source": {
+      "format": "json",
+      "kind": "file",
+      "name": "sample-crew-tasks.json",
+      "url": "/_blob/8c07c8d32922b944d88e009ad3d5828e"
+    },
+    "title": "Sample: úkoly crew po týdnech",
+    "updated": {
+      "at": "2026-11-07T12:10:00Z",
+      "by": "Claude"
+    }
+  }
+}

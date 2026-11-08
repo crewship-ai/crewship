@@ -1,4 +1,5 @@
 import { LIBRARY_KINDS, repeatedSeries, type LibraryItem, type LibraryKind } from "./library-items"
+import { needsAttention as attentionRule } from "./attention"
 
 /** The places the panel offers. Empty, Clean up, Test items and Archive only show; changes go through a previewed bulk action, and nothing is deleted. */
 export type LibraryView = "home" | "all" | "attention" | "opened" | "mine" | "favorites" | "empty" | "series" | "test" | "archive"
@@ -9,6 +10,8 @@ export interface Personal {
   favorites?: ReadonlySet<string>
   /** Slugs this person created from New artifact; a blank one of these is still theirs to find. */
   created?: ReadonlySet<string>
+  /** Slugs with a recovered local draft in this browser (a Needs attention signal). */
+  drafts?: ReadonlySet<string>
 }
 
 /**
@@ -47,8 +50,8 @@ export function versionOf(item: LibraryItem): VersionState {
   return item.sharedVersion ? "shared" : "unshared"
 }
 
-/** Made but never shared: the one thing the library can flag from the list alone. */
-export const needsAttention = (item: LibraryItem) => !item.empty && versionOf(item) === "unshared"
+/** The fixed Needs attention rule (attention.ts): a recovered draft, a failed refresh, or stale data you own. Never "not shared". */
+export const needsAttention = (item: LibraryItem, personal: Personal = {}) => attentionRule(item, { drafts: personal.drafts })
 
 export const OWNER_NONE = "—"
 const ownerKey = (item: LibraryItem) => item.ownerLabel ?? OWNER_NONE
@@ -60,8 +63,9 @@ export interface ParsedQuery {
   owner: string[]
 }
 
+// Storage keys and their plurals keep working (`kind:projects`) beside the labels; a label with a space is not one token.
 const KIND_WORDS = new Map<string, LibraryKind>(LIBRARY_KINDS.flatMap(({ kind, label, plural }) =>
-  [[kind, kind], [label.toLowerCase(), kind], [plural.toLowerCase(), kind]] as [string, LibraryKind][]))
+  [[kind, kind], [`${kind}s`, kind], [label.toLowerCase().replace(/\s+/g, ""), kind], [plural.toLowerCase().replace(/\s+/g, ""), kind]] as [string, LibraryKind][]))
 
 /** `kind:word is:private owner:you budget` — operators first-class, the rest is free text. */
 export function parseQuery(q: string): ParsedQuery {
@@ -117,7 +121,7 @@ export function inView(items: LibraryItem[], view: LibraryView, personal: Person
     case "test": return kept.filter(item => item.test)
     case "empty": return kept.filter(item => item.empty && !item.test)
     case "series": return repeatedSeries(live).flatMap(series => series.items)
-    case "attention": return live.filter(needsAttention)
+    case "attention": return live.filter(item => needsAttention(item, personal))
     case "mine": return live.filter(item => item.ownerLabel === "You")
     case "favorites": return live.filter(item => personal.favorites?.has(item.slug))
     case "opened": {

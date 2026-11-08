@@ -34,8 +34,9 @@ item still opens the Pages overview. A build made with
 and Dashboard items with their kind and shared version, views such as Home,
 Mine, Favorites, Test items and Archive, and a detail that opens the item
 itself. Every item has its own address, `/artifacts/<id>`, so a reload or a
-shared link opens it again. With `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true` as
-well, `/pages` hands its overview to the library.
+shared link opens it again. In that build every old Pages address
+(`/pages`, `/pages/<slug>`, `/pages/@<id>`, `/pages?ref=<id>` and
+`/pages/craft/editor?page_id=<id>`) leads to the same `/artifacts/<id>`.
 
 The artifact kinds behind it are experimental and **off by default**. A
 workspace flag, turned on for the current workspace with

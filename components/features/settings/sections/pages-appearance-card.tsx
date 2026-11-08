@@ -17,7 +17,7 @@ import { normalizePageTheme, PAGE_THEME_PRESETS, colorContrast, pageThemePreset,
 import { PagesThemePreviewPanel } from "./pages-theme-preview"
 import { cn } from "@/lib/utils"
 
-// Settings › General › Pages appearance: the workspace palette agents build
+// Settings › General › Artifacts appearance: the workspace palette agents build
 // Page applications with. Everything drawn from the palette (preset tiles,
 // swatches, the mini Page) uses literal inline colours, never app tokens —
 // it shows what a Page will look like, not the Crewship interface.
@@ -78,7 +78,7 @@ function PresetPreview({ theme }: { theme: PageTheme }) {
 function ThemeTiles({ draft, editing, onPick, onCustom }: { draft: PageTheme; editing: boolean; onPick: (theme: PageTheme) => void; onCustom: () => void }) {
   const preset = pageThemePreset(draft)
   return (
-    <div role="radiogroup" aria-label="Pages theme" className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
+    <div role="radiogroup" aria-label="Artifacts theme" className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5">
       {PAGE_THEME_PRESETS.map((p, i) => {
         const checked = preset?.id === p.id
         return (
@@ -155,7 +155,7 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
       if (!response.ok) { const body = await response.json().catch(() => null); toast.error(body?.error ?? "Unable to reset Pages colors"); return }
       form.reset()
       await refreshWorkspaceSettings()
-      toast.success("Pages use the Crewship default again")
+      toast.success("Artifacts use the Crewship default again")
     } finally {
       setResetting(false)
     }
@@ -169,7 +169,7 @@ export function PagesAppearanceCard({ workspaceId, role }: { workspaceId: string
     onChange={(key, value) => form.set(key, value)}
     onClose={() => setPreviewOpen(false)}
   />}
-  <SettingsCard icon={Palette} title="Pages appearance"
+  <SettingsCard icon={Palette} title="Artifacts appearance"
     actions={<span className="flex flex-wrap items-center justify-end gap-2">
       <StatusPill data-testid="pages-theme-status" tone={status === "Crewship default" ? "success" : "blue"} label={status} />
       <Button variant="ghost" size="sm" className="gap-1.5" aria-pressed={previewOpen} onClick={() => setPreviewOpen((v) => !v)}><Eye className="h-3.5 w-3.5" />Preview</Button>

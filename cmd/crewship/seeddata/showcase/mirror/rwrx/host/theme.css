@@ -1,0 +1,107 @@
+/*
+ * The tokens the original page reads from its dashboard host, resolved to the
+ * values that host uses at its default ("comfortable") density. The Crewship
+ * frame draws the page in an isolated document with none of them, so they are
+ * declared here once; the page's own styles stay verbatim.
+ */
+:root {
+  color-scheme: light dark;
+  --font-anthropic-sans: "Anthropic Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-anthropic-serif: "Anthropic Serif", ui-serif, Georgia, "Times New Roman", serif;
+
+  --color-fg: #0b0b0b;
+  --color-fg-muted: #898781;
+  --color-bg: #f9f9f7;
+  --color-panel: #ffffff;
+  --color-border-line: rgb(11 11 11 / 0.1);
+  --color-ok: #006300;
+  --color-warn: #734500;
+  --color-bad: #8e2626;
+
+  --cds-gap-xs: 0.5rem;
+  --cds-gap-sm: 0.75rem;
+  --cds-gap-md: 1rem;
+  --cds-gap-lg: 1.75rem;
+  --cds-pad-xs: 0.375rem;
+  --cds-pad-sm: 0.5rem;
+  --cds-pad-md: 0.75rem;
+  --cds-pad-lg: 1rem;
+  --cds-pad-xl: 1.5rem;
+  --cds-radius: 0.5rem;
+  --cds-font-size-caption: 0.75rem;
+  --cds-font-size-body: 0.875rem;
+  --cds-font-size-heading: 0.9375rem;
+  --cds-font-size-title: 1.375rem;
+  --cds-font-weight-medium: 500;
+  --cds-dur-slow: 0.45s;
+
+  --cds-surface-popover: #ffffff;
+  --cds-border: rgb(11 11 11 / 0.1);
+  --cds-shadow-popover: 0 8px 24px #0000001f, 0 2px 6px #00000014;
+  --cds-text-secondary: #52514e;
+  --cds-chart-axis: #c3c2b7;
+  --cds-chart-grid: rgb(11 11 11 / 0.1);
+  --cds-chart-muted: #c3c2b7;
+  --cds-chart-categorical-1: #2a78d6;
+  --cds-chart-categorical-2: #eb6834;
+  --cds-chart-categorical-3: #1baf7a;
+  --cds-chart-categorical-4: #eda100;
+  --cds-chart-categorical-5: #e87ba4;
+  --cds-chart-categorical-6: #008300;
+  --cds-chart-categorical-7: #6250d6;
+  --cds-chart-categorical-8: #e34948;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-fg: #f0efec;
+    --color-fg-muted: #898781;
+    --color-bg: #0b0b0b;
+    --color-panel: #1a1a19;
+    --color-border-line: rgb(255 255 255 / 0.1);
+    --color-ok: #0ca30c;
+    --color-warn: #db9300;
+    --color-bad: #ec7e7e;
+
+    --cds-surface-popover: #20201f;
+    --cds-border: rgb(255 255 255 / 0.1);
+    --cds-shadow-popover: 0 8px 24px #00000052, 0 2px 6px #0003;
+    --cds-text-secondary: #c3c2b7;
+    --cds-chart-axis: #383835;
+    --cds-chart-grid: rgb(255 255 255 / 0.1);
+    --cds-chart-muted: #5f5e5a;
+    --cds-chart-categorical-1: #3987e5;
+    --cds-chart-categorical-2: #d95926;
+    --cds-chart-categorical-3: #199e70;
+    --cds-chart-categorical-4: #c98500;
+    --cds-chart-categorical-5: #d55181;
+    --cds-chart-categorical-6: #008300;
+    --cds-chart-categorical-7: #9085e9;
+    --cds-chart-categorical-8: #e66767;
+  }
+}
+
+html, body { margin: 0; background: var(--color-bg); }
+body { font-family: var(--font-anthropic-sans); }
+
+/* The host's page gutter and base text, as the dashboard host sets them. */
+#dash-root { color: var(--color-fg); font-size: 14px; line-height: 1.45; padding: clamp(var(--cds-pad-md), 4%, var(--cds-pad-xl)); }
+
+/* The host's dropdown look for `dash-select`. */
+.dash-select {
+  appearance: none;
+  border: 1px solid var(--color-border-line);
+  border-radius: var(--cds-radius);
+  background: var(--color-panel) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 20 20'%3E%3Cpath fill='%23808080' d='M14.128 7.165a.502.502 0 0 1 .744.67l-4.5 5-.078.07a.5.5 0 0 1-.666-.07l-4.5-5-.06-.082a.501.501 0 0 1 .729-.656l.075.068L10 11.752z'/%3E%3C/svg%3E") no-repeat right .5em center;
+  max-width: 100%;
+  color: var(--color-fg);
+  font: inherit;
+  text-overflow: ellipsis;
+  padding: .35em 2em .35em .75em;
+}
+.dash-select:disabled { opacity: .55; }
+
+/* The host's loading placeholder. */
+.dash-skeleton { -webkit-text-fill-color: transparent !important; background-image: linear-gradient(color-mix(in srgb, currentColor 13%, transparent) 0 0) !important; border-radius: .3em; }
+.dash-skeleton > * { visibility: hidden !important; }
+.dash-skeleton:empty::before { content: ""; width: 3ch; display: inline-block; }

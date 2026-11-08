@@ -447,7 +447,7 @@ test.describe("v67 parity", () => {
         await seed(page, PINNED)
         await page.goto("/settings?tab=general")
         await expect(page.getByLabel("Workspace name")).toHaveCSS("text-align", "right")
-        const pages = page.getByRole("region", { name: "Pages appearance" })
+        const pages = page.getByRole("region", { name: "Artifacts appearance" })
         await expect(pages.getByRole("radio")).toHaveCount(5)
         await expect(pages.locator(".uppercase")).toHaveCount(0)
         await expect(page.getByRole("button", { name: /Store missing avatars/ })).toHaveCount(0)

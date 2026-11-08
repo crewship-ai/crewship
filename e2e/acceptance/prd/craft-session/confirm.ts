@@ -1,7 +1,7 @@
 // When the hour rows (hour-steps.ts) may count a cycle's typing as saved. Pure
 // functions, no browser: confirm.test.mjs covers them.
 //
-// The save label ("Uloženo · verze N") only says that *some* save happened. A
+// The save label ("Saved · version N") only says that *some* save happened. A
 // step earlier in the same cycle (inserting a table, a picture, a second sheet)
 // saves too, so its label can already sit on screen before the cycle types
 // anything (#4871, RC-4: the table step left "verze 14", the typing never reached
@@ -18,9 +18,9 @@ function* walk(value: unknown): Generator<Node> {
   }
 }
 
-/** "Uloženo · verze N" -> "N"; anything else (saving, unsaved draft, read-only) -> undefined. */
+/** "Saved · version N" -> "N"; anything else (saving, unsaved draft, read-only) -> undefined. */
 export function labelVersion(status: string): string | undefined {
-  return /^Uloženo · verze (\d+)/.exec(status)?.[1]
+  return /^Saved · version (\d+)/.exec(status)?.[1]
 }
 
 /**
@@ -57,7 +57,7 @@ export function confirmCycle(input: { typed: string[]; baseline: string; label: 
   if (typed.length === 0) return { confirmed: false, problem: "the cycle typed no markers" }
   const missing = typed.filter((m) => !holdsMarker(head.text, m))
   if (missing.length === 0) return { confirmed: true, version: head.version }
-  const said = label ? `the label says saved (verze ${label}, baseline ${baseline})` : `no save newer than verze ${baseline} was shown`
+  const said = label ? `the label says saved (version ${label}, baseline ${baseline})` : `no save newer than version ${baseline} was shown`
   return {
     confirmed: false,
     problem: `${said}, but the server head v${head.version} lacks ${missing.length} of ${typed.length} typed markers, first ${missing.slice(0, 2).join(", ")}; the typing is not counted as saved`,
@@ -109,7 +109,7 @@ export function hourInterruptions(verifications: readonly VerifyPress[], stalls:
   const presses = verifications.length
   const pollGaps = stalls.length
   const note = (accounting ? accounting.note + " " : "") +
-    `Ověřit výsledek pressed ${presses} times, interrupted ${seconds(interruptedMs)} in total (page-poll gaps and unconfirmed spells), longest interruption ${seconds(longestStallMs)}; ` +
+    `Check the result pressed ${presses} times, interrupted ${seconds(interruptedMs)} in total (page-poll gaps and unconfirmed spells), longest interruption ${seconds(longestStallMs)}; ` +
     `${pollGaps} page-poll gap(s) of at least 10 s (${PAGE_STALLS_DESCRIPTION}).` +
     (presses ? " Saving did not recover by itself." : "")
   return { presses, interruptedMs, longestStallMs, pollGaps, note }
@@ -193,7 +193,7 @@ export interface ForcedCtrlS {
   opsAtPress: number
   /** When the wait after the press ended (also when it threw); null while it runs. */
   endedAt: string | null
-  /** Did a new version follow the press (a newer "Uloženo · verze N", or a newer server head for the table cell). */
+  /** Did a new version follow the press (a newer "Saved · version N", or a newer server head for the table cell). */
   newVersion: boolean
   version: string | null
   outcome: PressOutcome
@@ -262,10 +262,10 @@ export function producerOf(ops: readonly AccountedOp[], version: string): Accoun
   return w?.op === undefined ? undefined : ops.find((o) => o.n === w.op)
 }
 
-/** The harness actions after which a request may be the harness's: presses, "Ověřit výsledek", releases, and the closed pages that end them. */
+/** The harness actions after which a request may be the harness's: presses, "Check the result", releases, and the closed pages that end them. */
 export interface Interventions {
   presses: readonly ForcedCtrlS[]
-  /** "Ověřit výsledek": a reconcile that proves an attempt absent lets the editor send a fresh save (single-editor-save.ts, settle). */
+  /** "Check the result": a reconcile that proves an attempt absent lets the editor send a fresh save (single-editor-save.ts, settle). */
   verifications?: readonly VerifyPress[]
   releases?: readonly TrailMark[]
   editorEnds?: readonly TrailMark[]
@@ -273,7 +273,7 @@ export interface Interventions {
 
 /**
  * Why request `o` cannot be called the editor's own, or undefined when it can: it was
- * sent after a harness Ctrl+S, "Ověřit výsledek" or release whose editor had not ended yet.
+ * sent after a harness Ctrl+S, "Check the result" or release whose editor had not ended yet.
  */
 export function openIntervention(o: Pick<AccountedOp, "n" | "sentAt">, p: Interventions): string | undefined {
   const sent = o.sentAt ? Date.parse(o.sentAt) : NaN
@@ -286,7 +286,7 @@ export function openIntervention(o: Pick<AccountedOp, "n" | "sentAt">, p: Interv
   }
   for (const v of p.verifications ?? []) {
     const m = { at: v.pressedAt, opsAt: v.opsAtPress }
-    if (after(m) && !ended(m)) return `sent after a harness Ověřit výsledek (cycle ${v.cycle}, ${v.pressedAt}) of the same editor`
+    if (after(m) && !ended(m)) return `sent after a harness Check the result (cycle ${v.cycle}, ${v.pressedAt}) of the same editor`
   }
   for (const r of p.releases ?? []) {
     if (after(r) && !ended(r)) return `sent after a harness release (flush before transfer, ${r.at}) of the same editor`
@@ -331,7 +331,7 @@ export function finishPress(event: ForcedCtrlS, ops: readonly AccountedOp[], res
 }
 
 /**
- * Records an "Ověřit výsledek" press at dispatch, before the click: an interrupted wait
+ * Records an "Check the result" press at dispatch, before the click: an interrupted wait
  * still leaves the press (without `waitEndedAt`) in the evidence. The caller fills in the rest.
  */
 export function startVerify(verifications: VerifyPress[], p: { cycle: number; firstSeenAt: string; opsAtPress: number; at?: string }): VerifyPress {
@@ -386,7 +386,7 @@ const OPEN_VERIFY_MS = 15_000
 export interface SaveAccounting {
   /** Writes the server confirmed, each version once: autosaves + unknownOrigin. */
   committedWrites: number
-  /** Confirmed writes sent while no harness Ctrl+S, Ověřit výsledek or release of the same editor could have caused them. */
+  /** Confirmed writes sent while no harness Ctrl+S, Check the result or release of the same editor could have caused them. */
   autosaves: number
   /** Confirmed writes whose origin the trail cannot prove: a forced save and a queued autosave look the same. */
   unknownOrigin: number
@@ -413,11 +413,11 @@ export interface SaveAccounting {
 
 export const SAVE_ACCOUNTING_DESCRIPTION =
   "Measured: forcedCtrlS, releases and verifyPresses. committedWrites: versions the server confirmed (a save answer that created a version, or a reconcile that proved one), each once; committedWrites = autosaves + unknownOrigin. " +
-  "autosaves: writes sent before every harness Ctrl+S, Ověřit výsledek and release of the same editor (or after its page closed), so no harness action caused them; " +
-  "unknownOrigin: writes sent after a harness Ctrl+S, Ověřit výsledek or release of the still-open editor, or confirmed without a save request in the trail. The request carries no trigger and an autosave can queue behind a slow capture, so the harness cannot tell a forced save from an autosave (#5112); a forced save is among these, never counted apart; " +
-  "forcedCtrlS: Control+s pressed by the harness (no new version within 4 s, or the Word table cell not in the head after 4 s with status Neuložený koncept), by outcome confirm-only / no-version / unattributed / incomplete; " +
-  "editorReconciles: reconcile requests sent outside every press window; reconcilesDuringPressWait: reconcile requests sent between a press (Ctrl+S or Ověřit výsledek) and 2 s after its wait, cause unknown; " +
-  "verifyPresses: Ověřit výsledek presses. Accounting only, not a gate."
+  "autosaves: writes sent before every harness Ctrl+S, Check the result and release of the same editor (or after its page closed), so no harness action caused them; " +
+  "unknownOrigin: writes sent after a harness Ctrl+S, Check the result or release of the still-open editor, or confirmed without a save request in the trail. The request carries no trigger and an autosave can queue behind a slow capture, so the harness cannot tell a forced save from an autosave (#5112); a forced save is among these, never counted apart; " +
+  "forcedCtrlS: Control+s pressed by the harness (no new version within 4 s, or the Word table cell not in the head after 4 s with status Unsaved draft), by outcome confirm-only / no-version / unattributed / incomplete; " +
+  "editorReconciles: reconcile requests sent outside every press window; reconcilesDuringPressWait: reconcile requests sent between a press (Ctrl+S or Check the result) and 2 s after its wait, cause unknown; " +
+  "verifyPresses: Check the result presses. Accounting only, not a gate."
 
 /** Counts how the saves of an hour row happened. Pure: the session records the waits, presses, releases, closed pages and requests. */
 export function saveAccounting(input: {
@@ -455,9 +455,9 @@ export function saveAccounting(input: {
   const editorReconcileOps = reconciles.filter((o) => !duringPress(o)).map((o) => o.n)
   const detail = (Object.entries(forcedCtrlSOutcomes) as Array<[PressOutcome, number]>).filter(([, k]) => k > 0).map(([o, k]) => `${k} ${o}`)
   const note =
-    `forced Ctrl+S ${events.length}×, Ověřit výsledek ${verifications.length}×${releases.length ? `, release ${releases.length}×` : ""}; ` +
+    `forced Ctrl+S ${events.length}×, Check the result ${verifications.length}×${releases.length ? `, release ${releases.length}×` : ""}; ` +
     `server-confirmed writes ${writes.length}× = autosave ${autosaves}× + origin unknown ${unknown.length}×` +
-    (unknown.length ? ` (sent after a harness Ctrl+S, Ověřit výsledek or release, or without a save request in the trail: the harness cannot tell a forced save from an autosave, #5112)` : "") +
+    (unknown.length ? ` (sent after a harness Ctrl+S, Check the result or release, or without a save request in the trail: the harness cannot tell a forced save from an autosave, #5112)` : "") +
     `, ` +
     (detail.length ? `press outcomes ${detail.join(", ")}, ` : "") +
     (reconcilesDuringPressWaitOps.length ? `reconcile during a press wait (cause unknown) ${reconcilesDuringPressWaitOps.length}×, ` : "") +
@@ -600,24 +600,24 @@ export function pendingReplies(ops: SentOp[]): number[] {
 }
 
 // ---------------------------------------------------------------------------
-// "Výsledek nepotvrzen" in the hour rows and the lost-reply rows (RC f3035b06c).
+// "Result not confirmed" in the hour rows and the lost-reply rows (RC f3035b06c).
 //
 // A renderer stalled past the editor's 10 s save deadline turns a committed save into
-// "Výsledek nepotvrzen", and the editor sends nothing until somebody asks. A person
-// presses "Ověřit výsledek"; the hour session does too, a little after that deadline,
+// "Result not confirmed", and the editor sends nothing until somebody asks. A person
+// presses "Check the result"; the hour session does too, a little after that deadline,
 // and records it. The press proves nothing about the typing: confirmCycle stays the judge.
 
 /** Past the editor's own 10 s save deadline, so a reply that is merely late can still land. */
 export const VERIFY_AFTER_MS = 15_000
 
-export const isUnconfirmedStatus = (status: string): boolean => /^Výsledek nepotvrzen/.test(status)
+export const isUnconfirmedStatus = (status: string): boolean => /^Result not confirmed/.test(status)
 
-/** Has the status said "Výsledek nepotvrzen" for longer than the deadline, counted from `since`? */
+/** Has the status said "Result not confirmed" for longer than the deadline, counted from `since`? */
 export function verifyDue(status: string, since: number, now: number, after = VERIFY_AFTER_MS): boolean {
   return isUnconfirmedStatus(status) && now - since >= after
 }
 
-/** One press of "Ověřit výsledek", for the row's evidence. */
+/** One press of "Check the result", for the row's evidence. */
 export interface VerifyPress {
   cycle: number
   firstSeenAt: string

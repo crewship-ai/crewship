@@ -16,6 +16,7 @@ import { pause } from "./drafts-crash/crash"
 import * as editor from "./drafts-crash/native"
 import { recoveryRows } from "./drafts-crash/native"
 import { expect, prdRequirement, test } from "./fixtures"
+import { lockButton } from "./craft-session/frame"
 
 const REQ = {
   wordcraft: prdRequirement("A.craft.write-revoked-word", "Word: when the write right is withdrawn the open editor turns read-only and the unsaved draft is kept, offered to nobody while the right is gone, and offered with every line when it returns"),
@@ -65,7 +66,7 @@ for (const { application, label } of APPLICATIONS) {
           traceCraft(page, "peer", trail)
           const admission = captureAdmission(page)
           await page.goto(doc.editorPath)
-          await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
+          await page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor({ timeout: 90_000 })
 
           // The person takes the editor and types; nothing is saved.
           const tag = Date.now().toString(36)
@@ -104,17 +105,17 @@ for (const { application, label } of APPLICATIONS) {
             await prd.evidence("lines.json", { ledger, checks: lineChecks })
             expect(c.problems, what).toEqual([])
           }
-          await expect(page.getByRole("button", { name: "Uvolnit úpravy", exact: true }), "the editor is no longer the person's to edit").toHaveCount(0, { timeout: READ_ONLY_WITHIN_MS })
-          // The editor ends the write session: "Pouze čtení", or "Editor odpojen · koncept zachován"
+          await expect(await lockButton(page, "Hand back", 10_000), "the editor is no longer the person's to edit").toHaveCount(0, { timeout: READ_ONLY_WITHIN_MS })
+          // The editor ends the write session: "Read-only", or "Editor disconnected · draft kept"
           // when the server closes the editor's event stream because the authority changed.
-          await expect(page.getByRole("status").filter({ hasText: /Pouze čtení|Editor odpojen/ }).first()).toBeVisible({ timeout: READ_ONLY_WITHIN_MS })
+          await expect(page.getByRole("status").filter({ hasText: /Read-only|Editor disconnected/ }).first()).toBeVisible({ timeout: READ_ONLY_WITHIN_MS })
           const readOnlyAfterMs = Date.now() - revokedAt
           // Keeping a draft and offering it are separate (#5073): without Edit the
           // open tab offers the kept draft to nobody, as draft-revocation proves for
           // the same frame (draft: "retain", reason: "write_revoked"). The page says
           // the draft is kept, the browser holds it, and its lines are checked when
           // the right returns below.
-          await expect(page.getByText(/koncept zachován|zůstaly jako místní koncept/).first(), "the page says the draft is kept").toBeVisible({ timeout: READ_ONLY_WITHIN_MS })
+          await expect(page.getByText(/draft kept|stay as a local draft/).first(), "the page says the draft is kept").toBeVisible({ timeout: READ_ONLY_WITHIN_MS })
           await expect.poll(() => storedDrafts(page, doc.pageId), { timeout: READ_ONLY_WITHIN_MS, message: "the browser keeps the draft" }).toBeGreaterThan(0)
           // Long enough for a late read proof to have offered it, if it would.
           await pause(15_000)
@@ -147,15 +148,15 @@ for (const { application, label } of APPLICATIONS) {
           // The draft survives a reload; it is offered again once the person may edit.
           // A Read grantee gets the shared preview, or its empty state, not the editor.
           await page.reload()
-          await page.getByText(/Sdílený náhled/).first().waitFor({ timeout: 90_000 })
+          await page.getByText(/Shared preview/).first().waitFor({ timeout: 90_000 })
           await doc.grant(request, peer.userId, "write")
           await page.reload()
-          await page.getByRole("status").filter({ hasText: /Pouze čtení|Připraveno k úpravám/ }).first().waitFor({ timeout: 90_000 })
+          await page.getByRole("status").filter({ hasText: /Read-only|Ready to edit/ }).first().waitFor({ timeout: 90_000 })
           await editor.frameOf(page, application)
           // A draft is never imported into a read-only view: it is offered once
           // the person takes the editor back (the old lease runs out first).
-          await editor.takeButton(page).click({ timeout: 90_000 })
-          await page.getByRole("status").filter({ hasText: "Připraveno k úpravám" }).first().waitFor({ timeout: 60_000 })
+          await (await editor.takeButton(page, 90_000)).click({ timeout: 90_000 })
+          await page.getByRole("status").filter({ hasText: "Ready to edit" }).first().waitFor({ timeout: 60_000 })
           await waitForDraftOffer(page, 60_000)
           const regained = await inspectDrafts(page, typedBefore)
           // Record the per-line check (lines.json) before any verdict on this copy.

@@ -14,7 +14,11 @@ createServer(async (req, res) => {
     // a directory fails with EISDIR and falls through like anything else.
     let file = path
     let data = null
-    for (const candidate of [path, path + ".html", resolve(path, "index.html")]) {
+    // Like internal/api/static.go: a dynamic route (/pages/<slug>,
+    // /artifacts/<id>) falls back to the exported `_` placeholder exactly one
+    // level above the leaf, so the client reads the real segment from the URL.
+    const placeholder = [resolve(path, "..", "_.html"), resolve(path, "..", "_", "index.html")]
+    for (const candidate of [path, path + ".html", resolve(path, "index.html"), ...(path === root || resolve(path, "..") === root ? [] : placeholder)]) {
       if (candidate !== root && !candidate.startsWith(root + sep)) continue
       data = await readFile(candidate).catch(() => null)
       if (data) { file = candidate; break }

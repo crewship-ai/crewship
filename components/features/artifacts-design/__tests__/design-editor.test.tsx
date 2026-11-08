@@ -250,7 +250,7 @@ describe("Design status after the write right went",()=>{
   state.editable=false;state.dirty=true;state.unsynced=true
   render(<DesignEditor workspaceId="workspace" slug="shop"/>)
   expect(screen.queryByText(/saved as you work/)).toBeNull()
-  expect(screen.getByRole("status")).toHaveTextContent("neodeslané změny zůstaly v tomto prohlížeči")
+  expect(screen.getByRole("status")).toHaveTextContent("unsent changes stay in this browser")
  })
  it("does not call a connected canvas up to date while the server has not confirmed the work",()=>{
   state.unsynced=true
@@ -280,10 +280,10 @@ describe("Design conflict notice",()=>{
   state.conflicts=[conflict("theirs")]
   render(<DesignEditor workspaceId="workspace" slug="shop"/>)
   const alert=screen.getByRole("alert")
-  expect(alert).toHaveTextContent("Konflikt úprav")
-  expect(alert).toHaveTextContent("Váš text se neuložil")
+  expect(alert).toHaveTextContent("Edit conflict")
+  expect(alert).toHaveTextContent("Your text was not saved")
   expect(alert).toHaveTextContent("Můj text")
-  fireEvent.click(screen.getByRole("button",{name:"Obnovit tento text"}))
+  fireEvent.click(screen.getByRole("button",{name:"Restore this text"}))
   expect(designNodes(state.doc!)[0].text).toBe("Můj text")
   expect(state.dismiss).toHaveBeenCalledWith(state.conflicts[0])
  })
@@ -291,24 +291,24 @@ describe("Design conflict notice",()=>{
   upsertDesignNode(state.doc!,{...node,text:"Cizí text",x:77,fill:"#ff0000",name:"Přejmenováno"})
   state.conflicts=[conflict("theirs")]
   render(<DesignEditor workspaceId="workspace" slug="shop"/>)
-  fireEvent.click(screen.getByRole("button",{name:"Obnovit tento text"}))
+  fireEvent.click(screen.getByRole("button",{name:"Restore this text"}))
   expect(designNodes(state.doc!)).toMatchObject([{text:"Můj text",x:77,fill:"#ff0000",name:"Přejmenováno"}])
  })
  it("says the other person's text was overwritten and may exist nowhere else",()=>{
   state.conflicts=[conflict("mine")]
   render(<DesignEditor workspaceId="workspace" slug="shop"/>)
   const alert=screen.getByRole("alert")
-  expect(alert).toHaveTextContent("Text druhého člověka byl přepsán")
-  expect(alert).toHaveTextContent("v historii zůstává, jen pokud byl uložen ve verzi")
+  expect(alert).toHaveTextContent("other person’s text was overwritten")
+  expect(alert).toHaveTextContent("stays in History only if it was saved in a version")
   expect(alert).toHaveTextContent("Cizí text")
  })
  it("does not claim a text stayed on a layer that was deleted",()=>{
   state.conflicts=[{...conflict("theirs"),left:undefined,theirs:""}]
   render(<DesignEditor workspaceId="workspace" slug="shop"/>)
   const alert=screen.getByRole("alert")
-  expect(alert).toHaveTextContent("Vrstva je mezitím smazaná")
-  expect(alert).not.toHaveTextContent("Na plátně zůstal")
-  fireEvent.click(screen.getByRole("button",{name:"Obnovit tento text"}))
+  expect(alert).toHaveTextContent("The layer was deleted meanwhile")
+  expect(alert).not.toHaveTextContent("stayed on the canvas")
+  fireEvent.click(screen.getByRole("button",{name:"Restore this text"}))
   expect(designNodes(state.doc!)).toMatchObject([{id:"label",text:"Můj text"}])
  })
  it("copies the text and keeps the notice when a person only dismisses it",async()=>{
@@ -316,16 +316,16 @@ describe("Design conflict notice",()=>{
   vi.stubGlobal("navigator",{...navigator,clipboard:{writeText}})
   state.conflicts=[conflict("theirs")]
   render(<DesignEditor workspaceId="workspace" slug="shop"/>)
-  fireEvent.click(screen.getByRole("button",{name:"Kopírovat text"}))
+  fireEvent.click(screen.getByRole("button",{name:"Copy text"}))
   await waitFor(()=>expect(writeText).toHaveBeenCalledWith("Můj text"))
   expect(state.dismiss).not.toHaveBeenCalled()
-  fireEvent.click(screen.getByRole("button",{name:"Zavřít upozornění"}))
+  fireEvent.click(screen.getByRole("button",{name:"Dismiss"}))
   expect(state.dismiss).toHaveBeenCalledWith(state.conflicts[0])
  })
  it("does not offer a restore to a person who can no longer edit",()=>{
   state.editable=false
   state.conflicts=[conflict("theirs")]
   render(<DesignEditor workspaceId="workspace" slug="shop"/>)
-  expect(screen.getByRole("button",{name:"Obnovit tento text"})).toBeDisabled()
+  expect(screen.getByRole("button",{name:"Restore this text"})).toBeDisabled()
  })
 })

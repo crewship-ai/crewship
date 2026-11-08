@@ -6,7 +6,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
-import { VERSION, RICH_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
+import { VERSION, RICH_VERSION, LATEST_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
 import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
@@ -17,7 +17,9 @@ const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(v
 const textBoundary = (text, index) => index === 0 || index === text.length ||
   !(text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff && text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff);
 const contentSchema = version => version === 1 ? VERSION : version;
-const supportedSchema = version => [1, VERSION, RICH_VERSION].includes(version);
+const supportedSchema = version => [1, VERSION, RICH_VERSION, LATEST_VERSION].includes(version);
+// Schemas 3 and 4 are bound to their original Page and carry rich semantic proofs.
+const richSchema = version => version === RICH_VERSION || version === LATEST_VERSION;
 async function verifyTargets(doc, targets, version = VERSION) {
   if (!Array.isArray(targets) || targets.length < 1 || targets.length > 16) throw fault(400, 'one to sixteen selected text targets required');
   const blocks = new Map((await outline(doc,version)).map(block => [block.id, block]));
@@ -36,7 +38,7 @@ async function verifyTargets(doc, targets, version = VERSION) {
     if (target.hash !== block.hash || target.quote !== block.text.slice(target.from, target.to)) throw fault(409, 'selected text changed');
     const ancestors = []; let parent = block.parent;
     while (parent) { ancestors.push(parent); parent = blocks.get(parent)?.parent; }
-    verified.push({ id: block.id, hash: block.hash, from: target.from, to: target.to, quote: block.text.slice(target.from, target.to), text: block.text, ancestors, ...(version === RICH_VERSION ? {schema:RICH_VERSION} : {}) });
+    verified.push({ id: block.id, hash: block.hash, from: target.from, to: target.to, quote: block.text.slice(target.from, target.to), text: block.text, ancestors, ...(richSchema(version) ? {schema:version} : {}) });
   }
   return verified;
 }
@@ -85,7 +87,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   const secret = await readServiceSecret(tokenFile);
   const build = createHash('sha256');
   for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'position-migrations.mjs', 'service.mjs', 'create-document.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
-  const identity = { protocol: PROTOCOL, schema: RICH_VERSION, build: build.digest('hex') };
+  const identity = { protocol: PROTOCOL, schema: LATEST_VERSION, build: build.digest('hex') };
   const leases = new Map();
   const owner = randomUUID();const syncEpoch=state=>`${state.incarnation??"legacy"}:${owner}:${state.generation??state.epoch}`; const documents = new Map(); let queued = 0; let draining = false;let ready=false;let admitted=0;const decoding=new Set();
   async function go(page, operation, context, data = {}) {
@@ -160,14 +162,16 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       }
       if (operation === 'verify-targets') {
         if (!Number.isSafeInteger(request.base_rev) || request.base_rev !== state.rev) throw fault(409, 'document request revision changed');
-        return { page_id: page, rev: state.rev, ...(version === RICH_VERSION ? {schema:RICH_VERSION} : {}), targets: await verifyTargets(doc, request.targets,version) };
+        return { page_id: page, rev: state.rev, ...(richSchema(version) ? {schema:version} : {}), targets: await verifyTargets(doc, request.targets,version) };
       }
-      if(operation==='export') { try { return {markdown:markdown(validate(doc,version))}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; } }
+      if(operation==='export') { try { return {markdown:markdown(validate(doc,version),version)}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; } }
       if(operation==='checkpoints') return {checkpoints:await go(page,'checkpoints',context)};
       if(operation==='checkpoint-read') { const c=await go(page,'checkpoint-read',context,{id:request.checkpoint});const pinned=load(c.snapshot);try{return {...c,content:validate(pinned,contentSchema(c.schema??VERSION)),outline:await outline(pinned,contentSchema(c.schema??VERSION))}}finally{pinned.destroy()} };
       if (operation === 'comments') {
         const comments = await go(page, 'comments', context);
         return { comments: comments.map(comment => {
+          // A reply carries no anchor of its own; it follows its root thread.
+          if (comment.parent) { const { anchor: _none, ...reply } = comment; return reply; }
           const { id, block, quote, checkpoint, start, end, status, from, to } = resolve(doc, comment.anchor,version);
           const publicAnchor = { id, block, quote, checkpoint, start, end };
           return { ...comment, anchor: publicAnchor, ...publicAnchor, status: comment.resolved ? 'resolved' : status, from, to };
@@ -177,10 +181,10 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     } finally { doc.destroy(); }
   }
   async function executeMutation(page, operation, context, request) {
-    if ((request.schema === RICH_VERSION || request.page_id !== undefined) && request.page_id !== page) throw fault(409,'original Page identity changed');
-    if (operation === 'initialize' && request.schema === RICH_VERSION && context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human rich document initialization required');
+    if ((richSchema(request.schema) || request.page_id !== undefined) && request.page_id !== page) throw fault(409,'original Page identity changed');
+    if (operation === 'initialize' && richSchema(request.schema) && context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human rich document initialization required');
     if (operation === 'initialize') {
-      if (![VERSION,RICH_VERSION].includes(request.schema) || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
+      if (![VERSION,RICH_VERSION,LATEST_VERSION].includes(request.schema) || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
       const fingerprint = await hash({ operation, request });
       try { const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint }); if (receipt.found) return { ...receipt, duplicate: true }; } catch (error) { if (error.status !== 404) throw error; }
       const doc = create(request.body,request.schema);
@@ -196,14 +200,14 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     const fingerprint = await hash({ operation, request });
     const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint });
     if (receipt.found) {
-      let schema = operation === 'upgrade' ? RICH_VERSION : request.schema;
+      let schema = operation === 'upgrade' ? request.target_schema : request.schema;
       if (operation === 'restore') { const pinned = await go(page,'checkpoint-read',context,{id:request.checkpoint}); schema = pinned.schema ?? VERSION; }
       return { ...receipt, schema, epoch:syncEpoch(state), duplicate: true };
     }
     if (request.schema !== state.schema && !(state.schema === 1 && request.schema === VERSION)) throw fault(409,'unsupported client schema; reopen the confirmed document');
     if (operation === 'upgrade') {
       if (context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human schema upgrade required');
-      if (request.page_id !== page || request.target_schema !== RICH_VERSION || ![1,VERSION].includes(state.schema) || request.ifRev !== state.rev || Object.keys(request).some(key=>!['id','schema','target_schema','page_id','epoch','ifRev'].includes(key))) throw fault(409,'original Page identity, revision and supported upgrade required');
+      if (request.page_id !== page || request.target_schema !== LATEST_VERSION || ![1,VERSION,RICH_VERSION].includes(state.schema) || request.ifRev !== state.rev || Object.keys(request).some(key=>!['id','schema','target_schema','page_id','epoch','ifRev'].includes(key))) throw fault(409,'original Page identity, revision and supported upgrade required');
     }
     let doc = load(state.snapshot); let lease;
     try {
@@ -211,18 +215,30 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       validate(doc,version);
       const baseVector = Y.encodeStateVector(doc);
       if (request.epoch !== syncEpoch(state)) throw fault(409, 'old epoch; reload document');
-      if(operation==='comment') { if(request.ifRev!==state.rev)throw fault(409,'comment revision changed');const selected=anchor(doc,request.block,request.from,request.to,request.id,state.rev,version);const result=await go(page,'comment',context,{id:request.id,fingerprint,body:request.text,anchor:selected,ifRev:state.rev,generation:state.generation??0});return {...result,epoch:syncEpoch(state)}; }
-      if(operation==='resolve') return {...await go(page,'resolve',context,{id:request.id,fingerprint,comment:request.comment,version:request.version,resolved:request.resolved,ifRev:request.ifRev,generation:state.generation??0}),epoch:syncEpoch(state)};
+      if(operation==='comment'||operation==='resolve') {
+        if (context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human comment required');
+        const reply = operation === 'comment' && request.parent !== undefined;
+        const fields = ['id','schema','page_id','epoch','ifRev', ...(operation === 'resolve' ? ['comment','version','resolved'] : reply ? ['parent','text'] : ['block','from','to','text'])];
+        if (Object.keys(request).some(key => !fields.includes(key)) || fields.some(key => key !== 'page_id' && request[key] === undefined)) throw fault(400,'closed comment request required');
+        if (operation === 'comment' && (typeof request.text !== 'string' || !request.text.trim() || request.text.length > 10000)) throw fault(400,'comment text of 1 to 10000 characters required');
+        if (reply && !id(request.parent)) throw fault(400,'reply parent required');
+        if (operation === 'resolve' && (!id(request.comment) || !Number.isSafeInteger(request.version) || request.version < 1 || typeof request.resolved !== 'boolean')) throw fault(400,'comment version and resolved state required');
+        if(request.ifRev!==state.rev)throw fault(409,'comment revision changed');
+        if(operation==='resolve') return {...await go(page,'resolve',context,{id:request.id,fingerprint,comment:request.comment,version:request.version,resolved:request.resolved,ifRev:state.rev,generation:state.generation??0}),epoch:syncEpoch(state)};
+        let selected;
+        if (!reply) { try { selected = anchor(doc,request.block,request.from,request.to,request.id,state.rev,version); } catch (error) { if (error.message === 'comment anchor limit') throw fault(413,error.message); throw fault(400,'select text inside a paragraph, heading or code block'); } }
+        const result=await go(page,'comment',context,{id:request.id,fingerprint,body:request.text,...(reply ? {parent:request.parent} : {anchor:selected}),ifRev:state.rev,generation:state.generation??0});return {...result,epoch:syncEpoch(state)};
+      }
       const key=`${context.workspace}/${page}`;const cached=leases.get(key);
       if(cached && cached.lease.epoch===state.epoch && (!cached.lease.expiresAt || Date.parse(cached.lease.expiresAt)>Date.now()+1000)) lease=cached.lease;
       if(!lease) { lease=await go(page,'lease',context,{owner,epoch:state.epoch});leases.set(key,{lease,context,page,touched:Date.now()}); } else {cached.touched=Date.now();cached.context=context;}
       if(lease.generation!==undefined && lease.generation!==state.generation) throw fault(409,'document generation changed; reload');
       if (!Number.isSafeInteger(lease.epoch) || lease.epoch < state.epoch || typeof lease.token !== 'string') throw fault(409, 'writer lease changed; reload document');
       if (operation === 'upgrade') {
-        validate(doc,RICH_VERSION);
-        const result = await go(page,'upgrade',context,{id:request.id,fingerprint,schema:state.schema,targetSchema:RICH_VERSION,ifRev:state.rev,generation:state.generation??0,epoch:lease.epoch,leaseToken:lease.token,leaseOwner:owner});
+        validate(doc,LATEST_VERSION);
+        const result = await go(page,'upgrade',context,{id:request.id,fingerprint,schema:state.schema,targetSchema:LATEST_VERSION,ifRev:state.rev,generation:state.generation??0,epoch:lease.epoch,leaseToken:lease.token,leaseOwner:owner});
         leases.delete(key);
-        return {...result,schema:RICH_VERSION,epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
+        return {...result,schema:LATEST_VERSION,epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
       }
       const hashes = {}; let semantic; let resultVersion = version;
       switch (operation) {
@@ -242,7 +258,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
               if (request.text.length < prefix.length + suffix.length || !request.text.startsWith(prefix) || !request.text.endsWith(suffix)) throw fault(409, 'selected text range conflict');
             }
             const richProof = () => { const value=validate(doc,version); if(Buffer.byteLength(JSON.stringify(value),'utf8')>500000) throw fault(413,'rich semantic proof exceeds 500000 bytes; content unchanged'); return value; };
-            const before = version === RICH_VERSION ? richProof() : undefined;
+            const before = richSchema(version) ? richProof() : undefined;
             const edit = patch(doc, { op: 'replaceText', id: request.target, text: request.text, ...(scope ? { range: { from: scope.target.from, to: scope.target.to } } : {}) },version);
             semantic = { target: request.target, text: request.text, edit, ...(before ? {rich:{before,after:richProof()}} : {}) };
           }
@@ -293,7 +309,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if (req.method === 'GET' && req.url === '/health/ready') {
         if (draining || !ready) return reply(503, { ready: false, ...identity });
         const authority = await go('', 'health', { workspace: '' });
-        if (authority.protocol !== PROTOCOL || authority.schema !== RICH_VERSION) throw fault(503, 'authority protocol or schema unsupported');
+        if (authority.protocol !== PROTOCOL || authority.schema !== LATEST_VERSION) throw fault(503, 'authority protocol or schema unsupported');
         return reply(200, { ready: true, ...identity });
       }
       if (req.method === 'POST' && req.url === '/drain') { await drain(); return reply(200, { drained: true }); }
@@ -317,8 +333,8 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     await reclaimCrashedSocket(socket,Boolean(startupLock));
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socket,resolve)});bound=true;
     await chmod(socket,0o600);
-    const recovered=await go('engine','recover',{workspace:''},{boot:owner,protocol:PROTOCOL,schema:RICH_VERSION});
-    if(!recovered.recovered || recovered.protocol!==PROTOCOL || recovered.schema!==RICH_VERSION)throw new Error('authority did not confirm compatible engine recovery');ready=true;
+    const recovered=await go('engine','recover',{workspace:''},{boot:owner,protocol:PROTOCOL,schema:LATEST_VERSION});
+    if(!recovered.recovered || recovered.protocol!==PROTOCOL || recovered.schema!==LATEST_VERSION)throw new Error('authority did not confirm compatible engine recovery');ready=true;
   }catch(error){clearInterval(timer);if(bound){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}startupLock?.close();throw error}
   return { identity, socket, drain, async close() { await drain(); clearInterval(timer); await new Promise(resolve => server.close(resolve)); startupLock?.close(); } };
 }

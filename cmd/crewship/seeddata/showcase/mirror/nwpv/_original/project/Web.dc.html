@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – webová stránka</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#B85E1F}a:hover{color:#8C4512}
+</style>
+</helmet>
+<div style="box-sizing: border-box; padding: 32px 16px; background: #D9D3C6; font-family: 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33">
+<div style="max-width: 1360px; margin: 0 auto; border-radius: 14px; overflow: hidden; border: 1px solid #C9C1B1; background: #F4F1EA; box-shadow: 0 24px 60px rgba(8, 16, 28, .22)">
+<div style="display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #ECE6DA; border-bottom: 1px solid #D6CFC0">
+<div style="display: flex; gap: 8px"><div style="width: 12px; height: 12px; border-radius: 6px; background: #E5605A"></div><div style="width: 12px; height: 12px; border-radius: 6px; background: #E7B13F"></div><div style="width: 12px; height: 12px; border-radius: 6px; background: #5CB85C"></div></div>
+<div style="flex: 1; max-width: 560px; margin: 0 auto; height: 30px; border-radius: 8px; background: #FFFDF8; display: flex; align-items: center; justify-content: center; gap: 6px; font-size: 13px; color: #4A5568"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="5" y="11" width="14" height="10" rx="2"></rect><path d="M8 11V7a4 4 0 0 1 8 0v4"></path></svg>crewship.example</div>
+<div style="width: 60px"></div>
+</div>
+<div style="background: #0F1F33; color: #F4F1EA">
+<div style="max-width: 1120px; margin: 0 auto; padding: 20px 24px; display: flex; flex-wrap: wrap; align-items: center; gap: 16px 32px">
+<div style="font-size: 22px; font-weight: 700; flex: 1 1 auto">Crewship</div>
+<nav style="display: flex; flex-wrap: wrap; gap: 8px 24px; font-size: 15px">
+<a href="#funkce" style="color: #F4F1EA; text-decoration: none">Funkce</a>
+<a href="#cenik" style="color: #F4F1EA; text-decoration: none">Ceník</a>
+<a href="#faq" style="color: #F4F1EA; text-decoration: none">Otázky</a>
+</nav>
+<a href="#cenik" style="display: inline-flex; align-items: center; height: 44px; padding: 0 18px; border-radius: 12px; background: {{ accent }}; color: #0F1F33; font-weight: 600; text-decoration: none">Vyzkoušet</a>
+</div>
+<div style="max-width: 1120px; margin: 0 auto; padding: 72px 24px 96px; display: flex; flex-wrap: wrap; gap: 48px; align-items: center">
+<div style="flex: 1 1 420px; display: flex; flex-direction: column; gap: 24px">
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; letter-spacing: 3px; color: #F0954F">TÝMY AGENTŮ PRO TVOU PRÁCI</div>
+<h1 style="margin: 0; font-size: 56px; line-height: 60px; font-weight: 700">Zadej úkol. Crew ho dotáhne.</h1>
+<p style="margin: 0; font-size: 19px; line-height: 29px; color: #BFCBD8; max-width: 520px">Crewship sestaví tým agentů, rozdělí práci a vrátí hotový výsledek ke schválení.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 12px">
+<a href="#cenik" style="display: inline-flex; align-items: center; height: 52px; padding: 0 24px; border-radius: 14px; background: {{ accent }}; color: #0F1F33; font-size: 16px; font-weight: 600; text-decoration: none">Založit první crew</a>
+<a href="#funkce" style="display: inline-flex; align-items: center; height: 52px; padding: 0 24px; border-radius: 14px; border: 1px solid #2A4566; color: #F4F1EA; font-size: 16px; font-weight: 600; text-decoration: none">Jak to funguje</a>
+</div>
+</div>
+<div style="flex: 1 1 380px; background: #16304F; border-radius: 20px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+<div style="background: #13253C; border: 1px solid #2A4566; border-radius: 14px; padding: 14px; display: flex; justify-content: space-between; gap: 12px"><span style="font-weight: 600">Research</span><span style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; color: #BFCBD8">pracuje</span></div>
+<div style="background: #13253C; border: 1px solid #2A4566; border-radius: 14px; padding: 14px; display: flex; justify-content: space-between; gap: 12px"><span style="font-weight: 600">Frontend</span><span style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; color: #F0954F">review</span></div>
+<div style="background: #13253C; border: 1px solid #2A4566; border-radius: 14px; padding: 14px; display: flex; justify-content: space-between; gap: 12px"><span style="font-weight: 600">Support</span><span style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; color: #7FD1A6">hotovo</span></div>
+</div>
+</div>
+</div>
+<div id="funkce" style="max-width: 1120px; margin: 0 auto; padding: 88px 24px; display: flex; flex-direction: column; gap: 40px">
+<h2 style="margin: 0; font-size: 36px; line-height: 42px; font-weight: 700">Tři kroky od zadání k výsledku</h2>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px">
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 12px"><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; color: #B85E1F">01</div><h3 style="margin: 0; font-size: 20px">Sestav crew</h3><p style="margin: 0; font-size: 16px; line-height: 24px; color: #4A5568">Vyber šablonu a role agentů. Nebo nech crew navrhnout podle úkolu.</p></div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 12px"><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; color: #B85E1F">02</div><h3 style="margin: 0; font-size: 20px">Zadej úkol</h3><p style="margin: 0; font-size: 16px; line-height: 24px; color: #4A5568">Cíl, termín a podklady. Crew si práci rozdělí a průběžně hlásí stav.</p></div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 12px"><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; color: #B85E1F">03</div><h3 style="margin: 0; font-size: 20px">Schval a pošli</h3><p style="margin: 0; font-size: 16px; line-height: 24px; color: #4A5568">Výsledek zkontroluješ, vrátíš k úpravě nebo jedním klikem odešleš.</p></div>
+</div>
+</div>
+<div id="cenik" style="background: #ECE6DA">
+<div style="max-width: 1120px; margin: 0 auto; padding: 88px 24px; display: flex; flex-direction: column; gap: 32px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 16px">
+<h2 style="margin: 0; font-size: 36px; line-height: 42px; font-weight: 700">Ceník</h2>
+<div style="display: flex; gap: 4px; padding: 4px; background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 14px">
+<button onClick="{{ monthly }}" style="height: 40px; padding: 0 16px; border: none; border-radius: 10px; font: 600 14px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer; background: {{ mBg }}; color: {{ mFg }}">Měsíčně</button>
+<button onClick="{{ yearly }}" style="height: 40px; padding: 0 16px; border: none; border-radius: 10px; font: 600 14px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer; background: {{ yBg }}; color: {{ yFg }}">Ročně</button>
+</div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 20px">
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 14px"><h3 style="margin: 0; font-size: 20px">Start</h3><div style="font-size: 32px; font-weight: 700">{{ p1 }}</div><div style="font-size: 15px; color: #4A5568">1 crew, základní šablony</div></div>
+<div style="background: #0F1F33; color: #F4F1EA; border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 14px"><h3 style="margin: 0; font-size: 20px">Tým</h3><div style="font-size: 32px; font-weight: 700">{{ p2 }}</div><div style="font-size: 15px; color: #BFCBD8">neomezeně crew, sdílené artefakty</div><a href="#" style="display: inline-flex; align-items: center; justify-content: center; height: 48px; border-radius: 12px; background: {{ accent }}; color: #0F1F33; font-weight: 600; text-decoration: none">Vybrat Tým</a></div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 14px"><h3 style="margin: 0; font-size: 20px">Firma</h3><div style="font-size: 32px; font-weight: 700">Na míru</div><div style="font-size: 15px; color: #4A5568">vlastní prostředí, SSO, podpora</div></div>
+</div>
+</div>
+</div>
+<div id="faq" style="max-width: 1120px; margin: 0 auto; padding: 88px 24px; display: flex; flex-direction: column; gap: 16px">
+<h2 style="margin: 0 0 8px; font-size: 36px; line-height: 42px; font-weight: 700">Otázky</h2>
+<sc-for list="{{ faq }}" as="q" hint-placeholder-count="3">
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 16px">
+<button onClick="{{ q.toggle }}" style="width: 100%; min-height: 60px; padding: 0 20px; border: none; background: transparent; display: flex; justify-content: space-between; align-items: center; gap: 12px; font: 600 17px 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33; cursor: pointer; text-align: left">{{ q.q }}<span style="font-size: 22px; color: #B85E1F">{{ q.sign }}</span></button>
+<sc-if value="{{ q.open }}" hint-placeholder-val="{{ false }}"><p style="margin: 0; padding: 0 20px 20px; font-size: 16px; line-height: 24px; color: #4A5568">{{ q.a }}</p></sc-if>
+</div>
+</sc-for>
+</div>
+<div style="background: #0F1F33; color: #BFCBD8">
+<div style="max-width: 1120px; margin: 0 auto; padding: 32px 24px; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 16px; font-size: 14px"><span>Crewship · testovací web</span><span style="font-family: 'JetBrains Mono', 'Courier New', monospace">[ODKAZY V PATIČCE]</span></div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#E8833A","options":["#E8833A","#3FA7A0","#6C8CFF","#E8C547"]},"$preview":{"width":1440,"height":2400}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { yearly: false, open: 0 };
+  }
+  renderVals() {
+    const y = this.state.yearly;
+    const items = [
+      { q: 'Potřebuju vlastní server?', a: 'Ne. Crew běží v cloudu, vlastní prostředí je volitelné v tarifu Firma.' },
+      { q: 'Můžu crew zastavit v půlce?', a: 'Ano, kdykoli. Rozpracovaný výstup zůstane uložený.' },
+      { q: 'Kdo vidí moje data?', a: 'Jen lidé, se kterými crew nebo artefakt sdílíš.' }
+    ];
+    return {
+      accent: this.props.accent ?? '#E8833A',
+      p1: y ? '[CENA / ROK]' : '[CENA / MĚS.]',
+      p2: y ? '[CENA / ROK]' : '[CENA / MĚS.]',
+      mBg: y ? 'transparent' : '#0F1F33', mFg: y ? '#0F1F33' : '#F4F1EA',
+      yBg: y ? '#0F1F33' : 'transparent', yFg: y ? '#F4F1EA' : '#0F1F33',
+      monthly: () => this.setState({ yearly: false }),
+      yearly: () => this.setState({ yearly: true }),
+      faq: items.map((it, i) => ({
+        ...it,
+        open: this.state.open === i,
+        sign: this.state.open === i ? '−' : '+',
+        toggle: () => this.setState({ open: this.state.open === i ? -1 : i })
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

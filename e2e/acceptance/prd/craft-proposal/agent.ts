@@ -183,19 +183,28 @@ export interface BarSeen {
   text: string
 }
 
-/** Records every text the lease bar shows, with timestamps, inside the page. */
+/**
+ * Records every text the lease bar shows, with timestamps, inside the page. In
+ * the Artifacts frame (#5132) the bar lives in the status popover, which closes
+ * on the next click elsewhere; the status chip then says who holds the lock, so
+ * its label is recorded too.
+ */
 export async function watchBar(page: Page): Promise<void> {
   await page.evaluate(() => {
     const w = window as unknown as { __bar: Array<{ at: number; text: string }> }
     w.__bar = []
-    const bar = document.querySelector('[role="toolbar"][aria-label="Úpravy dokumentu"]')
-    if (!bar) throw new Error("lease bar not found")
+    const read = () => {
+      const bar = document.querySelector('[role="toolbar"][aria-label="Document editing"]')
+      const chip = document.querySelector("button[data-status]")?.getAttribute("aria-label")?.replace(/^Status: /, "")
+      return [bar?.textContent?.trim(), chip].filter(Boolean).join(" | ")
+    }
+    if (!read()) throw new Error("lease bar not found")
     const note = () => {
-      const text = (bar.textContent ?? "").trim()
-      if (w.__bar.at(-1)?.text !== text) w.__bar.push({ at: Date.now(), text })
+      const text = read()
+      if (text && w.__bar.at(-1)?.text !== text) w.__bar.push({ at: Date.now(), text })
     }
     note()
-    new MutationObserver(note).observe(bar, { subtree: true, childList: true, characterData: true })
+    new MutationObserver(note).observe(document.body, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: ["aria-label"] })
   })
 }
 

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – barvy a písmo</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#B85E1F}a:hover{color:#8C4512}
+</style>
+</helmet>
+<div style="width: 880px; height: 844px; box-sizing: border-box; padding: 56px; background: #FBFAF6; font-family: 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33; display: flex; flex-direction: column; gap: 40px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; letter-spacing: 3px; color: #B85E1F">PALETA</div>
+<h1 style="margin: 0; font-size: 40px; font-weight: 700">Noční moře a signální oranžová</h1>
+</div>
+<div style="display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px">
+<div style="display: flex; flex-direction: column; gap: 8px"><div style="height: 120px; border-radius: 14px; background: #0F1F33"></div><div style="font-size: 14px; font-weight: 600">Hlubina</div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #4A5568">#0F1F33</div></div>
+<div style="display: flex; flex-direction: column; gap: 8px"><div style="height: 120px; border-radius: 14px; background: #16304F"></div><div style="font-size: 14px; font-weight: 600">Paluba</div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #4A5568">#16304F</div></div>
+<div style="display: flex; flex-direction: column; gap: 8px"><div style="height: 120px; border-radius: 14px; background: {{ accent }}"></div><div style="font-size: 14px; font-weight: 600">Signál</div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #4A5568">{{ accent }}</div></div>
+<div style="display: flex; flex-direction: column; gap: 8px"><div style="height: 120px; border-radius: 14px; background: #F4F1EA; border: 1px solid #E2DCCF; box-sizing: border-box"></div><div style="font-size: 14px; font-weight: 600">Plachta</div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #4A5568">#F4F1EA</div></div>
+<div style="display: flex; flex-direction: column; gap: 8px"><div style="height: 120px; border-radius: 14px; background: #4A5568"></div><div style="font-size: 14px; font-weight: 600">Text tlumený</div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #4A5568">#4A5568</div></div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 24px">
+<div style="background: #0F1F33; color: #F4F1EA; border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 12px">
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #BFCBD8">NADPISY · IBM Plex Sans 700</div>
+<div style="font-size: 44px; font-weight: 700; line-height: 1.05">Posádka na palubě</div>
+<div style="font-size: 15px; color: #BFCBD8; line-height: 1.5">Technický, ale přívětivý grotesk. Česká diakritika: ěščřžýáíéůú.</div>
+</div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 18px; padding: 28px; display: flex; flex-direction: column; gap: 12px">
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #4A5568">DETAIL · JetBrains Mono 400</div>
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 22px; line-height: 1.4">crewship run --crew research</div>
+<div style="font-size: 15px; color: #4A5568; line-height: 1.5">Monospace pro CLI, čísla a metadata. Drží rytmus s Plex Sans.</div>
+</div>
+</div>
+<div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap">
+<button style="height: 48px; padding: 0 22px; border: none; border-radius: 12px; font: 600 15px 'IBM Plex Sans', Arial, sans-serif; background: {{ accent }}; color: #0F1F33; cursor: pointer">Primární akce</button>
+<button style="height: 48px; padding: 0 22px; border: 1px solid #0F1F33; border-radius: 12px; font: 600 15px 'IBM Plex Sans', Arial, sans-serif; background: transparent; color: #0F1F33; cursor: pointer">Sekundární</button>
+<div style="font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; background: #E1E9F3; color: #1E3A5F">Pracuje</div>
+<div style="font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; background: #FCE9D9; color: #8C4512">Review</div>
+<div style="font-size: 12px; font-weight: 600; padding: 6px 12px; border-radius: 999px; background: #DDEFE6; color: #1F5E40">Hotovo</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#E8833A","options":["#E8833A","#3FA7A0","#6C8CFF","#E8C547"]},"$preview":{"width":880,"height":844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#E8833A' };
+  }
+}
+</script>
+</body>
+</html>

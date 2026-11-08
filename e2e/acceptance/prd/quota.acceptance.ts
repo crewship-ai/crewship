@@ -14,7 +14,7 @@
 import type { APIRequestContext, Page } from "@playwright/test"
 import * as fs from "node:fs"
 import { expect, prdRequirement, test } from "./fixtures"
-import { acquire, createNative, NATIVE_APPS, nativeAvailability, openEditor, readNative, refuseSavesAsFull, statusText, typeMarker } from "./quota/native"
+import { acquire, createNative, NATIVE_APPS, nativeAvailability, openEditor, quotaData, readNative, refuseSavesAsFull, statusText, typeMarker } from "./quota/native"
 import {
   alerts,
   announcedCopyActions,
@@ -243,7 +243,9 @@ test.describe("Word and Sheet history quota", () => {
       expect.soft(BigInt(read.quota.limitBytes) > 0n, `${a.label}: a positive history limit`).toBe(true)
       expect.soft(BigInt(read.quota.usedBytes) > 0n, `${a.label}: version 1 counts against the budget`).toBe(true)
       expect.soft(read.quota.retention, `${a.label}: every version is retained`).toBe("keep-all")
-      expect.soft(status, `${a.label}: the editor shows used / limit`).toContain(`Historie ${read.quota.usedBytes} / ${read.quota.limitBytes} B`)
+      // #5132: the status line no longer prints raw bytes; it carries them as data and words a warning.
+      expect.soft(await quotaData(page), `${a.label}: the editor carries used / limit`).toEqual({ used: read.quota.usedBytes, limit: read.quota.limitBytes })
+      expect.soft(status, `${a.label}: no raw byte counts on screen`).not.toContain(`${read.quota.limitBytes} B`)
     }
     await prd.evidence("native-budget.json", ev)
   })
@@ -270,7 +272,7 @@ test.describe("Word and Sheet history quota", () => {
       await typeMarker(page, f, a.app, marker)
       const deadline = Date.now() + 60_000
       let status = await statusText(page)
-      while (Date.now() < deadline && !(refused.saves > 0 && /Neuložený koncept|Koncept zůstává|koncept zachován/i.test(status))) {
+      while (Date.now() < deadline && !(refused.saves > 0 && /Unsaved draft|The draft stays|draft kept/i.test(status))) {
         await page.waitForTimeout(500)
         status = await statusText(page)
       }
@@ -281,7 +283,7 @@ test.describe("Word and Sheet history quota", () => {
       const promise = promisesMoreSpace(message)
       const copies = await announcedCopyActions(page, message)
       let download: { offered: boolean; bytes: number | null } = { offered: false, bytes: null }
-      const button = page.getByRole("button", { name: /Stáhnout koncept|Download/i })
+      const button = page.getByRole("button", { name: /Download draft|Download/i })
       if ((await button.count()) > 0) {
         const pending = page.waitForEvent("download", { timeout: 30_000 })
         await button.first().click()
@@ -295,9 +297,9 @@ test.describe("Word and Sheet history quota", () => {
       ev[a.label] = { pageId: doc.pageId, refusedSaves: refused.saves, status, alerts: all, promisesMoreSpace: promise, announcedCopyActions: copies, download, serverVersion: { before: doc.version, after: server.version } }
       checks.push(() => {
         expect.soft(refused.saves, `${a.label}: the editor tried to save`).toBeGreaterThan(0)
-        expect.soft(status, `${a.label}: the editor keeps the unsaved draft`).toMatch(/Neuložený koncept|Koncept zůstává|koncept zachován/i)
+        expect.soft(status, `${a.label}: the editor keeps the unsaved draft`).toMatch(/Unsaved draft|The draft stays|draft kept/i)
         expect.soft(server.version, `${a.label}: nothing was saved`).toBe(doc.version)
-        expect.soft(message, `${a.label}: the editor says the document history is full`).toMatch(/histori\w*[^.|]{0,40}pln|history[^.|]{0,20}full|kvót|quota|kapacit\w*\s+úložiště|neumožňuje další uložení/i)
+        expect.soft(message, `${a.label}: the editor says the document history is full`).toMatch(/histori\w*[^.|]{0,40}pln|history[^.|]{0,20}full|kvót|quota|kapacit\w*\s+úložiště|neumožňuje další uložení|storage is full|nothing more can be saved/i)
         expect.soft(promise, `${a.label}: no promise of more space ("${promise}")`).toBeNull()
         for (const c of copies) expect.soft(c.control, `${a.label}: the message announces "${c.phrase}" but offers no such control`).toBe(true)
         if (download.offered) expect.soft(download.bytes ?? 0, `${a.label}: the offered draft download has content`).toBeGreaterThan(0)

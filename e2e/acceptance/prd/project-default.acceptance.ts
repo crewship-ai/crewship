@@ -119,7 +119,7 @@ test.describe("project default", () => {
       const readerPage = await readerCtx.newPage()
       await readerPage.goto(shareBody.url)
       await expect(preview(readerPage).locator(HERO)).toHaveText(V2, { timeout: 60_000 })
-      for (const control of ["Select", "Restore as new version", "Send to agent", /^Share v\d+$/]) {
+      for (const control of ["Select", "Add a comment", "Restore as new version", "Send to agent", /^Share v\d+$/]) {
         await expect(readerPage.getByRole("button", { name: control, exact: typeof control === "string" })).toHaveCount(0)
       }
       await readerPage.screenshot({ path: test.info().outputPath("reader-shared-link.png"), fullPage: true })

@@ -55,6 +55,7 @@ COPY config/*.json ./config/
 COPY schemas/*.json ./schemas/
 COPY schemas/wordcraft/ ./schemas/wordcraft/
 COPY internal/pages/content_types.json ./internal/pages/
+COPY internal/slides/lucide_icons.json ./internal/slides/
 COPY mooring/client/ ./mooring/client/
 COPY mooring/protocol/generated/ts/ ./mooring/protocol/generated/ts/
 COPY e2e/ ./e2e/

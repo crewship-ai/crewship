@@ -1,5 +1,5 @@
 import type { PageFolderRef, PageView } from "@/hooks/use-pages"
-import { artifactDashboards, artifactSlides } from "@/lib/feature-flags"
+import { artifactsDesign } from "@/lib/feature-flags"
 
 /**
  * The kinds the library shows: each has a backend that stores and opens it.
@@ -11,10 +11,14 @@ export type LibraryKind = "project" | "dashboard" | "page" | "word" | "sheet" | 
 /** Web things run in a sandbox; documents are Crafts or decks. */
 export type LibraryFamily = "web" | "document"
 
+/**
+ * Storage kinds, labelled in the UI's words (kinds.ts): a project is a static
+ * App and a legacy Page with panels an App. "Page" is never a label (#5132).
+ */
 export const LIBRARY_KINDS: { kind: LibraryKind; label: string; plural: string; family: LibraryFamily }[] = [
-  { kind: "project", label: "Project", plural: "Projects", family: "web" },
+  { kind: "project", label: "Static app", plural: "Static apps", family: "web" },
   { kind: "dashboard", label: "Dashboard", plural: "Dashboards", family: "web" },
-  { kind: "page", label: "Page", plural: "Pages", family: "web" },
+  { kind: "page", label: "App", plural: "Apps", family: "web" },
   { kind: "word", label: "Word", plural: "Word", family: "document" },
   { kind: "sheet", label: "Sheet", plural: "Sheets", family: "document" },
   { kind: "slides", label: "Slides", plural: "Slides", family: "document" },
@@ -50,6 +54,15 @@ export interface LibraryItem {
   test?: boolean
   /** The Page's `pages_version`, which archive and folder moves are confirmed against. */
   pagesVersion?: number
+  /** A published application exists; an App without one is Static. */
+  hasApplication?: boolean
+  /** The server says whether the caller may move it; undefined on a server that does not say. */
+  canMove?: boolean
+  /** The caller reaches it as its owner (`reach` has `owner`). */
+  ownedByMe?: boolean
+  /** Panels whose last refresh failed, and panels past their freshness window, from the catalog rollup. */
+  failedPanels?: number
+  stalePanels?: number
 }
 
 /** The version head names projects, dashboards, slides, Word and Sheet; older storage names the rest. */
@@ -96,6 +109,11 @@ export function libraryItems(pages: PageView[], options: { keepOrder?: boolean }
       ...(page.archived ? { archived: true } : {}),
       ...(page.createdByTest ? { test: true } : {}),
       ...(typeof page.pagesVersion === "number" ? { pagesVersion: page.pagesVersion } : {}),
+      ...(page.hasApplication ? { hasApplication: true } : {}),
+      ...(page.canMove === undefined ? {} : { canMove: page.canMove }),
+      ...(page.reach?.includes("owner") ? { ownedByMe: true } : {}),
+      ...(page.tally.failed > 0 ? { failedPanels: page.tally.failed } : {}),
+      ...(page.tally.stale > 0 ? { stalePanels: page.tally.stale } : {}),
     }
   })
   if (options.keepOrder) return items
@@ -115,31 +133,27 @@ export function versionPin(raw: string | null | undefined): number | undefined {
  * version: what the API returns for create, share and restore (#4995) and
  * where an old /pages/<slug>?artifact=1 link moves.
  */
-export function artifactsProjectHref(id: string, workspaceId: string, version?: number): string {
+export function artifactsProjectHref(id: string, workspaceId: string, version?: number, edit?: boolean): string {
   const query = new URLSearchParams({ workspace_id: workspaceId })
   if (version !== undefined) query.set("version", String(version))
+  if (edit) query.set("edit", "1")
   return `/artifacts/${encodeURIComponent(id)}?${query}`
 }
 
-/** The Pages address of an item; a project keeps the version its address pins. */
-export function openInPagesHref(workspaceId: string, item: Pick<LibraryItem, "slug" | "pageId" | "projectBacked">, version?: number): string {
-  const query = new URLSearchParams({ workspace_id: workspaceId })
-  if (item.projectBacked) {
-    query.set("artifact", "1")
-    if (version !== undefined) query.set("version", String(version))
-  }
-  const reference = item.projectBacked && item.pageId ? "@" + item.pageId : item.slug
-  return `/pages/${encodeURIComponent(reference)}?${query}`
+/**
+ * Whether the Artifacts frame opens this item as a versioned project: an App,
+ * a Dashboard or Slides. Every one of them opens in the frame, in its kind's
+ * view or, while that view's build switch is off, in the project's own
+ * read-only view; never on Pages. A Design is a project too, but opens in
+ * its canvas behind its own switch.
+ */
+export function opensAsProject(item: Pick<LibraryItem, "projectBacked" | "kind">): boolean {
+  return item.projectBacked && item.kind !== "design"
 }
 
-/**
- * Whether the Artifacts detail shows this versioned item in its own project
- * viewer (a Project, and a Dashboard or Slides behind their build switches).
- * The same rule decides whether an old /pages/<slug>?artifact=1 link moves to
- * Artifacts: anything else keeps opening on Pages.
- */
-export function viewsProjectInline(item: LibraryItem): boolean {
-  return item.projectBacked && (item.kind === "project" || item.kind === "dashboard" && artifactDashboards() || item.kind === "slides" && artifactSlides())
+/** Whether the Artifacts frame opens this item at all; a Design only behind its switch. */
+export function opensInArtifacts(item: Pick<LibraryItem, "kind">): boolean {
+  return item.kind !== "design" || artifactsDesign()
 }
 
 export function withLibraryState(items: LibraryItem[], state: {

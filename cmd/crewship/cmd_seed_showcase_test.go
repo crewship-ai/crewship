@@ -31,6 +31,7 @@ type showcaseKnobs struct {
 	dataStatus             int            // data batch POST; 0 = 200
 	designStatus           int            // design create; 0 = 201
 	designOpsStatus        int            // design operations; 0 = 200
+	docs                   bool           // documents/status enabled (Docs mirrors); their own tests turn it on
 }
 
 type fakeShowcasePage struct {
@@ -116,7 +117,7 @@ func (s *showcaseServer) handler(t *testing.T) http.Handler {
 				refuse(k.statusCode)
 				return
 			}
-			reply(200, map[string]bool{"enabled": true, "wordcraft_native": k.wordNative, "gridcraft_native": k.gridNative})
+			reply(200, map[string]bool{"enabled": k.docs, "wordcraft_native": k.wordNative, "gridcraft_native": k.gridNative})
 		case r.Method == "GET" && path == "/api/v1/feature-flags":
 			var list []map[string]any
 			for key, f := range s.flags {
@@ -298,9 +299,36 @@ type showcaseWant struct {
 func runShowcaseOnce(t *testing.T, s *showcaseServer, url string, want showcaseWant) {
 	t.Helper()
 	var out bytes.Buffer
+	// Docs is off on this fake, so every mirrored Docs item counts as unavailable.
+	want.stats.Unavailable += showcaseMirrorDocs
 	stats, err := seedShowcase(context.Background(), cli.NewClient(url, "tok", showcaseTestWS), &out)
 	if err != nil {
 		t.Fatalf("seedShowcase returned %v; the phase is fail-soft\n%s", err, out.String())
+	}
+	// Mirrored reference artifacts (slug prefix "ref-") are fixed-content
+	// extras with their own tests; here they only shift the totals by what
+	// each one reported.
+	for _, a := range seeddata.ShowcaseArtifacts {
+		if !strings.HasPrefix(a.Slug, "ref-") {
+			continue
+		}
+		switch text := out.String(); {
+		case strings.Contains(text, "  + "+a.Slug+"\n"):
+			want.stats.Created++
+			want.artifactCreates++
+			want.dataWrites += len(a.Data)
+		case strings.Contains(text, "  + "+a.Slug+": completed"):
+			want.stats.Completed++
+			want.dataWrites += len(a.Data)
+		case strings.Contains(text, "  ! "+a.Slug+": incomplete"):
+			want.stats.Incomplete++
+			want.artifactCreates++
+			want.dataWrites += len(a.Data)
+		case strings.Contains(text, "  = "+a.Slug+": already exists"):
+			want.stats.Skipped++
+		default:
+			t.Errorf("mirror item %s reported no outcome\n%s", a.Slug, text)
+		}
 	}
 	if stats != want.stats {
 		t.Errorf("stats = %+v, want %+v\n%s", stats, want.stats, out.String())
@@ -339,8 +367,43 @@ func runShowcaseOnce(t *testing.T, s *showcaseServer, url string, want showcaseW
 
 var allOn = showcaseKnobs{wordNative: true, gridNative: true}
 
+// mirrorSlugPrefix marks the mirrored reference artifacts each
+// seeddata/mirror_<slug>.go appends to the catalogue (showcase/mirror).
+const mirrorSlugPrefix = "ref-"
+
+// showcaseCoreOnly runs a test against the core catalogue: mirrored reference
+// copies (ref-*) register from their own files with their own tests, so the
+// phase counts below stay fixed. The test must not be parallel: it swaps the
+// package catalogue until it and its subtests finish.
+func showcaseCoreOnly(t *testing.T) {
+	t.Helper()
+	crafts, arts, designs := seeddata.ShowcaseCrafts, seeddata.ShowcaseArtifacts, seeddata.ShowcaseDesigns
+	t.Cleanup(func() {
+		seeddata.ShowcaseCrafts, seeddata.ShowcaseArtifacts, seeddata.ShowcaseDesigns = crafts, arts, designs
+	})
+	core := func(slug string) bool { return !strings.HasPrefix(slug, mirrorSlugPrefix) }
+	seeddata.ShowcaseCrafts = nil
+	for _, c := range crafts {
+		if core(c.Slug) {
+			seeddata.ShowcaseCrafts = append(seeddata.ShowcaseCrafts, c)
+		}
+	}
+	seeddata.ShowcaseArtifacts = nil
+	for _, a := range arts {
+		if core(a.Slug) {
+			seeddata.ShowcaseArtifacts = append(seeddata.ShowcaseArtifacts, a)
+		}
+	}
+	seeddata.ShowcaseDesigns = nil
+	for _, d := range designs {
+		if core(d.Slug) {
+			seeddata.ShowcaseDesigns = append(seeddata.ShowcaseDesigns, d)
+		}
+	}
+}
+
 func TestSeedShowcase_Phase(t *testing.T) {
-	t.Parallel()
+	showcaseCoreOnly(t)
 	full := showcaseWant{stats: showcaseStats{Created: 12}, pageCreates: 7, initializes: 7, releases: 7,
 		artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 7,
 		lines: []string{"+ feature flag craft_version_history enabled for workspace " + showcaseTestWS, "+ obchodni-nabidka"}}
@@ -516,8 +579,16 @@ func TestShowcaseCatalogue_FilesExist(t *testing.T) {
 			t.Errorf("%s: design operations unreadable: %v", d.Slug, err)
 		}
 	}
-	if strings.Join(got, ",") != strings.Join(wantSlugs, ",") {
-		t.Errorf("slugs = %v, want %v", got, wantSlugs)
+	// Mirrored reference items (seeddata/mirror_*.go, slug prefix "ref-")
+	// append themselves and carry their own tests; the rest is fixed here.
+	var base []string
+	for _, s := range got {
+		if !strings.HasPrefix(s, "ref-") {
+			base = append(base, s)
+		}
+	}
+	if strings.Join(base, ",") != strings.Join(wantSlugs, ",") {
+		t.Errorf("slugs = %v, want %v", base, wantSlugs)
 	}
 	for _, s := range got {
 		if seen[s] {

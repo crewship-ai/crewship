@@ -4,6 +4,9 @@ package main
 // POST /api/v1/pages/{slug}/document/initialize doc initialize
 // GET /api/v1/pages/{slug}/document doc read, doc outline
 // POST /api/v1/pages/{slug}/document/patch doc patch
+// GET /api/v1/pages/{slug}/document/comments doc comments
+// POST /api/v1/pages/{slug}/document/comments doc comment
+// POST /api/v1/pages/{slug}/document/comments/resolve doc comment-resolve
 
 import (
 	"bytes"
@@ -33,7 +36,7 @@ block hash from this output when preparing a patch.`, `  crewship doc read @<art
 parent is null at the top level. Reads the same state as read and never
 changes the document.`, `  crewship doc outline @<artifact-id>`},
 		"patch": {"Apply a guarded text replacement to one block", `Send one JSON object (at most 2 MiB) with id, schema, epoch, target, text, ifRev
-and ifHash; schema 3 also needs page_id. A changed revision, hash or epoch
+and ifHash; schemas 3 and 4 also need page_id. A changed revision, hash or epoch
 refuses the edit and nothing is saved. Resend the exact request with the same id
 after a lost confirmation; the original receipt comes back with found: true
 and duplicate: true. A stale epoch, revision or hash returns 409.`, `  crewship doc patch @<artifact-id> --file patch.json
@@ -41,14 +44,30 @@ and duplicate: true. A stale epoch, revision or hash returns 409.`, `  crewship 
 		"status": {"Show whether native documents are enabled on this server", `Print enabled, wordcraft_native and gridcraft_native for the selected server.
 enabled is false unless the server starts with CREWSHIP_DOCUMENTS_ENABLED=true.`, `  crewship doc status
   crewship doc status -f yaml`},
-		"initialize": {"Write the first content of an empty artifact as a document", `Send one JSON object (at most 2 MiB) with an operation id, schema (2 or 3) and
-a body document tree; schema 3 also needs page_id. Resend the exact request
+		"initialize": {"Write the first content of an empty artifact as a document", `Send one JSON object (at most 2 MiB) with an operation id, schema (2, 3 or 4)
+and a body document tree; schemas 3 and 4 also need page_id. Schema 4 adds
+bold, italic and strike marks, code block languages, quotes and checklists. Resend the exact request
 after a lost confirmation; the original receipt comes back with duplicate: true.
 The artifact must be empty and owned by you, not by a crew (for example one made
 with crewship page create --allow-empty). Read the document afterwards to obtain
 its epoch.`, `  crewship doc initialize @<artifact-id> --file initialize.json`},
+		"comments": {"List the document's comment threads and replies", `Print comments (oldest first) with id, body, actor, created_at, version and
+resolved, plus can_comment and can_resolve for you. A thread has its quoted
+text, block and status (attached, collapsed, detached or resolved); a reply has
+parent, the thread it answers. Reading needs read access to the document.`, `  crewship doc comments @<artifact-id>
+  crewship doc comments <slug> -f yaml`},
+		"comment": {"Start a comment thread on quoted text, or reply to one", `Send one JSON object with id, schema, epoch, ifRev and text, plus page_id for
+schemas 3 and 4. A new thread also names block, from and to: the UTF-16 range
+of the quoted text inside one paragraph, heading or code block (see doc outline).
+A reply names parent, the thread's id, instead. Comments never change content.
+You need Comment or Edit access. Resend the exact request after a lost
+confirmation; a changed revision returns 409.`, `  crewship doc comment @<artifact-id> --file comment.json`},
+		"comment-resolve": {"Resolve or reopen a comment thread", `Send one JSON object with id, schema, epoch, ifRev, page_id (schemas 3 and 4),
+comment (the thread id), version (from doc comments) and resolved (true or
+false). A changed version or revision returns 409. You need Comment or Edit
+access.`, `  crewship doc comment-resolve @<artifact-id> --file resolve.json`},
 	}
-	for _, operation := range []string{"read", "outline", "patch", "status", "initialize"} {
+	for _, operation := range []string{"read", "outline", "patch", "status", "initialize", "comments", "comment", "comment-resolve"} {
 		operation := operation
 		cmd := &cobra.Command{Use: operation + " <page-slug>", Short: help[operation][0], Long: help[operation][1], Example: help[operation][2], Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := pageClient()
@@ -62,6 +81,8 @@ its epoch.`, `  crewship doc initialize @<artifact-id> --file initialize.json`},
 				response, err = client.Get(path)
 			case "status":
 				response, err = client.Get("/api/v1/documents/status")
+			case "comments":
+				response, err = client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/document/comments")
 			default:
 				filename, _ := cmd.Flags().GetString("file")
 				if filename == "" {
@@ -96,6 +117,10 @@ its epoch.`, `  crewship doc initialize @<artifact-id> --file initialize.json`},
 					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/patch", body)
 				case "initialize":
 					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/initialize", body)
+				case "comment":
+					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/comments", body)
+				case "comment-resolve":
+					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/comments/resolve", body)
 				default:
 					return fmt.Errorf("unknown document operation %q", operation)
 				}
@@ -129,7 +154,7 @@ its epoch.`, `  crewship doc initialize @<artifact-id> --file initialize.json`},
 			cmd.Use = "status"
 			cmd.Args = cobra.NoArgs
 		}
-		if operation == "patch" || operation == "initialize" {
+		if operation == "patch" || operation == "initialize" || operation == "comment" || operation == "comment-resolve" {
 			cmd.Flags().String("file", "", "JSON request file; - reads stdin. Preserve operation IDs when retrying an exact request")
 		}
 		root.AddCommand(cmd)

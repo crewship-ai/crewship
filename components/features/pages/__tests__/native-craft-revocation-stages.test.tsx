@@ -97,7 +97,7 @@ const frame=()=>document.querySelector('iframe') as HTMLIFrameElement|null
 // The host conceals a frame by opacity first (#5060, #5073); visibility follows only after
 // the write capture, which hashes with real crypto that fake time does not move.
 const contentVisible=()=>{const f=frame();return Boolean(f&&f.style.visibility!=='hidden'&&f.style.opacity!=='0')}
-const offered=()=>screen.queryAllByRole('button',{name:'Kopie konceptu'}).length>0
+const offered=()=>screen.queryAllByRole('button',{name:'Keep a copy'}).length>0
 /** An unconfirmed edit is captured locally while the network is already gone. */
 async function editWhileOffline(){
  server.reachable=false
@@ -113,7 +113,7 @@ async function opened(){
  render(<NativeCraftEditorHost workspaceId="w" pageId="p" humanId="human" enabled/>)
  await advance(50)
  server.push('lease',lease());await advance(50)
- fireEvent.click(screen.getByRole('button',{name:'Převzít úpravy'}))
+ fireEvent.click(screen.getByRole('button',{name:'Take over editing'}))
  await settle(()=>contentVisible()&&offered())
  expect(contentVisible()).toBe(true)
  expect(offered()).toBe(true)
@@ -153,7 +153,7 @@ describe('healthy stream',()=>{
   server.push('session_retired',{delivery:'stopped',reason:'authority_changed',draft:'purge'})
   await advance(1)
   expect(frame()).toBeNull();expect(offered()).toBe(false);expect(journal.revokeRead).toHaveBeenCalledOnce()
-  expect(screen.getByRole('status')).toHaveTextContent('Přístup ke čtení byl odebrán')
+  expect(screen.getByRole('status')).toHaveTextContent('Read access was removed')
   server.calls.length=0
   await advance(5*60_000)
   expect(server.count('document')).toBe(0);expect(server.count('sessions')).toBe(0);expect(offered()).toBe(false)
@@ -193,7 +193,7 @@ describe('silent stream',()=>{
   await advance(60_000)
   expect(server.count('document')).toBe(0)
   expect(server.count('draft-key')).toBeGreaterThan(0);expect(m.purge).toHaveBeenCalledWith({human:'human',workspace:'w',page:'p'},expect.anything())
-  expect(screen.getByRole('status')).toHaveTextContent('Přístup ke čtení byl odebrán')
+  expect(screen.getByRole('status')).toHaveTextContent('Read access was removed')
  })
  it('both monitors stalled: content and draft leave at the detection bound, not later',async()=>{
   await opened()
@@ -276,7 +276,7 @@ describe('a draft kept after write loss',()=>{
   server.state='read-lost'
   await advance(NATIVE_DETECTION_BOUND_MS)
   expect(m.purge).toHaveBeenCalledWith({human:'human',workspace:'w',page:'p'},expect.anything())
-  expect(screen.getByRole('status')).toHaveTextContent('Přístup ke čtení byl odebrán')
+  expect(screen.getByRole('status')).toHaveTextContent('Read access was removed')
   server.calls.length=0
   await advance(5*60_000)
   expect(server.count('draft-key')).toBe(0)
@@ -355,7 +355,7 @@ describe('a draft kept after write loss',()=>{
  })
 })
 describe('keeping a draft is not offering it',()=>{
- const rows=()=>screen.queryAllByText(/^Místní koncept/).length
+ const rows=()=>screen.queryAllByText(/^Local draft/).length
  const recoveredOffer=()=>offered()||rows()>0
  const setVisibility=(state:'hidden'|'visible')=>Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>state})
  afterEach(()=>{Reflect.deleteProperty(document,'visibilityState')})
@@ -377,7 +377,7 @@ describe('keeping a draft is not offering it',()=>{
   m.server=async(input,init)=>{const response=await answer(input,init);return route(String(input))==='lease'||route(String(input))==='action'?json({...lease(),can_edit:false,mine:false,can_write:false,holder:undefined}):response}
   server.push('session_retired',{delivery:'stopped',reason:'write_revoked',draft:'retain'})
   await advance(NATIVE_ADMISSION_DEADLINE_MS+1_000)
-  expect(screen.queryAllByRole('button',{name:'Kopie konceptu'})).toHaveLength(0)
+  expect(screen.queryAllByRole('button',{name:'Keep a copy'})).toHaveLength(0)
   expect(rows()).toBe(0)
   expect(m.purge).not.toHaveBeenCalled();expect(journal.revokeRead).not.toHaveBeenCalled()
  })
@@ -521,9 +521,9 @@ describe('keeping a draft is not offering it',()=>{
    await dirty()
    server.stall.add('document')
    await act(async()=>{window.dispatchEvent(new Event('pageshow'))})
-   expect(screen.queryByText('Ověřuji přístup…')).toBeNull()
+   expect(screen.queryByText('Checking access…')).toBeNull()
    await advance(1_500)
-   expect(screen.getByText('Ověřuji přístup…')).toBeTruthy()
+   expect(screen.getByText('Checking access…')).toBeTruthy()
   })
   // An answer to something asked before the return says nothing about after it.
   function held(){
@@ -579,12 +579,12 @@ describe('keeping a draft is not offering it',()=>{
    await advance(11_000+5_000)
    expect(asked).toBeGreaterThan(1)
    expect(opacity()).toBe('0')
-   expect(screen.getByText('Ověřuji přístup…')).toBeTruthy()
+   expect(screen.getByText('Checking access…')).toBeTruthy()
    silent=false
    await advance(20_000)
    await settle(()=>opacity()==='')
    expect(opacity()).toBe('')
-   expect(screen.queryByText('Ověřuji přístup…')).toBeNull()
+   expect(screen.queryByText('Checking access…')).toBeNull()
   })
  })
  it('going hidden asks nothing',async()=>{
@@ -649,13 +649,13 @@ describe('lease handoff',()=>{
   server.push('lease',{...lease(),handoff_requested_by:[{actor_id:'user:other',display_name:'Eva',kind:'human',request_id:'r1'}]});await advance(50)
   server.stall=new Set<Route>(['action'])
   act(()=>options.at(-1)!.onChanged('final','doc'))
-  fireEvent.click(screen.getByRole('button',{name:/Předat/}))
+  fireEvent.click(screen.getByRole('button',{name:/Hand over/}))
   await settle(()=>server.count('action')>0)
   expect(server.count('action')).toBe(1)
   await advance(NATIVE_ADMISSION_DEADLINE_MS-2_000)
   expect(screen.queryByRole('alert')).toBeNull()
   await advance(2_000)
-  expect(screen.getByRole('alert')).toHaveTextContent('Vypršel čas připojení')
+  expect(screen.getByRole('alert')).toHaveTextContent('The connection timed out')
   expect(journal.revokeRead).not.toHaveBeenCalled()
  })
 })

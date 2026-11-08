@@ -23,7 +23,7 @@ type ActionBody = { generation?: string; request_id?: string }
 
 /** Advisory controls only. Every action is still authorized and fenced by the
  * server; the status never contains the private admission bearer. */
-export function NativeCraftLeaseBar({ view, mayEdit, pending = false, requested = false, onAction, onStopAgent, self }: { view: NativeCraftLeaseView; mayEdit: boolean; pending?: boolean; /** Server-confirmed request for this holder and generation. */ requested?: boolean; onStopAgent?(): void; onAction(action: NativeCraftLeaseAction, body: ActionBody): void; /** The signed-in person's user id. */ self?: string }) {
+export function NativeCraftLeaseBar({ view, mayEdit, pending = false, requested = false, onAction, onStopAgent, self, variant = "bar" }: { /** "popover": inside a status popover (the Artifacts frame), not a row above the editor. */ variant?: "bar" | "popover"; view: NativeCraftLeaseView; mayEdit: boolean; pending?: boolean; /** Server-confirmed request for this holder and generation. */ requested?: boolean; onStopAgent?(): void; onAction(action: NativeCraftLeaseAction, body: ActionBody): void; /** The signed-in person's user id. */ self?: string }) {
   // The same person in another editor session: typically the tab this one
   // replaced by a reload. Its lease is renewed only while that editor is
   // connected, so a closed tab frees it within the TTL; say so instead of
@@ -32,21 +32,21 @@ export function NativeCraftLeaseBar({ view, mayEdit, pending = false, requested 
   const releaseIn = useSecondsUntil(otherSession ? view.expires_at ?? null : null)
   const generation = validNativeVersion(view.generation) && view.generation !== "0" ? view.generation : undefined
   const mine = mayEdit && view.mine && view.can_write && generation !== undefined
-  const name = view.holder?.display_name.trim() || (view.holder?.kind === "agent" ? "Agent" : "Někdo")
+  const name = view.holder?.display_name.trim() || (view.holder?.kind === "agent" ? "Agent" : "Someone")
   const since = view.acquired_at && Number.isFinite(Date.parse(view.acquired_at)) ? new Date(view.acquired_at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }) : null
-  return <div role="toolbar" aria-label="Úpravy dokumentu" aria-busy={pending} className="flex flex-wrap items-center gap-2 border-b px-3 py-2 text-sm">
-    <span>{otherSession ? "Upravujete v jiné kartě nebo okně" : view.holder ? `Upravuje ${name}` : "Volné"}{since ? ` · od ${since}` : ""}</span>
-    {otherSession && <span role="status" className="text-muted-foreground">{releaseIn !== null && releaseIn > 0 ? `Pokud jste ji zavřeli nebo obnovili, úpravy se uvolní do ${releaseIn} s.` : "Čekám na uvolnění úprav z jiné karty…"}</span>}
-    {!mayEdit && <span className="text-muted-foreground">Pouze čtení</span>}
-    {mayEdit && !view.holder && <Button size="sm" disabled={pending} onClick={() => onAction("acquire", {})}>Převzít úpravy</Button>}
-    {mayEdit && view.holder && !view.mine && <Button size="sm" variant="outline" disabled={pending || requested} onClick={() => onAction("request-handoff", {})}>{requested ? "Žádost odeslána" : otherSession ? "Požádat jinou kartu o předání" : "Požádat o předání"}</Button>}
-    {mayEdit && view.holder && !view.mine && <span data-slot="handoff-request-status" aria-live="polite" aria-atomic="true" role={requested ? "status" : undefined} className="text-muted-foreground">{requested ? view.holder.kind === "agent" ? "Požadavek zaznamenán. Agent sám úpravy nepředává." : "Čeká se na předání úprav." : ""}</span>}
-    {mayEdit && view.holder?.kind === "agent" && view.can_stop_agent === true && onStopAgent && <Button size="sm" variant="outline" disabled={pending} onClick={onStopAgent}>Zastavit agenta</Button>}
+  return <div role="toolbar" aria-label="Document editing" aria-busy={pending} className={variant === "popover" ? "flex w-full flex-wrap items-center gap-1.5 text-sm" : "flex flex-wrap items-center gap-2 border-b px-3 py-2 text-sm"}>
+    <span className={variant === "popover" ? "w-full font-medium" : undefined}>{otherSession ? "You are editing in another tab or window" : view.holder ? `${name} is editing` : "Free"}{since ? ` · since ${since}` : ""}</span>
+    {otherSession && <span role="status" className="text-muted-foreground">{releaseIn !== null && releaseIn > 0 ? `If you closed or reloaded it, editing is released within ${releaseIn} s.` : "Waiting for the other tab to release editing…"}</span>}
+    {!mayEdit && <span className="text-muted-foreground">Read-only</span>}
+    {mayEdit && !view.holder && <Button size="sm" disabled={pending} onClick={() => onAction("acquire", {})}>Take over editing</Button>}
+    {mayEdit && view.holder && !view.mine && <Button size="sm" variant="outline" disabled={pending || requested} onClick={() => onAction("request-handoff", {})}>{requested ? "Request sent" : otherSession ? "Ask the other tab to hand over" : "Request edit"}</Button>}
+    {mayEdit && view.holder && !view.mine && <span data-slot="handoff-request-status" aria-live="polite" aria-atomic="true" role={requested ? "status" : undefined} className="text-muted-foreground">{requested ? view.holder.kind === "agent" ? "Request recorded. An agent does not hand over editing by itself." : "Waiting for the handover." : ""}</span>}
+    {mayEdit && view.holder?.kind === "agent" && view.can_stop_agent === true && onStopAgent && <Button size="sm" variant="outline" disabled={pending} onClick={onStopAgent}>Stop agent</Button>}
     {mine && <>
-      <Button size="sm" variant="outline" disabled={pending} onClick={() => onAction("release", { generation })}>Uvolnit úpravy</Button>
-      {view.handoff_requested_by.map(request => <Button key={request.request_id} size="sm" disabled={pending} onClick={() => onAction("handoff", { generation, request_id: request.request_id })}>Předat uživateli {request.display_name.trim() || (request.kind === "agent" ? "Agent" : "Uživatel")}</Button>)}
+      <Button size="sm" variant="outline" disabled={pending} onClick={() => onAction("release", { generation })}>Hand back</Button>
+      {view.handoff_requested_by.map(request => <Button key={request.request_id} size="sm" disabled={pending} onClick={() => onAction("handoff", { generation, request_id: request.request_id })}>Hand over to {request.display_name.trim() || (request.kind === "agent" ? "Agent" : "User")}</Button>)}
     </>}
-    {mayEdit && view.mine && !view.can_write && <span className="text-muted-foreground">Pouze čtení · místní koncept zachován</span>}
+    {mayEdit && view.mine && !view.can_write && <span className="text-muted-foreground">Read-only · local draft kept</span>}
   </div>
 }
 

@@ -3,6 +3,7 @@ package api
 // This authority is served ONLY on a private Unix listener. It is deliberately
 // absent from the public Router: editor/CLI delivery belongs to D1b.
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -86,7 +87,7 @@ func (h *documentAuthority) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.SetPathValue("page", parts[3])
 	r.SetPathValue("operation", parts[4])
-	if parts[4] == "state" || parts[4] == "checkpoints" || parts[4] == "checkpoint-read" {
+	if parts[4] == "state" || parts[4] == "checkpoints" || parts[4] == "checkpoint-read" || parts[4] == "comments" {
 		// This marker cannot be supplied by a public client. Service-secret
 		// authentication and exact method/path parsing have already succeeded.
 		r = r.WithContext(context.WithValue(r.Context(), documentPrivateReadKey{}, documentPrivateReadAdmission{pageID: parts[3]}))
@@ -191,7 +192,14 @@ func (h *documentAuthority) authorizeWithReadRecord(r *http.Request, k documents
 		if initialize && (rec.OwnerUserID != user.ID || rec.OwnerCrewID != "") {
 			return "", errDocumentAccess
 		}
-		if write {
+		if op := r.PathValue("operation"); write && (op == "comment" || op == "resolve") {
+			// Discussion is feedback authority, never content authority: Edit,
+			// or a Comment/Edit grant. On private output only its custodian
+			// comments; the audited administrator read never qualifies.
+			if !h.pages.mayCommentPage(ctx, k.WorkspaceID, user.ID, role, rec) || (rec.PrivateAudience && rec.OwnerUserID != user.ID) {
+				return "", errDocumentAccess
+			}
+		} else if write {
 			if !h.pages.mayEditSpec(ctx, k.WorkspaceID, user.ID, role, rec) {
 				return "", errDocumentAccess
 			}
@@ -238,6 +246,9 @@ func documentAuthorityError(w http.ResponseWriter, err error) {
 	case errors.Is(err, artifacts.ErrUnsupported):
 		status = 409
 		message = "unsupported document operation or schema"
+	case errors.Is(err, documents.ErrInvalidComment):
+		status = 400
+		message = err.Error()
 	case errors.Is(err, documents.ErrConflict), errors.Is(err, documents.ErrFence), errors.Is(err, documents.ErrSchema), errors.Is(err, documents.ErrDuplicate):
 		status = 409
 		message = err.Error()
@@ -279,6 +290,12 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		Semantic     *documentSemanticPatch `json:"semantic"`
 		Kind         string                 `json:"kind"`
 		Checkpoint   string                 `json:"checkpoint"`
+		Body         string                 `json:"body"`
+		Anchor       json.RawMessage        `json:"anchor"`
+		Parent       string                 `json:"parent"`
+		Comment      string                 `json:"comment"`
+		Version      int64                  `json:"version"`
+		Resolved     bool                   `json:"resolved"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 3<<20)
 	decoder := json.NewDecoder(r.Body)
@@ -291,9 +308,9 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "one authority JSON object required")
 		return
 	}
-	read := op == "state" || op == "receipt" || op == "checkpoint-read" || op == "checkpoints"
+	read := op == "state" || op == "receipt" || op == "checkpoint-read" || op == "checkpoints" || op == "comments"
 	_, agent := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
-	auditNeeded := !agent && (op == "state" || op == "checkpoints" || op == "checkpoint-read")
+	auditNeeded := !agent && (op == "state" || op == "checkpoints" || op == "checkpoint-read" || op == "comments")
 	var readRecord *pageRecord
 	var capture func(*pageRecord)
 	if auditNeeded {
@@ -328,6 +345,28 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		var s documents.State
 		s, err = operations.Create(ctx, k, artifacts.CreateDocument{ID: in.ID, Fingerprint: in.Fingerprint, Schema: in.Schema, Snapshot: in.Snapshot, Projection: in.Blocks}, auth)
 		result = h.documentStateWire(s)
+	case "comments":
+		result, err = h.store.Comments(ctx, k, auth)
+	case "comment":
+		if agent {
+			replyError(w, 403, "human comment required")
+			return
+		}
+		anchor := in.Anchor
+		if string(bytes.TrimSpace(anchor)) == "null" {
+			anchor = nil
+		}
+		var receipt documents.Receipt
+		receipt, err = h.store.Comment(ctx, k, documents.CommentInput{ID: in.ID, Fingerprint: in.Fingerprint, Parent: in.Parent, Body: in.Body, Anchor: anchor, IfRev: in.IfRev, Generation: in.Generation}, auth)
+		result = documentReceiptWire(receipt)
+	case "resolve":
+		if agent {
+			replyError(w, 403, "human comment required")
+			return
+		}
+		var receipt documents.Receipt
+		receipt, err = h.store.ResolveComment(ctx, k, in.ID, in.Fingerprint, in.Comment, in.Version, in.Resolved, in.IfRev, in.Generation, auth)
+		result = documentReceiptWire(receipt)
 	case "lease":
 		var l documents.Lease
 		l, err = h.store.Acquire(ctx, k, in.Owner, auth)

@@ -33,6 +33,8 @@ vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-c
 vi.mock("@/components/layout/secondary-panel", async importOriginal => ({ ...(await importOriginal<typeof import("@/components/layout/secondary-panel")>()), SecondaryPanel: ({ label, children }: { label: string; children: React.ReactNode }) => <aside aria-label={label}>{children}</aside> }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "owner" } } }) }))
 vi.mock("@/components/features/chat/artifact-context/viewer/artifact-slides-preview", () => ({ ArtifactSlidesPreview: ({ selectMode }: { selectMode: boolean }) => <div data-testid="library-slides" data-select-mode={String(selectMode)}>Library typed Slides</div> }))
+// The Artifacts detail draws typed Slides in its own frame view (kinds/slides); the deck read is the existing hook.
+vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-slides", () => ({ useArtifactSlides: () => ({ scope: "s", enabled: true, projection: undefined, error: false, downloadPDF: async () => null }) }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: () => ({ pages: state.pages, loading: false, error: null, refresh: vi.fn() }),
@@ -87,9 +89,9 @@ afterEach(cleanup)
 
 const open = () => render(withQuery(<ArtifactsLibrary workspaceId="workspace-1" item="page-1" onSelect={vi.fn()} />))
 
-// The composer opens once the private local draft has loaded.
+// The composer opens once the private local draft has loaded. Comment sits in the frame's tools slot (#5132).
 async function compose() {
-  fireEvent.click(screen.getByRole("button", { name: "Select" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Add a comment" }))
   const frame = screen.getByTitle(/Preview of/) as HTMLIFrameElement
   act(() => window.dispatchEvent(new MessageEvent("message", {
     source: frame.contentWindow,
@@ -100,30 +102,25 @@ async function compose() {
   fireEvent.change(box, { target: { value: saved.text } })
 }
 
-it("provides Preview, History and Comments tabs without losing an unsent anchored comment", async () => {
+it("opens History and Comments in the frame drawer without losing an unsent anchored comment", async () => {
   open()
-  expect(screen.getByRole("tab", { name: "Preview", selected: true })).toBeInTheDocument()
   await compose()
-  fireEvent.click(screen.getByRole("tab", { name: "History" }))
+  fireEvent.click(screen.getByRole("button", { name: "History" }))
   expect(screen.getByRole("region", { name: "Version history" })).toBeVisible()
-  fireEvent.click(screen.getByRole("tab", { name: "Comments" }))
+  fireEvent.click(screen.getByRole("button", { name: "Comments" }))
   expect(screen.getByRole("region", { name: "Comment queue" })).toBeVisible()
-  fireEvent.click(screen.getByRole("tab", { name: "Preview" }))
   expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue(saved.text)
   expect(state.version).toBeUndefined()
   expect(state.comment).not.toHaveBeenCalled()
 })
 
-it("supports arrow keys and Home and End between detail tabs", () => {
+it("lays a static project out as an App: version in view, Static under it, Propose in the Agent drawer", async () => {
   open()
-  const preview = screen.getByRole("tab", { name: "Preview" })
-  preview.focus()
-  fireEvent.keyDown(preview, { key: "ArrowRight" })
-  expect(screen.getByRole("tab", { name: "History", selected: true })).toHaveFocus()
-  fireEvent.keyDown(document.activeElement!, { key: "End" })
-  expect(screen.getByRole("tab", { name: "Comments", selected: true })).toHaveFocus()
-  fireEvent.keyDown(document.activeElement!, { key: "Home" })
-  expect(screen.getByRole("tab", { name: "Preview", selected: true })).toHaveFocus()
+  expect(await screen.findByRole("button", { name: "Version: v3 · Latest" })).toBeInTheDocument()
+  expect(screen.getByRole("group", { name: "Capabilities" })).toHaveTextContent("Static · no capabilities")
+  expect(screen.queryByRole("tab", { name: "Preview" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Agent" }))
+  expect(screen.getByRole("radio", { name: "Propose" })).not.toBeDisabled()
 })
 
 it("starts the source agent only after saving the exact library comment", async () => {
@@ -189,12 +186,17 @@ it.each(["true", "false"])("routes explicit server-typed Slides with flag %s whi
     state.snapshot!.manifest.files.push({ path: "deck.json", media_type: "application/json", content: '{"schema_version":1,"order":["intro"]}' })
     open()
     if (flag === "true") {
-      expect(screen.getByTestId("library-slides")).toHaveAttribute("data-select-mode", "false")
-      expect(screen.queryByRole("button", { name: "Select" })).toBeNull()
-      expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull()
+      expect(document.querySelector('[data-artifact-frame="slides"]')).not.toBeNull()
+      expect(screen.getByLabelText("Loading slides")).toBeInTheDocument()
+      expect(screen.queryByRole("button", { name: /Select on the slide/ })).toBeNull()
+      expect(screen.queryByRole("textbox", { name: "Comment on the slide" })).toBeNull()
+      expect(screen.getByRole("button", { name: /^Status:/ })).toHaveAttribute("data-status", "readonly")
     } else {
-      expect(screen.queryByTestId("library-slides")).toBeNull()
-      expect(screen.getByRole("link", { name: "Open in Pages" })).toBeInTheDocument()
+      // Its own Slides view is switched off: the generic project viewer shows it in the frame, never a link to Pages.
+      expect(document.querySelector('[data-artifact-frame="slides"]')).not.toBeNull()
+      expect(screen.queryByRole("link", { name: "Open full view" })).toBeNull()
+      expect(document.querySelector('a[href^="/pages"]')).toBeNull()
+      expect(screen.queryByRole("textbox", { name: "Comment on the slide" })).toBeNull()
     }
   } finally { vi.unstubAllEnvs() }
 })
@@ -202,4 +204,31 @@ it.each(["true", "false"])("routes explicit server-typed Slides with flag %s whi
 it("opens the version an address pins (a shared-version link), not Latest (#4995)", () => {
   render(withQuery(<ArtifactsLibrary workspaceId="workspace-1" item="page-1" version={2} onSelect={vi.fn()} />))
   expect(state.version).toBe(2)
+})
+
+// A design system is a project the catalog calls an App until it is read; the frame must
+// still open it as a Design library, not the App view's fallback (the legacy viewer chrome).
+it("opens a design-system project as a Design library with the frame's title, history, comments and edit source", async () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM", "true")
+  try {
+    const tokens = JSON.stringify({ schema_version: 1, name: "Harbor", colors: { ink: "#0e1726" }, typography: {}, spacing: {}, radii: {}, components: [] })
+    state.snapshot!.manifest.files.push({ path: "design-system.json", media_type: "application/json", content: tokens })
+    state.snapshot!.comments = [{ ...saved, author: "owner", status: "pending" }]
+    open()
+    await waitFor(() => expect(document.querySelector('[data-artifact-frame="design"]')).not.toBeNull())
+    expect(document.querySelector("[data-kind-mode]")).toHaveAttribute("data-kind-mode", "library")
+    expect(screen.getByRole("region", { name: "Colors" })).toBeInTheDocument()
+    // No second viewer chrome inside the frame.
+    expect(screen.queryByText("Comments for agent")).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Preview" })).toBeNull()
+    expect(screen.queryByRole("tablist", { name: "Artifact detail" })).toBeNull()
+    expect(screen.queryByRole("region", { name: "Comments beside preview" })).toBeNull()
+    // What the viewer offered stays reachable through the frame.
+    expect(screen.getByRole("link", { name: "Edit source" })).toHaveAttribute("href", expect.stringContaining("edit=1"))
+    expect(screen.getByRole("button", { name: "Version: v3 · Latest" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "History" }))
+    expect(screen.getByRole("region", { name: "Version history" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Comments" }))
+    expect(screen.getByRole("region", { name: "Comment queue" })).toHaveTextContent(saved.text)
+  } finally { vi.unstubAllEnvs() }
 })

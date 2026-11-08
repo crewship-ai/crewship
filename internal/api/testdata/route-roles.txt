@@ -378,6 +378,8 @@ POST /api/v1/pages/{slug}/design/operations roleInline
 POST /api/v1/pages/{slug}/design/restore roleInline
 POST /api/v1/pages/{slug}/design/share roleInline
 POST /api/v1/pages/{slug}/design/snapshots roleInline
+POST /api/v1/pages/{slug}/document/comments roleInline
+POST /api/v1/pages/{slug}/document/comments/resolve roleInline
 POST /api/v1/pages/{slug}/document/initialize roleInline
 POST /api/v1/pages/{slug}/document/patch roleInline
 POST /api/v1/pages/{slug}/document/restore roleInline

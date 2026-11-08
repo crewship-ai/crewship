@@ -60,6 +60,8 @@ type Slide struct {
 	ID       string    `json:"id"`
 	Notes    string    `json:"notes"`
 	Elements []Element `json:"elements"`
+	// Transition is schema 3 only: how Present enters this slide ("fade" or "push").
+	Transition string `json:"transition,omitempty"`
 }
 type Element struct {
 	ID     string `json:"id"`
@@ -72,6 +74,8 @@ type Element struct {
 	Shape  *Shape `json:"shape,omitempty"`
 	Table  *Table `json:"table,omitempty"`
 	Image  *Image `json:"image,omitempty"`
+	// Icon is schema 3 (artifact rich profile) only: a closed allow-listed glyph.
+	Icon *Icon `json:"icon,omitempty"`
 }
 type Image struct {
 	AssetID        string `json:"asset_id"`
@@ -89,12 +93,22 @@ type Text struct {
 	FontSize   int    `json:"font_size"`
 	Color      string `json:"color"`
 	Align      string `json:"align"`
+	// Schema 3 only. Zero means the schema-1 default: weight 400, no extra
+	// letter spacing, line height 120 % of the font size.
+	FontWeight    int `json:"font_weight,omitempty"`
+	LetterSpacing int `json:"letter_spacing,omitempty"`
+	LineHeight    int `json:"line_height,omitempty"`
 }
 type Shape struct {
 	Kind        string `json:"kind"`
 	Fill        string `json:"fill"`
 	Stroke      string `json:"stroke"`
 	StrokeWidth int    `json:"stroke_width"`
+	// Schema 3 only: rounded rectangle corners, a linear gradient painted
+	// instead of Fill (which stays the solid fallback), and the "line" kind.
+	CornerRadius int       `json:"corner_radius,omitempty"`
+	Gradient     *Gradient `json:"gradient,omitempty"`
+	Line         *Line     `json:"line,omitempty"`
 }
 type Table struct {
 	Cells      [][]string `json:"cells"`
@@ -194,17 +208,28 @@ func validText(value string, limit int) bool {
 	}
 	return true
 }
-func validFont(family string, size int) bool {
-	return validText(family, 128) && strings.TrimSpace(family) != "" && !strings.ContainsAny(family, "\n\t") && size >= 1 && size <= 160
+func validFont(family string, size int, rich bool) bool {
+	if rich {
+		_, known := RichFonts[family]
+		return known && size >= 1 && size <= MaxRichFontSize
+	}
+	return validText(family, 128) && strings.TrimSpace(family) != "" && !strings.ContainsAny(family, "\n\t") && size >= 1 && size <= MaxFontSize
 }
+
+// Validate admits the stored schemas 1 and 2. Schema 3 is a read projection
+// only and goes through ValidateProjection.
 func Validate(deck Deck) error {
 	if !SupportedSchema(deck.SchemaVersion) {
 		return ErrSchema
 	}
+	return validate(deck)
+}
+func validate(deck Deck) error {
+	rich := deck.SchemaVersion == RichSchemaVersion
 	if !identifier.MatchString(deck.DeckID) || deck.Width < 64 || deck.Width > 4096 || deck.Height < 64 || deck.Height > 4096 || deck.Slides == nil || deck.SlideOrder == nil || len(deck.Slides) < 1 || len(deck.Slides) > MaxSlides || len(deck.SlideOrder) != len(deck.Slides) {
 		return errors.New("invalid Slides deck structure")
 	}
-	if !color.MatchString(deck.Theme.Background) || !color.MatchString(deck.Theme.Color) || !validFont(deck.Theme.FontFamily, deck.Theme.FontSize) {
+	if !color.MatchString(deck.Theme.Background) || !color.MatchString(deck.Theme.Color) || !validFont(deck.Theme.FontFamily, deck.Theme.FontSize, rich) {
 		return errors.New("invalid deck theme")
 	}
 	ids := map[string]bool{}
@@ -214,7 +239,7 @@ func Validate(deck Deck) error {
 	images := map[string]string{}
 	for _, slide := range deck.Slides {
 		slideCells := 0
-		if !identifier.MatchString(slide.ID) || ids[slide.ID] || slide.Elements == nil || !validText(slide.Notes, MaxNotesBytes) {
+		if !identifier.MatchString(slide.ID) || ids[slide.ID] || slide.Elements == nil || !validText(slide.Notes, MaxNotesBytes) || !(slide.Transition == "" || rich && (slide.Transition == "fade" || slide.Transition == "push")) {
 			return errors.New("invalid slide identity, notes or elements")
 		}
 		ids[slide.ID] = true
@@ -231,17 +256,17 @@ func Validate(deck Deck) error {
 			switch element.Type {
 			case "text":
 				v := element.Text
-				if v == nil || element.Shape != nil || element.Table != nil || element.Image != nil || !validText(v.Value, MaxTextBytes) || !validFont(v.FontFamily, v.FontSize) || !color.MatchString(v.Color) || (v.Align != "left" && v.Align != "center" && v.Align != "right") {
+				if v == nil || element.Shape != nil || element.Table != nil || element.Image != nil || element.Icon != nil || !validText(v.Value, MaxTextBytes) || !validFont(v.FontFamily, v.FontSize, rich) || !color.MatchString(v.Color) || (v.Align != "left" && v.Align != "center" && v.Align != "right") || !validRichText(v, rich) {
 					return errors.New("invalid text element")
 				}
 			case "shape":
 				v := element.Shape
-				if v == nil || element.Text != nil || element.Table != nil || element.Image != nil || (v.Kind != "rectangle" && v.Kind != "ellipse") || !color.MatchString(v.Fill) || !color.MatchString(v.Stroke) || v.StrokeWidth < 0 || v.StrokeWidth > 16 {
+				if v == nil || element.Text != nil || element.Table != nil || element.Image != nil || element.Icon != nil || !color.MatchString(v.Fill) || !color.MatchString(v.Stroke) || v.StrokeWidth < 0 || v.StrokeWidth > 16 || !validRichShape(element, rich) {
 					return errors.New("invalid shape element")
 				}
 			case "table":
 				v := element.Table
-				if v == nil || element.Text != nil || element.Shape != nil || element.Image != nil || len(v.Cells) < 1 || len(v.Cells) > 30 || len(v.Cells[0]) < 1 || len(v.Cells[0]) > 20 || !validFont(v.FontFamily, v.FontSize) || !color.MatchString(v.Color) || !color.MatchString(v.Fill) || !color.MatchString(v.Border) {
+				if v == nil || element.Text != nil || element.Shape != nil || element.Image != nil || element.Icon != nil || len(v.Cells) < 1 || len(v.Cells) > 30 || len(v.Cells[0]) < 1 || len(v.Cells[0]) > 20 || !validFont(v.FontFamily, v.FontSize, rich) || !color.MatchString(v.Color) || !color.MatchString(v.Fill) || !color.MatchString(v.Border) {
 					return errors.New("invalid table element")
 				}
 				for _, row := range v.Cells {
@@ -264,7 +289,7 @@ func Validate(deck Deck) error {
 				}
 			case "image":
 				v := element.Image
-				if deck.SchemaVersion != ImageSchemaVersion || v == nil || element.Text != nil || element.Shape != nil || element.Table != nil || !identifier.MatchString(v.AssetID) || !hashPattern.MatchString(v.ExpectedSHA256) || !validText(v.Alt, MaxImageAltBytes) {
+				if deck.SchemaVersion != ImageSchemaVersion || v == nil || element.Text != nil || element.Shape != nil || element.Table != nil || element.Icon != nil || !identifier.MatchString(v.AssetID) || !hashPattern.MatchString(v.ExpectedSHA256) || !validText(v.Alt, MaxImageAltBytes) {
 					return errors.New("invalid schema-2 image element")
 				}
 				if sha, exists := images[v.AssetID]; exists && sha != v.ExpectedSHA256 {
@@ -273,6 +298,10 @@ func Validate(deck Deck) error {
 				images[v.AssetID] = v.ExpectedSHA256
 				if len(images) > MaxImageAssets {
 					return errors.New("too many unique image assets")
+				}
+			case "icon":
+				if !validIcon(element, rich) {
+					return errors.New("invalid schema-3 icon element")
 				}
 			default:
 				return errors.New("unsupported element type")
@@ -338,6 +367,9 @@ func DeckHash(deck Deck) (string, error) {
 	}
 	if deck.SchemaVersion == ImageSchemaVersion {
 		return hashDomainBytes(ImageHashDomain, data), nil
+	}
+	if deck.SchemaVersion == RichSchemaVersion {
+		return hashDomainBytes(RichHashDomain, data), nil
 	}
 	return hashBytes(data), nil
 }

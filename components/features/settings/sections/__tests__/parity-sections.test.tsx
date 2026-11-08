@@ -54,7 +54,7 @@ describe("PAR-097 accent colour", () => {
     expect(card.querySelector("[class*='border-dashed']")).toBeNull()
     const row = screen.getByTestId("workspace-accent-hint")
     expect(row.getAttribute("data-slot")).toBe("settings-row")
-    expect(row).toHaveTextContent("The workspace brand colour from General › Pages appearance")
+    expect(row).toHaveTextContent("The workspace brand colour from General › Artifacts appearance")
     expect(within(row).getByRole("radio", { name: "Team colour" })).toHaveTextContent("Use")
   })
 })
@@ -117,10 +117,10 @@ describe("PAR-117 agent avatars copy", () => {
   })
 })
 
-describe("PAR-116 Pages appearance", () => {
+describe("PAR-116 Artifacts appearance", () => {
   it("is five plain tiles, with no mono caption, no hex fields and no sample block", () => {
     general()
-    const card = screen.getByRole("region", { name: "Pages appearance" })
+    const card = screen.getByRole("region", { name: "Artifacts appearance" })
     expect(within(card).getAllByRole("radio")).toHaveLength(5)
     for (const caption of ["Theme", "Colours", "Live sample"]) {
       expect(within(card).queryByText(caption)).toBeNull()
@@ -136,7 +136,7 @@ describe("PAR-116 Pages appearance", () => {
 
   it("keeps the editor under Custom…", () => {
     general()
-    const card = screen.getByRole("region", { name: "Pages appearance" })
+    const card = screen.getByRole("region", { name: "Artifacts appearance" })
     fireEvent.click(within(card).getByRole("radio", { name: "Custom" }))
     expect(within(card).getByLabelText("Accent")).toBeInTheDocument()
     expect(within(card).getAllByLabelText(/picker$/)).toHaveLength(6)

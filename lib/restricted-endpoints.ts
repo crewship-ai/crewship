@@ -22,6 +22,7 @@ export const RESTRICTED_FE_ENDPOINTS = [
   "GET /api/v1/pages/{slug}/document",
   "GET /api/v1/pages/{slug}/document/checkpoints",
   "GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}",
+  "GET /api/v1/pages/{slug}/document/comments",
   "GET /api/v1/pages/{slug}/project",
   "GET /api/v1/pages/{slug}/project/source",
   "GET /api/v1/pages/{slug}/project/history",

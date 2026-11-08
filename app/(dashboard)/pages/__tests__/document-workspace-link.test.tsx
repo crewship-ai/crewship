@@ -13,7 +13,6 @@ vi.mock("@/lib/use-url-segment", () => ({ useUrlSegment: () => "document" }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => "standard" }))
 vi.mock("@/hooks/use-pages", () => ({ usePage: (...args: unknown[]) => { test.metadata(...args); return { page: {}, loading: false, error: null, accessDenied: false } } }))
 vi.mock("@/components/features/restricted/access-notice", () => ({ useAccessContext: () => ({}) }))
-vi.mock("@/components/features/restricted/restricted-pages", () => ({ RestrictedPages: () => null }))
 vi.mock("@/components/features/pages/pages-layout", () => ({ PagesLayout: (props: unknown) => { test.document(props); return <p>Editor</p> } }))
 
 beforeEach(() => {

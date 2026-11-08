@@ -18,6 +18,7 @@ import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactD
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { cn } from "@/lib/utils"
 import { artifactDashboards, artifactDesignSystem, artifactsLibrary } from "@/lib/feature-flags"
+import { artifactsEditHref, artifactsItemHref } from "../artifacts-href"
 import { parseDashboardManifest } from "@/lib/pages/artifact-dashboard"
 import { artifactSlidesMode } from "@/lib/pages/artifact-slides"
 import { useArtifactViewer, type ArtifactViewerTarget } from "../projects/artifact-viewer-context"
@@ -30,9 +31,47 @@ import { ArtifactSlidesPreview } from "./artifact-slides-preview"
 import { ArtifactDesignSystemPreview } from "@/components/features/artifacts/design-system/design-system-preview"
 import { hasDesignSystemFile } from "@/components/features/artifacts/design-system/manifest"
 import { isValidAnchorSelector, screenLabel, screenLabels } from "./element-select"
-import { artifactsItemHref } from "../artifacts-href"
 
 export type ArtifactViewerVariant = "pane" | "fullscreen" | "library"
+
+/** What the stage is drawing: the same chain the viewer always used, named for a host that lays it out itself. */
+export type ArtifactPreviewKind = "unsupported" | "slides" | "interactive" | "design-system" | "dashboard" | "static"
+
+/**
+ * The loaded viewer's pieces, for a host that places them itself (the
+ * Artifacts frame puts them in its slots and drawer). Every rule, permission
+ * epoch and backend call stays in this file; the host only arranges.
+ */
+export interface ArtifactViewerParts {
+  data: ArtifactProjectSnapshot
+  previewKind: ArtifactPreviewKind
+  canWrite: boolean
+  canComment: boolean
+  /** Edit plus the server's send_to_agent grant. */
+  maySend: boolean
+  version: { latest: number; shared: number; shown: number; viewingOld: boolean; pick: (value: "latest" | "shared" | number) => void }
+  screens: string[]
+  screen: string
+  labelOf: (path: string) => string
+  setScreen: (path: string) => void
+  /** Select an element to comment on; `available` is false when this person or version cannot comment. */
+  select: { on: boolean; available: boolean; toggle: () => void; hint: React.ReactNode }
+  /** The preview itself, sized by its host. */
+  preview: React.ReactNode
+  /** The anchored comment composer; it belongs over the preview. */
+  pinCard: React.ReactNode
+  canvasRef: React.RefObject<HTMLDivElement | null>
+  /** Conflict, quota, retry and version notices, and the live status line. */
+  banners: React.ReactNode
+  history: React.ReactNode
+  queue: React.ReactNode
+  /** Send waiting comments to the source agent; null without that path. */
+  sendBar: React.ReactNode
+  waiting: number
+  /** Share the shown version with readers, behind its confirmation; null when this person may not. */
+  share: React.ReactNode
+  editSourceHref: string | null
+}
 
 /** Queue state of a comment. Derived only from what the server sent: no status, no reply, no task → no chip. */
 export function commentQueueChip(comment: ArtifactComment): { label: string; tone: StatusTone; live?: boolean } | null {
@@ -130,18 +169,23 @@ function hasAnchor(html: string, selector: string): boolean {
 const PIN = "inline-flex shrink-0 items-center justify-center rounded-[999px_999px_999px_4px] font-semibold tabular-nums"
 
 /** The right-side viewer for the artifact project the chat opened. Renders nothing without a target. */
-export function ArtifactViewerPanel({ className, variant = "pane" }: { className?: string; variant?: ArtifactViewerVariant }) {
+export function ArtifactViewerPanel({ className, variant = "pane", render, onSection }: { className?: string; variant?: ArtifactViewerVariant
+  /** Lays the loaded viewer out itself; undefined keeps the built-in layout. */
+  render?: (parts: ArtifactViewerParts) => React.ReactNode | undefined
+  /** With `render`: where History, Comments or the preview (null) open. */
+  onSection?: (section: "history" | "comments" | null) => void }) {
   const viewer = useArtifactViewer()
   const target = viewer?.target
   if (!viewer || !target) return null
   // A new target starts clean: no draft, banner or old version carries over to another project.
-  return <ViewerBody key={`${viewer.workspaceId}:${target.slug}:${target.version ?? ""}`} workspaceId={viewer.workspaceId} target={target} onClose={viewer.close} className={className} variant={variant} />
+  return <ViewerBody key={`${viewer.workspaceId}:${target.slug}:${target.version ?? ""}`} workspaceId={viewer.workspaceId} target={target} onClose={viewer.close} className={className} variant={variant} render={render} onSection={onSection} />
 }
 
-interface BodyProps { workspaceId: string; target: ArtifactViewerTarget; onClose: () => void; className?: string; variant: ArtifactViewerVariant }
+interface BodyProps { workspaceId: string; target: ArtifactViewerTarget; onClose: () => void; className?: string; variant: ArtifactViewerVariant
+  render?: (parts: ArtifactViewerParts) => React.ReactNode | undefined; onSection?: (section: "history" | "comments" | null) => void }
 type Shell = (header: React.ReactNode, body: React.ReactNode) => React.ReactNode
 
-function ViewerBody({ workspaceId, target, onClose, className, variant }: BodyProps) {
+function ViewerBody({ workspaceId, target, onClose, className, variant, render, onSection }: BodyProps) {
   const [viewing, setViewing] = useState<number | undefined>(target.version)
   const snapshot = useArtifactProjectSnapshot(workspaceId, target.slug, viewing)
   const data = snapshot.data
@@ -181,7 +225,7 @@ function ViewerBody({ workspaceId, target, onClose, className, variant }: BodyPr
       <Skeleton className="h-8 w-full" /><Skeleton className="min-h-40 flex-1" />
     </div>)
   }
-  const props = { data, target, setViewing, refetch: () => void snapshot.refetch(), workspaceId, shell, fullscreen, writeEnabled: !snapshot.error && data.can_write === true, commentEnabled: !snapshot.error && (data.can_write === true || data.can_comment === true), readForRetry: async () => { const fresh = await snapshot.refetch(); return fresh && !fresh.error ? fresh.data : undefined } }
+  const props = { data, target, setViewing, refetch: () => void snapshot.refetch(), workspaceId, shell, fullscreen, writeEnabled: !snapshot.error && data.can_write === true, commentEnabled: !snapshot.error && (data.can_write === true || data.can_comment === true), readForRetry: async () => { const fresh = await snapshot.refetch(); return fresh && !fresh.error ? fresh.data : undefined }, render, onSection }
   return variant === "library"
     ? <LibraryLoadedViewer {...props} dispatchEnabled={props.writeEnabled && data.can_send_to_agent === true} />
     : <LoadedViewer {...props} />
@@ -201,6 +245,8 @@ interface LoadedProps {
   commentEnabled: boolean
   library?: boolean
   sendToOrigin?: (request: { pageId: string; comment: ArtifactComment }) => Promise<boolean>
+  render?: (parts: ArtifactViewerParts) => React.ReactNode | undefined
+  onSection?: (section: "history" | "comments" | null) => void
 }
 
 /** Only the library connects to the source chat; chat panes already own their live dispatcher. */
@@ -210,7 +256,7 @@ function LibraryLoadedViewer(props: LoadedProps & { dispatchEnabled: boolean }) 
   return <LoadedViewer {...props} library sendToOrigin={data.origin && dispatchEnabled ? request => agent.dispatch(request.comment) : undefined} />
 }
 
-function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, shell, fullscreen, writeEnabled, commentEnabled, library = false, sendToOrigin }: LoadedProps) {
+function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, shell, fullscreen, writeEnabled, commentEnabled, library = false, sendToOrigin, render, onSection }: LoadedProps) {
   const me = useSessionSafe()?.data?.user?.id
   const canWrite = writeEnabled && data.can_write === true
   const mayShare=canWrite && data.can_share === true
@@ -444,7 +490,8 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
     else { setAnchor(null); setSelectMode(true); setBanner("anchor") }
   }
   const openHistory = () => {
-    if (library) setActiveTab("versions")
+    if (render && onSection) onSection("history")
+    else if (library) setActiveTab("versions")
     else setHistoryOpen(true)
     window.requestAnimationFrame(() => historyRef.current?.focus())
   }
@@ -452,6 +499,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
     try { await navigator.clipboard.writeText(draft); if (writeAllowed()) setNotice({ text: "Comment copied" }) } catch { if (writeAllowed()) setNotice({ text: "Could not copy the comment" }) }
   }
   const jumpTo = (c: ArtifactComment) => {
+    if (render && onSection) onSection(null)
     if (library) setActiveTab("preview")
     if (screens.includes(c.path)) setScreenPath(c.path)
     if (isValidAnchorSelector(c.selector)) setHighlight(prev => ({ selector: c.selector, seq: (prev?.seq ?? 0) + 1 }))
@@ -502,23 +550,26 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const shareTarget = shown
   const canShare = mayShare && shareTarget !== sharedVersion
 
+  const shareControl = canShare && <Popover open={confirmShare} onOpenChange={setConfirmShare}>
+    <PopoverTrigger asChild><Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5"><Link2 className="size-3.5" aria-hidden />Share</Button></PopoverTrigger>
+    <PopoverContent align="end" className="w-72 space-y-3 text-sm">
+      <p>People with access will see v{shareTarget}. Later versions stay private until you share them.</p>
+      <div className="flex justify-end gap-2">
+        <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmShare(false)}>Cancel</Button>
+        <Button type="button" size="sm" disabled={share.isPending} onClick={() => doShare(shareTarget)}>Share v{shareTarget}</Button>
+      </div>
+    </PopoverContent>
+  </Popover>
+  // The App source editor opens inside the artifact's own frame, /artifacts/<id>?edit=1 (never Pages).
+  const editSourceHref = artifactsEditHref(workspaceId, data.page_id, `/pages/${encodeURIComponent(target.slug)}?${new URLSearchParams({artifact:"1",edit:"1",workspace_id:workspaceId})}`)
   const toolbar = <div className="flex shrink-0 flex-wrap items-center gap-1.5 border-b px-3 py-2">
     {!library && <Segmented ariaLabel="Version" size="xs" value={versionValue} options={versionOptions} onChange={pickVersion} />}
     {!library && versions.length > 0 && <Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5" aria-pressed={historyOpen} onClick={() => setHistoryOpen(open => !open)}>
       <Clock className="size-3.5" aria-hidden />History
     </Button>}
     <div className="flex-1" />
-    {canWrite && <Link className="inline-flex items-center px-2 text-sm underline coarse:min-h-[44px]" href={`/pages/${encodeURIComponent(target.slug)}?${new URLSearchParams({artifact:"1",edit:"1",workspace_id:workspaceId})}`}>Edit source</Link>}
-    {canShare && <Popover open={confirmShare} onOpenChange={setConfirmShare}>
-      <PopoverTrigger asChild><Button type="button" variant="ghost" size="sm" className="h-7 gap-1.5"><Link2 className="size-3.5" aria-hidden />Share</Button></PopoverTrigger>
-      <PopoverContent align="end" className="w-72 space-y-3 text-sm">
-        <p>People with access will see v{shareTarget}. Later versions stay private until you share them.</p>
-        <div className="flex justify-end gap-2">
-          <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmShare(false)}>Cancel</Button>
-          <Button type="button" size="sm" disabled={share.isPending} onClick={() => doShare(shareTarget)}>Share v{shareTarget}</Button>
-        </div>
-      </PopoverContent>
-    </Popover>}
+    {canWrite && <Link className="inline-flex items-center px-2 text-sm underline coarse:min-h-[44px]" href={editSourceHref}>Edit source</Link>}
+    {shareControl}
   </div>
 
   const compactScreens = screens.length > 4
@@ -606,9 +657,10 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
     </div>
   </form>
 
-  const canvas = <div ref={canvasRef} className="relative rounded-card bg-muted p-3.5">
-    <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>
-      {slidesMode === "unsupported" ? <p role="alert" className="p-4">This Slides format is unsupported.</p>
+  const previewKind: ArtifactPreviewKind = slidesMode === "unsupported" ? "unsupported" : slidesMode === "slides" ? "slides"
+    : data.interactive && !(canComment && selectMode && !viewingOld) ? "interactive" : designSystem ? "design-system"
+      : artifactDashboards() && data.manifest.files.some(file => file.path === "dashboard.json") ? "dashboard" : "static"
+  const preview = slidesMode === "unsupported" ? <p role="alert" className="p-4">This Slides format is unsupported.</p>
         : slidesMode === "slides" ? <ArtifactSlidesPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} artifactKind={data.artifact_kind} path={screenPath ?? ""} title={`Preview of ${labelOf(screen)}`} selectMode={canComment && selectMode && !viewingOld} onSelect={select} onNavigate={setScreenPath} />
         // Select mode keeps the static preview so comments anchor to inert markup.
         : data.interactive && !(canComment && selectMode && !viewingOld)
@@ -617,7 +669,10 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
         : artifactDashboards() && data.manifest.files.some(file => file.path === "dashboard.json")
         ? <ArtifactDashboardPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} files={data.manifest.files} path={screen} selectMode={canComment && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`} onSelect={select} onNavigate={setScreenPath} />
         : <ArtifactPreviewFrame html={html} files={data.manifest.files} screens={screens} path={screen} selectMode={canComment && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
-          highlight={highlight} onSelect={select} onNavigate={setScreenPath} />}
+          highlight={highlight} onSelect={select} onNavigate={setScreenPath} />
+  const canvas = <div ref={canvasRef} className="relative rounded-card bg-muted p-3.5">
+    <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>
+      {preview}
     </div>
     {pinCard}
   </div>
@@ -670,6 +725,29 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const tabCount = (n: number) => n > 0 && <span aria-hidden className="ml-1.5 font-mono text-micro text-muted-foreground">{n}</span>
 
   if(draftReadError?.key===draftKey&&draftReadError.revoked)return shell(header,<p role="alert" className="p-6">Page read access was removed. The local draft has been deleted where this browser could reach it.</p>)
+  if (render) {
+    const selectable = canComment && slidesMode !== "unsupported" && !viewingOld
+    const laidOut = render({
+      data, previewKind, canWrite, canComment, maySend,
+      version: { latest, shared: sharedVersion, shown, viewingOld, pick: value => setViewing(value === "latest" || value === latest ? undefined : value === "shared" ? sharedVersion : value) },
+      screens, screen, labelOf, setScreen: setScreenPath,
+      select: { on: selectMode, available: selectable, toggle: () => { if (selectMode) setAnchor(null); else clearCommentNotice(); setSelectMode(on => !on) },
+        hint: selectable && selectMode && !anchor && (anchorable
+          ? <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><MousePointerClick className="size-3.5" aria-hidden />Click a part of the screen. The comment stays anchored to that element and version.</p>
+          : <p role="status" className="flex items-center gap-1.5 text-xs text-muted-foreground"><Info className="size-3.5" aria-hidden />Nothing on this screen can take a comment yet: comments anchor to parts with an id, and this screen has none. Ask the agent in chat to add them.</p>) },
+      preview, pinCard, canvasRef,
+      banners: <>
+        {draftReadError?.key===draftKey&&<p role="alert" className="p-3">Private draft could not be opened. Reconnect and reopen; the stored copy is retained.</p>}
+        {banners}
+        <p role="status" aria-live="polite" className="text-xs text-muted-foreground empty:hidden">{notice.text}</p>
+      </>,
+      history, queue: <div ref={queueRef} tabIndex={-1} role="region" aria-label="Comment queue" className="focus-visible:outline-none">{queueItems}</div>,
+      sendBar: sendBar || null, waiting: waitingCount,
+      share: shareControl || null,
+      editSourceHref: canWrite ? editSourceHref : null,
+    })
+    if (laidOut !== undefined) return laidOut
+  }
   return shell(header, <>
     {draftReadError?.key===draftKey&&<p role="alert" className="p-3">Private draft could not be opened. Reconnect and reopen; the stored copy is retained.</p>}
     {library && <div role="tablist" aria-label="Artifact detail" className="flex gap-1 border-b px-3 py-2" onKeyDown={event => {
