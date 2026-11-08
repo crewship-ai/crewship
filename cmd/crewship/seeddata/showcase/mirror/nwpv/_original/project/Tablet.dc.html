@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – tablet</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#B85E1F}a:hover{color:#8C4512}
+</style>
+</helmet>
+<div style="width: 834px; height: 1194px; box-sizing: border-box; background: #F4F1EA; font-family: 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33; display: flex">
+<div style="width: 300px; flex: none; background: #0F1F33; color: #F4F1EA; padding: 32px 16px; box-sizing: border-box; display: flex; flex-direction: column; gap: 16px">
+<div style="font-size: 24px; font-weight: 700; padding: 0 8px">Crewship</div>
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; font-weight: 600; letter-spacing: 2px; color: #BFCBD8; padding: 8px 8px 0">CREW</div>
+<sc-for list="{{ crews }}" as="c" hint-placeholder-count="4">
+<button onClick="{{ c.pick }}" style="text-align: left; border: none; border-radius: 14px; padding: 14px 16px; min-height: 64px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; background: {{ c.bg }}; color: {{ c.fg }}; font-family: 'IBM Plex Sans', Arial, sans-serif">
+<span style="font-size: 16px; font-weight: 600">{{ c.name }}</span>
+<span style="font-size: 13px; opacity: .85">{{ c.status }}</span>
+</button>
+</sc-for>
+</div>
+<div style="flex: 1; min-width: 0; padding: 40px 36px; display: flex; flex-direction: column; gap: 24px">
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; font-weight: 600; letter-spacing: 2px; color: #B85E1F">DETAIL</div>
+<h1 style="margin: 0; font-size: 36px; font-weight: 700">{{ sel.name }}</h1>
+<div style="font-size: 17px; color: #4A5568">{{ sel.task }}</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px">
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 13px; color: #4A5568">Hotovo</div><div style="font-size: 28px; font-weight: 700">{{ sel.done }}</div></div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 13px; color: #4A5568">Chyby</div><div style="font-size: 28px; font-weight: 700">{{ sel.failed }}</div></div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 13px; color: #4A5568">Náklady</div><div style="font-size: 28px; font-weight: 700">{{ sel.cost }}</div></div>
+</div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 18px; padding: 20px; display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 18px; font-weight: 600">Poslední výstup</div>
+<p style="margin: 0; font-size: 16px; line-height: 25px; color: #253246">Na tabletu se seznam a detail vejdou vedle sebe. Na telefonu je to jedna obrazovka po druhé, na desktopu přibude ještě třetí sloupec s aktivitou.</p>
+<div style="display: flex; gap: 12px; flex-wrap: wrap">
+<button style="height: 48px; padding: 0 20px; border: none; border-radius: 14px; background: {{ accent }}; color: #0F1F33; font: 600 16px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer">Otevřít report</button>
+<button style="height: 48px; padding: 0 20px; border: 1px solid #C9C1B1; border-radius: 14px; background: #FFFDF8; color: #0F1F33; font: 600 16px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer">Sdílet</button>
+</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#E8833A","options":["#E8833A","#3FA7A0","#6C8CFF","#E8C547"]},"$preview":{"width":834,"height":1194}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { picked: 0 };
+  }
+  renderVals() {
+    const accent = this.props.accent ?? '#E8833A';
+    const list = [
+      { name: 'Research', status: 'Pracuje · 62 %', task: 'Rešerše konkurence pro Q4', done: 25, failed: 1, cost: '$27' },
+      { name: 'Frontend', status: 'Review · 90 %', task: 'Redesign stránky Artifacts', done: 31, failed: 2, cost: '$19' },
+      { name: 'Ops', status: 'Pracuje · 35 %', task: 'Kontrola nasazení na stage', done: 12, failed: 0, cost: '$6' },
+      { name: 'Support', status: 'Hotovo', task: 'Odpovědi na tikety z víkendu', done: 42, failed: 3, cost: '$18' }
+    ];
+    const picked = this.state.picked;
+    return {
+      accent,
+      sel: list[picked],
+      crews: list.map((c, i) => ({
+        ...c,
+        bg: i === picked ? '#F4F1EA' : 'transparent',
+        fg: i === picked ? '#0F1F33' : '#F4F1EA',
+        pick: () => this.setState({ picked: i })
+      }))
+    };
+  }
+}
+</script>
+</body>
+</html>

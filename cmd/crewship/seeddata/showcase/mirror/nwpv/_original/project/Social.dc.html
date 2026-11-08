@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – příspěvek na sociální sítě</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#F0954F}a:hover{color:#F4F1EA}
+</style>
+</helmet>
+<div style="width: 1080px; height: 1080px; box-sizing: border-box; padding: 96px; background: #0F1F33; color: #F4F1EA; font-family: 'IBM Plex Sans', Arial, sans-serif; display: flex; flex-direction: column; justify-content: space-between">
+<div style="display: flex; justify-content: space-between; align-items: center">
+<div style="font-size: 36px; font-weight: 700">Crewship</div>
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 24px; letter-spacing: 4px; color: #BFCBD8">NOVINKA</div>
+</div>
+<div style="display: flex; flex-direction: column; gap: 32px">
+<div style="width: 120px; height: 12px; border-radius: 6px; background: {{ accent }}"></div>
+<div style="font-size: 104px; line-height: 104px; font-weight: 700; letter-spacing: -2px">Crew teď pracuje i v noci.</div>
+<div style="font-size: 36px; line-height: 48px; color: #BFCBD8">Zadej úkol večer, ráno máš výsledek ke schválení.</div>
+</div>
+<div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 24px">
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 28px; color: #BFCBD8">crewship.example</div>
+<div style="display: flex; gap: 12px">
+<div style="width: 64px; height: 64px; border-radius: 18px; background: #16304F"></div>
+<div style="width: 64px; height: 64px; border-radius: 18px; background: #1E3E63"></div>
+<div style="width: 64px; height: 64px; border-radius: 18px; background: {{ accent }}"></div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#E8833A","options":["#E8833A","#3FA7A0","#6C8CFF","#E8C547"]},"$preview":{"width":1080,"height":1080}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { accent: this.props.accent ?? '#E8833A' };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – detail crew</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#B85E1F}a:hover{color:#8C4512}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #F4F1EA; font-family: 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33; display: flex; flex-direction: column">
+<div style="background: #0F1F33; color: #F4F1EA; padding: 24px 20px 20px; display: flex; flex-direction: column; gap: 12px">
+<a href="Main.dc.html" style="display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: #BFCBD8; text-decoration: none; font-size: 15px; align-self: flex-start"><svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>Všechny crew</a>
+<div style="display: flex; justify-content: space-between; align-items: center; gap: 12px">
+<h1 style="margin: 0; font-size: 28px; font-weight: 700">Research</h1>
+<div style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: {{ pillBg }}; color: {{ pillFg }}">{{ status }}</div>
+</div>
+<div style="font-size: 15px; color: #BFCBD8">Rešerše konkurence pro Q4</div>
+<div style="height: 6px; background: #16304F; border-radius: 3px; overflow: hidden"><div style="height: 6px; border-radius: 3px; width: {{ width }}; background: {{ bar }}"></div></div>
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #BFCBD8">{{ meta }}</div>
+</div>
+<div style="flex: 1; padding: 20px; display: flex; flex-direction: column; gap: 16px; overflow: auto">
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; font-weight: 600; letter-spacing: 2px; color: #B85E1F">AGENTI</div>
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 15px; font-weight: 600">Scout</div><div style="font-size: 13px; color: #4A5568">hledá zdroje</div></div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 15px; font-weight: 600">Analyst</div><div style="font-size: 13px; color: #4A5568">porovnává ceny</div></div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 15px; font-weight: 600">Writer</div><div style="font-size: 13px; color: #4A5568">píše souhrn</div></div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 4px"><div style="font-size: 15px; font-weight: 600">Reviewer</div><div style="font-size: 13px; color: #4A5568">kontroluje fakta</div></div>
+</div>
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; font-weight: 600; letter-spacing: 2px; color: #B85E1F">PRŮBĚH</div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 16px; padding: 16px; display: flex; flex-direction: column; gap: 14px">
+<div style="display: flex; gap: 12px; align-items: flex-start"><div style="width: 10px; height: 10px; border-radius: 5px; background: #2F8A5B; margin-top: 5px; flex: none"></div><div style="display: flex; flex-direction: column; gap: 2px"><div style="font-size: 15px">Nalezeno 14 zdrojů</div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #5A6472">10:02</div></div></div>
+<div style="display: flex; gap: 12px; align-items: flex-start"><div style="width: 10px; height: 10px; border-radius: 5px; background: #2F8A5B; margin-top: 5px; flex: none"></div><div style="display: flex; flex-direction: column; gap: 2px"><div style="font-size: 15px">Ceník 5 konkurentů v tabulce</div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #5A6472">10:09</div></div></div>
+<div style="display: flex; gap: 12px; align-items: flex-start"><div style="width: 10px; height: 10px; border-radius: 5px; background: {{ stepDot }}; margin-top: 5px; flex: none"></div><div style="display: flex; flex-direction: column; gap: 2px"><div style="font-size: 15px">{{ stepText }}</div><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #5A6472">10:14</div></div></div>
+</div>
+</div>
+<div style="padding: 16px 20px 28px; display: flex; gap: 12px">
+<button onClick="{{ sendBack }}" style="flex: 1; height: 52px; border: 1px solid #C9C1B1; border-radius: 14px; font: 600 16px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer; background: #FFFDF8; color: #0F1F33">Vrátit</button>
+<button onClick="{{ approve }}" style="flex: 2; height: 52px; border: none; border-radius: 14px; font: 600 16px 'IBM Plex Sans', Arial, sans-serif; cursor: pointer; background: {{ accent }}; color: #0F1F33">{{ approveLabel }}</button>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#E8833A","options":["#E8833A","#3FA7A0","#6C8CFF","#E8C547"]},"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { s: 'review' };
+  }
+  renderVals() {
+    const accent = this.props.accent ?? '#E8833A';
+    const s = this.state.s;
+    const map = {
+      review: { status: 'Review', pill: ['#FCE9D9', '#8C4512'], pct: 0.9, step: 'Souhrn čeká na schválení', dot: accent, label: 'Schválit', meta: '4 agenti · 14 min' },
+      done: { status: 'Hotovo', pill: ['#DDEFE6', '#1F5E40'], pct: 1, step: 'Schváleno, report odeslán týmu', dot: '#2F8A5B', label: 'Schváleno', meta: '4 agenti · hotovo za 15 min' },
+      back: { status: 'Pracuje', pill: ['#E1E9F3', '#1E3A5F'], pct: 0.7, step: 'Vráceno: doplnit zdroje k cenám', dot: '#6B7A8C', label: 'Schválit', meta: '4 agenti · upravují' }
+    }[s];
+    return {
+      accent,
+      status: map.status,
+      pillBg: map.pill[0],
+      pillFg: map.pill[1],
+      width: Math.round(map.pct * 100) + '%',
+      bar: map.pct === 1 ? '#2F8A5B' : accent,
+      stepText: map.step,
+      stepDot: map.dot,
+      approveLabel: map.label,
+      meta: map.meta,
+      approve: () => this.setState({ s: 'done' }),
+      sendBack: () => this.setState({ s: 'back' })
+    };
+  }
+}
+</script>
+</body>
+</html>

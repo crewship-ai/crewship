@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Crewship – stavy komponent</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<style>
+body{margin:0}
+a{color:#B85E1F}a:hover{color:#8C4512}
+</style>
+</helmet>
+<div style="width: 1280px; height: 900px; box-sizing: border-box; padding: 56px; background: #FBFAF6; font-family: 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33; display: flex; flex-direction: column; gap: 36px">
+<div style="display: flex; flex-direction: column; gap: 8px">
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 13px; letter-spacing: 3px; color: #B85E1F">KOMPONENTY A STAVY</div>
+<h1 style="margin: 0; font-size: 36px; font-weight: 700">Každý prvek ve všech stavech</h1>
+</div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 8px"><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #4A5568">VÝCHOZÍ</div><button style="height: 48px; border: none; border-radius: 14px; background: #E8833A; color: #0F1F33; font: 600 16px 'IBM Plex Sans', Arial, sans-serif">Uložit</button></div>
+<div style="display: flex; flex-direction: column; gap: 8px"><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #4A5568">NAJETÍ MYŠÍ</div><button style="height: 48px; border: none; border-radius: 14px; background: #D0712B; color: #0F1F33; font: 600 16px 'IBM Plex Sans', Arial, sans-serif">Uložit</button></div>
+<div style="display: flex; flex-direction: column; gap: 8px"><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #4A5568">FOKUS Z KLÁVESNICE</div><button style="height: 48px; border: none; border-radius: 14px; background: #E8833A; color: #0F1F33; font: 600 16px 'IBM Plex Sans', Arial, sans-serif; outline: 3px solid #0F1F33; outline-offset: 3px">Uložit</button></div>
+<div style="display: flex; flex-direction: column; gap: 8px"><div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #4A5568">NEAKTIVNÍ</div><button disabled style="height: 48px; border: none; border-radius: 14px; background: #E2DCCF; color: #5A6472; font: 600 16px 'IBM Plex Sans', Arial, sans-serif">Uložit</button></div>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px">
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Název crew<input value="Research" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: 1px solid #C9C1B1; border-radius: 14px; background: #FFFFFF; font: 16px 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33"><span style="font-weight: 400; color: #4A5568">Zobrazí se v seznamu.</span></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">E-mail<input value="pavel@" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: 2px solid #B3261E; border-radius: 14px; background: #FFFFFF; font: 16px 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33"><span style="font-weight: 400; color: #B3261E">Doplň doménu, např. pavel@firma.cz.</span></label>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 14px; font-weight: 600">Rozpočet (USD)<input value="50" style="height: 48px; box-sizing: border-box; padding: 0 14px; border: 2px solid #1F5E40; border-radius: 14px; background: #FFFFFF; font: 16px 'IBM Plex Sans', Arial, sans-serif; color: #0F1F33"><span style="font-weight: 400; color: #1F5E40">V pořádku.</span></label>
+</div>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px; flex: 1">
+<div style="background: #FFFDF8; border: 1px dashed #C9C1B1; border-radius: 18px; padding: 24px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; text-align: center">
+<svg aria-hidden="true" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6B7A8C" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"></rect><path d="M3 10h18"></path></svg>
+<div style="font-size: 18px; font-weight: 600">Zatím žádná crew</div>
+<div style="font-size: 14px; color: #4A5568">Prázdný stav: řekni proč a nabídni první krok.</div>
+<button style="height: 44px; padding: 0 18px; border: none; border-radius: 12px; background: #E8833A; color: #0F1F33; font: 600 15px 'IBM Plex Sans', Arial, sans-serif">Založit crew</button>
+</div>
+<div style="background: #FFFDF8; border: 1px solid #E2DCCF; border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 14px">
+<div style="font-family: 'JetBrains Mono', 'Courier New', monospace; font-size: 12px; color: #4A5568">NAČÍTÁNÍ</div>
+<div style="height: 20px; width: 60%; border-radius: 6px; background: #ECE6DA"></div>
+<div style="height: 14px; width: 90%; border-radius: 6px; background: #F1EBDF"></div>
+<div style="height: 14px; width: 80%; border-radius: 6px; background: #F1EBDF"></div>
+<div style="height: 6px; border-radius: 3px; background: #ECE6DA"></div>
+<div style="font-size: 14px; color: #4A5568">Skeleton drží tvar obsahu, aby stránka neposkakovala.</div>
+</div>
+<div style="background: #FBEBEB; border: 1px solid #E8B4B0; border-radius: 18px; padding: 24px; display: flex; flex-direction: column; gap: 12px">
+<div style="font-size: 18px; font-weight: 600; color: #8C1D18">Crew se nepodařilo spustit</div>
+<div style="font-size: 14px; line-height: 21px; color: #5C1A16">Chybový stav: co se stalo, proč a co s tím. Překročen denní rozpočet 50 USD.</div>
+<div style="display: flex; gap: 10px; flex-wrap: wrap">
+<button style="height: 44px; padding: 0 16px; border: none; border-radius: 12px; background: #8C1D18; color: #FFFFFF; font: 600 15px 'IBM Plex Sans', Arial, sans-serif">Zvýšit rozpočet</button>
+<button style="height: 44px; padding: 0 16px; border: 1px solid #C98A85; border-radius: 12px; background: transparent; color: #5C1A16; font: 600 15px 'IBM Plex Sans', Arial, sans-serif">Zkusit znovu</button>
+</div>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":900}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return {};
+  }
+}
+</script>
+</body>
+</html>
