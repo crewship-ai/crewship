@@ -47,6 +47,13 @@ describe("parseDashboardDatasets", () => {
     expect(parseDashboardDatasets(files(content), declared)).toEqual({ status: "invalid" })
   })
 
+  it("rejects invisible formatting characters in author text and a non-JSON media type", () => {
+    expect(parseDashboardDatasets(files(JSON.stringify({ schema_version: 1, datasets: { tasks: { mode: "fixed", title: "Tasks\u202Eskat" } } })), declared)).toEqual({ status: "invalid" })
+    expect(parseDashboardDatasets(files(JSON.stringify({ schema_version: 1, datasets: { tasks: { mode: "fixed", description: "a\u200Bb" } } })), declared)).toEqual({ status: "invalid" })
+    const html = [{ path: DASHBOARD_DATASETS_FILE, media_type: "text/html", content: JSON.stringify({ schema_version: 1, datasets: { tasks: { mode: "fixed" } } }) }]
+    expect(parseDashboardDatasets(html, declared)).toEqual({ status: "invalid" })
+  })
+
   it("rejects two datasets.json files and an oversized file", () => {
     const ok = '{"schema_version":1,"datasets":{"tasks":{"mode":"fixed"}}}'
     expect(parseDashboardDatasets(files(ok, ok), declared)).toEqual({ status: "invalid" })

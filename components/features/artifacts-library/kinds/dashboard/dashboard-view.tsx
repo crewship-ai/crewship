@@ -71,7 +71,8 @@ export function DashboardProjectView({ workspaceId, parts, onReport }: { workspa
   const now = useMinuteClock()
   const freshness = React.useMemo(() => read.collections ? dashboardFreshness(read.collections, datasets, now) : null, [read.collections, datasets, now])
   // Host bindings (data-field) attribute each value; an interactive page draws its own numbers, so no per-value citation exists there.
-  const citations = !data.interactive
+  // Decided by what is drawn: an interactive project in comment-select mode shows the bound preview, with citations.
+  const citations = parts.previewKind === "dashboard"
   const error = Boolean(read.error)
   useKindReport(onReport, {
     status: dashboardFrameStatus({ pending: read.pending, error, limitExceeded: read.limitExceeded, freshness, viewingOld: version.viewingOld, shown: version.shown, now }),
