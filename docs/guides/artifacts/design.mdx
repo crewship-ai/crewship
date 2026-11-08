@@ -128,7 +128,19 @@ People with read access see a **Read only** badge next to the status.
      to their screen.
    - **Fill** (or **Text color** for text), with a color picker or a value such
      as `#16a34a`.
-   - **Text** for a text layer.
+   - **Text** for a text layer, and its style:
+     - **Font**: **Sans**, **Serif** or **Mono**. These are system fonts, so the
+       canvas and the exported file need no font download.
+     - **Weight** from 100 (Thin) to 900 (Black), **Size** in pixels (1 to 1000)
+       and **Line height** as a multiple of the size (0.5 to 5).
+     - **Align**: **Left**, **Center** or **Right** within the layer's box.
+     - **Wrap to the box width**: without it, lines break only where you press
+       Enter. With it, lines break at the box width, and a long word breaks too.
+     - **Clip to the box**: cuts off text that does not fit the box. Without it,
+       text may run past the box.
+
+     A text layer created before these settings existed keeps its look: 20 px
+     Sans, Regular, line height 1.3, left, no wrap, no clip.
    - **Image URL** for an image: an `https://` address, or an embedded PNG,
      JPEG, WebP or GIF data URL. Other addresses are not drawn.
    - **Screen**, to move a layer into another screen or to **On canvas**.

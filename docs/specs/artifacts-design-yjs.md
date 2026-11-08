@@ -93,7 +93,8 @@ connected, the server saves the live document as a version with the message
 of node changes:
 
 - `upsert` with a `node` (`id`, `type`, `name`, `x`, `y`, `width`, `height`,
-  `fill`, optional `parentId`, `text`, `src`, `linkTo`). A new node needs its type and
+  `fill`, optional `parentId`, `text`, `src`, `linkTo` and the
+  [text style](#text-style) fields). A new node needs its type and
   full geometry; an existing node changes only the fields supplied.
 - `delete` with an `id`.
 - `reorder` with a complete `order` array of node IDs.
@@ -143,6 +144,32 @@ The server accepts `linkTo` regardless of `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYP
 which only hides the editor controls. A server without this field refuses any
 document that contains it, so deploy the server before turning on the UI
 variable.
+
+## Text style
+
+A text layer may carry these optional fields (#5161). Each one takes only the
+listed values; the server refuses anything else with `400`, so no other value
+reaches the canvas or an exported style attribute.
+
+| Field | Values | Absent means |
+|---|---|---|
+| `fontFamily` | `sans`, `serif`, `mono` (fixed system font stacks, no web fonts) | `sans` |
+| `fontWeight` | 100 to 900 in steps of 100 | 400 |
+| `fontSize` | 1 to 1000 (pixels) | 20 |
+| `lineHeight` | 0.5 to 5 (multiple of the size) | 1.3 |
+| `textAlign` | `left`, `center`, `right` | `left` |
+| `textWrap` | `none` (lines break only at a newline), `wrap` (lines break at the box width; a long word breaks too) | `none` |
+| `overflow` | `visible` (text may run past the box), `clip` (cut at the box) | `visible` |
+
+- A layer without these fields looks exactly as before they existed, on the
+  canvas, in prototype playback and in the HTML export.
+- Clients that predate the fields keep them when they edit other fields, and
+  restore copies them with the rest of the node. Such clients draw the layer in
+  the old default style.
+- A server without the fields refuses any document that contains them. Do not
+  roll the server back past this change once a Design uses text style; the
+  Design would not open until the server is updated again.
+- Only editors change the fields, in **Properties** or through `upsert`.
 
 ## HTML export
 
@@ -302,6 +329,7 @@ The CLI equivalents are the `crewship page design` commands; see the
 | Coordinates and sizes | finite, absolute value at most 1,000,000; sizes not negative | `400` |
 | `text` / `src` / `name` | 100,000 / 2,000,000 / 2000 characters | `400` |
 | `parentId` / `linkTo` | 128 characters | `400` |
+| Text style fields | the values in [Text style](#text-style) | `400` |
 | Operations request body | 4 MiB | `413` |
 | Comment request body (`POST .../design/comments`) | 20,000 bytes | `413` |
 | Create, snapshot, restore, share and agent request bodies | 8 KiB | `413` |

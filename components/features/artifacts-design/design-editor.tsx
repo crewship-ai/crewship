@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils"
 import type { DesignConnection, DesignPeer } from "./design-provider"
 import { useDesign } from "./use-design"
 import { readablePeerFill } from "./peer-colors"
-import { designLinkTarget, designScreenOf, removeDesignNode, restoreDesignConflict, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignConflict, type DesignNode, type DesignNodeType } from "./design-document"
+import { DESIGN_FONT_SIZE, DESIGN_FONT_WEIGHTS, DESIGN_LINE_HEIGHT, designTextStyle, designLinkTarget, designScreenOf, removeDesignNode, restoreDesignConflict, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignConflict, type DesignNode, type DesignNodeType } from "./design-document"
 import { DesignNodeShape } from "./design-node-shape"
 import { DesignPrototypePlayer } from "./design-prototype-player"
 import { DesignExportButton } from "./design-export-button"
@@ -341,6 +341,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
    <div className="grid grid-cols-2 gap-2">{(["x", "y", "width", "height"] as const).map(field => <Field key={field} label={field === "width" ? "W" : field === "height" ? "H" : field.toUpperCase()}><Input type="number" aria-label={field} value={selected[field] ?? 0} disabled={!canChange} min={field === "width" || field === "height" ? 1 : undefined} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && Math.abs(value) <= 1000000 && (!(field === "width" || field === "height") || value >= 1)) patch({ [field]: value }) }} /></Field>)}</div>
    <Field label={selected.type === "text" ? "Text color" : "Fill"}><div className="flex gap-2"><input aria-label="Fill color" type="color" className="h-9 w-10 rounded border bg-background p-1 coarse:h-[44px]" value={/^#[0-9a-f]{6}$/i.test(selected.fill) ? selected.fill : "#ffffff"} disabled={!canChange} onChange={event => patch({ fill: event.target.value })} /><Input aria-label="Fill value" value={selected.fill ?? ""} disabled={!canChange} onChange={event => patch({ fill: event.target.value })} /></div></Field>
    {selected.type === "text" && <Field label="Text"><textarea aria-label="Text content" maxLength={100000} className="min-h-24 w-full rounded border bg-background p-2 text-sm" value={selected.text ?? ""} disabled={!canChange} onChange={event => patch({ text: event.target.value })} /></Field>}
+   {selected.type === "text" && <DesignTextStyleFields node={selected} disabled={!canChange} onChange={patch} />}
    {selected.type === "image" && <Field label="Image URL"><Input aria-label="Image URL" placeholder="https://…" value={selected.src ?? ""} disabled={!canChange} onChange={event => { setImageURL(event.target.value); patch({ src: event.target.value }) }} /><p className="mt-1 text-xs text-muted-foreground">HTTPS image or embedded PNG, JPEG, WebP, GIF.</p></Field>}
    {selected.type !== "frame" && <Field label="Screen"><select aria-label="Parent screen" className="h-9 w-full rounded border bg-background px-2 text-sm coarse:h-[44px]" value={selected.parentId ?? ""} disabled={!canChange} onChange={event => patch({ parentId: event.target.value })}><option value="">On canvas</option>{frames.map(frame => <option key={frame.id} value={frame.id}>{frame.name || "Screen"}</option>)}</select></Field>}
    {prototype && selected.type !== "frame" && (() => {
@@ -488,6 +489,26 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   </div>
   {overlays}
  </section>
+}
+
+const WEIGHT_NAMES: Record<number, string> = { 100: "Thin", 200: "Extra light", 300: "Light", 400: "Regular", 500: "Medium", 600: "Semibold", 700: "Bold", 800: "Extra bold", 900: "Black" }
+const selectClass = "h-9 w-full rounded border bg-background px-2 text-sm coarse:h-[44px]"
+
+/** Text style of a text layer (#5161). Each control writes one field; an unset field shows its default. */
+function DesignTextStyleFields({ node, disabled, onChange }: { node: DesignNode; disabled: boolean; onChange: (values: Partial<DesignNode>) => void }) {
+ const style = designTextStyle(node)
+ const number = (value: string, range: { min: number; max: number }) => { const parsed = Number(value); return value.trim() !== "" && Number.isFinite(parsed) && parsed >= range.min && parsed <= range.max ? parsed : undefined }
+ return <fieldset className="space-y-3" aria-label="Text style">
+  <div className="grid grid-cols-2 gap-2">
+   <Field label="Font"><select aria-label="Font family" className={selectClass} value={style.family} disabled={disabled} onChange={event => onChange({ fontFamily: event.target.value as DesignNode["fontFamily"] })}><option value="sans">Sans</option><option value="serif">Serif</option><option value="mono">Mono</option></select></Field>
+   <Field label="Weight"><select aria-label="Font weight" className={selectClass} value={style.weight} disabled={disabled} onChange={event => onChange({ fontWeight: Number(event.target.value) })}>{DESIGN_FONT_WEIGHTS.map(weight => <option key={weight} value={weight}>{weight} · {WEIGHT_NAMES[weight]}</option>)}</select></Field>
+   <Field label="Size"><Input type="number" aria-label="Font size" min={DESIGN_FONT_SIZE.min} max={DESIGN_FONT_SIZE.max} value={style.size} disabled={disabled} onChange={event => { const value = number(event.target.value, DESIGN_FONT_SIZE); if (value !== undefined) onChange({ fontSize: value }) }} /></Field>
+   <Field label="Line height"><Input type="number" aria-label="Line height" step={0.1} min={DESIGN_LINE_HEIGHT.min} max={DESIGN_LINE_HEIGHT.max} value={style.lineHeight} disabled={disabled} onChange={event => { const value = number(event.target.value, DESIGN_LINE_HEIGHT); if (value !== undefined) onChange({ lineHeight: value }) }} /></Field>
+  </div>
+  <Field label="Align"><select aria-label="Text alignment" className={selectClass} value={style.align} disabled={disabled} onChange={event => onChange({ textAlign: event.target.value as DesignNode["textAlign"] })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></Field>
+  <label className="flex items-center gap-2 text-xs text-muted-foreground coarse:min-h-[44px]"><input type="checkbox" aria-label="Wrap text to the box width" checked={style.wrap} disabled={disabled} onChange={event => onChange({ textWrap: event.target.checked ? "wrap" : "none" })} />Wrap to the box width</label>
+  <label className="flex items-center gap-2 text-xs text-muted-foreground coarse:min-h-[44px]"><input type="checkbox" aria-label="Clip text to the box" checked={style.clip} disabled={disabled} onChange={event => onChange({ overflow: event.target.checked ? "clip" : "visible" })} />Clip to the box</label>
+ </fieldset>
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
