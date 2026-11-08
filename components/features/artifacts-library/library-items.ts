@@ -56,6 +56,10 @@ export interface LibraryItem {
   pagesVersion?: number
   /** A published application exists; an App without one is Static. */
   hasApplication?: boolean
+  /** The server's profile of the selected version (#5152): a design system is a Design library… */
+  designSystem?: boolean
+  /** …and a project that runs its own scripts is an App, never Static and never a Dashboard. */
+  interactive?: boolean
   /** The server says whether the caller may move it; undefined on a server that does not say. */
   canMove?: boolean
   /** The caller reaches it as its owner (`reach` has `owner`). */
@@ -110,6 +114,8 @@ export function libraryItems(pages: PageView[], options: { keepOrder?: boolean }
       ...(page.createdByTest ? { test: true } : {}),
       ...(typeof page.pagesVersion === "number" ? { pagesVersion: page.pagesVersion } : {}),
       ...(page.hasApplication ? { hasApplication: true } : {}),
+      ...(page.artifactProfile === "design_system" ? { designSystem: true } : {}),
+      ...(page.artifactProfile === "interactive" ? { interactive: true } : {}),
       ...(page.canMove === undefined ? {} : { canMove: page.canMove }),
       ...(page.reach?.includes("owner") ? { ownedByMe: true } : {}),
       ...(page.tally.failed > 0 ? { failedPanels: page.tally.failed } : {}),

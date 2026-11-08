@@ -1,5 +1,6 @@
-import { LIBRARY_KINDS, repeatedSeries, type LibraryItem, type LibraryKind } from "./library-items"
+import { LIBRARY_KINDS, repeatedSeries, type LibraryItem } from "./library-items"
 import { needsAttention as attentionRule } from "./attention"
+import { KIND_ORDER, KINDS, kindOf, type ArtifactKind } from "./kinds"
 
 /** The places the panel offers. Empty, Clean up, Test items and Archive only show; changes go through a previewed bulk action, and nothing is deleted. */
 export type LibraryView = "home" | "all" | "attention" | "opened" | "mine" | "favorites" | "empty" | "series" | "test" | "archive"
@@ -29,7 +30,8 @@ export type VersionState = "shared" | "unshared" | "unversioned"
 export interface LibraryFilters {
   view: LibraryView
   q: string
-  kinds: LibraryKind[]
+  /** UI kinds (kinds.ts), derived once by `kindOf` like every label, count and preview (#5152). */
+  kinds: ArtifactKind[]
   access: Access[]
   version: VersionState[]
   owners: string[]
@@ -58,14 +60,26 @@ const ownerKey = (item: LibraryItem) => item.ownerLabel ?? OWNER_NONE
 
 export interface ParsedQuery {
   text: string
-  kinds: LibraryKind[]
+  kinds: ArtifactKind[]
   is: string[]
   owner: string[]
 }
 
-// Storage keys and their plurals keep working (`kind:projects`) beside the labels; a label with a space is not one token.
-const KIND_WORDS = new Map<string, LibraryKind>(LIBRARY_KINDS.flatMap(({ kind, label, plural }) =>
-  [[kind, kind], [`${kind}s`, kind], [label.toLowerCase().replace(/\s+/g, ""), kind], [plural.toLowerCase().replace(/\s+/g, ""), kind]] as [string, LibraryKind][]))
+const word = (text: string) => text.toLowerCase().replace(/\s+/g, "")
+/**
+ * UI kinds by id, label and plural (`kind:apps`, `kind:design`). Older storage
+ * words still work and land on the kind `kindOf` shows that storage as: a
+ * project or a static app is an App (`kind:projects`), a Page with panels a
+ * Dashboard. The UI words come last, so `apps` means Apps.
+ */
+const KIND_WORDS = new Map<string, ArtifactKind>([
+  ...LIBRARY_KINDS.flatMap(({ kind, label, plural }) => {
+    const shown = kindOf({ kind, native: kind === "word" || kind === "sheet" }).kind
+    return [[kind, shown], [`${kind}s`, shown], [word(label), shown], [word(plural), shown]] as [string, ArtifactKind][]
+  }),
+  ...KIND_ORDER.flatMap(kind => [[kind, kind], [word(KINDS[kind].label), kind], [word(KINDS[kind].plural), kind]] as [string, ArtifactKind][]),
+])
+const uiKind = (item: LibraryItem): ArtifactKind => kindOf(item).kind
 
 /** `kind:word is:private owner:you budget` — operators first-class, the rest is free text. */
 export function parseQuery(q: string): ParsedQuery {
@@ -101,10 +115,10 @@ function matchesIs(item: LibraryItem, is: string): boolean {
 export function matches(item: LibraryItem, filters: LibraryFilters, skip?: "kinds" | "access" | "version" | "owners"): boolean {
   const query = parseQuery(filters.q)
   if (query.text && !item.name.toLowerCase().includes(query.text) && !item.slug.toLowerCase().includes(query.text)) return false
-  if (query.kinds.length && !query.kinds.includes(item.kind)) return false
+  if (query.kinds.length && !query.kinds.includes(uiKind(item))) return false
   if (!query.is.every(is => matchesIs(item, is))) return false
   if (query.owner.length && !query.owner.some(owner => (item.ownerLabel ?? "").toLowerCase().includes(owner))) return false
-  if (skip !== "kinds" && filters.kinds.length && !filters.kinds.includes(item.kind)) return false
+  if (skip !== "kinds" && filters.kinds.length && !filters.kinds.includes(uiKind(item))) return false
   if (skip !== "access" && filters.access.length && !filters.access.includes(item.private ? "private" : "open")) return false
   if (skip !== "version" && filters.version.length && !filters.version.includes(versionOf(item))) return false
   if (skip !== "owners" && filters.owners.length && !filters.owners.includes(ownerKey(item))) return false
@@ -138,9 +152,9 @@ export function applyFilters(items: LibraryItem[], filters: LibraryFilters, pers
 
 export function sortItems(items: LibraryItem[], sort: SortKey): LibraryItem[] {
   const byUpdated = (a: LibraryItem, b: LibraryItem) => (b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0)
-  const kindRank = (kind: LibraryKind) => LIBRARY_KINDS.findIndex(entry => entry.kind === kind)
+  const kindRank = (item: LibraryItem) => KIND_ORDER.indexOf(uiKind(item))
   return [...items].sort(sort === "name" ? (a, b) => a.name.localeCompare(b.name) || byUpdated(a, b)
-    : sort === "kind" ? (a, b) => kindRank(a.kind) - kindRank(b.kind) || byUpdated(a, b)
+    : sort === "kind" ? (a, b) => kindRank(a) - kindRank(b) || byUpdated(a, b)
       : byUpdated)
 }
 
@@ -148,8 +162,8 @@ export function groupItems(items: LibraryItem[], group: GroupKey): { key: string
   if (group === "none") return [{ key: "all", label: "", items }]
   const groups = new Map<string, { key: string; label: string; items: LibraryItem[] }>()
   for (const item of items) {
-    const key = group === "kind" ? item.kind : item.folder?.slug ?? ""
-    const label = group === "kind" ? LIBRARY_KINDS.find(entry => entry.kind === item.kind)!.plural : item.folder?.name ?? "Unfiled"
+    const key = group === "kind" ? uiKind(item) : item.folder?.slug ?? ""
+    const label = group === "kind" ? KINDS[uiKind(item)].plural : item.folder?.name ?? "Unfiled"
     const entry = groups.get(key) ?? { key, label, items: [] }
     entry.items.push(item)
     groups.set(key, entry)
@@ -158,7 +172,7 @@ export function groupItems(items: LibraryItem[], group: GroupKey): { key: string
 }
 
 export interface FacetCounts {
-  kinds: [LibraryKind, number][]
+  kinds: [ArtifactKind, number][]
   access: [Access, number][]
   version: [VersionState, number][]
   owners: [string, number][]
@@ -172,12 +186,12 @@ export function facetCounts(items: LibraryItem[], filters: LibraryFilters, perso
     for (const item of base) if (matches(item, filters, skip)) counts.set(key(item), (counts.get(key(item)) ?? 0) + 1)
     return counts
   }
-  const kinds = count("kinds", item => item.kind)
+  const kinds = count("kinds", uiKind)
   const access = count("access", item => (item.private ? "private" : "open") as Access)
   const version = count("version", versionOf)
   const owners = count("owners", ownerKey)
   return {
-    kinds: LIBRARY_KINDS.map(({ kind }) => [kind, kinds.get(kind) ?? 0] as [LibraryKind, number]).filter(([kind, n]) => n > 0 || filters.kinds.includes(kind)),
+    kinds: KIND_ORDER.map(kind => [kind, kinds.get(kind) ?? 0] as [ArtifactKind, number]).filter(([kind, n]) => n > 0 || filters.kinds.includes(kind)),
     access: (["open", "private"] as const).map(key => [key, access.get(key) ?? 0] as [Access, number]),
     version: (["shared", "unshared", "unversioned"] as const).map(key => [key, version.get(key) ?? 0] as [VersionState, number]).filter(([key, n]) => n > 0 || filters.version.includes(key)),
     owners: [...owners.entries()].sort((a, b) => b[1] - a[1]),
@@ -189,17 +203,18 @@ export const SERVER_PAGE_SIZE = 50
 
 /**
  * The All view as `GET /api/v1/pages` parameters, or null when only the browser
- * can express it: another view, query operators, or owner labels (the server
- * takes canonical owners, the panel shows names). Archived and test items stay
+ * can express it: another view, query operators, owner labels (the server
+ * takes canonical owners, the panel shows names), or a kind filter or kind
+ * sort: the server's `kind` is the storage kind, and UI kinds come from one
+ * derivation (`kindOf`) in the browser (#5152). Archived and test items stay
  * out by the server's defaults, empty ones by `empty=exclude`, as in `inView`.
  */
 export function serverCatalogParams(filters: LibraryFilters, sort: SortKey, options: { design: boolean }): URLSearchParams | null {
-  if (filters.view !== "all" || filters.owners.length) return null
+  if (filters.view !== "all" || filters.owners.length || filters.kinds.length || sort === "kind") return null
   const query = parseQuery(filters.q)
   if (query.kinds.length || query.is.length || query.owner.length) return null
-  const kinds = (filters.kinds.length ? filters.kinds : options.design ? [] : LIBRARY_KINDS.map(entry => entry.kind))
-    .filter(kind => options.design || kind !== "design")
-  if (filters.kinds.length && !kinds.length) return null
+  // Without the Design switch, the server leaves Design storage out, as the browser does.
+  const kinds = options.design ? [] : LIBRARY_KINDS.map(entry => entry.kind).filter(kind => kind !== "design")
   const params = new URLSearchParams({ empty: "exclude", sort })
   if (query.text) params.set("q", query.text)
   if (kinds.length) params.set("kind", kinds.join(","))
@@ -234,12 +249,12 @@ export function filtersToParams(filters: LibraryFilters, params: URLSearchParams
 export function filtersFromParams(params: URLSearchParams | null | undefined): LibraryFilters {
   if (!params) return EMPTY_FILTERS
   const view = params.get("view") as LibraryView | null
-  const kinds = new Set(LIBRARY_KINDS.map(entry => entry.kind as string))
   const folder = params.get("folder")
   return {
     view: view && VIEWS.includes(view) ? view : EMPTY_FILTERS.view,
     q: params.get("q") ?? "",
-    kinds: list(params.get("kind")).filter(kind => kinds.has(kind)) as LibraryKind[],
+    // A UI kind, or an older storage word for one (`kind=project` is Apps); duplicates fold.
+    kinds: [...new Set(list(params.get("kind")).flatMap(kind => { const shown = KIND_WORDS.get(kind.toLowerCase()); return shown ? [shown] : [] }))],
     access: list(params.get("access")).filter(access => access === "private" || access === "open") as Access[],
     version: list(params.get("version")).filter(version => version === "shared" || version === "unshared" || version === "unversioned") as VersionState[],
     owners: list(params.get("owner")),

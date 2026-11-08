@@ -16,9 +16,12 @@ import { KIND_ORDER, KINDS, kindOf, uiKindCounts, type ArtifactKind } from "./ki
 import { KindBadge, KindTile } from "./kind-tile"
 import { KindThumb } from "./kind-thumb"
 
-/** The existing creation flow behind each kind, first live one wins. Docs has none yet, so it is not offered. */
+/**
+ * The existing creation flow behind each kind, first live one wins. Docs has none yet, so it is not offered.
+ * A Page with panels shows as a Dashboard (kindOf), so it is made from New Dashboard, never New App (#5152).
+ */
 export const CREATE_FLOW: Record<ArtifactKind, readonly ArtifactKindKey[]> = {
-  docs: [], dashboard: ["dashboard"], slides: ["slides"], design: ["design"], app: ["project", "page"], word: ["word"], sheet: ["sheet"],
+  docs: [], dashboard: ["dashboard", "page"], slides: ["slides"], design: ["design"], app: ["project"], word: ["word"], sheet: ["sheet"],
 }
 
 export function creatableUiKinds(creatable: readonly ArtifactKindKey[]): { kind: ArtifactKind; flow: ArtifactKindKey }[] {

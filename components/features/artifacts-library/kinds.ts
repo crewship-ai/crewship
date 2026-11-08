@@ -75,8 +75,10 @@ export interface KindSource {
   /** A published application with capabilities exists (`has_application`). */
   hasApplication?: boolean
   contentType?: ContentType
-  /** The project's manifest carries `design-system.json`. Known only once the project is read. */
+  /** The selected manifest carries `design-system.json` (the catalog's `artifact_profile`, or the project once read). */
   designSystem?: boolean
+  /** The selected manifest carries `interactive.json`: an App running its own scripts, whatever data it declares. */
+  interactive?: boolean
 }
 
 /**
@@ -84,6 +86,8 @@ export interface KindSource {
  * on exactly one kind, so nothing in the library is ever unnamed.
  *
  * - A design system (a manifest with design-system.json) is a Design in Library mode.
+ * - An interactive project (interactive.json) is an App, never Static and never a Dashboard:
+ *   a helper data collection does not make a running app a data view.
  * - A project is an App; without a published application it is Static.
  * - A legacy Page that publishes an application is an App; without one it is its data panels, a Dashboard.
  * - A board is Docs in Canvas mode; a legacy doc (Word storage without a version head) is Docs.
@@ -91,6 +95,7 @@ export interface KindSource {
  */
 export function kindOf(source: KindSource): ResolvedKind {
   if (source.designSystem) return { kind: "design", mode: "library", badge: "Library" }
+  if (source.interactive && (source.kind === "project" || source.kind === "dashboard" || source.kind === "page")) return { kind: "app" }
   switch (source.contentType) {
     case "board": return { kind: "docs", mode: "canvas", badge: "Canvas" }
     case "doc": return source.kind === "word" && source.native ? { kind: "word" } : { kind: "docs", mode: "page" }
