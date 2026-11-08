@@ -71,7 +71,7 @@ func TestDocumentDraftTransportIdentityAndBounds(t *testing.T) {
 	}
 }
 func TestDocumentDraftPrepareRejectsScopeAndAmbiguousJSON(t *testing.T) {
-	for _, raw := range []string{`null`, draftPrepareInput + `{}`, strings.Replace(draftPrepareInput, `"target":"p1"`, `"target":"missing"`, 1), strings.Replace(draftPrepareInput, `"schema":3`, `"schema":4`, 1), strings.Replace(draftPrepareInput, `"rev":0`, `"rev":null`, 1), strings.Replace(draftPrepareInput, `"type":"paragraph"`, `"type":"table"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"B","text":"C"`, 1), strings.Replace(draftPrepareInput, `"mutation_id":"draft-one"`, `"mutation_id":"draft-one","user_id":"other"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"`+strings.Repeat("b", 64<<10)+`"`, 1)} {
+	for _, raw := range []string{`null`, draftPrepareInput + `{}`, strings.Replace(draftPrepareInput, `"target":"p1"`, `"target":"missing"`, 1), strings.Replace(draftPrepareInput, `"schema":3`, `"schema":5`, 1), strings.Replace(draftPrepareInput, `"rev":0`, `"rev":null`, 1), strings.Replace(draftPrepareInput, `"type":"paragraph"`, `"type":"table"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"B","text":"C"`, 1), strings.Replace(draftPrepareInput, `"mutation_id":"draft-one"`, `"mutation_id":"draft-one","user_id":"other"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"`+strings.Repeat("b", 64<<10)+`"`, 1)} {
 		if _, err := PrepareDocumentDraft([]byte(raw)); err == nil {
 			t.Fatalf("unsafe prepare accepted: %.100s", raw)
 		}
@@ -200,5 +200,26 @@ func TestDocumentProposalPacketStaysInsideTheProposeMandate(t *testing.T) {
 	})
 	if err != nil || out.Status != "proposed" {
 		t.Fatalf("proposal: %+v %v", out, err)
+	}
+}
+
+// Docs are created at schema 4 (#5137 WP2): a direct draft view at schema 4
+// prepares a packet that keeps schema 4 end to end and round-trips intact.
+func TestDocumentDraftPrepareKeepsSchemaFour(t *testing.T) {
+	p, err := PrepareDocumentDraft([]byte(strings.Replace(draftPrepareInput, `"schema":3`, `"schema":4`, 1)))
+	if err != nil || p.Patch.Schema != 4 || p.Checkpoint.Schema != 4 {
+		t.Fatalf("schema-4 draft: %+v %v", p, err)
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseDocumentDraftPacket(raw)
+	if err != nil || parsed.Patch.Schema != 4 {
+		t.Fatalf("schema-4 packet round trip: %+v %v", parsed, err)
+	}
+	mixed := strings.Replace(string(raw), `"schema":4`, `"schema":3`, 1)
+	if _, err := ParseDocumentDraftPacket([]byte(mixed)); err == nil {
+		t.Fatal("mixed-schema packet accepted")
 	}
 }

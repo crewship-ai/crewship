@@ -14,6 +14,10 @@ import (
 
 func documentDraftPayload(t *testing.T, id, before, after string, rev int64, lease documents.Lease) map[string]any {
 	t.Helper()
+	return documentDraftPayloadAt(t, 3, id, before, after, rev, lease)
+}
+func documentDraftPayloadAt(t *testing.T, schema int, id, before, after string, rev int64, lease documents.Lease) map[string]any {
+	t.Helper()
 	tree := func(text string) json.RawMessage {
 		b, e := json.Marshal(map[string]any{"type": "doc", "content": []any{map[string]any{"type": "paragraph", "attrs": map[string]any{"id": "paragraph"}, "content": []any{map[string]any{"type": "text", "text": text}}}}})
 		if e != nil {
@@ -22,15 +26,15 @@ func documentDraftPayload(t *testing.T, id, before, after string, rev int64, lea
 		return b
 	}
 	rawBefore, rawAfter := tree(before), tree(after)
-	first, e := documentRichTree(rawBefore)
+	first, e := documentRichTreeFor(rawBefore, schema)
 	if e != nil {
 		t.Fatal(e)
 	}
-	last, e := documentRichTree(rawAfter)
+	last, e := documentRichTreeFor(rawAfter, schema)
 	if e != nil {
 		t.Fatal(e)
 	}
-	return map[string]any{"id": id, "fingerprint": id, "schema": 3, "kind": "agent", "generation": 0, "ifRev": rev, "epoch": lease.Epoch, "leaseToken": lease.Writer, "leaseOwner": lease.Owner, "snapshot": []byte("synthetic candidate " + after), "update": []byte("synthetic delta " + after), "blocks": json.RawMessage(richTestProjection(t, last)), "ifHashes": map[string]string{"paragraph": documentRichHash(documentRichFind(first, "paragraph"))}, "semantic": documentSemanticPatch{Target: "paragraph", Text: after, Edit: &documentSemanticEdit{From: 0, To: len(before), Insert: after}, Rich: &documentRichProof{Before: rawBefore, After: rawAfter}}}
+	return map[string]any{"id": id, "fingerprint": id, "schema": schema, "kind": "agent", "generation": 0, "ifRev": rev, "epoch": lease.Epoch, "leaseToken": lease.Writer, "leaseOwner": lease.Owner, "snapshot": []byte("synthetic candidate " + after), "update": []byte("synthetic delta " + after), "blocks": json.RawMessage(richTestProjection(t, last)), "ifHashes": map[string]string{"paragraph": documentRichHash(documentRichFind(first, "paragraph"))}, "semantic": documentSemanticPatch{Target: "paragraph", Text: after, Edit: &documentSemanticEdit{From: 0, To: len(before), Insert: after}, Rich: &documentRichProof{Before: rawBefore, After: rawAfter}}}
 }
 func callDocumentDraftAuthority(t *testing.T, f *artifactPrincipalFixture, h *documentAuthority, token, page, op string, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
@@ -220,5 +224,39 @@ func TestDocumentDraftPinFailureDoesNotPretendCommitRolledBack(t *testing.T) {
 	var head, cursor, receipts, pins int
 	if e := f.rig.db.QueryRow(`SELECT head_rev,(SELECT draft_rev FROM document_creation_consents WHERE result_page_id=documents.page_id),(SELECT COUNT(*) FROM document_receipts WHERE id='committed'),(SELECT COUNT(*) FROM document_checkpoints WHERE page_id=documents.page_id) FROM documents WHERE page_id=?`, created.PageID).Scan(&head, &cursor, &receipts, &pins); e != nil || head != 1 || cursor != 1 || receipts != 1 || pins != 1 {
 		t.Fatalf("committed point misreported:%d %d %d %d %v", head, cursor, receipts, pins, e)
+	}
+}
+
+// #5137 WP2: a Doc created at schema 4 is directly drafted by its original
+// run under creation consent. The proof schema is the stored one: a schema-3
+// proof against a schema-4 Doc is refused and leaves the cursor unchanged.
+func TestDocumentDraftSchemaFourCreationCommitsDirectly(t *testing.T) {
+	f, h, token, created := newDocumentDraftFixtureAt(t, true, documents.LatestSchema)
+	f.rig.db.SetMaxOpenConns(1)
+	initializeDocumentDraftProjection(t, f, created.PageID)
+	lease := documentDraftLease(t, f, h, token, created.PageID)
+	wantCode(t, callDocumentDraftAuthority(t, f, h, token, created.PageID, "commit", documentDraftPayloadAt(t, 3, "legacy-proof", "initial", "draft one", 0, lease)), 409, "schema-3 proof on schema-4 Doc")
+	wantCode(t, callDocumentDraftAuthority(t, f, h, token, created.PageID, "commit", documentDraftPayloadAt(t, documents.LatestSchema, "draft-four", "initial", "draft one", 0, lease)), 200, "schema-4 direct draft")
+	var head, cursor, schema int
+	if e := f.rig.db.QueryRow(`SELECT d.head_rev,c.draft_rev,d.schema_version FROM documents d JOIN document_creation_consents c ON c.result_page_id=d.page_id WHERE d.page_id=?`, created.PageID).Scan(&head, &cursor, &schema); e != nil || head != 1 || cursor != 1 || schema != documents.LatestSchema {
+		t.Fatalf("head=%d cursor=%d schema=%d err=%v", head, cursor, schema, e)
+	}
+}
+
+// The protected draft envelope admits a direct draft at schema 3 or 4 (bound
+// to the stored schema by the handler) and a proposal only at schema 4.
+func TestValidateDocumentDraftRequestSchemas(t *testing.T) {
+	for _, tc := range []struct {
+		operation string
+		schema    int
+		ok        bool
+	}{{"patch", 3, true}, {"patch", 4, true}, {"checkpoint", 4, true}, {"patch", 2, false}, {"patch", 5, false}, {"propose", 4, true}, {"propose", 3, false}} {
+		request := map[string]json.RawMessage{"id": json.RawMessage(`"op"`), "schema": json.RawMessage(fmt.Sprint(tc.schema)), "page_id": json.RawMessage(`"page"`), "epoch": json.RawMessage(`"e"`), "ifRev": json.RawMessage(`0`)}
+		if tc.operation != "checkpoint" {
+			request["target"], request["ifHash"], request["text"] = json.RawMessage(`"t"`), json.RawMessage(`"`+strings.Repeat("a", 64)+`"`), json.RawMessage(`"x"`)
+		}
+		if err := validateDocumentDraftRequest(tc.operation, request); (err == nil) != tc.ok {
+			t.Errorf("%s schema %d: err=%v want ok=%v", tc.operation, tc.schema, err, tc.ok)
+		}
 	}
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -15,7 +16,14 @@ import (
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
+// newDocumentDraftFixture is a Doc created before #5137 WP2, still at schema
+// 3, so the legacy direct-drafting path stays covered unchanged.
 func newDocumentDraftFixture(t *testing.T, drafting bool) (*artifactPrincipalFixture, *documentAuthority, string, documentCreationResult) {
+	t.Helper()
+	return newDocumentDraftFixtureAt(t, drafting, 3)
+}
+
+func newDocumentDraftFixtureAt(t *testing.T, drafting bool, schema int) (*artifactPrincipalFixture, *documentAuthority, string, documentCreationResult) {
 	t.Helper()
 	f, intent := documentCreationAdmissionFixture(t, drafting)
 	if err := bindCreation(f, intent); err != nil {
@@ -24,7 +32,7 @@ func newDocumentDraftFixture(t *testing.T, drafting bool) (*artifactPrincipalFix
 	f.pages.artifactMasterToken = "synthetic-draft"
 	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(f.pages.artifactMasterToken, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, f.a.RunID)
 	f.pages.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
-		return []byte(`{"schema":3,"snapshot":"c3ludGhldGlj","blocks":[{"id":"paragraph","hash":"synthetic"}]}`), 200, nil
+		return []byte(`{"schema":4,"snapshot":"c3ludGhldGlj","blocks":[{"id":"paragraph","hash":"synthetic"}]}`), 200, nil
 	}
 	w := httptest.NewRecorder()
 	f.pages.CreateDocumentAgent(w, documentDraftRequest(f, token, http.MethodPost, documentCreationBody))
@@ -32,8 +40,13 @@ func newDocumentDraftFixture(t *testing.T, drafting bool) (*artifactPrincipalFix
 		t.Fatalf("valid creation control: status=%d %s", w.Code, w.Body.String())
 	}
 	var created documentCreationResult
-	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil {
-		t.Fatal(err)
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil || created.Schema != documents.LatestSchema {
+		t.Fatalf("created %+v: %v", created, err)
+	}
+	if schema != documents.LatestSchema {
+		mustExec(t, f.rig.db, `UPDATE documents SET schema_version=? WHERE page_id=?`, schema, created.PageID)
+		mustExec(t, f.rig.db, `UPDATE document_checkpoints SET schema_version=? WHERE page_id=?`, schema, created.PageID)
+		created.Schema = schema
 	}
 	return f, &documentAuthority{pages: f.pages, store: documents.New(f.rig.db, documents.Options{})}, token, created
 }
@@ -101,6 +114,36 @@ func TestDocumentDraftPrivateAuthorityAdmitsOnlyOriginalPurpose(t *testing.T) {
 			}
 			if !enabled && err == nil {
 				t.Fatal("one-shot creation acquired continuation authority")
+			}
+		})
+	}
+}
+
+// Direct drafting under creation consent works on schema 4 and on legacy
+// schema 3 Docs; the scope carries the stored schema. Older schemas refuse.
+func TestDocumentDraftScopeCarriesStoredSchema(t *testing.T) {
+	for _, tc := range []struct {
+		schema int
+		ok     bool
+	}{{4, true}, {3, true}, {2, false}} {
+		t.Run(fmt.Sprintf("schema-%d", tc.schema), func(t *testing.T) {
+			f, _, token, created := newDocumentDraftFixtureAt(t, true, documents.LatestSchema)
+			mustExec(t, f.rig.db, `UPDATE documents SET schema_version=? WHERE page_id=?`, tc.schema, created.PageID)
+			w := httptest.NewRecorder()
+			checked, ok := f.pages.artifactAgentRequest(w, documentDraftRequest(f, token, "POST", ""))
+			if !ok {
+				t.Fatalf("original run control: %d", w.Code)
+			}
+			a, err := documentDraftRun(checked.Context())
+			if err != nil {
+				t.Fatal(err)
+			}
+			scope, err := f.pages.documentDraftScope(checked.Context(), a, created.PageID)
+			if tc.ok && (err != nil || scope.Schema != tc.schema || scope.Propose) {
+				t.Fatalf("scope=%+v err=%v", scope, err)
+			}
+			if !tc.ok && err == nil {
+				t.Fatalf("schema %d gained drafting scope", tc.schema)
 			}
 		})
 	}
