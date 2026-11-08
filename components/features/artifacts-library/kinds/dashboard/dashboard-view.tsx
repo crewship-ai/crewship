@@ -10,19 +10,46 @@ import { ArtifactDrawerSection, ArtifactSlot, ArtifactTool, ArtifactToolSeparato
 import { FullScreenTool, ProjectDrawer, VersionMenu, useKindReport, type KindReport } from "../project-parts"
 import { RuntimeGate } from "../app/app-view"
 import { runtimeMissing } from "../app/app-status"
-import { dashboardFrameStatus, dashboardFreshness, freshnessLabel, freshnessTime, type DashboardFreshness } from "./freshness"
+import { parseDashboardDatasets } from "@/lib/pages/artifact-dashboard"
+import { DATASET_MODE_LABEL, dashboardFrameStatus, dashboardFreshness, freshnessLabel, freshnessTime, maxAgeLabel, type DashboardFreshness } from "./freshness"
 
-/** Per collection: how many values, when the newest changed and who wrote them. */
-export function SourcesList({ freshness }: { freshness: DashboardFreshness }) {
-  return <ul className="grid">
-    {freshness.collections.map(row => <li key={row.name} className="grid gap-0.5 border-t px-3.5 py-2.5 first:border-t-0">
-      <span className="flex items-center gap-2 text-sm"><Database aria-hidden className="size-3.5 text-muted-foreground" /><b className="font-mono font-semibold">{row.name}</b>
-        <span className="ml-auto text-xs tabular-nums text-muted-foreground">{row.documents} {row.documents === 1 ? "value" : "values"}</span></span>
-      <small className="text-xs text-muted-foreground">
-        {row.updatedAt ? `Updated ${freshnessTime(row.updatedAt)}` : "Nothing written yet"}{row.sources.length ? ` · ${row.sources.join(", ")}` : ""}
-      </small>
-    </li>)}
-  </ul>
+/**
+ * Per collection: the author's title, description, mode and maximum age from
+ * datasets.json, then what the server confirmed: how many values, the last
+ * successful write and who wrote them. `detailed` adds the lineage line.
+ */
+export function SourcesList({ freshness, codeVersion, detailed = false }: { freshness: DashboardFreshness; codeVersion?: number; detailed?: boolean }) {
+  return <>
+    {freshness.details === "invalid" && <p role="alert" className="mx-3.5 my-2 rounded-[var(--radius-row)] bg-warn/10 px-2.5 py-1.5 text-xs">The dataset details in datasets.json are invalid, so none are shown. The data itself is unaffected.</p>}
+    <ul className="grid">
+      {freshness.collections.map(row => <li key={row.name} data-dataset={row.name} className="grid gap-0.5 border-t px-3.5 py-2.5 first:border-t-0">
+        <span className="flex items-center gap-2 text-sm"><Database aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
+          <b className={cn("min-w-0 truncate font-semibold", !row.dataset?.title && "font-mono")}>{row.dataset?.title ?? row.name}</b>
+          <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">{row.documents} {row.documents === 1 ? "value" : "values"}</span></span>
+        {detailed && row.dataset?.description && <p className="whitespace-pre-line text-xs">{row.dataset.description}</p>}
+        {detailed && row.dataset && <small className="flex flex-wrap gap-x-2 text-xs">
+          <span>{DATASET_MODE_LABEL[row.dataset.mode]}</span>
+          {row.dataset.maxAgeSeconds && <span className="text-muted-foreground">· Max age {maxAgeLabel(row.dataset.maxAgeSeconds)}</span>}
+          {row.dataset.sample && <span className="font-medium text-warn">· Sample data</span>}
+          {row.stale && <span className="font-medium text-warn">· Stale</span>}
+        </small>}
+        <small className="text-xs text-muted-foreground">
+          {row.updatedAt ? `Last write ${freshnessTime(row.updatedAt)}` : "Nothing written yet"}{row.sources.length ? ` · ${row.sources.join(", ")}` : ""}
+        </small>
+        {detailed && <small className="font-mono text-[11px] text-muted-foreground">Collection {row.name}{codeVersion ? ` · declared by v${codeVersion}` : ""}</small>}
+      </li>)}
+    </ul>
+  </>
+}
+
+const CLOCK_MS = 30_000
+function useMinuteClock(): Date {
+  const [now, setNow] = React.useState(() => new Date())
+  React.useEffect(() => {
+    const timer = window.setInterval(() => setNow(new Date()), CLOCK_MS)
+    return () => window.clearInterval(timer)
+  }, [])
+  return now
 }
 
 /**
@@ -39,10 +66,15 @@ export function DashboardProjectView({ workspaceId, parts, onReport }: { workspa
   const { data, version } = parts
   // The same read (and cache entry) the preview draws from; nothing is fetched twice.
   const read = useArtifactDashboardData({ workspaceId, pageId: data.page_id, codeVersion: version.shown, files: data.manifest.files })
-  const freshness = React.useMemo(() => read.collections ? dashboardFreshness(read.collections) : null, [read.collections])
+  const datasets = React.useMemo(() => parseDashboardDatasets(data.manifest.files, read.manifest?.collections ?? []), [data.manifest.files, read.manifest])
+  // An unchanged poll keeps the same collections, so a clock re-derives Stale while the dashboard stays open.
+  const now = useMinuteClock()
+  const freshness = React.useMemo(() => read.collections ? dashboardFreshness(read.collections, datasets, now) : null, [read.collections, datasets, now])
+  // Host bindings (data-field) attribute each value; an interactive page draws its own numbers, so no per-value citation exists there.
+  const citations = !data.interactive
   const error = Boolean(read.error)
   useKindReport(onReport, {
-    status: dashboardFrameStatus({ pending: read.pending, error, limitExceeded: read.limitExceeded, freshness, viewingOld: version.viewingOld, shown: version.shown }),
+    status: dashboardFrameStatus({ pending: read.pending, error, limitExceeded: read.limitExceeded, freshness, viewingOld: version.viewingOld, shown: version.shown, now }),
     canEdit: parts.canWrite && parts.maySend,
   })
   const gate = parts.previewKind === "interactive" && runtimeMissing(data.interactive)
@@ -78,8 +110,10 @@ export function DashboardProjectView({ workspaceId, parts, onReport }: { workspa
       <ArtifactTool icon={MessageSquarePlus} label={parts.select.on ? "Stop selecting" : "Add a comment"} text={phone ? undefined : "Comment"} on={parts.select.on} onClick={parts.select.toggle} />
     </ArtifactSlot>}
     {freshness && <ArtifactDrawerSection tab="sources" label="Sources" icon={Database} order={0}>
-      <p className="px-3.5 pb-1 pt-3 text-xs text-muted-foreground">Each value carries its source; hover a number in the dashboard to see it.</p>
-      <SourcesList freshness={freshness} />
+      <p className="px-3.5 pb-1 pt-3 text-xs text-muted-foreground">{citations
+        ? "Each bound value carries its source; hover or focus a number in the dashboard to see it."
+        : "This dashboard draws its own numbers, so values carry no per-number citation. The datasets below are what it reads."}</p>
+      <SourcesList freshness={freshness} codeVersion={version.shown} detailed />
     </ArtifactDrawerSection>}
     <ProjectDrawer parts={parts} />
   </div>

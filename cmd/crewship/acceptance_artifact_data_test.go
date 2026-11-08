@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -74,9 +75,14 @@ func TestAcceptance_DashboardDataBinary(t *testing.T) {
 		command.Env = append(command.Env, "CREWSHIP_CONFIG="+config, "CREWSHIP_NO_SLUG_CACHE=1", "NO_COLOR=1")
 		return command.CombinedOutput()
 	}
-	manifest := `{"entrypoint":"index.html","files":[{"path":"index.html","media_type":"text/html","content":"<h1 id=artifact-title>Revenue</h1>"},{"path":"dashboard.json","media_type":"application/json","content":"{\"schema_version\":1,\"collections\":[\"sales\"]}"}]}`
+	// datasets.json is additive: the server stores it as an ordinary file and dashboard.json stays schema 1.
+	const datasets = `{"schema_version":1,"datasets":{"sales":{"title":"Sales","mode":"planned","max_age_seconds":3600}}}`
+	manifest := `{"entrypoint":"index.html","files":[{"path":"index.html","media_type":"text/html","content":"<h1 id=artifact-title>Revenue</h1>"},{"path":"dashboard.json","media_type":"application/json","content":"{\"schema_version\":1,\"collections\":[\"sales\"]}"},{"path":"datasets.json","media_type":"application/json","content":` + strconv.Quote(datasets) + `}]}`
 	if out, err := run(manifest, "create", "dashboard", "--name", "Dashboard", "--file", "-"); err != nil {
 		t.Fatalf("create: %v %s", err, out)
+	}
+	if out, err := run("", "get", "dashboard", "--version", "1"); err != nil || !bytes.Contains(out, []byte(strconv.Quote(datasets)[1:len(strconv.Quote(datasets))-1])) {
+		t.Fatalf("datasets.json did not round-trip unchanged: %v %s", err, out)
 	}
 	batch := `{"base_version":1,"documents":[{"id":"north","ifVersion":0,"value":{"amount":9007199254740993,"label":"` + strings.Repeat("<", 200<<10) + `"}}]}`
 	if out, err := run(batch, "data", "batch", "dashboard", "sales", "--file", "-"); err != nil || !bytes.Contains(out, []byte("9007199254740993")) {
