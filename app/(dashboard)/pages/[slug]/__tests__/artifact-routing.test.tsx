@@ -6,7 +6,6 @@ vi.mock("@/lib/use-url-segment", () => ({ useUrlSegment: () => state.slug }))
 vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: state.workspace, loading: false }) }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => "full" }))
 vi.mock("@/components/features/restricted/access-notice", () => ({ useAccessContext: () => ({}) }))
-vi.mock("@/components/features/pages/restricted-pages", () => ({ RestrictedPages: () => null }))
 vi.mock("@/components/features/pages/pages-layout", () => ({ PagesLayout: ({initialArtifactVersion}: {initialArtifactVersion?: number}) => <p data-pin={initialArtifactVersion}>Legacy Page reader</p> }))
 vi.mock("@/components/features/pages/artifact-project", () => ({ ArtifactProject: ({ workspaceId, slug, initialVersion }: { workspaceId: string; slug: string; initialVersion?: number }) => <p data-testid="artifact-reader" data-workspace={workspaceId} data-page={slug} data-pin={initialVersion}>Versioned artifact reader</p> }))
 vi.mock("@/hooks/use-pages", () => ({ usePage: (...args: unknown[]) => {

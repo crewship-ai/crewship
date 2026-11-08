@@ -10,13 +10,21 @@ import type { WorkspaceData } from "@/hooks/use-workspace"
 
 export type RestrictedSurface = "issues" | "chat" | "routines" | "pages" | "account_security"
 
-/** The screen each surface lives at. */
+/** The screen each surface lives at. The server's `pages` surface (Page
+ *  actions) is the member's Artifacts screen (#5132): "Pages" is never shown. */
 export const RESTRICTED_SURFACE_PATHS: Record<RestrictedSurface, string> = {
   issues: "/issues",
   chat: "/chat",
   routines: "/routines",
-  pages: "/pages",
+  pages: "/artifacts",
   account_security: "/settings",
+}
+
+/** Old addresses a surface still answers, only so that the route can move
+ *  them to the surface's screen (`/pages*` to `/artifacts`). They are never a
+ *  destination: navigation and "Go to" links use `RESTRICTED_SURFACE_PATHS`. */
+export const RESTRICTED_LEGACY_PATHS: Partial<Record<RestrictedSurface, string>> = {
+  pages: "/pages",
 }
 
 /** The surfaces the session may open, or null for a session that is not
@@ -35,12 +43,18 @@ export function restrictedSurfacesOf(
   return (row.restricted_surfaces ?? []).filter((s): s is RestrictedSurface => known.has(s))
 }
 
-/** Whether a restricted session may open this path. */
+const under = (pathname: string, base: string | undefined) => base !== undefined && (pathname === base || pathname.startsWith(base + "/"))
+
+/** Whether a restricted session may open this path as a screen. */
 export function restrictedPathAllowed(pathname: string, surfaces: readonly RestrictedSurface[]): boolean {
-  return surfaces.some((s) => {
-    const base = RESTRICTED_SURFACE_PATHS[s]
-    return pathname === base || pathname.startsWith(base + "/")
-  })
+  return surfaces.some((s) => under(pathname, RESTRICTED_SURFACE_PATHS[s]))
+}
+
+/** Whether this path is an old address of a granted surface, which the shell
+ *  mounts only so that its route redirects it (or, for the native editor
+ *  host, answers it exactly as before). Requires the same surface. */
+export function restrictedLegacyPath(pathname: string, surfaces: readonly RestrictedSurface[]): boolean {
+  return surfaces.some((s) => under(pathname, RESTRICTED_LEGACY_PATHS[s]))
 }
 
 /** Where a restricted session lands instead of the dashboard: chat when it has

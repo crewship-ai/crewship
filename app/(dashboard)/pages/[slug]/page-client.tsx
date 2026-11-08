@@ -5,8 +5,7 @@ import { ArtifactProject } from "@/components/features/pages/artifact-project"
 import { useUrlSegment } from "@/lib/use-url-segment"
 import { usePageWorkspace } from "@/hooks/use-page-workspace"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
-import { useAccessContext } from "@/components/features/restricted/access-notice"
-import { RestrictedPages } from "@/components/features/pages/restricted-pages"
+import { RestrictedPagesRedirect } from "@/components/features/artifacts-library/restricted-pages-redirect"
 import { useAccessMode } from "@/hooks/use-access-mode"
 import { artifactsLibrary } from "@/lib/feature-flags"
 import { legacyPagesTarget } from "@/components/features/artifacts-library/legacy-pages-url"
@@ -21,7 +20,6 @@ const PAGE_PATH_RE = /^\/pages\/([^/]+)\/?$/
 
 export function PageDetailClient() {
   const { workspaceId, loading: wsLoading, linkUnavailable } = usePageWorkspace()
-  const access = useAccessContext()
   const search = useSearchParams()
   // The slug comes from the URL, never from useParams(). Under
   // `output: "export"` this route is exported once, as /pages/_/index.html,
@@ -32,14 +30,14 @@ export function PageDetailClient() {
   // issue, skill, mission and chat detail routes all had it first.
   const slug = useUrlSegment(PAGE_PATH_RE)
   // A restricted session cannot open the Studio page view (its endpoints are
-  // not on the allowlist); it gets the same declared-actions surface as /pages.
+  // not on the allowlist); it moves to its Artifacts catalog (#5132).
   const accessMode = useAccessMode()
 
   if (linkUnavailable) return <p className="p-6" role="alert">Document unavailable.</p>
 
   if (wsLoading || !workspaceId || !slug || accessMode === "loading") return <DetailSkeleton />
 
-  if (accessMode === "restricted") return <RestrictedPages key={workspaceId} workspaceId={workspaceId} access={access} />
+  if (accessMode === "restricted") return <RestrictedPagesRedirect />
   const value = Number(search.get("version"))
   const initialVersion = Number.isSafeInteger(value) && value > 0 ? value : undefined
   const project = search.get("artifact") === "1"

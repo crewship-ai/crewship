@@ -4,14 +4,12 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import type { AccessMode } from "@/hooks/use-access-mode"
 
 // /pages hands its overview to the Artifacts library whenever the library is
-// on (#5129); a reference link resolves to its artifact and restricted members
-// stay on their Pages catalog.
+// on (#5129); a reference link resolves to its artifact. A restricted member
+// moves to their Artifacts catalog by address alone, without a page read (#5132).
 const nav = vi.hoisted(() => ({ params: new URLSearchParams("workspace_id=ws1"), replace: vi.fn(), access: "trusted" as AccessMode }))
 vi.mock("next/navigation", () => ({ useSearchParams: () => nav.params, useRouter: () => ({ replace: nav.replace, push: vi.fn() }) }))
 vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: "ws1", loading: false, linkUnavailable: false }) }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => nav.access }))
-vi.mock("@/components/features/restricted/access-notice", () => ({ useAccessContext: () => ({}) }))
-vi.mock("@/components/features/pages/restricted-pages", () => ({ RestrictedPages: () => <p>Restricted pages</p> }))
 vi.mock("@/components/features/pages/pages-layout", () => ({ PagesLayout: () => <p>Pages overview</p> }))
 vi.mock("@/components/features/pages/page-reference-entry", () => ({ PageReferenceEntry: () => <p>Reference</p> }))
 vi.mock("@/components/features/artifacts-library/legacy-pages-redirect", () => ({
@@ -58,13 +56,18 @@ it("keeps a reference link on the Pages reference entry without the library", ()
   expect(screen.getByText("Reference")).toBeTruthy()
 })
 
-it.each(["", "&ref=abc"])("keeps restricted members on their Pages catalog (query %s)", extra => {
+it.each([
+  ["", "/artifacts?workspace_id=ws1"],
+  ["&ref=abc", "/artifacts/abc?workspace_id=ws1"],
+])("moves a restricted member to their Artifacts catalog without a page read (query %s)", (extra, target) => {
   nav.access = "restricted"
   nav.params = new URLSearchParams(`workspace_id=ws1${extra}`)
+  window.history.replaceState(null, "", `/pages?${nav.params}`)
   render(<PagesPage />)
-  expect(nav.replace).not.toHaveBeenCalled()
+  expect(nav.replace).toHaveBeenCalledWith(target)
   expect(screen.queryByTestId("resolve")).toBeNull()
-  expect(screen.getByText(extra ? "Reference" : "Restricted pages")).toBeTruthy()
+  expect(screen.queryByText("Reference")).toBeNull()
+  expect(screen.queryByText("Pages overview")).toBeNull()
 })
 
 it("waits for the access mode before deciding", () => {

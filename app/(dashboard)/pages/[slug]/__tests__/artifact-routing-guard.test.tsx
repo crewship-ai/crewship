@@ -6,7 +6,6 @@ vi.mock("@/lib/use-url-segment", () => ({ useUrlSegment: () => state.slug }))
 vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: state.workspace, loading: false }) }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => "full" }))
 vi.mock("@/components/features/restricted/access-notice", () => ({ useAccessContext: () => ({}) }))
-vi.mock("@/components/features/pages/restricted-pages", () => ({ RestrictedPages: () => null }))
 vi.mock("@/components/features/pages/pages-layout", async () => {
   const { useEditorRoute } = await import("@/components/features/pages/editor/use-editor-route")
   return { PagesLayout: ({ slug }: { slug: string }) => {

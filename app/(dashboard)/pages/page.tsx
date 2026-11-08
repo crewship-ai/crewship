@@ -9,8 +9,7 @@ import { artifactsLibrary } from "@/lib/feature-flags"
 import { legacyPagesTarget } from "@/components/features/artifacts-library/legacy-pages-url"
 import { LegacyPagesRedirect } from "@/components/features/artifacts-library/legacy-pages-redirect"
 import { PagesLayout } from "@/components/features/pages/pages-layout"
-import { useAccessContext } from "@/components/features/restricted/access-notice"
-import { RestrictedPages } from "@/components/features/pages/restricted-pages"
+import { RestrictedPagesRedirect } from "@/components/features/artifacts-library/restricted-pages-redirect"
 import { PageReferenceEntry } from "@/components/features/pages/page-reference-entry"
 
 // /pages — the Pages surface (docs/specs/pages.md §9b).
@@ -29,14 +28,14 @@ function PagesEntry() {
   const params = useSearchParams()
   const search = params?.toString() ?? ""
   const { workspaceId, loading: wsLoading, linkUnavailable } = usePageWorkspace()
-  const access = useAccessContext()
   // Session-level, not the selected workspace's row: one restricted
   // membership restricts every request the account makes (#2861).
   const accessMode = useAccessMode()
   const router = useRouter()
   // With the library on the overview lives in the Artifacts library, and a
   // reference link opens its artifact at /artifacts/<id> (#5129). A restricted
-  // member's catalog stays here: the library reads are not on their allowlist.
+  // member's catalog is their Artifacts screen (#5132): every /pages address
+  // moves there without a page read (RestrictedPagesRedirect).
   const target = workspaceId && accessMode !== "loading"
     ? legacyPagesTarget("/pages", search, { workspaceId, library: artifactsLibrary(), trusted: accessMode === "trusted" })
     : null
@@ -60,10 +59,12 @@ function PagesEntry() {
     )
   }
 
+  if (accessMode === "restricted") return <RestrictedPagesRedirect />
+
   if (new URLSearchParams(search).has("ref")) {
     const entry = <PageReferenceEntry workspaceId={workspaceId} search={search} />
     return target?.to === "resolve" ? <LegacyPagesRedirect target={target}>{entry}</LegacyPagesRedirect> : entry
   }
 
-  return accessMode === "restricted" ? <RestrictedPages key={workspaceId} workspaceId={workspaceId} access={access} /> : <PagesLayout workspaceId={workspaceId} />
+  return <PagesLayout workspaceId={workspaceId} />
 }

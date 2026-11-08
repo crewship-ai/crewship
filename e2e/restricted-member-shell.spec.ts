@@ -635,13 +635,27 @@ for (const width of [1280, 390]) {
   })
 }
 
-// #5129: old Pages links move to /artifacts/<id> for a trusted session once the
-// library is on. A restricted member is never moved and sees exactly what they
-// saw before: their Page actions catalog on every /pages address, no Page
-// detail read (GET /api/v1/pages/{slug} is not on the allowlist), and
-// /artifacts outside their access.
-test("restricted member with old Pages links and a canonical link sees nothing new", async ({ page }) => {
+// #5132: a restricted member's Page actions catalog is their Artifacts screen,
+// with EXACTLY the rights they had on /pages. BEFORE is what ccf155788 showed
+// on every /pages address: one catalog read and one option per declared
+// action. After the move /artifacts shows the same items, an old /pages link
+// lands on the matching /artifacts address, and anything the catalog does not
+// grant is the access gate without its title. No request beyond BEFORE.
+const RESTRICTED_BEFORE = {
+  requests: ["GET /api/v1/workspaces/ws-a/restricted-pages"],
+  items: ["Brief — Archive", "Brief — Publish", "Launch plan — Notify"],
+}
+const RESTRICTED_CATALOG = [
+  { slug: "brief", name: "Brief", publication: 3, actions: [
+    { intent_hash: "i1", panel_id: "p", id: "publish", label: "Publish", inputs: [] },
+    { intent_hash: "i2", panel_id: "p", id: "archive", label: "Archive", inputs: [] },
+  ] },
+  { slug: "launch", name: "Launch plan", actions: [{ intent_hash: "i3", panel_id: "q", id: "notify", label: "Notify", inputs: [] }] },
+  { slug: "silent", name: "Silent draft", actions: [] },
+]
+test("restricted member's Artifacts shows exactly their old Pages catalog, and old links land on it", async ({ page }) => {
   const forbidden: string[] = []
+  const seen = new Set<string>()
   await page.route("**/api/**", async (route) => {
     const request = route.request()
     const path = new URL(request.url()).pathname
@@ -650,21 +664,65 @@ test("restricted member with old Pages links and a canonical link sees nothing n
       forbidden.push(key)
       return route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "Resource not found" }) })
     }
+    if (path.startsWith("/api/v1/workspaces/")) seen.add(key)
     let body: unknown = []
     if (path === "/api/auth/session") body = { user: { id: "u-r", name: "Rita", email: "rita@example.test" }, expires: "2099-01-01T00:00:00Z" }
     else if (path === "/api/auth/csrf") body = { csrfToken: "t" }
     else if (path === "/api/v1/workspaces") body = ROWS
+    else if (path === "/api/v1/workspaces/ws-a/restricted-pages") body = RESTRICTED_CATALOG
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
   })
-  for (const link of ["/pages?workspace_id=ws-a", "/pages/brief?workspace_id=ws-a", "/pages/%40page-brief?workspace_id=ws-a", "/pages/brief?artifact=1&version=2&workspace_id=ws-a", "/pages?ref=page-brief&workspace_id=ws-a"]) {
-    await page.goto(link)
-    await expect(page.getByText("No Page actions shared with you yet")).toBeVisible()
-    await page.waitForTimeout(1_000)
-    expect(new URL(page.url()).pathname, link).toMatch(/^\/pages(\/|$)/)
+  const main = page.locator("main, [data-slot=content-column]").first()
+
+  // The catalog home: the same artifacts, each opening the same actions.
+  await page.goto("/artifacts?workspace_id=ws-a")
+  const home = page.getByRole("region", { name: /Shared with you/ })
+  await expect(home.getByRole("link")).toHaveCount(2)
+  await expect(page.getByText("Silent draft")).toHaveCount(0)
+  await expect(main).not.toContainText(/\bPages?\b/)
+  const items: string[] = []
+  for (const name of ["Brief", "Launch plan"]) {
+    await page.goto("/artifacts?workspace_id=ws-a")
+    await page.getByRole("region", { name: /Shared with you/ }).getByRole("link", { name: new RegExp(name) }).click()
+    const select = page.getByRole("combobox", { name: "Action" })
+    await expect(select).toBeVisible()
+    for (const label of await select.locator("option:not([value=''])").allTextContents()) items.push(`${name} — ${label}`)
   }
-  await page.goto("/artifacts/page-brief?workspace_id=ws-a")
-  await expect(page.getByText(/isn’t part of your access/)).toBeVisible()
-  await page.waitForTimeout(1_000)
-  expect(new URL(page.url()).pathname).toBe("/artifacts/page-brief")
+  expect(items.sort()).toEqual(RESTRICTED_BEFORE.items)
+
+  // Old links move to the matching /artifacts address and show it.
+  for (const [link, landing] of [
+    ["/pages?workspace_id=ws-a", "/artifacts?workspace_id=ws-a"],
+    ["/pages/brief?workspace_id=ws-a", "/artifacts?workspace_id=ws-a&item=brief"],
+    ["/pages/brief?artifact=1&version=2&workspace_id=ws-a", "/artifacts?workspace_id=ws-a&item=brief"],
+    ["/pages/%40page-brief?workspace_id=ws-a", "/artifacts/page-brief?workspace_id=ws-a"],
+    ["/pages?ref=page-brief&workspace_id=ws-a", "/artifacts/page-brief?workspace_id=ws-a"],
+    ["/pages/craft/editor?page_id=page-brief&workspace_id=ws-a", "/artifacts/page-brief?workspace_id=ws-a"],
+  ]) {
+    await page.goto(link)
+    await expect.poll(() => { const url = new URL(page.url()); return url.pathname + url.search }, { message: link }).toBe(landing)
+  }
+  await page.goto("/pages/brief?workspace_id=ws-a")
+  await expect(page.getByRole("heading", { name: "Brief" })).toBeVisible()
+  await expect(page.getByRole("combobox", { name: "Action" }).locator("option:not([value=''])")).toHaveText(["Publish", "Archive"])
+  await expect(page.getByText("Launch plan")).toHaveCount(0)
+
+  // Anything not granted: the gate, never the address's or another artifact's name.
+  for (const link of ["/pages/secret-plan?workspace_id=ws-a", "/artifacts?item=secret-plan&workspace_id=ws-a", "/artifacts/page-secret?workspace_id=ws-a", "/pages/%40page-secret?workspace_id=ws-a", "/pages/craft/editor?page_id=page-secret&workspace_id=ws-a"]) {
+    await page.goto(link)
+    await expect(page.getByRole("heading", { name: "This artifact isn’t part of your access" })).toBeVisible()
+    await expect(page.getByRole("link", { name: "Go to Artifacts" })).toHaveAttribute("href", "/artifacts?workspace_id=ws-a")
+    for (const secret of ["secret-plan", "page-secret", "Brief", "Launch plan", "Silent draft"]) await expect(main, link).not.toContainText(secret)
+  }
+
+  await page.waitForTimeout(500)
+  expect([...seen].sort()).toEqual(RESTRICTED_BEFORE.requests)
+  expect(forbidden).toEqual([])
+
+  // The sidebar's Artifacts row is /artifacts, never /pages.
+  await page.goto("/routines")
+  const rows = page.getByRole("link", { name: "Artifacts", exact: true })
+  await expect(rows.first()).toBeVisible()
+  for (const link of await rows.all()) await expect(link).toHaveAttribute("href", "/artifacts")
   expect(forbidden).toEqual([])
 })

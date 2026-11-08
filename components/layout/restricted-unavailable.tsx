@@ -12,6 +12,8 @@ import { useRestrictedSurfaces } from "@/hooks/use-access-mode"
  *  "Credentials"), else the path's first segment made readable. */
 export function screenName(pathname: string | undefined): string {
   if (!pathname) return "This screen"
+  // Old Pages addresses are Artifacts in every build: "Pages" is never shown (#5132).
+  if (pathname === "/pages" || pathname.startsWith("/pages/")) return "Artifacts"
   const area = areaOf(pathname)
   if (area && area.href !== "/") return area.title
   if (pathname === "/") return "Dashboard"

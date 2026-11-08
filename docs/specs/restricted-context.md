@@ -39,9 +39,12 @@ The web app follows the same rule (#2861):
   session (terminal, not an outage, and not a logout).
 - **Mixed membership.** A member restricted in workspace A and trusted in B
   sees the restricted screens in B as well: `/routines` shows private
-  routines and `/pages` (and `/pages/<slug>`) shows declared Page actions.
-  A restricted session is never redirected from `/pages` to `/artifacts`
-  (#5129); `/artifacts` stays outside its surfaces.
+  routines and `/artifacts` shows the artifacts whose declared actions were
+  shared with them (#5132). That screen makes the same restricted catalog
+  requests the old Page actions catalog made, and nothing more. An old
+  `/pages` address only redirects to the matching `/artifacts` address. An
+  artifact address outside the catalog shows the access gate without the
+  artifact's name (docs/specs/pages.md §9b.7).
 - **Access changes while open.** The app re-reads the workspace list every
   60 seconds while the tab is visible and when it becomes visible again; an
   unchanged answer changes nothing. Turning restricted closes the socket and

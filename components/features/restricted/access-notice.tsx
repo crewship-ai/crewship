@@ -2,7 +2,7 @@
 
 import type { ReactNode } from "react"
 import Link from "next/link"
-import { AlertTriangle, ArrowRight, KeyRound, LayoutGrid, Lock, MessageSquare, Settings, ShieldCheck, UserRound, Workflow, Wrench, type LucideIcon } from "lucide-react"
+import { AlertTriangle, ArrowRight, KeyRound, LayoutGrid, Library, Lock, MessageSquare, Settings, ShieldCheck, UserRound, Workflow, Wrench, type LucideIcon } from "lucide-react"
 
 import { CrewshipLogoMark } from "@/components/branding/crewship-logo"
 import { DashboardCard } from "@/components/features/dashboard/dashboard-card"
@@ -47,7 +47,8 @@ const SURFACES: Record<RestrictedSurface, { label: string; detail: string; icon:
   issues: { label:"Issues", detail:"Read issues in projects shared with you",icon:LayoutGrid },
   chat: { label: "Chat", detail: "Discover agents shared with you", icon: MessageSquare },
   routines: { label: "Routines", detail: "View or run routines shared with you", icon: Workflow },
-  pages: { label: "Pages", detail: "Open Pages and run their actions", icon: LayoutGrid },
+  // The server's `pages` surface is the member's Artifacts screen (#5132).
+  pages: { label: "Artifacts", detail: "Open artifacts shared with you and run their actions", icon: Library },
   account_security: { label: "Settings", detail: "Your account and sign-in security", icon: Settings },
 }
 

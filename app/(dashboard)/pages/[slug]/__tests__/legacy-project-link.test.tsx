@@ -16,7 +16,6 @@ vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ worksp
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => "trusted" }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "u1" } } }) }))
 vi.mock("@/components/features/restricted/access-notice", () => ({ useAccessContext: () => ({}) }))
-vi.mock("@/components/features/pages/restricted-pages", () => ({ RestrictedPages: () => <p>Restricted pages</p> }))
 vi.mock("@/components/features/pages/pages-layout", () => ({ PagesLayout: () => <p>Pages view</p> }))
 vi.mock("@/components/features/pages/artifact-project", () => ({
   ArtifactProject: ({ slug, initialVersion }: { slug: string; initialVersion?: number }) => <p data-testid="legacy" data-page={slug} data-pin={initialVersion ?? ""}>Pages project viewer</p>,

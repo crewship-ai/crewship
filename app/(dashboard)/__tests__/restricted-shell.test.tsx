@@ -200,22 +200,41 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     for (const name of ["Chat", "Routines", "Artifacts", "Settings"]) {
       expect(screen.getAllByRole("link", { name }).length).toBeGreaterThan(0)
     }
+    // #5132: their Artifacts is /artifacts whatever the library flag; /pages only redirects.
     for (const link of screen.getAllByRole("link", { name: "Artifacts" })) {
-      expect(link).toHaveAttribute("href", "/pages")
+      expect(link).toHaveAttribute("href", "/artifacts")
     }
     for (const name of ["Dashboard", "Inbox", "Issues", "Activity", "Crews", "Skills", "Credentials", "Integrations"]) {
       expect(screen.queryByRole("link", { name })).toBeNull()
     }
   })
 
-  it("requires the server's pages permission for the Artifacts surface", async () => {
+  it.each(["/pages", "/pages/brief", "/artifacts", "/artifacts/page-brief"])("requires the server's pages permission for the Artifacts surface at %s", async (pathname) => {
     workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: SURFACES.filter(surface => surface !== "pages") }]
-    nav.pathname = "/pages"
+    nav.pathname = pathname
     mount()
-    expect(await screen.findByText(/isn’t part of your access$/)).toBeInTheDocument()
+    expect(await screen.findByText("Artifacts isn’t part of your access")).toBeInTheDocument()
+    expect(screen.queryByText(/\bPages?\b/)).toBeNull()
     expect(screen.queryByRole("link", { name: "Artifacts" })).toBeNull()
     expect(screen.queryByTestId("page")).toBeNull()
     expect(forbidden()).toEqual([])
+  })
+
+  // #5132: with the surface, /artifacts is the screen and old /pages addresses
+  // mount only so that their route can move them there.
+  it.each(["/artifacts", "/artifacts/page-brief", "/pages", "/pages/brief", "/pages/craft/editor"])("mounts %s for the pages surface", async (pathname) => {
+    nav.pathname = pathname
+    mount()
+    expect(await screen.findByTestId("page")).toBeInTheDocument()
+    expect(screen.queryByText(/isn’t part of your access$/)).toBeNull()
+    expect(forbidden()).toEqual([])
+  })
+
+  it.each(["/pagesx", "/artifactsx", "/page"])("does not widen %s beyond the surface boundary", async (pathname) => {
+    nav.pathname = pathname
+    mount()
+    await settle(200)
+    expect(screen.queryByTestId("page")).toBeNull()
   })
 
   it("keeps only allowed tabs in the phone tab bar", async () => {

@@ -942,14 +942,36 @@ cross-workspace reference, a refused or failed read and a kind the Artifacts
 detail cannot open keep the Pages view. The decision is made once for the
 entry address, so navigation inside Pages never tears down an open editor.
 
-A restricted session is never redirected. `GET /api/v1/pages` and
-`GET /api/v1/pages/{slug}` are not on the restricted allowlist
-(`internal/api/restricted_surfaces.go`), so the Artifacts detail could show
-them nothing. Every `/pages` address keeps rendering their `RestrictedPages`
-catalog without a page read, and the shell keeps `/artifacts` outside their
-surfaces (`lib/restricted-surfaces.ts`); `ArtifactsRoute` itself also renders
-and reads nothing for such a session. Permissions are unchanged; the server
-remains authoritative.
+A restricted session has no Pages screen (#5132). Its one surface, the
+server's `pages` surface (`internal/api/restricted_surfaces.go`), is
+`/artifacts` (`lib/restricted-surfaces.ts`), with or without
+`NEXT_PUBLIC_ARTIFACTS_LIBRARY`. There `ArtifactsRoute` renders only
+`RestrictedArtifacts`: the artifacts that have declared actions shared with
+the member, and those actions. It sends exactly the requests the Page actions
+catalog sent at `/pages`: `GET /api/v1/workspaces/{id}/restricted-pages`, the
+publication-bound action `POST` and its own run poll. It never mounts the
+library, the detail or Design, because `GET /api/v1/pages` and
+`GET /api/v1/pages/{slug}` are not on the restricted allowlist.
+
+| Restricted address | Shows |
+|---|---|
+| `/artifacts` | the granted artifacts, each with its action count |
+| `/artifacts?item=<slug>` | that artifact's actions, if the catalog lists it; otherwise the access gate |
+| `/artifacts/<id>` | the access gate, decided without a request: the catalog names artifacts by slug only, so an ID never proves a grant |
+
+The gate reads "This artifact isn’t part of your access". It never names the
+address or any artifact. An artifact listed without actions was never shown
+before and is not shown now.
+
+Old `/pages` addresses stay mountable for the surface only so that they can
+move (`restricted-artifacts-url.ts`, by address alone, with `router.replace`).
+`/pages[?…]` and a malformed `?ref=` go to `/artifacts`. `/pages/<slug>` goes
+to `/artifacts?item=<slug>`, and `/pages/@<id>` or `?ref=<id>` to
+`/artifacts/<id>`. `/pages/craft/editor?page_id=<id>` goes to `/artifacts/<id>`
+without mounting the editor host (its availability read is not allowlisted);
+it first runs the same local read-loss proof, whose only request is the
+allowlisted `draft-key`. Only `workspace_id` is kept. Permissions are
+unchanged, and the server remains authoritative.
 
 Without the library, `/artifacts/<id>` resolves the kind and opens
 `/pages/@<id>?artifact=1[&version=N]` for a project and `/pages/@<id>` for any
