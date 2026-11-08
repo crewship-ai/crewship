@@ -126,12 +126,16 @@ func TestDocumentCommentsLimitAndPageDeletion(t *testing.T) {
 	if e := db.QueryRow(`SELECT used_bytes FROM artifact_storage_workspaces WHERE workspace_id='workspace-a'`).Scan(&used); e != nil || used-base < int64(CommentLimit*(256+2)) {
 		t.Fatalf("comments not charged: %d -> %d %v", base, used, e)
 	}
-	// Resolve receipts are bounded too: flipping a thread cannot grow them forever.
-	if _, e := db.Exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?) INSERT INTO document_receipts(workspace_id,page_id,id,digest,fingerprint,rev,epoch,actor,kind) SELECT 'workspace-a','page-a','r'||i,'d','f',0,0,'a','resolve' FROM n`, ResolveLimit); e != nil {
+	// Each thread is resolved or reopened a bounded number of times; another
+	// thread is unaffected.
+	if _, e := db.Exec(`UPDATE document_comments SET version=? WHERE id='c1'`, ResolveLimit+1); e != nil {
 		t.Fatal(e)
 	}
-	if _, e := s.ResolveComment(ctx, key, "one-more", "f", "c1", 1, true, 0, &zero, allow); !errors.Is(e, ErrQuota) {
+	if _, e := s.ResolveComment(ctx, key, "one-more", "f", "c1", ResolveLimit+1, true, 0, &zero, allow); !errors.Is(e, ErrQuota) {
 		t.Fatalf("resolve limit: %v", e)
+	}
+	if _, e := s.ResolveComment(ctx, key, "other-thread", "f", "c2", 1, true, 0, &zero, allow); e != nil {
+		t.Fatalf("other thread: %v", e)
 	}
 	if _, e := db.Exec(`DELETE FROM pages WHERE id='page-a'`); e != nil {
 		t.Fatal(e)
@@ -143,5 +147,28 @@ func TestDocumentCommentsLimitAndPageDeletion(t *testing.T) {
 	var after int64
 	if e := db.QueryRow(`SELECT used_bytes FROM artifact_storage_workspaces WHERE workspace_id='workspace-a'`).Scan(&after); e != nil || used-after < int64(CommentLimit*(256+2)) {
 		t.Fatalf("comment storage not released: before %d after %d %v", used, after, e)
+	}
+}
+
+// Discussion and content edits have separate receipt windows: a commenter at
+// the limit cannot make an editor's save wait.
+func TestDocumentCommentsDoNotShareTheEditWindow(t *testing.T) {
+	s, db, _ := fixture(t, Options{MaxCommits: 2})
+	zero := int64(0)
+	for _, id := range []string{"a", "b"} {
+		if _, e := s.Comment(ctx, key, CommentInput{ID: id, Body: "x", Anchor: json.RawMessage(`{}`), Generation: &zero}, allow); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if _, e := s.Comment(ctx, key, CommentInput{ID: "c", Body: "x", Anchor: json.RawMessage(`{}`), Generation: &zero}, allow); !errors.Is(e, ErrRateLimit) {
+		t.Fatalf("discussion window: %v", e)
+	}
+	tx, e := db.BeginTx(ctx, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if e = s.admitNewReceipt(ctx, tx, key); e != nil {
+		t.Fatalf("edit window consumed by comments: %v", e)
 	}
 }

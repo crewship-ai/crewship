@@ -19,9 +19,10 @@ const CommentBodyLimit = 10000
 // CommentAnchorLimit matches the engine's anchor bound.
 const CommentAnchorLimit = 8192
 
-// ResolveLimit bounds one document's resolve and reopen receipts, so flipping
-// a thread cannot grow its receipts without end.
-const ResolveLimit = 10 * CommentLimit
+// ResolveLimit bounds how often one thread is resolved or reopened, so flipping
+// threads cannot grow receipts without end; one thread reaching it leaves the
+// others untouched.
+const ResolveLimit = 100
 
 var ErrInvalidComment = errors.New("invalid bounded comment")
 
@@ -153,7 +154,7 @@ func (s *Store) Comment(ctx context.Context, k Key, in CommentInput, a Authorize
 		if n >= CommentLimit {
 			return ErrQuota
 		}
-		if e = s.admitNewReceipt(ctx, tx, k); e != nil {
+		if e = s.admitDiscussionReceipt(ctx, tx, k); e != nil {
 			return e
 		}
 		if e = admitDisk(ctx, tx, len(in.Body)+len(in.Anchor)+512); e != nil {
@@ -199,14 +200,11 @@ func (s *Store) ResolveComment(ctx context.Context, k Key, id, fingerprint, comm
 		if v.HeadRev != ifRev || v.Generation != *generation {
 			return ErrConflict
 		}
-		var n int
-		if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id=? AND kind='resolve'`, k.WorkspaceID, k.PageID).Scan(&n); e != nil {
-			return e
-		}
-		if n >= ResolveLimit {
+		// version starts at 1 and grows by one per resolve or reopen.
+		if version > ResolveLimit {
 			return ErrQuota
 		}
-		if e = s.admitNewReceipt(ctx, tx, k); e != nil {
+		if e = s.admitDiscussionReceipt(ctx, tx, k); e != nil {
 			return e
 		}
 		result, e := tx.ExecContext(ctx, `UPDATE document_comments SET resolved=?,version=version+1 WHERE workspace_id=? AND page_id=? AND id=? AND parent_id IS NULL AND version=?`, resolved, k.WorkspaceID, k.PageID, comment, version)
