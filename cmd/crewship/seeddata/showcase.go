@@ -8,7 +8,7 @@ import "embed"
 // (see showcase/README.md for how each one was produced) and posted verbatim;
 // the server is what judges the bytes.
 //
-//go:embed showcase/word/*.json showcase/sheet/*.json showcase/art/*.json
+//go:embed showcase/word/*.json showcase/sheet/*.json showcase/art/*.json showcase/mirror
 var showcaseFS embed.FS
 
 // ShowcaseFile returns one embedded showcase file. Panics on a missing path:
