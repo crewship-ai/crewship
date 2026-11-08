@@ -18,13 +18,13 @@ const BEFORE = {
   items: ["Brief — Publish", "Brief — Archive", "Launch plan — Notify"],
 }
 const CATALOG = [
-  { slug: "brief", name: "Brief", publication: 3, actions: [
+  { id: "page-brief", slug: "brief", name: "Brief", publication: 3, actions: [
     { intent_hash: "i1", panel_id: "p", id: "publish", label: "Publish", inputs: [] },
     { intent_hash: "i2", panel_id: "p", id: "archive", label: "Archive", inputs: [] },
   ] },
-  { slug: "launch", name: "Launch plan", actions: [{ intent_hash: "i3", panel_id: "q", id: "notify", label: "Notify", inputs: [] }] },
+  { id: "page-launch", slug: "launch", name: "Launch plan", actions: [{ intent_hash: "i3", panel_id: "q", id: "notify", label: "Notify", inputs: [] }] },
   // Granted but with nothing to run: the old catalog listed no option for it, so nothing names it now either.
-  { slug: "silent", name: "Silent draft", actions: [] },
+  { id: "page-silent", slug: "silent", name: "Silent draft", actions: [] },
 ]
 
 const requests: string[] = []
@@ -172,20 +172,61 @@ describe.each(["true", "false"])("a restricted member with NEXT_PUBLIC_ARTIFACTS
     expect(forbidden()).toEqual([])
   })
 
+  // #5135: a granted artifact's own address opens exactly what ?item=<slug> opens.
   it.each([
-    ["a direct /artifacts/<id> of a non-allowed item", "/artifacts/page-secret?workspace_id=ws1"],
+    ["its direct /artifacts/<id>", "/artifacts/page-brief?workspace_id=ws1"],
+    ["a pinned /artifacts/<id>", "/artifacts/page-brief?workspace_id=ws1&version=2"],
+    ["an old /pages/@<id> link", "/pages/%40page-brief?workspace_id=ws1"],
+    ["an old native editor link", "/pages/craft/editor?page_id=page-brief&workspace_id=ws1"],
+  ])("a granted artifact at %s opens the same actions as its slug link", async (_name, link) => {
+    await visit(link)
+    const select = await screen.findByRole("combobox", { name: "Action" })
+    const byId = within(select).getAllByRole("option").filter(option => option.getAttribute("value")).map(option => `Brief — ${option.textContent}`)
+    expect(screen.getByRole("heading", { name: "Brief" })).toBeTruthy()
+    const idView = document.body.innerHTML
+    expect(screen.queryByText("This artifact isn’t part of your access")).toBeNull()
+    expect(screen.queryByText("Launch plan")).toBeNull()
+    noTrustedView()
+    noPageWord()
+    expect(unique()).toEqual(BEFORE.requests)
+    expect(forbidden()).toEqual([])
+    await visit("/artifacts?item=brief&workspace_id=ws1")
+    const bySlug = within(await screen.findByRole("combobox", { name: "Action" })).getAllByRole("option").filter(option => option.getAttribute("value")).map(option => `Brief — ${option.textContent}`)
+    expect(byId).toEqual(bySlug)
+    expect(idView).toBe(document.body.innerHTML)
+  })
+
+  // No existence oracle (PRD §0.6): an ID outside the catalog, whether never
+  // granted, nonexistent or deleted, sends the same ID-free catalog read and
+  // renders the same gate, byte for byte.
+  it("non-granted, nonexistent, deleted and action-less IDs send identical requests and render an identical gate", async () => {
+    const seen: { requests: string[]; html: string }[] = []
+    for (const id of ["page-secret", "page-never-existed", "page-deleted", "page-silent"]) {
+      requests.length = 0
+      await visit(`/artifacts/${id}?workspace_id=ws1`)
+      await expectGate(id)
+      expect(requests).toEqual(BEFORE.requests)
+      expect(requests.some(request => request.includes(id))).toBe(false)
+      expect(forbidden()).toEqual([])
+      seen.push({ requests: [...requests], html: document.body.innerHTML })
+    }
+    for (const view of seen) expect(view).toEqual(seen[0])
+  })
+
+  it.each([
     ["a pinned /artifacts/<id>", "/artifacts/page-secret?workspace_id=ws1&version=2"],
     ["an old /pages/@<id> link", "/pages/%40page-secret?workspace_id=ws1"],
-  ])("%s shows the access gate and sends no request at all", async (_name, link) => {
+  ])("%s outside the access shows the gate after only the ID-free catalog read", async (_name, link) => {
     await visit(link)
     await expectGate("page-secret")
-    await waitFor(() => expect(requests).toEqual([]))
+    await waitFor(() => expect(unique()).toEqual(BEFORE.requests))
+    expect(requests.some(request => request.includes("page-secret"))).toBe(false)
   })
 
   it("an old native editor link runs only the read-loss proof, then shows the gate", async () => {
     expect(await visit("/pages/craft/editor?page_id=page-secret&workspace_id=ws1")).toBe("/artifacts/page-secret?workspace_id=ws1")
     expect(readLoss).toHaveBeenCalledWith({ human: "u-r", workspace: "ws1", page: "page-secret" })
     await expectGate("page-secret")
-    expect(requests).toEqual([])
+    expect(unique()).toEqual(BEFORE.requests)
   })
 })

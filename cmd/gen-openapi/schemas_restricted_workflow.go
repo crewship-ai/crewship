@@ -66,7 +66,7 @@ func restrictedWorkflowSchemaCatalog() (map[string]DomainSchema, map[string]any)
 	components["RestrictedPageInput"] = obj(map[string]any{"name": str(), "label": str(), "type": map[string]any{"type": "string", "enum": []string{"text", "textarea", "number", "boolean", "select"}}, "required": map[string]any{"type": "boolean"}, "options": arr(str())}, "name", "type", "required")
 	components["RestrictedPageConfirmation"] = obj(map[string]any{"title": str(), "body": str(), "confirm_label": str(), "cancel_label": str()}, "title", "body")
 	components["RestrictedPageAction"] = obj(map[string]any{"intent_hash": str(), "panel_id": str(), "id": str(), "label": str(), "inputs": arr(ref("RestrictedPageInput")), "confirm": ref("RestrictedPageConfirmation")}, "intent_hash", "panel_id", "id", "label", "inputs")
-	components["RestrictedPage"] = obj(map[string]any{"slug": str(), "name": str(), "publication": map[string]any{"type": "integer", "minimum": 1}, "actions": arr(ref("RestrictedPageAction"))}, "slug", "name", "actions")
+	components["RestrictedPage"] = obj(map[string]any{"id": str(), "slug": str(), "name": str(), "publication": map[string]any{"type": "integer", "minimum": 1}, "actions": arr(ref("RestrictedPageAction"))}, "id", "slug", "name", "actions")
 	prefix := "/api/v1/workspaces/{workspaceId}/"
 	routes := map[string]DomainSchema{
 		"GET " + prefix + "restricted-routines":             {Response: arr(ref("RestrictedRoutine")), SuccessStatuses: []string{"200"}, SuccessHeaders: map[string]any{"X-Total-Count": map[string]any{"description": "Number of currently authorized routines", "schema": map[string]any{"type": "integer", "minimum": 0}}}},

@@ -196,4 +196,4 @@ An empty search lists the available metadata; narrow it when `has_more` is true.
 
 ## Authorized Pages
 
-`crewship context pages` lists only Pages with currently executable declared actions in the selected workspace. The authenticated projection returns current publication identifiers and scalar input descriptors; it excludes fixed parameters, input defaults and producer data.
+`crewship context pages` lists only Pages with currently executable declared actions in the selected workspace. Each entry carries the Page's immutable `id` (its `/artifacts/<id>` address) and `slug`. The authenticated projection returns current publication identifiers and scalar input descriptors; it excludes fixed parameters, input defaults and producer data.

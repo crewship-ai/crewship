@@ -19586,6 +19586,9 @@
             },
             "type": "array"
           },
+          "id": {
+            "type": "string"
+          },
           "name": {
             "type": "string"
           },
@@ -19598,6 +19601,7 @@
           }
         },
         "required": [
+          "id",
           "slug",
           "name",
           "actions"

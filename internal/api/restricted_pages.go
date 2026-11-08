@@ -26,7 +26,13 @@ type restrictedPageAction struct {
 	Inputs  []restrictedPageInput     `json:"inputs"`
 	Confirm *pages.PanelActionConfirm `json:"confirm,omitempty"`
 }
+
+// restrictedPage is one catalog entry. ID is the immutable page ID behind the
+// member's /artifacts/<id> address (#5135); it is emitted only inside an entry,
+// and an entry exists only for a page with at least one action the member is
+// currently authorized to run, so it names nothing the slug did not already.
 type restrictedPage struct {
+	ID          string                 `json:"id"`
 	Slug        string                 `json:"slug"`
 	Name        string                 `json:"name"`
 	Publication int64                  `json:"publication,omitempty"`
@@ -88,7 +94,7 @@ func (h *PageHandler) restrictedPageCatalog(ctx context.Context, user, workspace
 		if json.Unmarshal([]byte(raw), &doc) != nil {
 			continue
 		}
-		entry := restrictedPage{Slug: rec.Slug, Name: rec.Name, Publication: publication, Actions: []restrictedPageAction{}}
+		entry := restrictedPage{ID: rec.ID, Slug: rec.Slug, Name: rec.Name, Publication: publication, Actions: []restrictedPageAction{}}
 		for _, panel := range doc.Spec.Panels {
 			if _, _, err = h.resolvePanelForCaller(ctx, workspace, user, rec.Slug, panel.ID); err != nil {
 				continue
