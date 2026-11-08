@@ -38,15 +38,65 @@ class DocumentCreationAcceptance(unittest.TestCase):
             with self.subTest(raw=raw), self.assertRaises(ValueError):
                 lane.Evidence().accept(raw)
 
-    def child(self, directory, events, status=0):
+    def child(self, directory, events, status=0, measurements=None):
         executable = directory / 'go'
         executable.write_text('#!/usr/bin/env python3\n'
                               'import json,os,pathlib,sys\n'
                               'root=pathlib.Path(os.environ["DOC_RUNNER_FIXTURE"])\n'
-                              '(root/"call.json").write_text(json.dumps({"args":sys.argv[1:],"cwd":os.getcwd(),"opt_in":os.environ.get("CREWSHIP_DOCUMENT_CREATE")}))\n'
+                              'evidence=os.environ.get("TEST_DOCUMENT_DURABILITY_EVIDENCE")\n'
+                              '(root/"call.json").write_text(json.dumps({"args":sys.argv[1:],"cwd":os.getcwd(),"opt_in":os.environ.get("CREWSHIP_DOCUMENT_CREATE"),'
+                              '"durability":os.environ.get("TEST_DOCUMENT_DURABILITY"),"evidence":evidence,'
+                              '"reserved":evidence is not None and os.path.isfile(evidence) and os.path.getsize(evidence)==0}))\n'
+                              + ('' if measurements is None else 'open(evidence,"wb").write(' + repr(measurements) + ')\n')
                               + 'sys.stdout.buffer.write(' + repr(events) + ')\n'
                               + 'sys.exit(' + str(status) + ')\n')
         executable.chmod(0o700)
+
+    def durability_event(self, action='pass'):
+        scenario = lane.SCENARIOS['durability']
+        return dict(Package=scenario.package, Test=scenario.test, Action=action)
+
+    def test_durability_scenario_selects_its_own_test_and_requires_measurements(self):
+        scenario = lane.SCENARIOS['durability']
+        self.assertEqual(scenario.command, ['go', 'test', '-json', '-tags', 'docs_foundation', './cmd/crewship', '-run',
+                                            '^TestAcceptance_DocumentDurabilityRealEngine$', '-count=1', '-timeout=5m'])
+        # A create pass is not a durability pass, and vice versa.
+        create, durability = lane.Evidence(), lane.Evidence(scenario)
+        create.accept(json.dumps(self.durability_event()).encode())
+        durability.accept(json.dumps(self.event()).encode())
+        self.assertFalse(create.passed(0))
+        self.assertFalse(durability.passed(0))
+        good = json.dumps({'recover_spawn_to_ready_ms': 42, 'clients': 2}).encode()
+        raw = json.dumps(self.durability_event()).encode() + b'\n'
+        cases = [(good, 0), (None, 1), (b'', 1), (b'not JSON', 1), (b'[]', 1), (b'{}', 1),
+                 (json.dumps({'recover_spawn_to_ready_ms': '42'}).encode(), 1)]
+        for measurements, expected in cases:
+            with self.subTest(measurements=measurements), tempfile.TemporaryDirectory() as temporary:
+                directory = Path(temporary)
+                self.child(directory, raw, measurements=measurements)
+                output = directory / 'evidence' / 'document-durability.jsonl'
+                with patch.dict(os.environ, PATH=str(directory) + os.pathsep + os.environ['PATH'], DOC_RUNNER_FIXTURE=str(directory),
+                                TEST_DOCUMENT_DURABILITY='0', TEST_DOCUMENT_DURABILITY_EVIDENCE='/elsewhere.json'):
+                    self.assertEqual(lane.run(output, io.BytesIO(), scenario='durability'), expected)
+                call = json.loads((directory / 'call.json').read_text())
+                self.assertEqual(call['args'], scenario.command[1:])
+                self.assertEqual(call['durability'], '1')
+                self.assertEqual(call['evidence'], str(output.with_name('document-durability-measurements.json')))
+                self.assertTrue(call['reserved'])
+
+    def test_durability_fails_closed_on_test_failure_and_prior_measurements(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = Path(temporary)
+            good = json.dumps({'recover_spawn_to_ready_ms': 42}).encode()
+            self.child(directory, json.dumps(self.durability_event('fail')).encode() + b'\n', measurements=good)
+            with patch.dict(os.environ, PATH=str(directory) + os.pathsep + os.environ['PATH'], DOC_RUNNER_FIXTURE=str(directory)):
+                self.assertEqual(lane.run(directory / 'a.jsonl', io.BytesIO(), scenario='durability'), 1)
+                prior = directory / 'prior.json'
+                prior.write_bytes(good)
+                with patch.object(lane.subprocess, 'Popen') as launch, self.assertRaises(OSError):
+                    lane.run(directory / 'b.jsonl', io.BytesIO(), scenario='durability', measurements=prior)
+                launch.assert_not_called()
+            self.assertEqual(prior.read_bytes(), good)
 
     def test_actual_child_launch_and_streaming(self):
         with tempfile.TemporaryDirectory() as temporary:

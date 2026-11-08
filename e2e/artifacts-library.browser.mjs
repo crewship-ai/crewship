@@ -107,6 +107,18 @@ try {
     }
     const listed = () => list.getByRole("button").evaluateAll(buttons => buttons.map(b => b.getAttribute("aria-label")))
     const noEmptyPanels = async where => assert.equal(await page.getByText(/declares no panels/i).count(), 0, `${vp.name} ${where}: never "This page declares no panels"`)
+    // A phone keeps the output slot (download, source, present, reload) top right in the view row, the band
+    // every body leaves free, so it never floats over the text (390 px Design Library, 8 Nov 2026).
+    const outputClear = async where => {
+      if (!vp.mobile) return
+      const output = page.locator("[data-artifact-slot=output]")
+      if (await output.count() === 0) return
+      const view = page.locator("[data-artifact-slot=view]")
+      assert.equal(await page.locator("[data-slot-dock=top] [data-artifact-slot=output]").count(), 1, `${where}: output is docked in the top row`)
+      const [o, v] = [await output.boundingBox(), await view.boundingBox()]
+      assert.ok(o && v && Math.abs(o.y - v.y) <= 1 && o.x >= v.x + v.width, `${where}: output sits top right beside view (${JSON.stringify({ o, v })})`)
+      assert.ok(o.x + o.width <= vp.width, `${where}: output stays on screen`)
+    }
 
     // 1. Home by default: Needs attention by the fixed rule (only the owner's stale panels here, never
     // "unshared"), every artifact once with kind chips and a grid/table toggle, the New popover. Then All.
@@ -239,6 +251,7 @@ try {
     await stage.waitFor()
     await page.getByRole("group", { name: "Capabilities" }).getByText("Static · no capabilities").waitFor()
     await stage.frameLocator('iframe[title^="Preview of"]').locator("#headline").waitFor()
+    await outputClear("Pricing site")
     await shot("07-app-static")
     await page.getByRole("button", { name: /^Version: v4/ }).waitFor()
     assert.equal(await page.getByRole("link", { name: /Open in Pages|Open page/ }).count(), 0, "a project opens in its viewer, not a link")
@@ -329,6 +342,7 @@ try {
       assert.equal(await viewer.count(), entry.viewer ? 1 : 0, `${entry.name}: a project viewer only for a project`)
       assert.equal(await lockControls.count(), 0, `${entry.name}: no lock bar outside the status chip`)
       await noEmptyPanels(entry.name)
+      await outputClear(entry.name)
       assert.doesNotMatch(await page.locator("body").textContent(), /\[object Object\]/, `${entry.name}: no stringified object in the page`)
 
       if (entry.kind === "docs") {
