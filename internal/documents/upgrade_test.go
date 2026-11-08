@@ -23,7 +23,7 @@ func TestDocumentSchemaThreeUpgradePreservesBytesFencesAndExactAuthorizedRetry(t
 		t.Fatal(e)
 	}
 	generation := before.Generation
-	r, e := s.UpgradeRequest(ctx, k, lease, "upgrade-three", "original", 2, 3, 0, &generation, allow)
+	r, e := s.UpgradeRequest(ctx, k, lease, "upgrade-three", "original", 2, LatestSchema, 0, &generation, allow)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -31,7 +31,7 @@ func TestDocumentSchemaThreeUpgradePreservesBytesFencesAndExactAuthorizedRetry(t
 	if e != nil {
 		t.Fatal(e)
 	}
-	if after.Schema != 3 || after.HeadRev != 1 || after.Epoch != before.Epoch+1 || after.Generation != before.Generation+1 || !bytes.Equal(after.Snapshot, before.Snapshot) || !bytes.Equal(after.Projection, before.Projection) || len(after.Updates) != 1 || !bytes.Equal(after.Updates[0].Payload, []byte{0, 0}) {
+	if after.Schema != LatestSchema || after.HeadRev != 1 || after.Epoch != before.Epoch+1 || after.Generation != before.Generation+1 || !bytes.Equal(after.Snapshot, before.Snapshot) || !bytes.Equal(after.Projection, before.Projection) || len(after.Updates) != 1 || !bytes.Equal(after.Updates[0].Payload, []byte{0, 0}) {
 		t.Fatalf("upgrade changed original content or failed fences: before=%+v after=%+v", before, after)
 	}
 	if _, e = s.Commit(ctx, k, Commit{Lease: lease, ID: "old-client", IfRev: 1, Schema: 2, Update: []byte("stale"), CandidateSnapshot: []byte("stale"), Projection: projection, Kind: "human"}, allow); !errors.Is(e, ErrFence) {
@@ -40,15 +40,15 @@ func TestDocumentSchemaThreeUpgradePreservesBytesFencesAndExactAuthorizedRetry(t
 	if e = s.RecoverEngine(ctx, "replacement-engine"); e != nil {
 		t.Fatal(e)
 	}
-	retry, e := s.UpgradeRequest(ctx, k, lease, "upgrade-three", "original", 2, 3, 0, &generation, allow)
+	retry, e := s.UpgradeRequest(ctx, k, lease, "upgrade-three", "original", 2, LatestSchema, 0, &generation, allow)
 	if e != nil || retry != r {
 		t.Fatalf("exact retry changed receipt: %+v %v", retry, e)
 	}
-	if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade-three", "changed", 2, 3, 0, &generation, allow); !errors.Is(e, ErrDuplicate) {
+	if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade-three", "changed", 2, LatestSchema, 0, &generation, allow); !errors.Is(e, ErrDuplicate) {
 		t.Fatalf("changed retry admitted: %v", e)
 	}
 	revoked := func(context.Context, *sql.Tx) (string, error) { return "", ErrNotFound }
-	if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade-three", "original", 2, 3, 0, &generation, revoked); !errors.Is(e, ErrNotFound) {
+	if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade-three", "original", 2, LatestSchema, 0, &generation, revoked); !errors.Is(e, ErrNotFound) {
 		t.Fatalf("revoked retry admitted: %v", e)
 	}
 	var count int
@@ -99,7 +99,7 @@ func TestDocumentSchemaThreeUpgradeRollbackAndStalePreconditions(t *testing.T) {
 					t.Fatal(e)
 				}
 			}
-			if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade", "original", 2, 3, 0, &generation, allow); e == nil {
+			if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade", "original", 2, LatestSchema, 0, &generation, allow); e == nil {
 				t.Fatal("invalid upgrade admitted")
 			}
 			v, e := s.Read(ctx, k, allow)
@@ -107,5 +107,46 @@ func TestDocumentSchemaThreeUpgradeRollbackAndStalePreconditions(t *testing.T) {
 				t.Fatalf("denied upgrade changed original state: %+v %v", v, e)
 			}
 		})
+	}
+}
+
+func TestDocumentSchemaFourUpgradeFromEverySupportedSchema(t *testing.T) {
+	for _, from := range []int{1, 2, 3} {
+		s, _, _ := fixture(t, Options{})
+		k := Key{key.WorkspaceID, "page-c"}
+		if _, e := s.InitRequest(ctx, k, "init", "init", from, []byte("binary"), projection, allow); e != nil {
+			t.Fatal(from, e)
+		}
+		lease, e := s.Acquire(ctx, k, "engine", allow)
+		if e != nil {
+			t.Fatal(e)
+		}
+		generation := int64(0)
+		for _, target := range []int{from, 3, 5} {
+			if target == LatestSchema {
+				continue
+			}
+			if _, e = s.UpgradeRequest(ctx, k, lease, "wrong-target", "original", from, target, 0, &generation, allow); !errors.Is(e, ErrSchema) {
+				t.Fatalf("schema %d -> %d admitted: %v", from, target, e)
+			}
+		}
+		if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade-four", "original", from, LatestSchema, 0, &generation, allow); e != nil {
+			t.Fatalf("schema %d upgrade: %v", from, e)
+		}
+		v, e := s.Read(ctx, k, allow)
+		if e != nil || v.Schema != 4 || string(v.Snapshot) != "binary" || v.HeadRev != 1 {
+			t.Fatalf("schema %d upgrade state: %+v %v", from, v, e)
+		}
+		lease, e = s.Acquire(ctx, k, "engine", allow)
+		if e != nil {
+			t.Fatal(e)
+		}
+		generation = v.Generation
+		if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade-again", "original", 4, LatestSchema, 1, &generation, allow); !errors.Is(e, ErrSchema) {
+			t.Fatalf("schema 4 upgraded again: %v", e)
+		}
+	}
+	if !RichSchema(3) || !RichSchema(4) || RichSchema(2) || RichSchema(5) {
+		t.Fatal("rich schema family changed")
 	}
 }

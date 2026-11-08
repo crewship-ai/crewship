@@ -162,9 +162,28 @@ does require one, so the same artifact is not a valid
 [`slides initialize`](/cli/slides) target.)
 
 Then supply a JSON request
-containing an operation `id`, explicit `schema` (2 or 3), and a `body` document
-tree. Schema 3 also requires the original `page_id`. Headings and paragraphs use
-schema 2; initialization does not silently upgrade an existing document.
+containing an operation `id`, explicit `schema` (2, 3 or 4), and a `body` document
+tree. Schemas 3 and 4 also require the original `page_id`. Headings, paragraphs,
+lists and simple tables use schema 2; schema 3 adds links, inline code and code
+blocks; schema 4 adds bold, italic and strikethrough, a code block `language`,
+block quotes and checklists. Initialization does not silently upgrade an
+existing document.
+
+Schema 4 nodes and marks:
+
+| In the document | Node or mark |
+| --- | --- |
+| Bold, italic, strikethrough | marks `bold`, `italic`, `strike` with `attrs: {}`; they combine with each other and with `link`. Inline `code` stays alone. |
+| Code block language | `codeBlock` with `attrs.language`: 1–32 characters of lowercase letters, digits, `+`, `#` or `-` (`python`, `c++`, `objective-c`). Omit it for plain text. |
+| Block quote | `blockquote` holding one or more blocks |
+| Checklist | `taskList` of `taskItem` nodes, each with `attrs.checked` (`true` or `false`) and a paragraph |
+
+```json
+{"type":"taskList","attrs":{"id":"todo"},"content":[{"type":"taskItem","attrs":{"id":"todo-1","checked":true},"content":[{"type":"paragraph","attrs":{"id":"todo-1-p"},"content":[{"type":"text","text":"Ship it","marks":[{"type":"bold","attrs":{}}]}]}]}]}
+```
+
+Agent drafting and document creation from chat still produce schema 3; an agent
+cannot edit a schema 4 document yet.
 
 `--file` is required. Use `--file -` to read stdin. The file must contain one JSON
 object of at most 2 MiB. Keep the same operation ID and contents when retrying
@@ -303,7 +322,7 @@ crewship doc outline @<artifact-id>
 Save an explicitly guarded update. `--file` is required; `--file -` reads stdin.
 Supply one JSON object of at most 2 MiB. A semantic text replacement contains
 `id`, `schema`, the confirmed `epoch`, `target` block ID, replacement `text`,
-`ifRev` and `ifHash`. Schema 3 also requires the original `page_id`. The editor's
+`ifRev` and `ifHash`. Schemas 3 and 4 also require the original `page_id`. The editor's
 binary update form uses `kind: "human"` and a base64 `update` instead.
 
 A changed revision, target hash or epoch refuses the edit. Read the confirmed
@@ -326,6 +345,67 @@ crewship doc patch @<artifact-id> --file patch.json
 
 An exact retry returns the original receipt with `found: true` and
 `duplicate: true`, plus the request's `schema` and the current `epoch`.
+
+## `crewship doc comments <page-slug>`
+
+List the document's comment threads and their replies, oldest first. Reading
+comments needs the same access as reading the document (`pages:read` for scoped
+CLI credentials). The response has `comments`, plus `can_comment` and
+`can_resolve` for you. Each comment has `id`, `body`, `actor`, `created_at`,
+`rev` (the document revision it was written against), `version` and
+`resolved`. A thread also has the quoted text: `block`, `quote`, the current
+UTF-16 range `from`/`to` and `status`: `attached`, `collapsed` (its text was
+deleted), `detached` (its block was removed) or `resolved`. A reply has
+`parent`, the thread it answers, and no quote of its own.
+
+```bash
+crewship doc comments @<artifact-id>
+```
+
+## `crewship doc comment <page-slug>`
+
+Start a thread on quoted text, or reply to one. `--file` is required; `--file -`
+reads stdin. You need Comment or Edit access to the document (`pages:write` for
+scoped CLI credentials). On private output only its owner comments. Comments
+never change the document's content, revision or epoch.
+
+A thread names the text it is about: `block` is a paragraph, heading or code
+block ID from `crewship doc outline`, and `from`/`to` are the UTF-16 offsets of
+the quoted text inside it. A reply names `parent` instead. Both need `id`,
+`schema`, the confirmed `epoch` and `ifRev` and `text` (1–10,000 characters);
+schemas 3 and 4 also need `page_id`.
+
+```bash
+crewship doc comment @<artifact-id> --file comment.json
+```
+
+```json
+{"id":"thread-1","schema":4,"page_id":"<page-id>","epoch":"<opaque-epoch>","ifRev":3,"block":"intro","from":0,"to":10,"text":"Is this confirmed?"}
+```
+
+```json
+{"id":"reply-1","schema":4,"page_id":"<page-id>","epoch":"<opaque-epoch>","ifRev":3,"parent":"thread-1","text":"Yes, on Thursday."}
+```
+
+The response is a receipt with `kind: "comment"`. Resend the exact request
+after a lost confirmation; the same `id` with different content returns 409, as
+does a changed revision or epoch. Read again and send a new request.
+
+## `crewship doc comment-resolve <page-slug>`
+
+Resolve a thread, or reopen it with `"resolved": false`. `--file` is required;
+`--file -` reads stdin. The request has `id`, `schema`, `epoch`, `ifRev`,
+`page_id` (schemas 3 and 4), `comment` (the thread ID), `version` (from
+`crewship doc comments`) and `resolved`. A changed `version` returns 409, so two
+people cannot silently undo each other. You need Comment or Edit access.
+
+```bash
+crewship doc comment-resolve @<artifact-id> --file resolve.json
+```
+
+```json
+{"id":"resolve-1","schema":4,"page_id":"<page-id>","epoch":"<opaque-epoch>","ifRev":3,"comment":"thread-1","version":1,"resolved":true}
+```
 
 ## Errors
 

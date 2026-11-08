@@ -1,18 +1,24 @@
 """Convert the Claude Docs original (original/*.json) into the Crewship Docs
-initialize body (document.json): one schema 3 Tiptap document.
+initialize body (document.json): one schema 4 Tiptap document, and the
+comment threads (threads.json) anchored to the same quoted text.
 
 Run from this directory:  python3 -I convert.py
 
-Every text run is copied verbatim. What schema 3 cannot hold is mapped as
-SOURCE.md describes (marks other than code/link, chips, check lists, quotes,
-embeds, cell colours, code languages, comments, tabs).
+Every text run is copied verbatim with its marks, code languages, check
+lists and quotes. What schema 4 cannot hold is mapped as SOURCE.md describes
+(chips, embeds, cell colours, tabs).
 """
 import hashlib
 import json
 import re
 import xml.etree.ElementTree as ET
 
-SCHEMA = 3
+SCHEMA = 4
+LANGUAGE = re.compile(r"^[a-z0-9][a-z0-9+#-]{0,31}$")
+# The engine projects several marks in its schema order; emit them the same way.
+MARK_ORDER = ("link", "bold", "italic", "strike", "code")
+# comment id -> (block id, UTF-16 offset of the marker), the first marker wins.
+ANCHORS = {}
 HREF = re.compile(r"^https?://[^\s@/]+(/\S*)?$")
 
 
@@ -46,7 +52,7 @@ def href_of(value):
 
 
 def runs(element, marks=()):
-    """Inline content of one block as (text, mark) pairs; at most one mark (code or link) survives."""
+    """Inline content of one block as (text, marks) pairs; a comment marker is (None, id)."""
     out = []
     if element.text and element.tag in ("text", "bold", "italic", "strike", "code", "link", "dropdown"):
         out.append((element.text, marks))
@@ -55,7 +61,7 @@ def runs(element, marks=()):
         if tag == "text":
             out += runs(child, marks)
         elif tag in ("bold", "italic", "strike"):
-            out += runs(child, marks)  # no such mark in schema 3: the words stay, the style does not
+            out += runs(child, marks + ({"type": tag, "attrs": {}},))
         elif tag == "code":
             out += runs(child, marks + ({"type": "code", "attrs": {}},))
         elif tag == "link":
@@ -68,7 +74,7 @@ def runs(element, marks=()):
         elif tag == "mention":
             out.append((child.attrib.get("name") or child.attrib.get("label"), marks))
         elif tag == "comment":
-            pass  # the thread is listed in SOURCE.md; the anchor has no home in schema 3
+            out.append((None, child.attrib["id"]))
         else:
             raise ValueError(f"unexpected inline {tag}")
         if child.tail and element.tag in ("text",):
@@ -76,13 +82,23 @@ def runs(element, marks=()):
     return out
 
 
-def inline(element, prefix=""):
+def utf16(text):
+    return len(text.encode("utf-16-le")) // 2
+
+
+def inline(element, block_id):
     merged = []
-    pairs = ([(prefix, ())] if prefix else []) + runs(element)
-    for text, marks in pairs:
+    offset = 0
+    for text, marks in runs(element):
+        if text is None:
+            ANCHORS.setdefault(marks, (block_id, offset))
+            continue
         if not text:
             continue
-        marks = list(marks[-1:])  # one mark at most; code and link exclude each other
+        offset += utf16(text)
+        if any(m["type"] == "code" for m in marks):
+            marks = [m for m in marks if m["type"] == "code"]  # code stands alone in every schema
+        marks = sorted({m["type"]: m for m in marks}.values(), key=lambda m: MARK_ORDER.index(m["type"]))
         if merged and merged[-1].get("marks", []) == marks:
             merged[-1]["text"] += text
             continue
@@ -100,11 +116,12 @@ def block_text(type_, id_, content, **attrs):
     return node
 
 
-def paragraph(ids, element, prefix=""):
+def paragraph(ids, element):
+    id_ = ids(element.attrib["id"])
     level = element.attrib.get("heading")
     if level:
-        return block_text("heading", ids(element.attrib["id"]), inline(element, prefix), level=int(level))
-    return block_text("paragraph", ids(element.attrib["id"]), inline(element, prefix))
+        return block_text("heading", id_, inline(element, id_), level=int(level))
+    return block_text("paragraph", id_, inline(element, id_))
 
 
 def convert_list(ids, element):
@@ -115,14 +132,16 @@ def convert_list(ids, element):
         content = []
         for child in li:
             if child.tag == "paragraph":
-                prefix = ("☑ " if li.attrib.get("checked") == "true" else "☐ ") if kind == "check" and not content else ""
-                content.append(paragraph(ids, child, prefix))
+                content.append(paragraph(ids, child))
             elif child.tag == "list":
                 content.append(convert_list(ids, child))
             else:
                 raise ValueError(f"unexpected list child {child.tag}")
-        items.append({"type": "listItem", "attrs": {"id": ids(li.attrib["id"])}, "content": content})
-    type_ = "orderedList" if kind == "ordered" else "bulletList"
+        if kind == "check":
+            items.append({"type": "taskItem", "attrs": {"id": ids(li.attrib["id"]), "checked": li.attrib.get("checked") == "true"}, "content": content})
+        else:
+            items.append({"type": "listItem", "attrs": {"id": ids(li.attrib["id"])}, "content": content})
+    type_ = {"ordered": "orderedList", "check": "taskList"}.get(kind, "bulletList")
     attrs = {"id": ids(element.attrib["id"])}
     if type_ == "orderedList":
         attrs["start"] = 1
@@ -193,10 +212,12 @@ def convert_tab(prefix, xml, widgets):
         elif tag == "table":
             out.append(convert_table(ids, element))
         elif tag == "codeBlock":
-            out.append(block_text("codeBlock", ids(element.attrib["id"]), [{"type": "text", "text": "".join(element.itertext())}]))
+            language = element.attrib.get("language")
+            assert language is None or LANGUAGE.match(language), language
+            attrs = {"language": language} if language else {}
+            out.append(block_text("codeBlock", ids(element.attrib["id"]), [{"type": "text", "text": "".join(element.itertext())}], **attrs))
         elif tag == "blockquote":
-            ids(element.attrib["id"])  # the quote itself has no node; its paragraphs stand alone
-            out += [paragraph(ids, p) for p in element]
+            out.append({"type": "blockquote", "attrs": {"id": ids(element.attrib["id"])}, "content": [paragraph(ids, p) for p in element]})
         elif tag == "embed":
             ids(element.attrib["id"])
             out += embed(ids, element, widgets)
@@ -213,6 +234,34 @@ def verify_hashes(xml):
             assert got == element.attrib["h"], (element.attrib.get("id"), got)
 
 
+def block_texts(nodes, out):
+    for node in nodes:
+        if node["type"] in ("paragraph", "heading", "codeBlock"):
+            out[node["attrs"]["id"]] = "".join(c["text"] for c in node.get("content", []))
+        block_texts(node.get("content", []), out)
+    return out
+
+
+def comments(content):
+    """Each thread at its first marker, as long as the original's character range, cut at the block's end.
+
+    The original anchors by character ids; their count is the selection's length.
+    Crewship anchors one block, so a selection across blocks keeps its first block."""
+    texts = block_texts(content, {})
+    out = []
+    rows = json.load(open("original/comments.json", encoding="utf-8"))["rows"]
+    for row in sorted(rows, key=lambda r: r["seq"]):
+        value = row["payload"]["value"]
+        start, end = (int(x.rsplit(".", 1)[1]) for x in value["parent"]["anchor"]["range"])
+        block, offset = ANCHORS[row["id"]]
+        units = texts[block].encode("utf-16-le")
+        to = min(offset + end - start + 1, len(units) // 2)
+        quote = units[offset * 2:to * 2].decode("utf-16-le")
+        assert quote and (value["parent"].get("label") or quote).startswith(quote), (row["id"], quote)
+        out.append({"id": f"seed-qakf-{row['id']}", "block": block, "from": offset, "to": to, "quote": quote, "text": value["body"]})
+    return out
+
+
 def main():
     widgets = json.load(open("original/widgets.json", encoding="utf-8"))
     content = []
@@ -221,9 +270,10 @@ def main():
         verify_hashes(xml)
         content += convert_tab(prefix, xml, widgets)
     body = {"type": "doc", "content": content}
-    with open("document.json", "w", encoding="utf-8") as f:
-        json.dump(body, f, ensure_ascii=False, indent=1)
-        f.write("\n")
+    for name, value in (("document.json", body), ("threads.json", comments(content))):
+        with open(name, "w", encoding="utf-8") as f:
+            json.dump(value, f, ensure_ascii=False, indent=1)
+            f.write("\n")
 
 
 if __name__ == "__main__":

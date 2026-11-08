@@ -7,7 +7,18 @@ export function createDocumentSchema({ Extension, Node, Mark, getSchema, Table, 
 const VERSION = 2;
 const legacyTypes = ['heading', 'paragraph', 'table', 'tableRow', 'tableCell', 'tableHeader', 'bulletList', 'orderedList', 'listItem'];
 const RICH_VERSION = 3;
-const typesFor = version => { if (![1,2,3].includes(version)) throw new Error('unsupported content schema'); return version === 3 ? [...legacyTypes, 'codeBlock'] : legacyTypes; };
+// Schema 4 is additive over 3: bold/italic/strike marks, code block languages,
+// block quotes and task lists. Schemas 1-3 keep their exact closed contracts.
+const LATEST_VERSION = 4;
+const richTypes = [...legacyTypes, 'codeBlock'];
+const formattedTypes = [...richTypes, 'blockquote', 'taskList', 'taskItem'];
+const typesFor = version => { if (![1,2,3,4].includes(version)) throw new Error('unsupported content schema'); return version === 4 ? formattedTypes : version === 3 ? richTypes : legacyTypes; };
+const isRich = version => version >= RICH_VERSION;
+// A code block language is a short lowercase identifier (python, c++, c#, objective-c), never markup.
+const LANGUAGE = /^[a-z0-9][a-z0-9+#-]{0,31}$/;
+const validLanguage = value => typeof value === 'string' && LANGUAGE.test(value);
+const formatKeys = version => version >= LATEST_VERSION ? ['link', 'code', 'bold', 'italic', 'strike'] : isRich(version) ? ['link', 'code'] : [];
+const maxMarks = version => version >= LATEST_VERSION ? 4 : isRich(version) ? 1 : 0;
 const idsFor = types => Extension.create({
   name: 'stableIDs',
   addGlobalAttributes: () => [{ types, attributes: { id: {
@@ -47,27 +58,50 @@ function extensionsFor(version = VERSION) {
     Mark.create({ name: 'code', code: true, excludes: 'link code', parseHTML: () => [{ tag: 'code' }], renderHTML: () => ['code', {}, 0] }),
     Node.create({ name: 'codeBlock', group: 'block', content: 'text*', marks: '', code: true, defining: true, parseHTML: () => [{ tag: 'pre', preserveWhitespace: 'full' }], renderHTML: ({ HTMLAttributes }) => ['pre', HTMLAttributes, ['code', {}, 0]] }),
   ] : []),
+  ...(version === LATEST_VERSION ? [
+    Mark.create({ name: 'link', excludes: 'link code', addAttributes: () => ({ href: { default: null } }), parseHTML: () => [{ tag: 'a[href]', getAttrs: element => validLinkHref(element.getAttribute('href')) ? { href: element.getAttribute('href') } : false }], renderHTML: ({ mark }) => ['a', { href: mark.attrs.href, rel: 'noopener noreferrer', target: '_blank' }, 0] }),
+    Mark.create({ name: 'bold', parseHTML: () => [{ tag: 'strong' }, { tag: 'b' }], renderHTML: () => ['strong', {}, 0] }),
+    Mark.create({ name: 'italic', parseHTML: () => [{ tag: 'em' }, { tag: 'i' }], renderHTML: () => ['em', {}, 0] }),
+    Mark.create({ name: 'strike', parseHTML: () => [{ tag: 's' }, { tag: 'del' }, { tag: 'strike' }], renderHTML: () => ['s', {}, 0] }),
+    // Inline code stands alone in schema 4: it excludes every other mark.
+    Mark.create({ name: 'code', code: true, excludes: '_', parseHTML: () => [{ tag: 'code' }], renderHTML: () => ['code', {}, 0] }),
+    Node.create({ name: 'codeBlock', group: 'block', content: 'text*', marks: '', code: true, defining: true,
+      addAttributes: () => ({ language: { default: null,
+        parseHTML: element => { const value = element.getAttribute('data-language') ?? /(?:^|\s)language-(\S+)/.exec(element.firstElementChild?.getAttribute('class') ?? '')?.[1] ?? null; return validLanguage(value) ? value : null; },
+        renderHTML: attrs => validLanguage(attrs.language) ? { 'data-language': attrs.language } : {} } }),
+      parseHTML: () => [{ tag: 'pre', preserveWhitespace: 'full' }], renderHTML: ({ HTMLAttributes }) => ['pre', HTMLAttributes, ['code', {}, 0]] }),
+    Node.create({ name: 'blockquote', group: 'block', content: 'block+', defining: true, parseHTML: () => [{ tag: 'blockquote' }], renderHTML: ({ HTMLAttributes }) => ['blockquote', HTMLAttributes, 0] }),
+    Node.create({ name: 'taskList', group: 'block', content: 'taskItem+', parseHTML: () => [{ tag: 'ul[data-type="taskList"]', priority: 51 }], renderHTML: ({ HTMLAttributes }) => ['ul', { ...HTMLAttributes, 'data-type': 'taskList' }, 0] }),
+    Node.create({ name: 'taskItem', content: 'paragraph block*', defining: true,
+      addAttributes: () => ({ checked: { default: false, keepOnSplit: false, parseHTML: element => element.getAttribute('data-checked') === 'true', renderHTML: attrs => ({ 'data-checked': attrs.checked === true ? 'true' : 'false' }) } }),
+      parseHTML: () => [{ tag: 'li[data-type="taskItem"]', priority: 51 }],
+      renderHTML: ({ node, HTMLAttributes }) => ['li', { ...HTMLAttributes, 'data-type': 'taskItem' }, ['label', { contenteditable: 'false' }, ['input', { type: 'checkbox', disabled: 'disabled', ...(node.attrs.checked === true ? { checked: 'checked' } : {}) }]], ['div', 0]] }),
+  ] : []),
  ];
 }
 const extensions = extensionsFor(VERSION);
 const schema = getSchema(extensions);
 const richSchema = getSchema(extensionsFor(RICH_VERSION));
-const schemaFor = (version = VERSION) => { typesFor(version); return version === RICH_VERSION ? richSchema : schema; };
+const latestSchema = getSchema(extensionsFor(LATEST_VERSION));
+const schemaFor = (version = VERSION) => { typesFor(version); return version === LATEST_VERSION ? latestSchema : version === RICH_VERSION ? richSchema : schema; };
 function validLinkHref(value) {
   if (typeof value !== 'string' || new TextEncoder().encode(value).length > 2048 || /[\u0000-\u0020\u007f\p{Cs}]/u.test(value)) return false;
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password && url.href === value; } catch { return false; }
 }
 const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-function validFormat(key, value) {
-  if (!['link', 'code'].includes(key)) return false;
+function validFormat(key, value, version = RICH_VERSION) {
+  if (!formatKeys(version).includes(key)) return false;
   if (value === null) return true;
   if (!object(value)) return false;
-  return key === 'code' ? Object.keys(value).length === 0 : Object.keys(value).length === 1 && validLinkHref(value.href);
+  return key === 'link' ? Object.keys(value).length === 1 && validLinkHref(value.href) : Object.keys(value).length === 0;
 }
+// Schema 4 combines bold, italic, strike and link; inline code stays alone.
+const validCombination = types => new Set(types).size === types.length && (!types.includes('code') || types.length === 1);
 function validateMarks(marks, version) {
   if (marks === undefined) return;
-  if (!Array.isArray(marks) || marks.length > (version === RICH_VERSION ? 1 : 0)) throw new Error('unsupported marks');
-  for (const mark of marks) if (!object(mark) || Object.keys(mark).some(key => !['type','attrs'].includes(key)) || !validFormat(mark.type, mark.attrs ?? {}) || mark.attrs === null) throw new Error('unsupported mark');
+  if (!Array.isArray(marks) || marks.length > maxMarks(version)) throw new Error('unsupported marks');
+  for (const mark of marks) if (!object(mark) || Object.keys(mark).some(key => !['type','attrs'].includes(key)) || !validFormat(mark.type, mark.attrs ?? {}, version) || mark.attrs === null) throw new Error('unsupported mark');
+  if (!validCombination(marks.map(mark => mark.type))) throw new Error('unsupported mark combination');
 }
 const encode = bytes => {
   if (typeof Buffer !== 'undefined') return Buffer.from(bytes).toString('base64');
@@ -95,8 +129,13 @@ function load(snapshot) {
 const snapshot = doc => encode(Y.encodeStateAsUpdate(doc));
 // y-tiptap 3.0.11 stopped emitting empty mark attrs. Keep the projection that
 // block hashes and stored receipts were computed from: every mark has attrs.
+// Yjs reports formatting in insertion order; schema 4 text can carry several
+// marks, so the projection orders them as ProseMirror does. One mark (all of
+// schema 3) is unchanged, so earlier hashes and receipts stay valid.
+const markRank = mark => latestSchema.marks[mark?.type]?.rank ?? Number.MAX_SAFE_INTEGER;
 const withMarkAttrs = node => {
   if (Array.isArray(node.marks)) node.marks = node.marks.map(mark => mark && typeof mark === 'object' && !('attrs' in mark) ? { ...mark, attrs: {} } : mark);
+  if (Array.isArray(node.marks) && node.marks.length > 1) node.marks = [...node.marks].sort((a, b) => markRank(a) - markRank(b));
   if (Array.isArray(node.content)) node.content.forEach(withMarkAttrs);
   return node;
 };
@@ -107,7 +146,7 @@ function validateJSON(json, version = VERSION) {
   const visit = (node, depth = 0) => {
     if (depth > 40 || !node || typeof node !== 'object') throw new Error('invalid bounded node');
     if (++count > 10000) throw new Error('node limit');
-    if (version === RICH_VERSION && node.type === 'doc' && (depth !== 0 || Object.keys(node).some(k => !['type','content'].includes(k)))) throw new Error('closed rich root required');
+    if (isRich(version) && node.type === 'doc' && (depth !== 0 || Object.keys(node).some(k => !['type','content'].includes(k)))) throw new Error('closed rich root required');
     if (Object.keys(node).some(k => !['type', 'attrs', 'content', 'text', 'marks'].includes(k))) throw new Error('unsupported node properties');
     if (node.type !== 'doc' && node.type !== 'text' && !types.includes(node.type)) throw new Error('unsupported node');
     validateMarks(node.marks, version);
@@ -118,8 +157,11 @@ function validateJSON(json, version = VERSION) {
       if (typeof node.attrs?.id !== 'string' || !/^[a-zA-Z0-9_-]{1,80}$/.test(node.attrs.id) || seen.has(node.attrs.id)) throw new Error('invalid or duplicate block ID');
       seen.add(node.attrs.id);
     }
-    const allowed = node.type === 'tableCell' || node.type === 'tableHeader' ? ['id', 'colspan', 'rowspan', 'colwidth', 'align'] : node.type === 'heading' ? ['id', 'level'] : node.type === 'orderedList' ? ['id','start','type'] : ['id'];
+    const allowed = node.type === 'tableCell' || node.type === 'tableHeader' ? ['id', 'colspan', 'rowspan', 'colwidth', 'align'] : node.type === 'heading' ? ['id', 'level'] : node.type === 'orderedList' ? ['id','start','type'] :
+      version === LATEST_VERSION && node.type === 'codeBlock' ? ['id', 'language'] : node.type === 'taskItem' ? ['id', 'checked'] : ['id'];
     if (Object.keys(node.attrs || {}).some(k => !allowed.includes(k))) throw new Error('unsupported attributes');
+    if (node.type === 'codeBlock' && node.attrs.language != null && !validLanguage(node.attrs.language)) throw new Error('unsupported code block language');
+    if (node.type === 'taskItem' && node.attrs.checked !== undefined && typeof node.attrs.checked !== 'boolean') throw new Error('invalid task item state');
     if (node.type === 'heading' && ![1,2,3].includes(node.attrs.level)) throw new Error('unsupported heading level');
     if (node.type === 'orderedList' && node.attrs.type != null) throw new Error('unsupported ordered list type');
     if (node.type === 'orderedList' && (!Number.isInteger(node.attrs.start??1) || (node.attrs.start??1)<1 || (node.attrs.start??1)>10000)) throw new Error('invalid ordered list start');
@@ -149,7 +191,8 @@ function validateRetained(doc, version, migrations) {
       const key = item.parentSub;
       const cell = ['tableCell', 'tableHeader'].includes(parent.nodeName);
       const allowed = key === 'id' || (key === 'level' && parent.nodeName === 'heading') || (['start','type'].includes(key) && parent.nodeName === 'orderedList') ||
-        (cell && ['colspan', 'rowspan', 'colwidth', 'align'].includes(key));
+        (cell && ['colspan', 'rowspan', 'colwidth', 'align'].includes(key)) ||
+        (version === LATEST_VERSION && ((key === 'language' && parent.nodeName === 'codeBlock') || (key === 'checked' && parent.nodeName === 'taskItem')));
       if (!allowed) throw new Error('unsupported retained attributes');
       if (content instanceof Y.ContentDeleted) continue;
       // Yjs coalesces adjacent deleted versions of the same scalar attribute.
@@ -157,15 +200,16 @@ function validateRetained(doc, version, migrations) {
       if (!(content instanceof Y.ContentAny) || content.arr.length === 0 || (!item.deleted && content.arr.length !== 1)) throw new Error('unsupported retained attribute content');
       for (const value of content.arr) {
         const valid = key === 'id' ? value === null || (typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)) :
-          key === 'level' ? [1,2,3].includes(value) : key === 'start' ? Number.isInteger(value) && value >=1 && value<=10000 : ['colspan','rowspan'].includes(key) ? value===1 : value===null;
+          key === 'level' ? [1,2,3].includes(value) : key === 'start' ? Number.isInteger(value) && value >=1 && value<=10000 : ['colspan','rowspan'].includes(key) ? value===1 :
+          key === 'language' ? value === null || validLanguage(value) : key === 'checked' ? typeof value === 'boolean' : value===null;
         if (!valid) throw new Error('unsupported retained attribute value');
       }
     } else if (content instanceof Y.ContentType) {
       if (item.parent instanceof Y.XmlText || !supportedType(content.type) || content.type === root) throw new Error('unsupported retained Yjs type');
     } else if (content instanceof Y.ContentString) {
       if (!(item.parent instanceof Y.XmlText)) throw new Error('unsupported retained string parent');
-    } else if (content instanceof Y.ContentFormat && version === RICH_VERSION) {
-      if (!(item.parent instanceof Y.XmlText) || item.parent.parent?.nodeName === 'codeBlock' || !validFormat(content.key, content.value)) throw new Error('unsupported retained format');
+    } else if (content instanceof Y.ContentFormat && isRich(version)) {
+      if (!(item.parent instanceof Y.XmlText) || item.parent.parent?.nodeName === 'codeBlock' || !validFormat(content.key, content.value, version)) throw new Error('unsupported retained format');
     } else if (!(content instanceof Y.ContentDeleted)) {
       // Includes formatting (even removed marks), embeds, binary and subdocs.
       throw new Error('unsupported retained Yjs content');
@@ -181,7 +225,7 @@ function validate(doc, version = VERSION) {
     if (depth > 40) throw new Error('node depth limit');
     if (node instanceof Y.XmlText) {
       if (Object.keys(node.getAttributes()).length) throw new Error('unsupported text attributes');
-      if (node.toDelta().some(part => typeof part.insert !== 'string' || Object.keys(part.attributes || {}).length > (version === RICH_VERSION ? 1 : 0) || Object.entries(part.attributes || {}).some(([key,value]) => !validFormat(key,value) || value === null))) throw new Error('unsupported text delta');
+      if (node.toDelta().some(part => typeof part.insert !== 'string' || Object.keys(part.attributes || {}).length > maxMarks(version) || !validCombination(Object.keys(part.attributes || {})) || Object.entries(part.attributes || {}).some(([key,value]) => !validFormat(key,value,version) || value === null))) throw new Error('unsupported text delta');
     } else if (node instanceof Y.XmlElement || node instanceof Y.XmlFragment) {
       for (const child of node.toArray()) inspect(child, depth + 1);
     } else throw new Error('unsupported Yjs content');
@@ -223,7 +267,7 @@ function textNode(doc, id) {
 // Reading anchors never coalesces children or changes retained CRDT identities.
 function textChildren(doc, id, version = VERSION) {
   const block = find(doc, id);
-  if (!(version === RICH_VERSION ? ['paragraph', 'heading', 'codeBlock'] : ['paragraph', 'heading']).includes(block.nodeName)) throw new Error('text target required');
+  if (!(isRich(version) ? ['paragraph', 'heading', 'codeBlock'] : ['paragraph', 'heading']).includes(block.nodeName)) throw new Error('text target required');
   return { block, texts: block.toArray().filter(node => node instanceof Y.XmlText) };
 }
 const textBoundary = (text, index) => index === 0 || index === text.length ||
@@ -273,7 +317,7 @@ function patch(doc, op, version = VERSION) {
       if (end > start) text.delete(start, end - start);
       base += length;
     }
-    if (replacement) insertion.text.insert(insertion.index, replacement, version === RICH_VERSION ? {} : undefined);
+    if (replacement) insertion.text.insert(insertion.index, replacement, isRich(version) ? {} : undefined);
   }, 'semantic-agent');
   validate(doc, version);
   return { from, to, insert: replacement };
@@ -344,8 +388,17 @@ function create(json = initialJSON(), version = VERSION) {
   const doc = prosemirrorToYDoc(pm, 'default'); doc.gc = false; validate(doc, version); return doc;
 }
 
-function markdown(json) {
-  const escape = text => text.replace(/([\\`*_{}\[\]<>#!|&])/g, '\\$1');
+function markdown(json, version = RICH_VERSION) {
+  // Schema 4 can produce strikethrough, so a literal tilde is escaped there only:
+  // earlier documents keep their exact export.
+  const escape = version >= LATEST_VERSION ? text => text.replace(/([\\`*_{}\[\]<>#!|&~])/g, '\\$1') : text => text.replace(/([\\`*_{}\[\]<>#!|&])/g, '\\$1');
+  // Emphasis delimiters must touch non-space text: outer spaces stay outside.
+  const emphasis = (value, marks) => {
+    const open = [['bold','**'],['italic','*'],['strike','~~']].filter(([type]) => marks.some(mark => mark.type === type)).map(([, d]) => d);
+    if (!open.length) return value;
+    const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(value);
+    return core ? lead + open.join('') + core + [...open].reverse().join('') + trail : value;
+  };
   // GFM strips one escape before a pipe before parsing inline code. An odd
   // original backslash run cannot survive that preprocessing without turning
   // the pipe into a cell separator. Refuse rather than change the code text.
@@ -368,15 +421,25 @@ function markdown(json) {
     if (node.type==='text') {
       const value = node.text || '', mark = node.marks?.[0];
       if (mark?.type === 'code') { if (/[\r\n]/.test(value)) throw Object.assign(new Error('Markdown export cannot preserve line breaks in inline code; use a code block.'), {code:'unsupported_markdown'}); const fence = '`'.repeat(Math.max(0, ...(value.match(/`+/g) || []).map(run => run.length)) + 1); const pad = !/^ +$/.test(value) && /^[ `]|[ `]$/.test(value) ? ' ' : ''; return fence + pad + (table ? tableCode(value) : value) + pad + fence; }
-      if (mark?.type === 'link') return '[' + escape(value) + '](<' + destination(mark.attrs.href) + '>)';
-      return escape(value);
+      const marks = node.marks || [], link = marks.find(mark => mark.type === 'link');
+      const styled = emphasis(escape(value), marks);
+      if (link) return '[' + styled + '](<' + destination(link.attrs.href) + '>)';
+      return styled;
     }
-    if (node.type==='codeBlock') { if (table) throw Object.assign(new Error('Markdown export cannot represent a code block inside a simple table; move it outside the table.'), {code:'unsupported_markdown'}); const value = textOf(node), fence = '`'.repeat(Math.max(2, ...(value.match(/`+/g) || []).map(run => run.length)) + 1); return fence + '\n' + value + '\n' + fence + '\n\n'; }
+    if (node.type==='codeBlock') { if (table) throw Object.assign(new Error('Markdown export cannot represent a code block inside a simple table; move it outside the table.'), {code:'unsupported_markdown'}); const value = textOf(node), fence = '`'.repeat(Math.max(2, ...(value.match(/`+/g) || []).map(run => run.length)) + 1); return fence + (validLanguage(node.attrs?.language) ? node.attrs.language : '') + '\n' + value + '\n' + fence + '\n\n'; }
+    if (node.type==='blockquote') {
+      if (table) throw Object.assign(new Error('Markdown export cannot represent a quote inside a simple table; move it outside the table.'), {code:'unsupported_markdown'});
+      return (node.content||[]).map(n=>visit(n,0,false)).join('').trimEnd().split('\n').map(line => line ? '> ' + line : '>').join('\n') + '\n\n';
+    }
+    if (node.type==='taskList') {
+      if (table) throw Object.assign(new Error('Markdown export cannot represent a checklist inside a simple table; move it outside the table.'), {code:'unsupported_markdown'});
+      return (node.content||[]).map(n=>'  '.repeat(depth)+(n.attrs?.checked === true ? '- [x] ' : '- [ ] ')+visit(n,depth+1,table).trim().replace(/\n/g,'\n'+'  '.repeat(depth+1))).join('\n')+'\n\n';
+    }
     if (node.type==='heading') return '#'.repeat(node.attrs.level)+' '+(node.content||[]).map(n=>visit(n,depth,table)).join('')+'\n\n';
     if (node.type==='paragraph') return (node.content||[]).map(n=>visit(n,depth,table)).join('')+'\n\n';
     if (node.type==='bulletList'||node.type==='orderedList') return (node.content||[]).map((n,i)=>'  '.repeat(depth)+(node.type==='bulletList'?'- ':`${(node.attrs.start||1)+i}. `)+visit(n,depth+1,table).trim().replace(/\n/g,'\n'+'  '.repeat(depth+1))).join('\n')+'\n\n';
     if (node.type==='table') {
-      const rich = node => !!node.marks?.length || node.type === 'codeBlock' || (node.content || []).some(rich);
+      const rich = node => !!node.marks?.length || ['codeBlock','blockquote','taskList'].includes(node.type) || (node.content || []).some(rich);
       const rows=(node.content||[]).map(r=>r.content.map(c=>(rich(c) ? (c.content||[]).map(n=>visit(n,depth,true).trimEnd()).join(' ') : escape((c.content||[]).map(textOf).join(' '))).replace(/\n/g,' ')));
       return rows.map((r,i)=>'| '+r.join(' | ')+' |'+(i===0?'\n| '+r.map(()=>'---').join(' | ')+' |':'')).join('\n')+'\n\n';
     }
@@ -385,5 +448,5 @@ function markdown(json) {
   return visit(json).trimEnd()+'\n';
 }
 
-return { VERSION, RICH_VERSION, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
+return { VERSION, RICH_VERSION, LATEST_VERSION, validLanguage, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
 }

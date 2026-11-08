@@ -1,0 +1,54 @@
+---
+title: "Document formatting and comments"
+description: "What a Docs page can hold in schema 4, how a document gets it, and how comment threads work."
+icon: "message-square"
+stability: experimental
+tag: Experimental
+---
+
+This page covers the Docs backend. Native Craft Word and Sheet documents use
+[Word and Sheet editing](/guides/artifacts/word-and-sheet).
+
+## Formatting
+
+Every Docs page records its content schema. Each schema keeps its exact rules,
+so a document never changes meaning on its own:
+
+| Schema | Holds |
+| --- | --- |
+| 2 | Headings (levels 1–3), paragraphs, bulleted and numbered lists, simple tables |
+| 3 | Schema 2 plus web links, inline code and code blocks |
+| 4 | Schema 3 plus **bold**, *italic* and ~~strikethrough~~ (combinable, and with links), a language on each code block, block quotes and checklists |
+
+In a schema 4 document the toolbar offers Bold, Italic, Strikethrough, Quote,
+Checklist and a language for the current code block. Code blocks show their
+language above the code, use a monospace font and scroll sideways instead of
+wrapping. Tick a checklist item to mark it done. Markdown export writes
+`**bold**`, `*italic*`, `~~strike~~`, fenced code with its language, `>` quotes
+and `- [x]` checklists.
+
+A document becomes schema 4 only explicitly: initialize it with `"schema": 4`
+(see [`crewship doc initialize`](/cli/doc)), or upgrade an older document through
+the documents service's human-only upgrade, which keeps its content, history and
+comments and only widens what it may hold. New documents from the Artifacts
+library and from agents in chat are still schema 3, because agent drafting
+works on schema 3 only; an agent cannot edit a schema 4 document yet.
+
+## Comments
+
+Select text in a paragraph, heading or code block and choose **Comment** to
+start a thread on it. The **Comments** tab lists threads in document order with
+their quoted text, replies and who wrote them. Reply under a thread, or
+**Resolve** it; resolved threads stay listed under *Resolved* and can be
+reopened.
+
+- Anyone who can read the document can read its comments.
+- Commenting, replying and resolving need Comment or Edit access. On private
+  output only its owner comments; a workspace owner's audited read never
+  includes commenting.
+- Comments never change the document's content or revision. When the quoted
+  text is edited the thread follows it; when it is deleted the thread shows as
+  *text removed*.
+
+From the CLI: [`crewship doc comments`](/cli/doc), `crewship doc comment` and
+`crewship doc comment-resolve`.

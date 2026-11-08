@@ -71,7 +71,17 @@
        "content": [
         {
          "type": "text",
-         "text": "Pro koho: týmy, které chtějí delegovat opakovanou práci na agenty."
+         "text": "Pro koho:",
+         "marks": [
+          {
+           "type": "bold",
+           "attrs": {}
+          }
+         ]
+        },
+        {
+         "type": "text",
+         "text": " týmy, které chtějí delegovat opakovanou práci na agenty."
         }
        ]
       }
@@ -91,7 +101,17 @@
        "content": [
         {
          "type": "text",
-         "text": "Jak: crew = sada agentů s rolemi; každý endpoint má CLI příkaz."
+         "text": "Jak:",
+         "marks": [
+          {
+           "type": "bold",
+           "attrs": {}
+          }
+         ]
+        },
+        {
+         "type": "text",
+         "text": " crew = sada agentů s rolemi; každý endpoint má CLI příkaz."
         }
        ]
       }
@@ -111,7 +131,17 @@
        "content": [
         {
          "type": "text",
-         "text": "Kde: dev prostředí dev1–dev4, stage jako canary."
+         "text": "Kde:",
+         "marks": [
+          {
+           "type": "bold",
+           "attrs": {}
+          }
+         ]
+        },
+        {
+         "type": "text",
+         "text": " dev prostředí dev1–dev4, stage jako canary."
         }
        ]
       }
@@ -550,15 +580,16 @@
    ]
   },
   {
-   "type": "bulletList",
+   "type": "taskList",
    "attrs": {
     "id": "prehled-mje9hk5kec2-859"
    },
    "content": [
     {
-     "type": "listItem",
+     "type": "taskItem",
      "attrs": {
-      "id": "prehled-mje9hk5kec2-860"
+      "id": "prehled-mje9hk5kec2-860",
+      "checked": true
      },
      "content": [
       {
@@ -569,16 +600,17 @@
        "content": [
         {
          "type": "text",
-         "text": "☑ Založit Template Crewship Docs"
+         "text": "Založit Template Crewship Docs"
         }
        ]
       }
      ]
     },
     {
-     "type": "listItem",
+     "type": "taskItem",
      "attrs": {
-      "id": "prehled-mje9hk5kec2-892"
+      "id": "prehled-mje9hk5kec2-892",
+      "checked": false
      },
      "content": [
       {
@@ -589,16 +621,17 @@
        "content": [
         {
          "type": "text",
-         "text": "☐ Projet export do PDF"
+         "text": "Projet export do PDF"
         }
        ]
       }
      ]
     },
     {
-     "type": "listItem",
+     "type": "taskItem",
      "attrs": {
-      "id": "prehled-mje9hk5kec2-914"
+      "id": "prehled-mje9hk5kec2-914",
+      "checked": false
      },
      "content": [
       {
@@ -609,7 +642,7 @@
        "content": [
         {
          "type": "text",
-         "text": "☐ Pozvat kolegu ke komentářům"
+         "text": "Pozvat kolegu ke komentářům"
         }
        ]
       }
@@ -632,7 +665,8 @@
   {
    "type": "codeBlock",
    "attrs": {
-    "id": "prehled-mje9hk5kec2-974"
+    "id": "prehled-mje9hk5kec2-974",
+    "language": "latex"
    },
    "content": [
     {
@@ -1267,7 +1301,67 @@
    "content": [
     {
      "type": "text",
-     "text": "Text umí tučné, kurzívu, přeškrtnutí, kombinaci, "
+     "text": "Text umí "
+    },
+    {
+     "type": "text",
+     "text": "tučné",
+     "marks": [
+      {
+       "type": "bold",
+       "attrs": {}
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "text": ", "
+    },
+    {
+     "type": "text",
+     "text": "kurzívu",
+     "marks": [
+      {
+       "type": "italic",
+       "attrs": {}
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "text": ", "
+    },
+    {
+     "type": "text",
+     "text": "přeškrtnutí",
+     "marks": [
+      {
+       "type": "strike",
+       "attrs": {}
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "text": ", "
+    },
+    {
+     "type": "text",
+     "text": "kombinaci",
+     "marks": [
+      {
+       "type": "bold",
+       "attrs": {}
+      },
+      {
+       "type": "italic",
+       "attrs": {}
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "text": ", "
     },
     {
      "type": "text",
@@ -1341,14 +1435,22 @@
    ]
   },
   {
-   "type": "paragraph",
+   "type": "blockquote",
    "attrs": {
-    "id": "prehled-mje9hk5kec2-1617"
+    "id": "prehled-mje9hk5kec2-1616"
    },
    "content": [
     {
-     "type": "text",
-     "text": "Citace: „Crew je tým agentů, který dostane úkol a dodá výsledek.“ Hodí se na výroky zákazníků nebo zadání."
+     "type": "paragraph",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-1617"
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Citace: „Crew je tým agentů, který dostane úkol a dodá výsledek.“ Hodí se na výroky zákazníků nebo zadání."
+      }
+     ]
     }
    ]
   },
@@ -1603,7 +1705,8 @@
   {
    "type": "codeBlock",
    "attrs": {
-    "id": "prehled-mje9hk5kec2-2102"
+    "id": "prehled-mje9hk5kec2-2102",
+    "language": "python"
    },
    "content": [
     {
@@ -1627,7 +1730,8 @@
   {
    "type": "codeBlock",
    "attrs": {
-    "id": "prehled-mje9hk5kec2-2411"
+    "id": "prehled-mje9hk5kec2-2411",
+    "language": "go"
    },
    "content": [
     {
@@ -1651,7 +1755,8 @@
   {
    "type": "codeBlock",
    "attrs": {
-    "id": "prehled-mje9hk5kec2-2735"
+    "id": "prehled-mje9hk5kec2-2735",
+    "language": "typescript"
    },
    "content": [
     {
@@ -1675,7 +1780,8 @@
   {
    "type": "codeBlock",
    "attrs": {
-    "id": "prehled-mje9hk5kec2-2905"
+    "id": "prehled-mje9hk5kec2-2905",
+    "language": "bash"
    },
    "content": [
     {
@@ -1699,7 +1805,8 @@
   {
    "type": "codeBlock",
    "attrs": {
-    "id": "prehled-mje9hk5kec2-3004"
+    "id": "prehled-mje9hk5kec2-3004",
+    "language": "sql"
    },
    "content": [
     {
@@ -1723,7 +1830,8 @@
   {
    "type": "codeBlock",
    "attrs": {
-    "id": "prehled-mje9hk5kec2-3141"
+    "id": "prehled-mje9hk5kec2-3141",
+    "language": "json"
    },
    "content": [
     {
@@ -1747,7 +1855,8 @@
   {
    "type": "codeBlock",
    "attrs": {
-    "id": "prehled-mje9hk5kec2-3212"
+    "id": "prehled-mje9hk5kec2-3212",
+    "language": "yaml"
    },
    "content": [
     {
@@ -1784,7 +1893,8 @@
   {
    "type": "codeBlock",
    "attrs": {
-    "id": "prehled-mje9hk5kec2-3394"
+    "id": "prehled-mje9hk5kec2-3394",
+    "language": "csv"
    },
    "content": [
     {
@@ -1808,7 +1918,8 @@
   {
    "type": "codeBlock",
    "attrs": {
-    "id": "prehled-mje9hk5kec2-3609"
+    "id": "prehled-mje9hk5kec2-3609",
+    "language": "markdown"
    },
    "content": [
     {
@@ -2318,15 +2429,16 @@
    ]
   },
   {
-   "type": "bulletList",
+   "type": "taskList",
    "attrs": {
     "id": "prehled-mje9hk5kec2-1282"
    },
    "content": [
     {
-     "type": "listItem",
+     "type": "taskItem",
      "attrs": {
-      "id": "prehled-mje9hk5kec2-1283"
+      "id": "prehled-mje9hk5kec2-1283",
+      "checked": false
      },
      "content": [
       {
@@ -2337,7 +2449,7 @@
        "content": [
         {
          "type": "text",
-         "text": "☐ Které šablony chceme používat týmově? (napiš komentář)"
+         "text": "Které šablony chceme používat týmově? (napiš komentář)"
         }
        ]
       }

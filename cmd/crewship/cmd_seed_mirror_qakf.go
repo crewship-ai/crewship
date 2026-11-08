@@ -11,19 +11,26 @@ package main
 //   - self-completing: the empty Page an earlier run created before its
 //     initialization was refused is initialized by the next run, and nothing
 //     else is.
+//
+// The original's comment threads follow through `doc comment`, each with a
+// fixed id. A thread is added only where the document still holds its quoted
+// text at the same place, so a later run completes the threads a refusal
+// left out and never comments on anybody's edited content.
 
 import (
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"unicode/utf16"
 
 	"github.com/crewship-ai/crewship/cmd/crewship/seeddata"
 	"github.com/crewship-ai/crewship/internal/cli"
 )
 
-// mirrorQakfSchema is the rich Docs schema: code blocks, inline code and links.
-const mirrorQakfSchema = 3
+// mirrorQakfSchema is the formatted Docs schema: marks, code languages,
+// quotes and check lists on top of schema 3's code blocks, code and links.
+const mirrorQakfSchema = 4
 
 // mirrorQakfInitialize is the body `crewship doc initialize` sends.
 type mirrorQakfInitialize struct {
@@ -75,6 +82,17 @@ func seedShowcaseMirrorQakf(client *cli.Client, out io.Writer) showcaseOutcome {
 		// Only the shell an earlier run left behind is ours to fill; the
 		// server initializes only an empty Page its caller owns.
 		if !page.emptyShell() {
+			if !page.HasDocument {
+				return showcaseExists
+			}
+			added, err := seedMirrorQakfThreads(client, item.Slug)
+			if err != nil {
+				fmt.Fprintf(out, "  ! %s: comment threads incomplete (%v); the next seed adds them\n", item.Slug, err)
+				return showcaseIncomplete
+			}
+			if added > 0 {
+				return showcaseCompleted
+			}
 			return showcaseExists
 		}
 		raw, err := seedShowcaseGet(client, "/api/v1/pages/"+pagePathEscape(item.Slug))
@@ -104,10 +122,98 @@ func seedShowcaseMirrorQakf(client *cli.Client, out io.Writer) showcaseOutcome {
 		fmt.Fprintf(out, "  ! %s: incomplete (Docs refused initialization: %v); the empty Page is kept and the next seed initializes it\n", item.Slug, err)
 		return showcaseIncomplete
 	}
+	if _, err := seedMirrorQakfThreads(client, item.Slug); err != nil {
+		fmt.Fprintf(out, "  ! %s: comment threads incomplete (%v); the next seed adds them\n", item.Slug, err)
+		return showcaseIncomplete
+	}
 	return success
 }
 
-// mirrorQakfPageID reads the Page id a schema 3 initialize must name.
+// mirrorQakfThread is one entry of threads.json.
+type mirrorQakfThread struct {
+	ID    string `json:"id"`
+	Block string `json:"block"`
+	From  int    `json:"from"`
+	To    int    `json:"to"`
+	Quote string `json:"quote"`
+	Text  string `json:"text"`
+}
+
+func mirrorQakfThreads() ([]mirrorQakfThread, error) {
+	var threads []mirrorQakfThread
+	if err := json.Unmarshal(seeddata.ShowcaseFile(seeddata.MirrorQakfDoc.Threads), &threads); err != nil {
+		return nil, fmt.Errorf("%s: %w", seeddata.MirrorQakfDoc.Threads, err)
+	}
+	return threads, nil
+}
+
+// seedMirrorQakfThreads adds the threads the document does not hold yet and
+// returns how many it added. A document on another schema, or one whose
+// quoted text moved, gets none: the mirror's anchors describe this copy only.
+func seedMirrorQakfThreads(client *cli.Client, slug string) (int, error) {
+	threads, err := mirrorQakfThreads()
+	if err != nil {
+		return 0, err
+	}
+	base := "/api/v1/pages/" + pagePathEscape(slug) + "/document"
+	raw, err := seedShowcaseGet(client, base)
+	var doc struct {
+		Schema     int    `json:"schema"`
+		Rev        int64  `json:"rev"`
+		Epoch      string `json:"epoch"`
+		PageID     string `json:"page_id"`
+		CanComment bool   `json:"can_comment"`
+		Outline    []struct {
+			ID   string `json:"id"`
+			Text string `json:"text"`
+		} `json:"outline"`
+	}
+	if err == nil {
+		err = json.Unmarshal(raw, &doc)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("document read: %w", err)
+	}
+	if doc.Schema != mirrorQakfSchema || !doc.CanComment {
+		return 0, nil
+	}
+	raw, err = seedShowcaseGet(client, base+"/comments")
+	var listing struct {
+		Comments []struct {
+			ID string `json:"id"`
+		} `json:"comments"`
+	}
+	if err == nil {
+		err = json.Unmarshal(raw, &listing)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("comment listing: %w", err)
+	}
+	present := map[string]bool{}
+	for _, c := range listing.Comments {
+		present[c.ID] = true
+	}
+	texts := map[string][]uint16{}
+	for _, b := range doc.Outline {
+		texts[b.ID] = utf16.Encode([]rune(b.Text))
+	}
+	added := 0
+	for _, t := range threads {
+		units, ok := texts[t.Block]
+		if present[t.ID] || !ok || t.From < 0 || t.To <= t.From || t.To > len(units) || string(utf16.Decode(units[t.From:t.To])) != t.Quote {
+			continue
+		}
+		body := map[string]any{"id": t.ID, "schema": doc.Schema, "page_id": doc.PageID, "epoch": doc.Epoch, "ifRev": doc.Rev,
+			"block": t.Block, "from": t.From, "to": t.To, "text": t.Text}
+		if _, _, err := seedShowcasePost(client, base+"/comments", body); err != nil {
+			return added, fmt.Errorf("thread %s: %w", t.ID, err)
+		}
+		added++
+	}
+	return added, nil
+}
+
+// mirrorQakfPageID reads the Page id a schema 3 or 4 initialize must name.
 func mirrorQakfPageID(raw []byte, err error) (string, error) {
 	if err != nil {
 		return "", err

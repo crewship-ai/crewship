@@ -191,7 +191,7 @@ func TestHumanDocumentTransportPreservesHumanRequest(t *testing.T) {
 			if json.Unmarshal(w.Body.Bytes(), &got) != nil || got["epoch"] != "opaque" || got["rev"] != float64(4) {
 				t.Fatalf("changed receipt/state: %s", w.Body.String())
 			}
-			if operation == "read" && (got["page_id"] != "human-doc-page" || got["can_write"] != true || got["can_comment"] != false || got["can_resolve"] != false) {
+			if operation == "read" && (got["page_id"] != "human-doc-page" || got["can_write"] != true || got["can_comment"] != true || got["can_resolve"] != true) {
 				t.Fatalf("read metadata: %s", w.Body.String())
 			}
 		})

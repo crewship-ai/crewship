@@ -2434,7 +2434,7 @@ refused. Reading somebody else's private document as workspace OWNER requires
 an audit entry before disclosure; earlier checkpoint permissions are not reused.
 
 Request: one JSON object of at most 4096 bytes, with exactly `page_id`, `id`,
-`schema` (2 or 3), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
+`schema` (2, 3 or 4), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
 the current editing epoch and revision, a retained checkpoint ID and a new
 mutation ID. Page, mutation and checkpoint IDs contain 1–128 ASCII letters,
 digits, underscores or hyphens. A changed Page identity, revision or epoch
@@ -2461,8 +2461,10 @@ CLI: `crewship doc restore <page-slug> --file <request.json>`.
 
 Authentication: a current human credential owning an empty Page, with current
 write permission; scoped CLI credentials need both `pages:read` and `pages:write`.
-Request body: one JSON object of at most 2 MiB containing `id`, `schema` (2 or 3)
-and `body`. Schema 3 also requires the original `page_id`. Stage a Page through
+Request body: one JSON object of at most 2 MiB containing `id`, `schema` (2, 3 or 4)
+and `body`. Schemas 3 and 4 also require the original `page_id`. Schema 4 adds
+`bold`, `italic` and `strike` marks, a code block `language`, `blockquote` and
+`taskList`/`taskItem` (`checked`); see [`crewship doc initialize`](/cli/doc). Stage a Page through
 `POST /api/v1/pages` with `panels: []` and `allow_empty: true`; this is an explicit
 human-only opt-in and cannot assign crew ownership. Existing panel Pages retain
 normal validation. Response: first durable initialization state, or the original
@@ -2482,7 +2484,7 @@ Authentication: a current human credential with current document write access;
 scoped CLI credentials need both `pages:read` and `pages:write`. Request body:
 one JSON object of at most 2 MiB. Semantic replacement requires `id`, `schema`,
 `epoch`, `target`, `text`, `ifRev` and `ifHash`. The editor's incremental form
-uses `kind: "human"` and base64 `update`; schema 3 requires the original
+uses `kind: "human"` and base64 `update`; schemas 3 and 4 require the original
 `page_id`. The service rechecks the exact credential and permission within the
 storage transaction. Response: a receipt for the confirmed revision. Repeating
 the original operation after a lost confirmation returns its receipt without
@@ -2493,6 +2495,58 @@ automatically rebased. Statuses: 200 confirmed receipt; 400 invalid request;
 request; 422 invalid content; 429 temporary operation limit; 500 storage failure;
 502 invalid engine response; 503 disabled or unavailable service. Responses use
 `Cache-Control: no-store`. CLI: `crewship doc patch <page-slug> --file <request.json>`.
+
+## List document comments
+
+`GET /api/v1/pages/{slug}/document/comments`
+
+Authentication: a current human credential with read access to the document;
+scoped CLI credentials need `pages:read`. Agent run credentials are refused.
+Reading somebody else's private document as workspace OWNER is audited, as for
+the document itself. Request: no body or query parameters.
+
+Response 200: `page_id`, `comments` (at most 1,000, oldest first), and
+`can_comment` and `can_resolve` for the caller. Each comment has `id`, `body`,
+`actor`, `rev`, `version`, `resolved` and `created_at`. A thread also has
+`block`, `quote`, `from`, `to` (UTF-16 offsets in the current text) and `status`
+(`attached`, `collapsed`, `detached` or `resolved`); a reply has `parent`.
+Statuses: 200 listing; 400 invalid request; 401 invalid credential; 403 missing
+access/scope; 404 unavailable document; 409 unsupported schema; 429 capacity
+limit; 500 storage failure; 502 invalid engine response; 503 disabled or
+unavailable service. Responses use `Cache-Control: no-store`.
+CLI: `crewship doc comments <page-slug>`.
+
+## Comment on a document
+
+`POST /api/v1/pages/{slug}/document/comments`
+
+Authentication: a current human credential with Comment or Edit access to the
+document (Edit, or a Comment or Edit grant); on private output only its owner.
+Scoped CLI credentials need `pages:write`; agent credentials are refused.
+Request body: `id`, `schema`, `epoch`, `ifRev`, `text` (1–10,000 characters) and,
+for schemas 3 and 4, `page_id`. A new thread adds `block`, `from` and `to` (the
+quoted UTF-16 range in one paragraph, heading or code block); a reply adds
+`parent` instead. Response: a receipt with `id`, `rev`, `epoch`, `actor` and
+`kind: "comment"`; an exact retry returns it again. Comments never change
+content, revision or epoch. Statuses: 200 confirmed; 400 invalid request or
+range; 401 invalid credential; 403 missing access/scope; 404 unavailable
+document or thread; 409 stale revision/epoch or conflicting operation ID;
+413 anchor limit; 429 comment or operation limit; 500 storage failure; 502 invalid
+engine response; 503 disabled or unavailable service.
+CLI: `crewship doc comment <page-slug> --file <request.json>`.
+
+## Resolve a document comment thread
+
+`POST /api/v1/pages/{slug}/document/comments/resolve`
+
+Authentication: as for commenting. Request body: `id`, `schema`, `epoch`,
+`ifRev`, `page_id` (schemas 3 and 4), `comment` (thread ID), `version` (current)
+and `resolved` (`true` resolves, `false` reopens). Response: a receipt with
+`kind: "resolve"`. Statuses: 200 confirmed; 400 invalid request; 401 invalid
+credential; 403 missing access/scope; 409 stale version, revision or epoch;
+429 operation limit; 500 storage failure; 502 invalid engine response;
+503 disabled or unavailable service.
+CLI: `crewship doc comment-resolve <page-slug> --file <request.json>`.
 
 Page read and list responses include `has_document`, which identifies saved native
 document content. They also include `has_slides` and `slides_schema`: saved Slides

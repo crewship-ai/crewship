@@ -88,10 +88,16 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 		return
 	}
 	operation := "read"
+	if strings.HasSuffix(r.URL.Path, "/document/comments") {
+		operation = "comments"
+	}
 	var body any = map[string]any{}
 	if mutate {
 		operation = r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
-		if operation != "initialize" && operation != "patch" {
+		if operation == "comments" {
+			operation = "comment"
+		}
+		if operation != "initialize" && operation != "patch" && operation != "comment" && operation != "resolve" {
 			replyError(w, 404, "unknown document operation")
 			return
 		}
@@ -127,17 +133,25 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 		replyError(w, 502, "invalid document engine response")
 		return
 	}
-	if operation == "read" {
+	if operation == "read" || operation == "comments" {
 		value["page_id"] = rec.ID
 		user := UserFromContext(r.Context())
-		canWrite := user != nil && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID, RoleFromContext(r.Context()), rec)
+		workspace, role := WorkspaceIDFromContext(r.Context()), RoleFromContext(r.Context())
 		if rec.PrivateAudience && user != nil {
-			role, err := h.liveContentHumanRole(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID)
-			canWrite = err == nil && h.mayEditSpec(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID, role, rec)
+			var err error
+			if role, err = h.liveContentHumanRole(r.Context(), workspace, user.ID); err != nil {
+				role = ""
+			}
 		}
-		value["can_write"] = canWrite
-		value["can_comment"] = false
-		value["can_resolve"] = false
+		canWrite := user != nil && role != "" && h.mayEditSpec(r.Context(), workspace, user.ID, role, rec)
+		// The same rule the authority applies to every comment write: Comment
+		// authority, and on private output only its custodian.
+		canComment := user != nil && role != "" && h.mayCommentPage(r.Context(), workspace, user.ID, role, rec) && (!rec.PrivateAudience || rec.OwnerUserID == user.ID)
+		if operation == "read" {
+			value["can_write"] = canWrite
+		}
+		value["can_comment"] = canComment
+		value["can_resolve"] = canComment
 	}
 	writeJSON(w, 200, value)
 }

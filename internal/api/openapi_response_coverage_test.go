@@ -29,6 +29,8 @@ import (
 // that has to happen first (a DTO); "shape disagrees with the handler" names a
 // documentation bug that a required list would only make louder.
 var responseShapeExclusions = map[string]string{
+	"DocumentCommentList": "assembled by the docs-service engine (comments: stored rows plus resolved anchors) and given can_comment/can_resolve by serveDocument; no Go struct. " +
+		"Its rows are paired as DocumentComment, and TestAcceptance_DocumentCommentsBinary decodes the real listing through the CLI.",
 	"CrewRead": "oneOf of the existing full Crew and the closed sharedCrewResponse; no single backing struct. " +
 		"SharedCrew/CrewAccessMe have struct pairs; TestCrewGrantHTTPReadsAreFilteredAndBounded validates actual Guest list/detail/access responses and rejects a missing identity against these schemas; cmd/gen-openapi checks both union branches.",
 	"CrewList": "array of the CrewRead union; same actual HTTP and union schema checks as CrewRead.",
