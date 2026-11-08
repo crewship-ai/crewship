@@ -8,7 +8,9 @@ import { usePageWorkspace } from "@/hooks/use-page-workspace"
 import { useAccessMode } from "@/hooks/use-access-mode"
 import { usePage } from "@/hooks/use-pages"
 import { artifactsDesign, artifactsLibrary } from "@/lib/feature-flags"
+import { useAccessContext } from "@/components/features/restricted/access-notice"
 import { ArtifactsLibrary } from "./artifacts-library"
+import { RestrictedArtifactGate, RestrictedArtifacts } from "./restricted-artifacts"
 import { filtersFromParams, filtersToParams } from "./library-filter"
 import { libraryItems, versionPin } from "./library-items"
 
@@ -38,12 +40,10 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
   if (linked) workspaceQuery.set("workspace_id", linked)
 
   const pinned = versionPin(params?.get("version"))
-  // A restricted member sees nothing here, exactly as before (#5129): the
-  // shell does not open /artifacts for them (lib/restricted-surfaces.ts maps
-  // their Page actions to /pages only) and the library reads
-  // (GET /api/v1/pages, GET /api/v1/pages/{slug}) are outside the restricted
-  // allowlist. Should the shell ever mount this route for such a session, it
-  // still reads, opens and redirects nothing.
+  // A restricted member's Artifacts is their restricted catalog (#5132), with
+  // or without the library flag: the library reads (GET /api/v1/pages,
+  // GET /api/v1/pages/{slug}) are outside the restricted allowlist, so the
+  // library, the detail, Design and every redirect below stay unmounted.
   const restricted = accessMode === "restricted"
   // Without the library an ID address opens on Pages; its kind decides how.
   const resolveOnPages = !enabled && !restricted && accessMode !== "loading" && Boolean(item) && !bySlug
@@ -55,7 +55,7 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
 
   if (linkUnavailable) return <p className="p-6" role="alert">Artifacts unavailable.</p>
   if (loading || !workspaceId || accessMode === "loading") return enabled || resolveOnPages ? <Skeleton className="m-6 h-12" /> : null
-  if (restricted) return null
+  if (restricted) return <RestrictedEntry key={workspaceId} workspaceId={workspaceId} item={item} bySlug={bySlug} workspaceQuery={workspaceQuery} />
   if (resolveOnPages) return <OpenOnPages workspaceId={workspaceId} id={item!} version={pinned} workspaceQuery={workspaceQuery} />
   if (!enabled) return null
 
@@ -77,6 +77,25 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
   const designSlug = design && params?.get("design") === "1" ? params.get("item") : null
   if (designSlug) return <div className="h-full p-4"><DesignEditor workspaceId={workspaceId} slug={designSlug} initialVersion={pinned} /></div>
   return <ArtifactsLibrary workspaceId={workspaceId} item={item} version={item ? pinned : undefined} bySlug={bySlug} onSelect={select} onCanonical={canonical} filters={filters} onFiltersChange={filter} />
+}
+
+/**
+ * /artifacts for a restricted member (#5132). `?item=<slug>` opens one granted
+ * artifact's actions; `/artifacts/<id>` is always the access gate, decided
+ * without any request: the restricted catalog names artifacts by slug only, so
+ * an immutable ID can never be matched to a grant (the server stays
+ * authoritative for every action either way).
+ */
+function RestrictedEntry({ workspaceId, item, bySlug, workspaceQuery }: { workspaceId: string; item: string | null; bySlug?: boolean; workspaceQuery: URLSearchParams }) {
+  const access = useAccessContext()
+  const homeHref = `/artifacts${workspaceQuery.size ? `?${workspaceQuery}` : ""}`
+  if (item !== null && !bySlug) return <RestrictedArtifactGate homeHref={homeHref} />
+  const hrefFor = (slug: string) => {
+    const next = new URLSearchParams(workspaceQuery)
+    next.set("item", slug)
+    return `/artifacts?${next}`
+  }
+  return <RestrictedArtifacts workspaceId={workspaceId} access={access} focus={item} hrefFor={hrefFor} homeHref={homeHref} />
 }
 
 /**

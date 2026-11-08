@@ -13,9 +13,10 @@ export type LegacyPagesTarget =
   | { to: "stay" }
 
 /**
- * `trusted` is the session's access mode: a restricted member is never moved,
- * because the library reads (`GET /api/v1/pages`, `GET /api/v1/pages/{slug}`)
- * are outside the restricted allowlist and Pages shows them their catalog.
+ * `trusted` is the session's access mode: a restricted member is never resolved
+ * here, because the library reads (`GET /api/v1/pages`, `GET /api/v1/pages/{slug}`)
+ * are outside the restricted allowlist. Their /pages addresses move to their
+ * catalog by address alone (`restricted-artifacts-url.ts`, #5132).
  */
 export interface LegacyPagesContext { workspaceId: string; library: boolean; trusted: boolean }
 

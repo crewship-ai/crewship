@@ -7,7 +7,6 @@ vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id
 vi.mock("@/hooks/use-workspace", () => ({ useWorkspace: () => ({ workspaceId: "workspace", loading: false }) }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => "standard" }))
 vi.mock("@/components/features/restricted/access-notice", () => ({ useAccessContext: () => ({}) }))
-vi.mock("@/components/features/restricted/restricted-pages", () => ({ RestrictedPages: () => <p>Restricted catalog</p> }))
 vi.mock("@/components/features/pages/pages-layout", () => ({ PagesLayout: () => <p>Pages overview</p> }))
 beforeEach(() => { replace.mockReset(); window.history.replaceState({}, "", "/pages?ref=saved-id&workspace_id=workspace") })
 afterEach(cleanup)

@@ -1,5 +1,5 @@
 import { roleAtLeast } from "@/lib/routine-governance"
-import { restrictedHome, restrictedPathAllowed, type RestrictedSurface } from "@/lib/restricted-surfaces"
+import { RESTRICTED_LEGACY_PATHS, RESTRICTED_SURFACE_PATHS, restrictedHome, restrictedPathAllowed, type RestrictedSurface } from "@/lib/restricted-surfaces"
 import type { LucideIcon } from "lucide-react"
 
 import { CONCEPT_ICON } from "@/lib/concept-icons"
@@ -124,7 +124,19 @@ export function visibleNavItems(viewer: NavViewer, sections: NavSection[] = navS
 
 /** One section's rows for this person. */
 export function visibleItems(items: NavItem[], { role, instanceAdmin, surfaces }: NavViewer): NavItem[] {
-  return items.filter((item) => !isHiddenForRole(item, role, instanceAdmin) && (!surfaces || restrictedPathAllowed(item.href, surfaces)))
+  return items.flatMap((item) => {
+    if (isHiddenForRole(item, role, instanceAdmin)) return []
+    if (!surfaces) return [item]
+    const shown = restrictedDestination(item)
+    return restrictedPathAllowed(shown.href, surfaces) ? [shown] : []
+  })
+}
+
+/** A restricted session's row points at the surface's screen, never at an old
+ *  address: Artifacts is /artifacts whatever the build's library flag (#5132). */
+function restrictedDestination(item: NavItem): NavItem {
+  const surface = (Object.keys(RESTRICTED_LEGACY_PATHS) as RestrictedSurface[]).find((s) => RESTRICTED_LEGACY_PATHS[s] === item.href)
+  return surface ? { ...item, href: RESTRICTED_SURFACE_PATHS[surface] } : item
 }
 
 /**

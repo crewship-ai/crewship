@@ -24,7 +24,7 @@ import { ActiveRoutineRunsProvider } from "@/hooks/use-active-routine-runs"
 import { WorkspaceAvailabilityBoundary } from "@/components/layout/workspace-availability-boundary"
 import { bindWorkspaceSession, useWorkspace } from "@/hooks/use-workspace"
 import { useAccessMode, useAccessModeWatcher, useRestrictedSurfaces, useTrustedWorkspaceId } from "@/hooks/use-access-mode"
-import { restrictedHome, restrictedPathAllowed } from "@/lib/restricted-surfaces"
+import { restrictedHome, restrictedLegacyPath, restrictedPathAllowed } from "@/lib/restricted-surfaces"
 import { RestrictedUnavailable } from "@/components/layout/restricted-unavailable"
 import { RealtimeToasts } from "@/components/layout/realtime-toasts"
 import { RealtimeStatusBanner } from "@/components/layout/realtime-status-banner"
@@ -82,7 +82,8 @@ export default function DashboardLayout({
   // This exact page mounts only a known resource's server-checked boundary.
   // It does not offer Issues discovery or widen the navigation surfaces.
   const knownProjectManagement = pathname === "/issues/manage"
-  const restrictedBlocked = !unknownPath && surfaces !== null && !knownProjectManagement && !restrictedPathAllowed(pathname, surfaces)
+  // An old /pages address of a granted surface mounts only to move to /artifacts (#5132).
+  const restrictedBlocked = !unknownPath && surfaces !== null && !knownProjectManagement && !restrictedPathAllowed(pathname, surfaces) && !restrictedLegacyPath(pathname, surfaces)
   const restrictedLanding = restrictedBlocked && pathname === "/" ? restrictedHome(surfaces) : null
   useEffect(() => {
     if (restrictedLanding) router.replace(restrictedLanding)
