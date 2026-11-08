@@ -620,6 +620,43 @@ Sizes are whole pixels (`80px`), colors are six-digit hex (`#112233`),
 `border-width` 0–16 pixels. `font-family` is optional on text and tables and
 accepts only `Go Regular` or `sans-serif`. The canvas is 1920 × 1080.
 
+#### Rich profile (optional)
+
+A deck may also use the additions below. A deck that uses any of them is
+returned with `schema_version: 3`; a deck that uses none keeps the
+`schema_version: 1` projection byte for byte. Each addition has a fixed syntax
+and anything else is refused with `422 artifact_slides_unsupported`.
+
+| Where | Addition | Accepted values |
+|---|---|---|
+| `<p>`, `<table>` | `font-family` | Exactly one of `Go Regular`, `IBM Plex Sans`, `JetBrains Mono` (bare, or in single or double quotes). Fallback lists such as `'IBM Plex Sans', Arial` are refused. |
+| `<p>` | `font-weight` | `400`, `600` or `700` where the face has it: IBM Plex Sans 400/600/700, JetBrains Mono 400/600, Go Regular 400. |
+| `<p>` | `letter-spacing` | Whole pixels from `-20px` to `100px`, and no less than minus half the font size; added after every character. |
+| `<p>` | `line-height` | A unitless number with up to two decimals from `0.8` to `3` (default `1.2`). |
+| `<p>`, `<table>` | `font-size` | Up to 320 pixels (160 without the rich profile). |
+| `<div data-shape="rectangle">` | `border-radius` | Whole pixels, at most half the shorter side. |
+| `<div data-shape>` | `background-image` | `linear-gradient(<0–359>deg, <#hex> <0–100>%, …)` with 2–8 stops in increasing order. `background-color` stays required and is not painted under the gradient. |
+| `<div data-shape="line" data-line="x1 y1 x2 y2">` | Line | Whole-pixel end points inside the element box; style has only `left`, `top`, `width`, `height`, `border-color` and `border-width` (1–16). Optional `data-arrow-start` and `data-arrow-end` take `triangle`. |
+| `<div data-icon="<name>">` | Icon | An outline icon from the fixed list below, drawn in `color` and centred in the box; style has only `left`, `top`, `width`, `height` and `color`. |
+| `<section>` | `data-transition` | `fade` or `push`, played by **Present** when the slide is entered. |
+
+Icon names: `arrow-down`, `arrow-left`, `arrow-right`, `arrow-up`, `bell`,
+`bot`, `briefcase`, `building`, `calendar`, `chart-column`, `chart-line`,
+`chart-pie`, `check`, `circle-check`, `clock`, `cloud`, `code`, `database`,
+`download`, `file-text`, `flag`, `folder`, `globe`, `heart`, `house`, `info`,
+`layers`, `lightbulb`, `link`, `lock`, `mail`, `map-pin`, `message-circle`,
+`message-square`, `phone`, `play`, `presentation`, `rocket`, `search`, `send`,
+`settings`, `shield`, `sparkles`, `star`, `target`, `terminal`, `trending-up`,
+`triangle-alert`, `upload`, `user`, `users`, `x`, `zap`. They are Lucide icons
+(ISC) bundled with Crewship; a deck can name one but never supply SVG.
+
+In the projection these become `font_weight`, `letter_spacing` (pixels) and
+`line_height` (percent of the font size, so `1.05` is `105`) on `text`;
+`corner_radius`, `gradient` (`{"angle", "stops": [{"color", "position"}]}`) and,
+for `kind: "line"`, `line` (`{"x1", "y1", "x2", "y2", "start", "end"}`) on
+`shape`; an element of `type: "icon"` with `icon: {"name", "color"}`; and
+`transition` on the slide. Each is omitted when it holds its default.
+
 ### `crewship page artifact slides <slug-or-id>`
 
 Read the projected deck and the anchors that comments can use. Use `@<id>` to

@@ -2375,7 +2375,7 @@
           },
           "deck": {
             "additionalProperties": true,
-            "description": "Slides deck derived from deck.json and one file per slide: schema version 1, a 1920×1080 canvas and the Go Regular font, with at most 100 slides, 1000 elements and 2 MiB.",
+            "description": "Slides deck derived from deck.json and one file per slide on a 1920×1080 canvas, with at most 100 slides, 1000 elements and 2 MiB. Schema version 1 uses the Go Regular font only; schema version 3 is returned when the source uses the rich profile: the IBM Plex Sans and JetBrains Mono faces, font_weight, letter_spacing and line_height on text, font sizes up to 320, corner_radius and a linear gradient on shapes, the line shape kind with triangle arrowheads, icon elements named from a fixed allow-list and per-slide fade or push transitions. Schema-3 fields are omitted when unused.",
             "type": "object"
           }
         },

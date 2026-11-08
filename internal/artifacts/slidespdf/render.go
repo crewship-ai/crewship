@@ -15,7 +15,6 @@ import (
 
 	"github.com/signintech/gopdf"
 	"golang.org/x/image/font"
-	"golang.org/x/image/font/gofont/goregular"
 	"golang.org/x/image/font/sfnt"
 	"golang.org/x/image/math/fixed"
 
@@ -57,6 +56,8 @@ type line struct {
 type textPlan struct {
 	x, y, w, h           float64
 	size                 int
+	face                 string
+	spacing              float64
 	color, align         string
 	lines                []line
 	ascender, lineHeight float64
@@ -64,6 +65,7 @@ type textPlan struct {
 }
 type elementPlan struct {
 	element     slides.Element
+	icon        iconPlan
 	texts       []textPlan
 	rows        []float64
 	tableHeight float64
@@ -71,11 +73,26 @@ type elementPlan struct {
 type pagePlan struct{ elements []elementPlan }
 type layout struct {
 	pdf               *gopdf.GoPdf
-	widths            map[int]map[rune]float64
 	lines, primitives int
-	font              *sfnt.Font
 	buffer            sfnt.Buffer
-	ink               map[int]map[rune]glyphInk
+	faces             map[string]*faceMetrics
+}
+
+// faceMetrics caches one registered face's parsed font, advances and ink.
+type faceMetrics struct {
+	font   *sfnt.Font
+	widths map[int]map[rune]float64
+	ink    map[int]map[rune]glyphInk
+}
+
+// textStyle is one text frame's typography. Zero spacing and lineHeight 120
+// are the schema-1 profile.
+type textStyle struct {
+	face         string
+	size         int
+	color, align string
+	spacing      float64
+	lineHeight   int
 }
 type glyphInk struct{ minX, minY, maxX, maxY float64 }
 
@@ -87,6 +104,12 @@ type glyphInk struct{ minX, minY, maxX, maxY float64 }
 // elements. Text wraps words first, with glyph fallback for overlong words and
 // no discarded whitespace, using 1.2×font-size line spacing. Tables use equal
 // column widths, natural row heights and four-unit cell padding.
+//
+// Schema 3 adds the embedded IBM Plex Sans and JetBrains Mono faces, font
+// weight, letter spacing (added after every glyph, as CSS does), line height,
+// rounded rectangles, linear gradients (128 strips, exact colour per strip),
+// lines with triangle arrowheads and allow-listed outline icons. Transitions
+// do not apply to a PDF.
 // Unsupported glyphs or shaping, frame overflow and resource limits are errors.
 func Render(ctx context.Context, deck slides.Deck) ([]byte, error) {
 	return render(ctx, deck, MaxOutputBytes)
@@ -107,10 +130,16 @@ func render(ctx context.Context, deck slides.Deck, outputLimit int) ([]byte, err
 	}
 	pdf := &gopdf.GoPdf{}
 	pdf.Start(gopdf.Config{Unit: gopdf.UnitPT, PageSize: gopdf.Rect{W: 1920, H: 1080}})
-	if err := pdf.AddTTFFontData(fontFamily, goregular.TTF); err != nil {
-		return nil, fmt.Errorf("load fixed PDF font: %w", err)
+	for _, key := range deckFaces(deck) {
+		data, err := faceData(key)
+		if err != nil {
+			return nil, err
+		}
+		if err := pdf.AddTTFFontData(key, data); err != nil {
+			return nil, fmt.Errorf("load fixed PDF font: %w", err)
+		}
 	}
-	l := layout{pdf: pdf, widths: make(map[int]map[rune]float64)}
+	l := layout{pdf: pdf, faces: map[string]*faceMetrics{}}
 	pages := make([]pagePlan, 0, len(deck.SlideOrder))
 	byID := make(map[string]slides.Slide, len(deck.Slides))
 	for _, s := range deck.Slides {
@@ -147,8 +176,18 @@ func render(ctx context.Context, deck slides.Deck, outputLimit int) ([]byte, err
 			el := p.element
 			clip(pdf, float64(el.X), float64(el.Y), float64(el.Width), float64(el.Height))
 			switch el.Type {
+			case "icon":
+				drawIcon(pdf, p.icon, el.Icon.Color)
 			case "shape":
 				sh := el.Shape
+				if sh.Kind == "line" {
+					drawLine(pdf, el)
+					break
+				}
+				if sh.CornerRadius != 0 || sh.Gradient != nil {
+					drawShape(pdf, el)
+					break
+				}
 				setColor(pdf.SetFillColor, sh.Fill)
 				setColor(pdf.SetStrokeColor, sh.Stroke)
 				pdf.SetLineWidth(float64(sh.StrokeWidth))
@@ -195,8 +234,13 @@ func render(ctx context.Context, deck slides.Deck, outputLimit int) ([]byte, err
 				if el.Type == "table" {
 					clip(pdf, text.x-4, text.y-4, text.w+8, text.h+8)
 				}
-				if err := pdf.SetFont(fontFamily, "", text.size); err != nil {
+				if err := pdf.SetFont(text.face, "", text.size); err != nil {
 					return nil, err
+				}
+				if text.spacing != 0 {
+					if err := pdf.SetCharSpacing(text.spacing); err != nil {
+						return nil, err
+					}
 				}
 				setColor(pdf.SetTextColor, text.color)
 				for i, ln := range text.lines {
@@ -211,6 +255,11 @@ func render(ctx context.Context, deck slides.Deck, outputLimit int) ([]byte, err
 					}
 					pdf.SetXY(x, text.y+text.ascender+float64(i)*text.lineHeight)
 					if err := pdf.Text(ln.text); err != nil {
+						return nil, err
+					}
+				}
+				if text.spacing != 0 {
+					if err := pdf.SetCharSpacing(0); err != nil {
 						return nil, err
 					}
 				}
@@ -238,7 +287,7 @@ func render(ctx context.Context, deck slides.Deck, outputLimit int) ([]byte, err
 }
 
 func admit(ctx context.Context, d slides.Deck) error {
-	if d.SchemaVersion != 1 || d.Width != 1920 || d.Height != 1080 || d.Theme.FontFamily != fontFamily {
+	if d.SchemaVersion != slides.SchemaVersion && d.SchemaVersion != slides.RichSchemaVersion || d.Width != 1920 || d.Height != 1080 || d.Theme.FontFamily != fontFamily {
 		return ErrUnsupported
 	}
 	if len(d.Slides) > 100 || len(d.SlideOrder) > 100 {
@@ -264,18 +313,19 @@ func admit(ctx context.Context, d slides.Deck) error {
 			switch el.Type {
 			case "text":
 				if el.Text != nil {
-					if el.Text.FontFamily != fontFamily {
+					if el.Text.FontFamily != fontFamily && (d.SchemaVersion != slides.RichSchemaVersion || !slides.RichFontAllowed(el.Text.FontFamily, el.Text.FontWeight)) {
 						return ErrUnsupported
 					}
 					values = []string{el.Text.Value}
 				}
 			case "shape":
-				if el.Shape != nil && (el.Shape.StrokeWidth >= el.Width || el.Shape.StrokeWidth >= el.Height) {
+				if el.Shape != nil && el.Shape.Kind != "line" && (el.Shape.StrokeWidth >= el.Width || el.Shape.StrokeWidth >= el.Height) {
 					return ErrUnsupported
 				}
+			case "icon":
 			case "table":
 				if el.Table != nil {
-					if el.Table.FontFamily != fontFamily {
+					if el.Table.FontFamily != fontFamily && (d.SchemaVersion != slides.RichSchemaVersion || !slides.RichFontAllowed(el.Table.FontFamily, 0)) {
 						return ErrUnsupported
 					}
 					if len(el.Table.Cells) > 30 {
@@ -307,7 +357,7 @@ func admit(ctx context.Context, d slides.Deck) error {
 			}
 		}
 	}
-	if err := slides.Validate(d); err != nil {
+	if err := slides.ValidateProjection(d); err != nil {
 		return fmt.Errorf("%w: %v", ErrInvalidDeck, err)
 	}
 	return nil
@@ -318,10 +368,17 @@ func (l *layout) element(ctx context.Context, el slides.Element) (elementPlan, e
 	l.primitives += 5
 	switch el.Type {
 	case "shape":
-		l.primitives += 128
+		l.primitives += shapePrimitives(el.Shape)
+	case "icon":
+		plan, err := planIcon(el)
+		if err != nil {
+			return p, err
+		}
+		p.icon = plan
+		l.primitives += plan.primitives
 	case "text":
 		t := el.Text
-		plan, err := l.text(ctx, t.Value, t.FontSize, t.Color, t.Align, float64(el.X), float64(el.Y), float64(el.Width), float64(el.Height))
+		plan, err := l.text(ctx, t.Value, textStyle{face: faceKey(t.FontFamily, t.FontWeight), size: t.FontSize, color: t.Color, align: t.Align, spacing: float64(t.LetterSpacing), lineHeight: t.LineHeight}, float64(el.X), float64(el.Y), float64(el.Width), float64(el.Height))
 		if err != nil {
 			return p, err
 		}
@@ -335,7 +392,7 @@ func (l *layout) element(ctx context.Context, el slides.Element) (elementPlan, e
 			rowHeight := 0.0
 			for c, value := range row {
 				l.primitives += 10
-				plan, err := l.text(ctx, value, t.FontSize, t.Color, "left", float64(el.X)+float64(c)*w+4, y+4, w-8, math.Inf(1))
+				plan, err := l.text(ctx, value, textStyle{face: faceKey(t.FontFamily, 0), size: t.FontSize, color: t.Color, align: "left"}, float64(el.X)+float64(c)*w+4, y+4, w-8, math.Inf(1))
 				if err != nil {
 					return p, err
 				}
@@ -362,37 +419,47 @@ func (l *layout) element(ctx context.Context, el slides.Element) (elementPlan, e
 	return p, nil
 }
 
-func (l *layout) text(ctx context.Context, value string, size int, color, align string, x, y, w, h float64) (textPlan, error) {
-	p := textPlan{x: x, y: y, w: w, h: h, size: size, color: color, align: align, lineHeight: float64(size) * 1.2}
+func (l *layout) text(ctx context.Context, value string, style textStyle, x, y, w, h float64) (textPlan, error) {
+	size := style.size
+	lineHeight := float64(size) * 1.2
+	if style.lineHeight != 0 {
+		lineHeight = float64(size) * float64(style.lineHeight) / 100
+	}
+	p := textPlan{x: x, y: y, w: w, h: h, size: size, face: style.face, spacing: style.spacing, color: style.color, align: style.align, lineHeight: lineHeight}
 	if w <= 0 || h <= 0 {
 		return p, ErrOverflow
 	}
-	if err := l.pdf.SetFont(fontFamily, "", size); err != nil {
+	if err := l.pdf.SetFont(style.face, "", size); err != nil {
 		return p, err
 	}
-	if l.font == nil {
-		f, err := sfnt.Parse(goregular.TTF)
+	fm := l.faces[style.face]
+	if fm == nil {
+		data, err := faceData(style.face)
 		if err != nil {
 			return p, err
 		}
-		l.font = f
-		l.ink = make(map[int]map[rune]glyphInk)
+		f, err := sfnt.Parse(data)
+		if err != nil {
+			return p, err
+		}
+		fm = &faceMetrics{font: f, widths: make(map[int]map[rune]float64), ink: make(map[int]map[rune]glyphInk)}
+		l.faces[style.face] = fm
 	}
-	metrics, err := l.font.Metrics(&l.buffer, fixed.I(size), font.HintingNone)
+	metrics, err := fm.font.Metrics(&l.buffer, fixed.I(size), font.HintingNone)
 	if err != nil {
 		return p, err
 	}
 	ascent, descent := float64(metrics.Ascent)/64, float64(metrics.Descent)/64
 	p.ascender = ascent + (p.lineHeight-ascent-descent)/2
-	cache := l.widths[size]
+	cache := fm.widths[size]
 	if cache == nil {
 		cache = make(map[rune]float64)
-		l.widths[size] = cache
+		fm.widths[size] = cache
 	}
-	inks := l.ink[size]
+	inks := fm.ink[size]
 	if inks == nil {
 		inks = make(map[rune]glyphInk)
-		l.ink[size] = inks
+		fm.ink[size] = inks
 	}
 	type glyph struct {
 		r       rune
@@ -428,11 +495,11 @@ func (l *layout) text(ctx context.Context, value string, size int, color, align 
 				return p, err
 			}
 			cache[r] = advance
-			index, err := l.font.GlyphIndex(&l.buffer, r)
+			index, err := fm.font.GlyphIndex(&l.buffer, r)
 			if err != nil {
 				return p, err
 			}
-			bounds, _, err := l.font.GlyphBounds(&l.buffer, index, fixed.I(size), font.HintingNone)
+			bounds, _, err := fm.font.GlyphBounds(&l.buffer, index, fixed.I(size), font.HintingNone)
 			if err != nil {
 				return p, err
 			}
@@ -441,7 +508,8 @@ func (l *layout) text(ctx context.Context, value string, size int, color, align 
 		ink := inks[r]
 		minY = math.Min(minY, ink.minY)
 		maxY = math.Max(maxY, ink.maxY)
-		glyphs = append(glyphs, glyph{r: r, advance: advance, ink: ink})
+		// CSS letter-spacing follows every glyph, the last one of a line included.
+		glyphs = append(glyphs, glyph{r: r, advance: advance + style.spacing, ink: ink})
 	}
 	var b strings.Builder
 	width, minX, maxX := 0.0, 0.0, 0.0
