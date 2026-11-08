@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { creationDocument } from './create-document.mjs';
-import { readFile, chmod, lstat } from 'node:fs/promises';
+import { readFile, chmod, lstat, unlink } from 'node:fs/promises';
+import net from 'node:net';
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -38,6 +39,23 @@ async function verifyTargets(doc, targets, version = VERSION) {
     verified.push({ id: block.id, hash: block.hash, from: target.from, to: target.to, quote: block.text.slice(target.from, target.to), text: block.text, ancestors, ...(version === RICH_VERSION ? {schema:RICH_VERSION} : {}) });
   }
   return verified;
+}
+// A killed engine leaves its socket file behind; its supervised replacement
+// must still start at the configured path. Only a socket with no listener is
+// removed. A live (or paused) engine accepts the probe and keeps custody; any
+// other file, or an unexpected probe error, is refused unchanged.
+async function reclaimCrashedSocket(socket) {
+  let found;
+  try { found = await lstat(socket); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
+  if (!found.isSocket()) throw new Error('service socket already exists');
+  const abandoned = await new Promise(resolve => {
+    const probe = net.connect(socket);
+    probe.once('connect', () => { probe.destroy(); resolve(false); });
+    probe.once('error', error => resolve(error.code === 'ECONNREFUSED'));
+  });
+  const current = abandoned && await lstat(socket).catch(() => undefined);
+  if (!current || current.ino !== found.ino || current.dev !== found.dev) throw new Error('service socket already exists');
+  await unlink(socket);
 }
 async function body(req) {
   let size = 0; const chunks = [];
@@ -278,7 +296,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   // request is admitted until Go confirms the idempotent recovery barrier.
   let bound=false;
   try {
-    try{await lstat(socket);throw new Error('service socket already exists')}catch(error){if(error.code!=='ENOENT')throw error}
+    await reclaimCrashedSocket(socket);
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socket,resolve)});bound=true;
     await chmod(socket,0o600);
     const recovered=await go('engine','recover',{workspace:''},{boot:owner,protocol:PROTOCOL,schema:RICH_VERSION});

@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import * as Y from 'yjs';
-import { mkdtemp, copyFile, appendFile, writeFile, stat, chmod, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, copyFile, appendFile, writeFile, readFile, stat, lstat, chmod, symlink, rm } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -283,6 +285,23 @@ test('duplicate socket bind cannot recover or fence the existing engine', async 
     await assert.rejects(startService({ socket: f.socket, authoritySocket: f.authoritySocket, tokenFile: f.tokenFile }), /already exists/);
     assert.equal(model.recoveries, 1); assert.equal((await read(f)).body.epoch, before.epoch);
   } finally { await f.close(); }
+});
+test('a socket left by a killed engine is reclaimed by its replacement; other paths stay refused', { timeout: 10000 }, async () => {
+  const model = authorityModel(), f = await fixture(model.handle);
+  // A real process binds the path and is killed: the kernel leaves the file.
+  const crashed = spawn(process.execPath, ['-e', "require('node:net').createServer().listen(process.argv[1], () => console.log('bound'))", f.socket], { stdio: ['ignore', 'pipe', 'inherit'] });
+  try {
+    await once(crashed.stdout, 'data'); crashed.kill('SIGKILL'); await once(crashed, 'exit');
+    assert.ok((await lstat(f.socket)).isSocket());
+    await f.start();
+    assert.equal(model.recoveries, 1); assert.equal((await read(f)).status, 200);
+  } finally { crashed.kill('SIGKILL'); await f.close(); }
+  const other = await fixture(authorityModel().handle);
+  try {
+    await writeFile(other.socket, 'not a socket');
+    await assert.rejects(other.start(), /already exists/);
+    assert.equal(await readFile(other.socket, 'utf8'), 'not a socket');
+  } finally { await other.close(); }
 });
 test('recovery gates all admission and failure closes its socket; a fresh boot can retry', async () => {
   const entered = deferred(), proceed = deferred(); let reject = true, boots = [];

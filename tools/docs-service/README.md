@@ -91,6 +91,28 @@ configured socket path when it closes, so do not replace or unlink that path
 while the Node service is alive. Dedicated private directories are part of this
 service's operating contract.
 
+A killed engine cannot remove its socket. At startup, Node removes a socket
+file that no process accepts connections on, so a supervised restart at the
+configured path succeeds and then recovers with a new boot identity. A live or
+paused engine still accepts the connection probe and keeps its socket, and any
+other file at that path is refused unchanged.
+
 Node and image smoke tests use a controlled authority fixture. They qualify the
 service protocol and packaging; real Go persistence, managed deployment and
 provider-backed document creation require their separate acceptance scenarios.
+
+`cmd/crewship/acceptance_doc_durability_test.go` drives the CLI binary through
+the Router and the real Go authority into this service, which it spawns, kills,
+pauses and replaces. It covers lost acknowledgements, a crash with requests in
+flight, rejection of a stale epoch, lease or generation from a resumed old
+engine, and records document size, client count, update rate, engine RSS and
+time to recover. It is opt-in and not part of default CI:
+
+```sh
+pnpm --dir tools/docs-service install --frozen-lockfile
+TEST_DOCUMENT_DURABILITY=1 go test -tags docs_foundation ./cmd/crewship \
+  -run '^TestAcceptance_DocumentDurabilityRealEngine$' -count=1
+```
+
+`TEST_DOCUMENT_DURABILITY_EVIDENCE` names the measurements JSON file. The test
+needs Node.js 24 and records numbers only; it enforces no thresholds.
