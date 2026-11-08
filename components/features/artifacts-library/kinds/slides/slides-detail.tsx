@@ -110,6 +110,38 @@ function useBox(ref: React.RefObject<HTMLElement | null>) {
   return box
 }
 
+/** Focus in these keeps its own keys: typing, menus, dialogs and other composite widgets. */
+const VIEWER_KEYS_IGNORED = "input,textarea,select,[contenteditable]:not([contenteditable=false]),[role=dialog],[role=menu],[role=menubar],[role=listbox],[role=tablist],[role=radiogroup],[role=slider],[role=textbox],[role=grid],[role=tree]"
+
+const SLIDE_LINK = /^#slide-([A-Za-z][A-Za-z0-9_-]{0,63})$/
+
+/** The position of the slide `#slide-<id>` names, or -1 when the link names none of these slides. */
+export function linkedSlide(order: readonly string[], hash = typeof window === "undefined" ? "" : window.location.hash): number {
+  const match = SLIDE_LINK.exec(hash)
+  return match ? order.indexOf(match[1]) : -1
+}
+
+/**
+ * The selected slide lives in the address as `#slide-<id>`: reload, a shared
+ * link and back/forward select it. The fragment is replaced, not pushed, so
+ * stepping through a deck does not fill the history; the query (workspace,
+ * pinned version, edit) is left as it is.
+ */
+function useSlideLink(order: readonly string[], slideId: string | undefined, select: (position: number) => void) {
+  React.useEffect(() => {
+    if (!slideId || typeof window === "undefined") return
+    const hash = `#slide-${slideId}`
+    if (window.location.hash !== hash) window.history.replaceState(window.history.state, "", `${window.location.pathname}${window.location.search}${hash}`)
+  }, [slideId])
+  const follow = React.useRef(select); follow.current = select
+  React.useEffect(() => {
+    const onNavigate = () => { const position = linkedSlide(order); if (position >= 0) follow.current(position) }
+    window.addEventListener("hashchange", onNavigate)
+    window.addEventListener("popstate", onNavigate)
+    return () => { window.removeEventListener("hashchange", onNavigate); window.removeEventListener("popstate", onNavigate) }
+  }, [order])
+}
+
 interface StageProps {
   projection: ArtifactSlidesProjection
   codeVersion: number
@@ -125,7 +157,8 @@ function SlidesStage({ projection, codeVersion, download, data, workspaceId, slu
   const { deck, anchors } = projection
   const frame = useArtifactFrame()
   const phone = frame?.layout === "phone"
-  const [current, setCurrent] = React.useState(0)
+  // One selection for the stage, filmstrip, grid, picker, notes and Present; the link names it.
+  const [current, setCurrent] = React.useState(() => Math.max(0, linkedSlide(deck.slide_order)))
   const index = Math.min(current, deck.slide_order.length - 1)
   const slideId = deck.slide_order[index]
   const slide = deck.slides.find(entry => entry.id === slideId)
@@ -162,6 +195,32 @@ function SlidesStage({ projection, codeVersion, download, data, workspaceId, slu
     setSelectionError("")
     setAnchor({ version: data.manifest.version, path, selector: anchors[id].selector, quote: anchors[id].quote })
   }
+  useSlideLink(deck.slide_order, slideId, setCurrent)
+  // Arrows, PageUp/PageDown, Home and End move the viewer's selection; Present has its own keys.
+  React.useEffect(() => {
+    if (present) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+      const target = event.target instanceof Element ? event.target : null
+      if (target?.closest(VIEWER_KEYS_IGNORED)) return
+      const last = deck.slide_order.length - 1
+      const next = event.key === "ArrowRight" || event.key === "PageDown" ? index + 1 : event.key === "ArrowLeft" || event.key === "PageUp" ? index - 1
+        : event.key === "Home" ? 0 : event.key === "End" ? last : null
+      if (next === null) return
+      event.preventDefault()
+      setCurrent(Math.max(0, Math.min(last, next))); setSelectionError("")
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [present, index, deck.slide_order.length])
+  // Leaving browser full screen (Escape there never reaches the page) ends Present on the slide shown.
+  React.useEffect(() => {
+    if (!present || typeof document === "undefined") return
+    let entered = Boolean(document.fullscreenElement)
+    const onChange = () => { if (document.fullscreenElement) entered = true; else if (entered) setPresent(false) }
+    document.addEventListener("fullscreenchange", onChange)
+    return () => document.removeEventListener("fullscreenchange", onChange)
+  }, [present])
   const startPresent = () => { setPresent(true); enterFullscreen() }
   const stopPresent = () => { setPresent(false); exitFullscreen() }
   const pdf = async () => {
@@ -263,7 +322,8 @@ function SlidesStage({ projection, codeVersion, download, data, workspaceId, slu
       selectMode={selectMode} setSelectMode={setSelectMode} anchor={anchor} setAnchor={setAnchor}
       onOpen={comment => { const position = deck.slide_order.findIndex(id => comment.path === `slides/${id}.html`); if (position >= 0) { go(position); setGrid(false) } }} />
     <ProjectVersionHistory data={data} workspaceId={workspaceId} slug={slug} canWrite={canWrite} setViewing={setViewing} />
-    {present && <SlidePresent deck={deck} initialSlideId={slideId} onClose={stopPresent} />}
+    {present && <SlidePresent deck={deck} initialSlideId={slideId} onClose={stopPresent}
+      onSlideChange={id => { const position = deck.slide_order.indexOf(id); if (position >= 0) setCurrent(position) }} />}
   </section>
 }
 
