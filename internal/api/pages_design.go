@@ -162,7 +162,7 @@ func designAuthorityRevision(ctx context.Context, tx *sql.Tx, workspace string) 
 	if err != nil {
 		return "", artifacts.ErrVersionAuthority
 	}
-	revision := g.user + "." + g.page
+	revision := g.user + "." + g.page + "." + g.grant
 	if admitted, ok := ctx.Value(designAdmissionKey{}).(designAdmission); ok && (admitted.WorkspaceID != workspace || admitted.Revision != revision) {
 		return "", artifacts.ErrVersionAuthority
 	}

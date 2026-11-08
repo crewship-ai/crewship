@@ -40,12 +40,24 @@ func seedAuthorGenerationFixture(t *testing.T, tx *sql.Tx) {
 			t.Fatal(err)
 		}
 	}
+	for _, k := range []authorGenerationKey{{"user", "alice"}, {"user", "bob"}, {"user", "carol"}, {"agent", "agent"}} {
+		if _, err := tx.Exec(`INSERT INTO mooring_page_grant_generations(workspace_id,page_id,principal_kind,principal_id) VALUES('generation-ws','generation-page',?,?)`, k.kind, "generation-"+k.id); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
+// Kinds "grant:user" and "grant:agent" read the (generation-page, principal)
+// direct-grant pair in mooring_page_grant_generations (#5123).
 func readAuthorGeneration(t *testing.T, tx *sql.Tx, kind, id string) int64 {
 	t.Helper()
 	var n int64
-	if err := tx.QueryRow(`SELECT revision FROM mooring_authority_generations WHERE workspace_id='generation-ws' AND scope_kind=? AND scope_id=?`, kind, "generation-"+id).Scan(&n); err != nil {
+	query := `SELECT revision FROM mooring_authority_generations WHERE workspace_id='generation-ws' AND scope_kind=? AND scope_id=?`
+	if len(kind) > 6 && kind[:6] == "grant:" {
+		kind = kind[6:]
+		query = `SELECT revision FROM mooring_page_grant_generations WHERE workspace_id='generation-ws' AND page_id='generation-page' AND principal_kind=? AND principal_id=?`
+	}
+	if err := tx.QueryRow(query, kind, "generation-"+id).Scan(&n); err != nil {
 		t.Fatal(err)
 	}
 	return n
@@ -65,6 +77,7 @@ func TestMooringAuthorGenerationsSeparateRecipientFromDeliveryEpoch(t *testing.T
 	}
 	before["agent"] = readAuthorGeneration(t, tx, "agent", "agent")
 	before["page"] = readAuthorGeneration(t, tx, "page", "page")
+	before["grant-bob"] = readAuthorGeneration(t, tx, "grant:user", "bob")
 	var deliveryBefore, deliveryAfter int64
 	if err = tx.QueryRow(`SELECT authority_revision FROM workspaces WHERE id='generation-ws'`).Scan(&deliveryBefore); err != nil {
 		t.Fatal(err)
@@ -72,8 +85,11 @@ func TestMooringAuthorGenerationsSeparateRecipientFromDeliveryEpoch(t *testing.T
 	if _, err = tx.Exec(`DELETE FROM page_grants WHERE page_id='generation-page' AND subject_type='user' AND subject_id='generation-bob'`); err != nil {
 		t.Fatal(err)
 	}
-	if readAuthorGeneration(t, tx, "user", "bob") <= before["bob"] {
-		t.Fatal("revoked recipient generation unchanged")
+	if readAuthorGeneration(t, tx, "grant:user", "bob") <= before["grant-bob"] {
+		t.Fatal("revoked recipient's Page grant generation unchanged")
+	}
+	if readAuthorGeneration(t, tx, "user", "bob") != before["bob"] {
+		t.Fatal("a Page grant moved the recipient's workspace-wide generation (#5123)")
 	}
 	for _, key := range []string{"alice", "carol"} {
 		if got := readAuthorGeneration(t, tx, "user", key); got != before[key] {
@@ -89,7 +105,7 @@ func TestMooringAuthorGenerationsSeparateRecipientFromDeliveryEpoch(t *testing.T
 	if _, err = tx.Exec(`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('generation-page','user','generation-bob','write','generation-alice')`); err != nil {
 		t.Fatal(err)
 	}
-	if readAuthorGeneration(t, tx, "user", "bob") <= before["bob"] {
+	if readAuthorGeneration(t, tx, "grant:user", "bob") <= before["grant-bob"] {
 		t.Fatal("grant ABA restored original generation")
 	}
 }
@@ -103,7 +119,11 @@ func TestMooringAuthorGenerationIdentityAndOverflowAreAtomic(t *testing.T) {
 	defer tx.Rollback()
 	seedAuthorGenerationFixture(t, tx)
 	where := ` WHERE workspace_id='generation-ws' AND scope_kind='user' AND scope_id='generation-bob'`
+	grantWhere := ` WHERE workspace_id='generation-ws' AND page_id='generation-page' AND principal_kind='user' AND principal_id='generation-bob'`
 	if _, err = tx.Exec(`UPDATE mooring_authority_generations SET revision=revision+1` + where); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = tx.Exec(`UPDATE mooring_page_grant_generations SET revision=revision+1` + grantWhere); err != nil {
 		t.Fatal(err)
 	}
 	for _, q := range []string{
@@ -112,12 +132,16 @@ func TestMooringAuthorGenerationIdentityAndOverflowAreAtomic(t *testing.T) {
 		`UPDATE mooring_authority_generations SET scope_id='replacement'` + where,
 		`DELETE FROM mooring_authority_generations` + where,
 		`INSERT OR REPLACE INTO mooring_authority_generations(workspace_id,scope_kind,scope_id,revision) VALUES('generation-ws','user','generation-bob',1)`,
+		`UPDATE mooring_page_grant_generations SET revision=1` + grantWhere,
+		`UPDATE mooring_page_grant_generations SET principal_id='replacement'` + grantWhere,
+		`DELETE FROM mooring_page_grant_generations` + grantWhere,
+		`INSERT OR REPLACE INTO mooring_page_grant_generations(workspace_id,page_id,principal_kind,principal_id,revision) VALUES('generation-ws','generation-page','user','generation-bob',1)`,
 	} {
 		if _, err = tx.Exec(q); err == nil {
 			t.Fatalf("generation reset accepted: %s", q)
 		}
 	}
-	if _, err = tx.Exec(`UPDATE mooring_authority_generations SET revision=9223372036854775807` + where); err != nil {
+	if _, err = tx.Exec(`UPDATE mooring_page_grant_generations SET revision=9223372036854775807` + grantWhere); err != nil {
 		t.Fatal(err)
 	}
 	var before, after string
@@ -144,16 +168,28 @@ func TestMooringAuthorGenerationCanonicalMutationMatrix(t *testing.T) {
 	agent := authorGenerationKey{"agent", "agent"}
 	page := authorGenerationKey{"page", "page"}
 	app := authorGenerationKey{"app", "crew"}
-	keys := []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, page, app}
+	grant := func(id string) authorGenerationKey { return authorGenerationKey{"grant:user", id} }
+	agentGrant := authorGenerationKey{"grant:agent", "agent"}
+	global := []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, page, app}
+	keys := append(append([]authorGenerationKey{}, global...), grant("alice"), grant("bob"), grant("carol"), agentGrant)
 	type vector struct {
 		name            string
 		prepare, mutate []string
 		changed, stable []authorGenerationKey
 	}
 	vectors := []vector{
-		{name: "grant recipient old and new", mutate: []string{`UPDATE page_grants SET subject_id='generation-carol' WHERE subject_type='user'`}, changed: []authorGenerationKey{user("bob"), user("carol")}, stable: []authorGenerationKey{user("alice"), agent, page, app}},
-		{name: "grant issuer replacement", mutate: []string{`UPDATE page_grants SET granted_by_user_id='generation-carol' WHERE subject_type='user'`}, changed: []authorGenerationKey{user("bob")}, stable: []authorGenerationKey{user("alice"), user("carol"), agent, page, app}},
-		{name: "workspace grant names humans only", mutate: []string{`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('generation-page','workspace','','read','generation-alice')`}, changed: []authorGenerationKey{user("alice"), user("bob"), user("carol")}, stable: []authorGenerationKey{agent, page, app}},
+		{name: "grant recipient old and new", mutate: []string{`UPDATE page_grants SET subject_id='generation-carol' WHERE subject_type='user'`}, changed: []authorGenerationKey{grant("bob"), grant("carol")}, stable: []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, page, app, grant("alice"), agentGrant}},
+		{name: "grant issuer replacement", mutate: []string{`UPDATE page_grants SET granted_by_user_id='generation-carol' WHERE subject_type='user'`}, changed: []authorGenerationKey{grant("bob")}, stable: []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, page, app, grant("alice"), grant("carol"), agentGrant}},
+		{name: "workspace grant names humans only", mutate: []string{`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('generation-page','workspace','','read','generation-alice')`}, changed: []authorGenerationKey{grant("alice"), grant("bob"), grant("carol")}, stable: []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, page, app, agentGrant}},
+		{name: "agent grant ABA", mutate: []string{`DELETE FROM page_grants WHERE subject_type='agent'`, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('generation-page','agent','generation-agent','write','generation-alice')`}, changed: []authorGenerationKey{agentGrant}, stable: []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, page, app, grant("alice"), grant("bob"), grant("carol")}},
+		{name: "crew grant ABA names crew humans", mutate: []string{`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('generation-page','crew','generation-crew','read','generation-alice')`, `DELETE FROM page_grants WHERE subject_type='crew'`}, changed: []authorGenerationKey{grant("bob"), grant("carol")}, stable: []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, page, app, grant("alice"), agentGrant}},
+		// #5123: grants on another Page, whoever they name, move nothing here.
+		{name: "grants on another page are not this page's", prepare: []string{`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('generation-other-page','generation-ws','other-page','Other','generation-alice','{}')`}, mutate: []string{
+			`INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('generation-other-page','workspace','','read','generation-alice'),('generation-other-page','crew','generation-crew','read','generation-alice'),('generation-other-page','user','generation-bob','write','generation-alice'),('generation-other-page','agent','generation-agent','write','generation-alice')`,
+			`UPDATE page_grants SET level='write' WHERE page_id='generation-other-page' AND subject_type='crew'`,
+			`UPDATE page_grants SET granted_by_user_id='generation-carol' WHERE page_id='generation-other-page'`,
+			`DELETE FROM page_grants WHERE page_id='generation-other-page'`,
+		}, stable: keys},
 		{name: "folder recipient ABA", mutate: []string{`DELETE FROM page_folder_acl WHERE folder_id='generation-folder'`, `INSERT INTO page_folder_acl(folder_id,subject_type,subject_id,can_write,set_by_user_id,set_at) VALUES('generation-folder','user','generation-bob',1,'generation-carol','2026-10-24')`}, changed: []authorGenerationKey{user("bob")}, stable: []authorGenerationKey{user("alice"), user("carol"), agent, page, app}},
 		{name: "folder setter is audit only", mutate: []string{`UPDATE page_folder_acl SET set_by_user_id='generation-alice',set_at='2026-10-25'`}, stable: keys},
 		{name: "folder crew recipients", mutate: []string{`INSERT INTO page_folder_acl(folder_id,subject_type,subject_id,can_write,set_by_user_id,set_at) VALUES('generation-folder','crew','generation-crew',1,'generation-alice','2026-10-24')`}, changed: []authorGenerationKey{user("bob"), user("carol")}, stable: []authorGenerationKey{user("alice"), agent, page, app}},
@@ -169,7 +205,7 @@ func TestMooringAuthorGenerationCanonicalMutationMatrix(t *testing.T) {
 		{name: "folder owner crew ABA", mutate: []string{`UPDATE page_folders SET owner_crew_id='generation-crew-two' WHERE id='generation-folder'`, `UPDATE page_folders SET owner_crew_id='generation-crew' WHERE id='generation-folder'`}, changed: []authorGenerationKey{page}, stable: []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, app}},
 		{name: "app policy ABA", mutate: []string{`UPDATE workspace_artifact_creation_policy SET enabled=0 WHERE workspace_id='generation-ws'`, `UPDATE workspace_artifact_creation_policy SET enabled=1 WHERE workspace_id='generation-ws'`}, changed: []authorGenerationKey{app}, stable: []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, page}},
 		{name: "app crew grant ABA", mutate: []string{`DELETE FROM workspace_artifact_creation_crews WHERE crew_id='generation-crew'`, `INSERT INTO workspace_artifact_creation_crews(workspace_id,crew_id) VALUES('generation-ws','generation-crew')`}, changed: []authorGenerationKey{app}, stable: []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, page}},
-		{name: "workspace deletion state ABA", mutate: []string{`UPDATE workspaces SET deleted_at='2026-10-24' WHERE id='generation-ws'`, `UPDATE workspaces SET deleted_at=NULL WHERE id='generation-ws'`}, changed: keys},
+		{name: "workspace deletion state ABA", mutate: []string{`UPDATE workspaces SET deleted_at='2026-10-24' WHERE id='generation-ws'`, `UPDATE workspaces SET deleted_at=NULL WHERE id='generation-ws'`}, changed: global},
 		{name: "collaboration content incarnation ABA", prepare: []string{`INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64) VALUES('generation-page','generation-ws','wordcraft','0','e30=')`}, mutate: []string{`DELETE FROM mooring_collab_documents WHERE page_id='generation-page'`, `INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64) VALUES('generation-page','generation-ws','wordcraft','0','e30=')`}, changed: []authorGenerationKey{page}, stable: []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, app}},
 		{name: "ordinary collaboration head writes preserve author generation", prepare: []string{`INSERT INTO mooring_collab_documents(page_id,workspace_id,application_id,revision,checkpoint_base64) VALUES('generation-page','generation-ws','wordcraft','0','e30=')`}, mutate: []string{`UPDATE mooring_collab_documents SET revision='1',checkpoint_base64='eyJ0ZXN0IjoxfQ==' WHERE page_id='generation-page'`}, stable: keys},
 		{name: "document presence ABA", prepare: []string{`UPDATE pages SET private_audience=1,folder_id=NULL WHERE id='generation-page'`}, mutate: []string{`INSERT INTO documents(workspace_id,page_id,schema_version,head_rev,snapshot,projection) VALUES('generation-ws','generation-page',1,1,x'00',x'00')`, `DELETE FROM documents WHERE page_id='generation-page'`}, changed: []authorGenerationKey{page}, stable: []authorGenerationKey{user("alice"), user("bob"), user("carol"), agent, app}},
@@ -287,7 +323,7 @@ func TestMooringAuthorGenerationUntrackedPolicyChangesAllocateNothing(t *testing
 		}
 	}
 	var n int
-	if err = tx.QueryRow(`SELECT COUNT(*) FROM mooring_authority_generations`).Scan(&n); err != nil || n != 0 {
+	if err = tx.QueryRow(`SELECT (SELECT COUNT(*) FROM mooring_authority_generations)+(SELECT COUNT(*) FROM mooring_page_grant_generations)`).Scan(&n); err != nil || n != 0 {
 		t.Fatal("inactive/untracked canonical mutations allocated generation state", n, err)
 	}
 }
@@ -327,10 +363,10 @@ func TestMooringAuthorGenerationFirstTrackingSerializesWithCanonicalGrantABA(t *
 		t.Fatal("canonical mutation passed the held capture writer", e)
 	case <-time.After(20 * time.Millisecond):
 	}
-	if _, err = capture.Exec(`INSERT INTO mooring_authority_generations(workspace_id,scope_kind,scope_id) VALUES('generation-ws','user','generation-bob')`); err != nil {
+	if _, err = capture.Exec(`INSERT INTO mooring_page_grant_generations(workspace_id,page_id,principal_kind,principal_id) VALUES('generation-ws','generation-page','user','generation-bob')`); err != nil {
 		t.Fatal(err)
 	}
-	original := readAuthorGeneration(t, capture, "user", "bob")
+	original := readAuthorGeneration(t, capture, "grant:user", "bob")
 	if original != 1 {
 		t.Fatal("fresh tracking did not start at exact baseline1")
 	}
@@ -341,11 +377,11 @@ func TestMooringAuthorGenerationFirstTrackingSerializesWithCanonicalGrantABA(t *
 		t.Fatal(err)
 	}
 	var current int64
-	if err = db.QueryRow(`SELECT revision FROM mooring_authority_generations WHERE workspace_id='generation-ws' AND scope_kind='user' AND scope_id='generation-bob'`).Scan(&current); err != nil || current <= original {
+	if err = db.QueryRow(`SELECT revision FROM mooring_page_grant_generations WHERE workspace_id='generation-ws' AND page_id='generation-page' AND principal_kind='user' AND principal_id='generation-bob'`).Scan(&current); err != nil || current <= original {
 		t.Fatal("raced grant ABA revived original captured generation", original, current, err)
 	}
 	var count int
-	if err = db.QueryRow(`SELECT COUNT(*) FROM mooring_authority_generations`).Scan(&count); err != nil || count != 1 {
+	if err = db.QueryRow(`SELECT (SELECT COUNT(*) FROM mooring_authority_generations)+(SELECT COUNT(*) FROM mooring_page_grant_generations)`).Scan(&count); err != nil || count != 1 {
 		t.Fatal("mutation installed an untracked key", count, err)
 	}
 }

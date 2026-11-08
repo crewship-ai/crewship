@@ -1658,11 +1658,14 @@ that `authority_revision`; the host rejects a mismatch before upgrading, includi
 a revoke-and-regrant gap. Revocation never restores an earlier writer draft.
 The authority revision is scoped to the authenticated person and this Design
 Page: it is built from their `user` and `page` rows in
-`mooring_authority_generations` (installed on a fresh admission if absent),
+`mooring_authority_generations` and their row for this Page in
+`mooring_page_grant_generations` (installed on a fresh admission if absent),
 the same generations native Craft sessions use. A change whose recipients
-include that person or that Page (their grants, crew or workspace membership,
-folder ACL, account status, or the Page's owner, audience or folder) closes
-an open Design websocket, including a revoke-then-restore cycle. The broad
+include that person or that Page (their grants on this Page, crew or workspace
+membership, folder ACL, account status, or the Page's owner, audience or
+folder) closes an open Design websocket, including a revoke-then-restore
+cycle. A grant on another Page, even one naming everyone or their crew, does
+not (#5123). The broad
 workspace delivery epoch is not part of it, so creating another Page, changing
 a grant for someone else on another Page or adding a member does not close an
 open canvas or drop its unconfirmed edits. Current Page rights, membership and

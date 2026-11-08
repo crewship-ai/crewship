@@ -50,6 +50,7 @@ var workspaceTablesNotBundled = map[string]string{
 	"artifact_project_run_consents":    "live original-run Page permissions cannot travel in a bundle",
 	"page_grant_retired_issuances":     "target-local memory of retired grants must survive logical replacement; a bundle must neither reset it nor bring a copy",
 	"mooring_authority_generations":    "target-local non-ABA author generations must survive logical replacement; portable bundles cannot reset them",
+	"mooring_page_grant_generations":   "target-local (Page, recipient) grant generations must survive logical replacement; portable bundles cannot reset them",
 	"mooring_delivery_gates":           "runtime delivery admission requires fresh identity after portable restore",
 	"mooring_delivery_barriers":        "runtime read-revocation barriers belong to source installation",
 	"mooring_session_owners":           "process-bound owner capability must not travel in a portable backup",
