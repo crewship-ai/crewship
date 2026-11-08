@@ -71,7 +71,7 @@ export function RestrictedArtifacts({ workspaceId, access, focus, hrefFor, homeH
   }, [workspaceId, reload])
 
   // Another artifact, another workspace or a re-read starts from a clean form.
-  useEffect(() => { setSelected(""); setValues({}); setRun(null); setError(""); request.current = null }, [scope, reload])
+  useEffect(() => { setSelected(""); setValues({}); setRun(null); setError(""); setSubmitting(false); request.current = null }, [scope, reload])
 
   useEffect(() => {
     if (!runId || !runState || !ACTIVE.includes(runState)) return

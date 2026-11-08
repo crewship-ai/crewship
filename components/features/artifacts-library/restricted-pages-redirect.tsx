@@ -11,11 +11,11 @@ import { restrictedArtifactsHref } from "./restricted-artifacts-url"
  * request; the address is read from `window.location` because the static
  * export serves /pages/_ for every slug.
  */
-export function RestrictedPagesRedirect() {
+export function RestrictedPagesRedirect({ before }: { before?: () => void }) {
   const router = useRouter()
   useEffect(() => {
-    const href = restrictedArtifactsHref(window.location.pathname, window.location.search.replace(/^\?/, ""))
-    if (href) router.replace(href)
+    before?.()
+    router.replace(restrictedArtifactsHref(window.location.pathname, window.location.search.replace(/^\?/, "")))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
   return <div className="flex flex-col gap-3 p-4"><Skeleton className="h-9 w-full" /><Skeleton className="h-40 w-full" /></div>
 }

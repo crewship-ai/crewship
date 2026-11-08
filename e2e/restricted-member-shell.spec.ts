@@ -697,6 +697,7 @@ test("restricted member's Artifacts shows exactly their old Pages catalog, and o
     ["/pages/brief?artifact=1&version=2&workspace_id=ws-a", "/artifacts?workspace_id=ws-a&item=brief"],
     ["/pages/%40page-brief?workspace_id=ws-a", "/artifacts/page-brief?workspace_id=ws-a"],
     ["/pages?ref=page-brief&workspace_id=ws-a", "/artifacts/page-brief?workspace_id=ws-a"],
+    ["/pages/craft/editor?page_id=page-brief&workspace_id=ws-a", "/artifacts/page-brief?workspace_id=ws-a"],
   ]) {
     await page.goto(link)
     await expect.poll(() => { const url = new URL(page.url()); return url.pathname + url.search }, { message: link }).toBe(landing)
@@ -707,7 +708,7 @@ test("restricted member's Artifacts shows exactly their old Pages catalog, and o
   await expect(page.getByText("Launch plan")).toHaveCount(0)
 
   // Anything not granted: the gate, never the address's or another artifact's name.
-  for (const link of ["/pages/secret-plan?workspace_id=ws-a", "/artifacts?item=secret-plan&workspace_id=ws-a", "/artifacts/page-secret?workspace_id=ws-a", "/pages/%40page-secret?workspace_id=ws-a"]) {
+  for (const link of ["/pages/secret-plan?workspace_id=ws-a", "/artifacts?item=secret-plan&workspace_id=ws-a", "/artifacts/page-secret?workspace_id=ws-a", "/pages/%40page-secret?workspace_id=ws-a", "/pages/craft/editor?page_id=page-secret&workspace_id=ws-a"]) {
     await page.goto(link)
     await expect(page.getByRole("heading", { name: "This artifact isn’t part of your access" })).toBeVisible()
     await expect(page.getByRole("link", { name: "Go to Artifacts" })).toHaveAttribute("href", "/artifacts?workspace_id=ws-a")

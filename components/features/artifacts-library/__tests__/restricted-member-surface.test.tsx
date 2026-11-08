@@ -58,13 +58,21 @@ vi.mock("@/components/features/artifacts-library/artifacts-library", () => ({ Ar
 vi.mock("@/components/features/pages/pages-layout", () => ({ PagesLayout: () => <p>PAGES LAYOUT MOUNTED</p> }))
 vi.mock("@/components/features/pages/artifact-project", () => ({ ArtifactProject: () => <p>PROJECT MOUNTED</p> }))
 
+const readLoss = vi.hoisted(() => vi.fn(async () => false))
+vi.mock("@/lib/mooring/native-read-loss", () => ({ verifyNativeReadLoss: readLoss }))
+// The editor host itself must never mount for a restricted member.
+vi.mock("@/components/features/pages/native-craft-editor-host", () => ({ NativeCraftEditorHost: () => <p>EDITOR HOST MOUNTED</p> }))
+vi.mock("@/components/features/pages/native-craft-preview", () => ({ NativeCraftPreview: () => <p>EDITOR PREVIEW MOUNTED</p> }))
+
 import PagesPage from "@/app/(dashboard)/pages/page"
+import CraftPage from "@/app/(dashboard)/pages/craft/editor/page"
 import PageDetailRoute from "@/app/(dashboard)/pages/[slug]/page"
 import ArtifactsPage from "@/app/(dashboard)/artifacts/page"
 import ArtifactRoute from "@/app/(dashboard)/artifacts/[id]/page"
 
 function routeOf(pathname: string) {
   if (pathname === "/pages") return <PagesPage />
+  if (pathname === "/pages/craft/editor") return <CraftPage />
   if (pathname.startsWith("/pages/")) return <PageDetailRoute />
   if (pathname === "/artifacts") return <ArtifactsPage />
   if (pathname.startsWith("/artifacts/")) return <ArtifactRoute />
@@ -112,7 +120,7 @@ async function expectGate(...secrets: string[]) {
   noTrustedView()
 }
 
-beforeEach(() => { requests.length = 0; nav.push.mockReset() })
+beforeEach(() => { requests.length = 0; nav.push.mockReset(); readLoss.mockClear() })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 describe.each(["true", "false"])("a restricted member with NEXT_PUBLIC_ARTIFACTS_LIBRARY=%s", library => {
@@ -134,6 +142,7 @@ describe.each(["true", "false"])("a restricted member with NEXT_PUBLIC_ARTIFACTS
     ["/pages/brief?artifact=1&version=2&workspace_id=ws1", "/artifacts?workspace_id=ws1&item=brief"],
     ["/pages/brief?mode=edit&workspace_id=ws1", "/artifacts?workspace_id=ws1&item=brief"],
     ["/pages/%40page-brief?workspace_id=ws1", "/artifacts/page-brief?workspace_id=ws1"],
+    ["/pages/craft/editor?page_id=page-brief&workspace_id=ws1", "/artifacts/page-brief?workspace_id=ws1"],
   ])("following the old link %s lands on %s", async (link, landing) => {
     expect(await visit(link)).toBe(landing)
     noTrustedView()
@@ -171,5 +180,12 @@ describe.each(["true", "false"])("a restricted member with NEXT_PUBLIC_ARTIFACTS
     await visit(link)
     await expectGate("page-secret")
     await waitFor(() => expect(requests).toEqual([]))
+  })
+
+  it("an old native editor link runs only the read-loss proof, then shows the gate", async () => {
+    expect(await visit("/pages/craft/editor?page_id=page-secret&workspace_id=ws1")).toBe("/artifacts/page-secret?workspace_id=ws1")
+    expect(readLoss).toHaveBeenCalledWith({ human: "u-r", workspace: "ws1", page: "page-secret" })
+    await expectGate("page-secret")
+    expect(requests).toEqual([])
   })
 })

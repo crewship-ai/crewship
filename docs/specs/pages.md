@@ -967,10 +967,11 @@ Old `/pages` addresses stay mountable for the surface only so that they can
 move (`restricted-artifacts-url.ts`, by address alone, with `router.replace`).
 `/pages[?…]` and a malformed `?ref=` go to `/artifacts`. `/pages/<slug>` goes
 to `/artifacts?item=<slug>`, and `/pages/@<id>` or `?ref=<id>` to
-`/artifacts/<id>`. Only `workspace_id` is kept. `/pages/craft/editor` keeps its
-own answer, because the native editor host refuses a restricted session
-itself and still runs its read-loss proof. Permissions are unchanged, and the
-server remains authoritative.
+`/artifacts/<id>`. `/pages/craft/editor?page_id=<id>` goes to `/artifacts/<id>`
+without mounting the editor host (its availability read is not allowlisted);
+it first runs the same local read-loss proof, whose only request is the
+allowlisted `draft-key`. Only `workspace_id` is kept. Permissions are
+unchanged, and the server remains authoritative.
 
 Without the library, `/artifacts/<id>` resolves the kind and opens
 `/pages/@<id>?artifact=1[&version=N]` for a project and `/pages/@<id>` for any

@@ -12,6 +12,7 @@ import {useAccessMode} from "@/hooks/use-access-mode"
 import {artifactsLibrary} from "@/lib/feature-flags"
 import {legacyPagesTarget} from "@/components/features/artifacts-library/legacy-pages-url"
 import {LegacyPagesRedirect} from "@/components/features/artifacts-library/legacy-pages-redirect"
+import {RestrictedPagesRedirect} from "@/components/features/artifacts-library/restricted-pages-redirect"
 
 interface Availability {scope:string;state:"loading"|"enabled"|"preview"|"disabled"|"error"}
 export default function CraftPage(){return <Suspense fallback={<p className="p-6">Connecting…</p>}><CraftEntry/></Suspense>}
@@ -19,7 +20,18 @@ export default function CraftPage(){return <Suspense fallback={<p className="p-6
 // detail, /artifacts/<id>, which mounts this same editor host (#5129). Any
 // address that does not resolve, and every restricted session, keeps this route.
 // The build-time flag never changes at runtime, so the branch is stable.
-function CraftEntry(){return artifactsLibrary()?<CraftEntryWithLibrary/>:<NativeWordEntry/>}
+// A restricted session never mounts the editor host (its availability read is
+// outside the restricted allowlist): it moves to /artifacts/<id> (#5132), after
+// the same read-loss proof the host ran when admission failed (draft-key only).
+function CraftEntry(){const accessMode=useAccessMode();if(accessMode==='restricted')return <RestrictedCraftEntry/>;return artifactsLibrary()?<CraftEntryWithLibrary/>:<NativeWordEntry/>}
+function RestrictedCraftEntry(){
+ const params=useSearchParams(),session=useSession(),workspace=usePageWorkspace()
+ if(session.status==='loading'||workspace.loading)return <p className="p-6">Connecting…</p>
+ const pages=params?.getAll('page_id')??[],workspaces=params?.getAll('workspace_id')??[]
+ const human=session.status==='authenticated'?session.data?.user.id:undefined,page=pages[0],linked=workspaces[0]
+ const scope=human&&pages.length===1&&page&&page.length<=256&&!page.includes('\0')&&workspaces.length===1&&linked?{human,workspace:linked,page}:null
+ return <RestrictedPagesRedirect before={()=>{if(scope)void verifyNativeReadLoss(scope).catch(()=>{})}}/>
+}
 function CraftEntryWithLibrary(){
  const params=useSearchParams(),workspace=usePageWorkspace(),accessMode=useAccessMode()
  if(workspace.loading||accessMode==='loading')return <p className="p-6">Connecting…</p>

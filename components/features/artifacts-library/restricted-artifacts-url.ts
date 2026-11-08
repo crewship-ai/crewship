@@ -9,21 +9,24 @@
  *   catalog answers for a granted artifact and gates for any other
  * - `/pages/@<id>`, `/pages?ref=<id>` → `/artifacts/<id>`, which is gated:
  *   the catalog names artifacts by slug only, so an ID never proves a grant
- * - `/pages/craft/editor` → null: the native editor host keeps answering it
- *   exactly as before (it refuses a restricted session itself)
+ * - `/pages/craft/editor?page_id=<id>` → `/artifacts/<id>`, gated like any ID;
+ *   the route first runs the native read-loss proof (allowlisted `draft-key`)
  *
  * Only the workspace link survives; versions, modes and project flags have
  * nothing to open in the restricted catalog.
  */
-export function restrictedArtifactsHref(pathname: string, search: string): string | null {
+export function restrictedArtifactsHref(pathname: string, search: string): string {
   const params = new URLSearchParams(search)
   const path = pathname.replace(/\/+$/, "") || "/"
-  if (path === "/pages/craft/editor" || path.startsWith("/pages/craft/editor/")) return null
   const query = new URLSearchParams()
   const workspaces = params.getAll("workspace_id")
   if (workspaces.length === 1 && workspaces[0]) query.set("workspace_id", workspaces[0])
   const home = () => `/artifacts${query.size ? `?${query}` : ""}`
   const byId = (id: string) => SAFE_ID.test(id) ? `/artifacts/${encodeURIComponent(id)}${query.size ? `?${query}` : ""}` : home()
+  if (path === "/pages/craft/editor") {
+    const pages = params.getAll("page_id")
+    return pages.length === 1 ? byId(pages[0]) : home()
+  }
   if (path === "/pages") {
     const refs = params.getAll("ref")
     return refs.length === 1 ? byId(refs[0]) : home()

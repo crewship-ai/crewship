@@ -109,3 +109,28 @@ it("names neither a missing artifact nor the catalog behind the gate", async () 
   expect(document.body.textContent).not.toMatch(/secret-brief|Allowed Page|Allowed action/)
   expect(screen.getByRole("link", { name: "Go to Artifacts" }).getAttribute("href")).toBe("/artifacts?workspace_id=workspace")
 })
+
+it("a pending action on one artifact neither locks nor lands on the next one", async () => {
+  mountConfirmHost()
+  const two = [...catalog, { slug: "other", name: "Other", actions: [{ intent_hash: "o", panel_id: "panel", id: "go", label: "Other action", inputs: [] }] }]
+  let finish: (value: Response) => void = () => {}
+  api.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (url.endsWith("/restricted-pages")) return response(two)
+    if (init?.method === "POST") return new Promise<Response>(resolve => { finish = resolve })
+    throw new Error("Unexpected request")
+  })
+  const view = render(<Allowed />)
+  await screen.findByRole("option", { name: "Allowed action" })
+  fireEvent.change(screen.getByRole("combobox", { name: "Action" }), { target: { value: key } })
+  fireEvent.change(screen.getByRole("textbox", { name: "task" }), { target: { value: "x" } })
+  fireEvent.click(screen.getByRole("button", { name: "Run action" }))
+  await answerConfirm("Run action")
+  await screen.findByRole("button", { name: "Submitting…" })
+  view.rerender(<RestrictedArtifacts workspaceId="workspace" focus="other" hrefFor={slug => `/artifacts?item=${slug}`} homeHref="/artifacts" />)
+  await screen.findByRole("option", { name: "Other action" })
+  expect(screen.getByRole("combobox", { name: "Action" })).toBeEnabled()
+  finish(response({ run_id: "late-run", status: "SCHEDULED" }, 202))
+  await new Promise(resolve => setTimeout(resolve, 20))
+  expect(screen.queryByText(/Status:/)).toBeNull()
+  expect(screen.getByRole("combobox", { name: "Action" })).toBeEnabled()
+})
