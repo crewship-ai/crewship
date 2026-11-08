@@ -13,6 +13,7 @@ import { createArtifactMockServer, type ArtifactMockServer } from "../components
 import { documentSchema } from "../lib/documents/schema"
 import type { ArtifactFile } from "../components/features/chat/artifact-context/projects/types"
 import slidesFixture from "../testdata/slides-schema-v1.json"
+import designSystemManifest from "../cmd/crewship/seeddata/showcase/mirror/ds216/manifest.json"
 
 const WORKSPACE = "ws-fixture"
 const html = (path: string, title: string, body: string): ArtifactFile => ({ path, media_type: "text/html",
@@ -54,7 +55,12 @@ const LIST = [
   row({ id: "page-survey", slug: "field-survey", name: "Field survey", artifact_kind: "project", has_application: true, artifact_shared_version: 1, updated_at: ago(60 * 120) }),
   // A Design canvas; its live document is the use-design stand-in (artifacts-library.design-fixture.ts).
   row({ id: "page-design", slug: "launch-landing", name: "Launch landing", artifact_kind: "design", updated_at: ago(60 * 130) }),
+  // A design system: a project the catalog cannot tell from an App until its manifest (design-system.json) is read.
+  row({ id: "page-ds", slug: "ref-design-system", name: "Template Crewship Design System", artifact_kind: "project", updated_at: ago(60 * 140) }),
 ]
+// The mirrored claude.ai design system the dev seed carries (cmd/crewship/seeddata/showcase/mirror/ds216).
+mocks["ref-design-system"] = createArtifactMockServer({ slug: "ref-design-system", name: "Template Crewship Design System", entrypoint: designSystemManifest.entrypoint,
+  files: designSystemManifest.files as ArtifactFile[], message: "Mirrored design system" })
 // The private project's mock: a single unshared version.
 mocks["q3-support-summary"] = createArtifactMockServer({ slug: "q3-support-summary", name: "Q3 support summary", entrypoint: "plans.html", files: site(1), message: "First draft" })
 

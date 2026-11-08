@@ -61,11 +61,11 @@ export function DocsBody({ workspaceId, item, fallback, onFrame }: {
     return <>{fallback}</>
   }
   return <PageDocument workspaceId={workspaceId} slug={"@" + pageId} pageId={pageId} name={item.name}
-    renderWorkspace={props => <DocsWorkspace {...props} item={item} onFrame={onFrame} />} />
+    renderWorkspace={props => <DocsWorkspace {...props} onFrame={onFrame} />} />
 }
 
-function DocsWorkspace(props: DocumentWorkspaceProps & { item: LibraryItem; onFrame: (report: DocsFrameReport | null) => void }) {
-  const { workspaceId, pageId, humanId, slug, available, historyExpired, sync, item, onFrame } = props
+function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsFrameReport | null) => void }) {
+  const { workspaceId, pageId, humanId, slug, available, historyExpired, sync, onFrame } = props
   const frame = useArtifactFrame()
   const layout: FrameLayout = frame?.layout ?? "desktop"
   const phone = layout === "phone"
@@ -142,8 +142,6 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { item: LibraryItem; onFr
       <DocumentEarlierDraftNotice sync={sync} slug={slug} onError={setActionError} className="flex flex-wrap items-center gap-2 [&>p]:basis-full" />
     </div>
     : null
-  const owner = item.ownerLabel ? `owned by ${item.ownerLabel === "You" ? "you" : item.ownerLabel}` : null
-  const meta = [item.folder?.name, owner].filter(Boolean).join(" · ")
 
   const jump = (entry: OutlineEntry) => {
     if (!entry.id || !editor) return
@@ -155,15 +153,12 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { item: LibraryItem; onFr
   return <section aria-label="Doc page" data-docs-page data-layout={layout} className={cn("touch-form min-h-full", outlineOpen && !phone && "pl-[256px]")}>
     <article className={COLUMN}>
       {banner}
-      <header className="grid gap-1">
-        <h1 className="text-3xl font-semibold tracking-tight">{item.name}</h1>
-        {meta && <p className="text-sm text-muted-foreground">{meta}</p>}
-        {/* The chip is a button; this stays the one live region that announces save state. */}
-        <div className="sr-only">
-          <DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status}
-            durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} unverifiedDraft={sync.unverifiedDrafts.length > 0} lockless={sync.storageLockless} />
-        </div>
-      </header>
+      {/* The frame names the artifact and its Info drawer the owner and folder (Harbor 2 v87 Docs): the column starts with the document. */}
+      {/* The chip is a button; this stays the one live region that announces save state. */}
+      <div className="sr-only">
+        <DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status}
+          durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} unverifiedDraft={sync.unverifiedDrafts.length > 0} lockless={sync.storageLockless} />
+      </div>
       {reviewEnabled && sync.state && !sync.denied && <DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} />}
       {!sync.denied && <>
         {sync.state && empty && <p className="text-sm text-muted-foreground">{editable ? "This document is empty. Start writing below, or ask an agent in a chat to draft it." : "This document is empty."}</p>}

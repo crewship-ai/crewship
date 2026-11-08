@@ -50,7 +50,7 @@ try {
   await build({
     entryPoints: ["e2e/artifacts-library.fixture.tsx"], bundle: true, outfile: join(output, "bundle.js"), platform: "browser", format: "esm", jsx: "automatic",
     alias: { "@": process.cwd() }, logLevel: "error", external: ["/fonts/*"],
-    define: { "process.env": JSON.stringify({ NODE_ENV: "test", NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS: "true", NEXT_PUBLIC_CHAT_CRAFT_LEASE: "true", NEXT_PUBLIC_ARTIFACTS_LIBRARY: "true", NEXT_PUBLIC_ARTIFACTS_DESIGN: "true", NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK: "true" }) },
+    define: { "process.env": JSON.stringify({ NODE_ENV: "test", NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS: "true", NEXT_PUBLIC_CHAT_CRAFT_LEASE: "true", NEXT_PUBLIC_ARTIFACTS_LIBRARY: "true", NEXT_PUBLIC_ARTIFACTS_DESIGN: "true", NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM: "true", NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK: "true" }) },
     plugins: [{ name: "fixture-neighbours", setup(b) {
       b.onResolve({ filter: /(?:^@\/hooks\/use-auth$|\/hooks\/use-auth(?:\.tsx?)?$|^@\/hooks\/use-workspace$|^next\/navigation$)/ }, args => ({ path: stubOf(args.path), namespace: "fixture" }))
       b.onLoad({ filter: /.*/, namespace: "fixture" }, args => ({ loader: "js", contents: STUBS[args.path] }))
@@ -113,7 +113,7 @@ try {
     await page.getByRole("heading", { level: 1, name: "Artifacts" }).waitFor({ state: "attached" })
     const attention = page.getByRole("region", { name: /^Needs attention/ })
     assert.deepEqual(await attention.getByRole("button").evaluateAll(b => b.map(x => x.getAttribute("aria-label"))), ["Data is stale: Weekly competitor report"])
-    const HOME = ["Open Pricing site", "Open Partner brief", "Open Price model", "Open Sales pipeline", "Open Weekly competitor report", "Open Q3 board deck", "Open Q3 support summary", "Open Launch notes", "Open Field survey", "Open Launch landing"]
+    const HOME = ["Open Pricing site", "Open Partner brief", "Open Price model", "Open Sales pipeline", "Open Weekly competitor report", "Open Q3 board deck", "Open Q3 support summary", "Open Launch notes", "Open Field survey", "Open Launch landing", "Open Template Crewship Design System"]
     assert.deepEqual((await listed()).sort(), [...HOME].sort())
     assert.equal(await page.getByText("Pricing calculator").count(), 0, "an empty Page is not on Home")
     assert.equal(await page.getByText(/\bPages?\b/).count(), 0, "\"Page\" is never a label")
@@ -146,9 +146,9 @@ try {
     assert.equal(await spaces.getByRole("tab", { name: /^All artifacts/ }).getAttribute("aria-selected"), "true")
     await closePanel()
     await list.waitFor()
-    const ALL = ["Open Pricing site", "Open Partner brief", "Open Price model", "Open Sales pipeline", "Open Weekly competitor report", "Open Q3 board deck", "Open Q3 support summary", "Open Launch notes", "Open Field survey", "Open Launch landing"]
+    const ALL = ["Open Pricing site", "Open Partner brief", "Open Price model", "Open Sales pipeline", "Open Weekly competitor report", "Open Q3 board deck", "Open Q3 support summary", "Open Launch notes", "Open Field survey", "Open Launch landing", "Open Template Crewship Design System"]
     assert.deepEqual(await listed(), ALL)
-    await page.getByRole("toolbar", { name: "Display" }).getByText("10 artifacts").waitFor()
+    await page.getByRole("toolbar", { name: "Display" }).getByText("11 artifacts").waitFor()
     // A legacy Page of data panels without an application is a Dashboard (kinds.ts), never "Page" and not an App.
     assert.match(await list.getByRole("button", { name: "Open Weekly competitor report" }).innerText(), /\bDashboard\b/)
     assert.doesNotMatch(await list.getByRole("button", { name: "Open Weekly competitor report" }).innerText(), /\bPage\b/)
@@ -162,13 +162,13 @@ try {
     const search = panel.getByRole("textbox", { name: "Search artifacts" })
     await search.fill("kind:project")
     await closePanel()
-    await page.getByRole("toolbar", { name: "Display" }).getByText("3 artifacts").waitFor()
-    assert.deepEqual(await listed(), ["Open Pricing site", "Open Q3 support summary", "Open Field survey"])
+    await page.getByRole("toolbar", { name: "Display" }).getByText("4 artifacts").waitFor()
+    assert.deepEqual(await listed(), ["Open Pricing site", "Open Q3 support summary", "Open Field survey", "Open Template Crewship Design System"])
     if (!vp.mobile) {
       // 2b. The peek: the list stays with its filter; J/K move the peek, Escape closes it, Enter opens.
       await list.getByRole("button", { name: "Open Pricing site" }).click()
       await peek.getByRole("heading", { name: "Pricing site", exact: true }).waitFor()
-      assert.deepEqual(await listed(), ["Open Pricing site", "Open Q3 support summary", "Open Field survey"], "the list keeps its filter under the peek")
+      assert.deepEqual(await listed(), ["Open Pricing site", "Open Q3 support summary", "Open Field survey", "Open Template Crewship Design System"], "the list keeps its filter under the peek")
       assert.equal(await list.getByRole("button", { name: "Open Pricing site" }).getAttribute("aria-current"), "true")
       await page.keyboard.press("j")
       await peek.getByRole("heading", { name: "Q3 support summary", exact: true }).waitFor()
@@ -178,7 +178,7 @@ try {
       await peek.getByRole("heading", { name: "Pricing site", exact: true }).waitFor()
       await page.keyboard.press("Escape")
       await peek.waitFor({ state: "detached" })
-      assert.deepEqual(await listed(), ["Open Pricing site", "Open Q3 support summary", "Open Field survey"])
+      assert.deepEqual(await listed(), ["Open Pricing site", "Open Q3 support summary", "Open Field survey", "Open Template Crewship Design System"])
     }
     panel = await openPanel()
     const filterButton = panel.getByRole("button", { name: /^Filter/ })
@@ -202,7 +202,7 @@ try {
     await panel.getByRole("button", { name: "Remove filter Who can open: Private" }).click()
     await panel.getByRole("textbox", { name: "Search artifacts" }).fill("")
     await closePanel()
-    await page.getByRole("toolbar", { name: "Display" }).getByText("10 artifacts").waitFor()
+    await page.getByRole("toolbar", { name: "Display" }).getByText("11 artifacts").waitFor()
     assert.deepEqual(await listed(), ALL)
 
     // 3 + 4. Open every kind inside the ArtifactFrame. The project opens in its library viewer:
@@ -217,6 +217,8 @@ try {
       await openRow(name)
       // The frame names it once, in the header's title menu, and says which UI kind it is.
       await page.getByRole("button", { name: `${name}, artifact menu` }).waitFor()
+      // A design system is known only once its project is read; the frame then names it a Design.
+      await page.locator(`[data-artifact-frame="${kind}"]`).waitFor().catch(() => {})
       assert.equal(await frame.getAttribute("data-artifact-frame"), kind, `${name} is a ${kind}`)
       assert.ok(await page.getByRole("heading", { name, exact: true }).count() <= 1, `${name} is titled at most once in the body`)
       if (status) await page.getByRole("button", { name: `Status: ${status}`, exact: true }).waitFor()
@@ -315,6 +317,7 @@ try {
       { name: "Field survey", kind: "app", slug: "field-survey", status: "Can't run here", viewer: true, shot: "07-app-interactive" },
       { name: "Q3 board deck", kind: "slides", slug: "q3-board-deck", shot: "07-slides" },
       { name: "Launch landing", kind: "design", slug: "launch-landing", status: "Live", shot: "07-design" },
+      { name: "Template Crewship Design System", kind: "design", slug: "ref-design-system", status: "Saved · v1", library: true, shot: "07-design-library" },
       { name: "Partner brief", kind: "word", slug: "partner-brief", status: "Jana Nováková is editing", shot: "07-word" },
       { name: "Price model", kind: "sheet", slug: "price-model", status: "Free to edit", shot: "07-sheet" },
     ]
@@ -326,10 +329,13 @@ try {
       assert.equal(await viewer.count(), entry.viewer ? 1 : 0, `${entry.name}: a project viewer only for a project`)
       assert.equal(await lockControls.count(), 0, `${entry.name}: no lock bar outside the status chip`)
       await noEmptyPanels(entry.name)
+      assert.doesNotMatch(await page.locator("body").textContent(), /\[object Object\]/, `${entry.name}: no stringified object in the page`)
 
       if (entry.kind === "docs") {
         // The live document, confirmed by the server; its outline and counts sit in the frame's slots.
         const doc = page.getByRole("region", { name: "Doc page" })
+        // The frame names it and Info says who owns it: no second title or owner line above the document.
+        assert.equal(await doc.getByText(/owned by/).count(), 0, "no owner line in the Docs body")
         await doc.getByRole("textbox", { name: "Document editor" }).getByText("The launch moves to Tuesday", { exact: false }).waitFor()
         await doc.getByRole("status").getByText("Saved · Confirmed by server").waitFor()
         // The counts sit in the viewport slot, which a phone hides (FRAME.md).
@@ -357,7 +363,7 @@ try {
         await deck.getByText(/^Slide 1 of \d+$/).waitFor()
         assert.equal(await deck.getByRole("button").count(), 0, "the saved deck is read-only")
       }
-      if (entry.kind === "app") {
+      if (entry.kind === "app" && !entry.library) {
         // Interactive, but no isolated runtime origin here: it says so and loads nothing.
         await page.getByRole("group", { name: "Capabilities" }).getByLabel(/^User:/).waitFor()
         await page.getByRole("group", { name: "Capabilities" }).getByLabel(/^Data: .*responses/).waitFor()
@@ -365,7 +371,16 @@ try {
         assert.equal(await stage.locator("iframe").count(), 0, "an app that cannot run loads no frame")
         assert.equal(await stage.getByText("Runs isolated").count(), 0, "an app that cannot run never says it runs isolated")
       }
-      if (entry.kind === "design") {
+      if (entry.library) {
+        // The library itself in the frame: no second title row, viewer tabs or comment column (#5132).
+        await page.getByRole("region", { name: "Colors" }).waitFor()
+        assert.equal(await page.locator("[data-kind-mode]").getAttribute("data-kind-mode"), "library")
+        assert.equal(await page.getByText("Comments for agent").count(), 0, "no legacy comment column")
+        assert.equal(await page.getByRole("tablist", { name: "Artifact detail" }).count(), 0, "no legacy Preview/History/Comments tabs")
+        await page.getByRole("toolbar", { name: "View" }).getByRole("button", { name: "Version: v1 · Latest" }).waitFor()
+        await page.getByRole("group", { name: "Output" }).getByRole("link", { name: "Edit source" }).waitFor()
+      }
+      if (entry.kind === "design" && !entry.library) {
         await page.getByRole("region", { name: "Design editor" }).getByRole("img", { name: "Design canvas" }).waitFor()
         // Drawing tools are offered where the canvas can be changed (not on a phone, design-editor.tsx `canChange`).
         if (!vp.mobile) await page.getByRole("toolbar", { name: "Design tools" }).waitFor()

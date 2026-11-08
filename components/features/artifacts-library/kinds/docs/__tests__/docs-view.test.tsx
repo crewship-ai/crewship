@@ -86,12 +86,15 @@ describe("Docs in the ArtifactFrame", () => {
     expect(screen.queryByRole("button", { name: /^Status:/ })).toBeNull()
   })
 
-  it("lays the page out: reading column with title and meta, Page mode only, outline, counts, tools and History", async () => {
+  it("lays the page out: reading column, Page mode only, outline, counts, tools and History", async () => {
     serve()
     open()
     expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
-    expect(screen.getByRole("heading", { level: 1, name: "Launch notes" })).toBeTruthy()
-    expect(screen.getByText("Demo Lab · owned by Research crew")).toBeTruthy()
+    // The frame names the artifact and the Info drawer its owner: the body starts with the document itself.
+    const page = screen.getByRole("region", { name: "Doc page" })
+    expect(within(page).queryByText("Launch notes")).toBeNull()
+    expect(within(page).queryByText(/owned by/)).toBeNull()
+    expect(within(page).getAllByRole("heading", { level: 1 }).map(heading => heading.textContent)).toEqual(["Goal"])
     // Page is the one mode; Canvas has no backend and is not offered.
     const modes = within(slot("view")!).getByRole("tablist", { name: "Mode" })
     expect(within(modes).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Page"])
