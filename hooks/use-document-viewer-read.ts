@@ -20,7 +20,7 @@ export interface DocumentViewerReadInput {
    *  (human, workspace, chat, activation) still reset the read at once. */
   hold?: boolean
 }
-export interface SavedDocumentBody { schema: 2 | 3 | 4; rev: number; content: unknown }
+export interface SavedDocumentBody { schema: 2 | 3 | 4 | 5; rev: number; content: unknown }
 type Read = DocumentViewerRead<SavedDocumentBody>
 type FailureStatus = "denied" | "unavailable" | "error"
 class ReadFailure extends Error {
@@ -67,7 +67,7 @@ export function useDocumentViewerRead({ workspaceId, chatId, currentUserId, acti
           if (!object(metadata) || metadata.id !== pageId || metadata.has_document !== true || !nonempty(metadata.name, 512)) throw new ReadFailure("unavailable")
           const value = await readJSON(`${path}/document?${query}`, controller.signal)
           if (!current()) return
-          if (!object(value) || value.page_id !== pageId || (value.schema !== 2 && value.schema !== 3 && value.schema !== 4)
+          if (!object(value) || value.page_id !== pageId || (value.schema !== 2 && value.schema !== 3 && value.schema !== 4 && value.schema !== 5)
             || !Number.isSafeInteger(value.rev) || (value.rev as number) < 0) throw new ReadFailure("unavailable")
           try {
             documentSchema.validateJSON(value.content, value.schema)

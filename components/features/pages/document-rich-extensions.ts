@@ -17,17 +17,20 @@ const BASE_BLOCKS = ["paragraph", "heading", "bulletList", "orderedList", "listI
 const RICH_NAMES: Record<number, string[]> = {
   3: ["link", "code", "codeBlock"],
   4: ["link", "bold", "italic", "strike", "code", "codeBlock", "blockquote", "taskList", "taskItem"],
+  5: ["link", "bold", "italic", "strike", "underline", "textColor", "highlight", "code", "codeBlock", "blockquote", "taskList", "taskItem"],
 }
 
 /** Block types that carry a stable `id` in this schema. */
 export function stableBlockTypes(schema: number | undefined): string[] {
-  return [...BASE_BLOCKS, ...(schema === 3 || schema === 4 ? ["codeBlock"] : []), ...(schema === 4 ? ["blockquote", "taskList", "taskItem"] : [])]
+  return [...BASE_BLOCKS, ...(isRichSchema(schema) ? ["codeBlock"] : []), ...(isFormattedSchema(schema) ? ["blockquote", "taskList", "taskItem"] : [])]
 }
 
 /** True where the schema has bold, italic, strike, quotes, checklists and code languages. */
-export const isFormattedSchema = (schema: number | undefined) => schema === 4
+export const isFormattedSchema = (schema: number | undefined) => schema === 4 || schema === 5
 /** True where the schema has links, inline code and code blocks. */
-export const isRichSchema = (schema: number | undefined) => schema === 3 || schema === 4
+export const isRichSchema = (schema: number | undefined) => schema === 3 || schema === 4 || schema === 5
+/** True where the schema has underline and palette text colour and highlight. */
+export const isStyledSchema = (schema: number | undefined) => schema === 5
 
 /** The schema's own marks and nodes beyond the StarterKit base, with editing behaviour. */
 export function documentEditorExtensions(schema: number | undefined): AnyExtension[] {
@@ -36,7 +39,7 @@ export function documentEditorExtensions(schema: number | undefined): AnyExtensi
   const own = (documentSchema.extensionsFor(schema) as AnyExtension[]).filter(extension => names.includes(extension.name))
     .map(extension => extension.name === "taskItem" ? interactiveTaskItem(extension)
       : extension.name === "codeBlock" ? codeBlockView(extension, { languages: isFormattedSchema(schema) }) : extension)
-  return isFormattedSchema(schema) ? [...own, FormatShortcuts, CodeHighlight] : own
+  return isStyledSchema(schema) ? [...own, FormatShortcuts, CodeHighlight, StyleShortcuts] : isFormattedSchema(schema) ? [...own, FormatShortcuts, CodeHighlight] : own
 }
 
 const FormatShortcuts = Extension.create({
@@ -47,6 +50,27 @@ const FormatShortcuts = Extension.create({
       "Mod-i": () => this.editor.commands.toggleMark("italic"),
       "Mod-Shift-s": () => this.editor.commands.toggleMark("strike"),
       "Mod-e": () => this.editor.commands.toggleMark("code"),
+    }
+  },
+})
+
+/** Inline formatting that "Clear formatting" removes. Links are content, not formatting, and stay. */
+export const CLEARABLE_MARKS = ["bold", "italic", "strike", "underline", "textColor", "highlight", "code"] as const
+
+/** Removes every clearable mark this schema has from the selection, as one undoable step. */
+export function clearFormatting(editor: Editor, chain = editor.chain()): boolean {
+  const present = CLEARABLE_MARKS.filter(name => editor.schema.marks[name])
+  if (!present.length) return false
+  return present.reduce((next, name) => next.unsetMark(name, { extendEmptyMarkRange: false }), chain).run()
+}
+
+/** Schema 5: underline, and clearing inline formatting from the selection. */
+const StyleShortcuts = Extension.create({
+  name: "documentStyleShortcuts",
+  addKeyboardShortcuts() {
+    return {
+      "Mod-u": () => this.editor.commands.toggleMark("underline"),
+      "Mod-\\": () => clearFormatting(this.editor),
     }
   },
 })
@@ -176,3 +200,4 @@ export function commentTarget(editor: Editor): CommentTarget | string {
   const start = $from.parentOffset, end = $to.parentOffset
   return { block: block.attrs.id, from: start, to: end, quote: block.textBetween(start, end) }
 }
+

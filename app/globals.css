@@ -234,6 +234,28 @@
   --info: #0A63D6;
   --notice: #0B6E7F;
   --warn: #8A5A00;
+  /* Docs schema 5 palette (text colour and highlight). A document stores the
+     NAME; each theme resolves it here. Every text shade is at least 4.5:1 on
+     --background, --card and --muted, and on every highlight of this theme;
+     --foreground on every highlight is far above that. Checked by
+     components/features/pages/__tests__/document-palette.test.ts. Word export
+     (lib/documents/docx-export.mjs) uses the light values. */
+  --doc-text-gray: #545B67;
+  --doc-text-red: #B3242B;
+  --doc-text-orange: #A04307;
+  --doc-text-yellow: #7A5600;
+  --doc-text-green: #1A6E46;
+  --doc-text-blue: #1C56BA;
+  --doc-text-purple: #6D35B5;
+  --doc-text-pink: #A11F6D;
+  --doc-mark-gray: #ECEEF1;
+  --doc-mark-red: #FDE2E1;
+  --doc-mark-orange: #FDE8D5;
+  --doc-mark-yellow: #FCF0B8;
+  --doc-mark-green: #D9F2E3;
+  --doc-mark-blue: #DDE9FD;
+  --doc-mark-purple: #ECE2FC;
+  --doc-mark-pink: #FBE0EF;
   --purple: oklch(0.66 0.22 300);
   /* Text on a purple tint. --purple is a fill/stroke token and is not
      text-safe: measured on the LEAD badge (bg-purple/20 over the card) it
@@ -473,6 +495,23 @@
   --info: #5DA1FF;
   --notice: oklch(0.72 0.14 200);
   --warn: #E5A83B;
+  /* Docs palette, dark theme: same names and the same contrast floor. */
+  --doc-text-gray: #A9AFBA;
+  --doc-text-red: #FF8E8A;
+  --doc-text-orange: #FFA466;
+  --doc-text-yellow: #F2C94C;
+  --doc-text-green: #62D49D;
+  --doc-text-blue: #80B5FF;
+  --doc-text-purple: #C6A4FF;
+  --doc-text-pink: #FF8FCC;
+  --doc-mark-gray: #30343C;
+  --doc-mark-red: #4D2226;
+  --doc-mark-orange: #4D2E17;
+  --doc-mark-yellow: #463A10;
+  --doc-mark-green: #173F2C;
+  --doc-mark-blue: #1B3359;
+  --doc-mark-purple: #382750;
+  --doc-mark-pink: #4A213C;
   --purple: oklch(0.66 0.22 300);
   /* See the light-theme note. Measured on bg-purple/20 over the dark card:
      5.11:1, up from 4.48:1. Chroma unchanged at 0.22. */
@@ -2260,3 +2299,23 @@ body {
   outline-offset: 2px;
   border-radius: 0.375rem;
 }
+
+/* Docs schema 5 marks: a palette name resolves to the theme's token. Nothing
+   in stored content is CSS. <mark> loses its browser yellow and keeps the text colour. */
+[data-text-color="gray"] { color: var(--doc-text-gray); }
+[data-text-color="red"] { color: var(--doc-text-red); }
+[data-text-color="orange"] { color: var(--doc-text-orange); }
+[data-text-color="yellow"] { color: var(--doc-text-yellow); }
+[data-text-color="green"] { color: var(--doc-text-green); }
+[data-text-color="blue"] { color: var(--doc-text-blue); }
+[data-text-color="purple"] { color: var(--doc-text-purple); }
+[data-text-color="pink"] { color: var(--doc-text-pink); }
+mark[data-highlight] { color: inherit; border-radius: 2px; padding: 0 1px; -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+mark[data-highlight="gray"] { background-color: var(--doc-mark-gray); }
+mark[data-highlight="red"] { background-color: var(--doc-mark-red); }
+mark[data-highlight="orange"] { background-color: var(--doc-mark-orange); }
+mark[data-highlight="yellow"] { background-color: var(--doc-mark-yellow); }
+mark[data-highlight="green"] { background-color: var(--doc-mark-green); }
+mark[data-highlight="blue"] { background-color: var(--doc-mark-blue); }
+mark[data-highlight="purple"] { background-color: var(--doc-mark-purple); }
+mark[data-highlight="pink"] { background-color: var(--doc-mark-pink); }

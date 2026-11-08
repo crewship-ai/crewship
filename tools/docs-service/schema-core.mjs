@@ -9,16 +9,24 @@ const legacyTypes = ['heading', 'paragraph', 'table', 'tableRow', 'tableCell', '
 const RICH_VERSION = 3;
 // Schema 4 is additive over 3: bold/italic/strike marks, code block languages,
 // block quotes and task lists. Schemas 1-3 keep their exact closed contracts.
-const LATEST_VERSION = 4;
+const FORMATTED_VERSION = 4;
+// Schema 5 is additive over 4: underline, and a text colour and a highlight
+// whose value is a palette NAME. The reader's theme resolves the name; stored
+// content never carries CSS, so a colour cannot become markup or a payload.
+const LATEST_VERSION = 5;
+const PALETTE = Object.freeze(['gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink']);
+const validColor = value => typeof value === 'string' && PALETTE.includes(value);
 const richTypes = [...legacyTypes, 'codeBlock'];
 const formattedTypes = [...richTypes, 'blockquote', 'taskList', 'taskItem'];
-const typesFor = version => { if (![1,2,3,4].includes(version)) throw new Error('unsupported content schema'); return version === 4 ? formattedTypes : version === 3 ? richTypes : legacyTypes; };
+const typesFor = version => { if (![1,2,3,4,5].includes(version)) throw new Error('unsupported content schema'); return version >= FORMATTED_VERSION ? formattedTypes : version === 3 ? richTypes : legacyTypes; };
 const isRich = version => version >= RICH_VERSION;
+const isFormatted = version => version >= FORMATTED_VERSION;
 // A code block language is a short lowercase identifier (python, c++, c#, objective-c), never markup.
 const LANGUAGE = /^[a-z0-9][a-z0-9+#-]{0,31}$/;
 const validLanguage = value => typeof value === 'string' && LANGUAGE.test(value);
-const formatKeys = version => version >= LATEST_VERSION ? ['link', 'code', 'bold', 'italic', 'strike'] : isRich(version) ? ['link', 'code'] : [];
-const maxMarks = version => version >= LATEST_VERSION ? 4 : isRich(version) ? 1 : 0;
+const COLOR_MARKS = ['textColor', 'highlight'];
+const formatKeys = version => version >= 5 ? ['link', 'code', 'bold', 'italic', 'strike', 'underline', ...COLOR_MARKS] : isFormatted(version) ? ['link', 'code', 'bold', 'italic', 'strike'] : isRich(version) ? ['link', 'code'] : [];
+const maxMarks = version => version >= 5 ? 7 : isFormatted(version) ? 4 : isRich(version) ? 1 : 0;
 const idsFor = types => Extension.create({
   name: 'stableIDs',
   addGlobalAttributes: () => [{ types, attributes: { id: {
@@ -58,11 +66,24 @@ function extensionsFor(version = VERSION) {
     Mark.create({ name: 'code', code: true, excludes: 'link code', parseHTML: () => [{ tag: 'code' }], renderHTML: () => ['code', {}, 0] }),
     Node.create({ name: 'codeBlock', group: 'block', content: 'text*', marks: '', code: true, defining: true, parseHTML: () => [{ tag: 'pre', preserveWhitespace: 'full' }], renderHTML: ({ HTMLAttributes }) => ['pre', HTMLAttributes, ['code', {}, 0]] }),
   ] : []),
-  ...(version === LATEST_VERSION ? [
+  ...(isFormatted(version) ? [
     Mark.create({ name: 'link', excludes: 'link code', addAttributes: () => ({ href: { default: null } }), parseHTML: () => [{ tag: 'a[href]', getAttrs: element => validLinkHref(element.getAttribute('href')) ? { href: element.getAttribute('href') } : false }], renderHTML: ({ mark }) => ['a', { href: mark.attrs.href, rel: 'noopener noreferrer', target: '_blank' }, 0] }),
     Mark.create({ name: 'bold', parseHTML: () => [{ tag: 'strong' }, { tag: 'b' }], renderHTML: () => ['strong', {}, 0] }),
     Mark.create({ name: 'italic', parseHTML: () => [{ tag: 'em' }, { tag: 'i' }], renderHTML: () => ['em', {}, 0] }),
     Mark.create({ name: 'strike', parseHTML: () => [{ tag: 's' }, { tag: 'del' }, { tag: 'strike' }], renderHTML: () => ['s', {}, 0] }),
+    // Schema 5 marks rank after strike and before code, so schema 4 mark order
+    // (and with it every schema 4 projection and hash) is unchanged.
+    ...(version >= 5 ? [
+      Mark.create({ name: 'underline', parseHTML: () => [{ tag: 'u' }], renderHTML: () => ['u', {}, 0] }),
+      ...COLOR_MARKS.map(name => {
+        const tag = name === 'highlight' ? 'mark' : 'span', data = name === 'highlight' ? 'data-highlight' : 'data-text-color';
+        const parsed = element => validColor(element.getAttribute(data)) ? element.getAttribute(data) : null;
+        return Mark.create({ name,
+          addAttributes: () => ({ color: { default: null, parseHTML: parsed, renderHTML: () => ({}) } }),
+          parseHTML: () => [{ tag: `${tag}[${data}]`, getAttrs: element => parsed(element) ? { color: parsed(element) } : false }],
+          renderHTML: ({ mark }) => [tag, validColor(mark.attrs.color) ? { [data]: mark.attrs.color } : {}, 0] });
+      }),
+    ] : []),
     // Inline code stands alone in schema 4: it excludes every other mark.
     Mark.create({ name: 'code', code: true, excludes: '_', parseHTML: () => [{ tag: 'code' }], renderHTML: () => ['code', {}, 0] }),
     Node.create({ name: 'codeBlock', group: 'block', content: 'text*', marks: '', code: true, defining: true,
@@ -82,8 +103,9 @@ function extensionsFor(version = VERSION) {
 const extensions = extensionsFor(VERSION);
 const schema = getSchema(extensions);
 const richSchema = getSchema(extensionsFor(RICH_VERSION));
+const formattedSchema = getSchema(extensionsFor(FORMATTED_VERSION));
 const latestSchema = getSchema(extensionsFor(LATEST_VERSION));
-const schemaFor = (version = VERSION) => { typesFor(version); return version === LATEST_VERSION ? latestSchema : version === RICH_VERSION ? richSchema : schema; };
+const schemaFor = (version = VERSION) => { typesFor(version); return version === LATEST_VERSION ? latestSchema : version === FORMATTED_VERSION ? formattedSchema : version === RICH_VERSION ? richSchema : schema; };
 function validLinkHref(value) {
   if (typeof value !== 'string' || new TextEncoder().encode(value).length > 2048 || /[\u0000-\u0020\u007f\p{Cs}]/u.test(value)) return false;
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password && url.href === value; } catch { return false; }
@@ -93,6 +115,7 @@ function validFormat(key, value, version = RICH_VERSION) {
   if (!formatKeys(version).includes(key)) return false;
   if (value === null) return true;
   if (!object(value)) return false;
+  if (COLOR_MARKS.includes(key)) return Object.keys(value).length === 1 && validColor(value.color);
   return key === 'link' ? Object.keys(value).length === 1 && validLinkHref(value.href) : Object.keys(value).length === 0;
 }
 // Schema 4 combines bold, italic, strike and link; inline code stays alone.
@@ -158,7 +181,7 @@ function validateJSON(json, version = VERSION) {
       seen.add(node.attrs.id);
     }
     const allowed = node.type === 'tableCell' || node.type === 'tableHeader' ? ['id', 'colspan', 'rowspan', 'colwidth', 'align'] : node.type === 'heading' ? ['id', 'level'] : node.type === 'orderedList' ? ['id','start','type'] :
-      version === LATEST_VERSION && node.type === 'codeBlock' ? ['id', 'language'] : node.type === 'taskItem' ? ['id', 'checked'] : ['id'];
+      isFormatted(version) && node.type === 'codeBlock' ? ['id', 'language'] : node.type === 'taskItem' ? ['id', 'checked'] : ['id'];
     if (Object.keys(node.attrs || {}).some(k => !allowed.includes(k))) throw new Error('unsupported attributes');
     if (node.type === 'codeBlock' && node.attrs.language != null && !validLanguage(node.attrs.language)) throw new Error('unsupported code block language');
     if (node.type === 'taskItem' && node.attrs.checked !== undefined && typeof node.attrs.checked !== 'boolean') throw new Error('invalid task item state');
@@ -192,7 +215,7 @@ function validateRetained(doc, version, migrations) {
       const cell = ['tableCell', 'tableHeader'].includes(parent.nodeName);
       const allowed = key === 'id' || (key === 'level' && parent.nodeName === 'heading') || (['start','type'].includes(key) && parent.nodeName === 'orderedList') ||
         (cell && ['colspan', 'rowspan', 'colwidth', 'align'].includes(key)) ||
-        (version === LATEST_VERSION && ((key === 'language' && parent.nodeName === 'codeBlock') || (key === 'checked' && parent.nodeName === 'taskItem')));
+        (isFormatted(version) && ((key === 'language' && parent.nodeName === 'codeBlock') || (key === 'checked' && parent.nodeName === 'taskItem')));
       if (!allowed) throw new Error('unsupported retained attributes');
       if (content instanceof Y.ContentDeleted) continue;
       // Yjs coalesces adjacent deleted versions of the same scalar attribute.
@@ -391,13 +414,24 @@ function create(json = initialJSON(), version = VERSION) {
 function markdown(json, version = RICH_VERSION) {
   // Schema 4 can produce strikethrough, so a literal tilde is escaped there only:
   // earlier documents keep their exact export.
-  const escape = version >= LATEST_VERSION ? text => text.replace(/([\\`*_{}\[\]<>#!|&~])/g, '\\$1') : text => text.replace(/([\\`*_{}\[\]<>#!|&])/g, '\\$1');
+  const escape = isFormatted(version) ? text => text.replace(/([\\`*_{}\[\]<>#!|&~])/g, '\\$1') : text => text.replace(/([\\`*_{}\[\]<>#!|&])/g, '\\$1');
   // Emphasis delimiters must touch non-space text: outer spaces stay outside.
+  // Schema 5 underline, colour and highlight have no Markdown syntax; they are
+  // written as closed inline HTML whose only attribute value is a palette name,
+  // around the emphasis. Text itself stays escaped, so it never becomes markup.
   const emphasis = (value, marks) => {
     const open = [['bold','**'],['italic','*'],['strike','~~']].filter(([type]) => marks.some(mark => mark.type === type)).map(([, d]) => d);
-    if (!open.length) return value;
+    const has = type => marks.find(mark => mark.type === type);
+    const tags = [];
+    if (has('textColor') && validColor(has('textColor').attrs?.color)) tags.push([`<span data-text-color="${has('textColor').attrs.color}">`, '</span>']);
+    if (has('highlight') && validColor(has('highlight').attrs?.color)) tags.push([`<mark data-highlight="${has('highlight').attrs.color}">`, '</mark>']);
+    if (has('underline')) tags.push(['<u>', '</u>']);
+    if (!open.length && !tags.length) return value;
     const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(value);
-    return core ? lead + open.join('') + core + [...open].reverse().join('') + trail : value;
+    // Tags wrap the emphasis, so a delimiter always touches text and stays
+    // flanking inside a word (abc<u>**def**</u>ghi).
+    const inner = open.join('') + core + [...open].reverse().join('');
+    return core ? lead + tags.map(([o]) => o).join('') + inner + tags.map(([, c]) => c).reverse().join('') + trail : value;
   };
   // GFM strips one escape before a pipe before parsing inline code. An odd
   // original backslash run cannot survive that preprocessing without turning
@@ -448,5 +482,5 @@ function markdown(json, version = RICH_VERSION) {
   return visit(json).trimEnd()+'\n';
 }
 
-return { VERSION, RICH_VERSION, LATEST_VERSION, validLanguage, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
+return { VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION, PALETTE, validColor, validLanguage, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
 }
