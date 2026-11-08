@@ -45,7 +45,7 @@ export type DashboardDatasets = { status: "absent" } | { status: "invalid" } | {
 export const DASHBOARD_MAX_AGE_SECONDS = { min: 60, max: 366 * 24 * 3600 }
 const DATASET_KEYS = ["title", "description", "mode", "sample", "max_age_seconds"]
 const datasetText = (value: unknown, max: number, lines: boolean): value is string =>
-  typeof value === "string" && value.trim().length > 0 && value.length <= max && !(lines ? /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/ : /[\u0000-\u001f\u007f-\u009f]/).test(value)
+  typeof value === "string" && value.trim().length > 0 && value.length <= max && !(lines ? /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/ : /[\u0000-\u001f\u007f-\u009f]/).test(value) && !/\p{Cf}/u.test(value)
 function decodedKeys(value: unknown): number {
   if (Array.isArray(value)) return value.reduce((sum: number, item) => sum + decodedKeys(item), 0)
   if (!object(value)) return 0
@@ -53,16 +53,17 @@ function decodedKeys(value: unknown): number {
 }
 
 /** Fails closed: any unknown key, undeclared collection, duplicate key or out-of-range value rejects the whole file. */
-export function parseDashboardDatasets(files: readonly { path: string; content: string }[], collections: readonly string[]): DashboardDatasets {
+export function parseDashboardDatasets(files: readonly { path: string; content: string; media_type?: string }[], collections: readonly string[]): DashboardDatasets {
   const candidates = files.filter(file => file.path === DASHBOARD_DATASETS_FILE)
   if (candidates.length === 0) return { status: "absent" }
   const invalid = { status: "invalid" } as const
-  if (candidates.length !== 1 || candidates[0].content.length > 16384) return invalid
+  if (candidates.length !== 1 || candidates[0].content.length > 16384 || (candidates[0].media_type !== undefined && candidates[0].media_type !== "application/json")) return invalid
   const source = candidates[0].content
   let value: unknown
   try { value = JSON.parse(source) } catch { return invalid }
   if (!object(value) || value.schema_version !== 1 || Object.keys(value).length !== 2 || !object(value.datasets)) return invalid
-  // JSON.parse merges duplicate keys; the spelled count catches them (and __proto__, which it drops).
+  // JSON.parse merges duplicate keys; the spelled count catches them. A "__proto__" key stays an own key and
+  // fails `collections.includes` / dashboardName; lookups elsewhere use Object.hasOwn.
   if ([...source.matchAll(/"(?:\\.|[^"\\])*"\s*:/g)].length !== decodedKeys(value)) return invalid
   const datasets: Record<string, DashboardDataset> = {}
   for (const [name, raw] of Object.entries(value.datasets)) {

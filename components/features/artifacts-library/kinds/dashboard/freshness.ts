@@ -90,7 +90,8 @@ export function dashboardFrameStatus(input: { pending: boolean; error: boolean; 
   if (input.limitExceeded) return { key: "error", label: "Too much data", detail: "The data is larger than the preview can show. Nothing was changed." }
   if (input.error) return { key: "error", label: "Data unavailable", detail: "The data could not be read. Reload to check access. Nothing was changed." }
   if (input.pending || !input.freshness) return null
-  const versionNote = input.viewingOld ? ` You are viewing v${input.shown}.` : ""
+  // An invalid datasets.json must not leave the chip looking authoritative: every state says so.
+  const versionNote = `${input.freshness.details === "invalid" ? " Dataset details in datasets.json are invalid, so sample, fixed and stale states cannot be shown." : ""}${input.viewingOld ? ` You are viewing v${input.shown}.` : ""}`
   const rows = input.freshness.collections
   const name = (row: CollectionFreshness) => row.dataset?.title ?? row.name
   const stale = rows.filter(row => row.stale)

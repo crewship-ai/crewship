@@ -85,10 +85,12 @@ describe("Dashboard freshness", () => {
     const fresh = dashboardFreshness([collection("constructor", [["2026-11-08T10:00:00", "Scout"]])], { status: "ok", datasets: {} }, now)
     expect(fresh.collections[0]).toMatchObject({ dataset: null, stale: false })
   })
-  it("keeps the read error above every dataset state and says nothing about invalid details", () => {
+  it("keeps the read error above every dataset state and names invalid details in the chip", () => {
     expect(status({ a: ds({ maxAgeSeconds: 60 }) }, undefined, { error: true })).toMatchObject({ key: "error" })
     const invalid = dashboardFreshness([collection("a", [["2026-11-08T10:00:00", "Scout"]])], { status: "invalid" }, now)
     expect(invalid).toMatchObject({ details: "invalid", collections: [{ dataset: null, stale: false }] })
-    expect(dashboardFrameStatus({ pending: false, error: false, limitExceeded: false, freshness: invalid, viewingOld: false, shown: 2, now })).toMatchObject({ key: "live" })
+    const chip = dashboardFrameStatus({ pending: false, error: false, limitExceeded: false, freshness: invalid, viewingOld: false, shown: 2, now })
+    expect(chip).toMatchObject({ key: "live" })
+    expect(chip!.detail).toContain("Dataset details in datasets.json are invalid")
   })
 })
