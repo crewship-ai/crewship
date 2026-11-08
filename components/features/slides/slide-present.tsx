@@ -3,13 +3,13 @@
 import * as React from "react"
 import type { SlideDeck } from "@/lib/slides/model"
 import { SlideCanvas } from "./slide-canvas"
-import { isNativeSlideDeck } from "./native-model"
+import { isRenderableSlideDeck } from "./native-model"
 
 const control = "min-h-9 coarse:min-h-[44px] rounded border px-3"
 
 /** Presentation is a modal native view, not an export or durable write. */
 export function SlidePresent({ deck, initialSlideId, onClose }: { deck: unknown; initialSlideId: string; onClose: () => void }) {
-  if (!isNativeSlideDeck(deck) || !deck.slide_order.includes(initialSlideId)) return <p role="alert">This presentation format or target is unavailable.</p>
+  if (!isRenderableSlideDeck(deck) || !deck.slide_order.includes(initialSlideId)) return <p role="alert">This presentation format or target is unavailable.</p>
   return <NativePresentation deck={deck} initialSlideId={initialSlideId} onClose={onClose} />
 }
 
@@ -24,6 +24,20 @@ function NativePresentation({ deck, initialSlideId, onClose }: { deck: SlideDeck
     return () => { if (previous?.isConnected) previous.focus() }
   }, [])
   const current = Math.min(index, deck.slide_order.length - 1)
+  const stage = React.useRef<HTMLDivElement>(null)
+  const shown = React.useRef(current)
+  // Schema-3 slide transitions play on entry; reduced motion shows the slide at once.
+  React.useEffect(() => {
+    const from = shown.current
+    shown.current = current
+    if (from === current) return
+    const transition = deck.slides.find(slide => slide.id === deck.slide_order[current])?.transition
+    const node = stage.current
+    if (!transition || !node?.animate || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return
+    const frames = transition === "fade" ? [{ opacity: 0 }, { opacity: 1 }] : [{ transform: `translateX(${current > from ? 100 : -100}%)` }, { transform: "translateX(0)" }]
+    const animation = node.animate(frames, { duration: transition === "fade" ? 300 : 400, easing: "ease-out" })
+    return () => animation.cancel()
+  }, [current, deck])
   return <div ref={root} role="dialog" aria-modal="true" aria-label="Present slides" tabIndex={-1} className="fixed inset-0 z-50 flex flex-col bg-black p-3 text-white outline-none" onKeyDown={event => {
     const target = event.target as HTMLElement
     if (target.closest("input,textarea,select,[contenteditable=true]")) return
@@ -39,7 +53,7 @@ function NativePresentation({ deck, initialSlideId, onClose }: { deck: SlideDeck
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
     }
   }}>
-    <div className="m-auto w-full" style={{ maxWidth: `min(100%, calc((100dvh - 160px) * ${deck.width} / ${deck.height}))` }}><SlideCanvas deck={deck} slideId={deck.slide_order[current]} /></div>
+    <div className="m-auto w-full overflow-hidden" style={{ maxWidth: `min(100%, calc((100dvh - 160px) * ${deck.width} / ${deck.height}))` }}><div ref={stage} data-slide-transition={deck.slides.find(slide => slide.id === deck.slide_order[current])?.transition}><SlideCanvas deck={deck} slideId={deck.slide_order[current]} /></div></div>
     <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 py-2">
       <button className={control} disabled={current === 0} onClick={() => setIndex(current - 1)}>Previous slide</button>
       <span aria-live="polite">{current + 1} / {deck.slide_order.length}</span>

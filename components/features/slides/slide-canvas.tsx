@@ -4,20 +4,62 @@ import * as React from "react"
 import type { Slide, SlideElement } from "@/lib/slides/model"
 import { clampDelta } from "./element-edit"
 import type { Rect } from "./element-edit"
-import { isNativeSlideDeck } from "./native-model"
+import { arrowhead, gradientLine, slideIconNodes, SLIDES_FONT_STACK, SLIDES_ICON_STROKE } from "@/lib/slides/rich"
+import { isRenderableSlideDeck } from "./native-model"
+import "./slide-fonts.css"
+
+const ICON_TAGS = new Set(["path", "circle", "ellipse", "line", "rect", "polyline", "polygon"])
+const ICON_ATTRS = new Set(["d", "cx", "cy", "r", "rx", "ry", "x1", "y1", "x2", "y2", "x", "y", "width", "height", "points"])
+
+/** Geometry from the committed icon set only; the deck supplies a name and a hex colour. */
+function SlideIconGlyph({ element }: { element: Extract<SlideElement, { type: "icon" }> }) {
+  const nodes = slideIconNodes(element.icon.name)
+  if (!nodes) throw new Error("Unknown slide icon")
+  return <svg width={element.width} height={element.height} viewBox="0 0 24 24" overflow="hidden" fill="none" stroke={element.icon.color} strokeWidth={SLIDES_ICON_STROKE} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    {nodes.map(([tag, attrs], index) => ICON_TAGS.has(tag) ? React.createElement(tag, { key: index, ...Object.fromEntries(Object.entries(attrs).filter(([name]) => ICON_ATTRS.has(name))) }) : null)}
+  </svg>
+}
+
+function SlideShapeGlyph({ element }: { element: Extract<SlideElement, { type: "shape" }> }) {
+  const gradientId = `slide-gradient-${React.useId().replace(/[^A-Za-z0-9_-]/g, "")}`
+  const { shape } = element, sw = shape.stroke_width
+  if (shape.kind === "line" && shape.line) {
+    const l = shape.line
+    let { x1, y1, x2, y2 } = l
+    const heads: string[] = []
+    if (l.end === "triangle") { const a = arrowhead(l.x1, l.y1, l.x2, l.y2, sw); heads.push(a.points); x2 = a.bx; y2 = a.by }
+    if (l.start === "triangle") { const a = arrowhead(l.x2, l.y2, l.x1, l.y1, sw); heads.push(a.points); x1 = a.bx; y1 = a.by }
+    return <svg width={element.width} height={element.height} overflow="hidden">
+      {(x1 !== x2 || y1 !== y2) && <line x1={x1} y1={y1} x2={x2} y2={y2} stroke={shape.stroke} strokeWidth={sw} />}
+      {heads.map(points => <polygon key={points} points={points} fill={shape.stroke} />)}
+    </svg>
+  }
+  const g = shape.gradient
+  const fill = g ? `url(#${gradientId})` : shape.fill
+  const defs = g && <defs><linearGradient id={gradientId} gradientUnits="userSpaceOnUse" {...gradientLine(g.angle, element.width, element.height)}>
+    {g.stops.map((stop, index) => <stop key={index} offset={`${stop.position}%`} stopColor={stop.color} />)}
+  </linearGradient></defs>
+  const stroke = { stroke: shape.stroke, strokeWidth: sw }
+  if (shape.kind === "ellipse") return <>{defs}
+    {g && <ellipse cx={element.width / 2} cy={element.height / 2} rx={element.width / 2} ry={element.height / 2} fill={fill} />}
+    <ellipse cx={element.width / 2} cy={element.height / 2} rx={Math.max(0, (element.width - sw) / 2)} ry={Math.max(0, (element.height - sw) / 2)} fill={g ? "none" : fill} {...stroke} />
+  </>
+  const radius = shape.corner_radius ?? 0
+  return <>{defs}
+    {g && <rect width={element.width} height={element.height} rx={radius || undefined} fill={fill} />}
+    <rect x={sw / 2} y={sw / 2} width={Math.max(0, element.width - sw)} height={Math.max(0, element.height - sw)} rx={radius ? Math.max(0, radius - sw / 2) : undefined} fill={g ? "none" : fill} {...stroke} />
+  </>
+}
 
 function ElementContent({ element }: { element: SlideElement }) {
-  // The whole-deck schema-1 gate excludes images before any source text renders.
+  // The whole-deck schema gate excludes images before any source text renders.
   if (element.type === "image") throw new Error("Images are unavailable in this renderer")
-  if (element.type === "shape") {
-    const style = { fill: element.shape.fill, stroke: element.shape.stroke, strokeWidth: element.shape.stroke_width }
-    return element.shape.kind === "ellipse"
-      ? <ellipse cx={element.width / 2} cy={element.height / 2} rx={Math.max(0, (element.width - element.shape.stroke_width) / 2)} ry={Math.max(0, (element.height - element.shape.stroke_width) / 2)} {...style} />
-      : <rect x={element.shape.stroke_width / 2} y={element.shape.stroke_width / 2} width={Math.max(0, element.width - element.shape.stroke_width)} height={Math.max(0, element.height - element.shape.stroke_width)} {...style} />
-  }
+  if (element.type === "icon") return <SlideIconGlyph element={element} />
+  if (element.type === "shape") return <SlideShapeGlyph element={element} />
   const style = element.type === "text" ? element.text : element.table
+  const typography = element.type === "text" ? element.text : undefined
   return <foreignObject width={element.width} height={element.height}>
-    <div data-slide-content={element.id} style={{ width: "100%", height: "100%", overflow: "hidden", fontFamily: style.font_family, fontSize: style.font_size, color: style.color, lineHeight: 1.2, boxSizing: "border-box" }}>
+    <div data-slide-content={element.id} style={{ width: "100%", height: "100%", overflow: "hidden", fontFamily: Object.hasOwn(SLIDES_FONT_STACK, style.font_family) ? SLIDES_FONT_STACK[style.font_family] : style.font_family, fontSize: style.font_size, fontWeight: typography?.font_weight, letterSpacing: typography?.letter_spacing ? `${typography.letter_spacing}px` : undefined, color: style.color, lineHeight: (typography?.line_height ?? 120) / 100, boxSizing: "border-box" }}>
       {element.type === "text"
         ? <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", textAlign: element.text.align }}>{element.text.value}</div>
         : <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", background: element.table.fill }}><tbody>{element.table.cells.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, column) => <td key={column} style={{ border: `1px solid ${element.table.border}`, padding: 4, verticalAlign: "top", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{cell}</td>)}</tr>)}</tbody></table>}
@@ -47,7 +89,7 @@ export function SlideCanvas({ deck, slideId, selectedIds = [], onSelectElement, 
   const root = React.useRef<SVGSVGElement>(null)
   const [drag, setDrag] = React.useState<Drag>()
   const [focused, setFocused] = React.useState<string>()
-  const valid = isNativeSlideDeck(deck)
+  const valid = isRenderableSlideDeck(deck)
   const slide: Slide | undefined = valid ? deck.slides.find(value => value.id === slideId) : undefined
   const editable = Boolean(onSelectElement)
   React.useLayoutEffect(() => {

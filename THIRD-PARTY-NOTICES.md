@@ -55,6 +55,27 @@ The authored Slides read/export entrypoints link this renderer into the binary.
 Runtime access remains disabled by default behind `artifact_slides`; the Go
 dependency inventory below includes its linked dependencies.
 
+## Slides rich profile: fonts and icons
+
+The schema-3 Slides profile embeds IBM Plex Sans 1.1.0 (Regular, SemiBold,
+Bold; copyright 2017 IBM Corp., Reserved Font Name "Plex") and JetBrains Mono
+2.304 (Regular, SemiBold; copyright 2020 The JetBrains Mono Project Authors),
+both under the SIL Open Font License 1.1. The PDF renderer embeds the unmodified
+TTF files in
+[`internal/artifacts/slidespdf/fonts/`](internal/artifacts/slidespdf/fonts/README.md)
+with the notices in
+[`internal/artifacts/slidespdf/licenses/`](internal/artifacts/slidespdf/licenses/);
+the web app serves the unmodified WOFF2 files from
+[`public/fonts/ibm-plex-sans/`](public/fonts/ibm-plex-sans/README.md) and
+`public/fonts/jetbrains-mono/`, each with its `OFL.txt`.
+
+The Slides icon allow-list
+[`internal/slides/lucide_icons.json`](internal/slides/lucide_icons.json) is
+geometry copied from `lucide-react` 1.66.0 by `scripts/gen-slides-icons.mjs`
+(ISC, copyright 2026 Lucide Icons and Contributors; parts derived from
+Feather, MIT). Its notice is retained in
+[`internal/artifacts/slidespdf/licenses/lucide-LICENSE.txt`](internal/artifacts/slidespdf/licenses/lucide-LICENSE.txt).
+
 ## Artifact Slides font
 
 The packaged Go Regular font in `public/fonts/go-regular/Go-Regular.ttf` is

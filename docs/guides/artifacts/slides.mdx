@@ -204,7 +204,8 @@ Agents write a deck as a fixed, closed format. You do not need it to read a deck
 but it explains why a version is refused. A deck version contains:
 
 - `deck.json`: `{"schema_version":1,"order":["intro","results"]}`, the slide IDs in
-  order, at most 100 slides.
+  order, at most 100 slides. `schema_version` stays `1` for decks that use the
+  rich profile.
 - One `slides/<id>.html` file per listed slide and no other files.
 
 Each slide file is a single `<section id="<id>">` holding, in order, any number
@@ -220,8 +221,35 @@ and `height` in whole pixels on a 1920 × 1080 slide. Text blocks also set
 `font-size`, `color` and `text-align`; shapes set `background-color`,
 `border-color` and `border-width`; tables set `font-size`, `color`,
 `background-color` and `border-color`. Colors are six-digit hex values such as
-`#F97316`. The only font is Go Regular. Scripts, images, links, comments,
-nested markup and other elements or styles are refused.
+`#F97316`. Scripts, images, links, comments, nested markup and other elements
+or styles are refused.
+
+A deck can also use the **rich profile**, which the deck view, **Present** and
+the PDF all draw the same way:
+
+- **Typefaces:** Go Regular (the default), IBM Plex Sans (regular, semibold,
+  bold) and JetBrains Mono (regular, semibold). The faces ship with Crewship;
+  a deck cannot load a font from anywhere else.
+- **Text:** bold and semibold weights, letter spacing, line height and font
+  sizes up to 320 pixels.
+- **Shapes:** rounded rectangle corners, linear gradients between hex colors,
+  and straight lines with optional triangle arrowheads.
+- **Icons:** about fifty outline icons picked by name, such as `users`,
+  `message-circle` or `rocket`, in any hex color. A deck names an icon; it
+  cannot supply its own SVG.
+- **Transitions:** a slide can fade or push in when you reach it in
+  **Present**. With reduced motion turned on in your system, slides change
+  without animation. The PDF has no transitions.
+
+The exact syntax and the full icon list are in the
+[`crewship page artifact` reference](/cli/artifacts#rich-profile-optional).
+In the PDF, a gradient is drawn as 128 narrow bands of the exact colors, and
+text has no kerning, so a heading can be a few pixels wider than in the
+browser.
+
+What the profile still cannot express: images and photos, CSS layout (flex or
+grid), `text-transform`, mixed styles inside one text block, element
+animations (build-ins), shadows, opacity and radial gradients.
 
 Limits: at most 2 MiB of source in total, 256 KiB per slide file, 200 elements
 per slide, 1,000 elements per deck and 4,000 characters of notes per slide. A
