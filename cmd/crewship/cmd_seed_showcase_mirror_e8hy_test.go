@@ -177,7 +177,7 @@ func TestMirrorE8hy_ManifestIsWhatTheRouteAccepts(t *testing.T) {
 		got  []byte
 	}{
 		{"manifest index.html with its three resources restored", []byte(restored)},
-		{"embedded index.html", seeddata.ShowcaseFile("mirror/e8hy/index.html")},
+		{"embedded original page", seeddata.ShowcaseFile("mirror/e8hy/original-index.html.txt")},
 	} {
 		sum := sha256.Sum256(tc.got)
 		if hex.EncodeToString(sum[:]) != mirrorE8hyOriginalSHA {

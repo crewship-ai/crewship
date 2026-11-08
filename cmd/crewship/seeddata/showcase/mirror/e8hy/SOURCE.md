@@ -17,9 +17,9 @@
 
 | File | What it is |
 | --- | --- |
-| `index.html` | The page exactly as the artifact service returned it (29,401 bytes, sha256 `e7ebdcd2…0d37d5`), including the publish skeleton and the Mermaid runtime block the service stores. |
+| `original-index.html.txt` | The page exactly as the artifact service returned it, stored as text so it is never served or scanned as a page (29,401 bytes, sha256 `e7ebdcd2…0d37d5`), including the publish skeleton and the Mermaid runtime block the service stores. |
 | `m-e8hy.json` | The manifest the route takes: `index.html` (with the three resources below made local), `fonts.css`, `interactive.json` and `dashboard.json`. About 1.9 MB. |
-| `_build.py` | Regenerates `m-e8hy.json` from `index.html`: `python3 -I _build.py <cache dir>`. Downloads are pinned by sha256. Not embedded in the binary. |
+| `_build.py` | Regenerates `m-e8hy.json` from `original-index.html.txt`: `python3 -I _build.py <cache dir>`. Downloads are pinned by sha256. Not embedded in the binary. |
 
 `interactive.json` (`{"schema_version": 1}`) and `dashboard.json`
 (`{"schema_version": 1, "collections": ["showcase"]}`) are Crewship markers,

@@ -1,4 +1,4 @@
-"""Regenerates m-e8hy.json from the verbatim original (index.html).
+"""Regenerates m-e8hy.json from the verbatim original (original-index.html.txt).
 
     python3 -I _build.py <cache dir>
 
@@ -87,7 +87,7 @@ def inline(js: str, name: str) -> str:
 def main() -> None:
     cache = pathlib.Path(sys.argv[1])
     cache.mkdir(parents=True, exist_ok=True)
-    page = (HERE / "index.html").read_text(encoding="utf-8")
+    page = (HERE / "original-index.html.txt").read_text(encoding="utf-8")
     for tag in (THREE_TAG, MERMAID_TAG, FONTS_TAG):
         if page.count(tag) != 1:
             raise SystemExit("original no longer has exactly one " + tag)

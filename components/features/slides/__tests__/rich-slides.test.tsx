@@ -102,7 +102,7 @@ describe("schema-3 canvas", () => {
     const nodes = slideIconNodes("users")!
     expect(Array.from(icon.children).map(child => child.tagName)).toEqual(nodes.map(([tag]) => tag))
     expect(icon.querySelector("circle")!.getAttribute("r")).toBe("4")
-    for (const child of Array.from(icon.querySelectorAll("*"))) for (const attribute of Array.from(child.attributes)) expect(attribute.name).not.toMatch(/^on|href/)
+    for (const child of Array.from(icon.querySelectorAll("*"))) for (const attribute of Array.from(child.attributes)) expect(attribute.name).not.toMatch(/^(?:on|href)/)
   })
   it("sets bundled faces without kerning or ligatures, like the PDF", () => {
     const { container } = render(<SlideCanvas deck={rich()} slideId="cover" />)
