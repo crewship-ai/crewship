@@ -308,14 +308,21 @@ func TestDocumentCreationRefusesOlderPreparationSchema(t *testing.T) {
 		return []byte(`{"schema":3,"snapshot":"dHJ1c3RlZC1Ob2RlLXByZXBhcmF0aW9uLWZpeHR1cmU=","blocks":[{"id":"server-leaf","hash":"server-fixture-hash"}]}`), 200, nil
 	}
 	creationExpect(t, call("older engine", documentCreationBody), 502)
-	var pages, docs int
-	if err := h.db.QueryRow(`SELECT (SELECT count(*) FROM pages WHERE workspace_id=? AND slug='created-doc'),(SELECT count(*) FROM documents WHERE workspace_id=?)`, workspace, workspace).Scan(&pages, &docs); err != nil || pages != 0 || docs != 0 {
-		t.Fatalf("older preparation left state: pages=%d documents=%d %v", pages, docs, err)
+	var pages, docs, creations, consumed int
+	if err := h.db.QueryRow(`SELECT (SELECT count(*) FROM pages WHERE workspace_id=? AND slug='created-doc'),(SELECT count(*) FROM documents WHERE workspace_id=?),(SELECT count(*) FROM document_creations),(SELECT count(*) FROM document_creation_consents WHERE consumed_at IS NOT NULL)`, workspace, workspace).Scan(&pages, &docs, &creations, &consumed); err != nil || pages != 0 || docs != 0 || creations != 0 || consumed != 0 {
+		t.Fatalf("older preparation left state: pages=%d documents=%d creations=%d consumed=%d %v", pages, docs, creations, consumed, err)
 	}
+	// The unconsumed consent still admits the same mutation on a current engine.
+	h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
+		return []byte(`{"schema":4,"snapshot":"dHJ1c3RlZC1Ob2RlLXByZXBhcmF0aW9uLWZpeHR1cmU=","blocks":[{"id":"server-leaf","hash":"server-fixture-hash"}]}`), 200, nil
+	}
+	creationExpect(t, call("current engine", documentCreationBody), 201)
 }
 
 // A retry reports the schema the Doc was stored with, so a Doc created at
-// schema 3 before this change still replays as schema 3.
+// schema 3 before this change still replays as schema 3. This guards the
+// legacy replay; TestDocumentCreationAtomicResultAndOriginalPayloadRetry
+// proves a new Doc's retry reports 4.
 func TestDocumentCreationReplayReportsStoredSchema(t *testing.T) {
 	h, _, _, _, call := documentCreationFixture(t)
 	first := call("first", documentCreationBody)

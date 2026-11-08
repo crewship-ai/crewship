@@ -260,3 +260,26 @@ func TestValidateDocumentDraftRequestSchemas(t *testing.T) {
 		}
 	}
 }
+
+// The protected draft handler binds a direct request's schema to the stored
+// schema of the run's scope before any engine call: a mismatch is 409 and the
+// consent cursor does not move.
+func TestMutateDocumentDraftBindsRequestSchemaToScope(t *testing.T) {
+	for _, tc := range []struct{ stored, requested int }{{4, 3}, {3, 4}} {
+		t.Run(fmt.Sprintf("stored-%d-requested-%d", tc.stored, tc.requested), func(t *testing.T) {
+			f, _, token, created := newDocumentDraftFixtureAt(t, true, tc.stored)
+			f.pages.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
+				t.Fatal("schema mismatch reached the engine")
+				return nil, 0, nil
+			}
+			body, _ := json.Marshal(map[string]any{"operation": "patch", "generation": 0, "request": map[string]any{"id": "mismatch", "schema": tc.requested, "page_id": created.PageID, "epoch": "e", "ifRev": 0, "target": "paragraph", "ifHash": strings.Repeat("a", 64), "text": "x"}})
+			w := httptest.NewRecorder()
+			f.pages.MutateDocumentDraftAgent(w, documentDraftRequest(f, token, "POST", string(body)))
+			wantCode(t, w, 409, "schema mismatch")
+			var cursor int
+			if err := f.rig.db.QueryRow(`SELECT draft_rev FROM document_creation_consents WHERE run_id=?`, f.a.RunID).Scan(&cursor); err != nil || cursor != 0 {
+				t.Fatalf("cursor moved: %d %v", cursor, err)
+			}
+		})
+	}
+}

@@ -50,12 +50,14 @@ lowercase name can be typed, and an unknown one stays uncoloured.
 - Blocks longer than 20 000 characters are shown without colours so typing
   stays responsive.
 
-A document becomes schema 4 only explicitly: initialize it with `"schema": 4`
-(see [`crewship doc initialize`](/cli/doc)), or upgrade an older document through
-the documents service's human-only upgrade, which keeps its content, history and
-comments and only widens what it may hold. New documents from the Artifacts
-library and from agents in chat are still schema 3, because agent drafting
-works on schema 3 only; an agent cannot edit a schema 4 document yet.
+New documents start at schema 4: the New Doc dialog, the Artifacts library and
+documents an agent creates from chat. The agent run that created a document with
+your drafting permission edits it directly; any later agent request on a schema 4
+document is a proposal that a person accepts or rejects. Documents created
+earlier stay at schema 3 until someone with edit access upgrades them through the
+documents service's human-only upgrade, which keeps their content, history and
+comments and only widens what they may hold. You can also initialize a document
+with `"schema": 4` (see [`crewship doc initialize`](/cli/doc)).
 
 ## Comments
 
