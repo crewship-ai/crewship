@@ -1,6 +1,5 @@
 "use client"
 
-import dynamic from "next/dynamic"
 import { useEffect, useMemo, useState } from "react"
 import { ExternalLink, FolderInput, Star } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -28,8 +27,10 @@ import { KindBadge, KindTile } from "./kind-tile"
 import { ShareDialog } from "./sharing/share-dialog"
 import { AccessTab } from "./sharing/access-tab"
 import { MoveToFolderDialog } from "./sharing/bulk-actions"
+import { DesignBody, type KindFrameReport } from "./kinds/design/design-detail"
+import { DesignLibraryGate } from "./kinds/design/design-library"
+import { SlidesBody } from "./kinds/slides/slides-detail"
 
-const DesignEditor = dynamic(() => import("@/components/features/artifacts-design/design-editor").then(module => module.DesignEditor), { ssr: false })
 
 /**
  * The saved Word document, read-only: the same current-version read the chat
@@ -154,6 +155,8 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   const [dialog, setDialog] = useState<"share" | "move" | null>(null)
   const [craft, setCraft] = useState<NativeCraftHostStatus | null>(null)
   const [availability, setAvailability] = useState<NativeAvailability>()
+  // Status, edit right, presence and actions a kind body reports (Design, Slides).
+  const [kindFrame, setKindFrame] = useState<KindFrameReport | null>(null)
   const projects = useArtifactProjectsAvailable(workspaceId)
   const projectPreview = viewsProjectInline(item) && projects
   const design = item.kind === "design" && artifactsDesign()
@@ -182,21 +185,25 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   ]
   const caps: FrameCapabilities = {
     access: "ok",
-    canEdit: nativeEditor && availability === "enabled" ? craft?.canEdit === true : false,
-    status: nativeStatus ?? catalogStatus(item),
+    canEdit: kindFrame ? kindFrame.canEdit : nativeEditor && availability === "enabled" ? craft?.canEdit === true : false,
+    status: kindFrame ? kindFrame.status : nativeStatus ?? catalogStatus(item),
     agent: {
       ask: { chatHref: prompt => chatAskHref(workspaceId, item.slug, prompt) },
       permission: "The agent reads this artifact with your access. Ask changes nothing.",
     },
-    actions,
+    actions: [...actions, ...(kindFrame?.actions ?? [])],
   }
 
   const documentColumn = (children: React.ReactNode) => <div className="mx-auto grid w-full max-w-5xl content-start gap-3 p-4 md:p-6">{children}</div>
   let body: React.ReactNode
-  if (design) body = <div className="flex min-h-0 flex-1 flex-col"><DesignEditor workspaceId={workspaceId} slug={item.pageId ? "@" + item.pageId : item.slug} /></div>
-  else if (projectPreview) body = <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
-    <div className="flex min-h-[520px] flex-1 overflow-hidden"><ArtifactViewerPanel variant="library" /></div>
-  </ArtifactViewerProvider>
+  if (design) body = <DesignBody workspaceId={workspaceId} slug={item.pageId ? "@" + item.pageId : item.slug} onFrame={setKindFrame} />
+  else if (projectPreview && item.kind === "slides") body = <SlidesBody workspaceId={workspaceId} slug={item.slug} version={version} onFrame={setKindFrame} />
+  // A project whose manifest is a design system opens as a Design library; any other project keeps its viewer.
+  else if (projectPreview) body = <DesignLibraryGate workspaceId={workspaceId} slug={item.slug} version={version} onFrame={setKindFrame}>
+    <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
+      <div className="flex min-h-[520px] flex-1 overflow-hidden"><ArtifactViewerPanel variant="library" /></div>
+    </ArtifactViewerProvider>
+  </DesignLibraryGate>
   else if (pageContent) body = <ArtifactPageContent workspaceId={workspaceId} pageId={item.pageId!} onBack={onBack} />
   else if (nativeEditor) body = <div className="flex min-h-0 flex-1 flex-col">
     {item.kind === "word" && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
@@ -220,8 +227,8 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
     {item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} onStatus={legacyWord ? setLegacyRead : undefined} />}
   </>)
 
-  return <ArtifactFrame name={item.name} kind={resolved} folder={item.folder?.name ?? null} caps={caps} onHome={onBack}
-    href={item.pageId ? `/artifacts/${encodeURIComponent(item.pageId)}` : undefined} onShare={() => setDialog("share")}
+  return <ArtifactFrame name={item.name} kind={kindFrame?.kind ?? resolved} folder={item.folder?.name ?? null} caps={caps} onHome={onBack}
+    href={item.pageId ? `/artifacts/${encodeURIComponent(item.pageId)}` : undefined} onShare={() => setDialog("share")} presence={kindFrame?.presence}
     statusFoot={item.kind === "word" || item.kind === "sheet" ? "One editor at a time. The lock is a server lease and ends when the tab closes." : `${KINDS[resolved.kind].label}${item.sharedVersion ? ` · shared v${item.sharedVersion}` : ""}${item.ownerLabel ? ` · owned by ${item.ownerLabel}` : ""}`}
     info={<ArtifactInfo workspaceId={workspaceId} item={item} onShare={() => setDialog("share")} />}>
     {body}

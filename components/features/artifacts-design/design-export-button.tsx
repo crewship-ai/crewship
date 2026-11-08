@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { FileDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ArtifactTool } from "@/components/features/artifacts-library/frame"
 import { apiFetch } from "@/lib/api-fetch"
 import { artifactsDesignExport } from "@/lib/feature-flags"
 
@@ -13,7 +14,7 @@ const SERVER_FILE_NAME = /^attachment; filename="([a-z0-9][a-z0-9_-]{0,63}-desig
  * renders it from that saved version; unsaved live edits are never exported.
  * Hidden unless NEXT_PUBLIC_ARTIFACTS_DESIGN_EXPORT is on.
  */
-export function DesignExportButton({ workspaceId, pageId, version }: { workspaceId: string; pageId: string; version?: number }) {
+export function DesignExportButton({ workspaceId, pageId, version, variant = "button" }: { workspaceId: string; pageId: string; version?: number; variant?: "button" | "tool" }) {
  const [pending, setPending] = useState(false)
  const [error, setError] = useState("")
  if (!artifactsDesignExport() || !version) return null
@@ -45,6 +46,12 @@ export function DesignExportButton({ workspaceId, pageId, version }: { workspace
    }
   }
  }
+ const title = `Download saved version ${version} as one HTML file. Unsaved live changes are not included.`
+ // Inside the artifact frame: an icon in the output slot, same name and rule.
+ if (variant === "tool") return <>
+  <ArtifactTool icon={FileDown} label={`Export HTML (version ${version})`} title={title} disabled={pending} onClick={() => { void exportHTML() }} />
+  {error && <span role="alert" className="max-w-56 px-1 text-xs text-destructive">{error}</span>}
+ </>
  return <>
   <Button variant="outline" disabled={pending} onClick={() => { void exportHTML() }} title={`Download saved version ${version} as one HTML file. Unsaved live changes are not included.`}><FileDown className="size-4" />Export HTML<span className="sr-only"> (version {version})</span></Button>
   {error && <p role="alert" className="basis-full text-xs text-destructive">{error}</p>}

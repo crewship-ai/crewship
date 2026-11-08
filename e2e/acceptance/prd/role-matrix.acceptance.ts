@@ -807,7 +807,7 @@ test.describe("role matrix", () => {
       const history = await versionTexts(request, ws.id, d.slug, d.text.id)
       const headText = head.nodes.find((n) => n.id === d.text.id)?.text
       // The notice counts only because it survives a reload: it is a sealed draft.
-      const notice = who.page.getByRole("alert").filter({ hasText: "Konflikt úprav" })
+      const notice = who.page.getByRole("alert").filter({ hasText: "Edit conflict" })
       const conflictShown = (await notice.count()) > 0
       const loser = headText === LATER ? OWNER : LATER
       await who.page.reload({ waitUntil: "domcontentloaded" })
@@ -825,7 +825,7 @@ test.describe("role matrix", () => {
       expect.soft(owner.includes(headText ?? ""), "the first canvas converged").toBe(true)
       expect.soft(later.includes(headText ?? ""), "the later canvas converged").toBe(true)
       expect(conflictShown, `the later person sees the conflict; the page said: ${messages.join(" | ")}`).toBe(true)
-      await notice.getByRole("button", { name: "Obnovit tento text" }).click()
+      await notice.getByRole("button", { name: "Restore this text" }).click()
       await expect.poll(async () => (await getDesign(request, ws.id, d.slug)).nodes.find((n) => n.id === d.text.id)?.text, { timeout: 30_000 }).toBe(loser)
       await expect(notice, "the restored text ends the notice").toHaveCount(0)
     },
