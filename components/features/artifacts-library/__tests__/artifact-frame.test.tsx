@@ -109,10 +109,26 @@ describe("ArtifactFrame", () => {
     unmount()
     frame({ children: body, layout: "phone" })
     const phone = document.querySelector("[data-slot-layer]")!
-    expect(phone.querySelector("[data-artifact-slot=view]")!.className).toContain("inset-x-2 top-2 overflow-x-auto")
+    expect(phone.querySelector("[data-slot-dock=top] [data-artifact-slot=view]")!.className).toContain("overflow-x-auto")
     expect(phone.querySelector("[data-artifact-slot=tools]")!.className).toContain("inset-x-2 bottom-2")
     expect(phone.querySelector("[data-artifact-slot=viewport]")!.className).toMatch(/(^| )hidden( |$)/)
     expect(phone.querySelector("[data-artifact-slot=panel]")!.className).toContain("bottom-0 h-[62%]")
+  })
+
+  it("docks output beside view at the top of a phone, so it never floats over the content", () => {
+    frame({ layout: "phone", children: <>
+      <ArtifactSlot name="output" label="Output">o</ArtifactSlot>
+      <ArtifactSlot name="view" label="View">v</ArtifactSlot>
+    </> })
+    const dock = document.querySelector("[data-slot-layer] [data-slot-dock=top]")!
+    expect(dock).toBeTruthy()
+    const view = dock.querySelector("[data-artifact-slot=view]")!
+    const output = dock.querySelector("[data-artifact-slot=output]")!
+    // One row, view first: the output sits top right whatever order the body mounts them in.
+    expect(view.compareDocumentPosition(output) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(output.className).not.toMatch(/(^| )bottom-/)
+    expect(output.className).not.toMatch(/(^| )absolute( |$)/)
+    expect(view.className).toContain("min-w-0 flex-1")
   })
 
   it.each([

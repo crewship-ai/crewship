@@ -19,6 +19,8 @@ export interface SectionMeta {
 interface FrameContextValue {
   layout: FrameLayout
   slotLayer: HTMLElement | null
+  /** The phone's top row: view on the left, output on the right (see SLOT_POSITION). */
+  topDock: { view: HTMLElement | null; output: HTMLElement | null }
   sections: ReadonlyMap<string, SectionMeta>
   register: (meta: SectionMeta) => () => void
   target: (id: string) => HTMLElement | null
@@ -37,13 +39,15 @@ export function useArtifactFrame(): Pick<FrameContextValue, "layout" | "openDraw
 
 /**
  * Where each slot floats over the stage. Desktop and tablet follow
- * `ART.slot`; the phone follows its CSS: view a full-width scrolling top row,
- * tools a bottom bar, output and nav above it, viewport hidden, panel a
- * bottom sheet.
+ * `ART.slot`. On a phone, view and output share one top row (the frame's
+ * dock): view fills it and scrolls sideways, output keeps the top-right
+ * corner. Every body already leaves that band free, so output never floats
+ * over the reading area. Tools are a bottom bar with nav above it, viewport
+ * is hidden, panel is a bottom sheet.
  */
 export const SLOT_POSITION: Record<SlotName, { wide: string; phone: string }> = {
-  view: { wide: "left-3 top-3", phone: "inset-x-2 top-2 overflow-x-auto [scrollbar-width:none] [&>*]:shrink-0" },
-  output: { wide: "right-3 top-3", phone: "right-2 bottom-[3.75rem]" },
+  view: { wide: "left-3 top-3", phone: "min-w-0 flex-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&>*]:shrink-0" },
+  output: { wide: "right-3 top-3", phone: "shrink-0" },
   tools: { wide: "bottom-3 left-1/2 -translate-x-1/2 max-w-[calc(100%-1.5rem)] overflow-x-auto [scrollbar-width:none]", phone: "inset-x-2 bottom-2 justify-start overflow-x-auto [scrollbar-width:none] [&>*]:shrink-0" },
   viewport: { wide: "right-3 bottom-3", phone: "hidden" },
   nav: { wide: "left-3 bottom-3", phone: "left-2 bottom-[3.75rem]" },
@@ -65,14 +69,18 @@ export const SLOT_POSITION: Record<SlotName, { wide: string; phone: string }> = 
 export function ArtifactSlot({ name, label, className, children }: { name: SlotName; label?: string; className?: string; children: React.ReactNode }) {
   const frame = React.useContext(FrameContext)
   if (!frame?.slotLayer) return null
-  const position = SLOT_POSITION[name][frame.layout === "phone" ? "phone" : "wide"]
+  const phone = frame.layout === "phone"
+  const docked = phone && (name === "view" || name === "output")
+  const host = docked ? frame.topDock[name as "view" | "output"] : frame.slotLayer
+  if (!host) return null
+  const position = SLOT_POSITION[name][phone ? "phone" : "wide"]
   return createPortal(
     <div role={name === "tools" || name === "view" || name === "nav" ? "toolbar" : "group"} aria-label={label ?? name}
       data-artifact-slot={name} data-layout={frame.layout}
-      className={cn("pointer-events-auto absolute z-10 flex items-center gap-0.5 rounded-lg border border-border/60 bg-card/95 p-[3px] shadow-md backdrop-blur", position, className)}>
+      className={cn("pointer-events-auto z-10 flex items-center gap-0.5 rounded-lg border border-border/60 bg-card/95 p-[3px] shadow-md backdrop-blur", docked ? "relative" : "absolute", position, className)}>
       {children}
     </div>,
-    frame.slotLayer,
+    host,
   )
 }
 

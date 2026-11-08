@@ -75,8 +75,8 @@ Place floating chrome with `<ArtifactSlot name label>`, and use
 
 | Slot | Wide | Phone |
 |---|---|---|
-| `view` | top left | full-width strip at the top, scrolls sideways |
-| `output` | top right | above the tools |
+| `view` | top left | top row left of `output`, scrolls sideways |
+| `output` | top right | top right, in one row with `view` (never over the content) |
 | `tools` | bottom centre | full-width bar at the bottom |
 | `viewport` | bottom right | hidden; pinch zoom instead |
 | `nav` | bottom left | above the tools |

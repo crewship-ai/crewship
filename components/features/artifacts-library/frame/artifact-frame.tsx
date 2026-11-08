@@ -125,6 +125,8 @@ export function ArtifactFrame({ name, kind, folder, caps, onHome, href, onShare,
   const [sections, setSections] = React.useState<ReadonlyMap<string, SectionMeta>>(new Map())
   const [targets, setTargets] = React.useState<ReadonlyMap<string, HTMLElement>>(new Map())
   const [slotLayer, setSlotLayer] = React.useState<HTMLElement | null>(null)
+  const [viewDock, setViewDock] = React.useState<HTMLElement | null>(null)
+  const [outputDock, setOutputDock] = React.useState<HTMLElement | null>(null)
   const [drawer, setDrawer] = React.useState<string | null>(defaultDrawer)
 
   const register = React.useCallback((meta: SectionMeta) => {
@@ -164,8 +166,8 @@ export function ArtifactFrame({ name, kind, folder, caps, onHome, href, onShare,
   const toggle = (tab: string) => setDrawer(current => (current === tab ? null : tab))
 
   const context = React.useMemo(() => ({
-    layout, slotLayer, sections, register, target: (id: string) => targets.get(id) ?? null, openDrawer: setDrawer, drawerTab: open,
-  }), [layout, slotLayer, sections, register, targets, open])
+    layout, slotLayer, topDock: { view: viewDock, output: outputDock }, sections, register, target: (id: string) => targets.get(id) ?? null, openDrawer: setDrawer, drawerTab: open,
+  }), [layout, slotLayer, viewDock, outputDock, sections, register, targets, open])
 
   // Every action, in one place; the history and info tabs are reachable from here too.
   const actions: FrameAction[] = ok ? [
@@ -224,7 +226,13 @@ export function ArtifactFrame({ name, kind, folder, caps, onHome, href, onShare,
         <div className="flex min-h-0 flex-1 flex-col overflow-auto">
           {ok ? children : <AccessGate access={caps.access as Exclude<typeof caps.access, "ok">} onHome={onHome} signInHref={signInHref} />}
         </div>
-        <div ref={setSlotLayer} data-slot-layer className="pointer-events-none absolute inset-0 z-10" />
+        <div ref={setSlotLayer} data-slot-layer className="pointer-events-none absolute inset-0 z-10">
+          {/* A phone's top row: view fills it and scrolls, output keeps the right end, off the content. */}
+          {phone && <div data-slot-dock="top" className="absolute inset-x-2 top-2 z-10 flex items-start gap-1.5">
+            <div ref={setViewDock} className="flex min-w-0 flex-1" />
+            <div ref={setOutputDock} className="flex shrink-0 empty:hidden" />
+          </div>}
+        </div>
       </div>
       {ok && <aside aria-label={tabs.find(tab => tab.id === open)?.label ?? "Panel"} hidden={!open} data-drawer={open ?? ""}
         className={cn("flex min-h-0 flex-col bg-background", drawerClass, !open && "hidden")}>
