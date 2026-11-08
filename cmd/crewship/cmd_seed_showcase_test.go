@@ -364,6 +364,30 @@ func runShowcaseOnce(t *testing.T, s *showcaseServer, url string, want showcaseW
 
 var allOn = showcaseKnobs{wordNative: true, gridNative: true}
 
+// mirrorSlugPrefix marks the mirrored reference artifacts each
+// seeddata/mirror_<slug>.go appends to the catalogue (showcase/mirror).
+const mirrorSlugPrefix = "ref-"
+
+// withMirrorItems adds the mirrored reference projects to a run's expected
+// outcome. Each is a data-less artifact project, so it fares exactly like
+// kalkulacka-roi: created whenever the run creates artifacts, otherwise
+// already present. Their own content is tested in *_mirror_<slug>_test.go.
+func withMirrorItems(w showcaseWant) showcaseWant {
+	n := 0
+	for _, a := range seeddata.ShowcaseArtifacts {
+		if strings.HasPrefix(a.Slug, mirrorSlugPrefix) && len(a.Data) == 0 {
+			n++
+		}
+	}
+	if w.artifactCreates > 0 {
+		w.stats.Created += n
+		w.artifactCreates += n
+	} else {
+		w.stats.Skipped += n
+	}
+	return w
+}
+
 func TestSeedShowcase_Phase(t *testing.T) {
 	t.Parallel()
 	full := showcaseWant{stats: showcaseStats{Created: 12}, pageCreates: 7, initializes: 7, releases: 7,
@@ -455,7 +479,7 @@ func TestSeedShowcase_Phase(t *testing.T) {
 			defer srv.Close()
 			for i, knobs := range tc.runs {
 				s.setKnobs(knobs)
-				runShowcaseOnce(t, s, srv.URL, tc.want[i])
+				runShowcaseOnce(t, s, srv.URL, withMirrorItems(tc.want[i]))
 			}
 		})
 	}

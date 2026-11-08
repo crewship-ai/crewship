@@ -3,6 +3,7 @@
 import * as React from "react"
 import { BookOpen, CornerUpLeft, Component, Download, Palette, Ruler, Search, Type } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
+import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { artifactDesignSystem } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
 import { hasDesignSystemFile, parseDesignSystem, DESIGN_SYSTEM_FILE, type DesignSystem } from "@/components/features/artifacts/design-system/manifest"
@@ -28,6 +29,44 @@ const SECTIONS: { id: SectionId; label: string; icon: typeof Palette; count: (sy
   { id: "components", label: "Components", icon: Component, count: system => system.components.length },
 ]
 const SAMPLE = "Agents propose, people decide."
+/** The library's brand book, next to design-system.json in the manifest. */
+export const LIBRARY_README_FILE = "README.md"
+const PREVIEW_HEIGHT = { fallback: 240, min: 80, max: 1200 }
+/** A component card is laid out on a 960px canvas (the claude.ai Design System card) and scaled down to fit. */
+const PREVIEW_WIDTH = 960
+// The preview is the system's own HTML: an opaque origin with no scripts and no network, like the chat artifact pane.
+const PREVIEW_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'; font-src data:; form-action 'none'; base-uri 'none'">`
+
+/** What the Library shows beside the tokens: the README brand book and each component's `components/<Name>/preview.html`. */
+export interface LibraryExtras { readme: string | null; previews: Record<string, string> }
+
+export function libraryExtras(system: DesignSystem, files: readonly { path: string; content: string }[]): LibraryExtras {
+  const byPath = new Map(files.map(file => [file.path, file.content]))
+  const previews: Record<string, string> = {}
+  for (const component of system.components) {
+    const html = byPath.get(`components/${component.name}/preview.html`)
+    if (html?.trim()) previews[component.name] = html
+  }
+  const readme = byPath.get(LIBRARY_README_FILE)
+  return { readme: readme?.trim() ? readme : null, previews }
+}
+
+/**
+ * A component preview as its system renders it: the colour tokens become CSS
+ * custom properties (`var(--name)`). Names and values are the admitted
+ * literals (lowercase identifiers, #rrggbb), so they cannot leave the rule.
+ */
+export function previewDocument(system: DesignSystem, html: string): string {
+  const vars = system.colors.map(color => `--${color.name}:${color.value}`).join(";")
+  return `${PREVIEW_CSP}<style>:root{${vars}}</style>${html}`
+}
+
+/** The preview's own `<!-- @dsCard height=N -->` hint, bounded; otherwise a default. */
+export function previewHeight(html: string): number {
+  const hint = /<!--\s*@dsCard\b[^>]*?\bheight=(\d{1,4})\b/.exec(html)
+  const height = hint ? Number(hint[1]) : PREVIEW_HEIGHT.fallback
+  return Math.min(PREVIEW_HEIGHT.max, Math.max(PREVIEW_HEIGHT.min, height))
+}
 
 /**
  * The read-only Library view of a design system (Harbor 2 v87 `ds`): the
@@ -54,7 +93,7 @@ export function DesignLibraryBody({ workspaceId, slug, version, onFrame }: { wor
   if (!system) return <p role="alert" className="p-6 pt-16 text-sm">This Design System file is invalid or uses an unsupported format.</p>
   const source = data.manifest.files.find(file => file.path === DESIGN_SYSTEM_FILE)?.content ?? ""
   return <>
-    <LibraryView system={system} version={data.manifest.version} source={source} />
+    <LibraryView system={system} version={data.manifest.version} source={source} extras={libraryExtras(system, data.manifest.files)} />
     <ProjectVersionHistory data={data} workspaceId={workspaceId} slug={slug} canWrite={canEdit} setViewing={setViewing} />
   </>
 }
@@ -66,7 +105,7 @@ export function DesignLibraryGate({ workspaceId, slug, version, onFrame, childre
   return isDesignLibrary(snapshot.data) ? <DesignLibraryBody workspaceId={workspaceId} slug={slug} version={version} onFrame={onFrame} /> : <>{children}</>
 }
 
-export function LibraryView({ system, version, source }: { system: DesignSystem; version: number; source: string }) {
+export function LibraryView({ system, version, source, extras = { readme: null, previews: {} } }: { system: DesignSystem; version: number; source: string; extras?: LibraryExtras }) {
   const frame = useArtifactFrame()
   const phone = frame?.layout === "phone"
   const [query, setQuery] = React.useState("")
@@ -116,9 +155,12 @@ export function LibraryView({ system, version, source }: { system: DesignSystem;
           <div className="grid content-center gap-1.5 p-5">
             <small className="text-xs text-muted-foreground">Library · v{version}</small>
             <h1 className="text-2xl font-semibold">{system.name ?? "Design system"}</h1>
-            <p className="text-sm text-muted-foreground">{system.colors.length} colors · {system.typography.length} text styles · {system.spacing.length} spacing steps · {system.radii.length} radii{system.components.length ? ` · ${system.components.length} components` : ""}</p>
+            <p className="text-sm text-muted-foreground">{system.colors.length} colors · {system.typography.length} text styles · {system.spacing.length} spacing steps · {system.radii.length} radii{system.components.length ? ` · ${system.components.length} ${system.components.length === 1 ? "component" : "components"}` : ""}</p>
           </div>
         </section>
+        {extras.readme && <article aria-label="README" className="rounded-card border px-5 py-4">
+          <MarkdownContent>{extras.readme}</MarkdownContent>
+        </article>}
         <section aria-label="Colors">
           {head("colors", "Colors", colors.length)}
           {colors.length === 0 ? none : <ul className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3">
@@ -158,7 +200,13 @@ export function LibraryView({ system, version, source }: { system: DesignSystem;
         <section aria-label="Components">
           {head("components", "Components", components.length)}
           {components.length === 0 ? none : <ul className="divide-y rounded-card border text-sm">
-            {components.map(component => <li key={component.name} className="px-3 py-2"><b className="font-medium">{component.name}</b>{component.description && <p className="text-xs text-muted-foreground">{component.description}</p>}</li>)}
+            {components.map(component => {
+              const preview = extras.previews[component.name]
+              return <li key={component.name} data-component={component.name} className="grid gap-2 px-3 py-2">
+                <div><b className="font-medium">{component.name}</b>{component.description && <p className="text-xs text-muted-foreground">{component.description}</p>}</div>
+                {preview && <ComponentPreview name={component.name} document={previewDocument(system, preview)} height={previewHeight(preview)} />}
+              </li>
+            })}
           </ul>}
         </section>
       </div>
@@ -177,5 +225,22 @@ export function LibraryView({ system, version, source }: { system: DesignSystem;
       <ArtifactTool icon={Download} label="Download design-system.json" onClick={download} />
     </ArtifactSlot>
     {!phone && <ArtifactSlot name="panel" label="Sections">{navigator}</ArtifactSlot>}
+  </div>
+}
+
+/** The card at its canvas size, scaled to the column so a phone sees all of it rather than a crop. */
+function ComponentPreview({ name, document, height }: { name: string; document: string; height: number }) {
+  const box = React.useRef<HTMLDivElement>(null)
+  const [scale, setScale] = React.useState(1)
+  React.useEffect(() => {
+    const node = box.current
+    if (!node || typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(([entry]) => setScale(Math.min(1, entry.contentRect.width / PREVIEW_WIDTH) || 1))
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
+  return <div ref={box} data-preview-scale={scale} className="overflow-hidden rounded-[var(--radius-row)] border bg-muted" style={{ height: height * scale }}>
+    <iframe title={`${name} preview`} sandbox="" referrerPolicy="no-referrer" srcDoc={document}
+      className="block origin-top-left border-0" style={{ width: PREVIEW_WIDTH, height, transform: scale < 1 ? `scale(${scale})` : undefined }} />
   </div>
 }
