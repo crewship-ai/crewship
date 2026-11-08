@@ -18,7 +18,9 @@ import { canonicalArtifactHref, resolvedArtifactId, type LegacyPagesTarget } fro
 export function LegacyPagesRedirect({ target, children }: { target: Extract<LegacyPagesTarget, { to: "resolve" }>; children: ReactNode }) {
   const [stay, setStay] = useState(false)
   if (stay) return <>{children}</>
-  return <Resolve target={target} onStay={() => setStay(true)} />
+  // Only the address is frozen: a workspace switch while the read is pending
+  // starts the decision again in the workspace now selected.
+  return <Resolve key={target.workspaceId} target={target} onStay={() => setStay(true)} />
 }
 
 function Resolve({ target: entry, onStay }: { target: Extract<LegacyPagesTarget, { to: "resolve" }>; onStay: () => void }) {

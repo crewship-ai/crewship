@@ -9,10 +9,11 @@ import { toPageView, type WirePage } from "@/hooks/use-pages"
 const state = vi.hoisted(() => ({
   query: "workspace_id=ws1", slug: "brief", access: "trusted" as AccessMode, replace: vi.fn(), read: vi.fn(),
   wire: null as Record<string, unknown> | null, loading: false, error: null as string | null, denied: false, session: "authenticated" as string,
+  workspace: "ws1",
 }))
 vi.mock("next/navigation", () => ({ useSearchParams: () => new URLSearchParams(state.query), useRouter: () => ({ replace: state.replace, push: vi.fn() }) }))
 vi.mock("@/lib/use-url-segment", () => ({ useUrlSegment: () => state.slug }))
-vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: "ws1", loading: false, linkUnavailable: false }) }))
+vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ workspaceId: state.workspace, loading: false, linkUnavailable: false }) }))
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => state.access }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: state.session, data: state.session === "authenticated" ? { user: { id: "u1" } } : null }) }))
 vi.mock("@/components/features/restricted/access-notice", () => ({ useAccessContext: () => ({}) }))
@@ -33,7 +34,7 @@ import { PageDetailClient } from "../page-client"
 const wire = (extra: Record<string, unknown> = {}) => ({ id: "page-brief", slug: "brief", name: "Brief", owner: "user/u1", reach: ["owner"], ...extra })
 
 beforeEach(() => {
-  Object.assign(state, { query: "workspace_id=ws1", slug: "brief", access: "trusted", wire: wire({ artifact_kind: "word", has_document: true }), loading: false, error: null, denied: false, session: "authenticated" })
+  Object.assign(state, { workspace: "ws1", query: "workspace_id=ws1", slug: "brief", access: "trusted", wire: wire({ artifact_kind: "word", has_document: true }), loading: false, error: null, denied: false, session: "authenticated" })
   state.replace.mockReset(); state.read.mockReset()
   vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", "true")
 })
@@ -122,4 +123,18 @@ it("decides once: navigating to another page inside Pages does not redirect", ()
   view.rerender(<PageDetailClient />)
   expect(state.replace).not.toHaveBeenCalled()
   expect(screen.getByText("Pages view other")).toBeTruthy()
+})
+
+it("follows a workspace switch while the page read is pending", () => {
+  state.loading = true
+  state.wire = null
+  const view = render(<PageDetailClient />)
+  expect(state.read).toHaveBeenLastCalledWith("ws1", "brief")
+  state.workspace = "ws2"
+  state.loading = false
+  state.wire = wire({ artifact_kind: "word", has_document: true })
+  view.rerender(<PageDetailClient />)
+  expect(state.read).toHaveBeenLastCalledWith("ws2", "brief")
+  expect(state.replace).toHaveBeenCalledWith("/artifacts/page-brief?workspace_id=ws2")
+  expect(state.replace).not.toHaveBeenCalledWith("/artifacts/page-brief?workspace_id=ws1")
 })
