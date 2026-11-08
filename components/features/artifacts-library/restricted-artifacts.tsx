@@ -48,11 +48,14 @@ export function RestrictedArtifacts({ workspaceId, access, focus, hrefFor, homeH
   const [submitting, setSubmitting] = useState(false)
   // Bumped by "Check again" / "Try again" to re-read the catalog.
   const [reload, setReload] = useState(0)
-  const request = useRef<{ key: string; body: string; url: string } | null>(null)
-  // A result lands only on the workspace and artifact it was started from.
+  // The frozen request a retry resends, bound to the one action it was built for.
+  const request = useRef<{ action: string; key: string; body: string; url: string } | null>(null)
   const scope = JSON.stringify([workspaceId, focus])
-  const owner = useRef(scope)
-  owner.current = scope
+  // Bumped whenever the scope changes, the catalog is re-read or the view
+  // unmounts: a confirmation or response that resumes later finds a different
+  // generation and touches nothing (#5132).
+  const generation = useRef(0)
+  useEffect(() => () => { generation.current++ }, [])
   const runId = run?.run_id
   const runState = run?.status
   const artifact = focus === null ? null : catalog.find(entry => entry.slug === focus) ?? null
@@ -71,7 +74,7 @@ export function RestrictedArtifacts({ workspaceId, access, focus, hrefFor, homeH
   }, [workspaceId, reload])
 
   // Another artifact, another workspace or a re-read starts from a clean form.
-  useEffect(() => { setSelected(""); setValues({}); setRun(null); setError(""); setSubmitting(false); request.current = null }, [scope, reload])
+  useEffect(() => { generation.current++; setSelected(""); setValues({}); setRun(null); setError(""); setSubmitting(false); request.current = null }, [scope, reload])
 
   useEffect(() => {
     if (!runId || !runState || !ACTIVE.includes(runState)) return
@@ -98,11 +101,14 @@ export function RestrictedArtifacts({ workspaceId, access, focus, hrefFor, homeH
   const submit = async () => {
     if (!action || submitting) return
     const workspace = workspaceId
-    const started = scope
+    const started = generation.current
+    const current = () => generation.current === started
     setSubmitting(true); setError(""); setRun(null)
     try {
+      if (request.current && request.current.action !== action.key) request.current = null
       if (!request.current) {
         if (action.confirm && !await askConfirm({ title: action.confirm.title, description: action.confirm.body, confirmLabel: "Run action", cancelLabel: "Cancel" })) return
+        if (!current()) return
         const inputs: Record<string, string | number | boolean> = {}
         for (const field of action.inputs) {
           const value = values[field.name] ?? ""
@@ -114,18 +120,18 @@ export function RestrictedArtifacts({ workspaceId, access, focus, hrefFor, homeH
         const path = `/api/v1/pages/${requireApiPathSegment(action.artifact.slug)}`
         const target = `${requireApiPathSegment(action.panel_id)}/${requireApiPathSegment(action.id)}`
         const published = !!action.artifact.publication
-        request.current = { key: crypto.randomUUID(), url: (published ? `${path}/application/actions/${target}` : `${path}/panels/${requireApiPathSegment(action.panel_id)}/actions/${requireApiPathSegment(action.id)}`) + `?workspace_id=${encodeURIComponent(workspace)}`, body: JSON.stringify(published ? { inputs, publication: action.artifact.publication, expected_intent_hash: action.intent_hash } : { inputs, expected_intent_hash: action.intent_hash }) }
+        request.current = { action: action.key, key: crypto.randomUUID(), url: (published ? `${path}/application/actions/${target}` : `${path}/panels/${requireApiPathSegment(action.panel_id)}/actions/${requireApiPathSegment(action.id)}`) + `?workspace_id=${encodeURIComponent(workspace)}`, body: JSON.stringify(published ? { inputs, publication: action.artifact.publication, expected_intent_hash: action.intent_hash } : { inputs, expected_intent_hash: action.intent_hash }) }
       }
       const attempt = request.current
       const response = await apiFetch(attempt.url, { method: "POST", headers: { "Content-Type": "application/json", "Idempotency-Key": attempt.key }, body: attempt.body })
       const body = await response.json()
-      if (owner.current !== started) return
+      if (!current()) return
       if (!response.ok) { request.current = null; throw new Error(body.error ?? "Action unavailable.") }
       setRun({ run_id: body.run_id, status: body.status, step_outputs: {} })
       request.current = null
     } catch (cause) {
-      if (owner.current === started) setError(cause instanceof TypeError ? "Could not confirm the outcome. Retry sends the same request ID." : cause instanceof Error ? cause.message : "Action unavailable.")
-    } finally { if (owner.current === started) setSubmitting(false) }
+      if (current()) setError(cause instanceof TypeError ? "Could not confirm the outcome. Retry sends the same request ID." : cause instanceof Error ? cause.message : "Action unavailable.")
+    } finally { if (current()) setSubmitting(false) }
   }
 
   const active = submitting || !!run && ACTIVE.includes(run.status)
