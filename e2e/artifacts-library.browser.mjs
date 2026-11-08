@@ -1,7 +1,8 @@
-// Isolated production-component browser test of the Artifacts library (Harbor 2): Home, the
-// panel's spaces, search operators and a facet (a bottom sheet on a phone), every kind's detail,
-// a project's comment, new version and restore, a native Word held by another person, and the
-// New artifact dialog. Every Pages, artifact and Craft request goes to in-memory mocks;
+// Isolated production-component browser test of the Artifacts library (Harbor 2 v87): Home with
+// Needs attention, kind chips, grid/table and the New popover; the panel's spaces, search operators
+// and a facet (a bottom sheet on a phone); every kind's detail inside the ArtifactFrame (title menu,
+// status chip, Agent and Info drawer); a project's comment, new version and restore; a native Word
+// held by another person; and the New artifact dialog. Every Pages, artifact and Craft request goes to in-memory mocks;
 // anything else fails the run. No live instance, provider or credentials are used.
 // Run: crewship-heavy node e2e/artifacts-library.browser.mjs
 // Screenshots: $ARTIFACTS_LIBRARY_SCREENS or a fresh temporary directory
@@ -97,18 +98,33 @@ try {
     const listed = () => list.getByRole("button").evaluateAll(buttons => buttons.map(b => b.getAttribute("aria-label")))
     const noEmptyPanels = async where => assert.equal(await page.getByText(/declares no panels/i).count(), 0, `${vp.name} ${where}: never "This page declares no panels"`)
 
-    // 1. Home by default: Make something, Not shared yet, Recent; the empty Page is hidden. Then All artifacts.
-    await page.getByRole("heading", { level: 1, name: "Artifacts" }).waitFor()
-    await page.getByRole("heading", { name: "Make something" }).waitFor()
-    await page.getByRole("button", { name: "New Project" }).waitFor()
-    const attention = page.getByRole("region", { name: "Not shared yet" })
-    assert.deepEqual(await attention.getByRole("button").evaluateAll(b => b.map(x => x.getAttribute("aria-label"))), ["Open Partner brief", "Open Q3 support summary"])
-    const recent = page.getByRole("region", { name: "Recent" })
-    assert.deepEqual(await recent.getByRole("button").evaluateAll(b => b.map(x => x.getAttribute("aria-label"))),
-      ["Open Pricing site", "Open Price model", "Open Sales pipeline", "Open Weekly competitor report", "Open Q3 board deck"])
+    // 1. Home by default: Needs attention by the fixed rule (only the owner's stale panels here, never
+    // "unshared"), every artifact once with kind chips and a grid/table toggle, the New popover. Then All.
+    await page.getByRole("heading", { level: 1, name: "Artifacts" }).waitFor({ state: "attached" })
+    const attention = page.getByRole("region", { name: /^Needs attention/ })
+    assert.deepEqual(await attention.getByRole("button").evaluateAll(b => b.map(x => x.getAttribute("aria-label"))), ["Data is stale: Weekly competitor report"])
+    const HOME = ["Open Pricing site", "Open Partner brief", "Open Price model", "Open Sales pipeline", "Open Weekly competitor report", "Open Q3 board deck", "Open Q3 support summary"]
+    assert.deepEqual((await listed()).sort(), [...HOME].sort())
     assert.equal(await page.getByText("Pricing calculator").count(), 0, "an empty Page is not on Home")
+    assert.equal(await page.getByText(/\bPages?\b/).count(), 0, "\"Page\" is never a label")
     await noSideways("home")
     await shot("01-home")
+    const chips = page.getByRole("group", { name: "Kind" })
+    await chips.getByRole("button", { name: /^Sheets/ }).click()
+    assert.deepEqual(await listed(), ["Open Price model"])
+    await chips.getByRole("button", { name: /^All/ }).click()
+    await page.getByRole("radio", { name: "Table" }).click()
+    await page.getByRole("table").waitFor()
+    await page.getByRole("radio", { name: "Grid" }).click()
+    await list.waitFor()
+    await page.getByRole("button", { name: "New artifact", exact: true }).click()
+    const newMenu = page.getByRole("dialog", { name: "New artifact" })
+    await newMenu.getByRole("region", { name: "Artifacts" }).getByRole("button", { name: "New App" }).waitFor()
+    await newMenu.getByRole("region", { name: "Craft · one editor at a time" }).getByRole("button", { name: "New Word" }).waitFor()
+    await noSideways("new popover")
+    await shot("01c-new-popover")
+    await page.keyboard.press("Escape")
+    await newMenu.waitFor({ state: "detached" })
     let panel = await openPanel()
     const spaces = panel.getByRole("tablist", { name: "Artifacts" })
     assert.equal(await spaces.getByRole("tab", { name: /^Home/ }).getAttribute("aria-selected"), "true")
@@ -123,8 +139,9 @@ try {
     const ALL = ["Open Pricing site", "Open Partner brief", "Open Price model", "Open Sales pipeline", "Open Weekly competitor report", "Open Q3 board deck", "Open Q3 support summary"]
     assert.deepEqual(await listed(), ALL)
     await page.getByRole("toolbar", { name: "Display" }).getByText("7 artifacts").waitFor()
-    // A legacy Page with panels is a Page, not a Dashboard.
-    assert.match(await list.getByRole("button", { name: "Open Weekly competitor report" }).innerText(), /\bPage\b/)
+    // A legacy Page with panels is an App in the UI's words, not a Dashboard and never "Page".
+    assert.match(await list.getByRole("button", { name: "Open Weekly competitor report" }).innerText(), /\bApp\b/)
+    assert.doesNotMatch(await list.getByRole("button", { name: "Open Weekly competitor report" }).innerText(), /\bPage\b/)
     assert.doesNotMatch(await list.getByRole("button", { name: "Open Weekly competitor report" }).innerText(), /Dashboard/)
     assert.match(await list.getByRole("button", { name: "Open Sales pipeline" }).innerText(), /\bDashboard\b/)
     await noSideways("all artifacts")
@@ -178,20 +195,24 @@ try {
     await page.getByRole("toolbar", { name: "Display" }).getByText("7 artifacts").waitFor()
     assert.deepEqual(await listed(), ALL)
 
-    // 3 + 4. Open every kind. The project opens in its library viewer: comment, a new version in
-    // History, restore. The others land on their Open in Pages / Open page link (Word with its lock).
-    const back = async () => { await page.getByRole("button", { name: "All artifacts", exact: true }).click(); await list.waitFor() }
+    // 3 + 4. Open every kind inside the ArtifactFrame. The project opens in its library viewer:
+    // comment, a new version in History, restore. The others keep their full-view / Open page link.
+    // The frame header's way back (the crumb, or a phone's back button); a body may carry its own.
+    const back = async () => { await page.getByRole("group", { name: "Artifact" }).getByRole("button", { name: "All artifacts", exact: true }).first().click(); await list.waitFor() }
+    const frame = page.locator("[data-artifact-frame]")
     const openItem = async (name, kind) => {
       await openRow(name)
-      // Exactly one title: the library's h1, or the viewer's own header where it opens in the viewer.
-      const title = page.getByRole("heading", { level: 1, name }).or(page.locator('section[aria-label="Artifact viewer"]').getByRole("heading", { level: 2, name }))
-      await title.waitFor()
-      assert.equal(await page.getByRole("heading", { name, exact: true }).count(), 1, `${name} is titled once`)
-      assert.ok((await title.locator("xpath=..").innerText()).includes(kind), `${name} is a ${kind}`)
+      // The frame names it once, in the header's title menu, and says which UI kind it is.
+      await page.getByRole("button", { name: `${name}, artifact menu` }).waitFor()
+      assert.equal(await frame.getAttribute("data-artifact-frame"), kind, `${name} is a ${kind}`)
+      assert.ok(await page.getByRole("heading", { name, exact: true }).count() <= 1, `${name} is titled at most once in the body`)
+      // The chip shows only what a real signal says: the stale report does, an item without one shows none.
+      if (name === "Weekly competitor report") await page.getByRole("button", { name: "Status: Stale · 1 panel" }).waitFor()
+      else if (name !== "Partner brief") assert.equal(await page.getByRole("button", { name: /^Status: / }).count(), 0, `${name}: no invented status`)
     }
     const viewer = page.locator('section[aria-label="Artifact viewer"]')
 
-    await openItem("Pricing site", "Project")
+    await openItem("Pricing site", "app")
     await viewer.waitFor()
     assert.equal(await viewer.getByRole("tab", { name: "Preview" }).getAttribute("aria-selected"), "true")
     assert.equal(await page.getByRole("link", { name: /Open in Pages|Open page/ }).count(), 0, "a project opens in its viewer, not a link")
@@ -241,20 +262,24 @@ try {
     await back()
 
     const linked = [
-      { name: "Sales pipeline", kind: "Dashboard", link: "Open in Pages", href: "/pages/%40page-pipeline?workspace_id=ws-fixture&artifact=1" },
-      { name: "Weekly competitor report", kind: "Page", link: "Open page", href: "/pages/weekly-competitor-report?workspace_id=ws-fixture" },
-      { name: "Partner brief", kind: "Word", link: "Open in Pages", href: "/pages/partner-brief?workspace_id=ws-fixture" },
-      { name: "Price model", kind: "Sheet", link: "Open in Pages", href: "/pages/price-model?workspace_id=ws-fixture" },
-      { name: "Q3 board deck", kind: "Slides", link: "Open in Pages", href: "/pages/q3-board-deck?workspace_id=ws-fixture" },
+      { name: "Sales pipeline", kind: "dashboard", link: "Open full view", href: "/pages/%40page-pipeline?workspace_id=ws-fixture&artifact=1" },
+      // A legacy Page shows its own content in the frame (#4483): no way out to Pages.
+      { name: "Weekly competitor report", kind: "app", link: null },
+      { name: "Partner brief", kind: "word", link: "Open full view", href: "/pages/partner-brief?workspace_id=ws-fixture" },
+      { name: "Price model", kind: "sheet", link: "Open full view", href: "/pages/price-model?workspace_id=ws-fixture" },
+      { name: "Q3 board deck", kind: "slides", link: "Open full view", href: "/pages/q3-board-deck?workspace_id=ws-fixture" },
     ]
     for (const entry of linked) {
       await openItem(entry.name, entry.kind)
-      const link = page.getByRole("link", { name: entry.link })
-      await link.waitFor()
-      assert.equal(await link.getAttribute("href"), entry.href, `${entry.name} links to its Page`)
+      if (entry.link) {
+        const link = page.getByRole("link", { name: entry.link })
+        await link.waitFor()
+        assert.equal(await link.getAttribute("href"), entry.href, `${entry.name} links to its full view`)
+      } else assert.equal(await page.getByRole("link", { name: /Open full view|Open page|Open in Pages/ }).count(), 0, `${entry.name} opens in place`)
       assert.equal(await viewer.count(), 0, `${entry.name} has no project viewer`)
       await noEmptyPanels(entry.name)
-      if (entry.kind === "Word") {
+      assert.equal(await page.getByText(/Open in Pages/).count(), 0, `${entry.name}: the frame never offers Open in Pages`)
+      if (entry.kind === "word") {
         // Native Word held by another person: the lock and Request edit, no Edit.
         await page.getByText("Editing: Jana Nováková").waitFor()
         assert.equal(await page.getByRole("button", { name: "Edit", exact: true }).count(), 0)
@@ -264,16 +289,32 @@ try {
         const body = page.getByRole("region", { name: "Partner brief, saved version" })
         await body.getByText("Three partners, one launch date").waitFor()
         assert.equal(await body.locator("[contenteditable=true]").count(), 0, "the preview is read-only")
+        // Agent: no agent path here but chat, so Ask only — no mode switch — opening the chat with the artifact as context.
+        await page.getByRole("button", { name: "Agent", exact: true }).click()
+        const agent = page.getByRole("complementary", { name: "Agent" })
+        await agent.getByRole("textbox", { name: "What should the agent do?" }).fill("What is still open?")
+        assert.equal(await agent.getByRole("radiogroup", { name: "Agent mode" }).count(), 0)
+        assert.match(await agent.getByRole("link", { name: "Ask in chat" }).getAttribute("href"), /^\/chat\?.*page=partner-brief.*prompt=What/)
+        await noSideways("agent drawer")
+        await shot("07-word-agent")
+        await agent.getByRole("button", { name: "Close panel" }).click()
+        await agent.waitFor({ state: "detached" }).catch(async () => assert.equal(await agent.isVisible(), false))
       }
       await noSideways(entry.name)
-      await shot(`07-${entry.kind.toLowerCase()}`)
+      await shot(`07-${entry.kind}`)
       await back()
     }
 
     // 4b. Sharing (mock of the agreed interface): Share with Comment, the Access tab says who and why;
     // then select two rows, Move with an impact preview, Confirm; Archive previews and deletes nothing.
     await openRow("Price model")
-    await page.getByRole("button", { name: "Share", exact: true }).click()
+    // Every action lives in the title menu (on a phone, Share has no header button of its own).
+    const menu = async () => {
+      await page.getByRole("button", { name: vp.mobile ? "Artifact menu" : "Price model, artifact menu", exact: true }).click()
+      return page.getByRole("menu")
+    }
+    if (vp.mobile) await (await menu()).getByRole("menuitem", { name: /^Share/ }).click()
+    else await page.getByRole("button", { name: "Share", exact: true }).click()
     const share = page.getByRole("dialog", { name: /Share/ })
     await share.waitFor()
     assert.equal(await share.getByText(/expir|guest|public link/i).filter({ hasNotText: "No public links" }).count(), 0, "no expiry, guests or links")
@@ -286,10 +327,15 @@ try {
     await shot("08a-share")
     await page.keyboard.press("Escape")
     await share.waitFor({ state: "detached" })
-    await page.getByRole("radio", { name: "Access" }).click()
-    await page.getByText("Jana Nováková").waitFor()
+    await (await menu()).getByRole("menuitem", { name: /^Info/ }).click()
+    const info = page.getByRole("complementary", { name: "Info" })
+    await info.getByText("Jana Nováková").waitFor()
+    await noSideways("info drawer")
     await shot("08b-access")
+    await info.getByRole("button", { name: "Close panel" }).click()
     await back()
+    // A phone list shows its checkboxes only after Select.
+    if (vp.mobile) await page.getByRole("button", { name: "Select", exact: true }).click()
     await list.getByRole("checkbox", { name: "Select Partner brief" }).check()
     await list.getByRole("checkbox", { name: "Select Price model" }).check()
     const bulk = page.getByRole("toolbar", { name: "Selection" })
@@ -307,9 +353,10 @@ try {
     assert.deepEqual(await listed(), ALL, "a cancelled preview changes nothing")
     await bulk.getByRole("button", { name: "Clear" }).click()
 
-    // 5. New artifact from the SubBar: the dialog with its kinds, then Cancel.
+    // 5. New artifact from the bar's popover: one entry opens the existing dialog on its flow, then Cancel.
     await page.getByRole("button", { name: "New artifact", exact: true }).click()
-    const dialog = page.getByRole("dialog", { name: "New artifact" })
+    await page.getByRole("button", { name: "New App", exact: true }).click()
+    const dialog = page.getByRole("dialog", { name: "New artifact" }).filter({ has: page.getByLabel("Name") })
     await dialog.waitFor()
     const kinds = await dialog.getByRole("group", { name: "Kind" }).locator("[data-kind]").evaluateAll(tiles => tiles.map(t => t.getAttribute("data-kind")))
     assert.ok(kinds.includes("project") && kinds.includes("page") && kinds.includes("word"), `creatable kinds: ${kinds.join(", ")}`)

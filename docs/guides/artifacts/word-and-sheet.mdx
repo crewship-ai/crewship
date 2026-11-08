@@ -72,7 +72,7 @@ Open the native Word document or Sheet in **Artifacts**. With both build flags
 `NEXT_PUBLIC_ARTIFACTS_LIBRARY` and `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` enabled,
 the Craft editor opens inside the detail when the server confirms editing is
 available. Follow [Take over editing](#take-over-editing) in that editor. In this
-mode there is no **Open in Pages** button, and `/pages/<slug>` leads back to
+mode there is no full-view link, and `/pages/<slug>` leads back to
 the artifact detail. Readers without edit access get the shared preview.
 
 Outside that mode, Word detail shows the saved version read-only. With the
@@ -83,9 +83,9 @@ lock bar enabled, a bar above it shows:
 - **Editing: *name*** · *you see a read-only preview*, with **Request edit**.
   When an agent holds the lease, its name is followed by **(agent)**.
 
-Choose **Edit** to open an editor in a new tab, or **Open in Pages** to open
+Choose **Edit** to open an editor in a new tab, or **Open full view** to open
 one in this tab. Without the lock bar, or for a Sheet outside the inline mode,
-use **Open in Pages**.
+use **Open full view**.
 
 A document result in chat has the same bar in its side panel. There, **Edit**
 also opens the editor in a new tab. Chat never takes the lease itself.

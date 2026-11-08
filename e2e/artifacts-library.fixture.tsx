@@ -69,6 +69,14 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   if (path === "/api/v1/me/preferences" && method === "GET") return json({})
   if (path.startsWith("/api/v1/me/preferences/") && method === "PUT") return json({ ok: true })
   if (path === "/api/v1/documents/status" && method === "GET") return json({ enabled: true })
+  // The legacy panel Page's own content, read by ID inside its frame (#4483): one fresh and one stale panel.
+  if (path === "/api/v1/pages/%40page-weekly" && method === "GET") return json({ ...LIST[4], has_application: false, panels: [
+    { id: "competitors", schema: "status.v1", title: "Competitor pricing", owner: "user/fixture-human", sla_seconds: 86400, span: 8, state: "fresh",
+      data: { items: [{ name: "Acme", state: "ok", label: "No change" }, { name: "Globex", state: "warn", label: "New Team tier" }] },
+      provenance: { producer: "routine/weekly-scan", run_id: "run-1", produced_at: ago(60) } },
+    { id: "share", schema: "metric.v1", title: "Share of voice", sla_seconds: 3600, span: 4, state: "stale",
+      data: { value: 31, unit: "%" }, provenance: { producer: "routine/weekly-scan", run_id: "run-0", produced_at: ago(60 * 30) } },
+  ] })
   // The Word detail's read-only preview: current metadata, then the saved document (schema 3).
   if (path === "/api/v1/pages/%40page-brief" && method === "GET") return json({ id: "page-brief", slug: "partner-brief", name: "Partner brief", has_document: true })
   if (path === "/api/v1/pages/%40page-brief/document" && method === "GET") return json({ page_id: "page-brief", schema: 3, rev: 4, content: {
@@ -77,9 +85,23 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
       { type: "paragraph", attrs: { id: "p1" }, content: [{ type: "text", text: "Partner brief" }] },
       { type: "paragraph", attrs: { id: "p2" }, content: [{ type: "text", text: "Three partners, one launch date and the open questions for each." }] },
     ] } })
+  // The private comment draft's key service (lib/local-draft-seal): an in-memory stand-in that
+  // wraps a key as its own envelope. It only lets the fixture's drafts seal; nothing is secret here.
+  if (/^\/api\/v1\/pages\/[^/]+\/draft-key$/.test(path) && method === "POST") {
+    const body = JSON.parse(String(init?.body ?? "{}"))
+    if (body.operation === "wrap") return json({ envelope: `v1:${body.key}` })
+    if (body.operation === "unwrap") return json({ key: String(body.envelope).slice(3) })
+    return json({ readable: true })
+  }
   const slug = /^\/api\/v1\/pages\/([^/]+)\/(?:artifact|craft)\b/.exec(path)?.[1]
   const mock = slug ? mocks[decodeURIComponent(slug)] : path === "/api/v1/pages/artifacts/availability" ? project : undefined
-  const response = mock?.handle(url, init)
+  const response = await mock?.handle(url, init)
+  // The server answers whether this person may send to the agent, restore and share (#4628); the
+  // shared mock predates those fields, so the fixture says yes where the person can write.
+  if (response && method === "GET" && /\/artifact$/.test(path) && response.headers.get("content-type")?.includes("json")) {
+    const body = await response.clone().json()
+    if (body && typeof body === "object" && "can_write" in body && !("can_send_to_agent" in body)) return json({ ...body, can_send_to_agent: body.can_write === true, can_restore: body.can_write === true, can_share: body.can_write === true })
+  }
   if (response) return response
   if (path === "/bundle.js") return realFetch(input, init)
   window.__unmocked.push(`${(init?.method ?? "GET").toUpperCase()} ${url}`)
