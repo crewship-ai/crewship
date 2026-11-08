@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"time"
 	"unicode/utf8"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // ProposalLimit bounds one document's stored proposals, open and decided.
@@ -243,7 +245,7 @@ func (s *Store) RejectProposal(ctx context.Context, k Key, id, fingerprint, prop
 		if e = s.admitDiscussionReceipt(ctx, tx, k); e != nil {
 			return e
 		}
-		result, e := tx.ExecContext(ctx, `UPDATE document_proposals SET status='rejected',decided_by=?,decision_id=?,decided_at=? WHERE workspace_id=? AND page_id=? AND id=? AND status='open'`, actor, id, time.Now().UTC().Format(time.RFC3339Nano), k.WorkspaceID, k.PageID, proposal)
+		result, e := tx.ExecContext(ctx, `UPDATE document_proposals SET status='rejected',decided_by=?,decision_id=?,decided_at=? WHERE workspace_id=? AND page_id=? AND id=? AND status='open'`, actor, id, tsformat.Format(time.Now()), k.WorkspaceID, k.PageID, proposal)
 		if e != nil {
 			return e
 		}
@@ -312,7 +314,7 @@ func AcceptProposalGuard(k Key, proposal, decision string, candidate json.RawMes
 		if !seen {
 			return ErrConflict
 		}
-		result, e := tx.ExecContext(ctx, `UPDATE document_proposals SET status='accepted',decided_by=?,decision_id=?,decided_at=?,accepted_rev=? WHERE workspace_id=? AND page_id=? AND id=? AND status='open'`, actor, decision, time.Now().UTC().Format(time.RFC3339Nano), v.HeadRev+1, k.WorkspaceID, k.PageID, proposal)
+		result, e := tx.ExecContext(ctx, `UPDATE document_proposals SET status='accepted',decided_by=?,decision_id=?,decided_at=?,accepted_rev=? WHERE workspace_id=? AND page_id=? AND id=? AND status='open'`, actor, decision, tsformat.Format(time.Now()), v.HeadRev+1, k.WorkspaceID, k.PageID, proposal)
 		if e != nil {
 			return e
 		}
