@@ -366,30 +366,41 @@ var allOn = showcaseKnobs{wordNative: true, gridNative: true}
 
 // mirrorSlugPrefix marks the mirrored reference artifacts each
 // seeddata/mirror_<slug>.go appends to the catalogue (showcase/mirror).
-const mirrorSlugPrefix = "ref-"
+const mirrorSlugPrefix = "ref-" // used by the per-mirror tests
 
-// withMirrorItems adds the mirrored reference projects to a run's expected
-// outcome. Each is a data-less artifact project, so it fares exactly like
-// kalkulacka-roi: created whenever the run creates artifacts, otherwise
-// already present. Their own content is tested in *_mirror_<slug>_test.go.
-func withMirrorItems(w showcaseWant) showcaseWant {
-	n := 0
-	for _, a := range seeddata.ShowcaseArtifacts {
-		if strings.HasPrefix(a.Slug, mirrorSlugPrefix) && len(a.Data) == 0 {
-			n++
+// showcaseCoreOnly runs a test against the core catalogue: mirrored reference
+// copies (ref-*) register from their own files with their own tests, so the
+// phase counts below stay fixed. The test must not be parallel: it swaps the
+// package catalogue until it and its subtests finish.
+func showcaseCoreOnly(t *testing.T) {
+	t.Helper()
+	crafts, arts, designs := seeddata.ShowcaseCrafts, seeddata.ShowcaseArtifacts, seeddata.ShowcaseDesigns
+	t.Cleanup(func() {
+		seeddata.ShowcaseCrafts, seeddata.ShowcaseArtifacts, seeddata.ShowcaseDesigns = crafts, arts, designs
+	})
+	core := func(slug string) bool { return !strings.HasPrefix(slug, "ref-") }
+	seeddata.ShowcaseCrafts = nil
+	for _, c := range crafts {
+		if core(c.Slug) {
+			seeddata.ShowcaseCrafts = append(seeddata.ShowcaseCrafts, c)
 		}
 	}
-	if w.artifactCreates > 0 {
-		w.stats.Created += n
-		w.artifactCreates += n
-	} else {
-		w.stats.Skipped += n
+	seeddata.ShowcaseArtifacts = nil
+	for _, a := range arts {
+		if core(a.Slug) {
+			seeddata.ShowcaseArtifacts = append(seeddata.ShowcaseArtifacts, a)
+		}
 	}
-	return w
+	seeddata.ShowcaseDesigns = nil
+	for _, d := range designs {
+		if core(d.Slug) {
+			seeddata.ShowcaseDesigns = append(seeddata.ShowcaseDesigns, d)
+		}
+	}
 }
 
 func TestSeedShowcase_Phase(t *testing.T) {
-	t.Parallel()
+	showcaseCoreOnly(t)
 	full := showcaseWant{stats: showcaseStats{Created: 12}, pageCreates: 7, initializes: 7, releases: 7,
 		artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 7,
 		lines: []string{"+ feature flag craft_version_history enabled for workspace " + showcaseTestWS, "+ obchodni-nabidka"}}
@@ -479,7 +490,7 @@ func TestSeedShowcase_Phase(t *testing.T) {
 			defer srv.Close()
 			for i, knobs := range tc.runs {
 				s.setKnobs(knobs)
-				runShowcaseOnce(t, s, srv.URL, withMirrorItems(tc.want[i]))
+				runShowcaseOnce(t, s, srv.URL, tc.want[i])
 			}
 		})
 	}
