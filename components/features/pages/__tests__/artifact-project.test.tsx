@@ -411,3 +411,31 @@ it("does not offer one Page's draft to a different Page that reuses the slug (G4
   expect(screen.queryByRole("button",{name:"Restore source draft"})).toBeNull()
  }finally{state.data.page_id=previous}
 })
+
+// Hosted in the Artifacts frame (owner, 8 Nov 2026): no link to Pages, and read-only leaves out every write.
+it("hosted read-only in the Artifacts frame: no Pages link, no source, restore or share, and it reports can_write", async () => {
+ const onCanWrite = vi.fn()
+ const { container } = render(<ArtifactProject workspaceId="w" slug="@demo" hosted={{ readOnly: true, versionHref: version => `/artifacts/demo?workspace_id=w&version=${version}`, onCanWrite }} />)
+ expect(container.querySelector('a[href^="/pages"]')).toBeNull()
+ expect(screen.queryByRole("link", { name: "Back to Page" })).toBeNull()
+ expect(screen.getByRole("link", { name: "Open shared version 1" })).toHaveAttribute("href", "/artifacts/demo?workspace_id=w&version=1")
+ expect(screen.queryByRole("button", { name: /Restore version|Share version/ })).toBeNull()
+ expect(screen.queryByRole("region", { name: "Project source" })).toBeNull()
+ expect(screen.queryByRole("button", { name: "Edit source" })).toBeNull()
+ await waitFor(() => expect(onCanWrite).toHaveBeenLastCalledWith(true))
+})
+it("hosted for editing in the Artifacts frame: the same source editor and write controls, still no Pages link", async () => {
+ const { container } = render(<ArtifactProject workspaceId="w" slug="@demo" hosted={{ readOnly: false, versionHref: version => `/artifacts/demo?version=${version}` }} />)
+ expect(container.querySelector('a[href^="/pages"]')).toBeNull()
+ expect(screen.getByRole("button", { name: "Restore version 2" })).toBeTruthy()
+ await editSource()
+ expect(screen.getByRole("textbox", { name: "Source file" })).toBeTruthy()
+})
+it("hosted for a reader: the editor address still shows no write control and reports can_write false", async () => {
+ state.data.can_write = false
+ const onCanWrite = vi.fn()
+ render(<ArtifactProject workspaceId="w" slug="@demo" hosted={{ readOnly: false, versionHref: String, onCanWrite }} />)
+ expect(screen.queryByRole("button", { name: "Edit source" })).toBeNull()
+ expect(screen.getByText("Read only")).toBeTruthy()
+ await waitFor(() => expect(onCanWrite).toHaveBeenLastCalledWith(false))
+})

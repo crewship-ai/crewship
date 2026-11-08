@@ -309,6 +309,9 @@ interface ArtifactsLibraryProps {
   /** Controlled filters, when the route keeps them in the URL; otherwise the library holds them. */
   filters?: LibraryFilters
   onFiltersChange?: (next: LibraryFilters) => void
+  /** `?edit=1`: the open artifact shows its editor inside the frame. */
+  edit?: boolean
+  onEditChange?: (edit: boolean) => void
 }
 
 /**
@@ -317,7 +320,7 @@ interface ArtifactsLibraryProps {
  * searches, filters and switches views; Home offers what can be made. Empty
  * items and repeated runs have their own views and are never deleted here.
  */
-export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect, onCanonical, filters: controlled, onFiltersChange }: ArtifactsLibraryProps) {
+export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect, onCanonical, filters: controlled, onFiltersChange, edit, onEditChange }: ArtifactsLibraryProps) {
   const { pages, loading, error, refresh } = usePages(workspaceId, undefined, CATALOG)
   const { folders } = usePageFolders(workspaceId)
   const caps = useArtifactCapabilities(workspaceId)
@@ -428,7 +431,7 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   else if (error && !items.length) content = <PageError title="Artifacts could not be loaded" onRetry={refresh} retryLabel="Try again" />
   else if (item !== null) {
     content = selected ? <ArtifactDetail key={selected.slug} workspaceId={workspaceId} item={selected} version={version} folders={folderChoices} onBack={() => onSelect(null)}
-      favorite={personal.favorites?.has(selected.slug) ?? false} onFavorite={() => toggleFavorite(selected.slug)} />
+      favorite={personal.favorites?.has(selected.slug) ?? false} onFavorite={() => toggleFavorite(selected.slug)} edit={edit} onEditChange={onEditChange} />
       : access === "loading" ? <div aria-label="Loading artifact"><PageLoading variant="cards" /></div>
         : access === "unknown" || access === "ok" ? <div className="grid gap-2 p-4 text-sm md:p-6">
           <p>This artifact is not available.</p>

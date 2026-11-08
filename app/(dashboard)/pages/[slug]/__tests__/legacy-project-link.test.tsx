@@ -106,17 +106,22 @@ it("follows the address: a later link is resolved for its own page, never the fi
   expect(state.replace).not.toHaveBeenCalledWith("/artifacts/page-brief?workspace_id=ws1")
 })
 
-it("stays on Pages when the build has no project viewer to land on", () => {
+it("moves to the frame even when the build has no project viewer: the frame shows the project read-only", () => {
   vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "false")
   state.query = "artifact=1&version=1&workspace_id=ws1"
   render(<PageDetailClient />)
-  expect(state.replace).not.toHaveBeenCalled()
-  expect(screen.getByTestId("legacy").dataset).toMatchObject({ page: "brief", pin: "1" })
+  expect(state.replace).toHaveBeenCalledWith("/artifacts/page-brief?workspace_id=ws1&version=1")
+  expect(screen.queryByTestId("legacy")).toBeNull()
 })
 
-it("keeps the source editor reachable from the Edit source address", () => {
-  state.query = "artifact=1&edit=1&workspace_id=ws1"
+it.each([
+  ["the Edit source address", "brief", "artifact=1&edit=1&workspace_id=ws1", "/artifacts/page-brief?workspace_id=ws1&edit=1"],
+  ["the Edit source address by ID", "@page-brief", "artifact=1&edit=1&workspace_id=ws1", "/artifacts/page-brief?workspace_id=ws1&edit=1"],
+  ["a pinned Edit source address", "brief", "artifact=1&version=2&edit=1&workspace_id=ws1", "/artifacts/page-brief?workspace_id=ws1&version=2&edit=1"],
+])("opens the source editor inside the frame from %s", (_name, slug, query, target) => {
+  state.slug = slug
+  state.query = query
   render(<PageDetailClient />)
-  expect(state.replace).not.toHaveBeenCalled()
-  expect(screen.getByTestId("legacy")).toBeInTheDocument()
+  expect(state.replace).toHaveBeenCalledWith(target)
+  expect(screen.queryByTestId("legacy")).toBeNull()
 })

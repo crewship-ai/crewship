@@ -33,7 +33,7 @@ function Resolve({ target: entry, onStay }: { target: Extract<LegacyPagesTarget,
   const id = settled && !signedOut && !detail.error && !detail.accessDenied ? resolvedArtifactId(target, detail.page) : null
   useEffect(() => {
     if (!settled) return
-    if (id) router.replace(canonicalArtifactHref(id, target.workspaceId, target.version))
+    if (id) router.replace(canonicalArtifactHref(id, target.workspaceId, target.version, target.edit))
     else onStay()
   }, [settled, id]) // eslint-disable-line react-hooks/exhaustive-deps
   return <LegacyPagesSkeleton />

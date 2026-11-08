@@ -68,15 +68,27 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
     router.push(`/artifacts${next.size ? `?${next}` : ""}`)
   }
   // A link from before IDs, /artifacts?item=<slug>, moves to the ID address once the slug resolves.
-  const canonical = (id: string) => router.replace(artifactHref(id, filtersToParams(filters, workspaceQuery)))
+  const canonical = (id: string) => {
+    const next = filtersToParams(filters, workspaceQuery)
+    if (params?.get("edit") === "1") next.set("edit", "1")
+    router.replace(artifactHref(id, next))
+  }
   // A filter change replaces the entry: typing a search is not a trail of Back steps.
   const filter = (nextFilters: typeof filters) => {
     const next = filtersToParams(nextFilters, workspaceQuery)
     router.replace(`/artifacts${next.size ? `?${next}` : ""}`)
   }
+  // `?edit=1` opens the editor inside the frame; leaving it replaces the entry, so Back leaves the artifact.
+  const edit = item !== null && params?.get("edit") === "1"
+  const editChange = (next: boolean) => {
+    const query = new URLSearchParams(params?.toString() ?? "")
+    if (next) query.set("edit", "1"); else query.delete("edit")
+    router.replace(`${window.location.pathname}${query.size ? `?${query}` : ""}`)
+  }
   const designSlug = design && params?.get("design") === "1" ? params.get("item") : null
   if (designSlug) return <div className="h-full p-4"><DesignEditor workspaceId={workspaceId} slug={designSlug} initialVersion={pinned} /></div>
-  return <ArtifactsLibrary workspaceId={workspaceId} item={item} version={item ? pinned : undefined} bySlug={bySlug} onSelect={select} onCanonical={canonical} filters={filters} onFiltersChange={filter} />
+  return <ArtifactsLibrary workspaceId={workspaceId} item={item} version={item ? pinned : undefined} bySlug={bySlug} onSelect={select} onCanonical={canonical} filters={filters} onFiltersChange={filter}
+    edit={edit} onEditChange={editChange} />
 }
 
 /**

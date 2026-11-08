@@ -1,6 +1,5 @@
 import type { PageView } from "@/hooks/use-pages"
-import { chatArtifactProjects } from "@/lib/feature-flags"
-import { artifactsProjectHref, libraryItems, versionPin, viewsProjectInline } from "./library-items"
+import { artifactsProjectHref, libraryItems, opensAsProject, opensInArtifacts, versionPin } from "./library-items"
 
 /**
  * Where an old Pages address goes once the Artifacts library is the single
@@ -9,7 +8,7 @@ import { artifactsProjectHref, libraryItems, versionPin, viewsProjectInline } fr
  */
 export type LegacyPagesTarget =
   | { to: "library"; href: string }
-  | { to: "resolve"; reference: string; workspaceId: string; project: boolean; version?: number }
+  | { to: "resolve"; reference: string; workspaceId: string; project: boolean; version?: number; edit?: boolean }
   | { to: "stay" }
 
 /**
@@ -19,7 +18,7 @@ export type LegacyPagesTarget =
  */
 export interface LegacyPagesContext { workspaceId: string; library: boolean; trusted: boolean }
 
-/** The one canonical address of an artifact: its immutable page ID, workspace and optional pin. */
+/** The one canonical address of an artifact: its immutable page ID, workspace, optional pin and its editor (`edit=1`). */
 export const canonicalArtifactHref = artifactsProjectHref
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,128}$/
@@ -56,24 +55,30 @@ export function legacyPagesTarget(pathname: string, search: string, context: Leg
   if (!match) return STAY
   let reference: string
   try { reference = decodeURIComponent(match[1]) } catch { return STAY }
-  // The Pages panel editor, the project source editor and a reference on a
-  // single page have no Artifacts equivalent.
-  if (params.has("mode") || params.has("edit") || params.has("ref")) return STAY
+  // A reference on a single page has no Artifacts equivalent.
+  if (params.has("ref")) return STAY
+  // The Pages panel editor (`mode=edit`) and the project source editor
+  // (`artifact=1&edit=1`) open in the frame at /artifacts/<id>?edit=1.
+  const mode = params.getAll("mode"), editFlag = params.getAll("edit")
+  if (mode.length > 1 || mode.length === 1 && mode[0] !== "edit" && mode[0] !== "view") return STAY
+  if (editFlag.length > 1 || editFlag.length === 1 && editFlag[0] !== "1") return STAY
+  const edit = mode[0] === "edit" || editFlag[0] === "1"
   // A pin is a project version: it moves only to a project viewer, with the pin.
   const project = params.get("artifact") === "1" || params.has("version")
   const version = project ? versionPin(params.get("version")) : undefined
-  return { to: "resolve", reference, workspaceId: context.workspaceId, project, ...(version === undefined ? {} : { version }) }
+  return { to: "resolve", reference, workspaceId: context.workspaceId, project, ...(version === undefined ? {} : { version }), ...(edit ? { edit } : {}) }
 }
 
 /**
- * The ID a resolved page opens at in Artifacts, or null to stay on Pages. A
- * plain address moves for a kind the Artifacts detail opens (a Page, a native
- * Word or Sheet, a versioned project); a project address only to a project
- * viewer the detail has. Fails closed on a missing page or unusable ID.
+ * The ID a resolved page opens at in Artifacts, or null to stay on Pages.
+ * Every kind opens in the Artifacts frame (owner, 8 Nov 2026); a project
+ * address only for a versioned project, and a Design only behind its switch.
+ * Fails closed on a missing page or unusable ID.
  */
 export function resolvedArtifactId(target: Extract<LegacyPagesTarget, { to: "resolve" }>, page: PageView | null): string | null {
   if (!page?.immutablePageId) return null
   const [item] = libraryItems([page])
-  if (target.project) return chatArtifactProjects() && viewsProjectInline(item) ? page.immutablePageId : null
-  return item.projectBacked || item.native || item.kind === "page" ? page.immutablePageId : null
+  if (!opensInArtifacts(item)) return null
+  if (target.project) return opensAsProject(item) ? page.immutablePageId : null
+  return page.immutablePageId
 }

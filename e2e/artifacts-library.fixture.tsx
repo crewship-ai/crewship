@@ -12,6 +12,7 @@ import { ArtifactsLibrary } from "../components/features/artifacts-library/artif
 import { createArtifactMockServer, type ArtifactMockServer } from "../components/features/chat/artifact-context/projects/mock-server"
 import { documentSchema } from "../lib/documents/schema"
 import type { ArtifactFile } from "../components/features/chat/artifact-context/projects/types"
+import slidesFixture from "../testdata/slides-schema-v1.json"
 
 const WORKSPACE = "ws-fixture"
 const html = (path: string, title: string, body: string): ArtifactFile => ({ path, media_type: "text/html",
@@ -64,6 +65,19 @@ mocks["field-survey"] = createArtifactMockServer({ slug: "field-survey", name: "
 mocks["field-survey"].state.sharedVersion = 1
 const INTERACTIVE: Record<string, unknown> = { "field-survey": { runtime_url: "", development_same_origin: false, collections: ["responses"] } }
 
+// The typed Dashboard: its project, read in the generic viewer while its own Dashboard view is switched off.
+mocks["sales-pipeline"] = createArtifactMockServer({ slug: "sales-pipeline", name: "Sales pipeline", entrypoint: "index.html",
+  files: [html("index.html", "Pipeline", `<h1 id="pipeline">Sales pipeline</h1><p>12 open deals</p>`), { path: "dashboard.json", media_type: "application/json", content: JSON.stringify({ schema_version: 1, collections: ["deals"] }) }], message: "Pipeline" })
+mocks["sales-pipeline"].state.sharedVersion = 1
+// The legacy deck: its saved slides (schema 1), read through the Slides read route.
+// The schema fixture's words are replaced with the deck's own English ones; its shapes stay.
+const english = (value: unknown): unknown => Array.isArray(value) ? value.map(english)
+  : value && typeof value === "object" ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, key === "value" && typeof entry === "string" ? "Q3 board update" : key === "notes" ? "" : english(entry)]))
+    : value
+const CELLS = [["Item", "EUR"], ["Research", "12345"]]
+const DECK = { ...(english(slidesFixture.deck) as typeof slidesFixture.deck), deck_id: "page-deck" }
+for (const slide of DECK.slides) for (const element of slide.elements as { table?: { cells: string[][] } }[]) if (element.table) element.table.cells = element.table.cells.map((row, r) => row.map((_cell, c) => CELLS[r]?.[c] ?? ""))
+
 const LAUNCH = { type: "doc", content: [
   { type: "heading", attrs: { id: "h1", level: 2 }, content: [{ type: "text", text: "Summary" }] },
   { type: "paragraph", attrs: { id: "l1" }, content: [{ type: "text", text: "The launch moves to Tuesday. Support has the new FAQ; sales has the pricing sheet." }] },
@@ -99,6 +113,7 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     { id: "share", schema: "metric.v1", title: "Share of voice", sla_seconds: 3600, span: 4, state: "stale",
       data: { value: 31, unit: "%" }, provenance: { producer: "routine/weekly-scan", run_id: "run-0", produced_at: ago(60 * 30) } },
   ] })
+  if (path === "/api/v1/pages/%40page-deck/slides" && method === "GET") return json({ schema_version: 1, revision: 1, order_version: 1, content_hash: "0".repeat(64), deck: DECK })
   // The Word detail's read-only preview: current metadata, then the saved document (schema 3).
   if (path === "/api/v1/pages/%40page-brief" && method === "GET") return json({ id: "page-brief", slug: "partner-brief", name: "Partner brief", has_document: true })
   if (path === "/api/v1/pages/%40page-brief/document" && method === "GET") return json({ page_id: "page-brief", schema: 3, rev: 4, content: {
