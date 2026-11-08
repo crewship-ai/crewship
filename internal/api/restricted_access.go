@@ -65,6 +65,7 @@ var restrictedRoutes = map[string]restrictedRule{
 	"GET /api/v1/pages/{slug}/export":                            restrictedPrivateCustody,
 	"GET /api/v1/pages/{slug}/document":                          restrictedPrivateCustody,
 	"GET /api/v1/pages/{slug}/document/checkpoints":              restrictedPrivateCustody,
+	"GET /api/v1/pages/{slug}/document/comments":                 restrictedPrivateCustody,
 	"GET /api/v1/pages/{slug}/document/checkpoints/{checkpoint}": restrictedPrivateCustody,
 	"GET /api/v1/pages/{slug}/project":                           restrictedPrivateCustody,
 	"GET /api/v1/pages/{slug}/project/source":                    restrictedPrivateCustody,

@@ -20,8 +20,31 @@ func TestStorageSourceSQLMatchesMigration(t *testing.T) {
 			seed = strings.TrimSuffix(strings.TrimPrefix(line, prefix), ";")
 		}
 	}
-	if seed == "" || seed != storageSourceBytesSQL {
-		t.Fatal("storageSourceBytesSQL no longer matches the migration seed; update both together")
+	if seed == "" || seed != storageSeedSQL {
+		t.Fatal("storageSeedSQL no longer matches the migration seed; update both together")
+	}
+	if !strings.Contains(storageSourceBytesSQL, storageLaterSourcesSQL+") GROUP BY workspace_id") {
+		t.Fatal("storageSourceBytesSQL does not charge the later tables")
+	}
+}
+
+// A table created after the seed is charged by its triggers with the same
+// expression the recompute query uses for it.
+func TestStorageLaterSourcesMatchTheirTriggers(t *testing.T) {
+	raw, err := os.ReadFile("../database/migrations/20261108145251_document_comments.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	const head = " UNION ALL SELECT r.workspace_id AS workspace_id,"
+	expr, ok := strings.CutPrefix(storageLaterSourcesSQL, head)
+	expr, _, found := strings.Cut(expr, " AS bytes FROM document_comments r")
+	if !ok || !found {
+		t.Fatalf("unexpected later source %q", storageLaterSourcesSQL)
+	}
+	for _, side := range []string{"NEW", "OLD"} {
+		if want := strings.ReplaceAll(expr, "r.", side+"."); !strings.Contains(string(raw), want) {
+			t.Errorf("document_comments %s trigger does not charge %s", side, want)
+		}
 	}
 }
 

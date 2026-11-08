@@ -9,7 +9,13 @@ import (
 	"errors"
 )
 
-const LatestSchema = 3
+// LatestSchema is the newest content schema: 4 adds bold, italic, strike,
+// code block languages, block quotes and task lists to schema 3.
+const LatestSchema = 4
+
+// RichSchema is schema 3 or 4: bound to its original Page and edited through
+// rich semantic proofs. Agent drafting stays on schema 3 (see iteration intents).
+func RichSchema(schema int) bool { return schema == 3 || schema == 4 }
 
 func supportedSchema(schema int) bool { return schema >= 1 && schema <= LatestSchema }
 
@@ -53,7 +59,7 @@ func (s *Store) UpgradeRequest(ctx context.Context, k Key, lease Lease, id, fing
 		if v.HeadRev != ifRev || v.Generation != *generation {
 			return ErrConflict
 		}
-		if targetSchema != LatestSchema || (fromSchema != 1 && fromSchema != 2) || v.Schema != fromSchema {
+		if targetSchema != LatestSchema || fromSchema < 1 || fromSchema >= LatestSchema || v.Schema != fromSchema {
 			return ErrSchema
 		}
 		var logBytes int

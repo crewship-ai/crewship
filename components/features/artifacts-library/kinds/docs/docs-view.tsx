@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { EditorContent, useEditorState } from "@tiptap/react"
-import { Download, FileText, History, ListTree, PanelLeft, X } from "lucide-react"
+import { Download, FileText, History, ListTree, MessageSquare, PanelLeft, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { durabilityLabel, DocumentSaveState } from "@/components/features/pages/document-save-state"
@@ -13,6 +13,10 @@ import { ArtifactDrawerSection, ArtifactSlot, ArtifactTool, ArtifactToolSeparato
 import type { LibraryItem } from "../../library-items"
 import { docsFrameStatus, outlineOf, readingStats, readingText, type DocNode, type OutlineEntry } from "./docs-model"
 import { DocsTools } from "./docs-tools"
+import { DocsComments } from "./docs-comments"
+import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
+import { useMembers } from "@/components/features/settings/members/use-members"
+import { commentTarget, setCommentHighlights, type CommentTarget } from "@/components/features/pages/document-rich-extensions"
 
 /** What the Docs body tells the frame: the chip, whether this person can edit now, and the chip's popover. */
 export interface DocsFrameReport {
@@ -23,10 +27,10 @@ export interface DocsFrameReport {
 }
 
 /** The reading column: centred, 700 px at most, clear of the floating view strip and tools bar. */
-const COLUMN = "mx-auto grid w-full max-w-[700px] content-start gap-4 px-4 pb-28 pt-16 md:px-8 md:pb-20"
+const COLUMN = "mx-auto grid w-full max-w-[700px] grid-cols-[minmax(0,1fr)] content-start gap-4 px-4 pb-28 pt-16 md:px-8 md:pb-20"
 
 /** Reading typography (Harbor 2 v87 Docs page): a comfortable size on a phone, a calmer one on wider screens. */
-const DOCS_EDITOR_CLASS = "min-h-64 max-w-none text-lg leading-relaxed outline-none md:text-base md:leading-[1.65] [&_[data-block-id]]:scroll-mt-20 [&_p]:my-3 [&_h1]:mb-3 [&_h1]:mt-8 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-2 [&_h2]:mt-7 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-5 [&_h3]:text-lg [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_th]:text-left [&_td_p]:my-0 [&_th_p]:my-0 [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_code]:font-mono [&_a]:text-primary-hover [&_a]:underline"
+const DOCS_EDITOR_CLASS = "min-h-64 max-w-none text-lg leading-relaxed outline-none md:text-base md:leading-[1.65] [&_[data-block-id]]:scroll-mt-20 [&_p]:my-3 [&_h1]:mb-3 [&_h1]:mt-8 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-2 [&_h2]:mt-7 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-5 [&_h3]:text-lg [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_th]:text-left [&_td_p]:my-0 [&_th_p]:my-0 [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:whitespace-pre [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:text-sm [&_pre]:leading-normal [&_pre[data-language]]:relative [&_pre[data-language]]:pt-7 [&_pre[data-language]]:before:absolute [&_pre[data-language]]:before:left-3 [&_pre[data-language]]:before:top-1.5 [&_pre[data-language]]:before:font-mono [&_pre[data-language]]:before:text-xs [&_pre[data-language]]:before:text-muted-foreground [&_pre[data-language]]:before:content-[attr(data-language)] [&_code]:font-mono [&_:not(pre)>code]:rounded-sm [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:text-[0.9em] [&_a]:text-primary-hover [&_a]:underline [&_strong]:font-semibold [&_em]:italic [&_s]:line-through [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_ul[data-type=taskList]]:list-none [&_ul[data-type=taskList]]:pl-0.5 [&_li[data-type=taskItem]]:flex [&_li[data-type=taskItem]]:items-start [&_li[data-type=taskItem]]:gap-2 [&_li[data-type=taskItem]>label]:mt-[0.3em] [&_li[data-type=taskItem]>label]:flex [&_li[data-type=taskItem]>div]:min-w-0 [&_li[data-type=taskItem]>div]:flex-1 [&_li[data-type=taskItem]_p]:my-0.5 [&_li[data-checked=true]>div]:text-muted-foreground [&_li[data-checked=true]>div]:line-through [&_input[type=checkbox]]:size-4 [&_input[type=checkbox]]:cursor-pointer [&_input[type=checkbox]]:accent-primary [&_input[type=checkbox]:disabled]:cursor-default [&_.document-comment]:rounded-sm [&_.document-comment]:bg-warn/15 [&_.document-comment]:underline [&_.document-comment]:decoration-warn/60 [&_.document-comment]:underline-offset-4 [&_.document-comment-active]:bg-warn/35"
 
 /**
  * A Docs page (a native Tiptap/Yjs document) inside the ArtifactFrame. The
@@ -75,6 +79,39 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { item: LibraryItem; onFr
     return { outline: outlineOf(json), stats: readingStats(json) }
   } })
   const outline = summary?.outline ?? []
+
+  // Comments appear only once the discussion read succeeds; any refusal leaves the page as it was.
+  const head = sync.state ? { schema: sync.state.schema, epoch: sync.state.epoch, rev: sync.state.rev } : undefined
+  const comments = useDocumentComments({ workspaceId, slug, pageId, humanId, enabled: Boolean(sync.state) && available && !sync.denied, head })
+  const discussion = comments.query.isSuccess && !sync.denied ? comments.query.data : null
+  const members = useMembers(discussion ? workspaceId : null)
+  const nameOf = React.useCallback((actor: string) => {
+    const [kind, id] = actor.split(":", 2)
+    if (kind === "user" && id === humanId) return "You"
+    const member = kind === "user" ? (members.members ?? []).find(entry => entry.user.id === id) : undefined
+    return member?.user.full_name || member?.user.email || (kind === "agent" ? "Agent" : "Workspace member")
+  }, [humanId, members.members])
+  const [draft, setDraft] = React.useState<CommentTarget | null>(null)
+  const [commentNotice, setCommentNotice] = React.useState<string | null>(null)
+  const [activeThread, setActiveThread] = React.useState<string | null>(null)
+  const highlights = React.useMemo(() => (discussion?.comments ?? []).filter(comment => !comment.parent && !comment.resolved && comment.status === "attached" && comment.block && comment.from !== undefined && comment.to !== undefined)
+    .map(comment => ({ id: comment.id, block: comment.block!, from: comment.from!, to: comment.to! })), [discussion])
+  React.useEffect(() => { if (editor) setCommentHighlights(editor, [...highlights, ...(draft ? [{ id: "draft", ...draft }] : [])], activeThread ?? (draft ? "draft" : null)) }, [editor, highlights, draft, activeThread])
+  const startComment = () => {
+    if (!editor || !discussion?.canComment) return
+    const target = commentTarget(editor)
+    if (typeof target === "string") { setDraft(null); setCommentNotice(target) } else { setDraft(target); setCommentNotice(null) }
+    frame?.openDrawer("comments")
+  }
+  const writeComment = async (change: CommentWrite) => {
+    try { await comments.write.mutateAsync(change) } catch (cause) { throw new Error(commentFailure(cause)) }
+  }
+  const jumpToComment = (comment: DocumentComment) => {
+    if (!editor || !comment.block) return
+    setActiveThread(comment.id)
+    const target = [...editor.view.dom.querySelectorAll<HTMLElement>("[data-block-id]")].find(node => node.dataset.blockId === comment.block)
+    target?.scrollIntoView?.({ block: "center", behavior: "smooth" })
+  }
   const stats = summary?.stats ?? { words: 0, minutes: 0 }
 
   const editable = Boolean(sync.editable && !restoring && editor)
@@ -165,11 +202,19 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { item: LibraryItem; onFr
       </nav>
     </ArtifactSlot>}
 
-    {editable && editor && sync.state && <DocsTools editor={editor} schema={sync.state.schema} onError={setActionError} />}
+    {editable && editor && sync.state && <DocsTools editor={editor} schema={sync.state.schema} onError={setActionError} onComment={discussion?.canComment ? startComment : undefined} />}
 
     <ArtifactSlot name="viewport" label="Reading">
       <span className="px-2 font-mono text-xs tabular-nums text-muted-foreground">{readingText(stats)}</span>
     </ArtifactSlot>
+
+    {discussion && <ArtifactDrawerSection tab="comments" label="Comments" icon={MessageSquare}>
+      {discussion.canComment && !editable && <div className="px-3.5 pt-3.5">
+        <Button type="button" size="sm" variant="outline" className="coarse:min-h-[44px]" onClick={startComment}>Comment on selection</Button>
+      </div>}
+      <DocsComments data={discussion} nameOf={nameOf} draft={draft} notice={commentNotice} active={activeThread}
+        onCancelDraft={() => setDraft(null)} onWrite={writeComment} onJump={jumpToComment} />
+    </ArtifactDrawerSection>}
 
     <ArtifactDrawerSection tab="history" label="History" icon={History}>
       <div className="grid content-start gap-3 p-3.5">

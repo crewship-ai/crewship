@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/costvis"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/groupchat"
 	"github.com/crewship-ai/crewship/internal/harbormaster"
 	"github.com/crewship-ai/crewship/internal/mooring"
@@ -125,6 +126,8 @@ var responseShapeContracts = []struct {
 	{name: "AgentReleasedV1", pointer: "/components/schemas/AgentReleasedV1", value: agentReleasedResponse{}},
 	{name: "CrewPolicyResponseV1", pointer: "/components/schemas/CrewPolicyResponseV1", value: crewPolicyResponse{}},
 	{name: "DocumentAvailability", pointer: "/components/schemas/DocumentAvailability", value: DocumentAvailability{}},
+	// The engine adds the resolved anchor fields to each stored row.
+	{name: "DocumentComment", pointer: "/components/schemas/DocumentComment", value: documents.Comment{}},
 	{name: "ArtifactProjectAvailability", pointer: "/components/schemas/ArtifactProjectAvailability", value: artifactProjectAvailabilityResponse{}},
 	{name: "ArtifactStorageUsage", pointer: "/components/schemas/ArtifactStorageUsage", value: artifacts.WorkspaceStorageUsage{}},
 	{name: "ArtifactProjectSnapshot", pointer: "/components/schemas/ArtifactProjectSnapshot", value: artifactProjectSnapshotResponse{}},

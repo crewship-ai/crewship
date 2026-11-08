@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+
+	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 type documentRestoreInput struct {
@@ -38,7 +40,7 @@ func (h *PageHandler) RestoreDocumentCheckpoint(w http.ResponseWriter, r *http.R
 	var input documentRestoreInput
 	if err != nil || shapeErr != nil || len(fields) != 6 || json.Unmarshal(raw, &input) != nil ||
 		!documentCheckpointID.MatchString(input.PageID) || !documentCheckpointID.MatchString(input.ID) || !documentCheckpointID.MatchString(input.Checkpoint) ||
-		(input.Schema != 2 && input.Schema != 3) || input.IfRev < 0 || input.IfRev >= 9007199254740991 || input.Epoch == "" || len(input.Epoch) > 256 {
+		input.Schema < 2 || input.Schema > documents.LatestSchema || input.IfRev < 0 || input.IfRev >= 9007199254740991 || input.Epoch == "" || len(input.Epoch) > 256 {
 		replyError(w, 400, "original bounded Document restore packet required")
 		return
 	}
@@ -75,7 +77,7 @@ func (h *PageHandler) RestoreDocumentCheckpoint(w http.ResponseWriter, r *http.R
 	}
 	// First-commit responses omit schema; replay may include the pinned schema.
 	// Do not invent a schema or expose internal snapshot/lease/actor fields.
-	if receipt.Schema != 0 && (receipt.Schema < 1 || receipt.Schema > 3) {
+	if receipt.Schema != 0 && (receipt.Schema < 1 || receipt.Schema > documents.LatestSchema) {
 		replyError(w, 409, "unsupported restored Document schema")
 		return
 	}

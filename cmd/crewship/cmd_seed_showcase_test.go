@@ -31,6 +31,7 @@ type showcaseKnobs struct {
 	dataStatus             int            // data batch POST; 0 = 200
 	designStatus           int            // design create; 0 = 201
 	designOpsStatus        int            // design operations; 0 = 200
+	docs                   bool           // documents/status enabled (Docs mirrors); their own tests turn it on
 }
 
 type fakeShowcasePage struct {
@@ -116,7 +117,7 @@ func (s *showcaseServer) handler(t *testing.T) http.Handler {
 				refuse(k.statusCode)
 				return
 			}
-			reply(200, map[string]bool{"enabled": true, "wordcraft_native": k.wordNative, "gridcraft_native": k.gridNative})
+			reply(200, map[string]bool{"enabled": k.docs, "wordcraft_native": k.wordNative, "gridcraft_native": k.gridNative})
 		case r.Method == "GET" && path == "/api/v1/feature-flags":
 			var list []map[string]any
 			for key, f := range s.flags {
@@ -298,6 +299,8 @@ type showcaseWant struct {
 func runShowcaseOnce(t *testing.T, s *showcaseServer, url string, want showcaseWant) {
 	t.Helper()
 	var out bytes.Buffer
+	// Docs is off on this fake, so every mirrored Docs item counts as unavailable.
+	want.stats.Unavailable += showcaseMirrorDocs
 	stats, err := seedShowcase(context.Background(), cli.NewClient(url, "tok", showcaseTestWS), &out)
 	if err != nil {
 		t.Fatalf("seedShowcase returned %v; the phase is fail-soft\n%s", err, out.String())

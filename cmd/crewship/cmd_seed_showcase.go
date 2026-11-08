@@ -92,6 +92,7 @@ func seedShowcase(ctx context.Context, client *cli.Client, out io.Writer) (showc
 		}
 		seedShowcaseCount(&stats, out, item.Slug, seedShowcaseDesign(client, out, item))
 	}
+	seedShowcaseCount(&stats, out, seeddata.MirrorQakfDoc.Slug, seedShowcaseMirrorQakf(client, out))
 
 	fmt.Fprintf(out, "  showcase: %d created, %d completed, %d already present, %d incomplete (retried next seed), %d unavailable on this server\n",
 		stats.Created, stats.Completed, stats.Skipped, stats.Incomplete, stats.Unavailable)

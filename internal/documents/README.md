@@ -4,7 +4,7 @@ This package stores document state separately from the Page specification.
 Pages keep their existing IDs, workspace boundaries and ownership. Documents
 require a human-owned Page without existing panels or application source.
 
-The storage foundation supports schemas 1 through 3. Public endpoints and the
+The storage foundation supports schemas 1 through 4. Public endpoints and the
 editor are delivered separately; the runtime remains disabled by default.
 The storage API also supports writer leases, atomic edits, receipt lookup,
 pinned checkpoints and explicit restoration. Public endpoint wiring is
@@ -63,7 +63,7 @@ credential and a current human session or CLI credential; Page permissions,
 credential validity and CLI read/write scope are rechecked in the storage
 transaction. These routes are absent from the public HTTP router.
 
-The engine must acknowledge protocol 3 and schema capability 3 before recovery.
+The engine must acknowledge protocol 3 and schema capability 4 before recovery.
 An incompatible engine cannot fence a live writer. Recovery of the same boot
 identity is idempotent; a replacement engine fences old leases atomically.
 Listener startup refuses an existing path before changing leases, and a

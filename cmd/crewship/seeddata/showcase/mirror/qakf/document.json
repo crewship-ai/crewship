@@ -1,0 +1,2534 @@
+{
+ "type": "doc",
+ "content": [
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-0",
+    "level": 1
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Template Crewship Docs"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-23"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "2026-11-07 · Pavel"
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-32",
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Co je Crewship"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-47"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Crewship je platforma, kde tým AI agentů (crew) dostane úkol, rozdělí si práci a doručí výsledek přes jedno CLI a webové rozhraní. Tento dokument je testovací šablona: ukazuje, co umí Claude Docs."
+    }
+   ]
+  },
+  {
+   "type": "bulletList",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-244"
+   },
+   "content": [
+    {
+     "type": "listItem",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-245"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-246"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Pro koho:",
+         "marks": [
+          {
+           "type": "bold",
+           "attrs": {}
+          }
+         ]
+        },
+        {
+         "type": "text",
+         "text": " týmy, které chtějí delegovat opakovanou práci na agenty."
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-313"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-314"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Jak:",
+         "marks": [
+          {
+           "type": "bold",
+           "attrs": {}
+          }
+         ]
+        },
+        {
+         "type": "text",
+         "text": " crew = sada agentů s rolemi; každý endpoint má CLI příkaz."
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-378"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-379"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Kde:",
+         "marks": [
+          {
+           "type": "bold",
+           "attrs": {}
+          }
+         ]
+        },
+        {
+         "type": "text",
+         "text": " dev prostředí dev1–dev4, stage jako canary."
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-428",
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Ukázka funkcí dokumentu"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-452"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Tabulka níže je živá: buňky se píšou přímo, sloupec Stav je dropdown a ke každé buňce jde přidat komentář."
+    }
+   ]
+  },
+  {
+   "type": "table",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-559"
+   },
+   "content": [
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-560"
+     },
+     "content": [
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-561",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-562"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Typ artefaktu"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-576",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-577"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Co umí"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-584",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-585"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Stav"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-590"
+     },
+     "content": [
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-591",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-592"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Docs"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-597",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-598"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Editace, komentáře, export .docx / PDF / Markdown"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-648",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-649"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Hotovo"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-651"
+     },
+     "content": [
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-652",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-653"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Slides"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-660",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-661"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "16:9 prezentace, export .pptx / PDF"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-697",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-698"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Hotovo"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-700"
+     },
+     "content": [
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-701",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-702"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Dashboard"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-712",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-713"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Grafy, KPI, filtry, zdroj u každého čísla"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-755",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-756"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Rozpracováno"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-758"
+     },
+     "content": [
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-759",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-760"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Design"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-767",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-768"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Plátno s artboardy, mockupy obrazovek"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-806",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-807"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Napánováno"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-809"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Checklist s termínem 2026-11-20 – položky jdou odškrtávat:"
+    }
+   ]
+  },
+  {
+   "type": "taskList",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-859"
+   },
+   "content": [
+    {
+     "type": "taskItem",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-860",
+      "checked": true
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-861"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Založit Template Crewship Docs"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "taskItem",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-892",
+      "checked": false
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-893"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Projet export do PDF"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "taskItem",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-914",
+      "checked": false
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-915"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Pozvat kolegu ke komentářům"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-943"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Vzorec se vykreslí jako LaTeX:"
+    }
+   ]
+  },
+  {
+   "type": "codeBlock",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-974",
+    "language": "latex"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "\\text{náklad crew} = \\sum_{i=1}^{n} \\text{tokeny}_i \\times \\text{cena}_i"
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1047",
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Diagram a graf"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1062"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Diagram i graf jsou živé: popisky jde přepsat přímo v obrázku a na každý box nebo sloupec jde napsat komentář."
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-embed-8b77865d-4f22-title"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Kapitán rozdělí zadání mezi agenty crew"
+    }
+   ]
+  },
+  {
+   "type": "table",
+   "attrs": {
+    "id": "prehled-embed-8b77865d-4f22"
+   },
+   "content": [
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-embed-8b77865d-4f22-r0"
+     },
+     "content": [
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-embed-8b77865d-4f22-r0c0",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-8b77865d-4f22-r0c0-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Zadání"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-embed-8b77865d-4f22-r0c1",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-8b77865d-4f22-r0c1-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Kapitán"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-embed-8b77865d-4f22-r0c2",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-8b77865d-4f22-r0c2-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Agenti crew"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-embed-8b77865d-4f22-r0c3",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-8b77865d-4f22-r0c3-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Výsledek"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-embed-8b77865d-4f22-r1"
+     },
+     "content": [
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-embed-8b77865d-4f22-r1c0",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-8b77865d-4f22-r1c0-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "CLI nebo web"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-embed-8b77865d-4f22-r1c1",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-8b77865d-4f22-r1c1-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "rozdělí práci"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-embed-8b77865d-4f22-r1c2",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-8b77865d-4f22-r1c2-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "každý svou roli"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-embed-8b77865d-4f22-r1c3",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-8b77865d-4f22-r1c3-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "k review"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-embed-8b77865d-4f22-caption"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "tok práce v Crewship · 4 kroky"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-embed-67f94a98-44a1-title"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Dokončené úkoly crew rostou týden od týdne"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-embed-67f94a98-44a1-subtitle"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "138 úkolů za 6 týdnů · testovací data"
+    }
+   ]
+  },
+  {
+   "type": "table",
+   "attrs": {
+    "id": "prehled-embed-67f94a98-44a1"
+   },
+   "content": [
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-embed-67f94a98-44a1-r0"
+     },
+     "content": [
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r0c0",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r0c0-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "T1"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r0c1",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r0c1-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "T2"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r0c2",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r0c2-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "T3"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r0c3",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r0c3-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "T4"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r0c4",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r0c4-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "T5"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r0c5",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r0c5-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "T6"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-embed-67f94a98-44a1-r1"
+     },
+     "content": [
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r1c0",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r1c0-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "12"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r1c1",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r1c1-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "18"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r1c2",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r1c2-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "15"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r1c3",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r1c3-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "24"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r1c4",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r1c4-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "31"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-embed-67f94a98-44a1-r1c5",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-embed-67f94a98-44a1-r1c5-p"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "38"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-embed-67f94a98-44a1-caption"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "testovací data zadaná v chatu · 6 týdnů"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1175"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Na sloupec najedíš myší a uvidíš hodnotu; graf se překreslí, když se změní jeho řádky dat."
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1345",
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Formátování textu"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1363"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Text umí "
+    },
+    {
+     "type": "text",
+     "text": "tučné",
+     "marks": [
+      {
+       "type": "bold",
+       "attrs": {}
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "text": ", "
+    },
+    {
+     "type": "text",
+     "text": "kurzívu",
+     "marks": [
+      {
+       "type": "italic",
+       "attrs": {}
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "text": ", "
+    },
+    {
+     "type": "text",
+     "text": "přeškrtnutí",
+     "marks": [
+      {
+       "type": "strike",
+       "attrs": {}
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "text": ", "
+    },
+    {
+     "type": "text",
+     "text": "kombinaci",
+     "marks": [
+      {
+       "type": "bold",
+       "attrs": {}
+      },
+      {
+       "type": "italic",
+       "attrs": {}
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "text": ", "
+    },
+    {
+     "type": "text",
+     "text": "inline kód",
+     "marks": [
+      {
+       "type": "code",
+       "attrs": {}
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "text": " jako "
+    },
+    {
+     "type": "text",
+     "text": "crew ls",
+     "marks": [
+      {
+       "type": "code",
+       "attrs": {}
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "text": " a "
+    },
+    {
+     "type": "text",
+     "text": "odkaz na web",
+     "marks": [
+      {
+       "type": "link",
+       "attrs": {
+        "href": "https://claude.ai/"
+       }
+      }
+     ]
+    },
+    {
+     "type": "text",
+     "text": ". Vše jde měnit i z panelu nad označeným textem."
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1499",
+    "level": 3
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Nadpis třetí úrovně"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1519"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Nadpisy tvoří strukturu dokumentu; podle nich se dá skákat odkazem (viz sekce Záložky a odkazy)."
+    }
+   ]
+  },
+  {
+   "type": "blockquote",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1616"
+   },
+   "content": [
+    {
+     "type": "paragraph",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-1617"
+     },
+     "content": [
+      {
+       "type": "text",
+       "text": "Citace: „Crew je tým agentů, který dostane úkol a dodá výsledek.“ Hodí se na výroky zákazníků nebo zadání."
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1724",
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Seznamy"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1732"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Číslovaný seznam s vnořenými body; položky jde přetažením přeřadit a čísla se přepočítají sama."
+    }
+   ]
+  },
+  {
+   "type": "orderedList",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1828",
+    "start": 1
+   },
+   "content": [
+    {
+     "type": "listItem",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-1829"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-1830"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Založ crew"
+        }
+       ]
+      },
+      {
+       "type": "orderedList",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-1841",
+        "start": 1
+       },
+       "content": [
+        {
+         "type": "listItem",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-1842"
+         },
+         "content": [
+          {
+           "type": "paragraph",
+           "attrs": {
+            "id": "prehled-mje9hk5kec2-1843"
+           },
+           "content": [
+            {
+             "type": "text",
+             "text": "Vyber šablonu"
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "type": "listItem",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-1857"
+         },
+         "content": [
+          {
+           "type": "paragraph",
+           "attrs": {
+            "id": "prehled-mje9hk5kec2-1858"
+           },
+           "content": [
+            {
+             "type": "text",
+             "text": "Přidej agenty a role"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-1879"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-1880"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Zadej úkol"
+        }
+       ]
+      },
+      {
+       "type": "bulletList",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-1891"
+       },
+       "content": [
+        {
+         "type": "listItem",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-1892"
+         },
+         "content": [
+          {
+           "type": "paragraph",
+           "attrs": {
+            "id": "prehled-mje9hk5kec2-1893"
+           },
+           "content": [
+            {
+             "type": "text",
+             "text": "Popis a termín"
+            }
+           ]
+          }
+         ]
+        },
+        {
+         "type": "listItem",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-1908"
+         },
+         "content": [
+          {
+           "type": "paragraph",
+           "attrs": {
+            "id": "prehled-mje9hk5kec2-1909"
+           },
+           "content": [
+            {
+             "type": "text",
+             "text": "Přílohy a odkazy"
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-1926"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-1927"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Zkontroluj výsledek"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-1947"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-1948"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Pošli report týmu"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1966",
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Bloky kódu"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1977"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Kód má zvýrazněnou syntaxi podle jazyka a tlačítko pro kopírování. Ukázky níže jsou vymyšlené a slouží jen pro test."
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-2094"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Python:"
+    }
+   ]
+  },
+  {
+   "type": "codeBlock",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-2102",
+    "language": "python"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "from dataclasses import dataclass\n\n@dataclass\nclass Task:\n    crew: str\n    done: int\n    failed: int\n\n    @property\n    def success_rate(self) -> float:\n        total = self.done + self.failed\n        return self.done / total if total else 0.0\n\nprint(f\"{Task('Support', 42, 3).success_rate:.0%}\")  # 93%"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-2407"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Go:"
+    }
+   ]
+  },
+  {
+   "type": "codeBlock",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-2411",
+    "language": "go"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "package main\n\nimport \"fmt\"\n\ntype Task struct {\n\tCrew   string\n\tDone   int\n\tFailed int\n}\n\nfunc (t Task) SuccessRate() float64 {\n\ttotal := t.Done + t.Failed\n\tif total == 0 {\n\t\treturn 0\n\t}\n\treturn float64(t.Done) / float64(total)\n}\n\nfunc main() {\n\tfmt.Printf(\"%.0f%%\\n\", Task{\"Support\", 42, 3}.SuccessRate()*100)\n}"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-2723"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "TypeScript:"
+    }
+   ]
+  },
+  {
+   "type": "codeBlock",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-2735",
+    "language": "typescript"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "type Task = { crew: string; done: number; failed: number };\n\nconst successRate = (t: Task): number =>\n  t.done + t.failed === 0 ? 0 : t.done / (t.done + t.failed);"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-2899"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Bash:"
+    }
+   ]
+  },
+  {
+   "type": "codeBlock",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-2905",
+    "language": "bash"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "export CREWSHIP_SERVER=http://localhost:8081\ncrewship crew list --output json | jq '.[].name'"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-2999"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "SQL:"
+    }
+   ]
+  },
+  {
+   "type": "codeBlock",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3004",
+    "language": "sql"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "SELECT crew, SUM(done) AS done, SUM(failed) AS failed\nFROM crew_tasks\nWHERE week >= '2026-10-01'\nGROUP BY crew\nORDER BY done DESC;"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3135"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "JSON:"
+    }
+   ]
+  },
+  {
+   "type": "codeBlock",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3141",
+    "language": "json"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "{ \"crew\": \"Support\", \"done\": 42, \"failed\": 3, \"cost_usd\": 18.4 }"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3206"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "YAML:"
+    }
+   ]
+  },
+  {
+   "type": "codeBlock",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3212",
+    "language": "yaml"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "crew:\n  name: Support\n  agents:\n    - role: triage\n    - role: writer"
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3282",
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "CSV a Markdown ukázky"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3304"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Blok CSV se zobrazí jako mřížka jen pro čtení, ale text pod ním jde upravit a zkopírovat."
+    }
+   ]
+  },
+  {
+   "type": "codeBlock",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3394",
+    "language": "csv"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "week,crew,done,failed,cost_usd\n2026-W40,Support,38,4,16.20\n2026-W40,Research,21,2,24.80\n2026-W41,Support,42,3,18.40\n2026-W41,Research,25,1,27.10"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3539"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Blok Markdown se vykreslí jako hotový text, třeba šablona changelogu:"
+    }
+   ]
+  },
+  {
+   "type": "codeBlock",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3609",
+    "language": "markdown"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "### v1.4.0 (2026-11-07)\n\n- **Nové:** filtr crew v dashboardu\n- **Opraveno:** export CSV s diakritikou"
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3711",
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Tabulka s barvami a odkazy"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3738"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Buňky jde podbarvit jednou ze sedmi barev editoru; odkaz v buňce vede rovnou na další artefakt."
+    }
+   ]
+  },
+  {
+   "type": "table",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-3834"
+   },
+   "content": [
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-3835"
+     },
+     "content": [
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3836",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3837"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Artefakt"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3846",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3847"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Co ukazuje"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableHeader",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3858",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3859"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Stav"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-3864"
+     },
+     "content": [
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3865",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3866"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Slides",
+           "marks": [
+            {
+             "type": "link",
+             "attrs": {
+              "href": "https://claude.ai/artifact/CBBoNZhbaHvUUUz2aQ2Ccv"
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3873",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3874"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "prezentace, animace, export .pptx"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3908",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3909"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Hotovo"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-3916"
+     },
+     "content": [
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3917",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3918"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Dashboard",
+           "marks": [
+            {
+             "type": "link",
+             "attrs": {
+              "href": "https://claude.ai/artifact/RwrX5Qdjw7zLHdvxjEABKL"
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3928",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3929"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "KPI, filtry, CSV"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3946",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3947"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Ke kontrole"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-3959"
+     },
+     "content": [
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3960",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3961"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Design",
+           "marks": [
+            {
+             "type": "link",
+             "attrs": {
+              "href": "https://claude.ai/artifact/NwPV8rqSjHWDtpZPYUb2ko"
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3968",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3969"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "klikací mockup, paleta"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-3992",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-3993"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Hotovo"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "tableRow",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-4000"
+     },
+     "content": [
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-4001",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-4002"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Showcase",
+           "marks": [
+            {
+             "type": "link",
+             "attrs": {
+              "href": "https://claude.ai/artifact/E8HYX1pSVKSAbLqgvTCZ8Z"
+             }
+            }
+           ]
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-4011",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-4012"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "3D, Mermaid, e-mail"
+          }
+         ]
+        }
+       ]
+      },
+      {
+       "type": "tableCell",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-4032",
+        "colspan": 1,
+        "rowspan": 1,
+        "colwidth": null
+       },
+       "content": [
+        {
+         "type": "paragraph",
+         "attrs": {
+          "id": "prehled-mje9hk5kec2-4033"
+         },
+         "content": [
+          {
+           "type": "text",
+           "text": "Rozpracováno"
+          }
+         ]
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-4046",
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Záložky a odkazy"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-4063"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Dokument má záložky vlevo vedle textu, jako listy v Excelu (na telefonu v menu). Pracovní poznámky jsou na druhé záložce: Poznámky"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-4154"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Odkaz umí skočit i na sekci ve stejném dokumentu: zpět na Formátování textu nebo na Bloky kódu."
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1266",
+    "level": 2
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Otevřené otázky"
+    }
+   ]
+  },
+  {
+   "type": "taskList",
+   "attrs": {
+    "id": "prehled-mje9hk5kec2-1282"
+   },
+   "content": [
+    {
+     "type": "taskItem",
+     "attrs": {
+      "id": "prehled-mje9hk5kec2-1283",
+      "checked": false
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "prehled-mje9hk5kec2-1284"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Které šablony chceme používat týmově? (napiš komentář)"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "type": "heading",
+   "attrs": {
+    "id": "poznamky-mje9hk5kec2-0",
+    "level": 1
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Pracovní poznámky"
+    }
+   ]
+  },
+  {
+   "type": "paragraph",
+   "attrs": {
+    "id": "poznamky-mje9hk5kec2-18"
+   },
+   "content": [
+    {
+     "type": "text",
+     "text": "Druhá záložka je pro materiál, který si čtenář otevře zvlášť: zdroje, surová data, zápisy. Záložky jde přejmenovat, přeřadit a vnořit pod jinou."
+    }
+   ]
+  },
+  {
+   "type": "bulletList",
+   "attrs": {
+    "id": "poznamky-mje9hk5kec2-163"
+   },
+   "content": [
+    {
+     "type": "listItem",
+     "attrs": {
+      "id": "poznamky-mje9hk5kec2-164"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "poznamky-mje9hk5kec2-165"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Test pro Crewship, data jsou vymyšlená"
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "type": "listItem",
+     "attrs": {
+      "id": "poznamky-mje9hk5kec2-204"
+     },
+     "content": [
+      {
+       "type": "paragraph",
+       "attrs": {
+        "id": "poznamky-mje9hk5kec2-205"
+       },
+       "content": [
+        {
+         "type": "text",
+         "text": "Další záložka může být třeba zápis z porady nebo seznam zdrojů"
+        }
+       ]
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}
