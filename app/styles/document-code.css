@@ -78,3 +78,26 @@
 [data-code-block] .hljs-deletion { color: var(--destructive); }
 [data-code-block] .hljs-emphasis { font-style: italic; }
 [data-code-block] .hljs-strong { font-weight: 600; }
+
+/* Rendered previews (LaTeX, CSV, Markdown): outside the editable text. */
+[data-code-block] > [data-code-header] > [data-code-mode] {
+  display: inline-flex;
+  gap: 1px;
+  border-radius: var(--radius-row, 0.375rem);
+  background: var(--accent);
+  padding: 1px;
+}
+[data-code-block] > [data-code-header] > [data-code-mode][hidden] { display: none; }
+[data-code-block] > [data-code-preview] {
+  padding: 0.5rem 0.75rem 0.75rem;
+  overflow-x: auto;
+  user-select: text;
+}
+[data-code-block] > [data-code-preview][hidden] { display: none; }
+[data-code-block] > [data-code-preview][data-error] {
+  padding-block: 0.25rem;
+  font-size: 0.875rem;
+  color: var(--destructive);
+}
+[data-code-block] > [data-code-preview] .katex-display { margin: 0.25rem 0; overflow-x: auto; overflow-y: hidden; }
+[data-code-block] > pre[hidden] { display: none; }

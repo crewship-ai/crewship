@@ -45,6 +45,8 @@ const formatted = { type: "doc", content: [
     { type: "taskItem", attrs: { id: "open", checked: false }, content: [p("open-p", "Pricing page")] },
   ] },
   { type: "codeBlock", attrs: { id: "markup", language: "html" }, content: [{ type: "text", text: MARKUP }] },
+  { type: "codeBlock", attrs: { id: "euler", language: "latex" }, content: [{ type: "text", text: String.raw`e^{i\pi} + 1 = 0` }] },
+  { type: "codeBlock", attrs: { id: "broken", language: "math" }, content: [{ type: "text", text: String.raw`\frac{1}{` }] },
 ] }
 
 const comments = [
@@ -207,6 +209,69 @@ describe("Docs code blocks", () => {
     expect(await within(blockDom(editor, "markup")).findByText("Copied")).toBeTruthy()
     // The header is not document text: it is outside the code and outside the saved content.
     expect(blockDom(editor, "markup").querySelector("pre")!.textContent).not.toContain("Copy")
+  })
+})
+
+describe("Docs math blocks", () => {
+  const blockDom = (editor: HTMLElement, id: string) => editor.querySelector<HTMLElement>(`[data-code-block][data-block-id="${id}"]`)!
+
+  it("typesets a latex block, switches to its source and back, and never changes the document", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    const before = structuredClone(editor.editor.getJSON())
+    const euler = blockDom(editor, "euler")
+    await waitFor(() => expect(euler.querySelector("[data-code-preview] .katex math")).not.toBeNull())
+    expect(euler.querySelector("[data-code-preview] annotation")!.textContent).toBe(String.raw`e^{i\pi} + 1 = 0`)
+    expect(euler.querySelector("pre")!.hidden).toBe(true)
+    const group = within(euler).getByRole("group", { name: "Show formula" })
+    expect(within(group).getByRole("button", { name: "Preview" }).getAttribute("aria-pressed")).toBe("true")
+    fireEvent.click(within(group).getByRole("button", { name: "Source" }))
+    expect(euler.querySelector("pre")!.hidden).toBe(false)
+    expect(euler.querySelector<HTMLElement>("[data-code-preview]")!.hidden).toBe(true)
+    expect(euler.querySelector("pre")!.textContent).toBe(String.raw`e^{i\pi} + 1 = 0`)
+    fireEvent.click(within(group).getByRole("button", { name: "Preview" }))
+    await waitFor(() => expect(euler.querySelector("[data-code-preview] .katex")).not.toBeNull())
+    // Source/Preview is this viewer's view: nothing was written or sent.
+    expect(editor.editor.getJSON()).toEqual(before)
+    expect(posts("/document/patch")).toHaveLength(0)
+  })
+
+  it("explains a syntax error inside that block and keeps its source and the rest of the page", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    const broken = blockDom(editor, "broken")
+    await waitFor(() => expect(broken.querySelector("[data-code-preview][data-error]")?.textContent).toMatch(/^Cannot show this formula: /))
+    expect(broken.querySelector("pre")!.hidden).toBe(false)
+    expect(broken.querySelector("pre")!.textContent).toBe(String.raw`\frac{1}{`)
+    await waitFor(() => expect(blockDom(editor, "euler").querySelector(".katex")).not.toBeNull())
+    expect(editor.querySelector("strong")!.textContent).toBe("Partners only")
+  })
+
+  it("shows the source when the caret enters a previewed block, so typing is never hidden, and re-renders the edit", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    const euler = blockDom(editor, "euler")
+    await waitFor(() => expect(euler.querySelector("[data-code-preview] .katex")).not.toBeNull())
+    let start = -1
+    editor.editor.state.doc.descendants((node, pos) => { if (node.attrs.id === "euler") start = pos + 1 })
+    act(() => { editor.editor.commands.setTextSelection(start) })
+    expect(euler.querySelector("pre")!.hidden).toBe(false)
+    act(() => { editor.editor.commands.insertContent("x + ") })
+    expect(editor.editor.getJSON().content!.find(block => block.attrs?.id === "euler")!.content).toEqual([{ type: "text", text: String.raw`x + e^{i\pi} + 1 = 0` }])
+    fireEvent.click(within(euler).getByRole("button", { name: "Preview" }))
+    await waitFor(() => expect(euler.querySelector("[data-code-preview] annotation")?.textContent).toBe(String.raw`x + e^{i\pi} + 1 = 0`))
+  })
+
+  it("previews math for a reader too, without a caret to follow", async () => {
+    serve()
+    env.canWrite = false
+    open()
+    expect(await screen.findByRole("button", { name: "Status: Read-only" })).toBeTruthy()
+    const editor = screen.getByLabelText("Document editor")
+    await waitFor(() => expect(blockDom(editor, "euler").querySelector("[data-code-preview] .katex")).not.toBeNull())
   })
 })
 
