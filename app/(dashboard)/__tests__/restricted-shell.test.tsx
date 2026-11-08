@@ -213,7 +213,8 @@ describe("dashboard shell for a restricted account (#2861)", () => {
     workspacesPayload = [{ ...RESTRICTED_A, restricted_surfaces: SURFACES.filter(surface => surface !== "pages") }]
     nav.pathname = pathname
     mount()
-    expect(await screen.findByText(/isn’t part of your access$/)).toBeInTheDocument()
+    expect(await screen.findByText("Artifacts isn’t part of your access")).toBeInTheDocument()
+    expect(screen.queryByText(/\bPages?\b/)).toBeNull()
     expect(screen.queryByRole("link", { name: "Artifacts" })).toBeNull()
     expect(screen.queryByTestId("page")).toBeNull()
     expect(forbidden()).toEqual([])
