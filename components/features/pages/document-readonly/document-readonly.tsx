@@ -5,7 +5,7 @@ import { isEmptyDocument } from "@/lib/documents/empty"
 import { documentSchema } from "@/lib/documents/schema"
 
 export interface DocumentReadonlyProps {
-  schema: 2 | 3
+  schema: 2 | 3 | 4
   content: unknown
   /** A label from the authorized caller; never infer a private title here. */
   accessibleLabel: string
@@ -16,7 +16,7 @@ export interface DocumentReadonlyProps {
 const unavailable = "Document unavailable. This content cannot be displayed by this reader."
 
 function confirmedContent(content: unknown, version: number) {
-  if (version !== 2 && version !== 3) return null
+  if (version !== 2 && version !== 3 && version !== 4) return null
   try {
     documentSchema.validateJSON(content, version)
     const schema = documentSchema.schemaFor(version)
@@ -35,7 +35,7 @@ export function DocumentReadonly({ schema, content, accessibleLabel, emptyText =
   return <div
     role="region"
     aria-label={accessibleLabel}
-    className="min-w-0 break-words rounded-md border p-4 [&_p]:my-2 [&_h1]:text-2xl [&_h2]:text-xl [&_h3]:text-lg [&_ul]:list-disc [&_ol]:list-decimal [&_li]:ml-5 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:p-2 [&_pre]:whitespace-pre-wrap"
+    className="min-w-0 break-words rounded-md border p-4 [&_p]:my-2 [&_h1]:text-2xl [&_h2]:text-xl [&_h3]:text-lg [&_ul]:list-disc [&_ol]:list-decimal [&_li]:ml-5 [&_table]:block [&_table]:max-w-full [&_table]:overflow-x-auto [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:p-2 [&_pre]:whitespace-pre-wrap [&_strong]:font-semibold [&_em]:italic [&_s]:line-through [&_blockquote]:border-l-2 [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_ul[data-type=taskList]]:list-none [&_li[data-type=taskItem]]:ml-0 [&_li[data-type=taskItem]]:flex [&_li[data-type=taskItem]]:gap-2 [&_li[data-checked=true]>div]:line-through"
     ref={element => {
       if (!element) return
       // Clear before serialization as well: a failed new read cannot retain old DOM.
