@@ -90,7 +90,7 @@ function Quote({ text, hint, onClick }: { text: string; hint?: string; onClick?:
 function Remark({ comment, nameOf, reply }: { comment: DocumentComment; nameOf: (actor: string) => string; reply?: boolean }) {
   const name = nameOf(comment.actor)
   return <div className={cn("flex gap-2", reply && "pl-6")}>
-    <span aria-hidden className={cn("grid shrink-0 place-items-center rounded-full bg-muted font-medium text-muted-foreground", reply ? "size-5 text-[10px]" : "size-6 text-[11px]")}>{initials(name)}</span>
+    <span aria-hidden className={cn("grid shrink-0 place-items-center rounded-full bg-muted font-medium text-muted-foreground", reply ? "size-5 text-xs" : "size-6 text-xs")}>{initials(name)}</span>
     <div className="min-w-0 flex-1">
       <p className="text-sm"><b className="font-semibold">{name}</b> <span className="text-xs text-muted-foreground">{when(comment.created_at)}</span></p>
       <p className="whitespace-pre-wrap break-words text-sm">{comment.body}</p>
