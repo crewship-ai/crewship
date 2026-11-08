@@ -25,7 +25,7 @@ import { DocumentProposals } from "./document-proposals/document-proposals"
 import { createHttpHistoryActions } from "@/lib/documents/history-actions"
 import { createHttpProposalClient } from "@/lib/documents/proposals"
 import { documentReviewActions } from "@/lib/feature-flags"
-import { CommentHighlights, documentEditorExtensions, isRichSchema, stableBlockTypes } from "./document-rich-extensions"
+import { CommentHighlights, documentEditorExtensions, isRichSchema, KeptSelection, stableBlockTypes } from "./document-rich-extensions"
 
 const StableIDs = Extension.create({
   name: "documentBlockIDs",
@@ -113,7 +113,7 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
   }, [sync.doc])
   const editor = useEditor({
     immediatelyRender: false, editable: false,
-    extensions: [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(sync.state?.schema) }), ...documentEditorExtensions(sync.state?.schema), CommentHighlights, Collaboration.configure({ document: sync.doc, field: "default" })],
+    extensions: [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(sync.state?.schema) }), ...documentEditorExtensions(sync.state?.schema), CommentHighlights, KeptSelection, Collaboration.configure({ document: sync.doc, field: "default" })],
     // The browser moves the caret (Ctrl+End, arrows, a tap) before its selectionchange reaches ProseMirror. A key the
     // editor handles itself, such as Enter, must act where the caret is shown, so the DOM selection is read first.
     // Only for real key presses: ProseMirror replays a browser-made Enter or Backspace (iOS, Android) as a plain Event
