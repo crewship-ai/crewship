@@ -11,10 +11,14 @@ export type LibraryKind = "project" | "dashboard" | "page" | "word" | "sheet" | 
 /** Web things run in a sandbox; documents are Crafts or decks. */
 export type LibraryFamily = "web" | "document"
 
+/**
+ * Storage kinds, labelled in the UI's words (kinds.ts): a project is a static
+ * App and a legacy Page with panels an App. "Page" is never a label (#5132).
+ */
 export const LIBRARY_KINDS: { kind: LibraryKind; label: string; plural: string; family: LibraryFamily }[] = [
-  { kind: "project", label: "Project", plural: "Projects", family: "web" },
+  { kind: "project", label: "Static app", plural: "Static apps", family: "web" },
   { kind: "dashboard", label: "Dashboard", plural: "Dashboards", family: "web" },
-  { kind: "page", label: "Page", plural: "Pages", family: "web" },
+  { kind: "page", label: "App", plural: "Apps", family: "web" },
   { kind: "word", label: "Word", plural: "Word", family: "document" },
   { kind: "sheet", label: "Sheet", plural: "Sheets", family: "document" },
   { kind: "slides", label: "Slides", plural: "Slides", family: "document" },

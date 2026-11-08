@@ -194,7 +194,7 @@ it.each(["true", "false"])("routes explicit server-typed Slides with flag %s whi
       expect(screen.queryByRole("textbox", { name: "Comment" })).toBeNull()
     } else {
       expect(screen.queryByTestId("library-slides")).toBeNull()
-      expect(screen.getByRole("link", { name: "Open in Pages" })).toBeInTheDocument()
+      expect(screen.getByRole("link", { name: "Open full view" })).toBeInTheDocument()
     }
   } finally { vi.unstubAllEnvs() }
 })

@@ -70,7 +70,7 @@ it.each([
   const host = await screen.findByTestId("native-host")
   expect(state.fetch).toHaveBeenCalledWith("/api/v1/pages/%40page-brief/craft/availability?workspace_id=ws1")
   expect(host.dataset).toMatchObject({ workspace: "ws1", page: "page-brief", human: "u1", enabled: "true" })
-  expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
+  expect(screen.queryByRole("link", { name: /Open in Pages|Open full view/ })).toBeNull()
   expect(screen.queryByTestId("lock-bar")).toBeNull()
   expect(screen.queryByText("saved preview")).toBeNull()
 })
@@ -93,8 +93,8 @@ it.each([
   expect(await screen.findByText(notice)).toBeInTheDocument()
   expect(screen.getByText("saved preview")).toBeInTheDocument()
   expect(screen.queryByTestId("lock-bar")).toBeNull()
-  expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
-  expect(screen.queryByText(/Open in Pages/)).toBeNull()
+  expect(screen.queryByRole("link", { name: /Open in Pages|Open full view/ })).toBeNull()
+  expect(screen.queryByText(/Open in Pages|Open full view/)).toBeNull()
   expect(screen.queryByTestId("native-host")).toBeNull()
 })
 
@@ -114,7 +114,7 @@ it("a native Sheet whose editor is off says so instead of an empty detail", asyn
   state.availability = { enabled: false }
   open()
   expect(await screen.findByText("Editing is not available here right now.")).toBeInTheDocument()
-  expect(screen.queryByText(/Open in Pages/)).toBeNull()
+  expect(screen.queryByText(/Open in Pages|Open full view/)).toBeNull()
 })
 
 it("a native Word whose saved preview fails does not point to Pages, which sends it back here", async () => {
@@ -122,7 +122,7 @@ it("a native Word whose saved preview fails does not point to Pages, which sends
   state.read = "error"
   open()
   expect(await screen.findByText(/The document preview could not be loaded\./)).toBeInTheDocument()
-  expect(screen.queryByText(/Open in Pages/)).toBeNull()
+  expect(screen.queryByText(/Open in Pages|Open full view/)).toBeNull()
 })
 
 it.each(["unavailable", "error"])("an old-editor Word whose document answers %s has no Open in Pages: Pages reads the same document", status => {
@@ -130,29 +130,29 @@ it.each(["unavailable", "error"])("an old-editor Word whose document answers %s 
   state.read = status
   open()
   expect(screen.getByText(/older version of the editor/)).toBeInTheDocument()
-  expect(screen.queryByRole("link", { name: /Open in Pages/ })).toBeNull()
+  expect(screen.queryByRole("link", { name: /Open in Pages|Open full view/ })).toBeNull()
 })
 
-it("an old-editor Word that still reads keeps Open in Pages, where its editor opens it", () => {
+it("an old-editor Word that still reads keeps a full-view link, where its editor opens it", () => {
   state.pages = [page({ has_document: true })]
   open()
   expect(screen.getByText("saved preview")).toBeInTheDocument()
-  expect(screen.getByRole("link", { name: /Open in Pages/ })).toHaveAttribute("href", "/pages/brief?workspace_id=ws1")
+  expect(screen.getByRole("link", { name: /Open full view/ })).toHaveAttribute("href", "/pages/brief?workspace_id=ws1")
 })
 
-it("with the switch off an old-editor Word keeps Open in Pages as before", () => {
+it("with the switch off an old-editor Word keeps its full-view link as before", () => {
   vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "false")
   state.pages = [page({ has_document: true })]
   state.read = "unavailable"
   open()
-  expect(screen.getByRole("link", { name: /Open in Pages/ })).toBeInTheDocument()
+  expect(screen.getByRole("link", { name: /Open full view/ })).toBeInTheDocument()
 })
 
-it("is unchanged with the single-home switch off: lock bar, preview and Open in Pages", async () => {
+it("is unchanged with the single-home switch off: lock bar, preview and the full-view link", async () => {
   vi.stubEnv("NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS", "false")
   open()
   expect(screen.getByTestId("lock-bar")).toBeInTheDocument()
-  expect(screen.getByRole("link", { name: /Open in Pages/ })).toBeInTheDocument()
+  expect(screen.getByRole("link", { name: /Open full view/ })).toBeInTheDocument()
   await waitFor(() => expect(screen.getByText("saved preview")).toBeInTheDocument())
   expect(state.fetch).not.toHaveBeenCalled()
   expect(screen.queryByTestId("native-host")).toBeNull()

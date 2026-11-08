@@ -63,8 +63,9 @@ export interface ParsedQuery {
   owner: string[]
 }
 
+// Storage keys and their plurals keep working (`kind:projects`) beside the labels; a label with a space is not one token.
 const KIND_WORDS = new Map<string, LibraryKind>(LIBRARY_KINDS.flatMap(({ kind, label, plural }) =>
-  [[kind, kind], [label.toLowerCase(), kind], [plural.toLowerCase(), kind]] as [string, LibraryKind][]))
+  [[kind, kind], [`${kind}s`, kind], [label.toLowerCase().replace(/\s+/g, ""), kind], [plural.toLowerCase().replace(/\s+/g, ""), kind]] as [string, LibraryKind][]))
 
 /** `kind:word is:private owner:you budget` — operators first-class, the rest is free text. */
 export function parseQuery(q: string): ParsedQuery {

@@ -1,8 +1,15 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 
-const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[], readStatus: "ready" as string, pagesArgs: [] as unknown[], mobile: false, caps: {} as Record<string, boolean> }))
+const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[], readStatus: "ready" as string, pagesArgs: [] as unknown[], mobile: false, caps: {} as Record<string, boolean>, access: "unknown" as string, accessRefs: [] as (string | null)[] }))
+// Storage is a no-op in this suite's setup: the drafts this browser kept are listed here instead.
+const drafts = vi.hoisted(() => new Set<string>())
+vi.mock("@/components/features/chat/artifact-context/craft/local-draft", async importOriginal => ({
+  ...(await importOriginal<typeof import("@/components/features/chat/artifact-context/craft/local-draft")>()),
+  readLocalDraft: (userId: string, workspaceId: string, slug: string) => drafts.has([userId, workspaceId, slug].join(":")) ? { content: "x", baseVersion: 1, savedAt: "2026-10-27T10:00:00Z" } : null,
+}))
+vi.mock("../use-artifact-access", () => ({ useArtifactAccess: (_ws: string, ref: string | null, enabled: boolean) => { if (enabled) state.accessRefs.push(ref); return enabled ? state.access : "ok" } }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: (...args: unknown[]) => { state.pagesArgs = args; return { pages: state.pages, loading: state.loading, error: state.error, refresh: state.refresh } },
@@ -77,12 +84,17 @@ beforeEach(() => {
     wire({ slug: "calc", id: "page-calc", name: "Calculator", has_application: true } as Partial<WirePage>),
   ]
   windowState.calls = []; windowState.pages = []; windowState.total = 0
-  state.folders = []; state.reads = []; state.pagesArgs = []; state.mobile = false; state.readStatus = "ready"; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.caps = {}; state.select.mockReset(); state.refresh.mockReset()
+  state.folders = []; state.reads = []; state.pagesArgs = []; state.mobile = false; state.readStatus = "ready"; state.loading = false; state.error = null; state.projectsOn = true; state.item = null; state.caps = {}; state.access = "unknown"; state.accessRefs = []; state.select.mockReset(); state.refresh.mockReset()
 })
 afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 const renderLibrary = () => render(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
 
+/** The bar's New artifact opens a popover grouped Artifacts / Craft; each entry opens the existing dialog on its flow. */
+const newFrom = (name: string) => {
+  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  fireEvent.click(screen.getByRole("button", { name }))
+}
 const openAll = () => fireEvent.click(screen.getByRole("tab", { name: /All artifacts/ }))
 
 it("lists every kind with something in it, a panel Page as Page, and keeps empty items in their own view", () => {
@@ -91,11 +103,14 @@ it("lists every kind with something in it, a panel Page as Page, and keeps empty
   fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
   const cards = within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem")
   expect(cards.map(card => within(card).getByRole("heading").textContent)).toEqual(["Pricing site", "Partner brief", "Price model", "Weekly report"])
-  expect(within(cards[0]).getByText("Project")).toBeTruthy()
+  expect(within(cards[0]).getByText("App")).toBeTruthy()
+  expect(within(cards[0]).getByText("Static")).toBeTruthy()
   expect(within(cards[0]).getByText("Shared v2")).toBeTruthy()
   expect(within(cards[1]).getByText("Not shared")).toBeTruthy()
   expect(within(cards[2]).queryByText(/shared/i)).toBeNull()
-  expect(within(cards[3]).getByText("Page")).toBeTruthy()
+  // A Page with panels is an App in the UI's words: "Page" is never a label (#5132).
+  expect(within(cards[3]).getByText("App")).toBeTruthy()
+  expect(screen.queryByText("Page")).toBeNull()
   expect(screen.queryByText("Calculator")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: /Empty/ }))
   expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Calculator")])
@@ -168,15 +183,37 @@ it("asks the server for archived and test-made items, which it leaves out by def
   expect(state.pagesArgs).toEqual(["ws1", undefined, { archived: "include", testItems: "include" }])
 })
 
-it("Home offers what can be made, what is not shared yet and what changed last, each once", () => {
+it("Home lists each artifact once, filters by kind chips, and offers what can be made grouped Artifact and Craft", () => {
   renderLibrary()
   expect(screen.getByRole("heading", { level: 1, name: "Artifacts" })).toBeTruthy()
-  expect(screen.getByRole("button", { name: "New Project" })).toBeTruthy()
-  expect(screen.getByRole("button", { name: "New Word document" })).toBeTruthy()
-  expect(screen.queryByRole("button", { name: "New Slides" })).toBeNull()
   expect(screen.getAllByRole("button", { name: "Open Partner brief" })).toHaveLength(1)
-  fireEvent.click(screen.getByRole("button", { name: "New Word document" }))
+  // A fresh library with nothing failed, stale or recovered has nothing that needs attention: unshared is not a reason.
+  expect(screen.queryByRole("heading", { name: /Needs attention/ })).toBeNull()
+  fireEvent.click(within(screen.getByRole("group", { name: "Kind" })).getByRole("button", { name: /Sheets/ }))
+  expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Price model")])
+  fireEvent.click(screen.getByRole("radio", { name: "Table" }))
+  expect(screen.getByRole("table")).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
+  expect(within(screen.getByRole("region", { name: "Artifacts" })).getByRole("button", { name: "New App" })).toBeTruthy()
+  expect(within(screen.getByRole("region", { name: "Craft · one editor at a time" })).getByRole("button", { name: "New Word" })).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "New Slides" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "New Word" }))
   expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("word")
+})
+
+it("Needs attention lists a failed refresh and a recovered draft, never an unshared item", () => {
+  state.pages = [
+    ...state.pages,
+    wire({ slug: "ops", id: "page-ops", name: "Ops board", panel_count: 3, has_application: true, failed_panels: 1 } as Partial<WirePage>),
+    wire({ slug: "memo", id: "page-memo", name: "Memo", artifact_kind: "word", has_document: true, native_craft_application: "wordcraft" } as Partial<WirePage>),
+  ]
+  // A draft this person's browser kept for the native Word (u1, ws1, by Page reference).
+  drafts.add("u1:ws1:@page-memo")
+  try {
+    renderLibrary()
+    const section = screen.getByRole("region", { name: /Needs attention/ })
+    expect(within(section).getAllByRole("button").map(button => button.getAttribute("aria-label"))).toEqual(["Your recovered draft: Memo", "Refresh failed: Ops board"])
+  } finally { drafts.clear() }
 })
 
 it("New artifact in the bar opens the dialog in the folder being looked at", () => {
@@ -184,9 +221,9 @@ it("New artifact in the bar opens the dialog in the folder being looked at", () 
   state.pages = [wire({ slug: "site", name: "Pricing site", artifact_kind: "project", folder: { slug: "sales", name: "Sales" } } as Partial<WirePage>)]
   renderLibrary()
   fireEvent.click(screen.getByRole("button", { name: /Sales/ }))
-  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  newFrom("New App")
   const dialog = screen.getByRole("dialog", { name: "New artifact" })
-  expect([dialog.dataset.kind, dialog.dataset.folder]).toEqual(["", "sales"])
+  expect([dialog.dataset.kind, dialog.dataset.folder]).toEqual(["project", "sales"])
 })
 
 it("does not offer New artifact to a member who cannot create Pages, whatever the server serves (#4534)", () => {
@@ -206,7 +243,8 @@ it("offers New artifact in the bar, on Home and in the empty state to a member w
   state.caps = { projects: true, dashboards: true, slides: true, documents: true, designs: true, pages: true }
   const view = renderLibrary()
   expect(screen.getAllByRole("button", { name: "New artifact" })).toHaveLength(1)
-  for (const name of ["New Project", "New Dashboard", "New Slide deck"]) expect(screen.getByRole("button", { name })).toBeTruthy()
+  fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
+  for (const name of ["New App", "New Dashboard", "New Slides"]) expect(screen.getByRole("button", { name })).toBeTruthy()
   view.unmount()
   state.pages = []
   renderLibrary()
@@ -215,7 +253,7 @@ it("offers New artifact in the bar, on Home and in the empty state to a member w
 
 it("a just-created artifact opens by its slug, never as an ID, so it does not land on not available", () => {
   renderLibrary()
-  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  newFrom("New App")
   fireEvent.click(screen.getByRole("button", { name: "Create" }))
   // The new item is not in the list yet; the route opens it by slug and moves to its ID once it resolves.
   expect(state.select).toHaveBeenCalledWith(null, "fresh-design")
@@ -227,7 +265,7 @@ it("opens a just-created artifact with a confirmed ID at its own address, never 
   // the session) and the exported build then reloaded the page as
   // /artifacts/<id> mid-refresh, which signed the person out.
   renderLibrary()
-  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  newFrom("New App")
   fireEvent.click(screen.getByRole("button", { name: "Create with ID" }))
   expect(state.select).toHaveBeenCalledWith("page-id-1")
   expect(state.select).not.toHaveBeenCalledWith(null, "fresh-sheet")
@@ -332,9 +370,10 @@ it("desktop rows keep their checkboxes without a Select toggle", () => {
 it("a project detail opens the project preview", () => {
   state.item = "page-site"
   renderLibrary()
-  // The viewer names it; the library does not repeat the title above it.
+  // The frame names it once, in the header's title menu; the body is the viewer.
   expect(screen.queryByRole("heading", { level: 1, name: "Pricing site" })).toBeNull()
-  expect(screen.getByText(/^You · /)).toBeTruthy()
+  expect(screen.getByRole("button", { name: "Pricing site, artifact menu" })).toBeTruthy()
+  expect(document.querySelector("[data-artifact-frame]")?.getAttribute("data-artifact-frame")).toBe("app")
   expect(screen.getByTestId("viewer-provider").dataset).toMatchObject({ slug: "site", tab: "preview" })
   expect(screen.getByTestId("viewer-panel")).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "All artifacts" }))
@@ -346,7 +385,8 @@ it("without the project surface the detail links to the Page instead of a dead v
   state.item = "page-site"
   renderLibrary()
   expect(screen.queryByTestId("viewer-panel")).toBeNull()
-  expect(screen.getByRole("link", { name: "Open in Pages" }).getAttribute("href")).toBe("/pages/%40page-site?workspace_id=ws1&artifact=1")
+  expect(screen.getByRole("link", { name: "Open full view" }).getAttribute("href")).toBe("/pages/%40page-site?workspace_id=ws1&artifact=1")
+  expect(screen.queryByText(/Open in Pages/)).toBeNull()
 })
 
 it("a native Word detail shows its edit lock by Page reference", () => {
@@ -401,6 +441,29 @@ it("an unknown or removed item falls back to the gallery", () => {
   state.item = "page-gone"
   renderLibrary()
   expect(screen.getByText("This artifact is not available.")).toBeTruthy()
+  expect(state.accessRefs.at(-1)).toBe("@page-gone")
+})
+
+it.each([
+  ["signedout", "Sign in to open this artifact"],
+  ["denied", "You don’t have access"],
+  ["missing", "This artifact doesn’t exist"],
+])("an address the catalog lacks shows the %s gate the server answers", (access, heading) => {
+  state.access = access
+  state.item = "page-gone"
+  renderLibrary()
+  expect(screen.getByRole("heading", { name: heading })).toBeTruthy()
+  fireEvent.click(screen.getAllByRole("button", { name: /Back to Artifacts|All artifacts/ })[0])
+  expect(state.select).toHaveBeenCalledWith(null)
+})
+
+it("the folder panel steps aside while an artifact is open, and a pin keeps it open", () => {
+  state.item = "page-brief"
+  renderLibrary()
+  const pin = screen.getByRole("button", { name: "Keep the panel open beside artifacts" })
+  expect(pin.getAttribute("aria-pressed")).toBe("false")
+  fireEvent.click(pin)
+  expect(screen.getByRole("button", { name: "Let the panel close when an artifact opens" }).getAttribute("aria-pressed")).toBe("true")
 })
 
 it("an ID address fails closed: another artifact now holding that slug never opens in its place", () => {
@@ -442,8 +505,8 @@ it("an explicitly typed Dashboard opens the versioned viewer without a Craft lea
   state.item = "sales"
   renderLibrary()
   expect(screen.getByTestId("viewer-panel")).toBeTruthy()
-  // The viewer's Latest / Shared switch says which version is shared; the library does not repeat it.
-  expect(screen.queryByText("Shared v2")).toBeNull()
+  // The viewer's Latest / Shared switch says which version is shared; the stage does not repeat it (Info in the drawer may).
+  expect(within(document.querySelector<HTMLElement>("[data-artifact-stage]")!).queryByText("Shared v2")).toBeNull()
   expect(screen.queryByTestId("lock-bar")).toBeNull()
 })
 
@@ -465,7 +528,7 @@ it.each(["project", "dashboard", "slides"] as const)("keeps %s routed through it
   expect(state.select).toHaveBeenLastCalledWith("owner-page")
   state.item = "owner-page"
   view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
-  expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/%40owner-page?workspace_id=ws1&artifact=1")
+  expect(screen.getByRole("link", { name: "Open full view" })).toHaveAttribute("href", "/pages/%40owner-page?workspace_id=ws1&artifact=1")
   expect(screen.queryByTestId("viewer-panel")).toBeNull()
 })
 
@@ -473,14 +536,14 @@ it.each(["word", "sheet"] as const)("preserves the existing reader link for nati
   state.pages = [wire({ id: "native-page", slug: "saved-native", name: "Native document", artifact_kind })]
   state.projectsOn = false; state.item = "native-page"
   renderLibrary()
-  expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/saved-native?workspace_id=ws1")
+  expect(screen.getByRole("link", { name: "Open full view" })).toHaveAttribute("href", "/pages/saved-native?workspace_id=ws1")
 })
 
 it("keeps legacy Slides in their existing Page reader", () => {
   state.pages = [wire({ id: "legacy-page", slug: "legacy-slides", name: "Legacy deck", has_slides: true })]
   state.item = "legacy-page"
   renderLibrary()
-  expect(screen.getByRole("link", { name: "Open in Pages" })).toHaveAttribute("href", "/pages/legacy-slides?workspace_id=ws1")
+  expect(screen.getByRole("link", { name: "Open full view" })).toHaveAttribute("href", "/pages/legacy-slides?workspace_id=ws1")
 })
 
 it("J and K move between items, Enter opens, Escape leaves the detail, never from a field", () => {
@@ -505,14 +568,20 @@ it("J and K move between items, Enter opens, Escape leaves the detail, never fro
   expect(state.select).toHaveBeenLastCalledWith(null)
 })
 
-it("remembers what was opened and starred, per person, in Recently opened and Favorites", () => {
+const openTitleMenu = (name: string) => act(async () => {
+  fireEvent.pointerDown(screen.getByRole("button", { name: `${name}, artifact menu` }), { button: 0, ctrlKey: false })
+})
+
+it("remembers what was opened and starred, per person, in Recently opened and Favorites", async () => {
   state.item = "page-brief"
   const view = renderLibrary()
-  fireEvent.click(screen.getByRole("button", { name: "Add to favorites" }))
-  expect(screen.getByRole("button", { name: "Remove from favorites" }).getAttribute("aria-pressed")).toBe("true")
+  await openTitleMenu("Partner brief")
+  fireEvent.click(await screen.findByRole("menuitem", { name: /Add to favorites/ }))
+  await openTitleMenu("Partner brief")
+  expect(await screen.findByRole("menuitem", { name: /Remove from favorites/ })).toBeTruthy()
+  fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" })
   state.item = null
   view.rerender(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
-  expect(screen.getByRole("heading", { name: /Recently opened/ })).toBeTruthy()
   fireEvent.click(screen.getByRole("tab", { name: /Recently opened/ }))
   expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Partner brief")])
   fireEvent.click(screen.getByRole("button", { name: /^Favorites/ }))
@@ -524,7 +593,7 @@ it("each kind wears its colour and the gallery draws a thumbnail per kind", () =
   openAll()
   fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
   const thumbs = [...document.querySelectorAll("[data-thumb]")].map(node => node.getAttribute("data-thumb"))
-  expect(thumbs).toEqual(["project", "word", "sheet", "page"])
+  expect(thumbs).toEqual(["app", "word", "sheet", "app"])
 })
 
 it("selecting rows in the list opens the bulk bar with exactly those items", () => {
@@ -538,11 +607,15 @@ it("selecting rows in the list opens the bulk bar with exactly those items", () 
   expect(screen.getByRole("toolbar", { name: "Bulk actions" }).dataset.slugs).toBe("brief")
 })
 
-it("a detail offers Share, Move and an Access tab", () => {
+it("a detail offers Share, Move and access in its Info drawer", async () => {
   state.item = "page-model"
   renderLibrary()
-  fireEvent.click(screen.getByRole("radio", { name: "Access" }))
-  expect(screen.getByRole("region", { name: "Access to Price model" })).toBeTruthy()
+  // Access is read only once Info opens: an open artifact never asks for its grants unasked.
+  expect(screen.queryByRole("region", { name: "Access to Price model" })).toBeNull()
+  await openTitleMenu("Price model")
+  expect(await screen.findByRole("menuitem", { name: /Move to folder/ })).toBeTruthy()
+  fireEvent.click(screen.getByRole("menuitem", { name: /^Info/ }))
+  expect(within(screen.getByRole("complementary", { name: "Info" })).getByRole("region", { name: "Access to Price model" })).toBeTruthy()
   fireEvent.click(screen.getByRole("button", { name: "Share" }))
   expect(screen.getByRole("dialog", { name: "Share Price model" })).toBeTruthy()
 })
@@ -566,7 +639,7 @@ it("keeps a blank Page the person just created in the library and points to hidd
   cleanup()
 
   renderLibrary()
-  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  newFrom("New App")
   fireEvent.click(within(screen.getByRole("dialog", { name: "New artifact" })).getByRole("button", { name: "Create" }))
   expect(state.select).toHaveBeenCalledWith(null, "fresh-design")
   expect(screen.queryByText("No artifacts yet")).toBeNull()
@@ -581,7 +654,7 @@ it("with the server catalog flag, All keeps a blank Page the person just created
   windowState.pages = []
   windowState.total = 0
   renderLibrary()
-  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
+  newFrom("New App")
   fireEvent.click(within(screen.getByRole("dialog", { name: "New artifact" })).getByRole("button", { name: "Create" }))
   openAll()
   expect(windowState.calls[windowState.calls.length - 1].params).toBeNull()

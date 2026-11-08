@@ -1,13 +1,20 @@
 "use client"
 
 import { useEffect, useState, type ReactNode } from "react"
+import { History } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { apiFetch } from "@/lib/api-fetch"
 import { verifyNativeReadLoss } from "@/lib/mooring/native-read-loss"
-import { NativeCraftEditorHost } from "@/components/features/pages/native-craft-editor-host"
+import { NativeCraftEditorHost, type NativeCraftHostStatus } from "@/components/features/pages/native-craft-editor-host"
 import { NativeCraftPreview } from "@/components/features/pages/native-craft-preview"
 import { NativeCraftReaderHistory } from "@/components/features/pages/native-craft-reader-history"
+import { ArtifactAgentMode, ArtifactDrawerSection } from "./frame"
+
+/** History lives in the frame's drawer, never as a row above the editor (#5132). */
+const inHistory = (node: ReactNode) => <ArtifactDrawerSection tab="history" label="History" icon={History}>{node}</ArtifactDrawerSection>
+/** The Craft agent task is the Edit mode of the Agent drawer, mounted only once the server admits agents. */
+const asEditMode = (form: ReactNode) => <ArtifactAgentMode mode="edit">{form}</ArtifactAgentMode>
 
 type State = "loading" | "enabled" | "preview" | "readonly" | "disabled" | "error"
 
@@ -19,7 +26,13 @@ type State = "loading" | "enabled" | "preview" | "readonly" | "disabled" | "erro
  * what it showed before (`fallback`) under a notice that says why, and
  * nothing is opened or written. An unconfirmed answer can be asked again.
  */
-export function ArtifactNativeEditor({ workspaceId, pageId, fallback }: { workspaceId: string; pageId: string; fallback: ReactNode }) {
+export type NativeAvailability = State
+
+export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, onAvailability }: { workspaceId: string; pageId: string; fallback: ReactNode
+  /** The host's save and lock state, for the frame's status chip. */
+  onStatus?: (status: NativeCraftHostStatus) => void
+  /** The server's availability answer (editor, preview, read-only…). */
+  onAvailability?: (state: NativeAvailability) => void }) {
   const session = useSessionSafe()
   const humanId = session.status === "authenticated" ? session.data?.user?.id ?? null : null
   const scope = humanId ? JSON.stringify([humanId, workspaceId, pageId]) : null
@@ -45,16 +58,18 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback }: { worksp
     return () => abort.abort()
   }, [scope, humanId, workspaceId, pageId, attempt])
 
-  if (!scope || !humanId) return <>{fallback}</>
   // A previous person's or document's answer never authorizes this render.
   const state = availability?.scope === scope ? availability.state : "loading"
-  if (state === "loading") return <p role="status" className="rounded-card border p-4 text-sm text-muted-foreground">Připojuji…</p>
+  useEffect(() => { onAvailability?.(state) }, [state]) // eslint-disable-line react-hooks/exhaustive-deps -- report each answer once
+  if (!scope || !humanId) return <>{fallback}</>
+  if (state === "loading") return <p role="status" className="p-4 text-sm text-muted-foreground">Connecting…</p>
   // The host's UI and draft journal are remounted for every person and document.
-  if (state === "enabled") return <div data-testid="native-editor" className="flex min-h-[520px] flex-1 flex-col overflow-hidden rounded-card border">
-    <NativeCraftEditorHost key={scope} workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled />
+  if (state === "enabled") return <div data-testid="native-editor" className="flex min-h-[520px] flex-1 flex-col overflow-hidden">
+    <NativeCraftEditorHost key={scope} workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled
+      placeHistory={inHistory} placeAgentStart={asEditMode} onStatus={onStatus} />
   </div>
-  if (state === "preview") return <div className="flex min-h-[520px] flex-1 flex-col overflow-hidden rounded-card border">
-    <NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />
+  if (state === "preview") return <div className="flex min-h-[520px] flex-1 flex-col overflow-hidden">
+    {inHistory(<NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />)}
     <NativeCraftPreview key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />
   </div>
   return <>
@@ -64,7 +79,7 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback }: { worksp
     </p> : <p role="status" className="text-sm text-muted-foreground">
       {state === "readonly" ? "You can read this document but not edit it." : "Editing is not available here right now."}
     </p>}
-    {state === "readonly" && <NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />}
+    {state === "readonly" && inHistory(<NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} />)}
     {fallback}
   </>
 }

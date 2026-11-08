@@ -56,6 +56,8 @@ export function SecondaryPanel<S extends string = string>({
   spaces,
   className,
   children,
+  collapsed: collapsedOverride,
+  onCollapsedChange,
 }: {
   /** Stable section id: "issues", "inbox"… keys the remembered state. */
   id: string
@@ -79,6 +81,10 @@ export function SecondaryPanel<S extends string = string>({
   spaces?: PanelSpacesConfig<S>
   className?: string
   children?: React.ReactNode
+  /** Desktop only: the section decides (Artifacts steps its panel aside while
+   *  an artifact is open). Overrides the remembered preference, which stays. */
+  collapsed?: boolean
+  onCollapsedChange?: (collapsed: boolean) => void
 }) {
   const spacesNode = spaces ? <PanelSpaces<S> {...spaces} /> : null
   const isMobile = useIsMobile()
@@ -210,17 +216,18 @@ export function SecondaryPanel<S extends string = string>({
   }
 
   // A list docked on a tablet has no collapse: the width is planned for it.
-  const isCollapsed = collapsed && !tabletWidth
+  const shut = collapsedOverride ?? collapsed
+  const isCollapsed = shut && !tabletWidth
   const toggle = tabletWidth ? null : (
     <button
       type="button"
-      onClick={() => setCollapsed(!collapsed)}
-      aria-label={collapsed ? `Show ${label}` : `Hide ${label}`}
-      aria-expanded={!collapsed}
-      title={collapsed ? "Show panel" : "Hide panel"}
+      onClick={() => (collapsedOverride === undefined ? setCollapsed(!collapsed) : onCollapsedChange?.(!collapsedOverride))}
+      aria-label={shut ? `Show ${label}` : `Hide ${label}`}
+      aria-expanded={!shut}
+      title={shut ? "Show panel" : "Hide panel"}
       className="secondary-panel-toggle"
     >
-      {collapsed ? <PanelLeftOpen aria-hidden /> : <PanelLeftClose aria-hidden />}
+      {shut ? <PanelLeftOpen aria-hidden /> : <PanelLeftClose aria-hidden />}
     </button>
   )
 

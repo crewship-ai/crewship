@@ -1,62 +1,46 @@
 "use client"
-import dynamic from "next/dynamic"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useQuery } from "@tanstack/react-query"
-import { ArrowLeft, ExternalLink, FolderInput, LayoutGrid, Library, List, Lock, Maximize2, Plus, Settings2, Share2, Star, Table2, X } from "lucide-react"
+import { ArrowLeft, LayoutGrid, Library, List, Lock, Maximize2, Plus, Settings2, Share2, Star, Table2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Segmented } from "@/components/ui/segmented"
 import { StatusPill } from "@/components/ui/status-pill"
-import { SubBar, SubBarPrimary } from "@/components/layout/sub-bar"
+import { SubBar } from "@/components/layout/sub-bar"
 import { SecondaryPanel } from "@/components/layout/secondary-panel"
 import { PageEmpty, PageError, PageLoading, PageNoResults } from "@/components/layout/page-state"
 import { usePageCatalogWindow, usePages, type PageCatalogFilter } from "@/hooks/use-pages"
 import { usePageFolders } from "@/hooks/use-page-folders"
 import { useSessionSafe } from "@/hooks/use-auth"
-import { useDocumentViewerRead } from "@/hooks/use-document-viewer-read"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { formatRelativeShort } from "@/lib/time"
-import { artifactsDesign, artifactsServerCatalog, artifactsSharingMock, pagesOpenArtifacts } from "@/lib/feature-flags"
+import { artifactsDesign, artifactsServerCatalog, artifactsSharingMock } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
-import { ArtifactViewerProvider } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
-import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
-import { ArtifactViewerPanel } from "@/components/features/chat/artifact-context/viewer/artifact-viewer-panel"
-import { CraftLockBar, craftEditorHref } from "@/components/features/chat/artifact-context/craft/craft-lock-bar"
-import { useCraftLeaseState } from "@/components/features/chat/artifact-context/craft/use-craft-lease"
-import { readLocalDraft, type LocalDraft } from "@/components/features/chat/artifact-context/craft/local-draft"
-import { LocalDraftBanner } from "@/components/features/chat/artifact-context/craft/local-draft-banner"
-import { KIND_ACCENT, KIND_ICON, ARTIFACT_KINDS, type ArtifactKindKey } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
+import { readLocalDraft } from "@/components/features/chat/artifact-context/craft/local-draft"
+import { ARTIFACT_KINDS, type ArtifactKindKey } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
 import { useArtifactCapabilities } from "@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities"
 import { NewArtifactDialog } from "./new-artifact-dialog"
-import { ArtifactPageContent } from "./page-content"
-import { ArtifactNativeEditor } from "./native-editor"
-import { kindLabel, libraryItems, openInPagesHref, viewsProjectInline, withLibraryState, type LibraryItem, type LibraryKind } from "./library-items"
+import { libraryItems, withLibraryState, type LibraryItem } from "./library-items"
 import { sharingKeys, useSharingApi } from "./sharing/sharing-api"
 import { ShareDialog } from "./sharing/share-dialog"
-import { AccessTab } from "./sharing/access-tab"
 import { FolderSettingsDialog } from "./sharing/folder-settings-dialog"
-import { BulkBar, MoveToFolderDialog } from "./sharing/bulk-actions"
+import { BulkBar } from "./sharing/bulk-actions"
 import {
-  applyFilters, EMPTY_FILTERS, groupItems, hiddenAsEmpty, inView, needsAttention, serverCatalogParams, SERVER_PAGE_SIZE, sortItems, versioned,
+  applyFilters, EMPTY_FILTERS, groupItems, hiddenAsEmpty, inView, serverCatalogParams, SERVER_PAGE_SIZE, sortItems, versioned,
   type GroupKey, type LibraryFilters, type Personal, type SortKey,
 } from "./library-filter"
+import { attentionItems } from "./attention"
+import { ArtifactDetail } from "./artifact-detail"
+import { ArtifactFrame, NO_FRAME_CAPABILITIES } from "./frame"
+import { kindOf, kindText } from "./kinds"
+import { KindBadge, KindTile } from "./kind-tile"
+import { LibraryHome, NewArtifactMenu } from "./library-home"
 import { LibraryPanel } from "./library-panel"
 import { KindThumb } from "./kind-thumb"
+import { useArtifactAccess } from "./use-artifact-access"
 
-const DesignEditor = dynamic(() => import("@/components/features/artifacts-design/design-editor").then(module => module.DesignEditor), { ssr: false })
-
-/** Each kind wears its registry colour, so Word reads blue and Sheet green before the label is read. */
-function KindTile({ kind, large }: { kind: LibraryKind; large?: boolean }) {
-  const Icon = KIND_ICON[kind]
-  const accent = KIND_ACCENT[kind]
-  return <span aria-hidden="true" className={cn("flex shrink-0 items-center justify-center rounded-[28%] border", accent.chip, accent.fg, large ? "size-10" : "size-7")}>
-    <Icon className={large ? "size-5" : "size-3.5"} />
-  </span>
-}
-
-function KindBadge({ kind }: { kind: LibraryKind }) {
-  return <span className="shrink-0 rounded-sm border bg-muted px-1.5 text-micro font-medium leading-[1.6] text-muted-foreground">{kindLabel(kind)}</span>
+function KindLabel({ item }: { item: LibraryItem }) {
+  return <KindBadge resolved={kindOf(item)} />
 }
 
 function StateChips({ item }: { item: LibraryItem }) {
@@ -81,16 +65,16 @@ function GalleryCard({ item, onOpen, peeked }: { item: LibraryItem; onOpen: () =
     <button type="button" aria-label={`Open ${item.name}`} onClick={onOpen} data-library-item={item.slug} aria-current={peeked || undefined}
       className={cn("grid h-full w-full min-w-0 content-start overflow-hidden rounded-card border bg-card text-left transition-colors hover:border-foreground/20 focus-visible:outline-2 focus-visible:outline-primary",
         peeked && "border-primary/60 ring-1 ring-primary/40")}>
-      <KindThumb kind={item.kind} empty={item.empty} />
+      <KindThumb kind={kindOf(item).kind} mode={kindOf(item).mode} empty={item.empty} className="rounded-none border-b" />
       <span className="grid min-w-0 gap-2 p-3">
         <span className="flex min-w-0 items-center gap-2.5">
-          <KindTile kind={item.kind} />
+          <KindTile kind={kindOf(item).kind} />
           <span className="grid min-w-0 gap-0.5">
             <h3 className="truncate text-sm font-semibold">{item.name}</h3>
             <small className="truncate text-xs text-muted-foreground">{meta(item)}</small>
           </span>
         </span>
-        <span className="flex min-w-0 flex-wrap items-center gap-1.5"><KindBadge kind={item.kind} /><StateChips item={item} /></span>
+        <span className="flex min-w-0 flex-wrap items-center gap-1.5"><KindLabel item={item} /><StateChips item={item} /></span>
       </span>
     </button>
   </li>
@@ -106,10 +90,10 @@ function ListRow({ item, onOpen, selection, peeked }: { item: LibraryItem; onOpe
     </label>}
     <button type="button" aria-label={`Open ${item.name}`} onClick={onOpen} data-library-item={item.slug} aria-current={peeked || undefined}
       className="row-interactive row-hover flex w-full min-w-0 items-center gap-3 px-3 py-2 text-left coarse:min-h-[44px]">
-      <KindTile kind={item.kind} />
+      <KindTile kind={kindOf(item).kind} />
       <span className="grid min-w-0 flex-1">
         <span className="truncate text-sm font-medium">{item.name}</span>
-        <small className="truncate text-xs text-muted-foreground">{kindLabel(item.kind)}{meta(item) ? ` · ${meta(item)}` : ""}</small>
+        <small className="truncate text-xs text-muted-foreground">{kindText(kindOf(item))}{meta(item) ? ` · ${meta(item)}` : ""}</small>
       </span>
       <span className="hidden shrink-0 items-center gap-1.5 sm:flex"><StateChips item={item} /></span>
     </button>
@@ -127,10 +111,10 @@ function LibraryTable({ items, onOpen, peeked }: { items: LibraryItem[]; onOpen:
           <td className="max-w-[320px] px-3 py-2">
             <button type="button" data-library-item={item.slug} aria-current={peeked === item.slug || undefined}
               className="flex min-w-0 items-center gap-2 font-medium hover:underline" onClick={() => onOpen(item.slug)}>
-              <KindTile kind={item.kind} /><span className="truncate">{item.name}</span>
+              <KindTile kind={kindOf(item).kind} /><span className="truncate">{item.name}</span>
             </button>
           </td>
-          <td className="px-3 py-2"><KindBadge kind={item.kind} /></td>
+          <td className="px-3 py-2"><KindLabel item={item} /></td>
           <td className="px-3 py-2 text-xs">{versioned(item) ? item.sharedVersion ? <span className="font-mono">v{item.sharedVersion}</span> : <span className="text-muted-foreground">Not shared</span> : "—"}</td>
           <td className="max-w-[180px] truncate px-3 py-2 text-xs text-muted-foreground">{item.folder?.name ?? "—"}</td>
           <td className="whitespace-nowrap px-3 py-2 text-xs text-muted-foreground">{item.updatedAt ? formatRelativeShort(item.updatedAt.toISOString()) : "—"}</td>
@@ -184,206 +168,6 @@ function DisplayRow({ count, sort, group, layout, onSort, onGroup, onLayout, sel
   </div>
 }
 
-/** Home: what can be made, what waits on its owner, what this person opened last (or what changed last). */
-function LibraryHome({ items, creatable, personal, onNew, onOpen, onShow, peeked }: {
-  items: LibraryItem[]; creatable: ArtifactKindKey[]; personal: Personal
-  onNew: (kind: ArtifactKindKey) => void; onOpen: (slug: string) => void; onShow: (view: "all" | "opened") => void; peeked?: string | null
-}) {
-  const visible = items.filter(item => !hiddenAsEmpty(item, personal))
-  const attention = visible.filter(needsAttention).slice(0, 5)
-  const opened = inView(items, "opened", personal)
-  // Each item once on Home: what waits on its owner is not repeated below.
-  const below = (opened.length ? opened : visible).filter(item => !attention.includes(item))
-  return <div className="grid content-start gap-6">
-    <header className="grid gap-1">
-      <h1 className="text-xl font-semibold">Artifacts</h1>
-      <p className="text-sm text-muted-foreground">Projects, dashboards, pages and documents people and agents made, in one place.</p>
-    </header>
-    {creatable.length > 0 && <section aria-labelledby="make-heading" className="grid gap-2">
-      <h2 id="make-heading" className="text-sm font-semibold">Make something</h2>
-      <ul className="grid grid-cols-[repeat(auto-fill,minmax(min(100%,180px),1fr))] gap-2">
-        {ARTIFACT_KINDS.filter(kind => creatable.includes(kind.key)).map(kind => <li key={kind.key}>
-          <button type="button" onClick={() => onNew(kind.key)} aria-label={`New ${kind.newLabel ?? kind.label}`}
-            className="flex h-full w-full items-start gap-2.5 rounded-card border bg-card p-3 text-left transition-colors hover:border-foreground/20 coarse:min-h-[44px]">
-            <KindTile kind={kind.key} />
-            <span className="grid min-w-0 gap-0.5">
-              <span className="text-sm font-medium">{kind.newLabel ?? kind.label}</span>
-              <small className="text-xs text-muted-foreground">{kind.description}</small>
-            </span>
-          </button>
-        </li>)}
-      </ul>
-    </section>}
-    {attention.length > 0 && <section aria-labelledby="attention-heading" className="grid gap-2">
-      <h2 id="attention-heading" className="text-sm font-semibold">Not shared yet</h2>
-      <ItemsView items={attention} layout="list" onOpen={onOpen} peeked={peeked} />
-    </section>}
-    <section aria-labelledby="recent-heading" className="grid gap-2">
-      <div className="flex items-center gap-2">
-        <h2 id="recent-heading" className="text-sm font-semibold">{opened.length ? "Recently opened" : "Recent"}
-          {opened.length > 0 && <span className="ml-1.5 font-normal text-muted-foreground">by you</span>}</h2>
-        {below.length > 8 && <Button type="button" variant="link" size="sm" className="ml-auto h-auto p-0" onClick={() => onShow(opened.length ? "opened" : "all")}>All {below.length}</Button>}
-      </div>
-      <ItemsView items={below.slice(0, 8)} layout="gallery" onOpen={onOpen} peeked={peeked} />
-    </section>
-  </div>
-}
-
-function OpenInPages({ workspaceId, item, version }: { workspaceId: string; item: LibraryItem; version?: number }) {
-  const href = openInPagesHref(workspaceId, item, version)
-  return <Button asChild size="sm" variant="outline" className="coarse:min-h-[44px]">
-    <a href={href}>{item.kind === "page" ? "Open page" : "Open in Pages"}<ExternalLink aria-hidden /></a>
-  </Button>
-}
-
-/**
- * The saved Word document, read-only: the same current-version read the chat
- * viewer uses. It never opens an editor, a CRDT or a lease, and writes nothing;
- * editing stays in the Craft editor behind the lock bar.
- */
-function WordPreview({ workspaceId, item, onStatus }: { workspaceId: string; item: LibraryItem; onStatus?: (status: string) => void }) {
-  const userId = useSessionSafe()?.data?.user?.id ?? null
-  const target = useMemo(() => item.pageId ? { workspaceId, pageId: item.pageId, type: "document" as const, mode: "latest" as const } : null, [workspaceId, item.pageId])
-  // chatId and activationKey only scope the read; the library is its own scope, one per opened item.
-  const { read } = useDocumentViewerRead({ workspaceId, chatId: "artifacts-library", currentUserId: userId, activationKey: `library:${item.slug}`, target, enabled: target !== null })
-  useEffect(() => { onStatus?.(read.status) }, [onStatus, read.status])
-  if (read.status === "loading") return <div aria-busy="true" className="h-40 animate-pulse rounded-card border bg-muted/40" />
-  if (read.status !== "ready") return <p role="status" className="rounded-card border border-dashed p-4 text-sm text-muted-foreground">
-    {read.status === "denied" ? "You can't read this document."
-      // A Word without a version head is from the old editor, which this environment no longer runs.
-      : !item.native ? "This document is from an older version of the editor and does not open here. Nothing was changed."
-        : read.status === "unavailable" ? "The document service is not answering right now, so there is no preview. Nothing was changed."
-          // Behind the single-home switch /pages/<slug> sends a native Word back here, so it names no Pages.
-          : pagesOpenArtifacts() ? "The document preview could not be loaded. Nothing was changed." : "The document preview could not be loaded. Open in Pages shows it."}
-  </p>
-  return <div className="bg-card">
-    <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} />
-  </div>
-}
-
-/**
- * Lost Craft lock: edits this browser kept as a local draft come back for
- * compare or copy, never saved over whoever holds the lock now. Reads the
- * lease only when such a draft exists.
- */
-function LockLostDraft({ workspaceId, slug }: { workspaceId: string; slug: string }) {
-  const userId = useSessionSafe()?.data?.user?.id ?? ""
-  // Keyed by who, where and what: another person signing in remounts the whole
-  // recovery in the same render, so no draft or open comparison of theirs survives it.
-  return userId ? <OwnLockLostDraft key={JSON.stringify([userId, workspaceId, slug])} userId={userId} workspaceId={workspaceId} slug={slug} /> : null
-}
-
-function OwnLockLostDraft({ userId, workspaceId, slug }: { userId: string; workspaceId: string; slug: string }) {
-  const [present, setPresent] = useState(false)
-  // Read after mount: storage does not exist during prerender.
-  useEffect(() => { setPresent(Boolean(readLocalDraft(userId, workspaceId, slug))) }, [userId, workspaceId, slug])
-  return present ? <RecoveredDraft userId={userId} workspaceId={workspaceId} slug={slug} /> : null
-}
-
-function RecoveredDraft({ userId, workspaceId, slug }: { userId: string; workspaceId: string; slug: string }) {
-  const lease = useCraftLeaseState(workspaceId, slug)
-  const holder = lease.status?.holder
-  const [compare, setCompare] = useState<LocalDraft | null>(null)
-  return <>
-    <LocalDraftBanner userId={userId} workspaceId={workspaceId} slug={slug} holderName={holder && !lease.heldByMe ? holder.display_name : null} onCompare={setCompare} />
-    {compare && <section aria-label="Your local draft" className="grid gap-2 rounded-card border bg-card p-3 text-sm">
-      <div className="flex items-center gap-2">
-        <b className="font-semibold">Your local draft</b>
-        <span className="text-xs text-muted-foreground">based on v{compare.baseVersion}; the saved version is below</span>
-        <Button type="button" size="sm" variant="ghost" className="ml-auto coarse:min-h-[44px]" onClick={() => setCompare(null)}>Hide</Button>
-      </div>
-      <p className="whitespace-pre-wrap">{compare.content}</p>
-    </section>}
-  </>
-}
-
-/** The Craft lock and an Edit that opens the full Craft editor in a new tab. */
-function WordLockBar({ workspaceId, pageId }: { workspaceId: string; pageId: string }) {
-  return <div className="overflow-hidden rounded-card border">
-    <CraftLockBar workspaceId={workspaceId} slug={"@" + pageId}
-      onEdit={() => window.open(craftEditorHref(workspaceId, "@" + pageId), "_blank", "noopener,noreferrer")} />
-  </div>
-}
-
-const DETAIL_HINT: Partial<Record<LibraryKind, string>> = {
-  word: "This is the saved version. Edit it in its editor from Open in Pages.",
-  sheet: "Read and edit it in its editor; Open in Pages shows the saved document.",
-}
-
-/** One artifact: a project shows its history in the project viewer, a native Word or Sheet its edit lock. */
-function ArtifactDetail({ workspaceId, item, version, folders, onBack, favorite, onFavorite }: {
-  workspaceId: string; item: LibraryItem; version?: number; folders: { slug: string; name: string }[]; onBack: () => void; favorite: boolean; onFavorite: () => void
-}) {
-  const [tab, setTab] = useState<"content" | "access">("content")
-  const [dialog, setDialog] = useState<"share" | "move" | null>(null)
-  const projects = useArtifactProjectsAvailable(workspaceId)
-  const projectPreview = viewsProjectInline(item) && projects
-  // A Page shows its own content here, with the views Pages draws; it names itself in its breadcrumb.
-  const pageContent = item.kind === "page" && item.pageId
-  const inline = projectPreview || pageContent
-  // Behind the single-home switch a native Word or Sheet is edited here, in the
-  // one Craft editor and its lease; /pages/<slug> sends it back here, so the
-  // detail no longer links out to Pages for it.
-  const nativeEditor = pagesOpenArtifacts() && item.native && (item.kind === "word" || item.kind === "sheet") && Boolean(item.pageId)
-  // An old-editor Word opens on Pages only in the old editor, which reads the
-  // same saved document as the preview here. Behind the switch the link stays
-  // only once that read succeeds; otherwise Pages would show nothing usable.
-  const [legacyRead, setLegacyRead] = useState<string>()
-  const legacyWord = item.kind === "word" && !item.native
-  const pagesOpensIt = !(pagesOpenArtifacts() && legacyWord && legacyRead !== "ready")
-  // A pinned address (a shared-version link) opens that version, not Latest.
-  const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const, ...(version === undefined ? {} : { version }) }), [item.slug, version])
-  return <div className="flex min-h-0 flex-1 flex-col gap-3">
-    <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1">
-      <Button type="button" variant="ghost" size="sm" className="-ml-2 coarse:min-h-[44px]" onClick={onBack}><ArrowLeft aria-hidden />All artifacts</Button>
-      {/* The viewer names the artifact, its kind and version itself; here only what it does not say. */}
-      {inline && meta(item) && <span className="ml-auto truncate text-xs text-muted-foreground">{meta(item)}</span>}
-      <Segmented<"content" | "access"> ariaLabel="Detail" value={tab} onChange={setTab} className={cn(!(inline && meta(item)) && "ml-auto")} options={[
-        { value: "content", label: "Content" }, { value: "access", label: "Access" },
-      ]} />
-      <Button type="button" variant="outline" size="sm" className="coarse:min-h-[44px]" onClick={() => setDialog("share")}><Share2 aria-hidden />Share</Button>
-      <Button type="button" variant="ghost" size="icon-sm" aria-label="Move to folder" title="Move to folder" className="coarse:min-h-[44px] coarse:min-w-[44px]" onClick={() => setDialog("move")}>
-        <FolderInput aria-hidden className="size-4" />
-      </Button>
-      <Button type="button" variant="ghost" size="icon-sm" aria-pressed={favorite} className="coarse:min-h-[44px] coarse:min-w-[44px]"
-        aria-label={favorite ? "Remove from favorites" : "Add to favorites"} title={favorite ? "Remove from favorites" : "Add to favorites"} onClick={onFavorite}>
-        <Star aria-hidden className={cn("size-4", favorite && "fill-current text-warn")} />
-      </Button>
-    </div>
-    {!inline && <header className="flex min-w-0 flex-wrap items-center gap-3">
-      <KindTile kind={item.kind} large />
-      <div className="grid min-w-0 flex-[1_1_220px] gap-1">
-        <h1 className="truncate text-xl font-semibold">{item.name}</h1>
-        <p className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground"><KindBadge kind={item.kind} /><StateChips item={item} /><span>{meta(item)}</span></p>
-      </div>
-      {item.kind !== "design" && !nativeEditor && pagesOpensIt && <OpenInPages workspaceId={workspaceId} item={item} version={version} />}
-    </header>}
-    {dialog === "share" && <ShareDialog workspaceId={workspaceId} item={item} open onOpenChange={open => { if (!open) setDialog(null) }} />}
-    {dialog === "move" && <MoveToFolderDialog workspaceId={workspaceId} item={item} folders={folders} open
-      onOpenChange={open => { if (!open) setDialog(null) }} onDone={() => setDialog(null)} />}
-    {tab === "access" ? <AccessTab workspaceId={workspaceId} item={item} onShare={() => setDialog("share")} /> : <>
-    {item.kind === "design" && artifactsDesign() ? <DesignEditor workspaceId={workspaceId} slug={item.pageId ? "@" + item.pageId : item.slug} /> : projectPreview
-      ? <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
-        <div className="flex min-h-[520px] flex-1 overflow-hidden rounded-card border"><ArtifactViewerPanel variant="library" /></div>
-      </ArtifactViewerProvider>
-      : pageContent ? <ArtifactPageContent workspaceId={workspaceId} pageId={item.pageId!} onBack={onBack} />
-      // Without the editor here there is none on Pages either: /pages/craft/editor asks the same
-      // availability, so the fallback offers no Edit that opens it, only the saved version.
-      : nativeEditor ? <ArtifactNativeEditor workspaceId={workspaceId} pageId={item.pageId!} fallback={<>
-        {item.kind === "word" && !item.empty && <WordPreview workspaceId={workspaceId} item={item} />}
-      </>} />
-      : item.native && item.kind === "word" && item.pageId ? <WordLockBar workspaceId={workspaceId} pageId={item.pageId} />
-        : null}
-    {!projectPreview && item.native && item.kind === "word" && item.pageId && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}
-    {!nativeEditor && item.kind === "word" && !item.empty && item.pageId && <WordPreview workspaceId={workspaceId} item={item} onStatus={legacyWord ? setLegacyRead : undefined} />}
-    {/* An old-editor Word has nowhere to edit it; its notice says so on its own. A native editor here needs no pointer to Pages. */}
-    {!inline && !nativeEditor && item.kind !== "project" && item.kind !== "design" && !(item.kind === "word" && !item.native) && <p className="text-sm text-muted-foreground">
-      {DETAIL_HINT[item.kind] ?? "Open in Pages shows it with everything it contains."}
-    </p>}
-    </>}
-  </div>
-}
-
 /**
  * The peek on the right: what an item is, without leaving the list. The list
  * keeps its filter, selection and scroll; Open (or Enter) opens the full
@@ -395,7 +179,7 @@ function ArtifactPeek({ workspaceId, item, favorite, onFavorite, onOpen, onClose
 }) {
   const [sharing, setSharing] = useState(false)
   const facts: [string, React.ReactNode][] = [
-    ["Kind", kindLabel(item.kind)],
+    ["Kind", kindText(kindOf(item))],
     ["Version", versioned(item)
       ? item.sharedVersion ? <StatusPill tone="success" label={`Shared v${item.sharedVersion}`} /> : <StatusPill tone="muted" label="Not shared" />
       : "No versions"],
@@ -409,7 +193,7 @@ function ArtifactPeek({ workspaceId, item, favorite, onFavorite, onOpen, onClose
   ]
   return <aside aria-label="Preview" className="flex min-h-0 flex-col">
     <div className="flex h-12 shrink-0 items-center gap-1.5 border-b pl-3.5 pr-2">
-      <KindBadge kind={item.kind} />
+      <KindLabel item={item} />
       <Button type="button" variant="ghost" size="icon-sm" aria-pressed={favorite} className="ml-auto coarse:min-h-[44px] coarse:min-w-[44px]"
         aria-label={favorite ? "Remove from favorites" : "Add to favorites"} title={favorite ? "Remove from favorites" : "Add to favorites"} onClick={onFavorite}>
         <Star aria-hidden className={cn("size-4", favorite && "fill-current text-warn")} />
@@ -420,9 +204,9 @@ function ArtifactPeek({ workspaceId, item, favorite, onFavorite, onOpen, onClose
     </div>
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="grid gap-2.5 border-b p-3.5">
-        <KindThumb kind={item.kind} empty={item.empty} className="h-[140px] rounded-card border" />
+        <KindThumb kind={kindOf(item).kind} mode={kindOf(item).mode} empty={item.empty} className="h-[140px] rounded-card border" />
         <div className="flex min-w-0 items-center gap-2.5">
-          <KindTile kind={item.kind} />
+          <KindTile kind={kindOf(item).kind} />
           <div className="grid min-w-0 gap-0.5">
             <h2 className="truncate text-sm font-semibold">{item.name}</h2>
             {meta(item) && <small className="truncate text-xs text-muted-foreground">{meta(item)}</small>}
@@ -561,11 +345,19 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   const [favorites, setFavorites] = useUserPreference<string[]>(`artifacts.${workspaceId}.favorites`, [])
   // What this person made from New artifact: a blank Page they just created is still theirs to find.
   const [madeHere, setMadeHere] = useUserPreference<string[]>(`artifacts.${workspaceId}.created`, [])
+  // A recovered Word draft lives only in this browser: read after mount, storage does not exist during prerender.
+  const userId = useSessionSafe()?.data?.user?.id ?? ""
+  const draftRefs = useMemo(() => items.filter(entry => entry.kind === "word" && entry.native && entry.pageId).map(entry => [entry.slug, "@" + entry.pageId] as const), [items])
+  const [drafts, setDrafts] = useState<ReadonlySet<string>>(new Set())
+  useEffect(() => {
+    setDrafts(new Set(userId ? draftRefs.filter(([, ref]) => readLocalDraft(userId, workspaceId, ref)).map(([slug]) => slug) : []))
+  }, [userId, workspaceId, draftRefs])
   const personal = useMemo<Personal>(() => ({
+    drafts,
     opened: new Map(Array.isArray(recent) ? recent.filter(entry => typeof entry?.slug === "string" && Number.isFinite(entry?.at)).map(entry => [entry.slug, entry.at]) : []),
     favorites: new Set(Array.isArray(favorites) ? favorites.filter(slug => typeof slug === "string") : []),
     created: new Set(Array.isArray(madeHere) ? madeHere.filter(slug => typeof slug === "string") : []),
-  }), [recent, favorites, madeHere])
+  }), [recent, favorites, madeHere, drafts])
   // Behind its own default-off flag, the All view is filtered, sorted and paged
   // by the server; the mock sharing store changes archive state the server cannot see.
   // A blank Page this person made here stays visible in All (hiddenAsEmpty);
@@ -619,11 +411,17 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   // A selection and a peek belong to the list they were made in.
   useEffect(() => { setPicked(new Set()); setPeek(null) }, [filters.view, filters.folder, item])
 
-  const subBar = <SubBar icon={Library} title="Artifacts" ariaLabel="Artifacts" heading={false}
-    section={selected ? selected.name : undefined}
-    actions={creatable.length > 0 ? <SubBarPrimary icon={Plus} aria-label="New artifact" onClick={() => setNewKind(null)}>
-      <span className="hidden sm:inline">New artifact</span>
-    </SubBarPrimary> : undefined} />
+  // The open artifact's frame owns the bar; the library's bar is only for lists.
+  const subBar = item === null ? <SubBar icon={Library} title="Artifacts" ariaLabel="Artifacts" heading={false}
+    actions={<NewArtifactMenu creatable={creatable} onNew={kind => setNewKind(kind)} />} /> : null
+  // Not in the catalog: ask the server why, so the frame can say signed out, no access or not there.
+  const access = useArtifactAccess(workspaceId, item === null ? null : bySlug ? item : "@" + item, item !== null && !selected && !loading)
+  // The folder panel steps aside while an artifact is open, unless pinned; its own toggle still works per open.
+  const [pinned, setPinned] = useUserPreference<boolean>("artifacts.panelPinned", false)
+  const [panelOpen, setPanelOpen] = useState(false)
+  useEffect(() => { setPanelOpen(false) }, [item])
+  const panelCollapsed = item === null ? undefined : !(pinned || panelOpen)
+  const folderInView = filters.folder ? folders.find(entry => entry.slug === filters.folder) : undefined
 
   let content: React.ReactNode
   if (loading) content = <div aria-label="Loading artifacts"><PageLoading variant="cards" /></div>
@@ -631,10 +429,12 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   else if (item !== null) {
     content = selected ? <ArtifactDetail key={selected.slug} workspaceId={workspaceId} item={selected} version={version} folders={folderChoices} onBack={() => onSelect(null)}
       favorite={personal.favorites?.has(selected.slug) ?? false} onFavorite={() => toggleFavorite(selected.slug)} />
-      : <div className="grid gap-2 text-sm">
-        <p>This artifact is not available.</p>
-        <div><Button type="button" size="sm" variant="outline" onClick={() => onSelect(null)}><ArrowLeft aria-hidden />All artifacts</Button></div>
-      </div>
+      : access === "loading" ? <div aria-label="Loading artifact"><PageLoading variant="cards" /></div>
+        : access === "unknown" || access === "ok" ? <div className="grid gap-2 p-4 text-sm md:p-6">
+          <p>This artifact is not available.</p>
+          <div><Button type="button" size="sm" variant="outline" onClick={() => onSelect(null)}><ArrowLeft aria-hidden />All artifacts</Button></div>
+        </div>
+          : <ArtifactFrame name="" kind={{ kind: "app" }} caps={{ ...NO_FRAME_CAPABILITIES, access }} onHome={() => onSelect(null)}>{null}</ArtifactFrame>
   } else if (!inView(items, "all", personal).length && !VIEW_NOTE[filters.view]) {
     // Blank items are only hidden, never gone: say where they are.
     const blank = inView(items, "empty", personal).length
@@ -645,8 +445,9 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
       primary={creatable.length ? { label: "New artifact", icon: Plus, onClick: () => setNewKind(null) } : undefined}
       secondary={blank ? { label: `Show empty (${blank})`, onClick: () => setFilters({ ...EMPTY_FILTERS, view: "empty" }) } : undefined} />
   } else if (filters.view === "home") {
-    content = <LibraryHome items={items} creatable={creatable} personal={personal} onNew={kind => setNewKind(kind)} onOpen={pick}
-      onShow={view => setFilters({ ...filters, view })} peeked={peeked?.slug} />
+    const inHome = inView(items, "all", personal).filter(entry => filters.folder === null || (entry.folder?.slug ?? "") === filters.folder)
+    content = <LibraryHome items={inHome} attention={attentionItems(inHome, { drafts })} title={folderInView?.name ?? (filters.folder === "" ? "Unfiled" : "All artifacts")}
+      onOpen={pick} peeked={peeked?.slug} />
   } else if (serverParams && catalogWindow.loading) {
     content = <div aria-label="Loading artifacts"><PageLoading variant="cards" /></div>
   } else if (serverParams && catalogWindow.error) {
@@ -696,16 +497,19 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   return <div className="flex h-[calc(100dvh-var(--app-header-h)-var(--mobile-tab-bar-h))] min-h-0 flex-col bg-background">
     {subBar}
     <div className="@container relative flex min-h-0 flex-1 overflow-hidden">
-      {!loading && !(error && !items.length) && <SecondaryPanel id="artifacts" label="Artifacts">
+      {!loading && !(error && !items.length) && <SecondaryPanel id="artifacts" label="Artifacts" collapsed={panelCollapsed} onCollapsedChange={shut => setPanelOpen(!shut)}>
         <LibraryPanel items={items} folders={folders} filters={filters} personal={personal}
+          pin={item !== null ? { pinned, onToggle: () => setPinned(!pinned) } : undefined}
           onFiltersChange={next => {
             setFilters(next)
             // The route drops ?item= with its own replace; a second navigation would race it.
             if (item !== null && !onFiltersChange) onSelect(null)
           }} />
       </SecondaryPanel>}
-      <div ref={contentRef} className={cn("min-w-0 flex-1", selected ? "flex min-h-0 flex-col overflow-y-auto" : "overflow-y-auto")}>
-        <div className={cn("mx-auto flex w-full max-w-6xl flex-col p-4 md:p-6", selected && "min-h-full")}>{content}</div>
+      <div ref={contentRef} className={cn("min-w-0 flex-1", item !== null ? "flex min-h-0 flex-col overflow-hidden" : "overflow-y-auto")}>
+        {item !== null
+          ? <div className="flex min-h-0 flex-1 flex-col">{content}</div>
+          : <div className="mx-auto flex w-full max-w-6xl flex-col p-4 md:p-6">{content}</div>}
       </div>
       {/* Beside the list on a wide app; over it, behind a scrim, where the app is narrower. */}
       {peeked && <>

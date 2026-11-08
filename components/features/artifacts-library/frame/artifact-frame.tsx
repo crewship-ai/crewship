@@ -159,6 +159,8 @@ export function ArtifactFrame({ name, kind, folder, caps, onHome, href, onShare,
     ...(info || sections.has("info") ? [{ id: "info", ...COMMON_META.info }] : []),
   ] : []
   const open = drawer && tabs.some(tab => tab.id === drawer) ? drawer : null
+  const [infoSeen, setInfoSeen] = React.useState(false)
+  React.useEffect(() => { if (open === "info") setInfoSeen(true) }, [open])
   const toggle = (tab: string) => setDrawer(current => (current === tab ? null : tab))
 
   const context = React.useMemo(() => ({
@@ -178,7 +180,11 @@ export function ArtifactFrame({ name, kind, folder, caps, onHome, href, onShare,
   const title = <TitleMenu name={name} kind={kind} actions={actions} compact={phone} restricted={caps.access === "denied"} />
   const known = caps.access === "ok" || caps.access === "denied"
   const crumbs = <span className="flex min-w-0 items-center gap-1.5">
-    {layout === "desktop" && ok && folder && <><span className="truncate font-normal text-muted-foreground">{folder}</span><ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground-soft" /></>}
+    {/* The way back on desktop and tablet: the folder the artifact lives in, or All artifacts. A phone has its back button. */}
+    {!phone && <><button type="button" aria-label="All artifacts" onClick={onHome}
+      className="max-w-[16rem] truncate rounded-sm font-normal text-muted-foreground hover:text-foreground hover:underline focus-visible:outline-2 focus-visible:outline-primary">
+      {ok && folder && layout === "desktop" ? folder : "All artifacts"}
+    </button><ChevronRight aria-hidden className="size-3.5 shrink-0 text-muted-foreground-soft" /></>}
     {known ? title : <span className="font-semibold">Artifact</span>}
     {phone && chip}
   </span>
@@ -234,7 +240,8 @@ export function ArtifactFrame({ name, kind, folder, caps, onHome, href, onShare,
               modeTarget={mode => paneRef(`agent:${mode}`)} />
           </div>}
           {[...sections.values()].filter(meta => !meta.hidden).map(meta => <div key={meta.id} ref={paneRef(meta.id)} hidden={open !== meta.id} data-pane={meta.id} />)}
-          {info && !sections.has("info") && <div hidden={open !== "info"} data-pane="info">{info}</div>}
+          {/* Info mounts the first time it opens: its access list reads the server, which an open artifact must not do unasked. */}
+          {info && infoSeen && !sections.has("info") && <div hidden={open !== "info"} data-pane="info">{info}</div>}
         </div>
       </aside>}
     </div>
