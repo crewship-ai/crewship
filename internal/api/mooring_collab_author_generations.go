@@ -18,7 +18,9 @@ var errCollaborationAuthorUnqualified = errors.New("original collaboration autho
 type collaborationAuthorVector struct {
 	workspace, user, page, agent, crew                     string
 	userRevision, pageRevision, agentRevision, appRevision string
-	schemaCookie                                           int64
+	// (Page, human) and (Page, agent) direct-grant generations (#5123).
+	userGrantRevision, agentGrantRevision string
+	schemaCookie                          int64
 }
 
 func collaborationQualifiedSchema(ctx context.Context, tx *sql.Tx) (int64, error) {
@@ -78,6 +80,15 @@ func captureCollaborationAuthorVector(ctx context.Context, tx *sql.Tx, key moori
 			return collaborationAuthorVector{}, err
 		}
 	}
+	grants := [][2]string{{"user", v.user}}
+	if v.agent != "" {
+		grants = append(grants, [2]string{"agent", v.agent})
+	}
+	for _, k := range grants {
+		if _, err = pageGrantGeneration(ctx, tx, v.workspace, v.page, k[0], k[1], true); err != nil {
+			return collaborationAuthorVector{}, errCollaborationAuthorUnqualified
+		}
+	}
 	return readCollaborationAuthorVector(ctx, tx, v)
 }
 
@@ -106,11 +117,19 @@ func readCollaborationAuthorVector(ctx context.Context, tx *sql.Tx, original col
 			return collaborationAuthorVector{}, errCollaborationAuthorUnqualified
 		}
 	}
+	if v.userGrantRevision, err = pageGrantGeneration(ctx, tx, v.workspace, v.page, "user", v.user, false); err != nil {
+		return collaborationAuthorVector{}, errCollaborationAuthorUnqualified
+	}
+	if v.agent != "" {
+		if v.agentGrantRevision, err = pageGrantGeneration(ctx, tx, v.workspace, v.page, "agent", v.agent, false); err != nil {
+			return collaborationAuthorVector{}, errCollaborationAuthorUnqualified
+		}
+	}
 	return v, nil
 }
 
 func collaborationAuthorVectorChanged(ctx context.Context, tx *sql.Tx, original collaborationAuthorVector) (bool, error) {
-	if !chataudience.ValidUserAuthorityRevision(original.userRevision) || !chataudience.ValidUserAuthorityRevision(original.pageRevision) || (original.agent != "" && (!chataudience.ValidUserAuthorityRevision(original.agentRevision) || !chataudience.ValidUserAuthorityRevision(original.appRevision))) || (original.agent == "" && (original.agentRevision != "" || original.appRevision != "")) {
+	if !chataudience.ValidUserAuthorityRevision(original.userRevision) || !chataudience.ValidUserAuthorityRevision(original.pageRevision) || !chataudience.ValidUserAuthorityRevision(original.userGrantRevision) || (original.agent != "" && (!chataudience.ValidUserAuthorityRevision(original.agentRevision) || !chataudience.ValidUserAuthorityRevision(original.appRevision) || !chataudience.ValidUserAuthorityRevision(original.agentGrantRevision))) || (original.agent == "" && (original.agentRevision != "" || original.appRevision != "" || original.agentGrantRevision != "")) {
 		return false, errCollaborationAuthorUnqualified
 	}
 	current, err := readCollaborationAuthorVector(ctx, tx, original)

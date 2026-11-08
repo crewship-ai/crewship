@@ -322,10 +322,14 @@ status; `session_retired` stops delivery and explicitly says `draft: "retain"`
 or `draft: "purge"`. Generic 401/403 responses alone do not prove read loss and
 must not trigger local erasure. An admission captures the author-relevant
 generations of its own human and its own Page (`mooring_authority_generations`
-`user` and `page` rows, installed at admission if absent). Any change whose
-recipients include that person or that Page (their grants, crew or workspace
-membership, folder ACL, account status, the Page's owner, audience, folder or
-panels) retires the old admission, including a revoke-then-restore cycle. The
+`user` and `page` rows, plus the person's row for this Page in
+`mooring_page_grant_generations`, all installed at admission if absent). Any
+change whose recipients include that person or that Page (their grants on this
+Page, crew or workspace membership, folder ACL, account status, the Page's
+owner, audience, folder or panels) retires the old admission, including a
+revoke-then-restore cycle. A grant on another Page moves only that Page's
+grant generations, so sharing or unsharing another Page, even with everyone or
+with the editor's crew, does not retire the session (#5123). The
 broad workspace delivery epoch (`workspaces.authority_revision`) is not part of
 this fence: creating another Page, changing a grant for someone else on another
 Page or adding a member does not retire a live editor. Current Page rights,

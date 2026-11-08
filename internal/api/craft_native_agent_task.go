@@ -23,7 +23,7 @@ type craftNativeAgentWorkInput struct {
 	WholeDocument  bool                 `json:"whole_document"`
 	Instruction    string               `json:"instruction"`
 	Original       chataudience.Receipt `json:"original_human"`
-	Epochs         [4]string            `json:"epochs"`
+	Epochs         [6]string            `json:"epochs"`
 	WorkspaceEpoch string               `json:"workspace_epoch"`
 }
 

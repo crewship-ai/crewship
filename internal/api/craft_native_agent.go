@@ -64,7 +64,7 @@ type craftNativeAgentGrant struct {
 	AgentID     string
 	CrewID      string
 	Proof       craftNativeProof
-	Epochs      [4]string
+	Epochs      [6]string
 	Boot        string
 	Deadline    time.Duration
 	Instruction string
@@ -168,8 +168,10 @@ func (m *craftNativeAgentManager) checkOriginalGrant(ctx context.Context, tx *sq
 // Reuse the existing canonical non-ABA authority counters, without a D1
 // document/application subject. Only fresh original-human admission creates a
 // baseline; checks never reconstruct a missing counter or refresh its value.
-func craftNativeAgentEpochs(ctx context.Context, tx *sql.Tx, g craftNativeAgentGrant, capture bool) ([4]string, error) {
-	var result [4]string
+// The last two are the (Page, human) and (Page, agent) direct-grant
+// generations: a grant on another Page moves neither (#5123).
+func craftNativeAgentEpochs(ctx context.Context, tx *sql.Tx, g craftNativeAgentGrant, capture bool) ([6]string, error) {
+	var result [6]string
 	for i, k := range [][2]string{{"user", g.Source.UserID}, {"page", g.Scope.ArtifactID}, {"agent", g.AgentID}, {"app", g.CrewID}} {
 		if capture {
 			if _, err := tx.ExecContext(ctx, `INSERT INTO mooring_authority_generations(workspace_id,scope_kind,scope_id) SELECT ?,?,? WHERE NOT EXISTS(SELECT 1 FROM mooring_authority_generations WHERE workspace_id=? AND scope_kind=? AND scope_id=?)`, g.Scope.WorkspaceID, k[0], k[1], g.Scope.WorkspaceID, k[0], k[1]); err != nil {
@@ -182,6 +184,13 @@ func craftNativeAgentEpochs(ctx context.Context, tx *sql.Tx, g craftNativeAgentG
 		if !chataudience.ValidUserAuthorityRevision(result[i]) {
 			return result, fmt.Errorf("%w: original epoch unavailable", errCraftNativeAgentDenied)
 		}
+	}
+	for i, k := range [][2]string{{"user", g.Source.UserID}, {"agent", g.AgentID}} {
+		revision, err := pageGrantGeneration(ctx, tx, g.Scope.WorkspaceID, g.Scope.ArtifactID, k[0], k[1], capture)
+		if err != nil {
+			return result, fmt.Errorf("%w: original epoch unavailable", errCraftNativeAgentDenied)
+		}
+		result[4+i] = revision
 	}
 	return result, nil
 }

@@ -31,6 +31,14 @@ func craftNativeGrantedWriter(t *testing.T, f *pagesTransferRig) context.Context
 	return auth.WithOriginalCredential(context.WithValue(context.WithValue(context.WithValue(t.Context(), ctxUser, u), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.wsID), *source)
 }
 
+// craftNativeScopeEveryoneOnly makes an everyone write grant on native-page the
+// editor's only path to it.
+func craftNativeScopeEveryoneOnly(t *testing.T, f *pagesTransferRig) {
+	t.Helper()
+	mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('native-page','workspace','','write',?)`, f.adminID)
+	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_type='user'`)
+}
+
 // craftNativeStreamBound runs exactly the check the SSE loop repeats every five
 // seconds before each lease delivery (events → bound). An error is what makes
 // the stream send session_retired.
@@ -50,9 +58,12 @@ func craftNativeStreamBound(m *craftNativeHTTP, ctx context.Context, token, id s
 // revocation must still retire it, including revoke-then-restore (ABA).
 func TestCraftNativeSessionSurvivesUnrelatedWorkspaceAuthorityChanges(t *testing.T) {
 	for _, test := range []struct {
-		name   string
-		mutate func(t *testing.T, f *pagesTransferRig)
-		retire bool
+		name string
+		// prepare runs before the admission; nil keeps the editor's only path
+		// the direct user write grant on native-page.
+		prepare func(t *testing.T, f *pagesTransferRig)
+		mutate  func(t *testing.T, f *pagesTransferRig)
+		retire  bool
 		// sameEpoch marks a control row that does not touch the workspace epoch.
 		sameEpoch bool
 	}{
@@ -66,6 +77,31 @@ func TestCraftNativeSessionSurvivesUnrelatedWorkspaceAuthorityChanges(t *testing
 		{name: "revoke grant on another page from another member", mutate: func(t *testing.T, f *pagesTransferRig) {
 			f.seedPage(t, "scope-other", "scope-other", "Other", f.adminID, "")
 			mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('scope-other','user',?,'read',?)`, f.userID, f.adminID)
+			mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='scope-other'`)
+		}},
+		// #5123: a grant on another Page that names the editor (directly, as
+		// everyone or through their crew) changes nothing on this Page.
+		{name: "everyone grant on another page", mutate: func(t *testing.T, f *pagesTransferRig) {
+			f.seedPage(t, "scope-other", "scope-other", "Other", f.userID, "")
+			mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('scope-other','workspace','','read',?)`, f.adminID)
+		}},
+		{name: "everyone grant on another page then revoke", mutate: func(t *testing.T, f *pagesTransferRig) {
+			f.seedPage(t, "scope-other", "scope-other", "Other", f.userID, "")
+			mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('scope-other','workspace','','write',?)`, f.adminID)
+			mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='scope-other'`)
+		}},
+		{name: "crew grant on another page naming the editor's crew, changed and revoked", prepare: func(t *testing.T, f *pagesTransferRig) {
+			f.seedCrew(t, "scope-crew", "Scope crew", "scope-crew")
+			f.seedCrewMember(t, "scope-crew", "native-scope-writer")
+		}, mutate: func(t *testing.T, f *pagesTransferRig) {
+			f.seedPage(t, "scope-other", "scope-other", "Other", f.adminID, "")
+			mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('scope-other','crew','scope-crew','read',?)`, f.adminID)
+			mustExec(t, f.db, `UPDATE page_grants SET level='write' WHERE page_id='scope-other'`)
+			mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='scope-other'`)
+		}},
+		{name: "grant on another page to this editor then revoke", mutate: func(t *testing.T, f *pagesTransferRig) {
+			f.seedPage(t, "scope-other", "scope-other", "Other", f.adminID, "")
+			mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('scope-other','user','native-scope-writer','write',?)`, f.adminID)
 			mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='scope-other'`)
 		}},
 		{name: "grant on this page to another member", mutate: func(t *testing.T, f *pagesTransferRig) {
@@ -88,6 +124,24 @@ func TestCraftNativeSessionSurvivesUnrelatedWorkspaceAuthorityChanges(t *testing
 			mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_id='native-scope-writer'`)
 			mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('native-page','user','native-scope-writer','write',?)`, f.adminID)
 		}},
+		// The Page-local fence still retires an editor whose only path was a
+		// group grant on this Page, including revoke-then-restore (#5123).
+		{name: "revoke this page everyone grant", retire: true, prepare: craftNativeScopeEveryoneOnly, mutate: func(t *testing.T, f *pagesTransferRig) {
+			mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_type='workspace'`)
+		}},
+		{name: "revoke and restore this page everyone grant", retire: true, prepare: craftNativeScopeEveryoneOnly, mutate: func(t *testing.T, f *pagesTransferRig) {
+			mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_type='workspace'`)
+			mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('native-page','workspace','','write',?)`, f.adminID)
+		}},
+		{name: "revoke and restore this page crew grant", retire: true, prepare: func(t *testing.T, f *pagesTransferRig) {
+			f.seedCrew(t, "scope-crew", "Scope crew", "scope-crew")
+			f.seedCrewMember(t, "scope-crew", "native-scope-writer")
+			mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('native-page','crew','scope-crew','write',?)`, f.adminID)
+			mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_type='user'`)
+		}, mutate: func(t *testing.T, f *pagesTransferRig) {
+			mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_type='crew'`)
+			mustExec(t, f.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('native-page','crew','scope-crew','write',?)`, f.adminID)
+		}},
 		{name: "transfer this page owner away and back", retire: true, mutate: func(t *testing.T, f *pagesTransferRig) {
 			mustExec(t, f.db, `UPDATE pages SET owner_user_id=? WHERE id='native-page'`, f.adminID)
 			mustExec(t, f.db, `UPDATE pages SET owner_user_id=? WHERE id='native-page'`, f.userID)
@@ -103,6 +157,9 @@ func TestCraftNativeSessionSurvivesUnrelatedWorkspaceAuthorityChanges(t *testing
 		t.Run(test.name, func(t *testing.T) {
 			f, m, _ := craftNativeHTTPFixture(t)
 			ctx := craftNativeGrantedWriter(t, f)
+			if test.prepare != nil {
+				test.prepare(t, f)
+			}
 			token, id := craftNativeIssued(t, m, ctx)
 			acquired := craftNativeLeaseCall(m, ctx, token, "native-page", "acquire", `{}`)
 			if acquired.Code != 200 {
