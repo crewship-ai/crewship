@@ -388,4 +388,62 @@ describe.skipIf(!ready)("Design canvas viewport in Chromium", () => {
   expect(await nodes(page)).toBe(before)
   await page.context().close()
  }, 60_000)
+
+ it("ends a pinch when a finger lifts or on Escape, and the fingers left start nothing; the next touch works again", async () => {
+  const page = await open(true)
+  // Explicit touch pointer events: CDP cannot lift one finger of two.
+  // The first finger down of a touch is the primary one (10 here, and 12 for the lost one).
+  const finger = (type: "pointerdown" | "pointermove" | "pointerup", id: number, x: number, y: number) => page.getByLabel("Design canvas viewport").evaluate((element, event) => {
+   element.dispatchEvent(new PointerEvent(event.type, { pointerId: event.id, pointerType: "touch", isPrimary: event.id !== 11, clientX: event.x, clientY: event.y, button: event.type === "pointermove" ? -1 : 0, buttons: event.type === "pointerup" ? 0 : 1, bubbles: true, cancelable: true }))
+  }, { type, id, x, y })
+  const bg = await background(page)
+  const ax = bg.x + 200, bx = bg.x + 300, y = bg.y
+  // Lift one finger of a pinch: the other one moving changes nothing.
+  await finger("pointerdown", 10, ax, y); await finger("pointerdown", 11, bx, y)
+  await finger("pointermove", 10, ax - 20, y); await finger("pointermove", 11, bx + 20, y)
+  const pinched = await viewOf(page)
+  await finger("pointerup", 10, ax - 20, y)
+  await finger("pointermove", 11, bx + 120, y + 40)
+  expect(await viewOf(page)).toEqual(pinched)
+  await finger("pointerup", 11, bx + 120, y + 40)
+  // Escape mid-pinch goes back to where the pinch started; the fingers left start nothing.
+  await page.getByLabel("Design canvas viewport").focus()
+  await finger("pointerdown", 10, ax, y); await finger("pointerdown", 11, bx, y)
+  await finger("pointermove", 10, ax - 40, y); await finger("pointermove", 11, bx + 40, y)
+  expect(await viewOf(page)).not.toEqual(pinched)
+  await page.keyboard.press("Escape")
+  expect(await viewOf(page)).toEqual(pinched)
+  await finger("pointermove", 10, ax + 60, y); await finger("pointermove", 11, bx + 60, y)
+  expect(await viewOf(page)).toEqual(pinched)
+  await finger("pointerup", 10, ax + 60, y); await finger("pointerup", 11, bx + 60, y)
+  // A one-finger pan whose pointerup was lost (it stays behind) does not block the next touch.
+  await finger("pointerdown", 12, ax, y)
+  for (let i = 1; i <= 2; i++) await finger("pointermove", 12, ax + i * 5, y)
+  const stuck = await viewOf(page)
+  // A fresh one-finger pan works.
+  await finger("pointerdown", 10, ax, y)
+  for (let i = 1; i <= 3; i++) await finger("pointermove", 10, ax + i * 10, y)
+  await finger("pointerup", 10, ax + 30, y)
+  expect((await viewOf(page)).x - stuck.x).toBeCloseTo(30, 0)
+  await page.context().close()
+ }, 60_000)
+
+ it("leaves Space to a focused button while the pointer is over the canvas", async () => {
+  const page = await open()
+  const bg = await background(page)
+  await page.mouse.move(bg.x, bg.y)
+  const zoomIn = page.getByRole("button", { name: "Zoom in" })
+  await zoomIn.focus()
+  await page.evaluate(() => window.addEventListener("keydown", event => { if (event.key === " ") setTimeout(() => { (window as unknown as { spacePrevented: boolean }).spacePrevented = event.defaultPrevented }) }, { once: true }))
+  await page.keyboard.press("Space")
+  await page.waitForFunction(() => typeof (window as unknown as { spacePrevented?: boolean }).spacePrevented === "boolean")
+  expect(await page.evaluate(() => (window as unknown as { spacePrevented: boolean }).spacePrevented)).toBe(false)
+  // With the canvas focused, Space is the canvas's.
+  await page.getByLabel("Design canvas viewport").focus()
+  await page.evaluate(() => window.addEventListener("keydown", event => { if (event.key === " ") setTimeout(() => { (window as unknown as { canvasSpace: boolean }).canvasSpace = event.defaultPrevented }) }, { once: true }))
+  await page.keyboard.press("Space")
+  await page.waitForFunction(() => typeof (window as unknown as { canvasSpace?: boolean }).canvasSpace === "boolean")
+  expect(await page.evaluate(() => (window as unknown as { canvasSpace: boolean }).canvasSpace)).toBe(true)
+  await page.context().close()
+ }, 60_000)
 })

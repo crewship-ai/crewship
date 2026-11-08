@@ -196,7 +196,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  // One gesture at a time. Escape, pointercancel and window blur put back where it started.
  type Gesture =
   | { kind: "pan"; pointerId: number; start: Point; view: DesignView; moved: boolean; tapNode?: string; touch: boolean; button: number }
-  | { kind: "move"; pointerId: number; start: Point; id: string; x: number; y: number; moved: boolean }
+  | { kind: "move"; pointerId: number; start: Point; id: string; x: number; y: number; moved: boolean; touch: boolean }
   | { kind: "pinch"; ids: [number, number]; view: DesignView; from: ReturnType<typeof pinchOf> }
   // Fingers still down after a pinch ended or was cancelled start nothing until all are up.
   | { kind: "spent" }
@@ -210,8 +210,8 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const menuAfterPan = useRef(0)
  const cancelGesture = () => {
   const current = gesture.current
-  gesture.current = current?.kind === "pinch" || (current?.kind === "pan" && current.touch) ? { kind: "spent" } : null
-  if (touches.current.size === 0) gesture.current = null
+  // Fingers still down after a cancel start nothing until they are all up.
+  gesture.current = touches.current.size ? { kind: "spent" } : null
   setPanning(false)
   if (!current || current.kind === "spent") return false
   if (current.kind === "move" && current.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, x: current.x, y: current.y })
@@ -228,7 +228,15 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const pressDown = (event: PointerEvent<HTMLDivElement>) => {
   const at = local(event)
   if (event.button === 1) event.preventDefault() // no middle-button autoscroll
+  menuAfterPan.current = 0
   if (event.pointerType === "touch") {
+   // The first finger of a new touch: nothing else is down, whatever a lost pointerup left behind.
+   // A touch gesture still open then lost its pointerup; it ends where it is.
+   if (event.isPrimary) {
+    touches.current.clear()
+    const open = gesture.current
+    if (open && (open.kind === "pinch" || open.kind === "spent" || open.touch)) { gesture.current = null; setPanning(false) }
+   }
    touches.current.set(event.pointerId, at)
    if (gesture.current?.kind === "spent" || gesture.current?.kind === "pinch") return
    if (touches.current.size >= 2) {
@@ -250,7 +258,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   if (node && (intent === "select" || intent === "move")) selectNode(node)
   viewport.current?.focus({ preventScroll: true })
   if (intent === "select") return
-  if (intent === "move" && node) gesture.current = { kind: "move", pointerId: event.pointerId, start: at, id: node.id, x: Number(node.x) || 0, y: Number(node.y) || 0, moved: false }
+  if (intent === "move" && node) gesture.current = { kind: "move", pointerId: event.pointerId, start: at, id: node.id, x: Number(node.x) || 0, y: Number(node.y) || 0, moved: false, touch: event.pointerType === "touch" }
   else if (intent === "pan") {
    gesture.current = { kind: "pan", pointerId: event.pointerId, start: at, view, moved: false, touch: event.pointerType === "touch", button: event.button, ...(node ? { tapNode: node.id } : {}) }
    setPanning(true)
@@ -492,7 +500,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   aria-keyshortcuts="Escape + - Shift+1 Shift+0 ArrowLeft ArrowRight ArrowUp ArrowDown"
   data-design-view={`${Math.round(scale * 10000) / 10000} ${Math.round(view.x * 100) / 100} ${Math.round(view.y * 100) / 100}`}
   className={cn("relative min-h-0 flex-1 touch-none select-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset", panning ? "cursor-grabbing" : space && "cursor-grab", className)}
-  onPointerDown={pressDown} onPointerMove={pressMove} onPointerUp={pressUp} onPointerCancel={pressCancel}
+  onPointerDown={pressDown} onPointerMove={pressMove} onPointerUp={pressUp} onPointerCancel={pressCancel} onLostPointerCapture={event => { if (event.pointerType === "touch" && touches.current.has(event.pointerId)) pressUp(event) }}
   onPointerEnter={() => { pointerInside.current = true }} onPointerLeave={() => { pointerInside.current = false; design.setCursor(null) }}
   onMouseDown={event => { if (event.button === 1) event.preventDefault() }} onAuxClick={event => event.preventDefault()}
   onContextMenu={event => event.preventDefault()} onKeyDown={viewKey}>{canvasView}</div>
