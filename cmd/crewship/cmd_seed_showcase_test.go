@@ -302,6 +302,31 @@ func runShowcaseOnce(t *testing.T, s *showcaseServer, url string, want showcaseW
 	if err != nil {
 		t.Fatalf("seedShowcase returned %v; the phase is fail-soft\n%s", err, out.String())
 	}
+	// Mirrored reference artifacts (slug prefix "ref-") are fixed-content
+	// extras with their own tests; here they only shift the totals by what
+	// each one reported.
+	for _, a := range seeddata.ShowcaseArtifacts {
+		if !strings.HasPrefix(a.Slug, "ref-") {
+			continue
+		}
+		switch text := out.String(); {
+		case strings.Contains(text, "  + "+a.Slug+"\n"):
+			want.stats.Created++
+			want.artifactCreates++
+			want.dataWrites += len(a.Data)
+		case strings.Contains(text, "  + "+a.Slug+": completed"):
+			want.stats.Completed++
+			want.dataWrites += len(a.Data)
+		case strings.Contains(text, "  ! "+a.Slug+": incomplete"):
+			want.stats.Incomplete++
+			want.artifactCreates++
+			want.dataWrites += len(a.Data)
+		case strings.Contains(text, "  = "+a.Slug+": already exists"):
+			want.stats.Skipped++
+		default:
+			t.Errorf("mirror item %s reported no outcome\n%s", a.Slug, text)
+		}
+	}
 	if stats != want.stats {
 		t.Errorf("stats = %+v, want %+v\n%s", stats, want.stats, out.String())
 	}
@@ -516,8 +541,16 @@ func TestShowcaseCatalogue_FilesExist(t *testing.T) {
 			t.Errorf("%s: design operations unreadable: %v", d.Slug, err)
 		}
 	}
-	if strings.Join(got, ",") != strings.Join(wantSlugs, ",") {
-		t.Errorf("slugs = %v, want %v", got, wantSlugs)
+	// Mirrored reference items (seeddata/mirror_*.go, slug prefix "ref-")
+	// append themselves and carry their own tests; the rest is fixed here.
+	var base []string
+	for _, s := range got {
+		if !strings.HasPrefix(s, "ref-") {
+			base = append(base, s)
+		}
+	}
+	if strings.Join(base, ",") != strings.Join(wantSlugs, ",") {
+		t.Errorf("slugs = %v, want %v", base, wantSlugs)
 	}
 	for _, s := range got {
 		if seen[s] {
