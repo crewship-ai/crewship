@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"path"
 	"reflect"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -24,6 +25,21 @@ import (
 // sha256 of index.html as the claude.ai artifact service returned it
 // (E8HYX1pSVKSAbLqgvTCZ8Z, version 1794069218-3a10).
 const mirrorE8hyOriginalSHA = "e7ebdcd29ad05a150f02cc75c6a8d58d540ff6d942b540460caa208cad0d37d5"
+
+// What _build.py substitutes in the original page.
+const (
+	mirrorE8hyThreeTag    = `<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>`
+	mirrorE8hyMermaidTag  = `<script src="/_runtime/mermaid-11.16.1.min.js"></script>`
+	mirrorE8hyFontsTag    = `<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">`
+	mirrorE8hyThreeOpen   = `<script data-mirror="three.js r128">`
+	mirrorE8hyMermaidOpen = `<script data-mirror="mermaid 8.11.5">`
+	mirrorE8hyFontsMark   = `<!--mirror: Google Fonts faces are in fonts.css-->`
+)
+
+var (
+	mirrorE8hyThreeRe   = regexp.MustCompile(`(?s)<script data-mirror="three\.js r128">.*?</script>`)
+	mirrorE8hyMermaidRe = regexp.MustCompile(`(?s)<script data-mirror="mermaid 8\.11\.5">.*?</script><script data-mirror="mermaid render shim">.*?</script>`)
+)
 
 func mirrorE8hyDef(t *testing.T) seeddata.ShowcaseArtifactDef {
 	t.Helper()
@@ -103,7 +119,6 @@ func TestMirrorE8hy_ManifestIsWhatTheRouteAccepts(t *testing.T) {
 		t.Error("message over 4096 bytes")
 	}
 	files := map[string]artifacts.VersionFile{}
-	total := 0
 	for _, f := range m.Files {
 		if _, dup := files[f.Path]; dup {
 			t.Errorf("duplicate path %s", f.Path)
@@ -112,10 +127,6 @@ func TestMirrorE8hy_ManifestIsWhatTheRouteAccepts(t *testing.T) {
 			t.Errorf("%s: unsafe path or invalid UTF-8", f.Path)
 		}
 		files[f.Path] = artifacts.VersionFile{Content: []byte(f.Content), MediaType: f.MediaType}
-		total += len(f.Content)
-	}
-	if total > 2<<20 {
-		t.Errorf("project is %d bytes, over the 2 MiB interactive source limit", total)
 	}
 	entry, ok := files[m.EntryPoint]
 	if m.EntryPoint != "index.html" || !ok || entry.MediaType != "text/html" {
@@ -126,30 +137,51 @@ func TestMirrorE8hy_ManifestIsWhatTheRouteAccepts(t *testing.T) {
 	if cols, err := artifacts.ParseInteractiveArtifact(files); err != nil || len(cols) != 1 || cols[0] != "showcase" {
 		t.Errorf("interactive marker: collections %v, err %v; the page's scripts would not run", cols, err)
 	}
-	if len(files) != 3 {
-		t.Errorf("project has %d files, want index.html and the two markers", len(files))
+	if len(files) != 4 {
+		t.Errorf("project has %d files, want index.html, fonts.css and the two markers", len(files))
+	}
+	fonts, ok := files["fonts.css"]
+	if !ok || fonts.MediaType != "text/css" || strings.Count(string(fonts.Content), "@font-face") != 6 ||
+		strings.Contains(string(fonts.Content), "url(http") {
+		t.Error("fonts.css must hold the six embedded font files and fetch nothing")
+	}
+	// The runtime receives the page as a JSON string with < escaped, plus the
+	// stylesheets, under a 2 MiB limit. Go's HTML-safe escaping is at least as
+	// long; 16 KiB covers the runtime's own installer.
+	escaped, _ := json.Marshal(string(entry.Content))
+	if n := len(escaped) + len(fonts.Content) + 16<<10; n > 2<<20 {
+		t.Errorf("interactive source is about %d bytes, over the 2 MiB limit", n)
 	}
 
+	// Only the three external resources were made local; every other byte is
+	// the original's.
+	page := string(entry.Content)
+	for _, lib := range []struct{ open, header string }{
+		{mirrorE8hyThreeOpen, "Copyright 2010-2021 Three.js Authors\n * SPDX-License-Identifier: MIT"},
+		{mirrorE8hyMermaidOpen, "/*! mermaid 8.11.5 | MIT License"},
+	} {
+		if !strings.Contains(page, lib.open) || !strings.Contains(page, lib.header) {
+			t.Errorf("%s missing or without its licence header", lib.open)
+		}
+	}
+	for _, needle := range []string{"<script src=", "fonts.googleapis.com", "/_runtime/"} {
+		if strings.Contains(page, needle) {
+			t.Errorf("index.html still loads %q, which the runtime drops", needle)
+		}
+	}
+	restored := mirrorE8hyThreeRe.ReplaceAllLiteralString(page, mirrorE8hyThreeTag)
+	restored = mirrorE8hyMermaidRe.ReplaceAllLiteralString(restored, mirrorE8hyMermaidTag)
+	restored = strings.Replace(restored, mirrorE8hyFontsMark, mirrorE8hyFontsTag, 1)
 	for _, tc := range []struct {
 		name string
 		got  []byte
 	}{
-		{"manifest index.html", entry.Content},
+		{"manifest index.html with its three resources restored", []byte(restored)},
 		{"embedded index.html", seeddata.ShowcaseFile("mirror/e8hy/index.html")},
 	} {
 		sum := sha256.Sum256(tc.got)
 		if hex.EncodeToString(sum[:]) != mirrorE8hyOriginalSHA {
 			t.Errorf("%s differs from the original page", tc.name)
-		}
-	}
-	// The original pins its CDN script; the copy must not float it.
-	for _, want := range []string{
-		`<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>`,
-		`<title>Template Crewship Showcase</title>`,
-		`id="model-3d"`,
-	} {
-		if !strings.Contains(string(entry.Content), want) {
-			t.Errorf("index.html lost %s", want)
 		}
 	}
 }
