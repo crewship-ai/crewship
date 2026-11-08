@@ -1,4 +1,4 @@
-import { AppWindow, FileText, Frame, LayoutDashboard, PanelsTopLeft, Presentation, Sheet, type LucideIcon } from "lucide-react"
+import { AppWindow, FileText, Frame, LayoutDashboard, NotebookText, PanelsTopLeft, Presentation, Sheet, type LucideIcon } from "lucide-react"
 import type { PageView } from "@/hooks/use-pages"
 import { ACCENT, type Accent, type AccentName } from "@/lib/concept-accents"
 
@@ -7,7 +7,7 @@ import { ACCENT, type Accent, type AccentName } from "@/lib/concept-accents"
  * the chat "+" menu all read it, so a new kind is one entry here and no UI
  * change. Keys match the library's kinds and the server's `artifact_kind`.
  */
-export type ArtifactKindKey = "project" | "dashboard" | "page" | "word" | "sheet" | "slides" | "design"
+export type ArtifactKindKey = "project" | "dashboard" | "page" | "docs" | "word" | "sheet" | "slides" | "design"
 
 /** Web kinds render as screens or panels; document kinds are files with an editor. */
 export type ArtifactFamily = "web" | "document"
@@ -31,8 +31,13 @@ export interface ArtifactCapabilities {
   slides: boolean
   /** Some document creation format is confirmed (Doc, WordCraft or commands). */
   documents: boolean
-  /** Collaborative Docs, independently of native Word/Sheet availability. */
+  /** The collaborative Doc format is confirmed: a new one opens as Docs. */
   docs?: boolean
+  /**
+   * A Word editor format is confirmed (native WordCraft, the WordCraft SDK or
+   * commands). Unset falls back to `documents`, for sources without the split.
+   */
+  words?: boolean
   /** GridCraft workbook creation is switched on for the workspace. */
   sheets: boolean
   /** The caller may create Pages at all (role or page.create). Every kind needs it, agent-made ones too. */
@@ -93,11 +98,20 @@ export const ARTIFACT_KINDS: readonly ArtifactKindEntry[] = [
     live: caps => caps.pages,
   },
   {
+    key: "docs", drafted: false, family: "document", accent: "indigo", label: "Docs", plural: "Docs", icon: NotebookText,
+    description: "Write together, live", viewer: "Page · comments · versions", make: "edit",
+    placeholder: "Team notes", templates: [], uploadExtensions: [],
+    starterPrompts: [],
+    // Created blank by a person in the Doc format; the catalogue reads that format as Docs.
+    live: caps => caps.pages && caps.docs === true,
+  },
+  {
     key: "word", drafted: true, family: "document", accent: "blue", label: "Word", newLabel: "Word document", plural: "Word", icon: FileText,
     description: "A document, one editor at a time", viewer: "Read-only preview · Edit in WordCraft", make: "edit",
     placeholder: "Partner brief", templates: ["Proposal", "Contract summary", "Meeting minutes", "Playbook"], uploadExtensions: [".docx"],
     starterPrompts: ["A partner brief from this chat", "Turn the weekly report into a two-page memo"],
-    live: caps => caps.pages && caps.documents,
+    // Only a Word editor: the Doc format opens as Docs, so it is offered there instead.
+    live: caps => caps.pages && (caps.words ?? caps.documents),
   },
   {
     key: "sheet", drafted: false, family: "document", accent: "green", label: "Sheet", plural: "Sheets", icon: Sheet,
@@ -139,7 +153,7 @@ export function creatableKinds(caps: ArtifactCapabilities): ArtifactKindEntry[] 
 
 /** Listed in a "Coming" line rather than offered. */
 export function comingKinds(caps: ArtifactCapabilities): ArtifactKindEntry[] {
-  return ARTIFACT_KINDS.filter(k => !k.live(caps) && (k.key !== "design" || caps.designs === true))
+  return ARTIFACT_KINDS.filter(k => !k.live(caps) && (k.key !== "design" || caps.designs === true) && (k.key !== "docs" || caps.docs === true))
 }
 
 /** The kind of an existing Page: the version head first, then the storage it reports; a plain Page is a Page. */

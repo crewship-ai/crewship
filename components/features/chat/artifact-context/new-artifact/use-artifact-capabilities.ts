@@ -25,5 +25,8 @@ export function useArtifactCapabilities(workspaceId: string): ArtifactCapabiliti
     // Sheet is offered only when the server advertises the native GridCraft
     // profile (gridcraft_native); unconfirmed or failed reads withdraw it.
     sheets: documents.gridcraftNative === true,
+    // The Doc format creates Docs; Word needs one of the Word editor formats.
+    docs: documents.data === true,
+    words: documents.wordcraftNative === true || Boolean(documents.wordcraftSDKPrefix) || documents.wordcraftCommands === true,
   }
 }

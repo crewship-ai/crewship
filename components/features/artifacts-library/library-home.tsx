@@ -17,7 +17,7 @@ import { KindBadge, KindTile } from "./kind-tile"
 import { KindThumb } from "./kind-thumb"
 
 /** Library Docs uses human collaborative creation, distinct from the Word Craft flow and agent artifact kinds. */
-export type LibraryCreationFlow = ArtifactKindKey | "docs"
+export type LibraryCreationFlow = ArtifactKindKey
 export const CREATE_FLOW: Record<ArtifactKind, readonly LibraryCreationFlow[]> = {
   docs: ["docs"], dashboard: ["dashboard"], slides: ["slides"], design: ["design"], app: ["project", "page"], word: ["word"], sheet: ["sheet"],
 }

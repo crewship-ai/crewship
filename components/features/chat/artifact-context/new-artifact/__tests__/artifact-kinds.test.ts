@@ -8,7 +8,7 @@ describe("artifact kind registry", () => {
   it("is one ordered list with the library's keys and families", () => {
     expect(ARTIFACT_KINDS.map(k => [k.key, k.family])).toEqual([
       ["project", "web"], ["dashboard", "web"], ["page", "web"],
-      ["word", "document"], ["sheet", "document"], ["slides", "document"], ["design", "document"],
+      ["docs", "document"], ["word", "document"], ["sheet", "document"], ["slides", "document"], ["design", "document"],
     ])
     for (const k of ARTIFACT_KINDS) {
       expect(k.label && k.plural && k.description && k.viewer).toBeTruthy()
@@ -26,6 +26,24 @@ describe("artifact kind registry", () => {
     expect(creatableKinds(ALL).map(k => k.key)).toEqual(["project", "dashboard", "page", "word", "sheet", "slides"])
     expect(creatableKinds(NO_CAPABILITIES)).toEqual([])
     expect(creatableKinds({ ...NO_CAPABILITIES, documents: true, pages: true }).map(k => k.key)).toEqual(["page", "word"])
+  })
+
+  // G03 (#5153): Docs are the collaborative Doc format, created blank by a person.
+  it("offers Docs only when the server confirms the Doc format and the caller may create Pages", () => {
+    expect(artifactKind("docs").make).toBe("edit")
+    expect(artifactKind("docs").label).toBe("Docs")
+    expect(artifactKind("docs").live(ALL)).toBe(false)
+    expect(artifactKind("docs").live({ ...ALL, docs: true })).toBe(true)
+    expect(artifactKind("docs").live({ ...ALL, docs: true, pages: false })).toBe(false)
+    expect(comingKinds(ALL).map(k => k.key)).not.toContain("docs")
+    expect(creatableKinds({ ...ALL, docs: true }).map(k => k.key)).toEqual(["project", "dashboard", "page", "docs", "word", "sheet", "slides"])
+  })
+
+  it("offers Word only for a Word editor, never for the Doc format that opens as Docs", () => {
+    expect(artifactKind("word").live({ ...ALL, docs: true, words: false })).toBe(false)
+    expect(artifactKind("word").live({ ...ALL, docs: true, words: true })).toBe(true)
+    // An older capability source without the split keeps offering Word.
+    expect(artifactKind("word").live(ALL)).toBe(true)
   })
 
   it("creates Slides through an agent only with projects and the Slides flag", () => {
