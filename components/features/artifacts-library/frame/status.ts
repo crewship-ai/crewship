@@ -11,6 +11,7 @@ import type { StatusTone } from "@/lib/format-status"
 export type FrameStatusKey =
   | "live" | "saving" | "saved" | "offline" | "readonly" | "free" | "editing" | "held"
   | "agent" | "proposal" | "draft" | "stale" | "refreshing" | "unconfirmed" | "error"
+  | "sample" | "fixed"
 
 export interface FrameStatusDef {
   tone: StatusTone
@@ -37,6 +38,9 @@ export const FRAME_STATUS: Record<FrameStatusKey, FrameStatusDef> = {
   refreshing: { tone: "muted", icon: "spin", label: "Refreshing…", detail: "Showing the last confirmed data until the run finishes." },
   unconfirmed: { tone: "warn", icon: AlertTriangle, label: "Not confirmed yet", detail: "Your last edits are on this device. Crewship has not confirmed them." },
   error: { tone: "danger", icon: AlertTriangle, label: "Error", detail: "Something failed. Nothing was changed." },
+  // A Dashboard's own datasets.json: what the author states, never a server measurement.
+  sample: { tone: "warn", icon: Info, label: "Sample data", detail: "The author marked these values as sample data, not measurements." },
+  fixed: { tone: "muted", icon: Info, label: "Fixed data", detail: "A fixed snapshot with no automatic refresh." },
 }
 
 /** What a kind reports: a key, optionally a more precise label or detail ("Jana is editing"). */
