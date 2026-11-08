@@ -1,0 +1,1 @@
+- **Agents learn the kind of an attached artifact.** The Page context in a chat names the artifact kind and its guide version, and agents read the guide with the `artifact_kind_guide` tool.
