@@ -147,15 +147,16 @@ describe("Docs in the ArtifactFrame", () => {
     expect(await within(screen.getByRole("complementary", { name: "Proposals" })).findByText("No proposals.")).toBeTruthy()
   })
 
-  it("keeps Propose disabled for a reader who cannot edit", async () => {
+  it("offers no Propose to a reader who cannot edit, but still the Proposals to read", async () => {
     env.proposals = true
     env.canWrite = false
     serve()
     open()
     expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
     fireEvent.click(screen.getByRole("button", { name: "Agent" }))
-    const modes = await screen.findByRole("radiogroup", { name: "Agent mode" })
-    expect(within(modes).getByRole("radio", { name: "Propose" })).toBeDisabled()
+    expect(screen.queryByRole("radiogroup", { name: "Agent mode" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Ask for a proposal" })).toBeNull()
+    expect(await screen.findByRole("button", { name: "Proposals" })).toBeTruthy()
   })
 
   it("stays on Saving… while the receipt has not arrived", async () => {

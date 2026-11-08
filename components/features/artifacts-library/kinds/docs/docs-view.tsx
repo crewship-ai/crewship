@@ -217,17 +217,17 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     </ArtifactDrawerSection>}
 
     {proposalsServed && sync.state && <>
-      <ArtifactAgentMode mode="propose">
+      {sync.state.can_write && <ArtifactAgentMode mode="propose">
         <div className="grid gap-2" data-docs-propose>
           <Textarea aria-label="What should the agent change?" placeholder="What should the agent change?" value={proposalPrompt}
             onChange={event => setProposalPrompt(event.target.value)} className="min-h-20 text-sm" />
-          <p className="text-xs text-muted-foreground">The agent proposes changes in a private chat. Nothing changes until someone with edit access accepts them under Proposals.</p>
+          <p className="text-xs text-muted-foreground">The agent proposes changes in a private chat. On a shared document it needs edit access granted to it. Nothing changes until someone with edit access accepts them under Proposals.</p>
           <div className="flex justify-end">
             <Button asChild size="sm"><a href={proposalChatHref(workspaceId, { pageId, rev: sync.state.rev, generation: sync.state.generation }, proposalPrompt.trim())}>
               <Send aria-hidden />Ask for a proposal</a></Button>
           </div>
         </div>
-      </ArtifactAgentMode>
+      </ArtifactAgentMode>}
       <ArtifactDrawerSection tab="proposals" label="Proposals" icon={GitPullRequestArrow}>
         <div className="grid content-start gap-3 p-3.5">
           <DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} />

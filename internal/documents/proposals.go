@@ -114,12 +114,28 @@ func (s *Store) Propose(ctx context.Context, k Key, in ProposalInput, a Authoriz
 		if e = in.Guard(ctx, tx, actor, v); e != nil {
 			return e
 		}
+		// Only proposals that can still be accepted count as awaiting review.
+		// When the document holds ProposalLimit rows, the oldest one that can
+		// no longer be accepted (decided, or from an earlier generation) makes
+		// room; a document full of live proposals refuses with ErrQuota.
 		var total, open int
-		if e = tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(status='open'),0) FROM document_proposals WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&total, &open); e != nil {
+		if e = tx.QueryRowContext(ctx, `SELECT count(*),coalesce(sum(status='open' AND generation=?),0) FROM document_proposals WHERE workspace_id=? AND page_id=?`, v.Generation, k.WorkspaceID, k.PageID).Scan(&total, &open); e != nil {
 			return e
 		}
-		if total >= ProposalLimit || open >= ProposalOpenLimit {
+		if open >= ProposalOpenLimit {
 			return ErrQuota
+		}
+		if total >= ProposalLimit {
+			result, e := tx.ExecContext(ctx, `DELETE FROM document_proposals WHERE rowid IN (SELECT rowid FROM document_proposals WHERE workspace_id=? AND page_id=? AND (status!='open' OR generation!=?) ORDER BY created_at,rowid LIMIT ?)`, k.WorkspaceID, k.PageID, v.Generation, total-ProposalLimit+1)
+			if e != nil {
+				return e
+			}
+			if n, e := result.RowsAffected(); e != nil || n != int64(total-ProposalLimit+1) {
+				if e != nil {
+					return e
+				}
+				return ErrQuota
+			}
 		}
 		if e = s.admitDiscussionReceipt(ctx, tx, k); e != nil {
 			return e

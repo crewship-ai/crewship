@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -181,5 +182,53 @@ func TestRejectProposalClosesOnce(t *testing.T) {
 	}
 	if _, e = db.ExecContext(ctx, `UPDATE document_proposals SET status='open',decided_by=NULL,decision_id=NULL WHERE id='p1'`); e == nil {
 		t.Fatal("decided proposal reopened")
+	}
+}
+
+// A restart or restore moves the generation: earlier proposals can no longer
+// be accepted, stop counting as awaiting review, can still be rejected, and
+// make room once the document holds ProposalLimit rows.
+func TestProposalsFromEarlierGenerationsNeverLockTheDocument(t *testing.T) {
+	s, db := proposalFixture(t)
+	for i := 0; i < ProposalOpenLimit; i++ {
+		if _, e := s.Propose(ctx, key, proposalInput(fmt.Sprintf("old-%d", i), pass), allow); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if _, e := s.Propose(ctx, key, proposalInput("one-too-many", pass), allow); !errors.Is(e, ErrQuota) {
+		t.Fatalf("open limit: %v", e)
+	}
+	if _, e := db.ExecContext(ctx, `UPDATE documents SET generation=generation+1 WHERE page_id='page-a'`); e != nil {
+		t.Fatal(e)
+	}
+	next := func(id string) ProposalInput {
+		in := proposalInput(id, pass)
+		generation := int64(1)
+		in.Generation = &generation
+		return in
+	}
+	if _, e := s.Propose(ctx, key, next("after-restart"), allow); e != nil {
+		t.Fatalf("earlier-generation proposals locked the document: %v", e)
+	}
+	generation := int64(1)
+	if _, e := s.RejectProposal(ctx, key, "close-old", "f", "old-0", 0, &generation, allow); e != nil {
+		t.Fatalf("earlier-generation proposal cannot be closed: %v", e)
+	}
+	// Fill to the stored limit with rows that can no longer be accepted.
+	for i := ProposalOpenLimit; i < ProposalLimit-1; i++ {
+		if _, e := db.ExecContext(ctx, `INSERT INTO document_proposals(workspace_id,page_id,id,run_id,actor,target,ancestors,schema_version,generation,base_rev,base_hash,proposed_hash,text,base_json,proposed_json) SELECT workspace_id,page_id,?,run_id,actor,target,ancestors,4,0,base_rev,base_hash,proposed_hash,text,base_json,proposed_json FROM document_proposals WHERE id='old-1'`, fmt.Sprintf("old-%d", i)); e != nil {
+			t.Fatal(e)
+		}
+	}
+	var total int
+	if e := db.QueryRowContext(ctx, `SELECT count(*) FROM document_proposals`).Scan(&total); e != nil || total != ProposalLimit {
+		t.Fatalf("fixture total %d %v", total, e)
+	}
+	if _, e := s.Propose(ctx, key, next("at-limit"), allow); e != nil {
+		t.Fatalf("full document of dead proposals refused: %v", e)
+	}
+	var live, gone int
+	if e := db.QueryRowContext(ctx, `SELECT count(*),(SELECT count(*) FROM document_proposals WHERE id='old-0') FROM document_proposals WHERE generation=1`).Scan(&live, &gone); e != nil || live != 2 || gone != 0 {
+		t.Fatalf("purge removed a live proposal or kept the oldest dead one: live=%d oldest=%d %v", live, gone, e)
 	}
 }

@@ -333,7 +333,10 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     if (state.schema !== LATEST_VERSION) throw fault(409, 'proposals require a schema 4 document');
     if (request.ifRev !== state.rev) throw fault(409, 'document changed since the proposal was reviewed; reload');
     const proposal = await go(page, 'proposal', context, { id: request.proposal });
-    if (proposal.status !== 'open' || proposal.generation !== (state.generation ?? 0)) throw fault(409, 'proposal is no longer open');
+    // A proposal from an earlier generation (engine restart, restore) or with a
+    // changed target can never be accepted, but it can always be rejected, so
+    // nothing is left open that nobody can close.
+    if (proposal.status !== 'open' || (operation !== 'proposal-reject' && proposal.generation !== (state.generation ?? 0))) throw fault(409, 'proposal is no longer open');
     if (operation === 'proposal-reject') return { ...await go(page, 'proposal-reject', context, { id: request.id, fingerprint, proposal: request.proposal, ifRev: state.rev, generation: state.generation ?? 0 }), proposal: request.proposal, epoch: syncEpoch(state) };
     let doc = load(state.snapshot);
     try {

@@ -973,6 +973,9 @@ test('schema4 proposals go stale when their target changes and are rejected with
     assert.deepEqual(listed, { 'p-a': 'stale', 'p-b': 'open' });
     assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-a', proposal: 'p-a', ifRev: now.rev })).status, 409);
     const commits = model.commits;
+    // An engine restart moved the generation: p-b can no longer be accepted, but it can still be closed.
+    proposals.get('p-b').generation = -1;
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-b', proposal: 'p-b', ifRev: now.rev })).status, 409);
     assert.equal((await call(f.socket, '/v1/documents/p/proposal-reject', { id: 'reject-b', proposal: 'p-b', ifRev: now.rev })).status, 200);
     assert.equal(model.commits, commits); assert.equal(proposals.get('p-b').status, 'rejected');
     assert.equal((await call(f.socket, '/v1/documents/p/proposal-reject', { id: 'reject-b2', proposal: 'p-b', ifRev: now.rev })).status, 409);
