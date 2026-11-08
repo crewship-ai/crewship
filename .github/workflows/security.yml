@@ -10,6 +10,7 @@ name: Security
 #                   actually change their result (Go code / dependency
 #                   manifests — see the `changes` router job). A docs- or
 #                   CI-only PR pays ~20s, not ~7 runner-minutes.
+#   merge_group   — full battery except advisory grype (see its job).
 #   push to main  — full battery, always. Nothing lands unscanned.
 #   schedule      — full battery daily against main, so a NEW advisory in
 #                   the govulncheck/OSV DBs is caught within a day even
@@ -279,12 +280,14 @@ jobs:
     name: Grype Source Scan
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Not on PRs at all: grype is warn-only (fail-build: false), its
-    # dependency coverage overlaps osv-scanner + the external
+    # Not on PRs or in the merge queue: grype is warn-only (fail-build:
+    # false), its dependency coverage overlaps osv-scanner + the external
     # Dependency-Track SBOM pipeline, and its SARIF lands in the Security
-    # tab — none of which a PR author acts on pre-merge. main pushes +
-    # the daily schedule keep the Security tab current.
-    if: github.event_name != 'pull_request'
+    # tab — none of which anyone acts on pre-merge. main pushes + the daily
+    # schedule keep the Security tab current. In the queue it only added a
+    # GitHub release-asset download that, when it failed (HTTP 504,
+    # 2026-11-08, #5127), blocked every merge for an advisory result.
+    if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
     # SARIF upload to the GitHub Security tab requires write access to
     # security-events. Granted only to this job (least-privilege).
     permissions:
@@ -705,6 +708,8 @@ jobs:
         env:
           RESULTS: ${{ toJSON(needs) }}
           IS_PR: ${{ github.event_name == 'pull_request' }}
+          # Mirrors the grype job's `if:` — advisory, pre-merge events skip it.
+          SKIP_GRYPE: ${{ github.event_name == 'pull_request' || github.event_name == 'merge_group' }}
         run: |
           python3 - <<'PY'
           import json, os
@@ -712,8 +717,9 @@ jobs:
           is_pr = os.environ['IS_PR'] == 'true'
           plan = n['changes']['outputs']
           expected = {key: 'success' for key in n}
-          if is_pr:
+          if os.environ['SKIP_GRYPE'] == 'true':
               expected['grype'] = 'skipped'
+          if is_pr:
               for key, flag in [('govulncheck','gocode'), ('license-check','deps'), ('osv-scan','deps')]:
                   assert plan.get(flag) in ('true', 'false'), 'missing security change plan'
                   if plan[flag] == 'false': expected[key] = 'skipped'

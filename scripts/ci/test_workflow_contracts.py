@@ -172,6 +172,65 @@ class WorkflowContracts(unittest.TestCase):
         for pattern in ('**/package.json', '**/pnpm-lock.yaml', '**/pnpm-workspace.yaml'):
             self.assertIn("'" + pattern + "'", router)
 
+    def test_security_result_skips_only_advisory_grype_before_merge(self):
+        # #5127: grype's release-asset download returned HTTP 504 and, because
+        # `Security Result` required grype on merge_group, blocked the whole
+        # queue for an advisory (fail-build: false) scan. Pre-merge events skip
+        # it; every blocking scanner keeps its expectation, and main pushes and
+        # the schedule still require grype. The aggregate's script runs
+        # verbatim against synthetic `needs`, with its env expressions and
+        # grype's `if:` evaluated for each event.
+        security = self.text('security.yml')
+        grype, result = self.job(security, 'grype'), self.job(security, 'result')
+        self.assertIn('fail-build: false', grype)
+
+        def expression(source, key):
+            match = re.search(r'^\s*' + key + r': \$\{\{ (.+?) \}\}\s*$', source, re.M)
+            self.assertIsNotNone(match, key)
+            return match.group(1)
+
+        def evaluate(expr, event):
+            # Only the shapes used here: event comparisons joined by one operator.
+            for joiner, combine in ((' || ', any), (' && ', all)):
+                if joiner in expr:
+                    return combine(evaluate(part, event) for part in expr.split(joiner))
+            match = re.fullmatch(r"github\.event_name (==|!=) '([a-z_]+)'", expr)
+            self.assertIsNotNone(match, expr)
+            return (event == match.group(2)) == (match.group(1) == '==')
+
+        grype_if = re.search(r'^    if: (.+)$', grype, re.M).group(1)
+        script = textwrap.dedent(re.search(r"python3 - <<'PY'\n(.*?)\n\s*PY\n", result, re.S).group(1))
+        scanners = ('gitleaks', 'govulncheck', 'license-check', 'osv-scan')
+
+        def verdict(event, overrides=(), plan=None):
+            runs_grype = evaluate(grype_if, event)
+            needs = {'changes': {'result': 'success', 'outputs': plan or {}}}
+            needs.update({job: {'result': 'success'} for job in scanners})
+            needs['grype'] = {'result': 'success' if runs_grype else 'skipped'}
+            for job, value in overrides:
+                needs[job] = {'result': value}
+            env = dict(os.environ, RESULTS=json.dumps(needs))
+            for key in ('IS_PR', 'SKIP_GRYPE'):
+                env[key] = str(evaluate(expression(result, key), event)).lower()
+            run = subprocess.run(['python3', '-c', script], env=env, capture_output=True, text=True)
+            return runs_grype, run.returncode
+
+        pr_plan = {'gocode': 'true', 'deps': 'true'}
+        for event in ('pull_request', 'merge_group'):
+            plan = pr_plan if event == 'pull_request' else None
+            self.assertEqual(verdict(event, plan=plan), (False, 0), event)
+            # A grype result other than the planned skip is still an error.
+            for value in ('success', 'failure'):
+                self.assertNotEqual(verdict(event, [('grype', value)], plan)[1], 0, (event, value))
+            for job in scanners:
+                for value in ('skipped', 'failure', 'cancelled'):
+                    self.assertNotEqual(verdict(event, [(job, value)], plan)[1], 0, (event, job, value))
+        for event in ('push', 'schedule', 'workflow_dispatch'):
+            self.assertEqual(verdict(event), (True, 0), event)
+            for job in ('grype',) + scanners:
+                for value in ('skipped', 'failure'):
+                    self.assertNotEqual(verdict(event, [(job, value)])[1], 0, (event, job, value))
+
     def test_frontend_partitions_preserve_the_merged_gate(self):
         ci = self.text('ci.yml')
         partitions = self.job(ci, 'frontend-test-shards')
