@@ -57,3 +57,36 @@ func TestResolvePageChatContextRechecksBothReadersAndLiveGrant(t *testing.T) {
 		t.Fatalf("grant with revoked issuer: %v", err)
 	}
 }
+
+func TestPageChatKindMirrorsTheLibraryKinds(t *testing.T) {
+	for _, tc := range []struct {
+		document, slides bool
+		storage          string
+		designSystem     bool
+		want             string
+	}{
+		{document: true, want: "docs"},
+		{slides: true, want: "slides"},
+		{storage: "project", want: "app"},
+		{storage: "project", designSystem: true, want: "library"},
+		{storage: "dashboard", want: "dashboard"},
+		{storage: "slides", want: "slides"},
+		{storage: "design", want: "design"},
+		{storage: "word"},
+		{document: true, storage: "word"},
+		{storage: "sheet"},
+		{},
+	} {
+		if got := pageChatKind(tc.document, tc.slides, tc.storage, tc.designSystem); got != tc.want {
+			t.Errorf("%+v = %q", tc, got)
+		}
+	}
+}
+
+func TestResolvePageChatContextNamesNoGuideForAPanelPage(t *testing.T) {
+	h, wsID, _ := pagesAccessFixture(t)
+	page, err := h.ResolvePageChatContext(context.Background(), wsID, "alice", "agent-watcher", "fleet-201")
+	if err != nil || page.Kind != "" || page.GuideVersion != "" {
+		t.Fatalf("panel Page context = %+v, %v", page, err)
+	}
+}

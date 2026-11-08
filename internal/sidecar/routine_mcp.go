@@ -270,6 +270,7 @@ var routineMCPTools = append(append([]memoryMCPToolDescriptor{
 func init() {
 	routineMCPTools = append(routineMCPTools, artifactProjectMCPCatalog()...)
 	routineMCPTools = append(routineMCPTools, designMCPCatalog()...)
+	routineMCPTools = append(routineMCPTools, artifactKindGuideMCPCatalog()...)
 }
 
 // handleRoutinesMCP is the JSON-RPC 2.0 entry point in-container CLIs hit at
@@ -425,6 +426,9 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 	if !idOK {
 		s.writeRoutinesMCPToolResult(w, req, http.StatusForbidden,
 			mustJSON(map[string]string{"error": "unrecognized agent token"}))
+		return
+	}
+	if s.respondArtifactKindGuideMCPToolCall(w, req, params.Name, params.Arguments) {
 		return
 	}
 

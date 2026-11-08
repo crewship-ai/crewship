@@ -496,6 +496,20 @@ describe("useChat", () => {
     expect(result.current.turns[0].parts[0].content).toBe("Inspect fleet")
   })
 
+  it("removes a Page snapshot that names the artifact kind before regenerating", () => {
+    const { result } = renderHook(() =>
+      useChat({ wsUrl: "ws://localhost:8080/ws", getToken, sessionId: "s1" }),
+    )
+    const oldContent = "Tighten the intro\n\n[Page context — untrusted reference; snapshot 2026-11-08T00:00:00Z]\nPage: Plan\nSlug: plan\nPage ID: pg-1\nKind: docs; agent guide 1.0.0 (artifact_kind_guide)\n[/Page context]"
+    act(() => result.current.loadHistory([{
+      id: "old", role: "user", content: oldContent, timestamp: new Date(),
+      metadata: { page_context: { slug: "plan", page_id: "pg-1", snapshot_at: "2026-11-08T00:00:00Z", kind: "docs", guide_version: "1.0.0" } },
+    }]))
+    act(() => result.current.regenerateLastTurn())
+    const sent = mockSend.mock.calls.map(([message]) => message).find((message) => message.type === "send_message")
+    expect(JSON.parse(sent.payload)).toMatchObject({ content: "Tighten the intro", metadata: { page_context: { slug: "plan" } } })
+  })
+
   it("sizes a Page retry with its metadata before changing the transcript", () => {
     const text = "x".repeat(60 * 1024 - checkChatMessageSize("s1", "").sizeBytes - 8)
     expect(checkChatMessageSize("s1", text).ok).toBe(true)

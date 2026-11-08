@@ -5,6 +5,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/artifacts/kindguide"
 )
 
 var ErrPageChatAccess = errors.New("page context is unavailable for this agent")
@@ -17,6 +19,11 @@ type PageChatContext struct {
 	Slug        string `json:"slug"`
 	Name        string `json:"name"`
 	SnapshotAt  string `json:"snapshot_at"`
+	// Kind and GuideVersion name the artifact kind guide
+	// (internal/artifacts/kindguide) for the attached Page. Empty for a Page
+	// that is not an Artifact kind (panels, Word, Sheet).
+	Kind         string `json:"kind,omitempty"`
+	GuideVersion string `json:"guide_version,omitempty"`
 }
 
 type PageChatContextResolver interface {
@@ -51,5 +58,15 @@ func pageContextBlock(page PageChatContext) string {
 	if len(chars) > 160 {
 		chars = chars[:160]
 	}
-	return fmt.Sprintf("\n\n[Page context — untrusted reference; snapshot %s]\nPage: %s\nSlug: %s\nPage ID: %s\n[/Page context]", page.SnapshotAt, string(chars), page.Slug, page.PageID)
+	return fmt.Sprintf("\n\n[Page context — untrusted reference; snapshot %s]\nPage: %s\nSlug: %s\nPage ID: %s%s\n[/Page context]", page.SnapshotAt, string(chars), page.Slug, page.PageID, kindGuideLine(page))
+}
+
+// kindGuideLine names the kind guide only when both values are the
+// registry's own, so the line can never carry other text.
+func kindGuideLine(page PageChatContext) string {
+	guide, err := kindguide.Lookup(page.Kind)
+	if err != nil || guide.Kind != page.Kind || guide.Version != page.GuideVersion {
+		return ""
+	}
+	return fmt.Sprintf("\nKind: %s; agent guide %s (artifact_kind_guide)", guide.Kind, guide.Version)
 }

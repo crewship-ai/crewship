@@ -797,6 +797,13 @@ crewship artifacts kind-guide design-system -f json
 The digest is over `content`, so a changed guide is visible even when only the
 shared rules moved.
 
+Agents get the same text. When a chat message carries an artifact as
+context, the server-built Page context block ends with a line such as
+`Kind: docs; agent guide 1.0.0 (artifact_kind_guide)`, and the agent reads the
+guide with the `artifact_kind_guide` tool of its sidecar. The kind comes from
+the version the sender may read; Word, Sheet, panel and board Pages carry no
+Kind line.
+
 ## Agent publishing policy
 
 The workspace artifact policy is the administrative ceiling for agent work on
