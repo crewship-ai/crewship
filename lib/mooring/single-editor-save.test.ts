@@ -197,6 +197,23 @@ it("a local-only capture never lifts a quota refusal", async () => {
   await r.controller.close()
 })
 
+it("a press stopped by a hold leaves a quota refusal fenced for autosave", async () => {
+  const r = rig(), capture = deferred<{ bytes: Uint8Array; editorRevision: string }>()
+  r.transport.save.mockRejectedValueOnce(new NativeSaveError("quota"))
+  await r.controller.save()
+  r.engine.snapshot.mockReturnValueOnce(capture.promise)
+  const press = r.controller.save()
+  await vi.waitFor(() => expect(r.engine.snapshot).toHaveBeenCalledTimes(2))
+  r.controller.hold()
+  capture.resolve({ bytes: new Uint8Array([4]), editorRevision: "doc:2:0" })
+  await press
+  r.controller.release()
+  await new Promise(resolve => setTimeout(resolve, 80))
+  expect(r.transport.save).toHaveBeenCalledOnce()
+  expect(r.state).toHaveBeenLastCalledWith(expect.objectContaining({ phase: "draft", reason: "quota" }))
+  await r.controller.close()
+})
+
 it("keeps edits during an in-flight save dirty and persists them without replaying the original", async () => {
   const r = rig(), ack = deferred<ReturnType<typeof receipt>>()
   r.transport.save.mockReturnValueOnce(ack.promise)
