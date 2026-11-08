@@ -21,6 +21,8 @@ import { LocalDraftBanner } from "@/components/features/chat/artifact-context/cr
 import { ArtifactFrame, craftFrameStatus, type FrameAction, type FrameCapabilities, type FrameStatus } from "./frame"
 import { ArtifactPageContent } from "./page-content"
 import { ArtifactNativeEditor, type NativeAvailability } from "./native-editor"
+import { ProjectKindView } from "./kinds/project-kind-view"
+import type { KindReport } from "./kinds/project-parts"
 import { openInPagesHref, viewsProjectInline, type LibraryItem } from "./library-items"
 import { versioned } from "./library-filter"
 import { KINDS, kindOf, kindText } from "./kinds"
@@ -157,6 +159,9 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   const [availability, setAvailability] = useState<NativeAvailability>()
   const projects = useArtifactProjectsAvailable(workspaceId)
   const projectPreview = viewsProjectInline(item) && projects
+  // An App or Dashboard project lays itself out in the frame and reports its chip and edit right.
+  const dataApp = projectPreview && (resolved.kind === "app" || resolved.kind === "dashboard")
+  const [kindReport, setKindReport] = useState<KindReport | null>(null)
   const design = item.kind === "design" && artifactsDesign()
   // A legacy Page shows its own content here, with the views Pages draws.
   const pageContent = item.kind === "page" && Boolean(item.pageId)
@@ -186,8 +191,8 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   ]
   const caps: FrameCapabilities = {
     access: "ok",
-    canEdit: nativeEditor && availability === "enabled" ? craft?.canEdit === true : docsPage ? docs?.canEdit === true : false,
-    status: docsPage ? docs?.status ?? null : nativeStatus ?? catalogStatus(item),
+    canEdit: nativeEditor && availability === "enabled" ? craft?.canEdit === true : docsPage ? docs?.canEdit === true : kindReport?.canEdit === true,
+    status: docsPage ? docs?.status ?? null : nativeStatus ?? kindReport?.status ?? catalogStatus(item),
     agent: {
       ask: { chatHref: prompt => chatAskHref(workspaceId, item.slug, prompt) },
       permission: "The agent reads this artifact with your access. Ask changes nothing.",
@@ -198,10 +203,11 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   const documentColumn = (children: React.ReactNode) => <div className="mx-auto grid w-full max-w-5xl content-start gap-3 p-4 md:p-6">{children}</div>
   let body: React.ReactNode
   if (design) body = <div className="flex min-h-0 flex-1 flex-col"><DesignEditor workspaceId={workspaceId} slug={item.pageId ? "@" + item.pageId : item.slug} /></div>
+  else if (dataApp) body = <ProjectKindView workspaceId={workspaceId} target={target} kind={resolved.kind as "app" | "dashboard"} onBack={onBack} onReport={setKindReport} />
   else if (projectPreview) body = <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
     <div className="flex min-h-[520px] flex-1 overflow-hidden"><ArtifactViewerPanel variant="library" /></div>
   </ArtifactViewerProvider>
-  else if (pageContent) body = <ArtifactPageContent workspaceId={workspaceId} pageId={item.pageId!} onBack={onBack} />
+  else if (pageContent) body = <ArtifactPageContent workspaceId={workspaceId} pageId={item.pageId!} onBack={onBack} onReport={setKindReport} />
   else if (docsPage) body = <DocsBody workspaceId={workspaceId} item={item} onFrame={setDocs}
     fallback={documentColumn(<WordPreview workspaceId={workspaceId} item={item} />)} />
   else if (nativeEditor) body = <div className="flex min-h-0 flex-1 flex-col">
