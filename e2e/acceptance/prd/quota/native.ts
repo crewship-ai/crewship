@@ -79,6 +79,12 @@ export async function statusText(page: Page): Promise<string> {
   return (await page.getByRole("status").allInnerTexts()).map((s) => s.trim()).join(" | ")
 }
 
+/** The history budget the editor's status line carries as data (#5132: raw bytes are no longer printed). */
+export async function quotaData(page: Page): Promise<{ used: string | null; limit: string | null }> {
+  const status = page.locator("[role=status][data-quota-used]").first()
+  return { used: await status.getAttribute("data-quota-used"), limit: await status.getAttribute("data-quota-limit") }
+}
+
 async function frameOf(page: Page, frameTitle: string): Promise<Frame> {
   const handle = await page.locator(`iframe[title="${frameTitle}"]`).elementHandle({ timeout: 90_000 })
   const frame = await handle!.contentFrame()

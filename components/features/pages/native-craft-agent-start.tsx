@@ -16,6 +16,8 @@ export interface NativeCraftAgentStartProps {
  enabled:boolean
  holder?:'human'|'agent'|null
  onStarted(workId:string):void
+ /** Where the form renders once the server admits agents (the Artifacts Agent drawer); inline by default. */
+ place?:(form:React.ReactNode)=>React.ReactNode
 }
 interface Attempt {life:number;chatId:string;content:string;sent:boolean;messageId?:string}
 const object=(value:unknown):value is Record<string,unknown>=>Boolean(value)&&typeof value==='object'&&!Array.isArray(value)
@@ -44,7 +46,9 @@ export function NativeCraftAgentStart(props:NativeCraftAgentStartProps){
   })()
   return()=>abort.abort()
  },[enabled,workspaceId,pageId])
- return flag?<AgentStartForm {...props}/>:null
+ if(!flag)return null
+ const form=<AgentStartForm {...props}/>
+ return props.place?<>{props.place(form)}</>:form
 }
 
 /** One deliberate start: a new chat, the person's persisted message without a

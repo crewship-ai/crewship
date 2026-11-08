@@ -14,7 +14,7 @@
 import type { APIRequestContext, Page } from "@playwright/test"
 import * as fs from "node:fs"
 import { expect, prdRequirement, test } from "./fixtures"
-import { acquire, createNative, NATIVE_APPS, nativeAvailability, openEditor, readNative, refuseSavesAsFull, statusText, typeMarker } from "./quota/native"
+import { acquire, createNative, NATIVE_APPS, nativeAvailability, openEditor, quotaData, readNative, refuseSavesAsFull, statusText, typeMarker } from "./quota/native"
 import {
   alerts,
   announcedCopyActions,
@@ -243,7 +243,9 @@ test.describe("Word and Sheet history quota", () => {
       expect.soft(BigInt(read.quota.limitBytes) > 0n, `${a.label}: a positive history limit`).toBe(true)
       expect.soft(BigInt(read.quota.usedBytes) > 0n, `${a.label}: version 1 counts against the budget`).toBe(true)
       expect.soft(read.quota.retention, `${a.label}: every version is retained`).toBe("keep-all")
-      expect.soft(status, `${a.label}: the editor shows used / limit`).toContain(`Historie ${read.quota.usedBytes} / ${read.quota.limitBytes} B`)
+      // #5132: the status line no longer prints raw bytes; it carries them as data and words a warning.
+      expect.soft(await quotaData(page), `${a.label}: the editor carries used / limit`).toEqual({ used: read.quota.usedBytes, limit: read.quota.limitBytes })
+      expect.soft(status, `${a.label}: no raw byte counts on screen`).not.toContain(`${read.quota.limitBytes} B`)
     }
     await prd.evidence("native-budget.json", ev)
   })

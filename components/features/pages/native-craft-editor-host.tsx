@@ -84,7 +84,14 @@ function blocksEditorFrame(e:SecurityPolicyViolationEvent,src:string):boolean {
  try{const want=new URL(src),got=new URL(e.blockedURI);return got.origin===want.origin&&(got.pathname==='/'||got.pathname===want.pathname)}catch{return false}
 }
 interface Comparison {version:string;server:string;draft:string;serverHash:string;draftHash:string;equal:boolean;draftLabel?:string}
-interface Props {workspaceId:string;pageId:string;humanId:string;enabled?:boolean}
+/** What the host knows about its save and lock, for a frame's status chip (Artifacts, #5132). */
+export interface NativeCraftHostStatus {ready:boolean;phase?:string;savedVersion?:string;dirty:boolean;canEdit:boolean;editing:boolean;holder:{kind:'human'|'agent';name:string}|null;holderIsMe:boolean;openProposals:number;recoveredDrafts:number}
+interface Props {workspaceId:string;pageId:string;humanId:string;enabled?:boolean
+ /** Where the version history renders; inline by default. The Artifacts frame moves it into its History drawer. */
+ placeHistory?:(history:React.ReactNode)=>React.ReactNode
+ /** Where the agent task form renders, once the server admits agents; inline by default. */
+ placeAgentStart?:(form:React.ReactNode)=>React.ReactNode
+ onStatus?:(status:NativeCraftHostStatus)=>void}
 type Coordinator=ReturnType<typeof createSingleEditorSave>
 // A recovered draft whose bytes the server already holds is a save whose reply
 // was lost; nothing in it can be lost, so retire it instead of offering it.
@@ -102,7 +109,7 @@ interface Runtime {transferSaved?:boolean;enginePin:string;sessionId:string;port
 /** One authenticated client/session owns both lease controls and the isolated full Craft editor. */
 const READ_ONLY_REFUSED='Právo upravovat bylo odebráno. Neuložené změny zůstaly jako místní koncept. Sdílenou verzi zobrazíte obnovením stránky.'
 const METADATA_RETRY_MS=5000,METADATA_RETRY_MAX_MS=60000
-export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}:Props){
+export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,placeHistory,placeAgentStart,onStatus}:Props){
  const scopeKey=JSON.stringify([humanId,workspaceId,pageId])
  const [stateScope,setStateScope]=React.useState(scopeKey)
  const [readVerified,setReadVerified]=React.useState(false),[offerWithdrawn,setOfferWithdrawn]=React.useState(false)
@@ -126,6 +133,9 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   const url=new URL(window.location.href);url.searchParams.set('craft_task_id',workId);window.history.replaceState(window.history.state,'',url)
  },[])
  useLeaveGuard(dirty)
+ const statusSink=React.useRef(onStatus);statusSink.current=onStatus
+ const openProposals=proposals.filter(proposal=>proposal.state==='open').length
+ React.useEffect(()=>{statusSink.current?.({ready:readVerified&&!connectionRetired,phase:saveTrace?.phase,savedVersion,dirty,canEdit:view.can_edit===true,editing:ownsEditor,holder:view.holder?{kind:view.holder.kind,name:view.holder.display_name}:null,holderIsMe:view.mine,openProposals,recoveredDrafts:recoveries.length})},[readVerified,connectionRetired,saveTrace?.phase,savedVersion,dirty,view.can_edit,ownsEditor,view.holder,view.mine,openProposals,recoveries.length])
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
   setOfferWithdrawn(false);setAccessCheck(false);setStateScope(scopeKey);setReadVerified(false);setRetainedBuffer(false);setAuthEnded(false);setView(vacant);setRecoveries([]);setComparison(undefined);setProposals([]);setQuota(undefined);setApplicationId(undefined);setPublishedVersion(undefined);setHistoryKey(0);setSavedVersion(undefined);setDirty(false);setOwnsEditor(false);setError(undefined);setMismatch(undefined);setSaveTrace(undefined);setLabel('Připojuji…')
@@ -963,11 +973,11 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false}
   <NativeCraftLeaseBar view={view} self={humanId} mayEdit={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired} pending={busy} requested={Boolean(handoffRequest&&!connectionRetired&&!view.mine&&view.generation===handoffRequest.generation&&view.holder?.actor_id===handoffRequest.holder)} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>
   <NativeCraftAgentTaskStatus workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired} workId={agentWork}/>
   {readVerified&&!retainedBuffer&&!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&<Button disabled={busy} onClick={()=>control.current('acquire',{})}>Převzít úpravy</Button>}
-  <NativeCraftAgentStart workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired&&applicationId!==undefined&&!hostBlocked&&!hostRetiring} holder={view.holder?.kind??null} onStarted={agentStarted}/>
+  <NativeCraftAgentStart workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired&&applicationId!==undefined&&!hostBlocked&&!hostRetiring} holder={view.holder?.kind??null} onStarted={agentStarted} place={placeAgentStart}/>
   {!connectionRetired&&view.can_edit===true&&view.can_share===true&&ownsEditor&&<Button variant="outline" disabled={busy} onClick={()=>publishPreview.current()}>Publikovat náhled</Button>}
   {publishedVersion&&<p className="px-3 py-2">Sdílený náhled · verze {publishedVersion}</p>}
-  <div role="status" className="px-3 py-2" data-save-phase={saveTrace?.phase} data-save-reason={saveTrace?.reason}><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&<span className="ml-3 text-muted-foreground">Historie {quota.usedBytes} / {quota.limitBytes} B{quota.level==='full'?' · historie je plná':quota.level==='critical'?' · historie je téměř plná':quota.warning?' · blíží se limit':''}</span>}</div>
-  {readVerified&&historyKey>0&&!connectionRetired&&<NativeCraftVersionHistory load={signal=>history.current.load(signal)} loadVersion={(version,signal)=>history.current.loadVersion(version,signal)} scope={{humanId,workspaceId,pageId}} refreshKey={`${historyKey}:${savedVersion??''}`} canRestore={view.can_edit===true&&ownsEditor} restoreHint={view.can_edit===true?'Pro obnovení verze převezměte úpravy.':'Obnovit verzi může jen ten, kdo dokument právě upravuje.'} pending={busy} onRestore={version=>history.current.restore(version)}/>}
+  <div role="status" className="px-3 py-2" data-save-phase={saveTrace?.phase} data-save-reason={saveTrace?.reason} data-quota-used={quota?.usedBytes} data-quota-limit={quota?.limitBytes} data-quota-level={quota?.level}><span>{label}</span>{savedVersion&&<span> · verze {savedVersion}</span>}{quota&&(quota.level==='full'||quota.level==='critical'||quota.warning)&&<span className="ml-3 text-muted-foreground">{quota.level==='full'?'Version history is full':quota.level==='critical'?'Version history is almost full':'Version history is nearing its limit'}</span>}</div>
+  {readVerified&&historyKey>0&&!connectionRetired&&(placeHistory?placeHistory(<NativeCraftVersionHistory load={signal=>history.current.load(signal)} loadVersion={(version,signal)=>history.current.loadVersion(version,signal)} scope={{humanId,workspaceId,pageId}} refreshKey={`${historyKey}:${savedVersion??''}`} canRestore={view.can_edit===true&&ownsEditor} restoreHint={view.can_edit===true?'Pro obnovení verze převezměte úpravy.':'Obnovit verzi může jen ten, kdo dokument právě upravuje.'} pending={busy} onRestore={version=>history.current.restore(version)}/>):<NativeCraftVersionHistory load={signal=>history.current.load(signal)} loadVersion={(version,signal)=>history.current.loadVersion(version,signal)} scope={{humanId,workspaceId,pageId}} refreshKey={`${historyKey}:${savedVersion??''}`} canRestore={view.can_edit===true&&ownsEditor} restoreHint={view.can_edit===true?'Pro obnovení verze převezměte úpravy.':'Obnovit verzi může jen ten, kdo dokument právě upravuje.'} pending={busy} onRestore={version=>history.current.restore(version)}/>)}
   {quotaFull&&<div role="alert" className="space-y-2 border-y px-3 py-2"><p><b>Kapacita úložiště neumožňuje další uložení. Změny zatím nejsou uložené na serveru.</b> Editor je drží a koncept zůstává v tomto prohlížeči. Všechny dosavadní verze zůstávají.</p><p className="text-sm text-muted-foreground">Nezavírejte editor. Jakmile se místo uvolní, zvolte Uložit znovu (nebo Ctrl+S). Pro jistotu si práci stáhněte jako soubor.</p><div className="flex flex-wrap gap-2"><Button onClick={()=>retrySave.current()}>Uložit znovu</Button><Button variant="outline" onClick={()=>downloadDraft.current()}>Stáhnout koncept</Button></div></div>}
   {retainedBuffer&&<div role="group" aria-label="Obnova místní kopie" className="space-y-2 border-y px-3 py-2"><p>Poslední změny nebyly potvrzeně zachyceny. Původní editor zůstává uzamčený; jeho obsah se nepřepisuje novým dokumentem.</p>{readVerified&&!offerWithdrawn?<Button disabled={busy} variant="outline" onClick={()=>downloadDraft.current()}>Stáhnout místní kopii</Button>:<Button disabled={busy||authEnded} variant="outline" onClick={()=>retryRead.current()}>Znovu ověřit přístup</Button>}</div>}
   {uncertain&&<Button variant="outline" onClick={()=>reconcile.current(true)}>Ověřit výsledek</Button>}

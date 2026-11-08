@@ -1433,10 +1433,13 @@ describe('full native history',()=>{
   await waitFor(()=>expect(click).toHaveBeenCalledOnce())
   expect(journal.revokeRead).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull()
  })
- it.each([['near','blíží se limit'],['critical','historie je téměř plná'],['full','historie je plná']] as const)('tells a %s history apart in the status line',async(level,text)=>{
+ it.each([['near','Version history is nearing its limit'],['critical','Version history is almost full'],['full','Version history is full']] as const)('tells a %s history apart in the status line',async(level,text)=>{
   client.read.mockResolvedValue({version:"1",bytes:new TextEncoder().encode('{"body":[]}'),applicationId:"wordcraft",enginePin:"a".repeat(64),editorBundle:"b".repeat(64),editorURL:`https://native.example/b/${"b".repeat(64)}/index.html`,quota:{usedBytes:"96",limitBytes:"100",warning:true,level,retention:"keep-all"}})
   mount();await ready()
-  expect(await screen.findByText(new RegExp(`Historie 96 / 100 B · ${text}`))).toBeInTheDocument()
+  expect(await screen.findByText(text)).toBeInTheDocument()
+  // #5132: the raw byte budget is data for diagnostics, never printed.
+  expect(screen.queryByText(/96 \/ 100 B/)).toBeNull()
+  expect(screen.getAllByRole('status').find(node=>node.dataset.quotaUsed)?.dataset).toMatchObject({quotaUsed:'96',quotaLimit:'100',quotaLevel:level})
  })
  // #5124: the session used to stay blocked after one refusal, so the work
  // typed meanwhile could only be downloaded, never saved.
