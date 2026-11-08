@@ -217,7 +217,7 @@ export function ArtifactFrame({ name, kind, folder, caps, onHome, href, onShare,
     : layout === "tablet" ? "absolute inset-y-0 right-0 z-30 w-[min(360px,100%)] border-l shadow-lg" : "absolute inset-0 z-30 w-full"
 
   return <FrameContext.Provider value={context}>
-    <SubBar title="Artifacts" ariaLabel="Artifact" section={crumbs} meta={phone ? undefined : chip ?? undefined} actions={headerActions}
+    <SubBar title="Artifacts" ariaLabel="Artifact" section={crumbs} sectionText={caps.access === "denied" ? "Restricted artifact" : known ? name : "Artifact"} meta={phone ? undefined : chip ?? undefined} actions={headerActions}
       leading={phone ? <Button type="button" variant="ghost" size="icon-sm" aria-label="All artifacts" onClick={onHome} className="coarse:min-h-[44px] coarse:min-w-[44px]"><ArrowLeft aria-hidden className="size-4" /></Button> : undefined} />
     <div data-artifact-frame={kind.kind} data-kind-mode={kind.mode} data-layout={layout} className="relative flex min-h-0 flex-1 overflow-hidden">
       <div data-artifact-stage className="relative flex min-h-0 min-w-0 flex-1 flex-col">

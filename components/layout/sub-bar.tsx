@@ -62,6 +62,12 @@ export interface SubBarProps<T extends string = string> {
    * keep the plain full-strength title.
    */
   section?: React.ReactNode
+  /**
+   * The section as plain text, for the places that need a string (the phone
+   * heading for assistive technology, the tooltip). Required in practice when
+   * `section` is a node; a string `section` is used as is.
+   */
+  sectionText?: string
   /** Live, "·"-separated context (counts / status). Muted, hidden on mobile. */
   description?: React.ReactNode
   /** Extra inline nodes after the description (status badges, Live dot, …). */
@@ -175,6 +181,7 @@ export function SubBar<T extends string = string>({
   icon: Icon,
   title,
   section,
+  sectionText,
   description,
   meta,
   leading,
@@ -194,6 +201,8 @@ export function SubBar<T extends string = string>({
   const Heading = heading ? "h1" : "div"
   const slot = useAppStore((s) => s.pageBarSlot)
   const isMobile = useIsMobile()
+  // Never String(node): a node section once read "Artifacts / [object Object]".
+  const sectionLabel = sectionText ?? (typeof section === "string" || typeof section === "number" ? String(section) : null)
 
   // Harbor 2: on desktop and tablet the identity and the actions join the top
   // bar after the area's breadcrumb; a title that only repeats the area's name
@@ -266,7 +275,7 @@ export function SubBar<T extends string = string>({
             {leading && (
               <span
                 data-slot="sub-bar-detail-title"
-                title={typeof (section ?? title) === "string" ? String(section ?? title) : undefined}
+                title={section == null ? title : sectionLabel ?? undefined}
                 className="line-clamp-2 min-w-0 flex-1 whitespace-normal break-words text-control font-semibold leading-tight text-foreground [overflow-wrap:anywhere]"
               >
                 {section ?? title}
@@ -280,7 +289,7 @@ export function SubBar<T extends string = string>({
         {/* A title that only repeats the area stays the page's heading for
             assistive technology; one that names something else (a section, a
             sub-page) is drawn as the chip row's lead, not as a bar. */}
-        {!showIdentity && heading && <h1 className="sr-only">{section != null ? `${title} / ${section}` : title}</h1>}
+        {!showIdentity && heading && <h1 className="sr-only">{sectionLabel != null ? `${title} / ${sectionLabel}` : title}</h1>}
         {showIdentity && (
           <div data-slot="sub-bar-row" className={cn(ROW, "min-h-9 gap-2", SCROLL_X)} role="group" aria-label={ariaLabel}>
             <Heading className={cn("text-body whitespace-nowrap shrink-0", repeatsArea && section == null && "sr-only")}>
