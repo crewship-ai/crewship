@@ -34,6 +34,8 @@ export function ProposalReview({ proposal, headRev, reviewedRev, canDecide, hasL
   const [outcome, setOutcome] = useState<ProposalDecision>()
   const attempt = useRef<{ kind: Kind; id: string }>(undefined)
   const open = proposal.status === "open" && outcome?.status !== "done"
+  // An out-of-date proposal can no longer be accepted, only closed.
+  const stale = proposal.status === "stale" && outcome?.status !== "done"
   // Accepting reloads the editor: unsent edits must be confirmed or downloaded first.
   const needsChoice = hasLocalDraft
   async function decide(kind: Kind) {
@@ -57,13 +59,14 @@ export function ProposalReview({ proposal, headRev, reviewedRev, canDecide, hasL
     <DocumentCompare base={proposal.baseContent} target={proposal.proposedContent} baseLabel="the original" targetLabel="the proposal" />
     {outcome?.status === "done" && <p role="status">{outcome.rev === undefined ? "Done." : `Applied as revision ${outcome.rev}.`}</p>}
     {outcome && outcome.status !== "done" && <p role="alert">{RESULT[outcome.status]}</p>}
-    {open && (canDecide ? <div className="space-y-2">
-      {hasLocalDraft && <div role="status" className="space-y-2">
+    {stale && <p role="status">Its text changed after the proposal was made, so it can no longer be accepted. Reject it to close it.</p>}
+    {(open || stale) && (canDecide ? <div className="space-y-2">
+      {open && hasLocalDraft && <div role="status" className="space-y-2">
         <p>You have unsent edits. Accepting reloads the document, so wait until they are confirmed, or download them first.</p>
         <Button type="button" variant="outline" className="coarse:min-h-[44px]" onClick={onDownloadDraft}>Download unsent edits</Button>
       </div>}
       <div className="flex flex-wrap gap-2">
-        <Button type="button" className="coarse:min-h-[44px]" disabled={busy || needsChoice} onClick={() => void decide("accept")}>{retry === "accept" ? "Try again (same request)" : "Accept proposal"}</Button>
+        {open && <Button type="button" className="coarse:min-h-[44px]" disabled={busy || needsChoice} onClick={() => void decide("accept")}>{retry === "accept" ? "Try again (same request)" : "Accept proposal"}</Button>}
         {confirmReject ? <>
           <Button type="button" variant="destructive" className="coarse:min-h-[44px]" disabled={busy} onClick={() => void decide("reject")}>{retry === "reject" ? "Try again (same request)" : "Confirm reject"}</Button>
           <Button type="button" variant="ghost" className="coarse:min-h-[44px]" disabled={busy} onClick={() => setConfirmReject(false)}>Keep reviewing</Button>

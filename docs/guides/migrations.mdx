@@ -762,6 +762,7 @@ it is.
 | `20261028193410_page_comment_grants` | A `comment` level for page grants. Rebuilds `page_grants` inside the migration, keeping every grant. |
 | `20261028193411_page_catalog_management`, `20261028195659_artifact_project_test_origin` | `pages.archived_at` and the explicit test-item markers. Existing pages stay unarchived and unmarked. |
 | `20261028202000_artifact_design_yjs` | `artifact_design_documents` for the live Design canvas. Rebuilds `artifact_version_heads` and the Dashboard tables to admit the Design storage family, copying every row. Seeds the `artifacts_design` flag. |
+| `20261108204553_document_proposals` | Agent proposals on schema 4 documents (`document_proposals`) and the schema 4 propose mandate with an optional block scope on `document_iteration_intents`. Proposals are backed up with their Pages. |
 
 The flags `artifact_dashboard_data`, `artifact_slides` and `artifacts_design`
 stay off after the upgrade until an administrator enables them per workspace

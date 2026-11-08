@@ -14,7 +14,9 @@ import (
 )
 
 type DocumentDraftView struct {
-	PageID     string                 `json:"page_id"`
+	PageID string `json:"page_id"`
+	// Mode is "propose" on a schema-4 mandate: the run may only propose.
+	Mode       string                 `json:"mode,omitempty"`
 	Schema     int                    `json:"schema"`
 	Rev        int64                  `json:"rev"`
 	Generation int64                  `json:"generation"`
@@ -105,13 +107,21 @@ func (h *PageHandler) GetDocumentDraftAgent(w http.ResponseWriter, r *http.Reque
 		Epoch      string                 `json:"epoch"`
 		Outline    []DocumentOutlineBlock `json:"outline"`
 	}
-	if json.Unmarshal(raw, &remote) != nil || remote.Schema != 3 || remote.Rev != scope.Rev || remote.Generation != scope.Generation || remote.Epoch == "" || len(remote.Epoch) > 256 {
+	schema := 3
+	if scope.Propose {
+		schema = documents.ProposalSchema
+	}
+	if json.Unmarshal(raw, &remote) != nil || remote.Schema != schema || remote.Rev != scope.Rev || remote.Generation != scope.Generation || remote.Epoch == "" || len(remote.Epoch) > 256 {
 		replyError(w, 502, "invalid document draft view")
 		return
 	}
 	view := DocumentDraftView{PageID: scope.PageID, Schema: remote.Schema, Rev: remote.Rev, Generation: remote.Generation, Epoch: remote.Epoch, Targets: []DocumentOutlineBlock{}}
+	if scope.Propose {
+		view.Mode = "propose"
+	}
 	for _, target := range remote.Outline {
-		if target.Type != "paragraph" && target.Type != "heading" {
+		// The run reads only blocks inside its mandate (PRD §0.3/3).
+		if target.Type != "paragraph" && target.Type != "heading" || !scope.admits(target.ID) {
 			continue
 		}
 		if !documentRichID.MatchString(target.ID) || !documentDraftHash(target.Hash) || !utf8.ValidString(target.Text) {
@@ -158,8 +168,8 @@ func (h *PageHandler) MutateDocumentDraftAgent(w http.ResponseWriter, r *http.Re
 	}
 	var operation string
 	var generation int64
-	if json.Unmarshal(envelope["operation"], &operation) != nil || json.Unmarshal(envelope["generation"], &generation) != nil || generation < 0 || (operation != "patch" && operation != "checkpoint") {
-		replyError(w, 400, "draft patch or checkpoint and original generation required")
+	if json.Unmarshal(envelope["operation"], &operation) != nil || json.Unmarshal(envelope["generation"], &generation) != nil || generation < 0 || (operation != "patch" && operation != "checkpoint" && operation != "propose") {
+		replyError(w, 400, "draft patch, checkpoint or propose and original generation required")
 		return
 	}
 	request, err := documentDraftObject(envelope["request"])
@@ -172,8 +182,15 @@ func (h *PageHandler) MutateDocumentDraftAgent(w http.ResponseWriter, r *http.Re
 		documentAuthorityError(w, err)
 		return
 	}
-	var page string
+	var page, target string
 	_ = json.Unmarshal(request["page_id"], &page)
+	_ = json.Unmarshal(request["target"], &target)
+	// A propose mandate only proposes, and only inside its blocks; a direct
+	// draft mandate never proposes. The guards re-check this under the fence.
+	if scope.Propose != (operation == "propose") || (operation == "propose" && !scope.admits(target)) {
+		documentAuthorityError(w, errDocumentAccess)
+		return
+	}
 	if page != scope.PageID || generation != scope.Generation {
 		documentAuthorityError(w, documents.ErrConflict)
 		return
@@ -211,6 +228,15 @@ func (h *PageHandler) MutateDocumentDraftAgent(w http.ResponseWriter, r *http.Re
 	}
 	if json.Unmarshal(result, &receipt) != nil || receipt.ID != id || receipt.Rev != revision || receipt.Epoch != epoch {
 		replyError(w, 502, "document draft confirmation unavailable; retain the exact prepared request")
+		return
+	}
+	if operation == "propose" {
+		// A proposal changes nothing: same revision, the agent's own receipt.
+		if receipt.Kind != "proposal" || receipt.Actor != "agent:"+a.AgentID+":"+a.RunID {
+			replyError(w, 502, "document proposal confirmation unavailable; retain the exact prepared request")
+			return
+		}
+		writeJSON(w, status, receipt)
 		return
 	}
 	if operation == "checkpoint" {
@@ -267,7 +293,7 @@ func documentDraftObject(raw []byte) (map[string]json.RawMessage, error) {
 
 func validateDocumentDraftRequest(operation string, request map[string]json.RawMessage) error {
 	fields := []string{"id", "schema", "page_id", "epoch", "ifRev"}
-	if operation == "patch" {
+	if operation == "patch" || operation == "propose" {
 		fields = append(fields, "target", "ifHash", "text")
 	}
 	if len(request) != len(fields) {
@@ -280,7 +306,11 @@ func validateDocumentDraftRequest(operation string, request map[string]json.RawM
 	}
 	var schema int
 	var rev int64
-	if json.Unmarshal(request["schema"], &schema) != nil || schema != 3 || json.Unmarshal(request["ifRev"], &rev) != nil || rev < 0 {
+	want := 3
+	if operation == "propose" {
+		want = documents.ProposalSchema
+	}
+	if json.Unmarshal(request["schema"], &schema) != nil || schema != want || json.Unmarshal(request["ifRev"], &rev) != nil || rev < 0 {
 		return errors.New("original schema/revision required")
 	}
 	for _, name := range []string{"id", "page_id", "epoch"} {
@@ -292,7 +322,7 @@ func validateDocumentDraftRequest(operation string, request map[string]json.RawM
 			return errors.New("operation ID required")
 		}
 	}
-	if operation == "patch" {
+	if operation == "patch" || operation == "propose" {
 		var target, hash, text string
 		if json.Unmarshal(request["target"], &target) != nil || !documentRichID.MatchString(target) || json.Unmarshal(request["ifHash"], &hash) != nil || !documentDraftHash(hash) || json.Unmarshal(request["text"], &text) != nil || len(text) > documents.CreationMaxItemBytes {
 			return errors.New("bounded semantic target required")

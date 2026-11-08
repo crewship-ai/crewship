@@ -47,6 +47,17 @@ func (r *Router) registerDocumentRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/comments", roleInline, p.MutateDocument)
 	// openapi: responses 200,400,401,403,404,409,413,429,500,502,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/comments/resolve", roleInline, p.MutateDocument)
+	// Agent proposals on schema-4 Docs (#5137). Reading follows document read
+	// authority; accept and reject need Edit in the authority. Agents never
+	// review, and restricted members have no route here.
+	// openapi: responses 200,400,401,403,404,409,429,500,502,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/document/proposals", authed(wsCtx(http.HandlerFunc(p.ListDocumentProposals))))
+	// openapi: responses 200,400,401,403,404,409,429,500,502,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/document/proposals/{proposal}", authed(wsCtx(http.HandlerFunc(p.ReadDocumentProposal))))
+	// openapi: responses 200,400,401,403,404,409,413,429,500,502,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/document/proposals/{proposal}/accept", roleInline, p.AcceptDocumentProposal)
+	// openapi: responses 200,400,401,403,404,409,413,429,500,502,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/document/proposals/{proposal}/reject", roleInline, p.RejectDocumentProposal)
 }
 
 // This advertises release assets only. Initialization and every later content

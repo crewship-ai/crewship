@@ -2,14 +2,16 @@
 
 import * as React from "react"
 import { EditorContent, useEditorState } from "@tiptap/react"
-import { Download, FileText, History, ListTree, MessageSquare, PanelLeft, X } from "lucide-react"
+import { Download, FileText, GitPullRequestArrow, History, ListTree, MessageSquare, PanelLeft, Send, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { proposalChatHref } from "@/lib/documents/proposal-request"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { durabilityLabel, DocumentSaveState } from "@/components/features/pages/document-save-state"
 import { DocumentProposals } from "@/components/features/pages/document-proposals/document-proposals"
 import { DocumentEarlierDraftNotice, DocumentHistoryHost, DocumentRecoveryAlert, PageDocument, useDocumentWorkspace, type DocumentWorkspaceProps } from "@/components/features/pages/page-document"
 import { cn } from "@/lib/utils"
-import { ArtifactDrawerSection, ArtifactSlot, ArtifactTool, ArtifactToolSeparator, useArtifactFrame, type FrameLayout, type FrameStatus } from "../../frame"
+import { ArtifactAgentMode, ArtifactDrawerSection, ArtifactSlot, ArtifactTool, ArtifactToolSeparator, useArtifactFrame, type FrameLayout, type FrameStatus } from "../../frame"
 import type { LibraryItem } from "../../library-items"
 import { docsFrameStatus, outlineOf, readingStats, readingText, type DocNode, type OutlineEntry } from "./docs-model"
 import { DocsTools } from "./docs-tools"
@@ -113,6 +115,9 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     target?.scrollIntoView?.({ block: "center", behavior: "smooth" })
   }
   const stats = summary?.stats ?? { words: 0, minutes: 0 }
+  // Proposals exist only where the server says so (schema 4); otherwise no Propose mode and no tab.
+  const proposalsServed = Boolean(sync.state?.proposals) && available && !sync.denied
+  const [proposalPrompt, setProposalPrompt] = React.useState("")
 
   const editable = Boolean(sync.editable && !restoring && editor)
   const status = docsFrameStatus({
@@ -159,7 +164,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
         <DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status}
           durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} unverifiedDraft={sync.unverifiedDrafts.length > 0} lockless={sync.storageLockless} />
       </div>
-      {reviewEnabled && sync.state && !sync.denied && <DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} />}
+      {reviewEnabled && !proposalsServed && sync.state && !sync.denied && <DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} />}
       {!sync.denied && <>
         {sync.state && empty && <p className="text-sm text-muted-foreground">{editable ? "This document is empty. Start writing below, or ask an agent in a chat to draft it." : "This document is empty."}</p>}
         <EditorContent editor={editor} />
@@ -210,6 +215,25 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
       <DocsComments data={discussion} nameOf={nameOf} draft={draft} notice={commentNotice} active={activeThread}
         onCancelDraft={() => setDraft(null)} onWrite={writeComment} onJump={jumpToComment} />
     </ArtifactDrawerSection>}
+
+    {proposalsServed && sync.state && <>
+      {sync.state.can_write && <ArtifactAgentMode mode="propose">
+        <div className="grid gap-2" data-docs-propose>
+          <Textarea aria-label="What should the agent change?" placeholder="What should the agent change?" value={proposalPrompt}
+            onChange={event => setProposalPrompt(event.target.value)} className="min-h-20 text-sm" />
+          <p className="text-xs text-muted-foreground">The agent proposes changes in a private chat. On a shared document it needs edit access granted to it. Nothing changes until someone with edit access accepts them under Proposals.</p>
+          <div className="flex justify-end">
+            <Button asChild size="sm"><a href={proposalChatHref(workspaceId, { pageId, rev: sync.state.rev, generation: sync.state.generation }, proposalPrompt.trim())}>
+              <Send aria-hidden />Ask for a proposal</a></Button>
+          </div>
+        </div>
+      </ArtifactAgentMode>}
+      <ArtifactDrawerSection tab="proposals" label="Proposals" icon={GitPullRequestArrow}>
+        <div className="grid content-start gap-3 p-3.5">
+          <DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} />
+        </div>
+      </ArtifactDrawerSection>
+    </>}
 
     <ArtifactDrawerSection tab="history" label="History" icon={History}>
       <div className="grid content-start gap-3 p-3.5">

@@ -108,6 +108,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"document_receipts":     IntentInclude,
 	"document_checkpoints":  IntentInclude,
 	"document_comments":     IntentInclude,
+	"document_proposals":    IntentInclude,        // reviewable agent proposals; accept re-checks live rights and the target
 	"document_writer_fence": IntentExcludeRuntime, // installation-local SQL serialization singleton
 
 	"workspace_artifact_creation_policy":    IntentInclude,
