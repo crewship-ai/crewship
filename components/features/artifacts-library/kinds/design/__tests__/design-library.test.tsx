@@ -52,7 +52,7 @@ afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 describe("Design library", () => {
   it("shows the navigator, colours and typography from the manifest, read-only", () => {
     mount()
-    expect(within(slot("panel")!).getAllByRole("button").map(button => button.textContent)).toEqual(["Overview", "Colors2", "Typography1", "Spacing1", "Corner radius1", "Components1"])
+    expect(within(slot("panel")!).getAllByRole("button").map(button => button.textContent)).toEqual(["Overview", "Colors2", "Typography1", "Spacing1", "Corner radius1", "Components1", "Files1"])
     expect(screen.getByRole("heading", { name: "Harbor" })).toBeInTheDocument()
     expect(within(screen.getByRole("region", { name: "Colors" })).getByText("#2f6feb")).toBeInTheDocument()
     expect(within(screen.getByRole("region", { name: "Typography" })).getByText("body")).toBeInTheDocument()
@@ -120,5 +120,68 @@ describe("Design library", () => {
     expect(isDesignLibrary(snapshot({ artifact_kind: "slides" }))).toBe(false)
     vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM", "false")
     expect(isDesignLibrary(snapshot())).toBe(false)
+  })
+
+  it("lists every file of the system read-only and shows text as text, never rendered", () => {
+    const files = [
+      { path: "design-system.json", media_type: "application/json", content: TOKENS },
+      { path: "README.md", media_type: "text/markdown", content: "# Harbor" },
+      { path: "components/Button/preview.html", media_type: "text/html", content: "<script>window.bad = 1</script><img src=x onerror=alert(1)>" },
+    ]
+    state.snapshot = snapshot({ manifest: { version: 2, entrypoint: "index.html", files } })
+    mount()
+    expect(within(slot("panel")!).getByRole("button", { name: /Files/ })).toHaveTextContent("Files3")
+    const section = screen.getByRole("region", { name: "Files" })
+    // The supported sections are stated, so a section the Library has no place for is not read as lost data.
+    expect(section).toHaveTextContent("The Library shows colors, typography, spacing, corner radius and components from design-system.json")
+    const rows = within(section).getAllByRole("row").slice(1)
+    expect(rows.map(row => within(row).getAllByRole("cell").map(cell => cell.textContent))).toEqual([
+      ["design-system.json", "application/json", `${new TextEncoder().encode(TOKENS).byteLength} B`, expect.any(String)],
+      ["README.md", "text/markdown", "8 B", expect.any(String)],
+      ["components/Button/preview.html", "text/html", "59 B", expect.any(String)],
+    ])
+    fireEvent.click(within(section).getByRole("button", { name: "View components/Button/preview.html" }))
+    const viewer = within(section).getByRole("region", { name: "components/Button/preview.html" })
+    expect(viewer.querySelector("pre")).toHaveTextContent("<script>window.bad = 1</script>")
+    expect(viewer.querySelector("script, img, iframe")).toBeNull()
+    expect((window as unknown as { bad?: number }).bad).toBeUndefined()
+    expect(within(section).getByRole("button", { name: "View components/Button/preview.html" })).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(within(section).getByRole("button", { name: "View components/Button/preview.html" }))
+    expect(within(section).queryByRole("region", { name: "components/Button/preview.html" })).toBeNull()
+  })
+
+  it("downloads a file as opaque bytes under its own name", () => {
+    const created: Blob[] = []
+    const createObjectURL = vi.fn((blob: Blob) => { created.push(blob); return "blob:x" })
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() }))
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+    mount()
+    const section = screen.getByRole("region", { name: "Files" })
+    fireEvent.click(within(section).getByRole("button", { name: "Download design-system.json" }))
+    expect(created[0].type).toBe("application/octet-stream")
+    expect(click).toHaveBeenCalledTimes(1)
+    expect((click.mock.contexts[0] as HTMLAnchorElement).download).toBe("design-system.json")
+    click.mockRestore()
+  })
+
+  it("filters files with the library search", () => {
+    state.snapshot = snapshot({ manifest: { version: 2, entrypoint: "index.html", files: [
+      { path: "design-system.json", media_type: "application/json", content: TOKENS }, { path: "tokens.json", media_type: "application/json", content: "{}" },
+    ] } })
+    mount()
+    fireEvent.change(within(slot("view")!).getByRole("searchbox", { name: "Search the library" }), { target: { value: "tokens" } })
+    expect(within(screen.getByRole("region", { name: "Files" })).getAllByRole("row").slice(1).map(row => row.firstChild!.textContent)).toEqual(["tokens.json"])
+  })
+
+  it("truncates a long file in the viewer and says so", () => {
+    state.snapshot = snapshot({ manifest: { version: 2, entrypoint: "index.html", files: [
+      { path: "design-system.json", media_type: "application/json", content: TOKENS }, { path: "big.txt", media_type: "text/plain", content: "a".repeat(70 * 1024) },
+    ] } })
+    mount()
+    const section = screen.getByRole("region", { name: "Files" })
+    fireEvent.click(within(section).getByRole("button", { name: "View big.txt" }))
+    const viewer = within(section).getByRole("region", { name: "big.txt" })
+    expect(viewer.querySelector("pre")!.textContent).toHaveLength(64 * 1024)
+    expect(viewer).toHaveTextContent("Showing the first 64 KB. Download the file for all of it.")
   })
 })
