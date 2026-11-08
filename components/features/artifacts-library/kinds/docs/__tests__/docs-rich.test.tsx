@@ -32,6 +32,8 @@ const item = {
   projectBacked: false, empty: false, private: false, ownerLabel: "Research crew", folder: { slug: "lab", name: "Demo Lab" }, updatedAt: null,
 } as unknown as LibraryItem
 
+/** Markup that must stay text: tabs, trailing spaces and the final newline are part of what Copy returns. */
+const MARKUP = "<script>window.__ran = true</script>\n\t<img src=x onerror=\"window.__ran = true\">  \n"
 const p = (id: string, text: string, marks?: { type: string; attrs: object }[]) => ({ type: "paragraph", attrs: { id }, content: [{ type: "text", text, ...(marks ? { marks } : {}) }] })
 const formatted = { type: "doc", content: [
   p("goal", "Ship the agency offer on 2 December."),
@@ -42,6 +44,7 @@ const formatted = { type: "doc", content: [
     { type: "taskItem", attrs: { id: "done", checked: true }, content: [p("done-p", "Legal review")] },
     { type: "taskItem", attrs: { id: "open", checked: false }, content: [p("open-p", "Pricing page")] },
   ] },
+  { type: "codeBlock", attrs: { id: "markup", language: "html" }, content: [{ type: "text", text: MARKUP }] },
 ] }
 
 const comments = [
@@ -146,6 +149,64 @@ describe("Docs schema 4 formatting", () => {
     const editor = screen.getByLabelText("Document editor")
     const box = editor.querySelector<HTMLInputElement>('li[data-type="taskItem"] input')!
     expect(box.disabled).toBe(true)
+  })
+})
+
+describe("Docs code blocks", () => {
+  const blockDom = (editor: HTMLElement, id: string) => editor.querySelector<HTMLElement>(`[data-code-block][data-block-id="${id}"]`)!
+
+  it("colours code by its language with decorations that never change the document", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    const before = structuredClone(editor.editor.getJSON())
+    const python = blockDom(editor, "code")
+    await waitFor(() => expect(python.querySelector("pre .hljs-number")?.textContent).toBe("1"))
+    expect(python.querySelector("pre .hljs-built_in")?.textContent).toBe("print")
+    expect(python.querySelector("[data-code-language]")!.textContent).toBe("python")
+    // The colours are view state: the document, its text and its marks are exactly as loaded, and nothing is sent.
+    expect(editor.editor.getJSON()).toEqual(before)
+    expect(editor.editor.getJSON().content![2]).toEqual({ type: "codeBlock", attrs: { id: "code", language: "python" }, content: [{ type: "text", text: "print(1)" }] })
+    expect(posts("/document/patch")).toHaveLength(0)
+    // Markup is only tokenized: no element from the code text reaches the page, and nothing ran.
+    const markup = blockDom(editor, "markup")
+    await waitFor(() => expect(markup.querySelector("pre .hljs-name")).not.toBeNull())
+    expect(markup.querySelector("pre")!.textContent).toBe(MARKUP)
+    expect(editor.querySelector("script, img")).toBeNull()
+    expect((window as unknown as { __ran?: boolean }).__ran).toBeUndefined()
+  })
+
+  it("re-colours after a language change and an edit, still without marks in the text", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    act(() => { editor.editor.commands.command(({ tr }) => {
+      let pos = -1
+      tr.doc.descendants((node, at) => { if (node.attrs.id === "code") pos = at })
+      tr.setNodeMarkup(pos, undefined, { id: "code", language: "go" }); tr.insertText("func main() {}\n", pos + 1)
+      return true
+    }) })
+    const go = blockDom(editor, "code")
+    await waitFor(() => expect(go.querySelector("pre .hljs-keyword")?.textContent).toBe("func"))
+    expect(go.querySelector("[data-code-language]")!.textContent).toBe("go")
+    expect(editor.editor.getJSON().content![2].content).toEqual([{ type: "text", text: "func main() {}\nprint(1)" }])
+    expect(documentSchema.validateJSON(editor.editor.getJSON(), 4)).toBeTruthy()
+  })
+
+  it("copies the exact characters of a block, also for a reader", async () => {
+    serve()
+    env.canWrite = false
+    const writeText = vi.fn(async (_text: string) => {})
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } })
+    open()
+    expect(await screen.findByRole("button", { name: "Status: Read-only" })).toBeTruthy()
+    const editor = screen.getByLabelText("Document editor")
+    const copy = within(blockDom(editor, "markup")).getByRole("button", { name: "Copy html code" })
+    fireEvent.click(copy)
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(MARKUP))
+    expect(await within(blockDom(editor, "markup")).findByText("Copied")).toBeTruthy()
+    // The header is not document text: it is outside the code and outside the saved content.
+    expect(blockDom(editor, "markup").querySelector("pre")!.textContent).not.toContain("Copy")
   })
 })
 
