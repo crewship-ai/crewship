@@ -33,7 +33,7 @@ export function ArtifactPageContent({ workspaceId, pageId, onBack, onReport }: {
   const stage = React.useRef<HTMLDivElement>(null)
   useKindReport(onReport, { status: running ? { key: "live", label: "Running", detail: "The application runs isolated on its own origin." } : null, canEdit: false })
   const view = <PageView page={detail.page} slug={slug} loading={detail.loading} error={detail.error} notFound={detail.notFound}
-    onBack={onBack} backLabel="All artifacts" workspaceId={workspaceId} live={detail.live} />
+    onBack={onBack} backLabel="All artifacts" workspaceId={workspaceId} live={detail.live} hosted />
   const step = (direction: 1 | -1) => setZoom(current => stepZoom(current, direction))
   const loaded = detail.page && !detail.loading && !detail.error && !detail.accessDenied
   return <div ref={stage} className={cn("relative flex min-h-[520px] flex-1 flex-col overflow-hidden", running && "bg-muted", running && (phone ? "pt-14" : "px-4 pb-16 pt-16"))}>

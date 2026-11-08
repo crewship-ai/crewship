@@ -53,6 +53,15 @@ describe("ArtifactFrame", () => {
     expect(within(modes).getByRole("radio", { name: "Edit" })).toBeDisabled()
   })
 
+  it.each([["word", "document"], ["docs", "document"], ["sheet", "sheet"], ["slides", "deck"], ["dashboard", "dashboard"], ["app", "app"], ["design", "design"]] as const)(
+    "asks about a %s in plain English: this %s", (kind, noun) => {
+      render(<ArtifactFrame name="Item" kind={{ kind }} caps={caps({ agent: ask })} onHome={vi.fn()} layout="desktop"><p>body</p></ArtifactFrame>)
+      fireEvent.click(screen.getByRole("button", { name: "Agent" }))
+      const prompt = screen.getByRole("textbox", { name: "What should the agent do?" })
+      expect(prompt).toHaveAttribute("placeholder", `Ask about this ${noun}…`)
+      expect(prompt.getAttribute("placeholder")).not.toMatch(/docs|word\b/)
+    })
+
   it("hides the Agent tab when there is no agent path at all", () => {
     frame({ caps: caps({ agent: null }) })
     expect(screen.queryByRole("button", { name: "Agent" })).toBeNull()

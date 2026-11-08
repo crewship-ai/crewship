@@ -84,7 +84,8 @@ export function AppProjectView({ parts, onReport }: { parts: ArtifactViewerParts
         className={cn("relative flex min-h-[420px] w-full min-w-0 flex-col overflow-hidden bg-card", !phone && "rounded-lg border shadow-sm")}>
         <div className="flex h-7 shrink-0 items-center gap-2 border-b bg-muted/60 px-2.5 text-xs text-muted-foreground">
           <span className="min-w-0 flex-1 truncate font-mono">{parts.labelOf(parts.screen) || data.name || "app"} · v{version.shown}</span>
-          <span className="inline-flex shrink-0 items-center gap-1" title="Own origin. No access to your Crewship session, cookies or credentials."><ShieldCheck aria-hidden className="size-3" />Runs isolated</span>
+          {/* Said only of an app that runs: one that cannot run here loaded nothing to isolate. */}
+          {!gate && <span className="inline-flex shrink-0 items-center gap-1" title="Own origin. No access to your Crewship session, cookies or credentials."><ShieldCheck aria-hidden className="size-3" />Runs isolated</span>}
         </div>
         <div key={reloads} ref={parts.canvasRef} className="relative min-h-0 flex-1 bg-white">{gate ? <RuntimeGate /> : parts.preview}</div>
         {/* The composer floats over the preview on a wide stage and follows it on a narrow one. */}

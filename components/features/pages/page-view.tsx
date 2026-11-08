@@ -287,6 +287,13 @@ export interface PageViewProps {
    * refuse to claim liveness it cannot demonstrate.
    */
   live?: PageLiveness
+  /**
+   * Shown inside the Artifacts frame, which already names the artifact, its
+   * owner, its status and the way back. The view then draws no breadcrumb bar
+   * of its own (no second back link, no `@id`, no owner reference), only the
+   * producers that have never pushed.
+   */
+  hosted?: boolean
 }
 
 export function PageView({
@@ -303,6 +310,7 @@ export function PageView({
   mayEditAvatar,
   live = "offline",
   artifactKind,
+  hosted = false,
 }: PageViewProps) {
   // The bar is derived from the panels the SERVER sent, sealed placeholders
   // included, so it has the same shape for every viewer (§2.3). It lives out
@@ -341,8 +349,14 @@ export function PageView({
   return (
     <div className="flex h-full flex-col overflow-hidden">
       {/* Breadcrumb back-bar — inside the content area, matching /routines and
-          /issues, so it does not compete with the global sub-bar above. */}
-      <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2 print:hidden">
+          /issues, so it does not compete with the global sub-bar above. The
+          Artifacts frame has its own, so a hosted view keeps only the line
+          that names who has never pushed. */}
+      {hosted ? silentProducers.length > 0 && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2 print:hidden">
+          <SilentProducers producers={silentProducers} />
+        </div>
+      ) : <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card/40 px-4 py-2 print:hidden">
         <button
           type="button"
           onClick={onBack}
@@ -364,22 +378,7 @@ export function PageView({
           {/* Every producer that has never pushed, named and linked — the
               overview said "1 never produced" and this bar said nothing about
               WHO was meant to fill it (see docs/ux/README.md, empty states). */}
-          {silentProducers.length > 0 && (
-            <span className="type-page-meta inline-flex min-w-0 items-center gap-1.5 text-warn" data-testid="page-silent-producers">
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" aria-hidden />
-              {silentProducers.length === 1 ? "waiting on" : `${silentProducers.length} panels waiting on`}{" "}
-              {silentProducers.slice(0, 2).map((ref, i) => {
-                const href = refHref(ref)
-                return (
-                  <React.Fragment key={ref}>
-                    {i > 0 && ", "}
-                    {href ? <Link href={href} className="text-primary-hover hover:underline">{refLabel(ref)}</Link> : <span>{refLabel(ref)}</span>}
-                  </React.Fragment>
-                )
-              })}
-              {silentProducers.length > 2 && ` +${silentProducers.length - 2}`}
-            </span>
-          )}
+          {silentProducers.length > 0 && <SilentProducers producers={silentProducers} />}
           {page?.ownerLabel && (
             ownerHref ? (
               <Link href={ownerHref} className="type-page-meta shrink-0 text-muted-foreground-soft hover:text-primary-hover hover:underline" data-testid="page-owner-link">
@@ -391,7 +390,7 @@ export function PageView({
           )}
           <LiveIndicator liveness={live} />
         </div>
-      </div>
+      </div>}
 
       {/* The bar renders only when the groups it points at will render too.
           `tabs` is derived from the LAST page the query held, and TanStack
@@ -427,6 +426,26 @@ export function PageView({
         </div>
       </div>
     </div>
+  )
+}
+
+/** Every producer that has never pushed, named and linked. */
+function SilentProducers({ producers }: { producers: string[] }) {
+  return (
+    <span className="type-page-meta inline-flex min-w-0 items-center gap-1.5 text-warn" data-testid="page-silent-producers">
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-warn" aria-hidden />
+      {producers.length === 1 ? "waiting on" : `${producers.length} panels waiting on`}{" "}
+      {producers.slice(0, 2).map((ref, i) => {
+        const href = refHref(ref)
+        return (
+          <React.Fragment key={ref}>
+            {i > 0 && ", "}
+            {href ? <Link href={href} className="text-primary-hover hover:underline">{refLabel(ref)}</Link> : <span>{refLabel(ref)}</span>}
+          </React.Fragment>
+        )
+      })}
+      {producers.length > 2 && ` +${producers.length - 2}`}
+    </span>
   )
 }
 

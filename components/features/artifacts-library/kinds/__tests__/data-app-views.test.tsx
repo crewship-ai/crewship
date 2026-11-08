@@ -58,6 +58,18 @@ describe("App view", () => {
     await waitFor(() => expect(reports.at(-1)?.status).toMatchObject({ key: "error", label: "Can't run here" }))
   })
 
+  it("says Runs isolated only of an app that runs, never beside the can't-run gate", async () => {
+    const gated = snapshot({ interactive: { runtime_url: "", development_same_origin: false, collections: ["quotes"] } })
+    inFrame(<AppProjectView parts={parts({ data: gated, previewKind: "interactive" })} />)
+    await screen.findByRole("alert")
+    expect(screen.queryByText("Runs isolated")).toBeNull()
+    cleanup()
+    const running = snapshot({ interactive: { runtime_url: "https://apps.example.test/run", development_same_origin: false, collections: ["quotes"] } })
+    inFrame(<AppProjectView parts={parts({ data: running, previewKind: "interactive" })} />)
+    expect(await screen.findByText("Runs isolated")).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).toBeNull()
+  })
+
   it("applies device width and zoom to the preview frame on a wide stage", async () => {
     const { container } = inFrame(<AppProjectView parts={parts()} />)
     fireEvent.click(await screen.findByRole("button", { name: "Phone · 390" }))
