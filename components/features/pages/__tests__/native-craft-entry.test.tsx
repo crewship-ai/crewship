@@ -4,7 +4,8 @@ import {APP_ROUTE_PATTERNS,isKnownAppPath} from '@/lib/app-routes'
 import CraftPage from '@/app/(dashboard)/pages/craft/editor/page'
 const m=vi.hoisted(()=>({readLoss:vi.fn(),host:vi.fn(),preview:vi.fn(),fetch:vi.fn(),params:new URLSearchParams('workspace_id=w&page_id=p'),workspace:{workspaceId:'w',loading:false,linkUnavailable:false},session:{status:'authenticated',data:{user:{id:'human'}}}}))
 vi.mock('@/lib/mooring/native-read-loss',()=>({verifyNativeReadLoss:m.readLoss}))
-vi.mock('next/navigation',()=>({useSearchParams:()=>m.params}))
+const nav=vi.hoisted(()=>({replace:vi.fn()}))
+vi.mock('next/navigation',()=>({useSearchParams:()=>m.params,useRouter:()=>({replace:nav.replace,push:vi.fn()})}))
 vi.mock('@/hooks/use-auth',()=>({useSession:()=>m.session}))
 vi.mock('@/hooks/use-page-workspace',()=>({usePageWorkspace:()=>m.workspace}))
 vi.mock('@/lib/api-fetch',()=>({apiFetch:m.fetch}))
@@ -75,9 +76,19 @@ it('with the library on resolves a trusted session to the Artifacts detail, keep
  expect(screen.getByTestId('resolve').dataset).toMatchObject({reference:'@p',ws:'w'})
  await screen.findByText('Full native Word')
 })
-it.each([['restricted','true'],['trusted','false']])('keeps a %s session with the library %s on this route',async(access,library)=>{
- vi.stubEnv('NEXT_PUBLIC_ARTIFACTS_LIBRARY',library);r.access=access
+it('keeps a trusted session with the library off on this route',async()=>{
+ vi.stubEnv('NEXT_PUBLIC_ARTIFACTS_LIBRARY','false');r.access='trusted'
  render(<CraftPage/>)
  expect(screen.queryByTestId('resolve')).toBeNull()
  await screen.findByText('Full native Word')
+})
+// #5132: a restricted member's surface is /artifacts; the old editor address
+// is replaced there and the native editor never mounts.
+it.each(['true','false'])('replaces a restricted session at the old editor address with /artifacts (library %s)',async(library)=>{
+ vi.stubEnv('NEXT_PUBLIC_ARTIFACTS_LIBRARY',library);r.access='restricted';nav.replace.mockClear()
+ window.history.replaceState(null,'','/pages/craft/editor?page_id=p')
+ render(<CraftPage/>)
+ await vi.waitFor(()=>expect(nav.replace).toHaveBeenCalledWith('/artifacts/p'))
+ expect(screen.queryByTestId('resolve')).toBeNull()
+ expect(m.host).not.toHaveBeenCalled()
 })
