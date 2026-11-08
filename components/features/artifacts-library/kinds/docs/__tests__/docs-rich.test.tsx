@@ -121,7 +121,7 @@ describe("Docs schema 4 formatting", () => {
     // The code language shows for the code block the caret is in, and accepts only safe names.
     select(editor.editor, "code", 0, 1)
     fireEvent.click(await tools.findByRole("button", { name: "Code language" }))
-    const language = await screen.findByRole("textbox", { name: "Code language" })
+    const language = await screen.findByRole("combobox", { name: "Code language" })
     fireEvent.change(language, { target: { value: "Py thon" } }); fireEvent.click(screen.getByRole("button", { name: "Apply language" }))
     expect(await screen.findByText("Use a short language name such as python, go or c++.")).toBeTruthy()
     fireEvent.change(language, { target: { value: "go" } }); fireEvent.click(screen.getByRole("button", { name: "Apply language" }))
