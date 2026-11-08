@@ -2,11 +2,16 @@
 kind: library
 title: Library (design system)
 version: 1.0.0
+modes: [ask, comment, propose]
+capabilities:
+  supported: [tokens.colors, tokens.typography, tokens.spacing, tokens.radii, components]
+  unsupported: [aliases, themes, fonts, install]
 ---
 # Library agent guide
 
 A Library is a Design in Library mode: a versioned project artifact whose
-manifest carries `design-system.json`. The library shows its tokens. Use the artifact
+manifest carries `design-system.json`. Where the Design System preview is
+enabled, people see its tokens there. Use the artifact
 tools (`artifact_create`, `artifact_versions`, `artifact_publish`,
 `artifact_restore`; CLI `crewship page artifact ...`).
 

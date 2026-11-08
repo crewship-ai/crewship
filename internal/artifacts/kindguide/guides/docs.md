@@ -2,6 +2,10 @@
 kind: docs
 title: Docs
 version: 1.0.0
+modes: [ask, comment, edit]
+capabilities:
+  supported: [blocks.paragraph, blocks.heading, blocks.bulletList, blocks.orderedList, blocks.codeBlock, draft.replaceText]
+  unsupported: [marks.underline, marks.textColor, tables, math, embeds, tabs, propose]
 ---
 # Docs agent guide
 

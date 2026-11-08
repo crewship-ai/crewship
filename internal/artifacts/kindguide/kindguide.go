@@ -52,13 +52,30 @@ type Guide struct {
 	RulesVersion string `json:"rules_version"`
 	SHA256       string `json:"sha256"`
 	Bytes        int    `json:"bytes"`
-	Content      string `json:"content"`
+	// Modes are the agent modes this kind has a path for. A listed mode is
+	// still subject to the caller's live access on every call.
+	Modes        []string     `json:"modes"`
+	Capabilities Capabilities `json:"capabilities"`
+	Content      string       `json:"content"`
 }
 
+// Capabilities declares what the agent profile of a kind supports and, by
+// name, what it does not, so a client hides an unsupported feature instead
+// of imitating it. The declaration grants nothing.
+type Capabilities struct {
+	Supported   []string `json:"supported" yaml:"supported"`
+	Unsupported []string `json:"unsupported" yaml:"unsupported"`
+}
+
+// AgentModes is the closed mode vocabulary, in increasing authority.
+var AgentModes = []string{"ask", "comment", "propose", "edit"}
+
 type frontMatter struct {
-	Kind    string `yaml:"kind"`
-	Title   string `yaml:"title"`
-	Version string `yaml:"version"`
+	Kind         string       `yaml:"kind"`
+	Title        string       `yaml:"title"`
+	Version      string       `yaml:"version"`
+	Modes        []string     `yaml:"modes"`
+	Capabilities Capabilities `yaml:"capabilities"`
 }
 
 var registry = mustLoad()
@@ -82,6 +99,7 @@ func mustLoad() map[string]Guide {
 		out[kind] = Guide{
 			Kind: kind, Title: meta.Title, Version: meta.Version, RulesVersion: rulesMeta.Version,
 			SHA256: hex.EncodeToString(sum[:]), Bytes: len(content), Content: content,
+			Modes: meta.Modes, Capabilities: meta.Capabilities,
 		}
 	}
 	return out
@@ -130,17 +148,24 @@ func Lookup(kind string) (Guide, error) {
 	if err != nil {
 		return Guide{}, err
 	}
-	return registry[k], nil
+	return detached(registry[k]), nil
 }
 
 // Kinds returns the guide kinds in served order.
 func Kinds() []string { return append([]string(nil), order...) }
 
-// List returns every guide in served order. The slice is a copy.
+// List returns every guide in served order. Slices are copies.
 func List() []Guide {
 	out := make([]Guide, 0, len(order))
 	for _, kind := range order {
-		out = append(out, registry[kind])
+		out = append(out, detached(registry[kind]))
 	}
 	return out
+}
+
+func detached(g Guide) Guide {
+	g.Modes = append([]string{}, g.Modes...)
+	g.Capabilities.Supported = append([]string{}, g.Capabilities.Supported...)
+	g.Capabilities.Unsupported = append([]string{}, g.Capabilities.Unsupported...)
+	return g
 }

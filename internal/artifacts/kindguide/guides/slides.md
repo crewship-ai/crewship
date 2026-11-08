@@ -2,6 +2,10 @@
 kind: slides
 title: Slides
 version: 1.0.0
+modes: [ask, comment, propose]
+capabilities:
+  supported: [deck.order, element.text, element.shape, element.table, notes, profile.rich, export.pdf]
+  unsupported: [scripts, network, custom.fonts]
 ---
 # Slides agent guide
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/artifacts/kindguide"
@@ -84,7 +85,7 @@ func TestArtifactKindGuideServesOneKindAndAliases(t *testing.T) {
 			t.Fatal(err)
 		}
 		want, _ := kindguide.Lookup(tc.want)
-		if g != want {
+		if !reflect.DeepEqual(g, want) {
 			t.Fatalf("%s: served guide differs from the registry", tc.kind)
 		}
 	}

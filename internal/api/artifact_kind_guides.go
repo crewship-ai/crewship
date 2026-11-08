@@ -9,12 +9,13 @@ import (
 // artifactKindGuideSummary is one row of the guide catalog. The content is
 // served only by the per-kind route, so the list stays small.
 type artifactKindGuideSummary struct {
-	Kind         string `json:"kind"`
-	Title        string `json:"title"`
-	Version      string `json:"version"`
-	RulesVersion string `json:"rules_version"`
-	SHA256       string `json:"sha256"`
-	Bytes        int    `json:"bytes"`
+	Kind         string   `json:"kind"`
+	Title        string   `json:"title"`
+	Version      string   `json:"version"`
+	RulesVersion string   `json:"rules_version"`
+	SHA256       string   `json:"sha256"`
+	Bytes        int      `json:"bytes"`
+	Modes        []string `json:"modes"`
 }
 
 // artifactKindGuideList is the catalog envelope.
@@ -32,7 +33,7 @@ func ListArtifactKindGuides(w http.ResponseWriter, r *http.Request) {
 	guides := kindguide.List()
 	out := make([]artifactKindGuideSummary, 0, len(guides))
 	for _, g := range guides {
-		out = append(out, artifactKindGuideSummary{Kind: g.Kind, Title: g.Title, Version: g.Version, RulesVersion: g.RulesVersion, SHA256: g.SHA256, Bytes: g.Bytes})
+		out = append(out, artifactKindGuideSummary{Kind: g.Kind, Title: g.Title, Version: g.Version, RulesVersion: g.RulesVersion, SHA256: g.SHA256, Bytes: g.Bytes, Modes: g.Modes})
 	}
 	writeJSON(w, http.StatusOK, artifactKindGuideList{Guides: out})
 }

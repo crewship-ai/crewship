@@ -2,6 +2,10 @@
 kind: dashboard
 title: Dashboard
 version: 1.0.0
+modes: [ask, comment, propose, edit]
+capabilities:
+  supported: [collections, data.batch, bindings, meter]
+  unsupported: [scripts, network, svg, canvas, live.connectors]
 ---
 # Dashboard agent guide
 

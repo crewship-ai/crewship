@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -105,11 +106,14 @@ func TestAcceptance_ArtifactKindGuideBinary(t *testing.T) {
 		}
 		var got struct {
 			Kind, Version, SHA256, Content string
+			Modes                          []string
+			Capabilities                   kindguide.Capabilities
 		}
 		if err := json.Unmarshal(out, &got); err != nil {
 			t.Fatalf("%s output: %v", want.Kind, err)
 		}
-		if got.Kind != want.Kind || got.Version != want.Version || got.SHA256 != want.SHA256 || got.Content != want.Content {
+		if got.Kind != want.Kind || got.Version != want.Version || got.SHA256 != want.SHA256 || got.Content != want.Content ||
+			!slices.Equal(got.Modes, want.Modes) || !slices.Equal(got.Capabilities.Supported, want.Capabilities.Supported) || !slices.Equal(got.Capabilities.Unsupported, want.Capabilities.Unsupported) {
 			t.Fatalf("%s: CLI guide differs from the embedded registry", want.Kind)
 		}
 	}

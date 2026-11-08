@@ -2,6 +2,10 @@
 kind: app
 title: App
 version: 1.0.0
+modes: [ask, comment, propose]
+capabilities:
+  supported: [data.get, data.list, data.batch, viewer]
+  unsupported: [user.profile, room, presence, model, mcp, assets, downloads, comments, publish]
 ---
 # App agent guide
 

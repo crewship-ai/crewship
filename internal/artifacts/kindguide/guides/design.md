@@ -2,6 +2,10 @@
 kind: design
 title: Design
 version: 1.0.0
+modes: [ask, comment, edit]
+capabilities:
+  supported: [node.frame, node.rect, node.text, node.image, op.upsert, op.delete, op.reorder, versions, restore]
+  unsupported: [pages, notes, prototypes, components, typed.properties, propose]
 ---
 # Design agent guide
 
