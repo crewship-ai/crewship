@@ -19,7 +19,7 @@ vi.mock("@/hooks/use-pages", async importOriginal => ({
   },
 }))
 const windowState = vi.hoisted(() => ({ calls: [] as { params: string | null; offset: number; limit: number }[], pages: [] as PageView[], total: 0 }))
-vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-project-data", () => ({ useArtifactProjectsAvailable: () => state.projectsOn }))
+vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-project-data", () => ({ useArtifactProjectsAvailable: () => state.projectsOn, useArtifactProjectSnapshot: () => ({ data: undefined, error: null }) }))
 vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-context", () => ({
   ArtifactViewerProvider: ({ children, target }: { children: React.ReactNode; target: { slug: string; tab?: string } }) =>
     <div data-testid="viewer-provider" data-slug={target?.slug} data-tab={target?.tab}>{children}</div>,

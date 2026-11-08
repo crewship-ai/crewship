@@ -128,7 +128,7 @@ export function restoreDesignConflict(doc: Y.Doc, conflict: DesignConflict): "te
   return "text"
  }
  const { linkTo: _linkTo, ...layer } = { ...current.toJSON(), id: conflict.id } as DesignNode
- upsertDesignNode(doc, { ...layer, id: crypto.randomUUID(), name: `${layer.name || conflict.name} (obnovený text)`, y: (Number(layer.y) || 0) + (Number(layer.height) || 0) + 8, text: lost })
+ upsertDesignNode(doc, { ...layer, id: crypto.randomUUID(), name: `${layer.name || conflict.name} (restored text)`, y: (Number(layer.y) || 0) + (Number(layer.height) || 0) + 8, text: lost })
  return "layer"
 }
 

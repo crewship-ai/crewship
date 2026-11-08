@@ -94,7 +94,7 @@ describe("restoring a conflict's text", () => {
   expect(restoreDesignConflict(doc, conflict())).toBe("layer")
   const [kept, restored] = designNodes(doc)
   expect(kept).toMatchObject({ id: "label", text: "Newer", name: "Title" })
-  expect(restored).toMatchObject({ type: "text", text: "Lost", x: 10, y: 68, width: 200, height: 40, fill: "#111111", name: "Title (obnovený text)" })
+  expect(restored).toMatchObject({ type: "text", text: "Lost", x: 10, y: 68, width: 200, height: 40, fill: "#111111", name: "Title (restored text)" })
   expect(restored.id).not.toBe("label")
   expect(restored.linkTo).toBeUndefined()
  })
