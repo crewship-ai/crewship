@@ -579,9 +579,22 @@ func arcPoints(x1, y1, rx, ry, phiDeg float64, large, sweep bool, x2, y2 float64
 // (SVG preserveAspectRatio xMidYMid meet), with lucide's 2-unit round stroke.
 type iconPlan struct {
 	lines      []polyline
+	joins      []iconJoin
 	stroke     float64
 	primitives int
 }
+
+// iconJoin fills what butt-ended segments leave open at a vertex: a disc (round
+// cap or a sharp turn) or, for gentle turns along flattened curves, the outer
+// wedge between the two segment ends (within 0.02 stroke widths of the round
+// join for turns up to 30 degrees).
+type iconJoin struct {
+	disc  bool
+	at    point
+	wedge [4]point
+}
+
+const iconDiscTurn = math.Pi / 6
 
 func planIcon(el slides.Element) (iconPlan, error) {
 	lines, err := iconPolylines(el.Icon.Name)
@@ -591,40 +604,109 @@ func planIcon(el slides.Element) (iconPlan, error) {
 	s := math.Min(float64(el.Width), float64(el.Height)) / 24
 	ox, oy := float64(el.X)+(float64(el.Width)-24*s)/2, float64(el.Y)+(float64(el.Height)-24*s)/2
 	p := iconPlan{stroke: 2 * s}
+	r := s
 	for _, l := range lines {
 		pts := make([]point, len(l.points))
 		for i, q := range l.points {
 			pts[i] = point{X: ox + q.X*s, Y: oy + q.Y*s}
 		}
 		p.lines = append(p.lines, polyline{points: pts, closed: l.closed})
-		// One line and one 16-point disc per vertex (drawIcon).
-		p.primitives += 18 * len(pts)
+		n := len(pts)
+		segments := n - 1
+		if l.closed && n > 2 {
+			segments = n
+		}
+		p.primitives += 2 * segments
+		for i, q := range pts {
+			var prev, next *point
+			if i > 0 {
+				prev = &pts[i-1]
+			} else if l.closed && n > 2 {
+				prev = &pts[n-1]
+			}
+			if i+1 < n {
+				next = &pts[i+1]
+			} else if l.closed && n > 2 {
+				next = &pts[0]
+			}
+			if prev == nil || next == nil {
+				p.joins = append(p.joins, iconJoin{disc: true, at: q})
+				p.primitives += 16
+				continue
+			}
+			ax, ay := q.X-prev.X, q.Y-prev.Y
+			bx, by := next.X-q.X, next.Y-q.Y
+			la, lb := math.Hypot(ax, ay), math.Hypot(bx, by)
+			if la == 0 || lb == 0 {
+				p.joins = append(p.joins, iconJoin{disc: true, at: q})
+				p.primitives += 16
+				continue
+			}
+			turn := math.Abs(math.Atan2(ax*by-ay*bx, ax*bx+ay*by))
+			switch {
+			case turn > iconDiscTurn:
+				p.joins = append(p.joins, iconJoin{disc: true, at: q})
+				p.primitives += 16
+			case turn > 1e-9:
+				// Outer side: the normals of both segments on the side away from the turn.
+				side := 1.0
+				if ax*by-ay*bx > 0 {
+					side = -1
+				}
+				// The wedge reaches half a unit back into both segments and out to
+				// the round join's apex, so antialiasing leaves no seam.
+				ux, uy, vx, vy := ax/la, ay/la, bx/lb, by/lb
+				na := point{X: q.X - uy*r*side - ux*0.5, Y: q.Y + ux*r*side - uy*0.5}
+				nb := point{X: q.X - vy*r*side + vx*0.5, Y: q.Y + vx*r*side + vy*0.5}
+				mx, my := -(uy+vy)*side, (ux+vx)*side
+				ml := math.Hypot(mx, my)
+				apex := point{X: q.X + mx/ml*r, Y: q.Y + my/ml*r}
+				p.joins = append(p.joins, iconJoin{wedge: [4]point{q, na, apex, nb}})
+				p.primitives += 4
+			}
+		}
 	}
 	return p, nil
 }
 
-// drawIcon strokes each segment with a butt line and paints a disc of the
-// stroke width at every vertex: round caps and round joins, as in lucide.
+// drawIcon strokes each segment with a butt line and fills the joins planned
+// above: round caps and round (or near-round) joins, as in lucide.
 func drawIcon(pdf *gopdf.GoPdf, p iconPlan, color string) {
 	setColor(pdf.SetStrokeColor, color)
 	setColor(pdf.SetFillColor, color)
 	pdf.SetLineWidth(p.stroke)
 	r := p.stroke / 2
+	// Each segment reaches half a unit (at most r) past both ends, under the
+	// neighbouring segment or the cap disc, so abutting edges leave no
+	// antialiasing seam across the stroke.
+	segment := func(a, b point) {
+		dx, dy := b.X-a.X, b.Y-a.Y
+		d := math.Hypot(dx, dy)
+		if d == 0 {
+			return
+		}
+		e := math.Min(0.5, r) / d
+		pdf.Line(a.X-dx*e, a.Y-dy*e, b.X+dx*e, b.Y+dy*e)
+	}
 	for _, l := range p.lines {
 		n := len(l.points)
 		for i := 0; i+1 < n; i++ {
-			pdf.Line(l.points[i].X, l.points[i].Y, l.points[i+1].X, l.points[i+1].Y)
+			segment(l.points[i], l.points[i+1])
 		}
 		if l.closed && n > 2 {
-			pdf.Line(l.points[n-1].X, l.points[n-1].Y, l.points[0].X, l.points[0].Y)
+			segment(l.points[n-1], l.points[0])
 		}
-		for _, q := range l.points {
-			disc := make([]point, 16)
-			for i := range disc {
-				a := float64(i) * 2 * math.Pi / 16
-				disc[i] = point{X: q.X + r*math.Cos(a), Y: q.Y + r*math.Sin(a)}
-			}
-			pdf.Polygon(disc, "F")
+	}
+	for _, j := range p.joins {
+		if !j.disc {
+			pdf.Polygon(j.wedge[:], "F")
+			continue
 		}
+		disc := make([]point, 16)
+		for i := range disc {
+			a := float64(i) * 2 * math.Pi / 16
+			disc[i] = point{X: j.at.X + r*math.Cos(a), Y: j.at.Y + r*math.Sin(a)}
+		}
+		pdf.Polygon(disc, "F")
 	}
 }

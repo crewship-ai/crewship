@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"os"
@@ -191,24 +192,46 @@ func TestEveryIconFlattensInsideItsGrid(t *testing.T) {
 	}
 }
 
-// The icon budget counts what drawIcon emits: a line and a disc per vertex.
+// The icon budget counts what drawIcon emits, and a deck of 100 large icons
+// (every name of the allow-list, repeated) still fits the PDF budget.
 func TestIconPrimitiveBudget(t *testing.T) {
 	el := slides.Element{X: 0, Y: 0, Width: 280, Height: 280, Icon: &slides.Icon{Name: "users", Color: "#000000"}}
 	p, err := planIcon(el)
 	if err != nil {
 		t.Fatal(err)
 	}
-	points := 0
+	want := 0
 	for _, l := range p.lines {
-		points += len(l.points)
+		segments := len(l.points) - 1
+		if l.closed && len(l.points) > 2 {
+			segments++
+		}
+		want += 2 * segments
 	}
-	if p.primitives != 18*points {
-		t.Fatalf("primitives %d for %d vertices", p.primitives, points)
+	for _, j := range p.joins {
+		if j.disc {
+			want += 16
+		} else {
+			want += 4
+		}
+	}
+	if p.primitives != want || len(p.joins) == 0 {
+		t.Fatalf("primitives %d, want %d", p.primitives, want)
 	}
 	again, _ := iconPolylines("users")
 	first, _ := iconPolylines("users")
 	if &again[0] != &first[0] {
 		t.Error("icon geometry is flattened again for every element")
+	}
+	d := richDeck()
+	d.Slides[0].Elements[3].Text.LineHeight = 100
+	d.Slides[0].Elements[3].Height = 300
+	names := slides.IconNames()
+	for i := 0; i < 100; i++ {
+		d.Slides[0].Elements = append(d.Slides[0].Elements, slides.Element{ID: fmt.Sprintf("icon%d", i), Type: "icon", X: (i % 10) * 190, Y: (i / 10) * 100, Width: 96, Height: 96, Icon: &slides.Icon{Name: names[i%len(names)], Color: "#E8833A"}})
+	}
+	if _, err := Render(context.Background(), d); err != nil {
+		t.Fatalf("100 icons: %v", err)
 	}
 }
 
