@@ -2,11 +2,12 @@
 
 import * as React from "react"
 import type * as Y from "yjs"
-import { Maximize, Minus, Plus, StickyNote } from "lucide-react"
+import { Maximize, MessageSquare, Minus, Plus, StickyNote } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { fitAll, focusRect, moved, nextPlacement, nudged, pan, resized, toWorld, wheelFactor, zoomAt, type Handle, type Rect, type Viewport } from "@/lib/documents/canvas-viewport"
 import { documentSurface, type SurfaceItem, type SurfacePlacement, type SurfaceView } from "@/lib/documents/surface"
+import type { DocumentComment } from "@/hooks/use-document-comments"
 
 /**
  * The Canvas view of one Docs document (R71 rev 2 §0.4). It shows the same
@@ -26,6 +27,15 @@ export interface DocsCanvasProps {
   origin: string
   /** Open this block in the Page view (double-click or Enter on a card). */
   onOpenInPage?: (blockId: string) => void
+  /**
+   * The document's comment threads, as the Page shows them. Comments anchor to
+   * blocks (R71 §0.4/4), never to placements: a card shows the open threads of
+   * its block and everything nested in it, so a move keeps them and switching
+   * views never creates a second thread.
+   */
+  comments?: readonly DocumentComment[]
+  /** Open these threads (the same ones the Page lists) in the Comments drawer. */
+  onOpenComments?: (blockId: string, threadIds: string[]) => void
 }
 
 type Drag =
@@ -45,11 +55,43 @@ function plain(node: Y.XmlElement | Y.XmlText | Y.XmlFragment): string {
   return (node as Y.XmlElement).toArray().map(child => plain(child as Y.XmlElement)).join(" ")
 }
 
+/** An XmlElement (XmlText also has attributes, but no children or node name). */
+const isElement = (node: unknown): node is Y.XmlElement => typeof (node as Y.XmlElement)?.nodeName === "string" && typeof (node as Y.XmlElement).toArray === "function"
+
+/** Every block ID mapped to the top-level Page block that contains it (itself when top-level). */
+export function topLevelOf(doc: Y.Doc): Map<string, string> {
+  const owner = new Map<string, string>()
+  const visit = (node: Y.XmlElement, top: string) => {
+    const id = node.getAttribute("id")
+    if (typeof id === "string") owner.set(id, top)
+    for (const child of node.toArray()) if (isElement(child)) visit(child, top)
+  }
+  for (const node of doc.getXmlFragment("default").toArray()) {
+    if (!isElement(node)) continue
+    const id = node.getAttribute("id")
+    if (typeof id === "string") visit(node, id)
+  }
+  return owner
+}
+
+/** Open threads per top-level block: roots only, resolved and detached ones excluded. */
+export function threadsByBlock(doc: Y.Doc, comments: readonly DocumentComment[]): Map<string, string[]> {
+  const owner = topLevelOf(doc), result = new Map<string, string[]>()
+  for (const comment of comments) {
+    if (comment.parent || comment.resolved || !comment.block || comment.status === "detached" || comment.status === "resolved") continue
+    const top = owner.get(comment.block)
+    if (!top) continue
+    result.set(top, [...(result.get(top) ?? []), comment.id])
+  }
+  return result
+}
+
 /** Top-level Page blocks with their plain text, in Page order. */
 export function pageBlocks(doc: Y.Doc): BlockSummary[] {
   return doc.getXmlFragment("default").toArray().flatMap(node => {
-    const element = node as Y.XmlElement
-    const id = typeof element.getAttribute === "function" ? element.getAttribute("id") : undefined
+    if (!isElement(node)) return []
+    const element = node
+    const id = element.getAttribute("id")
     if (typeof id !== "string") return []
     const level = element.getAttribute("level") as unknown
     return [{ id, type: element.nodeName, text: plain(element).replace(/\s+/g, " ").trim(), ...(typeof level === "number" ? { level } : {}) }]
@@ -78,7 +120,7 @@ const handleClass: Record<string, string> = {
   se: "bottom-[-5px] right-[-5px] size-3 cursor-nwse-resize",
 }
 
-export function DocsCanvas({ doc, editable, origin, onOpenInPage }: DocsCanvasProps) {
+export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOpenComments }: DocsCanvasProps) {
   const { view: surface, blocks, error } = useSurface(doc)
   const ref = React.useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = React.useState<Viewport>({ x: -48, y: -48, scale: 1 })
@@ -91,6 +133,8 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage }: DocsCanvasPr
   const fitted = React.useRef(false)
 
   const byId = React.useMemo(() => new Map(blocks.map(b => [b.id, b])), [blocks])
+  // Recomputed with the blocks: a Page edit that nests or moves a commented block updates its card.
+  const threads = React.useMemo(() => blocks && comments ? threadsByBlock(doc, comments) : new Map<string, string[]>(), [doc, blocks, comments])
   const placements = React.useMemo(() => surface?.placements ?? [], [surface])
   const items = React.useMemo(() => surface?.items ?? [], [surface])
   const rects = React.useMemo(() => [...placements, ...items.filter(i => i.kind !== "connector")] as (SurfacePlacement | Exclude<SurfaceItem, { kind: "connector" }>)[], [placements, items])
@@ -252,6 +296,12 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage }: DocsCanvasPr
               selected === p.id && "ring-2 ring-primary")}
             style={{ left: r.x, top: r.y, width: r.w, minHeight: r.h, zIndex: p.z }}>
             <p className={cn("whitespace-pre-wrap break-words", block.type === "heading" && "text-base font-semibold")}>{block.text || <span className="text-muted-foreground">Empty block</span>}</p>
+            {(threads.get(p.id)?.length ?? 0) > 0 && <button type="button" data-card-comments={p.id}
+              aria-label={`${threads.get(p.id)!.length} open ${threads.get(p.id)!.length === 1 ? "comment" : "comments"} on this block`}
+              onPointerDown={e => e.stopPropagation()} onClick={() => onOpenComments?.(p.id, threads.get(p.id)!)}
+              className="absolute right-1.5 top-1.5 inline-flex items-center gap-1 rounded-sm bg-warn/20 px-1.5 py-0.5 text-xs tabular-nums hover:bg-warn/35 coarse:min-h-[44px]">
+              <MessageSquare aria-hidden className="size-3.5" />{threads.get(p.id)!.length}
+            </button>}
             {editable && selected === p.id && HANDLES.map(h => <span key={h} aria-hidden data-handle={h}
               onPointerDown={e => onPointerDown(e, { id: p.id, handle: h })}
               className={cn("absolute rounded-sm border border-primary bg-background", handleClass[h])} />)}
