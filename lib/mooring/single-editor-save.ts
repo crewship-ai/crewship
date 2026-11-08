@@ -371,6 +371,11 @@ export function createSingleEditorSave(options: SingleEditorSaveOptions) {
       // transport, but never replay a queued ticket after an unknown ACK.
       const unavailable = () => readRevoked ? "read_revoked" : !active ? "native_session_retired" : !writable ? "write_revoked" : held ? "native_save_held" : blocked ?? (unconfirmed ? "unconfirmed" : pending ? "pending" : undefined)
       const refused = (reason: string) => reason === "read_revoked" ? new NativeSaveError("read_revoked") : new Error(reason)
+      // A full quota refused one save; it is no fence on this session. Nothing
+      // committed, so a press (Ctrl+S or "Uložit znovu") asks the server again
+      // at the same base: once space is free it saves this draft (#5124).
+      // Autosave never retries a quota refusal by itself.
+      if (explicit && blocked === "quota") blocked = undefined
       let lookedUp = false
       for (;;) {
         if (manual) while (pending && active && writable && !blocked && !unconfirmed) await pending.done

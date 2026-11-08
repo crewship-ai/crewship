@@ -375,25 +375,33 @@ The same browser-copy rules as for Docs apply; see
 Every saved version is kept. Each Word document or Sheet has its own history
 budget, 16 GiB. The status line shows how much is used, for example
 *Historie 1288490188 / 17179869184 B*. From 80 % it adds
-*blíží se limit* ("nearing the limit").
+*blíží se limit* ("nearing the limit"), from 95 % *historie je téměř plná*
+("history almost full") and at the limit *historie je plná* ("history full").
 
-When a save would go over the budget, the server refuses it and keeps every
-existing version. The status line stays on **Neuložený koncept**, and an alert
-appears under it: *Historie dokumentu je plná (X / Y B). Další verze se
-neuloží.* ("The document history is full. No further versions will be
-saved."). It adds that every earlier version is kept and that your unsaved
-changes are in this browser.
+When a save would go over the budget of the document, the workspace or the
+instance, the server refuses it and keeps every existing version. The status
+line stays on **Neuložený koncept**, and an alert appears under it:
+*Kapacita úložiště neumožňuje další uložení. Změny zatím nejsou uložené na
+serveru.* ("Storage capacity does not allow another save. Your changes are not
+yet saved on the server."). The editor keeps your changes, the draft stays in
+this browser and every earlier version is kept.
 
-The budget is fixed in this release. Crewship doesn't delete old versions, and
-the app offers no way to raise the budget or clear the history. To keep your
-work:
+Autosave doesn't retry on its own. To keep your work:
 
-1. Choose **Stáhnout koncept** (Download draft) in the alert. You get the
+1. Leave the editor open and keep working if you like.
+2. Once space is freed (for example an instance administrator raises the
+   workspace limit with `crewship admin instance artifact-storage set`),
+   choose **Uložit znovu** (Save again) in the alert or press Ctrl+S. The
+   editor sends the current content as a new version; if storage is still
+   full, the alert stays and nothing is lost.
+3. To be safe, choose **Stáhnout koncept** (Download draft). You get the
    current content of the editor as a `wordcraft-recovery.json` or
    `gridcraft-recovery.json` file. You can also export from the editor itself.
-2. Carry on in a new document: create one as described in
-   [Create a Word document or a Sheet](#create-a-word-document-or-a-sheet),
-   and carry over what you need from the downloaded file.
+
+Crewship doesn't delete old versions, and the per-document budget is fixed in
+this release. If the document's own history is full, a retry is refused again:
+download the draft and carry on in a new document (see
+[Create a Word document or a Sheet](#create-a-word-document-or-a-sheet)).
 
 The draft also stays in this browser. When you open the editor again, it is
 offered as a **Místní koncept** row, as after a crash.

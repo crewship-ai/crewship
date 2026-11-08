@@ -12,7 +12,8 @@ export interface NativeDocumentClientOptions {
 }
 export interface NativeDocumentSnapshot {
  version:string;bytes:Uint8Array;applicationId:"wordcraft"|"gridcraft";enginePin:string;editorBundle:string;editorURL:string
- quota:{usedBytes:string;limitBytes:string;warning:boolean;retention:string}
+ /** `level` (near 80 %, critical 95 %, full) when the server reports it; older servers send only `warning`. */
+ quota:{usedBytes:string;limitBytes:string;warning:boolean;retention:string;level?:"none"|"near"|"critical"|"full"}
 }
 export interface NativeShareRequest {
  workspaceId:string;pageId:string;applicationId:string;enginePin:string;sessionId:string;generation:string;baseVersion:string;targetVersion:string
@@ -293,7 +294,7 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    if(!validNativeVersion(v.version)||v.version==="0"||v.applicationId!==applicationId||typeof v.enginePin!=="string"||!/^[a-f0-9]{64}$/.test(v.enginePin)||typeof v.editorBundle!=="string"||!/^[a-f0-9]{64}$/.test(v.editorBundle)||typeof v.editorURL!=="string"||!v.editorURL.endsWith(`/b/${v.editorBundle}/index.html`)||typeof v.bytes!=="string"||!v.bytes.length||v.bytes.length>44739244||!q||!validNativeVersion(q.usedBytes)||!validNativeVersion(q.limitBytes)||q.limitBytes==="0"||typeof q.warning!=="boolean"||typeof q.retention!=="string")throw new Error("invalid_native_document")
    let bytes:Uint8Array
    try {const binary=atob(v.bytes);if(!binary.length||binary.length>32*1024*1024)throw new Error();bytes=Uint8Array.from(binary,c=>c.charCodeAt(0))}catch{throw new Error("invalid_native_document")}
-   return {version:v.version,bytes,applicationId:applicationId as "wordcraft"|"gridcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention}}
+   return {version:v.version,bytes,applicationId:applicationId as "wordcraft"|"gridcraft",enginePin:v.enginePin,editorBundle:v.editorBundle,editorURL:v.editorURL,quota:{usedBytes:q.usedBytes,limitBytes:q.limitBytes,warning:q.warning,retention:q.retention,...(q.level==="none"||q.level==="near"||q.level==="critical"||q.level==="full"?{level:q.level}:{})}}
   },
   async proposals(signal){
    ready();const response=await send(`${base}proposals?${query}`,{method:'GET',cache:'no-store',signal,headers:{'X-Craft-Session':token!}})

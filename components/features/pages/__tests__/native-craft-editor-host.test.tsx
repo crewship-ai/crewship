@@ -1433,6 +1433,32 @@ describe('full native history',()=>{
   await waitFor(()=>expect(click).toHaveBeenCalledOnce())
   expect(journal.revokeRead).not.toHaveBeenCalled();expect(document.querySelector('iframe')).not.toBeNull()
  })
+ it.each([['near','blíží se limit'],['critical','historie je téměř plná'],['full','historie je plná']] as const)('tells a %s history apart in the status line',async(level,text)=>{
+  client.read.mockResolvedValue({version:"1",bytes:new TextEncoder().encode('{"body":[]}'),applicationId:"wordcraft",enginePin:"a".repeat(64),editorBundle:"b".repeat(64),editorURL:`https://native.example/b/${"b".repeat(64)}/index.html`,quota:{usedBytes:"96",limitBytes:"100",warning:true,level,retention:"keep-all"}})
+  mount();await ready()
+  expect(await screen.findByText(new RegExp(`Historie 96 / 100 B · ${text}`))).toBeInTheDocument()
+ })
+ // #5124: the session used to stay blocked after one refusal, so the work
+ // typed meanwhile could only be downloaded, never saved.
+ it('keeps the changes and saves them with "Uložit znovu" once space is free',async()=>{
+  mount();await ready();await acquire()
+  client.save.mockRejectedValueOnce(new NativeSaveError('quota')).mockRejectedValueOnce(new NativeSaveError('quota'))
+  act(()=>portOptions.at(-1)!.onChanged('edit-at-full-quota','doc'))
+  expect(await screen.findByText(/Změny zatím nejsou uložené na serveru/)).toBeInTheDocument()
+  expect(client.save).toHaveBeenCalledOnce()
+  // Still full: refused again, nothing is lost and the alert stays.
+  fireEvent.click(screen.getByRole('button',{name:'Uložit znovu'}))
+  await waitFor(()=>expect(client.save).toHaveBeenCalledTimes(2))
+  expect(await screen.findByRole('button',{name:'Uložit znovu'})).toBeInTheDocument()
+  expect(journal.confirm).not.toHaveBeenCalled()
+  // Space freed: the next press commits the draft as a new version.
+  fireEvent.click(screen.getByRole('button',{name:'Uložit znovu'}))
+  await waitFor(()=>expect(client.save).toHaveBeenCalledTimes(3))
+  expect(client.save.mock.calls[2][0]).toMatchObject({baseVersion:'1'})
+  expect(await screen.findByText('Uloženo')).toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'Uložit znovu'})).toBeNull()
+  expect(journal.revokeRead).not.toHaveBeenCalled()
+ })
 })
 
 describe('unchanged-content transfer (G4 B1/B2)',()=>{
