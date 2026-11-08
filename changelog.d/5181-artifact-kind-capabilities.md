@@ -1,0 +1,1 @@
+- **Artifact kind guides declare agent modes and capabilities.** Each guide lists the modes the kind supports and its supported and unsupported capabilities; Docs and Design declare Propose unsupported, and an App lists only the runtime methods it serves.
