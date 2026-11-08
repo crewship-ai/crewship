@@ -187,11 +187,12 @@ does require one, so the same artifact is not a valid
 [`slides initialize`](/cli/slides) target.)
 
 Then supply a JSON request
-containing an operation `id`, explicit `schema` (2, 3 or 4), and a `body` document
-tree. Schemas 3 and 4 also require the original `page_id`. Headings, paragraphs,
+containing an operation `id`, explicit `schema` (2, 3, 4 or 5), and a `body` document
+tree. Schemas 3, 4 and 5 also require the original `page_id`. Headings, paragraphs,
 lists and simple tables use schema 2; schema 3 adds links, inline code and code
 blocks; schema 4 adds bold, italic and strikethrough, a code block `language`,
-block quotes and checklists. Initialization does not silently upgrade an
+block quotes and checklists; schema 5 adds underline, text colour and
+highlight. Initialization does not silently upgrade an
 existing document.
 
 Schema 4 nodes and marks:
@@ -203,6 +204,23 @@ Schema 4 nodes and marks:
 | Block quote | `blockquote` holding one or more blocks |
 | Checklist | `taskList` of `taskItem` nodes, each with `attrs.checked` (`true` or `false`) and a paragraph |
 
+Schema 5 adds three marks to these; every schema 4 document is valid schema 5
+content unchanged:
+
+| In the document | Mark |
+| --- | --- |
+| Underline | `underline` with `attrs: {}` |
+| Text colour | `textColor` with `attrs: {"color": "<name>"}` |
+| Highlight | `highlight` with `attrs: {"color": "<name>"}` |
+
+`<name>` is one of `gray`, `red`, `orange`, `yellow`, `green`, `blue`, `purple`,
+`pink`. Any other value, including CSS colours, is refused. These marks combine
+with each other, with emphasis and with `link`; inline `code` still stands alone.
+
+```json
+{"type":"text","text":"Due Friday","marks":[{"type":"bold","attrs":{}},{"type":"underline","attrs":{}},{"type":"highlight","attrs":{"color":"yellow"}}]}
+```
+
 ```json
 {"type":"taskList","attrs":{"id":"todo"},"content":[{"type":"taskItem","attrs":{"id":"todo-1","checked":true},"content":[{"type":"paragraph","attrs":{"id":"todo-1-p"},"content":[{"type":"text","text":"Ship it","marks":[{"type":"bold","attrs":{}}]}]}]}]}
 ```
@@ -210,6 +228,7 @@ Schema 4 nodes and marks:
 Agent drafting and document creation from chat still produce schema 3. On a
 schema 4 document an agent proposes and a person accepts; see
 [Proposing on a schema 4 document](#proposing-on-a-schema-4-document).
+An agent cannot draft or propose on a schema 5 document yet.
 
 `--file` is required. Use `--file -` to read stdin. The file must contain one JSON
 object of at most 2 MiB. Keep the same operation ID and contents when retrying
@@ -348,7 +367,7 @@ crewship doc outline @<artifact-id>
 Save an explicitly guarded update. `--file` is required; `--file -` reads stdin.
 Supply one JSON object of at most 2 MiB. A semantic text replacement contains
 `id`, `schema`, the confirmed `epoch`, `target` block ID, replacement `text`,
-`ifRev` and `ifHash`. Schemas 3 and 4 also require the original `page_id`. The editor's
+`ifRev` and `ifHash`. Schemas 3, 4 and 5 also require the original `page_id`. The editor's
 binary update form uses `kind: "human"` and a base64 `update` instead.
 
 A changed revision, target hash or epoch refuses the edit. Read the confirmed

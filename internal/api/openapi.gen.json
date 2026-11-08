@@ -8066,7 +8066,8 @@
               1,
               2,
               3,
-              4
+              4,
+              5
             ],
             "type": "integer"
           }
@@ -8356,7 +8357,7 @@
         "type": "object"
       },
       "DocumentNode": {
-        "description": "Versioned bounded tree: depth\u003c=40, nodes\u003c=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks (one per text) and plain codeBlock; explicit4 adds bold/italic/strike marks combinable with each other and link (inline code stays alone), codeBlock language, blockquote and taskList/taskItem(checked). Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine.",
+        "description": "Versioned bounded tree: depth\u003c=40, nodes\u003c=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks (one per text) and plain codeBlock; explicit4 adds bold/italic/strike marks combinable with each other and link (inline code stays alone), codeBlock language, blockquote and taskList/taskItem(checked); explicit5 adds underline and textColor/highlight marks whose only attribute is a palette name (at most 7 marks per text). Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine.",
         "properties": {
           "attrs": {
             "properties": {
@@ -8434,7 +8435,8 @@
                       "enum": [
                         "bold",
                         "italic",
-                        "strike"
+                        "strike",
+                        "underline"
                       ],
                       "type": "string"
                     }
@@ -8493,10 +8495,50 @@
                     "type"
                   ],
                   "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "attrs": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "color": {
+                          "description": "Schema 5 palette name; never a CSS value. Each theme resolves it.",
+                          "enum": [
+                            "gray",
+                            "red",
+                            "orange",
+                            "yellow",
+                            "green",
+                            "blue",
+                            "purple",
+                            "pink"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "color"
+                      ],
+                      "type": "object"
+                    },
+                    "type": {
+                      "enum": [
+                        "textColor",
+                        "highlight"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "attrs"
+                  ],
+                  "type": "object"
                 }
               ]
             },
-            "maxItems": 4,
+            "maxItems": 7,
             "type": "array"
           },
           "text": {
@@ -8802,7 +8844,8 @@
               1,
               2,
               3,
-              4
+              4,
+              5
             ],
             "type": "integer"
           }
@@ -148030,7 +148073,8 @@
                               "schema": {
                                 "enum": [
                                   3,
-                                  4
+                                  4,
+                                  5
                                 ]
                               }
                             },
@@ -148069,7 +148113,8 @@
                           1,
                           2,
                           3,
-                          4
+                          4,
+                          5
                         ],
                         "type": "integer"
                       },
@@ -148115,7 +148160,8 @@
                               "schema": {
                                 "enum": [
                                   3,
-                                  4
+                                  4,
+                                  5
                                 ]
                               }
                             },
@@ -148150,7 +148196,8 @@
                           1,
                           2,
                           3,
-                          4
+                          4,
+                          5
                         ],
                         "type": "integer"
                       },
@@ -148693,7 +148740,8 @@
                           "schema": {
                             "enum": [
                               3,
-                              4
+                              4,
+                              5
                             ]
                           }
                         },
@@ -148731,7 +148779,8 @@
                       1,
                       2,
                       3,
-                      4
+                      4,
+                      5
                     ],
                     "type": "integer"
                   },
@@ -149272,7 +149321,8 @@
                           "schema": {
                             "enum": [
                               3,
-                              4
+                              4,
+                              5
                             ]
                           }
                         },
@@ -149298,7 +149348,8 @@
                     "enum": [
                       2,
                       3,
-                      4
+                      4,
+                      5
                     ],
                     "type": "integer"
                   }
@@ -149885,7 +149936,8 @@
                               "schema": {
                                 "enum": [
                                   3,
-                                  4
+                                  4,
+                                  5
                                 ]
                               }
                             },
@@ -149918,7 +149970,8 @@
                           1,
                           2,
                           3,
-                          4
+                          4,
+                          5
                         ],
                         "type": "integer"
                       },
@@ -149957,7 +150010,8 @@
                               "schema": {
                                 "enum": [
                                   3,
-                                  4
+                                  4,
+                                  5
                                 ]
                               }
                             },
@@ -149998,7 +150052,8 @@
                           1,
                           2,
                           3,
-                          4
+                          4,
+                          5
                         ],
                         "type": "integer"
                       },
@@ -152131,7 +152186,8 @@
                     "enum": [
                       2,
                       3,
-                      4
+                      4,
+                      5
                     ],
                     "type": "integer"
                   }

@@ -6,7 +6,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
-import { VERSION, RICH_VERSION, LATEST_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
+import { VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
 import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
@@ -17,9 +17,9 @@ const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(v
 const textBoundary = (text, index) => index === 0 || index === text.length ||
   !(text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff && text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff);
 const contentSchema = version => version === 1 ? VERSION : version;
-const supportedSchema = version => [1, VERSION, RICH_VERSION, LATEST_VERSION].includes(version);
-// Schemas 3 and 4 are bound to their original Page and carry rich semantic proofs.
-const richSchema = version => version === RICH_VERSION || version === LATEST_VERSION;
+const supportedSchema = version => [1, VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION].includes(version);
+// Schemas 3, 4 and 5 are bound to their original Page and carry rich semantic proofs.
+const richSchema = version => version === RICH_VERSION || version === FORMATTED_VERSION || version === LATEST_VERSION;
 async function verifyTargets(doc, targets, version = VERSION) {
   if (!Array.isArray(targets) || targets.length < 1 || targets.length > 16) throw fault(400, 'one to sixteen selected text targets required');
   const blocks = new Map((await outline(doc,version)).map(block => [block.id, block]));
@@ -198,7 +198,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     if ((richSchema(request.schema) || request.page_id !== undefined) && request.page_id !== page) throw fault(409,'original Page identity changed');
     if (operation === 'initialize' && richSchema(request.schema) && context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human rich document initialization required');
     if (operation === 'initialize') {
-      if (![VERSION,RICH_VERSION,LATEST_VERSION].includes(request.schema) || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
+      if (![VERSION,RICH_VERSION,FORMATTED_VERSION,LATEST_VERSION].includes(request.schema) || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
       const fingerprint = await hash({ operation, request });
       try { const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint }); if (receipt.found) return { ...receipt, duplicate: true }; } catch (error) { if (error.status !== 404) throw error; }
       const doc = create(request.body,request.schema);
@@ -221,7 +221,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     if (request.schema !== state.schema && !(state.schema === 1 && request.schema === VERSION)) throw fault(409,'unsupported client schema; reopen the confirmed document');
     if (operation === 'upgrade') {
       if (context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human schema upgrade required');
-      if (request.page_id !== page || request.target_schema !== LATEST_VERSION || ![1,VERSION,RICH_VERSION].includes(state.schema) || request.ifRev !== state.rev || Object.keys(request).some(key=>!['id','schema','target_schema','page_id','epoch','ifRev'].includes(key))) throw fault(409,'original Page identity, revision and supported upgrade required');
+      if (request.page_id !== page || request.target_schema !== LATEST_VERSION || ![1,VERSION,RICH_VERSION,FORMATTED_VERSION].includes(state.schema) || request.ifRev !== state.rev || Object.keys(request).some(key=>!['id','schema','target_schema','page_id','epoch','ifRev'].includes(key))) throw fault(409,'original Page identity, revision and supported upgrade required');
     }
     let doc = load(state.snapshot); let lease;
     try {

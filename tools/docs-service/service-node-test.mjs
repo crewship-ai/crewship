@@ -520,7 +520,7 @@ test('public comment responses resolve spans without exposing the private anchor
 });
 
 test('startup rejects missing, old or future Go content capability before admitting documents', async () => {
- for (const schema of [undefined, 2, 3, 5]) {
+ for (const schema of [undefined, 2, 3, 4, 6]) {
   const f = await fixture((op,data) => { assert.equal(op,'recover'); assert.equal(data.schema,LATEST_VERSION); return {recovered:true,protocol:PROTOCOL,...(schema === undefined ? {} : {schema})}; });
   try { await assert.rejects(f.start(),/compatible engine recovery/); await assert.rejects(call(f.socket,'/v1/documents/p/read',{})); } finally { await f.close(); }
  }
@@ -529,11 +529,11 @@ test('startup rejects missing, old or future Go content capability before admitt
 test('explicit human upgrade binds original Page/revision, preserves bytes and retries without reapplying', async () => {
  const model=authorityModel(),f=await fixture(model.handle);await f.start();
  try {
-  const before=(await read(f)).body,request={id:'explicit-three',schema:2,target_schema:4,page_id:'p',epoch:before.epoch,ifRev:before.rev};
+  const before=(await read(f)).body,request={id:'explicit-three',schema:2,target_schema:LATEST_VERSION,page_id:'p',epoch:before.epoch,ifRev:before.rev};
   for(const changed of [{...request,page_id:'foreign'},{...request,ifRev:before.rev-1},{...request,target_schema:3},{...request,update:'forged'}])assert.equal((await call(f.socket,'/v1/documents/p/upgrade',changed)).status,409);
   assert.equal((await call(f.socket,'/v1/documents/p/upgrade',request,{Authorization:'Bearer agtv2.synthetic'})).status,403);
-  const receipt=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(receipt.status,200);assert.equal(receipt.body.schema,4);assert.equal(model.state.snapshot,before.snapshot);assert.equal(model.state.rev,before.rev+1);
-  const after=(await read(f)).body;assert.equal(after.schema,4);assert.notEqual(after.epoch,before.epoch);assert.deepEqual(after.content,before.content);
+  const receipt=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(receipt.status,200);assert.equal(receipt.body.schema,LATEST_VERSION);assert.equal(model.state.snapshot,before.snapshot);assert.equal(model.state.rev,before.rev+1);
+  const after=(await read(f)).body;assert.equal(after.schema,LATEST_VERSION);assert.notEqual(after.epoch,before.epoch);assert.deepEqual(after.content,before.content);
   const retry=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(retry.status,200);assert.equal(retry.body.rev,receipt.body.rev);assert.equal(retry.body.duplicate,true);assert.equal(model.seen.filter(x=>x.op==='upgrade').length,1);
   model.revoked.add('Bearer human');assert.equal((await call(f.socket,'/v1/documents/p/upgrade',request)).status,403);assert.equal(model.state.rev,before.rev+1);
  } finally {await f.close()}
@@ -541,24 +541,24 @@ test('explicit human upgrade binds original Page/revision, preserves bytes and r
 test('schema3 raw human marks are versioned; old clients and unqualified semantic clients fail closed',async()=>{
  const model=authorityModel(),f=await fixture(model.handle);await f.start();
  try {
-  const before=(await read(f)).body;const upgrade={id:'upgrade-marks',schema:2,target_schema:4,page_id:'p',epoch:before.epoch,ifRev:before.rev};assert.equal((await call(f.socket,'/v1/documents/p/upgrade',upgrade)).status,200);
+  const before=(await read(f)).body;const upgrade={id:'upgrade-marks',schema:2,target_schema:LATEST_VERSION,page_id:'p',epoch:before.epoch,ifRev:before.rev};assert.equal((await call(f.socket,'/v1/documents/p/upgrade',upgrade)).status,200);
   const current=(await read(f)).body,doc=load(current.snapshot),vector=Y.encodeStateVector(doc);find(doc,'intro').toArray()[0].format(0,8,{link:{href:'https://example.invalid/'}});const update=encode(Y.encodeStateAsUpdate(doc,vector));doc.destroy();
   assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'old-client',schema:2,epoch:current.epoch,kind:'human',update})).status,409);assert.equal(model.commits,0);
   assert.equal((await call(f.socket,'/v1/documents/p/verify-targets',{base_rev:current.rev,targets:[]})).status,400);
-  assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'raw-agent',schema:4,page_id:'p',epoch:current.epoch,kind:'human',update},{Authorization:'Bearer agtv2.synthetic'})).status,403);assert.equal(model.commits,0);
-  assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'foreign-page',schema:4,page_id:'foreign',epoch:current.epoch,kind:'human',update})).status,409);
-  const saved=await call(f.socket,'/v1/documents/p/patch',{id:'human-link',schema:4,page_id:'p',epoch:current.epoch,kind:'human',update});assert.equal(saved.status,200);const rich=(await read(f)).body;assert.equal(rich.schema,4);assert.equal(rich.content.content.find(node=>node.attrs?.id==='intro').content[0].marks[0].attrs.href,'https://example.invalid/');
+  assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'raw-agent',schema:LATEST_VERSION,page_id:'p',epoch:current.epoch,kind:'human',update},{Authorization:'Bearer agtv2.synthetic'})).status,403);assert.equal(model.commits,0);
+  assert.equal((await call(f.socket,'/v1/documents/p/patch',{id:'foreign-page',schema:LATEST_VERSION,page_id:'foreign',epoch:current.epoch,kind:'human',update})).status,409);
+  const saved=await call(f.socket,'/v1/documents/p/patch',{id:'human-link',schema:LATEST_VERSION,page_id:'p',epoch:current.epoch,kind:'human',update});assert.equal(saved.status,200);const rich=(await read(f)).body;assert.equal(rich.schema,LATEST_VERSION);assert.equal(rich.content.content.find(node=>node.attrs?.id==='intro').content[0].marks[0].attrs.href,'https://example.invalid/');
  }finally{await f.close()}
 });
 test('mixed schema checkpoint read and restore use the actual source version without a silent upgrade',async()=>{
  const model=authorityModel(),f=await fixture(model.handle);await f.start();
  try {
   const old=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{id:'legacy-checkpoint',schema:2,epoch:old.epoch,ifRev:old.rev})).status,200);
-  assert.equal((await call(f.socket,'/v1/documents/p/upgrade',{id:'mixed-upgrade',schema:2,target_schema:4,page_id:'p',epoch:old.epoch,ifRev:old.rev})).status,200);
-  const current=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{id:'rich-checkpoint',schema:4,page_id:'p',epoch:current.epoch,ifRev:current.rev})).status,200);
-  const request={id:'restore-legacy',schema:4,page_id:'p',epoch:current.epoch,ifRev:current.rev,checkpoint:'legacy-checkpoint'};const restored=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(restored.status,200);const head=(await read(f)).body;assert.equal(head.schema,2);assert.notEqual(head.epoch,current.epoch);assert.equal(head.snapshot,old.snapshot);
+  assert.equal((await call(f.socket,'/v1/documents/p/upgrade',{id:'mixed-upgrade',schema:2,target_schema:LATEST_VERSION,page_id:'p',epoch:old.epoch,ifRev:old.rev})).status,200);
+  const current=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{id:'rich-checkpoint',schema:LATEST_VERSION,page_id:'p',epoch:current.epoch,ifRev:current.rev})).status,200);
+  const request={id:'restore-legacy',schema:LATEST_VERSION,page_id:'p',epoch:current.epoch,ifRev:current.rev,checkpoint:'legacy-checkpoint'};const restored=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(restored.status,200);const head=(await read(f)).body;assert.equal(head.schema,2);assert.notEqual(head.epoch,current.epoch);assert.equal(head.snapshot,old.snapshot);
   const retry=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(retry.status,200);assert.equal(retry.body.schema,2);assert.equal(retry.body.rev,restored.body.rev);assert.equal(retry.body.duplicate,true);assert.equal(model.restores,1);
-  const pinned=await call(f.socket,'/v1/documents/p/checkpoint-read',{checkpoint:'rich-checkpoint'});assert.equal(pinned.status,200);assert.equal(pinned.body.schema,4);
+  const pinned=await call(f.socket,'/v1/documents/p/checkpoint-read',{checkpoint:'rich-checkpoint'});assert.equal(pinned.status,200);assert.equal(pinned.body.schema,LATEST_VERSION);
  }finally{await f.close()}
 });
 
@@ -566,12 +566,12 @@ test('mixed schema checkpoint read and restore use the actual source version wit
 test('WRITE to READ downgrade permits original receipt but never a fresh upgrade',async()=>{
  const model=authorityModel(),f=await fixture(model.handle);await f.start();
  try{
- const old=(await read(f)).body;const request={id:'readable-upgrade',schema:2,target_schema:4,page_id:'p',epoch:old.epoch,ifRev:old.rev};
+ const old=(await read(f)).body;const request={id:'readable-upgrade',schema:2,target_schema:LATEST_VERSION,page_id:'p',epoch:old.epoch,ifRev:old.rev};
  const original=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(original.status,200);
- const rich=(await read(f)).body;await call(f.socket,'/v1/documents/p/checkpoint',{id:'readable-rich',schema:4,page_id:'p',epoch:rich.epoch,ifRev:rich.rev});
+ const rich=(await read(f)).body;await call(f.socket,'/v1/documents/p/checkpoint',{id:'readable-rich',schema:LATEST_VERSION,page_id:'p',epoch:rich.epoch,ifRev:rich.rev});
  // A later confirmed restore changes the head, not the original receipt.
  model.state={...model.state,schema:2,rev:model.state.rev+1,snapshot:old.snapshot};model.readOnly.add('Bearer human');
- const rev=model.state.rev;const retry=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(retry.status,200);assert.equal(retry.body.duplicate,true);assert.equal(retry.body.rev,original.body.rev);assert.equal(retry.body.schema,4);assert.equal(model.state.rev,rev);
+ const rev=model.state.rev;const retry=await call(f.socket,'/v1/documents/p/upgrade',request);assert.equal(retry.status,200);assert.equal(retry.body.duplicate,true);assert.equal(retry.body.rev,original.body.rev);assert.equal(retry.body.schema,LATEST_VERSION);assert.equal(model.state.rev,rev);
  const current=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/upgrade',{...request,id:'fresh-read-only',epoch:current.epoch,ifRev:current.rev})).status,403);assert.equal(model.state.rev,rev);
  model.revoked.add('Bearer human');assert.equal((await call(f.socket,'/v1/documents/p/upgrade',request)).status,403);
  }finally{await f.close()}
@@ -824,7 +824,7 @@ test('schema4 initialize is human-only, Page-bound and exports formatting to Mar
     await f.start();
     assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, body })).status, 409);
     assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, page_id: 'p', body }, { Authorization: 'Bearer agtv2.synthetic' })).status, 403);
-    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-five', schema: 5, page_id: 'p', body })).status, 400);
+    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-six', schema: 6, page_id: 'p', body })).status, 400);
     const bad = structuredClone(body); bad.content[1].attrs.language = 'Go<script>';
     assert.notEqual((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-bad', schema: 4, page_id: 'p', body: bad })).status, 200);
     assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, page_id: 'p', body })).status, 200);
@@ -835,17 +835,45 @@ test('schema4 initialize is human-only, Page-bound and exports formatting to Mar
   } finally { await f.close(); }
 });
 
-test('schema3 documents upgrade to 4 explicitly; schema4 cannot upgrade again', async () => {
+for (const [from, body] of [
+  [3, { type: 'doc', content: [{ type: 'codeBlock', attrs: { id: 'c' }, content: [{ type: 'text', text: 'x' }] }] }],
+  [4, { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'b' }, content: [{ type: 'text', text: 'bold', marks: [{ type: 'bold', attrs: {} }] }] }] }],
+]) test(`schema${from} documents upgrade to ${LATEST_VERSION} explicitly with unchanged content; the latest cannot upgrade again or to 4`, async () => {
   const model = authorityModel();
-  const doc = create({ type: 'doc', content: [{ type: 'codeBlock', attrs: { id: 'c' }, content: [{ type: 'text', text: 'x' }] }] }, 3);
-  model.state = { ...model.state, schema: 3, snapshot: snapshot(doc) }; doc.destroy();
+  const doc = create(body, from);
+  model.state = { ...model.state, schema: from, snapshot: snapshot(doc) }; doc.destroy();
   const f = await fixture(model.handle); await f.start();
   try {
-    const before = (await read(f)).body, request = { id: 'three-to-four', schema: 3, target_schema: 4, page_id: 'p', epoch: before.epoch, ifRev: before.rev };
+    const before = (await read(f)).body, request = { id: 'upgrade-latest', schema: from, target_schema: LATEST_VERSION, page_id: 'p', epoch: before.epoch, ifRev: before.rev };
+    if (from === 3) assert.equal((await call(f.socket, '/v1/documents/p/upgrade', { ...request, id: 'to-four', target_schema: 4 })).status, 409);
     const receipt = await call(f.socket, '/v1/documents/p/upgrade', request);
-    assert.equal(receipt.status, 200); assert.equal(receipt.body.schema, 4); assert.equal(model.state.snapshot, before.snapshot);
-    const after = (await read(f)).body; assert.equal(after.schema, 4); assert.deepEqual(after.content, before.content); assert.deepEqual(after.outline, before.outline);
-    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', { ...request, id: 'four-again', schema: 4, epoch: after.epoch, ifRev: after.rev })).status, 409);
+    assert.equal(receipt.status, 200); assert.equal(receipt.body.schema, LATEST_VERSION); assert.equal(model.state.snapshot, before.snapshot);
+    const after = (await read(f)).body; assert.equal(after.schema, LATEST_VERSION); assert.deepEqual(after.content, before.content); assert.deepEqual(after.outline, before.outline);
+    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', { ...request, id: 'latest-again', schema: LATEST_VERSION, epoch: after.epoch, ifRev: after.rev })).status, 409);
+    // A client still on the old schema cannot write over the upgraded document.
+    assert.equal((await call(f.socket, '/v1/documents/p/checkpoint', { id: 'old-client', schema: from, page_id: 'p', epoch: after.epoch, ifRev: after.rev })).status, 409);
+  } finally { await f.close(); }
+});
+
+test('schema5 initialize keeps underline, colour and highlight and exports them to Markdown; free CSS is refused', async () => {
+  const model = authorityModel();
+  const body = { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'p5' }, content: [
+    { type: 'text', text: 'under', marks: [{ type: 'underline', attrs: {} }] }, { type: 'text', text: ' ' },
+    { type: 'text', text: 'red', marks: [{ type: 'textColor', attrs: { color: 'red' } }, { type: 'highlight', attrs: { color: 'yellow' } }] },
+  ] }] };
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'initialize') { model.state = { ...model.state, schema: data.schema, snapshot: data.snapshot, rev: 0 }; return model.state; }
+    return model.handle(op, data, req, res);
+  });
+  try {
+    await f.start();
+    const bad = structuredClone(body); bad.content[0].content[2].marks[0].attrs.color = '#ff0000';
+    assert.notEqual((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-css', schema: 5, page_id: 'p', body: bad })).status, 200);
+    assert.notEqual((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, page_id: 'p', body })).status, 200);
+    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-five', schema: 5, page_id: 'p', body })).status, 200);
+    const state = (await read(f)).body;
+    assert.equal(state.schema, 5); assert.deepEqual(state.content, body);
+    assert.equal((await call(f.socket, '/v1/documents/p/export', {})).body.markdown, '<u>under</u> <span data-text-color="red"><mark data-highlight="yellow">red</mark></span>\n');
   } finally { await f.close(); }
 });
 

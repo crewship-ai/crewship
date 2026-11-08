@@ -131,6 +131,23 @@
     "authoring_skill": "crewship-documents"
   },
   {
+    "type_id": "doc",
+    "schema_version": 5,
+    "viewer": "page-document",
+    "editor": "page-document",
+    "storage_adapter": "documents-yjs-v5",
+    "projection_adapter": "prosemirror-v5",
+    "anchor_kinds": [
+      "block",
+      "text-range"
+    ],
+    "export_formats": [
+      "markdown"
+    ],
+    "execution_profile": "managed-docs-v1",
+    "authoring_skill": "crewship-documents"
+  },
+  {
     "type_id": "slides",
     "schema_version": 1,
     "viewer": "page-slides",
