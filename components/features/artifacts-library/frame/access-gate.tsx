@@ -16,7 +16,7 @@ export function AccessGate({ access, onHome, signInHref }: { access: Exclude<Fra
   const gate = GATE[access]
   const Icon = gate.icon
   return <div role="region" aria-label={gate.title} data-access-gate={access} className="m-auto grid max-w-[420px] justify-items-center gap-2.5 px-5 py-10 text-center">
-    <span aria-hidden className={cn("grid size-[52px] place-items-center rounded-2xl", gate.tone)}><Icon className="size-[22px]" /></span>
+    <span aria-hidden className={cn("grid size-[52px] place-items-center rounded-xl", gate.tone)}><Icon className="size-[22px]" /></span>
     <h2 className="mt-1 text-xl font-semibold">{gate.title}</h2>
     <p className="text-sm text-muted-foreground">{gate.text}</p>
     <div className="mt-1.5 flex flex-wrap justify-center gap-2">

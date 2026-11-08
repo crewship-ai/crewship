@@ -69,7 +69,7 @@ export function ArtifactSlot({ name, label, className, children }: { name: SlotN
   return createPortal(
     <div role={name === "tools" || name === "view" || name === "nav" ? "toolbar" : "group"} aria-label={label ?? name}
       data-artifact-slot={name} data-layout={frame.layout}
-      className={cn("pointer-events-auto absolute z-10 flex items-center gap-0.5 rounded-[10px] border border-border/60 bg-card/95 p-[3px] shadow-md backdrop-blur", position, className)}>
+      className={cn("pointer-events-auto absolute z-10 flex items-center gap-0.5 rounded-lg border border-border/60 bg-card/95 p-[3px] shadow-md backdrop-blur", position, className)}>
       {children}
     </div>,
     frame.slotLayer,
@@ -80,7 +80,7 @@ export function ArtifactSlot({ name, label, className, children }: { name: SlotN
 export const ArtifactTool = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { icon: LucideIcon; label: string; on?: boolean; text?: React.ReactNode }>(
   function ArtifactTool({ icon: Icon, label, on, text, className, ...props }, ref) {
     return <button ref={ref} type="button" aria-label={label} title={label} aria-pressed={on} {...props}
-      className={cn("inline-flex h-[30px] min-w-[30px] items-center justify-center gap-1.5 rounded-[7px] px-[7px] text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 coarse:min-h-[44px] coarse:min-w-[44px]",
+      className={cn("inline-flex h-[30px] min-w-[30px] items-center justify-center gap-1.5 rounded-[var(--radius-row)] px-[7px] text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 coarse:min-h-[44px] coarse:min-w-[44px]",
         on && "bg-primary/12 text-primary-hover", className)}>
       <Icon aria-hidden className="size-4" />{text && <span>{text}</span>}
     </button>

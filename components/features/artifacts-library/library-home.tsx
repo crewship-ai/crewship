@@ -164,7 +164,7 @@ export function LibraryHome({ items, attention, title, onOpen, peeked }: {
           return <li key={entry.item.slug} className="min-w-0">
             <button type="button" aria-label={`${entry.title}: ${entry.item.name}`} onClick={() => onOpen(entry.item.slug)} data-attention={entry.reason}
               className="flex w-full min-w-0 items-center gap-3 rounded-card border bg-card px-3 py-2.5 text-left transition-colors hover:border-foreground/20 coarse:min-h-[44px]">
-              <span aria-hidden className={cn("grid size-8 shrink-0 place-items-center rounded-[9px]", look.tone)}><Icon className="size-4" /></span>
+              <span aria-hidden className={cn("grid size-8 shrink-0 place-items-center rounded-md", look.tone)}><Icon className="size-4" /></span>
               <span className="grid min-w-0 flex-1">
                 <b className="text-sm font-semibold">{entry.title}</b>
                 <small className="truncate text-xs text-muted-foreground">{entry.detail}</small>
