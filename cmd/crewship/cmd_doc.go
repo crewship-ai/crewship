@@ -36,7 +36,7 @@ block hash from this output when preparing a patch.`, `  crewship doc read @<art
 parent is null at the top level. Reads the same state as read and never
 changes the document.`, `  crewship doc outline @<artifact-id>`},
 		"patch": {"Apply a guarded text replacement to one block", `Send one JSON object (at most 2 MiB) with id, schema, epoch, target, text, ifRev
-and ifHash; schemas 3 and 4 also need page_id. A changed revision, hash or epoch
+and ifHash; schemas 3, 4 and 5 also need page_id. A changed revision, hash or epoch
 refuses the edit and nothing is saved. Resend the exact request with the same id
 after a lost confirmation; the original receipt comes back with found: true
 and duplicate: true. A stale epoch, revision or hash returns 409.`, `  crewship doc patch @<artifact-id> --file patch.json
@@ -44,9 +44,10 @@ and duplicate: true. A stale epoch, revision or hash returns 409.`, `  crewship 
 		"status": {"Show whether native documents are enabled on this server", `Print enabled, wordcraft_native and gridcraft_native for the selected server.
 enabled is false unless the server starts with CREWSHIP_DOCUMENTS_ENABLED=true.`, `  crewship doc status
   crewship doc status -f yaml`},
-		"initialize": {"Write the first content of an empty artifact as a document", `Send one JSON object (at most 2 MiB) with an operation id, schema (2, 3 or 4)
-and a body document tree; schemas 3 and 4 also need page_id. Schema 4 adds
-bold, italic and strike marks, code block languages, quotes and checklists. Resend the exact request
+		"initialize": {"Write the first content of an empty artifact as a document", `Send one JSON object (at most 2 MiB) with an operation id, schema (2, 3, 4 or 5)
+and a body document tree; schemas 3, 4 and 5 also need page_id. Schema 4 adds
+bold, italic and strike marks, code block languages, quotes and checklists;
+schema 5 adds underline and palette text colour and highlight. Resend the exact request
 after a lost confirmation; the original receipt comes back with duplicate: true.
 The artifact must be empty and owned by you, not by a crew (for example one made
 with crewship page create --allow-empty). Read the document afterwards to obtain
@@ -57,12 +58,12 @@ text, block and status (attached, collapsed, detached or resolved); a reply has
 parent, the thread it answers. Reading needs read access to the document.`, `  crewship doc comments @<artifact-id>
   crewship doc comments <slug> -f yaml`},
 		"comment": {"Start a comment thread on quoted text, or reply to one", `Send one JSON object with id, schema, epoch, ifRev and text, plus page_id for
-schemas 3 and 4. A new thread also names block, from and to: the UTF-16 range
+schemas 3, 4 and 5. A new thread also names block, from and to: the UTF-16 range
 of the quoted text inside one paragraph, heading or code block (see doc outline).
 A reply names parent, the thread's id, instead. Comments never change content.
 You need Comment or Edit access. Resend the exact request after a lost
 confirmation; a changed revision returns 409.`, `  crewship doc comment @<artifact-id> --file comment.json`},
-		"comment-resolve": {"Resolve or reopen a comment thread", `Send one JSON object with id, schema, epoch, ifRev, page_id (schemas 3 and 4),
+		"comment-resolve": {"Resolve or reopen a comment thread", `Send one JSON object with id, schema, epoch, ifRev, page_id (schemas 3, 4 and 5),
 comment (the thread id), version (from doc comments) and resolved (true or
 false). A changed version or revision returns 409. You need Comment or Edit
 access.`, `  crewship doc comment-resolve @<artifact-id> --file resolve.json`},

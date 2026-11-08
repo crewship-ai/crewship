@@ -10,12 +10,14 @@ import (
 )
 
 // LatestSchema is the newest content schema: 4 adds bold, italic, strike,
-// code block languages, block quotes and task lists to schema 3.
-const LatestSchema = 4
+// code block languages, block quotes and task lists to schema 3; 5 adds
+// underline and a text colour and highlight named from a closed palette.
+const LatestSchema = 5
 
-// RichSchema is schema 3 or 4: bound to its original Page and edited through
-// rich semantic proofs. Agent drafting stays on schema 3 (see iteration intents).
-func RichSchema(schema int) bool { return schema == 3 || schema == 4 }
+// RichSchema is schema 3, 4 or 5: bound to its original Page and edited
+// through rich semantic proofs. Agent drafting stays on schema 3 (see
+// iteration intents).
+func RichSchema(schema int) bool { return schema >= 3 && schema <= LatestSchema }
 
 func supportedSchema(schema int) bool { return schema >= 1 && schema <= LatestSchema }
 
