@@ -175,7 +175,7 @@ describe("PageView hosted in the Artifacts frame", () => {
   beforeEach(cleanup)
 
   it("draws no breadcrumb bar, back link, slug or owner reference", () => {
-    const owned = toPageView({ ...WIRE, owner: "user/fixture-human", panels: WIRE.panels!.map(panel => ({ ...panel, state: "fresh" as const })) })
+    const owned = toPageView({ ...WIRE, owner: "user/fixture-human", panels: (WIRE.panels as Exclude<WirePage["panels"], number | null | undefined>).map(panel => ({ ...panel, state: "fresh" as const })) })
     renderPage({ page: owned, slug: "@cpage1", hosted: true, backLabel: "All artifacts" })
     expect(screen.queryByRole("button", { name: /All artifacts/ })).toBeNull()
     expect(screen.queryByText("@cpage1")).toBeNull()
@@ -186,7 +186,7 @@ describe("PageView hosted in the Artifacts frame", () => {
   })
 
   it("keeps naming who has never pushed", () => {
-    const waiting = toPageView({ ...WIRE, panels: WIRE.panels!.map(panel => panel.id === "uptime" ? { ...panel, producer: "routine/uptime-sweep" } : panel) })
+    const waiting = toPageView({ ...WIRE, panels: (WIRE.panels as Exclude<WirePage["panels"], number | null | undefined>).map(panel => panel.id === "uptime" ? { ...panel, producer: "routine/uptime-sweep" } : panel) })
     renderPage({ page: waiting, hosted: true })
     expect(screen.queryByRole("button", { name: /Back to pages/ })).toBeNull()
     expect(screen.getByTestId("page-silent-producers")).toBeTruthy()

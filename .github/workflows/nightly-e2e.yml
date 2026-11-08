@@ -218,7 +218,10 @@ env:
   # gate gets read as dead code and deleted. Listed here, with its real owner
   # named, instead.
   # Credential reveal and provider pools have their own blocking PR configs.
+  # artifacts-canonical-url.spec.ts runs on every PR in ci.yml's restricted
+  # browser job (playwright.restricted.config.ts), against its own mocked API.
   EXCLUDED_SPECS: >-
+    e2e/artifacts-canonical-url.spec.ts
     e2e/credential-reveal.spec.ts
     e2e/provider-pools.spec.ts
     e2e/visual.spec.ts

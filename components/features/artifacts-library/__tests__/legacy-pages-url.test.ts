@@ -7,7 +7,7 @@ import { canonicalArtifactHref, legacyPagesTarget, resolvedArtifactId, type Lega
 // the reference that resolves to the ID; anything only Pages can show stays.
 const trusted = { workspaceId: "ws1", library: true, trusted: true }
 
-const resolve = (reference: string, extra: Partial<Extract<LegacyPagesTarget, { to: "resolve" }>> = {}): LegacyPagesTarget =>
+const resolve = (reference: string, extra: Partial<Extract<LegacyPagesTarget, { to: "resolve" }>> = {}): Extract<LegacyPagesTarget, { to: "resolve" }> =>
   ({ to: "resolve", reference, workspaceId: "ws1", project: false, ...extra })
 
 describe("legacyPagesTarget: every old URL shape and its canonical target", () => {

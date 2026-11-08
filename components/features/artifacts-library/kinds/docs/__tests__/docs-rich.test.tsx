@@ -133,7 +133,7 @@ describe("Docs schema 4 formatting", () => {
     box.checked = true
     fireEvent.change(box)
     await waitFor(() => expect(editor.querySelectorAll('li[data-type="taskItem"]')[1]!.getAttribute("data-checked")).toBe("true"))
-    const items = (editor.editor.getJSON().content![4].content ?? []).map(entry => entry.attrs?.checked)
+    const items = (editor.editor.getJSON().content![4].content ?? []).map(entry => (entry as { attrs?: { checked?: boolean } }).attrs?.checked)
     expect(items).toEqual([true, true])
     expect(await screen.findByRole("button", { name: "Status: Saved" }, { timeout: 4000 })).toBeTruthy()
   })
