@@ -23,10 +23,10 @@ export interface DocsFrameReport {
 }
 
 /** The reading column: centred, 700 px at most, clear of the floating view strip and tools bar. */
-const COLUMN = "mx-auto grid w-full max-w-[700px] content-start gap-4 px-4 pb-28 pt-16 md:px-8 md:pb-20"
+const COLUMN = "mx-auto grid w-full max-w-[700px] grid-cols-[minmax(0,1fr)] content-start gap-4 px-4 pb-28 pt-16 md:px-8 md:pb-20"
 
 /** Reading typography (Harbor 2 v87 Docs page): a comfortable size on a phone, a calmer one on wider screens. */
-const DOCS_EDITOR_CLASS = "min-h-64 max-w-none text-lg leading-relaxed outline-none md:text-base md:leading-[1.65] [&_[data-block-id]]:scroll-mt-20 [&_p]:my-3 [&_h1]:mb-3 [&_h1]:mt-8 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-2 [&_h2]:mt-7 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-5 [&_h3]:text-lg [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_th]:text-left [&_td_p]:my-0 [&_th_p]:my-0 [&_pre]:whitespace-pre-wrap [&_pre]:break-words [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_code]:font-mono [&_a]:text-primary-hover [&_a]:underline"
+const DOCS_EDITOR_CLASS = "min-h-64 max-w-none text-lg leading-relaxed outline-none md:text-base md:leading-[1.65] [&_[data-block-id]]:scroll-mt-20 [&_p]:my-3 [&_h1]:mb-3 [&_h1]:mt-8 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-2 [&_h2]:mt-7 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-5 [&_h3]:text-lg [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_th]:text-left [&_td_p]:my-0 [&_th_p]:my-0 [&_pre]:whitespace-pre-wrap [&_pre]:[overflow-wrap:anywhere] [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_code]:font-mono [&_a]:text-primary-hover [&_a]:underline"
 
 /**
  * A Docs page (a native Tiptap/Yjs document) inside the ArtifactFrame. The
