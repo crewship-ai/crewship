@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { BookOpen, CornerUpLeft, Component, Download, Palette, Ruler, Search, Type } from "lucide-react"
+import Link from "next/link"
+import { BookOpen, Code2, CornerUpLeft, Component, Download, Palette, Ruler, Search, Type } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { artifactDesignSystem } from "@/lib/feature-flags"
@@ -9,9 +10,11 @@ import { cn } from "@/lib/utils"
 import { hasDesignSystemFile, parseDesignSystem, DESIGN_SYSTEM_FILE, type DesignSystem } from "@/components/features/artifacts/design-system/manifest"
 import { useArtifactProjectSnapshot } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
 import type { ArtifactProjectSnapshot } from "@/components/features/chat/artifact-context/projects/types"
-import { ArtifactSlot, ArtifactTool, useArtifactFrame } from "../../frame"
+import { ArtifactViewerProvider, type ArtifactViewerTarget } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
+import { ArtifactViewerPanel, type ArtifactViewerParts } from "@/components/features/chat/artifact-context/viewer/artifact-viewer-panel"
+import { ArtifactSlot, ArtifactTool, ArtifactToolSeparator, useArtifactFrame } from "../../frame"
 import { slidesFrameStatus } from "../slides/slides-status"
-import { ProjectVersionHistory } from "../slides/slides-detail"
+import { ProjectDrawer, VersionMenu } from "../project-parts"
 import type { KindFrameReport } from "./design-detail"
 
 /** A project whose manifest carries design-system.json is a Design in Library mode (kinds.ts `kindOf`). */
@@ -51,6 +54,12 @@ export function libraryExtras(system: DesignSystem, files: readonly { path: stri
   return { readme: readme?.trim() ? readme : null, previews }
 }
 
+/** The README without a leading `# <name>` heading: the overview above it already names the system. */
+export function readmeBody(readme: string, name: string | null | undefined): string {
+  const lead = /^\s*#[ \t]+(.+?)[ \t#]*(?:\r?\n|$)/.exec(readme)
+  return lead && name && lead[1].trim().toLowerCase() === name.trim().toLowerCase() ? readme.slice(lead[0].length).replace(/^\s+/, "") : readme
+}
+
 /**
  * A component preview as its system renders it: the colour tokens become CSS
  * custom properties (`var(--name)`). Names and values are the admitted
@@ -69,43 +78,71 @@ export function previewHeight(html: string): number {
 }
 
 /**
- * The read-only Library view of a design system (Harbor 2 v87 `ds`): the
- * section navigator in the panel slot, and Colors, Typography, Spacing,
- * Corner radius and Components from the admitted design-system.json. The
- * library is a versioned artifact, so History is the artifact's versions.
- * Nothing here edits or publishes: there is no backend for library
- * publishing, pinning or "Used by", so those stay hidden.
+ * The Library of a design system (Harbor 2 v87 `ds`), laid out in the frame
+ * from the project viewer's parts: the frame owns the title, status and
+ * share; the body is the library itself (README, colours, typography,
+ * spacing, radii, components) with the section navigator in the panel slot.
+ * Version, Share and Edit source sit in the view and output slots; the
+ * comment queue, version history and Propose go to the drawer
+ * (`ProjectDrawer`). Every rule and backend call stays in the viewer.
+ * There is no backend for library publishing, pinning, "Used by" or a
+ * Canvas mode of a library, so those stay hidden.
  */
-export function DesignLibraryBody({ workspaceId, slug, version, onFrame }: { workspaceId: string; slug: string; version?: number; onFrame: (report: KindFrameReport) => void }) {
-  const [viewing, setViewing] = React.useState<number | undefined>(version)
-  const snapshot = useArtifactProjectSnapshot(workspaceId, slug, viewing)
-  const data = snapshot.data
-  const status = data ? slidesFrameStatus({ ready: true, canWrite: data.can_write === true, shown: data.manifest.version, latest: data.latest_version, refreshFailed: Boolean(snapshot.error) }) : null
-  const canEdit = Boolean(data && !snapshot.error && data.can_write === true)
-  const key = JSON.stringify([status, canEdit])
+export function DesignLibraryProjectView({ parts, onFrame }: { parts: ArtifactViewerParts; onFrame: (report: KindFrameReport) => void }) {
+  const { data, version } = parts
+  const status = slidesFrameStatus({ ready: true, canWrite: parts.canWrite, shown: version.shown, latest: version.latest, refreshFailed: false })
+  const key = JSON.stringify([status, parts.canWrite])
   const report = React.useRef(onFrame); report.current = onFrame
   // eslint-disable-next-line react-hooks/exhaustive-deps -- the key holds everything reported
-  React.useEffect(() => { report.current({ canEdit, status, kind: { kind: "design", mode: "library", badge: "Library" } }) }, [key])
-  const system = React.useMemo(() => data ? parseDesignSystem(data.manifest.files) : null, [data])
-  if (!data) return snapshot.error
-    ? <p role="alert" className="p-6 pt-16 text-sm text-muted-foreground">This library could not be loaded.</p>
-    : <div aria-busy="true" aria-label="Loading library" className="grid gap-3 p-6 pt-16"><Skeleton className="h-40 w-full" /><Skeleton className="h-60 w-full" /></div>
-  if (!system) return <p role="alert" className="p-6 pt-16 text-sm">This Design System file is invalid or uses an unsupported format.</p>
+  React.useEffect(() => { report.current({ canEdit: parts.canWrite, status, kind: LIBRARY_KIND }) }, [key])
+  const system = React.useMemo(() => parseDesignSystem(data.manifest.files), [data])
+  const notices = <div className="grid gap-2 px-3 pt-16 empty:hidden md:px-6">{parts.banners}</div>
+  if (!system) return <>{notices}<p role="alert" className="p-6 pt-16 text-sm">This Design System file is invalid or uses an unsupported format.</p><ProjectDrawer parts={parts} /></>
   const source = data.manifest.files.find(file => file.path === DESIGN_SYSTEM_FILE)?.content ?? ""
   return <>
-    <LibraryView system={system} version={data.manifest.version} source={source} extras={libraryExtras(system, data.manifest.files)} />
-    <ProjectVersionHistory data={data} workspaceId={workspaceId} slug={slug} canWrite={canEdit} setViewing={setViewing} />
+    <LibraryView system={system} version={version.shown} source={source} extras={libraryExtras(system, data.manifest.files)} notices={parts.banners}
+      view={<><ArtifactToolSeparator /><VersionMenu parts={parts} />{parts.share}</>}
+      output={parts.editSourceHref && <Link href={parts.editSourceHref} aria-label="Edit source" title="Edit source"
+        className="inline-flex h-[30px] min-w-[30px] items-center justify-center rounded-[var(--radius-row)] px-[7px] text-muted-foreground hover:bg-accent hover:text-foreground coarse:min-h-[44px] coarse:min-w-[44px]"><Code2 aria-hidden className="size-4" /></Link>} />
+    <ProjectDrawer parts={parts} />
   </>
 }
 
-/** Renders the Library body for a design system; anything else renders `children` (the project view). */
-export function DesignLibraryGate({ workspaceId, slug, version, onFrame, children }: { workspaceId: string; slug: string; version?: number; onFrame: (report: KindFrameReport) => void; children: React.ReactNode }) {
+const LIBRARY_KIND = { kind: "design", mode: "library", badge: "Library" } as const
+
+/**
+ * A project whose manifest is a design system opens as its Library; any other
+ * project renders `children` (its App, Dashboard or viewer). The catalog cannot
+ * tell a design system from an App before the project is read, so the gate
+ * comes first and holds the stage while that read is under way.
+ */
+export function DesignLibraryGate({ workspaceId, target, onBack, onFrame, children }: { workspaceId: string; target: ArtifactViewerTarget; onBack: () => void; onFrame: (report: KindFrameReport) => void; children: React.ReactNode }) {
   // The same query the project viewer makes, so nothing is fetched twice; nothing at all with the switch off.
-  const snapshot = useArtifactProjectSnapshot(workspaceId, artifactDesignSystem() ? slug : null, version)
-  return isDesignLibrary(snapshot.data) ? <DesignLibraryBody workspaceId={workspaceId} slug={slug} version={version} onFrame={onFrame} /> : <>{children}</>
+  const snapshot = useArtifactProjectSnapshot(workspaceId, artifactDesignSystem() ? target.slug : null, target.version)
+  const frame = useArtifactFrame()
+  const openDrawer = frame?.openDrawer
+  const layout = frame?.layout
+  const onSection = React.useCallback((section: "history" | "comments" | null) => {
+    if (section) openDrawer?.(section)
+    else if (layout !== "desktop") openDrawer?.(null)
+  }, [openDrawer, layout])
+  if (snapshot.isLoading && !snapshot.data) return <div aria-busy="true" aria-label="Loading artifact" className="grid gap-3 p-6 pt-16"><Skeleton className="h-40 w-full" /><Skeleton className="h-60 w-full" /></div>
+  if (!isDesignLibrary(snapshot.data)) return <>{children}</>
+  const render = (parts: ArtifactViewerParts) => parts.previewKind === "design-system" ? <DesignLibraryProjectView parts={parts} onFrame={onFrame} /> : undefined
+  return <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
+    <div className="flex min-h-[520px] flex-1 overflow-hidden"><ArtifactViewerPanel variant="library" render={render} onSection={onSection} /></div>
+  </ArtifactViewerProvider>
 }
 
-export function LibraryView({ system, version, source, extras = { readme: null, previews: {} } }: { system: DesignSystem; version: number; source: string; extras?: LibraryExtras }) {
+export function LibraryView({ system, version, source, extras = { readme: null, previews: {} }, notices, view, output }: {
+  system: DesignSystem; version: number; source: string; extras?: LibraryExtras
+  /** The viewer's conflict, retry and version notices, above the library. */
+  notices?: React.ReactNode
+  /** Version and Share after the Library switch and search. */
+  view?: React.ReactNode
+  /** Edit source beside Download. */
+  output?: React.ReactNode
+}) {
   const frame = useArtifactFrame()
   const phone = frame?.layout === "phone"
   const [query, setQuery] = React.useState("")
@@ -146,6 +183,7 @@ export function LibraryView({ system, version, source, extras = { readme: null, 
   return <div className="relative flex min-h-0 flex-1 flex-col bg-background">
     <div ref={scroller} className={cn("min-h-0 flex-1 overflow-auto pb-10", phone ? "px-3 pt-16" : "pl-[272px] pr-6 pt-16")}>
       <div className="mx-auto grid max-w-4xl gap-8">
+        {notices && <div className="grid gap-2 empty:hidden">{notices}</div>}
         <section data-ds-section="overview" aria-label="Overview" className="grid scroll-mt-16 overflow-hidden rounded-card border sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)]">
           <div aria-hidden className="relative flex min-h-32 items-end">
             {system.colors.slice(0, 4).map(color => <span key={color.name} className="h-full flex-1" style={{ backgroundColor: color.value }} />)}
@@ -159,7 +197,7 @@ export function LibraryView({ system, version, source, extras = { readme: null, 
           </div>
         </section>
         {extras.readme && <article aria-label="README" className="rounded-card border px-5 py-4">
-          <MarkdownContent>{extras.readme}</MarkdownContent>
+          <MarkdownContent>{readmeBody(extras.readme, system.name)}</MarkdownContent>
         </article>}
         <section aria-label="Colors">
           {head("colors", "Colors", colors.length)}
@@ -219,10 +257,12 @@ export function LibraryView({ system, version, source, extras = { readme: null, 
         <input type="search" aria-label="Search the library" placeholder="Search the library" value={query} onChange={event => setQuery(event.target.value)}
           className="h-[30px] w-44 rounded-[var(--radius-row)] bg-muted/60 pl-7 pr-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-primary/40 coarse:min-h-[44px] md:w-56" />
       </label>
+      {view}
       {phone && SECTIONS.slice(1).map(section => <ArtifactTool key={section.id} icon={section.icon} label={section.label} on={active === section.id} onClick={() => go(section.id)} />)}
     </ArtifactSlot>
     <ArtifactSlot name="output" label="Output">
       <ArtifactTool icon={Download} label="Download design-system.json" onClick={download} />
+      {output}
     </ArtifactSlot>
     {!phone && <ArtifactSlot name="panel" label="Sections">{navigator}</ArtifactSlot>}
   </div>

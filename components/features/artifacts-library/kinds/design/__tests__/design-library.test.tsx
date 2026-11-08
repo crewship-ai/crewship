@@ -2,12 +2,13 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ArtifactProjectSnapshot } from "@/components/features/chat/artifact-context/projects/types"
+import type { ArtifactViewerParts } from "@/components/features/chat/artifact-context/viewer/artifact-viewer-panel"
 import { ArtifactFrame, NO_FRAME_CAPABILITIES, type FrameLayout } from "../../../frame"
-import { DesignLibraryBody, DesignLibraryGate, isDesignLibrary } from "../design-library"
+import { DesignLibraryGate, DesignLibraryProjectView, isDesignLibrary } from "../design-library"
 
 const state = vi.hoisted(() => ({ snapshot: null as ArtifactProjectSnapshot | null }))
 vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-project-data", () => ({
-  useArtifactProjectSnapshot: () => ({ data: state.snapshot, error: null, refetch: vi.fn() }),
+  useArtifactProjectSnapshot: () => ({ data: state.snapshot, error: null, isLoading: false, refetch: vi.fn() }),
   useArtifactProjectMutations: () => ({ restore: { mutate: vi.fn(), isPending: false }, share: { mutate: vi.fn(), isPending: false }, comment: { mutate: vi.fn(), isPending: false } }),
 }))
 
@@ -18,10 +19,29 @@ function snapshot(over: Partial<ArtifactProjectSnapshot> = {}): ArtifactProjectS
     manifest: { version: 2, entrypoint: "index.html", files: [{ path: "design-system.json", media_type: "application/json", content: TOKENS }] }, ...over,
   }
 }
+// The viewer's parts as the project viewer hands them to its host; its rules are the viewer's own tests.
+const viewer = vi.hoisted(() => ({ parts: null as ArtifactViewerParts | null }))
+vi.mock("@/components/features/chat/artifact-context/viewer/artifact-viewer-panel", () => ({
+  ArtifactViewerPanel: ({ render }: { render?: (parts: ArtifactViewerParts) => React.ReactNode }) => render?.(viewer.parts!) ?? <p>legacy viewer chrome</p>,
+}))
+vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-context", () => ({ ArtifactViewerProvider: ({ children }: { children: React.ReactNode }) => children }))
+
+function parts(over: Partial<ArtifactViewerParts> = {}): ArtifactViewerParts {
+  const data = state.snapshot!
+  return {
+    data, previewKind: "design-system", canWrite: data.can_write === true, canComment: true, maySend: false,
+    version: { latest: data.latest_version, shared: data.shared_version, shown: data.manifest.version, viewingOld: false, pick: vi.fn() },
+    screens: ["index.html"], screen: "index.html", labelOf: path => path, setScreen: vi.fn(),
+    select: { on: false, available: false, toggle: vi.fn(), hint: null },
+    preview: <p>legacy design-system preview</p>, pinCard: null, canvasRef: { current: null },
+    banners: null, history: <div role="region" aria-label="Version history">versions</div>, queue: <div role="region" aria-label="Comment queue">queue</div>,
+    sendBar: null, waiting: 0, share: null, editSourceHref: null, ...over,
+  }
+}
 const report = vi.fn()
-function mount(layout: FrameLayout = "desktop") {
+function mount(layout: FrameLayout = "desktop", over: Partial<ArtifactViewerParts> = {}) {
   return render(<ArtifactFrame name="Harbor design system" kind={{ kind: "design", mode: "library" }} caps={NO_FRAME_CAPABILITIES} onHome={vi.fn()} layout={layout}>
-    <DesignLibraryBody workspaceId="workspace" slug="harbor" onFrame={report} />
+    <DesignLibraryProjectView parts={parts(over)} onFrame={report} />
   </ArtifactFrame>)
 }
 const slot = (name: string) => document.querySelector(`[data-artifact-slot="${name}"]`) as HTMLElement | null
@@ -60,19 +80,42 @@ describe("Design library", () => {
     expect(within(slot("view")!).getByRole("button", { name: "Colors" })).toBeInTheDocument()
   })
 
+  it("is the library itself: no second title row, viewer tabs or comment column inside the frame", () => {
+    mount()
+    expect(screen.queryByText("legacy design-system preview")).toBeNull()
+    expect(screen.queryByRole("tab")).toBeNull()
+    expect(screen.queryByText("Comments for agent")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Edit source" })).toBeNull()
+  })
+
+  it("keeps version, share, edit source, history and comments reachable through the frame's slots and drawer", () => {
+    mount("desktop", { editSourceHref: "/artifacts/page?edit=1", share: <button type="button">Share v2</button> })
+    expect(within(slot("view")!).getByRole("button", { name: "Version: v2 · Latest" })).toBeInTheDocument()
+    expect(within(slot("view")!).getByRole("button", { name: "Share v2" })).toBeInTheDocument()
+    expect(within(slot("output")!).getByRole("link", { name: "Edit source" })).toHaveAttribute("href", "/artifacts/page?edit=1")
+    fireEvent.click(screen.getByRole("button", { name: "History" }))
+    expect(screen.getByRole("region", { name: "Version history" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Comments" }))
+    expect(screen.getByRole("region", { name: "Comment queue" })).toBeVisible()
+  })
+
   it("says so when the file is invalid", () => {
     state.snapshot = snapshot({ manifest: { version: 2, entrypoint: "index.html", files: [{ path: "design-system.json", media_type: "application/json", content: "{}" }] } })
     mount()
+    expect(screen.queryByText("legacy design-system preview")).toBeNull()
     expect(screen.getByRole("alert")).toHaveTextContent("invalid or uses an unsupported format")
   })
 
   it("routes only design systems to the library and keeps other projects in their viewer", async () => {
-    render(<DesignLibraryGate workspaceId="workspace" slug="harbor" onFrame={report}><p>project viewer</p></DesignLibraryGate>)
+    viewer.parts = parts()
+    render(<DesignLibraryGate workspaceId="workspace" target={{ slug: "harbor", tab: "preview" }} onBack={vi.fn()} onFrame={report}><p>project viewer</p></DesignLibraryGate>)
     await act(async () => {})
     expect(screen.queryByText("project viewer")).toBeNull()
+    expect(screen.queryByText("legacy viewer chrome")).toBeNull()
+    expect(screen.getByRole("region", { name: "Colors" })).toBeInTheDocument()
     cleanup()
     state.snapshot = snapshot({ manifest: { version: 1, entrypoint: "index.html", files: [{ path: "index.html", media_type: "text/html", content: "<p>x</p>" }] } })
-    render(<DesignLibraryGate workspaceId="workspace" slug="site" onFrame={report}><p>project viewer</p></DesignLibraryGate>)
+    render(<DesignLibraryGate workspaceId="workspace" target={{ slug: "site", tab: "preview" }} onBack={vi.fn()} onFrame={report}><p>project viewer</p></DesignLibraryGate>)
     expect(screen.getByText("project viewer")).toBeInTheDocument()
     expect(isDesignLibrary(snapshot({ artifact_kind: "slides" }))).toBe(false)
     vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM", "false")

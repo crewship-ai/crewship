@@ -205,3 +205,30 @@ it("opens the version an address pins (a shared-version link), not Latest (#4995
   render(withQuery(<ArtifactsLibrary workspaceId="workspace-1" item="page-1" version={2} onSelect={vi.fn()} />))
   expect(state.version).toBe(2)
 })
+
+// A design system is a project the catalog calls an App until it is read; the frame must
+// still open it as a Design library, not the App view's fallback (the legacy viewer chrome).
+it("opens a design-system project as a Design library with the frame's title, history, comments and edit source", async () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM", "true")
+  try {
+    const tokens = JSON.stringify({ schema_version: 1, name: "Harbor", colors: { ink: "#0e1726" }, typography: {}, spacing: {}, radii: {}, components: [] })
+    state.snapshot!.manifest.files.push({ path: "design-system.json", media_type: "application/json", content: tokens })
+    state.snapshot!.comments = [{ ...saved, author: "owner", status: "pending" }]
+    open()
+    await waitFor(() => expect(document.querySelector('[data-artifact-frame="design"]')).not.toBeNull())
+    expect(document.querySelector("[data-kind-mode]")).toHaveAttribute("data-kind-mode", "library")
+    expect(screen.getByRole("region", { name: "Colors" })).toBeInTheDocument()
+    // No second viewer chrome inside the frame.
+    expect(screen.queryByText("Comments for agent")).toBeNull()
+    expect(screen.queryByRole("tab", { name: "Preview" })).toBeNull()
+    expect(screen.queryByRole("tablist", { name: "Artifact detail" })).toBeNull()
+    expect(screen.queryByRole("region", { name: "Comments beside preview" })).toBeNull()
+    // What the viewer offered stays reachable through the frame.
+    expect(screen.getByRole("link", { name: "Edit source" })).toHaveAttribute("href", expect.stringContaining("edit=1"))
+    expect(screen.getByRole("button", { name: "Version: v3 · Latest" })).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "History" }))
+    expect(screen.getByRole("region", { name: "Version history" })).toBeVisible()
+    fireEvent.click(screen.getByRole("button", { name: "Comments" }))
+    expect(screen.getByRole("region", { name: "Comment queue" })).toHaveTextContent(saved.text)
+  } finally { vi.unstubAllEnvs() }
+})

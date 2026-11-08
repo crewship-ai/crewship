@@ -233,12 +233,13 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   if (design) body = <DesignBody workspaceId={workspaceId} slug={item.pageId ? "@" + item.pageId : item.slug} onFrame={setKindFrame} />
   else if (sourceEditor) body = hostedProject(false)
   else if (projectPreview && item.kind === "slides" && artifactSlides()) body = <SlidesBody workspaceId={workspaceId} slug={item.slug} version={version} onFrame={setKindFrame} />
-  else if (dataApp) body = <ProjectKindView workspaceId={workspaceId} target={target} kind={resolved.kind as "app" | "dashboard"} onBack={onBack} onReport={setKindReport} />
-  // A project whose manifest is a design system opens as a Design library; any other project keeps its viewer.
-  else if (projectPreview) body = <DesignLibraryGate workspaceId={workspaceId} slug={item.slug} version={version} onFrame={setKindFrame}>
-    <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
-      <div className="flex min-h-[520px] flex-1 overflow-hidden"><ArtifactViewerPanel variant="library" /></div>
-    </ArtifactViewerProvider>
+  // A project whose manifest is a design system opens as a Design library. The catalog calls it an App until
+  // it is read, so the gate comes before the App and Dashboard views; any other project keeps its view.
+  else if (projectPreview) body = <DesignLibraryGate workspaceId={workspaceId} target={target} onBack={onBack} onFrame={setKindFrame}>
+    {dataApp ? <ProjectKindView workspaceId={workspaceId} target={target} kind={resolved.kind as "app" | "dashboard"} onBack={onBack} onReport={setKindReport} />
+      : <ArtifactViewerProvider workspaceId={workspaceId} target={target} onTargetChange={next => { if (!next) onBack() }}>
+        <div className="flex min-h-[520px] flex-1 overflow-hidden"><ArtifactViewerPanel variant="library" /></div>
+      </ArtifactViewerProvider>}
   </DesignLibraryGate>
   else if (projectReadOnly) body = hostedProject(true)
   else if (pageEditor) body = <FramePageEditor workspaceId={workspaceId} pageId={item.pageId!} onLeave={reason => reason === "deleted" ? onBack() : setEditing(false)} />

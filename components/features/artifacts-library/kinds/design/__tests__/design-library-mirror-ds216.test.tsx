@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type { ArtifactProjectSnapshot } from "@/components/features/chat/artifact-context/projects/types"
 import { parseDesignSystem } from "@/components/features/artifacts/design-system/manifest"
 import { ArtifactFrame, NO_FRAME_CAPABILITIES } from "../../../frame"
-import { DesignLibraryBody, libraryExtras, previewDocument, previewHeight } from "../design-library"
+import { DesignLibraryProjectView, libraryExtras, previewDocument, previewHeight, readmeBody } from "../design-library"
 
 const manifest = JSON.parse(readFileSync(join(process.cwd(), "cmd/crewship/seeddata/showcase/mirror/ds216/manifest.json"), "utf8")) as
   { entrypoint: string; files: { path: string; media_type: string; content: string }[] }
@@ -26,7 +26,12 @@ function mount() {
     manifest: { version: 1, entrypoint: manifest.entrypoint, files: manifest.files },
   } as ArtifactProjectSnapshot
   return render(<ArtifactFrame name="Template Crewship Design System" kind={{ kind: "design", mode: "library" }} caps={NO_FRAME_CAPABILITIES} onHome={vi.fn()} layout="desktop">
-    <DesignLibraryBody workspaceId="workspace" slug="ref-design-system" onFrame={vi.fn()} />
+    <DesignLibraryProjectView onFrame={vi.fn()} parts={{
+      data: state.snapshot!, previewKind: "design-system", canWrite: true, canComment: true, maySend: false,
+      version: { latest: 1, shared: 0, shown: 1, viewingOld: false, pick: vi.fn() }, screens: [], screen: "", labelOf: path => path, setScreen: vi.fn(),
+      select: { on: false, available: false, toggle: vi.fn(), hint: null }, preview: null, pinCard: null, canvasRef: { current: null },
+      banners: null, history: null, queue: null, sendBar: null, waiting: 0, share: null, editSourceHref: null,
+    }} />
   </ArtifactFrame>)
 }
 
@@ -60,9 +65,12 @@ describe("Design library: mirrored Template Crewship Design System", () => {
   it("renders the README brand book verbatim as markdown", () => {
     mount()
     const readme = screen.getByRole("article", { name: "README" })
-    for (const heading of ["Template Crewship Design System", "Obsah a tón", "Vizuální základy", "Ikonografie", "Co zatím chybí"]) {
+    for (const heading of ["Obsah a tón", "Vizuální základy", "Ikonografie", "Co zatím chybí"]) {
       expect(within(readme).getByRole("heading", { name: heading })).toBeInTheDocument()
     }
+    // The overview names the system once; the README's own title is not repeated under it.
+    expect(within(readme).queryByRole("heading", { name: "Template Crewship Design System" })).toBeNull()
+    expect(screen.getAllByRole("heading", { name: "Template Crewship Design System" })).toHaveLength(1)
     expect(readme).toHaveTextContent("Žádné emoji, žádné vykřičníky.")
     expect(readme.querySelector("script, iframe")).toBeNull()
   })
@@ -90,6 +98,12 @@ describe("Library extras", () => {
     ])
     expect(extras).toEqual({ readme: "# S", previews: { Button: "<p>b</p>" } })
     expect(libraryExtras(system, [])).toEqual({ readme: null, previews: {} })
+  })
+  it("drops only a leading README title that repeats the system's name", () => {
+    expect(readmeBody("# S\n\nBody", "S")).toBe("Body")
+    expect(readmeBody("# Other\n\nBody", "S")).toBe("# Other\n\nBody")
+    expect(readmeBody("Intro\n# S", "S")).toBe("Intro\n# S")
+    expect(readmeBody("# S", null)).toBe("# S")
   })
   it("bounds the preview height hint", () => {
     expect(previewHeight("<!-- @dsCard height=320 -->")).toBe(320)
