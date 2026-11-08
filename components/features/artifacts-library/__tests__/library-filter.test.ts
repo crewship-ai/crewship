@@ -72,8 +72,18 @@ describe("library filters", () => {
     expect(filter({ folder: "", kinds: ["word"] })).toEqual(["brief"])
   })
 
-  it("Needs attention lists made-but-unshared versioned items, Clean up the series", () => {
-    expect(filter({ view: "attention" })).toEqual(["draft", "brief"])
+  // #5132: Needs attention is a real signal, never "not shared yet".
+  it("Needs attention lists only items with a real signal, Clean up the series", () => {
+    expect(filter({ view: "attention" })).toEqual([])
+    const signalled = libraryItems([
+      page({ slug: "failed", name: "Ops board", owner: "crew/ops", reach: ["crew:ops"], panel_count: 3, failed_panels: 1 } as Partial<WirePage>),
+      page({ slug: "stale-mine", name: "My board", panel_count: 2, stale_panels: 2 } as Partial<WirePage>),
+      page({ slug: "stale-theirs", name: "Their board", owner: "crew/ops", reach: ["crew:ops"], panel_count: 2, stale_panels: 2 } as Partial<WirePage>),
+      page({ slug: "unshared", name: "Draft site", artifact_kind: "project" }),
+    ].map(toPageView))
+    const view = (personal = {}) => applyFilters(signalled, { ...EMPTY_FILTERS, view: "attention" }, personal).map(item => item.slug).sort()
+    expect(view()).toEqual(["failed", "stale-mine"])
+    expect(view({ drafts: new Set(["unshared"]) })).toEqual(["failed", "stale-mine", "unshared"])
     expect(filter({ view: "series" })).toEqual(["smoke-3", "smoke-2", "smoke-1"])
   })
 

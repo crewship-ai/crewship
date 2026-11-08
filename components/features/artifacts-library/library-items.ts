@@ -50,6 +50,15 @@ export interface LibraryItem {
   test?: boolean
   /** The Page's `pages_version`, which archive and folder moves are confirmed against. */
   pagesVersion?: number
+  /** A published application exists; an App without one is Static. */
+  hasApplication?: boolean
+  /** The server says whether the caller may move it; undefined on a server that does not say. */
+  canMove?: boolean
+  /** The caller reaches it as its owner (`reach` has `owner`). */
+  ownedByMe?: boolean
+  /** Panels whose last refresh failed, and panels past their freshness window, from the catalog rollup. */
+  failedPanels?: number
+  stalePanels?: number
 }
 
 /** The version head names projects, dashboards, slides, Word and Sheet; older storage names the rest. */
@@ -96,6 +105,11 @@ export function libraryItems(pages: PageView[], options: { keepOrder?: boolean }
       ...(page.archived ? { archived: true } : {}),
       ...(page.createdByTest ? { test: true } : {}),
       ...(typeof page.pagesVersion === "number" ? { pagesVersion: page.pagesVersion } : {}),
+      ...(page.hasApplication ? { hasApplication: true } : {}),
+      ...(page.canMove === undefined ? {} : { canMove: page.canMove }),
+      ...(page.reach?.includes("owner") ? { ownedByMe: true } : {}),
+      ...(page.tally.failed > 0 ? { failedPanels: page.tally.failed } : {}),
+      ...(page.tally.stale > 0 ? { stalePanels: page.tally.stale } : {}),
     }
   })
   if (options.keepOrder) return items
