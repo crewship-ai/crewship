@@ -265,7 +265,8 @@ func TestMooringAuthorGenerationWriterRollbackRetainsExactCounters(t *testing.T)
 	defer tx.Rollback()
 	seedAuthorGenerationFixture(t, tx)
 	snapshot := func() map[string]int64 {
-		rows, e := tx.Query(`SELECT scope_kind,scope_id,revision FROM mooring_authority_generations WHERE workspace_id='generation-ws'`)
+		rows, e := tx.Query(`SELECT scope_kind,scope_id,revision FROM mooring_authority_generations WHERE workspace_id='generation-ws'
+		 UNION ALL SELECT 'grant:'||principal_kind,page_id||'/'||principal_id,revision FROM mooring_page_grant_generations WHERE workspace_id='generation-ws'`)
 		if e != nil {
 			t.Fatal(e)
 		}
