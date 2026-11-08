@@ -7,7 +7,7 @@ vi.mock("@/lib/local-draft-seal", () => ({
 }))
 import * as React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { cleanup, render, screen, within } from "@testing-library/react"
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import { encodeUpdate } from "@/hooks/use-page-document"
@@ -73,22 +73,32 @@ describe("mirrored Template Crewship Docs", () => {
       "Template Crewship Docs", "Co je Crewship", "Ukázka funkcí dokumentu", "Diagram a graf", "Formátování textu", "Nadpis třetí úrovně",
       "Seznamy", "Bloky kódu", "CSV a Markdown ukázky", "Tabulka s barvami a odkazy", "Záložky a odkazy", "Otevřené otázky", "Pracovní poznámky",
     ])
-    expect(editor.querySelectorAll("table")).toHaveLength(4)
-    expect(editor.querySelectorAll("th")).toHaveLength(3 + 4 + 6 + 3)
-    const code = [...editor.querySelectorAll("pre")].map(pre => pre.textContent)
+    // Document content only: rendered CSV/Markdown previews are view chrome outside the text.
+    const own = <T extends Element>(selector: string) => [...editor.querySelectorAll<T>(selector)].filter(node => !node.closest("[data-code-preview]"))
+    expect(own("table")).toHaveLength(4)
+    expect(own("th")).toHaveLength(3 + 4 + 6 + 3)
+    const code = own("pre").map(pre => pre.textContent)
     expect(code).toHaveLength(10)
     expect(code[2]).toContain("\tfmt.Printf(\"%.0f%%\\n\", Task{\"Support\", 42, 3}.SuccessRate()*100)")
     expect([...editor.querySelectorAll("a")].map(a => a.getAttribute("href"))).toEqual([
       "https://claude.ai/", "https://claude.ai/artifact/CBBoNZhbaHvUUUz2aQ2Ccv", "https://claude.ai/artifact/RwrX5Qdjw7zLHdvxjEABKL",
       "https://claude.ai/artifact/NwPV8rqSjHWDtpZPYUb2ko", "https://claude.ai/artifact/E8HYX1pSVKSAbLqgvTCZ8Z",
     ])
-    expect([...editor.querySelectorAll(":not(pre) > code")].map(c => c.textContent)).toEqual(["inline kód", "crew ls"])
+    expect(own(":not(pre) > code").map(c => c.textContent)).toEqual(["inline kód", "crew ls"])
     // Schema 4 formatting: emphasis, code languages, checklists and a quote, with no text stand-ins.
     expect(editor.querySelectorAll("strong").length).toBeGreaterThanOrEqual(5)
     expect(editor.querySelectorAll("em").length).toBeGreaterThanOrEqual(2)
     expect(editor.querySelectorAll("s")).toHaveLength(1)
     expect([...editor.querySelectorAll("strong")].some(strong => strong.closest("em") || strong.querySelector("em"))).toBe(true)
-    expect([...editor.querySelectorAll("pre")].map(pre => pre.getAttribute("data-language"))).toEqual(["latex", "python", "go", "typescript", "bash", "sql", "json", "yaml", "csv", "markdown"])
+    expect(own("pre").map(pre => pre.getAttribute("data-language"))).toEqual(["latex", "python", "go", "typescript", "bash", "sql", "json", "yaml", "csv", "markdown"])
+    // The mirrored LaTeX, CSV and Markdown samples render as previews; the other languages are coloured code.
+    const block = (language: string) => editor.querySelector<HTMLElement>(`[data-code-block][data-language="${language}"]`)!
+    await waitFor(() => expect(block("latex").querySelector("[data-code-preview] .katex")).not.toBeNull())
+    await waitFor(() => expect(block("csv").querySelector("[data-code-preview] table")).not.toBeNull())
+    await waitFor(() => expect(block("markdown").querySelector("[data-code-preview] > *")).not.toBeNull())
+    expect(block("markdown").querySelector("[data-code-preview][data-error]")).toBeNull()
+    expect(block("csv").querySelector("[data-code-preview][data-error]")).toBeNull()
+    expect(block("python").querySelector("pre [class^=hljs-]")).not.toBeNull()
     expect(editor.querySelectorAll('ul[data-type="taskList"]')).toHaveLength(2)
     const boxes = [...editor.querySelectorAll<HTMLInputElement>('li[data-type="taskItem"] input[type="checkbox"]')]
     expect(boxes.map(box => box.checked)).toEqual([true, false, false, false])

@@ -12,7 +12,7 @@ import type { PreviewResult } from "./document-code-blocks"
  * referrer). Size, nesting and token count are limited.
  */
 
-export const MARKDOWN_LIMITS = { chars: 50_000, depth: 12, tokens: 5_000 }
+export const MARKDOWN_LIMITS = { chars: 20_000, depth: 12, tokens: 5_000 }
 
 const SAFE_LINK = /^(https?:|mailto:)/i
 
