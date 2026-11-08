@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react"
 import dynamic from "next/dynamic"
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Frame, ImagePlus, Info, Layers, MessageSquare, MousePointer2, Play, Plus, Save, Scan, SlidersHorizontal, Square, Trash2, Type, ZoomIn, ZoomOut } from "lucide-react"
 import * as Y from "yjs"
@@ -149,7 +149,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  // never written into the document, history or awareness.
  const viewport = useRef<HTMLDivElement | null>(null)
  const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null)
- const attachViewport = (element: HTMLDivElement | null) => { viewport.current = element; setViewportElement(element) }
+ const attachViewport = useCallback((element: HTMLDivElement | null) => { viewport.current = element; setViewportElement(element) }, [])
  const [placed, setPlaced] = useState<{ fit: true } | { fit: false; view: DesignView }>(() => framed ? { fit: true } : { fit: false, view: { scale: 1, x: 0, y: 0 } })
  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
  const [focus, setFocus] = useState(0)
@@ -173,16 +173,18 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   return { x: left, y: top, width: Math.max(...places.map(place => place.x + place.width)) - left, height: Math.max(...places.map(place => place.y + place.height)) - top }
  }
  // The frame's toolbars float over the canvas: keep the fitted area clear of them.
- const fitOptions = phone ? { top: 88, bottom: 0, side: 12, widthOnly: true } : { top: 80, bottom: 64, side: FIT_PAD }
- // Fit: the whole canvas on a wide screen; the focused artboard's width on a phone.
- const fitTarget = phone && focused ? box([focused]) : box(frames.length ? frames : design.nodes)
- const view: DesignView = placed.fit
-  ? fitTarget && viewportSize.width ? fitView(fitTarget, viewportSize, fitOptions) : { scale: 1, x: fitOptions.side, y: fitOptions.top }
-  : placed.view
+ const fitOptions = !framed ? { top: 24, bottom: 24, side: 24 } : phone ? { top: 88, bottom: 0, side: 12, widthOnly: true } : { top: 80, bottom: 64, side: FIT_PAD }
+ // Fit: every artboard and loose layer on a wide screen; the focused artboard's width on a phone.
+ const fitTarget = phone && focused ? box([focused]) : box(design.nodes.filter(node => !node.parentId || !design.nodes.some(parent => parent.id === node.parentId)))
+ const fitted: DesignView = fitTarget && viewportSize.width ? fitView(fitTarget, viewportSize, fitOptions) : { scale: 1, x: fitOptions.side, y: fitOptions.top }
+ const view: DesignView = placed.fit ? fitted : placed.view
  const scale = view.scale
+ const fittedNow = useRef(fitted); fittedNow.current = fitted
  const viewNow = useRef(view); viewNow.current = view
  const setView = (next: DesignView) => setPlaced({ fit: false, view: next })
- const center = (): Point => ({ x: viewportSize.width / 2, y: (viewportSize.height + (framed ? fitOptions.top - fitOptions.bottom : 0)) / 2 })
+ /** Changes the view from whatever it is when React applies the change, so quick wheel events add up. */
+ const changeView = useCallback((change: (view: DesignView) => DesignView) => setPlaced(previous => ({ fit: false, view: change(previous.fit ? fittedNow.current : previous.view) })), [])
+ const center = (): Point => ({ x: viewportSize.width / 2, y: (viewportSize.height + fitOptions.top - fitOptions.bottom) / 2 })
  const step = (direction: 1 | -1) => {
   const next = direction > 0 ? ZOOM_STEPS.find(value => value > scale + 0.001) : [...ZOOM_STEPS].reverse().find(value => value < scale - 0.001)
   setView(zoomAround(view, center(), next ?? (direction > 0 ? ZOOM_STEPS.at(-1)! : ZOOM_STEPS[0])))
@@ -193,21 +195,25 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  }
  // One gesture at a time. Escape, pointercancel and window blur put back where it started.
  type Gesture =
-  | { kind: "pan"; pointerId: number; start: Point; view: DesignView; moved: boolean; tapNode?: string; touch: boolean }
+  | { kind: "pan"; pointerId: number; start: Point; view: DesignView; moved: boolean; tapNode?: string; touch: boolean; button: number }
   | { kind: "move"; pointerId: number; start: Point; id: string; x: number; y: number; moved: boolean }
-  | { kind: "pinch"; view: DesignView; from: ReturnType<typeof pinchOf> }
+  | { kind: "pinch"; ids: [number, number]; view: DesignView; from: ReturnType<typeof pinchOf> }
+  // Fingers still down after a pinch ended or was cancelled start nothing until all are up.
+  | { kind: "spent" }
  const gesture = useRef<Gesture | null>(null)
  const touches = useRef(new Map<number, Point>())
  const [panning, setPanning] = useState(false)
  const [space, setSpace] = useState(false)
  const spaceHeld = useRef(false)
  const pointerInside = useRef(false)
+ /** A right-button pan that ends outside the canvas must not open the browser menu there (Windows opens it on release). */
+ const menuAfterPan = useRef(0)
  const cancelGesture = () => {
   const current = gesture.current
-  gesture.current = null
-  touches.current.clear()
+  gesture.current = current?.kind === "pinch" || (current?.kind === "pan" && current.touch) ? { kind: "spent" } : null
+  if (touches.current.size === 0) gesture.current = null
   setPanning(false)
-  if (!current) return false
+  if (!current || current.kind === "spent") return false
   if (current.kind === "move" && current.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, x: current.x, y: current.y })
   if (current.kind === "pan" || current.kind === "pinch") setView(current.view)
   return true
@@ -224,16 +230,16 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   if (event.button === 1) event.preventDefault() // no middle-button autoscroll
   if (event.pointerType === "touch") {
    touches.current.set(event.pointerId, at)
-   if (touches.current.size === 2) {
-    // A second finger turns whatever the first one started into a pinch.
+   if (gesture.current?.kind === "spent" || gesture.current?.kind === "pinch") return
+   if (touches.current.size >= 2) {
+    // A second finger turns whatever the first one started into a pinch from the current view.
     const started = gesture.current
     if (started?.kind === "move" && started.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: started.id, x: started.x, y: started.y })
-    const [a, b] = [...touches.current.values()]
-    gesture.current = { kind: "pinch", view, from: pinchOf(a, b) }
+    const ids = [...touches.current.keys()].slice(-2) as [number, number]
+    gesture.current = { kind: "pinch", ids, view, from: pinchOf(touches.current.get(ids[0])!, touches.current.get(ids[1])!) }
     setPanning(true)
     return
    }
-   if (touches.current.size > 2) return
   }
   if (gesture.current) return
   const nodeId = (event.target as Element | null)?.closest?.("[data-design-node]")?.getAttribute("data-design-node")
@@ -246,7 +252,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   if (intent === "select") return
   if (intent === "move" && node) gesture.current = { kind: "move", pointerId: event.pointerId, start: at, id: node.id, x: Number(node.x) || 0, y: Number(node.y) || 0, moved: false }
   else if (intent === "pan") {
-   gesture.current = { kind: "pan", pointerId: event.pointerId, start: at, view, moved: false, touch: event.pointerType === "touch", ...(node ? { tapNode: node.id } : {}) }
+   gesture.current = { kind: "pan", pointerId: event.pointerId, start: at, view, moved: false, touch: event.pointerType === "touch", button: event.button, ...(node ? { tapNode: node.id } : {}) }
    setPanning(true)
   }
   capture(event)
@@ -256,9 +262,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   design.setCursor(toCanvas(view, at))
   if (event.pointerType === "touch" && touches.current.has(event.pointerId)) touches.current.set(event.pointerId, at)
   const current = gesture.current
-  if (!current) return
+  if (!current || current.kind === "spent") return
   if (current.kind === "pinch") {
-   const [a, b] = [...touches.current.values()]
+   const [a, b] = current.ids.map(id => touches.current.get(id))
    if (a && b) setView(pinchView(current.view, current.from, pinchOf(a, b)))
    return
   }
@@ -274,10 +280,15 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   touches.current.delete(event.pointerId)
   const current = gesture.current
   if (!current) return
-  if (current.kind === "pinch") { if (touches.current.size === 0) { gesture.current = null; setPanning(false) } return }
+  if (current.kind === "pinch" || current.kind === "spent") {
+   // Lifting one finger of the pinch ends it; the fingers left start nothing.
+   if (current.kind === "spent" || current.ids.includes(event.pointerId)) { gesture.current = touches.current.size ? { kind: "spent" } : null; setPanning(false) }
+   return
+  }
   if (current.pointerId !== event.pointerId) return
   gesture.current = null
   setPanning(false)
+  if (current.kind === "pan" && current.button === 2 && current.moved) menuAfterPan.current = Date.now()
   // A tap with a finger selects or clears like a click; a right or middle click changes nothing.
   if (current.kind === "pan" && current.touch && !current.moved) {
    const node = current.tapNode ? design.nodes.find(item => item.id === current.tapNode) : undefined
@@ -286,13 +297,13 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  }
  const pressCancel = (event: PointerEvent<HTMLDivElement>) => {
   const current = gesture.current
-  if (current && (current.kind === "pinch" || current.pointerId === event.pointerId)) cancelGesture()
+  if (current && (current.kind === "pinch" ? current.ids.includes(event.pointerId) : current.kind !== "spent" && current.pointerId === event.pointerId)) cancelGesture()
   touches.current.delete(event.pointerId)
+  if (gesture.current?.kind === "spent" && touches.current.size === 0) gesture.current = null
  }
  const viewKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
   if (typingTarget(event.target)) return
   if (event.key === "Escape") { if (!cancelGesture()) setSelectedId(null); event.preventDefault(); return }
-  if (!framed) return
   const pan: Record<string, [number, number]> = { ArrowLeft: [40, 0], ArrowRight: [-40, 0], ArrowUp: [0, 40], ArrowDown: [0, -40] }
   if (pan[event.key]) { setView(panBy(view, ...pan[event.key])); event.preventDefault() }
   else if (event.key === "+" || event.key === "=") { step(1); event.preventDefault() }
@@ -307,17 +318,21 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   const at = (event: { clientX: number; clientY: number }) => { const bounds = element.getBoundingClientRect(); return { x: event.clientX - bounds.left, y: event.clientY - bounds.top } }
   const wheel = (event: WheelEvent) => {
    event.preventDefault()
-   const current = viewNow.current
+   // A drag in progress owns the view; a wheel would be undone by its next move.
+   if (gesture.current) return
    const result = wheelGesture(event, element.clientHeight)
-   setPlaced({ fit: false, view: result.kind === "zoom" ? zoomAround(current, at(event), current.scale * result.factor) : panBy(current, result.dx, result.dy) })
+   const anchor = at(event)
+   changeView(current => result.kind === "zoom" ? zoomAround(current, anchor, current.scale * result.factor) : panBy(current, result.dx, result.dy))
   }
+  // Safari reports a trackpad pinch as gesture events. On a touch screen it sends
+  // them as well as the touch pointers, which already pinch: ignore them there.
   let pinchStart: DesignView | null = null
   type SafariGesture = Event & { scale: number; clientX: number; clientY: number }
-  const gestureStart = (event: Event) => { event.preventDefault(); pinchStart = viewNow.current }
+  const gestureStart = (event: Event) => { event.preventDefault(); pinchStart = touches.current.size || gesture.current ? null : viewNow.current }
   const gestureChange = (event: Event) => {
    event.preventDefault()
    const pinch = event as SafariGesture
-   if (pinchStart) setPlaced({ fit: false, view: zoomAround(pinchStart, at(pinch), pinchStart.scale * pinch.scale) })
+   if (pinchStart && !touches.current.size && !gesture.current) setPlaced({ fit: false, view: zoomAround(pinchStart, at(pinch), pinchStart.scale * pinch.scale) })
   }
   const gestureEnd = (event: Event) => { event.preventDefault(); pinchStart = null }
   element.addEventListener("wheel", wheel, { passive: false })
@@ -330,22 +345,27 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
    element.removeEventListener("gesturechange", gestureChange)
    element.removeEventListener("gestureend", gestureEnd)
   }
- }, [viewportElement])
- // Space + drag pans while the pointer is over the canvas; text fields keep their Space.
+ }, [viewportElement, changeView])
+ // Space + drag pans with the canvas focused, or with the pointer over it while
+ // nothing else has focus; a focused button, menu or text field keeps its Space.
  // Leaving the window (blur) ends any gesture where it started.
  useEffect(() => {
   const down = (event: KeyboardEvent) => {
-   if (event.key === " " && !typingTarget(event.target) && (pointerInside.current || viewport.current?.contains(event.target as Node))) {
+   const target = event.target as Node | null
+   const free = target === document.body || target === document.documentElement || target === null
+   if (event.key === " " && !typingTarget(event.target) && (viewport.current?.contains(target) || (free && pointerInside.current))) {
     event.preventDefault()
     if (!spaceHeld.current) { spaceHeld.current = true; setSpace(true) }
-   } else if (event.key === "Escape" && gesture.current && !viewport.current?.contains(event.target as Node)) cancelNow.current()
+   } else if (event.key === "Escape" && gesture.current && !viewport.current?.contains(target)) cancelNow.current()
   }
   const up = (event: KeyboardEvent) => { if (event.key === " ") { spaceHeld.current = false; setSpace(false) } }
-  const blur = () => { spaceHeld.current = false; setSpace(false); cancelNow.current() }
+  const blur = () => { spaceHeld.current = false; setSpace(false); cancelNow.current(); touches.current.clear(); gesture.current = null }
+  const menu = (event: MouseEvent) => { if (Date.now() - menuAfterPan.current < 600) { event.preventDefault(); menuAfterPan.current = 0 } }
   window.addEventListener("keydown", down)
   window.addEventListener("keyup", up)
   window.addEventListener("blur", blur)
-  return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", blur) }
+  window.addEventListener("contextmenu", menu, true)
+  return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", blur); window.removeEventListener("contextmenu", menu, true) }
  }, [])
  // Links are edited only through the live document, and only by editors.
  const setLink = (target: string) => { if (selected && design.doc && canChange) setDesignNodeLink(design.doc, selected.id, target || null) }
@@ -635,6 +655,12 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
      <Button variant="ghost" size="sm" title="Select and move"><MousePointer2 className="size-4" /><span className="sr-only">Select and move</span></Button>
      {design.editable && <><Button variant="outline" size="sm" onClick={() => add("frame")}><Plus className="size-4" />Screen</Button><Button variant="ghost" size="sm" onClick={() => add("rect")}><Square className="size-4" />Rectangle</Button><Button variant="ghost" size="sm" onClick={() => add("text")}><Type className="size-4" />Text</Button><Button variant="ghost" size="sm" onClick={() => add("image")}><ImagePlus className="size-4" />Image</Button></>}
      <span className="ml-auto text-xs text-muted-foreground">{selected ? selected.name || selected.type : design.editable ? "Drag to move · right-drag or Space to pan · edit in Properties" : "View canvas"}</span>
+     <span className="flex items-center gap-0.5" aria-label="Zoom">
+      <Button variant="ghost" size="sm" aria-label="Zoom out" onClick={() => step(-1)}><ZoomOut className="size-4" /></Button>
+      <span className="min-w-12 text-center font-mono text-xs text-muted-foreground" aria-label="Zoom level">{Math.round(scale * 100)} %</span>
+      <Button variant="ghost" size="sm" aria-label="Zoom in" onClick={() => step(1)}><ZoomIn className="size-4" /></Button>
+      <Button variant="ghost" size="sm" aria-label="Fit" aria-pressed={placed.fit} onClick={() => setPlaced({ fit: true })}><Scan className="size-4" /></Button>
+     </span>
     </div>
     {viewportView("bg-muted/40")}
    </div>

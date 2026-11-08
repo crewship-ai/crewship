@@ -20,17 +20,20 @@ async function fixtureBundle(): Promise<string> {
    import { DesignEditor } from "./components/features/artifacts-design/design-editor";
    import { designNodes, upsertDesignNode } from "./components/features/artifacts-design/design-document";
    import { ArtifactFrame, NO_FRAME_CAPABILITIES } from "./components/features/artifacts-library/frame";
+   const options = Object.assign({ editable: true, layout: "desktop", framed: true, far: false }, window.fixtureOptions);
    const doc = new Y.Doc();
    upsertDesignNode(doc,{id:"screen",type:"frame",name:"Screen A",x:64,y:64,width:600,height:400,fill:"#ffffff"});
    upsertDesignNode(doc,{id:"cta",type:"rect",parentId:"screen",name:"Call to action",x:40,y:40,width:200,height:100,fill:"#2563eb"});
+   if (options.far) upsertDesignNode(doc,{id:"far",type:"rect",name:"Far left",x:-500,y:-300,width:120,height:80,fill:"#16a34a"});
    window.designUpdates = 0; doc.on("update",()=>{window.designUpdates++});
    window.nodesJSON = () => JSON.stringify(designNodes(doc));
    window.cursors = []; window.menus = [];
    window.addEventListener("contextmenu", event => window.menus.push({ prevented: event.defaultPrevented, inCanvas: Boolean(event.target.closest && event.target.closest('[aria-label="Design canvas viewport"]')) }));
    const mutation={mutate(){},mutateAsync:async()=>({version:1}),isPending:false,isSuccess:false,error:null};
-   window.designFixture={conflicts:[],dismissConflict(){},query:{data:{page_id:"page",can_edit:true,can_comment:true,can_share:true,latest_version:1},isError:false},comments:{data:{comments:[]}},versions:{data:{versions:[{version:1}]}},doc,peers:[],connection:"connected",editable:true,dirty:false,unsynced:false,draftError:false,save:mutation,restore:mutation,share:mutation,comment:mutation,connectAgent:mutation,setCursor(cursor){window.cursors.push(cursor)}};
-   const caps = { ...NO_FRAME_CAPABILITIES, canEdit: true };
-   createRoot(document.getElementById("root")).render(<div style={{height:"100vh",display:"flex",flexDirection:"column"}}><ArtifactFrame name="Gestures" kind={{kind:"design",mode:"canvas"}} caps={caps} onHome={()=>{}} layout="desktop"><DesignEditor workspaceId="ws" slug="gestures"/></ArtifactFrame></div>);
+   window.designFixture={conflicts:[],dismissConflict(){},query:{data:{page_id:"page",can_edit:options.editable,can_comment:true,can_share:true,latest_version:1},isError:false},comments:{data:{comments:[]}},versions:{data:{versions:[{version:1}]}},doc,peers:[],connection:"connected",editable:options.editable,dirty:false,unsynced:false,draftError:false,save:mutation,restore:mutation,share:mutation,comment:mutation,connectAgent:mutation,setCursor(cursor){window.cursors.push(cursor)}};
+   const caps = { ...NO_FRAME_CAPABILITIES, canEdit: options.editable };
+   const editor = <DesignEditor workspaceId="ws" slug="gestures"/>;
+   createRoot(document.getElementById("root")).render(<div style={{height:"100vh",display:"flex",flexDirection:"column"}}>{options.framed ? <ArtifactFrame name="Gestures" kind={{kind:"design",mode:"canvas"}} caps={caps} onHome={()=>{}} layout={options.layout}>{editor}</ArtifactFrame> : editor}</div>);
   ` },
   bundle: true, write: false, platform: "browser", format: "iife", jsx: "automatic",
   // The frame reads other build flags; they are all off here.
@@ -58,13 +61,15 @@ const LAYOUT = `
  .absolute{position:absolute}.left-0{left:0}.top-0{top:0}.max-w-none{max-width:none}.hidden{display:none}
 `
 
-async function open(touch = false): Promise<Page> {
+interface FixtureOptions { editable?: boolean; layout?: "desktop" | "phone"; framed?: boolean; far?: boolean }
+async function open(touch = false, options: FixtureOptions = {}): Promise<Page> {
  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, hasTouch: touch })
  const page = await context.newPage()
  const errors: string[] = []
  page.on("pageerror", error => errors.push(error.message))
  await page.route("https://design-viewport.test/**", route => route.fulfill({ body: `<!doctype html><html><head><style>${LAYOUT}</style></head><body style="margin:0"><div id="root"></div></body></html>`, contentType: "text/html" }))
  await page.goto("https://design-viewport.test/canvas")
+ await page.addScriptTag({ content: `window.fixtureOptions=${JSON.stringify(options)}` })
  await page.addScriptTag({ content: bundle })
  await page.locator('[data-design-node="cta"]').waitFor({ timeout: 15_000 }).catch(error => { throw new Error(`${error.message}\npage errors: ${errors.join(" | ")}\n${bundle.length}`) })
  return page
@@ -282,6 +287,104 @@ describe.skipIf(!ready)("Design canvas viewport in Chromium", () => {
   await touch("touchMove", [{ x: bg.x + 60, y: bg.y }, { x: bg.x + 160, y: bg.y }])
   expect(await viewOf(page)).toEqual(panned)
   await touch("touchEnd", [])
+  expect(await nodes(page)).toBe(before)
+  await page.context().close()
+ }, 60_000)
+ it.each([
+  ["a reader", { editable: false }, false],
+  ["a phone review", { layout: "phone" as const }, true],
+ ])("never writes for %s: a left or finger drag on a layer selects or pans, never moves", async (_who, options, touch) => {
+  const page = await open(touch, options)
+  const before = await nodes(page)
+  const writes = await updates(page)
+  const box = await cta(page)
+  const from = { x: box.x + 20, y: box.y + 20 }
+  if (touch) {
+   const cdp = await page.context().newCDPSession(page)
+   const send = (type: "touchStart" | "touchMove" | "touchEnd", points: { x: number; y: number }[]) => cdp.send("Input.dispatchTouchEvent", { type, touchPoints: points.map((point, id) => ({ ...point, id })) })
+   const view = await viewOf(page)
+   await send("touchStart", [from])
+   for (let i = 1; i <= 4; i++) await send("touchMove", [{ x: from.x + i * 15, y: from.y + i * 10 }])
+   await send("touchEnd", [])
+   const after = await viewOf(page)
+   expect(after.x - view.x).toBeCloseTo(60, 0)
+   expect(after.y - view.y).toBeCloseTo(40, 0)
+  } else {
+   await drag(page, from, { x: 80, y: 60 })
+   expect(await selectedOutline(page)).toBe(1)
+  }
+  await drag(page, from, { x: 50, y: 30 }, "right")
+  expect(await nodes(page)).toBe(before)
+  expect(await updates(page)).toBe(writes)
+  await page.context().close()
+ }, 60_000)
+
+ it("reports the pointer in canvas coordinates after pan and zoom, as peers draw it", async () => {
+  const page = await open()
+  await drag(page, await background(page), { x: 70, y: -40 }, "right")
+  await page.mouse.move(700, 420)
+  await page.keyboard.down("Control"); await page.mouse.wheel(0, -100); await page.keyboard.up("Control")
+  // The layer's centre on screen is the layer's centre on the canvas: 64+40+100, 64+40+50.
+  const box = await cta(page)
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
+  const last = await page.evaluate(() => { const list = (window as unknown as { cursors: ({ x: number; y: number } | null)[] }).cursors; return list[list.length - 1] })
+  expect(last!.x).toBeCloseTo(204, 0)
+  expect(last!.y).toBeCloseTo(154, 0)
+  await page.context().close()
+ }, 60_000)
+
+ it("adds up wheel events that arrive before a render", async () => {
+  const page = await open()
+  const view = await viewOf(page)
+  await page.getByLabel("Design canvas viewport").evaluate(element => {
+   for (let i = 0; i < 2; i++) element.dispatchEvent(new WheelEvent("wheel", { deltaY: 100, clientX: 600, clientY: 400, bubbles: true, cancelable: true }))
+  })
+  const after = await viewOf(page)
+  expect(after.y - view.y).toBeCloseTo(-200, 0)
+  await page.context().close()
+ }, 60_000)
+
+ it("zooms with Safari's trackpad gesture events around the pointer", async () => {
+  const page = await open()
+  const view = await viewOf(page)
+  const viewportBox = (await page.getByLabel("Design canvas viewport").boundingBox())!
+  const point = { x: viewportBox.x + 500, y: viewportBox.y + 300 }
+  const under = { x: (500 - view.x) / view.scale, y: (300 - view.y) / view.scale }
+  await page.getByLabel("Design canvas viewport").evaluate((element, at) => {
+   const fire = (type: string, scale: number) => element.dispatchEvent(Object.assign(new Event(type, { bubbles: true, cancelable: true }), { scale, clientX: at.x, clientY: at.y }))
+   fire("gesturestart", 1); fire("gesturechange", 1.5); fire("gestureend", 1.5)
+  }, point)
+  const after = await viewOf(page)
+  expect(after.scale / view.scale).toBeCloseTo(1.5, 2)
+  expect((500 - after.x) / after.scale).toBeCloseTo(under.x, 1)
+  expect((300 - after.y) / after.scale).toBeCloseTo(under.y, 1)
+  await page.context().close()
+ }, 60_000)
+
+ it("draws layers at negative coordinates and fits them", async () => {
+  const page = await open(false, { far: true })
+  const far = (await page.locator('[data-design-node="far"] rect').first().boundingBox())!
+  const viewportBox = (await page.getByLabel("Design canvas viewport").boundingBox())!
+  expect(far.width).toBeGreaterThan(0)
+  expect(far.x).toBeGreaterThanOrEqual(viewportBox.x)
+  expect(far.y).toBeGreaterThanOrEqual(viewportBox.y)
+  await page.context().close()
+ }, 60_000)
+
+ it("pans, zooms and fits in the standalone editor too", async () => {
+  const page = await open(false, { framed: false })
+  const before = await nodes(page)
+  let view = await viewOf(page)
+  const box = await cta(page)
+  await drag(page, { x: box.x + 20, y: box.y + 20 }, { x: 40, y: 30 }, "right")
+  let after = await viewOf(page)
+  expect(after.x - view.x).toBeCloseTo(40, 0)
+  await page.mouse.move(600, 400)
+  await page.keyboard.down("Control"); await page.mouse.wheel(0, 100); await page.keyboard.up("Control")
+  view = after; after = await viewOf(page)
+  expect(after.scale).toBeLessThan(view.scale)
+  await page.getByRole("button", { name: "Fit" }).dispatchEvent("click")
+  expect(await page.getByRole("button", { name: "Fit" }).getAttribute("aria-pressed")).toBe("true")
   expect(await nodes(page)).toBe(before)
   await page.context().close()
  }, 60_000)
