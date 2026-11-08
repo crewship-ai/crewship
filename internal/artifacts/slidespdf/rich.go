@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/signintech/gopdf"
 	"golang.org/x/image/font/gofont/goregular"
@@ -266,8 +267,22 @@ type polyline struct {
 
 var errIconPath = errors.New("icon path")
 
-// iconPolylines flattens the allow-listed icon's primitives on its 24-unit grid.
+var iconCache sync.Map // name -> []polyline; the set is fixed, so at most ~50 entries
+
+// iconPolylines flattens the allow-listed icon's primitives on its 24-unit grid,
+// once per name. Callers must not modify the returned points.
 func iconPolylines(name string) ([]polyline, error) {
+	if cached, ok := iconCache.Load(name); ok {
+		return cached.([]polyline), nil
+	}
+	lines, err := flattenIcon(name)
+	if err == nil {
+		iconCache.Store(name, lines)
+	}
+	return lines, err
+}
+
+func flattenIcon(name string) ([]polyline, error) {
 	nodes, ok := slides.IconNodes(name)
 	if !ok {
 		return nil, ErrUnsupported
@@ -582,7 +597,8 @@ func planIcon(el slides.Element) (iconPlan, error) {
 			pts[i] = point{X: ox + q.X*s, Y: oy + q.Y*s}
 		}
 		p.lines = append(p.lines, polyline{points: pts, closed: l.closed})
-		p.primitives += 2 * len(pts)
+		// One line and one 16-point disc per vertex (drawIcon).
+		p.primitives += 18 * len(pts)
 	}
 	return p, nil
 }

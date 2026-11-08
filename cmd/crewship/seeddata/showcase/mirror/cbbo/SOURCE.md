@@ -44,7 +44,7 @@ projection; see `docs/guides/artifacts/slides.mdx`).
   by Present.
 
 Rendered at 1920 and 390 px wide next to the original HTML (same fonts), the
-mean per-pixel difference is at most 2.8 of 255 levels on every slide (0.1–0.4
+mean per-pixel difference is at most 4.2 of 255 levels on every slide (0.6–2.3
 at 1920 px); what differs is listed below.
 
 ## Remaining gaps (not faked)
@@ -70,6 +70,8 @@ at 1920 px); what differs is listed below.
 7. **Deck metadata:** the original index's `title` becomes the Page name; its
    outline (`sections`: "Úvod: co je Crewship", "Ukázka funkcí Slides: karty,
    graf, diagram") has no field in the Crewship deck index.
-8. **PDF export only:** the PDF has no transitions, no kerning (headings can
-   be a few pixels wider than in the browser) and draws the gradient as 128
-   bands of exact colours.
+8. **Kerning:** Crewship sets the bundled faces without kerning or ligatures,
+   in the deck view and the PDF alike, so both break lines the same way; the
+   original kerns, so some lines are a few pixels wider here.
+9. **PDF export only:** the PDF has no transitions and draws the gradient as
+   128 bands of exact colours.

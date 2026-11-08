@@ -170,7 +170,7 @@ func validRichText(v *Text, rich bool) bool {
 	if !rich {
 		return v.FontWeight == 0 && v.LetterSpacing == 0 && v.LineHeight == 0
 	}
-	return RichFontAllowed(v.FontFamily, v.FontWeight) && v.LetterSpacing >= MinLetterSpacing && v.LetterSpacing <= MaxLetterSpacing && (v.LineHeight == 0 || v.LineHeight >= MinLineHeight && v.LineHeight <= MaxLineHeight)
+	return RichFontAllowed(v.FontFamily, v.FontWeight) && v.LetterSpacing >= MinLetterSpacing && 2*v.LetterSpacing >= -v.FontSize && v.LetterSpacing <= MaxLetterSpacing && (v.LineHeight == 0 || v.LineHeight >= MinLineHeight && v.LineHeight <= MaxLineHeight)
 }
 
 func validRichShape(element Element, rich bool) bool {

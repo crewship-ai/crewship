@@ -104,6 +104,29 @@ describe("schema-3 canvas", () => {
     expect(icon.querySelector("circle")!.getAttribute("r")).toBe("4")
     for (const child of Array.from(icon.querySelectorAll("*"))) for (const attribute of Array.from(child.attributes)) expect(attribute.name).not.toMatch(/^on|href/)
   })
+  it("sets bundled faces without kerning or ligatures, like the PDF", () => {
+    const { container } = render(<SlideCanvas deck={rich()} slideId="cover" />)
+    const title = container.querySelector<HTMLElement>('[data-slide-content="cover-title"]')!
+    expect(title.style.getPropertyValue("font-kerning")).toBe("none")
+    expect(title.style.getPropertyValue("font-variant-ligatures")).toBe("none")
+  })
+  it("keeps a schema-1 deck's family name as authored, even a bundled face's", () => {
+    const deck = structuredClone(v1.deck) as unknown as SlideDeck
+    const text = deck.slides.flatMap(slide => slide.elements).find(item => item.type === "text")!
+    if (text.type === "text") text.text.font_family = "IBM Plex Sans"
+    const slideId = deck.slides.find(slide => slide.elements.includes(text))!.id
+    const { container } = render(<SlideCanvas deck={deck} slideId={slideId} />)
+    const node = container.querySelector<HTMLElement>(`[data-slide-content="${text.id}"]`)!
+    expect(node.style.fontFamily).toBe('"IBM Plex Sans"') // the raw name, not the schema-3 stack
+    expect(node.style.getPropertyValue("font-kerning")).toBe("")
+  })
+  it("refuses negative spacing beyond half the font size", () => {
+    const deck = rich(); const t = element(deck, "cover-eyebrow").text
+    t.letter_spacing = -14
+    expect(isRenderableSlideDeck(deck)).toBe(true)
+    t.letter_spacing = -15
+    expect(isRenderableSlideDeck(deck)).toBe(false)
+  })
   it("leaves schema-1 typography exactly as before", () => {
     const { container } = render(<SlideCanvas deck={structuredClone(v1.deck)} slideId={v1.deck.slide_order[0]} />)
     for (const node of Array.from(container.querySelectorAll<HTMLElement>("[data-slide-content]"))) {

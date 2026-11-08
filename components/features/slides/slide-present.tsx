@@ -27,7 +27,8 @@ function NativePresentation({ deck, initialSlideId, onClose }: { deck: SlideDeck
   const stage = React.useRef<HTMLDivElement>(null)
   const shown = React.useRef(current)
   // Schema-3 slide transitions play on entry; reduced motion shows the slide at once.
-  React.useEffect(() => {
+  // Before paint, so the entering slide never flashes in its final position.
+  React.useLayoutEffect(() => {
     const from = shown.current
     shown.current = current
     if (from === current) return

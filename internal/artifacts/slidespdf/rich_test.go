@@ -83,7 +83,12 @@ func TestRenderRichRefusals(t *testing.T) {
 		{"weight without face", func(d *slides.Deck) { d.Slides[0].Elements[2].Text.FontWeight = 700 }, ErrUnsupported},
 		{"unknown family", func(d *slides.Deck) { d.Slides[0].Elements[2].Text.FontFamily = "Arial" }, ErrUnsupported},
 		{"unknown icon", func(d *slides.Deck) { d.Slides[0].Elements[6].Icon.Name = "nope" }, ErrInvalidDeck},
-		{"rich field in schema 1", func(d *slides.Deck) { d.SchemaVersion = 1 }, ErrInvalidDeck},
+		{"rich field in schema 1", func(d *slides.Deck) { d.SchemaVersion = 1 }, ErrUnsupported},
+		// Schema 1 admits any family name; only schema 3 selects the bundled faces.
+		{"bundled face in schema 1", func(d *slides.Deck) {
+			*d = fixture()
+			d.Slides[0].Elements[0].Text.FontFamily = "IBM Plex Sans"
+		}, ErrUnsupported},
 		{"tight line height", func(d *slides.Deck) {}, ErrOverflow},
 		{"letter spacing overflow", func(d *slides.Deck) {
 			d.Slides[0].Elements[3].Text.LineHeight = 100
@@ -183,6 +188,27 @@ func TestEveryIconFlattensInsideItsGrid(t *testing.T) {
 	head := lines[len(lines)-1]
 	if !head.closed || math.Abs(head.points[0].X-13) > 1e-9 || math.Abs(head.points[0].Y-7) > 1e-9 {
 		t.Fatalf("users head %v", head.points[:1])
+	}
+}
+
+// The icon budget counts what drawIcon emits: a line and a disc per vertex.
+func TestIconPrimitiveBudget(t *testing.T) {
+	el := slides.Element{X: 0, Y: 0, Width: 280, Height: 280, Icon: &slides.Icon{Name: "users", Color: "#000000"}}
+	p, err := planIcon(el)
+	if err != nil {
+		t.Fatal(err)
+	}
+	points := 0
+	for _, l := range p.lines {
+		points += len(l.points)
+	}
+	if p.primitives != 18*points {
+		t.Fatalf("primitives %d for %d vertices", p.primitives, points)
+	}
+	again, _ := iconPolylines("users")
+	first, _ := iconPolylines("users")
+	if &again[0] != &first[0] {
+		t.Error("icon geometry is flattened again for every element")
 	}
 }
 

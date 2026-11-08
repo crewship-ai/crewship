@@ -541,6 +541,9 @@ func artifactSlideText(style map[string]string) (*slides.Text, error) {
 		if text.LineHeight == 0 {
 			return nil, unsupportedSlide("line height out of range")
 		}
+		if text.LineHeight == 120 {
+			text.LineHeight = 0 // the schema-1 default, like weight 400
+		}
 	}
 	return text, nil
 }

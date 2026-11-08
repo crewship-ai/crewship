@@ -313,7 +313,7 @@ func admit(ctx context.Context, d slides.Deck) error {
 			switch el.Type {
 			case "text":
 				if el.Text != nil {
-					if el.Text.FontFamily != fontFamily && !slides.RichFontAllowed(el.Text.FontFamily, el.Text.FontWeight) {
+					if el.Text.FontFamily != fontFamily && (d.SchemaVersion != slides.RichSchemaVersion || !slides.RichFontAllowed(el.Text.FontFamily, el.Text.FontWeight)) {
 						return ErrUnsupported
 					}
 					values = []string{el.Text.Value}
@@ -325,7 +325,7 @@ func admit(ctx context.Context, d slides.Deck) error {
 			case "icon":
 			case "table":
 				if el.Table != nil {
-					if el.Table.FontFamily != fontFamily && !slides.RichFontAllowed(el.Table.FontFamily, 0) {
+					if el.Table.FontFamily != fontFamily && (d.SchemaVersion != slides.RichSchemaVersion || !slides.RichFontAllowed(el.Table.FontFamily, 0)) {
 						return ErrUnsupported
 					}
 					if len(el.Table.Cells) > 30 {

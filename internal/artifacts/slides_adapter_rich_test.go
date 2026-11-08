@@ -51,7 +51,8 @@ func TestSlidesArtifactRichProfile(t *testing.T) {
 func TestSlidesArtifactPlainDeckStaysSchemaOne(t *testing.T) {
 	legacy := strings.Replace(slideText("a", "x"), "text-align:left", "text-align:left;font-family:'Go Regular'", 1) +
 		strings.Replace(slideText("b", "y"), "text-align:left", "text-align:left;font-family:sans-serif", 1) +
-		strings.Replace(slideText("c", "z"), "text-align:left", "text-align:left;font-weight:400", 1)
+		strings.Replace(slideText("c", "z"), "text-align:left", "text-align:left;font-weight:400", 1) +
+		strings.Replace(slideText("d", "w"), "text-align:left", "text-align:left;line-height:1.2", 1)
 	got, err := ParseSlidesArtifact("page-id", slideFiles([]string{"intro"}, legacy))
 	if err != nil {
 		t.Fatal(err)

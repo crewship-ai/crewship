@@ -243,9 +243,9 @@ the PDF all draw the same way:
 
 The exact syntax and the full icon list are in the
 [`crewship page artifact` reference](/cli/artifacts#rich-profile-optional).
-In the PDF, a gradient is drawn as 128 narrow bands of the exact colors, and
-text has no kerning, so a heading can be a few pixels wider than in the
-browser.
+The bundled faces are set without kerning or ligatures in both the deck view
+and the PDF, so text wraps the same way in both. In the PDF, a gradient is
+drawn as 128 narrow bands of the exact colors.
 
 What the profile still cannot express: images and photos, CSS layout (flex or
 grid), `text-transform`, mixed styles inside one text block, element

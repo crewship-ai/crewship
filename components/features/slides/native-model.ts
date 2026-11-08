@@ -15,7 +15,8 @@ const has = (value: Record<string, unknown>, key: string) => Object.hasOwn(value
 
 function richText(v: Record<string, unknown>): boolean {
   if (!richFontAllowed(v.font_family, has(v, "font_weight") ? v.font_weight : 400)) return false
-  if (has(v, "letter_spacing") && !integer(v.letter_spacing, SLIDES_LETTER_SPACING[0], SLIDES_LETTER_SPACING[1])) return false
+  // Negative spacing is bounded by half the font size, so advances stay positive.
+  if (has(v, "letter_spacing") && (!integer(v.letter_spacing, SLIDES_LETTER_SPACING[0], SLIDES_LETTER_SPACING[1]) || 2 * v.letter_spacing < -(v.font_size as number))) return false
   return !has(v, "line_height") || integer(v.line_height, SLIDES_LINE_HEIGHT[0], SLIDES_LINE_HEIGHT[1])
 }
 function richShape(v: Record<string, unknown>, width: number, height: number): boolean {

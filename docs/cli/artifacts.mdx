@@ -631,7 +631,7 @@ and anything else is refused with `422 artifact_slides_unsupported`.
 |---|---|---|
 | `<p>`, `<table>` | `font-family` | Exactly one of `Go Regular`, `IBM Plex Sans`, `JetBrains Mono` (bare, or in single or double quotes). Fallback lists such as `'IBM Plex Sans', Arial` are refused. |
 | `<p>` | `font-weight` | `400`, `600` or `700` where the face has it: IBM Plex Sans 400/600/700, JetBrains Mono 400/600, Go Regular 400. |
-| `<p>` | `letter-spacing` | Whole pixels from `-20px` to `100px`, added after every character. |
+| `<p>` | `letter-spacing` | Whole pixels from `-20px` to `100px`, and no less than minus half the font size; added after every character. |
 | `<p>` | `line-height` | A unitless number with up to two decimals from `0.8` to `3` (default `1.2`). |
 | `<p>`, `<table>` | `font-size` | Up to 320 pixels (160 without the rich profile). |
 | `<div data-shape="rectangle">` | `border-radius` | Whole pixels, at most half the shorter side. |

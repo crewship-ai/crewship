@@ -49,6 +49,8 @@ func TestValidateProjectionRichProfile(t *testing.T) {
 		{"letter spacing min", func(d *Deck) { el(d, "t").Text.LetterSpacing = MinLetterSpacing }, true},
 		{"letter spacing below", func(d *Deck) { el(d, "t").Text.LetterSpacing = MinLetterSpacing - 1 }, false},
 		{"letter spacing above", func(d *Deck) { el(d, "t").Text.LetterSpacing = MaxLetterSpacing + 1 }, false},
+		{"negative spacing at half size", func(d *Deck) { el(d, "t").Text.FontSize = 20; el(d, "t").Text.LetterSpacing = -10 }, true},
+		{"negative spacing beyond half size", func(d *Deck) { el(d, "t").Text.FontSize = 20; el(d, "t").Text.LetterSpacing = -11 }, false},
 		{"line height below", func(d *Deck) { el(d, "t").Text.LineHeight = MinLineHeight - 1 }, false},
 		{"line height above", func(d *Deck) { el(d, "t").Text.LineHeight = MaxLineHeight + 1 }, false},
 		{"radius half of short side", func(d *Deck) { el(d, "r").Shape.CornerRadius = 100 }, true},
