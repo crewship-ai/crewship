@@ -9,13 +9,20 @@ const control = "min-h-9 coarse:min-h-[44px] rounded border px-3"
 
 /** Presentation is a modal native view, not an export or durable write. */
 /** `onSlideChange` hears every slide shown, so the viewer leaves Present on the last one. */
-export function SlidePresent({ deck, initialSlideId, onClose, onSlideChange }: { deck: unknown; initialSlideId: string; onClose: () => void; onSlideChange?: (slideId: string) => void }) {
+/** `follow` moves the presentation from outside (a Presenter view); each new `seq` is one move. */
+export interface PresentFollow { id: string; seq: number }
+
+export function SlidePresent({ deck, initialSlideId, onClose, onSlideChange, follow }: { deck: unknown; initialSlideId: string; onClose: () => void; onSlideChange?: (slideId: string) => void; follow?: PresentFollow }) {
   if (!isRenderableSlideDeck(deck) || !deck.slide_order.includes(initialSlideId)) return <p role="alert">This presentation format or target is unavailable.</p>
-  return <NativePresentation deck={deck} initialSlideId={initialSlideId} onClose={onClose} onSlideChange={onSlideChange} />
+  return <NativePresentation deck={deck} initialSlideId={initialSlideId} onClose={onClose} onSlideChange={onSlideChange} follow={follow} />
 }
 
-function NativePresentation({ deck, initialSlideId, onClose, onSlideChange }: { deck: SlideDeck; initialSlideId: string; onClose: () => void; onSlideChange?: (slideId: string) => void }) {
+function NativePresentation({ deck, initialSlideId, onClose, onSlideChange, follow }: { deck: SlideDeck; initialSlideId: string; onClose: () => void; onSlideChange?: (slideId: string) => void; follow?: PresentFollow }) {
   const [index, setIndex] = React.useState(Math.max(0, deck.slide_order.indexOf(initialSlideId)))
+  React.useEffect(() => {
+    const position = follow ? deck.slide_order.indexOf(follow.id) : -1
+    if (position >= 0) setIndex(position)
+  }, [follow, deck])
   const root = React.useRef<HTMLDivElement>(null)
   const close = React.useRef(onClose)
   close.current = onClose

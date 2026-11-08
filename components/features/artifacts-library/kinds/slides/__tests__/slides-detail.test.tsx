@@ -269,6 +269,104 @@ describe("one selected slide for the viewer, its link and Present (#5150)", () =
   })
 })
 
+/** Same-origin channels in one test: a message reaches every other channel of that name. */
+class FakeChannel {
+  static open = new Set<FakeChannel>()
+  onmessage: ((event: MessageEvent) => void) | null = null
+  received: unknown[] = []
+  constructor(readonly name: string) { FakeChannel.open.add(this) }
+  postMessage(data: unknown) {
+    for (const peer of FakeChannel.open) if (peer !== this && peer.name === this.name) { peer.received.push(data); act(() => { peer.onmessage?.({ data } as MessageEvent) }) }
+  }
+  close() { FakeChannel.open.delete(this) }
+}
+
+describe("Presenter view in its own window (#5151)", () => {
+  const SESSION = "0123456789abcdef01234567"
+  let opened: ReturnType<typeof vi.fn>
+  beforeEach(() => {
+    state.projection = threeSlides()
+    FakeChannel.open.clear()
+    vi.stubGlobal("BroadcastChannel", FakeChannel)
+    opened = vi.fn(() => null)
+    vi.stubGlobal("open", opened)
+  })
+  afterEach(() => { vi.unstubAllGlobals() })
+  const peer = (session = SESSION) => new FakeChannel(`crewship-slides-presenter:${session}`)
+
+  it("opens the presenter window on the current slide and presents here without notes", async () => {
+    await mount()
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Slide thumbnails" })).getByRole("button", { name: "Slide 2" }))
+    fireEvent.click(within(slot("output")).getByRole("button", { name: "Presenter view" }))
+    expect(opened).toHaveBeenCalledOnce()
+    const [url, target, features] = opened.mock.calls[0] as [string, string, string]
+    expect(url).toMatch(/^\/artifacts\/page\?workspace_id=workspace&presenter=[0-9a-f]{24}#slide-details$/)
+    expect(target).toMatch(/^crewship-presenter-[0-9a-f]{24}$/)
+    expect(features).toContain("noopener")
+    const dialog = screen.getByRole("dialog", { name: "Present slides" })
+    expect(within(dialog).getByText("2 / 3")).toBeInTheDocument()
+    expect(dialog).not.toHaveTextContent("Thank the board")
+    expect(dialog).not.toHaveTextContent("Opening note")
+  })
+
+  it("follows its presenter window and tells it when the presentation ends", async () => {
+    await mount()
+    fireEvent.click(within(slot("output")).getByRole("button", { name: "Presenter view" }))
+    const session = /presenter=([0-9a-f]{24})/.exec(opened.mock.calls[0][0] as string)![1]
+    const presenter = peer(session), stranger = peer("ffffffffffffffffffffffff")
+    const dialog = screen.getByRole("dialog", { name: "Present slides" })
+    presenter.postMessage({ kind: "slide", id: "closing" })
+    expect(within(dialog).getByText("3 / 3")).toBeInTheDocument()
+    presenter.postMessage({ kind: "slide", id: "missing" })
+    stranger.postMessage({ kind: "slide", id: "intro" })
+    expect(within(dialog).getByText("3 / 3")).toBeInTheDocument()
+    fireEvent.keyDown(dialog, { key: "ArrowLeft" })
+    expect(presenter.received.at(-1)).toEqual({ kind: "slide", id: "details" })
+    presenter.postMessage({ kind: "slide", id: "closing" })
+    fireEvent.keyDown(dialog, { key: "ArrowLeft" })
+    presenter.postMessage({ kind: "slide", id: "closing" })
+    expect(within(dialog).getByText("3 / 3")).toBeInTheDocument()
+    fireEvent.keyDown(dialog, { key: "Escape" })
+    expect(presenter.received.at(-1)).toEqual({ kind: "end" })
+    expect(stranger.received).toEqual([])
+    expect(shown3()).toBe("3 / 3")
+  })
+
+  it("ends here when the presenter window ends the presentation", async () => {
+    await mount()
+    fireEvent.click(within(slot("output")).getByRole("button", { name: "Presenter view" }))
+    const session = /presenter=([0-9a-f]{24})/.exec(opened.mock.calls[0][0] as string)![1]
+    peer(session).postMessage({ kind: "end" })
+    expect(screen.queryByRole("dialog", { name: "Present slides" })).toBeNull()
+  })
+
+  it("is the presenter window: current and next slide, notes and timer, driving the audience", async () => {
+    window.history.replaceState(null, "", `/artifacts/page?workspace_id=workspace&presenter=${SESSION}#slide-intro`)
+    const audience = peer()
+    await mount()
+    const view = screen.getByRole("dialog", { name: "Presenter view" })
+    expect(within(view).getByRole("region", { name: "Speaker notes" })).toHaveTextContent("Speaker notes · slide 1Opening note")
+    expect(within(view).getByRole("region", { name: "Next slide" })).toBeInTheDocument()
+    expect(within(view).getByLabelText("Elapsed time")).toHaveTextContent("00:00")
+    fireEvent.click(within(view).getByRole("button", { name: "Next slide" }))
+    expect(audience.received.at(-1)).toEqual({ kind: "slide", id: "details" })
+    fireEvent.keyDown(view, { key: "End" })
+    expect(within(view).getByRole("region", { name: "Speaker notes" })).toHaveTextContent("Thank the board")
+    expect(within(view).getByRole("region", { name: "Next slide" })).toHaveTextContent("End of the deck.")
+    audience.postMessage({ kind: "slide", id: "intro" })
+    expect(within(view).getByText("1 / 3")).toBeInTheDocument()
+    audience.postMessage({ kind: "end" })
+    expect(within(view).getByRole("status")).toHaveTextContent("The presentation ended. You can close this window.")
+  })
+
+  it("ignores a presenter address that is not a session", async () => {
+    window.history.replaceState(null, "", "/artifacts/page?workspace_id=workspace&presenter=../x")
+    await mount()
+    expect(screen.queryByRole("dialog", { name: "Presenter view" })).toBeNull()
+  })
+  const shown3 = () => within(slot("nav")).getByText(/^\d+ \/ 3$/).textContent
+})
+
 it("names a slide by its first text", () => {
   expect(slideLabel({ id: "a", notes: "", elements: [{ id: "t", type: "text", x: 0, y: 0, width: 1, height: 1, text: { value: "Revenue\nmore", font_family: "Go Regular", font_size: 1, color: "#000", align: "left" } }] }, 0)).toBe("Revenue")
   expect(slideLabel({ id: "a", notes: "", elements: [] }, 2)).toBe("Slide 3")
