@@ -131,10 +131,10 @@ test.describe("project", () => {
       await openProject(page, ws.id, slug)
       await openHistory(page)
       await historyRow(page, 1).getByRole("button", { name: "View" }).click()
-      await page.getByRole("tab", { name: "Preview" }).click()
+      await page.getByRole("button", { name: "Preview", exact: true }).click()
       await expect(preview(page).locator(HERO)).toHaveText(V1)
-      // The viewer's own Share pins a version; the library header's Share manages people.
-      await page.locator('section[aria-label="Artifact viewer"]').getByRole("button", { name: "Share", exact: true }).click()
+      // The view slot's Share pins a version; the frame header's Share manages people.
+      await page.locator('[data-artifact-slot="view"]').getByRole("button", { name: "Share", exact: true }).click()
       const shared = page.waitForResponse((r) => r.url().includes("/artifact/share") && r.request().method() === "POST")
       await page.getByRole("button", { name: "Share v1", exact: true }).click()
       const sharedRes = await shared
@@ -150,7 +150,7 @@ test.describe("project", () => {
       const readerPage = await readerCtx.newPage()
       await openProject(readerPage, ws.id, slug)
       await expect(preview(readerPage).locator(HERO)).toHaveText(V1)
-      for (const name of ["Select", "Restore as new version", "Send to agent", /^Share v\d+$/]) {
+      for (const name of ["Select", "Add a comment", "Restore as new version", "Send to agent", /^Share v\d+$/]) {
         await expect(readerPage.getByRole("button", { name, exact: typeof name === "string" })).toHaveCount(0)
       }
       await readerPage.screenshot({ path: test.info().outputPath("reader.png"), fullPage: true })
@@ -223,7 +223,7 @@ test.describe("project", () => {
       await expect(historyRow(page, 3)).toContainText("Restored from v1")
       await expect(historyRow(page, 2)).toBeVisible()
       await expect(historyRow(page, 1)).toBeVisible()
-      await page.getByRole("tab", { name: "Preview" }).click()
+      await page.getByRole("button", { name: "Preview", exact: true }).click()
       await expect(preview(page).locator(HERO)).toHaveText(V1)
       await page.screenshot({ path: test.info().outputPath("restored.png"), fullPage: true })
       const reloaded = await snapshot(request, ws.id, slug)
@@ -397,7 +397,7 @@ test.describe("project", () => {
         expect(newest?.restored_from).toBe(v1.latest_version)
         expect(heroOf(after)).toBe(heroOf(v1))
         await expect(historyRow(page, after.latest_version)).toContainText(`Restored from v${v1.latest_version}`)
-        await page.getByRole("tab", { name: "Preview" }).click()
+        await page.getByRole("button", { name: "Preview", exact: true }).click()
         await expect(preview(page).locator(HERO)).toHaveText(heroOf(v1) ?? V1)
         evidence.restore = { latest: after.latest_version, restored_from: newest?.restored_from, versions: after.versions.map((v) => v.version) }
         await page.screenshot({ path: test.info().outputPath("agent-restored.png"), fullPage: true })

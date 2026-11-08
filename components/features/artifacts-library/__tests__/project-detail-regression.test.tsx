@@ -87,9 +87,9 @@ afterEach(cleanup)
 
 const open = () => render(withQuery(<ArtifactsLibrary workspaceId="workspace-1" item="page-1" onSelect={vi.fn()} />))
 
-// The composer opens once the private local draft has loaded.
+// The composer opens once the private local draft has loaded. Comment sits in the frame's tools slot (#5132).
 async function compose() {
-  fireEvent.click(screen.getByRole("button", { name: "Select" }))
+  fireEvent.click(await screen.findByRole("button", { name: "Add a comment" }))
   const frame = screen.getByTitle(/Preview of/) as HTMLIFrameElement
   act(() => window.dispatchEvent(new MessageEvent("message", {
     source: frame.contentWindow,
@@ -100,30 +100,25 @@ async function compose() {
   fireEvent.change(box, { target: { value: saved.text } })
 }
 
-it("provides Preview, History and Comments tabs without losing an unsent anchored comment", async () => {
+it("opens History and Comments in the frame drawer without losing an unsent anchored comment", async () => {
   open()
-  expect(screen.getByRole("tab", { name: "Preview", selected: true })).toBeInTheDocument()
   await compose()
-  fireEvent.click(screen.getByRole("tab", { name: "History" }))
+  fireEvent.click(screen.getByRole("button", { name: "History" }))
   expect(screen.getByRole("region", { name: "Version history" })).toBeVisible()
-  fireEvent.click(screen.getByRole("tab", { name: "Comments" }))
+  fireEvent.click(screen.getByRole("button", { name: "Comments" }))
   expect(screen.getByRole("region", { name: "Comment queue" })).toBeVisible()
-  fireEvent.click(screen.getByRole("tab", { name: "Preview" }))
   expect(screen.getByRole("textbox", { name: "Comment" })).toHaveValue(saved.text)
   expect(state.version).toBeUndefined()
   expect(state.comment).not.toHaveBeenCalled()
 })
 
-it("supports arrow keys and Home and End between detail tabs", () => {
+it("lays a static project out as an App: version in view, Static under it, Propose in the Agent drawer", async () => {
   open()
-  const preview = screen.getByRole("tab", { name: "Preview" })
-  preview.focus()
-  fireEvent.keyDown(preview, { key: "ArrowRight" })
-  expect(screen.getByRole("tab", { name: "History", selected: true })).toHaveFocus()
-  fireEvent.keyDown(document.activeElement!, { key: "End" })
-  expect(screen.getByRole("tab", { name: "Comments", selected: true })).toHaveFocus()
-  fireEvent.keyDown(document.activeElement!, { key: "Home" })
-  expect(screen.getByRole("tab", { name: "Preview", selected: true })).toHaveFocus()
+  expect(await screen.findByRole("button", { name: "Version: v3 · Latest" })).toBeInTheDocument()
+  expect(screen.getByRole("group", { name: "Capabilities" })).toHaveTextContent("Static · no capabilities")
+  expect(screen.queryByRole("tab", { name: "Preview" })).toBeNull()
+  fireEvent.click(screen.getByRole("button", { name: "Agent" }))
+  expect(screen.getByRole("radio", { name: "Propose" })).not.toBeDisabled()
 })
 
 it("starts the source agent only after saving the exact library comment", async () => {
