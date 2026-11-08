@@ -101,3 +101,5 @@
 }
 [data-code-block] > [data-code-preview] .katex-display { margin: 0.25rem 0; overflow-x: auto; overflow-y: hidden; }
 [data-code-block] > pre[hidden] { display: none; }
+/* A preview never grows past a screenful (e.g. large negative TeX spacing); it scrolls instead. */
+[data-code-block] > [data-code-preview] { max-height: 40rem; overflow: auto; }

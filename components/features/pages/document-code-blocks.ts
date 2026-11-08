@@ -1,5 +1,5 @@
 import { Extension, type AnyExtension, type Editor } from "@tiptap/core"
-import { Plugin, PluginKey } from "@tiptap/pm/state"
+import { Plugin, PluginKey, Selection } from "@tiptap/pm/state"
 import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
 import { common, createLowlight } from "lowlight"
@@ -112,7 +112,11 @@ export const previewable = (language: unknown): language is string => typeof lan
  * the viewer's own choice in this tab: it is not document content, is never
  * saved and never reaches collaborators.
  */
-const modes = new Map<string, "source" | "preview">()
+const modes = new WeakMap<Editor, Map<string, "source" | "preview">>()
+const modesOf = (editor: Editor) => { let map = modes.get(editor); if (!map) { map = new Map(); modes.set(editor, map) } return map }
+
+/** How long a changed previewed block waits before it is rendered again, so typing and remote edits stay smooth. */
+export const PREVIEW_DELAY_MS = 250
 
 /**
  * The code block with its header: the language (or "Code"), Source and
@@ -142,34 +146,50 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
         preview.contentEditable = "false"; preview.dataset.codePreview = ""
         header.append(label, toggle, copy, status)
         pre.append(code); dom.append(header, preview, pre)
-        let current = node, reset: ReturnType<typeof setTimeout> | undefined, destroyed = false
-        let shown: { language: string; source: string } | null = null
+        let current = node, reset: ReturnType<typeof setTimeout> | undefined, pending: ReturnType<typeof setTimeout> | undefined, destroyed = false
+        let shown: { language: string; source: string } | null = null, ownMode: "source" | "preview" = "preview"
         const blockId = () => typeof current.attrs.id === "string" ? current.attrs.id : null
         const language = () => languages && typeof current.attrs.language === "string" ? current.attrs.language : null
-        const mode = () => { const id = blockId(); return (id && modes.get(id)) || "preview" }
+        const mode = () => { const id = blockId(); return (id ? modesOf(editor).get(id) : undefined) ?? ownMode }
+        const caretInside = () => {
+          if (!editor.isEditable) return false
+          const pos = getPos()
+          if (typeof pos !== "number") return false
+          const { from, to } = editor.state.selection
+          return to > pos && from < pos + current.nodeSize
+        }
+        const setMode = (next: "source" | "preview") => { ownMode = next; const id = blockId(); if (id) modesOf(editor).set(id, next); showPreview() }
 
-        const showPreview = () => {
+        function showPreview() {
           const lang = language()
           const active = lang !== null && previewable(lang) && mode() === "preview"
           toggle.hidden = lang === null || !previewable(lang)
           sourceButton.setAttribute("aria-pressed", String(!active)); previewButton.setAttribute("aria-pressed", String(active))
-          if (!active) { preview.hidden = true; pre.hidden = false; shown = null; preview.replaceChildren(); return }
+          if (!active) { clearTimeout(pending); preview.hidden = true; pre.hidden = false; shown = null; preview.replaceChildren(); return }
+          // Typing must never land in hidden text: also when the language changes under the caret.
+          if (caretInside()) { setMode("source"); return }
           const source = current.textContent
           if (shown && shown.language === lang && shown.source === source) return
+          const first = shown === null
           shown = { language: lang, source }
           preview.hidden = false
           const draw = (result: PreviewResult) => {
-            if (destroyed || shown?.source !== source || shown.language !== lang) return
-            if (result.ok) { preview.replaceChildren(result.node); delete preview.dataset.error; pre.hidden = true }
-            else {
+            if (destroyed || shown?.source !== source || shown.language !== lang || mode() !== "preview") return
+            if (result.ok) {
+              if (caretInside()) { setMode("source"); return }
+              preview.replaceChildren(result.node); delete preview.dataset.error; pre.hidden = true
+            } else {
               const message = document.createElement("p"); message.textContent = result.error; message.setAttribute("role", "status")
               preview.replaceChildren(message); preview.dataset.error = ""; pre.hidden = false
             }
           }
           if (!preview.childElementCount) { const wait = document.createElement("p"); wait.textContent = "Loading preview…"; preview.replaceChildren(wait) }
-          PREVIEWS[lang].load().then(render => draw(render(source)), () => draw({ ok: false, error: "The preview could not be loaded. The source is unchanged." }))
+          // Render the latest text once edits pause; a burst of keystrokes or remote updates renders once.
+          clearTimeout(pending)
+          pending = setTimeout(() => {
+            PREVIEWS[lang].load().then(render => draw(render(source)), () => draw({ ok: false, error: "The preview could not be loaded. The source is unchanged." }))
+          }, first ? 0 : PREVIEW_DELAY_MS)
         }
-        const setMode = (next: "source" | "preview") => { const id = blockId(); if (id) modes.set(id, next); showPreview() }
 
         const render = (next: ProseMirrorNode) => {
           current = next
@@ -184,15 +204,17 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
         render(node)
         for (const button of [sourceButton, previewButton, copy]) button.addEventListener("mousedown", event => event.preventDefault())
         sourceButton.addEventListener("click", () => setMode("source"))
-        previewButton.addEventListener("click", () => setMode("preview"))
-        // Typing must never land in hidden text: a caret inside a previewed block shows its source.
-        const followCaret = () => {
-          if (!editor.isEditable || mode() !== "preview" || !previewable(language()) || pre.hidden === false) return
+        previewButton.addEventListener("click", () => {
+          // Previewing the block being edited moves the caret past it, so the next keystroke is not hidden.
           const pos = getPos()
-          if (typeof pos !== "number") return
-          const { from, to } = editor.state.selection
-          if (to > pos && from < pos + current.nodeSize) setMode("source")
-        }
+          if (caretInside() && typeof pos === "number") {
+            const after = Math.min(pos + current.nodeSize, editor.state.doc.content.size)
+            editor.view.dispatch(editor.state.tr.setSelection(Selection.near(editor.state.doc.resolve(after))).setMeta("addToHistory", false))
+          }
+          if (caretInside()) return
+          setMode("preview")
+        })
+        const followCaret = () => { if (mode() === "preview" && previewable(language()) && caretInside()) setMode("source") }
         editor.on("selectionUpdate", followCaret)
         // Keep the caret where it is: pressing Copy must not move ProseMirror's selection.
         copy.addEventListener("click", () => {
@@ -210,7 +232,7 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
           // Only the code text is document content; the header and the preview are this view's own.
           ignoreMutation: (mutation: MutationRecord | { type: "selection"; target: Node }) => mutation.type !== "selection" && !code.contains(mutation.target),
           stopEvent: (event: Event) => header.contains(event.target as Node) || preview.contains(event.target as Node),
-          destroy: () => { destroyed = true; clearTimeout(reset); editor.off("selectionUpdate", followCaret) },
+          destroy: () => { destroyed = true; clearTimeout(reset); clearTimeout(pending); editor.off("selectionUpdate", followCaret) },
         }
       }
     },

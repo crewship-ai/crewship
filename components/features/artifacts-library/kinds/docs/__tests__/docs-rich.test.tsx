@@ -265,6 +265,26 @@ describe("Docs math blocks", () => {
     await waitFor(() => expect(euler.querySelector("[data-code-preview] annotation")?.textContent).toBe(String.raw`x + e^{i\pi} + 1 = 0`))
   })
 
+  it("keeps the source shown when the block under the caret becomes latex, so typing is never hidden", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    let start = -1
+    editor.editor.state.doc.descendants((node, pos) => { if (node.attrs.id === "code") start = pos + 1 })
+    act(() => { editor.editor.commands.setTextSelection(start) })
+    act(() => { editor.editor.commands.updateAttributes("codeBlock", { language: "latex" }) })
+    const block = blockDom(editor, "code")
+    await new Promise(resolve => setTimeout(resolve, 400))
+    expect(block.querySelector("pre")!.hidden).toBe(false)
+    expect(within(block).getByRole("button", { name: "Source" }).getAttribute("aria-pressed")).toBe("true")
+    // Choosing Preview moves the caret out of the block first.
+    fireEvent.click(within(block).getByRole("button", { name: "Preview" }))
+    await waitFor(() => expect(block.querySelector("[data-code-preview] .katex")).not.toBeNull())
+    expect(block.querySelector("pre")!.hidden).toBe(true)
+    const { from } = editor.editor.state.selection
+    expect(from < start - 1 || from > start - 1 + editor.editor.state.doc.nodeAt(start - 1)!.nodeSize).toBe(true)
+  })
+
   it("previews math for a reader too, without a caret to follow", async () => {
     serve()
     env.canWrite = false
