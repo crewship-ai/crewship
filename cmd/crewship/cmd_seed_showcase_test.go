@@ -339,8 +339,39 @@ func runShowcaseOnce(t *testing.T, s *showcaseServer, url string, want showcaseW
 
 var allOn = showcaseKnobs{wordNative: true, gridNative: true}
 
+// showcaseCoreOnly runs a test against the core catalogue: mirrored reference
+// copies (ref-*) register from their own files with their own tests, so the
+// phase counts below stay fixed. The test must not be parallel: it swaps the
+// package catalogue until it and its subtests finish.
+func showcaseCoreOnly(t *testing.T) {
+	t.Helper()
+	crafts, arts, designs := seeddata.ShowcaseCrafts, seeddata.ShowcaseArtifacts, seeddata.ShowcaseDesigns
+	t.Cleanup(func() {
+		seeddata.ShowcaseCrafts, seeddata.ShowcaseArtifacts, seeddata.ShowcaseDesigns = crafts, arts, designs
+	})
+	core := func(slug string) bool { return !strings.HasPrefix(slug, "ref-") }
+	seeddata.ShowcaseCrafts = nil
+	for _, c := range crafts {
+		if core(c.Slug) {
+			seeddata.ShowcaseCrafts = append(seeddata.ShowcaseCrafts, c)
+		}
+	}
+	seeddata.ShowcaseArtifacts = nil
+	for _, a := range arts {
+		if core(a.Slug) {
+			seeddata.ShowcaseArtifacts = append(seeddata.ShowcaseArtifacts, a)
+		}
+	}
+	seeddata.ShowcaseDesigns = nil
+	for _, d := range designs {
+		if core(d.Slug) {
+			seeddata.ShowcaseDesigns = append(seeddata.ShowcaseDesigns, d)
+		}
+	}
+}
+
 func TestSeedShowcase_Phase(t *testing.T) {
-	t.Parallel()
+	showcaseCoreOnly(t)
 	full := showcaseWant{stats: showcaseStats{Created: 12}, pageCreates: 7, initializes: 7, releases: 7,
 		artifactCreates: 4, dataWrites: 2, designOps: 1, overrides: 7,
 		lines: []string{"+ feature flag craft_version_history enabled for workspace " + showcaseTestWS, "+ obchodni-nabidka"}}
@@ -516,8 +547,16 @@ func TestShowcaseCatalogue_FilesExist(t *testing.T) {
 			t.Errorf("%s: design operations unreadable: %v", d.Slug, err)
 		}
 	}
-	if strings.Join(got, ",") != strings.Join(wantSlugs, ",") {
-		t.Errorf("slugs = %v, want %v", got, wantSlugs)
+	// Mirrored reference copies (ref-*) register from their own files and are
+	// checked by their own tests; the core catalogue stays fixed.
+	var core []string
+	for _, s := range got {
+		if !strings.HasPrefix(s, "ref-") {
+			core = append(core, s)
+		}
+	}
+	if strings.Join(core, ",") != strings.Join(wantSlugs, ",") {
+		t.Errorf("slugs = %v, want %v", core, wantSlugs)
 	}
 	for _, s := range got {
 		if seen[s] {

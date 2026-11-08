@@ -1,0 +1,481 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Template Crewship Showcase</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=IBM+Plex+Sans:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one sticky tab bar, one stage per feature, each stage = demo on the left, short "co to umí" on the right */
+:root {
+  --bg: #E9EEF2; --panel: #F8FAFB; --ink: #0E1B2A; --muted: #4B5B6C; --line: #CBD5DE;
+  --accent: #D9692B; --accent-ink: #FFFFFF; --sea: #2B6C8F; --sea-2: #9CC3D6;
+  --display: "Bricolage Grotesque", "IBM Plex Sans", Arial, sans-serif;
+  --body: "IBM Plex Sans", Arial, sans-serif;
+  --mono: "JetBrains Mono", "Courier New", monospace;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0A141F; --panel: #111F2E; --ink: #E7EDF2; --muted: #9DB0C2; --line: #24384D;
+  --accent: #F0844A; --accent-ink: #0A141F; --sea: #5FA6CC; --sea-2: #1E4A63; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0A141F; --panel: #111F2E; --ink: #E7EDF2; --muted: #9DB0C2; --line: #24384D;
+  --accent: #F0844A; --accent-ink: #0A141F; --sea: #5FA6CC; --sea-2: #1E4A63; color-scheme: dark }
+body { background: var(--bg); color: var(--ink); font: 15px/1.55 var(--body); }
+.wrap { max-width: 1120px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 32px 64px; display: flex; flex-direction: column; gap: 28px; }
+header h1 { font: 700 clamp(32px, 6vw, 56px)/1 var(--display); margin: 0; text-wrap: balance; letter-spacing: -0.02em; }
+header p { margin: 10px 0 0; color: var(--muted); max-width: 62ch; }
+.eyebrow { font: 600 12px/1 var(--mono); letter-spacing: .14em; text-transform: uppercase; color: var(--accent); }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--bg); }
+nav { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--bg); padding-block: 8px; display: flex; gap: 6px; flex-wrap: wrap; border-bottom: 1px solid var(--line); }
+nav a { font: 600 14px/1 var(--body); color: var(--muted); text-decoration: none; padding: 10px 14px; border-radius: 999px; }
+nav a:hover { color: var(--ink); }
+nav a[aria-current="page"] { background: var(--ink); color: var(--bg); }
+a:focus-visible, button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.stage { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 24px; align-items: start; }
+@media (max-width: 760px) { .stage { grid-template-columns: minmax(0, 1fr); } }
+.demo { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 20px; min-width: 0; }
+.about h2 { font: 700 28px/1.1 var(--display); margin: 8px 0 10px; text-wrap: balance; }
+.about p { margin: 0 0 10px; color: var(--muted); }
+.about ul { margin: 0; padding-left: 18px; color: var(--muted); display: flex; flex-direction: column; gap: 6px; }
+.about b { color: var(--ink); }
+#ship { width: 100%; aspect-ratio: 16 / 10; max-width: 100%; display: block; border-radius: 10px; cursor: grab; touch-action: none; }
+.hint { font: 12px/1.4 var(--mono); color: var(--muted); margin-top: 10px; }
+.mermaid-box { overflow-x: auto; }
+.pair-ctl { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+.pair-ctl label { display: flex; flex-direction: column; gap: 4px; font: 600 12px/1 var(--mono); color: var(--muted); }
+select, input[type="search"] { font: 15px var(--body); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; min-height: 44px; }
+.swatches { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
+.sw { height: 72px; border-radius: 10px; border: 1px solid var(--line); cursor: pointer; padding: 0; }
+.sw[aria-pressed="true"] { outline: 3px solid var(--ink); outline-offset: 2px; }
+.specimen { border-radius: 12px; padding: 24px; display: flex; flex-direction: column; gap: 8px; }
+.specimen .big { font-size: clamp(28px, 5vw, 44px); line-height: 1.05; text-wrap: balance; }
+.specimen .small { font-size: 15px; max-width: 52ch; }
+.contrast { font: 12px/1 var(--mono); margin-top: 10px; color: var(--muted); }
+.chips { display: flex; gap: 6px; flex-wrap: wrap; margin: 12px 0; }
+.chip { font: 600 13px/1 var(--body); padding: 10px 14px; border-radius: 999px; border: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; min-height: 40px; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+.list { display: flex; flex-direction: column; gap: 8px; }
+.row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); }
+.row .t { font-weight: 600; min-width: 0; }
+.row .m { font: 12px/1.4 var(--mono); color: var(--muted); grid-column: 1 / -1; }
+.pill { font: 600 12px/1 var(--body); padding: 6px 10px; border-radius: 999px; align-self: start; }
+.pill.work { background: color-mix(in srgb, var(--sea) 18%, transparent); color: var(--sea); }
+.pill.rev { background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.pill.done { background: color-mix(in srgb, #2F8A5B 20%, transparent); color: #3FA36F; }
+.empty { color: var(--muted); padding: 12px 0; }
+.mail { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: var(--bg); }
+.mail-h { padding: 12px 16px; border-bottom: 1px solid var(--line); font: 13px/1.6 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
+.mail-h b { color: var(--ink); font-weight: 600; }
+.mail-b { padding: 20px 16px; }
+.mail-b h3 { font: 700 22px/1.2 var(--display); margin: 0 0 10px; }
+.mail-b p { margin: 0 0 12px; max-width: 60ch; }
+.mail-b table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; margin: 6px 0 14px; }
+.mail-b td, .mail-b th { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); }
+.mail-b td:last-child, .mail-b th:last-child { text-align: right; }
+.btn { font: 600 14px/1 var(--body); padding: 12px 16px; min-height: 44px; border-radius: 10px; border: none; background: var(--accent); color: var(--accent-ink); cursor: pointer; }
+.btn.ghost { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+.mail-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; align-items: center; }
+#copied { font: 12px var(--mono); color: var(--muted); }
+textarea#mailtext { width: 100%; box-sizing: border-box; min-height: 120px; font: 12px/1.5 var(--mono); color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 10px; padding: 10px; margin-top: 10px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="wrap">
+  <header>
+    <div class="eyebrow">Template · Claude Artifacts</div>
+    <h1>Template Crewship Showcase</h1>
+    <p>Jedna stránka, pět věcí, které běžná HTML artefakt stránka zvládne: 3D scénu, diagram, párování barev a písma, filtry a e-mail. Všechno je klikací.</p>
+  </header>
+
+  <nav aria-label="Ukázky">
+    <a href="#model-3d" data-tab="model-3d">3D objekt</a>
+    <a href="#diagram" data-tab="diagram">Diagram</a>
+    <a href="#barvy" data-tab="barvy">Barvy a písmo</a>
+    <a href="#filtry" data-tab="filtry">Filtry</a>
+    <a href="#email" data-tab="email">E-mail</a>
+  </nav>
+
+  <section class="stage" id="model-3d" data-view>
+    <div class="demo">
+      <canvas id="ship" aria-label="3D model lodi Crewship na vlnách, otáčí se tažením myši"></canvas>
+      <div class="hint">Táhni myší nebo prstem pro otočení · kolečko přibližuje</div>
+    </div>
+    <div class="about">
+      <div class="eyebrow">WebGL · three.js</div>
+      <h2>3D objekty přímo ve stránce</h2>
+      <p>Artefakt načte knihovnu z povoleného CDN a vykreslí živou scénu. Loď je poskládaná z geometrie v kódu, vlny se hýbou každý snímek.</p>
+      <ul>
+        <li><b>Použití:</b> náhled produktu, vizualizace architektury, hra.</li>
+        <li><b>Ovládání:</b> tažení, zoom, animace.</li>
+        <li><b>Bez serveru:</b> běží celé v prohlížeči.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="stage" id="diagram" data-view hidden>
+    <div class="demo mermaid-box">
+<pre class="mermaid">
+flowchart LR
+  U[Uživatel] -->|zadání v CLI| K(Kapitán crew)
+  K --> R[Research agent]
+  K --> F[Frontend agent]
+  K --> O[Ops agent]
+  R --> V{Review}
+  F --> V
+  O --> V
+  V -->|schváleno| D[(Výsledek)]
+  V -->|oprava| K
+</pre>
+    </div>
+    <div class="about">
+      <div class="eyebrow">Mermaid · nativně</div>
+      <h2>Diagramy z textu</h2>
+      <p>Diagram se píše jako pár řádků textu a artefakt ho vykreslí sám, bez knihovny. Změníš řádek, změní se obrázek.</p>
+      <ul>
+        <li><b>Typy:</b> flowchart, sekvence, stavy, Gantt, ER.</li>
+        <li><b>V Docs:</b> diagramy s editovatelnými popisky a komentáři.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="stage" id="barvy" data-view hidden>
+    <div class="demo">
+      <div class="swatches" role="group" aria-label="Barva pozadí ukázky">
+        <button class="sw" type="button" data-bg="#0F1F33" data-fg="#F4F1EA" style="background:#0F1F33" aria-label="Hlubina" aria-pressed="true"></button>
+        <button class="sw" type="button" data-bg="#2B6C8F" data-fg="#FFFFFF" style="background:#2B6C8F" aria-label="Moře"></button>
+        <button class="sw" type="button" data-bg="#D9692B" data-fg="#0E1B2A" style="background:#D9692B" aria-label="Signál"></button>
+        <button class="sw" type="button" data-bg="#E4ECEF" data-fg="#0E1B2A" style="background:#E4ECEF" aria-label="Mlha"></button>
+        <button class="sw" type="button" data-bg="#1F5E40" data-fg="#EAF6EF" style="background:#1F5E40" aria-label="Řasa"></button>
+      </div>
+      <div class="pair-ctl">
+        <label for="f-head">Nadpis
+          <select id="f-head">
+            <option value="'Bricolage Grotesque', Arial, sans-serif">Bricolage Grotesque</option>
+            <option value="'IBM Plex Sans', Arial, sans-serif">IBM Plex Sans</option>
+            <option value="'JetBrains Mono', 'Courier New', monospace">JetBrains Mono</option>
+            <option value="Georgia, serif">Georgia</option>
+          </select>
+        </label>
+        <label for="f-body">Text
+          <select id="f-body">
+            <option value="'IBM Plex Sans', Arial, sans-serif">IBM Plex Sans</option>
+            <option value="'JetBrains Mono', 'Courier New', monospace">JetBrains Mono</option>
+            <option value="Georgia, serif">Georgia</option>
+          </select>
+        </label>
+      </div>
+      <div class="specimen" id="specimen" style="background:#0F1F33;color:#F4F1EA">
+        <div class="big" id="spec-big" style="font-family:'Bricolage Grotesque', Arial, sans-serif;font-weight:700">Posádka vyplouvá v 6:00</div>
+        <div class="small" id="spec-small">Kapitán rozdělil 12 úkolů mezi tři agenty. Ranní report dorazí do schránky, jakmile review schválí výsledek.</div>
+      </div>
+      <div class="contrast" id="contrast">Kontrast —</div>
+    </div>
+    <div class="about">
+      <div class="eyebrow">Barvy · typografie</div>
+      <h2>Párování barev a písma</h2>
+      <p>Vyber pozadí a dvojici písem; ukázka se hned přebarví a spočítá kontrast textu podle WCAG.</p>
+      <ul>
+        <li><b>Google Fonts:</b> jediný povolený zdroj písma.</li>
+        <li><b>Světlý i tmavý režim:</b> stránka sleduje motiv prohlížeče.</li>
+        <li><b>Design System</b> artefakt ukládá tokeny pro další práci.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="stage" id="filtry" data-view hidden>
+    <div class="demo">
+      <label for="q" class="eyebrow" style="display:block;margin-bottom:6px">Hledat úkol</label>
+      <input type="search" id="q" placeholder="např. stage, redesign" style="width:100%;box-sizing:border-box">
+      <div class="chips" role="group" aria-label="Stav">
+        <button class="chip" type="button" data-st="" aria-pressed="true">Vše</button>
+        <button class="chip" type="button" data-st="work" aria-pressed="false">Pracuje</button>
+        <button class="chip" type="button" data-st="rev" aria-pressed="false">Review</button>
+        <button class="chip" type="button" data-st="done" aria-pressed="false">Hotovo</button>
+      </div>
+      <div class="chips" role="group" aria-label="Crew">
+        <button class="chip" type="button" data-crew="" aria-pressed="true">Všechny crew</button>
+        <button class="chip" type="button" data-crew="Research" aria-pressed="false">Research</button>
+        <button class="chip" type="button" data-crew="Frontend" aria-pressed="false">Frontend</button>
+        <button class="chip" type="button" data-crew="Ops" aria-pressed="false">Ops</button>
+      </div>
+      <div class="list" id="list" aria-live="polite"></div>
+    </div>
+    <div class="about">
+      <div class="eyebrow">Interaktivita</div>
+      <h2>Filtry a vyhledávání</h2>
+      <p>Seznam se filtruje okamžitě podle textu, stavu a crew. Úkoly jsou ukázková data.</p>
+      <ul>
+        <li><b>V Dashboardu:</b> filtr přepočítá i grafy a dotazy na živá data.</li>
+        <li><b>Sdílený stav:</b> s databází artefaktu vidí změny všichni.</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="stage" id="email" data-view hidden>
+    <div class="demo">
+      <div class="mail">
+        <div class="mail-h"><b>Komu:</b> tym@example.com<br><b>Předmět:</b> Týdenní report Crewship · 2.–8. listopadu</div>
+        <div class="mail-b">
+          <h3>Crew tento týden dokončily 38 úkolů</h3>
+          <p>Ahoj týme, posílám krátký přehled. Nejvíc práce odvedla crew Frontend, Ops dokončila kontrolu nasazení na stage.</p>
+          <table>
+            <thead><tr><th>Crew</th><th>Hotovo</th></tr></thead>
+            <tbody><tr><td>Frontend</td><td>17</td></tr><tr><td>Research</td><td>12</td></tr><tr><td>Ops</td><td>9</td></tr></tbody>
+          </table>
+          <p>Celý přehled je v dashboardu. [Tvůj podpis]</p>
+        </div>
+      </div>
+      <div class="mail-actions">
+        <button class="btn" type="button" id="copy">Zkopírovat text e-mailu</button>
+        <span id="copied" aria-live="polite"></span>
+      </div>
+      <textarea id="mailtext" readonly aria-label="Text e-mailu ke zkopírování"></textarea>
+    </div>
+    <div class="about">
+      <div class="eyebrow">Šablona · ukázková data</div>
+      <h2>Návrh e-mailu</h2>
+      <p>Claude připraví e-mail jako náhled; tlačítko zkopíruje text do schránky. Odeslat ho umí přes Gmail konektor, až ho připojíš.</p>
+      <ul>
+        <li><b>Použití:</b> týdenní reporty, newslettery, odpovědi klientům.</li>
+        <li><b>Odeslání:</b> stránka sama e-mail neodešle.</li>
+      </ul>
+    </div>
+  </section>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+(() => {
+  const views = ['model-3d', 'diagram', 'barvy', 'filtry', 'email'];
+  const show = () => {
+    const id = views.includes(location.hash.slice(1)) ? location.hash.slice(1) : 'model-3d';
+    document.querySelectorAll('[data-view]').forEach((s) => { s.hidden = s.id !== id; });
+    document.querySelectorAll('nav a').forEach((a) => a.setAttribute('aria-current', a.dataset.tab === id ? 'page' : 'false'));
+    if (id === 'model-3d' && window.cxResize) window.cxResize();
+  };
+  window.addEventListener('hashchange', show);
+  show();
+
+  // ---- 3D ship ----
+  const canvas = document.getElementById('ship');
+  if (window.THREE && canvas) {
+    const css = (n) => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+    const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(38, 1.6, 0.1, 200);
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 0.9));
+    const sun = new THREE.DirectionalLight(0xffffff, 0.8); sun.position.set(6, 10, 4); scene.add(sun);
+
+    const ship = new THREE.Group();
+    const hullShape = new THREE.Shape();
+    hullShape.moveTo(-4.2, 0.9); hullShape.lineTo(4.6, 0.9); hullShape.quadraticCurveTo(4.4, 0.1, 3.6, -0.5);
+    hullShape.lineTo(-3.8, -0.5); hullShape.quadraticCurveTo(-4.3, 0.1, -4.2, 0.9);
+    const hullGeo = new THREE.ExtrudeGeometry(hullShape, { depth: 1.8, bevelEnabled: true, bevelSize: 0.12, bevelThickness: 0.12, bevelSegments: 2 });
+    hullGeo.translate(0, 0, -0.9);
+    const navy = new THREE.MeshStandardMaterial({ color: 0x14304f, roughness: 0.6 });
+    const white = new THREE.MeshStandardMaterial({ color: 0xf2f4f6, roughness: 0.5 });
+    const orange = new THREE.MeshStandardMaterial({ color: 0xe8833a, roughness: 0.45 });
+    const glass = new THREE.MeshStandardMaterial({ color: 0x2b6c8f, roughness: 0.2, metalness: 0.3 });
+    ship.add(new THREE.Mesh(hullGeo, navy));
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(8.4, 0.14, 2.16), orange); stripe.position.set(0.2, 0.7, 0); ship.add(stripe);
+    const decks = [[6.6, 0.6, 1.7, -0.3, 1.3], [5.0, 0.55, 1.5, -0.4, 1.88], [3.2, 0.5, 1.3, -0.6, 2.4]];
+    for (const [w, h, d, x, y] of decks) {
+      const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), white); m.position.set(x, y, 0); ship.add(m);
+      const win = new THREE.Mesh(new THREE.BoxGeometry(w * 0.92, h * 0.28, d + 0.02), glass); win.position.set(x, y + 0.04, 0); ship.add(win);
+    }
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 1.5), white); bridge.position.set(1.4, 2.4, 0); ship.add(bridge);
+    for (const x of [-1.6, -0.5]) {
+      const f = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.38, 1.1, 20), orange); f.position.set(x, 3.15, 0); ship.add(f);
+      const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.31, 0.31, 0.16, 20), navy); cap.position.set(x, 3.74, 0); ship.add(cap);
+    }
+    scene.add(ship);
+
+    const seaGeo = new THREE.PlaneGeometry(40, 40, 60, 60); seaGeo.rotateX(-Math.PI / 2);
+    const seaMat = new THREE.MeshStandardMaterial({ color: 0x2b6c8f, roughness: 0.35, metalness: 0.1, flatShading: true, transparent: true, opacity: 0.92 });
+    const sea = new THREE.Mesh(seaGeo, seaMat); sea.position.y = -0.1; scene.add(sea);
+    const base = seaGeo.attributes.position.array.slice();
+
+    let yaw = -0.7, pitch = 0.32, dist = 15, drag = null;
+    canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; canvas.setPointerCapture(e.pointerId); canvas.style.cursor = 'grabbing'; });
+    canvas.addEventListener('pointermove', (e) => {
+      if (!drag) return;
+      yaw -= (e.clientX - drag.x) * 0.008; pitch = Math.min(1.2, Math.max(0.05, pitch + (e.clientY - drag.y) * 0.006));
+      drag = { x: e.clientX, y: e.clientY };
+    });
+    const end = () => { drag = null; canvas.style.cursor = 'grab'; };
+    canvas.addEventListener('pointerup', end); canvas.addEventListener('pointercancel', end);
+    canvas.addEventListener('wheel', (e) => { e.preventDefault(); dist = Math.min(28, Math.max(8, dist + e.deltaY * 0.01)); }, { passive: false });
+
+    window.cxResize = () => {
+      const w = canvas.clientWidth, h = canvas.clientHeight;
+      if (!w || !h) return;
+      renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+    };
+    window.addEventListener('resize', window.cxResize);
+    const still = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const tick = (t) => {
+      const s = t * 0.001;
+      const p = seaGeo.attributes.position.array;
+      for (let i = 0; i < p.length; i += 3) p[i + 1] = base[i + 1] + (still ? 0 : Math.sin(base[i] * 0.5 + s * 1.4) * 0.12 + Math.cos(base[i + 2] * 0.6 + s) * 0.1);
+      seaGeo.attributes.position.needsUpdate = true; seaGeo.computeVertexNormals();
+      ship.position.y = still ? 0 : Math.sin(s * 1.2) * 0.08;
+      ship.rotation.z = still ? 0 : Math.sin(s * 0.9) * 0.025;
+      if (!drag && !still) yaw += 0.0015;
+      camera.position.set(Math.sin(yaw) * Math.cos(pitch) * dist, 1.2 + Math.sin(pitch) * dist, Math.cos(yaw) * Math.cos(pitch) * dist);
+      camera.lookAt(0, 1.2, 0);
+      seaMat.color.set(css('--sea') || '#2B6C8F');
+      if (!canvas.closest('[hidden]')) renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    };
+    window.cxResize();
+    requestAnimationFrame(tick);
+  }
+
+  // ---- color & type pairing ----
+  const lum = (hex) => {
+    const c = hex.replace('#', '').match(/../g).map((v) => parseInt(v, 16) / 255).map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const spec = document.getElementById('specimen');
+  const big = document.getElementById('spec-big');
+  const small = document.getElementById('spec-small');
+  const contrast = document.getElementById('contrast');
+  let bg = '#0F1F33', fg = '#F4F1EA';
+  const paint = () => {
+    spec.style.background = bg; spec.style.color = fg;
+    big.style.fontFamily = document.getElementById('f-head').value;
+    small.style.fontFamily = document.getElementById('f-body').value;
+    const a = lum(bg), b = lum(fg);
+    const r = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    contrast.textContent = `Kontrast ${r.toFixed(1)} : 1 · ${r >= 7 ? 'AAA' : r >= 4.5 ? 'AA' : 'nedostatečný pro běžný text'}`;
+  };
+  document.querySelectorAll('.sw').forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll('.sw').forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    bg = b.dataset.bg; fg = b.dataset.fg; paint();
+  }));
+  document.getElementById('f-head').addEventListener('change', paint);
+  document.getElementById('f-body').addEventListener('change', paint);
+  paint();
+
+  // ---- filters ----
+  const tasks = [
+    { t: 'Rešerše konkurence pro Q4', crew: 'Research', st: 'work', m: '4 agenti · 12 min' },
+    { t: 'Redesign stránky Artifacts', crew: 'Frontend', st: 'rev', m: '3 agenti · čeká na schválení' },
+    { t: 'Kontrola nasazení na stage', crew: 'Ops', st: 'work', m: '2 agenti · 4 min' },
+    { t: 'Souhrn rozhovorů se zákazníky', crew: 'Research', st: 'done', m: 'včera · 41 min' },
+    { t: 'Dark mode pro dashboard', crew: 'Frontend', st: 'done', m: 'pondělí · 1 h 12 min' },
+    { t: 'Rotace logů na dev hostu', crew: 'Ops', st: 'rev', m: '1 agent · čeká na review' },
+    { t: 'Překlad onboardingu do češtiny', crew: 'Frontend', st: 'work', m: '2 agenti · 25 min' }
+  ];
+  const label = { work: 'Pracuje', rev: 'Review', done: 'Hotovo' };
+  const state = { q: '', st: '', crew: '' };
+  const list = document.getElementById('list');
+  const draw = () => {
+    const q = state.q.trim().toLowerCase();
+    const rows = tasks.filter((x) => (!state.st || x.st === state.st) && (!state.crew || x.crew === state.crew) && (!q || x.t.toLowerCase().includes(q)));
+    list.replaceChildren(...rows.map((x) => {
+      const r = document.createElement('div'); r.className = 'row';
+      const t = document.createElement('div'); t.className = 't'; t.textContent = x.t;
+      const p = document.createElement('span'); p.className = 'pill ' + x.st; p.textContent = label[x.st];
+      const m = document.createElement('div'); m.className = 'm'; m.textContent = x.crew + ' · ' + x.m;
+      r.append(t, p, m); return r;
+    }));
+    if (!rows.length) { const e = document.createElement('div'); e.className = 'empty'; e.textContent = 'Nic neodpovídá. Zkus jiný stav nebo zruš hledání.'; list.append(e); }
+  };
+  document.getElementById('q').addEventListener('input', (e) => { state.q = e.target.value; draw(); });
+  const group = (attr, key) => document.querySelectorAll(`[data-${attr}]`).forEach((b) => b.addEventListener('click', () => {
+    document.querySelectorAll(`[data-${attr}]`).forEach((x) => x.setAttribute('aria-pressed', String(x === b)));
+    state[key] = b.dataset[attr]; draw();
+  }));
+  group('st', 'st'); group('crew', 'crew');
+  draw();
+
+  // ---- email copy ----
+  const text = 'Předmět: Týdenní report Crewship · 2.–8. listopadu\n\nAhoj týme,\n\ncrew tento týden dokončily 38 úkolů. Nejvíc práce odvedla crew Frontend, Ops dokončila kontrolu nasazení na stage.\n\nFrontend: 17\nResearch: 12\nOps: 9\n\nCelý přehled je v dashboardu.\n[Tvůj podpis]';
+  const ta = document.getElementById('mailtext'); ta.value = text;
+  const copied = document.getElementById('copied');
+  document.getElementById('copy').addEventListener('click', () => {
+    const fallback = () => { ta.focus(); ta.select(); copied.textContent = 'Text je označený, zkopíruj ho Ctrl+C.'; };
+    try {
+      navigator.clipboard.writeText(text).then(() => { copied.textContent = 'Zkopírováno do schránky.'; }, fallback);
+    } catch (e) { fallback(); }
+  });
+})();
+</script>
+
+<!--claude-mermaid-runtime-begin:3477-->
+<style>.mermaid-diagram{margin-block:4px}.mermaid-diagram svg{display:block;margin:0 auto;max-width:100%;height:auto}</style>
+<script src="/_runtime/mermaid-11.16.1.min.js"></script>
+<script>(function(){
+var CFG={"palettes":{"light":{"surface":"#f4efe4","text":"#42392e","line":"#8a7f6d","border":"#7a6c52","bg":"#fffdf8"},"dark":{"surface":"#262b34","text":"#f2f3f5","line":"#a8adb8","border":"#9aa4b8","bg":"#1f232b"}}};
+if(typeof mermaid==='undefined')return;
+var pres=Array.prototype.slice.call(document.querySelectorAll('pre.mermaid')).filter(function(p){if(p.hasAttribute('data-claude-mermaid-claimed'))return false;p.setAttribute('data-claude-mermaid-claimed','1');return true;});
+if(!pres.length)return;
+var mq=window.matchMedia?window.matchMedia('(prefers-color-scheme: dark)'):null;
+var root=document.documentElement;
+var items=pres.map(function(pre){
+var mount=document.createElement('div');mount.className='mermaid-diagram';
+return {pre:pre,mount:mount,src:pre.textContent||''};
+});
+var seq=0;
+var renderGen=0;
+var lastKey='';
+function pageBg(fallback){
+var els=[document.body,document.documentElement];
+for(var i=0;i<els.length;i++){
+var c=els[i]&&getComputedStyle(els[i]).backgroundColor;
+if(c&&c!=='transparent'&&c!=='rgba(0, 0, 0, 0)')return c;
+}
+return fallback;
+}
+function render(){
+var theme=root.getAttribute('data-theme');
+var dark=theme==='dark'||(!!(mq&&mq.matches)&&theme!=='light');
+var pal=dark?CFG.palettes.dark:CFG.palettes.light;
+var bg=pageBg(pal.bg);
+var key=(dark?'d':'l')+'|'+bg;
+if(key===lastKey)return;
+lastKey=key;
+var gen=++renderGen;
+var font=getComputedStyle(document.body).fontFamily||'sans-serif';
+var nat={useMaxWidth:false};
+mermaid.initialize({
+startOnLoad:false,securityLevel:'strict',theme:'base',
+flowchart:nat,sequence:nat,er:nat,state:nat,class:nat,pie:nat,
+gantt:nat,journey:nat,timeline:nat,gitGraph:nat,mindmap:nat,xyChart:nat,
+quadrantChart:nat,sankey:nat,c4:nat,requirement:nat,block:nat,
+packet:nat,kanban:nat,architecture:nat,radar:nat,
+themeVariables:{background:bg,mainBkg:pal.surface,primaryColor:pal.surface,
+primaryTextColor:pal.text,lineColor:pal.line,primaryBorderColor:pal.border,
+nodeBorder:pal.border,clusterBorder:pal.border,edgeLabelBackground:bg,
+clusterBkg:'rgba(127,127,127,0.07)',titleColor:pal.text,
+darkMode:dark,rowOdd:bg,rowEven:'rgba(127,127,127,0.07)',
+attributeBackgroundColorOdd:bg,attributeBackgroundColorEven:'rgba(127,127,127,0.07)',
+fontSize:'16px',fontFamily:font},
+themeCSS:'.node rect, .node circle, .node polygon, .node path, .cluster rect { stroke-width: 2px; }'
+});
+items.forEach(function(it){
+var id='claude-mermaid-'+seq++;
+mermaid.render(id,it.src).then(function(r){
+if(gen!==renderGen)return;
+var prev=it.pre.previousElementSibling;
+if(prev&&prev.className==='mermaid-diagram'&&prev!==it.mount)return;
+it.mount.innerHTML=r.svg;
+if(!it.mount.parentNode)it.pre.parentNode.insertBefore(it.mount,it.pre);
+it.pre.style.display='none';
+},function(){
+var scratch=document.getElementById(id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+scratch=document.getElementById('d'+id);
+if(scratch)scratch.parentNode.removeChild(scratch);
+if(gen!==renderGen)return;
+if(it.mount.parentNode)it.mount.parentNode.removeChild(it.mount);
+it.pre.style.display='';
+});
+});
+}
+render();
+if(mq&&mq.addEventListener)mq.addEventListener('change',render);
+if(typeof MutationObserver!=='undefined')new MutationObserver(render).observe(root,{attributes:true,attributeFilter:['data-theme']});
+})();</script>
+<!--claude-mermaid-runtime-end-->
+
+</body></html>
