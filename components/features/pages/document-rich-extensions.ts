@@ -233,3 +233,63 @@ export function commentTarget(editor: Editor): CommentTarget | string {
   return { block: block.attrs.id, from: textFrom, to: textTo, quote: block.textBetween(start, end) }
 }
 
+/** A toolbar toggle's state over the selection: on everywhere, on for part of it, or off. */
+export type ToggleState = boolean | "mixed"
+
+/** Text in the selection that may carry `name` (code blocks take no marks). */
+function markableText(editor: Editor, name: string, visit: (node: ProseMirrorNode) => void) {
+  const { state } = editor, type = state.schema.marks[name]
+  if (!type) return false
+  const { from, to } = state.selection
+  state.doc.nodesBetween(from, to, (node, _pos, parent) => { if (node.isText && parent?.type.allowsMarkType(type)) visit(node) })
+  return true
+}
+
+/** Whether all, part or none of the selected text has the mark. An empty selection reports the marks typing would use. */
+export function markState(editor: Editor, name: string): ToggleState {
+  const { state } = editor, type = state.schema.marks[name]
+  if (!type) return false
+  if (state.selection.empty) return Boolean(type.isInSet(state.storedMarks ?? state.selection.$from.marks()))
+  let some = false, all = true, any = false
+  markableText(editor, name, node => { any = true; const has = Boolean(type.isInSet(node.marks)); some ||= has; all &&= has })
+  return !any ? false : all ? true : some ? "mixed" : false
+}
+
+/** The selection's palette colour for `textColor` or `highlight`: one name, null for the default, or "mixed". */
+export function colorState(editor: Editor, name: "textColor" | "highlight"): string | null | "mixed" {
+  const { state } = editor, type = state.schema.marks[name]
+  if (!type) return null
+  if (state.selection.empty) return (type.isInSet(state.storedMarks ?? state.selection.$from.marks())?.attrs.color as string | undefined) ?? null
+  const seen = new Set<string | null>()
+  markableText(editor, name, node => { seen.add((type.isInSet(node.marks)?.attrs.color as string | undefined) ?? null) })
+  return seen.size > 1 ? "mixed" : seen.values().next().value ?? null
+}
+
+const keptKey = new PluginKey<boolean>("documentKeptSelection")
+
+/**
+ * Keeps a non-empty selection visible while the editor is not focused, for
+ * example while a toolbar menu is open, so the person still sees what the
+ * command will change. It only decorates; the selection itself never moves.
+ */
+export const KeptSelection = Extension.create({
+  name: "documentKeptSelection",
+  addProseMirrorPlugins() {
+    const focus = (focused: boolean) => (view: import("@tiptap/pm/view").EditorView) => {
+      if (keptKey.getState(view.state) !== focused) view.dispatch(view.state.tr.setMeta(keptKey, focused).setMeta("addToHistory", false))
+      return false
+    }
+    return [new Plugin<boolean>({
+      key: keptKey,
+      state: { init: () => false, apply: (tr, focused) => (tr.getMeta(keptKey) as boolean | undefined) ?? focused },
+      props: {
+        handleDOMEvents: { focus: focus(true), blur: focus(false) },
+        decorations: state => {
+          const { from, to, empty } = state.selection
+          if (keptKey.getState(state) || empty) return null
+          return DecorationSet.create(state.doc, [Decoration.inline(from, to, { class: "document-selection-kept" })])
+        },
+      },
+    })]
+  },
+})

@@ -84,15 +84,23 @@ export function ArtifactSlot({ name, label, className, children }: { name: SlotN
   )
 }
 
-/** An icon control for a slot (30 px, 44 px on touch). */
-export const ArtifactTool = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { icon: LucideIcon; label: string; on?: boolean; text?: React.ReactNode }>(
-  function ArtifactTool({ icon: Icon, label, on, text, className, ...props }, ref) {
-    return <button ref={ref} type="button" aria-label={label} title={label} aria-pressed={on} {...props}
-      className={cn("inline-flex h-[30px] min-w-[30px] items-center justify-center gap-1.5 rounded-[var(--radius-row)] px-[7px] text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 coarse:min-h-[44px] coarse:min-w-[44px]",
-        on && "bg-primary/12 text-primary-hover", className)}>
-      <Icon aria-hidden className="size-4" />{text && <span>{text}</span>}
+/**
+ * An icon control for a slot (30 px, 44 px on touch). `on` may be "mixed"
+ * (a toggle that applies to part of the selection), shown with a dashed
+ * outline and announced as partly pressed. `shortcut` is shown in the
+ * tooltip and exposed as `aria-keyshortcuts`.
+ */
+export const ArtifactTool = React.forwardRef<HTMLButtonElement, React.ButtonHTMLAttributes<HTMLButtonElement> & { icon: LucideIcon; label: string; on?: boolean | "mixed"; text?: React.ReactNode; shortcut?: string }>(
+  function ArtifactTool({ icon: Icon, label, on, text, shortcut, className, children, ...props }, ref) {
+    return <button ref={ref} type="button" aria-label={label} title={shortcut ? `${label} (${shortcut.replace("Mod", isApple() ? "⌘" : "Ctrl")})` : label} aria-pressed={on}
+      aria-keyshortcuts={shortcut?.replace("Mod", isApple() ? "Meta" : "Control")} {...props}
+      className={cn("relative inline-flex h-[30px] min-w-[30px] items-center justify-center gap-1.5 rounded-[var(--radius-row)] px-[7px] text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40 coarse:min-h-[44px] coarse:min-w-[44px]",
+        on === true && "bg-primary/12 text-primary-hover", on === "mixed" && "text-primary-hover outline outline-1 -outline-offset-2 outline-dashed outline-primary/50", className)}>
+      <Icon aria-hidden className="size-4" />{text && <span>{text}</span>}{children}
     </button>
   })
+
+const isApple = () => typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)
 
 export const ArtifactToolSeparator = () => <span aria-hidden className="mx-[3px] h-[18px] w-px shrink-0 bg-border" />
 

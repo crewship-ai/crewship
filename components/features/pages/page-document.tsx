@@ -32,7 +32,7 @@ import { DocumentCaretKeeper } from "./document-caret-keeper"
 import { DocumentRemoteCarets } from "./document-remote-carets"
 import { useDocumentPresence } from "@/hooks/use-document-presence"
 import { DocsPresence } from "@/components/features/artifacts-library/kinds/docs/docs-presence"
-import { CommentHighlights, documentEditorExtensions, isRichSchema, stableBlockTypes } from "./document-rich-extensions"
+import { CommentHighlights, documentEditorExtensions, isRichSchema, KeptSelection, stableBlockTypes } from "./document-rich-extensions"
 
 const StableIDs = Extension.create({
   name: "documentBlockIDs",
@@ -52,7 +52,7 @@ const StableIDs = Extension.create({
 })
 /** The editor of one document session: the schema's nodes and marks, stable block ids, comment highlights and the shared CRDT. */
 export function documentSessionExtensions(doc: Y.Doc, schema: number | undefined) {
-  return [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(schema) }), ...documentEditorExtensions(schema), CommentHighlights, Collaboration.configure({ document: doc, field: "default" }), DocumentCaretKeeper, DocumentRemoteCarets]
+  return [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(schema) }), ...documentEditorExtensions(schema), CommentHighlights, KeptSelection, Collaboration.configure({ document: doc, field: "default" }), DocumentCaretKeeper, DocumentRemoteCarets]
 }
 /** Saves text as a local file: the draft downloads. Nothing is sent. */
 export function downloadText(name: string, content: string) {
