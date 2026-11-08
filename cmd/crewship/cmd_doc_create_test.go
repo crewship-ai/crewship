@@ -27,7 +27,7 @@ func TestProtectedDocCreatePreservesOriginalBodyAndFixedOrigin(t *testing.T) {
 			if err != nil || string(raw) != body || r.URL.String() != "http://127.0.0.1:9119/api/v1/documents/create" || r.Header.Get("Authorization") != "Bearer "+token {
 				t.Fatalf("protected request changed: %s %s %v", r.URL, raw, err)
 			}
-			return &http.Response{StatusCode: 201, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"page_id":"server-page","revision":0,"url":"/pages?ref=server-page&workspace_id=workspace"}`))}, nil
+			return &http.Response{StatusCode: 201, Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"page_id":"server-page","revision":0,"url":"/artifacts/server-page?workspace_id=workspace"}`))}, nil
 		}))
 		command.SetArgs([]string{"--file", "-"})
 		command.SetIn(strings.NewReader(input))

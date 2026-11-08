@@ -30,9 +30,9 @@ read. `NEXT_PUBLIC_ARTIFACTS_LIBRARY=true` at build time opens this library
 and makes the **Artifacts** sidebar entry lead there. The Design build flag
 `NEXT_PUBLIC_ARTIFACTS_DESIGN=true` also opens `/artifacts`, but without the
 library flag the sidebar still leads to `/pages`; open `/artifacts` directly.
-When both flags are off, `/artifacts` sends the browser to `/pages`. `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true`
-additionally sends the Pages overview to the library; it has no effect unless
-the library flag is also on.
+When both flags are off, `/artifacts` sends the browser to `/pages`. With the
+library flag on, old Pages addresses lead to the library as well; see
+[One address per artifact](#one-address-per-artifact).
 
 The library lists each Page with its kind: Project, Dashboard, Page, Word,
 Sheet, Slides or Design. The kind comes from the server's `artifact_kind` or
@@ -51,6 +51,39 @@ Archived, test and empty items appear only in their own views; nothing is
 deleted by hiding it. The search box accepts free text plus `kind:`, `is:`
 and `owner:` operators, for example `kind:word is:private owner:you budget`.
 `is:` takes `private`, `shared`, `unshared` (or `draft`) and `empty`.
+
+## One address per artifact
+
+Every artifact opens at `/artifacts/<id>?workspace_id=<workspace-id>`, where
+`<id>` is its immutable page ID, never its slug. A pinned version adds
+`&version=N`. Links the server generates use this address: the `url` from
+`crewship doc create` and the project commands, and the `page_path` the agent
+project tool reports.
+
+With `NEXT_PUBLIC_ARTIFACTS_LIBRARY` in the build, older addresses keep working
+and replace themselves with that address, so Back does not return to them:
+
+| Old address | Opens |
+|---|---|
+| `/pages` | `/artifacts`, with the same query |
+| `/pages/<slug>`, `/pages/@<id>`, `/pages?ref=<id>&workspace_id=…` | `/artifacts/<id>?workspace_id=…` |
+| `/pages/<slug>?artifact=1[&version=N]`, `/pages/<slug>?version=N` | `/artifacts/<id>?workspace_id=…[&version=N]` for a project the detail shows in its project viewer |
+| `/pages/craft/editor?page_id=<id>&workspace_id=…` | `/artifacts/<id>?workspace_id=…`, where the same Craft editor opens |
+
+An address stays on Pages when Pages is the only place that shows it: the panel
+editor (`?mode=edit`), the project source editor (`?artifact=1&edit=1`), and
+a page the Artifacts detail cannot open, such as an older Craft workbook. A
+refused or failed read also stays on Pages, which answers it the way it always
+did. The public share address `/p/<token>` is unchanged.
+
+A restricted member is never redirected, and sees exactly what they saw
+before: every `/pages` address shows their catalog of declared Page actions,
+and `/artifacts` stays outside their access. The library reads
+(`GET /api/v1/pages` and `GET /api/v1/pages/{slug}`) are not on the restricted
+allowlist.
+
+Without the library flag, `/artifacts/<id>` opens on Pages: a project in the
+Pages project viewer, every other kind in its Pages detail.
 
 ## Versions
 

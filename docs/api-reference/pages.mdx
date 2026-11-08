@@ -2593,7 +2593,8 @@ which opens that shared version. Older `/pages/<slug>?artifact=1[&version=N]`
 links still open: with the Artifacts library in the web build they redirect to
 `/artifacts/<page_id>` with the same workspace and version, otherwise they open
 the Pages project viewer. In a build without the library,
-`/artifacts/<page_id>[?version=N]` goes to `/pages/@<page_id>?artifact=1[&version=N]`.
+`/artifacts/<page_id>[?version=N]` goes to `/pages/@<page_id>?artifact=1[&version=N]`
+for a project and to `/pages/@<page_id>` for every other kind.
 The Page is private and the complete version commits atomically. A failure does not acknowledge a version.
 **Statuses:** 201 created, 400 invalid manifest or request, 401 invalid
 authentication, 403 missing current authority, 404 disabled feature, 409 occupied

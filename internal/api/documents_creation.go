@@ -65,7 +65,7 @@ func (h *PageHandler) documentCreationReplay(ctx context.Context, a *artifactRun
 		return result, errors.New("document creation mutation conflicts with consumed permission")
 	}
 	result.Type, result.Schema = "document", 3
-	result.URL = "/pages?workspace_id=" + result.WorkspaceID + "&ref=" + result.PageID
+	result.URL = artifactCanonicalURL(result.PageID, result.WorkspaceID)
 	return result, nil
 }
 
@@ -254,5 +254,5 @@ func (h *PageHandler) CreateDocumentAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	broadcastWorkspaceEvent(h.hub, a.WorkspaceID, "page.updated", map[string]any{})
-	writeJSON(w, 201, documentCreationResult{PageID: pageID, WorkspaceID: a.WorkspaceID, Slug: request.Slug, Title: request.Name, Type: "document", Schema: 3, Revision: 0, URL: "/pages?workspace_id=" + a.WorkspaceID + "&ref=" + pageID})
+	writeJSON(w, 201, documentCreationResult{PageID: pageID, WorkspaceID: a.WorkspaceID, Slug: request.Slug, Title: request.Name, Type: "document", Schema: 3, Revision: 0, URL: artifactCanonicalURL(pageID, a.WorkspaceID)})
 }

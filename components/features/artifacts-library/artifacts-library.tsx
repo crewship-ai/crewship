@@ -17,7 +17,7 @@ import { useUserPreference } from "@/hooks/use-user-preference"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
 import { formatRelativeShort } from "@/lib/time"
-import { artifactsDesign, artifactsServerCatalog, artifactsSharingMock, pagesOpenArtifacts } from "@/lib/feature-flags"
+import { artifactsDesign, artifactsLibrary, artifactsServerCatalog, artifactsSharingMock } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
 import { ArtifactViewerProvider } from "@/components/features/chat/artifact-context/projects/artifact-viewer-context"
 import { useArtifactProjectsAvailable } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
@@ -253,8 +253,8 @@ function WordPreview({ workspaceId, item, onStatus }: { workspaceId: string; ite
       // A Word without a version head is from the old editor, which this environment no longer runs.
       : !item.native ? "This document is from an older version of the editor and does not open here. Nothing was changed."
         : read.status === "unavailable" ? "The document service is not answering right now, so there is no preview. Nothing was changed."
-          // Behind the single-home switch /pages/<slug> sends a native Word back here, so it names no Pages.
-          : pagesOpenArtifacts() ? "The document preview could not be loaded. Nothing was changed." : "The document preview could not be loaded. Open in Pages shows it."}
+          // With the library on /pages/<slug> sends a native Word back here, so it names no Pages.
+          : artifactsLibrary() ? "The document preview could not be loaded. Nothing was changed." : "The document preview could not be loaded. Open in Pages shows it."}
   </p>
   return <div className="bg-card">
     <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} />
@@ -321,16 +321,16 @@ function ArtifactDetail({ workspaceId, item, version, folders, onBack, favorite,
   // A Page shows its own content here, with the views Pages draws; it names itself in its breadcrumb.
   const pageContent = item.kind === "page" && item.pageId
   const inline = projectPreview || pageContent
-  // Behind the single-home switch a native Word or Sheet is edited here, in the
+  // With the library on a native Word or Sheet is edited here, in the
   // one Craft editor and its lease; /pages/<slug> sends it back here, so the
   // detail no longer links out to Pages for it.
-  const nativeEditor = pagesOpenArtifacts() && item.native && (item.kind === "word" || item.kind === "sheet") && Boolean(item.pageId)
+  const nativeEditor = artifactsLibrary() && item.native && (item.kind === "word" || item.kind === "sheet") && Boolean(item.pageId)
   // An old-editor Word opens on Pages only in the old editor, which reads the
   // same saved document as the preview here. Behind the switch the link stays
   // only once that read succeeds; otherwise Pages would show nothing usable.
   const [legacyRead, setLegacyRead] = useState<string>()
   const legacyWord = item.kind === "word" && !item.native
-  const pagesOpensIt = !(pagesOpenArtifacts() && legacyWord && legacyRead !== "ready")
+  const pagesOpensIt = !(artifactsLibrary() && legacyWord && legacyRead !== "ready")
   // A pinned address (a shared-version link) opens that version, not Latest.
   const target = useMemo(() => ({ slug: item.slug, tab: "preview" as const, ...(version === undefined ? {} : { version }) }), [item.slug, version])
   return <div className="flex min-h-0 flex-1 flex-col gap-3">

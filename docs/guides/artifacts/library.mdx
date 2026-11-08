@@ -23,7 +23,6 @@ The library is off by default. Each part of it is switched on separately:
 | Slide decks in the viewer, and creating one | the project switches above, plus build-time `NEXT_PUBLIC_ARTIFACT_SLIDES=true`, and the workspace flag `artifact_slides` (or `CREWSHIP_ARTIFACT_SLIDES_ENABLED=true`). Without the server switch, a slide deck is listed as a Project. |
 | Designs: listing, creating and the canvas | build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN=true`, and the workspace flag `artifacts_design` (or `CREWSHIP_ARTIFACTS_DESIGN_ENABLED=true`) |
 | The Craft lease bar for Word in the detail view | build-time `NEXT_PUBLIC_CHAT_CRAFT_LEASE=true` |
-| `/pages` opening the library instead of the Pages overview | build-time `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS=true` (only with the library on) |
 
 The default production build sets none of these to `true`. Enable a workspace
 flag with `crewship feature-flag enable <key>`; see
@@ -182,8 +181,7 @@ change that.
   header. See [Versions](#versions).
 - **Design**: the design canvas.
 - **Page**: the Page's panels, shown in the detail view.
-- **Native Word and Sheet**, with both `NEXT_PUBLIC_ARTIFACTS_LIBRARY` and
-  `NEXT_PUBLIC_PAGES_OPEN_ARTIFACTS` enabled: the Craft editor opens inside
+- **Native Word and Sheet**, with `NEXT_PUBLIC_ARTIFACTS_LIBRARY` enabled: the Craft editor opens inside
   the detail when the server confirms editing is available. Readers without
   edit access get the shared preview. This mode has no **Open in Pages**
   button; `/pages/<slug>` leads back to the artifact detail.

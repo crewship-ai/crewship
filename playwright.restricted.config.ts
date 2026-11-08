@@ -7,8 +7,10 @@ import { defineConfig } from "@playwright/test"
 // authentication, seeded server or provider request is used, so this runs on
 // every PR alongside playwright.reveal/pool-ui — the nightly GATE_SPECS
 // classification alone left PR #2874 executing the spec zero times.
+// artifacts-canonical-url.spec.ts (#5129) uses the same fixture-only footing
+// for the trusted side of the old /pages link redirects.
 export default defineConfig({
-  testDir: "./e2e", testMatch: "restricted-member-shell.spec.ts", workers: 1,
+  testDir: "./e2e", testMatch: ["restricted-member-shell.spec.ts", "artifacts-canonical-url.spec.ts"], workers: 1,
   reporter: "list", timeout: 60000, retries: 0,
   use: {
     baseURL: "http://127.0.0.1:3912", headless: true,
