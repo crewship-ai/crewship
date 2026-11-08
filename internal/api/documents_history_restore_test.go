@@ -69,10 +69,30 @@ func TestHumanDocumentHistoryRestoreBoundary(t *testing.T) {
 	}
 }
 
+// A schema 4 document restores through the same closed packet.
+func TestHumanDocumentHistoryRestoreAcceptsSchemaFour(t *testing.T) {
+	packet := strings.Replace(historyRestorePacket, `"schema":3`, `"schema":4`, 1)
+	for _, result := range []string{
+		`{"id":"restore-one","rev":9,"epoch":"next-epoch","kind":"restore"}`,
+		`{"id":"restore-one","rev":9,"epoch":"next-epoch","kind":"restore","schema":4}`,
+	} {
+		h, workspace, human := humanDocumentTransportFixture(t)
+		h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
+			return []byte(result), 200, nil
+		}
+		w := httptest.NewRecorder()
+		h.RestoreDocumentCheckpoint(w, humanDocumentRequest(t, "POST", "/restore", workspace, human, packet))
+		if w.Code != 200 {
+			t.Fatalf("schema 4 restore status=%d %s", w.Code, w.Body.String())
+		}
+	}
+}
+
 func TestHumanDocumentHistoryRestoreRejectsChangedScope(t *testing.T) {
 	for _, body := range []string{
 		strings.Replace(historyRestorePacket, "human-doc-page", "other-page", 1),
 		strings.Replace(historyRestorePacket, `"schema":3`, `"schema":99`, 1),
+		strings.Replace(historyRestorePacket, `"schema":3`, `"schema":5`, 1),
 		strings.Replace(historyRestorePacket, `"ifRev":8`, `"ifRev":-1`, 1),
 		strings.Replace(historyRestorePacket, `"id":"restore-one"`, `"id":"restore-one","id":"other"`, 1),
 		strings.TrimSuffix(historyRestorePacket, "}") + `,"run_id":"old-run"}`,

@@ -61,6 +61,7 @@ Nothing below is faked; each is carried as close as schema 4 allows.
 | `https://claude.ai` | `https://claude.ai/` | The schema keeps a link only in canonical form (trailing slash). |
 | The "oooo" thread selects "ej agenty a role / Zadej úkol / Popis a termín" across three list items | Anchored to its first part, "ej agenty a role" | A Docs comment anchors to one block. |
 | Comment authors (Pavel), times, the "mention Claude" reply flow | The seeding account at seed time | Comments are written by the caller. |
+| "Zmiň Clauda a změnu zapracuje" (an agent applies the change) | The thread's text is kept; agents cannot draft on a schema 4 document yet | Agent drafting works on schema 3 only. |
 | Byline author chip, doc sharing, suggestions mode | Page owner is the seeding account | Platform features, not content. |
 
 The Crewship frame also shows the page name above the content, so the title

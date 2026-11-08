@@ -19,6 +19,10 @@ const CommentBodyLimit = 10000
 // CommentAnchorLimit matches the engine's anchor bound.
 const CommentAnchorLimit = 8192
 
+// ResolveLimit bounds one document's resolve and reopen receipts, so flipping
+// a thread cannot grow its receipts without end.
+const ResolveLimit = 10 * CommentLimit
+
 var ErrInvalidComment = errors.New("invalid bounded comment")
 
 // Comment is one stored remark. A root carries the engine-validated anchor;
@@ -194,6 +198,13 @@ func (s *Store) ResolveComment(ctx context.Context, k Key, id, fingerprint, comm
 		}
 		if v.HeadRev != ifRev || v.Generation != *generation {
 			return ErrConflict
+		}
+		var n int
+		if e = tx.QueryRowContext(ctx, `SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id=? AND kind='resolve'`, k.WorkspaceID, k.PageID).Scan(&n); e != nil {
+			return e
+		}
+		if n >= ResolveLimit {
+			return ErrQuota
 		}
 		if e = s.admitNewReceipt(ctx, tx, k); e != nil {
 			return e

@@ -111,11 +111,27 @@ func TestDocumentCommentsRefuseInvalidStaleAndUnauthorized(t *testing.T) {
 func TestDocumentCommentsLimitAndPageDeletion(t *testing.T) {
 	s, db, _ := fixture(t, Options{})
 	zero := int64(0)
+	var base int64
+	if e := db.QueryRow(`SELECT used_bytes FROM artifact_storage_workspaces WHERE workspace_id='workspace-a'`).Scan(&base); e != nil {
+		t.Fatal(e)
+	}
 	if _, e := db.Exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?) INSERT INTO document_comments(workspace_id,page_id,id,body,anchor_json,actor,rev) SELECT 'workspace-a','page-a','c'||i,'x','{}','a',0 FROM n`, CommentLimit); e != nil {
 		t.Fatal(e)
 	}
 	if _, e := s.Comment(ctx, key, CommentInput{ID: "over", Body: "x", Anchor: json.RawMessage(`{}`), Generation: &zero}, allow); !errors.Is(e, ErrQuota) {
 		t.Fatalf("limit: %v", e)
+	}
+	// Comment rows are charged to the aggregate artifact storage budget.
+	var used int64
+	if e := db.QueryRow(`SELECT used_bytes FROM artifact_storage_workspaces WHERE workspace_id='workspace-a'`).Scan(&used); e != nil || used-base < int64(CommentLimit*(256+2)) {
+		t.Fatalf("comments not charged: %d -> %d %v", base, used, e)
+	}
+	// Resolve receipts are bounded too: flipping a thread cannot grow them forever.
+	if _, e := db.Exec(`WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<?) INSERT INTO document_receipts(workspace_id,page_id,id,digest,fingerprint,rev,epoch,actor,kind) SELECT 'workspace-a','page-a','r'||i,'d','f',0,0,'a','resolve' FROM n`, ResolveLimit); e != nil {
+		t.Fatal(e)
+	}
+	if _, e := s.ResolveComment(ctx, key, "one-more", "f", "c1", 1, true, 0, &zero, allow); !errors.Is(e, ErrQuota) {
+		t.Fatalf("resolve limit: %v", e)
 	}
 	if _, e := db.Exec(`DELETE FROM pages WHERE id='page-a'`); e != nil {
 		t.Fatal(e)
@@ -123,5 +139,9 @@ func TestDocumentCommentsLimitAndPageDeletion(t *testing.T) {
 	var n int
 	if e := db.QueryRow(`SELECT count(*) FROM document_comments`).Scan(&n); e != nil || n != 0 {
 		t.Fatalf("comments survived page deletion: %d %v", n, e)
+	}
+	var after int64
+	if e := db.QueryRow(`SELECT used_bytes FROM artifact_storage_workspaces WHERE workspace_id='workspace-a'`).Scan(&after); e != nil || used-after < int64(CommentLimit*(256+2)) {
+		t.Fatalf("comment storage not released: before %d after %d %v", used, after, e)
 	}
 }

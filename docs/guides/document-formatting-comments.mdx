@@ -46,6 +46,11 @@ reopened.
 - Commenting, replying and resolving need Comment or Edit access. On private
   output only its owner comments; a workspace owner's audited read never
   includes commenting.
+- Restricted members can read comments on output in their custody but
+  cannot comment, reply or resolve, the same as editing.
+- A document holds at most 1000 comments (threads and replies, 10 000
+  characters each) and 10 000 resolve or reopen actions. Comments count
+  toward the workspace's artifact storage budget.
 - Comments never change the document's content or revision. When the quoted
   text is edited the thread follows it; when it is deleted the thread shows as
   *text removed*.

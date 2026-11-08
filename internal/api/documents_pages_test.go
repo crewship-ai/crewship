@@ -348,3 +348,31 @@ func TestHumanDocumentRevisionSelectorNeverFallsForward(t *testing.T) {
 		})
 	}
 }
+
+// A restricted member may read under custody but its comment writes are
+// outside the route allowlist, so the read must not offer comment controls.
+func TestHumanDocumentReadHidesCommentControlsFromRestrictedMembers(t *testing.T) {
+	for _, mode := range []string{"trusted", "restricted"} {
+		h, ws, _ := humanDocumentTransportFixture(t)
+		const custodian = "doc-custodian"
+		execOrFatal(t, h.db, `INSERT INTO users(id,email) VALUES(?,'doc-custodian@example.test')`, custodian)
+		execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('doc-custodian-member',?,?,'MEMBER',?)`, ws, custodian, mode)
+		execOrFatal(t, h.db, `UPDATE pages SET owner_user_id=? WHERE id='human-doc-page'`, custodian)
+		h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
+			return []byte(`{"rev":1,"epoch":"opaque","outline":[]}`), 200, nil
+		}
+		for _, path := range []string{"/api/v1/pages/private-doc/document", "/api/v1/pages/private-doc/document/comments"} {
+			r := pagesRequest(t, "GET", path, ws, custodian, "MEMBER", "")
+			r = r.WithContext(context.WithValue(r.Context(), ctxAuthKind, AuthKindSession))
+			r.SetPathValue("slug", "private-doc")
+			r.Header.Set("Authorization", "Bearer original-human-credential")
+			w := httptest.NewRecorder()
+			h.serveDocument(w, r, false)
+			var got map[string]any
+			want := mode == "trusted"
+			if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got["can_comment"] != want || got["can_resolve"] != want {
+				t.Fatalf("%s %s: %d %s", mode, path, w.Code, w.Body.String())
+			}
+		}
+	}
+}
