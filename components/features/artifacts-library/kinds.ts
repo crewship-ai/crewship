@@ -83,7 +83,7 @@ export interface KindSource {
  *
  * - A design system (a manifest with design-system.json) is a Design in Library mode.
  * - A project is an App; without a published application it is Static.
- * - A legacy Page (no artifact_kind: panels, an application or nothing yet) is an App, Static unless it publishes an application.
+ * - A legacy Page that publishes an application is an App; without one it is its data panels, a Dashboard.
  * - A board is Docs in Canvas mode; a legacy doc (Word storage without a version head) is Docs.
  * - Native Word and Sheet stay Craft.
  */
@@ -96,7 +96,7 @@ export function kindOf(source: KindSource): ResolvedKind {
     case "gridcraft-workbook": return { kind: "sheet" }
     case "html": return { kind: "app", badge: "Static" }
     case "mooring-app": case "application": return { kind: "app" }
-    case "panels": return source.hasApplication ? { kind: "app" } : { kind: "app", badge: "Static" }
+    case "panels": return source.hasApplication ? { kind: "app" } : { kind: "dashboard" }
     default: break
   }
   switch (source.kind) {
@@ -106,8 +106,9 @@ export function kindOf(source: KindSource): ResolvedKind {
     case "dashboard": return { kind: "dashboard" }
     case "design": return { kind: "design", mode: "canvas" }
     case "project":
-    case "page":
       return source.hasApplication ? { kind: "app" } : { kind: "app", badge: "Static" }
+    case "page":
+      return source.hasApplication ? { kind: "app" } : { kind: "dashboard" }
   }
 }
 

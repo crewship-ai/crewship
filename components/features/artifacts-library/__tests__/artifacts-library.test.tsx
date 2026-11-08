@@ -97,7 +97,7 @@ const newFrom = (name: string) => {
 }
 const openAll = () => fireEvent.click(screen.getByRole("tab", { name: /All artifacts/ }))
 
-it("lists every kind with something in it, a panel Page as Page, and keeps empty items in their own view", () => {
+it("lists every kind with something in it, a panel Page as a Dashboard, and keeps empty items in their own view", () => {
   renderLibrary()
   openAll()
   fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
@@ -108,8 +108,8 @@ it("lists every kind with something in it, a panel Page as Page, and keeps empty
   expect(within(cards[0]).getByText("Shared v2")).toBeTruthy()
   expect(within(cards[1]).getByText("Not shared")).toBeTruthy()
   expect(within(cards[2]).queryByText(/shared/i)).toBeNull()
-  // A Page with panels is an App in the UI's words: "Page" is never a label (#5132).
-  expect(within(cards[3]).getByText("App")).toBeTruthy()
+  // A Page of data panels is a Dashboard in the UI's words: "Page" is never a label (#5132).
+  expect(within(cards[3]).getByText("Dashboard")).toBeTruthy()
   expect(screen.queryByText("Page")).toBeNull()
   expect(screen.queryByText("Calculator")).toBeNull()
   fireEvent.click(screen.getByRole("button", { name: /Empty/ }))
@@ -593,7 +593,7 @@ it("each kind wears its colour and the gallery draws a thumbnail per kind", () =
   openAll()
   fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
   const thumbs = [...document.querySelectorAll("[data-thumb]")].map(node => node.getAttribute("data-thumb"))
-  expect(thumbs).toEqual(["app", "word", "sheet", "app"])
+  expect(thumbs).toEqual(["app", "word", "sheet", "dashboard"])
 })
 
 it("selecting rows in the list opens the bulk bar with exactly those items", () => {

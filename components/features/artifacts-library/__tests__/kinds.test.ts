@@ -9,7 +9,7 @@ describe("kindOf", () => {
     ["project without an application is a static App", { kind: "project" }, { kind: "app", badge: "Static" }],
     ["project with a published application is an App", { kind: "project", hasApplication: true }, { kind: "app" }],
     ["legacy Page with panels and an application (Page · ops) is an App", { kind: "page", hasApplication: true }, { kind: "app" }],
-    ["legacy Page without an application is a static App", { kind: "page" }, { kind: "app", badge: "Static" }],
+    ["legacy Page without an application (data panels) is a Dashboard", { kind: "page" }, { kind: "dashboard" }],
     ["dashboard", { kind: "dashboard" }, { kind: "dashboard" }],
     ["slides", { kind: "slides" }, { kind: "slides" }],
     ["design is a Canvas design", { kind: "design" }, { kind: "design", mode: "canvas" }],
@@ -32,7 +32,7 @@ describe("kindOf", () => {
     ["html", { kind: "page" }, { kind: "app", badge: "Static" }],
     ["application", { kind: "page" }, { kind: "app" }],
     ["mooring-app", { kind: "page" }, { kind: "app" }],
-    ["panels", { kind: "page" }, { kind: "app", badge: "Static" }],
+    ["panels", { kind: "page" }, { kind: "dashboard" }],
     ["panels", { kind: "page", hasApplication: true }, { kind: "app" }],
   ]
   it.each(content)("content type %s (%o)", (contentType, source, expected) => {
