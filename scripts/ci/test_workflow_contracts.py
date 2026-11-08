@@ -162,7 +162,8 @@ class WorkflowContracts(unittest.TestCase):
         name = 'Require Document durability across a real engine crash through the CLI'
         step = self.step(lane, name)
         self.assertIn('run: python3 scripts/ci/document-create-acceptance.py --scenario durability\n', step)
-        self.assertIn('timeout-minutes: 6\n', step)
+        self.assertIn('timeout-minutes: 8\n', step)
+        self.assertIn("'-timeout=5m'", (ROOT / 'scripts/ci/document-create-acceptance.py').read_text())
         for weakening in ('if:', 'continue-on-error', 'env:'):
             self.assertNotIn(weakening, step)
         # It reuses the lane's Node 24 and frozen engine, after the create
@@ -180,7 +181,7 @@ class WorkflowContracts(unittest.TestCase):
         result = self.job(ci, 'result')
         self.assertIn('pages-apps', re.search(r'needs: \[([^\]]*)\]', result).group(1).split(', '))
         inventory = json.loads((ROOT / 'scripts/ci/required-inventory.json').read_text())
-        self.assertIn('pages-apps', json.dumps(inventory))
+        self.assertIn('pages-apps', inventory['workflows']['.github/workflows/ci.yml']['required_jobs'])
         # The runner selects exactly this opt-in test and build tag.
         test = (ROOT / 'cmd/crewship/acceptance_doc_durability_test.go').read_text()
         self.assertRegex(test.splitlines()[0], r'^//go:build .*\bdocs_foundation\b')

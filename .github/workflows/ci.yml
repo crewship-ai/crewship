@@ -926,8 +926,9 @@ jobs:
       # engine fences, crashed-socket reclaim) was opt-in only, so no CI run
       # executed it. It reuses this lane's Node 24 and frozen docs-service and
       # writes its Go JSON events and measurements into the evidence below.
+      # Step cap 8 > Go -timeout 5m plus compile, so a timeout names the test.
       - name: Require Document durability across a real engine crash through the CLI
-        timeout-minutes: 6
+        timeout-minutes: 8
         run: python3 scripts/ci/document-create-acceptance.py --scenario durability
       - name: Preserve Pages test evidence
         if: always()
