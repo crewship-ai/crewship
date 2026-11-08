@@ -55,7 +55,7 @@ func (s *Store) Comments(ctx context.Context, k Key, a Authorize) (out []Comment
 		if _, e := state(ctx, tx, k); e != nil {
 			return e
 		}
-		rows, e := tx.QueryContext(ctx, `SELECT id,coalesce(parent_id,''),body,anchor_json,actor,rev,version,resolved,created_at FROM document_comments WHERE workspace_id=? AND page_id=? ORDER BY created_at,id LIMIT ?`, k.WorkspaceID, k.PageID, CommentLimit)
+		rows, e := tx.QueryContext(ctx, `SELECT id,coalesce(parent_id,''),body,anchor_json,actor,rev,version,resolved,created_at FROM document_comments WHERE workspace_id=? AND page_id=? ORDER BY created_at,rowid LIMIT ?`, k.WorkspaceID, k.PageID, CommentLimit)
 		if e != nil {
 			return e
 		}

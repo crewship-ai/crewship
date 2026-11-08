@@ -20,6 +20,11 @@ func TestDocumentCommentsThreadsRepliesAndResolve(t *testing.T) {
 	if _, e = s.Comment(ctx, key, CommentInput{ID: "reply", Fingerprint: "f-reply", Parent: "root", Body: "Answer", IfRev: 0, Generation: &generation}, allow); e != nil {
 		t.Fatal(e)
 	}
+	// Both rows can land in the same millisecond (they do on fast runners);
+	// the thread must still list in the order it was written, not by ID.
+	if _, e = db.ExecContext(ctx, `UPDATE document_comments SET created_at='2026-11-08T00:00:00.000Z'`); e != nil {
+		t.Fatal(e)
+	}
 	list, e := s.Comments(ctx, key, allow)
 	if e != nil || len(list) != 2 || list[0].ID != "root" || string(list[0].Anchor) != string(anchor) || list[1].Parent != "root" || list[1].Anchor != nil || list[0].Actor != "server-actor" {
 		t.Fatalf("list: %+v %v", list, e)
