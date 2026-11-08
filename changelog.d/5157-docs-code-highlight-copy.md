@@ -1,0 +1,1 @@
+- **Docs code blocks are coloured by language and have a Copy button.** Schema 4 code in a known language (Python, Go, TypeScript, Bash, SQL, JSON, YAML and more) is highlighted as you type; the colours are display only and never change the stored text. Copy puts the block's exact characters on the clipboard, for readers too.
