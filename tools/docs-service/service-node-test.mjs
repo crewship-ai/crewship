@@ -286,22 +286,39 @@ test('duplicate socket bind cannot recover or fence the existing engine', async 
     assert.equal(model.recoveries, 1); assert.equal((await read(f)).body.epoch, before.epoch);
   } finally { await f.close(); }
 });
+// A real process binds the path and is killed: the kernel leaves the file.
+async function crashedSocket(path) {
+  const crashed = spawn(process.execPath, ['-e', "require('node:net').createServer().listen(process.argv[1], () => console.log('bound'))", path], { stdio: ['ignore', 'pipe', 'inherit'] });
+  try { await once(crashed.stdout, 'data'); } finally { crashed.kill('SIGKILL'); }
+  await once(crashed, 'exit');
+  assert.ok((await lstat(path)).isSocket());
+}
 test('a socket left by a killed engine is reclaimed by its replacement; other paths stay refused', { timeout: 10000 }, async () => {
   const model = authorityModel(), f = await fixture(model.handle);
-  // A real process binds the path and is killed: the kernel leaves the file.
-  const crashed = spawn(process.execPath, ['-e', "require('node:net').createServer().listen(process.argv[1], () => console.log('bound'))", f.socket], { stdio: ['ignore', 'pipe', 'inherit'] });
   try {
-    await once(crashed.stdout, 'data'); crashed.kill('SIGKILL'); await once(crashed, 'exit');
-    assert.ok((await lstat(f.socket)).isSocket());
+    await crashedSocket(f.socket);
     await f.start();
     assert.equal(model.recoveries, 1); assert.equal((await read(f)).status, 200);
-  } finally { crashed.kill('SIGKILL'); await f.close(); }
+  } finally { await f.close(); }
   const other = await fixture(authorityModel().handle);
   try {
     await writeFile(other.socket, 'not a socket');
     await assert.rejects(other.start(), /already exists/);
     assert.equal(await readFile(other.socket, 'utf8'), 'not a socket');
   } finally { await other.close(); }
+});
+test('concurrent replacements of a killed engine: exactly one reclaims, binds and recovers', { timeout: 10000 }, async () => {
+  const model = authorityModel(), f = await fixture(model.handle);
+  const paths = { socket: f.socket, authoritySocket: f.authoritySocket, tokenFile: f.tokenFile };
+  let started = [];
+  try {
+    await crashedSocket(f.socket);
+    const results = await Promise.allSettled(Array.from({ length: 4 }, () => startService(paths)));
+    started = results.filter(result => result.status === 'fulfilled').map(result => result.value);
+    assert.equal(started.length, 1);
+    for (const result of results.filter(result => result.status === 'rejected')) assert.match(result.reason.message, /already exists/);
+    assert.equal(model.recoveries, 1); assert.equal((await read(f)).status, 200);
+  } finally { await Promise.all(started.map(service => service.close())); await f.close(); }
 });
 test('recovery gates all admission and failure closes its socket; a fresh boot can retry', async () => {
   const entered = deferred(), proceed = deferred(); let reject = true, boots = [];

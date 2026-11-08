@@ -91,11 +91,15 @@ configured socket path when it closes, so do not replace or unlink that path
 while the Node service is alive. Dedicated private directories are part of this
 service's operating contract.
 
-A killed engine cannot remove its socket. At startup, Node removes a socket
-file that no process accepts connections on, so a supervised restart at the
-configured path succeeds and then recovers with a new boot identity. A live or
-paused engine still accepts the connection probe and keeps its socket, and any
-other file at that path is refused unchanged.
+A killed engine cannot remove its socket. On Linux, startup first takes a
+lock: an abstract-namespace listener named from the configured path, which an
+engine holds while it lives and the kernel releases when it exits. Only the lock
+holder removes a socket file that no process accepts connections on, so a
+supervised restart at the configured path succeeds and then recovers with a new
+boot identity, and concurrent starters cannot remove each other's socket. A
+live or paused engine keeps its lock and socket, and any other file at that path
+is refused unchanged. The lock is per network namespace: one engine deployment
+owns a socket directory. Elsewhere, any existing path is still refused.
 
 Node and image smoke tests use a controlled authority fixture. They qualify the
 service protocol and packaging; real Go persistence, managed deployment and

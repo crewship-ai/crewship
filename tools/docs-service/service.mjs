@@ -40,14 +40,29 @@ async function verifyTargets(doc, targets, version = VERSION) {
   }
   return verified;
 }
+// Startup custody of one configured socket path is serialized by a Linux
+// abstract-namespace listener named from that path. The kernel releases it when
+// its process exits, including SIGKILL, and an engine holds it while it lives.
+async function holdStartupLock(socket) {
+  if (process.platform !== 'linux') return undefined;
+  const lock = net.createServer();
+  const name = '\0crewship-docs-' + createHash('sha256').update(socket).digest('hex').slice(0, 40);
+  await new Promise((resolve, reject) => {
+    lock.once('error', error => reject(error.code === 'EADDRINUSE' ? new Error('service socket already exists') : error));
+    lock.listen(name, resolve);
+  });
+  lock.unref();
+  return lock;
+}
 // A killed engine leaves its socket file behind; its supervised replacement
-// must still start at the configured path. Only a socket with no listener is
-// removed. A live (or paused) engine accepts the probe and keeps custody; any
-// other file, or an unexpected probe error, is refused unchanged.
-async function reclaimCrashedSocket(socket) {
+// must still start at the configured path. Only while holding the startup lock,
+// and only a socket with no listener, is removed. A live (or paused) engine
+// accepts the probe and keeps custody; any other file, or any other probe
+// error, is refused unchanged. Without the lock nothing is removed.
+async function reclaimCrashedSocket(socket, locked) {
   let found;
   try { found = await lstat(socket); } catch (error) { if (error.code === 'ENOENT') return; throw error; }
-  if (!found.isSocket()) throw new Error('service socket already exists');
+  if (!locked || !found.isSocket()) throw new Error('service socket already exists');
   const abandoned = await new Promise(resolve => {
     const probe = net.connect(socket);
     probe.once('connect', () => { probe.destroy(); resolve(false); });
@@ -294,15 +309,16 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   server.requestTimeout = timeoutMs * 8; server.headersTimeout = timeoutMs; server.keepAliveTimeout = 1000;
   // Prove listener custody before fencing the previous engine. No document
   // request is admitted until Go confirms the idempotent recovery barrier.
-  let bound=false;
+  let bound=false,startupLock;
   try {
-    await reclaimCrashedSocket(socket);
+    startupLock=await holdStartupLock(socket);
+    await reclaimCrashedSocket(socket,Boolean(startupLock));
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(socket,resolve)});bound=true;
     await chmod(socket,0o600);
     const recovered=await go('engine','recover',{workspace:''},{boot:owner,protocol:PROTOCOL,schema:RICH_VERSION});
     if(!recovered.recovered || recovered.protocol!==PROTOCOL || recovered.schema!==RICH_VERSION)throw new Error('authority did not confirm compatible engine recovery');ready=true;
-  }catch(error){clearInterval(timer);if(bound){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}throw error}
-  return { identity, socket, drain, async close() { await drain(); clearInterval(timer); await new Promise(resolve => server.close(resolve)); } };
+  }catch(error){clearInterval(timer);if(bound){server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}startupLock?.close();throw error}
+  return { identity, socket, drain, async close() { await drain(); clearInterval(timer); await new Promise(resolve => server.close(resolve)); startupLock?.close(); } };
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const service = await startService({ socket: process.env.CREWSHIP_DOCS_SOCKET, authoritySocket: process.env.CREWSHIP_DOCS_AUTHORITY_SOCKET, tokenFile: process.env.CREWSHIP_DOCS_SERVICE_TOKEN_FILE });

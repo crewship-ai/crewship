@@ -196,20 +196,33 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 	engineA, firstReady := spawn("a", engineSocket)
 	front.route(engineSocket)
 
-	created := require("one", strings.Replace(emptyDocPage, "human-document", "durable-document", 1), "page", "create", "--allow-empty", "--file", "-")
-	var page struct {
-		ID string `json:"id"`
+	type docRef struct {
+		slug, id string
+		blocks   int
 	}
-	if json.Unmarshal(created, &page) != nil || page.ID == "" {
-		t.Fatalf("Page create response: %s", created)
+	createDoc := func(slug, prefix string, blocks int) docRef {
+		t.Helper()
+		created := require("one", strings.Replace(emptyDocPage, "human-document", slug, 1), "page", "create", "--allow-empty", "--file", "-")
+		var page struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(created, &page) != nil || page.ID == "" {
+			t.Fatalf("Page create response: %s", created)
+		}
+		var content []map[string]any
+		for i := range blocks {
+			content = append(content, map[string]any{"type": "paragraph", "attrs": map[string]any{"id": fmt.Sprintf("%s%02d", prefix, i)}, "content": []any{map[string]any{"type": "text", "text": fmt.Sprintf("Initial paragraph %02d with enough confirmed text to give the measured document a realistic body.", i)}}})
+		}
+		initialize, _ := json.Marshal(map[string]any{"id": slug + "-init", "schema": documents.LatestSchema, "page_id": page.ID, "body": map[string]any{"type": "doc", "content": content}})
+		require("one", string(initialize), "doc", "initialize", slug, "--file", "-")
+		return docRef{slug, page.ID, blocks}
 	}
 	const blocks = 24
-	var content []map[string]any
-	for i := range blocks {
-		content = append(content, map[string]any{"type": "paragraph", "attrs": map[string]any{"id": fmt.Sprintf("p%02d", i)}, "content": []any{map[string]any{"type": "text", "text": fmt.Sprintf("Initial paragraph %02d with enough confirmed text to give the measured document a realistic body.", i)}}})
-	}
-	initialize, _ := json.Marshal(map[string]any{"id": "durable-init", "schema": documents.LatestSchema, "page_id": page.ID, "body": map[string]any{"type": "doc", "content": content}})
-	require("one", string(initialize), "doc", "initialize", "durable-document", "--file", "-")
+	primary := createDoc("durable-document", "p", blocks)
+	// Client two's in-flight work in scenario 2 targets a second document so
+	// the engine admits it concurrently rather than queueing it behind client
+	// one's commit; the authority proxy observes that admission explicitly.
+	second := createDoc("durable-second", "q", 4)
 
 	type outlineBlock struct{ ID, Hash, Text string }
 	type state struct {
@@ -217,15 +230,16 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		Epoch   string         `json:"epoch"`
 		Outline []outlineBlock `json:"outline"`
 	}
-	read := func(client string) state {
+	readDoc := func(client string, d docRef) state {
 		t.Helper()
-		raw := require(client, "", "doc", "read", "durable-document")
+		raw := require(client, "", "doc", "read", d.slug)
 		var s state
-		if err := json.Unmarshal(raw, &s); err != nil || s.Epoch == "" || len(s.Outline) != blocks {
+		if err := json.Unmarshal(raw, &s); err != nil || s.Epoch == "" || len(s.Outline) != d.blocks {
 			t.Fatalf("read: %v %s", err, raw)
 		}
 		return s
 	}
+	read := func(client string) state { t.Helper(); return readDoc(client, primary) }
 	blockOf := func(s state, id string) outlineBlock {
 		t.Helper()
 		for _, block := range s.Outline {
@@ -236,10 +250,11 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		t.Fatalf("block %s missing", id)
 		return outlineBlock{}
 	}
-	patchFor := func(s state, id, target, text string) string {
-		raw, _ := json.Marshal(map[string]any{"id": id, "schema": documents.LatestSchema, "page_id": page.ID, "epoch": s.Epoch, "ifRev": s.Rev, "target": target, "ifHash": blockOf(s, target).Hash, "text": text})
+	patchDoc := func(d docRef, s state, id, target, text string) string {
+		raw, _ := json.Marshal(map[string]any{"id": id, "schema": documents.LatestSchema, "page_id": d.id, "epoch": s.Epoch, "ifRev": s.Rev, "target": target, "ifHash": blockOf(s, target).Hash, "text": text})
 		return string(raw)
 	}
+	patchFor := func(s state, id, target, text string) string { return patchDoc(primary, s, id, target, text) }
 	type receipt struct {
 		ID        string `json:"id"`
 		Rev       int64  `json:"rev"`
@@ -254,22 +269,23 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		}
 		return r
 	}
-	counts := func() (head, updates, receipts int64) {
+	countsDoc := func(d docRef) (head, updates, receipts int64) {
 		t.Helper()
-		if err := db.QueryRow(`SELECT head_rev FROM documents WHERE workspace_id=? AND page_id=?`, workspace, page.ID).Scan(&head); err != nil {
+		if err := db.QueryRow(`SELECT head_rev FROM documents WHERE workspace_id=? AND page_id=?`, workspace, d.id).Scan(&head); err != nil {
 			t.Fatal(err)
 		}
-		if err := db.QueryRow(`SELECT COUNT(*) FROM document_updates WHERE workspace_id=? AND page_id=?`, workspace, page.ID).Scan(&updates); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM document_updates WHERE workspace_id=? AND page_id=?`, workspace, d.id).Scan(&updates); err != nil {
 			t.Fatal(err)
 		}
-		if err := db.QueryRow(`SELECT COUNT(*) FROM document_receipts WHERE workspace_id=? AND page_id=?`, workspace, page.ID).Scan(&receipts); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM document_receipts WHERE workspace_id=? AND page_id=?`, workspace, d.id).Scan(&receipts); err != nil {
 			t.Fatal(err)
 		}
 		return
 	}
+	counts := func() (int64, int64, int64) { t.Helper(); return countsDoc(primary) }
 	hasReceipt := func(id string) bool {
 		var n int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM document_receipts WHERE workspace_id=? AND page_id=? AND id=?`, workspace, page.ID, id).Scan(&n); err != nil {
+		if err := db.QueryRow(`SELECT COUNT(*) FROM document_receipts WHERE workspace_id=? AND page_id=? AND id=?`, workspace, primary.id, id).Scan(&n); err != nil {
 			t.Fatal(err)
 		}
 		return n == 1
@@ -293,7 +309,7 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 	}
 	commitNew := func(client, id, target, text string) receipt {
 		t.Helper()
-		r := decodeReceipt(require(client, patchFor(read(client), id, target, text), "doc", "patch", "durable-document", "--file", "-"))
+		r := decodeReceipt(require(client, patchFor(read(client), id, target, text), "doc", "patch", primary.slug, "--file", "-"))
 		if r.ID != id || r.Duplicate {
 			t.Fatalf("new commit receipt: %+v", r)
 		}
@@ -318,14 +334,14 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		request := patchFor(s, "lost-ack-client", "p20", "Lost client acknowledgement, applied exactly once.")
 		headBefore, updatesBefore, receiptsBefore := counts()
 		dropNextPatch.Store(true)
-		if out, err := run("one", request, "doc", "patch", "durable-document", "--file", "-"); err == nil {
+		if out, err := run("one", request, "doc", "patch", primary.slug, "--file", "-"); err == nil {
 			t.Fatalf("first attempt must lose its acknowledgement: %s", out)
 		}
 		if head, updates, receipts := counts(); head != headBefore+1 || updates != updatesBefore+1 || receipts != receiptsBefore+1 {
 			t.Fatalf("lost ack must follow one durable commit: head %d→%d updates %d→%d receipts %d→%d", headBefore, head, updatesBefore, updates, receiptsBefore, receipts)
 		}
-		retry := decodeReceipt(require("one", request, "doc", "patch", "durable-document", "--file", "-"))
-		again := decodeReceipt(require("one", request, "doc", "patch", "durable-document", "--file", "-"))
+		retry := decodeReceipt(require("one", request, "doc", "patch", primary.slug, "--file", "-"))
+		again := decodeReceipt(require("one", request, "doc", "patch", primary.slug, "--file", "-"))
 		if !retry.Duplicate || retry.Rev != headBefore+1 || again.Rev != retry.Rev || again.Epoch != retry.Epoch {
 			t.Fatalf("retry must return the original receipt: %+v %+v", retry, again)
 		}
@@ -345,14 +361,14 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		request := patchFor(s, "lost-ack-engine", "p21", "Lost engine acknowledgement, applied exactly once.")
 		headBefore, updatesBefore, _ := counts()
 		engineA.proxy.arm("commit", proxyDropReply)
-		out, err := run("two", request, "doc", "patch", "durable-document", "--file", "-")
+		out, err := run("two", request, "doc", "patch", primary.slug, "--file", "-")
 		if err == nil || !bytes.Contains(out, []byte("503")) {
 			t.Fatalf("dropped authority reply must stay unacknowledged: %v %s", err, out)
 		}
 		if head, updates, _ := counts(); head != headBefore+1 || updates != updatesBefore+1 {
 			t.Fatal("the authority did not commit before the dropped reply")
 		}
-		retry := decodeReceipt(require("two", request, "doc", "patch", "durable-document", "--file", "-"))
+		retry := decodeReceipt(require("two", request, "doc", "patch", primary.slug, "--file", "-"))
 		if !retry.Duplicate || retry.Rev != headBefore+1 {
 			t.Fatalf("retry after lost engine reply: %+v", retry)
 		}
@@ -362,50 +378,59 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		confirmed["p21"] = "Lost engine acknowledgement, applied exactly once."
 	}()
 
-	// ── Scenario 2: kill the engine with one committed-unacknowledged and
-	// one uncommitted request in flight from two clients. ──
+	// ── Scenario 2: kill the engine while two clients have work in flight:
+	// client one's commit is durable but unacknowledged, and client two's
+	// commit was admitted by the engine but never reached the authority. ──
 	var engineB *durabilityEngine
 	var recoverReady, recoverRead time.Duration
 	var rssBeforeKill, hwmBeforeKill, rssReplacement, hwmReplacement int64
 	func() {
 		t.Log("scenario: engine-crash-mid-session")
 		s := read("one")
+		commitNew2 := func(id, target, text string) {
+			t.Helper()
+			r := decodeReceipt(require("two", patchDoc(second, readDoc("two", second), id, target, text), "doc", "patch", second.slug, "--file", "-"))
+			if r.ID != id || r.Duplicate {
+				t.Fatalf("second document receipt: %+v", r)
+			}
+		}
+		commitNew2("second-confirmed", "q00", "Confirmed on the second document before the crash.")
+		s2 := readDoc("two", second)
 		committedRequest := patchFor(s, "crash-committed", "p22", "Committed just before the engine crashed.")
-		uncommittedRequest := patchFor(s, "crash-uncommitted", "p23", "Never committed: the engine crashed first.")
+		uncommittedRequest := patchDoc(second, s2, "crash-uncommitted", "q01", "Never committed: the engine crashed first.")
 		headBefore, updatesBefore, _ := counts()
-		held := engineA.proxy.arm("commit", proxyHoldAfterForward)
-		forwarded := front.patches.Load()
+		head2Before, updates2Before, _ := countsDoc(second)
 		type result struct {
 			out []byte
 			err error
 		}
-		first, second := make(chan result, 1), make(chan result, 1)
+		first, other := make(chan result, 1), make(chan result, 1)
+		committedHeld := engineA.proxy.arm("commit", proxyHoldAfterForward)
 		go func() {
-			out, err := run("one", committedRequest, "doc", "patch", "durable-document", "--file", "-")
+			out, err := run("one", committedRequest, "doc", "patch", primary.slug, "--file", "-")
 			first <- result{out, err}
 		}()
 		select {
-		case <-held:
+		case <-committedHeld:
 		case <-time.After(20 * time.Second):
 			t.Fatal("client one's commit never reached the authority")
 		}
+		admittedHeld := engineA.proxy.arm("commit", proxyHoldBeforeForward)
 		go func() {
-			out, err := run("two", uncommittedRequest, "doc", "patch", "durable-document", "--file", "-")
-			second <- result{out, err}
+			out, err := run("two", uncommittedRequest, "doc", "patch", second.slug, "--file", "-")
+			other <- result{out, err}
 		}()
-		// Client two's request is admitted by the engine and queued behind
-		// client one's commit on the same document before the crash.
-		deadline := time.Now().Add(20 * time.Second)
-		for front.patches.Load() < forwarded+2 && time.Now().Before(deadline) {
-			time.Sleep(10 * time.Millisecond)
+		select {
+		case <-admittedHeld:
+		case <-time.After(20 * time.Second):
+			t.Fatal("client two's commit was never sent by the engine")
 		}
-		if front.patches.Load() < forwarded+2 {
-			t.Fatal("client two's request never reached the engine")
+		if held := engineA.proxy.captured(); held == nil || held.field("id") != "crash-uncommitted" {
+			t.Fatal("the engine-side barrier did not observe client two's commit")
 		}
-		time.Sleep(100 * time.Millisecond)
 		rssBeforeKill, hwmBeforeKill = engineA.memory()
 		engineA.kill()
-		for name, ch := range map[string]chan result{"one": first, "two": second} {
+		for name, ch := range map[string]chan result{"one": first, "two": other} {
 			select {
 			case r := <-ch:
 				if r.err == nil || !bytes.Contains(r.out, []byte("503")) {
@@ -415,11 +440,14 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 				t.Fatalf("client %s hung after the engine crash", name)
 			}
 		}
-		if head, updates, _ := counts(); head != headBefore+1 || updates != updatesBefore+1 || !hasReceipt("crash-committed") || hasReceipt("crash-uncommitted") {
+		if head, updates, _ := counts(); head != headBefore+1 || updates != updatesBefore+1 || !hasReceipt("crash-committed") {
 			t.Fatalf("crash state: head %d→%d updates %d→%d", headBefore, head, updatesBefore, updates)
 		}
+		if head, updates, _ := countsDoc(second); head != head2Before || updates != updates2Before {
+			t.Fatal("client two's unconfirmed commit reached durable state")
+		}
 		// While no engine runs, a retained draft is refused, never acknowledged.
-		if out, err := run("two", uncommittedRequest, "doc", "patch", "durable-document", "--file", "-"); err == nil || !bytes.Contains(out, []byte("503")) {
+		if out, err := run("two", uncommittedRequest, "doc", "patch", second.slug, "--file", "-"); err == nil || !bytes.Contains(out, []byte("503")) {
 			t.Fatalf("send during outage: %v %s", err, out)
 		}
 		// The supervisor restarts the engine at its configured socket path.
@@ -436,26 +464,30 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		}
 		confirmed["p22"] = "Committed just before the engine crashed."
 		expectConfirmed(after)
-		if occurrences(after, "Never committed") != 0 {
-			t.Fatal("an unconfirmed edit was resurrected")
+		after2 := readDoc("two", second)
+		if blockOf(after2, "q00").Text != "Confirmed on the second document before the crash." || occurrences(after2, "Never committed") != 0 {
+			t.Fatalf("second document after restart: %+v", after2.Outline)
 		}
 		// Client one retries its unacknowledged request after the restart and
 		// receives the original receipt; nothing is applied twice.
-		retry := decodeReceipt(require("one", committedRequest, "doc", "patch", "durable-document", "--file", "-"))
+		retry := decodeReceipt(require("one", committedRequest, "doc", "patch", primary.slug, "--file", "-"))
 		if !retry.Duplicate || retry.Rev != headBefore+1 {
 			t.Fatalf("committed request retry after restart: %+v", retry)
 		}
+		if head, updates, _ := counts(); head != headBefore+1 || updates != updatesBefore+1 {
+			t.Fatal("committed request retry after restart created another effect")
+		}
 		// Client two's retained draft carries the crashed engine's epoch. It is
 		// refused with no effect and must be offered for recovery.
-		if out, err := run("two", uncommittedRequest, "doc", "patch", "durable-document", "--file", "-"); err == nil || !bytes.Contains(out, []byte("409")) {
+		if out, err := run("two", uncommittedRequest, "doc", "patch", second.slug, "--file", "-"); err == nil || !bytes.Contains(out, []byte("409")) {
 			t.Fatalf("stale retained draft after restart: %v %s", err, out)
 		}
-		if head, updates, _ := counts(); head != headBefore+1 || updates != updatesBefore+1 || hasReceipt("crash-uncommitted") {
-			t.Fatal("stale retained draft changed the document")
+		if head, updates, receipts := countsDoc(second); head != head2Before || updates != updates2Before || receipts != head2Before+1 {
+			t.Fatalf("stale retained draft changed the second document: head %d updates %d receipts %d", head, updates, receipts)
 		}
 		// Recovering the draft against the new epoch saves it exactly once.
-		commitNew("two", "crash-recovered", "p23", "Never committed: the engine crashed first.")
-		if final := read("one"); occurrences(final, "Never committed") != 1 {
+		commitNew2("crash-recovered", "q01", "Never committed: the engine crashed first.")
+		if final := readDoc("one", second); occurrences(final, "Never committed") != 1 {
 			t.Fatal("recovered draft must appear exactly once")
 		}
 	}()
@@ -468,9 +500,9 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 	func() {
 		t.Log("scenario: stale-boot-epoch-generation")
 		commitNew("one", "fence-before", "p00", "Committed by engine b before it was paused.")
-		lease := engineB.proxy.last("lease")
+		oldLease := engineB.proxy.last("lease")
 		oldCommit := engineB.proxy.last("commit")
-		if lease == nil || oldCommit == nil {
+		if oldLease == nil || oldCommit == nil {
 			t.Fatal("engine b lease and commit were not observed")
 		}
 		stale := read("two")
@@ -510,28 +542,47 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 				t.Fatalf("%s changed durable state", label)
 			}
 		}
-		out, err := run("two", staleRequest, "doc", "patch", "durable-document", "--file", "-")
+		out, err := run("two", staleRequest, "doc", "patch", primary.slug, "--file", "-")
 		refusedWithoutEffect("old epoch through the replacement engine", out, err)
 
 		// The paused engine resumes and the supervisor routes to it again.
 		engineB.signal(syscall.SIGCONT)
 		front.route(engineB.socket)
-		out, err = run("two", staleRequest, "doc", "patch", "durable-document", "--file", "-")
+		out, err = run("two", staleRequest, "doc", "patch", primary.slug, "--file", "-")
 		refusedWithoutEffect("old epoch through the resumed old engine", out, err)
 
-		// The old engine's own lease, epoch and generation are rejected at
-		// the authority even when replayed verbatim with a fresh operation ID.
-		replay := func(label string, op string, mutate func(map[string]any)) {
-			t.Helper()
+		// Capture an otherwise valid commit from engine c, unforwarded. Each
+		// probe below changes only one fence field of that exact request.
+		front.route(engineC.socket)
+		freshText := "Committed by engine c after fencing engine b."
+		freshRequest := patchFor(read("one"), "fence-fresh", "p02", freshText)
+		capturedSignal := engineC.proxy.arm("commit", proxyCaptureDrop)
+		if out, err := run("one", freshRequest, "doc", "patch", primary.slug, "--file", "-"); err == nil || !bytes.Contains(out, []byte("503")) {
+			t.Fatalf("captured commit must stay unacknowledged: %v %s", err, out)
+		}
+		select {
+		case <-capturedSignal:
+		case <-time.After(20 * time.Second):
+			t.Fatal("engine c never sent the fresh commit")
+		}
+		valid, currentLease := engineC.proxy.captured(), engineC.proxy.last("lease")
+		if valid == nil || currentLease == nil || valid.field("id") != "fence-fresh" {
+			t.Fatal("engine c's fresh commit and lease were not observed")
+		}
+		if h, u, r := counts(); h != head || u != updates || r != receipts {
+			t.Fatal("captured commit reached durable state")
+		}
+		send := func(op string, body map[string]any) (int, []byte) { return engineC.proxy.direct(valid, op, body) }
+		variant := func(mutate func(map[string]any)) map[string]any {
 			body := map[string]any{}
-			if err := json.Unmarshal(oldCommit.body, &body); err != nil {
+			if err := json.Unmarshal(valid.body, &body); err != nil {
 				t.Fatal(err)
 			}
-			if op == "renew" || op == "release" {
-				body = map[string]any{"owner": lease.response["owner"], "token": lease.response["token"], "epoch": lease.response["epoch"]}
-			}
 			mutate(body)
-			status, raw := engineB.proxy.direct(oldCommit, op, body)
+			return body
+		}
+		refused := func(label string, status int, raw []byte) {
+			t.Helper()
 			if status != http.StatusConflict {
 				t.Fatalf("%s: HTTP%d %s", label, status, raw)
 			}
@@ -539,50 +590,43 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 				t.Fatalf("%s changed durable state", label)
 			}
 		}
-		replay("old lease commit", "commit", func(body map[string]any) {
-			body["id"], body["fingerprint"] = "fence-replay", strings.Repeat("f", 64)
-			body["ifRev"] = head
-		})
-		var generation int64
-		if err := db.QueryRow(`SELECT generation FROM documents WHERE workspace_id=? AND page_id=?`, workspace, page.ID).Scan(&generation); err != nil {
-			t.Fatal(err)
-		}
-		replay("old lease commit with the current generation", "commit", func(body map[string]any) {
-			body["id"], body["fingerprint"] = "fence-replay-generation", strings.Repeat("d", 64)
-			body["ifRev"], body["generation"] = head, generation
-		})
-		replay("old lease renew", "renew", func(map[string]any) {})
-		replay("old lease release", "release", func(map[string]any) {})
-
-		// The replacement engine's live lease with an old generation or epoch
-		// is rejected as well.
-		front.route(engineC.socket)
-		commitNew("one", "fence-after", "p02", "Committed by engine c after fencing engine b.")
-		head, updates, receipts = counts()
-		currentLease := engineC.proxy.last("lease")
-		currentCommit := engineC.proxy.last("commit")
-		if currentLease == nil || currentCommit == nil {
-			t.Fatal("engine c lease and commit were not observed")
-		}
-		for label, mutate := range map[string]func(map[string]any){
-			"old generation": func(body map[string]any) { body["generation"] = oldCommit.field("generation") },
-			"old epoch":      func(body map[string]any) { body["epoch"] = oldCommit.field("epoch") },
+		for _, probe := range []struct {
+			label  string
+			mutate func(map[string]any)
+		}{
+			{"lease, owner and epoch of fenced engine b", func(body map[string]any) {
+				body["leaseToken"], body["leaseOwner"], body["epoch"] = oldLease.response["token"], oldLease.response["owner"], oldLease.response["epoch"]
+			}},
+			{"lease and owner of fenced engine b at the current epoch", func(body map[string]any) {
+				body["leaseToken"], body["leaseOwner"] = oldLease.response["token"], oldLease.response["owner"]
+			}},
+			{"old epoch", func(body map[string]any) { body["epoch"] = oldLease.response["epoch"] }},
+			{"old generation", func(body map[string]any) { body["generation"] = oldCommit.field("generation") }},
 		} {
-			body := map[string]any{}
-			if err := json.Unmarshal(currentCommit.body, &body); err != nil {
-				t.Fatal(err)
-			}
-			body["id"], body["fingerprint"] = "fence-"+strings.ReplaceAll(label, " ", "-"), strings.Repeat("e", 64)
-			body["ifRev"] = head
-			mutate(body)
-			status, raw := engineC.proxy.direct(currentCommit, "commit", body)
-			if status != http.StatusConflict {
-				t.Fatalf("%s with the current lease: HTTP%d %s", label, status, raw)
-			}
-			if h, u, r := counts(); h != head || u != updates || r != receipts {
-				t.Fatalf("%s changed durable state", label)
-			}
+			status, raw := send("commit", variant(probe.mutate))
+			refused(probe.label, status, raw)
 		}
+		oldLeaseBody := map[string]any{"owner": oldLease.response["owner"], "token": oldLease.response["token"], "epoch": oldLease.response["epoch"]}
+		for _, op := range []string{"renew", "release"} {
+			status, raw := send(op, oldLeaseBody)
+			refused("fenced engine b "+op, status, raw)
+		}
+		// Positive controls: the current lease renews, and the unchanged
+		// captured request commits exactly once.
+		if status, raw := send("renew", map[string]any{"owner": currentLease.response["owner"], "token": currentLease.response["token"], "epoch": currentLease.response["epoch"]}); status != http.StatusOK {
+			t.Fatalf("current lease renew control: HTTP%d %s", status, raw)
+		}
+		if status, raw := send("commit", variant(func(map[string]any) {})); status != http.StatusOK {
+			t.Fatalf("unchanged captured commit control: HTTP%d %s", status, raw)
+		}
+		if h, u, r := counts(); h != head+1 || u != updates+1 || r != receipts+1 {
+			t.Fatal("positive control did not commit exactly once")
+		}
+		retry := decodeReceipt(require("one", freshRequest, "doc", "patch", primary.slug, "--file", "-"))
+		if !retry.Duplicate || retry.Rev != head+1 {
+			t.Fatalf("CLI retry of the control commit: %+v", retry)
+		}
+		confirmed["p02"] = freshText
 		final := read("one")
 		expectConfirmed(final)
 		if occurrences(final, "Must never persist") != 0 {
@@ -593,10 +637,10 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 
 	head, updates, receipts := counts()
 	var snapshotBytes, logBytes int64
-	if err := db.QueryRow(`SELECT length(snapshot) FROM documents WHERE workspace_id=? AND page_id=?`, workspace, page.ID).Scan(&snapshotBytes); err != nil {
+	if err := db.QueryRow(`SELECT length(snapshot) FROM documents WHERE workspace_id=? AND page_id=?`, workspace, primary.id).Scan(&snapshotBytes); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.QueryRow(`SELECT COALESCE(SUM(length(payload)),0) FROM document_updates WHERE workspace_id=? AND page_id=?`, workspace, page.ID).Scan(&logBytes); err != nil {
+	if err := db.QueryRow(`SELECT COALESCE(SUM(length(payload)),0) FROM document_updates WHERE workspace_id=? AND page_id=?`, workspace, primary.id).Scan(&logBytes); err != nil {
 		t.Fatal(err)
 	}
 	measurements := map[string]any{
@@ -703,6 +747,10 @@ const (
 	proxyForward proxyMode = iota
 	proxyDropReply
 	proxyHoldAfterForward
+	// proxyHoldBeforeForward never forwards: the engine waits until it dies.
+	proxyHoldBeforeForward
+	// proxyCaptureDrop records a valid request and drops it unforwarded.
+	proxyCaptureDrop
 )
 
 type durabilityExchange struct {
@@ -729,6 +777,7 @@ type durabilityAuthorityProxy struct {
 	signal  chan struct{}
 	hold    chan struct{}
 	seen    map[string]*durabilityExchange
+	held    *durabilityExchange
 	once    sync.Once
 }
 
@@ -742,6 +791,11 @@ func (p *durabilityAuthorityProxy) arm(op string, mode proxyMode) <-chan struct{
 	defer p.mu.Unlock()
 	p.armedOp, p.mode, p.signal = op, mode, make(chan struct{})
 	return p.signal
+}
+func (p *durabilityAuthorityProxy) captured() *durabilityExchange {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.held
 }
 func (p *durabilityAuthorityProxy) release() { p.once.Do(func() { close(p.hold) }) }
 func (p *durabilityAuthorityProxy) last(op string) *durabilityExchange {
@@ -779,6 +833,20 @@ func (p *durabilityAuthorityProxy) ServeHTTP(w http.ResponseWriter, r *http.Requ
 		p.armedOp = ""
 	}
 	p.mu.Unlock()
+	if mode == proxyHoldBeforeForward || mode == proxyCaptureDrop {
+		p.mu.Lock()
+		p.held = &durabilityExchange{op: op, path: r.URL.Path, header: r.Header.Clone(), body: body}
+		p.mu.Unlock()
+		close(signal)
+		if mode == proxyHoldBeforeForward {
+			select {
+			case <-r.Context().Done():
+			case <-p.hold:
+			}
+		}
+		durabilityDrop(w)
+		return
+	}
 	req, _ := http.NewRequestWithContext(context.WithoutCancel(r.Context()), r.Method, "http://authority"+r.URL.RequestURI(), bytes.NewReader(body))
 	req.Header = r.Header.Clone()
 	response, err := p.client.Do(req)
