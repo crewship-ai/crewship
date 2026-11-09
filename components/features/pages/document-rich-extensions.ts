@@ -138,6 +138,33 @@ export interface CommentHighlight { id: string; block: string; from: number; to:
 type HighlightState = { ranges: CommentHighlight[]; active: string | null; set: DecorationSet }
 const highlightKey = new PluginKey<HighlightState>("documentCommentHighlights")
 
+/**
+ * The engine counts comment offsets in text only: a schema 5 date or mention
+ * takes no place (#5155), while the editor counts it as one position. These
+ * convert between the two inside one text block.
+ */
+export function textOffsetIn(block: ProseMirrorNode, parentOffset: number): number {
+  let text = 0
+  block.forEach((child, offset) => { if (child.isText) text += Math.min(child.nodeSize, Math.max(0, parentOffset - offset)) })
+  return text
+}
+/** The editor offset of a text offset; `start` places it after any atoms at that point, otherwise before them. */
+export function parentOffsetIn(block: ProseMirrorNode, textOffset: number, start: boolean): number | null {
+  let text = 0, found: number | null = null
+  block.forEach((child, offset) => {
+    if (found !== null || !child.isText) return
+    if (start ? textOffset < text + child.nodeSize : textOffset <= text + child.nodeSize) found = offset + textOffset - text
+    text += child.nodeSize
+  })
+  if (found !== null) return found
+  return textOffset === text ? (start ? block.content.size : lastTextEnd(block)) : null
+}
+function lastTextEnd(block: ProseMirrorNode): number {
+  let end = 0
+  block.forEach((child, offset) => { if (child.isText) end = offset + child.nodeSize })
+  return end
+}
+
 function decorate(doc: ProseMirrorNode, ranges: CommentHighlight[], active: string | null): DecorationSet {
   if (!ranges.length) return DecorationSet.empty
   const blocks = new Map<string, { pos: number; node: ProseMirrorNode }>()
@@ -145,8 +172,10 @@ function decorate(doc: ProseMirrorNode, ranges: CommentHighlight[], active: stri
   const decorations: Decoration[] = []
   for (const range of ranges) {
     const target = blocks.get(range.block)
-    if (!target || range.from < 0 || range.to <= range.from || range.to > target.node.content.size) continue
-    decorations.push(Decoration.inline(target.pos + 1 + range.from, target.pos + 1 + range.to, {
+    if (!target || range.from < 0 || range.to <= range.from) continue
+    const from = parentOffsetIn(target.node, range.from, true), to = parentOffsetIn(target.node, range.to, false)
+    if (from === null || to === null || to <= from) continue
+    decorations.push(Decoration.inline(target.pos + 1 + from, target.pos + 1 + to, {
       class: range.id === active ? "document-comment document-comment-active" : "document-comment", "data-comment-anchor": range.id,
     }))
   }
@@ -199,6 +228,8 @@ export function commentTarget(editor: Editor): CommentTarget | string {
     return "Select text inside one paragraph, heading or code block."
   }
   const start = $from.parentOffset, end = $to.parentOffset
-  return { block: block.attrs.id, from: start, to: end, quote: block.textBetween(start, end) }
+  const textFrom = textOffsetIn(block, start), textTo = textOffsetIn(block, end)
+  if (textFrom === textTo) return "Select some text, not only a date or mention."
+  return { block: block.attrs.id, from: textFrom, to: textTo, quote: block.textBetween(start, end) }
 }
 

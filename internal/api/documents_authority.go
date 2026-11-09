@@ -32,12 +32,12 @@ var errDocumentAccess = errors.New("document access denied")
 
 const documentEngineProtocol = 3
 
-// DocumentAuthority constructs the private authority. It is never registered
-// on r.mux. Boot fencing runs only after the caller owns its Unix listener.
 // documentExclusiveOutputTables are the other output types a Document page
 // must not carry. The document authority and the people endpoint share it.
 var documentExclusiveOutputTables = []string{"artifact_version_heads", "slides_heads", "page_boards", "page_artifacts", "gridcraft_heads", "mooring_documents", "mooring_collab_documents"}
 
+// DocumentAuthority constructs the private authority. It is never registered
+// on r.mux. Boot fencing runs only after the caller owns its Unix listener.
 func (r *Router) DocumentAuthority(ctx context.Context, secret string) (http.Handler, error) {
 	if len(secret) < 32 {
 		return nil, errors.New("Docs service secret requires at least 32 characters")

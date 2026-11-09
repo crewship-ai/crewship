@@ -206,6 +206,10 @@ func TestDocumentPeopleRequiresTheCurrentCredentialAndReadScope(t *testing.T) {
 					execOrFatal(t, h.db, `UPDATE cli_tokens SET revoked_at='2026-01-01T00:00:00Z' WHERE id='people-cli'`)
 				}
 			}
+			h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
+				t.Fatal("people must never call the document engine")
+				return nil, 0, nil
+			}
 			w := httptest.NewRecorder()
 			h.DocumentPeople(w, r)
 			if w.Code != want || (want != 200 && strings.Contains(w.Body.String(), "Bea Member")) {
@@ -216,10 +220,15 @@ func TestDocumentPeopleRequiresTheCurrentCredentialAndReadScope(t *testing.T) {
 }
 
 func TestDocumentPeopleRefusesAPageTheDocumentReadRefuses(t *testing.T) {
+	// The database already refuses a panel on a Document page; the shared check
+	// is what the people endpoint and the document authority both apply.
 	h, ws, owner := documentPeopleFixture(t, false)
-	execOrFatal(t, h.db, `INSERT INTO page_panels(id,page_id,panel_id,schema,producer_kind,producer_ref,sla_seconds) VALUES('people-panel','people-page','sensor','status.v1','script','script/watch.sh',60)`)
-	if status, _ := documentPeopleCall(t, h, ws, owner, "OWNER", "ids="+owner); status != 404 {
-		t.Fatalf("page with a panel named people: %d", status)
+	execOrFatal(t, h.db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('mixed-page',?,'mixed','Mixed',?,'{}')`, ws, owner)
+	execOrFatal(t, h.db, `INSERT INTO page_panels(id,page_id,panel_id,schema,producer_kind,producer_ref,sla_seconds) VALUES('mixed-panel','mixed-page','sensor','status.v1','script','script/watch.sh',60)`)
+	for page, want := range map[string]bool{"mixed-page": true, "people-page": false} {
+		if other, err := documentPageHasOtherOutput(t.Context(), h.db, page); err != nil || other != want {
+			t.Fatalf("%s: other output %v, %v", page, other, err)
+		}
 	}
 }
 

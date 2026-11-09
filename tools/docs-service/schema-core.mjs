@@ -384,7 +384,7 @@ function patch(doc, op, version = VERSION) {
   while (!textBoundary(before, head) || !textBoundary(after, head)) head--;
   const slideFrom = range.from + head;
   let atomBase = 0;
-  for (const child of block.toArray()) {
+  for (const child of (from === to && !replacement) ? [] : block.toArray()) {
     if (child instanceof Y.XmlText) { atomBase += child.length; continue; }
     if (!(child instanceof Y.XmlElement) || !ATOMS.includes(child.nodeName)) continue;
     if ((slideFrom < atomBase && atomBase < to) || (replacement && (atomBase === slideFrom || atomBase === to))) throw Object.assign(new Error('semantic edit touches a date or mention; edit that text in the editor'), { code: 'ambiguous_inline_atom' });
