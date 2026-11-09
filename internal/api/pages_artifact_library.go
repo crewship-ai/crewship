@@ -41,12 +41,18 @@ type artifactLibraryResponse struct {
 type artifactLibraryPinResponse struct {
 	artifacts.LibraryPin
 	// Tokens is the pinned design-system.json, byte for byte.
-	Tokens  json.RawMessage `json:"tokens"`
-	Changed *bool           `json:"changed,omitempty"`
+	Tokens json.RawMessage `json:"tokens"`
 }
 
-func artifactLibraryPinBody(p artifacts.LibraryPin, changed *bool) artifactLibraryPinResponse {
-	return artifactLibraryPinResponse{LibraryPin: p, Tokens: json.RawMessage(p.Content), Changed: changed}
+// artifactLibraryPinResult answers a pin or update; Changed is false for a
+// retry of the version already pinned.
+type artifactLibraryPinResult struct {
+	artifactLibraryPinResponse
+	Changed bool `json:"changed"`
+}
+
+func artifactLibraryPinBody(p artifacts.LibraryPin) artifactLibraryPinResponse {
+	return artifactLibraryPinResponse{LibraryPin: p, Tokens: json.RawMessage(p.Content)}
 }
 
 // artifactLibraryPublisher admits only the library's human owner.
@@ -266,7 +272,7 @@ func (h *PageHandler) PutArtifactLibraryPin(w http.ResponseWriter, r *http.Reque
 	if notify != nil {
 		notify()
 	}
-	writeJSON(w, 200, artifactLibraryPinBody(pin, &changed))
+	writeJSON(w, 200, artifactLibraryPinResult{artifactLibraryPinBody(pin), changed})
 }
 
 // GetArtifactLibraryPin returns the pinned copy; the library is not read.
@@ -282,7 +288,7 @@ func (h *PageHandler) GetArtifactLibraryPin(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	notifyDesignAdminAudit(r)
-	writeJSON(w, 200, artifactLibraryPinBody(pin, nil))
+	writeJSON(w, 200, artifactLibraryPinBody(pin))
 }
 
 // GetArtifactLibraryPinUpdate reviews whether the library published a

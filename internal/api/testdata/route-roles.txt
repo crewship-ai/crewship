@@ -351,6 +351,7 @@ POST /api/v1/pages/{slug}/archive roleSelf
 POST /api/v1/pages/{slug}/artifact/comments roleInline
 POST /api/v1/pages/{slug}/artifact/comments/{commentId}/reply roleInline
 POST /api/v1/pages/{slug}/artifact/data/{collection} roleInline
+POST /api/v1/pages/{slug}/artifact/library/publish roleInline
 POST /api/v1/pages/{slug}/artifact/restore roleInline
 POST /api/v1/pages/{slug}/artifact/share roleInline
 POST /api/v1/pages/{slug}/artifact/versions roleInline
@@ -523,6 +524,7 @@ PUT /api/v1/me/notification-prefs roleSelf
 PUT /api/v1/me/preferences/{key} roleSelf
 PUT /api/v1/notification-templates roleManage
 PUT /api/v1/page-folders/{slug}/acl roleCreate
+PUT /api/v1/pages/{slug}/artifact/library-pin roleInline
 PUT /api/v1/pages/{slug}/grants roleSelf
 PUT /api/v1/pages/{slug}/panels/{panelId}/data roleSelf
 PUT /api/v1/pages/{slug}/project roleSelf

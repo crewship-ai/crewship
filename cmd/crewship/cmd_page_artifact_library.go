@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"io"
 
 	"github.com/spf13/cobra"
 
@@ -47,7 +48,25 @@ func newArtifactLibraryCommands() []*cobra.Command {
 		if ifPinned < 0 {
 			return cli.WithExitCode(errors.New("--if-pinned-version must be nonnegative"), cli.ExitValidation)
 		}
-		return artifactCLIRequest(cmd, "PUT", "/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/library-pin", map[string]any{"library": lib, "if_pinned_version": ifPinned})
+		// Pinning is a human decision; agent runs are refused by the server, so
+		// this always uses the authenticated Page client.
+		client, err := pageClient()
+		if err != nil {
+			return err
+		}
+		response, err := client.Put("/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/library-pin", map[string]any{"library": lib, "if_pinned_version": ifPinned})
+		if err != nil {
+			return err
+		}
+		defer response.Body.Close()
+		if err := pageCheckError(response); err != nil {
+			return err
+		}
+		raw, err := io.ReadAll(io.LimitReader(response.Body, 1<<20))
+		if err != nil {
+			return err
+		}
+		return pageEmitMachine(resolvedFormatter(cmd), raw, "{}")
 	}}
 	pinSet.Flags().String("library", "", "Library project slug or @id in this workspace")
 	pinSet.Flags().Int64("if-pinned-version", 0, "Library version currently pinned (0 for none); a mismatch is a conflict")
