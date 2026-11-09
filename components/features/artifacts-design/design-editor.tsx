@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react"
 import dynamic from "next/dynamic"
-import { ChevronDown, ChevronLeft, ChevronRight, Download, Frame, ImagePlus, Info, Layers, MessageSquare, MousePointer2, Play, Plus, Save, Scan, SlidersHorizontal, Square, Trash2, Type, ZoomIn, ZoomOut } from "lucide-react"
+import { ChevronDown, ChevronLeft, ChevronRight, Download, Frame, ImagePlus, Info, Layers, MessageSquare, MousePointer2, Play, Plus, Redo2, Save, Scan, SlidersHorizontal, Square, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react"
 import * as Y from "yjs"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
@@ -109,6 +109,29 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const wasPlaying = useRef(false)
  useEffect(() => { if (wasPlaying.current && !playing) playButton.current?.focus(); wasPlaying.current = Boolean(playing) }, [playing])
  const selected = design.nodes.find(node => node.id === selectedId)
+ // Undo and redo take back only this person's own edits (Ctrl/⌘+Z,
+ // Shift+Ctrl/⌘+Z or Ctrl+Y); a text field keeps its own undo.
+ const historyKeys = useRef({ undo: design.undo, redo: design.redo }); historyKeys.current = { undo: design.undo, redo: design.redo }
+ useEffect(() => {
+  if (!design.editable) return
+  const onKey = (event: KeyboardEvent) => {
+   if (!(event.ctrlKey || event.metaKey) || event.altKey) return
+   const target = event.target as HTMLElement | null
+   if (target && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return
+   const key = event.key.toLowerCase()
+   const redo = (key === "z" && event.shiftKey) || (key === "y" && !event.metaKey)
+   if (key !== "z" && !redo) return
+   event.preventDefault()
+   if (redo) historyKeys.current.redo?.(); else historyKeys.current.undo?.()
+  }
+  window.addEventListener("keydown", onKey)
+  return () => window.removeEventListener("keydown", onKey)
+ }, [design.editable])
+ // Others see which layer this person has selected on the live canvas (awareness
+ // only, never the document). A reader or a History view shares nothing.
+ const liveSelection = design.editable && !version
+ const shareSelection = useRef(design.setSelection); shareSelection.current = design.setSelection
+ useEffect(() => { shareSelection.current?.(liveSelection && selected ? selected.id : null) }, [selected?.id, liveSelection]) // eslint-disable-line react-hooks/exhaustive-deps -- the ID and the live state are the whole input
  const frames = design.nodes.filter(node => node.type === "frame")
  const selectedFrame = selected?.type === "frame" ? selected.id : selected?.parentId
  const position = (node: DesignNode, seen = new Set<string>()): { x: number; y: number } => {
@@ -494,6 +517,17 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     {selectedId === node.id && <rect width={w} height={h} fill="none" stroke="#2563eb" strokeWidth={2 / scale} pointerEvents="none" />}
    </g>
   })}
+  {!version && design.peers.filter(peer => peer.selection).map(peer => {
+   const node = design.nodes.find(item => item.id === peer.selection)
+   if (!node) return null
+   const { x, y } = position(node)
+   const w = Math.max(1, Number(node.width) || 1), h = Math.max(1, Number(node.height) || 1)
+   const label = peer.name.slice(0, 22)
+   return <g key={`selection-${peer.clientId}`} data-remote-selection={node.id} transform={`translate(${x},${y})`} pointerEvents="none" aria-label={`${peer.name} selected ${node.name || node.type}`}>
+    <rect width={w} height={h} fill="none" stroke={peer.color} strokeWidth={2 / scale} strokeDasharray={`${6 / scale} ${4 / scale}`} />
+    <g transform={`translate(0,${-22 / scale - 2 / scale})${scale === 1 ? "" : ` scale(${1 / scale})`}`}><rect width={Math.min(160, label.length * 7 + 12)} height="18" rx="3" fill={readablePeerFill(peer.color)} /><text x="6" y="13" fontSize="11" fill="white">{label}</text></g>
+   </g>
+  })}
   {design.peers.filter(peer => peer.cursor).map(peer => <g key={peer.clientId} transform={`translate(${peer.cursor!.x},${peer.cursor!.y})${scale === 1 ? "" : ` scale(${1 / scale})`}`} pointerEvents="none" aria-label={`${peer.name} cursor`}><path d="M0 0 L0 20 L5 15 L9 24 L13 22 L9 13 L17 13 Z" fill={peer.color} stroke="white" /><rect x="16" y="18" width={Math.min(160, peer.name.length * 7 + 16)} height="22" rx="4" fill={readablePeerFill(peer.color)} /><text x="24" y="33" fontSize="12" fill="white">{peer.name.slice(0, 22)}</text></g>)}
  </svg>
  // Right, middle or Space + left drag pans; Ctrl/Cmd + wheel or a pinch zooms around the pointer.
@@ -604,6 +638,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     <ArtifactTool icon={Square} label="Rectangle" onClick={() => add("rect")} />
     <ArtifactTool icon={Type} label="Text" onClick={() => add("text")} />
     <ArtifactTool icon={ImagePlus} label="Image" onClick={() => add("image")} />
+    <ArtifactToolSeparator />
+    <ArtifactTool icon={Undo2} label="Undo" disabled={!design.canUndo} onClick={() => design.undo?.()} />
+    <ArtifactTool icon={Redo2} label="Redo" disabled={!design.canRedo} onClick={() => design.redo?.()} />
    </ArtifactSlot>}
    {reviewOnly && <ArtifactSlot name="tools" label="Review">
     {mayComment && <ArtifactTool icon={MessageSquare} label="Comment" text="Comment" on={artifactFrame?.drawerTab === "comments"} onClick={() => artifactFrame?.openDrawer("comments")} />}
@@ -664,7 +701,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
    <div className="relative flex min-h-96 min-w-0 flex-1 flex-col">
     <div className="z-10 flex flex-wrap items-center gap-1 border-b bg-background px-3 py-2" aria-label="Design tools">
      <Button variant="ghost" size="sm" title="Select and move"><MousePointer2 className="size-4" /><span className="sr-only">Select and move</span></Button>
-     {design.editable && <><Button variant="outline" size="sm" onClick={() => add("frame")}><Plus className="size-4" />Screen</Button><Button variant="ghost" size="sm" onClick={() => add("rect")}><Square className="size-4" />Rectangle</Button><Button variant="ghost" size="sm" onClick={() => add("text")}><Type className="size-4" />Text</Button><Button variant="ghost" size="sm" onClick={() => add("image")}><ImagePlus className="size-4" />Image</Button></>}
+     {design.editable && <><Button variant="outline" size="sm" onClick={() => add("frame")}><Plus className="size-4" />Screen</Button><Button variant="ghost" size="sm" onClick={() => add("rect")}><Square className="size-4" />Rectangle</Button><Button variant="ghost" size="sm" onClick={() => add("text")}><Type className="size-4" />Text</Button><Button variant="ghost" size="sm" onClick={() => add("image")}><ImagePlus className="size-4" />Image</Button><Button variant="ghost" size="sm" aria-label="Undo" title="Undo" disabled={!design.canUndo} onClick={() => design.undo?.()}><Undo2 className="size-4" /></Button><Button variant="ghost" size="sm" aria-label="Redo" title="Redo" disabled={!design.canRedo} onClick={() => design.redo?.()}><Redo2 className="size-4" /></Button></>}
      <span className="ml-auto text-xs text-muted-foreground">{selected ? selected.name || selected.type : design.editable ? "Drag to move · right-drag or Space to pan · edit in Properties" : "View canvas"}</span>
      <span className="flex items-center gap-0.5" aria-label="Zoom">
       <Button variant="ghost" size="sm" aria-label="Zoom out" onClick={() => step(-1)}><ZoomOut className="size-4" /></Button>

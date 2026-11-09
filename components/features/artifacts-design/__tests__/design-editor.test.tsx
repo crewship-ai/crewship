@@ -13,7 +13,7 @@ vi.mock("@/lib/api-fetch",async()=>{
  const actual=await vi.importActual<typeof import("@/lib/api-fetch")>("@/lib/api-fetch")
  return {...actual,apiFetch:(...args:Parameters<typeof actual.apiFetch>)=>copying.real?actual.apiFetch(...args):copying.send(...args)}
 })
-const state = vi.hoisted(() => ({ canShare: true, editable: true, doc: null as Y.Doc | null, pageId: "old-private-page", user: false, peerColor: "#2563eb", saveError: null as (Error & { status?: number }) | null, restoreError: null as (Error & { status?: number }) | null, conflicts: [] as unknown[], dismiss: vi.fn(), dirty: false, unsynced: false, readRevoked: false, everRead: true }))
+const state = vi.hoisted(() => ({ peerSelection: "" as string, setSelection: vi.fn(), canShare: true, editable: true, doc: null as Y.Doc | null, pageId: "old-private-page", user: false, peerColor: "#2563eb", saveError: null as (Error & { status?: number }) | null, restoreError: null as (Error & { status?: number }) | null, conflicts: [] as unknown[], dismiss: vi.fn(), dirty: false, unsynced: false, readRevoked: false, everRead: true }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => state.user ? { data: { user: { id: "same-user" } } } : null }))
 vi.mock("@/hooks/use-artifact-agent-dispatch", () => ({ useArtifactAgentDispatch: () => ({ ready: false, dispatch: vi.fn() }) }))
 vi.mock("../use-design", () => ({ useDesign: (_workspaceId: string, _slug: string, selectedVersion?: number) => {
@@ -22,11 +22,11 @@ vi.mock("../use-design", () => ({ useDesign: (_workspaceId: string, _slug: strin
   query: { data: { page_id: state.pageId, can_edit: state.editable, can_share: state.canShare, can_comment: state.editable, latest_version: 1, comments: [] }, isError: false },
   comments: { data: { comments: [] }, isError: false },
   versions: { data: { versions: [{ version: 1 }], shared_version: 1 }, isError: false },
-  doc: state.doc, nodes: designNodes(state.doc!), peers: [{ clientId: 2, name: "Marie", color: state.peerColor, cursor: { x: 12, y: 24 } }], connection: "connected", editable: state.editable && !selectedVersion, dirty: state.dirty, unsynced: state.unsynced, draftError: false,
+  doc: state.doc, nodes: designNodes(state.doc!), peers: [{ clientId: 2, name: "Marie", color: state.peerColor, cursor: { x: 12, y: 24 }, ...(state.peerSelection ? { selection: state.peerSelection } : {}) }], setSelection: state.setSelection, connection: "connected", editable: state.editable && !selectedVersion, dirty: state.dirty, unsynced: state.unsynced, draftError: false,
   save: { ...mutation, error: state.saveError }, restore: { ...mutation, error: state.restoreError }, share: mutation, comment: mutation, connectAgent: mutation, setCursor: vi.fn(), conflicts: state.conflicts, dismissConflict: state.dismiss, readRevoked: state.readRevoked, everRead: state.everRead,
  }
 } }))
-beforeEach(() => { copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.canShare = true; state.pageId = "old-private-page"; state.user = false; state.peerColor = "#2563eb"; state.conflicts = []; state.dismiss.mockReset(); state.dirty = false; state.unsynced = false; state.saveError = null; state.restoreError = null; state.readRevoked = false; state.everRead = true; state.doc = new Y.Doc() })
+beforeEach(() => { state.peerSelection = ""; state.setSelection.mockReset(); copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.canShare = true; state.pageId = "old-private-page"; state.user = false; state.peerColor = "#2563eb"; state.conflicts = []; state.dismiss.mockReset(); state.dirty = false; state.unsynced = false; state.saveError = null; state.restoreError = null; state.readRevoked = false; state.everRead = true; state.doc = new Y.Doc() })
 afterEach(() => { cleanup(); state.doc?.destroy(); vi.unstubAllEnvs();vi.unstubAllGlobals() })
 describe("Design read refusal wording (#5144)", () => {
  it("tells someone who never read this Design that it is not available, not that access was removed", () => {
@@ -68,6 +68,35 @@ describe("Design editor controls", () => {
   fireEvent.click(screen.getByRole("button", { name: "Screen" }))
   expect(designNodes(state.doc!)).toMatchObject([{ type: "frame", name: "Screen 1", width: 360, height: 640 }])
   expect(screen.getByLabelText("Marie cursor")).toBeInTheDocument()
+ })
+ it("draws another person's selected layer in their colour and shares my own selection", () => {
+  upsertDesignNode(state.doc!, { id: "s", type: "frame", name: "Screen", x: 0, y: 0, width: 360, height: 640, fill: "#ffffff" })
+  upsertDesignNode(state.doc!, { id: "cta", type: "rect", name: "Buy", parentId: "s", x: 40, y: 60, width: 120, height: 40, fill: "#2563eb" })
+  state.peerSelection = "cta"
+  const view = render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  const outline = screen.getByLabelText("Marie selected Buy")
+  expect(outline).toHaveAttribute("data-remote-selection", "cta")
+  expect(outline).toHaveAttribute("transform", "translate(40,60)")
+  expect(outline.querySelector("rect")).toHaveAttribute("stroke", state.peerColor)
+  expect(within(outline).getByText("Marie")).toBeInTheDocument()
+  // My selection goes out through awareness; the document does not change.
+  const before = designNodes(state.doc!)
+  fireEvent.click(within(screen.getByLabelText("Layers")).getByRole("button", { name: "Buy" }))
+  expect(state.setSelection).toHaveBeenLastCalledWith("cta")
+  expect(designNodes(state.doc!)).toEqual(before)
+  view.unmount()
+  // A selection of a layer that is gone draws nothing.
+  state.peerSelection = "deleted-layer"
+  const gone = render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  expect(screen.queryByLabelText(/Marie selected/)).toBeNull()
+  gone.unmount()
+  // A reader shares no selection of its own.
+  state.peerSelection = ""
+  state.editable = false
+  state.setSelection.mockReset()
+  render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  fireEvent.click(within(screen.getByLabelText("Layers")).getByRole("button", { name: "Buy" }))
+  expect(state.setSelection).not.toHaveBeenCalledWith("cta")
  })
  it("draws peer labels on a fill that keeps white text readable", () => {
   state.peerColor = "#059669"
