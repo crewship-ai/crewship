@@ -19,7 +19,7 @@ route accepts, generated from `files/` (see "Regenerating" below). The test
 
 | Project file | From the original | How |
 | --- | --- | --- |
-| `design-system.json` | `project/tokens.json` | Converted to the Library's schema 1 (`components/features/artifacts/design-system/manifest.ts`) |
+| `design-system.json` | `project/tokens.json` | Converted to the Library's schema 2 (`components/features/artifacts/design-system/manifest.ts`) |
 | `README.md` | `project/README.md` | Verbatim; the Library shows it under Overview |
 | `tokens.json` | `project/tokens.json` | Verbatim: themes, usage notes and type groups |
 | `components/Cover/preview.html` | `project/components/Cover/preview.html` | Verbatim; the Library previews it under Components |
@@ -30,26 +30,28 @@ The version message is the original's `lastChange.note`.
 
 ## Token mapping
 
-- **Colors:** each of the 12 tokens appears twice. The light value uses the original name
-  (`surface`) and the dark value adds `-dark` (`surface-dark`). That makes 24 swatches with
-  every original hex value.
+- **Themes:** the original's two themes, `light` "Světlé" and `dark` "Tmavé", in its order
+  (the first is the default).
+- **Colors:** the 12 tokens, each once under its original name with both theme values and its
+  original `usage` note: `{"value": {"light": …, "dark": …}, "usage": …}`. The Library shows
+  the chosen theme, every theme's value, the usage note and the WCAG contrast of white or black
+  text on the swatch; the Cover preview gets the chosen theme's values.
 - **Typography:** 7 styles (`display`, `title`, `heading`, `body`, `caption`, `code`,
-  `eyebrow`). Each keeps its size, weight and family (sans or mono, spelled as in the original
-  `families`). The line height is stored as a ratio (line px / size px, 4 decimals) that rounds
+  `eyebrow`). Each keeps its size, weight, family (sans or mono, spelled as in the original
+  `families`) and its original group (Nadpisy, Text, Mono) in `group`. The line height is stored as a ratio (line px / size px, 4 decimals) that rounds
   back to the original pixels.
 - **Spacing:** `space-2/3/4/6` = 8/12/16/24 px. **Radius:** `radius-sm/md/lg` = 10/14/18 px.
 - **Components:** `Cover`.
 
 ## Known gaps (the Library format cannot hold these; nothing is faked)
 
-- **Themes:** the Library has one value per colour token and no theme switch. Dark values are
-  separate `-dark` swatches. The theme names "Světlé" and "Tmavé" appear only in `tokens.json`.
-- **Token usage notes** (`usage`) and **type group names** (Nadpisy, Text, Mono): the Library
-  schema has no field for them. They stay in `tokens.json`. The README describes the usage too.
+- **Spacing and radius usage notes:** the Library schema has a usage note only for colours.
+  The original has none for spacing or radius, so nothing is dropped.
 - **Line height** is a ratio, not pixels. Its rendered value can differ from the original by
   less than 0.01 px.
 - **Fonts:** the Cover preview links IBM Plex Sans from Google Fonts. The Library's preview
-  frame allows no network, so the preview falls back to Arial. The original's `fonts` list is empty.
+  frame allows no network, so the preview falls back to Arial. The original's `fonts` list is
+  empty, and the Library says so under Typography ("carries no font files").
 - **Component preview width:** the card is laid out at 960 px and scaled down to the column.
 - **The Library view is behind the web build switch** `NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM=true`.
   Without it, the project opens as an App · Static and shows `index.html`, the Cover.

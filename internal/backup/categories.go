@@ -212,6 +212,7 @@ var TableCategory = map[string]string{
 	"slides_receipts": CategoryPages, "slides_object_ids": CategoryPages,
 	"document_creations": CategoryPages, "documents": CategoryPages, "document_updates": CategoryPages,
 	"document_receipts": CategoryPages, "document_checkpoints": CategoryPages, "document_comments": CategoryPages,
+	"document_proposals": CategoryPages,
 
 	"environment_revisions": CategoryAgents, // definition/build provenance; image bytes remain CategoryEnv
 	"users":                 categoryAnchor, "workspaces": categoryAnchor, "skills": categoryAnchor,

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { artifactCopyMove, chatArtifactContext, chatCraftLease, documentReviewActions } from "@/lib/feature-flags"
+import { artifactCopyMove, chatArtifactContext, chatCraftLease } from "@/lib/feature-flags"
 import { execFileSync } from "node:child_process"
 import { readFileSync } from "node:fs"
 import path from "node:path"
@@ -46,7 +46,6 @@ const DEFERRED_CLIENTS: Record<string, { file: string; flag: string; enabled: ()
   "/api/v1/chats/X/X": { file: "components/features/chat/artifact-context/client.ts", flag: "NEXT_PUBLIC_CHAT_ARTIFACT_CONTEXT", enabled: chatArtifactContext },
   // Craft lease routes: pending backend, the EditLease HTTP proposal.
   "/api/v1/pages/X/craft": { file: "components/features/chat/artifact-context/craft/lease-client.ts", flag: "NEXT_PUBLIC_CHAT_CRAFT_LEASE", enabled: chatCraftLease },
-  "/api/v1/pages/X/document/proposals": { file: "lib/documents/proposals.ts", flag: "NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS", enabled: documentReviewActions },
   "/api/v1/pages/X/duplicate": { file: "lib/pages/catalog-duplicate.ts", flag: "NEXT_PUBLIC_ARTIFACT_COPY_MOVE", enabled: artifactCopyMove },
   "/api/v1/pages/X/move": { file: "lib/pages/catalog-move.ts", flag: "NEXT_PUBLIC_ARTIFACT_COPY_MOVE", enabled: artifactCopyMove },
 }

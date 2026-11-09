@@ -119,6 +119,31 @@ The routines MCP tools `doc_draft_view`, `doc_draft_prepare`, `doc_draft_apply`
 and `doc_draft_checkpoint` use the same permission and immutable requests. They
 do not accept raw Yjs updates or whole-document replacement.
 
+### Proposing on a schema 4 document
+
+On a schema 4 document an agent never edits directly: it proposes, and a person
+with edit access accepts or rejects each proposal. The run needs a schema 4
+targeted message from the person who asked (`document_iteration_intent` with
+`"schema": 4`, optionally `"blocks": ["<block-id>", …]` to limit it to up to 16
+blocks). The person needs edit access to the document. On anything but their
+own personal private document the agent also needs a live `write` grant naming
+it (`crewship page grant <slug> --agent <agent> --level write`); a `read` grant
+or a crew grant is not enough, and another person's private document is never
+reachable.
+
+1. `crewship doc draft view` returns `"mode": "propose"` and lists only the
+   paragraphs and headings inside the mandate.
+2. `crewship doc draft prepare --file <input.json>` builds an immutable proposal
+   packet from that view.
+3. `crewship doc draft propose --file <packet.json>` stores it. The result is
+   `"status": "proposed"`; the document, its revision and its formatting are
+   unchanged. Resending the same packet returns the same receipt.
+
+`crewship doc draft apply` and `checkpoint` are refused on a propose mandate.
+A proposal replaces one block's text; bold, italic, strike, inline code and
+links on unchanged text are kept, and code blocks, quotes and task lists
+elsewhere in the document are untouched. The MCP tool is `doc_draft_propose`.
+
 ## `crewship doc status`
 
 Read whether document support is configured on the selected instance. This
@@ -209,8 +234,10 @@ as an upper bound of its stored bytes); a save that would exceed it, or the
 2000-entry limit, is refused with status 413 and code `surface_quota`, and the
 page keeps room for text.
 
-Agent drafting and document creation from chat still produce schema 3; an agent
-cannot edit a schema 4, 5 or 6 document yet.
+Agent drafting and document creation from chat still produce schema 3. On a
+schema 4 document an agent proposes and a person accepts; see
+[Proposing on a schema 4 document](#proposing-on-a-schema-4-document). An agent
+cannot edit or propose on a schema 5 or 6 document yet.
 
 `--file` is required. Use `--file -` to read stdin. The file must contain one JSON
 object of at most 2 MiB. Keep the same operation ID and contents when retrying
@@ -434,6 +461,41 @@ crewship doc comment-resolve @<artifact-id> --file resolve.json
 {"id":"resolve-1","schema":4,"page_id":"<page-id>","epoch":"<opaque-epoch>","ifRev":3,"comment":"thread-1","version":1,"resolved":true}
 ```
 
+## `crewship doc proposals <page-slug>`
+
+List an agent's proposals on a schema 4 document, oldest first. Each has `id`,
+`author`, `run_id`, `target.block_ids`, `base_rev`, `status`, `text` and
+`created_at`. `status` is `open`, `stale` (its block changed after it was made,
+so it can no longer be accepted), `accepted` or `rejected`. Reading needs read
+access to the document. `crewship doc read` reports `"proposals": true` where
+the server serves them.
+
+```bash
+crewship doc proposals @<artifact-id>
+```
+
+## `crewship doc proposal <page-slug> <proposal-id>`
+
+Show one proposal with `base_content` (the block as the agent saw it) and
+`proposed_content` (the block after the change), both as document JSON.
+
+## `crewship doc proposal-accept <page-slug> <proposal-id>`
+
+Apply exactly the proposal as a new revision made by you. Pass the revision you
+reviewed as `--expected-rev` and a stable `--request-id`. A newer head, or a
+proposed block changed since the proposal was made, returns 409 and changes
+nothing. You need edit access. Resending the same `--request-id` returns the
+original receipt with `"duplicate": true`.
+
+```bash
+crewship doc proposal-accept @<artifact-id> <proposal-id> --expected-rev 7 --request-id accept-1
+```
+
+## `crewship doc proposal-reject <page-slug> <proposal-id>`
+
+Close an open proposal without changing the document. It takes the same
+`--expected-rev` and `--request-id` and needs edit access.
+
 ## Errors
 
 With `-f json`, errors are printed as an `error` object with `message`,
@@ -456,6 +518,8 @@ With `-f json`, errors are printed as an `error` object with `message`,
 | Restore HTTP packet shape or Page binding invalid | 400 | `closed Document restore packet required` or `original Page identity required` | 2 |
 | Unknown chat for `chat-results` | 404 | `chat not found` | 3 |
 | Missing `--file`, file over the size limit, not one JSON object | — | Local message | 1 |
+| `proposal-accept`/`proposal-reject`: newer head, changed target or decided proposal | 409 | `document changed since the proposal was reviewed; reload`, `proposal target changed; it can no longer be accepted as reviewed` or `proposal is no longer open` | 5 |
+| `doc draft propose` outside the mandate, without the agent `write` grant, or `apply` on a propose mandate | 403 | `document access denied` | 4 |
 | `create` or `draft` without a run capability | — | `original CREWSHIP_AGENT_TOKEN run capability required; no human profile fallback` | 1 |
 
 ## Requesting a document in chat
