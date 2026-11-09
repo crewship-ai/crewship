@@ -31,7 +31,14 @@ var (
 	ErrDataQuota    = errors.New("artifact dataset quota exceeded")
 )
 
-type DataOptions struct{ Enabled bool }
+// DataOptions configures a DataStore. Run limits left zero use the
+// DefaultDataRuns* defaults; they are server settings, not API contract.
+type DataOptions struct {
+	Enabled    bool
+	RunsKept   int
+	RunsActive int
+	RunKeyTTL  time.Duration
+}
 type DataWrite struct {
 	ID        string          `json:"id"`
 	IfVersion int64           `json:"ifVersion"`
@@ -85,11 +92,18 @@ func (s *DataStore) transaction(ctx context.Context, key VersionKey, auth Versio
 // ifVersion means absent; positive values must match the exact stored counter.
 // Input has no attribution fields: the current host authority supplies them.
 func (s *DataStore) Batch(ctx context.Context, key VersionKey, collection string, writes []DataWrite, auth VersionAuthorize) ([]DataDocument, error) {
+	out, _, err := s.BatchGeneration(ctx, key, collection, writes, auth)
+	return out, err
+}
+
+// BatchGeneration is Batch that also returns the collection's data generation
+// after the batch, which a producer names when it finishes a run as succeeded.
+func (s *DataStore) BatchGeneration(ctx context.Context, key VersionKey, collection string, writes []DataWrite, auth VersionAuthorize) ([]DataDocument, int64, error) {
 	if s == nil || s.db == nil || !s.opts.Enabled {
-		return nil, ErrDisabled
+		return nil, 0, ErrDisabled
 	}
 	if !dataIdentifier.MatchString(collection) || len(writes) == 0 || len(writes) > MaxDataBatchWrites {
-		return nil, ErrDataInvalid
+		return nil, 0, ErrDataInvalid
 	}
 	seen := map[string]bool{}
 	// Batch receives writes, not the code base_version. Account the smallest
@@ -99,28 +113,29 @@ func (s *DataStore) Batch(ctx context.Context, key VersionKey, collection string
 	batchBytes := len(`{"base_version":1,"documents":[]}`)
 	for i, w := range writes {
 		if !dataIdentifier.MatchString(w.ID) || seen[w.ID] || w.IfVersion < 0 || w.IfVersion >= MaxDataVersion {
-			return nil, ErrDataInvalid
+			return nil, 0, ErrDataInvalid
 		}
 		seen[w.ID] = true
 		if len(w.Value) > MaxDataDocumentBytes {
-			return nil, ErrDataQuota
+			return nil, 0, ErrDataQuota
 		}
 		if !validDataObject(w.Value) {
-			return nil, ErrDataInvalid
+			return nil, 0, ErrDataInvalid
 		}
 		metadata, err := json.Marshal(DataWrite{ID: w.ID, IfVersion: w.IfVersion, Value: json.RawMessage(`{}`)})
 		if err != nil {
-			return nil, ErrDataInvalid
+			return nil, 0, ErrDataInvalid
 		}
 		batchBytes += len(metadata) - len(`{}`) + len(w.Value)
 		if i > 0 {
 			batchBytes++ // comma between document objects
 		}
 		if batchBytes > MaxDataBatchBytes {
-			return nil, ErrDataQuota
+			return nil, 0, ErrDataQuota
 		}
 	}
 	var out []DataDocument
+	var generation int64
 	err := s.transaction(ctx, key, auth, func(tx *sql.Tx, actor string) error {
 		if err := ConsumeStorageUpload(ctx, tx, key); err != nil {
 			return err
@@ -168,12 +183,14 @@ func (s *DataStore) Batch(ctx context.Context, key VersionKey, collection string
 		if count > MaxDataDocuments || size > MaxDataCollectionBytes {
 			return ErrDataQuota
 		}
-		return nil
+		var genErr error
+		generation, genErr = dataGeneration(ctx, tx, key, collection)
+		return genErr
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return out, nil
+	return out, generation, nil
 }
 
 func (s *DataStore) Read(ctx context.Context, key VersionKey, collection string, auth VersionAuthorize) ([]DataDocument, error) {

@@ -114,11 +114,24 @@ func TestAcceptance_DashboardDataRunsBinary(t *testing.T) {
 	if out, err := run("reader", "", "data", "runs", "list", "runs-board", "--version", "1"); err != nil || !bytes.Contains(out, []byte(`"state": "running"`)) {
 		t.Fatalf("reader sees running: %v %s", err, out)
 	}
-	if out, err := run("owner", `{"base_version":1,"documents":[{"id":"north","ifVersion":0,"value":{"revision":"PRODUCER-REV-42"}}]}`, "data", "batch", "runs-board", "sales", "--file", "-"); err != nil {
-		t.Fatalf("batch: %v %s", err, out)
+	batched, err := run("owner", `{"base_version":1,"documents":[{"id":"north","ifVersion":0,"value":{"revision":"PRODUCER-REV-42"}}]}`, "data", "batch", "runs-board", "sales", "--file", "-")
+	generation, _ := decode(batched)["generation"].(float64)
+	if err != nil || generation != 1 {
+		t.Fatalf("batch: %v %s", err, batched)
 	}
-	if out, err := run("owner", "", "data", "runs", "finish", "runs-board", "sales", id, "--base-version", "1", "--state", "succeeded"); err != nil || decode(out)["state"] != "succeeded" {
+	// A success names the generation the producer wrote; without it the CLI refuses.
+	if out, err := run("owner", "", "data", "runs", "finish", "runs-board", "sales", id, "--base-version", "1", "--state", "succeeded"); err == nil {
+		t.Fatalf("success without generation: %s", out)
+	}
+	if out, err := run("owner", "", "data", "runs", "finish", "runs-board", "sales", id, "--base-version", "1", "--state", "succeeded", "--data-generation", "1"); err != nil || decode(out)["state"] != "succeeded" || decode(out)["data_generation"] != float64(1) {
 		t.Fatalf("finish: %v %s", err, out)
+	}
+	unchanged, err := run("owner", "", "data", "runs", "start", "runs-board", "sales", "--base-version", "1", "--key", "nightly-unchanged")
+	if err != nil {
+		t.Fatalf("unchanged start: %v %s", err, unchanged)
+	}
+	if out, err := run("owner", "", "data", "runs", "finish", "runs-board", "sales", decode(unchanged)["id"].(string), "--base-version", "1", "--state", "succeeded", "--data-generation", "1", "--unchanged"); err != nil || decode(out)["state"] != "succeeded" {
+		t.Fatalf("unchanged finish: %v %s", err, out)
 	}
 	second, err := run("owner", "", "data", "runs", "start", "runs-board", "sales", "--base-version", "1", "--key", "nightly-2")
 	if err != nil {

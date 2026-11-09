@@ -17,11 +17,15 @@ export interface CollectionFreshness {
   run: DashboardRunSummary | null
   /** The last successful producer run; with no run record, Stale falls back to the last write. */
   lastSuccessAt: Date | null
-  /** A run still marked running after STALLED_RUN_MS: the producer most likely died. */
+  /** A run still marked running after STALLED_RUN_MS: the producer most likely died. Derived here, never stored. */
   stalled: boolean
 }
 
-/** A run that has not finished after 30 minutes is shown as stalled, not as refreshing. */
+/**
+ * A run that has not finished after 30 minutes is shown as stalled, not as
+ * refreshing. A UI default, not a server contract: the server never ends or
+ * prunes a running run.
+ */
 export const STALLED_RUN_MS = 30 * 60 * 1000
 
 export interface DashboardFreshness {
@@ -42,7 +46,10 @@ const unique = (labels: string[]) => [...new Set(labels)]
  * the stated mode and maximum age, and the producer run record when the
  * server has one. With a run record, Stale is measured from the last
  * successful run (a stray write does not make data fresh); without one,
- * from the newest write. Values always stay as last written.
+ * from the newest write. The server binds a success to the data generation
+ * its producer wrote or verified unchanged, so a finish alone cannot mark
+ * data fresh. Batches apply as they are written; nothing is staged, so
+ * values may change while a refresh runs and a failed one may leave some.
  */
 export function dashboardFreshness(collections: readonly DashboardCollection[], datasets: DashboardDatasets = { status: "absent" }, now: Date = new Date(), runs: readonly DashboardRunSummary[] | null = null): DashboardFreshness {
   const rows = collections.map(collection => {
@@ -112,13 +119,13 @@ export function dashboardFrameStatus(input: { pending: boolean; error: boolean; 
   const rows = input.freshness.collections
   const name = (row: CollectionFreshness) => row.dataset?.title ?? row.name
   const at = (date: Date) => freshnessTime(date, input.now)
-  const lastGood = (row: CollectionFreshness) => row.lastSuccessAt ? `the last successful refresh from ${at(row.lastSuccessAt)}` : row.updatedAt ? `their last write from ${at(row.updatedAt)}` : "nothing yet"
+  const lastSuccess = (row: CollectionFreshness) => row.lastSuccessAt ? `the last successful refresh was ${at(row.lastSuccessAt)}` : "no refresh has succeeded yet"
   const failed = rows.filter(row => row.run?.state === "failed")
-  if (failed.length) return { key: "stale", label: "Refresh failed", detail: `${failed.map(row => `${name(row)}: the refresh at ${at(row.run!.lastAttemptAt)} failed${row.run!.reason ? `: ${row.run!.reason}` : ""}. ${row.lastSuccessAt ? `Values keep the last successful refresh from ${at(row.lastSuccessAt)}.` : "No refresh has succeeded yet."}`).join(" ")}${versionNote}` }
+  if (failed.length) return { key: "stale", label: "Refresh failed", detail: `${failed.map(row => `${name(row)}: the refresh at ${at(row.run!.lastAttemptAt)} failed${row.run!.reason ? `: ${row.run!.reason}` : ""}. ${row.run!.partial ? "Some values were already updated by it, so the data is partly from this refresh" : "It changed no values"}; ${lastSuccess(row)}.`).join(" ")}${versionNote}` }
   const stalled = rows.filter(row => row.stalled)
-  if (stalled.length) return { key: "stale", label: "Refresh stalled", detail: `${stalled.map(row => `${name(row)} has been refreshing since ${at(row.run!.startedAt)} without finishing`).join("; ")}. Values keep ${stalled.length === 1 ? lastGood(stalled[0]) : "their last good state"}.${versionNote}` }
+  if (stalled.length) return { key: "stale", label: "Refresh stalled", detail: `${stalled.map(row => `${name(row)} has been refreshing since ${at(row.run!.startedAt)} without finishing. Values may be partly updated; ${lastSuccess(row)}.`).join(" ")}${versionNote}` }
   const running = rows.filter(row => row.run?.state === "running")
-  if (running.length) return { key: "refreshing", detail: `${running.map(row => `${name(row)} is refreshing since ${at(row.run!.startedAt)}`).join("; ")}. ${running.length === 1 && running[0].lastSuccessAt ? `Showing the last good data from ${at(running[0].lastSuccessAt)}.` : "Showing the last good data until the run finishes."}${versionNote}` }
+  if (running.length) return { key: "refreshing", detail: `${running.map(row => `${name(row)} is refreshing since ${at(row.run!.startedAt)}. Values update as the refresh writes them; ${lastSuccess(row)}.`).join(" ")}${versionNote}` }
   const stale = rows.filter(row => row.stale)
   if (stale.length) return { key: "stale", detail: `${stale.map(row => row.run ? `${name(row)} last refreshed successfully ${row.lastSuccessAt ? at(row.lastSuccessAt) : "never"}, older than its stated maximum age of ${maxAgeLabel(row.dataset!.maxAgeSeconds!)}` : `${name(row)} was last written ${at(row.updatedAt!)}, older than its stated maximum age of ${maxAgeLabel(row.dataset!.maxAgeSeconds!)}`).join("; ")}. Values keep their last written state.${versionNote}` }
   const sample = rows.filter(row => row.dataset?.sample)

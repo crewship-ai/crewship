@@ -69,6 +69,7 @@ var responseShapeContracts = []struct {
 	{name: "ArtifactSlideAnchor", pointer: "/components/schemas/ArtifactSlideAnchor", value: artifacts.ArtifactSlideAnchor{}},
 	{name: "ArtifactDataCollections", pointer: "/components/schemas/ArtifactDataCollections", value: artifactDataCollectionsResponse{}},
 	{name: "ArtifactDataResponse", pointer: "/components/schemas/ArtifactDataResponse", value: artifactDataResponse{}},
+	{name: "ArtifactDataBatchResponse", pointer: "/components/schemas/ArtifactDataBatchResponse", value: artifactDataBatchResponse{}},
 	{name: "ArtifactDataDocument", pointer: "/components/schemas/ArtifactDataDocument", value: artifactDataDocumentResponse{}},
 	{name: "ArtifactDataRun", pointer: "/components/schemas/ArtifactDataRun", value: artifactDataRunResponse{}},
 	{name: "ArtifactDataRunSummary", pointer: "/components/schemas/ArtifactDataRunSummary", value: artifactDataRunSummaryResponse{}},

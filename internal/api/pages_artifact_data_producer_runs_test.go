@@ -106,7 +106,7 @@ func TestDashboardProducerRunLifecycleAndIdempotentReplay(t *testing.T) {
 	if w.Code != 200 || !strings.Contains(w.Body.String(), `"state":"running"`) || strings.Contains(w.Body.String(), "last_success_at") {
 		t.Fatalf("running summary: %d %s", w.Code, w.Body)
 	}
-	finish := `{"base_version":1,"state":"succeeded"}`
+	finish := `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`
 	if w := f.do(t, f.owner, "finish", "sales", run.ID, "", finish); w.Code != 200 || decodeRun(t, w).FinishedAt == "" {
 		t.Fatalf("finish: %d %s", w.Code, w.Body)
 	}
@@ -133,7 +133,7 @@ func TestDashboardProducerRunLifecycleAndIdempotentReplay(t *testing.T) {
 func TestDashboardProducerRunFailureKeepsLastSuccessAndHidesReasonFromReaders(t *testing.T) {
 	f := newProducerRunFixture(t)
 	first := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"one"}`))
-	if w := f.do(t, f.owner, "finish", "sales", first.ID, "", `{"base_version":1,"state":"succeeded"}`); w.Code != 200 {
+	if w := f.do(t, f.owner, "finish", "sales", first.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`); w.Code != 200 {
 		t.Fatalf("first finish: %d %s", w.Code, w.Body)
 	}
 	second := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"two"}`))
@@ -193,7 +193,7 @@ func TestDashboardProducerRunAuthority(t *testing.T) {
 			return f.do(t, f.reader, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"reader"}`)
 		}, []int{403}},
 		{"reader finish", func() *httptest.ResponseRecorder {
-			return f.do(t, f.reader, "finish", "sales", run.ID, "", `{"base_version":1,"state":"succeeded"}`)
+			return f.do(t, f.reader, "finish", "sales", run.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`)
 		}, []int{403}},
 		{"undeclared collection", func() *httptest.ResponseRecorder {
 			return f.do(t, f.owner, "start", "secret", "", "", `{"base_version":1,"idempotency_key":"undeclared"}`)
@@ -211,13 +211,13 @@ func TestDashboardProducerRunAuthority(t *testing.T) {
 			return f.do(t, f.owner, "finish", "sales", run.ID, "", `{"base_version":1,"state":"succeeded","reason":"x"}`)
 		}, []int{400}},
 		{"run from another page", func() *httptest.ResponseRecorder {
-			return producerRunRequest(t, f.h, f.ws, f.owner, "second-board", "finish", "sales", run.ID, "", `{"base_version":1,"state":"succeeded"}`)
+			return producerRunRequest(t, f.h, f.ws, f.owner, "second-board", "finish", "sales", run.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`)
 		}, []int{404}},
 		{"other workspace read", func() *httptest.ResponseRecorder {
 			return producerRunRequest(t, f.h, "other-ws", f.owner, "three-screens", "list", "", "", "?version=1", "")
 		}, []int{404}},
 		{"other workspace finish", func() *httptest.ResponseRecorder {
-			return producerRunRequest(t, f.h, "other-ws", f.owner, "three-screens", "finish", "sales", run.ID, "", `{"base_version":1,"state":"succeeded"}`)
+			return producerRunRequest(t, f.h, "other-ws", f.owner, "three-screens", "finish", "sales", run.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`)
 		}, []int{404}},
 		{"stranger read", func() *httptest.ResponseRecorder {
 			mustExec(t, f.h.db, `INSERT OR IGNORE INTO users(id,email) VALUES('stranger','stranger@example.test')`)
@@ -272,7 +272,7 @@ func TestDashboardProducerRunEditorWritesAndKeyBelongsToItsProducer(t *testing.T
 	// A revoked Edit share loses the run exactly like it loses batch writes.
 	run := decodeRun(t, start)
 	mustExec(t, f.h.db, `DELETE FROM page_grants WHERE page_id=? AND subject_id=?`, f.page, editor)
-	if w := f.do(t, editor, "finish", "sales", run.ID, "", `{"base_version":1,"state":"succeeded"}`); w.Code != 404 {
+	if w := f.do(t, editor, "finish", "sales", run.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`); w.Code != 404 {
 		t.Fatalf("revoked editor finished a run: %d %s", w.Code, w.Body)
 	}
 	if w := f.do(t, editor, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"after-revoke"}`); w.Code != 404 {
@@ -283,11 +283,15 @@ func TestDashboardProducerRunEditorWritesAndKeyBelongsToItsProducer(t *testing.T
 func TestDashboardProducerRunRetentionIsBounded(t *testing.T) {
 	f := newProducerRunFixture(t)
 	first := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"k-success"}`))
-	if w := f.do(t, f.owner, "finish", "sales", first.ID, "", `{"base_version":1,"state":"succeeded"}`); w.Code != 200 {
+	if w := f.do(t, f.owner, "finish", "sales", first.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`); w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
 	}
-	for i := 0; i < artifacts.MaxDataRunsKept+5; i++ {
-		if w := f.do(t, f.owner, "start", "sales", "", "", fmt.Sprintf(`{"base_version":1,"idempotency_key":"k-%d"}`, i)); w.Code != 201 {
+	for i := 0; i < artifacts.DefaultDataRunsKept+5; i++ {
+		w := f.do(t, f.owner, "start", "sales", "", "", fmt.Sprintf(`{"base_version":1,"idempotency_key":"k-%d"}`, i))
+		if w.Code != 201 {
+			t.Fatal(w.Code, w.Body)
+		}
+		if w := f.do(t, f.owner, "finish", "sales", decodeRun(t, w).ID, "", `{"base_version":1,"state":"failed"}`); w.Code != 200 {
 			t.Fatal(w.Code, w.Body)
 		}
 	}
@@ -295,7 +299,7 @@ func TestDashboardProducerRunRetentionIsBounded(t *testing.T) {
 	if err := f.h.db.QueryRow(`SELECT count(*), sum(state='succeeded') FROM artifact_data_runs WHERE workspace_id=? AND collection='sales'`, f.ws).Scan(&kept, &success); err != nil {
 		t.Fatal(err)
 	}
-	if kept != artifacts.MaxDataRunsKept+1 || success != 1 {
+	if kept != artifacts.DefaultDataRunsKept+1 || success != 1 {
 		t.Fatalf("retention kept %d runs, %d successes", kept, success)
 	}
 	var summary artifactDataRunsResponse
@@ -312,4 +316,189 @@ func decodeRunFinished(t *testing.T, f producerRunFixture, id string) string {
 		t.Fatal(err)
 	}
 	return at
+}
+
+// O04: a success is bound to the data generation the producer wrote or
+// verified, by the producer that started the run; the finisher is recorded.
+func TestDashboardProducerRunSuccessIsBoundToDataGeneration(t *testing.T) {
+	batch := func(t *testing.T, f producerRunFixture, user string, ifVersion int) int64 {
+		t.Helper()
+		w := dashboardRequest(t, f.h, f.ws, user, "POST", "sales", "", fmt.Sprintf(`{"base_version":1,"documents":[{"id":"row","ifVersion":%d,"value":{"amount":%d}}]}`, ifVersion, ifVersion+1))
+		var got struct {
+			Generation *int64 `json:"generation"`
+		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil || got.Generation == nil {
+			t.Fatalf("batch has no generation: %d %s", w.Code, w.Body)
+		}
+		return *got.Generation
+	}
+	finish := func(f producerRunFixture, user, id, body string) *httptest.ResponseRecorder {
+		return f.do(t, user, "finish", "sales", id, "", body)
+	}
+	t.Run("success needs the generation it wrote", func(t *testing.T) {
+		f := newProducerRunFixture(t)
+		run := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"g1"}`))
+		if run.StartGeneration != 0 {
+			t.Fatalf("start generation: %+v", run)
+		}
+		if w := finish(f, f.owner, run.ID, `{"base_version":1,"state":"succeeded"}`); w.Code != 400 {
+			t.Fatalf("success without generation: %d %s", w.Code, w.Body)
+		}
+		if w := finish(f, f.owner, run.ID, `{"base_version":1,"state":"succeeded","data_generation":0}`); w.Code != 409 {
+			t.Fatalf("success without a data change or unchanged claim: %d %s", w.Code, w.Body)
+		}
+		g := batch(t, f, f.owner, 0)
+		w := finish(f, f.owner, run.ID, fmt.Sprintf(`{"base_version":1,"state":"succeeded","data_generation":%d}`, g))
+		done := decodeRun(t, w)
+		if w.Code != 200 || done.DataGeneration == nil || *done.DataGeneration != g || done.FinishedBy != "You" {
+			t.Fatalf("bound success: %d %s", w.Code, w.Body)
+		}
+		if w := finish(f, f.owner, run.ID, fmt.Sprintf(`{"base_version":1,"state":"succeeded","data_generation":%d}`, g)); w.Code != 200 {
+			t.Fatalf("idempotent finish: %d %s", w.Code, w.Body)
+		}
+	})
+	t.Run("stale finish after another write", func(t *testing.T) {
+		f := newProducerRunFixture(t)
+		run := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"g2"}`))
+		g := batch(t, f, f.owner, 0)
+		batch(t, f, f.owner, 1) // a later write the producer did not confirm
+		if w := finish(f, f.owner, run.ID, fmt.Sprintf(`{"base_version":1,"state":"succeeded","data_generation":%d}`, g)); w.Code != 409 {
+			t.Fatalf("stale finish accepted: %d %s", w.Code, w.Body)
+		}
+		var state string
+		if err := f.h.db.QueryRow(`SELECT state FROM artifact_data_runs WHERE id=?`, run.ID).Scan(&state); err != nil || state != "running" {
+			t.Fatalf("stale finish changed the run: %q %v", state, err)
+		}
+	})
+	t.Run("unchanged success must be explicit and verified", func(t *testing.T) {
+		f := newProducerRunFixture(t)
+		run := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"g3"}`))
+		if w := finish(f, f.owner, run.ID, `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`); w.Code != 200 {
+			t.Fatalf("verified unchanged: %d %s", w.Code, w.Body)
+		}
+		other := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"g4"}`))
+		g := batch(t, f, f.owner, 0)
+		if w := finish(f, f.owner, other.ID, fmt.Sprintf(`{"base_version":1,"state":"succeeded","data_generation":%d,"unchanged":true}`, g)); w.Code != 409 {
+			t.Fatalf("unchanged claim over changed data: %d %s", w.Code, w.Body)
+		}
+	})
+	t.Run("a foreign writer cannot mark another producer's run succeeded", func(t *testing.T) {
+		f := newProducerRunFixture(t)
+		editor := "producer-editor"
+		mustExec(t, f.h.db, `INSERT INTO users(id,email) VALUES(?,'producer-editor@example.test')`, editor)
+		mustExec(t, f.h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, generateCUID(), f.ws, editor)
+		mustExec(t, f.h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'user',?,'write',?,datetime('now'))`, f.page, editor, f.owner)
+		run := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"g5"}`))
+		g := batch(t, f, f.owner, 0)
+		if w := finish(f, editor, run.ID, fmt.Sprintf(`{"base_version":1,"state":"succeeded","data_generation":%d}`, g)); w.Code != 403 {
+			t.Fatalf("foreign success: %d %s", w.Code, w.Body)
+		}
+		w := finish(f, editor, run.ID, `{"base_version":1,"state":"failed","reason":"abandoned"}`)
+		if w.Code != 200 || decodeRun(t, w).FinishedBy != "You" {
+			t.Fatalf("foreign abandon: %d %s", w.Code, w.Body)
+		}
+		var finisher string
+		if err := f.h.db.QueryRow(`SELECT finished_by FROM artifact_data_runs WHERE id=?`, run.ID).Scan(&finisher); err != nil || (finisher != editor && finisher != "user:"+editor) {
+			t.Fatalf("finisher not recorded: %q %v", finisher, err)
+		}
+		if w := f.do(t, f.owner, "list", "", "", "?version=1", ""); !strings.Contains(w.Body.String(), `"finished_by":"Contributor"`) || strings.Contains(w.Body.String(), editor) {
+			t.Fatalf("finisher projection: %s", w.Body)
+		}
+	})
+	t.Run("failed partial refresh is reported as partial", func(t *testing.T) {
+		f := newProducerRunFixture(t)
+		run := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"g6"}`))
+		batch(t, f, f.owner, 0)
+		if w := finish(f, f.owner, run.ID, `{"base_version":1,"state":"failed","reason":"second page timed out"}`); w.Code != 200 || !decodeRun(t, w).Partial {
+			t.Fatalf("partial failure: %d %s", w.Code, w.Body)
+		}
+		w := f.do(t, f.reader, "list", "", "", "?version=1", "")
+		if !strings.Contains(w.Body.String(), `"partial":true`) || strings.Contains(w.Body.String(), "last_success_at") {
+			t.Fatalf("reader summary of partial failure: %s", w.Body)
+		}
+	})
+	t.Run("retry after failure", func(t *testing.T) {
+		f := newProducerRunFixture(t)
+		run := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"g7"}`))
+		if w := finish(f, f.owner, run.ID, `{"base_version":1,"state":"failed","reason":"x"}`); w.Code != 200 {
+			t.Fatal(w.Code, w.Body)
+		}
+		if w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"g7"}`); w.Code != 200 || decodeRun(t, w).State != "failed" {
+			t.Fatalf("same key replays the failed run: %d %s", w.Code, w.Body)
+		}
+		retry := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"g7-retry"}`)
+		if retry.Code != 201 {
+			t.Fatalf("retry with a new key: %d %s", retry.Code, retry.Body)
+		}
+		g := batch(t, f, f.owner, 0)
+		if w := finish(f, f.owner, decodeRun(t, retry).ID, fmt.Sprintf(`{"base_version":1,"state":"succeeded","data_generation":%d}`, g)); w.Code != 200 {
+			t.Fatalf("retry success: %d %s", w.Code, w.Body)
+		}
+	})
+}
+
+// O05: retention never removes a running run, concurrent active runs are
+// bounded at admission, and an idempotency key expires only on terminal runs.
+func TestDashboardProducerRunRetentionNeverPrunesActiveRuns(t *testing.T) {
+	f := newProducerRunFixture(t)
+	active := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"long-running"}`))
+	for i := 0; i < artifacts.DefaultDataRunsKept+5; i++ {
+		run := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", fmt.Sprintf(`{"base_version":1,"idempotency_key":"short-%d"}`, i)))
+		if w := f.do(t, f.owner, "finish", "sales", run.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`); w.Code != 200 {
+			t.Fatal(w.Code, w.Body)
+		}
+	}
+	var running, terminal int
+	if err := f.h.db.QueryRow(`SELECT sum(state='running'), sum(state!='running') FROM artifact_data_runs WHERE workspace_id=?`, f.ws).Scan(&running, &terminal); err != nil || running != 1 || terminal != artifacts.DefaultDataRunsKept {
+		t.Fatalf("retention kept %d running and %d terminal (%v)", running, terminal, err)
+	}
+	if w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"long-running"}`); w.Code != 200 || decodeRun(t, w).ID != active.ID {
+		t.Fatalf("active key lost: %d %s", w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "finish", "sales", active.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`); w.Code != 200 {
+		t.Fatalf("active run could not finish: %d %s", w.Code, w.Body)
+	}
+	// A terminal run's key expires after the TTL; a running run's key never does.
+	newest := "short-" + fmt.Sprint(artifacts.DefaultDataRunsKept+4)
+	mustExec(t, f.h.db, `UPDATE artifact_data_runs SET started_at='2000-01-01T00:00:00Z', finished_at='2000-01-01T00:00:01Z' WHERE idempotency_key=?`, newest)
+	var expired string
+	if err := f.h.db.QueryRow(`SELECT id FROM artifact_data_runs WHERE idempotency_key=?`, newest).Scan(&expired); err != nil {
+		t.Fatal(err)
+	}
+	reused := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"`+newest+`"}`)
+	if reused.Code != 201 || decodeRun(t, reused).ID == expired {
+		t.Fatalf("expired terminal key not reusable: %d %s", reused.Code, reused.Body)
+	}
+	if w := f.do(t, f.owner, "finish", "sales", decodeRun(t, reused).ID, "", `{"base_version":1,"state":"failed"}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	mustExec(t, f.h.db, `UPDATE artifact_data_runs SET started_at='2000-01-01T00:00:00Z' WHERE id=?`, active.ID)
+	if w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"long-running"}`); w.Code != 200 || decodeRun(t, w).ID != active.ID {
+		t.Fatalf("running key expired: %d %s", w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "finish", "sales", active.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`); w.Code != 200 {
+		t.Fatalf("active run could not finish: %d %s", w.Code, w.Body)
+	}
+	// Admission bounds active runs; finished runs free a slot.
+	var busy []string
+	for i := 0; i < artifacts.DefaultDataRunsActive; i++ {
+		w := f.do(t, f.owner, "start", "sales", "", "", fmt.Sprintf(`{"base_version":1,"idempotency_key":"busy-%d"}`, i))
+		if w.Code != 201 {
+			t.Fatal(w.Code, w.Body)
+		}
+		busy = append(busy, decodeRun(t, w).ID)
+	}
+	w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"one-too-many"}`)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), "artifact_data_run_busy") {
+		t.Fatalf("active admission not bounded: %d %s", w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"busy-0"}`); w.Code != 200 {
+		t.Fatalf("replay of an admitted key while busy: %d %s", w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "finish", "sales", busy[0], "", `{"base_version":1,"state":"failed"}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"one-too-many"}`); w.Code != 201 {
+		t.Fatalf("finished run did not free a slot: %d %s", w.Code, w.Body)
+	}
 }

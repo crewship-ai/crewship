@@ -163,6 +163,13 @@ type artifactDataResponse struct {
 	Documents   []artifactDataDocumentResponse `json:"documents"`
 }
 
+// artifactDataBatchResponse adds the collection's data generation after the
+// batch; a producer names it when it finishes a run as succeeded.
+type artifactDataBatchResponse struct {
+	artifactDataResponse
+	Generation int64 `json:"generation"`
+}
+
 // This projection is identical for owners and shared readers. Raw provenance
 // includes private account, agent and run identifiers and never enters the wire.
 func projectArtifactData(r *http.Request, collection string, version int64, documents []artifacts.DataDocument) artifactDataResponse {
@@ -285,10 +292,10 @@ func (h *PageHandler) BatchArtifactData(w http.ResponseWriter, r *http.Request) 
 	}
 	collection := r.PathValue("collection")
 	auth, _ := h.artifactDataAuthority(r, k, collection, body.BaseVersion, true)
-	documents, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).Batch(r.Context(), k, collection, body.Documents, auth)
+	documents, generation, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).BatchGeneration(r.Context(), k, collection, body.Documents, auth)
 	if err != nil {
 		artifactDataError(w, err)
 		return
 	}
-	writeArtifactData(w, projectArtifactData(r, collection, body.BaseVersion, documents))
+	writeArtifactData(w, artifactDataBatchResponse{projectArtifactData(r, collection, body.BaseVersion, documents), generation})
 }

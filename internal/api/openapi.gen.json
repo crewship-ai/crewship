@@ -1396,6 +1396,42 @@
         ],
         "type": "object"
       },
+      "ArtifactDataBatchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code_version": {
+            "description": "Code version whose dashboard.json declared the visible collections.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "collection": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDataDocument"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "generation": {
+            "description": "The collection's data generation after this batch: the sum of its document versions, which only grows. Name it as data_generation when you finish a producer run as succeeded.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "collection",
+          "code_version",
+          "documents",
+          "generation"
+        ],
+        "type": "object"
+      },
       "ArtifactDataCollection": {
         "additionalProperties": false,
         "properties": {
@@ -1529,6 +1565,12 @@
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
             "type": "string"
           },
+          "data_generation": {
+            "description": "The collection's data generation when the run finished.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "failure_reason": {
             "description": "Returned to the owner and editors only.",
             "type": "string"
@@ -1537,9 +1579,31 @@
             "format": "date-time",
             "type": "string"
           },
+          "finished_by": {
+            "description": "Who finished the run, as display attribution like started_by. Only the producer can finish a run as succeeded; any writer can finish it as failed.",
+            "type": "string"
+          },
+          "finished_by_kind": {
+            "enum": [
+              "human",
+              "agent",
+              "unknown"
+            ],
+            "type": "string"
+          },
           "id": {
             "pattern": "^run_[0-9a-f]{24}$",
             "type": "string"
+          },
+          "partial": {
+            "description": "True for a failed run during which the collection's data changed: batches apply as written, so some values may be from this run.",
+            "type": "boolean"
+          },
+          "start_generation": {
+            "description": "The collection's data generation when the run started.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
           },
           "started_at": {
             "format": "date-time",
@@ -1572,7 +1636,8 @@
           "state",
           "started_by",
           "started_by_kind",
-          "started_at"
+          "started_at",
+          "start_generation"
         ],
         "type": "object"
       },
@@ -1586,6 +1651,12 @@
             "minimum": 1,
             "type": "integer"
           },
+          "data_generation": {
+            "description": "Required with state succeeded, refused with failed: the generation returned by the producer's last batch. It must equal the collection's current generation, or 409 artifact_data_run_generation.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
           "reason": {
             "description": "Only with state failed. Stored cleaned: control characters and common credential patterns removed, at most 500 bytes.",
             "maxLength": 2000,
@@ -1597,6 +1668,10 @@
               "failed"
             ],
             "type": "string"
+          },
+          "unchanged": {
+            "description": "With state succeeded: the run verified that no data needed to change. Required when data_generation equals the run's start_generation, refused otherwise.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -139953,7 +140028,7 @@
         "x-crewship-read-only": true
       },
       "post": {
-        "description": "Atomically upsert up to 50 documents. `base_version` must equal the latest code version and each document's `ifVersion` must equal its stored version (0 for a new document); any mismatch returns 409 and nothing is written. Allowed for the owner, the agent run acting for the owner, and a human with a current Edit share or inherited folder write; a workspace role without a grant does not write. Read and Comment shares get 403 and callers who cannot see the Dashboard get 404. Exceeding a dataset limit returns 413 `artifact_data_quota`.",
+        "description": "Atomically upsert up to 50 documents. `base_version` must equal the latest code version and each document's `ifVersion` must equal its stored version (0 for a new document); any mismatch returns 409 and nothing is written. Allowed for the owner, the agent run acting for the owner, and a human with a current Edit share or inherited folder write; a workspace role without a grant does not write. Read and Comment shares get 403 and callers who cannot see the Dashboard get 404. Exceeding a dataset limit returns 413 `artifact_data_quota`. The response carries the collection's data `generation` after the batch, which a producer names when it finishes a run.",
         "operationId": "post_api_v1_pages_slug_artifact_data_collection",
         "parameters": [
           {
@@ -139988,7 +140063,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactDataResponse"
+                  "$ref": "#/components/schemas/ArtifactDataBatchResponse"
                 }
               }
             },
@@ -140095,7 +140170,7 @@
     },
     "/api/v1/pages/{slug}/artifact/data/{collection}/runs": {
       "post": {
-        "description": "Record that a producer started refreshing a declared collection. Needs exactly the authority of a data batch for a human caller (owner or a current Edit share; agent runs on the artifact tool path cannot record runs yet) and `base_version` equal to the latest code version. Repeating `idempotency_key` returns the same run with 200; a key used by another producer returns 409. The producer is the authenticated principal. The newest 20 runs and the newest success are retained per collection. Runs never write data or code versions.",
+        "description": "Record that a producer started refreshing a declared collection. Needs exactly the authority of a data batch for a human caller (owner or a current Edit share; agent runs on the artifact tool path cannot record runs yet) and `base_version` equal to the latest code version. Repeating `idempotency_key` returns the same run with 200; a key used by another producer returns 409. The producer is the authenticated principal. The run records the collection's current data generation as `start_generation`. Server defaults, not contract: at most 4 running runs per collection (more return 409 `artifact_data_run_busy`), the newest 20 finished runs plus the newest success are retained, a running run is never pruned, and the key of a finished run can be reused after 24 hours. Runs never write data or code versions; batches apply as written.",
         "operationId": "post_api_v1_pages_slug_artifact_data_collection_runs",
         "parameters": [
           {
@@ -140247,7 +140322,7 @@
     },
     "/api/v1/pages/{slug}/artifact/data/{collection}/runs/{run}": {
       "post": {
-        "description": "End a running run as `succeeded` or `failed` with the authority of a data batch. Any writer may finish any run of the Page. A run that is never finished stays `running`. Repeating the same outcome returns the stored run; a different outcome returns 409 `artifact_data_run_conflict`. An unknown run, including one of another Page or workspace, returns 404.",
+        "description": "End a running run as `succeeded` or `failed` with the authority of a data batch. Only the producer that started the run can finish it as succeeded (another writer gets 403 `artifact_data_run_forbidden`), naming as `data_generation` the generation its last batch returned; it must still be current, and a success without a data change needs `unchanged` with the start generation, otherwise 409 `artifact_data_run_generation`. Any writer can finish a run as failed; the finisher is recorded and a failed run whose data changed is `partial`. A run that is never finished stays `running`. Repeating the same outcome returns the stored run; a different outcome returns 409 `artifact_data_run_conflict`. An unknown run, including one of another Page or workspace, returns 404.",
         "operationId": "post_api_v1_pages_slug_artifact_data_collection_runs_run",
         "parameters": [
           {

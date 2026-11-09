@@ -4,6 +4,8 @@ import { dashboardName } from "./artifact-dashboard"
  * What the server recorded about a collection's producer runs: the newest
  * run, its last attempt and the last success. `reason` is present only for
  * the owner and editors; a reader learns that a refresh failed, not why.
+ * `partial` marks a failed run during which the collection's data changed:
+ * batches apply as they are written, so some values may be from that run.
  */
 export interface DashboardRunSummary {
   collection: string
@@ -14,6 +16,7 @@ export interface DashboardRunSummary {
   lastSuccessAt: Date | null
   reason: string | null
   startedBy: string
+  partial: boolean
 }
 
 const STATES = new Set(["running", "succeeded", "failed"])
@@ -44,8 +47,10 @@ export function parseDashboardRuns(raw: unknown, codeVersion: number, collection
     const reason = latest.failure_reason
     if (reason !== undefined && (typeof reason !== "string" || reason.length > MAX_REASON || latest.state !== "failed")) return null
     if (typeof latest.started_by !== "string" || latest.started_by.length > 64) return null
+    const partial = latest.partial ?? false
+    if (typeof partial !== "boolean" || (partial && latest.state !== "failed")) return null
     if (!collections.includes(entry.collection)) continue
-    out.push({ collection: entry.collection, state: latest.state as DashboardRunSummary["state"], startedAt, finishedAt, lastAttemptAt, lastSuccessAt, reason: reason || null, startedBy: latest.started_by })
+    out.push({ collection: entry.collection, state: latest.state as DashboardRunSummary["state"], startedAt, finishedAt, lastAttemptAt, lastSuccessAt, reason: reason || null, startedBy: latest.started_by, partial })
   }
   return out
 }

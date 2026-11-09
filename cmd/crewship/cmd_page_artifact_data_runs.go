@@ -14,23 +14,35 @@ import (
 
 // newArtifactDataRunsCommand records producer runs of dashboard datasets. It
 // works with a CLI token only: CREWSHIP_AGENT_TOKEN runs map to artifact tool
-// operations, which have no run operations yet. A run never writes data; the producer writes with `data batch` between start
-// and finish, and readers see Refreshing, Failed and the last success.
+// operations, which have no run operations yet. A run never writes data; the
+// producer writes with `data batch` between start and finish, and readers see
+// Refreshing, Failed and the last success.
 func newArtifactDataRunsCommand() *cobra.Command {
 	root := &cobra.Command{Use: "runs", Short: "Record and read producer refresh runs of dashboard datasets"}
 	root.Long = `Record when a producer refreshes a dashboard collection.
 
 start opens a run with an idempotency key; repeating the same key returns the
-same run (exit 0, HTTP 200). Write the data with "data batch", then finish the
-run as succeeded or failed. A failure reason is cleaned on the server (control
-characters and common credential patterns removed, at most 500 bytes) and is shown to
-the owner and editors only. The producer is the authenticated principal; it
-cannot be supplied. The newest 20 runs and the newest success are kept per
-collection. Starting and finishing need the same right as "data batch", and
-any writer may finish any run. Agent runs that use the artifact tools cannot
-record runs yet; use a CLI token.`
+same run (exit 0, HTTP 200). Write the data with "data batch": each batch
+applies immediately (readers may see values while the run is still going) and
+returns the collection's "generation". Finish as succeeded with
+--data-generation set to the generation of your last batch; the server refuses
+it if anyone wrote since. If the run had nothing to change, finish with
+--data-generation set to the run's start_generation and --unchanged. Only the
+producer that started a run can mark it succeeded; any writer can finish it as
+failed, and the finisher is recorded. A failed run whose data changed is
+reported as partial.
+
+A failure reason is cleaned on the server (control characters and common
+credential patterns removed, at most 500 bytes) and is shown to the owner and
+editors only. The producer is the authenticated principal; it cannot be
+supplied. Starting and finishing need the same right as "data batch". Server
+defaults, not contract: at most 4 running runs per collection (more are
+refused with artifact_data_run_busy), the newest 20 finished runs plus the
+newest success are kept, a running run is never pruned, and a finished run's
+key can be reused after 24 hours. Agent runs that use the artifact tools
+cannot record runs yet; use a CLI token.`
 	root.Example = `  crewship page artifact data runs start sales-dashboard sales --base-version 3 --key nightly-2026-11-09
-  crewship page artifact data runs finish sales-dashboard sales run_0123456789abcdef01234567 --base-version 3 --state succeeded
+  crewship page artifact data runs finish sales-dashboard sales run_0123456789abcdef01234567 --base-version 3 --state succeeded --data-generation 42
   crewship page artifact data runs list sales-dashboard --version 3`
 
 	start := &cobra.Command{Use: "start <slug> <collection>", Short: "Start a producer run (idempotent per key)", Args: cobra.ExactArgs(2), RunE: func(cmd *cobra.Command, args []string) error {
@@ -64,10 +76,25 @@ record runs yet; use a CLI token.`
 		if state != "succeeded" && state != "failed" {
 			return fmt.Errorf("--state must be succeeded or failed")
 		}
+		generation, _ := cmd.Flags().GetInt64("data-generation")
+		unchanged, _ := cmd.Flags().GetBool("unchanged")
+		hasGeneration := cmd.Flags().Changed("data-generation")
 		if state == "succeeded" && reason != "" {
 			return fmt.Errorf("--reason is only accepted with --state failed")
 		}
+		if state == "succeeded" && (!hasGeneration || generation < 0) {
+			return fmt.Errorf("--data-generation is required with --state succeeded: the generation returned by your last data batch, or the run's start_generation with --unchanged")
+		}
+		if state == "failed" && (hasGeneration || unchanged) {
+			return fmt.Errorf("--data-generation and --unchanged are only accepted with --state succeeded")
+		}
 		body := map[string]any{"base_version": base, "state": state}
+		if state == "succeeded" {
+			body["data_generation"] = generation
+			if unchanged {
+				body["unchanged"] = true
+			}
+		}
 		if reason != "" {
 			body["reason"] = reason
 		}
@@ -76,6 +103,8 @@ record runs yet; use a CLI token.`
 	finish.Flags().Int64("base-version", 0, "Current code version declaring the collection (required)")
 	finish.Flags().String("state", "", "succeeded or failed (required)")
 	finish.Flags().String("reason", "", "Failure reason shown to the owner and editors; - reads standard input")
+	finish.Flags().Int64("data-generation", 0, "With --state succeeded: the generation returned by your last data batch (required)")
+	finish.Flags().Bool("unchanged", false, "With --state succeeded: the run verified that no data needed to change")
 
 	list := &cobra.Command{Use: "list <slug>", Short: "Show the latest run, last attempt and last success per collection", Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 		version, _ := cmd.Flags().GetInt64("version")

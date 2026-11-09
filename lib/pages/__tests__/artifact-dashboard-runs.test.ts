@@ -10,7 +10,10 @@ const summary = (over: Record<string, unknown> = {}, latest: Record<string, unkn
 describe("parseDashboardRuns", () => {
   it("reads the latest run, last attempt and last success per declared collection", () => {
     const runs = parseDashboardRuns({ code_version: 2, runs: [summary()] }, 2, ["sales"])
-    expect(runs).toEqual([{ collection: "sales", state: "failed", startedAt: new Date("2026-11-08T11:00:00Z"), finishedAt: new Date("2026-11-08T11:01:00Z"), lastAttemptAt: new Date("2026-11-08T11:00:00Z"), lastSuccessAt: new Date("2026-11-08T10:00:00Z"), reason: "warehouse 502", startedBy: "Agent" }])
+    expect(runs).toEqual([{ collection: "sales", state: "failed", startedAt: new Date("2026-11-08T11:00:00Z"), finishedAt: new Date("2026-11-08T11:01:00Z"), lastAttemptAt: new Date("2026-11-08T11:00:00Z"), lastSuccessAt: new Date("2026-11-08T10:00:00Z"), reason: "warehouse 502", startedBy: "Agent", partial: false }])
+  })
+  it("reads a failed refresh that already changed data as partial", () => {
+    expect(parseDashboardRuns({ code_version: 2, runs: [summary({}, { partial: true })] }, 2, ["sales"])?.[0]).toMatchObject({ state: "failed", partial: true })
   })
   it("keeps a run without a success or a reason", () => {
     const runs = parseDashboardRuns({ code_version: 1, runs: [summary({ last_success_at: undefined }, { state: "running", finished_at: undefined, failure_reason: undefined })] }, 1, ["sales"])
@@ -21,6 +24,8 @@ describe("parseDashboardRuns", () => {
     ["an unknown state", { code_version: 2, runs: [summary({}, { state: "queued" })] }],
     ["an invalid date", { code_version: 2, runs: [summary({ last_attempt_at: "yesterday" })] }],
     ["a mismatched collection", { code_version: 2, runs: [summary({}, { collection: "costs" })] }],
+    ["partial on a run that did not fail", { code_version: 2, runs: [summary({}, { state: "succeeded", failure_reason: undefined, partial: true })] }],
+    ["a non-boolean partial", { code_version: 2, runs: [summary({}, { partial: "yes" })] }],
     ["not an object", "runs"],
     ["runs not a list", { code_version: 2, runs: {} }],
   ])("rejects %s", (_, raw) => {

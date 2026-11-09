@@ -15,9 +15,11 @@ import (
 // run takes exactly the authority of a data batch (artifactDataAuthority with
 // write=true: the owner or a human Edit share on REST; agent runs have no run
 // operation on the artifact tool path yet), on the latest code version that
-// declares the collection. Any writer may finish any run. Reading takes the
-// authority of a data read and only lists collections that version declares.
-// The failure reason is shown to the owner and editors only.
+// declares the collection. Only the producer that started a run may finish it
+// as succeeded, naming the data generation it wrote (see artifacts.FinishRun);
+// any writer may finish a run as failed, and the finisher is recorded. Reading
+// takes the authority of a data read and only lists collections that version
+// declares. The failure reason is shown to the owner and editors only.
 
 const maxDataRunRequestBytes = 8 << 10
 
@@ -26,19 +28,26 @@ type artifactDataRunStart struct {
 	IdempotencyKey string `json:"idempotency_key"`
 }
 type artifactDataRunFinish struct {
-	BaseVersion int64  `json:"base_version"`
-	State       string `json:"state"`
-	Reason      string `json:"reason,omitempty"`
+	BaseVersion    int64  `json:"base_version"`
+	State          string `json:"state"`
+	Reason         string `json:"reason,omitempty"`
+	DataGeneration *int64 `json:"data_generation,omitempty"`
+	Unchanged      bool   `json:"unchanged,omitempty"`
 }
 type artifactDataRunResponse struct {
-	ID          string `json:"id"`
-	Collection  string `json:"collection"`
-	State       string `json:"state"`
-	StartedBy   string `json:"started_by"`
-	StartedKind string `json:"started_by_kind"`
-	StartedAt   string `json:"started_at"`
-	FinishedAt  string `json:"finished_at,omitempty"`
-	Reason      string `json:"failure_reason,omitempty"`
+	ID              string `json:"id"`
+	Collection      string `json:"collection"`
+	State           string `json:"state"`
+	StartedBy       string `json:"started_by"`
+	StartedKind     string `json:"started_by_kind"`
+	StartedAt       string `json:"started_at"`
+	StartGeneration int64  `json:"start_generation"`
+	FinishedAt      string `json:"finished_at,omitempty"`
+	FinishedBy      string `json:"finished_by,omitempty"`
+	FinishedKind    string `json:"finished_by_kind,omitempty"`
+	DataGeneration  *int64 `json:"data_generation,omitempty"`
+	Partial         bool   `json:"partial,omitempty"`
+	Reason          string `json:"failure_reason,omitempty"`
 }
 type artifactDataRunSummaryResponse struct {
 	Collection    string                  `json:"collection"`
@@ -54,18 +63,26 @@ type artifactDataRunsResponse struct {
 // The producer's raw actor (account, agent or run ids) never leaves the server.
 // The "agent:" branch is for future agent-run producers and restored rows; the
 // artifact tool path has no run operations yet, so live requests record humans.
-func projectArtifactDataRun(r *http.Request, run *artifacts.DataRun, showReason bool) artifactDataRunResponse {
-	label, kind := "Contributor", "human"
+func projectRunActor(r *http.Request, actor string) (label, kind string) {
+	label, kind = "Contributor", "human"
 	user := UserFromContext(r.Context())
 	switch {
-	case strings.HasPrefix(run.StartedBy, "agent:"):
+	case strings.HasPrefix(actor, "agent:"):
 		label, kind = "Agent", "agent"
-	case run.StartedBy == "erased" || run.StartedBy == "":
+	case actor == "erased" || actor == "":
 		label, kind = "Former contributor", "unknown"
-	case user != nil && (run.StartedBy == user.ID || run.StartedBy == "user:"+user.ID):
+	case user != nil && (actor == user.ID || actor == "user:"+user.ID):
 		label = "You"
 	}
-	out := artifactDataRunResponse{ID: run.ID, Collection: run.Collection, State: run.State, StartedBy: label, StartedKind: kind, StartedAt: run.StartedAt, FinishedAt: run.FinishedAt}
+	return label, kind
+}
+
+func projectArtifactDataRun(r *http.Request, run *artifacts.DataRun, showReason bool) artifactDataRunResponse {
+	label, kind := projectRunActor(r, run.StartedBy)
+	out := artifactDataRunResponse{ID: run.ID, Collection: run.Collection, State: run.State, StartedBy: label, StartedKind: kind, StartedAt: run.StartedAt, StartGeneration: run.StartGeneration, FinishedAt: run.FinishedAt, DataGeneration: run.EndGeneration, Partial: run.Partial()}
+	if run.State != "running" {
+		out.FinishedBy, out.FinishedKind = projectRunActor(r, run.FinishedBy)
+	}
 	if showReason {
 		out.Reason = run.Reason
 	}
@@ -90,6 +107,18 @@ func decodeDataRunBody(w http.ResponseWriter, r *http.Request, target any) bool 
 func artifactDataRunError(w http.ResponseWriter, err error) {
 	if errors.Is(err, artifacts.ErrDataRunNotFound) {
 		replyError(w, 404, "run not found")
+		return
+	}
+	if errors.Is(err, artifacts.ErrDataRunForbidden) {
+		writeJSON(w, 403, map[string]string{"error": "Only the producer that started this run can mark it succeeded. You can finish it as failed. Nothing was changed.", "code": "artifact_data_run_forbidden"})
+		return
+	}
+	if errors.Is(err, artifacts.ErrDataRunBusy) {
+		writeJSON(w, 409, map[string]string{"error": "This dataset already has the maximum number of running refreshes. Finish one, then start again.", "code": "artifact_data_run_busy"})
+		return
+	}
+	if errors.Is(err, artifacts.ErrDataRunGeneration) {
+		writeJSON(w, 409, map[string]string{"error": "The data changed since your last batch, or the run wrote nothing and was not marked unchanged. Nothing was changed.", "code": "artifact_data_run_generation"})
 		return
 	}
 	if errors.Is(err, artifacts.ErrDataConflict) {
@@ -151,7 +180,7 @@ func (h *PageHandler) FinishArtifactDataRun(w http.ResponseWriter, r *http.Reque
 	}
 	collection := r.PathValue("collection")
 	auth, _ := h.artifactDataAuthority(r, k, collection, body.BaseVersion, true)
-	run, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).FinishRun(r.Context(), k, collection, r.PathValue("run"), body.State, body.Reason, auth)
+	run, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).FinishRun(r.Context(), k, collection, r.PathValue("run"), artifacts.DataRunFinish{State: body.State, Reason: body.Reason, DataGeneration: body.DataGeneration, Unchanged: body.Unchanged}, auth)
 	if err != nil {
 		artifactDataRunError(w, err)
 		return
