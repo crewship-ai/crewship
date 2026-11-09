@@ -200,6 +200,9 @@ func TestMigratePages_TablesAndColumns(t *testing.T) {
 				{name: "config_json", notNull: true},
 				{name: "created_at", notNull: true},
 				{name: "updated_at", notNull: true},
+				// #5260: who designated the producer, and when an agent designation ended.
+				{name: "producer_designated_by_user_id"},
+				{name: "producer_retired_at"},
 			},
 		},
 		{

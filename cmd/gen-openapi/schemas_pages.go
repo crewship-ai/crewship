@@ -306,7 +306,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"changed": map[string]any{"type": "integer",
 			"description": "Rows affected by an issue or a revoke. 0 on a revoke naming a subject that held no grant — a revoke that changed nothing still succeeded."},
 		"can_delegate_agent_edit": map[string]any{"type": "boolean",
-			"description": "Whether the caller may grant an agent `write` or `produce`. Only the page's owner (the owning user, or a member of the owning crew) delegates Edit, of the spec or of the data, to an agent; a workspace ADMIN/OWNER role does not imply it. Anyone else gets 403 for `subject_type=agent, level=write|produce`, and an agent write or produce grant the owner did not issue is listed with `live: false` and stays retired."},
+			"description": "Whether the caller may grant an agent `write` or `produce`, or a crew `produce`. Only the page's owner (the owning user, or a member of the owning crew) delegates Edit, of the spec or of the data, to an agent or to the crew its agents push with; a workspace ADMIN/OWNER role does not imply it. Anyone else gets 403 for `subject_type=agent, level=write|produce` and `subject_type=crew, level=produce`, and such a grant the owner did not issue is listed with `live: false` and stays retired."},
 	})
 
 	// ── Effective access (pages-collections-access-analysis §5/10, F2) ─────

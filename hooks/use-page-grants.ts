@@ -81,6 +81,9 @@ export function pageGrantLevelsFor(
   // of the data (produce); everyone else is not offered the choice the server
   // would refuse.
   if (subjectType === "agent" && !canDelegateAgentEdit) return ["read"]
+  // A crew's produce grant lets its agents and routines push the page's data,
+  // so it is the owner's to give as well (#5260).
+  if (subjectType === "crew" && !canDelegateAgentEdit) return ["read", "write"]
   return PAGE_GRANT_LEVELS
 }
 

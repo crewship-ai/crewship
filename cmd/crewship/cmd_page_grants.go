@@ -110,12 +110,13 @@ Two rules the server enforces and this command cannot talk it out of:
   page freely but can never widen who reaches it — not even to an agent
   in its own crew.
 
-  Only the page's owner grants an agent "write" or "produce" (the owning
-  user, or a member of the owning crew while the crew is not deleted):
-  produce pushes the page's data,
-  which is Edit of its data. A workspace admin can grant an agent read and
-  can revoke any grant, but "--agent … --level write|produce" from anyone
-  else is refused with exit 4. An agent write or produce grant the owner
+  Only the page's owner grants an agent "write" or "produce", or a crew
+  "produce" (the owning user, or a member of the owning crew while the
+  crew is not deleted): produce pushes the page's data, which is Edit of
+  its data, and a crew's agents and routines push with a crew grant. A
+  workspace admin can grant an agent read and a crew read or write, and
+  can revoke any grant, but "--agent … --level write|produce" or
+  "--crew … --level produce" from anyone else is refused with exit 4. An agent write or produce grant the owner
   did not issue, or whose issuer stopped owning the page, reaches nothing
   and has ended for good, also after its issuer comes to own the page; the
   owner issues a new one.

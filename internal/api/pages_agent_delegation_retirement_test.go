@@ -22,7 +22,8 @@ func TestAgentProduceDelegationIsOwnerOnly(t *testing.T) {
 		{"another workspace owner may not delegate agent produce", "wsowner", "OWNER", agentProduce, http.StatusForbidden},
 		{"human Edit grantee may not delegate agent produce", "editor", "MEMBER", agentProduce, http.StatusForbidden},
 		{"admin still grants an agent read", "admin", "ADMIN", `{"subject_type":"agent","subject":"scribe","level":"read"}`, http.StatusOK},
-		{"admin still grants a crew produce", "admin", "ADMIN", `{"subject_type":"crew","subject":"engine","level":"produce"}`, http.StatusOK},
+		{"admin may not grant a crew produce either: its agents push with it (#5260)", "admin", "ADMIN", `{"subject_type":"crew","subject":"engine","level":"produce"}`, http.StatusForbidden},
+		{"admin still grants a crew read", "admin", "ADMIN", `{"subject_type":"crew","subject":"engine","level":"read"}`, http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, _, wsID, ownerID, _ := pagesGrantFixture(t, "")

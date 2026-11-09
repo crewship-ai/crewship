@@ -452,11 +452,14 @@ func (h *PageHandler) mayProduceUnattended(ctx context.Context, req internalPage
 			return true, "", nil
 		}
 	case "agent":
+		// #5260: a declared agent producer is a delegation only while the
+		// page's owner made it (ProducerDelegated); otherwise the agent needs
+		// a produce grant like anyone else.
 		slug, err := h.agentSlug(ctx, req.WorkspaceID, req.AgentID)
 		if err != nil {
 			return false, "", err
 		}
-		if slug != "" && slug == panel.ProducerRef {
+		if slug != "" && slug == panel.ProducerRef && panel.ProducerDelegated {
 			return true, "", nil
 		}
 	}

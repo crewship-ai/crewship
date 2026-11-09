@@ -159,7 +159,8 @@ type pageGrantRecord struct {
 
 // agentEditIssuerNotOwnerSQL is the use-time half of R71 §0.14/1, evaluated
 // against the alias v of page_grant_verdicts: true for an agent write or
-// produce grant whose issuer is not the page's owner now — the owning user, or a
+// produce grant, or a crew produce grant (its agents and routines push with
+// it, #5260; pageGrantDelegatesToAgents), whose issuer is not the page's owner now — the owning user, or a
 // member of the owning crew while that crew is live and in the page's
 // workspace (pageOwnerForDelegation, not isPageOwner). A workspace ADMIN or
 // OWNER role does not count. It sits in the single grant reader so every
@@ -172,7 +173,7 @@ type pageGrantRecord struct {
 // moment it is judged non-owner-issued, so its issuer owning the page later
 // does not revive it; this check covers the instant before. Crew ownership is
 // read as pageOwnerForDelegation reads it: a deleted crew owns nothing.
-const agentEditIssuerNotOwnerSQL = `(v.subject_type = 'agent' AND v.level IN ('write', 'produce') AND NOT EXISTS (
+const agentEditIssuerNotOwnerSQL = `(((v.subject_type = 'agent' AND v.level IN ('write', 'produce')) OR (v.subject_type = 'crew' AND v.level = 'produce')) AND NOT EXISTS (
 		SELECT 1 FROM pages op
 		WHERE op.id = v.page_id AND (
 		      (COALESCE(op.owner_user_id, '') <> '' AND op.owner_user_id = v.granted_by_user_id)

@@ -247,7 +247,7 @@ func (h *PageHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range doc.Spec.Panels {
-		if err := insertPanel(r.Context(), tx, pageID, &doc.Spec.Panels[i], resolved[doc.Spec.Panels[i].ID], now); err != nil {
+		if err := insertPanel(r.Context(), tx, pageID, &doc.Spec.Panels[i], resolved[doc.Spec.Panels[i].ID], now, ""); err != nil {
 			replyInternalError(w, h.logger, "insert agent-authored page panel", err)
 			return
 		}

@@ -33,6 +33,8 @@ it.each([
   expect(normalizePageGrantsDocument(body).canDelegateAgentEdit).toBe(want))
 it("never offers agent write or produce without delegation, and keeps them for people and the owner", () => {
   expect(pageGrantLevelsFor("agent", false)).toEqual(["read"])
+  expect(pageGrantLevelsFor("crew", false)).toEqual(["read", "write"])
+  expect(pageGrantLevelsFor("crew", true)).toEqual(["read", "produce", "write"])
   expect(pageGrantLevelsFor("agent", true)).toEqual(["read", "produce", "write"])
   expect(pageGrantLevelsFor("user", false)).toEqual(["read", "produce", "write"])
   expect(pageGrantLevelsFor("workspace", false)).toEqual(["read", "write"])

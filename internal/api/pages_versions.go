@@ -389,8 +389,16 @@ func (h *PageHandler) Rollback(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusConflict, "Page definition changed before rollback; reload before restoring")
 		return
 	}
-	if err := reconcilePanels(r.Context(), tx, rec.ID, &doc, resolved, now); err != nil {
+	retiredBefore, err := retiredAgentProducers(r.Context(), tx, rec.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "read agent producer designations", err)
+		return
+	}
+	if err := reconcilePanels(r.Context(), tx, rec.ID, &doc, resolved, now, producerDesignator(r, user.ID)); err != nil {
 		replyInternalError(w, h.logger, "reconcile page panels for rollback", err)
+		return
+	}
+	if h.refuseUndelegatedAgentProducers(w, r, tx, rec.ID, retiredBefore) {
 		return
 	}
 	// §10b.1's rule, in one statement: the restored panels have no numbers.

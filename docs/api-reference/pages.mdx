@@ -286,7 +286,7 @@ those is a 400 naming the rule; see the
 | 201 | Created. |
 | 400 | The spec is malformed, or a panel names a schema, icon, or owner that does not exist. |
 | 401 | No session or token. |
-| 403 | Caller lacks `page.create`, or named an owner crew they do not belong to. |
+| 403 | Caller lacks `page.create`, named an owner crew they do not belong to, or names `agent/<slug>` as a panel producer without being the page's owner (#5260). |
 | 409 | A page with that slug already exists in the workspace. |
 
 ---
@@ -399,7 +399,7 @@ modification time; the optimistic lock (409) still applies.
 | 200 | Updated. A new structural version is recorded. |
 | 400 | Malformed spec, or an unresolvable owner/producer/routine reference. |
 | 401 | No session or token. |
-| 403 | No write authority, a panel replacement includes unreadable current/target panels, or a hidden reference no longer validates. Only for a caller who reaches the page. |
+| 403 | No write authority, a panel replacement includes unreadable current/target panels, a hidden reference no longer validates, or the update newly names `agent/<slug>` as a panel producer and the caller is not the page's owner (keeping a panel's producer unchanged is allowed). Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 | 409 | The live definition changed before the update; reload before saving. |
 
@@ -482,7 +482,7 @@ push's own server-side reference `push:<panel>:<seq>` in place of a run id.
 | 200 | Stored. Connected viewers are notified over the page's websocket channel. |
 | 400 | The payload does not satisfy the panel's schema. The message names the field and why. |
 | 401 | No session or token. |
-| 403 | The caller is not the panel's declared producer and holds no `produce` grant, and reaches the page some other way. The refusal writes a journal entry and notifies the page owner — treat it as a signal to investigate, not noise to retry past. |
+| 403 | The caller is not the panel's declared producer and holds no `produce` grant, and reaches the page some other way. A declared `agent/<slug>` producer counts only while the page's owner named it; otherwise the panel carries the reason in `fault`. The refusal writes a journal entry and notifies the page owner — treat it as a signal to investigate, not noise to retry past. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or the page has no such panel. A caller who cannot reach the page gets this answer for an unauthorised push too — still journalled, and the owner still notified. |
 | 422 | The payload exceeds 64 KiB. The rejection names the bytes attempted and the limit. |
 | 429 | Faster than one push per two seconds for this panel, or over the per-minute budget. |
@@ -600,16 +600,17 @@ and by members of the crews that own its panels.
 
 ### Only the owner delegates Edit to an agent
 
-`write` or `produce` to an `agent` subject is issued by the page's **owner**
-only: the owning user, or a member of the owning crew while that crew is not
-deleted. `produce` pushes the
-page's data, so it is Edit of the data. A workspace ADMIN/OWNER role administers
+`write` or `produce` to an `agent` subject, and `produce` to a `crew` subject,
+are issued by the page's **owner** only: the owning user, or a member of the
+owning crew while that crew is not deleted. `produce` pushes the page's data, so
+it is Edit of the data, and a crew's agents and routines push with a crew
+`produce` grant. A workspace ADMIN/OWNER role administers
 every other grant, can grant an agent `read`, and can revoke any grant, but it
 does not imply the right to delegate Edit to an agent. A request from anyone
 else gets 403.
 
-The rule also applies at use time. An agent `write` or `produce` grant that the
-page's owner did not issue is listed with `live: false` and an `inert_reason`,
+The rule also applies at use time. An agent `write` or `produce` grant, or a
+crew `produce` grant, that the page's owner did not issue is listed with `live: false` and an `inert_reason`,
 and it authorises nothing: no spec edits, no pushed payloads, no document
 proposals and no collaborative writes. Such a row is retired for good when it
 is stored, when the page changes owner, when its issuer leaves the owning
@@ -627,7 +628,7 @@ propose a change to a document.
 | 200 | Issued, or updated in place if the subject already held one. |
 | 400 | Unknown `subject_type` or `level`, missing subject, `produce` for the `workspace` subject, `comment` for an `agent` subject, or `panels` naming a panel the page does not have. |
 | 401 | No session. |
-| 403 | Not the owner and not an admin; `write` or `produce` to an `agent` from anyone but the page's owner; or the caller is an agent rather than a human. Only for a caller who reaches the page. |
+| 403 | Not the owner and not an admin; `write` or `produce` to an `agent`, or `produce` to a `crew`, from anyone but the page's owner; or the caller is an agent rather than a human. Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
@@ -1456,7 +1457,7 @@ five minutes later.
 | 200 | Rolled back. |
 | 400 | `to` missing, invalid request, or a stored definition that no longer validates. |
 | 401 | No session or token. |
-| 403 | No write authority, or the current/archived definition contains panels the caller cannot read. Only for a caller who reaches the page. |
+| 403 | No write authority, the current/archived definition contains panels the caller cannot read, or the rollback newly names an agent producer and the caller is not the page's owner. Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or no such retained version. |
 | 409 | The live definition changed before rollback; reload before restoring. |
 
