@@ -18,6 +18,8 @@ import { DocsTools } from "./docs-tools"
 import { DocsComments } from "./docs-comments"
 import { DocsCanvas } from "./docs-canvas"
 import { documentSurface } from "@/lib/documents/surface"
+import { DocsPresence } from "./docs-presence"
+import { presentPeople } from "@/lib/documents/presence"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
 import { commentTarget, setCommentHighlights, type CommentTarget } from "@/components/features/pages/document-rich-extensions"
@@ -28,6 +30,8 @@ export interface DocsFrameReport {
   canEdit: boolean
   statusActions?: React.ReactNode
   statusFoot?: React.ReactNode
+  /** Who else has the document open (#5166); nothing while the person is alone. */
+  presence?: React.ReactNode
 }
 
 /** The reading column: centred, 700 px at most, clear of the floating view strip and tools bar. */
@@ -73,7 +77,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const frame = useArtifactFrame()
   const layout: FrameLayout = frame?.layout ?? "desktop"
   const phone = layout === "phone"
-  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, restoreGuard, review } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS)
+  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, restoreGuard, review, peers } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS)
   // The outline is open by default only where it does not cover the page.
   const [outlineOpen, setOutlineOpen] = React.useState(layout === "desktop")
   const [sent, setSent] = React.useState(false)
@@ -155,12 +159,16 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const download = React.useRef(downloadDraft); download.current = downloadDraft
   const offerDownload = hasLocalDraft && !sync.denied
   const statusKey = JSON.stringify(status)
+  const people = presentPeople(peers)
+  const presenceKey = JSON.stringify(people.map(peer => [peer.userId, peer.name, peer.color]))
   React.useEffect(() => {
     onFrame({
       status: JSON.parse(statusKey) as FrameStatus | null, canEdit: editable, statusFoot: foot || undefined,
+      presence: people.length ? <DocsPresence peers={people} /> : undefined,
       statusActions: offerDownload ? <Button type="button" size="sm" variant="outline" className="coarse:min-h-[44px]" onClick={() => download.current()}><Download aria-hidden />Download my changes</Button> : undefined,
     })
-  }, [onFrame, statusKey, editable, foot, offerDownload])
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- presenceKey holds the people reported
+  }, [onFrame, statusKey, editable, foot, offerDownload, presenceKey])
   React.useEffect(() => () => onFrame(null), [onFrame])
 
   const showRecovery = !sync.denied && (sync.recovery || (!available && sync.pending > 0))

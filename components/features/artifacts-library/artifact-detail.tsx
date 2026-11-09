@@ -263,7 +263,7 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   </>)
 
   return <ArtifactFrame name={item.name} kind={kindFrame?.kind ?? resolved} folder={item.folder?.name ?? null} caps={caps} onHome={onBack}
-    href={item.pageId ? `/artifacts/${encodeURIComponent(item.pageId)}` : undefined} onShare={() => setDialog("share")} presence={kindFrame?.presence}
+    href={item.pageId ? `/artifacts/${encodeURIComponent(item.pageId)}` : undefined} onShare={() => setDialog("share")} presence={kindFrame?.presence ?? (docsPage ? docs?.presence : undefined)}
     statusActions={docsPage ? docs?.statusActions : nativeEditor ? craftLease.statusActions : undefined}
     statusFoot={docsPage && docs?.statusFoot ? docs.statusFoot : item.kind === "word" || item.kind === "sheet" ? CRAFT_LOCK_RULE : `${KINDS[resolved.kind].label}${item.sharedVersion ? ` · shared v${item.sharedVersion}` : ""}${item.ownerLabel ? ` · owned by ${item.ownerLabel}` : ""}`}
     info={<ArtifactInfo workspaceId={workspaceId} item={item} onShare={() => setDialog("share")} />}>

@@ -2319,3 +2319,37 @@ mark[data-highlight="green"] { background-color: var(--doc-mark-green); }
 mark[data-highlight="blue"] { background-color: var(--doc-mark-blue); }
 mark[data-highlight="purple"] { background-color: var(--doc-mark-purple); }
 mark[data-highlight="pink"] { background-color: var(--doc-mark-pink); }
+
+/* Docs presence (#5166): another person's name above their caret, generated so it never becomes editor text. */
+.document-peer-caret-end {
+  position: relative;
+  box-shadow: 2px 0 0 var(--peer-color);
+}
+
+.document-peer-caret::after,
+.document-peer-caret-end::after {
+  content: attr(data-name);
+  /* Not announced: who is here is in the presence list. Browsers without alt text keep the line above. */
+  content: attr(data-name) / "";
+  position: absolute;
+  bottom: 100%;
+  left: -2px;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 5px;
+  border-radius: 4px 4px 4px 0;
+  font-size: 11px;
+  font-weight: 500;
+  font-style: normal;
+  line-height: 1.4;
+  color: #ffffff;
+  background-color: var(--peer-fill);
+  pointer-events: none;
+  user-select: none;
+}
+
+.document-peer-caret-end::after {
+  left: 100%;
+}

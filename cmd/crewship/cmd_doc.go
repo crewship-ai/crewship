@@ -164,6 +164,7 @@ access.`, `  crewship doc comment-resolve @<artifact-id> --file resolve.json`},
 	root.AddCommand(newDocCreateCommand())
 	root.AddCommand(newDocDraftCommand())
 	root.AddCommand(newDocResultsCommand())
+	root.AddCommand(newDocPresenceCommand())
 	root.AddCommand(newDocHistoryCommands()...)
 	root.AddCommand(newDocProposalCommands()...)
 	return root

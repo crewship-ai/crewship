@@ -91,7 +91,7 @@ it("accepts the original exact-retry receipt after the authorized head advances"
 it("does not recommit an acknowledged update when its authorized refresh fails",async()=>{
  const server=model();let committed=false,readFails=true,posts=0
  fetchMock.mockImplementation((_url:string,init?:RequestInit)=>{
-  if(init?.method==="POST"){posts++;const body=JSON.parse(init.body as string);Y.applyUpdate(server,decodeUpdate(body.update));committed=true;return response({id:body.id,epoch:body.epoch,rev:5})}
+  if(init?.method==="POST"){posts++;const body=JSON.parse(init.body as string);committed=true;Y.applyUpdate(server,decodeUpdate(body.update));return response({id:body.id,epoch:body.epoch,rev:5})}
   return committed && readFails?response({error:"read unavailable"},503):response(state(server,committed?5:4))
  })
  const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
@@ -118,7 +118,7 @@ it.each([400,413,422,"quota"])("retains a rejected local draft and stops retries
 it("retries rate admission with the exact request instead of discarding the draft",async()=>{
  const server=model();let limited=true;const bodies:string[]=[]
  fetchMock.mockImplementation((_url:string,init?:RequestInit)=>{
-  if(init?.method==="POST"){bodies.push(init.body as string);const body=JSON.parse(init.body as string);if(limited)return response({error:"wait",code:"document_rate_limit"},429);return response({id:body.id,epoch:body.epoch,rev:5})}
+  if(init?.method==="POST"){bodies.push(init.body as string);const body=JSON.parse(init.body as string);if(limited)return response({error:"wait",code:"document_rate_limit"},429);Y.applyUpdate(server,decodeUpdate(body.update));return response({id:body.id,epoch:body.epoch,rev:5})}
   return response(state(server,limited?4:5))
  })
  const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
@@ -128,7 +128,7 @@ it("retries rate admission with the exact request instead of discarding the draf
 it("retries a 429 without a document code (the general per-IP limiter) instead of stalling the queue",async()=>{
  const server=model();let limited=true;const bodies:string[]=[]
  fetchMock.mockImplementation((_url:string,init?:RequestInit)=>{
-  if(init?.method==="POST"){bodies.push(init.body as string);const body=JSON.parse(init.body as string);if(limited){limited=false;return response({error:"Too many requests"},429)}return response({id:body.id,epoch:body.epoch,rev:5})}
+  if(init?.method==="POST"){bodies.push(init.body as string);const body=JSON.parse(init.body as string);if(limited){limited=false;return response({error:"Too many requests"},429)}Y.applyUpdate(server,decodeUpdate(body.update));return response({id:body.id,epoch:body.epoch,rev:5})}
   return response(state(server,bodies.length>1?5:4))
  })
  const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
@@ -154,7 +154,7 @@ const failures:[string,()=>Promise<unknown>,boolean][]=[
 it.each(failures)("halts the queue on %s only when the poll blocks",async(_name,fail,blocks)=>{
  const server=model();let posts=0
  fetchMock.mockImplementation((_url:string,init?:RequestInit)=>{
-  if(init?.method==="POST"){posts++;const body=JSON.parse(init.body as string);return posts===1?fail():response({id:body.id,epoch:body.epoch,rev:5})}
+  if(init?.method==="POST"){posts++;const body=JSON.parse(init.body as string);if(posts===1)return fail();Y.applyUpdate(server,decodeUpdate(body.update));return response({id:body.id,epoch:body.epoch,rev:5})}
   return response(state(server,posts>1?5:4))
  })
  const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
@@ -270,8 +270,7 @@ it("keeps confirmed edits out of replay when journal cleanup fails",async()=>{
  fetchMock.mockImplementation((_url:string,init?:RequestInit)=>{
   if(init?.method==="POST"){
    posts++;const body=JSON.parse(init.body as string)
-   Y.applyUpdate(server,decodeUpdate(body.update))
-   return response({id:body.id,epoch:body.epoch,rev:5})
+   Y.applyUpdate(server,decodeUpdate(body.update));return response({id:body.id,epoch:body.epoch,rev:5})
   }
   return response(state(server,posts?5:4))
  })

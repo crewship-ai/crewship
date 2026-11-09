@@ -1,6 +1,8 @@
 // Editor lifecycle tests use a protected-store seam (as in the use-page-document
 // hook tests); protected-store authorization and encryption are exercised by the
 // real-browser and protected-document tests.
+// Presence heartbeats are covered by document-remote-carets and the presence API tests; these tests count document writes.
+vi.mock("@/hooks/use-document-presence", () => { const none: never[] = []; return { useDocumentPresence: () => none } })
 vi.mock("@/lib/protected-document-drafts", () => ({ openProtectedDocumentDrafts: async (...args: Parameters<typeof import("@/lib/document-queue").openDocumentDrafts>) => (await import("@/lib/document-queue")).openDocumentDrafts(...args) }))
 vi.mock("@/lib/local-draft-seal", () => ({
  createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
