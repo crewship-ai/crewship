@@ -315,6 +315,9 @@ importers:
       highlight.js:
         specifier: ^11.12.0
         version: 11.12.0
+      katex:
+        specifier: 0.18.2
+        version: 0.18.2
       lib0:
         specifier: 0.2.119
         version: 0.2.119
