@@ -424,9 +424,9 @@ try {
   const restoredResponse = page.waitForResponse(r => r.url().includes('/document/restore') && r.request().method() === 'POST')
   await page.getByRole('alertdialog', { name: 'Confirm checkpoint restore' }).getByRole('button', { name: 'Confirm restore' }).click()
   assert.equal((await restoredResponse).status(), 200, 'the restore is confirmed')
-  const back = await waitFor(s => s.value.schema === 6 && Object.keys(s.placements).length === 0, 'restore stored')
-  assert.deepEqual(back.value.content, beforeUpgrade.content, 'the restored Page is the version from before Canvas, formatting included')
-  assert.deepEqual([Object.keys(back.items).length, Object.keys(back.text).length], [0, 0], 'no notes or other canvas items are left')
+  const restoredState = await waitFor(s => s.value.schema === 6 && Object.keys(s.placements).length === 0, 'restore stored')
+  assert.deepEqual(restoredState.value.content, beforeUpgrade.content, 'the restored Page is the version from before Canvas, formatting included')
+  assert.deepEqual([Object.keys(restoredState.items).length, Object.keys(restoredState.text).length], [0, 0], 'no notes or other canvas items are left')
   pass('restoring a version from before Canvas keeps schema 6 with an empty layout and the original formatting')
   await coContext.setOffline(false)
   // Poll for the co-editor's notice instead of a fixed wait; a few extra seconds let any held patch reach the server.
