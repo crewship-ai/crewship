@@ -1,12 +1,14 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -144,6 +146,17 @@ func RestoreSnapshot(dbPath, snapshotPath string) error {
 		return fmt.Errorf("stage restored db: %w", err)
 	}
 	defer os.Remove(tmp) // no-op after a successful rename
+	defer func() {
+		for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+			_ = os.Remove(tmp + suffix)
+		}
+	}()
+	// The snapshot rewinds document content: give it a new document database
+	// identity before it goes live, so the public Docs epoch changes and no
+	// browser replays pending edits onto the older content (#5163).
+	if err := rotateStagedDocumentIdentity(tmp); err != nil {
+		return fmt.Errorf("stage restored db: %w", err)
+	}
 
 	// Drop WAL/SHM so a stale WAL isn't replayed over the restored file, then
 	// atomically swap the staged copy into place. If the rename fails the
@@ -157,6 +170,28 @@ func RestoreSnapshot(dbPath, snapshotPath string) error {
 		return fmt.Errorf("swap restored db into place: %w", err)
 	}
 	return nil
+}
+
+// rotateStagedDocumentIdentity rotates the document database identity in the
+// staged copy. A snapshot from before the table needs nothing: the migration
+// that creates it on first boot writes a fresh identity.
+func rotateStagedDocumentIdentity(path string) error {
+	staged, err := sql.Open("sqlite", path)
+	if err != nil {
+		return err
+	}
+	defer staged.Close()
+	staged.SetMaxOpenConns(1)
+	if _, err = staged.Exec(`UPDATE document_database_identity SET value=lower(hex(randomblob(16))) WHERE id=1`); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no such table") {
+			return nil
+		}
+		return fmt.Errorf("rotate document database identity: %w", err)
+	}
+	if _, err = staged.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return fmt.Errorf("checkpoint staged db: %w", err)
+	}
+	return staged.Close()
 }
 
 // Allocate each restore file exclusively: a predictable name can already be

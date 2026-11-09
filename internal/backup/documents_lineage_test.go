@@ -1,7 +1,9 @@
 package backup_test
 
 import (
+	"context"
 	"database/sql"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -92,6 +94,15 @@ func TestDocumentBackupRestoreRotatesDatabaseIdentity(t *testing.T) {
 		}
 		if documentDatabaseIdentity(t, source) != current {
 			t.Fatal("failed restore rotated the database identity")
+		}
+	})
+	t.Run("restore failing at commit rolls back the rotation", func(t *testing.T) {
+		current := documentDatabaseIdentity(t, source)
+		if _, err := backup.RestoreDumpTx(t.Context(), source, dump, func(context.Context) error { return errors.New("synthetic pre-commit failure") }); err == nil {
+			t.Fatal("pre-commit failure accepted")
+		}
+		if documentDatabaseIdentity(t, source) != current {
+			t.Fatal("rolled-back restore rotated the database identity")
 		}
 	})
 }
