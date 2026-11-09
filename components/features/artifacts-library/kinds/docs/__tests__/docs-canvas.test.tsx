@@ -1,9 +1,9 @@
 import * as React from "react"
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import { documentSurface } from "@/lib/documents/surface"
-import { DocsCanvas, pageBlocks, threadsByBlock } from "../docs-canvas"
+import { DocsCanvas, deleteConsequences, pageBlocks, threadsByBlock } from "../docs-canvas"
 import type { DocumentComment } from "@/hooks/use-document-comments"
 
 afterEach(cleanup)
@@ -171,5 +171,99 @@ describe("DocsCanvas", () => {
       expect(card("intro")).toBeNull()
       expect(screen.queryByRole("button", { name: /open comment/ })).toBeNull()
     })
+  })
+
+  it("Remove from canvas drops only the placement; the block and its text stay on the Page", () => {
+    const doc = fixture()
+    documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })
+    render(<DocsCanvas doc={doc} editable origin="me" />)
+    fireEvent.pointerDown(card("intro"), { pointerId: 1, button: 0, clientX: 5, clientY: 5 }); fireEvent.pointerUp(card("intro"), { pointerId: 1, clientX: 5, clientY: 5 })
+    const bar = screen.getByRole("toolbar", { name: "Selection" })
+    fireEvent.click(within(bar).getByRole("button", { name: "Remove from canvas" }))
+    expect(documentSurface.project(doc).placements).toEqual([])
+    expect(pageBlocks(doc).map(b => [b.id, b.text])).toEqual([["title", "Plan"], ["intro", "Shared text"], ["outro", "Last"]])
+  })
+
+  it("Delete block asks first, naming the Page, the Canvas and the threads it detaches, then deletes both at once", async () => {
+    const doc = fixture()
+    documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })
+    const comments = [{ id: "t1", block: "intro", status: "attached", resolved: false } as unknown as DocumentComment]
+    const origins: unknown[] = []
+    doc.on("update", (_u: Uint8Array, origin: unknown) => origins.push(origin))
+    render(<DocsCanvas doc={doc} editable origin="me" comments={comments} />)
+    fireEvent.pointerDown(card("intro"), { pointerId: 1, button: 0, clientX: 5, clientY: 5 }); fireEvent.pointerUp(card("intro"), { pointerId: 1, clientX: 5, clientY: 5 })
+    fireEvent.click(screen.getByRole("button", { name: "Delete block…" }))
+    const dialog = await screen.findByRole("alertdialog")
+    expect(dialog.textContent).toContain("deleted from the Page and from the Canvas")
+    expect(dialog.textContent).toContain("1 open comment thread becomes detached")
+    expect(pageBlocks(doc).map(b => b.id)).toEqual(["title", "intro", "outro"])
+    expect(origins).toEqual([])
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete block" }))
+    await act(async () => {})
+    expect(pageBlocks(doc).map(b => b.id)).toEqual(["title", "outro"])
+    expect(documentSurface.project(doc).placements).toEqual([])
+    expect(origins).toEqual(["me"])
+  })
+
+  it("Undo takes back only this person's own Canvas change, Redo puts it back; another person's move stays", () => {
+    const doc = fixture()
+    documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })
+    documentSurface.place(doc, "outro", { x: 400, y: 0, w: 320, h: 120, z: 2 })
+    render(<DocsCanvas doc={doc} editable origin="me" />)
+    const undo = screen.getByRole("button", { name: "Undo my last canvas change" }) as HTMLButtonElement
+    expect(undo.disabled).toBe(true)
+    drag(card("intro"), { x: 10, y: 10 }, { x: 110, y: 60 })
+    const mine = documentSurface.project(doc).placements.find(p => p.id === "intro")!
+    expect(mine.x).not.toBe(0)
+    act(() => { documentSurface.move(doc, "outro", { x: 900, y: 300 }, "someone-else") })
+    expect(undo.disabled).toBe(false)
+    fireEvent.click(undo)
+    const after = documentSurface.project(doc).placements
+    expect(after.find(p => p.id === "intro")).toMatchObject({ x: 0, y: 0 })
+    expect(after.find(p => p.id === "outro")).toMatchObject({ x: 900, y: 300 })
+    fireEvent.click(screen.getByRole("button", { name: "Redo" }))
+    expect(documentSurface.project(doc).placements.find(p => p.id === "intro")).toMatchObject({ x: mine.x, y: mine.y })
+  })
+
+  it("Undo of a deleted block brings it back to the Page and its placement", async () => {
+    const doc = fixture()
+    documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })
+    render(<DocsCanvas doc={doc} editable origin="me" />)
+    fireEvent.pointerDown(card("intro"), { pointerId: 1, button: 0, clientX: 5, clientY: 5 }); fireEvent.pointerUp(card("intro"), { pointerId: 1, clientX: 5, clientY: 5 })
+    fireEvent.click(screen.getByRole("button", { name: "Delete block…" }))
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Delete block" }))
+    await act(async () => {})
+    expect(pageBlocks(doc).map(b => b.id)).toEqual(["title", "outro"])
+    fireEvent.keyDown(canvas(), { key: "z", ctrlKey: true })
+    expect(pageBlocks(doc).map(b => [b.id, b.text])).toEqual([["title", "Plan"], ["intro", "Shared text"], ["outro", "Last"]])
+    expect(documentSurface.project(doc).placements.map(p => p.id)).toEqual(["intro"])
+  })
+
+  it("a note is canvas-only: its text is written on the canvas and never becomes a Page block", () => {
+    const doc = fixture()
+    render(<DocsCanvas doc={doc} editable origin="me" />)
+    fireEvent.click(screen.getByRole("button", { name: "Add note" }))
+    fireEvent.click(within(screen.getByRole("toolbar", { name: "Selection" })).getByRole("button", { name: "Edit text" }))
+    const box = screen.getByRole("textbox", { name: "Note text" })
+    fireEvent.change(box, { target: { value: "Idea" } })
+    fireEvent.blur(box)
+    const note = documentSurface.project(doc).items[0]
+    expect(note).toMatchObject({ kind: "note", text: "Idea" })
+    expect(pageBlocks(doc).map(b => b.id)).toEqual(["title", "intro", "outro"])
+  })
+
+  it("read-only people get no Remove, Delete, Undo or note editing", () => {
+    const doc = fixture()
+    documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })
+    render(<DocsCanvas doc={doc} editable={false} origin="me" />)
+    fireEvent.pointerDown(card("intro"), { pointerId: 1, button: 0, clientX: 5, clientY: 5 }); fireEvent.pointerUp(card("intro"), { pointerId: 1, clientX: 5, clientY: 5 })
+    const bar = screen.getByRole("toolbar", { name: "Selection" })
+    expect(within(bar).getAllByRole("button").map(b => b.textContent)).toEqual(["Open in Page"])
+    expect(screen.queryByRole("button", { name: "Undo my last canvas change" })).toBeNull()
+  })
+
+  it("names the impact of a delete in plain words", () => {
+    expect(deleteConsequences(0, 0).map(c => c.text)).toEqual(["The block is deleted from the Page and from the Canvas.", "History keeps it: undo here, or restore a version."])
+    expect(deleteConsequences(2, 1).map(c => c.text)[1]).toBe("2 open comment threads become detached; they keep the quoted text.")
   })
 })

@@ -100,7 +100,7 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 		if operation == "comments" {
 			operation = "comment"
 		}
-		if operation != "initialize" && operation != "patch" && operation != "comment" && operation != "resolve" {
+		if operation != "initialize" && operation != "patch" && operation != "upgrade" && operation != "comment" && operation != "resolve" {
 			replyError(w, 404, "unknown document operation")
 			return
 		}

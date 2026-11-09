@@ -4,6 +4,7 @@ package main
 // POST /api/v1/pages/{slug}/document/initialize doc initialize
 // GET /api/v1/pages/{slug}/document doc read, doc outline
 // POST /api/v1/pages/{slug}/document/patch doc patch
+// POST /api/v1/pages/{slug}/document/upgrade doc upgrade
 // GET /api/v1/pages/{slug}/document/comments doc comments
 // POST /api/v1/pages/{slug}/document/comments doc comment
 // POST /api/v1/pages/{slug}/document/comments/resolve doc comment-resolve
@@ -55,6 +56,14 @@ after a lost confirmation; the original receipt comes back with duplicate: true.
 The artifact must be empty and owned by you, not by a crew (for example one made
 with crewship page create --allow-empty). Read the document afterwards to obtain
 its epoch.`, `  crewship doc initialize @<artifact-id> --file initialize.json`},
+		"upgrade": {"Upgrade a document to the newest schema, for example to enable Canvas", `Send one JSON object with id, schema (the document's current schema),
+target_schema (6, the newest), page_id, epoch and ifRev from doc read. The
+upgrade only widens what the document may hold: its text, block IDs and hashes,
+versions, comments and open proposals stay as they are, and schema 6 adds the
+Canvas view. You need Edit access; agents cannot upgrade. A changed revision or
+epoch returns 409 and nothing changes. Resend the exact request after a lost
+confirmation; the original receipt comes back with duplicate: true. Editors
+still open at the old schema must reload before they can save again.`, `  crewship doc upgrade @<artifact-id> --file upgrade.json`},
 		"comments": {"List the document's comment threads and replies", `Print comments (oldest first) with id, body, actor, created_at, version and
 resolved, plus can_comment and can_resolve for you. A thread has its quoted
 text, block and status (attached, collapsed, detached or resolved); a reply has
@@ -71,7 +80,7 @@ comment (the thread id), version (from doc comments) and resolved (true or
 false). A changed version or revision returns 409. You need Comment or Edit
 access.`, `  crewship doc comment-resolve @<artifact-id> --file resolve.json`},
 	}
-	for _, operation := range []string{"read", "outline", "patch", "status", "initialize", "comments", "comment", "comment-resolve"} {
+	for _, operation := range []string{"read", "outline", "patch", "status", "initialize", "upgrade", "comments", "comment", "comment-resolve"} {
 		operation := operation
 		cmd := &cobra.Command{Use: operation + " <page-slug>", Short: help[operation][0], Long: help[operation][1], Example: help[operation][2], Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
 			client, err := pageClient()
@@ -121,6 +130,8 @@ access.`, `  crewship doc comment-resolve @<artifact-id> --file resolve.json`},
 					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/patch", body)
 				case "initialize":
 					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/initialize", body)
+				case "upgrade":
+					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/upgrade", body)
 				case "comment":
 					response, err = client.Post("/api/v1/pages/"+pagePathEscape(args[0])+"/document/comments", body)
 				case "comment-resolve":
@@ -158,7 +169,7 @@ access.`, `  crewship doc comment-resolve @<artifact-id> --file resolve.json`},
 			cmd.Use = "status"
 			cmd.Args = cobra.NoArgs
 		}
-		if operation == "patch" || operation == "initialize" || operation == "comment" || operation == "comment-resolve" {
+		if operation == "patch" || operation == "initialize" || operation == "upgrade" || operation == "comment" || operation == "comment-resolve" {
 			cmd.Flags().String("file", "", "JSON request file; - reads stdin. Preserve operation IDs when retrying an exact request")
 		}
 		root.AddCommand(cmd)

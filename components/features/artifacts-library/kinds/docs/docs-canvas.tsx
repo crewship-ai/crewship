@@ -1,9 +1,10 @@
 "use client"
 
 import * as React from "react"
-import type * as Y from "yjs"
-import { Maximize, MessageSquare, Minus, Plus, StickyNote } from "lucide-react"
+import * as Y from "yjs"
+import { FileText, Maximize, MessageSquare, Minus, Pencil, Plus, Redo2, StickyNote, Trash2, Undo2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
 import { cn } from "@/lib/utils"
 import { fitAll, focusRect, moved, nextPlacement, nudged, pan, resized, toWorld, wheelFactor, zoomAt, type Handle, type Rect, type Viewport } from "@/lib/documents/canvas-viewport"
 import { documentSurface, type SurfaceItem, type SurfacePlacement, type SurfaceView } from "@/lib/documents/surface"
@@ -19,6 +20,11 @@ import type { DocumentComment } from "@/hooks/use-document-comments"
  * resize, add or remove anything. Pointer: background drag pans with any
  * button; on a card the primary button moves (Edit only) and the others pan.
  * Ctrl/⌘ + wheel or a pinch zooms around the pointer; a plain wheel pans.
+ *
+ * "Remove from canvas" deletes only the placement: the block stays in the
+ * Page. "Delete block" deletes it from the Page and the Canvas in one change,
+ * after a confirmation that names both and the comment threads it detaches.
+ * Undo and Redo here take back only this person's own Canvas changes.
  */
 export interface DocsCanvasProps {
   doc: Y.Doc
@@ -131,6 +137,9 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
   const pointers = React.useRef(new Map<number, { x: number; y: number }>())
   const pinch = React.useRef<number | null>(null)
   const fitted = React.useRef(false)
+  const [editingNote, setEditingNote] = React.useState<{ id: string; text: string } | null>(null)
+  const [deleting, setDeleting] = React.useState<string | null>(null)
+  const undo = useOwnUndo(doc, origin)
 
   const byId = React.useMemo(() => new Map(blocks.map(b => [b.id, b])), [blocks])
   // Recomputed with the blocks: a Page edit that nests or moves a commented block updates its card.
@@ -150,7 +159,17 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
 
   const write = (action: () => void) => {
     if (!editable) return
-    try { action(); setFailure(null) } catch (e) { setFailure(e instanceof Error ? e.message : "This change could not be made.") }
+    try { action(); setFailure(null) } catch (e) { setFailure(failureText(e)) }
+  }
+  const removeFromCanvas = (id: string) => { write(() => documentSurface.unplace(doc, id, origin)); setSelected(null) }
+  const deleteItem = (id: string) => { write(() => documentSurface.removeItem(doc, id, origin)); setSelected(null) }
+  const deleteBlock = (id: string) => { write(() => documentSurface.deleteBlock(doc, id, origin)); setSelected(null); setDeleting(null) }
+  const saveNote = () => {
+    const note = editingNote
+    setEditingNote(null)
+    if (!note) return
+    const current = items.find(i => i.id === note.id)
+    if (current && current.kind !== "connector" && (current.text ?? "") !== note.text) write(() => documentSurface.setText(doc, note.id, note.text, origin))
   }
   const rectOf = (id: string): Rect | null => {
     const found = rects.find(r => r.id === id)
@@ -229,6 +248,12 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
   const onPointerCancel = (event: React.PointerEvent) => { pointers.current.delete(event.pointerId); cancel() }
 
   const onKeyDown = (event: React.KeyboardEvent) => {
+    if (editingNote) return
+    if (editable && (event.ctrlKey || event.metaKey) && (event.key === "z" || event.key === "Z" || event.key === "y")) {
+      event.preventDefault()
+      if (event.key === "y" || event.shiftKey) undo.redo(); else undo.undo()
+      return
+    }
     if (event.key === "Escape") { if (drag.current) cancel(); else setSelected(null); return }
     const center = { x: size().width / 2, y: size().height / 2 }
     if (event.target === ref.current || !selected) {
@@ -239,7 +264,12 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
     }
     const rect = rectOf(selected)
     if (!rect) return
-    if (event.key === "Enter") { event.preventDefault(); if (byId.has(selected)) onOpenInPage?.(selected); return }
+    if (event.key === "Enter") {
+      event.preventDefault()
+      if (byId.has(selected)) onOpenInPage?.(selected)
+      else if (editable) { const note = items.find(i => i.id === selected); if (note && note.kind === "note") setEditingNote({ id: note.id, text: note.text ?? "" }) }
+      return
+    }
     if (event.key === "f" || event.key === "F") { event.preventDefault(); setViewport(focusRect(rect, size())); return }
     if (!editable) return
     const next = nudged(rect, event.key, event.altKey)
@@ -247,9 +277,8 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
     if (event.key === "Delete" || event.key === "Backspace") {
       event.preventDefault()
       // A placement is removed from the canvas only; the block stays in the Page.
-      if (placements.some(p => p.id === selected)) write(() => documentSurface.unplace(doc, selected, origin))
-      else write(() => documentSurface.removeItem(doc, selected, origin))
-      setSelected(null)
+      if (placements.some(p => p.id === selected)) removeFromCanvas(selected)
+      else deleteItem(selected)
     }
   }
 
@@ -265,6 +294,13 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
     documentSurface.putItem(doc, id, { kind: "note", x: Math.round(center.x), y: Math.round(center.y), w: 200, h: 160, z: topZ(), text: "", tone: "yellow" }, origin)
     setSelected(id)
   })
+
+  const selectedEntry: { kind: "block"; id: string } | { kind: "note"; id: string; text: string } | null = !selected ? null
+    : placements.some(p => p.id === selected) && byId.has(selected) ? { kind: "block", id: selected }
+    : (() => { const note = items.find(i => i.id === selected); return note && note.kind === "note" ? { kind: "note" as const, id: note.id, text: note.text ?? "" } : null })()
+  const deletingBlock = deleting ? byId.get(deleting) : undefined
+  const deletingThreads = deleting ? threads.get(deleting)?.length ?? 0 : 0
+  const deletingConnectors = deleting ? items.filter(i => i.kind === "connector" && (i.from.ref === deleting || i.to.ref === deleting)).length : 0
 
   if (error) return <div role="alert" className="m-6 rounded-md border border-destructive/40 p-4 text-sm">This canvas contains data this version cannot read. Nothing was changed; reload to update.</div>
 
@@ -310,11 +346,18 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
         {items.filter(i => i.kind !== "connector").map(i => {
           const item = i as Exclude<SurfaceItem, { kind: "connector" }>, r = shown(item)
           return <div key={item.id} role="group" aria-label={item.kind === "note" ? `Note: ${item.text || "empty"}` : `Shape: ${item.text ?? item.shape}`}
-            data-item={item.id} tabIndex={0} onFocus={() => setSelected(item.id)} onPointerDown={e => onPointerDown(e, { id: item.id })}
+            data-item={item.id} tabIndex={0} onFocus={() => setSelected(item.id)} onPointerDown={e => { if (editingNote?.id !== item.id) onPointerDown(e, { id: item.id }) }}
+            onDoubleClick={() => { if (editable && item.kind === "note") setEditingNote({ id: item.id, text: item.text ?? "" }) }}
             className={cn("absolute rounded-md border p-2 text-sm outline-none", NOTE_TONES[item.tone] ?? "bg-card", item.kind === "shape" && item.shape === "ellipse" && "rounded-full",
               selected === item.id && "ring-2 ring-primary")}
             style={{ left: r.x, top: r.y, width: r.w, height: r.h, zIndex: item.z }}>
-            <p className="whitespace-pre-wrap break-words">{item.text}</p>
+            {editingNote?.id === item.id
+              ? <textarea autoFocus aria-label="Note text" value={editingNote.text} maxLength={documentSurface.LIMITS.text}
+                onChange={e => setEditingNote({ id: item.id, text: e.target.value })} onBlur={saveNote}
+                onPointerDown={e => e.stopPropagation()}
+                onKeyDown={e => { e.stopPropagation(); if (e.key === "Escape") setEditingNote(null); else if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) saveNote() }}
+                className="size-full resize-none bg-transparent outline-none" />
+              : <p className="whitespace-pre-wrap break-words">{item.text || (editable ? <span className="text-muted-foreground">Double-click to write</span> : null)}</p>}
           </div>
         })}
       </div>
@@ -332,7 +375,22 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
       </ul>
     </details>}
 
+    {selectedEntry && <div role="toolbar" aria-label="Selection" data-canvas-selection
+      className="absolute left-1/2 top-3 flex -translate-x-1/2 items-center gap-1 rounded-md border bg-background p-1 text-sm shadow-sm">
+      {selectedEntry.kind === "block" && <>
+        <Button type="button" size="sm" variant="ghost" onClick={() => onOpenInPage?.(selectedEntry.id)}><FileText aria-hidden className="size-4" />Open in Page</Button>
+        {editable && <Button type="button" size="sm" variant="ghost" onClick={() => removeFromCanvas(selectedEntry.id)}><X aria-hidden className="size-4" />Remove from canvas</Button>}
+        {editable && <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={() => setDeleting(selectedEntry.id)}><Trash2 aria-hidden className="size-4" />Delete block…</Button>}
+      </>}
+      {selectedEntry.kind === "note" && editable && <>
+        <Button type="button" size="sm" variant="ghost" onClick={() => setEditingNote({ id: selectedEntry.id, text: selectedEntry.text })}><Pencil aria-hidden className="size-4" />Edit text</Button>
+        <Button type="button" size="sm" variant="ghost" className="text-destructive" onClick={() => deleteItem(selectedEntry.id)}><Trash2 aria-hidden className="size-4" />Delete note</Button>
+      </>}
+    </div>}
+
     <div className="absolute bottom-3 right-3 flex items-center gap-1 rounded-md border bg-background p-1 shadow-sm">
+      {editable && <Button type="button" size="sm" variant="ghost" onClick={() => undo.undo()} disabled={!undo.canUndo} aria-label="Undo my last canvas change"><Undo2 aria-hidden className="size-4" /></Button>}
+      {editable && <Button type="button" size="sm" variant="ghost" onClick={() => undo.redo()} disabled={!undo.canRedo} aria-label="Redo"><Redo2 aria-hidden className="size-4" /></Button>}
       {editable && <Button type="button" size="sm" variant="ghost" onClick={addNote} aria-label="Add note"><StickyNote aria-hidden className="size-4" /></Button>}
       <Button type="button" size="sm" variant="ghost" onClick={() => zoomBy(1 / 1.2)} aria-label="Zoom out"><Minus aria-hidden className="size-4" /></Button>
       <span className="w-12 text-center font-mono text-xs tabular-nums" aria-live="polite" data-zoom>{Math.round(viewport.scale * 100)}%</span>
@@ -340,5 +398,43 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
       <Button type="button" size="sm" variant="ghost" onClick={fit} aria-label="Fit to screen"><Maximize aria-hidden className="size-4" /></Button>
     </div>
     {failure && <p role="alert" className="absolute bottom-14 right-3 rounded-md border border-destructive/40 bg-background px-3 py-2 text-sm">{failure}</p>}
+
+    <ConfirmDialog open={deleting !== null} onOpenChange={open => { if (!open) setDeleting(null) }} destructive
+      title="Delete this block?" description={deletingBlock ? `“${deletingBlock.text || "Empty block"}” is part of the Page as well as the Canvas.` : undefined}
+      consequences={deleting ? deleteConsequences(deletingThreads, deletingConnectors) : []}
+      confirmLabel="Delete block" onConfirm={() => { if (deleting) deleteBlock(deleting) }} />
   </div>
+}
+
+function failureText(cause: unknown): string {
+  const message = cause instanceof Error ? cause.message : ""
+  if (message === "a document keeps at least one block") return "A document keeps at least one block, so this one cannot be deleted."
+  if (message === "surface history limit" || message === "surface entry limit") return "The canvas is full. This change was not made."
+  return message || "This change could not be made."
+}
+
+/** What deleting a block does, for its confirmation (R71 §0.4/2 and /4). */
+export function deleteConsequences(threads: number, connectors: number): { tone: "lost" | "kept" | "warn"; text: string }[] {
+  return [
+    { tone: "lost", text: "The block is deleted from the Page and from the Canvas." },
+    ...(threads > 0 ? [{ tone: "warn" as const, text: `${threads} open comment ${threads === 1 ? "thread becomes" : "threads become"} detached; ${threads === 1 ? "it keeps" : "they keep"} the quoted text.` }] : []),
+    ...(connectors > 0 ? [{ tone: "warn" as const, text: `${connectors} ${connectors === 1 ? "connector loses" : "connectors lose"} an end.` }] : []),
+    { tone: "kept", text: "History keeps it: undo here, or restore a version." },
+  ]
+}
+
+/**
+ * This person's own undo on the Canvas: only changes made with their origin,
+ * across the Page and the surface roots, so a deleted block comes back with its
+ * placement and nobody else's work is ever taken back (R71 §0.4/5).
+ */
+function useOwnUndo(doc: Y.Doc, origin: string) {
+  const [state, setState] = React.useState({ canUndo: false, canRedo: false })
+  const manager = React.useMemo(() => new Y.UndoManager([doc.getXmlFragment("default"), ...documentSurface.ROOTS.map(name => doc.getMap(name))], { trackedOrigins: new Set([origin]), captureTimeout: 0 }), [doc, origin])
+  React.useEffect(() => {
+    const sync = () => setState({ canUndo: manager.canUndo(), canRedo: manager.canRedo() })
+    manager.on("stack-item-added", sync); manager.on("stack-item-popped", sync); manager.on("stack-cleared", sync)
+    return () => { manager.off("stack-item-added", sync); manager.off("stack-item-popped", sync); manager.off("stack-cleared", sync); manager.destroy() }
+  }, [manager])
+  return { ...state, undo: () => { manager.undo() }, redo: () => { manager.redo() } }
 }

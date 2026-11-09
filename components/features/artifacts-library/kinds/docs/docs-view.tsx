@@ -4,6 +4,8 @@ import * as React from "react"
 import { EditorContent, useEditorState } from "@tiptap/react"
 import { Download, FileText, GitPullRequestArrow, History, LayoutGrid, ListTree, MessageSquare, PanelLeft, Send, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { canEnableCanvas, enableCanvas, upgradeFailure } from "@/lib/documents/upgrade"
 import { Textarea } from "@/components/ui/textarea"
 import { proposalChatHref, proposalSchema } from "@/lib/documents/proposal-request"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
@@ -21,6 +23,13 @@ import { documentSurface } from "@/lib/documents/surface"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
 import { commentTarget, setCommentHighlights, type CommentTarget } from "@/components/features/pages/document-rich-extensions"
+
+/**
+ * Documents whose Canvas a person has just enabled in this tab: the session
+ * reopens at the new schema and shows Canvas, which they asked for. In memory
+ * only; nothing about a document is stored in the browser for it.
+ */
+const openCanvasAfterReopen = new Set<string>()
 
 /** What the Docs body tells the frame: the chip, whether this person can edit now, and the chip's popover. */
 export interface DocsFrameReport {
@@ -84,7 +93,7 @@ function DocsUnhydrated({ denied, status, onFrame, children }: { denied: boolean
 }
 
 function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsFrameReport | null) => void }) {
-  const { workspaceId, pageId, humanId, slug, available, historyExpired, sync, onFrame } = props
+  const { workspaceId, pageId, humanId, slug, available, historyExpired, sync, onFrame, onRestored } = props
   const frame = useArtifactFrame()
   const layout: FrameLayout = frame?.layout ?? "desktop"
   const phone = layout === "phone"
@@ -110,7 +119,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     const member = kind === "user" ? (members.members ?? []).find(entry => entry.user.id === id) : undefined
     return member?.user.full_name || member?.user.email || (kind === "agent" ? "Agent" : "Workspace member")
   }, [humanId, members.members])
-  const [mode, setMode] = React.useState<"page" | "canvas">("page")
+  const [mode, setMode] = React.useState<"page" | "canvas">(() => openCanvasAfterReopen.delete(pageId) ? "canvas" : "page")
   const [draft, setDraft] = React.useState<CommentTarget | null>(null)
   const [commentNotice, setCommentNotice] = React.useState<string | null>(null)
   const [activeThread, setActiveThread] = React.useState<string | null>(null)
@@ -141,9 +150,26 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const proposalsServed = Boolean(sync.state?.proposals) && requestSchema !== undefined && available && !sync.denied
   const [proposalPrompt, setProposalPrompt] = React.useState("")
 
-  // Canvas is a second view of the same Y.Doc (R71 §0.4), offered only at a schema that admits the surface.
-  // Older documents keep Page only; nothing upgrades them implicitly.
+  // Canvas is a second view of the same Y.Doc (R71 §0.4), shown at a schema that admits the surface.
+  // An older document is upgraded only when a person with edit access confirms "Enable Canvas"; never implicitly.
   const canvasReady = Boolean(sync.state && !sync.denied && sync.state.schema >= documentSurface.CANVAS_SCHEMA)
+  const canvasOffer = !canvasReady && Boolean(sync.state && !sync.denied && available) && canEnableCanvas(sync.state?.schema, sync.state?.can_write === true)
+  const [enabling, setEnabling] = React.useState<{ id: string; error: string | null } | null>(null)
+  const confirmEnable = async () => {
+    const state = sync.state
+    if (!state || !enabling) return
+    // Unsaved edits would be refused at the new schema: they are saved first, never dropped.
+    if (sync.pending > 0 || sync.recovery) { setEnabling({ ...enabling, error: "Wait until your changes are saved, then enable Canvas." }); throw new Error("pending") }
+    const result = await enableCanvas({ pageId, schema: state.schema, rev: state.rev, epoch: state.epoch }, enabling.id)
+    if (result.status !== "done") {
+      // A changed document needs a fresh read and a fresh decision; an unknown outcome is retried with the same ID.
+      setEnabling({ id: result.status === "unknown" ? enabling.id : crypto.randomUUID(), error: upgradeFailure(result) })
+      if (result.status === "denied") sync.deny()
+      throw new Error(result.status)
+    }
+    openCanvasAfterReopen.add(pageId)
+    onRestored()
+  }
   const view = canvasReady ? mode : "page"
   // Losing Canvas (schema or access changed) returns to the Page for good, never back on its own.
   React.useEffect(() => { if (!canvasReady) setMode("page") }, [canvasReady])
@@ -199,8 +225,9 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
 
   const outlineShown = outlineOpen && view === "page"
   const modeTab = (value: "page" | "canvas", Icon: typeof FileText, label: string) => <button type="button" role="tab" aria-selected={view === value}
-    id={`docs-mode-${value}`} aria-controls={`docs-view-${value}`}
-    onClick={() => setMode(value)} data-docs-mode={value}
+    id={`docs-mode-${value}`} aria-controls={view === value ? `docs-view-${value}` : undefined}
+    aria-haspopup={value === "canvas" && !canvasReady ? "dialog" : undefined}
+    onClick={() => { if (value === "canvas" && !canvasReady) setEnabling({ id: crypto.randomUUID(), error: null }); else setMode(value) }} data-docs-mode={value}
     className={cn("inline-flex h-[30px] items-center gap-1.5 rounded-[var(--radius-row)] px-2.5 text-sm font-medium coarse:min-h-[44px]",
       view === value ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}>
     <Icon aria-hidden className="size-4" />{label}
@@ -234,10 +261,10 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
         <ArtifactTool icon={PanelLeft} label={outlineOpen ? "Hide outline" : "Show outline"} on={outlineOpen} onClick={() => setOutlineOpen(open => !open)} />
         <ArtifactToolSeparator />
       </>}
-      {/* Canvas shows only for documents whose schema admits the surface. */}
+      {/* Canvas shows for documents whose schema admits the surface, and as "Enable Canvas" to editors of older ones. */}
       <span role="tablist" aria-label="Mode" className="inline-flex">
         {modeTab("page", FileText, "Page")}
-        {canvasReady && modeTab("canvas", LayoutGrid, "Canvas")}
+        {(canvasReady || canvasOffer) && modeTab("canvas", LayoutGrid, "Canvas")}
       </span>
     </ArtifactSlot>
 
@@ -303,5 +330,17 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
           control={{ open: frame?.drawerTab === "history", onClose: () => frame?.openDrawer(null) }} />
       </div>
     </ArtifactDrawerSection>
+    <ConfirmDialog open={enabling !== null} onOpenChange={open => { if (!open) setEnabling(null) }}
+      title="Enable Canvas for this document?"
+      description="Canvas shows this document's blocks on a board you can arrange, next to notes that live only on the canvas."
+      consequences={[
+        { tone: "kept", text: "The Page, its text and formatting stay exactly as they are." },
+        { tone: "kept", text: "Versions, comments and open proposals are kept." },
+        { tone: "warn", text: "Everyone with edit access can use Canvas from now on. Restoring an older version keeps Canvas enabled." },
+        { tone: "warn", text: "People who have this document open must reload before they can save again." },
+      ]}
+      confirmLabel="Enable Canvas" onConfirm={confirmEnable}>
+      {enabling?.error && <p role="alert" className="text-sm text-destructive">{enabling.error}</p>}
+    </ConfirmDialog>
   </section>
 }

@@ -124,6 +124,11 @@ func documentSchemaCatalog() map[string]DomainSchema {
 	human := body(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"human"}}, "update": map[string]any{"type": "string", "maxLength": 1400000, "description": "Base64 incremental Yjs update; agent raw updates forbidden."}}, "kind", "update")
 	semantic := body(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"agent"}}, "target": str(), "text": str(), "ifRev": integer(), "ifHash": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}}, "target", "text", "ifRev", "ifHash")
 	post("/patch", map[string]any{"oneOf": []any{human, semantic}})
+	upgrade := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "schema", "target_schema", "page_id", "epoch", "ifRev"},
+		"description": "Explicit human schema upgrade (for example enabling Canvas at schema 6). Content, block IDs and hashes, versions and comments are unchanged; agents are refused.",
+		"properties": map[string]any{"id": map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,128}$"}, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3, 4, 5}, "description": "The document's current schema; it must support upgrade."},
+			"target_schema": map[string]any{"type": "integer", "enum": []int{6}}, "page_id": str(), "epoch": str(), "ifRev": integer()}}
+	post("/upgrade", upgrade)
 	get(base+"/comments", "DocumentCommentList")
 	commentText := map[string]any{"type": "string", "minLength": 1, "maxLength": 10000}
 	thread := body(map[string]any{"ifRev": integer(), "block": map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,80}$"}, "from": integer(), "to": integer(), "text": commentText}, "ifRev", "block", "from", "to", "text")

@@ -444,6 +444,29 @@ crewship doc patch @<artifact-id> --file patch.json
 An exact retry returns the original receipt with `found: true` and
 `duplicate: true`, plus the request's `schema` and the current `epoch`.
 
+## `crewship doc upgrade <page-slug>`
+
+Upgrade a document to the newest schema. Today that enables the Canvas
+(schema 6) on an older document; in the Docs view the first switch to Canvas
+asks the same question. Read the document first and send its current values:
+
+```json
+{"id":"enable-canvas-1","schema":5,"target_schema":6,"page_id":"<artifact-id>","epoch":"<epoch>","ifRev":12}
+```
+
+```bash
+crewship doc upgrade @<artifact-id> --file upgrade.json
+```
+
+The upgrade only widens what the document may hold. Its text, block IDs and
+hashes, versions, comments and open proposals stay as they are, and restoring a
+version from before the upgrade keeps the new schema. You need Edit access;
+agents cannot upgrade. A changed revision or epoch returns 409 and nothing
+changes: read again and send a new request. Resend the exact request after a
+lost confirmation; the original receipt comes back with `duplicate: true`.
+Editors still open at the old schema are refused when they save and must
+reload.
+
 ## `crewship doc comments <page-slug>`
 
 List the document's comment threads and their replies, oldest first. Reading
