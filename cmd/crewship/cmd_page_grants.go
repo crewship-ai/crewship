@@ -63,6 +63,9 @@ type pageGrantJSON struct {
 type pageGrantsJSON struct {
 	Page   string          `json:"page" yaml:"page"`
 	Grants []pageGrantJSON `json:"grants" yaml:"grants"`
+	// CanDelegateAgentEdit is the server's answer for the caller: only the
+	// page's owner grants an agent write.
+	CanDelegateAgentEdit bool `json:"can_delegate_agent_edit" yaml:"can_delegate_agent_edit"`
 }
 
 // pageGrantWriteBody is the PUT body.
@@ -106,6 +109,12 @@ Two rules the server enforces and this command cannot talk it out of:
   Only a human issues a grant. An agent holding "write" may rebuild the
   page freely but can never widen who reaches it — not even to an agent
   in its own crew.
+
+  Only the page's owner grants an agent "write" (the owning user, or a
+  member of the owning crew). A workspace admin can grant an agent read or
+  produce and can revoke any grant, but "--agent … --level write" from
+  anyone else is refused with exit 4, and an agent write grant issued by
+  someone who does not own the page reaches nothing.
 
 An agent's authority is a subset of yours and is re-checked every time it
 is used: if you lose access to a crew, every grant you issued narrows

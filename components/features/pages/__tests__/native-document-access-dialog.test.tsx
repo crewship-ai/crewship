@@ -3,7 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { NativeDocumentAccessDialog } from "../native-document-access-dialog"
-import { pageAccessKeys, normalizePageGrants } from "@/hooks/use-page-grants"
+import { pageAccessKeys, normalizePageGrantsDocument } from "@/hooks/use-page-grants"
 import { pagesKeys } from "@/hooks/use-pages"
 import { effectiveAccessKey } from "../editor/section-access-effective"
 import { pageFoldersKeys } from "@/hooks/use-page-folders"
@@ -38,7 +38,7 @@ it("does not reveal a cached administrator roster while a new grants read is pen
   let finish!: (response: Response) => void
   const pending = new Promise<Response>(resolve => { finish = resolve })
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-  qc.setQueryData(pageAccessKeys.grants("ws", "native"), normalizePageGrants({ grants: [grant] }))
+  qc.setQueryData(pageAccessKeys.grants("ws", "native"), normalizePageGrantsDocument({ grants: [grant] }))
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => String(input).includes("/grants") ? pending : json(page)))
   mount(qc)
   await screen.findByText("Checking sharing permissions…")

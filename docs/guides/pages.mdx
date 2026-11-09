@@ -1084,6 +1084,22 @@ Being able to *see* a panel does not mean you can *write* it. Only the
 declared producer for a panel may push its payload — see
 [`crewship page set`](/cli/page#crewship-page-set).
 
+### Only the owner delegates Edit to an agent
+
+Giving an agent `write` is a delegation, and only the page's owner makes it:
+the owning user, or a member of the owning crew. A workspace admin can still
+grant an agent `read` or `produce`, grant people and crews any level, and
+revoke any grant, but the admin role alone does not let anyone hand an agent
+Edit. In the Access form the `write` level is not offered for an agent unless
+you own the page.
+
+The rule holds at use time too. If an agent `write` grant was issued by
+someone who does not own the page, it shows as inert with the reason and
+authorises nothing until the owner issues it.
+
+An agent never holds `comment`, and `read` does not let an agent propose
+document changes.
+
 ### Only a human issues a grant
 
 An agent holding `write` may rebuild a page's layout freely, but it can never
