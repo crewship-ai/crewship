@@ -66,3 +66,31 @@ func TestContentLineageSurvivesRestartAndAdvancesOnContentReplacement(t *testing
 		t.Fatalf("upgrade lineage %q/%d", upgraded.Database, upgraded.ContentGeneration)
 	}
 }
+
+// Every installation (and every database copied from one migrated image) gets
+// its own identity on first use. If the identity came from the migration, two
+// installations built from the same image would share it, and a fresh image
+// would not be deterministic (#5163).
+func TestDatabaseIdentityIsCreatedOnFirstUseAndUniquePerDatabase(t *testing.T) {
+	first, firstDB, _ := fixture(t, Options{})
+	second, _, _ := fixture(t, Options{})
+	a, e := first.Read(ctx, key, allow)
+	if e != nil {
+		t.Fatal(e)
+	}
+	b, e := second.Read(ctx, key, allow)
+	if e != nil {
+		t.Fatal(e)
+	}
+	if len(a.Database) != 32 || len(b.Database) != 32 || a.Database == b.Database {
+		t.Fatalf("databases copied from one image share or lack an identity: %q %q", a.Database, b.Database)
+	}
+	again, e := first.Read(ctx, key, allow)
+	if e != nil || again.Database != a.Database {
+		t.Fatalf("identity changed between reads: %q %q %v", a.Database, again.Database, e)
+	}
+	var rows int
+	if e = firstDB.QueryRow(`SELECT count(*) FROM document_database_identity`).Scan(&rows); e != nil || rows != 1 {
+		t.Fatalf("identity rows=%d: %v", rows, e)
+	}
+}
