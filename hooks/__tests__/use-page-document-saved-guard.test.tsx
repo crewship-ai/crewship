@@ -11,7 +11,7 @@ import { act, renderHook as baseRenderHook, waitFor } from "@testing-library/rea
 import { afterEach, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import { documentSchema } from "@/lib/documents/schema"
-import { decodeUpdate, usePageDocument } from "../use-page-document"
+import { usePageDocument } from "../use-page-document"
 
 const fetchMock = vi.hoisted(() => vi.fn())
 // Each mounted editor is a separate browser with its own private journal.
@@ -56,5 +56,8 @@ it("never says Saved while the confirmed document differs from the editor", asyn
   expect(text(author.result.current.doc).toString()).toBe("base local")
   expect(statuses.slice(edited)).not.toContain("Saved")
   expect(author.result.current.status).toMatch(/^Not confirmed/)
+  // Stopped like any unconfirmable state: recovery offered, no further edits built on the missing content.
+  expect(author.result.current.recovery).toBe(true)
+  expect(author.result.current.editable).toBe(false)
  } finally { author.unmount(); server.destroy() }
 })

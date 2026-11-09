@@ -23,8 +23,8 @@ const JOURNAL_COALESCE_MS = 200
 export class UnconfirmedReceipt extends Error {}
 /** The editor's shared content (the Collaboration field). */
 const CONTENT_FIELD = "default"
-/** Nothing is queued, yet the confirmed document is not what this editor shows: never call that Saved (#5162). */
-export const NOT_CONFIRMED = "Not confirmed · the saved document differs from this editor. Download your changes before reopening."
+/** Nothing is queued, yet the confirmed document lacks content this editor holds: never call that Saved (#5162). */
+export const NOT_CONFIRMED = "Not confirmed · the saved document lacks changes in this editor. Download them before you reopen the document."
 export function decodeUpdate(value: string): Uint8Array { return Uint8Array.from(atob(value), c => c.charCodeAt(0)) }
 export function encodeUpdate(value: Uint8Array): string { let text = ""; for (const byte of value) text += String.fromCharCode(byte); return btoa(text) }
 /** Where unsent work stands. Only "confirmed" means the server holds everything. */
@@ -336,7 +336,12 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
           if (!accept(next)) return
           recount()
         }
-        setError(undefined); setStatus(queue.size ? "Saving…" : !next.can_write ? "Read only" : serverText === doc.getXmlFragment(CONTENT_FIELD).toString() ? "Saved" : NOT_CONFIRMED)
+        if (!queue.size && next.can_write && serverText !== doc.getXmlFragment(CONTENT_FIELD).toString()) {
+          // Nothing is queued, yet the server's confirmed copy lacks what this editor holds: stop like any other
+          // unconfirmable state (no further sends built on it, read-only, the local copy offered for download).
+          blocked = blockedOther = true; setRecovery(true); setError(undefined); setStatus(NOT_CONFIRMED); return
+        }
+        setError(undefined); setStatus(queue.size ? "Saving…" : next.can_write ? "Saved" : "Read only")
       } catch (cause) {
         if (!active) return
         recount()

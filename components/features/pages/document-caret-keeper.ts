@@ -39,7 +39,7 @@ function alive(type: Y.AbstractType<unknown>, root: Y.XmlFragment): boolean {
 
 function resolve(binding: ProsemirrorBinding, position: Y.RelativePosition): number | null {
   const decoded = Y.createAbsolutePositionFromRelativePosition(position, binding.doc)
-  if (!decoded || !(decoded.type instanceof Y.XmlText) || !alive(decoded.type, binding.type)) return null
+  if (!decoded || !(decoded.type instanceof Y.XmlText) || !alive(decoded.type as unknown as Y.AbstractType<unknown>, binding.type)) return null
   return relativePositionToAbsolutePosition(binding.doc, binding.type, position, binding.mapping)
 }
 
@@ -57,7 +57,8 @@ export const DocumentCaretKeeper = Extension.create({
           if (!binding || captured || binding.projectionError) return
           const selection = view.state.selection
           if (!(selection instanceof TextSelection)) return
-          // A local edit's own Yjs transaction runs after the editor state moved ahead of the mapping; nothing to capture then.
+          // During a local edit's own Yjs write the editor state is ahead of the mapping, so this capture may be off or throw;
+          // it is never used: the binding dispatches no remote-change transaction inside its own write.
           try {
             captured = { anchor: absolutePositionToRelativePosition(selection.anchor, binding.type, binding.mapping), head: absolutePositionToRelativePosition(selection.head, binding.type, binding.mapping) }
           } catch { captured = null }

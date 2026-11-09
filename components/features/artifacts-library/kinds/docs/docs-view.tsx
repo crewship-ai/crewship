@@ -16,7 +16,6 @@ import type { LibraryItem } from "../../library-items"
 import { docsFrameStatus, outlineOf, readingStats, readingText, type DocNode, type OutlineEntry } from "./docs-model"
 import { DocsTools } from "./docs-tools"
 import { DocsComments } from "./docs-comments"
-import { NOT_CONFIRMED } from "@/hooks/use-page-document"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
 import { commentTarget, setCommentHighlights, type CommentTarget } from "@/components/features/pages/document-rich-extensions"
@@ -129,7 +128,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const durability = durabilityLabel(sync.durability, sync.status)
   const foot = [sync.status, durability, sync.error].filter(Boolean).join(" · ")
   const download = React.useRef(downloadDraft); download.current = downloadDraft
-  const offerDownload = (hasLocalDraft || sync.status === NOT_CONFIRMED) && !sync.denied
+  const offerDownload = hasLocalDraft && !sync.denied
   const statusKey = JSON.stringify(status)
   React.useEffect(() => {
     onFrame({
