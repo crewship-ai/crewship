@@ -19,6 +19,8 @@
   var draws = {}
   var listeners = []
   var params = Object.assign({}, DEFAULT_PARAMS)
+  // Keys restored from the viewer's storage, checked against the data once it arrives.
+  var restored = {}
   var started = false
   var scheduled = false
 
@@ -118,6 +120,7 @@
       loaded[id] = rows.length
         ? { status: "ok", data: rows, columns: columnsOf(rows), message: "", refreshing: false, meta: [] }
         : { status: "empty", data: [], columns: [], message: "No rows yet.", refreshing: false, meta: [] }
+      revalidate(rows)
       schedule()
     }, function (error) {
       loaded[id] = { status: "error", data: [], columns: [], message: String(error && error.message || error), refreshing: false, meta: [] }
@@ -146,11 +149,24 @@
       var saved = result && result.value
       if (saved && typeof saved === "object") {
         for (var key in DEFAULT_PARAMS) {
-          if (Object.prototype.hasOwnProperty.call(saved, key) && typeof saved[key] === typeof DEFAULT_PARAMS[key]) params[key] = saved[key]
+          if (Object.prototype.hasOwnProperty.call(saved, key) && typeof saved[key] === typeof DEFAULT_PARAMS[key]) { params[key] = saved[key]; restored[key] = true }
         }
       }
       done()
     }, function () { done() })
+  }
+
+  // A remembered value the data no longer has (a crew renamed or removed, or
+  // rows the viewer can no longer read) falls back to the default and is forgotten.
+  function revalidate(rows) {
+    var dropped = false
+    for (var key in restored) {
+      var value = params[key]
+      var present = value === DEFAULT_PARAMS[key] || rows.some(function (r) { return r && r[key] === value })
+      if (!present) { params[key] = DEFAULT_PARAMS[key]; dropped = true }
+      delete restored[key]
+    }
+    if (dropped) remember()
   }
 
   var widths = new WeakMap()
@@ -175,8 +191,8 @@
     colors: COLORS,
     refresh: function (id) { if (DATASETS.indexOf(id) >= 0) load(id) },
     params: function () { return Object.assign({}, params) },
-    setParams: function (next) { params = Object.assign({}, params, next || {}); remember(); schedule() },
-    resetParams: function () { params = Object.assign({}, DEFAULT_PARAMS); remember(); schedule() },
+    setParams: function (next) { params = Object.assign({}, params, next || {}); restored = {}; remember(); schedule() },
+    resetParams: function () { params = Object.assign({}, DEFAULT_PARAMS); restored = {}; remember(); schedule() },
     setLink: function () {},
   })
 
