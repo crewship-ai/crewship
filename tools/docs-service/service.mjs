@@ -6,7 +6,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
-import { VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
+import { VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown, validUserId } from './schema.mjs';
 import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
@@ -152,6 +152,14 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       default: throw fault(404, 'unknown operation');
     }
   }
+  // Names the caller resolved for this reader (Go decides who may be named).
+  // The engine never looks names up and refuses anything but a bounded map.
+  function exportPeople(people) {
+    if (people === undefined || people === null) return undefined;
+    if (typeof people !== 'object' || Array.isArray(people) || Object.keys(people).length > 1000) throw fault(400, 'invalid export people');
+    for (const [id, name] of Object.entries(people)) if (!validUserId(id) || typeof name !== 'string' || !name || name.length > 200 || /[\u0000-\u001f\u007f]/.test(name)) throw fault(400, 'invalid export people');
+    return people;
+  }
   async function executeRead(page, operation, context, request) {
     if (operation === 'verify-targets' && context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'human request admission required');
     if ((operation === 'proposals' || operation === 'proposal') && context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'human proposal review required');
@@ -170,7 +178,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         if (!Number.isSafeInteger(request.base_rev) || request.base_rev !== state.rev) throw fault(409, 'document request revision changed');
         return { page_id: page, rev: state.rev, ...(richSchema(version) ? {schema:version} : {}), targets: await verifyTargets(doc, request.targets,version) };
       }
-      if(operation==='export') { try { return {markdown:markdown(validate(doc,version),version)}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; } }
+      if(operation==='export') { const people = exportPeople(request.people); try { return {markdown:markdown(validate(doc,version),version,{people})}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; } }
       if(operation==='checkpoints') return {checkpoints:await go(page,'checkpoints',context)};
       if(operation==='checkpoint-read') { const c=await go(page,'checkpoint-read',context,{id:request.checkpoint});const pinned=load(c.snapshot);try{return {...c,content:validate(pinned,contentSchema(c.schema??VERSION)),outline:await outline(pinned,contentSchema(c.schema??VERSION))}}finally{pinned.destroy()} };
       if (operation === 'proposals' || operation === 'proposal') {

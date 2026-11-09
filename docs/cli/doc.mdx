@@ -225,6 +225,27 @@ with each other, with emphasis and with `link`; inline `code` still stands alone
 {"type":"taskList","attrs":{"id":"todo"},"content":[{"type":"taskItem","attrs":{"id":"todo-1","checked":true},"content":[{"type":"paragraph","attrs":{"id":"todo-1-p"},"content":[{"type":"text","text":"Ship it","marks":[{"type":"bold","attrs":{}}]}]}]}]}
 ```
 
+Schema 5 also has two inline nodes, placed among the text of a paragraph or
+heading. Each has exactly one attribute, no content and no marks:
+
+| In the document | Node |
+| --- | --- |
+| Date | `date` with `attrs: {"value": "YYYY-MM-DD"}`: one real calendar day, never a time or free text |
+| Mention | `mention` with `attrs: {"userId": "<user-id>"}`: only the person's id, never a name or address |
+
+A reader shows a date in their own locale and a mention as the name they may
+see (`crewship doc people`); anyone else, including a person without access to
+the document, appears as **Unknown member**. Block text in `read` and `outline`
+leaves both out. Markdown writes the date as `YYYY-MM-DD` and a mention as `@`
+and a name only when the export is given the names its reader may see, otherwise
+as `@Unknown member`. A semantic edit that would insert text beside a date or
+mention, or delete across one, is refused with `ambiguous_inline_atom`.
+
+```json
+{"type":"paragraph","attrs":{"id":"due"},"content":[{"type":"text","text":"Review on "},{"type":"date","attrs":{"value":"2026-11-20"}},{"type":"text","text":" with "},{"type":"mention","attrs":{"userId":"<user-id>"}}]}
+```
+
+
 Agent drafting and document creation from chat still produce schema 3. On a
 schema 4 document an agent proposes and a person accepts; see
 [Proposing on a schema 4 document](#proposing-on-a-schema-4-document).
@@ -486,6 +507,24 @@ crewship doc proposal-accept @<artifact-id> <proposal-id> --expected-rev 7 --req
 
 Close an open proposal without changing the document. It takes the same
 `--expected-rev` and `--request-id` and needs edit access.
+
+## `crewship doc people <page-slug>`
+
+Name the people mentioned in a schema 5 document, or find people to mention.
+`--ids` takes up to 100 comma-separated user ids; `--query` (or no flag) lists
+at most 20 people whose name contains the text. Only people who can read this
+document appear, and only when you can read it. Any other id is simply left out,
+so the answer never says whether an id exists; readers show it as
+**Unknown member**.
+
+```bash
+crewship doc people @<artifact-id> --ids <user-id>,<user-id>
+crewship doc people <slug> --query ada
+```
+
+```json
+{"people":[{"id":"<user-id>","name":"Ada Owner"}]}
+```
 
 ## Errors
 

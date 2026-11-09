@@ -141,3 +141,88 @@ test('schema5 hashes are canonical JSON hashes of the projected subtree', async 
   assert.ok(Y.encodeStateAsUpdate(doc).length > 0); doc.destroy();
   validateJSON(formatted, 5);
 });
+
+// D06: structured inline dates and mentions (schema 5).
+const date = value => ({ type: 'date', attrs: { value } });
+const mention = userId => ({ type: 'mention', attrs: { userId } });
+const atoms = { type: 'doc', content: [
+  p('meet', [t('Review on '), date('2026-11-20'), t(' with '), mention('cmw8i35310007a069c4b7'), t(' and '), mention('user_2-B')]),
+  { type: 'heading', attrs: { id: 'hd', level: 2 }, content: [date('2027-02-28')] },
+  { type: 'table', attrs: { id: 'tb' }, content: [{ type: 'tableRow', attrs: { id: 'r' }, content: [{ type: 'tableCell', attrs: { id: 'c', colspan: 1, rowspan: 1 }, content: [p('cp', [t('a|b '), mention('u1')])] }] }] },
+] };
+
+test('schema5 dates and mentions round-trip through a Yjs snapshot reload as closed atoms', async () => {
+  const doc = create(atoms, 5), reloaded = load(snapshot(doc));
+  assert.deepEqual(json(validate(reloaded, 5)), atoms);
+  const blocks = await outline(reloaded, 5);
+  assert.equal(blocks.find(b => b.id === 'meet').text, 'Review on  with  and ', 'atoms carry no text, so agent text offsets stay text-only');
+  assert.equal(blocks.find(b => b.id === 'meet').hash, await hash(atoms.content[0]));
+  doc.destroy(); reloaded.destroy();
+});
+
+test('schema5 atoms are refused by schemas 1-4 and carry exactly one valid value', () => {
+  for (const version of [1, 2, 3, 4]) assert.throws(() => create(atoms, version), String(version));
+  for (const bad of ['2026-02-30', '2026-2-03', '2026-11-20T10:00', '20261120', '0000-01-01', ' 2026-11-20', '', null, 20261120, ['2026-11-20']]) {
+    assert.throws(() => create({ type: 'doc', content: [p('x', [date(bad)])] }, 5), `date ${JSON.stringify(bad)}`);
+  }
+  for (const bad of ['', 'a b', 'x'.repeat(65), 'ada@example.invalid', '../u', null, 7, { id: 'u' }]) {
+    assert.throws(() => create({ type: 'doc', content: [p('x', [mention(bad)])] }, 5), `mention ${JSON.stringify(bad)}`);
+  }
+  for (const node of [
+    { type: 'date', attrs: { value: '2026-11-20', label: 'Friday' } }, { type: 'mention', attrs: { userId: 'u1', name: 'Ada' } },
+    { type: 'mention', attrs: { userId: 'u1', id: 'm1' } }, { type: 'date' }, { type: 'date', attrs: {} },
+    { type: 'date', attrs: { value: '2026-11-20' }, content: [t('x')] }, { type: 'mention', attrs: { userId: 'u1' }, text: 'Ada' },
+    { type: 'mention', attrs: { userId: 'u1' }, marks: [bold] },
+  ]) assert.throws(() => create({ type: 'doc', content: [p('x', [node])] }, 5), JSON.stringify(node));
+  // Atoms are inline only: never a block, never inside a code block.
+  assert.throws(() => create({ type: 'doc', content: [date('2026-11-20')] }, 5));
+  assert.throws(() => create({ type: 'doc', content: [{ type: 'codeBlock', attrs: { id: 'cb' }, content: [mention('u1')] }] }, 5));
+  // Leap day exists in 2028, not in 2027.
+  create({ type: 'doc', content: [p('x', [date('2028-02-29')])] }, 5).destroy();
+  assert.throws(() => create({ type: 'doc', content: [p('x', [date('2027-02-29')])] }, 5));
+});
+
+test('schema5 binary validation refuses atom children, extra or invalid attributes, including retained ones', () => {
+  const atomIn = (doc, index) => find(doc, 'meet').toArray().filter(n => n instanceof Y.XmlElement)[index];
+  const attempts = [
+    doc => atomIn(doc, 0).setAttribute('label', 'Friday'),
+    doc => atomIn(doc, 1).setAttribute('name', 'Ada Owner'),
+    doc => atomIn(doc, 1).setAttribute('userId', 'ada@example.invalid'),
+    doc => atomIn(doc, 0).setAttribute('value', '2026-13-01'),
+    doc => atomIn(doc, 0).insert(0, [new Y.XmlText('leak')]),
+    doc => { const el = atomIn(doc, 1); el.setAttribute('name', 'Ada'); el.removeAttribute('name'); },
+    doc => { const el = atomIn(doc, 0); el.insert(0, [new Y.XmlText('x')]); el.delete(0, 1); },
+    doc => { const el = atomIn(doc, 1); el.setAttribute('userId', 'bad id'); el.setAttribute('userId', 'u9'); },
+    doc => find(doc, 'meet').insert(0, [new Y.XmlElement('person')]),
+  ];
+  for (const attempt of attempts) {
+    const doc = create(atoms, 5); attempt(doc);
+    assert.throws(() => validate(load(snapshot(doc)), 5), attempt.toString());
+    doc.destroy();
+  }
+  // Changing a date or a mention target to another valid value keeps valid history.
+  const doc = create(atoms, 5);
+  atomIn(doc, 0).setAttribute('value', '2026-12-01'); atomIn(doc, 1).setAttribute('userId', 'u9');
+  const value = json(validate(load(snapshot(doc)), 5)).content[0].content;
+  assert.deepEqual([value[1], value[3]], [date('2026-12-01'), mention('u9')]);
+  doc.destroy();
+});
+
+test('schema5 semantic replacement and comments keep dates and mentions in place', () => {
+  const doc = create(atoms, 5);
+  const thread = anchor(doc, 'meet', 0, 6, 'review-thread', 0, 5);
+  patch(doc, { op: 'replaceText', id: 'meet', text: 'Review on  with  and ' }, 5);
+  patch(doc, { op: 'replaceText', id: 'meet', text: 'Final review on  with  and ', range: { from: 0, to: 6 } }, 5);
+  const content = json(validate(doc, 5)).content[0].content;
+  assert.deepEqual(content.filter(n => n.type !== 'text'), [date('2026-11-20'), mention('cmw8i35310007a069c4b7'), mention('user_2-B')]);
+  assert.equal(resolve(doc, thread, 5).status, 'attached');
+  doc.destroy();
+});
+
+test('schema5 Markdown writes dates as ISO text and mentions by the name the reader may see, otherwise neutrally', () => {
+  assert.equal(markdown(atoms, 5), ['Review on 2026-11-20 with @Unknown member and @Unknown member', '', '## 2027-02-28', '', '| a\\|b @Unknown member |', '| --- |', ''].join('\n'));
+  const people = { cmw8i35310007a069c4b7: 'Ada *Owner*', u1: 'Cell | Person' };
+  assert.equal(markdown(atoms, 5, { people }), ['Review on 2026-11-20 with @Ada \\*Owner\\* and @Unknown member', '', '## 2027-02-28', '', '| a\\|b @Cell \\| Person |', '| --- |', ''].join('\n'));
+  // Only own keys count; a prototype key never names anyone.
+  assert.equal(markdown({ type: 'doc', content: [p('x', [mention('toString')])] }, 5, { people: {} }), '@Unknown member\n');
+});

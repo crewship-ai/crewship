@@ -860,6 +860,7 @@ test('schema5 initialize keeps underline, colour and highlight and exports them 
   const body = { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'p5' }, content: [
     { type: 'text', text: 'under', marks: [{ type: 'underline', attrs: {} }] }, { type: 'text', text: ' ' },
     { type: 'text', text: 'red', marks: [{ type: 'textColor', attrs: { color: 'red' } }, { type: 'highlight', attrs: { color: 'yellow' } }] },
+    { type: 'text', text: ' ' }, { type: 'date', attrs: { value: '2026-11-20' } }, { type: 'text', text: ' ' }, { type: 'mention', attrs: { userId: 'u1' } },
   ] }] };
   const f = await fixture(async (op, data, req, res) => {
     if (op === 'initialize') { model.state = { ...model.state, schema: data.schema, snapshot: data.snapshot, rev: 0 }; return model.state; }
@@ -873,7 +874,12 @@ test('schema5 initialize keeps underline, colour and highlight and exports them 
     assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-five', schema: 5, page_id: 'p', body })).status, 200);
     const state = (await read(f)).body;
     assert.equal(state.schema, 5); assert.deepEqual(state.content, body);
-    assert.equal((await call(f.socket, '/v1/documents/p/export', {})).body.markdown, '<u>under</u> <span data-text-color="red"><mark data-highlight="yellow">red</mark></span>\n');
+    assert.equal((await call(f.socket, '/v1/documents/p/export', {})).body.markdown, '<u>under</u> <span data-text-color="red"><mark data-highlight="yellow">red</mark></span> 2026-11-20 @Unknown member\n');
+    // Go supplies the names this reader may see; the engine never looks them up.
+    assert.equal((await call(f.socket, '/v1/documents/p/export', { people: { u1: 'Ada' } })).body.markdown, '<u>under</u> <span data-text-color="red"><mark data-highlight="yellow">red</mark></span> 2026-11-20 @Ada\n');
+    for (const people of [[], 'Ada', { 'bad id': 'Ada' }, { u1: '' }, { u1: 7 }, { u1: 'line\nbreak' }, { u1: 'x'.repeat(201) }]) {
+      assert.equal((await call(f.socket, '/v1/documents/p/export', { people })).status, 400, JSON.stringify(people));
+    }
   } finally { await f.close(); }
 });
 

@@ -17,7 +17,8 @@ const BASE_BLOCKS = ["paragraph", "heading", "bulletList", "orderedList", "listI
 const RICH_NAMES: Record<number, string[]> = {
   3: ["link", "code", "codeBlock"],
   4: ["link", "bold", "italic", "strike", "code", "codeBlock", "blockquote", "taskList", "taskItem"],
-  5: ["link", "bold", "italic", "strike", "underline", "textColor", "highlight", "code", "codeBlock", "blockquote", "taskList", "taskItem"],
+  // Schema 5 also has the inline date and mention atoms; an editor without them would drop them.
+  5: ["link", "bold", "italic", "strike", "underline", "textColor", "highlight", "code", "codeBlock", "blockquote", "taskList", "taskItem", "date", "mention"],
 }
 
 /** Block types that carry a stable `id` in this schema. */
