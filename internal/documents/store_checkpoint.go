@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 func (s *Store) Checkpoint(ctx context.Context, k Key, l Lease, id string, snapshot []byte, ifRev int64, a Authorize) (Checkpoint, error) {
@@ -21,6 +22,10 @@ func (s *Store) CheckpointRequest(ctx context.Context, k Key, l Lease, id, finge
 func (s *Store) CheckpointRequestAtGeneration(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, generation *int64, a Authorize) (Checkpoint, error) {
 	return s.CheckpointRequestGuarded(ctx, k, l, id, fingerprint, snapshot, ifRev, generation, a, nil)
 }
+
+// CheckpointRequestGuarded writes the checkpoint receipt in the same
+// transaction. Keep it that way: the session budget (store_session_checkpoint.go)
+// treats a "session-" checkpoint without a checkpoint receipt as automatic.
 func (s *Store) CheckpointRequestGuarded(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, generation *int64, a Authorize, guard MutationGuard) (c Checkpoint, e error) {
 	e = s.tx(ctx, k, a, func(t *sql.Tx, actor string) error {
 		if id == "" || len(id) > 256 || len(fingerprint) > 256 {
@@ -41,6 +46,12 @@ func (s *Store) CheckpointRequestGuarded(ctx context.Context, k Key, l Lease, id
 		}
 		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
 			return lookupErr
+		}
+		// "session-" names automatic snapshots (store_session_checkpoint.go). A new
+		// explicit checkpoint may not take that name or an existing pin's row;
+		// an exact retry of an older explicit one still has its receipt above.
+		if lookupErr != nil && strings.HasPrefix(id, sessionCheckpointPrefix) {
+			return errors.New("checkpoint id prefix session- is reserved")
 		}
 		var existing Checkpoint
 		existing.ID = id

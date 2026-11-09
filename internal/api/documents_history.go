@@ -20,6 +20,10 @@ type documentCheckpointSummary struct {
 
 type documentCheckpointListResponse struct {
 	Checkpoints []documentCheckpointSummary `json:"checkpoints"`
+	// HistoryLimitReached is present (true) only when automatic snapshots have
+	// used their half of the History budget: edits are still saved, but no new
+	// automatic snapshots are kept. Computed here, never taken from the engine.
+	HistoryLimitReached bool `json:"history_limit_reached,omitempty"`
 }
 
 type documentCheckpointResponse struct {
@@ -85,6 +89,7 @@ func (h *PageHandler) serveDocumentHistory(w http.ResponseWriter, r *http.Reques
 			}
 			seen[checkpoint.ID] = true
 		}
+		value.HistoryLimitReached = h.documentSessionHistoryFull(r, rec.ID)
 		writeJSON(w, 200, value)
 		return
 	}
@@ -106,4 +111,13 @@ func (h *PageHandler) serveDocumentHistory(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, 200, documentCheckpointResponse{PageID: rec.ID, ID: value.ID, Rev: value.Rev, Schema: value.Schema, Content: value.Content})
+}
+
+// documentSessionHistoryFull re-runs the same human read authorization as the
+// authority, in the store's own transaction. Any refusal or failure reads as
+// "not full": the flag only explains History, it never gates it.
+func (h *PageHandler) documentSessionHistoryFull(r *http.Request, pageID string) bool {
+	k := documents.Key{WorkspaceID: WorkspaceIDFromContext(r.Context()), PageID: pageID}
+	full, err := documents.New(h.db, h.documentStoreOptions).SessionHistoryFull(r.Context(), k, (&documentAuthority{pages: h}).authorize(r, k, false, false))
+	return err == nil && full
 }
