@@ -31,6 +31,9 @@ const (
 // would copy. It never says whether the library or the version exists.
 var ErrLibraryUnreadable = errors.New("library is not readable by this caller")
 
+// ErrLibraryPinCorrupt means the stored copy no longer matches its SHA-256.
+var ErrLibraryPinCorrupt = errors.New("pinned library copy does not match its checksum")
+
 // LibraryVersionAuthorize checks, inside the caller's transaction, live read
 // authority over one library and that the caller may read the given version.
 // It must return the same actor as the consumer's authorize function, and
@@ -136,7 +139,13 @@ func readLibraryPin(ctx context.Context, tx *sql.Tx, k VersionKey) (p LibraryPin
 	if errors.Is(err, sql.ErrNoRows) {
 		return LibraryPin{}, false, nil
 	}
-	return p, err == nil, err
+	if err != nil {
+		return LibraryPin{}, false, err
+	}
+	if sum := sha256.Sum256(p.Content); hex.EncodeToString(sum[:]) != p.SHA256 {
+		return LibraryPin{}, false, ErrLibraryPinCorrupt
+	}
+	return p, true, nil
 }
 
 // ReadLibraryPin returns the consumer's pinned copy under the consumer's own
@@ -172,14 +181,27 @@ func libraryRead(ctx context.Context, tx *sql.Tx, la LibraryVersionAuthorize, ve
 	return nil
 }
 
+// LibraryPinExpect is the state the caller reviewed. Applying a pin only
+// succeeds when the library still publishes Version and the consumer still
+// pins PinnedLibrary at PinnedVersion (both empty/0 when nothing is pinned).
+type LibraryPinExpect struct {
+	Version       int64
+	PinnedLibrary string
+	PinnedVersion int64
+}
+
 // PinLibrary copies the library's published design-system.json into the
-// consumer. ifPinned is the library version the caller last saw pinned (0 for
-// none); a mismatch is ErrVersionConflict, so an update is always an explicit
-// decision on a reviewed state. Pinning the version already pinned is a no-op
-// (changed=false) whatever ifPinned says, which makes retries safe.
-func (s *VersionStore) PinLibrary(ctx context.Context, consumer VersionKey, libraryPageID string, ifPinned int64, a VersionAuthorize, la LibraryVersionAuthorize) (out LibraryPin, changed bool, err error) {
-	if libraryPageID == "" || libraryPageID == consumer.PageID || ifPinned < 0 {
+// consumer. Any difference from the reviewed state (another published version,
+// another pinned library or version) is ErrVersionConflict, so an update is
+// always an explicit decision on exactly what was reviewed. Repeating a pin
+// that already holds the reviewed version is a no-op (changed=false), which
+// makes retries safe.
+func (s *VersionStore) PinLibrary(ctx context.Context, consumer VersionKey, libraryPageID string, expect LibraryPinExpect, a VersionAuthorize, la LibraryVersionAuthorize) (out LibraryPin, changed bool, err error) {
+	if libraryPageID == "" || libraryPageID == consumer.PageID {
 		return LibraryPin{}, false, fmt.Errorf("%w: library must be another project in this workspace", ErrVersionInvalid)
+	}
+	if expect.Version < 1 || expect.PinnedVersion < 0 || (expect.PinnedVersion == 0) != (expect.PinnedLibrary == "") {
+		return LibraryPin{}, false, fmt.Errorf("%w: reviewed version, and pinned library with pinned version, required", ErrVersionInvalid)
 	}
 	lib := VersionKey{consumer.WorkspaceID, libraryPageID}
 	err = s.writeTransaction(ctx, consumer, a, func(tx *sql.Tx, actor string) error {
@@ -208,11 +230,14 @@ func (s *VersionStore) PinLibrary(ctx context.Context, consumer VersionKey, libr
 		if e != nil {
 			return e
 		}
+		if pub.Version != expect.Version {
+			return ErrVersionConflict
+		}
 		if found && current.LibraryPageID == libraryPageID && current.LibraryVersion == pub.Version && current.SHA256 == hash {
 			out = current
 			return libraryRead(ctx, tx, la, pub.Version, actor)
 		}
-		if current.LibraryVersion != ifPinned {
+		if current.LibraryPageID != expect.PinnedLibrary || current.LibraryVersion != expect.PinnedVersion {
 			return ErrVersionConflict
 		}
 		var name string

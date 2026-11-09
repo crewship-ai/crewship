@@ -55,11 +55,11 @@ func artifactLibraryPinBody(p artifacts.LibraryPin) artifactLibraryPinResponse {
 	return artifactLibraryPinResponse{LibraryPin: p, Tokens: json.RawMessage(p.Content)}
 }
 
-// artifactLibraryPublisher admits only the library's human owner.
-func (h *PageHandler) artifactLibraryPublisher(r *http.Request, k artifacts.VersionKey) artifacts.VersionAuthorize {
-	share := h.artifactProjectAuthority(r, k, true, true)
+// rejectArtifactAgentActor refuses an agent-run actor ("agent:…"): publishing
+// and pinning are human decisions.
+func rejectArtifactAgentActor(authorize artifacts.VersionAuthorize) artifacts.VersionAuthorize {
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
-		actor, err := share(ctx, tx)
+		actor, err := authorize(ctx, tx)
 		if err != nil {
 			return "", err
 		}
@@ -70,21 +70,34 @@ func (h *PageHandler) artifactLibraryPublisher(r *http.Request, k artifacts.Vers
 	}
 }
 
-// artifactLibraryVersionAuthority reads one library version with exactly the
-// coverage the project view gives the caller: the owner and a workspace
-// owner/admin (audited) any version, an editor the latest, any other reader the
-// shared version. Every denial is ErrLibraryUnreadable, so a pin never tells
-// apart an absent, private or merely unpublished library.
+// artifactLibraryPublisher admits only the library's human owner.
+func (h *PageHandler) artifactLibraryPublisher(r *http.Request, k artifacts.VersionKey) artifacts.VersionAuthorize {
+	return rejectArtifactAgentActor(h.artifactProjectAuthority(r, k, true, true))
+}
+
+// artifactLibraryVersionAuthority reads one library version with the coverage
+// the caller holds in their own standing: the owner any version, an editor the
+// latest, any other reader the shared version. The workspace owner/admin read
+// path is deliberately excluded: a pin is a durable copy that every reader of
+// the consumer sees, so an audited administrator read must never become one.
+// Coverage is decided before the base authority runs, so a refused admin
+// leaves no audit record. Every denial is ErrLibraryUnreadable, so a pin never
+// tells apart an absent, private or merely unpublished library.
 func (h *PageHandler) artifactLibraryVersionAuthority(r *http.Request, lib artifacts.VersionKey) artifacts.LibraryVersionAuthorize {
 	r = ensureDesignAdminAuditRequest(r, false)
 	base := h.artifactProjectAuthority(r, lib, false, false)
 	return func(ctx context.Context, tx *sql.Tx, version int64) (string, error) {
-		actor, err := base(ctx, tx)
-		if err == nil && strings.HasPrefix(actor, "agent:") {
-			err = errArtifactProjectAccess
+		user := UserFromContext(ctx)
+		if user == nil {
+			return "", artifacts.ErrLibraryUnreadable
 		}
+		err := h.artifactLibraryCovers(ctx, tx, lib, user.ID, version)
+		var actor string
 		if err == nil {
-			err = h.artifactLibraryCovers(ctx, tx, r, lib, actor, version)
+			actor, err = base(ctx, tx)
+		}
+		if err == nil && (strings.HasPrefix(actor, "agent:") || actor != user.ID) {
+			err = errArtifactProjectAccess
 		}
 		if errors.Is(err, errArtifactProjectAccess) || errors.Is(err, artifacts.ErrVersionNotFound) || errors.Is(err, sql.ErrNoRows) {
 			return "", artifacts.ErrLibraryUnreadable
@@ -93,7 +106,9 @@ func (h *PageHandler) artifactLibraryVersionAuthority(r *http.Request, lib artif
 	}
 }
 
-func (h *PageHandler) artifactLibraryCovers(ctx context.Context, tx *sql.Tx, r *http.Request, lib artifacts.VersionKey, user string, version int64) error {
+// artifactLibraryCovers reports whether the caller's own (non-administrator)
+// standing reads this exact library version. It never records an audit.
+func (h *PageHandler) artifactLibraryCovers(ctx context.Context, tx *sql.Tx, lib artifacts.VersionKey, user string, version int64) error {
 	readCtx := context.WithValue(ctx, pageAuthReaderKey{}, tx)
 	rec, err := h.loadPageForRead(readCtx, lib.WorkspaceID, "@"+lib.PageID)
 	if err != nil {
@@ -110,34 +125,24 @@ func (h *PageHandler) artifactLibraryCovers(ctx context.Context, tx *sql.Tx, r *
 		return err
 	}
 	covered, err := h.artifactVersionCoveredWithoutAdmin(readCtx, lib, rec, user, owner, editor, version, latest, shared)
-	if err != nil || covered {
-		return err
-	}
-	admin, err := h.artifactAdminReader(readCtx, lib.WorkspaceID, user, owner)
 	if err != nil {
 		return err
 	}
-	if !admin {
+	if !covered {
 		return artifacts.ErrVersionNotFound
 	}
-	return h.recordArtifactAdminRead(ctx, tx, r, lib, rec, user)
+	return nil
 }
 
 // artifactLibraryPinner is consumer write authority for a human, never an
 // agent run, with the pin journal entry written once in the same transaction.
 func (h *PageHandler) artifactLibraryPinner(r *http.Request, k artifacts.VersionKey, library string, notify *func()) artifacts.VersionAuthorize {
-	write := h.artifactProjectAuthority(r, k, true, false)
+	write := rejectArtifactAgentActor(h.artifactProjectAuthority(r, k, true, false))
 	recorded := false
 	return func(ctx context.Context, tx *sql.Tx) (string, error) {
 		actor, err := write(ctx, tx)
-		if err != nil {
-			return "", err
-		}
-		if strings.HasPrefix(actor, "agent:") {
-			return "", errArtifactProjectAccess
-		}
-		if recorded {
-			return actor, nil
+		if err != nil || recorded {
+			return actor, err
 		}
 		*notify, err = appendAuthorizationAudit(ctx, tx, h.journal, journal.Entry{
 			WorkspaceID: k.WorkspaceID, Type: journalArtifactLibraryPinned, ActorType: journal.ActorUser, ActorID: actor,
@@ -247,13 +252,15 @@ func (h *PageHandler) PutArtifactLibraryPin(w http.ResponseWriter, r *http.Reque
 	}
 	var p struct {
 		Library         string `json:"library"`
+		Version         int64  `json:"version"`
+		IfPinnedLibrary string `json:"if_pinned_library"`
 		IfPinnedVersion *int64 `json:"if_pinned_version"`
 	}
 	if !artifactProjectDecode(w, r, &p) {
 		return
 	}
-	if p.IfPinnedVersion == nil || *p.IfPinnedVersion < 0 {
-		artifactProjectError(w, fmt.Errorf("%w: if_pinned_version required (0 when nothing is pinned)", artifacts.ErrVersionInvalid))
+	if p.IfPinnedVersion == nil || *p.IfPinnedVersion < 0 || p.Version < 1 || (*p.IfPinnedVersion == 0) != (p.IfPinnedLibrary == "") {
+		artifactProjectError(w, fmt.Errorf("%w: version (the reviewed published version) and if_pinned_version are required; if_pinned_library is required exactly when if_pinned_version is not 0", artifacts.ErrVersionInvalid))
 		return
 	}
 	library, err := h.resolveArtifactLibrary(r.Context(), k.WorkspaceID, p.Library)
@@ -261,9 +268,20 @@ func (h *PageHandler) PutArtifactLibraryPin(w http.ResponseWriter, r *http.Reque
 		artifactProjectError(w, err)
 		return
 	}
+	// The reviewed pinned library is compared, not authorized: an @id is taken
+	// as is (the copy may outlive its library) and an unknown slug is a stale
+	// review.
+	pinnedLibrary := strings.TrimPrefix(p.IfPinnedLibrary, "@")
+	if p.IfPinnedLibrary != "" && !strings.HasPrefix(p.IfPinnedLibrary, "@") {
+		if pinnedLibrary, err = h.resolveArtifactLibrary(r.Context(), k.WorkspaceID, p.IfPinnedLibrary); err != nil {
+			artifactProjectError(w, artifacts.ErrVersionConflict)
+			return
+		}
+	}
 	r = ensureDesignAdminAuditRequest(r, false)
 	var notify func()
-	pin, changed, err := h.artifactProjectStore(r.Context()).PinLibrary(r.Context(), k, library, *p.IfPinnedVersion, h.artifactLibraryPinner(r, k, library, &notify), h.artifactLibraryVersionAuthority(r, artifacts.VersionKey{WorkspaceID: k.WorkspaceID, PageID: library}))
+	expect := artifacts.LibraryPinExpect{Version: p.Version, PinnedLibrary: pinnedLibrary, PinnedVersion: *p.IfPinnedVersion}
+	pin, changed, err := h.artifactProjectStore(r.Context()).PinLibrary(r.Context(), k, library, expect, h.artifactLibraryPinner(r, k, library, &notify), h.artifactLibraryVersionAuthority(r, artifacts.VersionKey{WorkspaceID: k.WorkspaceID, PageID: library}))
 	if err != nil {
 		artifactProjectError(w, err)
 		return

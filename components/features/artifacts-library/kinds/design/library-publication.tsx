@@ -42,7 +42,8 @@ export const libraryClient = {
   publish: (ws: string, slug: string, version: number) => artifactRequest(path(ws, slug, "/library/publish"), parsePublication, { method: "POST", body: { version } }),
   pin: (ws: string, slug: string, signal?: AbortSignal) => artifactRequest(path(ws, slug, "/library-pin"), parsePin, { signal }),
   update: (ws: string, slug: string, signal?: AbortSignal) => artifactRequest(path(ws, slug, "/library-pin/update"), parseUpdate, { signal }),
-  apply: (ws: string, slug: string, library: string, ifPinned: number) => artifactRequest(path(ws, slug, "/library-pin"), parsePin, { method: "PUT", body: { library: "@" + library, if_pinned_version: ifPinned } }),
+  /** Applies exactly the reviewed state: the published version shown, over the pin shown. */
+  apply: (ws: string, slug: string, library: string, version: number, ifPinned: number) => artifactRequest(path(ws, slug, "/library-pin"), parsePin, { method: "PUT", body: { library: "@" + library, version, if_pinned_library: "@" + library, if_pinned_version: ifPinned } }),
 }
 
 const message = (error: unknown) => (error as ArtifactRequestError)?.message || "Something went wrong. Try again."
@@ -102,7 +103,7 @@ function PinNotice({ workspaceId, slug }: { workspaceId: string; slug: string })
   const apply = () => {
     if (!update) return
     setBusy(true); setError(null)
-    libraryClient.apply(workspaceId, slug, pin.library_page_id, update.pinned_version)
+    libraryClient.apply(workspaceId, slug, pin.library_page_id, update.published_version, update.pinned_version)
       .then(() => { setReviewing(false); setRound(value => value + 1) }, failure => setError(message(failure)))
       .finally(() => setBusy(false))
   }

@@ -71,7 +71,7 @@ describe("LibraryPinNotice", () => {
     expect(api.calls.some(call => call.method === "PUT")).toBe(false)
     fireEvent.click(screen.getByRole("button", { name: "Apply v2" }))
     await waitFor(() => expect(api.calls.some(call => call.method === "PUT")).toBe(true))
-    expect(api.calls.find(call => call.method === "PUT")?.body).toEqual({ library: "@lib-1", if_pinned_version: 1 })
+    expect(api.calls.find(call => call.method === "PUT")?.body).toEqual({ library: "@lib-1", version: 2, if_pinned_library: "@lib-1", if_pinned_version: 1 })
   })
 
   it("keeps the pinned copy when the library is no longer readable", async () => {

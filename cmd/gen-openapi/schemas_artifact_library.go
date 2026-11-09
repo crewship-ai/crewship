@@ -37,8 +37,10 @@ func artifactLibrarySchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"ArtifactLibraryPinResult":      object(withChanged, "library_page_id", "library_version", "library_name", "sha256", "copied_by", "copied_at", "tokens", "changed"),
 		"ArtifactLibraryPinRequest": object(map[string]any{
 			"library":           map[string]any{"type": "string", "minLength": 1, "description": "Library slug, or @<page id>, in this workspace."},
+			"version":           integer(1, "Published Library version the caller reviewed; a different publication returns 409 artifact_version_conflict."),
+			"if_pinned_library": map[string]any{"type": "string", "description": "Library currently pinned as reviewed (slug or @<page id>); required exactly when if_pinned_version is not 0."},
 			"if_pinned_version": integer(0, "Library version currently pinned as reviewed, 0 when nothing is pinned; a mismatch returns 409 artifact_version_conflict."),
-		}, "library", "if_pinned_version"),
+		}, "library", "version", "if_pinned_version"),
 		"ArtifactLibraryUpdate": object(map[string]any{
 			"pinned_version":    integer(1, "Pinned Library version."),
 			"published_version": integer(0, "Library's published version; 0 when unpublished or not readable by the caller."),

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
@@ -171,8 +172,8 @@ func TestArtifactLibraryPublishIsOwnerOnly(t *testing.T) {
 
 func TestArtifactLibraryPinCopyUpdateAndRevocation(t *testing.T) {
 	f := newLibraryFixture(t)
-	unpublished := f.call("lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"lib","if_pinned_version":0}`)
-	missing := f.call("lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"no-such-library","if_pinned_version":0}`)
+	unpublished := f.call("lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"lib","version":1,"if_pinned_version":0}`)
+	missing := f.call("lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"no-such-library","version":1,"if_pinned_version":0}`)
 	if unpublished.Code != 404 || missing.Code != 404 || unpublished.Body.String() != missing.Body.String() {
 		t.Fatalf("unpublished and absent libraries differ: %d %s / %d %s", unpublished.Code, unpublished.Body, missing.Code, missing.Body)
 	}
@@ -180,11 +181,11 @@ func TestArtifactLibraryPinCopyUpdateAndRevocation(t *testing.T) {
 	if w := f.call("lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"lib"}`); w.Code != 400 {
 		t.Fatalf("missing if_pinned_version %d", w.Code)
 	}
-	pin := f.must(200, "lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"lib","if_pinned_version":0}`)
+	pin := f.must(200, "lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"lib","version":1,"if_pinned_version":0}`)
 	if pin["library_version"] != float64(1) || pin["changed"] != true || pin["library_name"] != "Brand library" || !strings.Contains(fmt.Sprint(pin["tokens"]), "#111") {
 		t.Fatalf("pin %v", pin)
 	}
-	again := f.must(200, "lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"lib","if_pinned_version":0}`)
+	again := f.must(200, "lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"lib","version":1,"if_pinned_version":0}`)
 	if again["changed"] != false || again["copied_at"] != pin["copied_at"] {
 		t.Fatalf("pin is not idempotent %v", again)
 	}
@@ -208,7 +209,7 @@ func TestArtifactLibraryPinCopyUpdateAndRevocation(t *testing.T) {
 	}
 	// The reader covers only the shared version; after the owner shares v2
 	// the reader sees the update, reviews it and applies it.
-	if w := f.call("lib-reader", "PUT", "deck/artifact/library-pin", `{"library":"lib","if_pinned_version":1}`); w.Code != 404 || w.Body.String() != missing.Body.String() {
+	if w := f.call("lib-reader", "PUT", "deck/artifact/library-pin", `{"library":"lib","version":2,"if_pinned_library":"lib","if_pinned_version":1}`); w.Code != 404 || w.Body.String() != missing.Body.String() {
 		t.Fatalf("reader pinned an unshared version %d %s", w.Code, w.Body)
 	}
 	f.must(200, f.owner, "POST", "lib/artifact/share", `{"base_version":3,"version":2}`)
@@ -217,10 +218,10 @@ func TestArtifactLibraryPinCopyUpdateAndRevocation(t *testing.T) {
 	if up["update_available"] != true || up["published_version"] != float64(2) || fmt.Sprint(changes["added"]) != "[colors.accent]" || fmt.Sprint(changes["changed"]) != "[colors.primary]" {
 		t.Fatalf("review %v", up)
 	}
-	if w := f.call("lib-reader", "PUT", "deck/artifact/library-pin", `{"library":"lib","if_pinned_version":0}`); w.Code != 409 {
+	if w := f.call("lib-reader", "PUT", "deck/artifact/library-pin", `{"library":"lib","version":2,"if_pinned_version":0}`); w.Code != 409 {
 		t.Fatalf("stale apply %d %s", w.Code, w.Body)
 	}
-	if got := f.must(200, "lib-reader", "PUT", "deck/artifact/library-pin", `{"library":"lib","if_pinned_version":1}`); got["library_version"] != float64(2) || got["changed"] != true {
+	if got := f.must(200, "lib-reader", "PUT", "deck/artifact/library-pin", `{"library":"lib","version":2,"if_pinned_library":"lib","if_pinned_version":1}`); got["library_version"] != float64(2) || got["changed"] != true {
 		t.Fatalf("apply %v", got)
 	}
 
@@ -236,7 +237,7 @@ func TestArtifactLibraryPinCopyUpdateAndRevocation(t *testing.T) {
 	if up = f.must(200, "lib-reader", "GET", "deck/artifact/library-pin/update", ""); up["library_available"] != false || up["published_version"] != float64(0) {
 		t.Fatalf("revoked review leaks %v", up)
 	}
-	if w := f.call("lib-reader", "PUT", "deck/artifact/library-pin", `{"library":"lib","if_pinned_version":2}`); w.Code != 404 {
+	if w := f.call("lib-reader", "PUT", "deck/artifact/library-pin", `{"library":"lib","version":4,"if_pinned_library":"lib","if_pinned_version":2}`); w.Code != 404 {
 		t.Fatalf("revoked update %d %s", w.Code, w.Body)
 	}
 	// Consumer access is still the consumer's own: the outsider sees nothing.
@@ -251,12 +252,12 @@ func TestArtifactLibraryPinDeniesOtherWorkspaceAndAdminWrites(t *testing.T) {
 	// The outsider's own consumer in another workspace cannot name this library.
 	f.must(201, "outsider", "POST", "artifacts", `{"slug":"their-deck","name":"Theirs",`+strings.TrimPrefix(artifactProjectBody(0, "Theirs"), "{"))
 	for _, ref := range []string{"lib", "@" + f.libID} {
-		if w := f.call("outsider", "PUT", "their-deck/artifact/library-pin", `{"library":"`+ref+`","if_pinned_version":0}`); w.Code != 404 {
+		if w := f.call("outsider", "PUT", "their-deck/artifact/library-pin", `{"library":"`+ref+`","version":1,"if_pinned_version":0}`); w.Code != 404 {
 			t.Fatalf("cross-workspace pin %s: %d %s", ref, w.Code, w.Body)
 		}
 	}
 	// A workspace admin reads with audit but holds no write on the consumer.
-	if w := f.call("lib-admin", "PUT", "deck/artifact/library-pin", `{"library":"lib","if_pinned_version":0}`); w.Code != 403 && w.Code != 404 {
+	if w := f.call("lib-admin", "PUT", "deck/artifact/library-pin", `{"library":"lib","version":1,"if_pinned_version":0}`); w.Code != 403 && w.Code != 404 {
 		t.Fatalf("admin pinned %d %s", w.Code, w.Body)
 	}
 	var pins int
@@ -265,7 +266,131 @@ func TestArtifactLibraryPinDeniesOtherWorkspaceAndAdminWrites(t *testing.T) {
 		t.Fatal("denied pin persisted", pins)
 	}
 	// A project cannot pin itself.
-	if w := f.call(f.owner, "PUT", "lib/artifact/library-pin", `{"library":"lib","if_pinned_version":0}`); w.Code != 400 {
+	if w := f.call(f.owner, "PUT", "lib/artifact/library-pin", `{"library":"lib","version":1,"if_pinned_version":0}`); w.Code != 400 {
 		t.Fatalf("self pin %d %s", w.Code, w.Body)
+	}
+}
+
+// A workspace admin reads a private library with audit, but that read must
+// never become a durable copy in the admin's own project, where its readers
+// would see the private tokens.
+func TestArtifactLibraryAdminCannotPinAPrivateLibrary(t *testing.T) {
+	f := newLibraryFixture(t)
+	f.must(201, f.owner, "POST", "artifacts", `{"slug":"secret","name":"Secret library",`+strings.TrimPrefix(libraryProjectBody(0, `{"colors":{"primary":"#abc"}}`), "{"))
+	f.must(200, f.owner, "POST", "secret/artifact/library/publish", `{"version":1}`)
+	f.must(201, "lib-admin", "POST", "artifacts", `{"slug":"admin-deck","name":"Admin deck",`+strings.TrimPrefix(artifactProjectBody(0, "Admin"), "{"))
+	var before int
+	_ = f.h.db.QueryRow(`SELECT count(*) FROM audit_logs`).Scan(&before)
+	missing := f.call("lib-admin", "PUT", "admin-deck/artifact/library-pin", `{"library":"no-such-library","version":1,"if_pinned_version":0}`)
+	for _, ref := range []string{"secret", "lib"} {
+		// "lib" is shared but the admin holds no grant on it: role-only reach is
+		// the audited admin path and is excluded too.
+		w := f.call("lib-admin", "PUT", "admin-deck/artifact/library-pin", `{"library":"`+ref+`","version":1,"if_pinned_version":0}`)
+		if w.Code != 404 || w.Body.String() != missing.Body.String() {
+			t.Fatalf("admin pinned %s: %d %s", ref, w.Code, w.Body)
+		}
+	}
+	var after, pins int
+	_ = f.h.db.QueryRow(`SELECT count(*) FROM audit_logs`).Scan(&after)
+	_ = f.h.db.QueryRow(`SELECT count(*) FROM artifact_library_pins`).Scan(&pins)
+	if after != before || pins != 0 {
+		t.Fatalf("refused admin pin left audit %d->%d, pins %d", before, after, pins)
+	}
+	// The owner may pin their own private library into their own project.
+	if got := f.must(200, f.owner, "PUT", "deck/artifact/library-pin", `{"library":"secret","version":1,"if_pinned_version":0}`); got["library_version"] != float64(1) {
+		t.Fatalf("owner pin %v", got)
+	}
+	// A reader with Edit on the consumer but no access to the private library cannot.
+	if w := f.call("lib-reader", "PUT", "deck/artifact/library-pin", `{"library":"secret","version":1,"if_pinned_library":"secret","if_pinned_version":1}`); w.Code != 404 {
+		t.Fatalf("reader switch to unshared library %d %s", w.Code, w.Body)
+	}
+	if w := f.call("lib-editor", "GET", "deck/artifact/library-pin/update", ""); w.Code != 200 || !strings.Contains(w.Body.String(), `"library_available":false`) {
+		t.Fatalf("editor review of private library %d %s", w.Code, w.Body)
+	}
+}
+
+func TestArtifactLibraryApplyRequiresTheReviewedPublication(t *testing.T) {
+	f := newLibraryFixture(t)
+	f.must(200, f.owner, "POST", "lib/artifact/library/publish", `{"version":1}`)
+	f.must(200, f.owner, "PUT", "deck/artifact/library-pin", `{"library":"lib","version":1,"if_pinned_version":0}`)
+	f.must(200, f.owner, "POST", "lib/artifact/versions", libraryProjectBody(1, `{"colors":{"primary":"#222"}}`))
+	f.must(200, f.owner, "POST", "lib/artifact/library/publish", `{"version":2}`)
+	// Reviewed v2; meanwhile the owner publishes v3.
+	f.must(200, f.owner, "POST", "lib/artifact/versions", libraryProjectBody(2, `{"colors":{"primary":"#333"}}`))
+	f.must(200, f.owner, "POST", "lib/artifact/library/publish", `{"version":3}`)
+	if w := f.call(f.owner, "PUT", "deck/artifact/library-pin", `{"library":"lib","version":2,"if_pinned_library":"lib","if_pinned_version":1}`); w.Code != 409 {
+		t.Fatalf("applied an unreviewed publication %d %s", w.Code, w.Body)
+	}
+	// A wrong pinned library with the right version number is stale too.
+	f.must(201, f.owner, "POST", "artifacts", `{"slug":"lib-two","name":"Second library",`+strings.TrimPrefix(libraryProjectBody(0, `{"colors":{"primary":"#999"}}`), "{"))
+	if w := f.call(f.owner, "PUT", "deck/artifact/library-pin", `{"library":"lib","version":3,"if_pinned_library":"lib-two","if_pinned_version":1}`); w.Code != 409 {
+		t.Fatalf("wrong pinned library accepted %d %s", w.Code, w.Body)
+	}
+	if got := f.must(200, f.owner, "GET", "deck/artifact/library-pin", ""); got["library_version"] != float64(1) {
+		t.Fatalf("pin moved %v", got)
+	}
+	if got := f.must(200, f.owner, "PUT", "deck/artifact/library-pin", `{"library":"lib","version":3,"if_pinned_library":"@`+f.libID+`","if_pinned_version":1}`); got["library_version"] != float64(3) {
+		t.Fatalf("reviewed apply %v", got)
+	}
+}
+
+func TestArtifactLibraryPublishFollowsOwnershipTransfer(t *testing.T) {
+	f := newLibraryFixture(t)
+	mustExec(t, f.h.db, `UPDATE pages SET owner_user_id='lib-editor' WHERE id=?`, f.libID)
+	if w := f.call(f.owner, "POST", "lib/artifact/library/publish", `{"version":1}`); w.Code == 200 {
+		t.Fatalf("former owner published: %s", w.Body)
+	}
+	if f.published() != 0 {
+		t.Fatal("former owner moved the publication")
+	}
+	if got := f.must(200, "lib-editor", "POST", "lib/artifact/library/publish", `{"version":1}`); got["published_version"] != float64(1) {
+		t.Fatalf("new owner publish %v", got)
+	}
+}
+
+func TestArtifactLibraryAgentRunsCannotPublishOrPin(t *testing.T) {
+	f := newLibraryFixture(t)
+	f.must(200, f.owner, "POST", "lib/artifact/library/publish", `{"version":1}`)
+	run := &artifactRunAuthority{WorkspaceID: f.ws, AgentID: "lib-agent", CrewID: "crew-lookout", RunID: "lib-run", HumanUserID: f.owner}
+	for _, c := range []struct{ method, path, body string }{
+		{"POST", "lib/artifact/library/publish", `{"version":1}`},
+		{"PUT", "deck/artifact/library-pin", `{"library":"lib","version":1,"if_pinned_version":0}`},
+	} {
+		req := httptest.NewRequest(c.method, "/api/v1/pages/"+c.path, strings.NewReader(c.body))
+		req.Header.Set("Authorization", "Bearer "+f.tokens[f.owner])
+		ctx := withWorkspace(withUser(req.Context(), &AuthUser{ID: f.owner}), f.ws, "OWNER")
+		ctx = context.WithValue(context.WithValue(ctx, ctxAuthKind, AuthKindCLIToken), artifactRunKey{}, run)
+		req = req.WithContext(ctx)
+		slug, _, _ := strings.Cut(c.path, "/")
+		req.SetPathValue("slug", slug)
+		w := httptest.NewRecorder()
+		if c.method == "POST" {
+			f.h.PublishArtifactLibrary(w, req)
+		} else {
+			f.h.PutArtifactLibraryPin(w, req)
+		}
+		if w.Code != 403 && w.Code != 404 {
+			t.Fatalf("agent run %s %s: %d %s", c.method, c.path, w.Code, w.Body)
+		}
+	}
+	var pins, entries int
+	_ = f.h.db.QueryRow(`SELECT count(*) FROM artifact_library_pins`).Scan(&pins)
+	_ = f.h.db.QueryRow(`SELECT count(*) FROM journal_entries WHERE entry_type='artifact.library_published'`).Scan(&entries)
+	if pins != 0 || entries != 1 {
+		t.Fatalf("agent run left pins %d, publish entries %d", pins, entries)
+	}
+}
+
+// The guard itself: whatever admits the run, an "agent:" actor never publishes
+// or pins.
+func TestRejectArtifactAgentActor(t *testing.T) {
+	for _, c := range []struct {
+		actor string
+		ok    bool
+	}{{"user-1", true}, {"agent:a:run", false}} {
+		got, err := rejectArtifactAgentActor(func(context.Context, *sql.Tx) (string, error) { return c.actor, nil })(t.Context(), nil)
+		if (err == nil) != c.ok || (c.ok && got != c.actor) {
+			t.Fatalf("%s: %q %v", c.actor, got, err)
+		}
 	}
 }

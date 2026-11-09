@@ -25,6 +25,14 @@ func artifactIdentityDataFixture(t *testing.T) (*sql.DB, string, string) {
 	mustExec(t, db, `INSERT INTO artifact_project_comments(id,workspace_id,page_id,version,path,selector,quote,text,author,created_at) VALUES('identity-comment',?,'identity-page',1,'index.html','#hero','Retained','Keep history',?,datetime('now'))`, ws, user)
 	mustExec(t, db, `INSERT INTO artifact_project_comment_replies(id,comment_id,version,text,author,created_at) VALUES('identity-reply','identity-comment',2,'Updated',?,datetime('now'))`, user)
 	mustExec(t, db, `INSERT INTO artifact_project_origins(page_id,workspace_id,human_user_id,message_id,created_at) VALUES('identity-page',?,?,'synthetic-original-message',datetime('now'))`, ws, user)
+	// Library publication and a pinned copy carry the human as publisher and
+	// copier, in this workspace and in the other one.
+	for _, scope := range []struct{ ws, page, consumer string }{{ws, "identity-page", "identity-consumer"}, {"identity-other-ws", "identity-other-page", "identity-other-consumer"}} {
+		mustExec(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?,?,?,'Consumer',?,'{}')`, scope.consumer, scope.ws, scope.consumer, user)
+		mustExec(t, db, `INSERT INTO artifact_version_heads(workspace_id,page_id,latest_version) VALUES(?,?,1)`, scope.ws, scope.consumer)
+		mustExec(t, db, `INSERT INTO artifact_library_publications(workspace_id,page_id,version,published_by,published_at) VALUES(?,?,1,?,datetime('now'))`, scope.ws, scope.page, user)
+		mustExec(t, db, `INSERT INTO artifact_library_pins(workspace_id,page_id,library_page_id,library_version,library_name,content,sha256,copied_by,copied_at) VALUES(?,?,?,1,'Library',CAST('{}' AS BLOB),'44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a',?,datetime('now'))`, scope.ws, scope.consumer, scope.page, "user:"+user)
+	}
 	return db, ws, user
 }
 
@@ -51,11 +59,21 @@ func TestArtifactProjectIdentityErasurePreservesHistoryAndWorkspaceScope(t *test
 		`SELECT count(*) FROM artifact_project_comments WHERE workspace_id=? AND author=?`,
 		`SELECT count(*) FROM artifact_project_comment_replies WHERE comment_id IN(SELECT id FROM artifact_project_comments WHERE workspace_id=?) AND author=?`,
 		`SELECT count(*) FROM artifact_project_origins WHERE workspace_id=? AND human_user_id=?`,
+		`SELECT count(*) FROM artifact_library_publications WHERE workspace_id=?1 AND published_by IN (?2,'user:'||?2)`,
+		`SELECT count(*) FROM artifact_library_pins WHERE workspace_id=?1 AND copied_by IN (?2,'user:'||?2)`,
 	} {
 		var n int
 		if err := db.QueryRow(query, ws, user).Scan(&n); err != nil || n != 0 {
 			t.Errorf("identity remains: count%d: %v", n, err)
 		}
+	}
+	var kept int
+	if err := db.QueryRow(`SELECT (SELECT count(*) FROM artifact_library_publications WHERE workspace_id='identity-other-ws' AND published_by=?1)+(SELECT count(*) FROM artifact_library_pins WHERE workspace_id='identity-other-ws' AND copied_by='user:'||?1)`, user).Scan(&kept); err != nil || kept != 2 {
+		t.Errorf("foreign workspace library attribution changed: %d: %v", kept, err)
+	}
+	var pinned int
+	if err := db.QueryRow(`SELECT count(*) FROM artifact_library_pins WHERE workspace_id=? AND copied_by='erased' AND content=CAST('{}' AS BLOB)`, ws).Scan(&pinned); err != nil || pinned != 1 {
+		t.Errorf("pinned copy lost or not anonymised: %d: %v", pinned, err)
 	}
 	var versions, heads, blobs int
 	if err := db.QueryRow(`SELECT count(*) FROM artifact_versions WHERE workspace_id=?`, ws).Scan(&versions); err != nil || versions != 2 {

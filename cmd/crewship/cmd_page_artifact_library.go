@@ -48,13 +48,21 @@ func newArtifactLibraryCommands() []*cobra.Command {
 		if ifPinned < 0 {
 			return cli.WithExitCode(errors.New("--if-pinned-version must be nonnegative"), cli.ExitValidation)
 		}
+		version, _ := cmd.Flags().GetInt64("version")
+		if version < 1 {
+			return cli.WithExitCode(errors.New("--version is required: the Library version you reviewed (published_version from pin check or library show)"), cli.ExitValidation)
+		}
+		pinnedLibrary, _ := cmd.Flags().GetString("if-pinned-library")
+		if (ifPinned == 0) != (pinnedLibrary == "") {
+			return cli.WithExitCode(errors.New("--if-pinned-library is required exactly when --if-pinned-version is not 0"), cli.ExitValidation)
+		}
 		// Pinning is a human decision; agent runs are refused by the server, so
 		// this always uses the authenticated Page client.
 		client, err := pageClient()
 		if err != nil {
 			return err
 		}
-		response, err := client.Put("/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/library-pin", map[string]any{"library": lib, "if_pinned_version": ifPinned})
+		response, err := client.Put("/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/library-pin", map[string]any{"library": lib, "version": version, "if_pinned_library": pinnedLibrary, "if_pinned_version": ifPinned})
 		if err != nil {
 			return err
 		}
@@ -69,6 +77,8 @@ func newArtifactLibraryCommands() []*cobra.Command {
 		return pageEmitMachine(resolvedFormatter(cmd), raw, "{}")
 	}}
 	pinSet.Flags().String("library", "", "Library project slug or @id in this workspace")
+	pinSet.Flags().Int64("version", 0, "Published Library version you reviewed; a different publication is a conflict")
+	pinSet.Flags().String("if-pinned-library", "", "Library currently pinned (slug or @id), empty when nothing is pinned; a mismatch is a conflict")
 	pinSet.Flags().Int64("if-pinned-version", 0, "Library version currently pinned (0 for none); a mismatch is a conflict")
 	check := &cobra.Command{Use: "check <slug>", Args: cobra.ExactArgs(1), Short: "Review whether the Library published a different version, with a token diff", RunE: func(cmd *cobra.Command, args []string) error {
 		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/library-pin/update", nil)

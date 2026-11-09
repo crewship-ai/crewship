@@ -1,5 +1,9 @@
 -- Library publication and consumer pins (#5189).
 --
+-- Both tables are foreign-key children of artifact_version_heads with ON
+-- DELETE CASCADE. A later migration that rebuilds artifact_version_heads must
+-- copy them aside first (TestArtifactVersionHeadsForeignKeyChildrenAreKnown).
+--
 -- A Library is an artifact project whose design-system.json other projects
 -- consume. Publishing is a separate right from editing: only the library's
 -- owner moves the publication pointer. Restoring or editing a library appends

@@ -109,18 +109,18 @@ func TestAcceptance_LibraryPinBinary(t *testing.T) {
 	if got := decode(run("", "library", "show", "harbor")); got["published_version"] != float64(0) || got["can_publish"] != true {
 		t.Fatalf("library show before publish: %v", got)
 	}
-	if out, err := run("", "pin", "set", "deck", "--library", "harbor", "--if-pinned-version", "0"); err == nil {
+	if out, err := run("", "pin", "set", "deck", "--library", "harbor", "--version", "1", "--if-pinned-version", "0"); err == nil {
 		t.Fatalf("pinned an unpublished library: %s", out)
 	}
 	if out, err := run("", "pin", "set", "deck", "--library", "harbor"); err == nil || !strings.Contains(string(out), "if-pinned-version") {
 		t.Fatalf("pin without the reviewed version: %v %s", err, out)
 	}
 	decode(run("", "library", "publish", "harbor", "--version", "1"))
-	pin := decode(run("", "pin", "set", "deck", "--library", "harbor", "--if-pinned-version", "0"))
+	pin := decode(run("", "pin", "set", "deck", "--library", "harbor", "--version", "1", "--if-pinned-version", "0"))
 	if pin["library_version"] != float64(1) || pin["changed"] != true || !strings.Contains(fmt.Sprint(pin["tokens"]), "#1d4ed8") {
 		t.Fatalf("pin set: %v", pin)
 	}
-	if again := decode(run("", "pin", "set", "deck", "--library", "harbor", "--if-pinned-version", "0")); again["changed"] != false {
+	if again := decode(run("", "pin", "set", "deck", "--library", "harbor", "--version", "1", "--if-pinned-version", "0")); again["changed"] != false {
 		t.Fatalf("pin is not idempotent: %v", again)
 	}
 
@@ -139,10 +139,13 @@ func TestAcceptance_LibraryPinBinary(t *testing.T) {
 	if review["update_available"] != true || review["published_version"] != float64(2) || fmt.Sprint(changes["changed"]) != "[colors.primary]" {
 		t.Fatalf("pin check: %v", review)
 	}
-	if out, err := run("", "pin", "set", "deck", "--library", "harbor", "--if-pinned-version", "0"); err == nil {
+	if out, err := run("", "pin", "set", "deck", "--library", "harbor", "--version", "2", "--if-pinned-version", "0"); err == nil {
 		t.Fatalf("stale update accepted: %s", out)
 	}
-	if got := decode(run("", "pin", "set", "deck", "--library", "harbor", "--if-pinned-version", "1")); got["library_version"] != float64(2) || !strings.Contains(fmt.Sprint(got["tokens"]), "#0f766e") {
+	if out, err := run("", "pin", "set", "deck", "--library", "harbor", "--version", "3", "--if-pinned-library", "harbor", "--if-pinned-version", "1"); err == nil {
+		t.Fatalf("unreviewed publication accepted: %s", out)
+	}
+	if got := decode(run("", "pin", "set", "deck", "--library", "harbor", "--version", "2", "--if-pinned-library", "harbor", "--if-pinned-version", "1")); got["library_version"] != float64(2) || !strings.Contains(fmt.Sprint(got["tokens"]), "#0f766e") {
 		t.Fatalf("apply update: %v", got)
 	}
 	if out, err := run("", "library", "publish", "harbor", "--version", "0"); err == nil {

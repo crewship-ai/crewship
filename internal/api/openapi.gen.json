@@ -1623,6 +1623,10 @@
       "ArtifactLibraryPinRequest": {
         "additionalProperties": false,
         "properties": {
+          "if_pinned_library": {
+            "description": "Library currently pinned as reviewed (slug or @\u003cpage id\u003e); required exactly when if_pinned_version is not 0.",
+            "type": "string"
+          },
           "if_pinned_version": {
             "description": "Library version currently pinned as reviewed, 0 when nothing is pinned; a mismatch returns 409 artifact_version_conflict.",
             "format": "int64",
@@ -1633,10 +1637,17 @@
             "description": "Library slug, or @\u003cpage id\u003e, in this workspace.",
             "minLength": 1,
             "type": "string"
+          },
+          "version": {
+            "description": "Published Library version the caller reviewed; a different publication returns 409 artifact_version_conflict.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
           }
         },
         "required": [
           "library",
+          "version",
           "if_pinned_version"
         ],
         "type": "object"
@@ -140621,7 +140632,7 @@
         "x-crewship-read-only": true
       },
       "put": {
-        "description": "Copy the Library's published design-system.json into this project. Requires Edit on the project (not an agent run) and live read access to the published version. `if_pinned_version` must equal the pinned version (0 for none), otherwise 409 `artifact_version_conflict`. Pinning the version already pinned returns `changed: false`. An absent, unpublished or unreadable Library returns the same 404.",
+        "description": "Copy the Library's published design-system.json into this project. Requires Edit on the project (not an agent run) and the caller's own read access to the published version; the workspace admin read path does not count. `version`, `if_pinned_library` and `if_pinned_version` must match the published version and the current pin, otherwise 409 `artifact_version_conflict`. Every reader of the project can read the copy, which survives unsharing the Library. Pinning the version already pinned returns `changed: false`. An absent, unpublished or unreadable Library returns the same 404.",
         "operationId": "put_api_v1_pages_slug_artifact_library-pin",
         "parameters": [
           {

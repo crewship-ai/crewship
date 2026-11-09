@@ -426,18 +426,25 @@ other project: the Library's **owner** chooses the published version with
 saving draft versions; they do not publish.
 
 A project that uses the Library keeps its own copy of the published
-`design-system.json`, made with `crewship page artifact pin set`. The project
-renders from that copy only, so:
+`design-system.json`, made with `crewship page artifact pin set`. The copy is a
+record the project owns:
 
-- restoring or editing the Library never changes the project;
-- deleting the Library, or losing your access to it, keeps the project working
-  with the copy it has;
-- losing access does block the next update.
+- restoring or editing the Library never changes it;
+- deleting the Library, or losing your access to it, keeps the copy;
+- losing access does block the next update;
+- everyone who can read the project can read the copy (tokens and Library
+  name), even without access to the Library, and the copy survives unsharing
+  the Library. Pin only tokens all of the project's readers may see.
+
+Project previews do not yet render with the pinned tokens; today the pin is a
+record with an update review. That rendering is planned.
 
 When the owner publishes a different version, `crewship page artifact pin check`
 reports **update available** with the token paths it adds, removes and changes.
-Nothing changes until someone with Edit on the project applies it with
-`pin set --if-pinned-version <pinned version>`. Full reference:
+Nothing changes until someone with Edit on the project applies exactly the
+reviewed state with `pin set --version <published> --if-pinned-library <library>
+--if-pinned-version <pinned>`. Workspace administrators cannot pin a Library
+they reach only through their administrator role. Full reference:
 [CLI: Library publication and pins](/cli/artifacts#library-publication-and-pins).
 
 ## Design System token preview

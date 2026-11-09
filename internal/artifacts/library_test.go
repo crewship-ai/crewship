@@ -37,18 +37,18 @@ func TestLibraryPublishPinAndUpdate(t *testing.T) {
 	if _, err := s.Apply(ctx, lib, libraryRequest(0, `{"colors":{"primary":"#111"},"radii":{"sm":"2px"}}`), a); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.PinLibrary(ctx, consumer, lib.PageID, 0, a, read); !errors.Is(err, ErrLibraryUnreadable) {
+	if _, _, err := s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{Version: 1}, a, read); !errors.Is(err, ErrLibraryUnreadable) {
 		t.Fatalf("pin before publication: %v", err)
 	}
 	if _, err := s.PublishLibrary(ctx, lib, 1, a); err != nil {
 		t.Fatal(err)
 	}
-	pin, changed, err := s.PinLibrary(ctx, consumer, lib.PageID, 0, a, read)
+	pin, changed, err := s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{Version: 1}, a, read)
 	if err != nil || !changed || pin.LibraryVersion != 1 || pin.LibraryName != "Page" || len(pin.SHA256) != 64 || !strings.Contains(string(pin.Content), "#111") {
 		t.Fatalf("pin %+v %v %v", pin, changed, err)
 	}
 	// A retried first pin is a no-op, not a conflict.
-	again, changed, err := s.PinLibrary(ctx, consumer, lib.PageID, 0, a, read)
+	again, changed, err := s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{Version: 1}, a, read)
 	if err != nil || changed || again.CopiedAt != pin.CopiedAt {
 		t.Fatalf("idempotent pin %+v %v %v", again, changed, err)
 	}
@@ -81,10 +81,10 @@ func TestLibraryPublishPinAndUpdate(t *testing.T) {
 		t.Fatalf("changes %+v", up.Changes)
 	}
 	// Applying the update is compare-and-swap on the pinned version.
-	if _, _, err = s.PinLibrary(ctx, consumer, lib.PageID, 0, a, read); !errors.Is(err, ErrVersionConflict) {
+	if _, _, err = s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{Version: 2}, a, read); !errors.Is(err, ErrVersionConflict) {
 		t.Fatalf("stale update %v", err)
 	}
-	pin, changed, err = s.PinLibrary(ctx, consumer, lib.PageID, 1, a, read)
+	pin, changed, err = s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{2, "page", 1}, a, read)
 	if err != nil || !changed || pin.LibraryVersion != 2 || !strings.Contains(string(pin.Content), "#222") {
 		t.Fatalf("update %+v %v %v", pin, changed, err)
 	}
@@ -99,7 +99,7 @@ func TestLibraryPinSurvivesLostLibraryAccessButBlocksUpdate(t *testing.T) {
 	if _, err := s.PublishLibrary(ctx, lib, 1, a); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := s.PinLibrary(ctx, consumer, lib.PageID, 0, a, read); err != nil {
+	if _, _, err := s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{Version: 1}, a, read); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.Apply(ctx, lib, libraryRequest(1, `{"colors":{"primary":"#333"}}`), a); err != nil {
@@ -113,7 +113,7 @@ func TestLibraryPinSurvivesLostLibraryAccessButBlocksUpdate(t *testing.T) {
 	if err != nil || up.LibraryAvailable || up.UpdateAvailable || up.PublishedVersion != 0 || len(up.Changes.Changed) != 0 {
 		t.Fatalf("revoked check leaks %+v %v", up, err)
 	}
-	if _, _, err = s.PinLibrary(ctx, consumer, lib.PageID, 1, a, revoked); !errors.Is(err, ErrLibraryUnreadable) {
+	if _, _, err = s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{2, "page", 1}, a, revoked); !errors.Is(err, ErrLibraryUnreadable) {
 		t.Fatalf("revoked update %v", err)
 	}
 	got, err := s.ReadLibraryPin(ctx, consumer, a)
@@ -122,7 +122,7 @@ func TestLibraryPinSurvivesLostLibraryAccessButBlocksUpdate(t *testing.T) {
 	}
 	// A different actor for the library than for the consumer is refused.
 	other := func(context.Context, *sql.Tx, int64) (string, error) { return "someone-else", nil }
-	if _, _, err = s.PinLibrary(ctx, consumer, lib.PageID, 1, a, other); !errors.Is(err, ErrVersionAuthority) {
+	if _, _, err = s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{2, "page", 1}, a, other); !errors.Is(err, ErrVersionAuthority) {
 		t.Fatalf("mixed actors %v", err)
 	}
 }
@@ -153,7 +153,7 @@ func TestLibraryPublishValidation(t *testing.T) {
 	if _, err := s.PublishLibrary(ctx, lib, 99, a); !errors.Is(err, ErrVersionNotFound) {
 		t.Fatalf("missing version %v", err)
 	}
-	if _, _, err := s.PinLibrary(ctx, consumer, consumer.PageID, 0, a, read); !errors.Is(err, ErrVersionInvalid) {
+	if _, _, err := s.PinLibrary(ctx, consumer, consumer.PageID, LibraryPinExpect{Version: 1}, a, read); !errors.Is(err, ErrVersionInvalid) {
 		t.Fatalf("self pin %v", err)
 	}
 	if _, err := s.ReadLibraryPin(ctx, consumer, a); !errors.Is(err, ErrVersionNotFound) {
@@ -181,5 +181,86 @@ func TestDiffLibraryTokens(t *testing.T) {
 				t.Fatalf("%+v", d)
 			}
 		})
+	}
+}
+
+func TestLibraryPinAppliesOnlyTheReviewedState(t *testing.T) {
+	s, lib, consumer, a, read := libraryFixture(t)
+	ctx := t.Context()
+	db := s.db
+	if _, err := db.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('other-lib','ws','other-lib','Other library','owner','{}')`); err != nil {
+		t.Fatal(err)
+	}
+	other := VersionKey{"ws", "other-lib"}
+	for _, k := range []VersionKey{lib, other} {
+		if _, err := s.Apply(ctx, k, libraryRequest(0, `{"colors":{"primary":"#100"}}`), a); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Apply(ctx, k, libraryRequest(1, `{"colors":{"primary":"#200"}}`), a); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.Apply(ctx, k, libraryRequest(2, `{"colors":{"primary":"#300"}}`), a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.PublishLibrary(ctx, lib, 2, a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PublishLibrary(ctx, other, 2, a); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{Version: 2}, a, read); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name    string
+		library string
+		expect  LibraryPinExpect
+	}{
+		// The consumer reviewed v2, then the owner published v3.
+		{"publication moved after review", lib.PageID, LibraryPinExpect{2, lib.PageID, 2}},
+		// The caller reviewed a switch from "other-lib" v2, but "page" v2 is pinned.
+		{"switch with equal version numbers from the wrong library", other.PageID, LibraryPinExpect{2, other.PageID, 2}},
+		{"pinned library without version", other.PageID, LibraryPinExpect{Version: 2, PinnedLibrary: lib.PageID}},
+	}
+	if _, err := s.PublishLibrary(ctx, lib, 3, a); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, _, err := s.PinLibrary(ctx, consumer, c.library, c.expect, a, read)
+			if !errors.Is(err, ErrVersionConflict) && !errors.Is(err, ErrVersionInvalid) {
+				t.Fatalf("applied an unreviewed state: %v", err)
+			}
+			got, _ := s.ReadLibraryPin(ctx, consumer, a)
+			if got.LibraryPageID != lib.PageID || got.LibraryVersion != 2 {
+				t.Fatalf("pin changed %+v", got)
+			}
+		})
+	}
+	// The reviewed switch, naming the library actually pinned, applies.
+	got, changed, err := s.PinLibrary(ctx, consumer, other.PageID, LibraryPinExpect{2, lib.PageID, 2}, a, read)
+	if err != nil || !changed || got.LibraryPageID != other.PageID || got.LibraryVersion != 2 {
+		t.Fatalf("reviewed switch %+v %v %v", got, changed, err)
+	}
+}
+
+func TestLibraryPinReadRejectsACorruptCopy(t *testing.T) {
+	s, lib, consumer, a, read := libraryFixture(t)
+	ctx := t.Context()
+	if _, err := s.Apply(ctx, lib, libraryRequest(0, `{"colors":{"primary":"#111"}}`), a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PublishLibrary(ctx, lib, 1, a); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{Version: 1}, a, read); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`UPDATE artifact_library_pins SET content=CAST('{"colors":{}}' AS BLOB)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.ReadLibraryPin(ctx, consumer, a); !errors.Is(err, ErrLibraryPinCorrupt) {
+		t.Fatalf("corrupt copy served: %v", err)
 	}
 }

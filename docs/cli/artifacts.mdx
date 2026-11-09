@@ -407,18 +407,27 @@ Publishing the version already published is a no-op. A non-owner gets `403`.
 ### `crewship page artifact pin set <slug>`
 
 Pin the Library's published version into project `<slug>`, or update the pin
-to a newer publication. You need Edit on the project and must be able to read
-the published version yourself: the owner and workspace admins read any
+to a newer publication. You need Edit on the project, and you must be able to
+read the published version through your own access: the owner reads any
 version, an editor of the Library only its latest version, everyone else only
-its shared version.
+its shared version. The workspace owner and admin read path does **not** count:
+an administrator can read a private Library (with an audit record), but cannot
+turn that read into a copy. Agent runs cannot pin.
+
+Every flag below describes the state you reviewed. If anything differs when the
+request arrives (another published version, another pinned Library or pinned
+version), nothing changes and you get `409 artifact_version_conflict`.
 
 | Flag | Description |
 |---|---|
 | `--library <slug or @id>` | Library in this workspace (required). |
-| `--if-pinned-version <n>` | The Library version you saw pinned, `0` when nothing is pinned (required). A mismatch returns `409 artifact_version_conflict`, so an update is always a decision about a state you reviewed. |
+| `--version <n>` | Published Library version you reviewed (required), as `pin check` or `library show` reported it. |
+| `--if-pinned-library <slug or @id>` | Library currently pinned in the project, empty when nothing is pinned. Required exactly when `--if-pinned-version` is not `0`. |
+| `--if-pinned-version <n>` | Library version currently pinned, `0` when nothing is pinned (required). |
 
 ```bash
-crewship page artifact pin set pitch-deck --library brand --if-pinned-version 0
+crewship page artifact pin set pitch-deck --library brand --version 1 --if-pinned-version 0
+crewship page artifact pin set pitch-deck --library brand --version 2 --if-pinned-library brand --if-pinned-version 1
 ```
 
 ```json
@@ -429,11 +438,20 @@ Pinning the version already pinned returns `"changed": false`. A Library you
 cannot read, one with nothing published and one that does not exist all return
 the same `404`.
 
+**What a pin shares.** The copy (the tokens and the Library's name at the time)
+belongs to the project. Everyone who can read the project can read it with
+`pin show`, including people who cannot read the Library. The copy stays when
+the Library is unshared, made private or deleted. Pin only a Library whose
+tokens every reader of the project may see. There is no unpin command yet.
+
 ### `crewship page artifact pin show <slug>`
 
 Read the pinned copy. Any reader of the project may call it; the Library is not
-read, so the copy keeps working after the Library changes or your access to it
-ends.
+read, so the copy stays available after the Library changes or your access to
+it ends. The stored SHA-256 is checked on every read.
+
+The pin is a record and a review step. Project previews do not yet render with
+the pinned tokens; that is planned.
 
 ### `crewship page artifact pin check <slug>`
 
@@ -448,8 +466,9 @@ Review an update before applying it.
 the pinned one, including when the owner republished an older version. Paths
 are dot-joined token keys; each list holds at most 200 entries and
 `truncated` says when one was cut. When you can no longer read the Library,
-`library_available` is false and nothing about it is reported; apply the update
-with `pin set --if-pinned-version <pinned_version>`.
+`library_available` is false and nothing about it is reported. Apply a reviewed
+update with `pin set --version <published_version> --if-pinned-library <library>
+--if-pinned-version <pinned_version>`.
 
 ## Comments
 
