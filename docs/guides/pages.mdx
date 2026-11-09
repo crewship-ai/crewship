@@ -1097,6 +1097,18 @@ The rule holds at use time too. If an agent `write` grant was issued by
 someone who does not own the page, it shows as inert with the reason and
 authorises nothing until the owner issues it.
 
+The same rule covers an agent you start from a chat or from a document. The
+agent edits an artifact with your rights only while you own it. You may be able
+to edit someone else's Document, Design, Slides, Dashboard or Library project
+through a workspace admin role or an Edit grant. Even so, your agent cannot
+write it, propose changes to it or save a new version of it unless the owner
+gave that agent `write`. Your own edits are unaffected.
+
+Reads also differ by artifact. On a Design, such an agent still reads what you
+can read. Slides, Dashboards and Library projects serve agent runs only for
+their owner. On a Document, an agent that is not working for the owner works
+only through the grant the owner gave it.
+
 An agent never holds `comment`, and `read` does not let an agent propose
 document changes.
 

@@ -612,6 +612,37 @@ func (h *PageHandler) mayDelegateAgentEdit(ctx context.Context, wsID, userID str
 	return h.isPageOwner(ctx, wsID, userID, rec)
 }
 
+// agentRunMayWrite is R71 §0.14/1 and §0.3/4 at use time for an agent RUN —
+// an agent acting on a human's original request — that writes an artifact.
+// See humanAgentMayWrite.
+func (h *PageHandler) agentRunMayWrite(ctx context.Context, wsID, pageID string, run *artifactRunAuthority) bool {
+	if run == nil {
+		return false
+	}
+	return h.humanAgentMayWrite(ctx, wsID, pageID, run.HumanUserID, run.AgentID)
+}
+
+// humanAgentMayWrite: an agent working for a human may borrow that human's
+// write only while the human OWNS the page (the owning user, or a member of
+// the owning crew). Editing the page through a workspace ADMIN/OWNER role or a
+// human Edit grant is not a right to delegate Edit, so otherwise the agent
+// writes only with its own live write grant, which only the owner can issue
+// (agentEditIssuerNotOwnerSQL). A private page admits only its owner: no
+// grant reaches it. Reads are not decided here.
+func (h *PageHandler) humanAgentMayWrite(ctx context.Context, wsID, pageID, humanID, agentID string) bool {
+	if humanID == "" || agentID == "" {
+		return false
+	}
+	rec := &pageRecord{ID: pageID}
+	if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT coalesce(owner_user_id,''),coalesce(owner_crew_id,''),private_audience FROM pages WHERE workspace_id=? AND id=?`, wsID, pageID).Scan(&rec.OwnerUserID, &rec.OwnerCrewID, &rec.PrivateAudience); err != nil {
+		return false
+	}
+	if h.isPageOwner(ctx, wsID, humanID, rec) {
+		return true
+	}
+	return !rec.PrivateAudience && h.agentMayEditSpec(ctx, wsID, rec, agentID)
+}
+
 // pagePanelIDs is the set of panel ids on this page, for validating a produce
 // scope.
 func (h *PageHandler) pagePanelIDs(ctx context.Context, wsID string, rec *pageRecord) (map[string]bool, error) {

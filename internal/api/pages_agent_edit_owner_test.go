@@ -46,6 +46,9 @@ func TestAgentEditDelegationIsOwnerOnly(t *testing.T) {
 		{"admin still grants the workspace write", "admin", "ADMIN", `{"subject_type":"workspace","level":"write"}`, http.StatusOK},
 		{"admin still grants a crew write", "admin", "ADMIN", `{"subject_type":"crew","subject":"engine","level":"write"}`, http.StatusOK},
 		{"agent comment stays refused: Comment is not Propose", "", "OWNER", `{"subject_type":"agent","subject":"scribe","level":"comment"}`, http.StatusBadRequest},
+		// A person's own Edit grant is not a right to delegate it (§0.3/4).
+		{"human Edit grantee may not delegate agent Edit", "editor", "MEMBER", agentWrite, http.StatusForbidden},
+		{"human Edit grantee may not grant an agent anything", "editor", "MEMBER", `{"subject_type":"agent","subject":"scribe","level":"read"}`, http.StatusForbidden},
 	}
 	for _, tc := range userOwned {
 		t.Run("user-owned page/"+tc.name, func(t *testing.T) {
@@ -54,6 +57,8 @@ func TestAgentEditDelegationIsOwnerOnly(t *testing.T) {
 			pagesSeedUser(t, h, wsID, "wsowner", "wsowner@example.com", "OWNER")
 			pagesSeedUser(t, h, wsID, "member", "member@example.com", "MEMBER")
 			pagesSeedAgent(t, h, wsID, "agt-scribe", "scribe", "crew-engine")
+			pagesSeedUser(t, h, wsID, "editor", "editor@example.com", "MEMBER")
+			pagesGrant(t, h, wsID, ownerID, "fleet-201", `{"subject_type":"user","subject":"editor@example.com","level":"write"}`)
 			caller := tc.caller
 			if caller == "" {
 				caller = ownerID
