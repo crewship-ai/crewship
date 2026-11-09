@@ -117,6 +117,10 @@ func artifactDataRunError(w http.ResponseWriter, err error) {
 		writeJSON(w, 409, map[string]string{"error": "This dataset already has the maximum number of running refreshes. Finish one, then start again.", "code": "artifact_data_run_busy"})
 		return
 	}
+	if errors.Is(err, artifacts.ErrDataRunOverlap) {
+		writeJSON(w, 409, map[string]string{"error": "Another refresh of this dataset is still running, or failed after changing data while this one ran. Finish or retry it first; a new run started afterwards can succeed. Nothing was changed.", "code": "artifact_data_run_overlap"})
+		return
+	}
 	if errors.Is(err, artifacts.ErrDataRunGeneration) {
 		writeJSON(w, 409, map[string]string{"error": "The data changed since your last batch, or the run wrote nothing and was not marked unchanged. Nothing was changed.", "code": "artifact_data_run_generation"})
 		return

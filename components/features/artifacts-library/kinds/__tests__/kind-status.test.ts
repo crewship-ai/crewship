@@ -114,9 +114,9 @@ describe("Dashboard freshness", () => {
       expect(status).toMatchObject({ key: "stale", label: "Refresh failed", detail: expect.stringMatching(/Sales: the refresh at 11:50 failed: warehouse 502\. It changed no values; the last successful refresh was 11:41\./) })
       expect(freshness.collections[0].documents).toBe(1)
     })
-    it("says a failed refresh that already wrote some values left the data partly updated", () => {
+    it("says data changed during a failed refresh, without claiming who wrote it", () => {
       const { status } = chip([run({ state: "failed", partial: true, lastAttemptAt: new Date("2026-11-08T11:50:00"), reason: null })])
-      expect(status).toMatchObject({ key: "stale", label: "Refresh failed", detail: expect.stringMatching(/Sales: the refresh at 11:50 failed\. Some values were already updated by it, so the data is partly from this refresh; the last successful refresh was 11:41\./) })
+      expect(status).toMatchObject({ key: "stale", label: "Refresh failed", detail: expect.stringMatching(/Sales: the refresh at 11:50 failed\. Data changed while this refresh ran, so some values may be from it; the last successful refresh was 11:41\./) })
       expect(status!.detail).not.toMatch(/changed no values|Values keep/)
     })
     it("does not invent a reason for a reader and says when nothing ever succeeded", () => {

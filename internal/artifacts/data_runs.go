@@ -27,8 +27,12 @@ import (
 // current generation. Only the producer that started a run may finish it as
 // succeeded, and only by naming the generation it wrote, which must still be
 // current; a success over unchanged data must say so explicitly. Any writer
-// may finish a run as failed (abandon it); the finisher is recorded. A failed
-// run whose generation moved is partial. Run records never change data or
+// may finish a run as failed (abandon it); the finisher is recorded. A success
+// cannot overlap another run that is still running or that failed after
+// changing data during it. A failed run whose generation moved is partial:
+// data changed while it ran, possibly by another writer. Unchanged is the
+// producer's own claim; the server only checks it against writes made
+// during the run. Run records never change data or
 // code versions.
 const (
 	MaxDataRunReason     = 500
@@ -52,6 +56,10 @@ var (
 	ErrDataRunBusy = errors.New("too many active runs for this collection")
 	// ErrDataRunForbidden is a success claimed by a writer that did not start the run.
 	ErrDataRunForbidden = errors.New("only the producer that started a run can finish it as succeeded")
+	// ErrDataRunOverlap is a success while another run of the collection is
+	// running, or after one failed with changed data during this run: the
+	// success would hide that refresh.
+	ErrDataRunOverlap = errors.New("another run of this collection overlaps this one")
 	// ErrDataRunGeneration is a success that does not match the current data generation.
 	ErrDataRunGeneration = errors.New("data generation is not current or does not match the claim")
 )
@@ -284,7 +292,10 @@ func (s *DataStore) StartRun(ctx context.Context, key VersionKey, collection, id
 // FinishRun ends a running run. A success needs the producer that started the
 // run and a DataGeneration equal to the current generation; when that equals
 // the start generation, Unchanged must be set, and Unchanged over changed data
-// is refused. A failure may come from any writer and carries no generation.
+// is refused. A success is also refused while another run of the collection
+// is running or after one failed with changed data during this run
+// (ErrDataRunOverlap). A failure may come from any writer and carries no
+// generation.
 // Finishing again with the same outcome returns the stored run; a different
 // outcome is a conflict. A reason is only kept for a failure and is cleaned by
 // CleanDataRunReason. The finisher and the end generation are recorded.
@@ -336,6 +347,17 @@ func (s *DataStore) FinishRun(ctx context.Context, key VersionKey, collection, i
 			claimed := *finish.DataGeneration
 			if claimed != current || claimed < run.StartGeneration || (claimed == run.StartGeneration) != finish.Unchanged {
 				return ErrDataRunGeneration
+			}
+			// The generation proves nobody wrote after the producer's last batch,
+			// not that every change since start was its own. Refuse a success
+			// that would hide another refresh still writing, or one that failed
+			// after changing data while this run was going.
+			var overlap bool
+			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND id!=? AND (state='running' OR (state='failed' AND end_generation>start_generation AND finished_at>=?)))`, key.WorkspaceID, key.PageID, collection, id, run.StartedAt).Scan(&overlap); err != nil {
+				return err
+			}
+			if overlap {
+				return ErrDataRunOverlap
 			}
 		}
 		stamp := tsformat.Format(time.Now().UTC())

@@ -47,8 +47,8 @@ const unique = (labels: string[]) => [...new Set(labels)]
  * server has one. With a run record, Stale is measured from the last
  * successful run (a stray write does not make data fresh); without one,
  * from the newest write. The server binds a success to the data generation
- * its producer wrote or verified unchanged, so a finish alone cannot mark
- * data fresh. Batches apply as they are written; nothing is staged, so
+ * its producer wrote (or claims unchanged, checked only against writes made
+ * during the run) and refuses it while another run overlaps. Batches apply as they are written; nothing is staged, so
  * values may change while a refresh runs and a failed one may leave some.
  */
 export function dashboardFreshness(collections: readonly DashboardCollection[], datasets: DashboardDatasets = { status: "absent" }, now: Date = new Date(), runs: readonly DashboardRunSummary[] | null = null): DashboardFreshness {
@@ -121,7 +121,7 @@ export function dashboardFrameStatus(input: { pending: boolean; error: boolean; 
   const at = (date: Date) => freshnessTime(date, input.now)
   const lastSuccess = (row: CollectionFreshness) => row.lastSuccessAt ? `the last successful refresh was ${at(row.lastSuccessAt)}` : "no refresh has succeeded yet"
   const failed = rows.filter(row => row.run?.state === "failed")
-  if (failed.length) return { key: "stale", label: "Refresh failed", detail: `${failed.map(row => `${name(row)}: the refresh at ${at(row.run!.lastAttemptAt)} failed${row.run!.reason ? `: ${row.run!.reason}` : ""}. ${row.run!.partial ? "Some values were already updated by it, so the data is partly from this refresh" : "It changed no values"}; ${lastSuccess(row)}.`).join(" ")}${versionNote}` }
+  if (failed.length) return { key: "stale", label: "Refresh failed", detail: `${failed.map(row => `${name(row)}: the refresh at ${at(row.run!.lastAttemptAt)} failed${row.run!.reason ? `: ${row.run!.reason}` : ""}. ${row.run!.partial ? "Data changed while this refresh ran, so some values may be from it" : "It changed no values"}; ${lastSuccess(row)}.`).join(" ")}${versionNote}` }
   const stalled = rows.filter(row => row.stalled)
   if (stalled.length) return { key: "stale", label: "Refresh stalled", detail: `${stalled.map(row => `${name(row)} has been refreshing since ${at(row.run!.startedAt)} without finishing. Values may be partly updated; ${lastSuccess(row)}.`).join(" ")}${versionNote}` }
   const running = rows.filter(row => row.run?.state === "running")

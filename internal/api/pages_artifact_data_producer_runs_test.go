@@ -443,8 +443,9 @@ func TestDashboardProducerRunRetentionNeverPrunesActiveRuns(t *testing.T) {
 	f := newProducerRunFixture(t)
 	active := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"long-running"}`))
 	for i := 0; i < artifacts.DefaultDataRunsKept+5; i++ {
+		// Failed without a data change: no overlap with the still-running run.
 		run := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", fmt.Sprintf(`{"base_version":1,"idempotency_key":"short-%d"}`, i)))
-		if w := f.do(t, f.owner, "finish", "sales", run.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`); w.Code != 200 {
+		if w := f.do(t, f.owner, "finish", "sales", run.ID, "", `{"base_version":1,"state":"failed"}`); w.Code != 200 {
 			t.Fatal(w.Code, w.Body)
 		}
 	}
@@ -472,10 +473,6 @@ func TestDashboardProducerRunRetentionNeverPrunesActiveRuns(t *testing.T) {
 	if w := f.do(t, f.owner, "finish", "sales", decodeRun(t, reused).ID, "", `{"base_version":1,"state":"failed"}`); w.Code != 200 {
 		t.Fatal(w.Code, w.Body)
 	}
-	mustExec(t, f.h.db, `UPDATE artifact_data_runs SET started_at='2000-01-01T00:00:00Z' WHERE id=?`, active.ID)
-	if w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"long-running"}`); w.Code != 200 || decodeRun(t, w).ID != active.ID {
-		t.Fatalf("running key expired: %d %s", w.Code, w.Body)
-	}
 	if w := f.do(t, f.owner, "finish", "sales", active.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`); w.Code != 200 {
 		t.Fatalf("active run could not finish: %d %s", w.Code, w.Body)
 	}
@@ -500,5 +497,42 @@ func TestDashboardProducerRunRetentionNeverPrunesActiveRuns(t *testing.T) {
 	}
 	if w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"one-too-many"}`); w.Code != 201 {
 		t.Fatalf("finished run did not free a slot: %d %s", w.Code, w.Body)
+	}
+}
+
+// Review round 1: overlapping runs must not let a success hide another run's
+// failed or still-running refresh.
+func TestDashboardProducerRunSuccessRefusedWhileAnotherRunOverlaps(t *testing.T) {
+	f := newProducerRunFixture(t)
+	write := func(ifVersion int) int64 {
+		w := dashboardRequest(t, f.h, f.ws, f.owner, "POST", "sales", "", fmt.Sprintf(`{"base_version":1,"documents":[{"id":"row","ifVersion":%d,"value":{"amount":%d}}]}`, ifVersion, ifVersion))
+		var got struct{ Generation int64 }
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &got) != nil {
+			t.Fatalf("batch: %d %s", w.Code, w.Body)
+		}
+		return got.Generation
+	}
+	r2 := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"producer-b"}`))
+	write(0)
+	r1 := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"producer-a"}`))
+	g := write(1)
+	success := fmt.Sprintf(`{"base_version":1,"state":"succeeded","data_generation":%d}`, g)
+	if w := f.do(t, f.owner, "finish", "sales", r1.ID, "", success); w.Code != 409 || !strings.Contains(w.Body.String(), "artifact_data_run_overlap") {
+		t.Fatalf("success while another run is running: %d %s", w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "finish", "sales", r2.ID, "", `{"base_version":1,"state":"failed","reason":"b died"}`); w.Code != 200 || !decodeRun(t, w).Partial {
+		t.Fatalf("overlapping failure: %d %s", w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "finish", "sales", r1.ID, "", success); w.Code != 409 || !strings.Contains(w.Body.String(), "artifact_data_run_overlap") {
+		t.Fatalf("success over a partial failure that ended during this run: %d %s", w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "finish", "sales", r1.ID, "", `{"base_version":1,"state":"failed"}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	// A run started after the failure ended may succeed and becomes the latest.
+	r3 := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"producer-a-retry"}`))
+	g = write(2)
+	if w := f.do(t, f.owner, "finish", "sales", r3.ID, "", fmt.Sprintf(`{"base_version":1,"state":"succeeded","data_generation":%d}`, g)); w.Code != 200 {
+		t.Fatalf("retry after the overlap ended: %d %s", w.Code, w.Body)
 	}
 }

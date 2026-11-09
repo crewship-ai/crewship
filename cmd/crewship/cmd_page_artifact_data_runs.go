@@ -26,11 +26,13 @@ same run (exit 0, HTTP 200). Write the data with "data batch": each batch
 applies immediately (readers may see values while the run is still going) and
 returns the collection's "generation". Finish as succeeded with
 --data-generation set to the generation of your last batch; the server refuses
-it if anyone wrote since. If the run had nothing to change, finish with
+it if anyone wrote since, or while another run of the collection is running or
+after one failed with changed data during yours (artifact_data_run_overlap). If the run had nothing to change, finish with
 --data-generation set to the run's start_generation and --unchanged. Only the
 producer that started a run can mark it succeeded; any writer can finish it as
-failed, and the finisher is recorded. A failed run whose data changed is
-reported as partial.
+failed, and the finisher is recorded. A failed run during which data changed
+(by it or another writer) is reported as partial. --unchanged is your claim;
+the server only checks it against writes made during the run.
 
 A failure reason is cleaned on the server (control characters and common
 credential patterns removed, at most 500 bytes) and is shown to the owner and
@@ -39,7 +41,7 @@ supplied. Starting and finishing need the same right as "data batch". Server
 defaults, not contract: at most 4 running runs per collection (more are
 refused with artifact_data_run_busy), the newest 20 finished runs plus the
 newest success are kept, a running run is never pruned, and a finished run's
-key can be reused after 24 hours. Agent runs that use the artifact tools
+key stays reserved until 24 hours pass or the run is pruned. Agent runs that use the artifact tools
 cannot record runs yet; use a CLI token.`
 	root.Example = `  crewship page artifact data runs start sales-dashboard sales --base-version 3 --key nightly-2026-11-09
   crewship page artifact data runs finish sales-dashboard sales run_0123456789abcdef01234567 --base-version 3 --state succeeded --data-generation 42

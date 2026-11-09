@@ -3,6 +3,7 @@ package artifacts
 import (
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 )
 
@@ -56,5 +57,24 @@ func TestCleanDataRunReason(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDataRunKeyExpiresOnlyForFinishedRuns(t *testing.T) {
+	now := time.Date(2026, 11, 9, 12, 0, 0, 0, time.UTC)
+	old := "2026-11-01T00:00:00Z"
+	for _, tc := range []struct {
+		name string
+		run  DataRun
+		want bool
+	}{
+		{"running run never expires", DataRun{State: "running", StartedAt: old}, false},
+		{"finished run past the TTL", DataRun{State: "failed", StartedAt: old, FinishedAt: old}, true},
+		{"finished run within the TTL", DataRun{State: "succeeded", StartedAt: old, FinishedAt: "2026-11-09T11:00:00Z"}, false},
+		{"unparsable finish time keeps the key", DataRun{State: "failed", FinishedAt: "yesterday"}, false},
+	} {
+		if got := keyExpired(&tc.run, DefaultDataRunKeyTTL, now); got != tc.want {
+			t.Errorf("%s: got %v", tc.name, got)
+		}
 	}
 }

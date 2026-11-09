@@ -3040,8 +3040,12 @@ returns it as `generation`, and a run records it as `start_generation`. A
 success must name as `data_generation` the generation the producer's last
 batch returned, and it must still be current. A success over unchanged data
 must set `unchanged: true` with the start generation; `unchanged` over
-changed data is refused. A failure carries neither field. A failed run whose
-generation moved is reported as `partial`.
+changed data is refused; `unchanged` is the producer's claim, which the
+server checks only against writes made during the run. A success is also
+refused while another run of the collection is running, or after one failed
+with changed data while this run was going (`artifact_data_run_overlap`). A
+failure carries neither field. A failed run whose generation moved (by it or
+another writer) is reported as `partial`.
 
 **Authentication and authority:** start and finish require exactly the
 authority of a data batch for a human caller (the owner or a current Edit
@@ -3064,8 +3068,8 @@ pattern based, not a guarantee.
 
 **Limits (server defaults, not contract):** at most 4 running runs per
 collection; the newest 20 finished runs plus the newest success are kept; the
-key of a finished run can be reused after 24 hours, while the key of a running
-run never expires.
+key of a finished run stays reserved until 24 hours pass or the run is pruned,
+whichever comes first, while the key of a running run never expires.
 
 **Statuses:** 200 success or idempotent replay; 201 run created; 400 invalid
 body, key, state, version, or a success without `data_generation`; 401
@@ -3075,7 +3079,9 @@ inaccessible, undeclared collection or unknown run (including a run of
 another Page or workspace); 409 stale code base, a key owned by another
 producer, a finish whose outcome differs from the stored one
 (`artifact_data_run_conflict`), a success whose generation is not current or
-whose `unchanged` claim does not match (`artifact_data_run_generation`), or
+whose `unchanged` claim does not match (`artifact_data_run_generation`), a
+success that overlaps another running or partly failed run
+(`artifact_data_run_overlap`), or
 too many running runs (`artifact_data_run_busy`); 413 storage quota; 500
 internal failure; 503 durable transaction unavailable.
 

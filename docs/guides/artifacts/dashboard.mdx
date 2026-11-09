@@ -301,16 +301,19 @@ supplied.
 **Data updates as it is written.** A run does not stage data or publish it at
 the end: each `data batch` applies immediately, so readers may see new values
 while a refresh is still running, and a failed refresh may leave some of its
-values behind. The chip says so: a failed run that already changed data is
-reported as partly applied.
+values behind. The chip says so: a failed run during which data changed (by
+it or another writer) is reported as partly applied.
 
 **A success is bound to the data it wrote.** Every batch returns the
 collection's `generation` (the sum of its document versions; it only grows).
 Finish as succeeded with the generation of your last batch. The server
 refuses the success with `409 artifact_data_run_generation` if anyone wrote
-to the collection since, so a finish cannot make data look fresher than it
-is. If the refresh had nothing to change, finish with the run's
-`start_generation` and `--unchanged`.
+to the collection since, and with `409 artifact_data_run_overlap` while
+another refresh of the collection is still running or after one failed with
+changed data while yours ran; finish or abandon that run, then start a new
+one. If the refresh had nothing to change, finish with the run's
+`start_generation` and `--unchanged`. `--unchanged` is your own claim: the
+server only checks that nobody wrote during the run, not the source.
 
 ```bash
 crewship page artifact data runs start <slug> sales --base-version 3 --key nightly-2026-11-09
@@ -341,7 +344,8 @@ Limits are server defaults and may change; they are not part of the API
 contract. At most 4 runs per collection can be running at once (more fail
 with `409 artifact_data_run_busy`). The newest 20 finished runs and the newest
 success are kept; a running run is never removed. The key of a finished run
-can be reused after 24 hours. **Refresh stalled** is decided by the viewer's
+stays reserved until 24 hours pass or the run is pruned, whichever comes
+first; do not rely on replaying a key of a run that may have been pruned. **Refresh stalled** is decided by the viewer's
 browser after 30 minutes (also a default); the server keeps such a run
 `running` until a writer finishes it.
 
