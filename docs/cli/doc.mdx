@@ -314,9 +314,10 @@ not every editor keystroke: the initial state, explicit checkpoints, and a
 session checkpoint of the confirmed result when an edit arrives more than ten
 minutes after the newest checkpoint, or at least a minute after another
 author's. Session checkpoints share at most half of the document's History
-budget and never refuse an edit. When that half is full, the oldest session
-checkpoints are dropped to keep the newest; the initial and explicit
-checkpoints are kept. Older pins remain retained and can be read by ID.
+budget and never refuse an edit. Nothing is deleted to make room: once that
+half is used, no new session checkpoints are kept and the response includes
+`"history_limit_reached": true` (the field is absent otherwise). Edits are still
+saved, and History in the app explains the limit. Older pins remain retained and can be read by ID.
 Each entry in `checkpoints` has `id`, `rev`, `schema`, `actor` and `created_at`.
 A valid document with no retained pins returns an empty `checkpoints` list.
 `404 document history unavailable` means the document state or selected
