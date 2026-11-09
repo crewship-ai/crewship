@@ -35,8 +35,9 @@ assert.equal((await stat(token)).mode & 0o777, 0o600)
 const output = process.env.DOCS_CANVAS_OUT || await mkdtemp(join(tmpdir(), 'crewship-docs-canvas-'))
 await mkdir(join(output, 'video'), { recursive: true })
 const engineLog = await open(join(output, 'engine.log'), 'w', 0o600)
+const engineEnv = { CREWSHIP_DOCS_SOCKET: socket, CREWSHIP_DOCS_AUTHORITY_SOCKET: authority, CREWSHIP_DOCS_SERVICE_TOKEN_FILE: token }
 const engine = spawn(process.execPath, [resolve('tools/docs-service/service.mjs')], {
-  env: { CREWSHIP_DOCS_SOCKET: socket, CREWSHIP_DOCS_AUTHORITY_SOCKET: authority, CREWSHIP_DOCS_SERVICE_TOKEN_FILE: token },
+  env: engineEnv,
   stdio: ['ignore', engineLog.fd, engineLog.fd],
 })
 const report = { output, checks: [] }
@@ -60,7 +61,13 @@ try {
   for (let attempt = 0; attempt < 100 && !enabled; attempt++) {
     if (engine.exitCode !== null || engine.signalCode !== null) throw new Error('Owned Node engine exited; inspect engine.log')
     const status = await owner.request.get(`${base}/api/v1/documents/status?${q}`)
-    enabled = status.ok() && (await status.json()).enabled === true
+    if (status.ok() && (await status.json()).enabled === true) {
+      // Availability advertises configured paths, not a completed engine
+      // recovery barrier. Use the packaged readiness probe before any write.
+      const probe = spawn(process.execPath, [resolve('tools/docs-service/healthcheck.mjs')], { env: engineEnv, stdio: 'ignore' })
+      const [code] = await once(probe, 'exit')
+      enabled = code === 0
+    }
     if (!enabled) await new Promise(r => setTimeout(r, 100))
   }
   assert.ok(enabled, 'real Node service becomes available')
