@@ -77,6 +77,18 @@ try {
   assert.ok(grant.status() < 300, await grant.text())
   const viewerPassword = 'disposable-canvas-viewer-password'
   assert.ok((await owner.request.post(`${base}/api/v1/auth/reset`, { data: { token: setup, new_password: viewerPassword } })).status() < 300)
+  // The third identity: a workspace Member with an explicit write grant on this Page.
+  const coProvisioned = await owner.request.post(`${base}/api/v1/workspaces/${encodeURIComponent(workspace)}/members/provision?${q}`, { data: { email: 'canvas-coeditor@example.invalid', role: 'MEMBER', full_name: 'Canvas Coeditor', create_only: true } })
+  assert.ok(coProvisioned.status() < 300, await coProvisioned.text())
+  const coPassword = 'disposable-canvas-coeditor-password'
+  assert.ok((await owner.request.post(`${base}/api/v1/auth/reset`, { data: { token: new URL((await coProvisioned.json()).setup_url).searchParams.get('token'), new_password: coPassword } })).status() < 300)
+  const coGrant = await owner.request.put(`${base}/api/v1/pages/canvas-plan/grants?${q}`, { data: { subject_type: 'user', subject: 'canvas-coeditor@example.invalid', level: 'write' } })
+  assert.ok(coGrant.status() < 300, await coGrant.text())
+  const signIn = async (context, email, password) => {
+    const token = (await (await context.request.get(`${base}/api/auth/csrf`)).json()).csrfToken
+    assert.equal((await context.request.post(`${base}/api/auth/callback/credentials`, { data: { email, password, csrfToken: token, redirect: 'false', json: 'true' } })).status(), 200, `password login ${email}`)
+    assert.equal((await (await context.request.get(`${base}/api/auth/session`)).json()).user?.email, email, 'a distinct identity')
+  }
 
   const errors = []
   const page = await owner.newPage()
@@ -205,11 +217,45 @@ try {
   await viewer.screenshot({ path: join(output, '04-viewer-panned.png') })
   pass('read-only viewer pans but cannot move; nothing is written')
 
+  // C07: two editors at once. The owner moves the placed card while the co-editor places another
+  // block; both writes survive, and each sees the other's change without reloading.
+  const coContext = await browser.newContext({ viewport, reducedMotion: 'reduce', recordVideo: video })
+  await signIn(coContext, 'canvas-coeditor@example.invalid', coPassword)
+  const co = await coContext.newPage()
+  co.on('pageerror', error => errors.push(error.message))
+  await co.goto(`${base}/artifacts/${encodeURIComponent(pageId)}`)
+  await co.getByLabel('Document editor', { exact: true }).waitFor()
+  await co.getByRole('button', { name: 'Status: Live' }).waitFor({ timeout: 15000 })
+  await co.getByRole('tab', { name: 'Canvas', exact: true }).click()
+  await co.locator('[data-placement="intro"]').waitFor()
+  const ownerCard = page.locator('[data-placement="intro"]')
+  const from = await ownerCard.boundingBox()
+  const ownerSaved = page.waitForResponse(r => r.url().includes('/document/patch') && r.request().method() === 'POST')
+  const coSaved = co.waitForResponse(r => r.url().includes('/document/patch') && r.request().method() === 'POST')
+  await co.getByText(/^Add blocks \(2\)$/).click()
+  await page.mouse.move(from.x + 40, from.y + 20); await page.mouse.down()
+  for (let i = 1; i <= 8; i++) await page.mouse.move(from.x + 40 + i * 15, from.y + 20 + i * 20)
+  await co.getByRole('button', { name: 'Book the venue.', exact: true }).click()
+  await page.mouse.up()
+  assert.equal((await ownerSaved).status(), 200); assert.equal((await coSaved).status(), 200)
+  let merged
+  for (let i = 0; i < 60; i++) { merged = await read(); if (merged.placement.x !== stored.placement.x) break; await new Promise(r => setTimeout(r, 250)) }
+  const doc = new Y.Doc({ gc: false }); const latest = await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document?${q}`)).json()
+  Y.applyUpdate(doc, decode(latest.snapshot)); for (const update of latest.updates ?? []) Y.applyUpdate(doc, decode(update))
+  const both = doc.getMap('surface:placements').toJSON(); doc.destroy()
+  assert.deepEqual(Object.keys(both).sort(), ['intro', 'outro'], 'both concurrent writes are stored')
+  assert.notEqual(both.intro.x, stored.placement.x, 'the owner move is stored')
+  await co.waitForFunction(x => document.querySelector('[data-placement="intro"]')?.style.left === `${x}px`, both.intro.x, { timeout: 20000 })
+  await page.locator('[data-placement="outro"]').waitFor({ timeout: 20000 })
+  await co.screenshot({ path: join(output, '05-coeditor-sees-move.png') })
+  await page.screenshot({ path: join(output, '05-owner-sees-placement.png') })
+  pass('two editors write at once: both changes are stored and each sees the other live')
+
   assert.deepEqual(errors, [], 'no browser runtime errors')
-  const videos = [await page.video()?.path(), await viewer.video()?.path()]
-  await owner.close(); await viewerContext.close()
+  const videos = [await page.video()?.path(), await viewer.video()?.path(), await co.video()?.path()]
+  await owner.close(); await viewerContext.close(); await coContext.close()
   report.videos = videos
-  console.log(JSON.stringify({ ...report, schema: 6, identities: 2, engine: 'production Node', persistence: 'Go authority/SQLite', providerInvoked: false }))
+  console.log(JSON.stringify({ ...report, schema: 6, identities: 3, engine: 'production Node', persistence: 'Go authority/SQLite', providerInvoked: false }))
 } finally {
   try { await browser?.close() } finally {
     try {
