@@ -227,7 +227,7 @@ export function createTabs({ Y }) {
       if (node instanceof Y.XmlElement && typeof node.getAttribute('id') === 'string') ids.add(node.getAttribute('id'));
       if (node instanceof Y.XmlElement || node instanceof Y.XmlFragment) for (const child of node.toArray()) visit(child);
     };
-    // Only called inside a write: typing a loaded root as a fragment emits nothing.
+    // Called by a mutator: typing a loaded root as a fragment emits no update, even if the write is then refused.
     for (const name of [...doc.share.keys()]) if (name === DEFAULT || name.startsWith(PREFIX)) visit(doc.getXmlFragment(name));
     return ids;
   }
@@ -291,9 +291,13 @@ export function createTabs({ Y }) {
     if (id === DEFAULT) fail('the first tab cannot be deleted');
     const self = find(id);
     if (!self) fail('tab required');
-    // Children by the stored parent, not the displayed one (the depth clamp may show a child elsewhere).
-    const up = state.place.get(id)?.parent ?? null;
-    const writes = [...state.place].filter(([, v]) => v.parent === id).map(([child, v]) => [TABS, child, { parent: up, order: v.order }]);
+    // Children by the stored parent (the depth clamp may show a child elsewhere); they move to
+    // the parent the tree shows, which already reflects cycle breaking. A child that is that
+    // parent or one of its ancestors (a broken cycle) becomes a root instead of its own parent.
+    const up = self.parent, above = new Set();
+    for (let cursor = up; cursor !== null; cursor = find(cursor).parent) above.add(cursor);
+    const writes = [...state.place].filter(([, v]) => v.parent === id)
+      .map(([child, v]) => [TABS, child, { parent: above.has(child) ? null : up, order: v.order }]);
     commit(doc, state, writes, () => {
       for (const [, child, value] of writes) doc.getMap(TABS).set(child, value);
       const fragment = doc.getXmlFragment(fragmentName(id));

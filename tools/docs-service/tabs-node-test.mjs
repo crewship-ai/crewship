@@ -227,6 +227,19 @@ test('renames are refused near the history budget by the real count, not an esti
   doc.destroy();
 });
 
+test('deleting the tab where a concurrent cycle was broken leaves a valid tree', () => {
+  const a = fixture();
+  createTab(a, { id: 'p', name: 'P', blockId: 'p-p' }); createTab(a, { id: 'q', name: 'Q', blockId: 'q-p' });
+  const b = load(snapshot(a));
+  moveTab(a, 'p', { parent: 'q' }); moveTab(b, 'q', { parent: 'p' });
+  sync(a, b);
+  const top = tree(a).find(n => n.children.length).id;
+  deleteTab(a, top);
+  validateTabs(load(snapshot(a)));
+  assert.deepEqual(shape(tree(load(snapshot(a)))).map(n => n[0]).sort(), ['default', top === 'p' ? 'q' : 'p']);
+  a.destroy(); b.destroy();
+});
+
 test('fractional order keys stay strictly ordered under repeated inserts', () => {
   const keys = ['1'];
   for (let i = 0; i < 150; i++) {
