@@ -45,6 +45,23 @@ function documentFrames(socket: Socket) {
  return socket.sent.flatMap(bytes => { const decoder = decoding.createDecoder(bytes); return decoding.readVarUint(decoder) === 0 ? [decoding.readVarUint(decoder)] : [] })
 }
 describe("Design standard sync provider", () => {
+ it("shares the selected layer through awareness only, and sends nothing when it does not change", () => {
+  const { doc, provider, socket } = setup(false)
+  const before = designNodes(doc)
+  const frames = () => socket.sent.filter(bytes => decoding.readVarUint(decoding.createDecoder(bytes)) === 1).length
+  const start = frames()
+  provider.setSelection("hero")
+  expect(provider.awareness.getLocalState()?.selection).toBe("hero")
+  expect(frames()).toBe(start + 1)
+  provider.setSelection("hero")
+  expect(frames()).toBe(start + 1)
+  provider.setSelection("x".repeat(129))
+  expect(provider.awareness.getLocalState()?.selection).toBeNull()
+  provider.setSelection(null)
+  expect(provider.awareness.getLocalState()?.selection).toBeNull()
+  expect(documentFrames(socket).filter(kind => kind !== 0)).toEqual([])
+  expect(designNodes(doc)).toEqual(before)
+ })
  it("keeps the immutable Page target during an offline reconnect", () => {
   vi.useFakeTimers()
   const url = "ws://localhost/api/v1/pages/@old-private-page/design/ws?workspace_id=workspace"

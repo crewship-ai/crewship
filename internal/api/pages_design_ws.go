@@ -79,13 +79,16 @@ func designCloseFor(err error) (int, string) {
 }
 
 type designClient struct {
-	conn            *websocket.Conn
-	out             chan []byte
-	actor           string
-	displayName     string
-	canEdit         bool
-	canReadLive     bool
-	awareness       []byte
+	conn        *websocket.Conn
+	out         chan []byte
+	actor       string
+	displayName string
+	canEdit     bool
+	canReadLive bool
+	awareness   []byte
+	// awarenessShared is awareness without live-canvas fields (selection),
+	// sent to clients that may read only the shared version.
+	awarenessShared []byte
 	clientID, clock uint64
 	hasID           bool
 	retired         bool // replaced by the same actor's newer connection
@@ -114,6 +117,29 @@ func (room *designRoom) broadcast(frame []byte, except *designClient) {
 		}
 	}
 }
+
+// broadcastAwareness sends a client's awareness to the room: the full state
+// to those who may read the live canvas, the state without live-canvas fields
+// to those who may read only the shared version.
+func (room *designRoom) broadcastAwareness(from *designClient) {
+	for client := range room.clients {
+		if client != from {
+			_ = client.enqueue(from.awarenessFor(client))
+		}
+	}
+}
+
+// awarenessFor is the awareness frame of c that the recipient may see.
+func (c *designClient) awarenessFor(recipient *designClient) []byte {
+	if recipient.canEdit || recipient.canReadLive || c.awarenessShared == nil {
+		return c.awareness
+	}
+	return c.awarenessShared
+}
+
+// designMaxSelection bounds the selected layer ID in awareness; layer IDs are
+// at most 128 characters.
+const designMaxSelection = 128
 
 // The standard JavaScript peers represent protocol integers exactly through 2^53-1.
 const designMaxSafeUint uint64 = 1<<53 - 1
@@ -237,11 +263,31 @@ func designAwareness(raw []byte, client *designClient, room *designRoom) ([]byte
 		user["name"] = client.displayName
 		user["id"] = client.actor
 		value["user"] = user
+		// The selected layer is live-canvas state: only someone who reads the
+		// live canvas may send it, as a bounded layer ID or null.
+		if selection, ok := value["selection"]; ok {
+			if text, isText := selection.(string); !client.canReadLive || !(selection == nil || (isText && text != "" && len(text) <= designMaxSelection)) {
+				delete(value, "selection")
+			}
+		}
 		state, _ = json.Marshal(value)
 	}
 	client.hasID = true
 	client.clientID = id
 	client.clock = clock
+	client.awareness = designAwarenessFrame(id, clock, state)
+	client.awarenessShared = nil
+	if value != nil {
+		if _, ok := value["selection"]; ok {
+			delete(value, "selection")
+			shared, _ := json.Marshal(value)
+			client.awarenessShared = designAwarenessFrame(id, clock, shared)
+		}
+	}
+	return client.awareness, nil
+}
+
+func designAwarenessFrame(id, clock uint64, state []byte) []byte {
 	out := designAppendUint(nil, 1)
 	out = designAppendUint(out, id)
 	out = designAppendUint(out, clock)
@@ -249,9 +295,7 @@ func designAwareness(raw []byte, client *designClient, room *designRoom) ([]byte
 	out = append(out, state...)
 	frame := designAppendUint(nil, 1)
 	frame = designAppendUint(frame, uint64(len(out)))
-	frame = append(frame, out...)
-	client.awareness = frame
-	return frame, nil
+	return append(frame, out...)
 }
 func designAwarenessGone(c *designClient) []byte {
 	p := designAppendUint(nil, 1)
@@ -351,7 +395,7 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 	room.clients[client] = true
 	for c := range room.clients {
 		if c != client && len(c.awareness) > 0 {
-			if client.enqueue(c.awareness) != nil {
+			if client.enqueue(c.awarenessFor(client)) != nil {
 				delete(room.clients, client)
 				room.mu.Unlock()
 				return
@@ -451,11 +495,10 @@ func (h *PageHandler) DesignWebsocket(w http.ResponseWriter, r *http.Request) {
 			if kind == 1 {
 				e = h.designTx(r, k, false, func(_ context.Context, _ *sql.Tx, _ string) error { return nil })
 				if e == nil {
-					var sanitized []byte
-					sanitized, e = designAwareness(frame, client, room)
+					_, e = designAwareness(frame, client, room)
 					switch {
 					case e == nil:
-						room.broadcast(sanitized, client)
+						room.broadcastAwareness(client)
 					case errors.Is(e, errDesignAwarenessHeld):
 						e = nil
 					default:

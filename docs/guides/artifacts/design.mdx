@@ -8,7 +8,9 @@ tag: Experimental
 
 A Design is an artifact that holds a shared canvas. You arrange screens,
 rectangles, text and images on it, and everyone who has the Design open sees
-each change and each other's cursors as it happens. Crewship keeps numbered
+each change, each other's cursors and the layer each person has selected
+(a dashed outline in their colour, with their name) as it happens. Each person
+on the canvas has their own colour, the same on every screen. Crewship keeps numbered
 versions of the canvas, lets the owner share one version with readers, and
 can pass a comment on a layer to the agent of a chat you connect.
 
@@ -174,6 +176,15 @@ at the current zoom. On a phone, **Fit** fits the artboard's width.
      screen among screens; layers later in the order are drawn on top.
 5. To remove the selection, click **Delete layer**. Deleting a screen with
    **Delete screen and layers** also removes every layer inside it.
+
+**Undo** and **Redo** in the toolbar (or **Ctrl + Z**, **Shift + Ctrl + Z**
+and **Ctrl + Y**; **Cmd** on a Mac) take back and redo your own edits on this
+canvas since you opened it. They never take back another person's change.
+When someone else changes a property you also changed (or deletes that
+layer), your step for it leaves the history, so undo never overwrites or
+removes their value. In a text field the keys undo typing in that field.
+Colours follow the people present, so one may change when someone joins or
+leaves.
 
 Live updates reach the people authorized to view the live canvas. Shared-only
 readers keep seeing the shared version. The editor also keeps a copy of your unsaved canvas in this browser, so a crash or a lost
@@ -388,7 +399,8 @@ A person with shared-only **read** access who opens the Design sees:
 
 - the shared snapshot, with a **Read only** badge and **View canvas** in the
   toolbar,
-- the cursors and initials of the people editing,
+- the cursors and initials of the people editing (not which layer they have
+  selected, which belongs to the live canvas),
 - in **History**, only the shared version,
 - comments on the shared version only.
 
