@@ -11,7 +11,8 @@ import (
 
 // TestSchemaCapabilities (#5233) fixes the capability table: new Docs are
 // born at a schema with every agent capability, never by following
-// LatestSchema; only older schemas upgrade; unknown schemas support nothing.
+// LatestSchema; only older schemas upgrade; a later schema keeps every
+// capability an earlier one released; unknown schemas support nothing.
 func TestSchemaCapabilities(t *testing.T) {
 	want := map[int]string{
 		0: "",
@@ -19,8 +20,10 @@ func TestSchemaCapabilities(t *testing.T) {
 		2: "read,edit,restore,export,upgrade",
 		3: "read,edit,draft,restore,export,upgrade",
 		4: "read,edit,draft,propose,accept,restore,export,upgrade",
-		5: "read,edit,draft,propose,accept,restore,export",
-		6: "",
+		5: "read,edit,draft,propose,accept,restore,export,upgrade",
+		// Enabling Canvas (6) keeps every capability schema 5 released.
+		6: "read,edit,draft,propose,accept,restore,export",
+		7: "",
 	}
 	for schema, list := range want {
 		if got := strings.Join(SchemaCapabilities(schema), ","); got != list {
@@ -42,6 +45,15 @@ func TestSchemaCapabilities(t *testing.T) {
 	}
 	if CreateSchema > LatestSchema {
 		t.Error("the creation schema is newer than the engine's latest schema")
+	}
+	// Upgrading never takes a capability away (opposition answer 4): every
+	// agent-facing capability of a schema stays at every later schema.
+	for schema := 1; schema < LatestSchema; schema++ {
+		for _, c := range []Capability{CapRead, CapEdit, CapDraft, CapPropose, CapAccept, CapRestore, CapExport} {
+			if SchemaAllows(schema, c) && !SchemaAllows(LatestSchema, c) {
+				t.Errorf("upgrading schema %d to %d loses %s", schema, LatestSchema, c)
+			}
+		}
 	}
 }
 
@@ -94,7 +106,9 @@ func TestIterationIntentBindsTheDocumentSchema(t *testing.T) {
 		{5, "", true, true},
 		{5, "a,b", true, true},
 		{2, "", false, false},
-		{6, "", false, false},
+		{6, "", true, true},
+		{6, "a,b", true, true},
+		{7, "", false, false},
 	} {
 		intent := IterationIntent{SubmissionID: "submission-1", PageID: "page-1", Schema: tt.schema, Rev: 1, Generation: 0, Blocks: tt.blocks}
 		if got := intent.Validate() == nil; got != tt.valid {

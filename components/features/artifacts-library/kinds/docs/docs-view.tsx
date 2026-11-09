@@ -2,8 +2,10 @@
 
 import * as React from "react"
 import { EditorContent, useEditorState } from "@tiptap/react"
-import { Download, FileText, GitPullRequestArrow, History, ListTree, MessageSquare, PanelLeft, Send, X } from "lucide-react"
+import { Download, FileText, GitPullRequestArrow, History, LayoutGrid, ListTree, MessageSquare, PanelLeft, Send, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { ConfirmDialog } from "@/components/ui/confirm-dialog"
+import { canEnableCanvas, enableCanvas, upgradeFailure } from "@/lib/documents/upgrade"
 import { Textarea } from "@/components/ui/textarea"
 import { proposalChatHref, proposalSchema } from "@/lib/documents/proposal-request"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
@@ -16,9 +18,18 @@ import type { LibraryItem } from "../../library-items"
 import { docsFrameStatus, outlineOf, readingStats, readingText, type DocNode, type OutlineEntry } from "./docs-model"
 import { DocsTools } from "./docs-tools"
 import { DocsComments } from "./docs-comments"
+import { DocsCanvas } from "./docs-canvas"
+import { documentSurface } from "@/lib/documents/surface"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
 import { commentTarget, setCommentHighlights, type CommentTarget } from "@/components/features/pages/document-rich-extensions"
+
+/**
+ * Documents whose Canvas a person has just enabled in this tab: the session
+ * reopens at the new schema and shows Canvas, which they asked for. In memory
+ * only; nothing about a document is stored in the browser for it.
+ */
+const openCanvasAfterReopen = new Set<string>()
 
 /** What the Docs body tells the frame: the chip, whether this person can edit now, and the chip's popover. */
 export interface DocsFrameReport {
@@ -82,7 +93,7 @@ function DocsUnhydrated({ denied, status, onFrame, children }: { denied: boolean
 }
 
 function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsFrameReport | null) => void }) {
-  const { workspaceId, pageId, humanId, slug, available, historyExpired, sync, onFrame } = props
+  const { workspaceId, pageId, humanId, slug, available, historyExpired, sync, onFrame, onRestored } = props
   const frame = useArtifactFrame()
   const layout: FrameLayout = frame?.layout ?? "desktop"
   const phone = layout === "phone"
@@ -108,6 +119,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     const member = kind === "user" ? (members.members ?? []).find(entry => entry.user.id === id) : undefined
     return member?.user.full_name || member?.user.email || (kind === "agent" ? "Agent" : "Workspace member")
   }, [humanId, members.members])
+  const [mode, setMode] = React.useState<"page" | "canvas">(() => openCanvasAfterReopen.delete(pageId) ? "canvas" : "page")
   const [draft, setDraft] = React.useState<CommentTarget | null>(null)
   const [commentNotice, setCommentNotice] = React.useState<string | null>(null)
   const [activeThread, setActiveThread] = React.useState<string | null>(null)
@@ -126,6 +138,8 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const jumpToComment = (comment: DocumentComment) => {
     if (!editor || !comment.block) return
     setActiveThread(comment.id)
+    // The thread's text lives on the Page: show it there.
+    setMode("page")
     const target = [...editor.view.dom.querySelectorAll<HTMLElement>("[data-block-id]")].find(node => node.dataset.blockId === comment.block)
     target?.scrollIntoView?.({ block: "center", behavior: "smooth" })
   }
@@ -135,6 +149,43 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const requestSchema = proposalSchema(sync.state?.schema)
   const proposalsServed = Boolean(sync.state?.proposals) && requestSchema !== undefined && available && !sync.denied
   const [proposalPrompt, setProposalPrompt] = React.useState("")
+
+  // Canvas is a second view of the same Y.Doc (R71 §0.4), shown at a schema that admits the surface.
+  // An older document is upgraded only when a person with edit access confirms "Enable Canvas"; never implicitly.
+  const canvasReady = Boolean(sync.state && !sync.denied && sync.state.schema >= documentSurface.CANVAS_SCHEMA)
+  const canvasOffer = !canvasReady && Boolean(sync.state && !sync.denied && available) && canEnableCanvas(sync.state?.schema, sync.state?.can_write === true)
+  const [enabling, setEnabling] = React.useState<{ id: string; error: string | null } | null>(null)
+  const confirmEnable = async () => {
+    const state = sync.state
+    if (!state || !enabling) return
+    // Unsaved edits would be refused at the new schema: they are saved first, never dropped.
+    if (sync.pending > 0 || sync.recovery) { setEnabling({ ...enabling, error: "Wait until your changes are saved, then enable Canvas." }); throw new Error("pending") }
+    const result = await enableCanvas({ workspaceId, pageId, schema: state.schema, rev: state.rev, epoch: state.epoch }, enabling.id)
+    if (result.status !== "done") {
+      // A changed document needs a fresh read and a fresh decision; an unknown outcome is retried with the same ID.
+      setEnabling({ id: result.status === "unknown" ? enabling.id : crypto.randomUUID(), error: upgradeFailure(result) })
+      if (result.status === "denied") sync.deny()
+      throw new Error(result.status)
+    }
+    openCanvasAfterReopen.add(pageId)
+    onRestored()
+  }
+  const view = canvasReady ? mode : "page"
+  // Losing Canvas (schema or access changed) returns to the Page for good, never back on its own.
+  React.useEffect(() => { if (!canvasReady) setMode("page") }, [canvasReady])
+  // The person's own transaction origin for Canvas writes: saved like every local change, never mixed with remote ones.
+  const canvasOrigin = React.useMemo(() => "canvas:" + crypto.randomUUID(), [])
+  const openInPage = (blockId: string) => {
+    setMode("page")
+    requestAnimationFrame(() => {
+      const target = [...(editor?.view.dom.querySelectorAll<HTMLElement>("[data-block-id]") ?? [])].find(node => node.dataset.blockId === blockId)
+      target?.scrollIntoView?.({ block: "center", behavior: "smooth" })
+    })
+  }
+  const openCanvasComments = (_block: string, threads: string[]) => {
+    setActiveThread(threads[0] ?? null)
+    frame?.openDrawer("comments")
+  }
 
   const editable = Boolean(sync.editable && !restoring && editor)
   const status = docsFrameStatus({
@@ -172,9 +223,20 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     if (phone) setOutlineOpen(false)
   }
 
-  return <section aria-label="Doc page" data-docs-page data-layout={layout} className={cn("touch-form min-h-full", outlineOpen && !phone && "pl-[256px]")}>
-    <article className={COLUMN}>
-      {banner}
+  const outlineShown = outlineOpen && view === "page"
+  const modeTab = (value: "page" | "canvas", Icon: typeof FileText, label: string) => <button type="button" role="tab" aria-selected={view === value}
+    id={`docs-mode-${value}`} aria-controls={view === value ? `docs-view-${value}` : undefined}
+    aria-haspopup={value === "canvas" && !canvasReady ? "dialog" : undefined}
+    onClick={() => { if (value === "canvas" && !canvasReady) setEnabling({ id: crypto.randomUUID(), error: null }); else setMode(value) }} data-docs-mode={value}
+    className={cn("inline-flex h-[30px] items-center gap-1.5 rounded-[var(--radius-row)] px-2.5 text-sm font-medium coarse:min-h-[44px]",
+      view === value ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}>
+    <Icon aria-hidden className="size-4" />{label}
+  </button>
+
+  return <section aria-label="Doc page" data-docs-page data-layout={layout} data-docs-view={view} className={cn("touch-form min-h-full", outlineShown && !phone && "pl-[256px]")}>
+    {/* The Page editor stays mounted under Canvas, so unsent edits and its undo history are never unmounted. */}
+    <article id="docs-view-page" role="tabpanel" aria-labelledby="docs-mode-page" className={COLUMN} hidden={view !== "page"}>
+      {view === "page" && banner}
       {/* The frame names the artifact and its Info drawer the owner and folder (Harbor 2 v87 Docs): the column starts with the document. */}
       {/* The chip is a button; this stays the one live region that announces save state. */}
       <div className="sr-only">
@@ -188,18 +250,25 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
       </>}
     </article>
 
+    {view === "canvas" && <div id="docs-view-canvas" role="tabpanel" aria-labelledby="docs-mode-canvas" className="h-[calc(100dvh-8rem)] min-h-[480px] w-full px-2 pb-16 pt-14 md:px-4 md:pb-4">
+      {banner}
+      <DocsCanvas doc={sync.doc} editable={editable} origin={canvasOrigin} onOpenInPage={openInPage}
+        comments={discussion?.comments} onOpenComments={discussion ? openCanvasComments : undefined} />
+    </div>}
+
     <ArtifactSlot name="view" label="View">
-      <ArtifactTool icon={PanelLeft} label={outlineOpen ? "Hide outline" : "Show outline"} on={outlineOpen} onClick={() => setOutlineOpen(open => !open)} />
-      <ArtifactToolSeparator />
-      {/* Page is the only mode with a backend; Canvas stays hidden until it has one. */}
+      {view === "page" && <>
+        <ArtifactTool icon={PanelLeft} label={outlineOpen ? "Hide outline" : "Show outline"} on={outlineOpen} onClick={() => setOutlineOpen(open => !open)} />
+        <ArtifactToolSeparator />
+      </>}
+      {/* Canvas shows for documents whose schema admits the surface, and as "Enable Canvas" to editors of older ones. */}
       <span role="tablist" aria-label="Mode" className="inline-flex">
-        <button type="button" role="tab" aria-selected="true" className="inline-flex h-[30px] items-center gap-1.5 rounded-[var(--radius-row)] bg-accent px-2.5 text-sm font-medium text-foreground coarse:min-h-[44px]">
-          <FileText aria-hidden className="size-4" />Page
-        </button>
+        {modeTab("page", FileText, "Page")}
+        {(canvasReady || canvasOffer) && modeTab("canvas", LayoutGrid, "Canvas")}
       </span>
     </ArtifactSlot>
 
-    {outlineOpen && <ArtifactSlot name="panel" label="Outline">
+    {outlineShown && <ArtifactSlot name="panel" label="Outline">
       <div className="flex items-center gap-1 border-b py-1.5 pl-3 pr-1.5">
         <b className="flex-1 text-sm font-semibold">Outline</b>
         <ArtifactTool icon={X} label="Close outline" onClick={() => setOutlineOpen(false)} />
@@ -219,14 +288,14 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
       </nav>
     </ArtifactSlot>}
 
-    {editable && editor && sync.state && <DocsTools editor={editor} schema={sync.state.schema} onError={setActionError} onComment={discussion?.canComment ? startComment : undefined} />}
+    {view === "page" && editable && editor && sync.state && <DocsTools editor={editor} schema={sync.state.schema} onError={setActionError} onComment={discussion?.canComment ? startComment : undefined} />}
 
     <ArtifactSlot name="viewport" label="Reading">
       <span className="px-2 font-mono text-xs tabular-nums text-muted-foreground">{readingText(stats)}</span>
     </ArtifactSlot>
 
     {discussion && <ArtifactDrawerSection tab="comments" label="Comments" icon={MessageSquare}>
-      {discussion.canComment && !editable && <div className="px-3.5 pt-3.5">
+      {discussion.canComment && !editable && view === "page" && <div className="px-3.5 pt-3.5">
         <Button type="button" size="sm" variant="outline" className="coarse:min-h-[44px]" onClick={startComment}>Comment on selection</Button>
       </div>}
       <DocsComments data={discussion} nameOf={nameOf} draft={draft} notice={commentNotice} active={activeThread}
@@ -261,5 +330,18 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
           control={{ open: frame?.drawerTab === "history", onClose: () => frame?.openDrawer(null) }} />
       </div>
     </ArtifactDrawerSection>
+    <ConfirmDialog open={enabling !== null} onOpenChange={open => { if (!open) setEnabling(null) }}
+      title="Enable Canvas for this document?"
+      description="Canvas shows this document's blocks on a board you can arrange, next to notes that live only on the canvas."
+      consequences={[
+        { tone: "kept", text: "The Page, its text and formatting stay exactly as they are." },
+        { tone: "kept", text: "Versions and comments are kept." },
+        { tone: "warn", text: "Open proposals can no longer be accepted; they can still be rejected, and an agent can propose again." },
+        { tone: "warn", text: "Everyone with edit access can use Canvas from now on. Restoring a version from before Canvas keeps Canvas enabled but empties its layout." },
+        { tone: "warn", text: "People who have this document open must reload before they can save again." },
+      ]}
+      confirmLabel="Enable Canvas" onConfirm={confirmEnable}>
+      {enabling?.error && <p role="alert" className="text-sm text-destructive">{enabling.error}</p>}
+    </ConfirmDialog>
   </section>
 }

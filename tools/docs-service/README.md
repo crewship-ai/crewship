@@ -83,18 +83,25 @@ the same transaction. Text left by an edit concurrent with a removal is reported
 as a stray and never carries over to a new item with the same ID. Mutators refuse
 to write into an invalid surface and refuse a write that would cross the history
 cap; after one full walk they add each own write's cost to a cached total, so a
-gesture does not re-walk the whole history. Known debt: the surface can use the
-whole 1 MiB document budget on its own; a separate surface share is open. Two
-replicas can each stay within the cap and exceed it once merged; then every
-surface write is refused until compaction or a server-side quota exists, which
-schema 6 admission must settle. Undo/redo writes bypass the pre-check (the next
-full validation still catches them). After a remote change the next gesture
-re-walks the surface once.
+gesture does not re-walk the whole history.
 
-No content schema admits these roots yet: `validate()` still refuses them for
-schemas 1-4. Schema 5 is reserved for formatting marks; the surface becomes
-schema 6 through the existing explicit human upgrade. `surface-node-test.mjs`
-covers the model, concurrency, comment anchoring and undo.
+Content schema 6 admits these roots; `validate()` keeps refusing them for
+schemas 1-5, and a document becomes schema 6 only by an explicit initialize or
+the human-only upgrade. The surface has its own share of the document: its
+history count is an upper bound of its encoded bytes (whatever the values,
+keys or number of writers) and may not exceed 512 KiB, half of the 1 MiB
+document limit, so the Page always keeps the other half. Every commit validates
+the merged state, so replicas that each stayed inside the share are refused
+together once merged past it: the service answers 413 with code
+`surface_quota` (also for the 2000-entry limit) and stores nothing.
+
+Known debt: history is a lifetime budget (gc:false, no compaction yet), so once
+the share is full every further Canvas write is refused; the editor treats that
+413 like any refused save and keeps the draft for recovery. Undo/redo writes
+bypass the client pre-check (the server validation still catches them). After a
+remote change the next gesture re-walks the surface once.
+`surface-node-test.mjs` covers the model, concurrency, comment anchoring and
+undo; `schema-v6-node-test.mjs` the admission and the share.
 
 ## Private service boundary
 

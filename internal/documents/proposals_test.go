@@ -245,8 +245,11 @@ func TestProposalBoundToDocumentSchema(t *testing.T) {
 		{5, 5, nil},
 		{5, 4, ErrSchema},
 		{4, 5, ErrSchema},
+		{6, 6, nil},
+		{6, 5, ErrSchema},
+		{5, 6, ErrSchema},
 		{3, 3, ErrInvalidProposal},
-		{6, 6, ErrInvalidProposal},
+		{7, 7, ErrInvalidProposal},
 	} {
 		t.Run(fmt.Sprintf("document %d proposal %d", tt.document, tt.proposal), func(t *testing.T) {
 			s, db := proposalFixture(t)

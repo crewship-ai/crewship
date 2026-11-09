@@ -253,14 +253,14 @@ func TestDocumentDraftSchemaFourCreationCommitsDirectly(t *testing.T) {
 }
 
 // The protected draft envelope admits a direct draft at a schema that supports
-// drafting (3, 4, 5) and a proposal at one that supports proposals (4, 5);
+// drafting (3 to 6) and a proposal at one that supports proposals (4 to 6);
 // the handler then binds either to the stored schema (#5233).
 func TestValidateDocumentDraftRequestSchemas(t *testing.T) {
 	for _, tc := range []struct {
 		operation string
 		schema    int
 		ok        bool
-	}{{"patch", 3, true}, {"patch", 4, true}, {"patch", 5, true}, {"checkpoint", 4, true}, {"checkpoint", 5, true}, {"patch", 2, false}, {"patch", 6, false}, {"propose", 4, true}, {"propose", 5, true}, {"propose", 3, false}, {"propose", 6, false}} {
+	}{{"patch", 3, true}, {"patch", 4, true}, {"patch", 5, true}, {"checkpoint", 4, true}, {"checkpoint", 5, true}, {"patch", 6, true}, {"checkpoint", 6, true}, {"patch", 2, false}, {"patch", 7, false}, {"propose", 4, true}, {"propose", 5, true}, {"propose", 6, true}, {"propose", 3, false}, {"propose", 7, false}} {
 		request := map[string]json.RawMessage{"id": json.RawMessage(`"op"`), "schema": json.RawMessage(fmt.Sprint(tc.schema)), "page_id": json.RawMessage(`"page"`), "epoch": json.RawMessage(`"e"`), "ifRev": json.RawMessage(`0`)}
 		if tc.operation != "checkpoint" {
 			request["target"], request["ifHash"], request["text"] = json.RawMessage(`"t"`), json.RawMessage(`"`+strings.Repeat("a", 64)+`"`), json.RawMessage(`"x"`)

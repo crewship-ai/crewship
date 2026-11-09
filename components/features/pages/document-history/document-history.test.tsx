@@ -135,3 +135,11 @@ it("fails closed instead of throwing or retaining a prior body when serializatio
   expect(screen.queryByText("Confirmed historical text")).toBeNull()
   expect(screen.getByRole("status")).toHaveTextContent(/unavailable/i)
 })
+it("warns that restoring a version from before Canvas empties the Canvas layout, and only then",()=>{
+  const restore={restore:{allowed:true,status:"idle" as const,onConfirm:vi.fn(),onRetry:vi.fn()}}
+  const {rerender}=render(<DocumentHistory {...props()} {...restore} headSchema={6}/>)
+  fireEvent.click(screen.getByRole("button",{name:"Restore selected checkpoint"}))
+  expect(screen.getByRole("alertdialog")).toHaveTextContent("This version is from before Canvas: Canvas stays enabled, but its layout and notes will be empty.")
+  rerender(<DocumentHistory {...props()} {...restore} headSchema={5}/>)
+  expect(screen.getByRole("alertdialog")).not.toHaveTextContent("before Canvas")
+})

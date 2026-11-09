@@ -154,10 +154,14 @@ func TestHumanDocumentEngineResponseObjectBoundary(t *testing.T) {
 }
 
 func TestHumanDocumentTransportPreservesHumanRequest(t *testing.T) {
-	for _, operation := range []string{"initialize", "patch", "read"} {
+	// upgrade (#5149) is the explicit human Enable Canvas: forwarded exactly, never rewritten.
+	for _, operation := range []string{"initialize", "patch", "upgrade", "read"} {
 		t.Run(operation, func(t *testing.T) {
 			h, ws, user := humanDocumentTransportFixture(t)
 			method, path, body := "POST", "/api/v1/pages/private-doc/document/"+operation, `{"id":"exact-retry","schema":2,"epoch":"opaque","ifRev":3,"ifHash":"old-hash","target":"block","text":"changed"}`
+			if operation == "upgrade" {
+				body = `{"id":"enable-canvas","schema":5,"target_schema":6,"page_id":"human-doc-page","epoch":"opaque","ifRev":3}`
+			}
 			if operation == "initialize" {
 				body = `{"id":"exact-initialize","schema":2,"body":{"type":"doc","content":[{"type":"paragraph","attrs":{"id":"block"}}]}}`
 			}

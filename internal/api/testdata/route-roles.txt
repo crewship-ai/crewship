@@ -384,6 +384,7 @@ POST /api/v1/pages/{slug}/document/proposals/{proposal}/accept roleInline
 POST /api/v1/pages/{slug}/document/proposals/{proposal}/reject roleInline
 POST /api/v1/pages/{slug}/document/initialize roleInline
 POST /api/v1/pages/{slug}/document/patch roleInline
+POST /api/v1/pages/{slug}/document/upgrade roleInline
 POST /api/v1/pages/{slug}/document/restore roleInline
 POST /api/v1/pages/{slug}/draft-key roleInline
 POST /api/v1/pages/{slug}/mooring/commands roleInline
