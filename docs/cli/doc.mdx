@@ -294,7 +294,8 @@ crewship doc initialize @<artifact-id> --file initialize.json
 ```
 
 The first response is the initial state, with `schema`, `rev: 0`, a numeric
-`epoch`, `generation`, `blocks` (block `id` and `hash`) and the stored snapshot.
+`epoch`, `generation`, `database`, `contentGeneration`, `blocks` (block `id` and
+`hash`) and the stored snapshot.
 An exact retry returns the original receipt with `duplicate: true` instead:
 
 ```json
@@ -377,6 +378,12 @@ document reuses its former slug. Current workspace and access checks still apply
 Read the currently confirmed document, content tree, block outline and revision.
 Use the returned opaque `epoch`, `rev` and target block hash when preparing an
 edit. Read after initialization to obtain the editing epoch.
+
+The epoch names the content you edited, not the server process. A server or
+Docs engine restart keeps it, so an edit prepared before the restart still
+applies. It changes when content is replaced: a History restore, a schema
+upgrade, or a restore from backup (which gives the database a new identity).
+After an epoch change, read again and prepare the edit against the new content.
 
 ```bash
 crewship doc read @<artifact-id> -f json

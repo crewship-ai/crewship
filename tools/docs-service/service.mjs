@@ -93,7 +93,13 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'surface-core.mjs', 'position-migrations.mjs', 'service.mjs', 'create-document.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
   const identity = { protocol: PROTOCOL, schema: LATEST_VERSION, build: build.digest('hex') };
   const leases = new Map();
-  const owner = randomUUID();const syncEpoch=state=>`${state.incarnation??"legacy"}:${owner}:${state.generation??state.epoch}`; const documents = new Map(); let queued = 0; let draining = false;let ready=false;let admitted=0;const decoding=new Set();
+  const owner = randomUUID();
+  // The public epoch names the content lineage a client edited. A database identity, rotated only by backup restore, and a
+  // content generation, advanced by History restore and schema upgrade, survive a plain restart, so pending edits replay.
+  // Engine boots still fence writers through generation and leases. Without that lineage the authority is older: fence every boot.
+  const syncEpoch=state=>typeof state.database==="string"&&state.database&&Number.isSafeInteger(state.contentGeneration)?`db:${state.database}:${state.contentGeneration}`:`${state.incarnation??"legacy"}:${owner}:${state.generation??state.epoch}`;
+  const advanced=state=>({...state,generation:(state.generation??0)+1,...(Number.isSafeInteger(state.contentGeneration)?{contentGeneration:state.contentGeneration+1}:{})});
+  const documents = new Map(); let queued = 0; let draining = false;let ready=false;let admitted=0;const decoding=new Set();
   async function go(page, operation, context, data = {}) {
     let deadline;
     return new Promise((resolve, reject) => {
@@ -288,7 +294,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         validate(doc,LATEST_VERSION);
         const result = await go(page,'upgrade',context,{id:request.id,fingerprint,schema:state.schema,targetSchema:LATEST_VERSION,ifRev:state.rev,generation:state.generation??0,epoch:lease.epoch,leaseToken:lease.token,leaseOwner:owner});
         leases.delete(key);
-        return {...result,schema:LATEST_VERSION,epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
+        return {...result,schema:LATEST_VERSION,epoch:syncEpoch(advanced(state))};
       }
       const hashes = {}; let semantic; let resultVersion = version; let restored;
       switch (operation) {
@@ -334,7 +340,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       const blocks = (await outline(doc,resultVersion)).map(({ id, hash }) => ({ id, hash }));
       const renewal=await go(page, 'renew', context, { owner, epoch: lease.epoch, token: lease.token });
       if(renewal.expiresAt)lease.expiresAt=renewal.expiresAt;
-      if (operation === 'restore') return {...await go(page, 'restore', context, { id: request.id, fingerprint, checkpoint: request.checkpoint, ifRev: state.rev,generation:state.generation??0, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner }),schema:restored,epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
+      if (operation === 'restore') return {...await go(page, 'restore', context, { id: request.id, fingerprint, checkpoint: request.checkpoint, ifRev: state.rev,generation:state.generation??0, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner }),schema:restored,epoch:syncEpoch(advanced(state))};
       if (operation === 'checkpoint') return {...await go(page, 'checkpoint', context, { id: request.id, fingerprint, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, ifRev: state.rev,generation:state.generation??0, snapshot: snapshot(doc) }),epoch:syncEpoch(state)};
       return {...await go(page, 'commit', context, { id: request.id, fingerprint, kind: operation === 'patch' ? (context.authorization.startsWith('Bearer agtv2.') ? 'agent' : 'human') : operation, ...(operation === 'patch' && context.authorization.startsWith('Bearer agtv2.') ? { semantic } : {}), epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation:state.generation??0, schema: version, snapshot: snapshot(doc), blocks, ifHashes: hashes, checkpoint: request.checkpoint }),epoch:syncEpoch(state)};
     } finally {

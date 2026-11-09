@@ -827,6 +827,9 @@ func finishRecoveredDatabase(ctx context.Context, rep *RecoverReport, kit *Recov
 				return fmt.Errorf("backup: reset document writer leases: %w", err)
 			}
 			rep.RuntimeReset = append(rep.RuntimeReset, "document writer leases and epochs")
+			if err := rotateDocumentDatabaseIdentity(ctx, db); err != nil {
+				return err
+			}
 		}
 		// Backup runs that were in flight (or queued) on the source when the
 		// bundle was taken — the run that took it, usually — are not this
