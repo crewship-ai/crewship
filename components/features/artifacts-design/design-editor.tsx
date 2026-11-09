@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useLayoutEffect, useRef, useState, type PointerEvent } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react"
 import dynamic from "next/dynamic"
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Frame, ImagePlus, Info, Layers, MessageSquare, MousePointer2, Play, Plus, Redo2, Save, Scan, SlidersHorizontal, Square, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react"
 import * as Y from "yjs"
@@ -23,6 +23,7 @@ import { designLinkTarget, designScreenOf, removeDesignNode, restoreDesignConfli
 import { DesignNodeShape } from "./design-node-shape"
 import { DesignPrototypePlayer } from "./design-prototype-player"
 import { DesignExportButton } from "./design-export-button"
+import { DRAG_THRESHOLD, fitView, focusView, panBy, pinchOf, pinchView, pressIntent, toCanvas, toScreen, typingTarget, wheelGesture, zoomAround, type DesignView, type Point } from "./design-viewport"
 
 function encodedDesignState(doc: Y.Doc,maxBytes=Infinity) {
  const state=Y.encodeStateAsUpdate(doc)
@@ -107,7 +108,6 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const playButton = useRef<HTMLButtonElement>(null)
  const wasPlaying = useRef(false)
  useEffect(() => { if (wasPlaying.current && !playing) playButton.current?.focus(); wasPlaying.current = Boolean(playing) }, [playing])
- const drag = useRef<{ id: string; startX: number; startY: number; x: number; y: number } | null>(null)
  const selected = design.nodes.find(node => node.id === selectedId)
  // Undo and redo take back only this person's own edits (Ctrl/⌘+Z,
  // Shift+Ctrl/⌘+Z or Ctrl+Y); a text field keeps its own undo.
@@ -168,72 +168,236 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   setPanel("properties")
   if (type === "frame") setFocus(frames.length)
  }
- // Zoom lives only in the frame; the standalone editor draws at 100 %.
- const viewport = useRef<HTMLDivElement>(null)
- const [zoom, setZoom] = useState<"fit" | number>("fit")
+ // The viewport (design-viewport.ts): pan and zoom are this browser's view only,
+ // never written into the document, history or awareness.
+ const viewport = useRef<HTMLDivElement | null>(null)
+ const [viewportElement, setViewportElement] = useState<HTMLDivElement | null>(null)
+ const attachViewport = useCallback((element: HTMLDivElement | null) => { viewport.current = element; setViewportElement(element) }, [])
+ const [placed, setPlaced] = useState<{ fit: true } | { fit: false; view: DesignView }>(() => framed ? { fit: true } : { fit: false, view: { scale: 1, x: 0, y: 0 } })
  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
  const [focus, setFocus] = useState(0)
  const [layersOpen, setLayersOpen] = useState(false)
  const focusIndex = Math.min(focus, Math.max(0, frames.length - 1))
  const focused = frames[focusIndex]
- const loaded = Boolean(design.query.data)
  useLayoutEffect(() => {
-  const element = viewport.current
-  if (!framed || !element) return
+  const element = viewportElement
+  if (!element) return
   const measure = () => setViewportSize(previous => previous.width === element.clientWidth && previous.height === element.clientHeight ? previous : { width: element.clientWidth, height: element.clientHeight })
   measure()
   if (typeof ResizeObserver === "undefined") return
   const observer = new ResizeObserver(measure)
   observer.observe(element)
   return () => observer.disconnect()
- }, [framed, loaded])
+ }, [viewportElement])
  const box = (nodes: DesignNode[]) => {
   if (!nodes.length) return null
   const places = nodes.map(node => ({ ...position(node), width: Math.max(1, Number(node.width) || 1), height: Math.max(1, Number(node.height) || 1) }))
   const left = Math.min(...places.map(place => place.x)), top = Math.min(...places.map(place => place.y))
   return { x: left, y: top, width: Math.max(...places.map(place => place.x + place.width)) - left, height: Math.max(...places.map(place => place.y + place.height)) - top }
  }
- // Fit: the whole canvas on a wide screen; the focused artboard's width on a phone.
- const fitTarget = phone && focused ? box([focused]) : box(frames.length ? frames : design.nodes)
- const fitScale = !framed || !fitTarget || !viewportSize.width ? 1
-  : Math.min(2, Math.max(0.05, phone ? (viewportSize.width - 24) / fitTarget.width : Math.min((viewportSize.width - FIT_PAD * 2) / fitTarget.width, (viewportSize.height - 56 - 64 - 24) / fitTarget.height)))
- const scale = !framed ? 1 : zoom === "fit" ? fitScale : zoom
- const step = (direction: 1 | -1) => setZoom(() => {
+ // The frame's toolbars float over the canvas: keep the fitted area clear of them.
+ const fitOptions = !framed ? { top: 24, bottom: 24, side: 24 } : phone ? { top: 88, bottom: 0, side: 12, widthOnly: true } : { top: 80, bottom: 64, side: FIT_PAD }
+ // Fit: every artboard and loose layer on a wide screen; the focused artboard's width on a phone.
+ const fitTarget = phone && focused ? box([focused]) : box(design.nodes.filter(node => !node.parentId || !design.nodes.some(parent => parent.id === node.parentId)))
+ const fitted: DesignView = fitTarget && viewportSize.width ? fitView(fitTarget, viewportSize, fitOptions) : { scale: 1, x: fitOptions.side, y: fitOptions.top }
+ const view: DesignView = placed.fit ? fitted : placed.view
+ const scale = view.scale
+ const fittedNow = useRef(fitted); fittedNow.current = fitted
+ const viewNow = useRef(view); viewNow.current = view
+ const setView = (next: DesignView) => setPlaced({ fit: false, view: next })
+ /** Changes the view from whatever it is when React applies the change, so quick wheel events add up. */
+ const changeView = useCallback((change: (view: DesignView) => DesignView) => setPlaced(previous => ({ fit: false, view: change(previous.fit ? fittedNow.current : previous.view) })), [])
+ const center = (): Point => ({ x: viewportSize.width / 2, y: (viewportSize.height + fitOptions.top - fitOptions.bottom) / 2 })
+ const step = (direction: 1 | -1) => {
   const next = direction > 0 ? ZOOM_STEPS.find(value => value > scale + 0.001) : [...ZOOM_STEPS].reverse().find(value => value < scale - 0.001)
-  return next ?? (direction > 0 ? ZOOM_STEPS.at(-1)! : ZOOM_STEPS[0])
- })
- // Bring the fitted area, or the focused artboard, into view.
- const scrollTarget = zoom === "fit" ? (phone && focused ? box([focused]) : fitTarget) : focused ? box([focused]) : null
- const scrollKey = scrollTarget ? `${Math.round(scrollTarget.x)}:${Math.round(scrollTarget.y)}:${scale}:${focusIndex}:${zoom}` : ""
- useEffect(() => {
-  const element = viewport.current
-  if (!framed || !element || !scrollTarget) return
-  const pad = phone ? 12 : FIT_PAD
-  // The canvas sits under the view slot's padding, so the target's top lands just below it.
-  element.scrollTo?.({ left: Math.max(0, scrollTarget.x * scale - pad), top: Math.max(0, scrollTarget.y * scale - 24) })
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- the key holds every input that moves the view
- }, [scrollKey])
- const point = (event: PointerEvent<SVGSVGElement> | PointerEvent<SVGGElement>) => {
-  const bounds = canvas.current?.getBoundingClientRect()
-  return { x: (event.clientX - (bounds?.left ?? 0)) / scale, y: (event.clientY - (bounds?.top ?? 0)) / scale }
+  setView(zoomAround(view, center(), next ?? (direction > 0 ? ZOOM_STEPS.at(-1)! : ZOOM_STEPS[0])))
  }
- const beginDrag = (event: PointerEvent<SVGGElement>, node: DesignNode) => {
-  event.stopPropagation()
+ const local = (event: { clientX: number; clientY: number }): Point => {
+  const bounds = viewport.current?.getBoundingClientRect()
+  return { x: event.clientX - (bounds?.left ?? 0), y: event.clientY - (bounds?.top ?? 0) }
+ }
+ // One gesture at a time. Escape, pointercancel and window blur put back where it started.
+ type Gesture =
+  | { kind: "pan"; pointerId: number; start: Point; view: DesignView; moved: boolean; tapNode?: string; touch: boolean; button: number }
+  | { kind: "move"; pointerId: number; start: Point; id: string; x: number; y: number; moved: boolean; touch: boolean }
+  | { kind: "pinch"; ids: [number, number]; view: DesignView; from: ReturnType<typeof pinchOf> }
+  // Fingers still down after a pinch ended or was cancelled start nothing until all are up.
+  | { kind: "spent" }
+ const gesture = useRef<Gesture | null>(null)
+ const touches = useRef(new Map<number, Point>())
+ const [panning, setPanning] = useState(false)
+ const [space, setSpace] = useState(false)
+ const spaceHeld = useRef(false)
+ const pointerInside = useRef(false)
+ /** A right-button pan that ends outside the canvas must not open the browser menu there (Windows opens it on release). */
+ const menuAfterPan = useRef(0)
+ const cancelGesture = () => {
+  const current = gesture.current
+  // Fingers still down after a cancel start nothing until they are all up.
+  gesture.current = touches.current.size ? { kind: "spent" } : null
+  setPanning(false)
+  if (!current || current.kind === "spent") return false
+  if (current.kind === "move" && current.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, x: current.x, y: current.y })
+  if (current.kind === "pan" || current.kind === "pinch") setView(current.view)
+  return true
+ }
+ const cancelNow = useRef(cancelGesture); cancelNow.current = cancelGesture
+ const selectNode = (node: DesignNode) => {
   setSelectedId(node.id)
   setPanel("properties")
   if (framed && !phone && artifactFrame?.drawerTab === null) artifactFrame.openDrawer("properties")
-  if (!canChange || !canvas.current) return
-  const start = point(event)
-  drag.current = { id: node.id, startX: start.x, startY: start.y, x: node.x, y: node.y }
-  canvas.current.setPointerCapture(event.pointerId)
  }
- const move = (event: PointerEvent<SVGSVGElement>) => {
-  const cursor = point(event)
-  design.setCursor(cursor)
-  if (!drag.current || !canChange || !design.doc) return
-  upsertDesignNode(design.doc, { id: drag.current.id, x: Math.round(drag.current.x + cursor.x - drag.current.startX), y: Math.round(drag.current.y + cursor.y - drag.current.startY) })
+ const capture = (event: PointerEvent<HTMLDivElement>) => { try { event.currentTarget.setPointerCapture(event.pointerId) } catch { /* capture is best effort */ } }
+ const pressDown = (event: PointerEvent<HTMLDivElement>) => {
+  const at = local(event)
+  if (event.button === 1) event.preventDefault() // no middle-button autoscroll
+  menuAfterPan.current = 0
+  if (event.pointerType === "touch") {
+   // The first finger of a new touch: nothing else is down, whatever a lost pointerup left behind.
+   // A touch gesture still open then lost its pointerup; it ends where it is.
+   if (event.isPrimary) {
+    touches.current.clear()
+    const open = gesture.current
+    if (open && (open.kind === "pinch" || open.kind === "spent" || open.touch)) { gesture.current = null; setPanning(false) }
+   }
+   touches.current.set(event.pointerId, at)
+   if (gesture.current?.kind === "spent" || gesture.current?.kind === "pinch") return
+   if (touches.current.size >= 2) {
+    // A second finger turns whatever the first one started into a pinch from the current view.
+    const started = gesture.current
+    if (started?.kind === "move" && started.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: started.id, x: started.x, y: started.y })
+    const ids = [...touches.current.keys()].slice(-2) as [number, number]
+    gesture.current = { kind: "pinch", ids, view, from: pinchOf(touches.current.get(ids[0])!, touches.current.get(ids[1])!) }
+    setPanning(true)
+    return
+   }
+  }
+  if (gesture.current) return
+  const nodeId = (event.target as Element | null)?.closest?.("[data-design-node]")?.getAttribute("data-design-node")
+  const node = nodeId ? design.nodes.find(item => item.id === nodeId) : undefined
+  const intent = pressIntent({ button: event.button, pointerType: event.pointerType, space: spaceHeld.current, onNode: Boolean(node), canMove: canChange })
+  if (intent === "none") return
+  if (intent === "deselect") { setSelectedId(null); viewport.current?.focus({ preventScroll: true }); return }
+  if (node && (intent === "select" || intent === "move")) selectNode(node)
+  viewport.current?.focus({ preventScroll: true })
+  if (intent === "select") return
+  if (intent === "move" && node) gesture.current = { kind: "move", pointerId: event.pointerId, start: at, id: node.id, x: Number(node.x) || 0, y: Number(node.y) || 0, moved: false, touch: event.pointerType === "touch" }
+  else if (intent === "pan") {
+   gesture.current = { kind: "pan", pointerId: event.pointerId, start: at, view, moved: false, touch: event.pointerType === "touch", button: event.button, ...(node ? { tapNode: node.id } : {}) }
+   setPanning(true)
+  }
+  capture(event)
  }
- const endDrag = () => { drag.current = null }
+ const pressMove = (event: PointerEvent<HTMLDivElement>) => {
+  const at = local(event)
+  design.setCursor(toCanvas(view, at))
+  if (event.pointerType === "touch" && touches.current.has(event.pointerId)) touches.current.set(event.pointerId, at)
+  const current = gesture.current
+  if (!current || current.kind === "spent") return
+  if (current.kind === "pinch") {
+   const [a, b] = current.ids.map(id => touches.current.get(id))
+   if (a && b) setView(pinchView(current.view, current.from, pinchOf(a, b)))
+   return
+  }
+  if (current.pointerId !== event.pointerId) return
+  const dx = at.x - current.start.x, dy = at.y - current.start.y
+  if (!current.moved && Math.hypot(dx, dy) < DRAG_THRESHOLD) return
+  if (!current.moved && placed.fit) setView(view) // a drag holds the view still, even if the fitted area changes
+  current.moved = true
+  if (current.kind === "pan") setView(panBy(current.view, dx, dy))
+  else if (design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, x: Math.round(current.x + dx / scale), y: Math.round(current.y + dy / scale) })
+ }
+ const pressUp = (event: PointerEvent<HTMLDivElement>) => {
+  touches.current.delete(event.pointerId)
+  const current = gesture.current
+  if (!current) return
+  if (current.kind === "pinch" || current.kind === "spent") {
+   // Lifting one finger of the pinch ends it; the fingers left start nothing.
+   if (current.kind === "spent" || current.ids.includes(event.pointerId)) { gesture.current = touches.current.size ? { kind: "spent" } : null; setPanning(false) }
+   return
+  }
+  if (current.pointerId !== event.pointerId) return
+  gesture.current = null
+  setPanning(false)
+  if (current.kind === "pan" && current.button === 2 && current.moved) menuAfterPan.current = Date.now()
+  // A tap with a finger selects or clears like a click; a right or middle click changes nothing.
+  if (current.kind === "pan" && current.touch && !current.moved) {
+   const node = current.tapNode ? design.nodes.find(item => item.id === current.tapNode) : undefined
+   if (node) selectNode(node); else setSelectedId(null)
+  }
+ }
+ const pressCancel = (event: PointerEvent<HTMLDivElement>) => {
+  const current = gesture.current
+  if (current && (current.kind === "pinch" ? current.ids.includes(event.pointerId) : current.kind !== "spent" && current.pointerId === event.pointerId)) cancelGesture()
+  touches.current.delete(event.pointerId)
+  if (gesture.current?.kind === "spent" && touches.current.size === 0) gesture.current = null
+ }
+ const viewKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
+  if (typingTarget(event.target)) return
+  if (event.key === "Escape") { if (!cancelGesture()) setSelectedId(null); event.preventDefault(); return }
+  const pan: Record<string, [number, number]> = { ArrowLeft: [40, 0], ArrowRight: [-40, 0], ArrowUp: [0, 40], ArrowDown: [0, -40] }
+  if (pan[event.key]) { setView(panBy(view, ...pan[event.key])); event.preventDefault() }
+  else if (event.key === "+" || event.key === "=") { step(1); event.preventDefault() }
+  else if (event.key === "-") { step(-1); event.preventDefault() }
+  else if (event.shiftKey && (event.key === "!" || event.code === "Digit1")) { setPlaced({ fit: true }); event.preventDefault() }
+  else if (event.shiftKey && (event.key === ")" || event.code === "Digit0")) { setView(zoomAround(view, center(), 1)); event.preventDefault() }
+ }
+ // Wheel and Safari's pinch need non-passive listeners to keep the page itself still.
+ useEffect(() => {
+  const element = viewportElement
+  if (!element) return
+  const at = (event: { clientX: number; clientY: number }) => { const bounds = element.getBoundingClientRect(); return { x: event.clientX - bounds.left, y: event.clientY - bounds.top } }
+  const wheel = (event: WheelEvent) => {
+   event.preventDefault()
+   // A drag in progress owns the view; a wheel would be undone by its next move.
+   if (gesture.current) return
+   const result = wheelGesture(event, element.clientHeight)
+   const anchor = at(event)
+   changeView(current => result.kind === "zoom" ? zoomAround(current, anchor, current.scale * result.factor) : panBy(current, result.dx, result.dy))
+  }
+  // Safari reports a trackpad pinch as gesture events. On a touch screen it sends
+  // them as well as the touch pointers, which already pinch: ignore them there.
+  let pinchStart: DesignView | null = null
+  type SafariGesture = Event & { scale: number; clientX: number; clientY: number }
+  const gestureStart = (event: Event) => { event.preventDefault(); pinchStart = touches.current.size || gesture.current ? null : viewNow.current }
+  const gestureChange = (event: Event) => {
+   event.preventDefault()
+   const pinch = event as SafariGesture
+   if (pinchStart && !touches.current.size && !gesture.current) setPlaced({ fit: false, view: zoomAround(pinchStart, at(pinch), pinchStart.scale * pinch.scale) })
+  }
+  const gestureEnd = (event: Event) => { event.preventDefault(); pinchStart = null }
+  element.addEventListener("wheel", wheel, { passive: false })
+  element.addEventListener("gesturestart", gestureStart, { passive: false } as AddEventListenerOptions)
+  element.addEventListener("gesturechange", gestureChange, { passive: false } as AddEventListenerOptions)
+  element.addEventListener("gestureend", gestureEnd, { passive: false } as AddEventListenerOptions)
+  return () => {
+   element.removeEventListener("wheel", wheel)
+   element.removeEventListener("gesturestart", gestureStart)
+   element.removeEventListener("gesturechange", gestureChange)
+   element.removeEventListener("gestureend", gestureEnd)
+  }
+ }, [viewportElement, changeView])
+ // Space + drag pans with the canvas focused, or with the pointer over it while
+ // nothing else has focus; a focused button, menu or text field keeps its Space.
+ // Leaving the window (blur) ends any gesture where it started.
+ useEffect(() => {
+  const down = (event: KeyboardEvent) => {
+   const target = event.target as Node | null
+   const free = target === document.body || target === document.documentElement || target === null
+   if (event.key === " " && !typingTarget(event.target) && (viewport.current?.contains(target) || (free && pointerInside.current))) {
+    event.preventDefault()
+    if (!spaceHeld.current) { spaceHeld.current = true; setSpace(true) }
+   } else if (event.key === "Escape" && gesture.current && !viewport.current?.contains(target)) cancelNow.current()
+  }
+  const up = (event: KeyboardEvent) => { if (event.key === " ") { spaceHeld.current = false; setSpace(false) } }
+  const blur = () => { spaceHeld.current = false; setSpace(false); cancelNow.current(); touches.current.clear(); gesture.current = null }
+  const menu = (event: MouseEvent) => { if (Date.now() - menuAfterPan.current < 600) { event.preventDefault(); menuAfterPan.current = 0 } }
+  window.addEventListener("keydown", down)
+  window.addEventListener("keyup", up)
+  window.addEventListener("blur", blur)
+  window.addEventListener("contextmenu", menu, true)
+  return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); window.removeEventListener("blur", blur); window.removeEventListener("contextmenu", menu, true) }
+ }, [])
  // Links are edited only through the live document, and only by editors.
  const setLink = (target: string) => { if (selected && design.doc && canChange) setDesignNodeLink(design.doc, selected.id, target || null) }
  const play = () => {
@@ -262,8 +426,13 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   : "This design is not available to you. Its owner may not have shared a version with you yet, or your access changed."}</p>
  if (design.query.isError) return <p className="p-6 text-destructive" role="alert">{design.query.error.message}</p>
  if (!design.query.data) return <p className="p-6" role="status">Opening Design…</p>
- const width = Math.max(1200, ...design.nodes.map(node => position(node).x + (Number(node.width) || 0) + 100))
- const height = Math.max(840, ...design.nodes.map(node => position(node).y + (Number(node.height) || 0) + 100))
+ // The drawn canvas starts at 0,0 unless layers sit at negative coordinates.
+ const placesNow = design.nodes.map(node => ({ ...position(node), width: Number(node.width) || 0, height: Number(node.height) || 0 }))
+ const left = Math.min(0, ...placesNow.map(place => place.x < 0 ? place.x - 100 : 0))
+ const top = Math.min(0, ...placesNow.map(place => place.y < 0 ? place.y - 100 : 0))
+ const width = Math.max(1200, ...placesNow.map(place => place.x + place.width + 100)) - left
+ const height = Math.max(840, ...placesNow.map(place => place.y + place.height + 100)) - top
+ const origin = toScreen(view, { x: left, y: top })
  const data = design.query.data
  const failure = design.save.error ?? design.restore.error ?? design.share.error ?? design.comment.error ?? design.connectAgent.error
  const viewedVersion = version ?? data.latest_version ?? data.version
@@ -336,13 +505,13 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const layerList = design.nodes.map(node => <button key={node.id} onClick={() => { setSelectedId(node.id); if (node.type === "frame") setFocus(frames.indexOf(node)) }} className={`flex min-h-9 items-center gap-2 px-3 text-left text-xs coarse:min-h-[44px] ${selectedId === node.id ? "bg-accent text-accent-foreground" : "hover:bg-muted"} ${node.parentId ? "pl-7" : "font-medium"}`}>
   {node.type === "frame" ? <Frame className="size-3.5 shrink-0" /> : node.type === "text" ? <Type className="size-3.5 shrink-0" /> : <Square className="size-3.5 shrink-0" />}<span className="truncate">{node.name || node.text || node.type}</span>
  </button>)
- const canvasView = <svg ref={canvas} role="img" aria-label="Design canvas" width={width * scale} height={height * scale} viewBox={`0 0 ${width} ${height}`} className="touch-none" onPointerMove={move} onPointerUp={endDrag} onPointerCancel={endDrag} onPointerLeave={() => design.setCursor(null)} onPointerDown={() => setSelectedId(null)}>
+ const canvasView = <svg ref={canvas} role="img" aria-label="Design canvas" width={width * scale} height={height * scale} viewBox={`${left} ${top} ${width} ${height}`} className="absolute left-0 top-0 max-w-none" style={{ transform: `translate(${origin.x}px, ${origin.y}px)` }}>
   <defs><pattern id="design-dots" width="20" height="20" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r="1" fill="currentColor" className="text-border" /></pattern></defs>
-  <rect width="100%" height="100%" fill="url(#design-dots)" />
+  <rect x={left} y={top} width={width} height={height} fill="url(#design-dots)" />
   {[...frames, ...design.nodes.filter(node => node.type !== "frame")].map(node => {
    const { x, y } = position(node)
    const w = Math.max(1, Number(node.width) || 1), h = Math.max(1, Number(node.height) || 1)
-   return <g key={node.id} data-design-node={node.id} data-node-type={node.type} data-node-name={node.name} transform={`translate(${x},${y})`} onPointerDown={event => beginDrag(event, node)} style={{ cursor: canChange ? "move" : "pointer" }}>
+   return <g key={node.id} data-design-node={node.id} data-node-type={node.type} data-node-name={node.name} transform={`translate(${x},${y})`} style={{ cursor: space || panning ? undefined : canChange ? "move" : "pointer" }}>
     {node.type === "frame" && <text x="0" y="-10" fontSize={12 / Math.min(1, scale)} fill="currentColor" className="text-muted-foreground">{node.name || "Screen"}</text>}
     <DesignNodeShape node={node} width={w} height={h} />
     {selectedId === node.id && <rect width={w} height={h} fill="none" stroke="#2563eb" strokeWidth={2 / scale} pointerEvents="none" />}
@@ -361,6 +530,16 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   })}
   {design.peers.filter(peer => peer.cursor).map(peer => <g key={peer.clientId} transform={`translate(${peer.cursor!.x},${peer.cursor!.y})${scale === 1 ? "" : ` scale(${1 / scale})`}`} pointerEvents="none" aria-label={`${peer.name} cursor`}><path d="M0 0 L0 20 L5 15 L9 24 L13 22 L9 13 L17 13 Z" fill={peer.color} stroke="white" /><rect x="16" y="18" width={Math.min(160, peer.name.length * 7 + 16)} height="22" rx="4" fill={readablePeerFill(peer.color)} /><text x="24" y="33" fontSize="12" fill="white">{peer.name.slice(0, 22)}</text></g>)}
  </svg>
+ // Right, middle or Space + left drag pans; Ctrl/Cmd + wheel or a pinch zooms around the pointer.
+ // The browser menu is held back only here, so a right-drag ends without one.
+ const viewportView = (className: string) => <div ref={attachViewport} role="group" tabIndex={0} aria-label="Design canvas viewport"
+  aria-keyshortcuts="Escape + - Shift+1 Shift+0 ArrowLeft ArrowRight ArrowUp ArrowDown"
+  data-design-view={`${Math.round(scale * 10000) / 10000} ${Math.round(view.x * 100) / 100} ${Math.round(view.y * 100) / 100}`}
+  className={cn("relative min-h-0 flex-1 touch-none select-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset", panning ? "cursor-grabbing" : space && "cursor-grab", className)}
+  onPointerDown={pressDown} onPointerMove={pressMove} onPointerUp={pressUp} onPointerCancel={pressCancel} onLostPointerCapture={event => { if (event.pointerType === "touch" && touches.current.has(event.pointerId)) pressUp(event) }}
+  onPointerEnter={() => { pointerInside.current = true }} onPointerLeave={() => { pointerInside.current = false; design.setCursor(null) }}
+  onMouseDown={event => { if (event.button === 1) event.preventDefault() }} onAuxClick={event => event.preventDefault()}
+  onContextMenu={event => event.preventDefault()} onKeyDown={viewKey}>{canvasView}</div>
  const historyPanel = <>
   {!framed && <h2 className="mb-3 text-sm font-semibold">History</h2>}
   {framed && design.editable && <Button className="mb-3 w-full" variant="outline" disabled={design.save.isPending || design.connection !== "connected"} onClick={() => design.save.mutate("Saved from Design editor")}><Save className="size-4" /> Save version</Button>}
@@ -417,11 +596,17 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  </>
 
  if (framed) {
-  const zoomLabel = zoom === "fit" ? `Fit · ${Math.round(scale * 100)} %` : `${Math.round(scale * 100)} %`
-  const goTo = (index: number) => { setFocus(Math.max(0, Math.min(frames.length - 1, index))) }
+  const zoomLabel = placed.fit ? `Fit · ${Math.round(scale * 100)} %` : `${Math.round(scale * 100)} %`
+  // Next and previous bring the artboard into view; a phone keeps fitting its width.
+  const goTo = (index: number) => {
+   const next = Math.max(0, Math.min(frames.length - 1, index))
+   setFocus(next)
+   const target = frames[next] && box([frames[next]])
+   if (target && !(phone && placed.fit)) setView(focusView(view, target, fitOptions))
+  }
   return <section aria-label="Design editor" className="relative flex min-h-0 flex-1 flex-col bg-muted/40 text-foreground" data-design-connection={design.connection} data-design-review={reviewOnly ? "phone" : undefined}>
    {hasBanners && <div className={cn("relative z-[11] shrink-0 bg-background", phone ? "mt-14" : "mt-16")}>{banners}</div>}
-   <div ref={viewport} className="min-h-0 flex-1 overflow-auto" aria-label="Design canvas viewport"><div className={cn("w-max", phone ? "pb-32 pt-16" : "pb-16 pt-14")}>{canvasView}</div></div>
+   {viewportView("")}
    {/* view: what am I looking at. Canvas | Library appears only for a file that publishes a library; none does yet. */}
    <ArtifactSlot name="view" label="View">
     {frames.length > 0 ? <DropdownMenu>
@@ -462,10 +647,10 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
    </ArtifactSlot>}
    <ArtifactSlot name="viewport" label="Zoom">
     <ArtifactTool icon={ZoomOut} label="Zoom out" onClick={() => step(-1)} />
-    <button type="button" aria-label="Zoom level" onClick={() => setZoom("fit")} className="h-[30px] min-w-16 rounded-[var(--radius-row)] px-1.5 font-mono text-xs text-muted-foreground hover:bg-accent hover:text-foreground">{zoomLabel}</button>
+    <button type="button" aria-label="Zoom level" onClick={() => setPlaced({ fit: true })} className="h-[30px] min-w-16 rounded-[var(--radius-row)] px-1.5 font-mono text-xs text-muted-foreground hover:bg-accent hover:text-foreground">{zoomLabel}</button>
     <ArtifactTool icon={ZoomIn} label="Zoom in" onClick={() => step(1)} />
     <ArtifactToolSeparator />
-    <ArtifactTool icon={Scan} label="Fit" on={zoom === "fit"} onClick={() => setZoom("fit")} />
+    <ArtifactTool icon={Scan} label="Fit" on={placed.fit} onClick={() => setPlaced({ fit: true })} />
    </ArtifactSlot>
    {frames.length > 0 && <ArtifactSlot name="nav" label="Artboards">
     <ArtifactTool icon={ChevronLeft} label="Previous artboard" disabled={focusIndex === 0} onClick={() => goTo(focusIndex - 1)} />
@@ -516,9 +701,15 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     <div className="z-10 flex flex-wrap items-center gap-1 border-b bg-background px-3 py-2" aria-label="Design tools">
      <Button variant="ghost" size="sm" title="Select and move"><MousePointer2 className="size-4" /><span className="sr-only">Select and move</span></Button>
      {design.editable && <><Button variant="outline" size="sm" onClick={() => add("frame")}><Plus className="size-4" />Screen</Button><Button variant="ghost" size="sm" onClick={() => add("rect")}><Square className="size-4" />Rectangle</Button><Button variant="ghost" size="sm" onClick={() => add("text")}><Type className="size-4" />Text</Button><Button variant="ghost" size="sm" onClick={() => add("image")}><ImagePlus className="size-4" />Image</Button><Button variant="ghost" size="sm" aria-label="Undo" title="Undo" disabled={!design.canUndo} onClick={() => design.undo?.()}><Undo2 className="size-4" /></Button><Button variant="ghost" size="sm" aria-label="Redo" title="Redo" disabled={!design.canRedo} onClick={() => design.redo?.()}><Redo2 className="size-4" /></Button></>}
-     <span className="ml-auto text-xs text-muted-foreground">{selected ? selected.name || selected.type : design.editable ? "Drag to move · edit in Properties" : "View canvas"}</span>
+     <span className="ml-auto text-xs text-muted-foreground">{selected ? selected.name || selected.type : design.editable ? "Drag to move · right-drag or Space to pan · edit in Properties" : "View canvas"}</span>
+     <span className="flex items-center gap-0.5" aria-label="Zoom">
+      <Button variant="ghost" size="sm" aria-label="Zoom out" onClick={() => step(-1)}><ZoomOut className="size-4" /></Button>
+      <span className="w-[52px] shrink-0 text-center font-mono text-xs text-muted-foreground" aria-label="Zoom level">{Math.round(scale * 100)} %</span>
+      <Button variant="ghost" size="sm" aria-label="Zoom in" onClick={() => step(1)}><ZoomIn className="size-4" /></Button>
+      <Button variant="ghost" size="sm" aria-label="Fit" aria-pressed={placed.fit} onClick={() => setPlaced({ fit: true })}><Scan className="size-4" /></Button>
+     </span>
     </div>
-    <div className="min-h-0 flex-1 overflow-auto bg-muted/40" aria-label="Design canvas viewport">{canvasView}</div>
+    {viewportView("bg-muted/40")}
    </div>
    <aside className="max-h-80 w-full shrink-0 overflow-auto border-t p-4 md:max-h-none md:w-60 md:border-l md:border-t-0" aria-label={panel === "history" ? "Version history" : "Properties"}>
     {panel === "history" ? historyPanel : propertiesPanel}
