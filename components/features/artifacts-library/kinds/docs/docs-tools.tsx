@@ -3,13 +3,14 @@
 import * as React from "react"
 import type { Editor } from "@tiptap/core"
 import { useEditorState } from "@tiptap/react"
-import { Baseline, Bold, Braces, Check, Code, Heading1, Heading2, Heading3, Highlighter, Italic, Link2, List, ListChecks, ListOrdered, MessageSquarePlus, Pilcrow, Quote, Redo2, RemoveFormatting, SquareCode, Strikethrough, Table, Underline, Undo2, Unlink } from "lucide-react"
+import { AtSign, Baseline, Bold, Braces, CalendarDays, Check, Code, Heading1, Heading2, Heading3, Highlighter, Italic, Link2, List, ListChecks, ListOrdered, MessageSquarePlus, Pilcrow, Quote, Redo2, RemoveFormatting, SquareCode, Strikethrough, Table, Underline, Undo2, Unlink } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { documentSchema, normalizeDocumentLink } from "@/lib/documents/schema"
-import { clearFormatting, colorState, isFormattedSchema, isRichSchema, isStyledSchema, markState } from "@/components/features/pages/document-rich-extensions"
+import { clearFormatting, colorState, documentPeopleOf, insertMention, isFormattedSchema, isRichSchema, isStyledSchema, markState, onMentionTrigger } from "@/components/features/pages/document-rich-extensions"
 import { SUGGESTED_LANGUAGES } from "@/components/features/pages/document-code-blocks"
+import { todayDocumentDate, type DocumentPerson } from "@/lib/documents/people"
 import { cn } from "@/lib/utils"
 import { ArtifactSlot, ArtifactTool, ArtifactToolSeparator } from "../../frame"
 
@@ -42,6 +43,8 @@ export function DocsTools({ editor, schema, onError, onComment }: { editor: Edit
     quote: formatted && editor.isActive("blockquote"), tasks: formatted && editor.isActive("taskList"),
     language: formatted && editor.isActive("codeBlock") ? (editor.getAttributes("codeBlock").language as string | null | undefined) ?? "" : null,
     selection: !editor.state.selection.empty,
+    // A selected date chip is edited in place; otherwise a new date is inserted.
+    date: styled && editor.isActive("date") ? String(editor.getAttributes("date").value ?? "") : null,
   }) })
   const run = () => editor.chain().focus()
   const toggle = (name: string, state: boolean | "mixed") => state === true ? run().unsetMark(name).run() : run().setMark(name).run()
@@ -74,6 +77,10 @@ export function DocsTools({ editor, schema, onError, onComment }: { editor: Edit
       <ArtifactTool icon={Quote} label="Quote" on={active.quote} onClick={() => run().toggleWrap("blockquote").run()} />
     </>}
     <ArtifactTool icon={Table} label="Table" onClick={() => run().insertTable({ rows: 3, cols: 3, withHeaderRow: true }).run()} />
+    {styled && <>
+      <DateTool editor={editor} selected={active.date} onError={onError} />
+      <MentionTool editor={editor} />
+    </>}
     {rich && <>
       <ArtifactToolSeparator />
       <ArtifactTool icon={Code} label="Inline code" on={active.code} onClick={() => run().toggleMark("code").run()} />
@@ -166,10 +173,78 @@ function ColorTool({ editor, mark, value }: { editor: Editor; mark: "textColor" 
           {value === null ? <Check aria-hidden className="size-3.5" /> : "A"}<span className="sr-only">Default</span>
         </button>
         {documentSchema.PALETTE.map(name => <button key={name} type="button" aria-label={COLOR_LABEL[name]} title={COLOR_LABEL[name]} aria-pressed={value === name} onClick={() => apply(name)}
-          className="inline-flex size-8 items-center justify-center rounded-[var(--radius-row)] border border-border text-sm font-semibold hover:ring-2 hover:ring-ring/40 coarse:size-11"
+          className="inline-flex size-8 items-center justify-center rounded-[var(--radius-row)] border border-border text-sm font-semibold hover:ring-2 hover:ring-ring/40 coarse:size-[44px]"
           style={highlight ? { background: `var(--doc-mark-${name})`, color: "var(--foreground)" } : { color: `var(--doc-text-${name})` }}>
           {value === name ? <Check aria-hidden className="size-4" /> : <span aria-hidden>A</span>}
         </button>)}
+      </div>
+    </PopoverContent>
+  </Popover>
+}
+
+/**
+ * A date chip: one calendar day from the browser's date picker. With a date
+ * chip selected it changes that date; otherwise it inserts one at the caret.
+ */
+function DateTool({ editor, selected, onError }: { editor: Editor; selected: string | null; onError: (message: string | undefined) => void }) {
+  const [open, setOpen] = React.useState(false)
+  const [value, setValue] = React.useState("")
+  React.useEffect(() => { if (open) setValue(selected || todayDocumentDate()) }, [open, selected])
+  const apply = () => {
+    if (!documentSchema.validDate(value)) { onError("Pick a date."); return }
+    const chain = editor.chain().focus()
+    if (selected !== null) chain.updateAttributes("date", { value }).run()
+    else chain.insertContent([{ type: "date", attrs: { value } }, { type: "text", text: " " }]).run()
+    onError(undefined); setOpen(false)
+  }
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild><ArtifactTool icon={CalendarDays} label={selected !== null ? "Change date" : "Insert date"} on={open || selected !== null} aria-haspopup="dialog" /></PopoverTrigger>
+    <PopoverContent side="top" className="grid w-64 gap-2 p-3" onCloseAutoFocus={event => { event.preventDefault(); editor.commands.focus() }}>
+      <form className="grid gap-2" onSubmit={event => { event.preventDefault(); apply() }}>
+        <Input type="date" aria-label="Date" value={value} required onChange={event => setValue(event.target.value)} className="coarse:min-h-[44px]" autoFocus />
+        <Button type="submit" size="sm" className="justify-self-end coarse:min-h-[44px]">{selected !== null ? "Change date" : "Insert date"}</Button>
+      </form>
+    </PopoverContent>
+  </Popover>
+}
+
+/**
+ * Mention a person who can open this document. The list comes from the
+ * server, which offers only people who can read the document; the content
+ * stores their id and every reader resolves the name for themselves. Typing
+ * "@" at the start of a word opens this menu too.
+ */
+function MentionTool({ editor }: { editor: Editor }) {
+  const people = documentPeopleOf(editor)
+  const [open, setOpen] = React.useState(false)
+  const [query, setQuery] = React.useState("")
+  const [found, setFound] = React.useState<DocumentPerson[] | null>(null)
+  const [failed, setFailed] = React.useState(false)
+  React.useEffect(() => { onMentionTrigger(editor, () => setOpen(true)); return () => onMentionTrigger(editor, null) }, [editor])
+  React.useEffect(() => {
+    if (!open || !people) return
+    const controller = new AbortController()
+    const timer = setTimeout(() => {
+      setFailed(false)
+      people.search(query.trim(), controller.signal).then(list => setFound(list), () => { if (!controller.signal.aborted) { setFound([]); setFailed(true) } })
+    }, query ? 150 : 0)
+    return () => { controller.abort(); clearTimeout(timer) }
+  }, [open, query, people])
+  React.useEffect(() => { if (!open) { setQuery(""); setFound(null) } }, [open])
+  if (!people) return null
+  const pick = (person: DocumentPerson) => { setOpen(false); insertMention(editor, person.id) }
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild><ArtifactTool icon={AtSign} label="Mention" on={open} aria-haspopup="dialog" /></PopoverTrigger>
+    <PopoverContent side="top" className="grid w-72 gap-2 p-2" onCloseAutoFocus={event => { event.preventDefault(); editor.commands.focus() }}>
+      <form onSubmit={event => { event.preventDefault(); if (found?.[0]) pick(found[0]) }}>
+        <Input aria-label="Search people" placeholder="Name" value={query} onChange={event => setQuery(event.target.value)} className="coarse:min-h-[44px]" autoFocus />
+      </form>
+      <div role="group" aria-label="People who can open this document" className="grid max-h-60 gap-0.5 overflow-y-auto">
+        {found === null ? <p className="px-2 py-1.5 text-sm text-muted-foreground">Loading…</p>
+          : failed ? <p role="alert" className="px-2 py-1.5 text-sm text-destructive">People could not be loaded.</p>
+          : found.length === 0 ? <p className="px-2 py-1.5 text-sm text-muted-foreground">No one found. Only people who can open this document can be mentioned.</p>
+          : found.map(person => <button key={person.id} type="button" onClick={() => pick(person)}
+            className="rounded-[var(--radius-row)] px-2 py-1.5 text-left text-sm hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring coarse:min-h-[44px]">{person.name}</button>)}
       </div>
     </PopoverContent>
   </Popover>

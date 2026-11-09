@@ -32,6 +32,7 @@ import { DocumentCaretKeeper } from "./document-caret-keeper"
 import { DocumentRemoteCarets } from "./document-remote-carets"
 import { useDocumentPresence } from "@/hooks/use-document-presence"
 import { DocsPresence } from "@/components/features/artifacts-library/kinds/docs/docs-presence"
+import { createDocumentPeople, type DocumentPeople } from "@/lib/documents/people"
 import { CommentHighlights, documentEditorExtensions, isRichSchema, KeptSelection, stableBlockTypes } from "./document-rich-extensions"
 
 const StableIDs = Extension.create({
@@ -51,8 +52,8 @@ const StableIDs = Extension.create({
   } })] },
 })
 /** The editor of one document session: the schema's nodes and marks, stable block ids, comment highlights and the shared CRDT. */
-export function documentSessionExtensions(doc: Y.Doc, schema: number | undefined) {
-  return [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(schema) }), ...documentEditorExtensions(schema), CommentHighlights, KeptSelection, Collaboration.configure({ document: doc, field: "default" }), DocumentCaretKeeper, DocumentRemoteCarets]
+export function documentSessionExtensions(doc: Y.Doc, schema: number | undefined, people?: DocumentPeople) {
+  return [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(schema) }), ...documentEditorExtensions(schema, people), CommentHighlights, KeptSelection, Collaboration.configure({ document: doc, field: "default" }), DocumentCaretKeeper, DocumentRemoteCarets]
 }
 /** Saves text as a local file: the draft downloads. Nothing is sent. */
 export function downloadText(name: string, content: string) {
@@ -119,6 +120,8 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
   const reviewEnabled = documentReviewActions()
   const revertActions = useMemo(() => createHttpHistoryActions(workspaceId, pageId), [workspaceId, pageId])
   const proposalClient = useMemo(() => createHttpProposalClient(workspaceId, pageId), [workspaceId, pageId])
+  // Mention names for this reader; the content only ever holds user ids.
+  const people = useMemo(() => createDocumentPeople(workspaceId, slug), [workspaceId, slug])
   const hasLocalDraft = sync.pending > 0 || sync.recovery
   const downloadDraft = () => downloadText(`${slug}-draft.json`, JSON.stringify(editor?.getJSON(), null, 2))
   const localVersion = useRef(0), restoreVersion = useRef(0)
@@ -129,13 +132,13 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
   }, [sync.doc])
   const editor = useEditor({
     immediatelyRender: false, editable: false,
-    extensions: documentSessionExtensions(sync.doc, sync.state?.schema),
+    extensions: documentSessionExtensions(sync.doc, sync.state?.schema, people),
     // The browser moves the caret (Ctrl+End, arrows, a tap) before its selectionchange reaches ProseMirror. A key the
     // editor handles itself, such as Enter, must act where the caret is shown, so the DOM selection is read first.
     // Only for real key presses: ProseMirror replays a browser-made Enter or Backspace (iOS, Android) as a plain Event
     // in the middle of its own flush, where reading the DOM again would split twice or recurse.
     editorProps: { handleKeyDown: (view, event) => { if (event instanceof KeyboardEvent && !view.composing) (view as unknown as { domObserver: { flush(): void } }).domObserver.flush(); return false }, attributes: { class: editorClass, "aria-label": "Document editor" } },
-  }, [sync.doc,sync.state?.schema])
+  }, [sync.doc,sync.state?.schema,people])
   useEffect(() => { editor?.setEditable(sync.editable && !restoring) }, [editor, sync.editable, restoring])
   // Who else is here and where their caret is (#5166): only while this session holds an authorized read.
   const peers = useDocumentPresence({ workspaceId, slug, editor, enabled: Boolean(sync.state) && !sync.denied })

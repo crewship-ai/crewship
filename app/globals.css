@@ -2353,3 +2353,27 @@ mark[data-highlight="green"] { background-color: var(--doc-mark-green); }
 mark[data-highlight="blue"] { background-color: var(--doc-mark-blue); }
 mark[data-highlight="purple"] { background-color: var(--doc-mark-purple); }
 mark[data-highlight="pink"] { background-color: var(--doc-mark-pink); }
+
+/* The kept selection (D17): what stays selected while a toolbar menu has
+   focus. Default text gets a 20% accent tint, which keeps --foreground at
+   least 4.5:1 on every surface and highlight for every accent. Palette text
+   has only a 4.5:1 margin, so it gets no tint, only an accent underline bar
+   (at least 3:1 on every surface), and keeps its colour while you pick one.
+   While actively selecting, the browser selection shows palette text in
+   --foreground for the same reason. Checked by document-palette.test.ts. */
+.document-selection-kept { background-color: color-mix(in srgb, var(--primary) 20%, transparent); -webkit-box-decoration-break: clone; box-decoration-break: clone; }
+:is([data-text-color] .document-selection-kept, .document-selection-kept[data-text-color], .document-selection-kept:has([data-text-color])) { background-color: transparent; box-shadow: inset 0 -2px 0 var(--ring); }
+.ProseMirror :is([data-text-color], [data-text-color] *)::selection { color: var(--foreground); }
+
+/* Docs schema 5 inline dates and mentions: one quiet chip style, readable in both themes. */
+:is(.document-chip, span[data-mention], time[data-date]) {
+  display: inline-block;
+  padding: 0 0.35em;
+  border-radius: 0.375em;
+  background-color: var(--muted);
+  color: var(--foreground);
+  font-size: 0.95em;
+  line-height: 1.45;
+  white-space: nowrap;
+}
+.ProseMirror-selectednode.document-chip { outline: 2px solid var(--ring); outline-offset: 1px; }
