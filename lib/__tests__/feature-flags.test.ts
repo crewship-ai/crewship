@@ -132,8 +132,8 @@ describe("build profile", () => {
     if (refTargetsMain()) expect(buildProfile().name).toBe("main")
   })
   it("recognises pushes and merge-queue refs of main only", () => {
-    expect(refTargetsMain("refs/heads/main")).toBe(true)
-    expect(refTargetsMain("refs/heads/gh-readonly-queue/main/pr-4484-abc")).toBe(true)
+    expect(refTargetsMain("refs/heads/main", "")).toBe(true)
+    expect(refTargetsMain("refs/heads/gh-readonly-queue/main/pr-4484-abc", "")).toBe(true)
     expect(refTargetsMain("refs/pull/4484/merge", "main")).toBe(true)
     expect(refTargetsMain("refs/heads/demo/release-dev-20261029-r2", "")).toBe(false)
   })
