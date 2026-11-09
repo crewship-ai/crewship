@@ -1334,7 +1334,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 				return stats, err
 			}
 			if table == "documents" {
-				if _, err := tx.ExecContext(ctx, `UPDATE documents SET epoch=MAX(epoch+1,?),generation=generation+1,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?`, row["epoch"], row["workspace_id"], row["page_id"]); err != nil {
+				if _, err := tx.ExecContext(ctx, `UPDATE documents SET epoch=MAX(epoch+1,?),generation=generation+1,content_generation=content_generation+1,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?`, row["epoch"], row["workspace_id"], row["page_id"]); err != nil {
 					return stats, fmt.Errorf("backup: fence existing document writer: %w", err)
 				}
 			}
@@ -1573,6 +1573,9 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	}
 	if err := fenceRestoredWebAuthority(ctx, tx, dump, webEpochBefore); err != nil {
 		return stats, fmt.Errorf("backup: fence restored web authority: %w", err)
+	}
+	if err := rotateDocumentDatabaseIdentity(ctx, tx); err != nil {
+		return stats, err
 	}
 	if err := reconcileRestoredIssueOutbox(ctx, tx); err != nil {
 		return stats, fmt.Errorf("backup: reconcile durable issue audit delivery: %w", err)

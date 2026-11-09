@@ -80,15 +80,19 @@ type DocumentMutationResponse struct {
 // DocumentInitializationState is the first durable initialize response and the
 // private authority's state wire. Public read adds content and an opaque epoch.
 type DocumentInitializationState struct {
-	Schema      int             `json:"schema"`
-	Rev         int64           `json:"rev"`
-	Epoch       int64           `json:"epoch"`
-	Generation  int64           `json:"generation"`
-	Incarnation string          `json:"incarnation"`
-	Snapshot    []byte          `json:"snapshot"`
-	SnapshotRev int64           `json:"snapshotRev"`
-	Updates     [][]byte        `json:"updates"`
-	Blocks      json.RawMessage `json:"blocks"`
+	Schema      int    `json:"schema"`
+	Rev         int64  `json:"rev"`
+	Epoch       int64  `json:"epoch"`
+	Generation  int64  `json:"generation"`
+	Incarnation string `json:"incarnation"`
+	// Database and ContentGeneration are the content lineage the public epoch
+	// is derived from: the database identity rotates only on backup restore.
+	Database          string          `json:"database"`
+	ContentGeneration int64           `json:"contentGeneration"`
+	Snapshot          []byte          `json:"snapshot"`
+	SnapshotRev       int64           `json:"snapshotRev"`
+	Updates           [][]byte        `json:"updates"`
+	Blocks            json.RawMessage `json:"blocks"`
 }
 
 // DocumentInitializeResponse is the exact-retry initialization receipt. The

@@ -51,9 +51,16 @@ type Update struct {
 type State struct {
 	Schema                                  int
 	HeadRev, Epoch, SnapshotRev, Generation int64
-	Snapshot                                []byte
-	Projection                              json.RawMessage
-	Updates                                 []Update
+	// Database and ContentGeneration name the content lineage the public Docs
+	// epoch is derived from (#5163). Database is this installation's identity,
+	// rotated only by backup restore; ContentGeneration advances when content
+	// is replaced (History restore, schema upgrade, backup restore), never on
+	// a boot fence, so a plain restart keeps the public epoch.
+	Database          string
+	ContentGeneration int64
+	Snapshot          []byte
+	Projection        json.RawMessage
+	Updates           []Update
 }
 
 // MutationGuard enforces application-specific immutable request bounds inside the writer transaction.
@@ -135,7 +142,7 @@ func (s *Store) tx(ctx context.Context, k Key, a Authorize, fn func(*sql.Tx, str
 	return t.Commit()
 }
 func state(ctx context.Context, t *sql.Tx, k Key) (v State, e error) {
-	e = t.QueryRowContext(ctx, "SELECT schema_version,head_rev,epoch,snapshot_rev,snapshot,projection,generation FROM documents WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection, &v.Generation)
+	e = t.QueryRowContext(ctx, "SELECT d.schema_version,d.head_rev,d.epoch,d.snapshot_rev,d.snapshot,d.projection,d.generation,d.content_generation,coalesce(i.value,'') FROM documents d LEFT JOIN document_database_identity i ON i.id=1 WHERE d.workspace_id=? AND d.page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection, &v.Generation, &v.ContentGeneration, &v.Database)
 	if errors.Is(e, sql.ErrNoRows) {
 		e = ErrNotFound
 	}

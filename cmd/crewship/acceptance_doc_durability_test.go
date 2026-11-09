@@ -397,7 +397,7 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		commitNew2("second-confirmed", "q00", "Confirmed on the second document before the crash.")
 		s2 := readDoc("two", second)
 		committedRequest := patchFor(s, "crash-committed", "p22", "Committed just before the engine crashed.")
-		uncommittedRequest := patchDoc(second, s2, "crash-uncommitted", "q01", "Never committed: the engine crashed first.")
+		uncommittedRequest := patchDoc(second, s2, "crash-uncommitted", "q01", "Pending when the engine crashed, replayed after the restart.")
 		headBefore, updatesBefore, _ := counts()
 		head2Before, updates2Before, _ := countsDoc(second)
 		type result struct {
@@ -459,13 +459,15 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		engineB, recoverReady = spawn("b", engineSocket)
 		after := read("two")
 		recoverRead = time.Since(restarted)
-		if after.Epoch == s.Epoch {
-			t.Fatal("replacement engine must present a new epoch")
+		// The epoch names the content lineage, not the engine boot (#5163): a
+		// plain restart keeps it, so pending edits still apply.
+		if after.Epoch != s.Epoch {
+			t.Fatalf("a plain engine restart changed the content epoch: %q -> %q", s.Epoch, after.Epoch)
 		}
 		confirmed["p22"] = "Committed just before the engine crashed."
 		expectConfirmed(after)
 		after2 := readDoc("two", second)
-		if blockOf(after2, "q00").Text != "Confirmed on the second document before the crash." || occurrences(after2, "Never committed") != 0 {
+		if blockOf(after2, "q00").Text != "Confirmed on the second document before the crash." || occurrences(after2, "Pending when the engine crashed") != 0 {
 			t.Fatalf("second document after restart: %+v", after2.Outline)
 		}
 		// Client one retries its unacknowledged request after the restart and
@@ -477,25 +479,29 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		if head, updates, _ := counts(); head != headBefore+1 || updates != updatesBefore+1 {
 			t.Fatal("committed request retry after restart created another effect")
 		}
-		// Client two's retained draft carries the crashed engine's epoch. It is
-		// refused with no effect and must be offered for recovery.
-		if out, err := run("two", uncommittedRequest, "doc", "patch", second.slug, "--file", "-"); err == nil || !bytes.Contains(out, []byte("409")) {
-			t.Fatalf("stale retained draft after restart: %v %s", err, out)
+		// Client two's retained draft was prepared before the crash against the
+		// same content. The restart kept the epoch, so replaying it saves it
+		// exactly once; a second replay returns the original receipt.
+		replayed := decodeReceipt(require("two", uncommittedRequest, "doc", "patch", second.slug, "--file", "-"))
+		if replayed.ID != "crash-uncommitted" || replayed.Duplicate || replayed.Rev != head2Before+1 {
+			t.Fatalf("retained draft replay after restart: %+v", replayed)
 		}
-		if head, updates, receipts := countsDoc(second); head != head2Before || updates != updates2Before || receipts != head2Before+1 {
-			t.Fatalf("stale retained draft changed the second document: head %d updates %d receipts %d", head, updates, receipts)
+		if again := decodeReceipt(require("two", uncommittedRequest, "doc", "patch", second.slug, "--file", "-")); !again.Duplicate || again.Rev != replayed.Rev {
+			t.Fatalf("second replay of the retained draft: %+v", again)
 		}
-		// Recovering the draft against the new epoch saves it exactly once.
-		commitNew2("crash-recovered", "q01", "Never committed: the engine crashed first.")
-		if final := readDoc("one", second); occurrences(final, "Never committed") != 1 {
-			t.Fatal("recovered draft must appear exactly once")
+		if head, updates, _ := countsDoc(second); head != head2Before+1 || updates != updates2Before+1 {
+			t.Fatalf("retained draft replay effects: head %d->%d updates %d->%d", head2Before, head, updates2Before, updates)
+		}
+		if final := readDoc("one", second); occurrences(final, "Pending when the engine crashed") != 1 {
+			t.Fatal("replayed draft must appear exactly once")
 		}
 	}()
 	if engineB == nil {
 		t.FailNow()
 	}
 
-	// ── Scenario 3: a replacement engine fences the previous boot, including
+	// ── Scenario 3: a replacement engine fences the previous boot's writes
+	// (authority lease and generation; the content epoch is kept), including
 	// when the paused old process resumes and receives traffic again. ──
 	func() {
 		t.Log("scenario: stale-boot-epoch-generation")
@@ -506,7 +512,8 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 			t.Fatal("engine b lease and commit were not observed")
 		}
 		stale := read("two")
-		staleRequest := patchFor(stale, "fence-stale", "p01", "Must never persist from a fenced boot.")
+		const preparedText = "Prepared before the replacement engine booted."
+		staleRequest := patchFor(stale, "fence-stale", "p01", preparedText)
 		rssReplacement, hwmReplacement = engineB.memory()
 		engineB.signal(syscall.SIGSTOP)
 		// A paused engine still owns its socket: a second engine at that path
@@ -532,24 +539,27 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		}
 		engineC, _ := spawn("c", filepath.Join(dir, "c.sock"))
 		front.route(engineC.socket)
-		head, updates, receipts := counts()
-		refusedWithoutEffect := func(label string, out []byte, err error) {
-			t.Helper()
-			if err == nil || !bytes.Contains(out, []byte("409")) {
-				t.Fatalf("%s must be refused with 409: %v %s", label, err, out)
-			}
-			if h, u, r := counts(); h != head || u != updates || r != receipts {
-				t.Fatalf("%s changed durable state", label)
-			}
+		// A request prepared before the replacement booted is not fenced by
+		// the boot (#5163): the epoch names the content, which is unchanged, so
+		// it applies exactly once. Engines are fenced by the authority's lease
+		// and generation, probed below, not by the client epoch.
+		applied := decodeReceipt(require("two", staleRequest, "doc", "patch", primary.slug, "--file", "-"))
+		if applied.ID != "fence-stale" || applied.Duplicate {
+			t.Fatalf("prepared request through the replacement engine: %+v", applied)
 		}
-		out, err := run("two", staleRequest, "doc", "patch", primary.slug, "--file", "-")
-		refusedWithoutEffect("old epoch through the replacement engine", out, err)
+		confirmed["p01"] = preparedText
 
-		// The paused engine resumes and the supervisor routes to it again.
+		// The paused engine resumes and the supervisor routes to it again. An
+		// exact retry returns the original receipt with no second effect.
 		engineB.signal(syscall.SIGCONT)
 		front.route(engineB.socket)
-		out, err = run("two", staleRequest, "doc", "patch", primary.slug, "--file", "-")
-		refusedWithoutEffect("old epoch through the resumed old engine", out, err)
+		head, updates, receipts := counts()
+		if again := decodeReceipt(require("two", staleRequest, "doc", "patch", primary.slug, "--file", "-")); !again.Duplicate || again.Rev != applied.Rev {
+			t.Fatalf("retry through the resumed old engine: %+v", again)
+		}
+		if h, u, r := counts(); h != head || u != updates || r != receipts {
+			t.Fatal("retry through the resumed old engine changed durable state")
+		}
 
 		// Capture an otherwise valid commit from engine c, unforwarded. Each
 		// probe below changes only one fence field of that exact request.
@@ -629,8 +639,8 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		confirmed["p02"] = freshText
 		final := read("one")
 		expectConfirmed(final)
-		if occurrences(final, "Must never persist") != 0 {
-			t.Fatal("fenced write persisted")
+		if occurrences(final, preparedText) != 1 {
+			t.Fatal("prepared request must appear exactly once")
 		}
 		engineB.kill()
 	}()
