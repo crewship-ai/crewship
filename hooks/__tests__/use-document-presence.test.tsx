@@ -58,3 +58,13 @@ it("leaves on unmount, again after a heartbeat that was still in flight", async 
   expect(new Set(all.map(body => body.client)).size).toBe(1)
   expect(request.mock.calls.every(([url, init]) => String(url).includes("/document/presence?workspace_id=w") && (init as RequestInit).method === "POST")).toBe(true)
 })
+
+it("leaves when the page is hidden (reload, closed tab), where no cleanup runs", async () => {
+  request.mockImplementation(async () => reply(200, { peers: [], color: 0, ttl_ms: 6000, interval_ms: 500 }))
+  const hook = renderHook(() => useDocumentPresence({ workspaceId: "w", slug: "notes", editor: editors[0] ?? editor(), enabled: true }))
+  await waitFor(() => expect(request).toHaveBeenCalled())
+  act(() => { window.dispatchEvent(new Event("pagehide")) })
+  const leave = request.mock.calls.find(([, init]) => JSON.parse(String((init as RequestInit).body)).leave === true)
+  expect(leave?.[1]).toMatchObject({ method: "POST", keepalive: true })
+  hook.unmount()
+})

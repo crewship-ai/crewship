@@ -71,9 +71,14 @@ export function useDocumentPresence({ workspaceId, slug, editor, enabled }: { wo
       if (stopped || soon) return
       soon = setTimeout(() => { soon = undefined; void beat() }, Math.max(0, SELECTION_THROTTLE_MS - (Date.now() - lastSent)))
     }
+    // A reload or a closed tab never runs the cleanup below: tell the server now, so this tab's caret does not
+    // linger next to the reopened one until it expires.
+    const hidden = () => { void post({ client: client.current, leave: true }, true).catch(() => {}) }
     editor.on("selectionUpdate", moved)
+    window.addEventListener("pagehide", hidden)
     void beat()
     return () => {
+      window.removeEventListener("pagehide", hidden)
       stopped = true
       clearTimeout(timer); clearTimeout(soon)
       editor.off("selectionUpdate", moved)
