@@ -131725,6 +131725,9 @@
                                       "produce": {
                                         "type": "boolean"
                                       },
+                                      "propose": {
+                                        "type": "boolean"
+                                      },
                                       "read": {
                                         "type": "boolean"
                                       }
@@ -131733,7 +131736,8 @@
                                       "read",
                                       "comment",
                                       "edit",
-                                      "produce"
+                                      "produce",
+                                      "propose"
                                     ],
                                     "type": "object"
                                   },
@@ -131769,6 +131773,9 @@
                                             "produce": {
                                               "type": "boolean"
                                             },
+                                            "propose": {
+                                              "type": "boolean"
+                                            },
                                             "read": {
                                               "type": "boolean"
                                             }
@@ -131777,7 +131784,8 @@
                                             "read",
                                             "comment",
                                             "edit",
-                                            "produce"
+                                            "produce",
+                                            "propose"
                                           ],
                                           "type": "object"
                                         }
@@ -131839,6 +131847,9 @@
                                       "produce": {
                                         "type": "boolean"
                                       },
+                                      "propose": {
+                                        "type": "boolean"
+                                      },
                                       "read": {
                                         "type": "boolean"
                                       }
@@ -131847,7 +131858,8 @@
                                       "read",
                                       "comment",
                                       "edit",
-                                      "produce"
+                                      "produce",
+                                      "propose"
                                     ],
                                     "type": "object"
                                   },
@@ -131883,6 +131895,9 @@
                                             "produce": {
                                               "type": "boolean"
                                             },
+                                            "propose": {
+                                              "type": "boolean"
+                                            },
                                             "read": {
                                               "type": "boolean"
                                             }
@@ -131891,7 +131906,8 @@
                                             "read",
                                             "comment",
                                             "edit",
-                                            "produce"
+                                            "produce",
+                                            "propose"
                                           ],
                                           "type": "object"
                                         }
@@ -131954,6 +131970,9 @@
                                   "produce": {
                                     "type": "boolean"
                                   },
+                                  "propose": {
+                                    "type": "boolean"
+                                  },
                                   "read": {
                                     "type": "boolean"
                                   }
@@ -131962,7 +131981,8 @@
                                   "read",
                                   "comment",
                                   "edit",
-                                  "produce"
+                                  "produce",
+                                  "propose"
                                 ],
                                 "type": "object"
                               },
@@ -131978,6 +131998,9 @@
                                   "produce": {
                                     "type": "boolean"
                                   },
+                                  "propose": {
+                                    "type": "boolean"
+                                  },
                                   "read": {
                                     "type": "boolean"
                                   }
@@ -131986,7 +132009,8 @@
                                   "read",
                                   "comment",
                                   "edit",
-                                  "produce"
+                                  "produce",
+                                  "propose"
                                 ],
                                 "type": "object"
                               },
@@ -137400,6 +137424,9 @@
                               "produce": {
                                 "type": "boolean"
                               },
+                              "propose": {
+                                "type": "boolean"
+                              },
                               "read": {
                                 "type": "boolean"
                               }
@@ -137408,7 +137435,8 @@
                               "read",
                               "comment",
                               "edit",
-                              "produce"
+                              "produce",
+                              "propose"
                             ],
                             "type": "object"
                           },
@@ -137444,6 +137472,9 @@
                                     "produce": {
                                       "type": "boolean"
                                     },
+                                    "propose": {
+                                      "type": "boolean"
+                                    },
                                     "read": {
                                       "type": "boolean"
                                     }
@@ -137452,7 +137483,8 @@
                                     "read",
                                     "comment",
                                     "edit",
-                                    "produce"
+                                    "produce",
+                                    "propose"
                                   ],
                                   "type": "object"
                                 }
@@ -153338,6 +153370,7 @@
                             "enum": [
                               "read",
                               "comment",
+                              "propose",
                               "produce",
                               "write"
                             ],
@@ -153544,6 +153577,7 @@
                             "enum": [
                               "read",
                               "comment",
+                              "propose",
                               "produce",
                               "write"
                             ],
@@ -153683,6 +153717,7 @@
                     "enum": [
                       "read",
                       "comment",
+                      "propose",
                       "produce",
                       "write"
                     ],
@@ -153747,6 +153782,7 @@
                             "enum": [
                               "read",
                               "comment",
+                              "propose",
                               "produce",
                               "write"
                             ],

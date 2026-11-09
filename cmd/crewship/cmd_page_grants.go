@@ -78,13 +78,17 @@ type pageGrantWriteBody struct {
 var pageGrantCmd = &cobra.Command{
 	Use:     "grant <slug>",
 	Aliases: []string{"share"},
-	Short:   "Grant read, comment, produce or write on a page to a user, a crew or an agent",
+	Short:   "Grant read, comment, propose, produce or write on a page to a user, a crew or an agent",
 	Long: `Widen who reaches a page. Three verbs, deliberately separate:
 
   read     may see the page and its panels
+  propose  an agent only: may see the page and, on a shared Document, propose
+           changes that a person accepts or rejects; never edits. Elsewhere it
+           reaches the page like read. The default for --agent.
   produce  may push payloads into NAMED panels (--panels)
   write    may edit the page spec — add, remove and re-arrange panels
 
+  crewship page grant brief --agent writer
   crewship page grant fleet-201 --agent watcher --level produce --panels sluzby
   crewship page grant fleet-201 --crew lookout --level read
   crewship page grant fleet-201 --user ada@example.com --level write
@@ -117,13 +121,20 @@ with you. "crewship page grants <slug>" shows which rows are still live.`,
 			return err
 		}
 		level := strings.ToLower(strings.TrimSpace(mustFlagString(cmd, "level")))
+		if level == "" && subjectType == "agent" && cmd.CalledAs() != "share" {
+			// An agent starts at Propose; Edit is asked for by name.
+			level = "propose"
+		}
 		if level == "" {
 			return cli.WithExitCode(errors.New(
 				`--level is required: "read" (see the page), "produce" (push into named panels) or "write" (edit the spec)`),
 				cli.ExitValidation)
 		}
-		if level != "read" && level != "comment" && level != "produce" && level != "write" {
+		if level != "read" && level != "comment" && level != "propose" && level != "produce" && level != "write" {
 			return cli.WithExitCode(errors.New("unknown page grant level"), cli.ExitValidation)
+		}
+		if level == "propose" && subjectType != "agent" {
+			return cli.WithExitCode(errors.New(`"propose" names an agent; people get read, comment or write`), cli.ExitValidation)
 		}
 		if level == "comment" && subjectType == "agent" || cmd.CalledAs() == "share" && (subjectType == "agent" || level == "produce") {
 			return cli.WithExitCode(errors.New("page share/comment grants are for people; agent production uses page grant --level produce"), cli.ExitValidation)
@@ -392,11 +403,11 @@ func init() {
 	}
 	pageGrantCmd.SetFlagErrorFunc(pageGrantFlagError)
 	pageRevokeCmd.SetFlagErrorFunc(pageGrantFlagError)
-	pageGrantCmd.Flags().String("level", "", `What is granted: "read", "comment", "produce" or "write"`)
+	pageGrantCmd.Flags().String("level", "", `What is granted: "read", "comment", "propose" (agents; the default for --agent), "produce" or "write"`)
 	pageGrantCmd.Flags().StringSlice("panels", nil,
 		"Panel ids a produce grant covers (comma-separated, or repeat the flag); omit to cover every panel")
 	pageRevokeCmd.Flags().String("level", "",
-		`Withdraw only this level ("read", "comment", "produce", "write"); omit to withdraw every level the subject holds`)
+		`Withdraw only this level ("read", "comment", "propose", "produce", "write"); omit to withdraw every level the subject holds`)
 
 	pageCmd.AddCommand(pageGrantCmd)
 	pageCmd.AddCommand(pageRevokeCmd)

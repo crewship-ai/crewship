@@ -121,6 +121,7 @@ import {
   PAGE_GRANT_LEVEL_MEANING,
   PAGE_SUBJECT_TYPES,
   PAGE_SUBJECT_TYPE_LABEL,
+  pageGrantDefaultLevel,
   pageGrantLevelsFor,
   usePageGrantRevoke,
   usePageGrantWrite,
@@ -252,7 +253,7 @@ export function pageSubjectIcon(kind: string): React.ComponentType<{ className?:
  * one because it is the floor, not because it does nothing (see rule 3 in
  * the file comment).
  */
-const LEVEL_TONE: Record<PageGrantLevel, DetailTone> = { read: "default", write: "blue", produce: "purple" }
+const LEVEL_TONE: Record<PageGrantLevel, DetailTone> = { read: "default", propose: "default", write: "blue", produce: "purple" }
 
 export function GrantRow({
   grant,
@@ -405,7 +406,7 @@ export function AccessCard({
 
   const [subjectType, setSubjectType] = React.useState<PageSubjectType>("user")
   const [subject, setSubject] = React.useState("")
-  const [level, setLevel] = React.useState<PageGrantLevel>(documentContent ? "read" : "produce")
+  const [level, setLevel] = React.useState<PageGrantLevel>(pageGrantDefaultLevel("user", !!documentContent))
   const [panels, setPanels] = React.useState("")
   /** The last write's refusal. Cleared when the form changes, because a
    *  message about a request nobody is making any more is worse than none. */
@@ -451,7 +452,9 @@ export function AccessCard({
           }`
 
   const forWorkspace = subjectType === "workspace"
-  const levels = pageGrantLevelsFor(subjectType).filter(level => !documentContent || level !== "produce")
+  // Propose has a path on Document content only; elsewhere it would read as a
+  // capability the page does not have.
+  const levels = pageGrantLevelsFor(subjectType).filter(level => documentContent ? level !== "produce" : level !== "propose")
 
   const onIssue = (e: React.FormEvent) => {
     e.preventDefault()
@@ -561,9 +564,11 @@ export function AccessCard({
                 onChange={(e) => {
                   const next = e.target.value as PageSubjectType
                   setSubjectType(next)
-                  // The workspace never produces; a level the new kind may
-                  // not hold is not left standing in the select.
-                  if (!pageGrantLevelsFor(next).includes(level)) setLevel("read")
+                  // The workspace never produces and only an agent proposes; a
+                  // level the new kind may not hold is not left standing. An
+                  // agent on a Document starts at Propose, never at Edit.
+                  if (next === "agent" && documentContent) setLevel("propose")
+                  else if (!pageGrantLevelsFor(next).includes(level)) setLevel(pageGrantDefaultLevel(next, !!documentContent))
                   touch()
                 }}
               >
@@ -649,6 +654,7 @@ export function AccessCard({
             <span className="type-page-meta text-muted-foreground-soft">
               {documentContent
                 ? level === "write" ? "May read and edit document content. This does not grant sharing or agent delegation."
+                  : level === "propose" ? "The agent may read and propose changes. A person accepts or rejects each proposal; the agent never edits."
                   : "May read document content. Writing and sharing require separate rights."
                 : PAGE_GRANT_LEVEL_MEANING[level]}
             </span>

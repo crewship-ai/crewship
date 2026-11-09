@@ -221,11 +221,15 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	if !validPageGrantLevel(req.Level) {
 		replyError(w, http.StatusBadRequest,
-			`level must be "read", "comment", "produce" or "write"`)
+			`level must be "read", "comment", "propose", "produce" or "write"`)
 		return
 	}
 	if req.Level == pageGrantComment && req.SubjectType == pageSubjectAgent {
 		replyError(w, http.StatusBadRequest, "comment grants name people, never agents")
+		return
+	}
+	if req.Level == pageGrantPropose && req.SubjectType != pageSubjectAgent {
+		replyError(w, http.StatusBadRequest, "propose grants name agents; people comment or edit")
 		return
 	}
 	// The workspace subject reads or writes, never produces (#2533 §3/14):
@@ -396,7 +400,7 @@ func (h *PageHandler) DeleteGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	if level != "" && !validPageGrantLevel(level) {
 		replyError(w, http.StatusBadRequest,
-			`level must be "read", "produce" or "write", or be omitted to revoke every level this subject holds`)
+			`level must be "read", "comment", "propose", "produce" or "write", or be omitted to revoke every level this subject holds`)
 		return
 	}
 

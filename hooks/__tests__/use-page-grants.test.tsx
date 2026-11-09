@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 const api = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: api }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: vi.fn() }))
-import { normalizePageGrants, normalizePageVersions, toPageOwner, pagePanelCount, usePageGrants, usePageVersions, usePageGrantWrite, usePageGrantRevoke, usePageRollback, pageWriteFailureMessage, type WirePageDetail } from "@/hooks/use-page-grants"
+import { pageGrantDefaultLevel, pageGrantLevelsFor, normalizePageGrants, normalizePageVersions, toPageOwner, pagePanelCount, usePageGrants, usePageVersions, usePageGrantWrite, usePageGrantRevoke, usePageRollback, pageWriteFailureMessage, type WirePageDetail } from "@/hooks/use-page-grants"
 
 const clients: QueryClient[] = []
 function setup() {
@@ -164,4 +164,20 @@ it("allows grant/revoke/rollback callers to omit callbacks", async () => {
   await result.current.rollback.mutateAsync({ to: 3 })
  })
  expect(api).toHaveBeenCalledTimes(3)
+})
+
+it("offers Propose to agents only and starts an agent on a Document at Propose", () => {
+  expect(pageGrantLevelsFor("agent")).toContain("propose")
+  for (const subject of ["user", "crew", "workspace"] as const) {
+    expect(pageGrantLevelsFor(subject)).not.toContain("propose")
+  }
+  expect(pageGrantDefaultLevel("agent", true)).toBe("propose")
+  expect(pageGrantDefaultLevel("agent", false)).toBe("produce")
+  expect(pageGrantDefaultLevel("user", true)).toBe("read")
+  expect(pageGrantDefaultLevel("workspace", false)).toBe("read")
+})
+
+it("keeps a listed agent propose grant", () => {
+  const out = normalizePageGrants({ page: "doc", grants: [{ subject_type: "agent", subject: "writer", subject_id: "a1", level: "propose", granted_by: "o@example.test", granted_by_user_id: "u1", granted_at: "2026-11-09T00:00:00Z", live: true }] })
+  expect(out.map((g) => g.level)).toEqual(["propose"])
 })

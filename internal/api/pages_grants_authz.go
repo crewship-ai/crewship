@@ -86,6 +86,10 @@ import (
 const (
 	pageGrantRead    = "read"
 	pageGrantComment = "comment"
+	// pageGrantPropose names an agent only (R71 §0.14/7): it reaches the page
+	// and may propose changes a person accepts or rejects. It never edits and
+	// never stands in for comment; write keeps admitting proposals.
+	pageGrantPropose = "propose"
 	pageGrantProduce = "produce"
 	pageGrantWrite   = "write"
 
@@ -101,7 +105,7 @@ const (
 
 func validPageGrantLevel(level string) bool {
 	switch level {
-	case pageGrantRead, pageGrantComment, pageGrantProduce, pageGrantWrite:
+	case pageGrantRead, pageGrantComment, pageGrantPropose, pageGrantProduce, pageGrantWrite:
 		return true
 	}
 	return false
@@ -196,7 +200,7 @@ func (g pageGrantRecord) inertReason() string {
 // here — "does any live grant name you" — has no ordering in it.
 func reachesPage(level string) bool {
 	switch level {
-	case pageGrantRead, pageGrantComment, pageGrantProduce, pageGrantWrite:
+	case pageGrantRead, pageGrantComment, pageGrantPropose, pageGrantProduce, pageGrantWrite:
 		return true
 	}
 	return false

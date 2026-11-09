@@ -499,7 +499,7 @@ func pageAccessGrantPaths(grants []pageGrantRecord, match func(pageGrantRecord) 
 		levels[g.Level] = true
 	}
 	var out []string
-	for _, level := range []string{pageGrantRead, pageGrantComment, pageGrantProduce, pageGrantWrite} {
+	for _, level := range []string{pageGrantRead, pageGrantComment, pageGrantPropose, pageGrantProduce, pageGrantWrite} {
 		if levels[level] {
 			out = append(out, pageReachGrantPage+level)
 		}

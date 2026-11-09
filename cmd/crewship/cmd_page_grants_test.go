@@ -249,7 +249,10 @@ func TestPageCLI_GrantRefusesAMalformedInvocationLocally(t *testing.T) {
 	}{
 		{"no subject", []string{"page", "grant", pageGrantSlug, "--level", "read"}, "--user"},
 		{"two subjects", []string{"page", "grant", pageGrantSlug, "--user", "a@b.c", "--crew", "lookout", "--level", "read"}, "exactly one subject"},
-		{"no level", []string{"page", "grant", pageGrantSlug, "--agent", "watcher"}, "--level"},
+		// An agent without --level defaults to propose (cmd_page_propose_grants_test.go);
+		// a person, a crew and everyone still name the level.
+		{"no level", []string{"page", "grant", pageGrantSlug, "--user", "a@b.c"}, "--level"},
+		{"no level for a crew", []string{"page", "grant", pageGrantSlug, "--crew", "lookout"}, "--level"},
 		{"a panel scope on a read grant", []string{"page", "grant", pageGrantSlug, "--agent", "watcher", "--level", "read", "--panels", "sluzby"}, "--panels"},
 		{"revoke with no subject", []string{"page", "revoke", pageGrantSlug}, "--user"},
 	}

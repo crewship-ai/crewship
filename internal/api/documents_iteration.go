@@ -88,8 +88,9 @@ func (h *PageHandler) documentIterationPage(ctx context.Context, workspace, huma
 	return scope, rec.PagesVersion, nil
 }
 
-// agentMayProposeOn: a live page grant naming this agent at write level.
-// Crew grants do not reach agents (pages_grants_authz.go §7.1b).
+// agentMayProposeOn: a live page grant naming this agent at propose or write
+// level. Read is not enough, and an agent never holds comment. Crew grants do
+// not reach agents (pages_grants_authz.go §7.1b).
 func (h *PageHandler) agentMayProposeOn(ctx context.Context, workspace string, rec *pageRecord, agent string) bool {
 	if agent == "" {
 		return false
@@ -99,7 +100,7 @@ func (h *PageHandler) agentMayProposeOn(ctx context.Context, workspace string, r
 		return false
 	}
 	for _, g := range grants {
-		if g.Level == pageGrantWrite {
+		if g.Level == pageGrantPropose || g.Level == pageGrantWrite {
 			return true
 		}
 	}

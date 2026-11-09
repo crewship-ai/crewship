@@ -95,7 +95,7 @@ func (r *Router) chatDocumentAccess(w http.ResponseWriter, req *http.Request) {
 		}) {
 			if grant.Level == pageGrantWrite {
 				level = "write"
-			} else if grant.Level == pageGrantRead && level == "" {
+			} else if (grant.Level == pageGrantRead || grant.Level == pageGrantPropose) && level == "" {
 				level = "read"
 			}
 		}
