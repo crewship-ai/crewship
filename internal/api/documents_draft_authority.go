@@ -26,6 +26,15 @@ type documentDraftScope struct {
 	PageID     string
 	Generation int64
 	Rev        int64
+	// Propose is a schema-4 mandate (#5137): proposals only, never commits.
+	Propose bool
+	// Blocks, comma-separated, are the only blocks a proposal may target; "" is the whole document.
+	Blocks string
+}
+
+// admits reports whether a block is inside this mandate.
+func (s documentDraftScope) admits(block string) bool {
+	return (documents.IterationIntent{Schema: documents.ProposalSchema, Blocks: s.Blocks}).Admits(block)
 }
 
 // The private Node callback has the original bearer, not crew IPC. Resolve only
@@ -109,7 +118,7 @@ func (h *PageHandler) documentDraftScope(ctx context.Context, a *artifactRunAuth
 
 func (h *PageHandler) authorizeDocumentDraft(ctx context.Context, a *artifactRunAuthority, k documents.Key, operation string) (string, error) {
 	switch operation {
-	case "state", "receipt", "lease", "renew", "release", "commit", "checkpoint":
+	case "state", "receipt", "lease", "renew", "release", "commit", "checkpoint", "propose":
 	default:
 		return "", errDocumentAccess
 	}

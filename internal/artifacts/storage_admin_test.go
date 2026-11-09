@@ -31,20 +31,30 @@ func TestStorageSourceSQLMatchesMigration(t *testing.T) {
 // A table created after the seed is charged by its triggers with the same
 // expression the recompute query uses for it.
 func TestStorageLaterSourcesMatchTheirTriggers(t *testing.T) {
-	raw, err := os.ReadFile("../database/migrations/20261108145251_document_comments.sql")
-	if err != nil {
-		t.Fatal(err)
-	}
 	const head = " UNION ALL SELECT r.workspace_id AS workspace_id,"
-	expr, ok := strings.CutPrefix(storageLaterSourcesSQL, head)
-	expr, _, found := strings.Cut(expr, " AS bytes FROM document_comments r")
-	if !ok || !found {
-		t.Fatalf("unexpected later source %q", storageLaterSourcesSQL)
-	}
-	for _, side := range []string{"NEW", "OLD"} {
-		if want := strings.ReplaceAll(expr, "r.", side+"."); !strings.Contains(string(raw), want) {
-			t.Errorf("document_comments %s trigger does not charge %s", side, want)
+	rest := storageLaterSourcesSQL
+	for _, source := range []struct{ table, migration string }{
+		{"document_comments", "20261108145251_document_comments.sql"},
+		{"document_proposals", "20261108204553_document_proposals.sql"},
+	} {
+		raw, err := os.ReadFile("../database/migrations/" + source.migration)
+		if err != nil {
+			t.Fatal(err)
 		}
+		expr, ok := strings.CutPrefix(rest, head)
+		expr, after, found := strings.Cut(expr, " AS bytes FROM "+source.table+" r")
+		if !ok || !found {
+			t.Fatalf("unexpected later source for %s: %q", source.table, rest)
+		}
+		rest = after
+		for _, side := range []string{"NEW", "OLD"} {
+			if want := strings.ReplaceAll(expr, "r.", side+"."); !strings.Contains(string(raw), want) {
+				t.Errorf("%s %s trigger does not charge %s", source.table, side, want)
+			}
+		}
+	}
+	if rest != "" {
+		t.Fatalf("later source without a trigger check: %q", rest)
 	}
 }
 

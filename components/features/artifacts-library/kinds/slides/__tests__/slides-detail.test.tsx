@@ -11,6 +11,7 @@ import { ArtifactFrame, NO_FRAME_CAPABILITIES, type FrameLayout } from "../../..
 import { slideLabel, SlidesBody } from "../slides-detail"
 
 const state = vi.hoisted(() => ({
+  projection: null as unknown,
   snapshot: null as ArtifactProjectSnapshot | null, comment: vi.fn(), restore: vi.fn(), share: vi.fn(), download: vi.fn(), viewing: [] as (number | undefined)[],
 }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "person" } } }) }))
@@ -21,7 +22,7 @@ vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-proje
 }))
 vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-slides", async () => {
   const { parseArtifactSlides } = await import("@/lib/pages/artifact-slides")
-  return { useArtifactSlides: () => ({ scope: "s", enabled: true, projection: parseArtifactSlides(fixture, "page"), error: false, downloadPDF: state.download }) }
+  return { useArtifactSlides: () => ({ scope: "s", enabled: true, projection: parseArtifactSlides(state.projection, "page"), error: false, downloadPDF: state.download }) }
 })
 
 function snapshot(over: Partial<ArtifactProjectSnapshot> = {}): ArtifactProjectSnapshot {
@@ -45,10 +46,19 @@ const slot = (name: string) => document.querySelector(`[data-artifact-slot="${na
 beforeEach(() => {
   vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", "true")
   Object.defineProperty(document, "fonts", { configurable: true, value: { load: vi.fn(async () => [{ family: "Go Regular" }]), ready: Promise.resolve() } })
-  state.snapshot = snapshot(); state.viewing = []
+  state.snapshot = snapshot(); state.viewing = []; state.projection = fixture
+  window.history.replaceState(null, "", "/artifacts/page?workspace_id=workspace")
   state.comment.mockReset(); state.restore.mockReset(); state.share.mockReset(); state.download.mockReset(); report.mockReset()
 })
-afterEach(() => { cleanup(); vi.unstubAllEnvs() })
+afterEach(() => { cleanup(); vi.unstubAllEnvs(); window.history.replaceState(null, "", "/") })
+
+/** The fixture with a third slide, so "2 → 3" has somewhere to go. */
+function threeSlides() {
+  const deck = structuredClone(fixture.deck) as typeof fixture.deck & { slides: unknown[] }
+  deck.slide_order = [...deck.slide_order, "closing"]
+  deck.slides = [...deck.slides, { id: "closing", notes: "Thank the board", elements: [] }]
+  return { ...fixture, deck }
+}
 
 describe("Slides in the artifact frame", () => {
   it("fills view, output, viewport and nav, and reports Saved with the server's version", async () => {
@@ -142,6 +152,120 @@ describe("Slides in the artifact frame", () => {
     state.snapshot = snapshot({ manifest: { version: 2, entrypoint: "x", files: [{ path: "deck.json", media_type: "application/json", content: "{}" }, { path: "dashboard.json", media_type: "application/json", content: "{}" }] } })
     await mount()
     expect(screen.getByRole("alert")).toHaveTextContent("This Slides format is unsupported.")
+  })
+})
+
+describe("one selected slide for the viewer, its link and Present (#5150)", () => {
+  beforeEach(() => { state.projection = threeSlides() })
+  const shown = () => within(slot("nav")).getByText(/^\d+ \/ 3$/).textContent
+
+  it("opens the slide the link names and keeps the link on the selection", async () => {
+    window.history.replaceState(null, "", "/artifacts/page?workspace_id=workspace#slide-details")
+    await mount()
+    expect(shown()).toBe("2 / 3")
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Slide thumbnails" })).getByRole("button", { name: "Slide 3" }))
+    expect(window.location.hash).toBe("#slide-closing")
+    expect(window.location.search).toBe("?workspace_id=workspace")
+    fireEvent.click(within(slot("nav")).getByRole("button", { name: "Speaker notes" }))
+    expect(screen.getByRole("complementary", { name: "Speaker notes" })).toHaveTextContent("Speaker notes · slide 3Thank the board")
+    fireEvent.click(within(slot("nav")).getByRole("button", { name: "All slides" }))
+    expect(within(screen.getByRole("list", { name: "All slides" })).getAllByRole("button")[2]).toHaveAttribute("aria-current", "true")
+    fireEvent.click(within(slot("nav")).getByRole("button", { name: "Single slide" }))
+    expect(shown()).toBe("3 / 3")
+  })
+
+  it("ignores a link to a slide the deck does not have", async () => {
+    window.history.replaceState(null, "", "/artifacts/page?workspace_id=workspace#slide-missing")
+    await mount()
+    expect(shown()).toBe("1 / 3")
+  })
+
+  it("follows back and forward between slide links", async () => {
+    await mount()
+    act(() => { window.history.replaceState(null, "", "#slide-closing"); window.dispatchEvent(new HashChangeEvent("hashchange")) })
+    expect(shown()).toBe("3 / 3")
+    act(() => { window.history.replaceState(null, "", "#slide-intro"); window.dispatchEvent(new PopStateEvent("popstate")) })
+    expect(shown()).toBe("1 / 3")
+  })
+
+  it("moves with the arrow, page, Home and End keys in the viewer, not while typing", async () => {
+    await mount()
+    fireEvent.keyDown(document.body, { key: "ArrowRight" })
+    expect(shown()).toBe("2 / 3")
+    expect(window.location.hash).toBe("#slide-details")
+    fireEvent.keyDown(document.body, { key: "PageDown" })
+    fireEvent.keyDown(document.body, { key: "ArrowRight" })
+    expect(shown()).toBe("3 / 3")
+    fireEvent.keyDown(document.body, { key: "Home" })
+    expect(shown()).toBe("1 / 3")
+    fireEvent.keyDown(document.body, { key: "ArrowLeft" })
+    expect(shown()).toBe("1 / 3")
+    fireEvent.keyDown(document.body, { key: "End" })
+    expect(shown()).toBe("3 / 3")
+    fireEvent.keyDown(document.body, { key: "PageUp" })
+    expect(shown()).toBe("2 / 3")
+    fireEvent.keyDown(document.body, { key: "ArrowRight", metaKey: true })
+    expect(shown()).toBe("2 / 3")
+    fireEvent.click(screen.getByRole("button", { name: "Comments" }))
+    const box = screen.getByRole("textbox", { name: "Comment on the slide" })
+    fireEvent.keyDown(box, { key: "ArrowRight" })
+    expect(shown()).toBe("2 / 3")
+    // A button in the drawer keeps PageDown/End for scrolling its list.
+    const select = screen.getByRole("button", { name: "Select on the slide" })
+    expect(fireEvent.keyDown(select, { key: "End" })).toBe(true)
+    expect(shown()).toBe("2 / 3")
+    // The frame's slot buttons and the filmstrip are the deck's own controls.
+    fireEvent.keyDown(within(slot("nav")).getByRole("button", { name: "All slides" }), { key: "ArrowRight" })
+    expect(shown()).toBe("3 / 3")
+  })
+
+  it("leaves Present on the last slide shown: 2 → 3 → Escape stays on 3", async () => {
+    await mount()
+    fireEvent.click(within(screen.getByRole("navigation", { name: "Slide thumbnails" })).getByRole("button", { name: "Slide 2" }))
+    fireEvent.click(within(slot("output")).getByRole("button", { name: "Present" }))
+    const dialog = screen.getByRole("dialog", { name: "Present slides" })
+    expect(within(dialog).getByText("2 / 3")).toBeInTheDocument()
+    fireEvent.keyDown(dialog, { key: "ArrowRight" })
+    expect(within(dialog).getByText("3 / 3")).toBeInTheDocument()
+    fireEvent.keyDown(dialog, { key: "Escape" })
+    expect(screen.queryByRole("dialog")).toBeNull()
+    expect(shown()).toBe("3 / 3")
+    expect(window.location.hash).toBe("#slide-closing")
+  })
+
+  it("stops at the first and last slide in Present and while the viewer keys are idle", async () => {
+    await mount()
+    fireEvent.click(within(slot("output")).getByRole("button", { name: "Present" }))
+    const dialog = screen.getByRole("dialog", { name: "Present slides" })
+    fireEvent.keyDown(dialog, { key: "ArrowLeft" })
+    expect(within(dialog).getByText("1 / 3")).toBeInTheDocument()
+    // One key, one step: the viewer's own keys do not move the slide under the presentation too.
+    fireEvent.keyDown(dialog, { key: "ArrowRight" })
+    expect(within(dialog).getByText("2 / 3")).toBeInTheDocument()
+    expect(shown()).toBe("2 / 3")
+    fireEvent.keyDown(dialog, { key: "End" })
+    fireEvent.keyDown(dialog, { key: "ArrowRight" })
+    expect(within(dialog).getByText("3 / 3")).toBeInTheDocument()
+    expect(shown()).toBe("3 / 3")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close presentation" }))
+    expect(shown()).toBe("3 / 3")
+  })
+
+  it("ends Present on the shown slide when the browser leaves full screen", async () => {
+    let element: Element | null = null
+    Object.defineProperty(document, "fullscreenElement", { configurable: true, get: () => element })
+    Object.defineProperty(document.documentElement, "requestFullscreen", { configurable: true, value: vi.fn(async () => { element = document.documentElement; document.dispatchEvent(new Event("fullscreenchange")) }) })
+    try {
+      await mount()
+      await act(async () => { fireEvent.click(within(slot("output")).getByRole("button", { name: "Present" })) })
+      const dialog = screen.getByRole("dialog", { name: "Present slides" })
+      fireEvent.keyDown(dialog, { key: "ArrowRight" })
+      act(() => { element = null; document.dispatchEvent(new Event("fullscreenchange")) })
+      expect(screen.queryByRole("dialog")).toBeNull()
+      expect(shown()).toBe("2 / 3")
+    } finally {
+      Reflect.deleteProperty(document, "fullscreenElement")
+    }
   })
 })
 
