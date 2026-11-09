@@ -107,17 +107,17 @@ describe("mention names", () => {
     expect(seen).toHaveBeenCalledTimes(1)
     // Not before the answer is five minutes old, and within one 30 s check after.
     delete readers.ada
-    calls.length = 1
+    const before = calls.length
     await vi.advanceTimersByTimeAsync(REFRESH_MS - 30_000 - 20)
-    expect(calls).toHaveLength(1)
+    expect(calls).toHaveLength(before)
     await vi.advanceTimersByTimeAsync(90_000)
-    expect(calls).toHaveLength(2)
+    expect(calls).toHaveLength(before + 1)
     expect(mentionLabel(names, "ada")).toBe("@Unknown member")
     expect(seen).toHaveBeenCalledTimes(2)
     // Once nothing shows the mention it is not asked again.
     names.release(["ada"])
     await vi.advanceTimersByTimeAsync(3 * REFRESH_MS)
-    expect(calls).toHaveLength(2)
+    expect(calls).toHaveLength(before + 1)
     // A session that ended sends nothing it had queued.
     const ended: string[] = []
     const closed = createMentionNames("ws", "p", people({}, ended))
@@ -128,6 +128,24 @@ describe("mention names", () => {
     closed.want(["ada"])
     await vi.advanceTimersByTimeAsync(0)
     expect(ended).toHaveLength(1)
+  })
+
+  it("counts failed requests per id: an id that joined late is not given up with the one that failed longest", async () => {
+    vi.useFakeTimers()
+    const calls: string[] = []
+    const names = createMentionNames("ws", "p", people({ ada: "Ada", bea: "Bea" }, calls, () => calls.length <= 5 ? 500 : 200))
+    names.want(["ada"])
+    // Ada is asked at 0, 2, 6 and 14 s; Bea, shown at 10 s, joins the 14 s request.
+    await vi.advanceTimersByTimeAsync(10_000)
+    names.want(["bea"])
+    await vi.advanceTimersByTimeAsync(20_000)
+    // At 30 s Ada's fifth request fails and she settles neutral; Bea, on her second, is asked again and named.
+    expect(calls).toHaveLength(5)
+    expect(mentionLabel(names, "ada")).toBe("@Unknown member")
+    await vi.advanceTimersByTimeAsync(4_000)
+    expect(calls).toHaveLength(6)
+    expect(new URL(calls[5], "http://x").searchParams.get("ids")).toBe("bea")
+    expect(mentionLabel(names, "bea")).toBe("@Bea")
   })
 
   it("keeps the server's wait after giving up on a rate limit", async () => {

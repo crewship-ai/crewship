@@ -49,12 +49,12 @@ export function createMentionNames(workspaceId: string, pageId: string, fetcher:
   const attempts = new Map<string, number>(), held = new Map<string, number>()
   const queued = new Set<string>(), asking = new Set<string>()
   const listeners = new Set<() => void>()
-  let version = 0, quietUntil = 0, disposed = false
+  let version = 0, quietUntil = 0, disposed = false, flushing = false
   let timer: ReturnType<typeof setTimeout> | undefined, ticker: ReturnType<typeof setInterval> | undefined
   const notify = () => { version++; for (const listener of [...listeners]) listener() }
-  // A new id never cuts a wait short.
+  // One lookup at a time, and a new id never cuts the server's wait short.
   const schedule = (delay: number) => {
-    if (timer !== undefined || disposed) return
+    if (timer !== undefined || flushing || disposed) return
     timer = setTimeout(() => { timer = undefined; void flush() }, Math.max(delay, quietUntil - Date.now()))
   }
   /** Records an answer; true when what this id shows changed. */
@@ -63,22 +63,27 @@ export function createMentionNames(workspaceId: string, pageId: string, fetcher:
     settled.set(id, { name, at: Date.now() }); attempts.delete(id)
     return (before?.name ?? null) !== name
   }
-  /** Asks for one batch: how long to wait before the next request, whether the batch must be asked again, and whether a shown name changed. */
-  const ask = async (ids: string[]): Promise<{ wait: number; again: boolean; changed: boolean }> => {
+  type Answer = { retryIn: number; quiet: number; again: string[]; changed: boolean }
+  /** Asks for one batch. A failure counts per id; ids that reached MAX_ATTEMPTS settle neutral, the rest are asked again. */
+  const ask = async (ids: string[]): Promise<Answer> => {
     let response: Response
     try {
       response = await fetcher(`${base}?ids=${encodeURIComponent(ids.join(","))}&workspace_id=${encodeURIComponent(workspaceId)}`, { cache: "no-store" })
     } catch { response = new Response(null, { status: 599 }) }
     let changed = false
     if (response.status === 429 || response.status >= 500) {
-      const tries = Math.max(...ids.map(id => (attempts.get(id) ?? 0) + 1))
-      ids.forEach(id => attempts.set(id, tries))
+      const again: string[] = []
+      let tries = 0
+      for (const id of ids) {
+        const n = (attempts.get(id) ?? 0) + 1
+        // Given up: no name is kept on an answer that could not be confirmed.
+        if (n >= MAX_ATTEMPTS) changed = settle(id, null) || changed
+        else { attempts.set(id, n); again.push(id); tries = Math.max(tries, n) }
+      }
       const after = Number(response.headers.get("Retry-After"))
-      const wait = response.status === 429 && Number.isFinite(after) && after > 0 ? Math.min(after, 60) * 1000 : Math.min(2 ** tries, 60) * 1000
-      if (tries < MAX_ATTEMPTS) return { wait, again: true, changed }
-      // Given up: no name is kept on an answer that could not be confirmed, and the wait still applies.
-      for (const id of ids) changed = settle(id, null) || changed
-      return { wait, again: false, changed }
+      // Only the server's own rate limit makes every lookup wait.
+      const quiet = response.status === 429 ? (Number.isFinite(after) && after > 0 ? Math.min(after, 60) * 1000 : 1000) : 0
+      return { retryIn: quiet || Math.min(2 ** tries, 60) * 1000, quiet, again, changed }
     }
     const named = new Map<string, string>()
     if (response.ok) {
@@ -89,24 +94,29 @@ export function createMentionNames(workspaceId: string, pageId: string, fetcher:
       }
     }
     for (const id of ids) changed = settle(id, named.get(id) ?? null) || changed
-    return { wait: 0, again: false, changed }
+    return { retryIn: 0, quiet: 0, again: [], changed }
   }
   const flush = async () => {
+    flushing = true
     const ids = [...queued].sort()
     queued.clear()
-    let wait = 0, changed = false
-    for (let start = 0; start < ids.length; start += BATCH) {
-      const batch = ids.slice(start, start + BATCH)
-      if (wait || disposed) { if (!disposed) batch.forEach(id => queued.add(id)); continue }
-      batch.forEach(id => asking.add(id))
-      const answer = await ask(batch)
-      batch.forEach(id => asking.delete(id))
-      wait = answer.wait; changed = answer.changed || changed
-      if (answer.again && !disposed) batch.forEach(id => queued.add(id))
-    }
-    if (wait) quietUntil = Date.now() + wait
+    let retryIn = 0, changed = false
+    try {
+      for (let start = 0; start < ids.length; start += BATCH) {
+        const batch = ids.slice(start, start + BATCH)
+        // After a failure the remaining batches wait for the retry.
+        if (retryIn || disposed) { if (!disposed) batch.forEach(id => queued.add(id)); continue }
+        batch.forEach(id => asking.add(id))
+        const answer = await ask(batch)
+        batch.forEach(id => asking.delete(id))
+        changed = answer.changed || changed
+        if (answer.quiet) quietUntil = Math.max(quietUntil, Date.now() + answer.quiet)
+        if (answer.again.length) { retryIn = answer.retryIn; if (!disposed) answer.again.forEach(id => queued.add(id)) }
+        else if (answer.quiet) retryIn = answer.quiet
+      }
+    } finally { flushing = false }
     if (changed) notify()
-    if (queued.size) schedule(wait)
+    if (queued.size) schedule(retryIn)
   }
   const stale = (id: string) => { const entry = settled.get(id); return !entry || Date.now() - entry.at >= REFRESH_MS }
   const ask_ = (ids: Iterable<string>) => {
