@@ -3,7 +3,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import { DOMSerializer } from "@tiptap/pm/model"
 import { DocumentHistory, type DocumentHistoryProps } from "./document-history"
 afterEach(()=>{cleanup();vi.restoreAllMocks()})
-const row = { id:"pin-1", rev:7, schema:3, actor:"human:writer", created_at:"2026-10-18T20:00:00Z" }
+const row = { id:"pin-1", rev:7, schema:3, actor:"user:writer", created_at:"2026-10-18T20:00:00Z" }
 const content = { type:"doc", content:[{type:"paragraph",attrs:{id:"p1"},content:[{type:"text",text:"Confirmed historical text"}]}] }
 function props(): DocumentHistoryProps {
   return {pageId:"page-1",scopeKey:"human/workspace/page-1/auth-1",list:{status:"ready",scopeKey:"human/workspace/page-1/auth-1",data:{checkpoints:[row]}},selectedId:"pin-1",snapshot:{status:"ready",scopeKey:"human/workspace/page-1/auth-1",data:{page_id:"page-1",id:"pin-1",rev:7,schema:3,content}},onSelect:vi.fn(),onClose:vi.fn()}
@@ -11,7 +11,7 @@ function props(): DocumentHistoryProps {
 it("shows only immutable confirmed content and explicit checkpoint provenance",()=>{
   const p=props();render(<DocumentHistory {...p}/>)
   expect(screen.getByText("Confirmed historical text")).toBeInTheDocument()
-  expect(screen.getByText("human:writer")).toBeInTheDocument()
+  expect(screen.getByText("Workspace member")).toBeInTheDocument()
   expect(screen.getByRole("button",{name:/Revision 7/})).toHaveAttribute("aria-pressed","true")
   expect(document.querySelector('[contenteditable="true"]')).toBeNull()
   expect(screen.queryByRole("button",{name:/restore|save|apply/i})).toBeNull()
@@ -60,7 +60,7 @@ it("removes old content synchronously when access or identity changes",()=>{
   const p=props();const {rerender}=render(<DocumentHistory {...p}/>)
   rerender(<DocumentHistory {...p} scopeKey="other-human/workspace/page-1/auth-2"/>)
   expect(screen.queryByText("Confirmed historical text")).toBeNull()
-  expect(screen.queryByText("human:writer")).toBeNull()
+  expect(screen.queryByText("Workspace member")).toBeNull()
   rerender(<DocumentHistory {...p} list={{status:"denied"}}/>)
   expect(screen.queryByText("Confirmed historical text")).toBeNull()
   expect(screen.getByRole("alert")).toHaveTextContent("History access is unavailable")
@@ -97,7 +97,7 @@ it("clears list metadata as well as content after a denied snapshot read",()=>{
   const p=props();const {rerender}=render(<DocumentHistory {...p}/>)
   rerender(<DocumentHistory {...p} snapshot={{status:"denied"}}/>)
   expect(screen.queryByText("Confirmed historical text")).toBeNull()
-  expect(screen.queryByText("human:writer")).toBeNull()
+  expect(screen.queryByText("Workspace member")).toBeNull()
   expect(screen.getByRole("alert")).toHaveTextContent("History access is unavailable")
 })
 it("renders schema 2 headings and schema 3 links through the closed schema",()=>{
@@ -142,4 +142,33 @@ it("warns that restoring a version from before Canvas empties the Canvas layout,
   expect(screen.getByRole("alertdialog")).toHaveTextContent("This version is from before Canvas: Canvas stays enabled, but its layout and notes will be empty.")
   rerender(<DocumentHistory {...props()} {...restore} headSchema={5}/>)
   expect(screen.getByRole("alertdialog")).not.toHaveTextContent("before Canvas")
+})
+
+it("never shows a raw actor id: authors are named, unknown people are described",()=>{
+  const p=props()
+  const list={status:"ready" as const,scopeKey:p.scopeKey,data:{checkpoints:[{...row,actor:"user:cmw86cvse000134809d57"},{...row,id:"pin-0",rev:0,actor:"agent:cmwagent01"}]}}
+  const {rerender}=render(<DocumentHistory {...p} list={list}/>)
+  expect(screen.queryByText(/cmw86cvse/)).toBeNull()
+  expect(screen.queryByText(/cmwagent01/)).toBeNull()
+  expect(screen.getByText("Workspace member")).toBeInTheDocument()
+  expect(screen.getByText("Agent")).toBeInTheDocument()
+  rerender(<DocumentHistory {...p} list={list} actorName={actor=>actor==="user:cmw86cvse000134809d57"?"Demo User":"Agent"}/>)
+  expect(screen.getByText("Demo User")).toBeInTheDocument()
+  expect(screen.queryByText(/cmw86cvse/)).toBeNull()
+})
+
+it("lists the current saved revision above older checkpoints",()=>{
+  const p=props()
+  render(<DocumentHistory {...p} headRev={9}/>)
+  const items=screen.getAllByRole("listitem")
+  expect(items[0]).toHaveTextContent("Current version")
+  expect(items[0]).toHaveTextContent("Revision 9")
+  expect(items[1]).toHaveTextContent("Revision 7")
+})
+
+it("does not list the current revision twice when it is already a checkpoint",()=>{
+  const p=props()
+  render(<DocumentHistory {...p} headRev={7}/>)
+  expect(screen.getAllByText(/Revision 7/)).toHaveLength(1)
+  expect(screen.getByRole("button",{name:/Revision 7/})).toHaveTextContent("Current version")
 })

@@ -47,6 +47,10 @@ export interface DocumentHistoryProps {
   review?: DocumentHistoryReview
   /** The live document's schema, to warn when a restore drops a layer the checkpoint predates (the Canvas at 6). */
   headSchema?: number
+  /** Confirmed head revision; listed as the current version when it is not a checkpoint. */
+  headRev?: number
+  /** Display name for a checkpoint actor (`user:<id>`, `agent:<id>`). Must never return the raw identifier. */
+  actorName?: (actor: string) => string
   restore?: {
     allowed: boolean
     baseKey?: string

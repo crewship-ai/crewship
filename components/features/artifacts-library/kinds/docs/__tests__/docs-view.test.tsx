@@ -129,7 +129,8 @@ describe("Docs in the ArtifactFrame", () => {
     fireEvent.click(screen.getByRole("button", { name: "History" }))
     const drawer = screen.getByRole("complementary", { name: "History" })
     expect(within(drawer).getByText("Restore creates a new version with this content. Later changes stay in History.")).toBeTruthy()
-    expect(await within(drawer).findByText("No checkpoints yet.")).toBeTruthy()
+    // The saved head is listed even before any checkpoint exists (dev2 baseline G05).
+    expect(await within(drawer).findByText("Current version")).toBeTruthy()
   })
 
   it.each([[undefined], [false]] as const)("offers no Propose mode and no Proposals tab when the server does not serve proposals (%s)", async proposals => {
