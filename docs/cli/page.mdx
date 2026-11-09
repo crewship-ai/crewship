@@ -915,8 +915,8 @@ crewship page grant fleet-201 --user  ops@example.com --level write
 </Note>
 
 <Note>
-  Only the page's owner (the owning user, or a member of the owning crew) can
-  grant an agent `write` or `produce`; `produce` pushes the page's data. A
+  Only the page's owner (the owning user, or a member of the owning crew while
+  that crew is not deleted) can grant an agent `write` or `produce`; `produce` pushes the page's data. A
   workspace admin can grant an agent `read` and can revoke any grant, but
   `--agent <slug> --level write` or `--level produce` from anyone but the owner
   exits `4`. An agent `write` or `produce` grant the owner did not issue shows

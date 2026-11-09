@@ -103,6 +103,16 @@ BEGIN
     AND page_id IN (SELECT id FROM pages WHERE owner_crew_id=NEW.id AND COALESCE(owner_user_id,'')='');
 END;
 
+-- An owning crew moved to another workspace owns nothing on the page it left.
+-- Nothing moves a crew today; this keeps a move back from reviving anything.
+CREATE TRIGGER page_grant_agent_delegation_crew_workspace AFTER UPDATE OF workspace_id ON crews
+WHEN OLD.workspace_id IS NOT NEW.workspace_id
+BEGIN
+ UPDATE page_grants SET retired_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
+  WHERE retired_at IS NULL AND subject_type='agent' AND level IN ('write','produce')
+    AND page_id IN (SELECT id FROM pages WHERE owner_crew_id=NEW.id AND COALESCE(owner_user_id,'')='');
+END;
+
 -- Every live non-owner-issued delegation stored today is judged once, here.
 UPDATE page_grants SET retired_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
  WHERE retired_at IS NULL AND subject_type='agent' AND level IN ('write','produce')

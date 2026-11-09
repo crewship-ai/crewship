@@ -111,12 +111,14 @@ Two rules the server enforces and this command cannot talk it out of:
   in its own crew.
 
   Only the page's owner grants an agent "write" or "produce" (the owning
-  user, or a member of the owning crew): produce pushes the page's data,
+  user, or a member of the owning crew while the crew is not deleted):
+  produce pushes the page's data,
   which is Edit of its data. A workspace admin can grant an agent read and
   can revoke any grant, but "--agent … --level write|produce" from anyone
   else is refused with exit 4. An agent write or produce grant the owner
-  did not issue reaches nothing and has ended for good, also after its
-  issuer comes to own the page; the owner issues a new one.
+  did not issue, or whose issuer stopped owning the page, reaches nothing
+  and has ended for good, also after its issuer comes to own the page; the
+  owner issues a new one.
 
 An agent's authority is a subset of yours and is re-checked every time it
 is used: if you lose access to a crew, every grant you issued narrows

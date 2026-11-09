@@ -159,8 +159,9 @@ type pageGrantRecord struct {
 
 // agentEditIssuerNotOwnerSQL is the use-time half of R71 §0.14/1, evaluated
 // against the alias v of page_grant_verdicts: true for an agent write or
-// produce grant whose issuer is not the page's owner now — the owning user, or a member of
-// the owning crew, the same standing isPageOwner reads. A workspace ADMIN or
+// produce grant whose issuer is not the page's owner now — the owning user, or a
+// member of the owning crew while that crew is live and in the page's
+// workspace (pageOwnerForDelegation, not isPageOwner). A workspace ADMIN or
 // OWNER role does not count. It sits in the single grant reader so every
 // consumer of agent grants (spec edit, proposals, collaboration, chat
 // document access, the Access view) inherits it without a second spelling.

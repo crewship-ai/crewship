@@ -594,8 +594,9 @@ func (h *PageHandler) mayAdministerGrants(ctx context.Context, wsID, userID, rol
 const (
 	pageAgentEditOwnerOnlyRefusal = "only the artifact's owner can delegate Edit (write) or data Edit (produce) to an agent; " +
 		"a workspace admin can grant an agent read, or ask the owner to grant write or produce"
-	pageAgentEditInertReason = "only the artifact's owner can delegate Edit (write) or data Edit (produce) to an agent, and the page's owner " +
-		"did not issue this grant, so it has ended for good; the owner must issue a new grant"
+	pageAgentEditInertReason = "only the artifact's owner can delegate Edit (write) or data Edit (produce) to an agent, and this grant " +
+		"was not issued by the page's current owner (or its issuer stopped owning the page), so it has ended for good; " +
+		"the owner must issue a new grant"
 )
 
 // mayDelegateAgentEdit answers R71 §0.14/1 (which overrides §0.3/4): "Edit

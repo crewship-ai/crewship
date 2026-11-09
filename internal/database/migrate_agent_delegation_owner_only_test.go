@@ -113,6 +113,17 @@ func TestAgentDelegationOwnerOnlyMigrationRetiresNonOwnerRows(t *testing.T) {
 	if err := db.QueryRow(`SELECT count(*) FROM page_grants WHERE subject_id='a6' AND retired_at IS NULL`).Scan(&live); err != nil || live != 0 {
 		t.Fatalf("a deleted crew's delegation survived: %d %v", live, err)
 	}
+	// Moving an owning crew away and back revives nothing.
+	mustExec(t, db, `UPDATE crews SET deleted_at=NULL WHERE id='d-crew'`)
+	mustExec(t, db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES('d-crew-page','agent','a10','write','d-crewmate','2026-11-09T01:00:00Z')`)
+	if err := db.QueryRow(`SELECT count(*) FROM page_grants WHERE subject_id='a10' AND retired_at IS NULL`).Scan(&live); err != nil || live != 1 {
+		t.Fatalf("a live crew member's delegation was not stored live: %d %v", live, err)
+	}
+	mustExec(t, db, `UPDATE crews SET workspace_id='x-ws' WHERE id='d-crew'`)
+	mustExec(t, db, `UPDATE crews SET workspace_id='d-ws' WHERE id='d-crew'`)
+	if err := db.QueryRow(`SELECT count(*) FROM page_grants WHERE subject_id='a10' AND retired_at IS NULL`).Scan(&live); err != nil || live != 0 {
+		t.Fatalf("moving the owning crew away and back revived a delegation: %d %v", live, err)
+	}
 	// Anyone else clearing the marker is undone in the same statement.
 	mustExec(t, db, `UPDATE page_grants SET retired_at=NULL WHERE subject_id='a7'`)
 	if err := db.QueryRow(`SELECT count(*) FROM page_grants WHERE subject_id='a7' AND retired_at IS NULL`).Scan(&live); err != nil || live != 0 {
