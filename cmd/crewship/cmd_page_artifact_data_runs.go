@@ -23,7 +23,7 @@ func newArtifactDataRunsCommand() *cobra.Command {
 start opens a run with an idempotency key; repeating the same key returns the
 same run (exit 0, HTTP 200). Write the data with "data batch", then finish the
 run as succeeded or failed. A failure reason is cleaned on the server (control
-characters and obvious credentials removed, at most 500 bytes) and is shown to
+characters and common credential patterns removed, at most 500 bytes) and is shown to
 the owner and editors only. The producer is the authenticated principal; it
 cannot be supplied. The newest 20 runs and the newest success are kept per
 collection. Starting and finishing need the same right as "data batch", and

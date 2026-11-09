@@ -306,8 +306,9 @@ crewship page artifact data runs finish <slug> sales <run-id> --base-version 3 -
 ```
 
 If the refresh fails, finish with `--state failed --reason "<what went wrong>"`.
-The server removes control characters and anything that looks like a
-credential and keeps at most 500 bytes. Repeating `start` with the same `--key`
+The server removes control characters and common credential patterns (such
+as passwords, tokens, API keys, private key blocks and URL user info) and keeps
+at most 500 bytes. This is not a guarantee, so do not put secrets in a reason. Repeating `start` with the same `--key`
 returns the same run, so a retried job does not open a second one. Finishing
 the same run again with the same outcome is accepted; a different outcome
 fails with `409`. `crewship page artifact data runs list <slug> --version 3`

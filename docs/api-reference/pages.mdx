@@ -3045,8 +3045,11 @@ Agent runs on the artifact tool path cannot record runs yet.
 `failure_reason` is returned to the owner and editors only, never to a reader or
 an auditing workspace administrator. A failure
 reason is cleaned on the server: control and invisible characters are removed,
-bearer and basic credentials, `key=value` secrets, Crewship and common provider
-tokens and URL user info are redacted, and it is cut to 500 bytes.
+common credential patterns are redacted (bearer and basic credentials,
+`key=value`, `key: value`, `key => value` and `key is value` secrets, PEM
+private key blocks, JWTs, Crewship, GitHub, GitLab, Google, AWS and other
+provider tokens, URL user info), and it is cut to 500 bytes. Redaction is
+pattern based, not a guarantee.
 
 **Statuses:** 200 success or idempotent replay; 201 run created; 400 invalid
 body, key, state or version; 401 unauthenticated; 403 write authority denied;

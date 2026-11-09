@@ -53,21 +53,28 @@ type DataRunSummary struct {
 var idempotencyKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 // Secrets a producer might paste into an error message. The reason is shown to
-// writers only, but it is stored, so obvious credentials never reach storage.
+// writers only, but it is stored, so common credential patterns never reach storage.
 // Key names match inside identifiers (access_token, client_secret,
-// PGPASSWORD), a closing quote may sit before the separator (JSON), and a
-// quoted value is taken whole so a space inside it does not leak the rest.
+// PGPASSWORD), a closing quote may sit before the separator (JSON), "=>" and
+// " is " count as separators, and a quoted value is taken whole so a space
+// inside it does not leak the rest. URL userinfo is removed through the last
+// "@" before the host. Known debt: lookalike characters and escaped quotes
+// inside quoted values are not handled; these are common patterns, not a
+// guarantee.
 var reasonSecrets = []struct {
 	pattern *regexp.Regexp
 	replace string
 }{
+	{regexp.MustCompile(`(?s)-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----.*?(?:-----END [A-Z0-9 ]*PRIVATE KEY-----|$)`), "[redacted private key]"},
 	{regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+`), "$1 [redacted]"},
-	{regexp.MustCompile(`(?i)([A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|api[_-]?key|authorization|cookie|credential)[A-Za-z0-9_-]*["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s&,;"'}]+)`), "$1[redacted]"},
+	{regexp.MustCompile(`(?i)([A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|api[_-]?key|authorization|cookie|credential)[A-Za-z0-9_-]*["']?(?:\s*(?:=>|[=:])\s*|\s+is\s+))(?:"[^"]*"|'[^']*'|[^\s&,;"'}]+)`), "$1[redacted]"},
 	{regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*`), "[redacted]"},
 	{regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`), "[redacted]"},
+	{regexp.MustCompile(`\bglpat-[A-Za-z0-9_-]{20,}`), "[redacted]"},
+	{regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{35}`), "[redacted]"},
 	{regexp.MustCompile(`\bcrewship_[a-z]+_[A-Za-z0-9_]+`), "[redacted]"},
 	{regexp.MustCompile(`\b(sk|pk|ghp|gho|ghs|xox[abp])[-_][A-Za-z0-9_-]{8,}`), "[redacted]"},
-	{regexp.MustCompile(`://[^/\s:@]+:[^/\s@]+@`), "://[redacted]@"},
+	{regexp.MustCompile(`://[^/\s]*@`), "://[redacted]@"},
 }
 
 // CleanDataRunReason bounds a failure reason to plain text: no control

@@ -31,6 +31,13 @@ func TestCleanDataRunReason(t *testing.T) {
 		"quoted value":    {in: `password = "hunter 2" rejected`, keep: []string{"rejected"}, without: []string{"hunter", " 2\""}},
 		"single quoted":   {in: `secret: 'two words' end`, keep: []string{"end"}, without: []string{"two words"}},
 		"jwt":             {in: "got eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2lnbmF0dXJlX3Rlc3Q from idp", keep: []string{"from idp"}, without: []string{"eyJhbGciOiJIUzI1NiJ9", "c2lnbmF0dXJlX3Rlc3Q"}},
+		"pem block":       {in: "ssh failed: -----BEGIN RSA PRIVATE KEY-----\nMIIBOgIBAAJBAKj34GkxFhD90vcNLYLInFEX6Ppy1tPf9Cnzj4p4WGeKLs1Pt8Qu\nKUpRKfFLfRYC9AIKjbJTWit+CqvjWYzvQwECAwEAAQ\n-----END RSA PRIVATE KEY----- after", keep: []string{"ssh failed:", "after"}, without: []string{"MIIBOg", "KUpRKf", "BEGIN RSA PRIVATE KEY"}},
+		"gitlab token":    {in: "clone failed glpat-AbCdEfGhIjKlMnOpQrSt", keep: []string{"clone failed"}, without: []string{"AbCdEfGhIjKlMnOpQrSt"}},
+		"google key":      {in: "maps AIzaSyA1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q denied", keep: []string{"denied"}, without: []string{"SyA1b2C3d4E5f6G7h8I9j0"}},
+		"bare userinfo":   {in: "GET https://tok123secret@api.example/v1 failed", keep: []string{"api.example/v1 failed"}, without: []string{"tok123secret"}},
+		"at in password":  {in: "dial postgres://bot:p@ss@word@db.example/app", keep: []string{"db.example/app"}, without: []string{"p@ss", "word@", "bot:"}},
+		"fat arrow":       {in: "config password => hunter2 rejected", keep: []string{"rejected"}, without: []string{"hunter2"}},
+		"is separator":    {in: "the api_key is zz9-plural-z-alpha here", keep: []string{"here"}, without: []string{"zz9-plural"}},
 		"aws key":         {in: "denied for AKIAIOSFODNN7EXAMPLE in us-east-1", keep: []string{"us-east-1"}, without: []string{"AKIAIOSFODNN7EXAMPLE"}},
 	} {
 		t.Run(name, func(t *testing.T) {

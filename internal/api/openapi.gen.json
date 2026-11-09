@@ -1587,7 +1587,7 @@
             "type": "integer"
           },
           "reason": {
-            "description": "Only with state failed. Stored cleaned: control characters and obvious credentials removed, at most 500 bytes.",
+            "description": "Only with state failed. Stored cleaned: control characters and common credential patterns removed, at most 500 bytes.",
             "maxLength": 2000,
             "type": "string"
           },
