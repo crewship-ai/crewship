@@ -58,6 +58,9 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
       <Button onClick={() => setConfirmation(undefined)}>Cancel restore</Button>
     </div>}
     {listMessage ? <p role={denied || list.status === "error" ? "alert" : "status"}>{listMessage}</p> : <>
+      {admitted && list.status === "ready" && list.data.history_limit_reached && <p role="status" aria-label="History limit" className="rounded-md border p-3 text-sm">
+        This document has reached its History limit. Your edits are still saved, but History no longer adds automatic snapshots. The current version and the revisions listed here stay available.
+      </p>}
       {checkpoints.length === 0 ? <p>No checkpoints yet.</p> : <ul aria-label="Confirmed checkpoints" className="max-h-72 space-y-2 overflow-y-auto">
         {checkpoints.map(checkpoint => <li key={checkpoint.id}>
           <Button type="button" variant="outline" aria-pressed={checkpoint.id === selectedId}

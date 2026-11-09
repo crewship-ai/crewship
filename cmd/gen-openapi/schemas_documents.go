@@ -31,7 +31,9 @@ func documentSchemaComponents() map[string]any {
 	revision := map[string]any{"type": "integer", "minimum": 0, "maximum": 9007199254740991}
 	checkpoint := obj(map[string]any{"id": checkpointID, "rev": revision, "schema": map[string]any{"type": "integer", "minimum": 1}, "actor": str(), "created_at": str()}, "id", "rev", "schema", "actor", "created_at")
 	checkpoint["additionalProperties"] = false
-	history := obj(map[string]any{"checkpoints": map[string]any{"type": "array", "maxItems": 1000, "items": checkpoint}}, "checkpoints")
+	history := obj(map[string]any{"checkpoints": map[string]any{"type": "array", "maxItems": 1000, "items": checkpoint},
+		// Present (true) only when automatic snapshots have used their half of the History budget.
+		"history_limit_reached": map[string]any{"type": "boolean", "enum": []bool{true}}}, "checkpoints")
 	history["additionalProperties"] = false
 	selected := obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3, 4}}, "content": ref("DocumentNode")}, "page_id", "id", "rev", "schema", "content")
 	selected["additionalProperties"] = false

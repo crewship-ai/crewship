@@ -135,3 +135,15 @@ it("fails closed instead of throwing or retaining a prior body when serializatio
   expect(screen.queryByText("Confirmed historical text")).toBeNull()
   expect(screen.getByRole("status")).toHaveTextContent(/unavailable/i)
 })
+
+it("explains the History limit without hiding the list",()=>{
+  const p=props()
+  const list={status:"ready" as const,scopeKey:p.scopeKey,data:{checkpoints:[row],history_limit_reached:true as const}}
+  render(<DocumentHistory {...p} list={list}/>)
+  expect(screen.getByRole("status",{name:"History limit"})).toHaveTextContent("Your edits are still saved")
+  expect(screen.getByRole("button",{name:/Revision 7/})).toBeInTheDocument()
+})
+it("says nothing about a limit that was not reached",()=>{
+  render(<DocumentHistory {...props()}/>)
+  expect(screen.queryByRole("status",{name:"History limit"})).toBeNull()
+})

@@ -33,3 +33,12 @@ To recover saved content, inspect the retained checkpoint first. The existing
 `crewship doc restore` command restores a checkpoint as a new revision with
 revision and epoch checks; preserve its original request packet if the outcome
 is unknown. See [Docs CLI](/cli/doc).
+
+## History limit
+
+History keeps an automatic snapshot of a document at editing-session
+boundaries. Automatic snapshots share half of the document's History budget
+and are never deleted. When that share is used, History shows "This document
+has reached its History limit": your edits are still saved, but no new
+automatic snapshots are added. The current version and the listed revisions
+stay available.

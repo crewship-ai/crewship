@@ -49,8 +49,10 @@ minutes, or was written by another actor at least one minute ago. Session pins
 are best effort (they never refuse the edit; a pin refused by the History,
 workspace storage or disk budget is undone in a savepoint), write no receipt,
 and share at most half of the History byte budget, so explicit checkpoints and
-restores keep their headroom. When that half is full the oldest session pins
-are dropped for the newest; initial and explicit checkpoints never are.
+restores keep their headroom. No checkpoint is ever deleted: once that half is
+used, new session pins are skipped and `SessionHistoryFull` reports it, so the
+History list can say why (`history_limit_reached`). A retention policy is a
+separate decision (R71 §0.11).
 Restoration creates a new head revision, advances its epoch and generation,
 and clears the writer lease. It replaces the replay log while retaining pinned
 checkpoints and retry receipts. Checkpoint and restore retries bind the original

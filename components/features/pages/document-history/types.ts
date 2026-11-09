@@ -8,6 +8,8 @@ export interface DocumentCheckpoint {
 }
 export interface DocumentCheckpointList {
   checkpoints: DocumentCheckpoint[]
+  /** Present only when automatic snapshots used their share of the History budget: edits still save, no new automatic snapshots are kept. */
+  history_limit_reached?: true
 }
 /** Public read projection: no Yjs bytes, lease, epoch or original run authority. */
 export interface DocumentCheckpointSnapshot {

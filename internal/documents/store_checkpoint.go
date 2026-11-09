@@ -23,7 +23,7 @@ func (s *Store) CheckpointRequestAtGeneration(ctx context.Context, k Key, l Leas
 }
 
 // CheckpointRequestGuarded writes the checkpoint receipt in the same
-// transaction. Keep it that way: session eviction (store_session_checkpoint.go)
+// transaction. Keep it that way: the session budget (store_session_checkpoint.go)
 // treats a "session-" checkpoint without a checkpoint receipt as automatic.
 func (s *Store) CheckpointRequestGuarded(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, generation *int64, a Authorize, guard MutationGuard) (c Checkpoint, e error) {
 	e = s.tx(ctx, k, a, func(t *sql.Tx, actor string) error {

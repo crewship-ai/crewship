@@ -130,33 +130,44 @@ func checkpointRows(t *testing.T, db *database.DB) (ids []string, bytes int) {
 	return ids, bytes
 }
 
-// Session pins share at most half of the History budget. When it is full the
-// oldest session pin makes room; the initial checkpoint is never dropped and
-// explicit checkpoints keep the other half.
-func TestSessionCheckpointsKeepHistoryHeadroom(t *testing.T) {
+// Session pins share at most half of the History budget and are never
+// deleted (R71 §0.11 has no retention spec yet). When the next pin would not
+// fit it is skipped, the edit commits, and SessionHistoryFull reports it so
+// History can say why no new automatic snapshots appear.
+func TestSessionCheckpointsStopAtTheirHalfOfTheBudget(t *testing.T) {
 	// Initial checkpoint: "baseline" (8) + projection (26) = 34 bytes. Each session pin is 16 + 26 = 42.
 	s, db, _ := fixture(t, Options{MaxHistoryBytes: 200})
 	l := acquire(t, s)
+	full, e := s.SessionHistoryFull(ctx, key, allow)
+	if e != nil || full {
+		t.Fatal("fresh document reported a full History", full, e)
+	}
 	for i := int64(0); i < 3; i++ {
 		ageCheckpoints(t, db)
 		c := commit(l, fmt.Sprint("edit-", i), i)
 		c.CandidateSnapshot = []byte("sixteen-byte-st" + fmt.Sprint(i))
 		if _, e := s.Commit(ctx, key, c, allow); e != nil {
-			t.Fatal(i, e)
+			t.Fatal("a skipped pin refused the edit:", i, e)
 		}
 	}
 	ids, size := checkpointRows(t, db)
-	if len(ids) != 3 || !strings.HasPrefix(ids[0], "session-") || !strings.HasPrefix(ids[1], "session-") || !strings.HasPrefix(ids[2], "initial-") || size != 34+84 {
-		t.Fatalf("want the two newest session pins plus the initial checkpoint, got %v (%d bytes)", ids, size)
+	if len(ids) != 3 || !strings.HasPrefix(ids[2], "initial-") || size != 34+84 {
+		t.Fatalf("want the two first session pins plus the initial checkpoint, nothing deleted: %v (%d bytes)", ids, size)
 	}
 	rows, _ := s.Checkpoints(ctx, key, allow)
-	if rows[0]["rev"] != int64(3) || rows[1]["rev"] != int64(2) {
-		t.Fatalf("the oldest session pin must be the one dropped: %v", rows)
+	if rows[0]["rev"] != int64(2) || rows[1]["rev"] != int64(1) {
+		t.Fatalf("existing session pins must be kept, the newest skipped: %v", rows)
+	}
+	if v, e := s.Read(ctx, key, allow); e != nil || v.HeadRev != 3 {
+		t.Fatal("edit not committed", v.HeadRev, e)
+	}
+	if full, e = s.SessionHistoryFull(ctx, key, allow); e != nil || !full {
+		t.Fatal("a skipped pin must be reported as a full History", full, e)
 	}
 	if _, e := s.Checkpoint(ctx, key, l, "explicit", []byte("explicit"), 3, allow); e != nil {
 		t.Fatal("explicit checkpoint lost its headroom:", e)
 	}
-	// A pin larger than half the budget is skipped; the edit still commits.
+	// A pin larger than half the budget is skipped too; the edit still commits.
 	ageCheckpoints(t, db)
 	c := commit(l, "huge", 3)
 	c.CandidateSnapshot = []byte(strings.Repeat("x", 90))
@@ -164,7 +175,16 @@ func TestSessionCheckpointsKeepHistoryHeadroom(t *testing.T) {
 		t.Fatal("an oversized session pin refused the edit:", e)
 	}
 	if ids, _ = checkpointRows(t, db); len(ids) != 4 {
-		t.Fatalf("oversized pin must be skipped without dropping others: %v", ids)
+		t.Fatalf("oversized pin must be skipped without deleting others: %v", ids)
+	}
+}
+
+// SessionHistoryFull runs the caller's authorization like every other read.
+func TestSessionHistoryFullRequiresAuthority(t *testing.T) {
+	s, _, _ := fixture(t, Options{})
+	deny := func(context.Context, *sql.Tx) (string, error) { return "", ErrNotFound }
+	if _, e := s.SessionHistoryFull(ctx, key, deny); e == nil {
+		t.Fatal("unauthorized History limit read succeeded")
 	}
 }
 
@@ -221,9 +241,9 @@ func TestSessionCheckpointTimestampAndRetry(t *testing.T) {
 	}
 }
 
-// An explicit checkpoint whose client-chosen ID starts with "session-" is
-// never counted as, or dropped like, an automatic session pin.
-func TestSessionEvictionKeepsExplicitCheckpointsNamedLikeSessionPins(t *testing.T) {
+// An explicit checkpoint whose client-chosen ID starts with "session-" counts
+// in the explicit half, not against automatic session pins, and is kept.
+func TestExplicitCheckpointsNamedLikeSessionPinsAreKept(t *testing.T) {
 	s, db, _ := fixture(t, Options{MaxHistoryBytes: 200})
 	l := acquire(t, s)
 	if _, e := s.Checkpoint(ctx, key, l, "session-explicit", []byte("explicit-sixteen"), 0, allow); e != nil {
