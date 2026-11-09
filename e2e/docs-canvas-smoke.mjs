@@ -305,18 +305,21 @@ try {
     d.destroy(); return out
   }
   const waitFor = async (check, label) => { for (let i = 0; i < 80; i++) { const s = await surfaceOf(); if (check(s)) return s; await new Promise(r => setTimeout(r, 250)) } throw new Error(label) }
-  const select = async id => { const b = await page.locator(`[data-placement="${id}"]`).boundingBox(); await page.mouse.click(b.x + 12, b.y + 8) }
+  // Select by focus (the keyboard path): a click could land on an overlapping card.
+  const select = async id => { await page.locator(`[data-placement="${id}"]`).focus(); await page.locator(`[data-placement="${id}"][data-selected="true"]`).waitFor() }
 
-  // Resize with the corner handle: width and height grow, the text is untouched.
-  await select('intro')
-  const handle = page.locator('[data-placement="intro"] [data-handle="se"]')
+  // Resize with the corner handle: width and height grow, the text is untouched. The topmost card
+  // (the co-editor's) is resized so no other card covers its handle; Fit brings it into view first.
+  await page.getByRole('button', { name: 'Fit to screen' }).click()
+  await select('outro')
+  const handle = page.locator('[data-placement="outro"] [data-handle="se"]')
   const hb = await handle.boundingBox()
   const sized = await surfaceOf()
   await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down()
   for (let i = 1; i <= 8; i++) await page.mouse.move(hb.x + i * 12, hb.y + i * 8)
   await page.mouse.up()
-  const resizedState = await waitFor(s => s.placements.intro.w > sized.placements.intro.w, 'resize stored')
-  assert.ok(resizedState.placements.intro.h >= sized.placements.intro.h)
+  const resizedState = await waitFor(s => s.placements.outro.w > sized.placements.outro.w, 'resize stored')
+  assert.ok(resizedState.placements.outro.h >= sized.placements.outro.h)
   assert.equal(resizedState.content, sized.content, 'a resize changes only geometry')
   pass('resize with the corner handle is stored; the Page is unchanged')
 
