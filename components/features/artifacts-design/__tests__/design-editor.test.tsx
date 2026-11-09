@@ -161,6 +161,8 @@ describe("Design editor controls", () => {
   fireEvent.keyDown(viewport, { key: "ArrowRight" })
   fireEvent.keyDown(viewport, { key: "Delete" })
   expect(designNodes(state.doc!).find(node => node.id === "bg")).toMatchObject({ x: 0, locked: true })
+  // Nor from the Properties button: unlock it first.
+  expect(screen.getByRole("button", { name: "Delete layer" })).toBeDisabled()
   fireEvent.click(row("Backdrop").getByRole("button", { name: "Unlock layer" }))
   expect(designNodes(state.doc!).find(node => node.id === "bg")).toMatchObject({ locked: false })
  })

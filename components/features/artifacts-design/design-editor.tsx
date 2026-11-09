@@ -709,13 +709,13 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     <Button variant="outline" size="sm" aria-label="Bring forward" title="Bring forward (])" disabled={!canChange} onClick={() => order("forward")}><ChevronDown className="size-4 rotate-180" /></Button>
     <Button variant="outline" size="sm" aria-label="Bring to front" title="Bring to front (Ctrl+])" disabled={!canChange} onClick={() => order("front")}><ArrowUpToLine className="size-4" /></Button>
    </div></Field>
-   {canChange && <Button variant="ghost" className="w-full text-destructive" onClick={() => { if (design.doc) removeDesignNode(design.doc, selected.id); setSelectedId(null) }}><Trash2 className="size-4" />Delete {selected.type === "frame" ? "screen and layers" : "layer"}</Button>}
+   {canChange && <Button variant="ghost" className="w-full text-destructive" disabled={lockedIds.has(selected.id)} title={lockedIds.has(selected.id) ? "Unlock the layer to delete it" : undefined} onClick={() => { if (design.doc) removeDesignNode(design.doc, selected.id); setSelectedId(null) }}><Trash2 className="size-4" />Delete {selected.type === "frame" ? "screen and layers" : "layer"}</Button>}
   </div> : many ? <div className="space-y-3">
    <p className="text-sm">{chosen.length} layers selected</p>
    <p className="text-xs text-muted-foreground">Drag one of them, its handles or the arrow keys to move or resize them together. Escape clears the selection.</p>
    {canChange && (() => {
     // The same as Delete on the keyboard: the selected layers go, screens stay.
-    const layers = chosen.filter(id => !lockedIds.has(id) && design.nodes.find(node => node.id === id)?.type !== "frame")
+    const layers = movable.filter(id => design.nodes.find(node => node.id === id)?.type !== "frame")
     return layers.length > 0 && <Button variant="ghost" className="w-full text-destructive" onClick={() => { const doc = design.doc; if (doc) doc.transact(() => { for (const id of layers) removeDesignNode(doc, id) }, "editor"); setSelectedIds(chosen.filter(id => !layers.includes(id))) }}><Trash2 className="size-4" />Delete {layers.length} {layers.length === 1 ? "layer" : "layers"}</Button>
    })()}
   </div> : <p className="text-sm text-muted-foreground">Select a screen or layer to see its properties.{canChange && " Add your first screen using the toolbar."}</p>}
