@@ -244,7 +244,7 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   else if (projectReadOnly) body = hostedProject(true)
   else if (pageEditor) body = <FramePageEditor workspaceId={workspaceId} pageId={item.pageId!} onLeave={reason => reason === "deleted" ? onBack() : setEditing(false)} />
   else if (pageContent) body = <ArtifactPageContent workspaceId={workspaceId} pageId={item.pageId!} onBack={onBack} onReport={setKindReport} />
-  else if (docsPage) body = <DocsBody workspaceId={workspaceId} item={item} onFrame={setDocs}
+  else if (docsPage) body = <DocsBody workspaceId={workspaceId} item={item} version={version} onFrame={setDocs}
     fallback={documentColumn(<WordPreview workspaceId={workspaceId} item={item} />)} />
   else if (nativeEditor) body = <div className="flex min-h-0 flex-1 flex-col">
     {item.kind === "word" && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}

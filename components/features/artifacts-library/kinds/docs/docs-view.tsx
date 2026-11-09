@@ -46,13 +46,19 @@ const DOCS_EDITOR_CLASS = "min-h-64 max-w-none text-lg leading-relaxed outline-n
  * (`fallback`); once admitted, the editor stays even if the service later
  * withdraws, so unsent edits are never unmounted.
  */
-export function DocsBody({ workspaceId, item, fallback, onFrame }: {
+export function DocsBody({ workspaceId, item, version, fallback, onFrame }: {
   workspaceId: string
   item: LibraryItem
+  /** A pinned address (`?version=N`, #5168): History opens with revision N selected. */
+  version?: number
   fallback: React.ReactNode
   onFrame: (report: DocsFrameReport | null) => void
 }) {
   const availability = useDocumentsAvailability(workspaceId)
+  // The pin is applied once per address: a restore remounts the workspace, and
+  // it must not reopen History or reselect revision N after the person moved on.
+  const pin = React.useRef<VersionPin>({ version, used: false })
+  if (pin.current.version !== version) pin.current = { version, used: false }
   const [admitted, setAdmitted] = React.useState(false)
   React.useEffect(() => { if (availability.data === true) setAdmitted(true) }, [availability.data])
   React.useEffect(() => () => onFrame(null), [onFrame])
@@ -63,7 +69,7 @@ export function DocsBody({ workspaceId, item, fallback, onFrame }: {
     return <>{fallback}</>
   }
   return <PageDocument workspaceId={workspaceId} slug={"@" + pageId} pageId={pageId} name={item.name}
-    renderWorkspace={props => <DocsWorkspace {...props} onFrame={onFrame} />}
+    renderWorkspace={props => <DocsWorkspace {...props} pin={pin.current} onFrame={onFrame} />}
     renderUnhydrated={(sync, message) => <DocsUnhydrated denied={sync.denied} status={sync.status} onFrame={onFrame}>{message}</DocsUnhydrated>} />
 }
 
@@ -81,9 +87,22 @@ function DocsUnhydrated({ denied, status, onFrame, children }: { denied: boolean
   return <div className={COLUMN}>{children}</div>
 }
 
-function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsFrameReport | null) => void }) {
-  const { workspaceId, pageId, humanId, slug, available, historyExpired, sync, onFrame } = props
+type VersionPin = { version?: number; used: boolean }
+
+function DocsWorkspace(props: DocumentWorkspaceProps & { pin: VersionPin; onFrame: (report: DocsFrameReport | null) => void }) {
+  const { workspaceId, pageId, humanId, slug, available, historyExpired, sync, pin, onFrame } = props
   const frame = useArtifactFrame()
+  // A version link opens History once, on arrival; closing it afterwards is the person's choice.
+  // A new address brings a new pin object; a remount of the same address sees it used.
+  const claimed = React.useRef<{ pin: VersionPin; version?: number } | null>(null)
+  if (claimed.current?.pin !== pin) claimed.current = { pin, version: pin.used ? undefined : pin.version }
+  const version = claimed.current.version
+  const openDrawer = frame?.openDrawer
+  React.useEffect(() => {
+    if (version === undefined) return
+    pin.used = true
+    openDrawer?.("history")
+  }, [version, openDrawer, pin])
   const layout: FrameLayout = frame?.layout ?? "desktop"
   const phone = layout === "phone"
   const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, restoreGuard, review } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS)
@@ -254,7 +273,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
       <div className="grid content-start gap-3 p-3.5">
         <p className="text-xs text-muted-foreground">Restore creates a new version with this content. Later changes stay in History.</p>
         <DocumentHistoryHost workspaceId={workspaceId} pageId={pageId} humanId={humanId} available={available} denied={sync.denied || historyExpired}
-          review={review} head={sync.state} blocked={restoreGuard.blocked}
+          review={review} head={sync.state} blocked={restoreGuard.blocked} pinnedRev={version}
           onStart={restoreGuard.onStart} onRefused={restoreGuard.onRefused} onRestored={restoreGuard.onRestored}
           control={{ open: frame?.drawerTab === "history", onClose: () => frame?.openDrawer(null) }} />
       </div>

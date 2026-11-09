@@ -934,10 +934,12 @@ reference with the same page read Pages makes and calls `router.replace`:
 | `/pages[?…]` | `/artifacts[?…]` |
 | `/pages?ref=<id>&workspace_id=<ws>` | resolve `@<id>` |
 | `/pages/<slug>`, `/pages/@<id>` | resolve the slug or `@<id>` |
-| `/pages/<slug>?artifact=1[&version=N]`, `/pages/<slug>?version=N` | resolve as a project; moves only to a project viewer the detail has |
+| `/pages/<slug>?artifact=1[&version=N]` | resolve as a project; moves only to a project viewer the detail has |
+| `/pages/<slug>?version=N` | resolve with the pin; moves only for a project, a Doc or a Design, to `/artifacts/<id>?version=N` (#5168). A Doc opens History with revision N selected, or says it is not there; a Design opens its editor at the current version |
 | `/pages/craft/editor?page_id=<id>&workspace_id=<ws>` | resolve `@<id>`; the detail mounts the same editor host |
 
-It fails closed: `?mode=edit`, `?artifact=1&edit=1`, a malformed or
+It fails closed: `?mode=edit`, `?artifact=1&edit=1`, a bare `?version=` that
+is not a positive integer, a malformed or
 cross-workspace reference, a refused or failed read and a kind the Artifacts
 detail cannot open keep the Pages view. The decision is made once for the
 entry address, so navigation inside Pages never tears down an open editor.
