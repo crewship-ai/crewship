@@ -86,7 +86,10 @@ document with the human-only upgrade ([`crewship doc upgrade`](/cli/doc), or
 (6), keeps its content, history and comments and only widens what it may hold.
 From schema 5 on, restoring a version from before an upgrade keeps the
 document's schema, so it never silently returns to schema 4 and Canvas stays
-enabled. An editor
+enabled. The restored version goes through the same conversion as the upgrade
+and must be valid content of the document's schema; its text, formatting,
+dates and mentions are kept, it has no Canvas layout, and the document stays
+editable and open to agent proposals. An editor
 that does not know a document's schema opens it read-only with "This document
 needs a newer editor" and never saves over it.
 

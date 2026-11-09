@@ -10,7 +10,8 @@ import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startService, PROTOCOL } from './service.mjs';
 import { createSurface } from './surface-core.mjs';
-import { RICH_VERSION, LATEST_VERSION, CREATE_VERSION, create, snapshot, initialJSON, outline, load, validate, anchor, find, encode } from './schema.mjs';
+import { RICH_VERSION, LATEST_VERSION, CREATE_VERSION, create, snapshot, initialJSON, outline, load, validate, upgradeContent, anchor, find, encode } from './schema.mjs';
+import { schemaAllows } from './schema-core.mjs';
 const secret = 'a'.repeat(48);
 function call(socket, path, data, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -1248,5 +1249,60 @@ test('schema6: a proposal made before Canvas was enabled can only be rejected af
       assert.deepEqual(surface.project(d).placements, [], 'the pre-Canvas version has no layout');
       validate(d, 6);
     } finally { d.destroy(); }
+  } finally { await f.close(); }
+});
+
+test('schema6: schema 4 and schema 5 history restored on a Canvas document is converted like Enable Canvas: content kept, valid at 6, editable, placeable and open to agent proposals (#5149)', async () => {
+  const model = authorityModel(), proposals = new Map();
+  const bold = { type: 'bold', attrs: {} }, red = { type: 'textColor', attrs: { color: 'red' } };
+  const four = { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'lead' }, content: [{ type: 'text', text: 'Ship ' }, { type: 'text', text: 'it', marks: [bold] }, { type: 'text', text: '.' }] }, { type: 'paragraph', attrs: { id: 'note' }, content: [{ type: 'text', text: 'Notes' }] }] };
+  const five = { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'lead' }, content: [{ type: 'text', text: 'Ship ' }, { type: 'text', text: 'it', marks: [bold, red] }, { type: 'text', text: ' by ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: ' with ' }, { type: 'mention', attrs: { userId: 'ada' } }] }, { type: 'paragraph', attrs: { id: 'note' }, content: [{ type: 'text', text: 'Notes' }] }] };
+  const doc4 = create(four, 4); model.state = { ...model.state, schema: 4, snapshot: snapshot(doc4) }; doc4.destroy();
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'propose') { proposals.set(data.id, { id: data.id, schema: data.schema }); return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, actor: 'agent:a:r', kind: 'proposal' }; }
+    return model.handle(op, data, req, res);
+  });
+  await f.start();
+  try {
+    const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
+    const at4 = (await read(f)).body; assert.equal(at4.schema, 4);
+    assert.equal((await call(f.socket, '/v1/documents/p/checkpoint', { id: 'four', schema: 4, page_id: 'p', epoch: at4.epoch, ifRev: at4.rev })).status, 200);
+    // The Document reached schema 5 while 5 was the latest schema, with dates, mentions and colour.
+    const doc5 = create(five, 5); model.state = { ...model.state, schema: 5, rev: model.state.rev + 1, snapshot: snapshot(doc5) }; doc5.destroy();
+    const at5 = (await read(f)).body; assert.equal(at5.schema, 5);
+    assert.equal((await call(f.socket, '/v1/documents/p/checkpoint', { id: 'five', schema: 5, page_id: 'p', epoch: at5.epoch, ifRev: at5.rev })).status, 200);
+    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', { id: 'enable-canvas', schema: 5, target_schema: 6, page_id: 'p', epoch: at5.epoch, ifRev: at5.rev })).status, 200);
+    const geometry = { x: 40, y: 60, w: 320, h: 120, z: 1 };
+    for (const [checkpoint, source] of [['four', at4], ['five', at5]]) {
+      // The head has a layout before each restore (placed now, or after the previous restore).
+      const head = (await read(f)).body; assert.equal(head.schema, 6);
+      if (checkpoint === 'four') assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'place-before', schema: 6, page_id: 'p', epoch: head.epoch, kind: 'human', update: placeUpdate(head, d => surface.place(d, 'lead', geometry)) })).status, 200);
+      const placed = (await read(f)).body, layout = load(placed.snapshot);
+      try { assert.deepEqual(surface.project(layout).placements, [{ id: 'lead', ...geometry }]); } finally { layout.destroy(); }
+      const restored = await call(f.socket, '/v1/documents/p/restore', { id: `restore-${checkpoint}`, schema: 6, page_id: 'p', epoch: placed.epoch, ifRev: placed.rev, checkpoint });
+      assert.equal(restored.status, 200, JSON.stringify(restored.body)); assert.equal(restored.body.schema, 6);
+      const back = (await read(f)).body, d = load(back.snapshot);
+      try {
+        assert.equal(back.schema, 6, `schema ${source.schema} history keeps Canvas enabled`);
+        assert.deepEqual(back.content, source.content, `schema ${source.schema} content, marks and atoms are kept`);
+        assert.deepEqual(surface.project(d).placements, [], 'the older version has no layout');
+        validate(d, 6); upgradeContent(d, source.schema, 6);
+      } finally { d.destroy(); }
+      // Still editable at 6: a block can be placed again, with valid geometry.
+      assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: `place-after-${checkpoint}`, schema: 6, page_id: 'p', epoch: back.epoch, kind: 'human', update: placeUpdate(back, d => surface.place(d, 'lead', geometry)) })).status, 200);
+      const edited = (await read(f)).body, e = load(edited.snapshot);
+      try { assert.deepEqual(surface.project(e).placements, [{ id: 'lead', ...geometry }]); validate(e, 6); } finally { e.destroy(); }
+      // And agents may still propose at 6.
+      assert.equal(schemaAllows(6, 'propose'), true);
+      const target = edited.outline.find(b => b.id === 'note');
+      const proposed = await call(f.socket, '/v1/documents/p/propose', { id: `propose-after-${checkpoint}`, schema: 6, page_id: 'p', epoch: edited.epoch, ifRev: edited.rev, target: 'note', ifHash: target.hash, text: 'Notes for today.' }, agent);
+      assert.equal(proposed.status, 200, JSON.stringify(proposed.body)); assert.equal(proposals.get(`propose-after-${checkpoint}`).schema, 6);
+    }
+    // The conversion goes only upwards, between known schemas.
+    const probe = create(five, 5);
+    try {
+      for (const [from, to] of [[6, 5], [5, 4], [7, 7], [5, 7]]) assert.throws(() => upgradeContent(probe, from, to), /unsupported schema conversion/);
+      assert.ok(upgradeContent(probe, 5, 6));
+    } finally { probe.destroy(); }
   } finally { await f.close(); }
 });
