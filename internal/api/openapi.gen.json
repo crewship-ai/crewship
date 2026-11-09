@@ -8357,7 +8357,7 @@
         "type": "object"
       },
       "DocumentNode": {
-        "description": "Versioned bounded tree: depth\u003c=40, nodes\u003c=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks (one per text) and plain codeBlock; explicit4 adds bold/italic/strike marks combinable with each other and link (inline code stays alone), codeBlock language, blockquote and taskList/taskItem(checked); explicit5 adds underline and textColor/highlight marks whose only attribute is a palette name (at most 7 marks per text). Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine.",
+        "description": "Versioned bounded tree: depth\u003c=40, nodes\u003c=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks (one per text) and plain codeBlock; explicit4 adds bold/italic/strike marks combinable with each other and link (inline code stays alone), codeBlock language, blockquote and taskList/taskItem(checked); explicit5 adds underline and textColor/highlight marks whose only attribute is a palette name (at most 7 marks per text), and inline atoms date{value: YYYY-MM-DD} and mention{userId} inside paragraphs and headings, with exactly that one attribute, no content and no marks. Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine.",
         "properties": {
           "attrs": {
             "properties": {
@@ -8409,6 +8409,16 @@
               },
               "type": {
                 "nullable": true,
+                "type": "string"
+              },
+              "userId": {
+                "description": "Schema 5 mention: opaque user id only. The name is resolved per reader (GET .../document/people); content never stores names.",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                "type": "string"
+              },
+              "value": {
+                "description": "Schema 5 date: one real calendar day, never a time.",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
                 "type": "string"
               }
             },
@@ -8560,13 +8570,46 @@
               "codeBlock",
               "blockquote",
               "taskList",
-              "taskItem"
+              "taskItem",
+              "date",
+              "mention"
             ],
             "type": "string"
           }
         },
         "required": [
           "type"
+        ],
+        "type": "object"
+      },
+      "DocumentPeople": {
+        "properties": {
+          "people": {
+            "description": "Only people who can read this Document, released only to a caller who can read it. Any other id is simply absent (shown as Unknown member), so the answer never confirms that an id exists.",
+            "items": {
+              "properties": {
+                "id": {
+                  "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                  "type": "string"
+                },
+                "name": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "type": "array"
+          }
+        },
+        "required": [
+          "people"
         ],
         "type": "object"
       },
@@ -150604,6 +150647,196 @@
           "pages"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/document/people": {
+      "get": {
+        "description": "List page document people (GET /api/v1/pages/{slug}/document/people).",
+        "operationId": "get_api_v1_pages_slug_document_people",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated mention user ids (at most 100) to name for this reader.",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Name search for the @-mention picker; at most 20 people who can read this Document. Not combinable with ids.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPeople"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List page document people",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/pages/{slug}/document/proposals": {
