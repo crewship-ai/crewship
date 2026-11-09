@@ -2462,7 +2462,7 @@ refused. Reading somebody else's private document as workspace OWNER requires
 an audit entry before disclosure; earlier checkpoint permissions are not reused.
 
 Request: one JSON object of at most 4096 bytes, with exactly `page_id`, `id`,
-`schema` (2 to 5), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
+`schema` (2 to 6), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
 the current editing epoch and revision, a retained checkpoint ID and a new
 mutation ID. Page, mutation and checkpoint IDs contain 1–128 ASCII letters,
 digits, underscores or hyphens. A changed Page identity, revision or epoch
@@ -2473,8 +2473,10 @@ Response 200: `page_id`, `id`, `rev`, a new `epoch`, `kind: "restore"` and
 Restoration creates a new revision, preserving the retained checkpoint. A
 schema 5 Document stays at schema 5 when you restore a checkpoint from before
 its upgrade: older content is valid schema 5 content, and new agent proposals
-are made at schema 5. Below schema 5 the Document takes the
-checkpoint's schema. After an uncertain confirmation, retry the original
+are made at schema 5. A Canvas (schema 6) Document stays at schema 6 in the
+same way; a checkpoint from before Canvas was enabled restores the Page and
+leaves the Canvas layout, cards and notes empty. Below schema 5 the Document
+takes the checkpoint's schema. After an uncertain confirmation, retry the original
 packet with the same mutation ID and preconditions; an exact authorized retry
 returns the original receipt without another restoration. A lost confirmation
 is not evidence that the write failed.

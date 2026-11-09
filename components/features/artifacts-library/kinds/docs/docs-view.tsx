@@ -5,7 +5,7 @@ import { EditorContent, useEditorState } from "@tiptap/react"
 import { Download, FileText, GitPullRequestArrow, History, LayoutGrid, ListTree, MessageSquare, PanelLeft, Send, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/ui/confirm-dialog"
-import { canEnableCanvas, enableCanvas, upgradeFailure } from "@/lib/documents/upgrade"
+import { canEnableCanvas, enableCanvas, upgradeFailure, type UpgradeTarget } from "@/lib/documents/upgrade"
 import { Textarea } from "@/components/ui/textarea"
 import { proposalChatHref, proposalSchema } from "@/lib/documents/proposal-request"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
@@ -145,7 +145,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   }
   const stats = summary?.stats ?? { words: 0, minutes: 0 }
   // Proposals exist only where the server says so and the Doc's own schema
-  // supports them (4 or 5); otherwise no Propose mode and no tab.
+  // supports them (4, 5 or 6); otherwise no Propose mode and no tab.
   const requestSchema = proposalSchema(sync.state?.schema)
   const proposalsServed = Boolean(sync.state?.proposals) && requestSchema !== undefined && available && !sync.denied
   const [proposalPrompt, setProposalPrompt] = React.useState("")
@@ -154,16 +154,19 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   // An older document is upgraded only when a person with edit access confirms "Enable Canvas"; never implicitly.
   const canvasReady = Boolean(sync.state && !sync.denied && sync.state.schema >= documentSurface.CANVAS_SCHEMA)
   const canvasOffer = !canvasReady && Boolean(sync.state && !sync.denied && available) && canEnableCanvas(sync.state?.schema, sync.state?.can_write === true)
-  const [enabling, setEnabling] = React.useState<{ id: string; error: string | null } | null>(null)
+  // An unknown outcome keeps its request ID AND its exact body: a retry is the same request, so a first attempt
+  // that did succeed is answered with its original receipt rather than refused as stale.
+  const [enabling, setEnabling] = React.useState<{ id: string; target?: UpgradeTarget; error: string | null } | null>(null)
   const confirmEnable = async () => {
     const state = sync.state
     if (!state || !enabling) return
     // Unsaved edits would be refused at the new schema: they are saved first, never dropped.
     if (sync.pending > 0 || sync.recovery) { setEnabling({ ...enabling, error: "Wait until your changes are saved, then enable Canvas." }); throw new Error("pending") }
-    const result = await enableCanvas({ workspaceId, pageId, schema: state.schema, rev: state.rev, epoch: state.epoch }, enabling.id)
+    const target = enabling.target ?? { workspaceId, pageId, schema: state.schema, rev: state.rev, epoch: state.epoch }
+    const result = await enableCanvas(target, enabling.id)
     if (result.status !== "done") {
-      // A changed document needs a fresh read and a fresh decision; an unknown outcome is retried with the same ID.
-      setEnabling({ id: result.status === "unknown" ? enabling.id : crypto.randomUUID(), error: upgradeFailure(result) })
+      // A changed document needs a fresh read and a fresh decision; an unknown outcome is retried as the same request.
+      setEnabling(result.status === "unknown" ? { id: enabling.id, target, error: upgradeFailure(result) } : { id: crypto.randomUUID(), error: upgradeFailure(result) })
       if (result.status === "denied") sync.deny()
       throw new Error(result.status)
     }

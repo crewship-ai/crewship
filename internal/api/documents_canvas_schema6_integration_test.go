@@ -499,4 +499,8 @@ func TestDocumentCanvasSchemaSixRealEngineCLI(t *testing.T) {
 	if block(restored, "lead") != block(before, "lead") {
 		t.Fatalf("restore did not bring back the original lead: %s", block(restored, "lead"))
 	}
+	// A version from before Canvas has no layout: Canvas stays enabled and empty.
+	if got := string(surface(restored, nil)["placements"]); got != "[]" {
+		t.Fatalf("placements after a pre-Canvas restore: %s", got)
+	}
 }

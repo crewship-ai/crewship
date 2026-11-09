@@ -344,6 +344,9 @@ receipt has `page_id`, `id`, `rev`, `epoch`, `kind` and `schema`, the
 document's schema after the restore; a replay also has `duplicate`. A schema 5
 document stays at schema 5 when you restore a checkpoint from before its
 upgrade, so new agent proposals are made at schema 5, never silently at 4.
+A Canvas (schema 6) document likewise stays at schema 6; restoring a
+checkpoint from before Canvas was enabled leaves its layout, cards and notes
+empty.
 
 ```bash
 crewship doc restore @<artifact-id> --file restore.json

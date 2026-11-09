@@ -18,7 +18,7 @@ import { DocsBody, type DocsFrameReport } from "../docs-view"
 
 const env = vi.hoisted(() => ({ proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, schema: 2, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang", denied: false }))
 const request = vi.hoisted(() => vi.fn())
-const upgrades = vi.hoisted(() => ({ outcome: "ok" as "ok" | "stale" | "missing", bodies: [] as Record<string, unknown>[], urls: [] as string[] }))
+const upgrades = vi.hoisted(() => ({ outcome: "ok" as "ok" | "stale" | "missing" | "lost", bodies: [] as Record<string, unknown>[], urls: [] as string[] }))
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: env.available, isPending: env.available === undefined }) }))
 vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/document-queue")>(), openDocumentDrafts: async () => ({ load: async () => env.drafts, put: async () => {}, remove: async () => {}, close: () => {}, exclusive: true }) }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
@@ -60,6 +60,9 @@ function serve() {
       upgrades.urls.push(url)
       if (upgrades.outcome === "stale") return { ok: false, status: 409, json: async () => ({ error: "original Page identity, revision and supported upgrade required" }) }
       if (upgrades.outcome === "missing") return { ok: false, status: 404, json: async () => ({ error: "not found" }) }
+      // The first attempt is applied but its answer is lost; the exact retry gets the original receipt.
+      if (upgrades.outcome === "lost" && upgrades.bodies.length === 1) { rev += 1; env.schema = 6; throw new TypeError("network") }
+      if (upgrades.outcome === "lost") return JSON.stringify(body) === JSON.stringify(upgrades.bodies[0]) ? { ok: true, json: async () => ({ id: body.id, rev, epoch: "go:node:2", schema: 6, duplicate: true }) } : { ok: false, status: 409, json: async () => ({ error: "stale" }) }
       rev += 1; env.schema = 6
       return { ok: true, json: async () => ({ id: body.id, rev, epoch: "go:node:2", schema: 6 }) }
     }
@@ -281,6 +284,23 @@ describe("Docs in the ArtifactFrame", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
     await waitFor(() => expect(upgrades.bodies).toHaveLength(2))
     expect(upgrades.bodies[1].id).not.toBe(upgrades.bodies[0].id)
+  })
+
+  it("retries an unknown outcome as the exact same request, so an upgrade that did happen is confirmed", async () => {
+    serve()
+    env.schema = 5
+    upgrades.outcome = "lost"
+    open()
+    const editor = (await screen.findByLabelText("Document editor")) as HTMLElement & { editor: Editor }
+    await waitFor(() => expect(editor.editor.isEditable).toBe(true))
+    fireEvent.click(within(slot("view")!).getByRole("tab", { name: "Canvas" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
+    expect(await within(dialog).findByRole("alert")).toHaveProperty("textContent", "We could not confirm whether Canvas was enabled. Try again; it is never enabled twice.")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
+    await waitFor(() => expect(upgrades.bodies).toHaveLength(2))
+    expect(upgrades.bodies[1]).toEqual(upgrades.bodies[0])
+    expect(await screen.findByRole("application", { name: "Canvas" })).toBeTruthy()
   })
 
   it("never upgrades while this tab has unsaved edits: the dialog says why and nothing is sent", async () => {
