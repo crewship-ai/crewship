@@ -24,7 +24,7 @@ export function highlightable(language: unknown): language is string {
 }
 
 /** Suggestions offered by the language field; any valid language name can still be typed. */
-export const SUGGESTED_LANGUAGES = ["bash", "c", "cpp", "csharp", "css", "csv", "go", "html", "java", "javascript", "json", "kotlin", "latex", "markdown", "php", "python", "ruby", "rust", "sql", "swift", "typescript", "yaml"]
+export const SUGGESTED_LANGUAGES = ["bash", "c", "chart", "cpp", "csharp", "css", "csv", "go", "html", "java", "javascript", "json", "kotlin", "latex", "markdown", "mermaid", "php", "python", "ruby", "rust", "sql", "swift", "typescript", "yaml"]
 
 /** One highlighted run inside a block's text: plain-text offsets and the token classes. */
 export interface CodeToken { from: number; to: number; className: string }
@@ -90,9 +90,14 @@ export const CodeHighlight = Extension.create({
 /** The exact characters of a code block, newlines and trailing spaces included, as the clipboard should receive them. */
 export const codeBlockText = (node: ProseMirrorNode) => node.textContent
 
-/** What a preview renderer returns: the rendered element, or why this block cannot be shown. */
-export type PreviewResult = { ok: true; node: HTMLElement } | { ok: false; error: string }
-type Renderer = (source: string) => PreviewResult
+/**
+ * What a preview renderer returns: the rendered element, or why this block
+ * cannot be shown. `ms` is how long the render itself took when the renderer
+ * measures it (for example, excluding time spent waiting for other renders);
+ * otherwise the block measures the call.
+ */
+export type PreviewResult = ({ ok: true; node: HTMLElement } | { ok: false; error: string }) & { ms?: number }
+type Renderer = (source: string) => PreviewResult | Promise<PreviewResult>
 
 /**
  * Languages that opt a code block into a rendered preview, and their
@@ -105,6 +110,8 @@ const PREVIEWS: Record<string, { name: string; load: () => Promise<Renderer> }> 
   csv: { name: "table", load: () => import("./code-preview-csv").then(module => module.renderCsv) },
   markdown: { name: "Markdown", load: () => import("./code-preview-markdown").then(module => module.renderMarkdown) },
   md: { name: "Markdown", load: () => import("./code-preview-markdown").then(module => module.renderMarkdown) },
+  mermaid: { name: "diagram", load: () => import("./code-preview-diagram").then(module => module.renderDiagram) },
+  chart: { name: "chart", load: () => import("./code-preview-chart").then(module => module.renderChart) },
 }
 
 /** True when a block with this language offers Source and Preview. */
@@ -120,6 +127,21 @@ const modesOf = (editor: Editor) => { let map = modes.get(editor); if (!map) { m
 
 /** How long a changed previewed block waits before it is rendered again, so typing and remote edits stay smooth. */
 export const PREVIEW_DELAY_MS = 250
+
+/** A render that took longer than this is slow: that block is not redrawn on others' edits until the reader chooses Preview. */
+export const SLOW_PREVIEW_MS = 500
+
+/** Render time one document may spend on previews before further blocks wait for the reader to choose Preview. */
+export const PREVIEW_BUDGET_MS = 1_000
+
+/**
+ * Per editor: previews render one at a time, and their render time is added
+ * up. Once the budget is spent, a block shows its source and draws only when
+ * the reader chooses Preview, so many heavy blocks cannot stall opening a page.
+ * Choosing Preview starts a fresh budget; a reloaded document has its own.
+ */
+const budgets = new WeakMap<Editor, { spent: number; queue: Promise<void> }>()
+const budgetOf = (editor: Editor) => { let budget = budgets.get(editor); if (!budget) { budget = { spent: 0, queue: Promise.resolve() }; budgets.set(editor, budget) } return budget }
 
 /**
  * The code block with its header: the language (or "Code"), Source and
@@ -150,7 +172,7 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
         header.append(label, toggle, copy, status)
         pre.append(code); dom.append(header, preview, pre)
         let current = node, reset: ReturnType<typeof setTimeout> | undefined, pending: ReturnType<typeof setTimeout> | undefined, destroyed = false
-        let shown: { language: string; source: string } | null = null, ownMode: "source" | "preview" = "preview"
+        let shown: { language: string; source: string } | null = null, ownMode: "source" | "preview" = "preview", slow = false, forced = false
         const blockId = () => typeof current.attrs.id === "string" ? current.attrs.id : null
         const language = () => languages && typeof current.attrs.language === "string" ? current.attrs.language : null
         const mode = () => { const id = blockId(); return (id ? modesOf(editor).get(id) : undefined) ?? ownMode }
@@ -173,11 +195,21 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
           if (caretInside()) { setMode("source"); return }
           const source = current.textContent
           if (shown && shown.language === lang && shown.source === source) return
+          // A preview that was slow to draw is not redrawn on every edit from others; the reader chooses Preview.
+          if (slow && shown && shown.language === lang) {
+            if (!preview.querySelector("[data-code-stale]")) {
+              const note = document.createElement("p"); note.dataset.codeStale = ""; note.setAttribute("role", "status")
+              note.textContent = "The source changed. Choose Preview to draw it again."
+              preview.prepend(note)
+            }
+            return
+          }
           const first = shown === null
           shown = { language: lang, source }
           preview.hidden = false
+          const stillWanted = () => !destroyed && shown?.source === source && shown.language === lang && mode() === "preview"
           const draw = (result: PreviewResult) => {
-            if (destroyed || shown?.source !== source || shown.language !== lang || mode() !== "preview") return
+            if (!stillWanted()) return
             if (result.ok) {
               if (caretInside()) { setMode("source"); return }
               preview.replaceChildren(result.node); delete preview.dataset.error; pre.hidden = true
@@ -190,7 +222,29 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
           // Render the latest text once edits pause; a burst of keystrokes or remote updates renders once.
           clearTimeout(pending)
           pending = setTimeout(() => {
-            PREVIEWS[lang].load().then(render => draw(render(source)), () => draw({ ok: false, error: "The preview could not be loaded. The source is unchanged." }))
+            const budget = budgetOf(editor)
+            budget.queue = budget.queue.then(async () => {
+              if (!stillWanted()) return
+              if (budget.spent > PREVIEW_BUDGET_MS && !forced) {
+                const note = document.createElement("p"); note.dataset.codePaused = ""; note.setAttribute("role", "status")
+                note.textContent = "Previews on this page took long to draw. Choose Preview to draw this one."
+                preview.replaceChildren(note); delete preview.dataset.error; pre.hidden = false; slow = true
+                return
+              }
+              forced = false
+              let result: PreviewResult
+              let started = 0
+              try {
+                const render = await PREVIEWS[lang].load()
+                started = performance.now()
+                result = await render(source)
+              } catch { result = { ok: false, error: "The preview could not be loaded. The source is unchanged." } }
+              const ms = result.ms ?? (started ? performance.now() - started : 0)
+              budget.spent += ms
+              // Errors count too: a source that takes long to refuse is as costly to redraw.
+              slow = ms > SLOW_PREVIEW_MS
+              draw(result)
+            })
           }, first ? 0 : PREVIEW_DELAY_MS)
         }
 
@@ -219,6 +273,10 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
             if (target) editor.view.dispatch(editor.state.tr.setSelection(target).setMeta("addToHistory", false))
           }
           if (caretInside()) return
+          // Choosing Preview always draws the current source, also after a slow render.
+          if (slow) { slow = false; forced = true; shown = null }
+          // The reader asked for previews here: later blocks on this page may draw by themselves again.
+          budgetOf(editor).spent = 0
           setMode("preview")
         })
         const followCaret = () => { if (mode() === "preview" && previewable(language()) && caretInside()) setMode("source") }

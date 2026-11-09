@@ -100,6 +100,78 @@ including Markdown pasted into a `python` or unlabelled block, stays code.
 - Cells and text are only ever text in the page: nothing in a CSV cell or a
   Markdown source can add markup, run script or fetch anything.
 
+### Diagram and chart previews
+
+Two more languages opt a schema 4 code block into **Source** and **Preview**:
+
+| Language | Preview |
+| --- | --- |
+| `mermaid` | A diagram drawn by Mermaid (flowcharts, sequence, class, state, Gantt and the other Mermaid types) |
+| `chart` | A bar or line chart from a small JSON spec |
+
+````
+```mermaid
+flowchart LR
+  Draft --> Review --> Published
+```
+````
+
+A `chart` block holds exactly this shape; `title` is optional:
+
+```json
+{
+  "type": "bar",
+  "title": "Runs per week",
+  "x": ["W1", "W2", "W3"],
+  "series": [
+    { "name": "Research", "values": [12, 18, 9] },
+    { "name": "Support", "values": [7, 4, 11] }
+  ]
+}
+```
+
+- Mermaid is bundled with the app at a fixed version and loads only when the
+  first diagram is shown. It never draws in the page itself: it draws in a
+  hidden frame whose security policy allows no requests at all, so whatever a
+  diagram's styles or shapes name (images, icons, masks, fonts), the browser
+  does not fetch it, from other sites or from the app. Text labels only:
+  `click` callbacks and links do nothing, HTML in labels stays text, and a
+  diagram's own `%%{init}%%` directive or front matter cannot change these
+  settings or restyle the page. The drawn SVG is cleaned again before it is
+  shown (no scripts, links, embedded HTML, images, `use` references, overlays
+  or styles that load a URL) and is kept in its own isolated subtree, so its
+  styles only affect the diagram.
+- As a second layer, a diagram that names something to load is refused with
+  *Cannot show this diagram: it refers to an image, icon, URL or escaped
+  text*: image and icon shapes (`A@{ img: … }`, `A@{ icon: … }`, quoted keys
+  too), sequence diagram `properties`, `url(…)`, `image-set(…)`,
+  `cross-fade(…)` and `image(…)` in styles and class definitions, and any
+  backslash.
+- Diagrams are drawn one at a time. At most 5 000 characters, 150
+  connections (arrows and links, in every diagram type), 300 statements, 50
+  subgraphs and nesting 6 deep (subgraphs or composite states). When a
+  diagram takes longer than half a second to draw (or to fail), edits by
+  others no longer redraw it automatically: the block says *The source
+  changed* and redraws when you choose **Preview**. Once previews on one page
+  have taken a second in all, further blocks show their source and say
+  *Previews on this page took long to draw*; choose **Preview** to draw one.
+- A chart is read strictly: `type` is `bar` or `line`, `x` lists the
+  category labels, and every series has a `name` and one finite number per
+  label. Unknown keys, wrong types and specs over the limits are refused with
+  the reason. At most 8 series, 200 points per series, 200 characters per
+  label or name, values up to ±1e300 and 50 000 characters in all. Labels
+  are only ever text.
+- Series use the product's chart colours, in order. The chart is announced to
+  screen readers with a summary (type, title, series, categories and value
+  range); **Show data table** under it lists every value, and hovering a bar
+  or point shows its value.
+- A diagram or chart that cannot be drawn shows *Cannot show this diagram* or
+  *Cannot show this chart* with the reason, above its source, in that block
+  only. Switching between Source and Preview never changes the document.
+- Comments on a diagram or chart anchor to text in its source, as in any code
+  block. Commenting on a single diagram node or chart bar is not available:
+  it needs a new kind of content and will come with a later document schema.
+
 A document becomes schema 4 only explicitly: initialize it with `"schema": 4`
 (see [`crewship doc initialize`](/cli/doc)), or upgrade an older document through
 the documents service's human-only upgrade, which keeps its content, history and
