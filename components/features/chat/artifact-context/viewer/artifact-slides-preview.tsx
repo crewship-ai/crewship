@@ -79,6 +79,6 @@ function Slides({ projection, path, title, selectMode, onSelect, onNavigate, cla
         <SlideCanvas deck={thumbnail} slideId={id} />
       </button>)}
     </nav>
-    {present && <SlidePresent deck={deck} initialSlideId={slideId} onClose={() => setPresent(false)} />}
+    {present && <SlidePresent deck={deck} initialSlideId={slideId} onClose={() => setPresent(false)} onSlideChange={id => { if (id !== slideId) onNavigate(`slides/${id}.html`) }} />}
   </section>
 }

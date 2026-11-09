@@ -529,7 +529,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  // eslint-disable-next-line react-hooks/exhaustive-deps -- the key is the whole state
  useEffect(() => { report.current?.(frameState) }, [frameKey])
  if (!artifactsDesign()) return <p className="p-6" role="status">Design is not enabled.</p>
- if (design.readRevoked) return <p className="p-6" role="alert">Page read access was removed. The local draft has been deleted where this browser could reach it.</p>
+ if (design.readRevoked) return <p className="p-6" role="alert">{design.everRead
+  ? "Page read access was removed. The local draft has been deleted where this browser could reach it."
+  : "This design is not available to you. Its owner may not have shared a version with you yet, or your access changed."}</p>
  if (design.query.isError) return <p className="p-6 text-destructive" role="alert">{design.query.error.message}</p>
  if (!design.query.data) return <p className="p-6" role="status">Opening Design…</p>
  // The drawn canvas starts at 0,0 unless layers sit at negative coordinates.
