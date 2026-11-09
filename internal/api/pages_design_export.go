@@ -35,6 +35,11 @@ func (h *PageHandler) designHistoryReader(ctx context.Context, tx *sql.Tx, r *ht
 	if writeErr == nil {
 		return writer, true, true, nil
 	}
+	// A run whose human may edit, but which the owner did not delegate Edit
+	// to, keeps its human's live read and loses only the write.
+	if errors.Is(writeErr, errDesignAgentNotDelegated) {
+		return "", false, true, nil
+	}
 	history, err = h.designManagerRead(ctx, tx, k)
 	return "", false, history, err
 }

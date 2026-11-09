@@ -70,6 +70,12 @@ func (m *craftNativeAgentManager) produceTask(ctx context.Context, slug string, 
 	if err != nil || original == nil || original.WorkspaceID != ws || original.OriginalCredential() != source {
 		return zero, errCraftNativeAgentDenied
 	}
+	// R71 §0.14/1 (#5235): the author's own Edit is lent to the agent only
+	// while the author owns the document; otherwise the owner must have given
+	// this agent write. A workspace role or an Edit grant is not delegable.
+	if !m.human.pages.humanAgentMayWrite(ctx, ws, rec.ID, source.UserID, original.AgentID) {
+		return zero, errCraftNativeAgentDenied
+	}
 	// Only a recorded instruction in the author's private chat: an ordinary
 	// turn has already reached agent logs and the journal, and a group chat
 	// shows the instruction to people without Page access (#5009).
