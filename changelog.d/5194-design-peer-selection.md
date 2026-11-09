@@ -1,0 +1,1 @@
+- **Design: see what each collaborator has selected (#5184).** On a live Design canvas, the layer another person has selected gets a dashed outline in their colour with their name, next to their pointer. Selection is shared like the pointer and is never written to the document.
