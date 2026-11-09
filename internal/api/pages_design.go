@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -192,6 +193,13 @@ func designCaptureGenerations(ctx context.Context, tx *sql.Tx, k artifacts.Versi
 // Canonical Page ACLs, live credentials and membership are checked under the
 // same SQLite writer fence as every persisted update. Read/Comment never writes
 // Design state; a fresh allowed admission may only install generation baselines.
+// errDesignAgentNotDelegated refuses a run's write that its human could make
+// themselves but may not delegate (R71 §0.14/1). It is an errDesignAccess, so
+// it answers 403 like any other refused write; readers that use the write
+// probe to choose the live version tell it apart, because the human's read
+// reach is unchanged.
+var errDesignAgentNotDelegated = fmt.Errorf("%w: only the Design's owner delegates Edit to an agent", errDesignAccess)
+
 func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, write bool) artifacts.VersionAuthorize {
 	r = ensureDesignAdminAuditRequest(r, write)
 	var stamp designAuthorityStamp
@@ -206,6 +214,7 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 		}
 		request := r.WithContext(ctx)
 		agent, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority)
+		undelegated := false
 		if agent != nil {
 			if agent.WorkspaceID != k.WorkspaceID || agent.HumanUserID != u.ID || h.checkOriginalUserArtifactRunPrincipal(ctx, agent) != nil || !h.artifactAgentPolicyAllows(ctx, k.WorkspaceID, agent.CrewID) {
 				return "", errDesignAccess
@@ -220,6 +229,13 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 			if _, e := h.validateArtifactPrincipalOriginalCredential(ctx, agent, required); e != nil {
 				return "", errDesignAccess
 			}
+			// R71 §0.14/1 (#5235): a run writes only while its human owns this
+			// Design, or with an Edit grant the owner issued to the agent. A
+			// workspace manager's audited reach and a human Edit grant are not
+			// delegable. Asked in this fenced transaction, on every admission;
+			// refused below only where the human's own write would be admitted,
+			// so the refusal never says more than the human may know.
+			undelegated = write && !h.agentRunMayWrite(ctx, k.WorkspaceID, k.PageID, agent)
 		} else {
 			isAgent, _ := pageGrantCallerIsAgent(request)
 			if isAgent || projectAgentFrom(ctx) != nil || InternalTokenWorkspaceFromContext(ctx) != "" {
@@ -281,6 +297,9 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 					return "", errDesignAccess
 				}
 			}
+			if undelegated {
+				return "", errDesignAgentNotDelegated
+			}
 			return stamp.admit(actor, revision)
 		}
 		ctx = context.WithValue(ctx, ctxRole, role)
@@ -308,6 +327,9 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 			return "", err
 		}
 		if agent != nil {
+			if undelegated {
+				return "", errDesignAgentNotDelegated
+			}
 			return stamp.admit("agent:"+agent.AgentID+":"+agent.RunID, revision)
 		}
 		return stamp.admit(u.ID, revision)
