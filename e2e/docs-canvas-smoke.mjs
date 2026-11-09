@@ -126,7 +126,8 @@ try {
   await page.getByRole('tab', { name: 'Canvas', exact: true }).click()
   const upgraded = page.waitForResponse(r => r.url().includes('/document/upgrade') && r.request().method() === 'POST')
   await page.getByRole('alertdialog').getByRole('button', { name: 'Enable Canvas' }).click()
-  assert.equal((await upgraded).status(), 200, 'the upgrade is confirmed')
+  const upgradeResponse = await upgraded
+  assert.equal(upgradeResponse.status(), 200, `the upgrade is confirmed: ${await upgradeResponse.text().catch(() => '')} request ${upgradeResponse.request().postData()}`)
   const canvas = page.getByRole('application', { name: 'Canvas' })
   await canvas.waitFor()
   const afterUpgrade = await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document?${q}`)).json()

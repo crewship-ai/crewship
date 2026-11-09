@@ -67,7 +67,7 @@ func TestDocumentCanvasSchemaSixRealEngineCLI(t *testing.T) {
 	authoritySocket, nodeSocket := filepath.Join(dir, "a.sock"), filepath.Join(dir, "n.sock")
 	writer := journal.NewWriter(f.rig.db, newTestLogger(), journal.WriterOptions{FlushSize: 1})
 	t.Cleanup(func() { _ = writer.Close() })
-	router, err := NewRouter(f.rig.db, "synthetic-canvas-six-jwt-secret", newTestLogger(), WithInternalToken(master), WithJournal(writer), WithStoragePath(filepath.Join(dir, "storage")), WithDocumentAuthority(authoritySocket, secret), WithDocumentService(nodeSocket))
+	router, err := NewRouter(f.rig.db, "synthetic-canvas-six-jwt-secret-for-tests-only", newTestLogger(), WithInternalToken(master), WithJournal(writer), WithStoragePath(filepath.Join(dir, "storage")), WithDocumentAuthority(authoritySocket, secret), WithDocumentService(nodeSocket))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestDocumentCanvasSchemaSixRealEngineCLI(t *testing.T) {
 	}
 
 	before := readDoc()
-	if before.Schema != documents.CreateSchema || before.Schema != 5 {
+	if before.Schema != documents.CreateSchema {
 		t.Fatalf("created at schema %d", before.Schema)
 	}
 	comment, _ := json.Marshal(map[string]any{"id": "canvas6-comment", "schema": 5, "page_id": page.ID, "epoch": before.Epoch, "ifRev": before.Rev, "block": "other", "from": 0, "to": 6, "text": "Keep this short."})
@@ -276,9 +276,10 @@ func TestDocumentCanvasSchemaSixRealEngineCLI(t *testing.T) {
 	// Enabling Canvas is a person's decision: an agent run is refused before the engine.
 	upgradeRequest := map[string]any{"id": "canvas6-enable", "schema": 5, "target_schema": 6, "page_id": page.ID, "epoch": commented.Epoch, "ifRev": commented.Rev}
 	upgradeBody, _ := json.Marshal(upgradeRequest)
-	agentToken := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(master, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, "canvas6-run")
-	if status, raw, _ := request(http.MethodPost, "/api/v1/pages/"+slug+"/document/upgrade", agentToken, upgradeBody); status != 403 {
-		t.Fatalf("agent upgrade: %d %s", status, raw)
+	agentToken := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(master, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, f.a.RunID)
+	// An agent run credential is no session on the public route (401), bound or not; the engine refuses it with 403 too.
+	if status, raw, _ := request(http.MethodPost, "/api/v1/pages/"+slug+"/document/upgrade", agentToken, upgradeBody); status != http.StatusUnauthorized {
+		t.Fatalf("unbound agent upgrade: %d %s", status, raw)
 	}
 	if readDoc().Schema != 5 {
 		t.Fatal("a refused upgrade changed the schema")
@@ -286,22 +287,27 @@ func TestDocumentCanvasSchemaSixRealEngineCLI(t *testing.T) {
 	// People without Edit on this document are refused too: a workspace Viewer
 	// with a read grant, a Member with only a Comment grant and a Restricted
 	// member even with a write grant (the route is not on their allowlist).
-	for _, person := range []struct{ id, role, level string }{{"canvas6-viewer", "VIEWER", "read"}, {"canvas6-commenter", "MEMBER", "comment"}, {"canvas6-restricted", "RESTRICTED", "write"}} {
+	for _, person := range []struct{ id, role, mode, level string }{{"canvas6-viewer", "VIEWER", "trusted", "read"}, {"canvas6-commenter", "MEMBER", "trusted", "comment"}, {"canvas6-restricted", "MEMBER", "restricted", "write"}} {
 		mustExec(t, f.rig.db, `INSERT INTO users(id,email) VALUES(?,?)`, person.id, person.id+"@example.test")
-		mustExec(t, f.rig.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,?)`, person.id+"-member", f.a.WorkspaceID, person.id, person.role)
+		mustExec(t, f.rig.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES(?,?,?,?,?)`, person.id+"-member", f.a.WorkspaceID, person.id, person.role, person.mode)
 		mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,?,?)`, page.ID, person.id, person.level, f.a.HumanUserID)
 		token := "crewship_cli_" + strings.ReplaceAll(person.id, "-", "_")
 		sum := sha256.Sum256([]byte(token))
 		mustExec(t, f.rig.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier,scopes) VALUES(?,?,'Canvas six person',?,'STANDARD','["*"]')`, person.id+"-token", person.id, fmt.Sprintf("%x", sum))
 		packet, _ := json.Marshal(map[string]any{"id": person.id + "-enable", "schema": 5, "target_schema": 6, "page_id": page.ID, "epoch": commented.Epoch, "ifRev": commented.Rev})
-		// The token is real: Viewer and Commenter read the document; Restricted is stopped at its allowlist (403, never 401).
-		if person.role != "RESTRICTED" {
+		// The token is real: Viewer and Commenter read the document; Restricted is stopped at its allowlist, never with 401.
+		if person.mode != "restricted" {
 			if status, raw, err := request(http.MethodGet, "/api/v1/pages/"+slug+"/document", token, nil); err != nil || status != http.StatusOK {
 				t.Fatalf("%s cannot read the document it was granted: %d %s %v", person.id, status, raw, err)
 			}
 		}
-		if status, raw, err := request(http.MethodPost, "/api/v1/pages/"+slug+"/document/upgrade", token, packet); err != nil || status != http.StatusForbidden {
-			t.Fatalf("%s (%s, %s grant) upgrade: %d %s %v", person.id, person.role, person.level, status, raw, err)
+		// Viewer and Commenter are refused (403); the restricted allowlist hides the route itself (404).
+		want := http.StatusForbidden
+		if person.mode == "restricted" {
+			want = http.StatusNotFound
+		}
+		if status, raw, err := request(http.MethodPost, "/api/v1/pages/"+slug+"/document/upgrade", token, packet); err != nil || status != want {
+			t.Fatalf("%s (%s %s, %s grant) upgrade: %d %s %v", person.id, person.mode, person.role, person.level, status, raw, err)
 		}
 		if readDoc().Schema != 5 {
 			t.Fatalf("%s changed the schema", person.id)
@@ -397,6 +403,10 @@ func TestDocumentCanvasSchemaSixRealEngineCLI(t *testing.T) {
 		t.Fatalf("bind schema-6 propose mandate: %v", err)
 	}
 	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(master, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, f.a.RunID)
+	// Even with a bound propose mandate an agent never upgrades a document.
+	if status, raw, _ := request(http.MethodPost, "/api/v1/pages/"+slug+"/document/upgrade", token, upgradeBody); status != http.StatusUnauthorized {
+		t.Fatalf("bound agent upgrade: %d %s", status, raw)
+	}
 	exchange := func(method string, body []byte) (int, []byte, error) {
 		return request(method, "/api/v1/internal/documents/draft", token, body)
 	}
