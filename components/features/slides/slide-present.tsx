@@ -8,12 +8,13 @@ import { isRenderableSlideDeck } from "./native-model"
 const control = "min-h-9 coarse:min-h-[44px] rounded border px-3"
 
 /** Presentation is a modal native view, not an export or durable write. */
-export function SlidePresent({ deck, initialSlideId, onClose }: { deck: unknown; initialSlideId: string; onClose: () => void }) {
+/** `onSlideChange` hears every slide shown, so the viewer leaves Present on the last one. */
+export function SlidePresent({ deck, initialSlideId, onClose, onSlideChange }: { deck: unknown; initialSlideId: string; onClose: () => void; onSlideChange?: (slideId: string) => void }) {
   if (!isRenderableSlideDeck(deck) || !deck.slide_order.includes(initialSlideId)) return <p role="alert">This presentation format or target is unavailable.</p>
-  return <NativePresentation deck={deck} initialSlideId={initialSlideId} onClose={onClose} />
+  return <NativePresentation deck={deck} initialSlideId={initialSlideId} onClose={onClose} onSlideChange={onSlideChange} />
 }
 
-function NativePresentation({ deck, initialSlideId, onClose }: { deck: SlideDeck; initialSlideId: string; onClose: () => void }) {
+function NativePresentation({ deck, initialSlideId, onClose, onSlideChange }: { deck: SlideDeck; initialSlideId: string; onClose: () => void; onSlideChange?: (slideId: string) => void }) {
   const [index, setIndex] = React.useState(Math.max(0, deck.slide_order.indexOf(initialSlideId)))
   const root = React.useRef<HTMLDivElement>(null)
   const close = React.useRef(onClose)
@@ -24,6 +25,9 @@ function NativePresentation({ deck, initialSlideId, onClose }: { deck: SlideDeck
     return () => { if (previous?.isConnected) previous.focus() }
   }, [])
   const current = Math.min(index, deck.slide_order.length - 1)
+  const report = React.useRef(onSlideChange)
+  report.current = onSlideChange
+  React.useEffect(() => { report.current?.(deck.slide_order[current]) }, [current, deck])
   const stage = React.useRef<HTMLDivElement>(null)
   const shown = React.useRef(current)
   // Schema-3 slide transitions play on entry; reduced motion shows the slide at once.

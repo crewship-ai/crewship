@@ -174,6 +174,6 @@ function NativeEditor({ deck, onChange, readOnly: parentReadOnly, onSave, saveDi
           : <p className="text-sm">Select an element to edit its content and position. Shift selects several.</p>}
       </div>
     </div> : <p role="alert">The selected slide is no longer available. Choose a slide from the list.</p>}
-    {present && slide && <SlidePresent deck={deck} initialSlideId={slideId} onClose={() => setPresent(false)} />}
+    {present && slide && <SlidePresent deck={deck} initialSlideId={slideId} onClose={() => setPresent(false)} onSlideChange={id => { if (id !== slideId) { setSlideId(id); setSelection([]) } }} />}
   </section>
 }

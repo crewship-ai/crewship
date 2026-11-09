@@ -53,7 +53,8 @@ test.describe("design model", () => {
    const found: Record<string, unknown> = {}
 
    // Layers: every layer, children indented under their screen; list and canvas select the same layer.
-   const entries = layersPanel(page).getByRole("button")
+   // One entry per layer: the Hide/Lock icon buttons of a row (#5218) carry no text.
+   const entries = layersPanel(page).getByRole("button").filter({ hasText: /\S/ })
    await expect(entries).toHaveText(["Screen A", "Screen B", "Backdrop", "Title", "Next"])
    for (const child of ["Backdrop", "Title", "Next"]) expect(await layersPanel(page).getByRole("button", { name: child, exact: true }).getAttribute("class"), `${child} is indented as a child`).toContain("pl-7")
    for (const screenName of ["Screen A", "Screen B"]) expect(await layersPanel(page).getByRole("button", { name: screenName, exact: true }).getAttribute("class"), `${screenName} is not indented`).not.toContain("pl-7")
