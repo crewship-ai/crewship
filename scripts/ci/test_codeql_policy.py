@@ -22,6 +22,7 @@ class CodeQLPolicyTests(unittest.TestCase):
                                               ('pull_request', 'true', 'false'),
                                               ('pull_request', 'false', 'true'),
                                               ('merge_group', 'false', 'false'),
+                                              ('workflow_dispatch', 'false', 'false'),
                                               ('push', 'false', 'false')]:
             with self.subTest(event=event, go=go_changed, js=js_changed), tempfile.TemporaryDirectory() as directory:
                 output = Path(directory) / 'output'
@@ -38,6 +39,7 @@ class CodeQLPolicyTests(unittest.TestCase):
         self.assertNotRegex(workflow, r'(?m)^\s+paths(?:-ignore)?:', 'required tool cannot skip docs-only PRs')
         self.assertIn('  merge_group:', workflow)
         self.assertIn('  pull_request:', workflow)
+        self.assertIn('  workflow_dispatch: {}', workflow)
 
     def test_actual_result_rejects_skipped_missing_or_single_language_analysis(self):
         workflow = (ROOT / '.github/workflows/codeql.yml').read_text()
