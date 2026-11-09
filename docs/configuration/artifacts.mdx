@@ -340,8 +340,23 @@ only when its value is exactly `true`.
 The repository's `.env.production` sets `NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS`
 and `NEXT_PUBLIC_CHAT_CRAFT_LEASE` to `false` explicitly, and none of the
 other variables. A default production build therefore hides every screen in the
-matrix above that needs a build-time variable. Values exported in the build
-environment take precedence over that file:
+matrix above that needs a build-time variable.
+
+The build-profile line of that file names the profile, and the tests in
+`lib/__tests__/build-profile.test.ts` and `lib/__tests__/feature-flags.test.ts`
+hold it to one of three shapes:
+
+| Profile | Where | Rule |
+|---|---|---|
+| `main` | `main`, every pull request to `main` and the merge queue | Release and unaccepted flags off |
+| `release` | A release branch | Release flags on, unaccepted flags (Dashboards, Slides, Design System) off |
+| `preview:<name>` | A shared development slot, never `main` | `.env.production` equals the declared `e2e/preview-profiles/<name>.env`, key for key and value for value |
+
+A declared preview is reviewed like any other change, and the slot's build copies
+it to `.env.production` unchanged. `e2e/preview-profiles/dev2.env` is the dev2
+preview. Code bound for `main` must carry the `main` profile; an unknown ref
+counts as bound for `main`. Values exported in the build environment take
+precedence over that file:
 
 ```bash
 export NEXT_PUBLIC_ARTIFACTS_LIBRARY=true

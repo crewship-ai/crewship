@@ -1,8 +1,15 @@
 import { describe, it, expect, vi, afterEach } from "vitest"
 import { readFileSync } from "node:fs"
 import { parseEnv } from "node:util"
-import { ALWAYS_ON_FLAGS, buildProfile, refTargetsMain, RELEASE_FLAGS, UNACCEPTED_FLAGS } from "../../e2e/build-profile"
+import { ALWAYS_ON_FLAGS, buildProfile, previewProfile, refTargetsMain, RELEASE_FLAGS, UNACCEPTED_FLAGS, type BuildProfile } from "../../e2e/build-profile"
 import { artifactDesignSystem, artifactSlides, artifactsLibrary, artifactsServerCatalog, chatArtifactProjects, chatCraftLease, crewsUnifiedUI, legacyMcpIntegrations } from "@/lib/feature-flags"
+
+// The value a flag must have in the checked-in profile: on in release for release
+// flags, off on main, and exactly the declared value in a preview (#5261).
+function expectedOn(profile: BuildProfile, flag: string, onInRelease: boolean): boolean {
+  if (profile.name === "preview") return previewProfile(profile.preview!)[flag] === "true"
+  return profile.name === "release" && onInRelease
+}
 
 describe.each([
   ["NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", chatArtifactProjects],
@@ -13,7 +20,7 @@ describe.each([
   it("follows the checked-in build profile", () => {
     const profile = buildProfile()
     vi.stubEnv(name, profile.env[name])
-    expect(enabled()).toBe(profile.name === "release")
+    expect(enabled()).toBe(expectedOn(profile, name, true))
   })
 
   it("allows an explicit build-time opt-in", () => {
@@ -114,8 +121,9 @@ describe("artifactSlides", () => {
     vi.stubEnv("NEXT_PUBLIC_ARTIFACT_SLIDES", "true")
     expect(artifactSlides()).toBe(true)
   })
-  it("stays off in the checked-in build profile until milestone D is accepted", () => {
-    expect(buildProfile().env.NEXT_PUBLIC_ARTIFACT_SLIDES).not.toBe("true")
+  it("stays off in the checked-in build profile until milestone D is accepted, unless a declared preview turns it on", () => {
+    const profile = buildProfile()
+    expect(profile.env.NEXT_PUBLIC_ARTIFACT_SLIDES === "true").toBe(expectedOn(profile, "NEXT_PUBLIC_ARTIFACT_SLIDES", false))
   })
 })
 
@@ -126,12 +134,12 @@ describe("build profile", () => {
   it("recognises pushes and merge-queue refs of main only", () => {
     expect(refTargetsMain("refs/heads/main")).toBe(true)
     expect(refTargetsMain("refs/heads/gh-readonly-queue/main/pr-4484-abc")).toBe(true)
-    expect(refTargetsMain("refs/pull/4484/merge")).toBe(false)
-    expect(refTargetsMain("refs/heads/demo/release-dev-20261029-r2")).toBe(false)
+    expect(refTargetsMain("refs/pull/4484/merge", "main")).toBe(true)
+    expect(refTargetsMain("refs/heads/demo/release-dev-20261029-r2", "")).toBe(false)
   })
   it("main keeps every release flag off; release turns each on without the sharing mock", () => {
     const profile = buildProfile()
-    for (const flag of RELEASE_FLAGS) expect(profile.env[flag] === "true", flag).toBe(profile.name === "release")
+    for (const flag of RELEASE_FLAGS) expect(profile.env[flag] === "true", flag).toBe(expectedOn(profile, flag, true))
     expect(profile.env.NEXT_PUBLIC_ARTIFACTS_SHARING_MOCK).not.toBe("true")
   })
   it("turns every always-on flag on in both profiles", () => {
@@ -145,9 +153,9 @@ describe("build profile", () => {
       + RELEASE_FLAGS.map(flag => `\n${flag}=true`).join(""))
     for (const flag of ALWAYS_ON_FLAGS) expect(release[flag], flag).toBe("true")
   })
-  it("keeps unaccepted milestones off in every profile", () => {
+  it("keeps unaccepted milestones off in main and release; only a declared preview may turn one on", () => {
     const profile = buildProfile()
-    for (const flag of UNACCEPTED_FLAGS) expect(profile.env[flag], flag).not.toBe("true")
+    for (const flag of UNACCEPTED_FLAGS) expect(profile.env[flag] === "true", flag).toBe(expectedOn(profile, flag, false))
     expect(RELEASE_FLAGS.filter(flag => (UNACCEPTED_FLAGS as readonly string[]).includes(flag))).toEqual([])
   })
 })
@@ -162,9 +170,10 @@ describe("artifactDesignSystem", () => {
     vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM", "true")
     expect(artifactDesignSystem()).toBe(true)
   })
-  it("keeps the tracked production build configuration default-off", () => {
+  it("keeps the tracked production build configuration default-off, unless a declared preview turns it on", () => {
     const production = readFileSync(".env.production", "utf8")
-    expect(production.match(/^NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM\s*=\s*(.*?)\s*$/m)?.[1]).not.toBe("true")
+    const on = production.match(/^NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM\s*=\s*(.*?)\s*$/m)?.[1] === "true"
+    expect(on).toBe(expectedOn(buildProfile(), "NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM", false))
   })
 })
 
