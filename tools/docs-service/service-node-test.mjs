@@ -62,8 +62,8 @@ function authorityModel() {
       assert.equal(data.leaseOwner.length, 36); assert.ok(data.update); model.commits++;
       model.state = { ...model.state, schema: data.schema, rev: model.state.rev + 1, snapshot: data.snapshot };
     } else if (op === 'checkpoint') { model.checkpoints++; model.checkpointStates.set(data.id,{schema:model.state.schema,snapshot:model.state.snapshot}); }
-    else if (op === 'upgrade') { assert.equal(data.schema,model.state.schema); assert.equal(data.targetSchema,LATEST_VERSION); assert.equal(data.ifRev,model.state.rev); assert.equal(data.generation,model.state.generation); model.state = {...model.state,schema:LATEST_VERSION,rev:model.state.rev+1,epoch:model.state.epoch+1,generation:model.state.generation+1}; }
-    else if (op === 'restore') { model.restores++; const source=model.checkpointStates.get(data.checkpoint)??model.state; model.state = { ...model.state,schema:model.state.schema>=5&&source.schema<model.state.schema?model.state.schema:source.schema,snapshot:source.snapshot, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1 }; }
+    else if (op === 'upgrade') { assert.equal(data.schema,model.state.schema); assert.equal(data.targetSchema,LATEST_VERSION); assert.equal(data.ifRev,model.state.rev); assert.equal(data.generation,model.state.generation); model.state = {...model.state,schema:LATEST_VERSION,rev:model.state.rev+1,epoch:model.state.epoch+1,generation:model.state.generation+1,...(model.state.contentGeneration===undefined?{}:{contentGeneration:model.state.contentGeneration+1})}; }
+    else if (op === 'restore') { model.restores++; const source=model.checkpointStates.get(data.checkpoint)??model.state; model.state = { ...model.state,schema:model.state.schema>=5&&source.schema<model.state.schema?model.state.schema:source.schema,snapshot:source.snapshot, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1, ...(model.state.contentGeneration === undefined ? {} : { contentGeneration: model.state.contentGeneration + 1 }) }; }
     const receipt = { id: data.id, rev: model.state.rev, epoch: model.state.epoch, fingerprint: data.fingerprint };
     model.receipts.set(data.id, receipt); return receipt;
   };
@@ -386,7 +386,49 @@ test('cached writer lease rechecks each principal and releases on idle and drain
     await call(f.socket, '/drain', {}); assert.equal(model.releases, 2);
   } finally { await f.close(); }
 });
-test('public epoch changes on either authority incarnation or engine boot even when generation rewinds', async () => {
+test('public epoch keeps a plain restart and changes when a backup restore rotates the database identity', async () => {
+  const model = authorityModel(), f = await fixture(model.handle);
+  Object.assign(model.state, { database: 'database-a', contentGeneration: 4 });
+  let service = await f.start();
+  try {
+    const old = (await read(f)).body;
+    // A plain restart: new Go authority incarnation and Node engine boot. The
+    // boot fence bumps generation and epoch, but the content lineage is unchanged.
+    model.state.incarnation = 'next-go-boot';
+    await service.close(); service = await f.start();
+    const rebooted = (await read(f)).body;
+    assert.ok(model.recoveries >= 2);
+    assert.notEqual(rebooted.generation, old.generation);
+    assert.equal(rebooted.epoch, old.epoch);
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(old, 'pending-before-restart'))).status, 200);
+    // A backup restore rotates the database identity, even when generation and
+    // content generation rewind to the bundle's values: old edits are fenced.
+    const current = (await read(f)).body;
+    Object.assign(model.state, { database: 'database-restored', generation: 1, contentGeneration: 4 });
+    const restored = (await read(f)).body;
+    assert.notEqual(restored.epoch, current.epoch);
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(current, 'stale'))).status, 409);
+    // A History restore or schema upgrade advances the content generation.
+    model.state.contentGeneration++;
+    assert.notEqual((await read(f)).body.epoch, restored.epoch);
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(restored, 'stale-history'))).status, 409);
+  } finally { await f.close(); }
+});
+test('History restore and schema upgrade answer with the epoch of the new content generation', async () => {
+  const model = authorityModel(), f = await fixture(model.handle);
+  Object.assign(model.state, { database: 'database-a', contentGeneration: 0 }); await f.start();
+  try {
+    const state = (await read(f)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/checkpoint', { id: 'cp', schema: 2, epoch: state.epoch, ifRev: state.rev })).status, 200);
+    const restored = await call(f.socket, '/v1/documents/p/restore', { id: 'restore', schema: 2, epoch: state.epoch, ifRev: state.rev, checkpoint: 'cp' });
+    assert.equal(restored.status, 200); assert.notEqual(restored.body.epoch, state.epoch);
+    const head = (await read(f)).body; assert.equal(head.epoch, restored.body.epoch);
+    const upgraded = await call(f.socket, '/v1/documents/p/upgrade', { id: 'upgrade', schema: 2, target_schema: LATEST_VERSION, page_id: 'p', epoch: head.epoch, ifRev: head.rev });
+    assert.equal(upgraded.status, 200); assert.notEqual(upgraded.body.epoch, head.epoch);
+    assert.equal((await read(f)).body.epoch, upgraded.body.epoch);
+  } finally { await f.close(); }
+});
+test('without a database identity the public epoch still changes on authority incarnation or engine boot', async () => {
   const model = authorityModel(), f = await fixture(model.handle); let service = await f.start();
   try {
     const old = (await read(f)).body;

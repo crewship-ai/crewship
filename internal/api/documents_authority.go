@@ -267,7 +267,7 @@ func (h *documentAuthority) documentStateWire(s documents.State) map[string]any 
 	for _, u := range s.Updates {
 		updates = append(updates, u.Payload)
 	}
-	return map[string]any{"schema": s.Schema, "rev": s.HeadRev, "epoch": s.Epoch, "generation": s.Generation, "incarnation": h.incarnation, "snapshot": s.Snapshot, "snapshotRev": s.SnapshotRev, "updates": updates, "blocks": s.Projection}
+	return map[string]any{"schema": s.Schema, "rev": s.HeadRev, "epoch": s.Epoch, "generation": s.Generation, "incarnation": h.incarnation, "database": s.Database, "contentGeneration": s.ContentGeneration, "snapshot": s.Snapshot, "snapshotRev": s.SnapshotRev, "updates": updates, "blocks": s.Projection}
 }
 func documentReceiptWire(r documents.Receipt) map[string]any {
 	return map[string]any{"id": r.ID, "rev": r.Rev, "epoch": r.Epoch, "actor": r.Actor, "kind": r.Kind}
