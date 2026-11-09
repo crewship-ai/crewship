@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/huh"
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -226,11 +227,21 @@ func exitWithError(cmd *cobra.Command, err error) {
 // token exfiltration to an attacker-controlled host (issue #571). In the
 // common case (no --server override) the resolved host equals the configured
 // host, so there is zero friction.
+var serverEnvNoticeOnce sync.Once
+
 func newAPIClient() *cli.Client {
 	// EffectiveServer (not ResolveServer) so an active profile's server wins
 	// over a stale CREWSHIP_SERVER env left over from the #544 stopgap; the
 	// token is host-bound to that same profile server below, so the two agree.
 	server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
+	// Say so when an implicitly selected profile overrides an exported
+	// CREWSHIP_SERVER: otherwise the other server's answers (a 404, or 503
+	// "Docs are not enabled") look like a fault of the intended one.
+	serverEnvNoticeOnce.Do(func() {
+		if notice := cli.IgnoredServerEnvNotice(flagServer, flagProfile, cliCfg); notice != "" {
+			fmt.Fprintln(os.Stderr, notice)
+		}
+	})
 	workspace := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 	token := ""
 	tokenHost := ""
