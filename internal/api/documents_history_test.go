@@ -2,10 +2,15 @@ package api
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 // Transport projections are tested separately from the real Node/authority/CLI
@@ -91,5 +96,72 @@ func TestHumanDocumentHistoryRejectsUnboundedIdentityBeforeEngine(t *testing.T) 
 		if w.Code != 400 {
 			t.Fatalf("invalid checkpoint status=%d", w.Code)
 		}
+	}
+}
+
+// When the automatic snapshots have used their half of the History budget, the
+// list says so (and only then), so History can explain why no new ones appear.
+func TestHumanDocumentHistoryReportsTheSessionLimit(t *testing.T) {
+	h, ws, user := humanDocumentTransportFixture(t)
+	h.documentStoreOptions = documents.Options{MaxHistoryBytes: 200}
+	h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
+		return []byte(`{"checkpoints":[]}`), 200, nil
+	}
+	// The flag re-runs the authority's human read check, which binds the exact session.
+	if _, err := h.db.Exec(`INSERT INTO user_sessions(id,user_id,expires_at) VALUES('history-limit-session',?,?)`, user, time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	request := func(session string) *http.Request {
+		r := humanDocumentRequest(t, "GET", "/history", ws, user, "")
+		return r.WithContext(withUser(r.Context(), &AuthUser{ID: user, Email: user + "@example.com", SessionID: session}))
+	}
+	list := func() map[string]any {
+		t.Helper()
+		w := httptest.NewRecorder()
+		h.ListDocumentCheckpoints(w, request("history-limit-session"))
+		var value map[string]any
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &value) != nil {
+			t.Fatalf("list %d %s", w.Code, w.Body)
+		}
+		return value
+	}
+	if value := list(); len(value) != 1 {
+		t.Fatalf("no document state: the list stays closed: %v", value)
+	}
+	k := documents.Key{WorkspaceID: ws, PageID: "human-doc-page"}
+	allow := func(context.Context, *sql.Tx) (string, error) { return "user:" + user, nil }
+	store := documents.New(h.db, documents.Options{MaxHistoryBytes: 200})
+	if _, err := store.Init(context.Background(), k, 1, []byte("baseline"), []byte(`[{"id":"one","hash":"h1"}]`), allow); err != nil {
+		t.Fatal(err)
+	}
+	if value := list(); len(value) != 1 {
+		t.Fatalf("History below its limit must not report one: %v", value)
+	}
+	// Fill the automatic half directly: the store test covers how pins get there.
+	if _, err := h.db.Exec(`INSERT INTO document_checkpoints(workspace_id,page_id,id,rev,schema_version,snapshot,projection,actor) VALUES(?,?,'session-filled',1,1,?,'[]','user:x')`, ws, "human-doc-page", strings.Repeat("s", 95)); err != nil {
+		t.Fatal(err)
+	}
+	if value := list(); value["history_limit_reached"] != true {
+		t.Fatalf("full automatic History must be reported: %v", value)
+	}
+	// Without a live session the authority check refuses, and the list carries no flag.
+	w := httptest.NewRecorder()
+	h.ListDocumentCheckpoints(w, request("revoked-or-unknown"))
+	var value map[string]any
+	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &value) != nil || len(value) != 1 {
+		t.Fatalf("unauthorized limit read leaked: %d %s", w.Code, w.Body)
+	}
+	// A signed-in person who is not a member of this workspace never learns the flag either,
+	// even when the request claims the workspace and the engine list answers.
+	if _, err := h.db.Exec(`INSERT INTO users(id,email) VALUES('history-outsider','history-outsider@example.com')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO user_sessions(id,user_id,expires_at) VALUES('outsider-session','history-outsider',?)`, time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	outsider := humanDocumentRequest(t, "GET", "/history", ws, "history-outsider", "")
+	outsider = outsider.WithContext(withUser(outsider.Context(), &AuthUser{ID: "history-outsider", Email: "history-outsider@example.com", SessionID: "outsider-session"}))
+	if h.documentSessionHistoryFull(outsider, "human-doc-page") {
+		t.Fatal("a non-member learned the History limit")
 	}
 }

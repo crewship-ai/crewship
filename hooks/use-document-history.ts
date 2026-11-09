@@ -25,7 +25,10 @@ class HistoryFailure extends Error {
   constructor(readonly status: "denied" | "unavailable" | "error") { super("Document history unavailable") }
 }
 function listResponse(value: unknown): DocumentCheckpointList {
-  if (!closed(value, ["checkpoints"]) || !Array.isArray(value.checkpoints) || value.checkpoints.length > 1000) throw new HistoryFailure("error")
+  // `history_limit_reached` is present only as `true` (automatic snapshots used their share of the budget).
+  const limited = object(value) && Object.hasOwn(value, "history_limit_reached")
+  if (limited && (value as Record<string, unknown>).history_limit_reached !== true) throw new HistoryFailure("error")
+  if (!closed(value, limited ? ["checkpoints", "history_limit_reached"] : ["checkpoints"]) || !Array.isArray(value.checkpoints) || value.checkpoints.length > 1000) throw new HistoryFailure("error")
   const seen = new Set<string>()
   for (const pin of value.checkpoints) {
     if (!closed(pin, ["id", "rev", "schema", "actor", "created_at"]) || !identifier(pin.id) || seen.has(pin.id) || !revision(pin.rev) || !schemaNumber(pin.schema) || typeof pin.actor !== "string" || pin.actor.length > 1024 || typeof pin.created_at !== "string" || pin.created_at.length > 128) throw new HistoryFailure("error")

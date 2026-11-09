@@ -200,3 +200,19 @@ describe("human Document history controller", () => {
     unmount(); expect(signal.aborted).toBe(true); await act(async () => late.resolve(response({ checkpoints: [pin] })))
   })
 })
+
+describe("History limit", () => {
+  it("passes on the server's History limit and still rejects any other extra field", async () => {
+    fetchMock.mockResolvedValueOnce(response({ checkpoints: [pin], history_limit_reached: true }))
+    const view = setup(); await ready(view.result)
+    const list = view.result.current.list
+    expect(list.status === "ready" && list.data.history_limit_reached).toBe(true)
+    cleanup()
+    for (const body of [{ checkpoints: [pin], history_limit_reached: false }, { checkpoints: [pin], history_limit_reached: "yes" }, { checkpoints: [pin], other: true }]) {
+      fetchMock.mockReset(); fetchMock.mockResolvedValueOnce(response(body))
+      const other = setup()
+      await waitFor(() => expect(other.result.current.list.status).toBe("error"))
+      cleanup()
+    }
+  })
+})
