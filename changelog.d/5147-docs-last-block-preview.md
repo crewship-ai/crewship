@@ -1,0 +1,1 @@
+- **Preview works for a Docs code block at the end of the page.** Choosing Preview while the caret is in the page's last code block now moves the caret just before it instead of doing nothing.

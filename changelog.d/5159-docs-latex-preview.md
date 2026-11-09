@@ -1,0 +1,1 @@
+- **Docs code blocks in `latex` show the typeset formula.** A schema 4 code block whose language is `latex` or `math` renders as block math (KaTeX, bundled, nothing loaded from other sites), with Source and Preview in its header. A formula with a syntax error shows the reason above its source in that block only. Inline math is not available yet.

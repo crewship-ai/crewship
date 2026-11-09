@@ -90,6 +90,56 @@ request on a schema 4 or 5 document is a proposal at that document's schema,
 which a person accepts or rejects. Accepting keeps underline, colours,
 highlights, dates and mentions outside the changed text.
 
+### Math
+
+A schema 4 code block whose language is `latex` (or `math`) is shown as a
+typeset formula. **Source** and **Preview** in the block's header switch
+between the formula and its LaTeX; the choice is yours alone, only in this
+tab, and never changes the document. Putting the caret into a formula shows
+its source, so you always see what you type. Readers see the formula too.
+
+- Math is block math: one display formula per code block. Inline math inside
+  a paragraph is not available yet; it needs a new kind of content and will
+  come with a later document schema.
+- The formula is drawn by KaTeX, bundled with the app at a fixed version
+  with its fonts, so showing it loads nothing from other sites. Commands that
+  could link, load or style (`\href`, `\url`, `\includegraphics`,
+  `\htmlClass`, `\htmlStyle` and similar) are refused and shown as plain
+  text.
+- A formula KaTeX cannot read shows *Cannot show this formula* with the
+  reason, above its source, in that block only; the rest of the page is
+  unaffected and nothing is changed. Sources longer than 10 000 characters
+  are shown as source only.
+- The stored content stays the LaTeX source, so history, comments, Copy and
+  agents see exactly what was typed.
+
+### CSV and Markdown previews
+
+Two more languages opt a schema 4 code block into **Source** and **Preview**:
+
+| Language | Preview |
+| --- | --- |
+| `csv` | A table; the first row is its header |
+| `markdown` or `md` | Formatted Markdown (GitHub flavour) |
+
+Only blocks with one of these languages are rendered. Every other code block,
+including Markdown pasted into a `python` or unlabelled block, stays code.
+
+- CSV is read strictly (RFC 4180): commas separate cells, a cell containing a
+  comma, quote or line break is wrapped in double quotes, and `""` is a quote
+  inside it. A stray quote, an unclosed quote or a row with a different number
+  of cells than the header is reported with its line, and the source stays
+  shown. At most 500 rows, 50 columns, 2 000 characters per cell and
+  100 000 characters in all.
+- Markdown shows headings, emphasis, strikethrough, inline and fenced code,
+  lists and checklists, quotes, rules, tables and links. Raw HTML is shown as
+  the characters that were typed, never as HTML. Images are shown as
+  *[Image: description]* and are never loaded. Only `http`, `https` and
+  `mailto` links become links; they open in a new tab. At most 20 000
+  characters, 12 levels of nesting and 5 000 elements.
+- Cells and text are only ever text in the page: nothing in a CSV cell or a
+  Markdown source can add markup, run script or fetch anything.
+
 ## Comments
 
 Select text in a paragraph, heading or code block and choose **Comment** to
