@@ -24,7 +24,7 @@ export function highlightable(language: unknown): language is string {
 }
 
 /** Suggestions offered by the language field; any valid language name can still be typed. */
-export const SUGGESTED_LANGUAGES = ["bash", "c", "cpp", "csharp", "css", "go", "html", "java", "javascript", "json", "kotlin", "latex", "markdown", "php", "python", "ruby", "rust", "sql", "swift", "typescript", "yaml"]
+export const SUGGESTED_LANGUAGES = ["bash", "c", "cpp", "csharp", "css", "csv", "go", "html", "java", "javascript", "json", "kotlin", "latex", "markdown", "php", "python", "ruby", "rust", "sql", "swift", "typescript", "yaml"]
 
 /** One highlighted run inside a block's text: plain-text offsets and the token classes. */
 export interface CodeToken { from: number; to: number; className: string }
@@ -102,6 +102,9 @@ type Renderer = (source: string) => PreviewResult
 const PREVIEWS: Record<string, { name: string; load: () => Promise<Renderer> }> = {
   latex: { name: "formula", load: () => import("./code-preview-math").then(module => module.renderMath) },
   math: { name: "formula", load: () => import("./code-preview-math").then(module => module.renderMath) },
+  csv: { name: "table", load: () => import("./code-preview-csv").then(module => module.renderCsv) },
+  markdown: { name: "Markdown", load: () => import("./code-preview-markdown").then(module => module.renderMarkdown) },
+  md: { name: "Markdown", load: () => import("./code-preview-markdown").then(module => module.renderMarkdown) },
 }
 
 /** True when a block with this language offers Source and Preview. */

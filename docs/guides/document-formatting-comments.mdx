@@ -73,6 +73,33 @@ its source, so you always see what you type. Readers see the formula too.
 - The stored content stays the LaTeX source, so history, comments, Copy and
   agents see exactly what was typed.
 
+### CSV and Markdown previews
+
+Two more languages opt a schema 4 code block into **Source** and **Preview**:
+
+| Language | Preview |
+| --- | --- |
+| `csv` | A table; the first row is its header |
+| `markdown` or `md` | Formatted Markdown (GitHub flavour) |
+
+Only blocks with one of these languages are rendered. Every other code block,
+including Markdown pasted into a `python` or unlabelled block, stays code.
+
+- CSV is read strictly (RFC 4180): commas separate cells, a cell containing a
+  comma, quote or line break is wrapped in double quotes, and `""` is a quote
+  inside it. A stray quote, an unclosed quote or a row with a different number
+  of cells than the header is reported with its line, and the source stays
+  shown. At most 500 rows, 50 columns, 2 000 characters per cell and
+  100 000 characters in all.
+- Markdown shows headings, emphasis, strikethrough, inline and fenced code,
+  lists and checklists, quotes, rules, tables and links. Raw HTML is shown as
+  the characters that were typed, never as HTML. Images are shown as
+  *[Image: description]* and are never loaded. Only `http`, `https` and
+  `mailto` links become links; they open in a new tab. At most 20 000
+  characters, 12 levels of nesting and 5 000 elements.
+- Cells and text are only ever text in the page: nothing in a CSV cell or a
+  Markdown source can add markup, run script or fetch anything.
+
 A document becomes schema 4 only explicitly: initialize it with `"schema": 4`
 (see [`crewship doc initialize`](/cli/doc)), or upgrade an older document through
 the documents service's human-only upgrade, which keeps its content, history and

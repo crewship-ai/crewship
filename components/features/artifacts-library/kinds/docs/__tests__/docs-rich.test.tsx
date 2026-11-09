@@ -34,6 +34,8 @@ const item = {
 
 /** Markup that must stay text: tabs, trailing spaces and the final newline are part of what Copy returns. */
 const MARKUP = "<script>window.__ran = true</script>\n\t<img src=x onerror=\"window.__ran = true\">  \n"
+const CSV = "name,role\n\"Doe, Jane\",<b>lead</b>\n"
+const MARKDOWN = "## Plan\n\n- [x] **ship**\n- read [docs](https://example.com/docs)\n\n<img src=x onerror=\"window.__ran = true\">\n\n![chart](https://example.test/chart.png)"
 const p = (id: string, text: string, marks?: { type: string; attrs: object }[]) => ({ type: "paragraph", attrs: { id }, content: [{ type: "text", text, ...(marks ? { marks } : {}) }] })
 const formatted = { type: "doc", content: [
   p("goal", "Ship the agency offer on 2 December."),
@@ -47,6 +49,10 @@ const formatted = { type: "doc", content: [
   { type: "codeBlock", attrs: { id: "markup", language: "html" }, content: [{ type: "text", text: MARKUP }] },
   { type: "codeBlock", attrs: { id: "euler", language: "latex" }, content: [{ type: "text", text: String.raw`e^{i\pi} + 1 = 0` }] },
   { type: "codeBlock", attrs: { id: "broken", language: "math" }, content: [{ type: "text", text: String.raw`\frac{1}{` }] },
+  { type: "codeBlock", attrs: { id: "people", language: "csv" }, content: [{ type: "text", text: CSV }] },
+  { type: "codeBlock", attrs: { id: "ragged", language: "csv" }, content: [{ type: "text", text: "a,b\n1,2,3" }] },
+  { type: "codeBlock", attrs: { id: "notes", language: "markdown" }, content: [{ type: "text", text: MARKDOWN }] },
+  { type: "codeBlock", attrs: { id: "plain-md", language: "python" }, content: [{ type: "text", text: "# not a heading" }] },
 ] }
 
 const comments = [
@@ -292,6 +298,57 @@ describe("Docs math blocks", () => {
     expect(await screen.findByRole("button", { name: "Status: Read-only" })).toBeTruthy()
     const editor = screen.getByLabelText("Document editor")
     await waitFor(() => expect(blockDom(editor, "euler").querySelector("[data-code-preview] .katex")).not.toBeNull())
+  })
+})
+
+describe("Docs CSV and Markdown blocks", () => {
+  const blockDom = (editor: HTMLElement, id: string) => editor.querySelector<HTMLElement>(`[data-code-block][data-block-id="${id}"]`)!
+
+  it("shows a csv block as a table of text cells, and its source on request", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    const before = structuredClone(editor.editor.getJSON())
+    const people = blockDom(editor, "people")
+    await waitFor(() => expect(people.querySelector("[data-code-preview] table")).not.toBeNull())
+    const table = people.querySelector("[data-code-preview] table")!
+    expect([...table.querySelectorAll("th")].map(th => th.textContent)).toEqual(["name", "role"])
+    expect([...table.querySelectorAll("td")].map(td => td.textContent)).toEqual(["Doe, Jane", "<b>lead</b>"])
+    expect(table.querySelector("b")).toBeNull()
+    fireEvent.click(within(within(people).getByRole("group", { name: "Show table" })).getByRole("button", { name: "Source" }))
+    expect(people.querySelector("pre")!.hidden).toBe(false)
+    expect(people.querySelector("pre")!.textContent).toBe(CSV)
+    expect(editor.editor.getJSON()).toEqual(before)
+    expect(posts("/document/patch")).toHaveLength(0)
+  })
+
+  it("explains a malformed csv block in that block only", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    const ragged = blockDom(editor, "ragged")
+    await waitFor(() => expect(ragged.querySelector("[data-code-preview][data-error]")?.textContent).toBe("Cannot show this CSV: this row has 3 cells, the header has 2 (line 2)."))
+    expect(ragged.querySelector("pre")!.hidden).toBe(false)
+  })
+
+  it("renders a markdown block without its raw HTML or images, and leaves other code alone", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    const notes = blockDom(editor, "notes")
+    await waitFor(() => expect(notes.querySelector("[data-code-preview] h2")?.textContent).toBe("Plan"))
+    const preview = notes.querySelector("[data-code-preview]")!
+    expect(preview.querySelector("strong")!.textContent).toBe("ship")
+    expect(preview.querySelector("a")!.getAttribute("href")).toBe("https://example.com/docs")
+    expect(preview.querySelector("img, script, [onerror]")).toBeNull()
+    expect(preview.textContent).toContain("<img src=x onerror=")
+    expect(preview.textContent).toContain("[Image: chart]")
+    expect((window as unknown as { __ran?: boolean }).__ran).toBeUndefined()
+    // Only blocks that opt in by language are rendered.
+    const plain = blockDom(editor, "plain-md")
+    expect(plain.querySelector<HTMLElement>("[data-code-preview]")!.hidden).toBe(true)
+    expect(within(plain).queryByRole("button", { name: "Preview" })).toBeNull()
+    expect(plain.querySelector("pre")!.textContent).toBe("# not a heading")
   })
 })
 
