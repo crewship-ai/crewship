@@ -65,17 +65,7 @@ A schema 5 date is one calendar day (`2026-11-20`), shown in each reader's own
 date format. A mention stores only the person's id, never their name: each
 reader sees the name of a person who can read the document, and anyone else,
 including someone without access, appears as **Unknown member**, so a document
-never reveals whether a person exists. The Page editor and the Canvas cards use
-the same rule: both ask the document's people lookup (`GET
-/api/v1/pages/{slug}/document/people?ids=`, where the app passes the page as
-`@{pageId}`; `crewship doc people`) for the ids
-they show, batched in requests of at most 100 ids, and never use the workspace
-member list. An answer is kept for the open document and, while the mention
-is shown, asked again once it is five minutes old (checked every 30 seconds),
-so a person who loses access stops being named without a reload. Until the
-answer arrives, or when the lookup is refused or still fails after five
-requests, a mention reads **@Unknown member**; a name already shown falls back
-to it too. Markdown and Word export write the date
+never reveals whether a person exists. Markdown and Word export write the date
 as `2026-11-20` and a mention as `@` and a name only when the export is given
 the names the exporting reader may see; otherwise as `@Unknown member`. The
 export serializers accept those names, but no export endpoint supplies them in
@@ -163,7 +153,9 @@ formatting, versions and comments; open proposals can then only be rejected,
 and an agent proposes again. Only people with edit access are asked. Canvas lays the same document out as cards: add blocks from the
 document, then drag a card to move it or drag its edges to resize it. A card is
 the block itself, not a copy: editing it on the Page changes the card, and
-moving a card never changes its text. Drag the background or use the wheel to
+moving a card never changes its text. A card shows the block's formatting,
+dates and mentions; a mention names a person exactly as the Page does, through
+the same people lookup, and otherwise reads **@Unknown member**. Drag the background or use the wheel to
 pan, Ctrl/⌘ + wheel or a pinch to zoom, and **Fit** to see everything.
 Double-click a card (or press Enter) to open that block in the Page.
 

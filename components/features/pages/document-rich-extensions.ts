@@ -3,7 +3,6 @@ import { Plugin, PluginKey } from "@tiptap/pm/state"
 import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
 import { documentSchema } from "@/lib/documents/schema"
-import { mentionLabel, type MentionNames } from "@/lib/documents/mention-names"
 import { CodeHighlight, codeBlockView } from "./document-code-blocks"
 
 /**
@@ -36,19 +35,13 @@ export const isRichSchema = (schema: number | undefined) => schema === 3 || sche
 /** True where the schema has underline and palette text colour and highlight. */
 export const isStyledSchema = (schema: number | undefined) => schema === 5 || schema === 6
 
-/**
- * The schema's own marks and nodes beyond the StarterKit base, with editing behaviour.
- * With `mentions`, a mention shows the name that reader-scoped lookup releases
- * (the same one the Canvas uses); without it, and in every serialization, it
- * stays the neutral "@Unknown member".
- */
-export function documentEditorExtensions(schema: number | undefined, options: { mentions?: MentionNames } = {}): AnyExtension[] {
+/** The schema's own marks and nodes beyond the StarterKit base, with editing behaviour. */
+export function documentEditorExtensions(schema: number | undefined): AnyExtension[] {
   if (!isRichSchema(schema)) return []
   const names = RICH_NAMES[schema as number]
   const own = (documentSchema.extensionsFor(schema) as AnyExtension[]).filter(extension => names.includes(extension.name))
     .map(extension => extension.name === "taskItem" ? interactiveTaskItem(extension)
-      : extension.name === "codeBlock" ? codeBlockView(extension, { languages: isFormattedSchema(schema) })
-      : extension.name === "mention" && options.mentions ? namedMention(extension, options.mentions) : extension)
+      : extension.name === "codeBlock" ? codeBlockView(extension, { languages: isFormattedSchema(schema) }) : extension)
   return isStyledSchema(schema) ? [...own, FormatShortcuts, CodeHighlight, StyleShortcuts] : isFormattedSchema(schema) ? [...own, FormatShortcuts, CodeHighlight] : own
 }
 
@@ -136,36 +129,6 @@ function interactiveTaskItem(base: AnyExtension): AnyExtension {
           // Only the text lives in the content element; the box and its attributes are this view's own.
           ignoreMutation: (mutation: MutationRecord | { type: "selection"; target: Node }) => mutation.type !== "selection" && !content.contains(mutation.target),
           destroy: () => { editor.off("transaction", editable); editor.off("update", editable) },
-        }
-      }
-    },
-  })
-}
-
-/**
- * A mention chip that shows the reader-scoped name. Display only: the stored
- * node keeps just the user id, and getHTML or copy still render the neutral label.
- */
-function namedMention(base: AnyExtension, mentions: MentionNames): AnyExtension {
-  return (base as AnyExtension & { extend: (config: object) => AnyExtension }).extend({
-    addNodeView() {
-      return ({ node }: { node: ProseMirrorNode }) => {
-        const chip = document.createElement("span")
-        chip.contentEditable = "false"
-        let userId = String(node.attrs.userId ?? "")
-        const render = () => { chip.setAttribute("data-mention", userId); chip.textContent = mentionLabel(mentions, userId) }
-        const unsubscribe = mentions.subscribe(render)
-        render(); mentions.want([userId])
-        return {
-          dom: chip,
-          update: (next: ProseMirrorNode) => {
-            if (next.type !== node.type) return false
-            const id = String(next.attrs.userId ?? "")
-            if (id !== userId) { mentions.release([userId]); userId = id; mentions.want([userId]) }
-            render(); return true
-          },
-          ignoreMutation: () => true,
-          destroy: () => { unsubscribe(); mentions.release([userId]) },
         }
       }
     },

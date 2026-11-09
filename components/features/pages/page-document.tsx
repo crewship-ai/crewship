@@ -24,7 +24,6 @@ import type { DocumentHistoryReview } from "./document-history/types"
 import { DocumentProposals } from "./document-proposals/document-proposals"
 import { createHttpHistoryActions } from "@/lib/documents/history-actions"
 import { createHttpProposalClient } from "@/lib/documents/proposals"
-import { createMentionNames } from "@/lib/documents/mention-names"
 import { documentReviewActions } from "@/lib/feature-flags"
 import { CommentHighlights, documentEditorExtensions, isRichSchema, stableBlockTypes } from "./document-rich-extensions"
 
@@ -109,9 +108,6 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
   const reviewEnabled = documentReviewActions()
   const revertActions = useMemo(() => createHttpHistoryActions(workspaceId, pageId), [workspaceId, pageId])
   const proposalClient = useMemo(() => createHttpProposalClient(workspaceId, pageId), [workspaceId, pageId])
-  // One reader-scoped mention lookup for every surface of this session (the Page editor and the Canvas).
-  const mentions = useMemo(() => createMentionNames(workspaceId, pageId), [workspaceId, pageId])
-  useEffect(() => () => mentions.dispose(), [mentions])
   const hasLocalDraft = sync.pending > 0 || sync.recovery
   const downloadDraft = () => downloadText(`${slug}-draft.json`, JSON.stringify(editor?.getJSON(), null, 2))
   const localVersion = useRef(0), restoreVersion = useRef(0)
@@ -122,13 +118,13 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
   }, [sync.doc])
   const editor = useEditor({
     immediatelyRender: false, editable: false,
-    extensions: [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(sync.state?.schema) }), ...documentEditorExtensions(sync.state?.schema, { mentions }), CommentHighlights, Collaboration.configure({ document: sync.doc, field: "default" })],
+    extensions: [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(sync.state?.schema) }), ...documentEditorExtensions(sync.state?.schema), CommentHighlights, Collaboration.configure({ document: sync.doc, field: "default" })],
     // The browser moves the caret (Ctrl+End, arrows, a tap) before its selectionchange reaches ProseMirror. A key the
     // editor handles itself, such as Enter, must act where the caret is shown, so the DOM selection is read first.
     // Only for real key presses: ProseMirror replays a browser-made Enter or Backspace (iOS, Android) as a plain Event
     // in the middle of its own flush, where reading the DOM again would split twice or recurse.
     editorProps: { handleKeyDown: (view, event) => { if (event instanceof KeyboardEvent && !view.composing) (view as unknown as { domObserver: { flush(): void } }).domObserver.flush(); return false }, attributes: { class: editorClass, "aria-label": "Document editor" } },
-  }, [sync.doc,sync.state?.schema,mentions])
+  }, [sync.doc,sync.state?.schema])
   useEffect(() => { editor?.setEditable(sync.editable && !restoring) }, [editor, sync.editable, restoring])
   const empty = useEditorState({ editor, selector: ({ editor }) => editor ? isEmptyDocument(editor.state.doc) : false })
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || sync.recovery); return () => onDirtyChange?.(false) }, [sync.pending, sync.recovery, onDirtyChange])
@@ -144,7 +140,7 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
     },
   }
   const review: DocumentHistoryReview = { currentContent: sync.state?.content, headRev: sync.state?.rev ?? 0, hasLocalDraft, actions: reviewEnabled && sync.editable && !restoring ? revertActions : undefined, onDownloadDraft: downloadDraft, onActionDone: () => window.location.reload() }
-  return { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, mentions, hasLocalDraft, downloadDraft, empty, history, restoreGuard, review }
+  return { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, history, restoreGuard, review }
 }
 
 function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available, historyExpired, onDirtyChange, sync, onRestored }: DocumentWorkspaceProps) {

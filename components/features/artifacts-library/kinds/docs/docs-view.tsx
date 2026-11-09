@@ -18,7 +18,7 @@ import type { LibraryItem } from "../../library-items"
 import { docsFrameStatus, outlineOf, readingStats, readingText, type DocNode, type OutlineEntry } from "./docs-model"
 import { DocsTools } from "./docs-tools"
 import { DocsComments } from "./docs-comments"
-import { DocsCanvas } from "./docs-canvas"
+import { DocsCanvas, type MentionLabels } from "./docs-canvas"
 import { documentSurface } from "@/lib/documents/surface"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
@@ -84,6 +84,17 @@ export function DocsBody({ workspaceId, item, fallback, onFrame }: {
  * nothing while the first read is still on its way. Dropping the chip would
  * leave the last state (often Saved) unexplained.
  */
+/**
+ * The session's reader-scoped people lookup, as the Page editor's mention
+ * support (DocumentMentions) carries it, so Canvas cards name people exactly as
+ * the Page does. An editor without it (an older schema, or a build without that
+ * support) has none, and every mention reads "@Unknown member".
+ */
+export function sessionPeople(editor: { storage: unknown } | null | undefined): MentionLabels | undefined {
+  const people = (editor?.storage as Record<string, { people?: Partial<MentionLabels> } | undefined> | undefined)?.documentMentions?.people
+  return typeof people?.label === "function" && typeof people.subscribe === "function" ? people as MentionLabels : undefined
+}
+
 function DocsUnhydrated({ denied, status, onFrame, children }: { denied: boolean; status: string; onFrame: (report: DocsFrameReport | null) => void; children: React.ReactNode }) {
   const chip = docsFrameStatus({ hydrated: false, denied, available: true, restoring: false, status, pending: 0, recovery: false, recoveredDrafts: 0, canWrite: false, durability: "confirmed", sentThisSession: false })
   const chipKey = JSON.stringify(chip)
@@ -97,7 +108,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const frame = useArtifactFrame()
   const layout: FrameLayout = frame?.layout ?? "desktop"
   const phone = layout === "phone"
-  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, mentions, hasLocalDraft, downloadDraft, empty, restoreGuard, review } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS)
+  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, restoreGuard, review } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS)
   // The outline is open by default only where it does not cover the page.
   const [outlineOpen, setOutlineOpen] = React.useState(layout === "desktop")
   const [sent, setSent] = React.useState(false)
@@ -257,7 +268,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     {view === "canvas" && <div id="docs-view-canvas" role="tabpanel" aria-labelledby="docs-mode-canvas" className="h-[calc(100dvh-8rem)] min-h-[480px] w-full px-2 pb-16 pt-14 md:px-4 md:pb-4">
       {banner}
       <DocsCanvas doc={sync.doc} editable={editable} origin={canvasOrigin} onOpenInPage={openInPage}
-        comments={discussion?.comments} onOpenComments={discussion ? openCanvasComments : undefined} mentions={mentions} />
+        comments={discussion?.comments} onOpenComments={discussion ? openCanvasComments : undefined} people={sessionPeople(editor)} />
     </div>}
 
     <ArtifactSlot name="view" label="View">
