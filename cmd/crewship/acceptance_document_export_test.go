@@ -204,8 +204,11 @@ func TestAcceptance_DocumentExportBinary(t *testing.T) {
 	if out := require(owner, "", "doc", "export", "export-notes", "-o", "-"); string(out) != want {
 		t.Fatalf("custodian export of private output: %q", out)
 	}
-	if out := failure(restricted, "doc", "export", "export-notes"); strings.Contains(out, "stays") {
-		t.Fatalf("restricted member export leaked content: %s", out)
+	// Export is not a restricted-member surface: the member gets the same 404
+	// as for a document that does not exist, even holding a read grant.
+	restrictedOut, restrictedMissing := failure(restricted, "doc", "export", "export-notes"), failure(restricted, "doc", "export", "no-such-document")
+	if strings.Contains(restrictedOut, "stays") || status(restrictedOut) != "404" || status(restrictedMissing) != "404" || strings.Contains(restrictedOut, page.ID) {
+		t.Fatalf("restricted member export must look missing: %s (missing: %s)", restrictedOut, restrictedMissing)
 	}
 	if _, err := os.Stat(filepath.Join(work, "no-such-document.md")); err == nil {
 		t.Fatal("a refused export wrote a file")
