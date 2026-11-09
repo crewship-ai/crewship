@@ -936,8 +936,11 @@ reference with the same page read Pages makes and calls `router.replace`:
 | `/pages/<slug>`, `/pages/@<id>` | resolve the slug or `@<id>` |
 | `/pages/<slug>?artifact=1[&version=N]`, `/pages/<slug>?version=N` | resolve as a project; moves only to a project viewer the detail has |
 | `/pages/craft/editor?page_id=<id>&workspace_id=<ws>` | resolve `@<id>`; the detail mounts the same editor host |
+| `/pages/<slug>/editor`, `/pages/@<id>/editor` | `/pages/<slug>?mode=edit` by address alone (`lib/legacy-app-address.ts`, from the in-shell 404) |
+| `/artifacts/@<id>` | `/artifacts/<id>` by address alone, query kept (`app/(dashboard)/artifacts/[id]/page-client.tsx`) |
+| `/artifacts/<slug>` | the catalog entry whose ID is `<slug>` first, else (only when the address is not shaped like a generated ID, so a slug can never stand in for a deleted or unreachable ID) whose slug is `<slug>`; then `/artifacts/<id>`, keeping `workspace_id`, a numeric `version` and `ref`. Not in the catalog: the `GET /api/v1/pages/@<slug>` probe, whose 404 is the same for missing and unreachable pages |
 
-It fails closed: `?mode=edit`, `?artifact=1&edit=1`, a malformed or
+It fails closed: an unknown `mode` or `edit` value, a malformed or
 cross-workspace reference, a refused or failed read and a kind the Artifacts
 detail cannot open keep the Pages view. The decision is made once for the
 entry address, so navigation inside Pages never tears down an open editor.

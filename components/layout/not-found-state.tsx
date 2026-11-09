@@ -1,12 +1,14 @@
 "use client"
 
 import { useEffect, useReducer } from "react"
+import { useRouter } from "next/navigation"
 import { Search } from "lucide-react"
 
 import { BareState } from "@/components/layout/app-frame"
 import { PageNotFound } from "@/components/layout/page-state"
 import { SubBar } from "@/components/layout/sub-bar"
 import { isKnownAppPath } from "@/lib/app-routes"
+import { legacyAppAddress } from "@/lib/legacy-app-address"
 import { useAppStore } from "@/lib/store"
 
 const TITLE = "This page doesn’t exist"
@@ -29,6 +31,13 @@ export function paletteQueryForPath(pathname: string): string {
 /** The 404 inside the app: the shell stays, the content says what happened. */
 export function NotFoundInShell() {
   const openCommandPalette = useAppStore((s) => s.openCommandPalette)
+  const router = useRouter()
+  // An old address that has a replacement moves there instead of a dead end (G04).
+  // Read from the live URL: on the static export the router may report "/" here.
+  // This state renders only once the session is known, never in the hydrating pass.
+  const moved = typeof window === "undefined" ? null : legacyAppAddress(window.location.pathname, window.location.search)
+  useEffect(() => { if (moved) router.replace(moved) }, [moved]) // eslint-disable-line react-hooks/exhaustive-deps
+  if (moved) return null
   // Search opens the palette with the missing path typed in (CHR-03, G05).
   const openPalette = () =>
     openCommandPalette(typeof window === "undefined" ? "" : paletteQueryForPath(window.location.pathname))

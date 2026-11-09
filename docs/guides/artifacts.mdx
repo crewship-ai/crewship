@@ -69,12 +69,21 @@ and replace themselves with that address, so Back does not return to them:
 | `/pages/<slug>`, `/pages/@<id>`, `/pages?ref=<id>&workspace_id=…` | `/artifacts/<id>?workspace_id=…` |
 | `/pages/<slug>?artifact=1[&version=N]`, `/pages/<slug>?version=N` | `/artifacts/<id>?workspace_id=…[&version=N]` for a project the detail shows in its project viewer |
 | `/pages/craft/editor?page_id=<id>&workspace_id=…` | `/artifacts/<id>?workspace_id=…`, where the same Craft editor opens |
+| `/pages/<slug>/editor`, `/pages/@<id>/editor` | `/pages/<slug>?mode=edit`, which then moves on like any Pages editor address |
+| `/artifacts/@<id>` (the CLI's `@<id>` form) | `/artifacts/<id>`, with the same query |
+| `/artifacts/<slug>` | `/artifacts/<id>`, keeping `workspace_id`, a version pin `?version=N` and `?ref=`. An artifact whose ID is that text always wins over a slug |
 
 An address stays on Pages when Pages is the only place that shows it: the panel
 editor (`?mode=edit`), the project source editor (`?artifact=1&edit=1`), and
 a page the Artifacts detail cannot open, such as an older Craft workbook. A
 refused or failed read also stays on Pages, which answers it the way it always
 did. The public share address `/p/<token>` is unchanged.
+
+None of these moves reveals whether an artifact exists. `/artifacts/@<id>` and
+`/pages/<slug>/editor` move by address alone, before any read. `/artifacts/<slug>`
+matches only the artifacts the person's own catalog lists; anything else gets
+the server's single answer for a page that is missing or not theirs, so the
+screen reads "This artifact doesn’t exist" in both cases.
 
 A restricted member is never redirected, and sees exactly what they saw
 before: every `/pages` address shows their catalog of declared Page actions,
