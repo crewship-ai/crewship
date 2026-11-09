@@ -665,7 +665,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
      <span className="ml-auto text-xs text-muted-foreground">{selected ? selected.name || selected.type : design.editable ? "Drag to move · right-drag or Space to pan · edit in Properties" : "View canvas"}</span>
      <span className="flex items-center gap-0.5" aria-label="Zoom">
       <Button variant="ghost" size="sm" aria-label="Zoom out" onClick={() => step(-1)}><ZoomOut className="size-4" /></Button>
-      <span className="min-w-12 text-center font-mono text-xs text-muted-foreground" aria-label="Zoom level">{Math.round(scale * 100)} %</span>
+      <span className="w-[52px] shrink-0 text-center font-mono text-xs text-muted-foreground" aria-label="Zoom level">{Math.round(scale * 100)} %</span>
       <Button variant="ghost" size="sm" aria-label="Zoom in" onClick={() => step(1)}><ZoomIn className="size-4" /></Button>
       <Button variant="ghost" size="sm" aria-label="Fit" aria-pressed={placed.fit} onClick={() => setPlaced({ fit: true })}><Scan className="size-4" /></Button>
      </span>
