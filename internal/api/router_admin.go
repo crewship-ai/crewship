@@ -99,6 +99,7 @@ func (r *Router) registerAdminRoutes() {
 	// the request — they need not belong to what they manage.
 	inst := NewInstanceAdminHandler(r.db, r.logger, r.sessionsStore, r.Journal(), r.hub)
 	inst.streams = r.authMw.streams
+	inst.presence = r.documentPresenceHub
 	// openapi: responses 201,400,401,403,404,409,500,503
 	r.authedInstance("POST", "/api/v1/admin/instance/people", inst.CreatePerson)
 	// openapi: responses 200,400,401,403,404,409,500
