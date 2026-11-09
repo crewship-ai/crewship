@@ -321,7 +321,8 @@ crewship doc outline @<artifact-id>
 
 Download the confirmed document as Markdown. It reads what `doc read` reads,
 with the same access: you need read access to the document (scoped tokens:
-`pages:read`). Restricted members cannot export. Content Markdown cannot
+`pages:read`), and without it fails exactly as `doc read` does. Restricted
+members cannot export, not even their own private output. Content Markdown cannot
 represent fails with the reason instead of a file with parts missing.
 
 The file is written atomically to `--out` (default: the server's file name,

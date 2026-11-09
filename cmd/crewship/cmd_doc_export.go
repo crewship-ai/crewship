@@ -77,7 +77,7 @@ Markdown itself to standard output instead.`, Example: "  crewship doc export @<
 		if out == "" {
 			out = name
 		}
-		if _, statErr := os.Stat(out); statErr == nil {
+		if _, statErr := os.Lstat(out); statErr == nil {
 			if force, _ := cmd.Flags().GetBool("force"); !force {
 				return cli.WithExitCode(fmt.Errorf("%s exists; pass --force to replace it", out), cli.ExitValidation)
 			}

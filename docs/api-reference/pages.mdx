@@ -2401,8 +2401,10 @@ with current document read access (scoped CLI credentials need `pages:read`).
 The documents engine reads the confirmed state through the same private
 authority, so private output is exported only to its custodian, and a
 workspace owner's audited read of someone else's private output is audited
-before any byte is returned. Restricted members cannot export. A caller who
-may not read the document gets the same `404` as for a missing one.
+before any byte is returned. A caller who may not read the document gets
+exactly the error `GET /document` gives it; for private output, everyone but
+its custodian gets the same `404` as for a missing document. Restricted members
+cannot export at all (`404`), not even private output they hold custody of.
 
 `format` must be `markdown` (or `md`); any other value returns 400 before the
 engine is contacted. Response: `200` with `Content-Type: text/markdown;
