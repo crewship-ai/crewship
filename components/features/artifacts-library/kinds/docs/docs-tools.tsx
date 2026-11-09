@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { documentSchema, normalizeDocumentLink } from "@/lib/documents/schema"
 import { isFormattedSchema, isRichSchema } from "@/components/features/pages/document-rich-extensions"
+import { SUGGESTED_LANGUAGES } from "@/components/features/pages/document-code-blocks"
 import { ArtifactSlot, ArtifactTool, ArtifactToolSeparator } from "../../frame"
 
 /**
@@ -93,7 +94,7 @@ function LinkTool({ editor, on, onError }: { editor: Editor; on: boolean; onErro
   </Popover>
 }
 
-/** The code block's language label: lowercase letters, digits, +, # and -, or none. */
+/** The code block's language: lowercase letters, digits, +, # and -, or none. Known languages are coloured; suggestions list common ones. */
 function LanguageTool({ editor, language, onError }: { editor: Editor; language: string; onError: (message: string | undefined) => void }) {
   const [open, setOpen] = React.useState(false)
   const [value, setValue] = React.useState(language)
@@ -108,7 +109,8 @@ function LanguageTool({ editor, language, onError }: { editor: Editor; language:
     <PopoverTrigger asChild><ArtifactTool icon={Braces} label="Code language" text={language || undefined} on={open} /></PopoverTrigger>
     <PopoverContent side="top" className="grid w-64 gap-2 p-3">
       <form className="grid gap-2" onSubmit={event => { event.preventDefault(); apply() }}>
-        <Input aria-label="Code language" value={value} maxLength={32} onChange={event => setValue(event.target.value)} placeholder="python" autoFocus />
+        <Input aria-label="Code language" value={value} maxLength={32} onChange={event => setValue(event.target.value)} placeholder="python" list="docs-code-languages" autoComplete="off" autoFocus />
+        <datalist id="docs-code-languages">{SUGGESTED_LANGUAGES.map(name => <option key={name} value={name} />)}</datalist>
         <Button type="submit" size="sm" className="justify-self-end coarse:min-h-[44px]">Apply language</Button>
       </form>
     </PopoverContent>

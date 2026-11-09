@@ -7,7 +7,7 @@ import { ProposalReview } from "./proposal-review"
 type View = { status: "loading" | "error" } | { status: "ready"; items: DocumentProposal[] }
 type Detail = { status: "loading" | "error" } | { status: "ready"; value: DocumentProposalDetail; reviewedRev: number }
 
-/** Lists proposals for one Document and opens one at a time. Needs the proposals API (flagged). */
+/** Lists proposals for one Document and opens one at a time (schema-4 Docs). */
 export function DocumentProposals({ client, headRev, canDecide, hasLocalDraft, onDownloadDraft, onAccepted }: {
   client: DocumentProposalClient
   headRev: number
@@ -44,6 +44,6 @@ export function DocumentProposals({ client, headRev, canDecide, hasLocalDraft, o
     {detail?.status === "ready" && <ProposalReview key={detail.value.id} proposal={detail.value} headRev={headRev} reviewedRev={detail.reviewedRev} canDecide={canDecide}
       hasLocalDraft={hasLocalDraft} onDownloadDraft={onDownloadDraft}
       onAccept={async requestId => { const result = await client.accept(detail.value.id, detail.reviewedRev, requestId); if (result.status === "done") { refresh(); onAccepted?.(result.rev) } return result }}
-      onReject={async requestId => { const result = await client.reject(detail.value.id, requestId); if (result.status === "done") refresh(); return result }} />}
+      onReject={async requestId => { const result = await client.reject(detail.value.id, detail.reviewedRev, requestId); if (result.status === "done") refresh(); return result }} />}
   </section>
 }

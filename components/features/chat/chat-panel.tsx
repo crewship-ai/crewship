@@ -119,6 +119,8 @@ import { apiFetch, AUTH_EVENT } from "@/lib/api-fetch"
 import { resolveWsBase } from "@/lib/server-base"
 import { emitChatEvent } from "@/lib/telemetry"
 import { copyToClipboard } from "@/lib/clipboard"
+import { randomUUIDv4 } from "@/lib/random-id"
+import { proposalIntent, proposalRequestParam, type ProposalRequestTarget } from "@/lib/documents/proposal-request"
 
 function getWsUrl(): string {
   const base = resolveWsBase()
@@ -179,6 +181,8 @@ interface ChatPanelProps {
   autoSendInitial?: boolean
   /** A Page reference is resolved and authorized by the server on send. */
   pageContextSlug?: string
+  /** A Docs proposal request (#5137): the next message asks the agent to propose on this schema-4 Doc. */
+  proposalRequest?: ProposalRequestTarget
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
   mobilePanel?: "chat" | "artifacts" | "work"
   /** Fired when the user sends a message — lets the parent optimistically
@@ -214,7 +218,7 @@ export function ChatPanel(props: ChatPanelProps) {
   return parent ? <ChatPanelBody {...props} /> : <QueryClientProvider client={client}><ChatPanelBody {...props} /></QueryClientProvider>
 }
 
-function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, pageContextSlug, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
+function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentRole, suggestedPrompts, askForms, sessionOrigin, agentMeta, sessionKind = "direct", initialInput, autoSendInitial, pageContextSlug, proposalRequest, mobilePanel, onSend, onReplySettled, onNewConversation, onMobilePanelChange }: ChatPanelProps) {
   const suggestionPack = getSuggestions(agentRole, suggestedPrompts)
   const defaultSuggestions = suggestionPack.empty
   const followUpPrompts = suggestionPack.followUps
@@ -227,6 +231,12 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
   const [pageContextError, setPageContextError] = useState(false)
   const [pageContextRemoved, setPageContextRemoved] = useState(false)
   const pendingPageSendRef = useRef<string | null>(null)
+  // One proposal request per handoff; a retry of the same text reuses its submission id.
+  const [proposalRemoved, setProposalRemoved] = useState(false)
+  const proposalSubmission = useRef<{ text: string; id: string } | null>(null)
+  const proposalKey = proposalRequest ? proposalRequestParam(proposalRequest) : ""
+  useEffect(() => { proposalSubmission.current = null; setProposalRemoved(false) }, [proposalKey, sessionId])
+  const proposalActive = Boolean(proposalRequest) && !proposalRemoved
   useEffect(() => {
     pendingPageSendRef.current = null
     setPageContextRemoved(false)
@@ -555,12 +565,21 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         return false
       }
       return true
+    } else if (proposalRequest && proposalActive) {
+      // The server admits this only in a private chat, for a person with Edit and an agent the Doc allows.
+      const held = proposalSubmission.current
+      const id = held && held.text === text ? held.id : randomUUIDv4()
+      proposalSubmission.current = { text, id }
+      const sent = sendMessage(text, { ...metadata, document_iteration_intent: proposalIntent(proposalRequest, id) })
+      const settle = (accepted: boolean) => { if (accepted) setProposalRemoved(true); else toast.error("Not connected — your message is still here. Try again when chat reconnects."); return accepted }
+      if (sent instanceof Promise) return sent.then(settle)
+      return settle(sent !== false)
     } else {
       const sent = metadata ? sendMessage(text, metadata) : sendMessage(text)
       if (sent === false) toast.error("Not connected — your message is still here. Try again when chat reconnects.")
       return sent
     }
-  }, [canChat, waitingForSignIn, sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs])
+  }, [canChat, waitingForSignIn, sendMessage, pageContextSlug, pageContextRemoved, pageContextError, sessionId, selectedProjectInputs, proposalRequest, proposalActive])
 
   // Reply-settled hook: when a stream the user watched in THIS session
   // finishes (isStreaming true→false), tell the parent so it can re-fire
@@ -1013,6 +1032,13 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           pageContext ? `Page: ${pageContext.name} · access rechecked when sent` : "Checking Page…"}
       </span>
       <button type="button" className="rounded px-2 py-1 text-muted-foreground hover:text-foreground coarse:min-h-[44px]" onClick={() => { pendingPageSendRef.current = null; setPageContextRemoved(true) }} aria-label="Remove Page context">Remove</button>
+    </div>
+  ) : null
+
+  const proposalChip = proposalActive ? (
+    <div className="mx-auto flex w-full max-w-3xl items-center gap-2 px-4 py-1 text-xs" data-testid="proposal-request-chip">
+      <span className="min-w-0 flex-1 truncate">Proposal request · the agent proposes changes to the document, you review them there</span>
+      <button type="button" className="rounded px-2 py-1 text-muted-foreground hover:text-foreground coarse:min-h-[44px]" onClick={() => setProposalRemoved(true)} aria-label="Remove proposal request">Remove</button>
     </div>
   ) : null
 
@@ -1616,6 +1642,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
+        {proposalChip}
         {artifactStrip}
         {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
         {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <div className="shrink-0 px-2"><ModelPicker key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} /></div>}
@@ -1623,8 +1650,8 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
-          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
-          artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
+          artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
           sendRefusal={sendRefusal}
           variant="mobile"
           mentionMembers={mentionMembers}
@@ -1757,6 +1784,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
         {prepareProjectInputs}
         {executionProfile === "restricted" && currentUserId && sessionId && workspaceId && <ProjectInputPicker key={projectInputScope} userId={currentUserId} chatId={sessionId} workspaceId={workspaceId} selected={selectedProjectInputs} onChange={changeProjectInputs} disabled={isStreaming} refreshKey={turns.length * 2 + Number(isStreaming)} />}
         {pageContextChip}
+        {proposalChip}
         {artifactStrip}
         {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <RunPreflight key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} enabled />}
         {canChat && verifiedChatReadScope && currentUserId && sessionId && workspaceId && <div className="shrink-0 px-2"><ModelPicker key={chatReadScope} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId} /></div>}
@@ -1764,8 +1792,8 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           agentId={agentId}
           sessionId={sessionId}
           agentName={agentName}
-          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
-          artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && Boolean(currentUserId && workspaceId)}
+          documentCreationEnabled={documentsAvailability.data === true && mayCreatePages && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
+          artifactCreationEnabled={artifactProjectAvailable && crewRefusedAgent !== agentId && sessionKind === "direct" && !pageContextSlug && !proposalActive && Boolean(currentUserId && workspaceId)}
           sendRefusal={sendRefusal}
           variant="desktop"
           isStreaming={isStreaming}
