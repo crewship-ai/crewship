@@ -850,6 +850,8 @@ test('export format docx returns the formatter package of the confirmed state, r
     { type: 'table', attrs: { id: 't' }, content: [{ type: 'tableRow', attrs: { id: 'r1' }, content: [cell('tableHeader', 'a', 'Owner'), cell('tableHeader', 'b', 'Share')] }, { type: 'tableRow', attrs: { id: 'r2' }, content: [cell('tableCell', 'c', 'Jana'), cell('tableCell', 'd', '40 %')] }] },
     { type: 'codeBlock', attrs: { id: 'py', language: 'python' }, content: [t('def f():\n\treturn 1')] },
     { type: 'codeBlock', attrs: { id: 'tex', language: 'latex' }, content: [t('e^{i\\pi} + 1 = 0')] },
+    { type: 'blockquote', attrs: { id: 'q' }, content: [{ type: 'paragraph', attrs: { id: 'qp' }, content: [t('Quoted')] }] },
+    { type: 'taskList', attrs: { id: 'tl' }, content: [{ type: 'taskItem', attrs: { id: 'ti', checked: true }, content: [{ type: 'paragraph', attrs: { id: 'tip' }, content: [t('Legal review')] }] }] },
   ] };
   const f = await fixture(async (op, data, req, res) => {
     if (op === 'initialize') { model.state = { ...model.state, schema: data.schema, snapshot: data.snapshot, rev: 0 }; return model.state; }
@@ -871,6 +873,8 @@ test('export format docx returns the formatter package of the confirmed state, r
     assert.equal((xml.match(/<w:tr>/g) || []).length, 2);
     assert.match(xml, /<w:pStyle w:val="CodeBlock"\/><\/w:pPr><w:r><w:t xml:space="preserve">def f\(\):<\/w:t><w:br\/><w:tab\/><w:t xml:space="preserve">return 1</);
     assert.match(xml, /e\^\{i\\pi\} \+ 1 = 0/);
+    assert.match(xml, /<w:pStyle w:val="Quote"\/><\/w:pPr><w:r><w:t xml:space="preserve">Quoted</);
+    assert.match(xml, /<w:t xml:space="preserve">\u2611 <\/w:t><\/w:r><w:r><w:t xml:space="preserve">Legal review</);
     // The same read authority: Markdown stays the default.
     assert.equal(typeof (await call(f.socket, '/v1/documents/p/export', {})).body.markdown, 'string');
     for (const request of [{ format: 'pdf' }, { format: 'DOCX' }, { format: 1 }, []]) assert.equal((await call(f.socket, '/v1/documents/p/export', request)).status, 400);

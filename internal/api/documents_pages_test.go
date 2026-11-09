@@ -429,3 +429,12 @@ func TestDocumentExportEngineReplyBoundary(t *testing.T) {
 		})
 	}
 }
+
+// The largest package the engine may deliver must still fit the engine read
+// once base64-encoded inside its {"docx":"..."} reply.
+func TestDocumentDOCXExportLimitFitsEngineRead(t *testing.T) {
+	reply := len(`{"docx":""}`) + base64.StdEncoding.EncodedLen(documentDOCXExportBytes)
+	if reply > 4<<20 || documentDOCXExportBytes != 3145680 {
+		t.Fatalf("limit %d gives a %d-byte reply; the engine read is %d", documentDOCXExportBytes, reply, 4<<20)
+	}
+}

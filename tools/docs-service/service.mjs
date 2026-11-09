@@ -12,8 +12,9 @@ import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
 const exportDOCX = createDocumentDOCXExporter(validateJSON);
-// The Go client reads at most 4 MiB of engine reply; base64 grows by a third.
-const MAX_DOCX_BYTES = 3 << 20;
+// The Go client reads at most 4 MiB of engine reply. Base64 grows by a third
+// and {"docx":""} adds 11 bytes, so the package stays 64 bytes of reply below it.
+const MAX_DOCX_BYTES = Math.floor(((4 << 20) - 64) / 4) * 3;
 const fault = (status, message,code) => Object.assign(new Error(message), { status,...(code?{code}:{}) });
 const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 // Offsets are ProseMirror/JavaScript UTF-16 positions. Do not admit a range

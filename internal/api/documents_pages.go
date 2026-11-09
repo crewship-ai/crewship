@@ -211,8 +211,9 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 	writeJSON(w, 200, value)
 }
 
-// The engine's DOCX delivery limit; its base64 reply must fit the 4 MiB read.
-const documentDOCXExportBytes = 3 << 20
+// The engine's DOCX delivery limit (tools/docs-service MAX_DOCX_BYTES, just
+// under 3 MiB): its base64 {"docx":...} reply must fit the 4 MiB engine read.
+const documentDOCXExportBytes = ((4 << 20) - 64) / 4 * 3
 
 const documentDOCXMediaType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 

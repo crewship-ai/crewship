@@ -26,10 +26,10 @@ type docExportFormat struct {
 }
 
 // The engine answers with at most 4 MiB of JSON: Markdown is smaller, and DOCX
-// (base64 in that reply) is capped at 3 MiB.
+// (base64 in that reply) is capped just under 3 MiB.
 var docExportFormats = map[string]docExportFormat{
 	"md": {"markdown", "text/markdown", 4 << 20, regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}\.md$`), utf8.Valid},
-	"docx": {"docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", 3 << 20, regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}\.docx$`),
+	"docx": {"docx", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", ((4 << 20) - 64) / 4 * 3, regexp.MustCompile(`^[A-Za-z0-9_-]{1,100}\.docx$`),
 		func(raw []byte) bool { return bytes.HasPrefix(raw, []byte("PK\x03\x04")) }},
 }
 

@@ -217,7 +217,7 @@ func TestAcceptance_DocumentExportRealEngine(t *testing.T) {
 			t.Errorf("exported DOCX lacks %s paragraph %q: %+v", want.style, want.text, paragraphs)
 		}
 	}
-	if tables != 1 || !bytes.Contains(docx, []byte("PK\x03\x04")) {
+	if tables != 1 {
 		t.Errorf("exported DOCX tables=%d", tables)
 	}
 	// What Markdown cannot represent is refused with its reason, not dropped.

@@ -36,7 +36,7 @@ Its one caller is the docs-service `export` operation with `format: "docx"`
 confirmed state the Go authority returned for the caller's own credential, so
 live read access, private-output custody and its audit are rechecked on every
 download; there is no cached or hash-addressed copy. The service caps the
-package at 3 MiB so its base64 reply fits the Go client's 4 MiB read, and maps
+package just under 3 MiB (3,145,680 bytes) so its base64 reply fits the Go client's 4 MiB read, and maps
 `DocxExportError` to `422` with its code. `fflate` is pinned in the
 docs-service package and lockfile, and the image copies this module.
 
