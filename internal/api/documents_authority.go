@@ -484,8 +484,15 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 400, "document generation required")
 			return
 		}
+		// The replaced head is kept in History (#5165); a restore without it
+		// would silently lose that work, so it is refused.
+		if len(in.Snapshot) == 0 {
+			replyError(w, 400, "replaced document state required")
+			return
+		}
 		var receipt documents.Receipt
-		receipt, err = operations.Restore(ctx, k, artifacts.RestoreDocument{Lease: lease, Checkpoint: in.Checkpoint, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, Generation: in.Generation}, auth)
+		// The Docs service sends the replaced head's full state; History keeps it (#5165).
+		receipt, err = operations.Restore(ctx, k, artifacts.RestoreDocument{Lease: lease, Checkpoint: in.Checkpoint, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, Generation: in.Generation, Replaced: in.Snapshot}, auth)
 		result = documentReceiptWire(receipt)
 	default:
 		replyError(w, 404, "unknown Docs authority operation")

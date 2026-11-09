@@ -101,11 +101,14 @@ type RestoreDocument struct {
 	Checkpoint, ID, Fingerprint string
 	IfRev                       int64
 	Generation                  *int64
+	// Replaced is the full state of the head being replaced; when set it is
+	// kept in History as a checkpoint at that revision (#5165).
+	Replaced []byte
 }
 
 func (a *DocumentAdapter) Restore(ctx context.Context, key documents.Key, request RestoreDocument, authorize documents.Authorize) (documents.Receipt, error) {
 	if err := a.check(documents.LatestSchema, Restore); err != nil {
 		return documents.Receipt{}, err
 	}
-	return a.store.RestoreRequestWithFingerprintAtGeneration(ctx, key, request.Lease, request.Checkpoint, request.ID, request.Fingerprint, request.IfRev, request.Generation, authorize)
+	return a.store.RestoreRequestKeeping(ctx, key, request.Lease, request.Checkpoint, request.ID, request.Fingerprint, request.IfRev, request.Generation, request.Replaced, authorize)
 }

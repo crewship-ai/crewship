@@ -15,14 +15,20 @@ import (
 // and charges no storage twice, keeps the immutability and storage triggers,
 // and widens only the closed schema CHECKs to schema 5.
 func TestMigrationDocumentSchema5AgentPipeline(t *testing.T) {
-	const before, after = 20261108204553, 20261109090843
+	// Seed at the newest migration below this one, whichever that is: another
+	// migration may land between 20261108204553 and this one on main.
+	const after = 20261109090843
 	if _, err := findMigration(after); err != nil {
 		t.Fatal(err)
 	}
+	before := 0
 	for _, m := range migrations {
-		if m.version > before && m.version < after {
-			t.Fatalf("migration %d sits between; seed it too", m.version)
+		if m.version < after && m.version > before {
+			before = m.version
 		}
+	}
+	if before < 20261108204553 {
+		t.Fatalf("no migration at or after 20261108204553 below %d", after)
 	}
 	// One connection with foreign keys off: the seeded rows name no real
 	// workspace, chat or run; this test is about the rebuild, not the FKs.
