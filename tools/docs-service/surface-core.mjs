@@ -8,9 +8,8 @@
 // block by construction. Values are plain JSON (ContentAny): moving replaces a
 // value, never the block, so block content, IDs and hashes are untouched.
 //
-// No content schema admits these roots yet. Schema 5 belongs to formatting
-// marks; the surface becomes schema 6 after it (see CANVAS_SCHEMA). Until then
-// the document validator keeps refusing every surface root.
+// Content schema 6 (CANVAS_SCHEMA) admits these roots; schemas 1-5 keep
+// refusing every surface root.
 //
 // Shared implementation instantiated with the caller's pinned Yjs, as
 // schema-core.mjs is, so browser and service never mix Yjs copies.
@@ -24,11 +23,14 @@ export function createSurface({ Y }) {
   const ID_PATTERN = /^[a-zA-Z0-9_-]{1,80}$/;
   const RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
   const validID = id => typeof id === 'string' && ID_PATTERN.test(id) && !RESERVED.has(id);
-  // `retainedBytes` bounds every value ever written to the surface, including
-  // deleted ones (gc:false keeps them). It is half of the whole-document binary
-  // limit: the Canvas can never take the room the Page needs. Every commit is
-  // validated on the merged state, so copies that each stayed inside their own
-  // budget are refused together once merged past it (server-side quota).
+  // `retainedBytes` bounds the encoded size of everything ever written to the
+  // surface, including deleted values (gc:false keeps them). It is half of the
+  // whole-document binary limit, so the Canvas can never take the room the Page
+  // needs. The count is an upper bound of the Yjs update encoding (see
+  // `encoded`), never smaller than the real bytes, whatever the values, keys or
+  // number of writers. Every commit is validated on the merged state, so copies
+  // that each stayed inside their own budget are refused together once merged
+  // past it (server-side quota).
   const LIMITS = Object.freeze({ entries: 2000, coordinate: 1_000_000, minW: 40, maxW: 4000, minH: 24, maxH: 4000, z: 1_000_000,
     text: 4000, textBytes: 12288, label: 200, valueBytes: 4096, retainedBytes: 512 * 1024 });
   const TONES = Object.freeze(['default', 'yellow', 'green', 'blue', 'red', 'purple']);
@@ -46,7 +48,21 @@ export function createSurface({ Y }) {
   const integer = n => Number.isSafeInteger(n) && !Object.is(n, -0) && Math.abs(n) <= LIMITS.z;
   const text = (s, max) => typeof s === 'string' && s.length <= max && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]|\p{Cs}/u.test(s);
   // Only called on values whose shape already passed: plain JSON scalars.
-  const bytes = v => new TextEncoder().encode(JSON.stringify(v)).length;
+  const utf8 = s => new TextEncoder().encode(s).length;
+  const bytes = v => utf8(JSON.stringify(v));
+  // Upper bound of lib0 writeAny: a type byte, then a varuint length (at most 5)
+  // for strings, arrays and objects; numbers at most a float64.
+  const any = v => v === null || typeof v === 'boolean' || v === undefined ? 1 : typeof v === 'number' ? 9 : typeof v === 'string' ? 6 + utf8(v)
+    : Array.isArray(v) ? 6 + v.reduce((sum, x) => sum + any(x), 0)
+      : 6 + Object.entries(v).reduce((sum, [k, x]) => sum + 5 + utf8(k) + any(x), 0);
+  // Upper bound of one surface map item in encodeStateAsUpdate: info byte, origin
+  // and right origin IDs (client and clock varuints, at most 8 bytes each), the
+  // parent root name and key strings, the content length, and one delete-set
+  // range (clock and length) once it is overwritten or deleted.
+  const ITEM = 1 + 2 * 16 + 1 + 5 + 5 + 5 + 16;
+  const encoded = (root, key, values) => ITEM + utf8(root) + utf8(key) + values.reduce((sum, v) => sum + any(v), 0);
+  // Per writer: a struct-run header (count, client, clock) and a delete-set client entry.
+  const WRITER = 5 + 8 + 8 + 8 + 5;
 
   const GEOMETRY = ['x', 'y', 'w', 'h', 'z'];
   function geometry(v) {
@@ -101,7 +117,7 @@ export function createSurface({ Y }) {
       roots.set(root, name);
     }
     if (roots.size === 0) return Object.defineProperty(live, 'retained', { value: 0 });
-    const surfaceRoots = new Set(roots.keys());
+    const surfaceRoots = new Set(roots.keys()), writers = new Set();
     let retained = 0;
     for (const structs of doc.store.clients.values()) for (const item of structs) {
       if (!(item instanceof Y.Item)) continue;
@@ -111,13 +127,14 @@ export function createSurface({ Y }) {
         continue;
       }
       if (item.parentSub === null || !validID(item.parentSub)) fail('invalid surface key');
-      retained += item.parentSub.length;
-      if (item.content instanceof Y.ContentDeleted) { if (retained > LIMITS.retainedBytes) fail('surface history limit'); continue; }
-      if (!(item.content instanceof Y.ContentAny) || item.content.arr.length < 1 || (!item.deleted && item.content.arr.length !== 1)) fail('unsupported surface content');
-      for (const value of item.content.arr) {
-        if (!validValue[name](item.parentSub, value)) fail(failure[name]);
-        if ((retained += bytes(value)) > LIMITS.retainedBytes) fail('surface history limit');
+      if (!writers.has(item.id.client)) { writers.add(item.id.client); retained += WRITER; }
+      if (item.content instanceof Y.ContentDeleted) {
+        if ((retained += encoded(name, item.parentSub, [])) > LIMITS.retainedBytes) fail('surface history limit');
+        continue;
       }
+      if (!(item.content instanceof Y.ContentAny) || item.content.arr.length < 1 || (!item.deleted && item.content.arr.length !== 1)) fail('unsupported surface content');
+      for (const value of item.content.arr) if (!validValue[name](item.parentSub, value)) fail(failure[name]);
+      if ((retained += encoded(name, item.parentSub, item.content.arr)) > LIMITS.retainedBytes) fail('surface history limit');
       if (!item.deleted) target[name].set(item.parentSub, item.content.arr[0]);
     }
     if (live.placements.size > LIMITS.entries || live.items.size > LIMITS.entries || live.text.size > LIMITS.entries) fail('surface entry limit');
@@ -182,7 +199,8 @@ export function createSurface({ Y }) {
   }
   // entries: [key, value] pairs this write sets (deletions add no payload).
   function commit(doc, origin, entries, action) {
-    const cost = entries.reduce((sum, [key, value]) => sum + key.length + bytes(value), 0);
+    // As the walk counts it, with the longest root name and a new writer each time: never below it.
+    const cost = WRITER + entries.reduce((sum, [key, value]) => sum + encoded(PLACEMENTS, key, [value]), 0);
     const retained = checked(doc);
     if (retained + cost > LIMITS.retainedBytes) fail('surface history limit');
     doc.transact(action, origin);

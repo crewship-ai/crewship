@@ -278,7 +278,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       // The Canvas budget is checked on the merged state, so copies that each
       // stayed inside it cannot be stored together past it (schema 6).
       try { validate(doc,resultVersion); } catch (error) {
-        if (error.message === 'surface history limit') throw fault(413, 'Canvas history is full; this change was not saved and stays in your draft.', 'surface_quota');
+        if (error.message === 'surface history limit' || error.message === 'surface entry limit') throw fault(413, error.message === 'surface entry limit' ? 'The canvas holds as many items as it can; this change was not saved and stays in your draft.' : 'Canvas history is full; this change was not saved and stays in your draft.', 'surface_quota');
         throw error;
       }
       const blocks = (await outline(doc,resultVersion)).map(({ id, hash }) => ({ id, hash }));

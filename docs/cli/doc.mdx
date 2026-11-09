@@ -204,9 +204,10 @@ with each other, with emphasis and with `link`; inline `code` still stands alone
 Schema 6 stores Canvas placements, notes and shapes beside the page in their own
 roots. Moving a block on the canvas never changes its text, block ID or hash, so
 the page, its Markdown and its comment anchors are the same as at schema 5. The
-canvas has its own share of the document budget (512 KiB of history); a save
-that would exceed it is refused with status 413 and code `surface_quota`, and
-the page keeps room for text.
+canvas has its own share of the document budget (512 KiB of history, counted
+as an upper bound of its stored bytes); a save that would exceed it, or the
+2000-entry limit, is refused with status 413 and code `surface_quota`, and the
+page keeps room for text.
 
 Agent drafting and document creation from chat still produce schema 3; an agent
 cannot edit a schema 4, 5 or 6 document yet.
@@ -348,7 +349,7 @@ crewship doc outline @<artifact-id>
 Save an explicitly guarded update. `--file` is required; `--file -` reads stdin.
 Supply one JSON object of at most 2 MiB. A semantic text replacement contains
 `id`, `schema`, the confirmed `epoch`, `target` block ID, replacement `text`,
-`ifRev` and `ifHash`. Schemas 3, 4 and 5 also require the original `page_id`. The editor's
+`ifRev` and `ifHash`. Schemas 3 to 6 also require the original `page_id`. The editor's
 binary update form uses `kind: "human"` and a base64 `update` instead.
 
 A changed revision, target hash or epoch refuses the edit. Read the confirmed
