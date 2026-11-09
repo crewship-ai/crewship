@@ -140,10 +140,11 @@ it("explains the History limit without hiding the list",()=>{
   const p=props()
   const list={status:"ready" as const,scopeKey:p.scopeKey,data:{checkpoints:[row],history_limit_reached:true as const}}
   render(<DocumentHistory {...p} list={list}/>)
-  expect(screen.getByRole("status",{name:"History limit"})).toHaveTextContent("Your edits are still saved")
+  // A note, not a live region: it is not re-announced on every list refresh.
+  expect(screen.getByRole("note",{name:"History limit"})).toHaveTextContent("Your edits are still saved")
   expect(screen.getByRole("button",{name:/Revision 7/})).toBeInTheDocument()
 })
 it("says nothing about a limit that was not reached",()=>{
   render(<DocumentHistory {...props()}/>)
-  expect(screen.queryByRole("status",{name:"History limit"})).toBeNull()
+  expect(screen.queryByRole("note",{name:"History limit"})).toBeNull()
 })

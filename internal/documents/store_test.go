@@ -37,6 +37,9 @@ func fixture(t *testing.T, o Options) (*Store, *database.DB, string) {
 			t.Fatal(err)
 		}
 	}
+	// Session skips are remembered per process; every fixture reuses the same key.
+	resetSessionSkips()
+	t.Cleanup(resetSessionSkips)
 	s := New(db.DB, o)
 	if _, err := s.Init(ctx, key, 1, []byte("baseline"), projection, allow); err != nil {
 		t.Fatal(err)

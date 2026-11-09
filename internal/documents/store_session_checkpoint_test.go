@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/database"
 )
@@ -25,7 +26,7 @@ func TestCommitPinsSessionCheckpoints(t *testing.T) {
 	}{
 		{"quick edits by the creator keep only the initial checkpoint", []step{{"self", ""}, {"self", ""}, {"self", ""}}, []int64{0}},
 		{"an edit after the session interval pins the new head", []step{{"self", ""}, {"self", "-11 minutes"}, {"self", ""}}, []int64{2, 0}},
-		{"another author after the minimum gap pins the new head", []step{{"self", ""}, {"other", "-2 minutes"}, {"other", ""}}, []int64{2, 0}},
+		{"another author after the author-change gap pins the new head", []step{{"self", ""}, {"other", "-6 minutes"}, {"other", ""}}, []int64{2, 0}},
 		{"interleaved authors within a minute do not pin every commit", []step{{"other", ""}, {"self", ""}, {"other", ""}, {"self", ""}}, []int64{0}},
 		{"a long session pins once per interval", []step{{"self", "-11 minutes"}, {"self", ""}, {"self", "-11 minutes"}, {"self", ""}}, []int64{3, 1, 0}},
 	} {
@@ -241,15 +242,22 @@ func TestSessionCheckpointTimestampAndRetry(t *testing.T) {
 	}
 }
 
-// An explicit checkpoint whose client-chosen ID starts with "session-" counts
-// in the explicit half, not against automatic session pins, and is kept.
-func TestExplicitCheckpointsNamedLikeSessionPinsAreKept(t *testing.T) {
+// New explicit checkpoints may not use the "session-" prefix, so they can never
+// take a pin's ID. An older explicit "session-x" checkpoint (it has a receipt)
+// still counts in the explicit half, not against automatic pins, and is kept.
+func TestSessionPrefixIsReservedAndOlderExplicitOnesAreKept(t *testing.T) {
 	s, db, _ := fixture(t, Options{MaxHistoryBytes: 200})
 	l := acquire(t, s)
-	if _, e := s.Checkpoint(ctx, key, l, "session-explicit", []byte("explicit-sixteen"), 0, allow); e != nil {
+	if _, e := s.Checkpoint(ctx, key, l, "session-explicit", []byte("explicit-sixteen"), 0, allow); e == nil {
+		t.Fatal("a new explicit checkpoint took the reserved session- prefix")
+	}
+	if _, e := db.Exec(`INSERT INTO document_checkpoints(workspace_id,page_id,id,rev,schema_version,snapshot,projection,actor) VALUES('workspace-a','page-a','session-legacy',0,1,CAST('explicit-sixteen' AS BLOB),CAST('[]' AS BLOB),'server-actor')`); e != nil {
 		t.Fatal(e)
 	}
-	for i := int64(0); i < 4; i++ {
+	if _, e := db.Exec(`INSERT INTO document_receipts(workspace_id,page_id,id,digest,fingerprint,rev,epoch,actor,kind) VALUES('workspace-a','page-a','session-legacy','d','f',0,0,'server-actor','checkpoint')`); e != nil {
+		t.Fatal(e)
+	}
+	for i := int64(0); i < 2; i++ {
 		ageCheckpoints(t, db)
 		c := commit(l, fmt.Sprint("edit-", i), i)
 		c.CandidateSnapshot = []byte("sixteen-byte-st" + fmt.Sprint(i))
@@ -257,15 +265,76 @@ func TestExplicitCheckpointsNamedLikeSessionPinsAreKept(t *testing.T) {
 			t.Fatal(i, e)
 		}
 	}
+	// Two automatic pins (84 bytes) fit beside the legacy explicit one only if it is not counted as automatic.
 	ids, _ := checkpointRows(t, db)
-	found := false
-	for _, id := range ids {
-		found = found || id == "session-explicit"
+	if len(ids) != 4 {
+		t.Fatalf("legacy explicit checkpoint counted as automatic or lost: %v", ids)
 	}
-	if !found {
-		t.Fatalf("explicit checkpoint was evicted: %v", ids)
-	}
-	if _, e := s.CheckpointRead(ctx, key, "session-explicit", allow); e != nil {
+	if _, e := s.CheckpointRead(ctx, key, "session-legacy", allow); e != nil {
 		t.Fatal(e)
 	}
+}
+
+// Interleaved authors pin at most once per author-change gap, and a result
+// identical to the newest checkpoint is never pinned again.
+func TestSessionPinsUnderConcurrentAuthors(t *testing.T) {
+	s, db, _ := fixture(t, Options{})
+	l := acquire(t, s)
+	other := func(context.Context, *sql.Tx) (string, error) { return "user:other", nil }
+	age := func(modifier string) {
+		if _, e := db.Exec(`UPDATE document_checkpoints SET created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now',?)`, modifier); e != nil {
+			t.Fatal(e)
+		}
+	}
+	commitAs := func(a Authorize, i int64, snapshot string) {
+		t.Helper()
+		c := commit(l, fmt.Sprint("edit-", i), i)
+		c.CandidateSnapshot = []byte(snapshot)
+		if _, e := s.Commit(ctx, key, c, a); e != nil {
+			t.Fatal(i, e)
+		}
+	}
+	age("-2 minutes")
+	commitAs(other, 0, "a") // another author, but only two minutes later: no pin
+	age("-6 minutes")
+	commitAs(other, 1, "b") // another author after the gap: pin
+	commitAs(allow, 2, "c") // the newest pin is seconds old: no pin
+	age("-11 minutes")
+	commitAs(allow, 3, "b") // due, but identical to the newest pin: no pin
+	if ids, _ := checkpointRows(t, db); len(ids) != 2 {
+		t.Fatalf("want the initial checkpoint and one pin: %v", ids)
+	}
+}
+
+// Automatic snapshots stop before the workspace storage budget is nearly full,
+// so later edits always have room, and History reports the skip.
+func TestSessionPinsLeaveWorkspaceHeadroomForEdits(t *testing.T) {
+	s, db, _ := fixture(t, Options{})
+	l := acquire(t, s)
+	var used int64
+	if e := db.QueryRow(`SELECT used_bytes FROM artifact_storage_workspaces WHERE workspace_id='workspace-a'`).Scan(&used); e != nil {
+		t.Fatal(e)
+	}
+	// 85% used (counting reservations): above the 80% high-water mark, with 15 kB left for edits.
+	if _, e := db.Exec(`UPDATE artifact_storage_workspaces SET max_bytes=100000,reserved_bytes=? WHERE workspace_id='workspace-a'`, 85000-used); e != nil {
+		t.Fatal(e)
+	}
+	for i := int64(0); i < 3; i++ {
+		ageCheckpoints(t, db)
+		if _, e := s.Commit(ctx, key, commit(l, fmt.Sprint("edit-", i), i), allow); e != nil {
+			t.Fatal("an edit failed under storage pressure:", i, e)
+		}
+	}
+	if ids, _ := checkpointRows(t, db); len(ids) != 1 {
+		t.Fatalf("automatic snapshots used the space edits need: %v", ids)
+	}
+	if full, e := s.SessionHistoryFull(ctx, key, allow); e != nil || !full {
+		t.Fatal("a skip for storage must be reported", full, e)
+	}
+}
+
+func resetSessionSkips() {
+	sessionSkips.Lock()
+	sessionSkips.at = map[Key]time.Time{}
+	sessionSkips.Unlock()
 }

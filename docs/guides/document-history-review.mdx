@@ -37,8 +37,10 @@ is unknown. See [Docs CLI](/cli/doc).
 ## History limit
 
 History keeps an automatic snapshot of a document at editing-session
-boundaries. Automatic snapshots share half of the document's History budget
-and are never deleted. When that share is used, History shows "This document
-has reached its History limit": your edits are still saved, but no new
-automatic snapshots are added. The current version and the listed revisions
-stay available.
+boundaries: at most every ten minutes, or five minutes after another author
+starts editing. Automatic snapshots share half of the document's History
+budget, pause while the workspace storage is more than 80% used, and are not
+deleted while the document exists. When no new automatic snapshot can be kept,
+History says "History is not adding new automatic snapshots of this document
+because its storage limit is reached." Your edits are still saved, and the
+listed revisions can still be compared and restored.

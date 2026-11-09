@@ -44,15 +44,19 @@ the initialization request digest, with the same trusted actor and history byte
 budget. Exact retries retain that one checkpoint without another receipt. Later
 human edits leave the initial version readable; existing documents are not
 backfilled. Individual edits are not all pinned: a commit pins its confirmed
-result as a `session-` checkpoint when the newest checkpoint is older than ten
-minutes, or was written by another actor at least one minute ago. Session pins
-are best effort (they never refuse the edit; a pin refused by the History,
-workspace storage or disk budget is undone in a savepoint), write no receipt,
-and share at most half of the History byte budget, so explicit checkpoints and
-restores keep their headroom. No checkpoint is ever deleted: once that half is
-used, new session pins are skipped and `SessionHistoryFull` reports it, so the
-History list can say why (`history_limit_reached`). A retention policy is a
-separate decision (R71 §0.11).
+result as a `session-` checkpoint at least ten minutes after the newest
+checkpoint, or five minutes after another actor's, unless it is identical to
+that checkpoint (store_session_checkpoint.go has the growth arithmetic).
+Session pins are best effort: they never refuse the edit (a refused pin is
+undone in a savepoint), write no receipt, share at most half of the History
+byte budget, and pause while workspace or instance storage would be more than
+80% used, so explicit checkpoints, restores and later edits keep their room.
+No checkpoint is deleted while its page exists (retention is a separate
+decision, R71 §0.11). A skip is remembered in-process for one interval, which
+bounds the cost of a full document and lets `SessionHistoryFull` report it
+(`history_limit_reached`). The `session-` prefix is reserved for new
+explicit checkpoints.
+
 Restoration creates a new head revision, advances its epoch and generation,
 and clears the writer lease. It replaces the replay log while retaining pinned
 checkpoints and retry receipts. Checkpoint and restore retries bind the original
