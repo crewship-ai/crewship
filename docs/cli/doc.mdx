@@ -119,12 +119,13 @@ The routines MCP tools `doc_draft_view`, `doc_draft_prepare`, `doc_draft_apply`
 and `doc_draft_checkpoint` use the same permission and immutable requests. They
 do not accept raw Yjs updates or whole-document replacement.
 
-### Proposing on a schema 4 document
+### Proposing on a schema 4 or 5 document
 
-On a schema 4 document an agent never edits directly: it proposes, and a person
-with edit access accepts or rejects each proposal. The run needs a schema 4
-targeted message from the person who asked (`document_iteration_intent` with
-`"schema": 4`, optionally `"blocks": ["<block-id>", …]` to limit it to up to 16
+On a schema 4 or 5 document an agent never edits directly: it proposes, and a
+person with edit access accepts or rejects each proposal. The run needs a
+targeted message from the person who asked that names the document's own
+schema (`document_iteration_intent` with `"schema": 4` or `"schema": 5`; a
+mandate naming another schema than the document has is refused), optionally `"blocks": ["<block-id>", …]` to limit it to up to 16
 blocks). The person needs edit access to the document. On anything but their
 own personal private document the agent also needs a live `write` grant naming
 it (`crewship page grant <slug> --agent <agent> --level write`); a `read` grant
@@ -187,11 +188,12 @@ does require one, so the same artifact is not a valid
 [`slides initialize`](/cli/slides) target.)
 
 Then supply a JSON request
-containing an operation `id`, explicit `schema` (2, 3 or 4), and a `body` document
-tree. Schemas 3 and 4 also require the original `page_id`. Headings, paragraphs,
+containing an operation `id`, explicit `schema` (2, 3, 4 or 5), and a `body` document
+tree. Schemas 3, 4 and 5 also require the original `page_id`. Headings, paragraphs,
 lists and simple tables use schema 2; schema 3 adds links, inline code and code
 blocks; schema 4 adds bold, italic and strikethrough, a code block `language`,
-block quotes and checklists. Initialization does not silently upgrade an
+block quotes and checklists; schema 5 adds underline, text colour and
+highlight. Initialization does not silently upgrade an
 existing document.
 
 Schema 4 nodes and marks:
@@ -203,13 +205,68 @@ Schema 4 nodes and marks:
 | Block quote | `blockquote` holding one or more blocks |
 | Checklist | `taskList` of `taskItem` nodes, each with `attrs.checked` (`true` or `false`) and a paragraph |
 
+Schema 5 adds three marks to these; every schema 4 document is valid schema 5
+content unchanged:
+
+| In the document | Mark |
+| --- | --- |
+| Underline | `underline` with `attrs: {}` |
+| Text colour | `textColor` with `attrs: {"color": "<name>"}` |
+| Highlight | `highlight` with `attrs: {"color": "<name>"}` |
+
+`<name>` is one of `gray`, `red`, `orange`, `yellow`, `green`, `blue`, `purple`,
+`pink`. Any other value, including CSS colours, is refused. These marks combine
+with each other, with emphasis and with `link`; inline `code` still stands alone.
+
+```json
+{"type":"text","text":"Due Friday","marks":[{"type":"bold","attrs":{}},{"type":"underline","attrs":{}},{"type":"highlight","attrs":{"color":"yellow"}}]}
+```
+
 ```json
 {"type":"taskList","attrs":{"id":"todo"},"content":[{"type":"taskItem","attrs":{"id":"todo-1","checked":true},"content":[{"type":"paragraph","attrs":{"id":"todo-1-p"},"content":[{"type":"text","text":"Ship it","marks":[{"type":"bold","attrs":{}}]}]}]}]}
 ```
 
-Agent drafting and document creation from chat still produce schema 3. On a
-schema 4 document an agent proposes and a person accepts; see
-[Proposing on a schema 4 document](#proposing-on-a-schema-4-document).
+Schema 5 also has two inline nodes, placed among the text of a paragraph or
+heading. Each has exactly one attribute, no content and no marks:
+
+| In the document | Node |
+| --- | --- |
+| Date | `date` with `attrs: {"value": "YYYY-MM-DD"}`: one real calendar day, never a time or free text |
+| Mention | `mention` with `attrs: {"userId": "<user-id>"}`: only the person's id, never a name or address |
+
+A reader shows a date in their own locale and a mention as the name they may
+see (`crewship doc people`); anyone else, including a person without access to
+the document, appears as **Unknown member**. Block text in `read` and `outline`
+leaves both out. Markdown writes the date as `YYYY-MM-DD` and a mention as `@`
+and a name only when the export is given the names its reader may see, otherwise
+as `@Unknown member`. A semantic edit that would insert text beside a date or
+mention, or delete across one, is refused with `ambiguous_inline_atom`.
+
+```json
+{"type":"paragraph","attrs":{"id":"due"},"content":[{"type":"text","text":"Review on "},{"type":"date","attrs":{"value":"2026-11-20"}},{"type":"text","text":" with "},{"type":"mention","attrs":{"userId":"<user-id>"}}]}
+```
+
+
+New documents, from the New Doc dialog, New artifact and an agent's `doc
+create`, start at schema 5, the creation schema; documents created earlier keep
+their schema and are never upgraded automatically. `crewship doc read` lists
+what the document's schema supports in `capabilities`:
+
+| Schema | Capabilities |
+| --- | --- |
+| 1, 2 | read, edit, restore, export, upgrade |
+| 3 | read, edit, draft, restore, export, upgrade |
+| 4 | read, edit, draft, propose, accept, restore, export, upgrade |
+| 5 | read, edit, draft, propose, accept, restore, export |
+
+`draft` is the run that created the document with your drafting permission
+editing it directly. On a schema 4 or 5 document any other agent request is a
+proposal at the document's own schema, and a person accepts it; see
+[Proposing on a schema 4 or 5 document](#proposing-on-a-schema-4-or-5-document).
+A proposal keeps every mark, date and mention outside the text it changes; one
+that would insert text beside a date or mention, or delete across one, is
+refused with `ambiguous_inline_atom`. A proposal made at one schema is never
+accepted after the document's schema changed; it can still be rejected.
 
 `--file` is required. Use `--file -` to read stdin. The file must contain one JSON
 object of at most 2 MiB. Keep the same operation ID and contents when retrying
@@ -270,8 +327,10 @@ Document first and confirm the intended checkpoint. Keep the exact same packet
 for a retry after uncertain confirmation; never refresh its revision or epoch.
 The server checks current human write access. A successful restore increments
 the revision and generation and invalidates the previous writer epoch. The
-receipt has `page_id`, `id`, `rev`, `epoch` and `kind`. The first commit may
-omit `schema`; a replay may include it and `duplicate`.
+receipt has `page_id`, `id`, `rev`, `epoch`, `kind` and `schema`, the
+document's schema after the restore; a replay also has `duplicate`. A schema 5
+document stays at schema 5 when you restore a checkpoint from before its
+upgrade, so new agent proposals are made at schema 5, never silently at 4.
 
 ```bash
 crewship doc restore @<artifact-id> --file restore.json
@@ -348,7 +407,7 @@ crewship doc outline @<artifact-id>
 Save an explicitly guarded update. `--file` is required; `--file -` reads stdin.
 Supply one JSON object of at most 2 MiB. A semantic text replacement contains
 `id`, `schema`, the confirmed `epoch`, `target` block ID, replacement `text`,
-`ifRev` and `ifHash`. Schemas 3 and 4 also require the original `page_id`. The editor's
+`ifRev` and `ifHash`. Schemas 3, 4 and 5 also require the original `page_id`. The editor's
 binary update form uses `kind: "human"` and a base64 `update` instead.
 
 A changed revision, target hash or epoch refuses the edit. Read the confirmed
@@ -435,7 +494,7 @@ crewship doc comment-resolve @<artifact-id> --file resolve.json
 
 ## `crewship doc proposals <page-slug>`
 
-List an agent's proposals on a schema 4 document, oldest first. Each has `id`,
+List an agent's proposals on a schema 4 or 5 document, oldest first. Each has `id`,
 `author`, `run_id`, `target.block_ids`, `base_rev`, `status`, `text` and
 `created_at`. `status` is `open`, `stale` (its block changed after it was made,
 so it can no longer be accepted), `accepted` or `rejected`. Reading needs read
@@ -467,6 +526,26 @@ crewship doc proposal-accept @<artifact-id> <proposal-id> --expected-rev 7 --req
 
 Close an open proposal without changing the document. It takes the same
 `--expected-rev` and `--request-id` and needs edit access.
+
+## `crewship doc people <page-slug>`
+
+Name the people mentioned in a schema 5 document, or find people to mention.
+`--ids` takes up to 100 comma-separated user ids; `--query` (or no flag) lists
+at most 20 people whose name contains the text. Only people who can read this
+document appear, and only when you can read it. Any other id is simply left out,
+so the answer never says whether an id exists; readers show it as
+**Unknown member**. Lookups are limited per person (30 at once, then 2 per
+second); past that the command fails with HTTP 429 and you retry after the
+`Retry-After` time.
+
+```bash
+crewship doc people @<artifact-id> --ids <user-id>,<user-id>
+crewship doc people <slug> --query ada
+```
+
+```json
+{"people":[{"id":"<user-id>","name":"Ada Owner"}]}
+```
 
 ## Errors
 

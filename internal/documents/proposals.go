@@ -18,9 +18,6 @@ const ProposalLimit = 500
 // ProposalOpenLimit bounds the proposals awaiting review on one document.
 const ProposalOpenLimit = 100
 
-// ProposalSchema is the only content schema proposals exist on (#5137).
-const ProposalSchema = 4
-
 var ErrInvalidProposal = errors.New("invalid bounded proposal")
 
 var proposalHash = regexp.MustCompile(`^[a-f0-9]{64}$`)
@@ -54,6 +51,10 @@ type Proposal struct {
 // writer transaction; it is required.
 type ProposalInput struct {
 	ID, Fingerprint, RunID, Target, BaseHash, ProposedHash, Text string
+	// Schema is the document schema the proof was made and checked at. The
+	// proposal is bound to it: it is stored only on a document of exactly
+	// this schema and accepted only while the document still has it.
+	Schema int
 	// Ancestors are the target's enclosing block IDs, nearest first: their
 	// subtree hashes change with the target and nothing else may.
 	Ancestors      []string
@@ -64,7 +65,7 @@ type ProposalInput struct {
 }
 
 func (in ProposalInput) valid() bool {
-	return in.ID != "" && len(in.ID) <= 128 && len(in.Fingerprint) <= 256 && in.RunID != "" && len(in.RunID) <= 256 &&
+	return SchemaAllows(in.Schema, CapPropose) && in.ID != "" && len(in.ID) <= 128 && len(in.Fingerprint) <= 256 && in.RunID != "" && len(in.RunID) <= 256 &&
 		proposalBlock.MatchString(in.Target) && proposalHash.MatchString(in.BaseHash) && proposalHash.MatchString(in.ProposedHash) &&
 		utf8.ValidString(in.Text) && len(in.Text) <= 100000 && in.Generation != nil && in.IfRev >= 0 && in.Guard != nil &&
 		len(in.Ancestors) <= 40 && validProposalBlocks(in.Ancestors) &&
@@ -107,7 +108,7 @@ func (s *Store) Propose(ctx context.Context, k Key, in ProposalInput, a Authoriz
 		if e != nil {
 			return e
 		}
-		if v.Schema != ProposalSchema {
+		if v.Schema != in.Schema || !SchemaAllows(v.Schema, CapPropose) {
 			return ErrSchema
 		}
 		if v.HeadRev != in.IfRev || v.Generation != *in.Generation {
@@ -275,14 +276,16 @@ func AcceptProposalGuard(k Key, proposal, decision string, candidate json.RawMes
 		}
 		var target, base, proposed, status, path string
 		var generation int64
-		e := tx.QueryRowContext(ctx, `SELECT target,ancestors,base_hash,proposed_hash,status,generation FROM document_proposals WHERE workspace_id=? AND page_id=? AND id=?`, k.WorkspaceID, k.PageID, proposal).Scan(&target, &path, &base, &proposed, &status, &generation)
+		var schema int
+		e := tx.QueryRowContext(ctx, `SELECT target,ancestors,base_hash,proposed_hash,status,generation,schema_version FROM document_proposals WHERE workspace_id=? AND page_id=? AND id=?`, k.WorkspaceID, k.PageID, proposal).Scan(&target, &path, &base, &proposed, &status, &generation, &schema)
 		if errors.Is(e, sql.ErrNoRows) {
 			return ErrNotFound
 		}
 		if e != nil {
 			return e
 		}
-		if status != "open" || generation != v.Generation || v.Schema != ProposalSchema {
+		// A proposal is accepted only at the schema it was proved at.
+		if status != "open" || generation != v.Generation || schema != v.Schema || !SchemaAllows(v.Schema, CapAccept) {
 			return ErrConflict
 		}
 		var ancestors []string

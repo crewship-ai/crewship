@@ -6,7 +6,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
-import { VERSION, RICH_VERSION, LATEST_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
+import { VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION, CREATE_VERSION, schemaAllows, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown, validUserId } from './schema.mjs';
 import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
@@ -17,9 +17,12 @@ const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(v
 const textBoundary = (text, index) => index === 0 || index === text.length ||
   !(text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff && text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff);
 const contentSchema = version => version === 1 ? VERSION : version;
-const supportedSchema = version => [1, VERSION, RICH_VERSION, LATEST_VERSION].includes(version);
-// Schemas 3 and 4 are bound to their original Page and carry rich semantic proofs.
-const richSchema = version => version === RICH_VERSION || version === LATEST_VERSION;
+const supportedSchema = version => [1, VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION].includes(version);
+// Mirrors Go documents.RestoredSchema (#5155): a restore never takes a schema 5
+// Document below schema 5, so schema 4 proposals are never silently re-enabled.
+const restoredSchema = (current, checkpoint) => current === LATEST_VERSION && checkpoint < LATEST_VERSION ? LATEST_VERSION : checkpoint;
+// Schemas 3, 4 and 5 are bound to their original Page and carry rich semantic proofs.
+const richSchema = version => version === RICH_VERSION || version === FORMATTED_VERSION || version === LATEST_VERSION;
 async function verifyTargets(doc, targets, version = VERSION) {
   if (!Array.isArray(targets) || targets.length < 1 || targets.length > 16) throw fault(400, 'one to sixteen selected text targets required');
   const blocks = new Map((await outline(doc,version)).map(block => [block.id, block]));
@@ -131,9 +134,13 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   async function execute(page, operation, context, request) {
     switch (operation) {
       case 'prepare-create': {
-        if (!request || typeof request !== 'object' || Object.keys(request).length !== 1 || !Object.hasOwn(request,'blocks')) throw fault(400,'closed authoring blocks required');
-        const doc=create(creationDocument(request.blocks),RICH_VERSION);
-        try { return {schema:RICH_VERSION,snapshot:snapshot(doc),blocks:(await outline(doc,RICH_VERSION)).map(({id,hash})=>({id,hash}))}; }
+        // Go names the creation schema (documents.CreateSchema); a caller that
+        // sends blocks alone gets the creation schema, never "latest".
+        if (!request || typeof request !== 'object' || Array.isArray(request) || !Object.hasOwn(request,'blocks') || Object.keys(request).some(key=>!['blocks','schema'].includes(key))) throw fault(400,'closed authoring blocks required');
+        const version = Object.hasOwn(request,'schema') ? request.schema : CREATE_VERSION;
+        if (!richSchema(version) || !schemaAllows(version,'draft')) throw fault(409,'unsupported creation schema');
+        const doc=create(creationDocument(request.blocks),version);
+        try { return {schema:version,snapshot:snapshot(doc),blocks:(await outline(doc,version)).map(({id,hash})=>({id,hash}))}; }
         finally { doc.destroy(); }
       }
       case 'read': return executeRead(page, 'read', context, request);
@@ -151,6 +158,14 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         return executeProposalDecision(page, operation, context, request);
       default: throw fault(404, 'unknown operation');
     }
+  }
+  // Names the caller resolved for this reader (Go decides who may be named).
+  // The engine never looks names up and refuses anything but a bounded map.
+  function exportPeople(people) {
+    if (people === undefined || people === null) return undefined;
+    if (typeof people !== 'object' || Array.isArray(people) || Object.keys(people).length > 1000) throw fault(400, 'invalid export people');
+    for (const [id, name] of Object.entries(people)) if (!validUserId(id) || typeof name !== 'string' || !name || [...name].length > 200 || /[\u0000-\u001f\u007f]/.test(name)) throw fault(400, 'invalid export people');
+    return people;
   }
   async function executeRead(page, operation, context, request) {
     if (operation === 'verify-targets' && context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'human request admission required');
@@ -170,7 +185,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         if (!Number.isSafeInteger(request.base_rev) || request.base_rev !== state.rev) throw fault(409, 'document request revision changed');
         return { page_id: page, rev: state.rev, ...(richSchema(version) ? {schema:version} : {}), targets: await verifyTargets(doc, request.targets,version) };
       }
-      if(operation==='export') { try { return {markdown:markdown(validate(doc,version),version)}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; } }
+      if(operation==='export') { const people = exportPeople(request.people); try { return {markdown:markdown(validate(doc,version),version,{people})}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; } }
       if(operation==='checkpoints') return {checkpoints:await go(page,'checkpoints',context)};
       if(operation==='checkpoint-read') { const c=await go(page,'checkpoint-read',context,{id:request.checkpoint});const pinned=load(c.snapshot);try{return {...c,content:validate(pinned,contentSchema(c.schema??VERSION)),outline:await outline(pinned,contentSchema(c.schema??VERSION))}}finally{pinned.destroy()} };
       if (operation === 'proposals' || operation === 'proposal') {
@@ -198,7 +213,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     if ((richSchema(request.schema) || request.page_id !== undefined) && request.page_id !== page) throw fault(409,'original Page identity changed');
     if (operation === 'initialize' && richSchema(request.schema) && context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human rich document initialization required');
     if (operation === 'initialize') {
-      if (![VERSION,RICH_VERSION,LATEST_VERSION].includes(request.schema) || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
+      if (![VERSION,RICH_VERSION,FORMATTED_VERSION,LATEST_VERSION].includes(request.schema) || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
       const fingerprint = await hash({ operation, request });
       try { const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint }); if (receipt.found) return { ...receipt, duplicate: true }; } catch (error) { if (error.status !== 404) throw error; }
       const doc = create(request.body,request.schema);
@@ -215,13 +230,13 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint });
     if (receipt.found) {
       let schema = operation === 'upgrade' ? request.target_schema : request.schema;
-      if (operation === 'restore') { const pinned = await go(page,'checkpoint-read',context,{id:request.checkpoint}); schema = pinned.schema ?? VERSION; }
+      if (operation === 'restore') { const pinned = await go(page,'checkpoint-read',context,{id:request.checkpoint}); schema = restoredSchema(state.schema, pinned.schema ?? VERSION); }
       return { ...receipt, schema, epoch:syncEpoch(state), duplicate: true };
     }
     if (request.schema !== state.schema && !(state.schema === 1 && request.schema === VERSION)) throw fault(409,'unsupported client schema; reopen the confirmed document');
     if (operation === 'upgrade') {
       if (context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human schema upgrade required');
-      if (request.page_id !== page || request.target_schema !== LATEST_VERSION || ![1,VERSION,RICH_VERSION].includes(state.schema) || request.ifRev !== state.rev || Object.keys(request).some(key=>!['id','schema','target_schema','page_id','epoch','ifRev'].includes(key))) throw fault(409,'original Page identity, revision and supported upgrade required');
+      if (request.page_id !== page || request.target_schema !== LATEST_VERSION || !schemaAllows(state.schema,'upgrade') || request.ifRev !== state.rev || Object.keys(request).some(key=>!['id','schema','target_schema','page_id','epoch','ifRev'].includes(key))) throw fault(409,'original Page identity, revision and supported upgrade required');
     }
     let doc = load(state.snapshot); let lease;
     try {
@@ -246,22 +261,25 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       if (operation === 'propose') {
         // A proposal is stored beside the document and never changes content,
         // revision, epoch or generation. Only a live agent run proposes, only
-        // on schema 4, and only as a closed semantic replacement Go re-proves.
+        // on a schema that supports proposals, at the document's own schema,
+        // and only as a closed semantic replacement Go re-proves (#5233).
         if (!context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'agent run proposal required');
         const fields = ['id','schema','page_id','epoch','ifRev','target','ifHash','text'];
         if (Object.keys(request).some(key => !fields.includes(key)) || fields.some(key => request[key] === undefined)) throw fault(400, 'closed proposal request required');
-        if (version !== LATEST_VERSION || request.schema !== LATEST_VERSION) throw fault(409, 'proposals require a schema 4 document');
+        if (!schemaAllows(version, 'propose') || request.schema !== version) throw fault(409, 'proposals are not available at this document schema');
         if (typeof request.text !== 'string' || request.text.length > 100000) throw fault(400, 'bounded proposal text required');
         const target = (await outline(doc,version)).find(block => block.id === request.target);
         if (request.ifRev !== state.rev || !target || target.hash !== request.ifHash) throw fault(409, 'semantic precondition conflict');
         if (!['paragraph','heading'].includes(target.type)) throw fault(400, 'propose text inside a paragraph or heading');
         const richProof = () => { const value=validate(doc,version); if(Buffer.byteLength(JSON.stringify(value),'utf8')>500000) throw fault(413,'rich semantic proof exceeds 500000 bytes; content unchanged'); return value; };
         const before = richProof();
-        const edit = patch(doc, { op: 'replaceText', id: request.target, text: request.text }, version);
+        let edit;
+        try { edit = patch(doc, { op: 'replaceText', id: request.target, text: request.text }, version); }
+        catch (error) { if (error.code === 'ambiguous_inline_atom') throw fault(409, error.message, error.code); throw error; }
         if (doc.store.pendingStructs || doc.store.pendingDs) throw fault(400, 'unresolved Yjs dependencies');
         const after = richProof();
         const blocks = (await outline(doc,version)).map(({ id, hash }) => ({ id, hash }));
-        return {...await go(page, 'propose', context, { id: request.id, fingerprint, target: request.target, ifHashes: { [request.target]: request.ifHash }, semantic: { target: request.target, text: request.text, edit, rich: { before, after } }, blocks, ifRev: state.rev, generation: state.generation ?? 0 }), epoch: syncEpoch(state)};
+        return {...await go(page, 'propose', context, { id: request.id, fingerprint, schema: version, target: request.target, ifHashes: { [request.target]: request.ifHash }, semantic: { target: request.target, text: request.text, edit, rich: { before, after } }, blocks, ifRev: state.rev, generation: state.generation ?? 0 }), epoch: syncEpoch(state)};
       }
       const key=`${context.workspace}/${page}`;
       lease=await writerLease(page,context,state);
@@ -271,7 +289,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         leases.delete(key);
         return {...result,schema:LATEST_VERSION,epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
       }
-      const hashes = {}; let semantic; let resultVersion = version;
+      const hashes = {}; let semantic; let resultVersion = version; let restored;
       switch (operation) {
         case 'patch':
           if (request.kind === 'human') {
@@ -298,7 +316,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
           if (request.ifRev !== state.rev) throw fault(409, 'restore precondition conflict');
           const checkpoint = await go(page, 'checkpoint-read', context, { id: request.checkpoint });
           if (checkpoint.schema !== undefined && !supportedSchema(checkpoint.schema)) throw fault(409, 'unsupported checkpoint schema');
-          resultVersion = contentSchema(checkpoint.schema??VERSION); doc.destroy(); doc = load(checkpoint.snapshot); break;
+          resultVersion = contentSchema(checkpoint.schema??VERSION); restored = restoredSchema(state.schema, checkpoint.schema??VERSION); doc.destroy(); doc = load(checkpoint.snapshot); if (restored !== contentSchema(checkpoint.schema??VERSION)) validate(doc, restored); break;
         }
         case 'checkpoint':
           if (request.ifRev !== state.rev) throw fault(409, 'checkpoint precondition conflict');
@@ -310,7 +328,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       const blocks = (await outline(doc,resultVersion)).map(({ id, hash }) => ({ id, hash }));
       const renewal=await go(page, 'renew', context, { owner, epoch: lease.epoch, token: lease.token });
       if(renewal.expiresAt)lease.expiresAt=renewal.expiresAt;
-      if (operation === 'restore') return {...await go(page, 'restore', context, { id: request.id, fingerprint, checkpoint: request.checkpoint, ifRev: state.rev,generation:state.generation??0, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner }),epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
+      if (operation === 'restore') return {...await go(page, 'restore', context, { id: request.id, fingerprint, checkpoint: request.checkpoint, ifRev: state.rev,generation:state.generation??0, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner }),schema:restored,epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
       if (operation === 'checkpoint') return {...await go(page, 'checkpoint', context, { id: request.id, fingerprint, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, ifRev: state.rev,generation:state.generation??0, snapshot: snapshot(doc) }),epoch:syncEpoch(state)};
       return {...await go(page, 'commit', context, { id: request.id, fingerprint, kind: operation === 'patch' ? (context.authorization.startsWith('Bearer agtv2.') ? 'agent' : 'human') : operation, ...(operation === 'patch' && context.authorization.startsWith('Bearer agtv2.') ? { semantic } : {}), epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation:state.generation??0, schema: version, snapshot: snapshot(doc), blocks, ifHashes: hashes, checkpoint: request.checkpoint }),epoch:syncEpoch(state)};
     } finally {
@@ -330,29 +348,32 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     const fingerprint = await hash({ operation, request });
     const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint });
     if (receipt.found) return { ...receipt, proposal: request.proposal, epoch: syncEpoch(state), duplicate: true };
-    if (state.schema !== LATEST_VERSION) throw fault(409, 'proposals require a schema 4 document');
+    // Rejecting never changes content, so an open proposal can always be closed.
+    if (operation !== 'proposal-reject' && !schemaAllows(state.schema, 'accept')) throw fault(409, 'proposals are not available at this document schema');
     if (request.ifRev !== state.rev) throw fault(409, 'document changed since the proposal was reviewed; reload');
     const proposal = await go(page, 'proposal', context, { id: request.proposal });
+    const version = state.schema;
     // A proposal from an earlier generation (engine restart, restore) or with a
     // changed target can never be accepted, but it can always be rejected, so
     // nothing is left open that nobody can close.
-    if (proposal.status !== 'open' || (operation !== 'proposal-reject' && proposal.generation !== (state.generation ?? 0))) throw fault(409, 'proposal is no longer open');
+    // A proposal is accepted only at the schema it was proved at (#5233).
+    if (proposal.status !== 'open' || (operation !== 'proposal-reject' && (proposal.generation !== (state.generation ?? 0) || proposal.schema !== version))) throw fault(409, 'proposal is no longer open');
     if (operation === 'proposal-reject') return { ...await go(page, 'proposal-reject', context, { id: request.id, fingerprint, proposal: request.proposal, ifRev: state.rev, generation: state.generation ?? 0 }), proposal: request.proposal, epoch: syncEpoch(state) };
     let doc = load(state.snapshot);
     try {
       for (const update of state.updates || []) Y.applyUpdate(doc, decode(typeof update === 'string' ? update : update.update));
-      validate(doc, LATEST_VERSION);
+      validate(doc, version);
       const baseVector = Y.encodeStateVector(doc);
-      const target = (await outline(doc, LATEST_VERSION)).find(block => block.id === proposal.target);
+      const target = (await outline(doc, version)).find(block => block.id === proposal.target);
       if (!target || target.hash !== proposal.base_hash) throw fault(409, 'proposal target changed; it can no longer be accepted as reviewed');
-      patch(doc, { op: 'replaceText', id: proposal.target, text: proposal.text }, LATEST_VERSION);
+      patch(doc, { op: 'replaceText', id: proposal.target, text: proposal.text }, version);
       if (doc.store.pendingStructs || doc.store.pendingDs) throw fault(400, 'unresolved Yjs dependencies');
-      validate(doc, LATEST_VERSION);
-      const blocks = (await outline(doc, LATEST_VERSION)).map(({ id, hash }) => ({ id, hash }));
+      validate(doc, version);
+      const blocks = (await outline(doc, version)).map(({ id, hash }) => ({ id, hash }));
       const lease = await writerLease(page, context, state);
       const renewal = await go(page, 'renew', context, { owner, epoch: lease.epoch, token: lease.token });
       if (renewal.expiresAt) lease.expiresAt = renewal.expiresAt;
-      return { ...await go(page, 'commit', context, { id: request.id, fingerprint, kind: 'human', proposal: request.proposal, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation: state.generation ?? 0, schema: LATEST_VERSION, snapshot: snapshot(doc), blocks, ifHashes: { [proposal.target]: proposal.base_hash } }), proposal: request.proposal, epoch: syncEpoch(state) };
+      return { ...await go(page, 'commit', context, { id: request.id, fingerprint, kind: 'human', proposal: request.proposal, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation: state.generation ?? 0, schema: version, snapshot: snapshot(doc), blocks, ifHashes: { [proposal.target]: proposal.base_hash } }), proposal: request.proposal, epoch: syncEpoch(state) };
     } finally { doc.destroy(); }
   }
   async function writerLease(page, context, state) {

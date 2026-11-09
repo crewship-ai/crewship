@@ -172,6 +172,14 @@ it.each(["page","epoch"])("rejects a changed %s before replaying local bytes",as
  try{await waitFor(()=>expect(result.current.status).toBe("Saved"));act(()=>content(result.current.doc).insert(0,"draft "));switched=true;await waitFor(()=>expect(result.current.recovery).toBe(true));expect(content(result.current.doc).toString()).toBe("draft base");expect(fetchMock.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)}finally{unmount();server.destroy();foreign.destroy()}
 })
 
+// A schema 5 Doc restored while this client was offline (#5233): the new epoch
+// blocks the editor, the unsent draft stays as recovery, and nothing is replayed.
+it("keeps an offline schema 5 draft as recovery when a restore changed the epoch",async()=>{
+ const server=model(),restored=model("restored text");let switched=false
+ fetchMock.mockImplementation(()=>response(switched?{...state(restored,5,"restored-epoch"),schema:5}:{...state(server),schema:5}))
+ const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
+ try{await waitFor(()=>expect(result.current.status).toBe("Saved"));act(()=>content(result.current.doc).insert(0,"offline "));switched=true;await waitFor(()=>expect(result.current.recovery).toBe(true));expect(result.current.status).toContain("Recover your draft");expect(content(result.current.doc).toString()).toBe("offline base");expect(content(result.current.doc).toString()).not.toContain("restored");expect(fetchMock.mock.calls.some(([,init])=>init?.method==="POST")).toBe(false)}finally{unmount();server.destroy();restored.destroy()}
+})
 it("does not hydrate or write an unknown schema",async()=>{
  const server=model();fetchMock.mockImplementation(()=>response({...state(server),schema:999}))
  const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))

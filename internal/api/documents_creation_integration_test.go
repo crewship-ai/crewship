@@ -22,6 +22,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/sidecar"
 )
@@ -198,7 +199,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		t.Fatalf("actual protected CLI retry after lost response: %v %s", err, output)
 	}
 	var created documentCreationResult
-	if json.Unmarshal(output, &created) != nil || created.PageID != committedPage || created.Schema != 3 || created.Revision != 0 || created.WorkspaceID != workspace || !strings.Contains(created.URL, "workspace_id=") {
+	if json.Unmarshal(output, &created) != nil || created.PageID != committedPage || created.Schema != documents.CreateSchema || created.Revision != 0 || created.WorkspaceID != workspace || !strings.Contains(created.URL, "workspace_id=") {
 		t.Fatalf("actual CLI retry changed the committed creation: %s", output)
 	}
 	retry, err := execute(file)
@@ -318,7 +319,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 							Schema int    `json:"schema"`
 						} `json:"checkpoints"`
 					}
-					if json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 1 || history.Checkpoints[0].Rev != 0 || history.Checkpoints[0].Schema != 3 {
+					if json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 1 || history.Checkpoints[0].Rev != 0 || history.Checkpoints[0].Schema != documents.CreateSchema {
 						t.Fatalf("actual initial history: %s", out)
 					}
 					initialCheckpointID = history.Checkpoints[0].ID
@@ -361,7 +362,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 	}
 	raw, status, err := request(host.URL, "GET", "/api/v1/pages/"+created.Slug+"/document", human, "", nil)
 	var saved DocumentStateResponse
-	if err != nil || status != 200 || json.Unmarshal(raw, &saved) != nil || saved.Schema != 3 || saved.Rev != 0 || !bytes.Contains(raw, []byte("Pilot with one team and review feedback.")) || !bytes.Contains(raw, []byte("codeBlock")) {
+	if err != nil || status != 200 || json.Unmarshal(raw, &saved) != nil || saved.Schema != documents.CreateSchema || saved.Rev != 0 || !bytes.Contains(raw, []byte("Pilot with one team and review feedback.")) || !bytes.Contains(raw, []byte("codeBlock")) {
 		t.Fatalf("actual saved human read%d %v %s", status, err, raw)
 	}
 	for _, block := range saved.Outline {
@@ -399,7 +400,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 			Epoch      string                 `json:"epoch"`
 			Targets    []DocumentOutlineBlock `json:"targets"`
 		}
-		if len(viewRaw) > 64<<10 || json.Unmarshal(viewRaw, &view) != nil || view.PageID != created.PageID || view.Schema != 3 || view.Rev != 0 || view.Epoch == "" || len(view.Targets) == 0 || bytes.Contains(viewRaw, []byte(`"snapshot"`)) || bytes.Contains(viewRaw, []byte(`"updates"`)) {
+		if len(viewRaw) > 64<<10 || json.Unmarshal(viewRaw, &view) != nil || view.PageID != created.PageID || view.Schema != documents.CreateSchema || view.Rev != 0 || view.Epoch == "" || len(view.Targets) == 0 || bytes.Contains(viewRaw, []byte(`"snapshot"`)) || bytes.Contains(viewRaw, []byte(`"updates"`)) {
 			t.Fatalf("actual drafting view lacks bounded consent-bound targets: %s", viewRaw)
 		}
 		var target DocumentOutlineBlock
@@ -659,7 +660,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 				Schema int    `json:"schema"`
 			} `json:"checkpoints"`
 		}
-		if out := readHistory("checkpoints", "@"+created.PageID); json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 2 || history.Checkpoints[1].ID != initialCheckpointID || history.Checkpoints[1].Rev != 0 || history.Checkpoints[0].ID != packet.Checkpoint.ID || history.Checkpoints[0].Rev != 1 || history.Checkpoints[0].Schema != 3 {
+		if out := readHistory("checkpoints", "@"+created.PageID); json.Unmarshal(out, &history) != nil || len(history.Checkpoints) != 2 || history.Checkpoints[1].ID != initialCheckpointID || history.Checkpoints[1].Rev != 0 || history.Checkpoints[0].ID != packet.Checkpoint.ID || history.Checkpoints[0].Rev != 1 || history.Checkpoints[0].Schema != documents.CreateSchema {
 			t.Fatalf("history lost confirmed checkpoint identity: %s", out)
 		}
 		var historical struct {
@@ -668,7 +669,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 			Rev    int64  `json:"rev"`
 			Schema int    `json:"schema"`
 		}
-		if out := readHistory("checkpoint", "@"+created.PageID, packet.Checkpoint.ID); json.Unmarshal(out, &historical) != nil || historical.PageID != created.PageID || historical.ID != packet.Checkpoint.ID || historical.Rev != 1 || historical.Schema != 3 || !bytes.Contains(out, []byte("CONFIRMED-A checkpoint content")) || bytes.Contains(out, []byte("Human intervening content")) {
+		if out := readHistory("checkpoint", "@"+created.PageID, packet.Checkpoint.ID); json.Unmarshal(out, &historical) != nil || historical.PageID != created.PageID || historical.ID != packet.Checkpoint.ID || historical.Rev != 1 || historical.Schema != documents.CreateSchema || !bytes.Contains(out, []byte("CONFIRMED-A checkpoint content")) || bytes.Contains(out, []byte("Human intervening content")) {
 			t.Fatalf("historical read did not preserve the immutable saved body: %s", out)
 		}
 		if out := readHistory("checkpoint", "@"+created.PageID, initialCheckpointID); json.Unmarshal(out, &historical) != nil || historical.Rev != 0 || historical.ID != initialCheckpointID || !bytes.Contains(out, []byte("Pilot with one team")) || bytes.Contains(out, []byte("Human intervening content")) || bytes.Contains(out, []byte("CONFIRMED-A")) {
@@ -757,7 +758,7 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		}
 		t.Log("actual CLI+MCP draft: immutable original packet, semantic commit and pinned A, exact retries/conflict, B prepared but never committed, live human cursor fence, fresh-run denial, no copies/grants/storage publication; no model/container-interruption evidence")
 	}
-	t.Log(fmt.Sprintf("actual protected CLI binary/fixed sidecar/Router/private Node24: schema3 content+server identities, CLI+MCP exact retry, changed409, one durable creation, durable creation provenance, human owner read, no continuation delegation; no model run; Page %s", created.PageID))
+	t.Log(fmt.Sprintf("actual protected CLI binary/fixed sidecar/Router/private Node24: schema4 content+server identities, CLI+MCP exact retry, changed409, one durable creation, durable creation provenance, human owner read, no continuation delegation; no model run; Page %s", created.PageID))
 }
 
 func documentsWaitSocket(t *testing.T, path string) {

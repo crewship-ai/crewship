@@ -22,10 +22,11 @@ func boolCount(b bool) int {
 // IterationIntent identifies one explicit existing Document, never a slug,
 // principal or mode supplied by a model. The host binds its human chat receipt.
 //
-// Schema 3 is the direct-draft mandate. Schema 4 is the propose mandate
-// (#5137): the agent may only propose, and Blocks, when present, names the
-// only blocks it may propose on. Blocks is a comma-free list of block IDs; it
-// is never accepted with schema 3.
+// Schema names the document's own schema. On a schema that supports
+// proposals (4 and 5, see SchemaAllows) the mandate is propose-only (#5137,
+// #5233): the agent may only propose, and Blocks, when present, names the
+// only blocks it may propose on. Schema 3 is the direct-draft mandate. Blocks
+// is a comma-free list of block IDs; it is never accepted with schema 3.
 type IterationIntent struct {
 	SubmissionID string `json:"submission_id"`
 	PageID       string `json:"page_id"`
@@ -41,7 +42,7 @@ const IterationBlockLimit = 16
 var iterationBlockID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,80}$`)
 
 // Propose reports whether this mandate admits proposals only.
-func (v IterationIntent) Propose() bool { return v.Schema == ProposalSchema }
+func (v IterationIntent) Propose() bool { return SchemaAllows(v.Schema, CapPropose) }
 
 // BlockList returns the named blocks, or nil for the whole document.
 func (v IterationIntent) BlockList() []string {
@@ -65,13 +66,13 @@ func (v IterationIntent) Admits(block string) bool {
 }
 
 func (v IterationIntent) Validate() error {
-	if !creationSubmissionID.MatchString(v.SubmissionID) || !creationSubmissionID.MatchString(v.PageID) || (v.Schema != 3 && v.Schema != ProposalSchema) || v.Rev < 0 || v.Generation < 0 || v.Rev > 9007199254740991 || v.Generation > 9007199254740991 {
+	if !creationSubmissionID.MatchString(v.SubmissionID) || !creationSubmissionID.MatchString(v.PageID) || (v.Schema != 3 && !SchemaAllows(v.Schema, CapPropose)) || v.Rev < 0 || v.Generation < 0 || v.Rev > 9007199254740991 || v.Generation > 9007199254740991 {
 		return errors.New("one explicit Document identity and original schema/revision/generation required")
 	}
 	if v.Blocks != "" {
 		ids := v.BlockList()
-		if v.Schema != ProposalSchema || len(ids) > IterationBlockLimit {
-			return errors.New("named blocks require a schema 4 proposal mandate of at most 16 blocks")
+		if !SchemaAllows(v.Schema, CapPropose) || len(ids) > IterationBlockLimit {
+			return errors.New("named blocks require a proposal mandate of at most 16 blocks")
 		}
 		seen := map[string]bool{}
 		for _, id := range ids {
