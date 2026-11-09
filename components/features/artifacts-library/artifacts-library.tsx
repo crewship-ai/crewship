@@ -328,7 +328,8 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   // Archive, test origin and mock moves; re-read whenever a sharing write settles.
   const stateTick = useQuery({ queryKey: sharingKeys.state(workspaceId), queryFn: () => Date.now(), staleTime: Infinity }).data
   const items = useMemo(() => {
-    const base = libraryItems(pages).filter(entry => entry.kind !== "design" || artifactsDesign())
+    // A design system is a Design too (#5152): without the Design switch it is left out, as the server catalog does.
+    const base = libraryItems(pages).filter(entry => kindOf(entry).kind !== "design" || artifactsDesign())
     return withLibraryState(base, sharing.libraryState(base))
   }, [pages, sharing, stateTick]) // eslint-disable-line react-hooks/exhaustive-deps -- stateTick is the re-read signal
   const [picked, setPicked] = useState<ReadonlySet<string>>(new Set())

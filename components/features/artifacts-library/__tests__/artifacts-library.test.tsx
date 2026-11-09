@@ -192,19 +192,24 @@ it("sorts by kind in the browser, in the UI kinds' order, even with the server c
   expect(listedNames()).toEqual(["Sales", "Showcase", "Newer word"])
 })
 
-// #5152 review: the Design switch hides Design canvases, which cannot open
-// without it. A design system is a project that opens anyway; it stays listed,
-// named Design as everywhere else.
-it("keeps a design-system project listed as a Design while the Design switch is off", () => {
-  state.pages = [
+// #5152 review: a design system is a Design, so the Design switch leaves it
+// out like a Design canvas, in the browser and in the server catalog alike.
+it.each([["browser", false], ["server catalog", true]] as const)("leaves a design-system project out while the Design switch is off (%s)", (_mode, server) => {
+  if (server) serverOn()
+  const rows = [
     wire({ slug: "tokens", id: "page-tokens", name: "Tokens", artifact_kind: "project", artifact_profile: "design_system" } as Partial<WirePage>),
     wire({ slug: "canvas", id: "page-canvas", name: "Checkout canvas", artifact_kind: "design" }),
+    wire({ slug: "site", id: "page-site", name: "Pricing site", artifact_kind: "project" }),
   ]
+  state.pages = rows
+  // The server window answers its kind facet the way the server does: a design system is design.
+  windowState.pages = rows.filter(row => row.slug === "site")
+  windowState.total = windowState.pages.length
   renderLibrary()
   openAll()
   fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
-  expect(listedNames()).toEqual(["Tokens"])
-  expect(within(screen.getByRole("list", { name: "Artifacts" })).getByRole("listitem")).toHaveTextContent(/Design/)
+  expect(listedNames()).toEqual(["Pricing site"])
+  if (server) expect(new URLSearchParams(windowState.calls[windowState.calls.length - 1].params!).get("kind")?.split(",")).not.toContain("design")
 })
 
 it("moves to the last page when the total shrinks under the current offset, so nothing becomes unreachable", () => {
