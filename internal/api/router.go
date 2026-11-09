@@ -930,6 +930,12 @@ func NewRouter(db *sql.DB, jwtSecret string, logger *slog.Logger, opts ...Router
 	// BEFORE registerRoutes so every handler constructed there holds the
 	// decorated store. authMw keeps the raw store — it only reads
 	// (Get/TouchLastUsed) and never revokes.
+	// Docs presence (#5166) ends a tab at once when the credential behind it is
+	// revoked: every revocation reaches the stream registry.
+	r.documentPresenceHub = newDocumentPresenceHub()
+	if r.authMw != nil && r.authMw.streams != nil {
+		r.authMw.streams.OnRevoke(r.documentPresenceHub.credentialRevoked)
+	}
 	notifiers := []SessionRevocationNotifier{r.authMw.streams}
 	if r.hub != nil {
 		r.hub.SetStreamAuthenticator(r.authMw.authenticateStream)

@@ -35,6 +35,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	ws.invitationJournal = r.journal
 	ws.policyJournal = r.journal
 	ws.SetStorageRoot(r.storagePath)
+	ws.presence = r.documentPresenceHub
 	crews := NewCrewHandler(r.db, r.logger)
 	crews.policyJournal = r.journal
 	crewSocket := r.socketPath

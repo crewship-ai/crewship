@@ -43,7 +43,6 @@ func (r *Router) registerDocumentRoutes() {
 	// openapi: responses 200,400,401,403,404,409,413,422,429,500,502,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/patch", roleInline, p.MutateDocument)
 	// Ephemeral presence (#5166): live read authority on every heartbeat, memory only.
-	r.documentPresenceHub = newDocumentPresenceHub()
 	// openapi: responses 200,400,401,403,404,429,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/presence", roleInline, r.documentPresence)
 	// Explicit human schema upgrade (enable Canvas, #5149): Edit in the
