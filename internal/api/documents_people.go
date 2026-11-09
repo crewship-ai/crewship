@@ -104,8 +104,9 @@ func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "search text too long")
 		return
 	}
-	rec, ok := h.documentPage(w, r)
-	if !ok {
+	// Resolves the Page and answers 503/404 the way the document read does;
+	// the record itself is read again inside the snapshot below.
+	if _, ok := h.documentPage(w, r); !ok {
 		return
 	}
 	// One read-only snapshot for the credential, the page shape and every authority check.
@@ -119,7 +120,8 @@ func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
 	r = r.WithContext(context.WithValue(r.Context(), pageAuthReaderKey{}, tx))
 	ctx, workspace, user := r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context())
 	// Owner and audience come from the same snapshot as every check below.
-	if rec, err = h.loadPageForRead(ctx, workspace, r.PathValue("slug")); err != nil {
+	rec, err := h.loadPageForRead(ctx, workspace, r.PathValue("slug"))
+	if err != nil {
 		replyError(w, 404, "document page not found")
 		return
 	}
