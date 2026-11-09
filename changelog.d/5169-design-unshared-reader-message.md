@@ -1,0 +1,1 @@
+- **A Design that was never shared with you no longer says your access was removed.** A reader or commenter whose owner has not shared a version yet now sees that the design is not available to them; the canvas also stops showing the access-removed message while it is still loading.
