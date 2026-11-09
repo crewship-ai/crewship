@@ -25,7 +25,7 @@ vi.mock("../use-design", () => ({ useDesign: () => {
 const text = (extra: Partial<DesignNode> = {}): DesignNode => ({ id: "t", type: "text", x: 0, y: 0, width: 200, height: 60, fill: "#172554", text: "Line one\nLine two", ...extra })
 const draw = (node: DesignNode) => render(<svg><DesignNodeShape node={node} width={node.width} height={node.height} /></svg>).container.querySelector("svg")!
 
-beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.doc = new Y.Doc() })
+beforeEach(() => { vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN_TEXT_STYLE", "true"); state.editable = true; state.doc = new Y.Doc() })
 afterEach(() => { cleanup(); state.doc?.destroy(); vi.unstubAllEnvs() })
 
 describe("Design text style", () => {
@@ -94,6 +94,16 @@ describe("Design text style", () => {
   fireEvent.change(screen.getByLabelText("x"), { target: { value: "12" } })
   fireEvent.change(screen.getByLabelText("Text content"), { target: { value: "New headline" } })
   expect(designNodes(state.doc!).find(node => node.id === "t")).toMatchObject({ ...expected, x: 12, text: "New headline" })
+ })
+
+ it("offers no text style controls while the build flag is off, but still draws stored style", () => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN_TEXT_STYLE", "false")
+  upsertDesignNode(state.doc!, { ...text({ fontSize: 30, fontFamily: "mono" }), name: "Headline" })
+  const { container } = render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  fireEvent.click(within(screen.getByLabelText("Layers")).getByRole("button", { name: "Headline" }))
+  expect(screen.getByLabelText("Text content")).toBeInTheDocument()
+  expect(screen.queryByRole("group", { name: "Text style" })).toBeNull()
+  expect(container.querySelector('text[font-size="30"]')).toHaveAttribute("font-family", "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace")
  })
 
  it("shows text style read-only to a reader", () => {

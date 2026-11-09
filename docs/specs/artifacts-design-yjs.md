@@ -21,6 +21,7 @@ apart and meet only when the live state is saved as a version.
 | Instance switch `CREWSHIP_ARTIFACTS_DESIGN_ENABLED` | unset | `true` enables Design for every workspace |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN` | off | `true` at build time shows the canvas in the Artifacts library |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | off | `true` at build time adds link editing and prototype playback ([Prototype links](#prototype-links)) |
+| Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_TEXT_STYLE` | off | `true` at build time adds the text style controls in Properties ([Text style](#text-style)) |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_EXPORT` | off | `true` at build time adds the **Export HTML** button ([HTML export](#html-export)) |
 
 The Design flag is independent of `artifact_projects`. When it is off, every
@@ -166,10 +167,16 @@ reaches the canvas or an exported style attribute.
 - Clients that predate the fields keep them when they edit other fields, and
   restore copies them with the rest of the node. Such clients draw the layer in
   the old default style.
-- A server without the fields refuses any document that contains them. Do not
-  roll the server back past this change once a Design uses text style; the
-  Design would not open until the server is updated again.
-- Only editors change the fields, in **Properties** or through `upsert`.
+- A server without the fields refuses any document that contains them; such a
+  Design would not open until the server is updated again. So the change ships
+  in two steps. This release: the server accepts and draws the fields, but the
+  **Properties** controls stay behind the build-time
+  `NEXT_PUBLIC_ARTIFACTS_DESIGN_TEXT_STYLE` (default off), and the agent tool
+  tells agents to leave the fields out unless asked. A later release turns the
+  controls on once no rollback past this server is expected. Before enabling the
+  variable, deploy a server with #5161 everywhere the client runs.
+- Only editors change the fields, in **Properties** (when enabled) or through
+  `upsert`.
 
 ## HTML export
 
