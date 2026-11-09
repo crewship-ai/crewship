@@ -17,6 +17,7 @@ const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(v
 const textBoundary = (text, index) => index === 0 || index === text.length ||
   !(text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff && text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff);
 const contentSchema = version => version === 1 ? VERSION : version;
+const PROPOSAL_VERSION = FORMATTED_VERSION;
 const supportedSchema = version => [1, VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION].includes(version);
 // Schemas 3, 4 and 5 are bound to their original Page and carry rich semantic proofs.
 const richSchema = version => version === RICH_VERSION || version === FORMATTED_VERSION || version === LATEST_VERSION;
@@ -258,7 +259,8 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         if (!context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'agent run proposal required');
         const fields = ['id','schema','page_id','epoch','ifRev','target','ifHash','text'];
         if (Object.keys(request).some(key => !fields.includes(key)) || fields.some(key => request[key] === undefined)) throw fault(400, 'closed proposal request required');
-        if (version !== LATEST_VERSION || request.schema !== LATEST_VERSION) throw fault(409, 'proposals require a schema 4 document');
+        // Proposals stay on schema 4 (FORMATTED_VERSION, Go's documents.ProposalSchema); schema 5 is refused cleanly.
+        if (version !== PROPOSAL_VERSION || request.schema !== PROPOSAL_VERSION) throw fault(409, 'proposals require a schema 4 document');
         if (typeof request.text !== 'string' || request.text.length > 100000) throw fault(400, 'bounded proposal text required');
         const target = (await outline(doc,version)).find(block => block.id === request.target);
         if (request.ifRev !== state.rev || !target || target.hash !== request.ifHash) throw fault(409, 'semantic precondition conflict');
@@ -338,7 +340,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     const fingerprint = await hash({ operation, request });
     const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint });
     if (receipt.found) return { ...receipt, proposal: request.proposal, epoch: syncEpoch(state), duplicate: true };
-    if (state.schema !== LATEST_VERSION) throw fault(409, 'proposals require a schema 4 document');
+    if (state.schema !== PROPOSAL_VERSION) throw fault(409, 'proposals require a schema 4 document');
     if (request.ifRev !== state.rev) throw fault(409, 'document changed since the proposal was reviewed; reload');
     const proposal = await go(page, 'proposal', context, { id: request.proposal });
     // A proposal from an earlier generation (engine restart, restore) or with a
@@ -349,18 +351,18 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     let doc = load(state.snapshot);
     try {
       for (const update of state.updates || []) Y.applyUpdate(doc, decode(typeof update === 'string' ? update : update.update));
-      validate(doc, LATEST_VERSION);
+      validate(doc, PROPOSAL_VERSION);
       const baseVector = Y.encodeStateVector(doc);
-      const target = (await outline(doc, LATEST_VERSION)).find(block => block.id === proposal.target);
+      const target = (await outline(doc, PROPOSAL_VERSION)).find(block => block.id === proposal.target);
       if (!target || target.hash !== proposal.base_hash) throw fault(409, 'proposal target changed; it can no longer be accepted as reviewed');
-      patch(doc, { op: 'replaceText', id: proposal.target, text: proposal.text }, LATEST_VERSION);
+      patch(doc, { op: 'replaceText', id: proposal.target, text: proposal.text }, PROPOSAL_VERSION);
       if (doc.store.pendingStructs || doc.store.pendingDs) throw fault(400, 'unresolved Yjs dependencies');
-      validate(doc, LATEST_VERSION);
-      const blocks = (await outline(doc, LATEST_VERSION)).map(({ id, hash }) => ({ id, hash }));
+      validate(doc, PROPOSAL_VERSION);
+      const blocks = (await outline(doc, PROPOSAL_VERSION)).map(({ id, hash }) => ({ id, hash }));
       const lease = await writerLease(page, context, state);
       const renewal = await go(page, 'renew', context, { owner, epoch: lease.epoch, token: lease.token });
       if (renewal.expiresAt) lease.expiresAt = renewal.expiresAt;
-      return { ...await go(page, 'commit', context, { id: request.id, fingerprint, kind: 'human', proposal: request.proposal, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation: state.generation ?? 0, schema: LATEST_VERSION, snapshot: snapshot(doc), blocks, ifHashes: { [proposal.target]: proposal.base_hash } }), proposal: request.proposal, epoch: syncEpoch(state) };
+      return { ...await go(page, 'commit', context, { id: request.id, fingerprint, kind: 'human', proposal: request.proposal, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation: state.generation ?? 0, schema: PROPOSAL_VERSION, snapshot: snapshot(doc), blocks, ifHashes: { [proposal.target]: proposal.base_hash } }), proposal: request.proposal, epoch: syncEpoch(state) };
     } finally { doc.destroy(); }
   }
   async function writerLease(page, context, state) {

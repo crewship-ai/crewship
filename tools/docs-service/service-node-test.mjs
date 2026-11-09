@@ -985,6 +985,31 @@ test('schema4 agents propose without changing content; a human accepts exactly t
   } finally { await f.close(); }
 });
 
+test('proposals stay on schema 4: a schema 5 document refuses propose and accept cleanly and keeps its content (#5155)', async () => {
+  const model = authorityModel(), stored = [];
+  const body = { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'lead' }, content: [{ type: 'text', text: 'Due ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: ' and ' }, { type: 'text', text: 'under', marks: [{ type: 'underline', attrs: {} }] }] }] };
+  const doc = create(body, 5); model.state = { ...model.state, schema: 5, snapshot: snapshot(doc) }; doc.destroy();
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'propose' || op === 'commit' || op === 'proposal-reject') stored.push(op);
+    if (op === 'proposal') return { id: data.id, actor: 'agent:a:r', run_id: 'r', target: 'lead', base_hash: '0'.repeat(64), text: 'Due  later', generation: 0, base_rev: 1, status: 'open', created_at: 'now' };
+    return model.handle(op, data, req, res);
+  });
+  await f.start();
+  try {
+    const before = (await read(f)).body, lead = before.outline.find(b => b.id === 'lead');
+    const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
+    for (const schema of [4, 5]) {
+      const proposed = await call(f.socket, '/v1/documents/p/propose', { id: `p-${schema}`, schema, page_id: 'p', epoch: before.epoch, ifRev: before.rev, target: 'lead', ifHash: lead.hash, text: 'Due  and under, revised' }, agent);
+      assert.equal(proposed.status, 409, `schema ${schema} request`); assert.match(proposed.body.error, /schema 4/);
+    }
+    const accepted = await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-1', proposal: 'p-4', ifRev: before.rev });
+    assert.equal(accepted.status, 409); assert.match(accepted.body.error, /schema 4/);
+    assert.deepEqual(stored, []);
+    const after = (await read(f)).body;
+    assert.equal(after.rev, before.rev); assert.deepEqual(after.content, before.content); assert.equal(after.schema, 5);
+  } finally { await f.close(); }
+});
+
 test('schema4 proposals go stale when their target changes and are rejected without a content write', async () => {
   const model = authorityModel(), proposals = new Map();
   const doc = create({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'a' }, content: [{ type: 'text', text: 'Alpha' }] }, { type: 'paragraph', attrs: { id: 'b' }, content: [{ type: 'text', text: 'Beta' }] }] }, 4);
