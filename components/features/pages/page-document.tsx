@@ -10,6 +10,7 @@ import TableRow from "@tiptap/extension-table-row"
 import TableHeader from "@tiptap/extension-table-header"
 import TableCell from "@tiptap/extension-table-cell"
 import { Plugin } from "@tiptap/pm/state"
+import type * as Y from "yjs"
 import { Button } from "@/components/ui/button"
 import { isEmptyDocument } from "@/lib/documents/empty"
 import { Input } from "@/components/ui/input"
@@ -25,7 +26,8 @@ import { DocumentProposals } from "./document-proposals/document-proposals"
 import { createHttpHistoryActions } from "@/lib/documents/history-actions"
 import { createHttpProposalClient } from "@/lib/documents/proposals"
 import { documentReviewActions } from "@/lib/feature-flags"
-import { createDocumentPeople } from "@/lib/documents/people"
+import { createDocumentPeople, type DocumentPeople } from "@/lib/documents/people"
+import { DocumentCaretKeeper } from "./document-caret-keeper"
 import { CommentHighlights, documentEditorExtensions, isRichSchema, KeptSelection, stableBlockTypes } from "./document-rich-extensions"
 
 const StableIDs = Extension.create({
@@ -44,6 +46,10 @@ const StableIDs = Extension.create({
     return tr.docChanged ? tr : null
   } })] },
 })
+/** The editor of one document session: the schema's nodes and marks, stable block ids, comment highlights and the shared CRDT. */
+export function documentSessionExtensions(doc: Y.Doc, schema: number | undefined, people?: DocumentPeople) {
+  return [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(schema) }), ...documentEditorExtensions(schema, people), CommentHighlights, KeptSelection, Collaboration.configure({ document: doc, field: "default" }), DocumentCaretKeeper]
+}
 /** Saves text as a local file: the draft downloads. Nothing is sent. */
 export function downloadText(name: string, content: string) {
   const url = URL.createObjectURL(new Blob([content], { type: "text/plain;charset=utf-8" }))
@@ -121,7 +127,7 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
   }, [sync.doc])
   const editor = useEditor({
     immediatelyRender: false, editable: false,
-    extensions: [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(sync.state?.schema) }), ...documentEditorExtensions(sync.state?.schema, people), CommentHighlights, KeptSelection, Collaboration.configure({ document: sync.doc, field: "default" })],
+    extensions: documentSessionExtensions(sync.doc, sync.state?.schema, people),
     // The browser moves the caret (Ctrl+End, arrows, a tap) before its selectionchange reaches ProseMirror. A key the
     // editor handles itself, such as Enter, must act where the caret is shown, so the DOM selection is read first.
     // Only for real key presses: ProseMirror replays a browser-made Enter or Backspace (iOS, Android) as a plain Event
