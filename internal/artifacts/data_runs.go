@@ -42,7 +42,7 @@ const (
 )
 
 // Defaults for DataOptions. They are server defaults, not API contract;
-// DataOptionsFromEnv reads the CREWSHIP_ARTIFACT_DATA_RUN* overrides. Whatever
+// DataOptionsFromEnv reads the environment overrides listed there. Whatever
 // the limits, a running run is never pruned.
 const (
 	// DefaultDataRunsKept terminal runs per collection, plus the newest success.
