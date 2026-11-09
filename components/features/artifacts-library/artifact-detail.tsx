@@ -7,6 +7,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useDocumentViewerRead } from "@/hooks/use-document-viewer-read"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
+import { createDocumentPeople } from "@/lib/documents/people"
 import type { NativeCraftHostStatus } from "@/components/features/pages/native-craft-editor-host"
 import { formatRelativeShort } from "@/lib/time"
 import { artifactDashboards, artifactSlides, artifactsDesign, artifactsLibrary } from "@/lib/feature-flags"
@@ -47,6 +48,7 @@ import { SlidesBody } from "./kinds/slides/slides-detail"
 function WordPreview({ workspaceId, item, onStatus }: { workspaceId: string; item: LibraryItem; onStatus?: (status: string) => void }) {
   const userId = useSessionSafe()?.data?.user?.id ?? null
   const target = useMemo(() => item.pageId ? { workspaceId, pageId: item.pageId, type: "document" as const, mode: "latest" as const } : null, [workspaceId, item.pageId])
+  const people = useMemo(() => createDocumentPeople(workspaceId, item.pageId ? "@" + item.pageId : item.slug), [workspaceId, item.pageId, item.slug])
   // chatId and activationKey only scope the read; the library is its own scope, one per opened item.
   const { read } = useDocumentViewerRead({ workspaceId, chatId: "artifacts-library", currentUserId: userId, activationKey: `library:${item.slug}`, target, enabled: target !== null })
   useEffect(() => { onStatus?.(read.status) }, [onStatus, read.status])
@@ -59,7 +61,7 @@ function WordPreview({ workspaceId, item, onStatus }: { workspaceId: string; ite
           : "The document preview could not be loaded. Nothing was changed."}
   </p>
   return <div className="rounded-card border bg-card">
-    <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} />
+    <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} people={people} />
   </div>
 }
 
