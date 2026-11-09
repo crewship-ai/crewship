@@ -1,4 +1,4 @@
-//go:build linux && (docs_foundation || conformance)
+//go:build linux && ((docs_foundation && docs_export) || conformance)
 
 package main
 
@@ -22,14 +22,12 @@ import (
 
 // Downloads a schema 4 document through the CLI binary, the Router, the real Go
 // authority and the real tools/docs-service engine, then opens the file and
-// checks what a reader of the Markdown sees. Opt-in like the durability test:
+// checks what a reader of the Markdown sees. Opt-in at compile time (it needs
+// Node 24 and the frozen docs-service install), so it never reports a skip:
 //
 //	pnpm --dir tools/docs-service install --frozen-lockfile
-//	TEST_DOCUMENT_EXPORT=1 go test -tags docs_foundation ./cmd/crewship -run '^TestAcceptance_DocumentExportRealEngine$' -count=1
+//	go test -tags docs_foundation,docs_export ./cmd/crewship -run '^TestAcceptance_DocumentExportRealEngine$' -count=1
 func TestAcceptance_DocumentExportRealEngine(t *testing.T) {
-	if os.Getenv("TEST_DOCUMENT_EXPORT") != "1" {
-		t.Skip("requires explicit Node24 plus frozen tools/docs-service installation opt-in")
-	}
 	nodeVersion, err := exec.Command("node", "--version").Output()
 	if err != nil || !strings.HasPrefix(string(nodeVersion), "v24.") {
 		t.Fatalf("Node24 required: %s %v", nodeVersion, err)
