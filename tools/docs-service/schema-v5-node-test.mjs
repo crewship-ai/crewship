@@ -230,6 +230,13 @@ test('schema5 semantic replacement refuses edits whose side of a date or mention
   refused('Review on X with  and ');      // inserted exactly before the date
   refused('Review onwith  and ');         // a range across the date (the spaces on both sides)
   assert.deepEqual(json(validate(doc, 5)), before);
+  // A change that could slide across an atom is refused even when one side was picked by the diff.
+  const sliding = create({ type: 'doc', content: [p('s', [t('aa'), mention('m1'), t('aa')]), p('d', [t('a'), mention('m2'), t('a')])] }, 5);
+  assert.throws(() => patch(sliding, { op: 'replaceText', id: 's', text: 'aaaaa' }, 5), /date or mention/);
+  assert.throws(() => patch(sliding, { op: 'replaceText', id: 'd', text: 'a' }, 5), /date or mention/);
+  patch(sliding, { op: 'replaceText', id: 's', text: 'aaab' }, 5);
+  assert.deepEqual(json(validate(sliding, 5)).content[0].content.map(n => n.text ?? n.type), ['aa', 'mention', 'ab']);
+  sliding.destroy();
   // Edits inside text, or deleting up to an atom without inserting there, still apply.
   patch(doc, { op: 'replaceText', id: 'meet', text: 'Review on  wit  and ' }, 5);
   patch(doc, { op: 'replaceText', id: 'meet', text: 'Revie on  wit  and ' }, 5);
