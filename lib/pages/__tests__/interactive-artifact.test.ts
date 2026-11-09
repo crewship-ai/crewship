@@ -8,8 +8,10 @@ import {
 const collection = { collection: "votes", documents: [{ id: "yes", version: 1, value: { count: 1 }, updated_at: "2026-10-31T10:00:00Z", source_label: "You" }] }
 function fakeAccess(): InteractiveDataAccess & { calls: string[] } {
   const calls: string[] = []
+  let stored: Record<string, unknown> | null = null
   return {
     calls,
+    prefs: { get: () => stored, set: value => { calls.push("prefs.set"); stored = value; return true } },
     get: vi.fn(async (name: string) => { calls.push(`get:${name}`); return collection }),
     list: vi.fn(async () => { calls.push("list"); return { collections: [{ name: "votes", documents: 1 }] } }),
     batch: vi.fn(async (name: string) => { calls.push(`batch:${name}`); return collection }),
@@ -46,7 +48,7 @@ describe("InteractiveArtifactBroker", () => {
     expect(access.calls).toEqual([])
   })
 
-  it("allows exactly data.get, data.list, data.batch and viewer", async () => {
+  it("allows data.get, data.list, data.batch, viewer and the viewer's own prefs", async () => {
     const { access, send, reply } = connect(true)
     send(1, "data.get", { collection: "votes" })
     send(2, "data.list")
@@ -57,6 +59,35 @@ describe("InteractiveArtifactBroker", () => {
     expect((await reply(3)).result).toEqual(collection)
     expect((await reply(4)).result).toEqual({ name: "Ada Lovelace" })
     expect(access.calls.sort()).toEqual(["batch:votes", "get:votes", "list"])
+  })
+
+  it("keeps a viewer's own preferences in the host, for readers too, never as a server call", async () => {
+    const { access, send, reply } = connect(false)
+    send(1, "prefs.get")
+    expect((await reply(1)).result).toEqual({ value: null })
+    send(2, "prefs.set", { value: { crew: "Frontend" } })
+    expect((await reply(2)).result).toEqual({ saved: true })
+    send(3, "prefs.get")
+    expect((await reply(3)).result).toEqual({ value: { crew: "Frontend" } })
+    expect(access.calls).toEqual(["prefs.set"])
+  })
+
+  it.each<[string, unknown]>([
+    ["a nested value", { value: { crew: { a: 1 } } }],
+    ["a missing value", {}],
+    ["an extra parameter", { value: {}, collection: "votes" }],
+  ])("refuses prefs.set with %s", async (_, params) => {
+    const { access, send, reply } = connect(true)
+    send(1, "prefs.set", params)
+    expect(await reply(1)).toMatchObject({ code: "invalid" })
+    expect(access.calls).toEqual([])
+  })
+
+  it("says preferences are unavailable when the host keeps none", async () => {
+    const { prefs: _, ...access } = fakeAccess()
+    const { send, reply } = connect(true, access as InteractiveDataAccess & { calls: string[] })
+    send(1, "prefs.get")
+    expect(await reply(1)).toMatchObject({ code: "unavailable" })
   })
 
   it("refuses a reader's write but still serves the read", async () => {
