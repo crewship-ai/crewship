@@ -121,3 +121,28 @@ TEST_DOCUMENT_DURABILITY=1 go test -tags docs_foundation ./cmd/crewship \
 
 `TEST_DOCUMENT_DURABILITY_EVIDENCE` names the measurements JSON file. The test
 needs Node.js 24 and records numbers only; it enforces no thresholds.
+
+## Tabs (not admitted yet)
+
+`tabs-core.mjs` is the model for Docs tabs, planned as content schema 7 after
+the Canvas surface (schema 6). No content schema admits its roots yet, so every
+validator still refuses them as unsupported Yjs roots.
+
+- The first tab is the existing `default` fragment: every older document is a
+  one-tab document without migration, and reading tabs writes nothing.
+- Further tabs are XmlFragments named `tab:<id>`. Names, nesting and order
+  live in one `tabs` map (`{ name, parent, order }`), so renaming, reordering
+  and nesting never move content and never detach comment anchors.
+- Order keys are fractional strings over `[0-9A-Za-z]` that never end in `0`,
+  so a key between any two neighbours always exists. Nesting is at most 8 deep;
+  a tab cannot move into itself or its descendants, and a cycle formed by
+  concurrent moves is broken the same way on every replica.
+- Deleting a tab removes its content and metadata and moves its children up;
+  the first tab cannot be deleted. Content written concurrently into a deleted
+  tab stays visible as "Untitled tab" instead of being lost.
+- Metadata is closed and bounded (200 tabs, 120-character names, 256 KiB of
+  retained metadata history), and retained values are validated like live ones.
+
+Admission (schema 7) still needs: the document validator to accept `tab:`
+fragments and the `tabs` map, a per-tab Page projection for outlines, Markdown
+and agents, block IDs unique across tabs, and the human-only upgrade.
