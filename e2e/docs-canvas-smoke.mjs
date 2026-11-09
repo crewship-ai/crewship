@@ -152,21 +152,23 @@ try {
   assert.equal(await co.getByRole('button', { name: 'Status: Saved' }).count(), 0, 'the old tab never claims Saved')
   console.log('old tab patches:', JSON.stringify(coPatches), 'status:', JSON.stringify(await co.locator('[data-docs-banner], [role=alert]').allInnerTexts()))
   pass('an editor still open at schema 5 is refused on save and keeps its draft out of the document')
-  // Reopening shows the held draft; the co-editor downloads it (it is not lost) and then discards it to edit the Canvas document.
-  await co.getByRole('button', { name: 'Reopen saved document' }).first().click().catch(() => co.goto(`${base}/artifacts/${encodeURIComponent(pageId)}`))
-  await co.getByLabel('Document editor', { exact: true }).waitFor()
-  const held = co.getByRole('button', { name: 'Download unsaved draft' }).first()
-  await held.waitFor({ timeout: 15000 })
-  const [download] = await Promise.all([co.waitForEvent('download'), held.click()])
+  // The old tab offers its held draft for download, then reopens the saved document. If the reopened tab still
+  // holds the draft (Recovered draft keeps the Canvas read-only), it is downloaded and discarded first.
+  const offered = co.getByRole('button', { name: 'Download unsaved draft' }).first()
+  const [download] = await Promise.all([co.waitForEvent('download'), offered.click()])
   const draftPath = join(output, 'coeditor-held-draft' + (download.suggestedFilename().match(/\.[a-z0-9]+$/i)?.[0] ?? ''))
   await download.saveAs(draftPath)
   const heldDraft = await readFile(draftPath, 'utf8')
   assert.ok(heldDraft.length > 2 && JSON.parse(heldDraft), 'the held draft downloads as JSON')
   console.log('held draft names the old-tab edit as text:', /Old tab/.test(heldDraft))
-  await co.getByRole('button', { name: 'Discard recovered drafts and reopen' }).click()
+  await co.getByRole('button', { name: 'Reopen saved document' }).first().click()
   await co.getByLabel('Document editor', { exact: true }).waitFor()
-  await co.getByRole('button', { name: /^Status: (Live|Saved)/ }).waitFor({ timeout: 15000 })
-  pass('the co-editor downloads its held draft, then discards it and reopens the Canvas document')
+  const discard = co.getByRole('button', { name: 'Discard recovered drafts and reopen' })
+  const live = co.getByRole('button', { name: /^Status: (Live|Saved)$/ })
+  await Promise.race([discard.waitFor({ timeout: 15000 }), live.waitFor({ timeout: 15000 })])
+  if (await discard.isVisible()) { console.log('reopened with the draft still held: discarding it'); await discard.click() }
+  await live.waitFor({ timeout: 15000 })
+  pass('the old tab downloads its held draft and reopens the Canvas document live')
 
   assert.equal(await page.locator('[data-docs-canvas]').getAttribute('data-editable'), 'true')
   await page.screenshot({ path: join(output, '01-editor-empty-canvas.png') })
