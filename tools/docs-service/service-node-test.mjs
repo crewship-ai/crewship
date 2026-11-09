@@ -1043,7 +1043,7 @@ test('prepare-create builds at the schema Go names and refuses one without draft
   const prepare=body=>call(f.socket,'/v1/documents/new/prepare-create',body,{Authorization:'Bearer agtv2.synthetic-creation'});
   try {
     for (const schema of [3,4,5]) { const result=await prepare({schema,blocks:[{type:'paragraph',text:'Hello'}]}); assert.equal(result.status,200); assert.equal(result.body.schema,schema); const doc=load(result.body.snapshot); try { validate(doc,schema); } finally { doc.destroy(); } }
-    for (const schema of [1,2,6,'5']) assert.equal((await prepare({schema,blocks:[{type:'paragraph',text:'x'}]})).status,409,`schema ${schema}`);
+    for (const schema of [1,2,7,'5']) assert.equal((await prepare({schema,blocks:[{type:'paragraph',text:'x'}]})).status,409,`schema ${schema}`);
     assert.equal((await prepare({schema:5,blocks:[],extra:1})).status,400);
   } finally { await f.close(); }
 });

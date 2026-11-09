@@ -1,9 +1,14 @@
 // Run only under scripts/throwaway-server.sh run NAME --documents --binary PATH.
-// Docs Canvas at content schema 6, end to end in a real browser against the
-// production Node engine and Go authority: an editor places and moves a block,
-// the placement survives a reload, and a second person with read-only access
-// can pan the canvas but not move anything. Two real identities, no model or
-// provider. DOCS_CANVAS_OUT names where screenshots and videos go.
+// Docs Canvas end to end in a real browser against the production Node engine
+// and Go authority. A document created at the creation schema (5) with
+// formatting is upgraded by its owner through "Enable Canvas" (the first switch
+// asks); a co-editor who had it open at schema 5 is refused on save and
+// reloads. The owner places, moves and resizes blocks, removes one from the
+// canvas (the block stays on the Page), undoes, writes a canvas-only note,
+// deletes a block after its confirmation (its comment thread detaches with the
+// quote), and everything survives a reload. A Viewer pans but cannot move; two
+// editors write at once. Three real identities, no model or provider.
+// DOCS_CANVAS_OUT names where screenshots and videos go.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
@@ -58,15 +63,18 @@ try {
   }
   assert.ok(enabled, 'real Node service becomes available')
 
-  // A schema 6 document, initialized explicitly (nothing upgrades implicitly).
+  // A document at the creation schema with formatting; Canvas is enabled later, by a person, in the UI.
   const created = await owner.request.post(`${base}/api/v1/pages?${q}`, { data: { name: 'Canvas plan', slug: 'canvas-plan', panels: [], allow_empty: true } })
   assert.equal(created.status(), 201, await created.text())
   const pageId = (await created.json()).id
   const p = (id, text) => ({ type: 'paragraph', attrs: { id }, content: [{ type: 'text', text }] })
-  const body = { type: 'doc', content: [{ type: 'heading', attrs: { id: 'title', level: 1 }, content: [{ type: 'text', text: 'Launch plan' }] }, p('intro', 'Agree the launch date with sales.'), p('outro', 'Book the venue.')] }
-  const init = await owner.request.post(`${base}/api/v1/pages/canvas-plan/document/initialize?${q}`, { data: { id: crypto.randomUUID(), schema: 6, page_id: pageId, body } })
+  const formatted = { type: 'paragraph', attrs: { id: 'note' }, content: [{ type: 'text', text: 'Bring ' }, { type: 'text', text: 'printed', marks: [{ type: 'bold', attrs: {} }, { type: 'underline', attrs: {} }] }, { type: 'text', text: ' copies by ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: '.' }] }
+  const body = { type: 'doc', content: [{ type: 'heading', attrs: { id: 'title', level: 1 }, content: [{ type: 'text', text: 'Launch plan' }] }, p('intro', 'Agree the launch date with sales.'), p('outro', 'Book the venue.'), formatted] }
+  const init = await owner.request.post(`${base}/api/v1/pages/canvas-plan/document/initialize?${q}`, { data: { id: crypto.randomUUID(), schema: 5, page_id: pageId, body } })
   assert.equal(init.status(), 200, await init.text())
-  pass('schema 6 document initialized through the public API')
+  const beforeUpgrade = await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document?${q}`)).json()
+  assert.equal(beforeUpgrade.schema, 5)
+  pass('schema 5 document with formatting initialized through the public API')
 
   // The second identity: a workspace Viewer with its own password.
   const provisioned = await owner.request.post(`${base}/api/v1/workspaces/${encodeURIComponent(workspace)}/members/provision?${q}`, { data: { email: 'canvas-viewer@example.invalid', role: 'VIEWER', full_name: 'Canvas Viewer', create_only: true } })
@@ -96,15 +104,58 @@ try {
   await page.goto(`${base}/artifacts/${encodeURIComponent(pageId)}`)
   const editor = page.getByLabel('Document editor', { exact: true })
   await editor.waitFor()
+  await page.getByRole('button', { name: 'Status: Live' }).waitFor({ timeout: 15000 })
+
+  // The co-editor already has the document open at schema 5 when Canvas is enabled.
+  const coContext = await browser.newContext({ viewport, reducedMotion: 'reduce', recordVideo: video })
+  await signIn(coContext, 'canvas-coeditor@example.invalid', coPassword)
+  const co = await coContext.newPage()
+  co.on('pageerror', error => errors.push(error.message))
+  await co.goto(`${base}/artifacts/${encodeURIComponent(pageId)}`)
+  await co.getByLabel('Document editor', { exact: true }).waitFor()
+  await co.getByRole('button', { name: 'Status: Live' }).waitFor({ timeout: 15000 })
+
+  // Enable Canvas: the first switch asks, Cancel changes nothing, Enable Canvas upgrades.
   await page.getByRole('tab', { name: 'Canvas', exact: true }).click()
+  const enableDialog = page.getByRole('alertdialog', { name: 'Enable Canvas for this document?' })
+  await enableDialog.waitFor()
+  await page.screenshot({ path: join(output, '00-enable-canvas-dialog.png') })
+  await enableDialog.getByRole('button', { name: 'Cancel' }).click()
+  assert.equal((await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document?${q}`)).json()).schema, 5, 'Cancel leaves the document at schema 5')
+  await page.getByRole('tab', { name: 'Canvas', exact: true }).click()
+  const upgraded = page.waitForResponse(r => r.url().includes('/document/upgrade') && r.request().method() === 'POST')
+  await page.getByRole('alertdialog').getByRole('button', { name: 'Enable Canvas' }).click()
+  assert.equal((await upgraded).status(), 200, 'the upgrade is confirmed')
   const canvas = page.getByRole('application', { name: 'Canvas' })
   await canvas.waitFor()
+  const afterUpgrade = await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document?${q}`)).json()
+  assert.equal(afterUpgrade.schema, 6)
+  assert.deepEqual(afterUpgrade.content, beforeUpgrade.content, 'enabling Canvas keeps the Page and its formatting exactly')
+  assert.deepEqual(afterUpgrade.outline, beforeUpgrade.outline, 'block IDs and hashes are unchanged')
+  pass('Enable Canvas: the first switch asks; confirming upgrades to schema 6 and keeps the content')
+
+  // The co-editor's tab is still at schema 5: whatever it sends is refused, never written over the Canvas document.
+  const coPatches = []
+  co.on('response', r => { if (r.url().includes('/document/patch') && r.request().method() === 'POST') coPatches.push(r.status()) })
+  await co.getByText('Book the venue.', { exact: true }).click()
+  await co.keyboard.press('End'); await co.keyboard.type(' Old tab.')
+  await co.waitForTimeout(6000)
+  await co.screenshot({ path: join(output, '00b-coeditor-old-tab.png') })
+  const stillSix = await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document?${q}`)).json()
+  assert.equal(stillSix.schema, 6); assert.doesNotMatch(JSON.stringify(stillSix.content), /Old tab/, 'the old tab wrote nothing')
+  assert.ok(coPatches.every(status => status !== 200), `no old-tab save is accepted: ${JSON.stringify(coPatches)}`)
+  assert.equal(await co.getByRole('button', { name: 'Status: Saved' }).count(), 0, 'the old tab never claims Saved')
+  console.log('old tab patches:', JSON.stringify(coPatches), 'status:', JSON.stringify(await co.locator('[data-docs-banner], [role=alert]').allInnerTexts()))
+  pass('an editor still open at schema 5 is refused on save and keeps its draft out of the document')
+  await co.goto(`${base}/artifacts/${encodeURIComponent(pageId)}`)
+  await co.getByLabel('Document editor', { exact: true }).waitFor()
+
   assert.equal(await page.locator('[data-docs-canvas]').getAttribute('data-editable'), 'true')
   await page.screenshot({ path: join(output, '01-editor-empty-canvas.png') })
   // Only a patch that carries the placement counts (the editor may save its own normalization first).
   const placementPatch = r => r.url().includes('/document/patch') && r.request().method() === 'POST' && Buffer.from(JSON.parse(r.request().postData() || '{}').update || '', 'base64').includes('surface:placements')
   let saved = page.waitForResponse(placementPatch)
-  await page.getByText(/^Add blocks \(3\)$/).click()
+  await page.getByText(/^Add blocks \(4\)$/).click()
   await page.getByRole('button', { name: 'Agree the launch date with sales.', exact: true }).click()
   assert.equal((await saved).status(), 200, 'placing a block saves a patch')
   const card = page.locator('[data-placement="intro"]')
@@ -219,20 +270,14 @@ try {
 
   // C07: two editors at once. The owner moves the placed card while the co-editor places another
   // block; both writes survive, and each sees the other's change without reloading.
-  const coContext = await browser.newContext({ viewport, reducedMotion: 'reduce', recordVideo: video })
-  await signIn(coContext, 'canvas-coeditor@example.invalid', coPassword)
-  const co = await coContext.newPage()
-  co.on('pageerror', error => errors.push(error.message))
-  await co.goto(`${base}/artifacts/${encodeURIComponent(pageId)}`)
-  await co.getByLabel('Document editor', { exact: true }).waitFor()
-  await co.getByRole('button', { name: 'Status: Live' }).waitFor({ timeout: 15000 })
+  await co.getByRole('button', { name: /^Status: (Live|Recovered|Saved)/ }).waitFor({ timeout: 15000 }).catch(() => {})
   await co.getByRole('tab', { name: 'Canvas', exact: true }).click()
   await co.locator('[data-placement="intro"]').waitFor()
   const ownerCard = page.locator('[data-placement="intro"]')
   const from = await ownerCard.boundingBox()
   const ownerSaved = page.waitForResponse(r => r.url().includes('/document/patch') && r.request().method() === 'POST')
   const coSaved = co.waitForResponse(r => r.url().includes('/document/patch') && r.request().method() === 'POST')
-  await co.getByText(/^Add blocks \(2\)$/).click()
+  await co.getByText(/^Add blocks \(3\)$/).click()
   await page.mouse.move(from.x + 40, from.y + 20); await page.mouse.down()
   for (let i = 1; i <= 8; i++) await page.mouse.move(from.x + 40 + i * 15, from.y + 20 + i * 20)
   await co.getByRole('button', { name: 'Book the venue.', exact: true }).click()
@@ -250,6 +295,76 @@ try {
   await co.screenshot({ path: join(output, '05-coeditor-sees-move.png') })
   await page.screenshot({ path: join(output, '05-owner-sees-placement.png') })
   pass('two editors write at once: both changes are stored and each sees the other live')
+
+  const surfaceOf = async () => {
+    const value = await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document?${q}`)).json()
+    const d = new Y.Doc({ gc: false }); Y.applyUpdate(d, decode(value.snapshot)); for (const update of value.updates ?? []) Y.applyUpdate(d, decode(update))
+    const out = { placements: d.getMap('surface:placements').toJSON(), items: d.getMap('surface:items').toJSON(), text: d.getMap('surface:text').toJSON(), content: JSON.stringify(value.content), value }
+    d.destroy(); return out
+  }
+  const waitFor = async (check, label) => { for (let i = 0; i < 80; i++) { const s = await surfaceOf(); if (check(s)) return s; await new Promise(r => setTimeout(r, 250)) } throw new Error(label) }
+  const select = async id => { const b = await page.locator(`[data-placement="${id}"]`).boundingBox(); await page.mouse.click(b.x + 12, b.y + 8) }
+
+  // Resize with the corner handle: width and height grow, the text is untouched.
+  await select('intro')
+  const handle = page.locator('[data-placement="intro"] [data-handle="se"]')
+  const hb = await handle.boundingBox()
+  const sized = await surfaceOf()
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down()
+  for (let i = 1; i <= 8; i++) await page.mouse.move(hb.x + i * 12, hb.y + i * 8)
+  await page.mouse.up()
+  const resizedState = await waitFor(s => s.placements.intro.w > sized.placements.intro.w, 'resize stored')
+  assert.ok(resizedState.placements.intro.h >= sized.placements.intro.h)
+  assert.equal(resizedState.content, sized.content, 'a resize changes only geometry')
+  pass('resize with the corner handle is stored; the Page is unchanged')
+
+  // Remove from canvas: the placement goes, the block stays on the Page. Undo brings the placement back.
+  await select('outro')
+  await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Remove from canvas' }).click()
+  const removed = await waitFor(s => !s.placements.outro, 'remove stored')
+  assert.match(removed.content, /Book the venue\./, 'the block stays on the Page')
+  await page.screenshot({ path: join(output, '06-removed-from-canvas.png') })
+  await page.getByRole('button', { name: 'Undo my last canvas change' }).click()
+  await waitFor(s => Boolean(s.placements.outro), 'undo stored')
+  pass('Remove from canvas keeps the block on the Page; Undo restores the placement')
+
+  // A note lives only on the canvas.
+  await page.getByRole('button', { name: 'Add note' }).click()
+  await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Edit text' }).click()
+  await page.getByRole('textbox', { name: 'Note text' }).fill('Ask about catering')
+  await canvas.click({ position: { x: 20, y: 400 } })
+  const noted = await waitFor(s => Object.values(s.text).includes('Ask about catering'), 'note stored')
+  assert.doesNotMatch(noted.content, /Ask about catering/, 'a note is never a Page block')
+  pass('a canvas-only note is stored on the surface, not on the Page')
+
+  // Delete block: the confirmation names the Page, the Canvas and the thread; the thread detaches with its quote.
+  await select('intro')
+  await page.getByRole('toolbar', { name: 'Selection' }).getByRole('button', { name: 'Delete block…' }).click()
+  const confirm = page.getByRole('alertdialog', { name: 'Delete this block?' })
+  await confirm.waitFor()
+  const confirmText = await confirm.innerText()
+  assert.match(confirmText, /deleted from the Page and from the Canvas/)
+  assert.match(confirmText, /1 open comment thread becomes detached/)
+  await page.screenshot({ path: join(output, '07-delete-block-confirmation.png') })
+  await confirm.getByRole('button', { name: 'Delete block', exact: true }).click()
+  const deleted = await waitFor(s => !/Agree the launch date/.test(s.content), 'delete stored')
+  assert.ok(!deleted.placements.intro, 'the placement went with the block')
+  const threads = await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document/comments?${q}`)).json()
+  const detached = threads.comments.find(c => c.body === 'Is the date confirmed?')
+  assert.equal(detached.status, 'detached'); assert.equal(detached.quote, 'Agree')
+  pass('Delete block asks first, deletes from Page and Canvas at once, and the thread detaches with its quote')
+
+  // Save then reload: geometry, the note and the formatting survive.
+  const final = await surfaceOf()
+  await page.reload()
+  await page.getByLabel('Document editor', { exact: true }).waitFor()
+  await page.getByRole('tab', { name: 'Canvas', exact: true }).click()
+  await page.locator('[data-placement="outro"]').waitFor()
+  assert.deepEqual(await page.locator('[data-placement="outro"]').evaluate(e => ({ left: e.style.left, top: e.style.top, width: e.style.width })), { left: `${final.placements.outro.x}px`, top: `${final.placements.outro.y}px`, width: `${final.placements.outro.w}px` })
+  await page.getByText('Ask about catering').waitFor()
+  assert.match(final.content, /"underline"/); assert.match(final.content, /"2026-12-01"/)
+  await page.screenshot({ path: join(output, '08-after-reload.png') })
+  pass('save then reload keeps geometry, the note and the Page formatting')
 
   assert.deepEqual(errors, [], 'no browser runtime errors')
   const videos = [await page.video()?.path(), await viewer.video()?.path(), await co.video()?.path()]
