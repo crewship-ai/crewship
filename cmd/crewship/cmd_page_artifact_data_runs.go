@@ -27,7 +27,9 @@ applies immediately (readers may see values while the run is still going) and
 returns the collection's "generation". Finish as succeeded with
 --data-generation set to the generation of your last batch; the server refuses
 it if anyone wrote since, or while another run of the collection is running or
-after one failed with changed data during yours (artifact_data_run_overlap). If the run had nothing to change, finish with
+after one failed with changed data during yours (artifact_data_run_overlap,
+listing blocking_runs; "runs list" shows every running run as active_runs to
+the owner and editors, and any writer can finish one as failed). If the run had nothing to change, finish with
 --data-generation set to the run's start_generation and --unchanged. Only the
 producer that started a run can mark it succeeded; any writer can finish it as
 failed, and the finisher is recorded. A failed run during which data changed

@@ -310,8 +310,11 @@ Finish as succeeded with the generation of your last batch. The server
 refuses the success with `409 artifact_data_run_generation` if anyone wrote
 to the collection since, and with `409 artifact_data_run_overlap` while
 another refresh of the collection is still running or after one failed with
-changed data while yours ran; finish or abandon that run, then start a new
-one. If the refresh had nothing to change, finish with the run's
+changed data while yours ran. The refusal lists those runs in
+`blocking_runs`, and `runs list` shows every running run to the owner and
+editors (`active_runs`), so a run whose producer died can always be found:
+any writer can finish it as failed. Then start a new run. Two healthy runs
+that overlap cannot both succeed; run one refresh per collection at a time. If the refresh had nothing to change, finish with the run's
 `start_generation` and `--unchanged`. `--unchanged` is your own claim: the
 server only checks that nobody wrote during the run, not the source.
 

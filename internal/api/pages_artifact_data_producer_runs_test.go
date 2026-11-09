@@ -536,3 +536,63 @@ func TestDashboardProducerRunSuccessRefusedWhileAnotherRunOverlaps(t *testing.T)
 		t.Fatalf("retry after the overlap ended: %d %s", w.Code, w.Body)
 	}
 }
+
+// Review round 2: a run whose producer died must be findable and abandonable
+// by another writer using only what the API returns.
+func TestDashboardProducerRunLostRunIsFindableAndAbandonable(t *testing.T) {
+	f := newProducerRunFixture(t)
+	editor := "producer-editor"
+	mustExec(t, f.h.db, `INSERT INTO users(id,email) VALUES(?,'producer-editor@example.test')`, editor)
+	mustExec(t, f.h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, generateCUID(), f.ws, editor)
+	mustExec(t, f.h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'user',?,'write',?,datetime('now'))`, f.page, editor, f.owner)
+	lost := decodeRun(t, f.do(t, editor, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"crashed-job"}`))
+	mine := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"owner-job"}`))
+	w := f.do(t, f.owner, "finish", "sales", mine.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`)
+	var refused struct {
+		Code     string                    `json:"code"`
+		Blocking []artifactDataRunResponse `json:"blocking_runs"`
+	}
+	if w.Code != 409 || json.Unmarshal(w.Body.Bytes(), &refused) != nil || refused.Code != "artifact_data_run_overlap" || len(refused.Blocking) != 1 || refused.Blocking[0].ID != lost.ID || refused.Blocking[0].StartedBy != "Contributor" || strings.Contains(w.Body.String(), editor) {
+		t.Fatalf("overlap does not name the blocking run: %d %s", w.Code, w.Body)
+	}
+	// The newest run is the owner's, yet the list still shows every running run to writers.
+	list := f.do(t, f.owner, "list", "", "", "?version=1", "")
+	var summary artifactDataRunsResponse
+	if err := json.Unmarshal(list.Body.Bytes(), &summary); err != nil || len(summary.Runs) != 1 || len(summary.Runs[0].Active) != 2 {
+		t.Fatalf("running runs not listed: %v %s", err, list.Body)
+	}
+	if w := f.do(t, f.reader, "list", "", "", "?version=1", ""); strings.Contains(w.Body.String(), "active_runs") {
+		t.Fatalf("reader sees run ids of active runs: %s", w.Body)
+	}
+	if w := f.do(t, f.owner, "finish", "sales", refused.Blocking[0].ID, "", `{"base_version":1,"state":"failed","reason":"producer crashed"}`); w.Code != 200 {
+		t.Fatalf("owner could not abandon the lost run: %d %s", w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "finish", "sales", mine.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0,"unchanged":true}`); w.Code != 200 {
+		t.Fatalf("success after abandoning: %d %s", w.Code, w.Body)
+	}
+	// A replayed success must repeat the same unchanged claim.
+	if w := f.do(t, f.owner, "finish", "sales", mine.ID, "", `{"base_version":1,"state":"succeeded","data_generation":0}`); w.Code != 409 {
+		t.Fatalf("replay with a different unchanged claim: %d %s", w.Code, w.Body)
+	}
+}
+
+// Review round 2: retention must not drop the failed partial run that blocks
+// a still-running run's success.
+func TestDashboardProducerRunRetentionKeepsOverlapEvidence(t *testing.T) {
+	f := newProducerRunFixture(t)
+	long := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"long"}`))
+	partial := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"partial"}`))
+	dashboardRequest(t, f.h, f.ws, f.owner, "POST", "sales", "", `{"base_version":1,"documents":[{"id":"row","ifVersion":0,"value":{"amount":1}}]}`)
+	if w := f.do(t, f.owner, "finish", "sales", partial.ID, "", `{"base_version":1,"state":"failed"}`); w.Code != 200 || !decodeRun(t, w).Partial {
+		t.Fatal(w.Code, w.Body)
+	}
+	for i := 0; i < artifacts.DefaultDataRunsKept+3; i++ {
+		run := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", fmt.Sprintf(`{"base_version":1,"idempotency_key":"short-%d"}`, i)))
+		if w := f.do(t, f.owner, "finish", "sales", run.ID, "", `{"base_version":1,"state":"failed"}`); w.Code != 200 {
+			t.Fatal(w.Code, w.Body)
+		}
+	}
+	if w := f.do(t, f.owner, "finish", "sales", long.ID, "", `{"base_version":1,"state":"succeeded","data_generation":1}`); w.Code != 409 {
+		t.Fatalf("pruning removed the overlap evidence: %d %s", w.Code, w.Body)
+	}
+}

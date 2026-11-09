@@ -1641,6 +1641,29 @@
         ],
         "type": "object"
       },
+      "ArtifactDataRunError": {
+        "additionalProperties": false,
+        "properties": {
+          "blocking_runs": {
+            "description": "With 409 artifact_data_run_overlap: the runs that block this success. Any writer can finish one as failed.",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDataRun"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "code": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
       "ArtifactDataRunFinish": {
         "additionalProperties": false,
         "properties": {
@@ -1705,6 +1728,14 @@
       "ArtifactDataRunSummary": {
         "additionalProperties": false,
         "properties": {
+          "active_runs": {
+            "description": "Every running run of the collection, newest first, so a run whose producer died stays findable. Returned to the owner and editors only.",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDataRun"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
           "collection": {
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
             "type": "string"
@@ -140322,7 +140353,7 @@
     },
     "/api/v1/pages/{slug}/artifact/data/{collection}/runs/{run}": {
       "post": {
-        "description": "End a running run as `succeeded` or `failed` with the authority of a data batch. Only the producer that started the run can finish it as succeeded (another writer gets 403 `artifact_data_run_forbidden`), naming as `data_generation` the generation its last batch returned; it must still be current, and a success without a data change needs `unchanged` with the start generation, otherwise 409 `artifact_data_run_generation`; a success while another run of the collection is running, or after one failed with changed data during this run, returns 409 `artifact_data_run_overlap`. Any writer can finish a run as failed; the finisher is recorded and a failed run whose data changed is `partial`. A run that is never finished stays `running`. Repeating the same outcome returns the stored run; a different outcome returns 409 `artifact_data_run_conflict`. An unknown run, including one of another Page or workspace, returns 404.",
+        "description": "End a running run as `succeeded` or `failed` with the authority of a data batch. Only the producer that started the run can finish it as succeeded (another writer gets 403 `artifact_data_run_forbidden`), naming as `data_generation` the generation its last batch returned; it must still be current, and a success without a data change needs `unchanged` with the start generation, otherwise 409 `artifact_data_run_generation`; a success while another run of the collection is running, or after one failed with changed data during this run, returns 409 `artifact_data_run_overlap` with the blocking runs in `blocking_runs`. Any writer can finish a run as failed; the finisher is recorded and a failed run whose data changed is `partial`. A run that is never finished stays `running`. Repeating the same outcome returns the stored run; a different outcome returns 409 `artifact_data_run_conflict`. An unknown run, including one of another Page or workspace, returns 404.",
         "operationId": "post_api_v1_pages_slug_artifact_data_collection_runs_run",
         "parameters": [
           {
@@ -140375,7 +140406,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactProjectError"
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
                 }
               }
             },
@@ -140385,7 +140416,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactProjectError"
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
                 }
               }
             },
@@ -140395,7 +140426,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactProjectError"
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
                 }
               }
             },
@@ -140405,7 +140436,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactProjectError"
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
                 }
               }
             },
@@ -140415,7 +140446,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactProjectError"
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
                 }
               }
             },
@@ -140425,7 +140456,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactProjectError"
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
                 }
               }
             },
@@ -140435,7 +140466,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactProjectError"
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
                 }
               }
             },

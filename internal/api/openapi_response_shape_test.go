@@ -74,6 +74,7 @@ var responseShapeContracts = []struct {
 	{name: "ArtifactDataRun", pointer: "/components/schemas/ArtifactDataRun", value: artifactDataRunResponse{}},
 	{name: "ArtifactDataRunSummary", pointer: "/components/schemas/ArtifactDataRunSummary", value: artifactDataRunSummaryResponse{}},
 	{name: "ArtifactDataRuns", pointer: "/components/schemas/ArtifactDataRuns", value: artifactDataRunsResponse{}},
+	{name: "ArtifactDataRunError", pointer: "/components/schemas/ArtifactDataRunError", value: artifactDataRunOverlapResponse{}},
 	{name: "NativeCraftAgentTaskReceipt", pointer: "/components/schemas/NativeCraftAgentTaskReceipt", value: craftNativeAgentTaskReceipt{}},
 	{name: "NativeCraftAgentStopReceipt", pointer: "/components/schemas/NativeCraftAgentStopReceipt", value: craftNativeAgentStopReceipt{}},
 	{name: "NativeCraftAgentTaskStatus", pointer: "/components/schemas/NativeCraftAgentTaskStatus", value: craftNativeAgentTaskStatus{}},

@@ -54,6 +54,13 @@ type artifactDataRunSummaryResponse struct {
 	Latest        artifactDataRunResponse `json:"latest"`
 	LastAttemptAt string                  `json:"last_attempt_at"`
 	LastSuccessAt string                  `json:"last_success_at,omitempty"`
+	// Active is every running run of the collection, for the owner and editors only.
+	Active []artifactDataRunResponse `json:"active_runs,omitempty"`
+}
+type artifactDataRunOverlapResponse struct {
+	Error    string                    `json:"error"`
+	Code     string                    `json:"code,omitempty"`
+	Blocking []artifactDataRunResponse `json:"blocking_runs,omitempty"`
 }
 type artifactDataRunsResponse struct {
 	CodeVersion int64                            `json:"code_version"`
@@ -104,7 +111,7 @@ func decodeDataRunBody(w http.ResponseWriter, r *http.Request, target any) bool 
 	return true
 }
 
-func artifactDataRunError(w http.ResponseWriter, err error) {
+func artifactDataRunError(w http.ResponseWriter, r *http.Request, err error) {
 	if errors.Is(err, artifacts.ErrDataRunNotFound) {
 		replyError(w, 404, "run not found")
 		return
@@ -117,8 +124,14 @@ func artifactDataRunError(w http.ResponseWriter, err error) {
 		writeJSON(w, 409, map[string]string{"error": "This dataset already has the maximum number of running refreshes. Finish one, then start again.", "code": "artifact_data_run_busy"})
 		return
 	}
-	if errors.Is(err, artifacts.ErrDataRunOverlap) {
-		writeJSON(w, 409, map[string]string{"error": "Another refresh of this dataset is still running, or failed after changing data while this one ran. Finish or retry it first; a new run started afterwards can succeed. Nothing was changed.", "code": "artifact_data_run_overlap"})
+	var overlap *artifacts.DataRunOverlapError
+	if errors.As(err, &overlap) {
+		// Only writers reach a finish, so the blocking runs are theirs to see and abandon.
+		blocking := make([]artifactDataRunResponse, 0, len(overlap.Runs))
+		for _, run := range overlap.Runs {
+			blocking = append(blocking, projectArtifactDataRun(r, run, true))
+		}
+		writeJSON(w, 409, artifactDataRunOverlapResponse{Error: "Another refresh of this dataset is still running, or failed after changing data while this one ran. Finish the runs in blocking_runs (any writer can finish one as failed), then start a new run. Nothing was changed.", Code: "artifact_data_run_overlap", Blocking: blocking})
 		return
 	}
 	if errors.Is(err, artifacts.ErrDataRunGeneration) {
@@ -154,7 +167,7 @@ func (h *PageHandler) StartArtifactDataRun(w http.ResponseWriter, r *http.Reques
 	auth, _ := h.artifactDataAuthority(r, k, collection, body.BaseVersion, true)
 	run, created, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).StartRun(r.Context(), k, collection, body.IdempotencyKey, auth)
 	if err != nil {
-		artifactDataRunError(w, err)
+		artifactDataRunError(w, r, err)
 		return
 	}
 	status := 200
@@ -186,7 +199,7 @@ func (h *PageHandler) FinishArtifactDataRun(w http.ResponseWriter, r *http.Reque
 	auth, _ := h.artifactDataAuthority(r, k, collection, body.BaseVersion, true)
 	run, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).FinishRun(r.Context(), k, collection, r.PathValue("run"), artifacts.DataRunFinish{State: body.State, Reason: body.Reason, DataGeneration: body.DataGeneration, Unchanged: body.Unchanged}, auth)
 	if err != nil {
-		artifactDataRunError(w, err)
+		artifactDataRunError(w, r, err)
 		return
 	}
 	writeJSON(w, 200, projectArtifactDataRun(r, run, true))
@@ -217,7 +230,13 @@ func (h *PageHandler) ListArtifactDataRuns(w http.ResponseWriter, r *http.Reques
 	out := artifactDataRunsResponse{CodeVersion: version, Runs: []artifactDataRunSummaryResponse{}}
 	showReason := selection.owner || selection.editor
 	for _, summary := range summaries {
-		out.Runs = append(out.Runs, artifactDataRunSummaryResponse{Collection: summary.Collection, Latest: projectArtifactDataRun(r, summary.Latest, showReason), LastAttemptAt: summary.LastAttemptAt, LastSuccessAt: summary.LastSuccessAt})
+		entry := artifactDataRunSummaryResponse{Collection: summary.Collection, Latest: projectArtifactDataRun(r, summary.Latest, showReason), LastAttemptAt: summary.LastAttemptAt, LastSuccessAt: summary.LastSuccessAt}
+		if showReason {
+			for _, run := range summary.Active {
+				entry.Active = append(entry.Active, projectArtifactDataRun(r, run, true))
+			}
+		}
+		out.Runs = append(out.Runs, entry)
 	}
 	writeJSON(w, 200, out)
 }

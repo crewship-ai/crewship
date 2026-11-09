@@ -3023,7 +3023,7 @@ CLI commands are `crewship page artifact data collections`, `data get` and
 | --- | --- | --- |
 | POST | `/api/v1/pages/{slug}/artifact/data/{collection}/runs` | Request body `{base_version,idempotency_key}`; response is the run `{id,collection,state,started_by,started_by_kind,started_at,start_generation}`: 201 when created, 200 when the key repeats. |
 | POST | `/api/v1/pages/{slug}/artifact/data/{collection}/runs/{run}` | Request body `{base_version,state,reason?,data_generation?,unchanged?}` with `state` `succeeded` or `failed`; response is the finished run with `finished_at`, `finished_by`, `finished_by_kind`, `data_generation`, `partial` (failed runs whose data changed) and, for a failure, `failure_reason`. |
-| GET | `/api/v1/pages/{slug}/artifact/data-runs` | Required `version` query; response `{code_version,runs:[{collection,latest,last_attempt_at,last_success_at?}]}` for declared collections that have a run. |
+| GET | `/api/v1/pages/{slug}/artifact/data-runs` | Required `version` query; response `{code_version,runs:[{collection,latest,last_attempt_at,last_success_at?,active_runs?}]}` for declared collections that have a run. |
 
 A producer records each refresh of a collection as a run. A run never writes
 data or changes a code version; the producer writes with the batch route
@@ -3043,7 +3043,11 @@ must set `unchanged: true` with the start generation; `unchanged` over
 changed data is refused; `unchanged` is the producer's claim, which the
 server checks only against writes made during the run. A success is also
 refused while another run of the collection is running, or after one failed
-with changed data while this run was going (`artifact_data_run_overlap`). A
+with changed data while this run was going (`artifact_data_run_overlap`;
+the response lists them in `blocking_runs`, and the list route returns every
+running run as `active_runs` to the owner and editors, so any writer can find
+and abandon a run whose producer died). Such failed runs are kept by
+retention while a run they block is still going. A
 failure carries neither field. A failed run whose generation moved (by it or
 another writer) is reported as `partial`.
 

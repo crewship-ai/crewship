@@ -83,6 +83,13 @@ func (r *DataRun) Partial() bool {
 	return r.State == "failed" && r.EndGeneration != nil && *r.EndGeneration > r.StartGeneration
 }
 
+// DataRunOverlapError is ErrDataRunOverlap with the runs that block the
+// success, so a writer can find and abandon a run whose producer died.
+type DataRunOverlapError struct{ Runs []*DataRun }
+
+func (e *DataRunOverlapError) Error() string        { return ErrDataRunOverlap.Error() }
+func (e *DataRunOverlapError) Is(target error) bool { return target == ErrDataRunOverlap }
+
 // DataRunFinish is how a producer ends a run. DataGeneration is required for a
 // success and is the generation returned by the producer's last batch, or the
 // run's start generation together with Unchanged when it verified that no
@@ -101,6 +108,9 @@ type DataRunSummary struct {
 	Latest        *DataRun `json:"latest"`
 	LastAttemptAt string   `json:"last_attempt_at"`
 	LastSuccessAt string   `json:"last_success_at,omitempty"`
+	// Active lists every running run of the collection, newest first, so a
+	// run whose producer died stays findable after newer runs start.
+	Active []*DataRun `json:"active,omitempty"`
 }
 
 var idempotencyKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
@@ -179,6 +189,22 @@ func scanDataRun(row interface{ Scan(...any) error }) (*DataRun, error) {
 	return &run, nil
 }
 
+func scanDataRuns(rows *sql.Rows, err error) ([]*DataRun, error) {
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []*DataRun
+	for rows.Next() {
+		run, err := scanDataRun(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, run)
+	}
+	return out, rows.Err()
+}
+
 // DataGeneration is the collection's data generation inside tx.
 func dataGeneration(ctx context.Context, tx *sql.Tx, key VersionKey, collection string) (int64, error) {
 	var generation int64
@@ -208,11 +234,14 @@ func (s *DataStore) runKeyTTL() time.Duration {
 }
 
 // pruneDataRuns keeps the newest terminal runs and the newest success. A
-// running run is never removed; admission bounds how many exist.
+// running run is never removed; admission bounds how many exist. A failed
+// partial run that ended while a run is still going is kept too: it is the
+// evidence that refuses that run's success (ErrDataRunOverlap).
 func (s *DataStore) pruneDataRuns(ctx context.Context, tx *sql.Tx, key VersionKey, collection string) error {
 	_, err := tx.ExecContext(ctx, `DELETE FROM artifact_data_runs WHERE workspace_id=?1 AND page_id=?2 AND collection=?3 AND state!='running'
  AND id NOT IN (SELECT id FROM artifact_data_runs WHERE workspace_id=?1 AND page_id=?2 AND collection=?3 AND state!='running' ORDER BY finished_at DESC, rowid DESC LIMIT ?4)
- AND id NOT IN (SELECT id FROM artifact_data_runs WHERE workspace_id=?1 AND page_id=?2 AND collection=?3 AND state='succeeded' ORDER BY finished_at DESC, rowid DESC LIMIT 1)`, key.WorkspaceID, key.PageID, collection, s.runsKept())
+ AND id NOT IN (SELECT id FROM artifact_data_runs WHERE workspace_id=?1 AND page_id=?2 AND collection=?3 AND state='succeeded' ORDER BY finished_at DESC, rowid DESC LIMIT 1)
+ AND NOT (state='failed' AND end_generation>start_generation AND finished_at>=coalesce((SELECT min(started_at) FROM artifact_data_runs WHERE workspace_id=?1 AND page_id=?2 AND collection=?3 AND state='running'),'9999'))`, key.WorkspaceID, key.PageID, collection, s.runsKept())
 	return err
 }
 
@@ -333,7 +362,7 @@ func (s *DataStore) FinishRun(ctx context.Context, key VersionKey, collection, i
 			return ErrDataRunForbidden
 		}
 		if run.State != "running" {
-			if run.State != state || run.Reason != reason || state == "succeeded" && (run.EndGeneration == nil || *run.EndGeneration != *finish.DataGeneration) {
+			if run.State != state || run.Reason != reason || state == "succeeded" && (run.EndGeneration == nil || *run.EndGeneration != *finish.DataGeneration || (*run.EndGeneration == run.StartGeneration) != finish.Unchanged) {
 				return ErrDataConflict
 			}
 			out = run
@@ -352,12 +381,12 @@ func (s *DataStore) FinishRun(ctx context.Context, key VersionKey, collection, i
 			// not that every change since start was its own. Refuse a success
 			// that would hide another refresh still writing, or one that failed
 			// after changing data while this run was going.
-			var overlap bool
-			if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND id!=? AND (state='running' OR (state='failed' AND end_generation>start_generation AND finished_at>=?)))`, key.WorkspaceID, key.PageID, collection, id, run.StartedAt).Scan(&overlap); err != nil {
+			blocking, err := scanDataRuns(tx.QueryContext(ctx, `SELECT `+dataRunColumns+` FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND id!=? AND (state='running' OR (state='failed' AND end_generation>start_generation AND finished_at>=?)) ORDER BY started_at, rowid LIMIT 16`, key.WorkspaceID, key.PageID, collection, id, run.StartedAt))
+			if err != nil {
 				return err
 			}
-			if overlap {
-				return ErrDataRunOverlap
+			if len(blocking) > 0 {
+				return &DataRunOverlapError{Runs: blocking}
 			}
 		}
 		stamp := tsformat.Format(time.Now().UTC())
@@ -397,6 +426,9 @@ func (s *DataStore) RunSummaries(ctx context.Context, key VersionKey, collection
 				return err
 			}
 			summary := DataRunSummary{Collection: collection, Latest: latest, LastAttemptAt: latest.StartedAt}
+			if summary.Active, err = scanDataRuns(tx.QueryContext(ctx, `SELECT `+dataRunColumns+` FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND state='running' ORDER BY started_at DESC, rowid DESC LIMIT 16`, key.WorkspaceID, key.PageID, collection)); err != nil {
+				return err
+			}
 			if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(finished_at),'') FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND state='succeeded'`, key.WorkspaceID, key.PageID, collection).Scan(&summary.LastSuccessAt); err != nil {
 				return err
 			}
