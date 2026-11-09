@@ -138,6 +138,7 @@ export const PREVIEW_BUDGET_MS = 1_000
  * Per editor: previews render one at a time, and their render time is added
  * up. Once the budget is spent, a block shows its source and draws only when
  * the reader chooses Preview, so many heavy blocks cannot stall opening a page.
+ * Choosing Preview starts a fresh budget; a reloaded document has its own.
  */
 const budgets = new WeakMap<Editor, { spent: number; queue: Promise<void> }>()
 const budgetOf = (editor: Editor) => { let budget = budgets.get(editor); if (!budget) { budget = { spent: 0, queue: Promise.resolve() }; budgets.set(editor, budget) } return budget }
@@ -274,6 +275,8 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
           if (caretInside()) return
           // Choosing Preview always draws the current source, also after a slow render.
           if (slow) { slow = false; forced = true; shown = null }
+          // The reader asked for previews here: later blocks on this page may draw by themselves again.
+          budgetOf(editor).spent = 0
           setMode("preview")
         })
         const followCaret = () => { if (mode() === "preview" && previewable(language()) && caretInside()) setMode("source") }

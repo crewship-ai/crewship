@@ -1,6 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-const mermaid = vi.hoisted(() => ({ initialize: vi.fn(), render: vi.fn() }))
+const mermaid = vi.hoisted(() => {
+  // Like mermaid: initialize merges into the site configuration that every later render uses.
+  let site: Record<string, unknown> = { securityLevel: "strict", theme: "default" }
+  return {
+    initialize: vi.fn((config: Record<string, unknown>) => { site = { ...site, ...config } }),
+    render: vi.fn(),
+    mermaidAPI: { getSiteConfig: () => site },
+    reset: (config: Record<string, unknown>) => { site = config },
+  }
+})
 vi.mock("mermaid", () => ({ default: mermaid }))
 
 import { DIAGRAM_LIMITS, MERMAID_OPTIONS, SURFACE_CSP, renderDiagram, sanitizeDiagramSvg, svgFromSandboxed } from "../code-preview-diagram"
@@ -109,7 +118,7 @@ describe("renderDiagram", () => {
     const second = await renderDiagram("flowchart LR\n  B --> C")
     expect(first.ok && second.ok).toBe(true)
     // Mermaid's settings are global and shared with chat's renderer: they are set again before every diagram.
-    expect(mermaid.initialize).toHaveBeenCalledTimes(2)
+    expect(mermaid.initialize.mock.calls.filter(([config]) => config === MERMAID_OPTIONS)).toHaveLength(2)
     expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining(MERMAID_OPTIONS))
     expect(MERMAID_OPTIONS).toMatchObject({ startOnLoad: false, securityLevel: "sandbox", htmlLabels: false, flowchart: { htmlLabels: false }, maxTextSize: 5_000, maxEdges: 150, suppressErrorRendering: true })
     // Directives in a diagram cannot loosen these settings or restyle the page.
@@ -250,6 +259,19 @@ describe("renderDiagram", () => {
     expect(svgFromSandboxed(sandboxed(svgOf("<g><text>é ✓</text></g>")))).toBe(svgOf("<g><text>é ✓</text></g>"))
     expect(svgFromSandboxed(svgOf("<g/>"))).toBeNull()
     expect(svgFromSandboxed('<iframe src="data:text/html;charset=UTF-8;base64,@@@"></iframe>')).toBeNull()
+  })
+
+  it("leaves mermaid's settings as it found them, so chat's diagrams are not drawn in Docs' sandbox mode", async () => {
+    const chat = { securityLevel: "strict", theme: "dark", htmlLabels: true, startOnLoad: false }
+    mermaid.reset({ ...chat })
+    mermaid.render.mockImplementation(drawing("<g/>"))
+    expect((await renderDiagram("flowchart LR\n A-->B")).ok).toBe(true)
+    expect(mermaid.mermaidAPI.getSiteConfig()).toMatchObject(chat)
+    mermaid.render.mockRejectedValue(new Error("Parse error"))
+    expect((await renderDiagram("flowchart LR\n A-->")).ok).toBe(false)
+    expect(mermaid.mermaidAPI.getSiteConfig()).toMatchObject(chat)
+    // Docs' settings were in force while it drew.
+    expect(mermaid.initialize).toHaveBeenCalledWith(MERMAID_OPTIONS)
   })
 
   it("reports how long the render took", async () => {

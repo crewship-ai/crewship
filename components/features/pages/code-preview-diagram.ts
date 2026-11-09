@@ -277,6 +277,10 @@ async function draw(source: string): Promise<PreviewResult> {
   let markup: string
   let surface: Awaited<ReturnType<typeof openSurface>> | undefined
   let stand: HTMLElement | undefined
+  // Mermaid's settings are global and chat's renderer initializes them only once: put back what was there,
+  // whatever happens, so chat never draws with Docs' sandbox settings.
+  let previous: MermaidConfig | undefined
+  try { previous = structuredClone(mermaid.mermaidAPI.getSiteConfig()) } catch { previous = undefined }
   try {
     surface = await openSurface()
     const id = nextId()
@@ -293,6 +297,7 @@ async function draw(source: string): Promise<PreviewResult> {
     return { ok: false, error: `Cannot show this diagram: ${message.slice(0, 300)}`, ms: ms() }
   } finally {
     stand?.remove(); surface?.close()
+    if (previous) mermaid.initialize(previous)
   }
   const inner = svgFromSandboxed(markup)
   const svg = inner === null ? null : sanitizeDiagramSvg(inner)

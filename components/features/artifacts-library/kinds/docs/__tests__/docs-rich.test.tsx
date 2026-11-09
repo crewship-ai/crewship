@@ -22,7 +22,7 @@ const env = vi.hoisted(() => ({ canWrite: true, canComment: true, comments: "ok"
 const request = vi.hoisted(() => vi.fn())
 // happy-dom cannot lay out SVG, so mermaid's renderer is replaced by one that returns hostile output; the
 // real renderer is exercised in a browser harness. What reaches the page must still be safe.
-const mermaid = vi.hoisted(() => ({ initialize: vi.fn(), render: vi.fn(async (id: string, text: string, container: HTMLElement) => {
+const mermaid = vi.hoisted(() => ({ initialize: vi.fn(), mermaidAPI: { getSiteConfig: () => ({}) }, render: vi.fn(async (id: string, text: string, container: HTMLElement) => {
   // A diagram mentioning "Slow" takes longer than the slow-render threshold.
   if (text.includes("Slow")) await new Promise(done => setTimeout(done, 600))
   // Like mermaid's sandbox mode: draw in a frame inside the given container and return that frame as markup.
@@ -454,6 +454,13 @@ describe("Docs diagram and chart blocks", () => {
     expect(mermaid.render.mock.calls.some(([, text]) => String(text).includes("Three"))).toBe(false)
     fireEvent.click(within(within(third()).getByRole("group", { name: "Show diagram" })).getByRole("button", { name: "Preview" }))
     await waitFor(() => expect(third().querySelector<HTMLElement>("[data-diagram-preview]")?.shadowRoot?.querySelector("svg")).toBeTruthy(), { timeout: 3000 })
+    // Choosing Preview starts a fresh budget, so a later block on this page draws again by itself.
+    act(() => { editor.editor.commands.command(({ tr }) => {
+      tr.insert(tr.doc.content.size, editor.editor.schema.nodes.codeBlock.create({ id: "quick", language: "mermaid" }, editor.editor.schema.text("flowchart LR\n  Quick --> Four")))
+      return true
+    }) })
+    await waitFor(() => expect(blockDom(editor, "quick").querySelector<HTMLElement>("[data-diagram-preview]")?.shadowRoot?.querySelector("svg")).toBeTruthy(), { timeout: 3000 })
+    expect(blockDom(editor, "quick").querySelector("[data-code-paused]")).toBeNull()
   }, 15_000)
 
   it("draws a chart block with its data table, and explains a bad spec in that block only", async () => {
