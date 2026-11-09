@@ -35,6 +35,14 @@ func designSchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"name": str(), "parentId": str(), "x": geometry(false), "y": geometry(false), "width": geometry(true), "height": geometry(true),
 		"fill": str(), "text": text(100000), "src": text(2000000),
 		"linkTo": map[string]any{"type": "string", "maxLength": 128, "description": "Prototype link: ID of the screen (frame) a click on this layer opens in Play mode. Empty string clears it. A target that no longer exists is kept and plays as an inert hotspot."},
+		// Text style (#5161): optional; absent means 20 px sans, 400, 1.3, left, no wrap, no clip.
+		"fontFamily": map[string]any{"type": "string", "enum": []string{"sans", "serif", "mono"}, "description": "Text style: system font stack. Absent means sans."},
+		"fontWeight": map[string]any{"type": "integer", "minimum": 100, "maximum": 900, "multipleOf": 100, "description": "Text style: weight. Absent means 400."},
+		"fontSize":   map[string]any{"type": "number", "minimum": 1, "maximum": 1000, "description": "Text style: size in pixels. Absent means 20."},
+		"lineHeight": map[string]any{"type": "number", "minimum": 0.5, "maximum": 5, "description": "Text style: line height as a multiple of the size. Absent means 1.3."},
+		"textAlign":  map[string]any{"type": "string", "enum": []string{"left", "center", "right"}, "description": "Text style: alignment in the layer's box. Absent means left."},
+		"textWrap":   map[string]any{"type": "string", "enum": []string{"none", "wrap"}, "description": "Text style: none breaks lines only at a newline; wrap breaks at the box width. Absent means none."},
+		"overflow":   map[string]any{"type": "string", "enum": []string{"visible", "clip"}, "description": "Text style: clip cuts text outside the box. Absent means visible."},
 	}
 	node := object(nodeProps, "id", "type", "x", "y", "width", "height")
 	// The Yjs map may preserve extension fields; this is not a generic request
