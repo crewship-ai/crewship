@@ -18,7 +18,7 @@ vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-co
   useArtifactViewer: () => ({ workspaceId: "ws", target: { slug: "deck" } }),
 }))
 
-import { LibraryPinNotice, LibraryPublishControl, parseUpdate } from "../library-publication"
+import { LibraryPinNotice, LibraryPublishControl, parseUpdate, usePinnedLibrary } from "../library-publication"
 
 const base = "/api/v1/pages/deck/artifact"
 beforeEach(() => { api.calls.length = 0; api.replies.clear() })
@@ -74,6 +74,16 @@ describe("LibraryPinNotice", () => {
     expect(api.calls.find(call => call.method === "PUT")?.body).toEqual({ library: "@lib-1", version: 2, if_pinned_library: "@lib-1", if_pinned_version: 1 })
   })
 
+  it("lists the fonts an update adds and the ones it leaves behind for their licence", async () => {
+    api.replies.set(`GET ${base}/library-pin`, pin)
+    api.replies.set(`GET ${base}/library-pin/update`, { pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: [], removed: [], changed: [] }, file_changes: { added: ["fonts/Inter.woff2", "fonts/OFL.txt"], removed: [], changed: [] }, not_copied: ["fonts/Secret.woff2:licence", "fonts/Huge.ttf:too_large"] })
+    render(<LibraryPinNotice />)
+    fireEvent.click(await screen.findByRole("button", { name: "Review update" }))
+    expect(screen.getByText("fonts/Inter.woff2")).toBeTruthy()
+    expect(screen.getByText("fonts/Secret.woff2 (no redistributable licence)")).toBeTruthy()
+    expect(screen.getByText("fonts/Huge.ttf (too large)")).toBeTruthy()
+  })
+
   it("keeps the pinned copy when the library is no longer readable", async () => {
     api.replies.set(`GET ${base}/library-pin`, pin)
     api.replies.set(`GET ${base}/library-pin/update`, { pinned_version: 1, published_version: 0, library_available: false, update_available: false, changes: { added: [], removed: [], changed: [] } })
@@ -97,7 +107,35 @@ describe("LibraryPinNotice", () => {
 
 describe("parseUpdate", () => {
   it("rejects answers without change lists", () => {
+    expect(parseUpdate({ pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: [], removed: [], changed: [] }, not_copied: [3] })).toBeNull()
     expect(parseUpdate({ pinned_version: 1, published_version: 2, library_available: true, update_available: true })).toBeNull()
     expect(parseUpdate({ pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: [1], removed: [], changed: [] } })).toBeNull()
+  })
+})
+
+describe("usePinnedLibrary", () => {
+  function Probe({ enabled = true }: { enabled?: boolean }) {
+    const pinned = usePinnedLibrary("ws", "deck", enabled)
+    return <pre data-testid="css">{pinned ? pinned.css ?? "unreadable" : "none"}</pre>
+  }
+  const tokens = { schema_version: 1, colors: { primary: "#1d4ed8" }, typography: {}, spacing: {}, radii: {} }
+  const font = { path: "fonts/Inter.woff2", media_type: "font/woff2", status: "copied", size: 8, sha256: "a".repeat(64), family: "Inter", weight: 400, style: "normal", content: "d09GMgAA" }
+
+  it("derives the preview theme from the project's own pinned copy and refreshes after an applied update", async () => {
+    api.replies.set(`GET ${base}/library-pin`, { tokens })
+    api.replies.set(`GET ${base}/library-pin/files`, { files: [font] })
+    render(<Probe />)
+    await waitFor(() => expect(screen.getByTestId("css").textContent).toContain("--ds-color-primary:#1d4ed8;"))
+    expect(screen.getByTestId("css").textContent).toContain('font-family:"Inter";src:url(data:font/woff2;base64,d09GMgAA)')
+    expect(api.calls.every(call => !call.url.includes("/library?") && !call.url.includes("/library/"))).toBe(true)
+    api.replies.set(`GET ${base}/library-pin`, { tokens: { ...tokens, colors: { primary: "#0f766e" } } })
+    window.dispatchEvent(new CustomEvent("crewship:library-pin-changed", { detail: "deck" }))
+    await waitFor(() => expect(screen.getByTestId("css").textContent).toContain("--ds-color-primary:#0f766e;"))
+  })
+
+  it("asks for nothing when the project is itself a Library or the flag is off", async () => {
+    render(<Probe enabled={false} />)
+    expect(screen.getByTestId("css").textContent).toBe("none")
+    expect(api.calls).toHaveLength(0)
   })
 })

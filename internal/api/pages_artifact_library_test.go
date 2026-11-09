@@ -61,6 +61,8 @@ func (f *libraryFixtureT) call(user, method, path, body string) *httptest.Respon
 		f.h.GetArtifactLibraryPin(w, req)
 	case rest == "artifact/library-pin/update":
 		f.h.GetArtifactLibraryPinUpdate(w, req)
+	case rest == "artifact/library-pin/files":
+		f.h.GetArtifactLibraryPinFiles(w, req)
 	default:
 		f.t.Fatalf("unrouted %s %s", method, path)
 	}

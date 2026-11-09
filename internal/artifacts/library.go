@@ -54,6 +54,9 @@ type LibraryPin struct {
 	SHA256         string `json:"sha256"`
 	CopiedBy       string `json:"copied_by"`
 	CopiedAt       string `json:"copied_at"`
+	// Files lists the copied dependencies (fonts and their licences) and the
+	// fonts left behind, without their bytes (#5248).
+	Files []LibraryPinFile `json:"files"`
 }
 
 type LibraryChanges struct {
@@ -71,6 +74,11 @@ type LibraryUpdate struct {
 	LibraryAvailable bool           `json:"library_available"`
 	UpdateAvailable  bool           `json:"update_available"`
 	Changes          LibraryChanges `json:"changes"`
+	// FileChanges compares dependency files by path and content; NotCopied
+	// names the published version's fonts an update would leave behind, as
+	// "path:status".
+	FileChanges LibraryChanges `json:"file_changes"`
+	NotCopied   []string       `json:"not_copied"`
 }
 
 func libraryTokens(m VersionManifest) ([]byte, error) {
@@ -111,6 +119,9 @@ func (s *VersionStore) PublishLibrary(ctx context.Context, k VersionKey, version
 		if _, e = libraryTokens(m); e != nil {
 			return e
 		}
+		if _, e = libraryDependencies(m); e != nil {
+			return e
+		}
 		if out, e = readLibraryPublication(ctx, tx, k); e != nil || out.Version == version {
 			return e
 		}
@@ -145,6 +156,11 @@ func readLibraryPin(ctx context.Context, tx *sql.Tx, k VersionKey) (p LibraryPin
 	if sum := sha256.Sum256(p.Content); hex.EncodeToString(sum[:]) != p.SHA256 {
 		return LibraryPin{}, false, ErrLibraryPinCorrupt
 	}
+	files, err := readLibraryPinFiles(ctx, tx, k)
+	if err != nil {
+		return LibraryPin{}, false, err
+	}
+	p.Files = withoutContent(files)
 	return p, true, nil
 }
 
@@ -224,6 +240,10 @@ func (s *VersionStore) PinLibrary(ctx context.Context, consumer VersionKey, libr
 		if e != nil {
 			return e
 		}
+		deps, e := libraryDependencies(m)
+		if e != nil {
+			return e
+		}
 		sum := sha256.Sum256(content)
 		hash := hex.EncodeToString(sum[:])
 		current, found, e := readLibraryPin(ctx, tx, consumer)
@@ -233,19 +253,25 @@ func (s *VersionStore) PinLibrary(ctx context.Context, consumer VersionKey, libr
 		if pub.Version != expect.Version {
 			return ErrVersionConflict
 		}
-		if found && current.LibraryPageID == libraryPageID && current.LibraryVersion == pub.Version && current.SHA256 == hash {
+		same := found && current.LibraryPageID == libraryPageID && current.LibraryVersion == pub.Version && current.SHA256 == hash
+		if same && libraryFilesEqual(current.Files, deps) {
 			out = current
 			return libraryRead(ctx, tx, la, pub.Version, actor)
 		}
-		if current.LibraryPageID != expect.PinnedLibrary || current.LibraryVersion != expect.PinnedVersion {
+		// A pin of the same version whose files differ (copied before pins
+		// carried dependencies) is refreshed in place.
+		if !same && (current.LibraryPageID != expect.PinnedLibrary || current.LibraryVersion != expect.PinnedVersion) {
 			return ErrVersionConflict
 		}
 		var name string
 		if e = tx.QueryRowContext(ctx, `SELECT coalesce(name,'') FROM pages WHERE id=? AND workspace_id=?`, libraryPageID, consumer.WorkspaceID).Scan(&name); e != nil {
 			return e
 		}
-		out = LibraryPin{libraryPageID, pub.Version, name, content, hash, actor, time.Now().UTC().Format("2006-01-02T15:04:05.000Z")}
+		out = LibraryPin{libraryPageID, pub.Version, name, content, hash, actor, time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), withoutContent(deps)}
 		if _, e = tx.ExecContext(ctx, `INSERT INTO artifact_library_pins(workspace_id,page_id,library_page_id,library_version,library_name,content,sha256,copied_by,copied_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id,page_id) DO UPDATE SET library_page_id=excluded.library_page_id,library_version=excluded.library_version,library_name=excluded.library_name,content=excluded.content,sha256=excluded.sha256,copied_by=excluded.copied_by,copied_at=excluded.copied_at`, consumer.WorkspaceID, consumer.PageID, out.LibraryPageID, out.LibraryVersion, out.LibraryName, out.Content, out.SHA256, out.CopiedBy, out.CopiedAt); e != nil {
+			return e
+		}
+		if e = writeLibraryPinFiles(ctx, tx, consumer, deps); e != nil {
 			return e
 		}
 		changed = true
@@ -271,7 +297,8 @@ func (s *VersionStore) CheckLibraryUpdate(ctx context.Context, consumer VersionK
 		if !found {
 			return ErrVersionNotFound
 		}
-		out = LibraryUpdate{PinnedVersion: pin.LibraryVersion, Changes: LibraryChanges{Added: []string{}, Removed: []string{}, Changed: []string{}}}
+		empty := LibraryChanges{Added: []string{}, Removed: []string{}, Changed: []string{}}
+		out = LibraryUpdate{PinnedVersion: pin.LibraryVersion, Changes: empty, FileChanges: empty, NotCopied: []string{}}
 		lib := VersionKey{consumer.WorkspaceID, pin.LibraryPageID}
 		pub, e := readLibraryPublication(ctx, tx, lib)
 		if e != nil || pub.Version == 0 {
@@ -303,6 +330,11 @@ func (s *VersionStore) CheckLibraryUpdate(ctx context.Context, consumer VersionK
 		if out.Changes, e = diffLibraryTokens(pin.Content, next); e != nil {
 			return e
 		}
+		deps, e := libraryDependencies(m)
+		if e != nil {
+			return e
+		}
+		out.FileChanges, out.NotCopied = diffLibraryFiles(pin.Files, deps), notCopied(deps)
 		out.UpdateAvailable = true
 		return libraryRead(ctx, tx, la, pub.Version, actor)
 	})

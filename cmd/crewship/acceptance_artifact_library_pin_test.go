@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -77,12 +78,23 @@ func TestAcceptance_LibraryPinBinary(t *testing.T) {
 		command.Env = append(command.Env, "CREWSHIP_CONFIG="+config, "CREWSHIP_NO_SLUG_CACHE=1", "NO_COLOR=1")
 		return command.CombinedOutput()
 	}
+	// The second library version carries an OFL font, its licence and a
+	// proprietary font (#5248).
+	inter := append([]byte("wOF2"), bytes.Repeat([]byte{7}, 200)...)
 	manifest := func(primary string) string {
-		tokens := `{"schema_version":1,"name":"Harbor","colors":{"primary":"` + primary + `"},"typography":{"body":{"size":16,"weight":400}},"spacing":{"md":16},"radii":{"sm":4}}`
-		body, err := json.Marshal(map[string]any{"entrypoint": "index.html", "files": []map[string]string{
+		tokens := `{"schema_version":1,"name":"Harbor","colors":{"primary":"` + primary + `"},"typography":{"body":{"size":16,"weight":400,"font_family":"Inter, sans-serif"}},"spacing":{"md":16},"radii":{"sm":4}}`
+		files := []map[string]string{
 			{"path": "index.html", "media_type": "text/html", "content": "<h1 id=title>Harbor tokens</h1>"},
 			{"path": "design-system.json", "media_type": "application/json", "content": tokens},
-		}})
+		}
+		if primary == "#0f766e" {
+			files = append(files,
+				map[string]string{"path": "fonts.json", "media_type": "application/json", "content": `{"schema_version":1,"fonts":[{"file":"fonts/Inter.woff2","family":"Inter","weight":400},{"file":"fonts/Secret.woff2","family":"Secret","license":"LicenseRef-Proprietary"}]}`},
+				map[string]string{"path": "fonts/Inter.woff2", "media_type": "font/woff2", "content": "data:font/woff2;base64," + base64.StdEncoding.EncodeToString(inter)},
+				map[string]string{"path": "fonts/Secret.woff2", "media_type": "font/woff2", "content": "data:font/woff2;base64," + base64.StdEncoding.EncodeToString([]byte("wOF2secret"))},
+				map[string]string{"path": "fonts/OFL.txt", "media_type": "text/plain", "content": "This Font Software is licensed under the SIL Open Font License, Version 1.1."})
+		}
+		body, err := json.Marshal(map[string]any{"entrypoint": "index.html", "files": files})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -139,6 +151,10 @@ func TestAcceptance_LibraryPinBinary(t *testing.T) {
 	if review["update_available"] != true || review["published_version"] != float64(2) || fmt.Sprint(changes["changed"]) != "[colors.primary]" {
 		t.Fatalf("pin check: %v", review)
 	}
+	fileChanges, _ := review["file_changes"].(map[string]any)
+	if fmt.Sprint(fileChanges["added"]) != "[fonts/Inter.woff2 fonts/OFL.txt fonts/Secret.woff2]" || fmt.Sprint(review["not_copied"]) != "[fonts/Secret.woff2:licence]" {
+		t.Fatalf("pin check files: %v", review)
+	}
 	if out, err := run("", "pin", "set", "deck", "--library", "harbor", "--version", "2", "--if-pinned-version", "0"); err == nil {
 		t.Fatalf("stale update accepted: %s", out)
 	}
@@ -147,6 +163,28 @@ func TestAcceptance_LibraryPinBinary(t *testing.T) {
 	}
 	if got := decode(run("", "pin", "set", "deck", "--library", "harbor", "--version", "2", "--if-pinned-library", "harbor", "--if-pinned-version", "1")); got["library_version"] != float64(2) || !strings.Contains(fmt.Sprint(got["tokens"]), "#0f766e") {
 		t.Fatalf("apply update: %v", got)
+	}
+	// The pin now carries the OFL font and its licence, byte for byte, and
+	// lists the proprietary font without bytes.
+	carried := decode(run("", "pin", "files", "deck"))
+	byPath := map[string]map[string]any{}
+	for _, raw := range carried["files"].([]any) {
+		f := raw.(map[string]any)
+		byPath[f["path"].(string)] = f
+	}
+	if f := byPath["fonts/Inter.woff2"]; f["status"] != "copied" || f["family"] != "Inter" || f["content"] != base64.StdEncoding.EncodeToString(inter) {
+		t.Fatalf("pinned font: %v", f)
+	}
+	if f := byPath["fonts/Secret.woff2"]; f["status"] != "licence" || f["content"] != "" {
+		t.Fatalf("proprietary font: %v", f)
+	}
+	if byPath["fonts/OFL.txt"]["status"] != "copied" {
+		t.Fatalf("licence file: %v", carried)
+	}
+	// A later library restore does not touch the carried files.
+	decode(run("", "restore", "harbor", "--base-version", "3", "--version", "1"))
+	if again := decode(run("", "pin", "files", "deck")); fmt.Sprint(again) != fmt.Sprint(carried) {
+		t.Fatalf("restore changed the pinned files: %v", again)
 	}
 	if out, err := run("", "library", "publish", "harbor", "--version", "0"); err == nil {
 		t.Fatalf("zero version accepted: %s", out)

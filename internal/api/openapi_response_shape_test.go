@@ -136,6 +136,8 @@ var responseShapeContracts = []struct {
 	{name: "ArtifactLibraryPublication", pointer: "/components/schemas/ArtifactLibraryPublication", value: artifactLibraryResponse{}},
 	{name: "ArtifactLibraryPin", pointer: "/components/schemas/ArtifactLibraryPin", value: artifactLibraryPinResponse{}},
 	{name: "ArtifactLibraryPinResult", pointer: "/components/schemas/ArtifactLibraryPinResult", value: artifactLibraryPinResult{}},
+	{name: "ArtifactLibraryPinFiles", pointer: "/components/schemas/ArtifactLibraryPinFiles", value: artifactLibraryPinFilesResponse{}},
+	{name: "ArtifactLibraryPinFile", pointer: "/components/schemas/ArtifactLibraryPinFiles/properties/files/items", value: artifactLibraryPinFileBody{}},
 	{name: "ArtifactLibraryUpdate", pointer: "/components/schemas/ArtifactLibraryUpdate", value: artifacts.LibraryUpdate{}},
 	{name: "ArtifactLibraryChanges", pointer: "/components/schemas/ArtifactLibraryUpdate/properties/changes", value: artifacts.LibraryChanges{}},
 	{name: "ArtifactProjectReply", pointer: "/components/schemas/ArtifactProjectReply", value: artifactProjectReply{}},

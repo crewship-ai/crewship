@@ -435,15 +435,16 @@ crewship page artifact pin set pitch-deck --library brand --version 2 --if-pinne
 ```
 
 ```json
-{"library_page_id": "<page-id>", "library_version": 1, "library_name": "Brand", "sha256": "…", "copied_by": "<user-id>", "copied_at": "…", "tokens": {"colors": {"primary": "#1d4ed8"}}, "changed": true}
+{"library_page_id": "<page-id>", "library_version": 1, "library_name": "Brand", "sha256": "…", "copied_by": "<user-id>", "copied_at": "…", "tokens": {"colors": {"primary": "#1d4ed8"}},
+ "files": [{"path": "fonts/Inter.woff2", "media_type": "font/woff2", "status": "copied", "size": 48212, "sha256": "…", "family": "Inter", "weight": 400, "style": "normal", "licence": "OFL-1.1"}], "changed": true}
 ```
 
 Pinning the version already pinned returns `"changed": false`. A Library you
 cannot read, one with nothing published and one that does not exist all return
 the same `404`.
 
-**What a pin shares.** The copy (the tokens and the Library's name at the time)
-belongs to the project. Everyone who can read the project can read it with
+**What a pin shares.** The copy (the tokens, the Library's name at the time,
+and the font and licence files the pin carries) belongs to the project. Everyone who can read the project can read it with
 `pin show`, including people who cannot read the Library. The copy stays when
 the Library is unshared, made private or deleted. Pin only a Library whose
 tokens every reader of the project may see. There is no unpin command yet.
@@ -457,8 +458,26 @@ matches is never served and returns `409 artifact_library_pin_corrupt` ("The
 pinned copy is damaged; pin the library again."). `pin check` reports the same
 error.
 
-The pin is a record and a review step. Project previews do not yet render with
-the pinned tokens; that is planned.
+Project previews render from this copy: see
+[Previews render from the pin](/guides/artifacts/library#previews-render-from-the-pin).
+
+### `crewship page artifact pin files <slug>`
+
+Read the font and licence files the pin carries, bytes in base64. Any reader of
+the project may call it; the Library is not read. A font left behind is listed
+with `status` `licence` (no redistributable licence) or `too_large` (over
+1 MiB, or past 4 MiB for the pin) and empty `content`. Each copy is checked
+against its SHA-256; a damaged one returns `409 artifact_library_pin_corrupt`.
+
+```json
+{"files": [
+ {"path": "fonts/Inter.woff2", "media_type": "font/woff2", "status": "copied", "size": 48212, "sha256": "…", "family": "Inter", "weight": 400, "style": "normal", "licence": "OFL-1.1", "content": "d09GMg…"},
+ {"path": "fonts/OFL.txt", "media_type": "text/plain", "status": "copied", "size": 4400, "sha256": "…", "content": "Q29weXJp…"},
+ {"path": "fonts/Brand.woff2", "media_type": "font/woff2", "status": "licence", "size": 0, "sha256": "", "family": "Brand", "content": ""}]}
+```
+
+How a Library stores fonts and which licences count:
+[What a pin carries](/guides/artifacts/library#what-a-pin-carries).
 
 ### `crewship page artifact pin check <slug>`
 
@@ -466,13 +485,18 @@ Review an update before applying it.
 
 ```json
 {"pinned_version": 1, "published_version": 2, "library_available": true, "update_available": true,
- "changes": {"added": ["colors.accent"], "removed": [], "changed": ["colors.primary"]}}
+ "changes": {"added": ["colors.accent"], "removed": [], "changed": ["colors.primary"]},
+ "file_changes": {"added": ["fonts/Inter.woff2", "fonts/OFL.txt"], "removed": [], "changed": []},
+ "not_copied": ["fonts/Brand.woff2:licence"]}
 ```
 
 `update_available` is true when the Library's published version differs from
 the pinned one, including when the owner republished an older version. Paths
 are dot-joined token keys; each list holds at most 200 entries and
-`truncated` says when one was cut. When you can no longer read the Library,
+`truncated` says when one was cut. `file_changes` compares the carried font
+and licence files by path and content, and `not_copied` names the published
+version's fonts an update would leave behind, as `path:reason`. When you can no
+longer read the Library,
 `library_available` is false and nothing about it is reported. Apply a reviewed
 update with `pin set --version <published_version> --if-pinned-library <library>
 --if-pinned-version <pinned_version>`.

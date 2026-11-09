@@ -5,10 +5,32 @@ import { SlidePresent } from "@/components/features/slides/slide-present"
 import { artifactSlideThumbnail, type ArtifactSlidesProjection } from "@/lib/pages/artifact-slides"
 import { useArtifactSlides } from "../projects/use-artifact-slides"
 import type { PreviewSelection } from "./artifact-preview-frame"
+import { slideFontFaces, type PinnedFile } from "@/components/features/artifacts/design-system/pinned-theme"
 import "./artifact-slides-preview.css"
 export interface ArtifactSlidesPreviewProps {
   workspaceId: string; pageId: string; codeVersion: number; artifactKind?: string; path: string; title: string
   selectMode: boolean; onSelect: (selection: PreviewSelection) => void; onNavigate: (path: string) => void; className?: string
+  /** Fonts the project pinned from a Library (#5248). */
+  pinnedFiles?: readonly PinnedFile[]
+}
+
+/** Registers pinned faces in the document for this deck only and returns family → alias. */
+export function usePinnedSlideFonts(files: readonly PinnedFile[] | undefined, deck: string): Readonly<Record<string, string>> | undefined {
+  const [aliases, setAliases] = useState<Record<string, string>>()
+  useEffect(() => {
+    const faces = slideFontFaces(files ?? [], deck)
+    if (!faces.length || typeof FontFace === "undefined" || !document.fonts) { setAliases(undefined); return }
+    let active = true
+    const added = faces.map(face => new FontFace(face.alias, face.source, { weight: face.weight, style: face.style }))
+    Promise.allSettled(added.map(face => face.load())).then(results => {
+      if (!active) return
+      const loaded: Record<string, string> = {}
+      results.forEach((result, index) => { if (result.status === "fulfilled") { document.fonts.add(added[index]); loaded[faces[index].family] = faces[index].alias } })
+      setAliases(Object.keys(loaded).length ? loaded : undefined)
+    })
+    return () => { active = false; for (const face of added) document.fonts.delete(face) }
+  }, [files, deck])
+  return aliases
 }
 export function ArtifactSlidesPreview(props: ArtifactSlidesPreviewProps) {
   const data = useArtifactSlides(props)
@@ -29,8 +51,9 @@ export function ArtifactSlidesPreview(props: ArtifactSlidesPreviewProps) {
 }
 
 const control = "min-h-9 coarse:min-h-[44px] rounded border px-3 text-sm"
-function Slides({ projection, path, title, selectMode, onSelect, onNavigate, className, codeVersion, download }: ArtifactSlidesPreviewProps & { projection: ArtifactSlidesProjection; download: () => Promise<Uint8Array<ArrayBuffer> | null> }) {
+function Slides({ projection, path, title, selectMode, onSelect, onNavigate, className, codeVersion, download, pinnedFiles, pageId }: ArtifactSlidesPreviewProps & { projection: ArtifactSlidesProjection; download: () => Promise<Uint8Array<ArrayBuffer> | null> }) {
   const { deck, anchors } = projection
+  const fontAliases = usePinnedSlideFonts(pinnedFiles, pageId)
   const requested = deck.slide_order.find(id => path === `slides/${id}.html`)
   const slideId = requested ?? deck.slide_order[0]
   // The server's slide order chooses the initial view; the parent must own the
@@ -72,13 +95,13 @@ function Slides({ projection, path, title, selectMode, onSelect, onNavigate, cla
     </div>
     {pdfError && <p role="alert" className="mb-2 text-sm">{pdfError}</p>}
     {selectionError && <p role="status" className="mb-2 text-sm">{selectionError}</p>}
-    <div className="artifact-slides-main min-h-0 w-full flex-1 rounded border bg-white"><SlideCanvas deck={deck} slideId={slideId} onSelectElement={selectMode && requested ? select : undefined} onOverflowChange={onOverflow} /></div>
+    <div className="artifact-slides-main min-h-0 w-full flex-1 rounded border bg-white"><SlideCanvas deck={deck} slideId={slideId} onSelectElement={selectMode && requested ? select : undefined} onOverflowChange={onOverflow} fontAliases={fontAliases} /></div>
     {overflow.length > 0 && <p role="status" className="mt-2 text-sm">Some slide content overflows its frame. PDF export may be unavailable.</p>}
     <nav aria-label="Slide thumbnails" className="mt-3 flex shrink-0 gap-2 overflow-x-auto pb-1">
       {thumbnails.map(({ id, deck: thumbnail }, index) => <button type="button" key={id} aria-label={`Slide ${index + 1}`} aria-current={id === slideId ? "true" : undefined} className="w-36 shrink-0 overflow-hidden rounded border-2 border-transparent aria-[current=true]:border-primary coarse:min-h-[44px]" onClick={() => { setSelectionError(""); onNavigate(`slides/${id}.html`) }}>
-        <SlideCanvas deck={thumbnail} slideId={id} />
+        <SlideCanvas deck={thumbnail} slideId={id} fontAliases={fontAliases} />
       </button>)}
     </nav>
-    {present && <SlidePresent deck={deck} initialSlideId={slideId} onClose={() => setPresent(false)} />}
+    {present && <SlidePresent deck={deck} initialSlideId={slideId} onClose={() => setPresent(false)} fontAliases={fontAliases} />}
   </section>
 }

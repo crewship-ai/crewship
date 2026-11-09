@@ -51,7 +51,7 @@ function SlideShapeGlyph({ element }: { element: Extract<SlideElement, { type: "
   </>
 }
 
-function ElementContent({ element, richFaces }: { element: SlideElement; richFaces: boolean }) {
+function ElementContent({ element, richFaces, fontAliases }: { element: SlideElement; richFaces: boolean; fontAliases?: Readonly<Record<string, string>> }) {
   // The whole-deck schema gate excludes images before any source text renders.
   if (element.type === "image") throw new Error("Images are unavailable in this renderer")
   if (element.type === "icon") return <SlideIconGlyph element={element} />
@@ -61,8 +61,11 @@ function ElementContent({ element, richFaces }: { element: SlideElement; richFac
   // Bundled schema-3 faces are set like the PDF renderer sets them: no kerning,
   // no contextual ligatures, so line breaks and overflow agree with the export.
   const bundled = richFaces && Object.hasOwn(SLIDES_FONT_STACK, style.font_family)
+  // A face pinned from a Library is registered under an alias, so it never
+  // replaces the app's own fonts; the named family stays as the fallback.
+  const pinned = !bundled && fontAliases && Object.hasOwn(fontAliases, style.font_family) ? `"${fontAliases[style.font_family]}", ${style.font_family}` : undefined
   return <foreignObject width={element.width} height={element.height}>
-    <div data-slide-content={element.id} style={{ width: "100%", height: "100%", overflow: "hidden", fontFamily: bundled ? SLIDES_FONT_STACK[style.font_family] : style.font_family, fontKerning: bundled ? "none" : undefined, fontVariantLigatures: bundled ? "none" : undefined, fontSize: style.font_size, fontWeight: typography?.font_weight, letterSpacing: typography?.letter_spacing ? `${typography.letter_spacing}px` : undefined, color: style.color, lineHeight: (typography?.line_height ?? 120) / 100, boxSizing: "border-box" }}>
+    <div data-slide-content={element.id} style={{ width: "100%", height: "100%", overflow: "hidden", fontFamily: bundled ? SLIDES_FONT_STACK[style.font_family] : pinned ?? style.font_family, fontKerning: bundled ? "none" : undefined, fontVariantLigatures: bundled ? "none" : undefined, fontSize: style.font_size, fontWeight: typography?.font_weight, letterSpacing: typography?.letter_spacing ? `${typography.letter_spacing}px` : undefined, color: style.color, lineHeight: (typography?.line_height ?? 120) / 100, boxSizing: "border-box" }}>
       {element.type === "text"
         ? <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", textAlign: element.text.align }}>{element.text.value}</div>
         : <table style={{ width: "100%", tableLayout: "fixed", borderCollapse: "collapse", background: element.table.fill }}><tbody>{element.table.cells.map((row, rowIndex) => <tr key={rowIndex}>{row.map((cell, column) => <td key={column} style={{ border: `1px solid ${element.table.border}`, padding: 4, verticalAlign: "top", whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{cell}</td>)}</tr>)}</tbody></table>}
@@ -81,6 +84,8 @@ export interface SlideCanvasProps {
   onMoveElements?: (dx: number, dy: number) => void
   onResizeElement?: (elementId: string, rect: Rect) => void
   onOverflowChange?: (elementIds: string[]) => void
+  /** Library-pinned faces by the family a slide names (#5248). */
+  fontAliases?: Readonly<Record<string, string>>
 }
 
 type Drag = { kind: "move" | "resize"; id: string; startX: number; startY: number; dx: number; dy: number }
@@ -88,7 +93,7 @@ type Drag = { kind: "move" | "resize"; id: string; startX: number; startY: numbe
 const coarse = () => typeof window !== "undefined" && Boolean(window.matchMedia?.("(pointer: coarse)").matches)
 
 /** One native typed frame. Text is React text; source cannot supply DOM or CSS. */
-export function SlideCanvas({ deck, slideId, selectedIds = [], onSelectElement, onClearSelection, onMoveElements, onResizeElement, onOverflowChange }: SlideCanvasProps) {
+export function SlideCanvas({ deck, slideId, selectedIds = [], onSelectElement, onClearSelection, onMoveElements, onResizeElement, onOverflowChange, fontAliases }: SlideCanvasProps) {
   const root = React.useRef<SVGSVGElement>(null)
   const [drag, setDrag] = React.useState<Drag>()
   const [focused, setFocused] = React.useState<string>()
@@ -147,7 +152,7 @@ export function SlideCanvas({ deck, slideId, selectedIds = [], onSelectElement, 
           onPointerDown: (event: React.PointerEvent) => { onSelectElement!(element.id, event.shiftKey); if (!event.shiftKey && onMoveElements) start("move", element.id, event) },
           onKeyDown: (event: React.KeyboardEvent) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onSelectElement!(element.id, event.shiftKey) } },
         } : {})}>
-        <ElementContent element={element} richFaces={deck.schema_version === 3} />
+        <ElementContent element={element} richFaces={deck.schema_version === 3} fontAliases={fontAliases} />
         {picked && <rect pointerEvents="none" width={element.width} height={element.height} fill="none" stroke="#2563eb" strokeWidth={2} />}
         {focused === element.id && <rect data-focus-ring pointerEvents="none" x={-3} y={-3} width={element.width + 6} height={element.height + 6} fill="none" stroke="#f59e0b" strokeWidth={3} strokeDasharray="8 4" />}
       </g>

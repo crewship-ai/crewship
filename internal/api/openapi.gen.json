@@ -1584,6 +1584,79 @@
             "description": "Human who made or updated the copy.",
             "type": "string"
           },
+          "files": {
+            "description": "Dependency files the pin carries or left behind, without bytes.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "family": {
+                  "description": "Font family from fonts.json; empty for an undeclared font or a licence file.",
+                  "type": "string"
+                },
+                "licence": {
+                  "description": "SPDX id of the licence that let the font travel.",
+                  "type": "string"
+                },
+                "media_type": {
+                  "enum": [
+                    "font/woff2",
+                    "font/woff",
+                    "font/ttf",
+                    "font/otf",
+                    "text/plain"
+                  ],
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Path of the file in the Library.",
+                  "type": "string"
+                },
+                "sha256": {
+                  "description": "SHA-256 of the copied bytes; empty when not copied.",
+                  "pattern": "^([0-9a-f]{64})?$",
+                  "type": "string"
+                },
+                "size": {
+                  "description": "Copied bytes; 0 when not copied.",
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "status": {
+                  "description": "copied; licence (no redistributable licence, not copied); too_large (over 1 MiB, or over 4 MiB for the pin, not copied).",
+                  "enum": [
+                    "copied",
+                    "licence",
+                    "too_large"
+                  ],
+                  "type": "string"
+                },
+                "style": {
+                  "enum": [
+                    "normal",
+                    "italic"
+                  ],
+                  "type": "string"
+                },
+                "weight": {
+                  "description": "Font weight from fonts.json (100-900).",
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "path",
+                "media_type",
+                "status",
+                "size",
+                "sha256"
+              ],
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
           "library_name": {
             "description": "Library name when the copy was made.",
             "type": "string"
@@ -1616,7 +1689,94 @@
           "sha256",
           "copied_by",
           "copied_at",
-          "tokens"
+          "tokens",
+          "files"
+        ],
+        "type": "object"
+      },
+      "ArtifactLibraryPinFiles": {
+        "additionalProperties": false,
+        "properties": {
+          "files": {
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "description": "Copied bytes in base64; empty when not copied.",
+                  "type": "string"
+                },
+                "family": {
+                  "description": "Font family from fonts.json; empty for an undeclared font or a licence file.",
+                  "type": "string"
+                },
+                "licence": {
+                  "description": "SPDX id of the licence that let the font travel.",
+                  "type": "string"
+                },
+                "media_type": {
+                  "enum": [
+                    "font/woff2",
+                    "font/woff",
+                    "font/ttf",
+                    "font/otf",
+                    "text/plain"
+                  ],
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Path of the file in the Library.",
+                  "type": "string"
+                },
+                "sha256": {
+                  "description": "SHA-256 of the copied bytes; empty when not copied.",
+                  "pattern": "^([0-9a-f]{64})?$",
+                  "type": "string"
+                },
+                "size": {
+                  "description": "Copied bytes; 0 when not copied.",
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "status": {
+                  "description": "copied; licence (no redistributable licence, not copied); too_large (over 1 MiB, or over 4 MiB for the pin, not copied).",
+                  "enum": [
+                    "copied",
+                    "licence",
+                    "too_large"
+                  ],
+                  "type": "string"
+                },
+                "style": {
+                  "enum": [
+                    "normal",
+                    "italic"
+                  ],
+                  "type": "string"
+                },
+                "weight": {
+                  "description": "Font weight from fonts.json (100-900).",
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "path",
+                "media_type",
+                "status",
+                "size",
+                "sha256",
+                "content"
+              ],
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          }
+        },
+        "required": [
+          "files"
         ],
         "type": "object"
       },
@@ -1667,6 +1827,79 @@
             "description": "Human who made or updated the copy.",
             "type": "string"
           },
+          "files": {
+            "description": "Dependency files the pin carries or left behind, without bytes.",
+            "items": {
+              "additionalProperties": false,
+              "properties": {
+                "family": {
+                  "description": "Font family from fonts.json; empty for an undeclared font or a licence file.",
+                  "type": "string"
+                },
+                "licence": {
+                  "description": "SPDX id of the licence that let the font travel.",
+                  "type": "string"
+                },
+                "media_type": {
+                  "enum": [
+                    "font/woff2",
+                    "font/woff",
+                    "font/ttf",
+                    "font/otf",
+                    "text/plain"
+                  ],
+                  "type": "string"
+                },
+                "path": {
+                  "description": "Path of the file in the Library.",
+                  "type": "string"
+                },
+                "sha256": {
+                  "description": "SHA-256 of the copied bytes; empty when not copied.",
+                  "pattern": "^([0-9a-f]{64})?$",
+                  "type": "string"
+                },
+                "size": {
+                  "description": "Copied bytes; 0 when not copied.",
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "status": {
+                  "description": "copied; licence (no redistributable licence, not copied); too_large (over 1 MiB, or over 4 MiB for the pin, not copied).",
+                  "enum": [
+                    "copied",
+                    "licence",
+                    "too_large"
+                  ],
+                  "type": "string"
+                },
+                "style": {
+                  "enum": [
+                    "normal",
+                    "italic"
+                  ],
+                  "type": "string"
+                },
+                "weight": {
+                  "description": "Font weight from fonts.json (100-900).",
+                  "format": "int64",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "path",
+                "media_type",
+                "status",
+                "size",
+                "sha256"
+              ],
+              "type": "object"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
           "library_name": {
             "description": "Library name when the copy was made.",
             "type": "string"
@@ -1700,6 +1933,7 @@
           "copied_by",
           "copied_at",
           "tokens",
+          "files",
           "changed"
         ],
         "type": "object"
@@ -1788,9 +2022,55 @@
             ],
             "type": "object"
           },
+          "file_changes": {
+            "additionalProperties": false,
+            "properties": {
+              "added": {
+                "description": "Dependency file paths, sorted.",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              "changed": {
+                "description": "Dependency file paths, sorted.",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              "removed": {
+                "description": "Dependency file paths, sorted.",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 32,
+                "type": "array"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "added",
+              "removed",
+              "changed"
+            ],
+            "type": "object"
+          },
           "library_available": {
             "description": "False when the caller can no longer read the published version; nothing else about the Library is reported.",
             "type": "boolean"
+          },
+          "not_copied": {
+            "description": "Fonts of the published version an update would leave behind, as path:status (licence or too_large).",
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "type": "array"
           },
           "pinned_version": {
             "description": "Pinned Library version.",
@@ -1814,7 +2094,9 @@
           "published_version",
           "library_available",
           "update_available",
-          "changes"
+          "changes",
+          "file_changes",
+          "not_copied"
         ],
         "type": "object"
       },
@@ -140642,7 +140924,7 @@
         "x-crewship-read-only": true
       },
       "put": {
-        "description": "Copy the Library's published design-system.json into this project. Requires Edit on the project (not an agent run) and the caller's own read access to the published version; the workspace admin read path does not count. `version`, `if_pinned_library` and `if_pinned_version` must match the published version and the current pin, otherwise 409 `artifact_version_conflict`; an `if_pinned_library` slug that no longer resolves is the same 409 (pass `@\u003clibrary_page_id\u003e`). Every reader of the project can read the copy, which survives unsharing the Library. Pinning the version already pinned returns `changed: false`. An absent, unpublished or unreadable Library returns the same 404.",
+        "description": "Copy the Library's published design-system.json, its fonts that carry a redistributable licence (within 1 MiB each and 4 MiB per pin) and those licence files into this project. Requires Edit on the project (not an agent run) and the caller's own read access to the published version; the workspace admin read path does not count. `version`, `if_pinned_library` and `if_pinned_version` must match the published version and the current pin, otherwise 409 `artifact_version_conflict`; an `if_pinned_library` slug that no longer resolves is the same 409 (pass `@\u003clibrary_page_id\u003e`). Every reader of the project can read the copy, which survives unsharing the Library. Pinning the version already pinned returns `changed: false`. An absent, unpublished or unreadable Library returns the same 404.",
         "operationId": "put_api_v1_pages_slug_artifact_library-pin",
         "parameters": [
           {
@@ -140774,9 +141056,132 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/artifact/library-pin/files": {
+      "get": {
+        "description": "Return the fonts and licence files the pin carries, bytes in base64, so the project renders from the copy. Requires read access to this project only; the Library is not read. A font without a redistributable licence, or over 1 MiB (4 MiB per pin), is listed with status `licence` or `too_large` and no bytes. A file whose SHA-256 no longer matches is never served: 409 `artifact_library_pin_corrupt`.",
+        "operationId": "get_api_v1_pages_slug_artifact_library-pin_files",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactLibraryPinFiles"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get pinned library files",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/pages/{slug}/artifact/library-pin/update": {
       "get": {
-        "description": "Compare the pin with the Library's published version and list the token paths an update adds, removes and changes. When the caller can no longer read the Library, `library_available` is false and nothing else about it is reported. A damaged stored copy returns 409 `artifact_library_pin_corrupt`.",
+        "description": "Compare the pin with the Library's published version and list the token paths an update adds, removes and changes, the dependency files (fonts and licences) it adds, removes and changes, and the fonts it would leave behind for their licence or size. When the caller can no longer read the Library, `library_available` is false and nothing else about it is reported. A damaged stored copy returns 409 `artifact_library_pin_corrupt`.",
         "operationId": "get_api_v1_pages_slug_artifact_library-pin_update",
         "parameters": [
           {

@@ -198,7 +198,8 @@ Too many concurrent uploads answer `503 artifact_storage_busy` with
 | POST | `/api/v1/pages/{slug}/artifact/library/publish` | Publish a Library version (owner only) |
 | GET | `/api/v1/pages/{slug}/artifact/library-pin` | The project's self-contained pinned Library copy |
 | PUT | `/api/v1/pages/{slug}/artifact/library-pin` | Pin or explicitly update the copy |
-| GET | `/api/v1/pages/{slug}/artifact/library-pin/update` | Update review with a token diff |
+| GET | `/api/v1/pages/{slug}/artifact/library-pin/update` | Update review with token and file diffs |
+| GET | `/api/v1/pages/{slug}/artifact/library-pin/files` | Font and licence files the pin carries, bytes in base64 |
 | GET | `/api/v1/pages/{slug}/artifact/comments` | Comments anchored to versions |
 | POST | `/api/v1/pages/{slug}/artifact/comments` | Add an anchored comment; `send_to_agent` hands it to the agent |
 | POST | `/api/v1/pages/{slug}/artifact/comments/{commentId}/reply` | Reply in a thread |

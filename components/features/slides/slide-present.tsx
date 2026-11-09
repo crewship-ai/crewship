@@ -8,12 +8,12 @@ import { isRenderableSlideDeck } from "./native-model"
 const control = "min-h-9 coarse:min-h-[44px] rounded border px-3"
 
 /** Presentation is a modal native view, not an export or durable write. */
-export function SlidePresent({ deck, initialSlideId, onClose }: { deck: unknown; initialSlideId: string; onClose: () => void }) {
+export function SlidePresent({ deck, initialSlideId, onClose, fontAliases }: { deck: unknown; initialSlideId: string; onClose: () => void; fontAliases?: Readonly<Record<string, string>> }) {
   if (!isRenderableSlideDeck(deck) || !deck.slide_order.includes(initialSlideId)) return <p role="alert">This presentation format or target is unavailable.</p>
-  return <NativePresentation deck={deck} initialSlideId={initialSlideId} onClose={onClose} />
+  return <NativePresentation deck={deck} initialSlideId={initialSlideId} onClose={onClose} fontAliases={fontAliases} />
 }
 
-function NativePresentation({ deck, initialSlideId, onClose }: { deck: SlideDeck; initialSlideId: string; onClose: () => void }) {
+function NativePresentation({ deck, initialSlideId, onClose, fontAliases }: { deck: SlideDeck; initialSlideId: string; onClose: () => void; fontAliases?: Readonly<Record<string, string>> }) {
   const [index, setIndex] = React.useState(Math.max(0, deck.slide_order.indexOf(initialSlideId)))
   const root = React.useRef<HTMLDivElement>(null)
   const close = React.useRef(onClose)
@@ -54,7 +54,7 @@ function NativePresentation({ deck, initialSlideId, onClose }: { deck: SlideDeck
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
     }
   }}>
-    <div className="m-auto w-full overflow-hidden" style={{ maxWidth: `min(100%, calc((100dvh - 160px) * ${deck.width} / ${deck.height}))` }}><div ref={stage} data-slide-transition={deck.slides.find(slide => slide.id === deck.slide_order[current])?.transition}><SlideCanvas deck={deck} slideId={deck.slide_order[current]} /></div></div>
+    <div className="m-auto w-full overflow-hidden" style={{ maxWidth: `min(100%, calc((100dvh - 160px) * ${deck.width} / ${deck.height}))` }}><div ref={stage} data-slide-transition={deck.slides.find(slide => slide.id === deck.slide_order[current])?.transition}><SlideCanvas deck={deck} slideId={deck.slide_order[current]} fontAliases={fontAliases} /></div></div>
     <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 py-2">
       <button className={control} disabled={current === 0} onClick={() => setIndex(current - 1)}>Previous slide</button>
       <span aria-live="polite">{current + 1} / {deck.slide_order.length}</span>
