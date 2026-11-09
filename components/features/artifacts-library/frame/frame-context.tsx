@@ -77,6 +77,10 @@ export function ArtifactSlot({ name, label, className, children }: { name: SlotN
   return createPortal(
     <div role={name === "tools" || name === "view" || name === "nav" ? "toolbar" : "group"} aria-label={label ?? name}
       data-artifact-slot={name} data-layout={frame.layout}
+      // A press on a tool must not take focus from what is being edited (#5155 D01). On a phone, the
+      // emulated mousedown after a touch moved focus to the button, the keyboard state ended, the tab bar
+      // came back and the bar moved before the click landed: the first tap did nothing. Keyboard focus is unchanged.
+      onMouseDown={name === "tools" ? event => { if ((event.target as Element).closest("button")) event.preventDefault() } : undefined}
       className={cn("pointer-events-auto z-10 flex items-center gap-0.5 rounded-lg border border-border/60 bg-card/95 p-[3px] shadow-md backdrop-blur", docked ? "relative" : "absolute", position, className)}>
       {children}
     </div>,

@@ -115,6 +115,19 @@ describe("ArtifactFrame", () => {
     expect(phone.querySelector("[data-artifact-slot=panel]")!.className).toContain("bottom-0 h-[62%]")
   })
 
+  it("keeps focus on what is being edited when a tool is pressed, so a phone's first tap is not lost (D01)", () => {
+    frame({ layout: "phone", children: <>
+      <textarea aria-label="Body" />
+      <ArtifactSlot name="tools" label="Tools"><button type="button" onClick={vi.fn()}>Bold</button><input aria-label="Size" /></ArtifactSlot>
+      <ArtifactSlot name="view" label="View"><button type="button">Mode</button></ArtifactSlot>
+    </> })
+    const tools = within(document.querySelector("[data-artifact-slot=tools]") as HTMLElement)
+    // fireEvent returns false when the default (moving focus) was prevented.
+    expect(fireEvent.mouseDown(tools.getByRole("button", { name: "Bold" }))).toBe(false)
+    expect(fireEvent.mouseDown(tools.getByLabelText("Size"))).toBe(true)
+    expect(fireEvent.mouseDown(screen.getByRole("button", { name: "Mode" }))).toBe(true)
+  })
+
   it("docks output beside view at the top of a phone, so it never floats over the content", () => {
     frame({ layout: "phone", children: <>
       <ArtifactSlot name="output" label="Output">o</ArtifactSlot>
