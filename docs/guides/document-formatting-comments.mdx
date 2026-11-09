@@ -177,6 +177,27 @@ with open comments shows a badge that opens the same threads as the Page.
 Agents propose changes to blocks as on the Page; they never move or add
 anything on the canvas.
 
+## Editing together
+
+Several people can type in one Docs page at the same time, also in the same
+paragraph. Every editor merges the others' changes as they arrive (about every
+half second) and keeps your caret on the character you typed last, so your own
+text stays in the order you typed it wherever the others type.
+
+Everyone who has the page open shows in the header as a round mark in their
+colour (hover it, or use a screen reader, for the name), and their caret shows
+in the text as a thin bar of that colour with their name above it; a selected
+range is tinted in the same colour. Names come from the workspace, not from
+the other person's browser. Presence is not stored anywhere: it disappears
+within a few seconds of somebody leaving, and at once for a person whose
+access is removed. Readers and commenters are shown too; nobody sees who is
+on a document they cannot read.
+
+The status chip says **Saved** only when the server has confirmed your changes
+and its confirmed copy holds everything in your editor. If it lacks something,
+editing stops, the chip shows an unsaved draft and offers **Download my
+changes**; that state is never reported as saved.
+
 ## Comments
 
 Select text in a paragraph, heading or code block and choose **Comment** to

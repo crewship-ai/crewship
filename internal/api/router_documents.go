@@ -46,6 +46,10 @@ func (r *Router) registerDocumentRoutes() {
 	// authority; agents are refused here and in the engine.
 	// openapi: responses 200,400,401,403,404,409,413,422,429,500,502,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/upgrade", roleInline, p.MutateDocument)
+	// Ephemeral presence (#5166): live read authority on every heartbeat, memory only.
+	r.documentPresenceHub = newDocumentPresenceHub()
+	// openapi: responses 200,400,401,403,404,429,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/document/presence", roleInline, r.documentPresence)
 	// Anchored discussion. Reading follows document read authority; writing
 	// needs Comment authority (Edit, or a Comment/Edit grant) in the authority.
 	// openapi: responses 200,400,401,403,404,409,429,500,502,503
