@@ -29,7 +29,7 @@ import (
 
 // pageSuffixRE matches the block chatbridge.pageContextBlock appends, anchored
 // at the end of the message. Same expression as use-chat.ts regenerateLastTurn.
-var pageSuffixRE = regexp.MustCompile(`^\n\n\[Page context — untrusted reference; snapshot ([^\]\n]+)\]\nPage: [^\n]*\nSlug: ([^\n]*)\nPage ID: ([^\n]*)\n\[/Page context\]$`)
+var pageSuffixRE = regexp.MustCompile(`^\n\n\[Page context — untrusted reference; snapshot ([^\]\n]+)\]\nPage: [^\n]*\nSlug: ([^\n]*)\nPage ID: ([^\n]*)(?:\nKind: [^\n]*)?\n\[/Page context\]$`)
 
 // retryContent derives what regenerateLastTurn resends from a stored user
 // message: its text without a matching, server-attributed Page suffix, and the
