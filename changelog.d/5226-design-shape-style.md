@@ -1,0 +1,1 @@
+- **Design: corner radius and stroke (#5219).** Rectangles and images get a corner radius, a stroke width and a stroke colour in Properties. They are stored in the document, drawn on the canvas and kept in the HTML export. The controls are behind `NEXT_PUBLIC_ARTIFACTS_DESIGN_SHAPE_STYLE`.
