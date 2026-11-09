@@ -2391,6 +2391,36 @@ the checkpoint endpoint below instead. Statuses: 200 document; 400 unsupported s
 502 invalid engine response; 503 disabled or unavailable service. Responses use
 `Cache-Control: no-store`. CLI: `crewship doc read` and `crewship doc outline`.
 
+## Export a native document as Markdown
+
+`GET /api/v1/pages/{slug}/document/export?format=markdown`
+
+Authentication and access are exactly those of
+[Read a native document](#read-a-native-document): a current human credential
+with current document read access (scoped CLI credentials need `pages:read`).
+The documents engine reads the confirmed state through the same private
+authority, so private output is exported only to its custodian, and a
+workspace owner's audited read of someone else's private output is audited
+before any byte is returned. A caller who may not read the document gets
+exactly the error `GET /document` gives it; for private output, everyone but
+its custodian gets the same `404` as for a missing document. Restricted members
+cannot export at all (`404`), not even private output they hold custody of.
+
+`format` must be `markdown` (or `md`); any other value returns 400 before the
+engine is contacted. Response: `200` with `Content-Type: text/markdown;
+charset=utf-8`, `Content-Disposition: attachment; filename="<slug>.md"`,
+`X-Content-Type-Options: nosniff` and `Cache-Control: no-store`. Markdown
+covers headings, paragraphs, lists, checklists, quotes, simple tables, links,
+bold, italic, strikethrough, inline code and fenced code blocks with their
+language; LaTeX, CSV and Markdown code blocks export as their source.
+Content Markdown cannot represent (for example a code block inside a table)
+returns `422` with code `unsupported_markdown` and a reason, never a file with
+parts missing. Statuses: 200 file; 400 unsupported format or selector; 401
+invalid credential; 403 missing access/scope; 404 unavailable Page/document;
+409 incompatible content; 422 not representable; 500 storage failure; 502
+invalid engine response; 503 disabled or unavailable service. CLI:
+`crewship doc export`.
+
 ## List saved document checkpoints
 
 `GET /api/v1/pages/{slug}/document/checkpoints`

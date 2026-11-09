@@ -82,6 +82,15 @@ func documentSchemaCatalog() map[string]DomainSchema {
 	get(base, "DocumentState")
 	get(base+"/checkpoints", "DocumentCheckpointList")
 	get(base+"/checkpoints/{checkpoint}", "DocumentCheckpoint")
+	out["GET "+base+"/export"] = DomainSchema{NoRequest: true,
+		Response:        map[string]any{"type": "string", "description": "UTF-8 Markdown of the confirmed document, produced by the docs engine from the same state GET /document reads. Delivered as an attachment named after the page slug."},
+		ResponseMedia:   []string{"text/markdown"},
+		SuccessStatuses: []string{"200"},
+		ErrorStatuses:   []string{"400", "401", "403", "404", "409", "422", "429", "500", "502", "503"},
+		Parameters: []map[string]any{
+			{"name": "format", "in": "query", "required": false, "schema": map[string]any{"type": "string", "enum": []string{"markdown", "md"}}, "description": "Export format. Only Markdown exists; omitted means markdown."},
+		},
+	}
 	out["POST "+base+"/restore"] = DomainSchema{
 		Request: map[string]any{"type": "object", "additionalProperties": false,
 			"required": []string{"page_id", "id", "schema", "epoch", "ifRev", "checkpoint"},

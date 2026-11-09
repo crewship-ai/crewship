@@ -159,6 +159,7 @@ access.`, `  crewship doc comment-resolve @<artifact-id> --file resolve.json`},
 		}
 		root.AddCommand(cmd)
 	}
+	root.AddCommand(newDocExportCommand())
 	root.AddCommand(newDocCreateCommand())
 	root.AddCommand(newDocDraftCommand())
 	root.AddCommand(newDocResultsCommand())
