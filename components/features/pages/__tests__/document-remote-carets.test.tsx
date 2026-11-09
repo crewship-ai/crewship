@@ -43,7 +43,10 @@ describe("remote carets", () => {
     setRemoteCarets(editor, [peerAt(remoteText(), 6, 15)])
     const carets = editor.view.dom.querySelectorAll('[class*="caret"], [class*="cursor"], [data-remote-caret]')
     expect(carets).toHaveLength(1)
-    expect(carets[0].textContent).toBe("Erin Editor")
+    expect(carets[0].querySelector<HTMLElement>(".document-peer-name")?.dataset.name).toBe("Erin Editor")
+    // The label is not text: copying or reading the editor never picks up another person's name.
+    expect(carets[0].textContent).toBe("")
+    expect(editor.view.dom.textContent).toBe("Caret paragraph with words.")
     expect(carets[0].getAttribute("aria-hidden")).toBe("true")
     expect(editor.view.dom.querySelector(".document-peer-range")?.textContent).toBe("paragraph")
     expect(caretOffset(editor)).toBe(15)

@@ -2260,3 +2260,8 @@ body {
   outline-offset: 2px;
   border-radius: 0.375rem;
 }
+
+/* Docs presence (#5166): another person's name above their caret, generated so it never becomes editor text. */
+.document-peer-name::after {
+  content: attr(data-name);
+}

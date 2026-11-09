@@ -279,3 +279,26 @@ func TestDocumentPresenceCapsTabsPerPerson(t *testing.T) {
 		t.Fatalf("another person locked out: %d %d", code, len(reply.Peers))
 	}
 }
+
+// One account cannot hold the server-wide limit across many documents.
+func TestDocumentPresenceCapsTabsPerPersonServerWide(t *testing.T) {
+	hub := newDocumentPresenceHub()
+	for i := 0; i < documentPresenceUserTotalLimit; i++ {
+		if _, _, ok := hub.beat(documentPresenceRoom("ws", "page-"+strconv.Itoa(i)), "busy-user", "tab-00000001", "Busy", "", ""); !ok {
+			t.Fatalf("tab %d refused", i)
+		}
+	}
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "busy-user", "tab-00000001", "Busy", "", ""); ok {
+		t.Fatal("one person exceeded the server-wide tab limit")
+	}
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "other-user", "tab-00000001", "Other", "", ""); !ok {
+		t.Fatal("another person locked out")
+	}
+	hub.leave(documentPresenceRoom("ws", "page-0"), "busy-user", "tab-00000001")
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "busy-user", "tab-00000001", "Busy", "", ""); !ok {
+		t.Fatal("a leave must free the person's slot")
+	}
+	if hub.users["busy-user"] != documentPresenceUserTotalLimit || hub.total != documentPresenceUserTotalLimit+1 {
+		t.Fatalf("counts drifted: user %d total %d", hub.users["busy-user"], hub.total)
+	}
+}

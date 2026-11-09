@@ -44,7 +44,7 @@ export function useDocumentPresence({ workspaceId, slug, editor, enabled }: { wo
     const url = `/api/v1/pages/${encodeURIComponent(slug)}/document/presence?workspace_id=${encodeURIComponent(workspaceId)}`
     const post = (body: object, keepalive = false) => apiFetch(url, { method: "POST", keepalive, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
     let stopped = false, inflight = false, again = false, interval = 1000, lastSent = 0
-    let timer: ReturnType<typeof setTimeout> | undefined, soon: ReturnType<typeof setTimeout> | undefined
+    let timer: ReturnType<typeof setTimeout> | undefined, soon: ReturnType<typeof setTimeout> | undefined, sending: Promise<unknown> | undefined
     const show = (next: PresencePeer[]) => { if (stopped) return; setPeers(next); setRemoteCarets(editor, next) }
     const beat = async () => {
       if (stopped) return
@@ -52,7 +52,8 @@ export function useDocumentPresence({ workspaceId, slug, editor, enabled }: { wo
       inflight = true; again = false; lastSent = Date.now()
       clearTimeout(timer)
       try {
-        const response = await post({ client: client.current, ...caretOf(editor) })
+        const request = post({ client: client.current, ...caretOf(editor) }); sending = request
+        const response = await request
         if (stopped) return
         if ([401, 403, 404, 503].includes(response.status)) { show([]); stopped = true; return }
         if (response.ok) {
@@ -78,7 +79,10 @@ export function useDocumentPresence({ workspaceId, slug, editor, enabled }: { wo
       editor.off("selectionUpdate", moved)
       if (!editor.isDestroyed) setRemoteCarets(editor, [])
       setPeers([])
-      void post({ client: client.current, leave: true }, true).catch(() => {})
+      const leave = () => post({ client: client.current, leave: true }, true).catch(() => {})
+      void leave()
+      // A heartbeat still in flight could reach the server after that leave and list this tab again.
+      if (inflight && sending) void sending.catch(() => {}).finally(() => void leave())
     }
   }, [enabled, editor, workspaceId, slug])
   return peers

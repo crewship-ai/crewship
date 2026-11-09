@@ -11,7 +11,8 @@ import { readablePeerFill } from "@/components/features/artifacts-design/peer-co
  * a remote change rebuilds the document, and mapped through local edits in
  * between, so a caret stays on the character it was on while anybody types.
  *
- * The caret is a thin bar in the person's colour with their name above it.
+ * The caret is a thin bar in the person's colour with their name above it;
+ * the name is generated content (app/globals.css), never editor text.
  * It is decoration only (aria-hidden, not editable, not selectable): who is
  * here is announced by the presence list in the frame, which carries the
  * same names.
@@ -47,7 +48,8 @@ function caretWidget(peer: PresencePeer): HTMLElement {
   Object.assign(caret.style, { position: "relative", display: "inline-block", width: "0", height: "1.2em", marginLeft: "-1px", marginRight: "-1px", borderLeft: `2px solid ${peer.color}`, verticalAlign: "text-bottom", pointerEvents: "none", userSelect: "none" })
   const label = document.createElement("span")
   label.className = "document-peer-name"
-  label.textContent = peer.name
+  // The name is drawn by CSS from an attribute, so it is never part of the editor's text (copy, innerText, find).
+  label.dataset.name = peer.name
   Object.assign(label.style, { position: "absolute", bottom: "100%", left: "-2px", maxWidth: "12rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "1px 5px", borderRadius: "4px 4px 4px 0", fontSize: "11px", fontWeight: "500", lineHeight: "1.4", fontStyle: "normal", color: "#ffffff", backgroundColor: readablePeerFill(peer.color), pointerEvents: "none", userSelect: "none" })
   caret.append(label)
   return caret

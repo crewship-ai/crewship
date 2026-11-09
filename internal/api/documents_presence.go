@@ -47,8 +47,12 @@ const (
 	// Per document and per server: bounded memory whatever clients send.
 	documentPresenceRoomLimit  = 64
 	documentPresenceTotalLimit = 20000
-	// Tabs of one person on one document, so nobody can fill a room alone.
-	documentPresenceUserTabLimit = 8
+	// Tabs of one person on one document, and on the whole server, so nobody
+	// can fill a room or the server alone.
+	documentPresenceUserTabLimit   = 8
+	documentPresenceUserTotalLimit = 64
+	// A full server forces a sweep of every room at most this often.
+	documentPresenceForcedSweep = time.Second
 	// One encoded Yjs relative position: a client id and clock, or a type key, plus assoc.
 	documentPresencePositionLimit = 192
 )
@@ -72,19 +76,34 @@ type documentPresencePeer struct {
 }
 
 type documentPresenceHub struct {
-	mu    sync.Mutex
-	now   func() time.Time
-	total int
-	swept time.Time
-	rooms map[string]map[string]*documentPresenceEntry
+	mu     sync.Mutex
+	now    func() time.Time
+	total  int
+	swept  time.Time
+	forced time.Time
+	users  map[string]int
+	rooms  map[string]map[string]*documentPresenceEntry
 }
 
 func newDocumentPresenceHub() *documentPresenceHub {
-	return &documentPresenceHub{now: time.Now, rooms: map[string]map[string]*documentPresenceEntry{}}
+	return &documentPresenceHub{now: time.Now, users: map[string]int{}, rooms: map[string]map[string]*documentPresenceEntry{}}
 }
 
 func documentPresenceRoom(workspace, page string) string { return workspace + "\x00" + page }
 func documentPresenceKey(user, client string) string     { return user + "\x00" + client }
+
+// remove deletes one entry and its counts; the caller holds mu.
+func (h *documentPresenceHub) remove(entries map[string]*documentPresenceEntry, key string) {
+	entry := entries[key]
+	if entry == nil {
+		return
+	}
+	delete(entries, key)
+	h.total--
+	if h.users[entry.user]--; h.users[entry.user] <= 0 {
+		delete(h.users, entry.user)
+	}
+}
 
 // sweep removes expired entries of one room; the caller holds mu.
 func (h *documentPresenceHub) sweep(room string) map[string]*documentPresenceEntry {
@@ -92,8 +111,7 @@ func (h *documentPresenceHub) sweep(room string) map[string]*documentPresenceEnt
 	limit := h.now().Add(-documentPresenceTTL)
 	for key, entry := range entries {
 		if entry.seen.Before(limit) {
-			delete(entries, key)
-			h.total--
+			h.remove(entries, key)
 		}
 	}
 	if len(entries) == 0 {
@@ -129,10 +147,13 @@ func documentPresenceColour(entries map[string]*documentPresenceEntry, room, use
 // whenever the server-wide limit is reached); the caller holds mu.
 func (h *documentPresenceHub) sweepAll(force bool) {
 	now := h.now()
-	if !force && now.Sub(h.swept) < documentPresenceTTL {
+	if !force && now.Sub(h.swept) < documentPresenceTTL || force && now.Sub(h.forced) < documentPresenceForcedSweep {
 		return
 	}
 	h.swept = now
+	if force {
+		h.forced = now
+	}
 	for room := range h.rooms {
 		h.sweep(room)
 	}
@@ -157,7 +178,7 @@ func (h *documentPresenceHub) beat(room, user, client, name, anchor, head string
 				tabs++
 			}
 		}
-		if len(entries) >= documentPresenceRoomLimit || h.total >= documentPresenceTotalLimit || tabs >= documentPresenceUserTabLimit {
+		if len(entries) >= documentPresenceRoomLimit || h.total >= documentPresenceTotalLimit || tabs >= documentPresenceUserTabLimit || h.users[user] >= documentPresenceUserTotalLimit {
 			return 0, nil, false
 		}
 		if entries == nil {
@@ -167,6 +188,7 @@ func (h *documentPresenceHub) beat(room, user, client, name, anchor, head string
 		entry = &documentPresenceEntry{user: user, client: client, color: documentPresenceColour(entries, room, user)}
 		entries[key] = entry
 		h.total++
+		h.users[user]++
 	}
 	entry.name, entry.anchor, entry.head, entry.seen = name, anchor, head, h.now()
 	peers := []documentPresencePeer{}
@@ -189,10 +211,7 @@ func (h *documentPresenceHub) leave(room, user, client string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	if entries := h.rooms[room]; entries != nil {
-		if _, ok := entries[documentPresenceKey(user, client)]; ok {
-			delete(entries, documentPresenceKey(user, client))
-			h.total--
-		}
+		h.remove(entries, documentPresenceKey(user, client))
 	}
 	h.sweep(room)
 }
@@ -201,10 +220,10 @@ func (h *documentPresenceHub) leave(room, user, client string) {
 func (h *documentPresenceHub) drop(room, user string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	for key, entry := range h.rooms[room] {
+	entries := h.rooms[room]
+	for key, entry := range entries {
 		if entry.user == user {
-			delete(h.rooms[room], key)
-			h.total--
+			h.remove(entries, key)
 		}
 	}
 	h.sweep(room)
