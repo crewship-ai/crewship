@@ -79,7 +79,7 @@ func caret(client, anchor string) string {
 	return `{"client":"` + client + `","anchor":"` + position + `","head":"` + position + `"}`
 }
 
-func names(peers []documentPresencePeer) []string {
+func presenceNames(peers []documentPresencePeer) []string {
 	out := []string{}
 	for _, peer := range peers {
 		out = append(out, peer.Name)
@@ -121,7 +121,7 @@ func TestDocumentPresenceNamesComeFromTheServerAndCaretsAreRelayed(t *testing.T)
 		}
 	}
 	_, reply = rig.beat("owner", "doc-a", caret("owner-tab-1", "owner-caret"))
-	if got := names(reply.Peers); len(got) != 1 || got[0] != "Erin Editor" {
+	if got := presenceNames(reply.Peers); len(got) != 1 || got[0] != "Erin Editor" {
 		t.Fatalf("owner sees %v", got)
 	}
 }
@@ -236,7 +236,7 @@ func TestDocumentPresenceNeverShowsAnEmailAsTheName(t *testing.T) {
 	mustExec(t, rig.router.db, `UPDATE users SET full_name='' WHERE id='presence-reader'`)
 	rig.beat("reader", "doc-a", caret("reader-tab-1", "r"))
 	_, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o"))
-	if got := names(reply.Peers); len(got) != 1 || got[0] != "Workspace member" {
+	if got := presenceNames(reply.Peers); len(got) != 1 || got[0] != "Workspace member" {
 		t.Fatalf("a member without a display name is shown as %v", got)
 	}
 }
