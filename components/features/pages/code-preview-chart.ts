@@ -57,6 +57,8 @@ function parse(source: string): Spec {
     if (entry.values.length !== x.length) throw new Invalid(`series ${n} has ${entry.values.length} values, "x" has ${x.length}`)
     const values = entry.values.map((value, i) => {
       if (typeof value !== "number" || !Number.isFinite(value)) throw new Invalid(`series ${n}, value ${i + 1} must be a finite number`)
+      // Larger magnitudes overflow when scaled to the axis.
+      if (Math.abs(value) > 1e300) throw new Invalid(`series ${n}, value ${i + 1} is larger than 1e300`)
       return value
     })
     return { name, values }

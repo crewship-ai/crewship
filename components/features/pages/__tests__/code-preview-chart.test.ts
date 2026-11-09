@@ -85,6 +85,8 @@ describe("renderChart", () => {
     ["a value count mismatch", { ...SALES, series: [{ name: "a", values: [1, 2] }] }, /series 1 has 2 values, "x" has 3/],
     ["a string value", { ...SALES, series: [{ name: "a", values: [1, "2", 3] }] }, /series 1, value 2 must be a finite number/],
     ["an infinite value", '{"type":"bar","x":["a"],"series":[{"name":"a","values":[1e999]}]}', /series 1, value 1 must be a finite number/],
+    ["a huge value", '{"type":"bar","x":["a"],"series":[{"name":"a","values":[1.7e308]}]}', /series 1, value 1 is larger than 1e300/],
+    ["a huge negative value", '{"type":"bar","x":["a"],"series":[{"name":"a","values":[-1e301]}]}', /series 1, value 1 is larger than 1e300/],
     ["a null value", { ...SALES, series: [{ name: "a", values: [1, null, 3] }] }, /must be a finite number/],
     ["a too long title", { ...SALES, title: "t".repeat(CHART_LIMITS.text + 1) }, /"title" is longer than 200 characters/],
     ["a too long label", { ...SALES, x: ["a", "b", "c".repeat(CHART_LIMITS.text + 1)] }, /label 3 is longer than 200 characters/],

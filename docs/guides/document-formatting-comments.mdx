@@ -133,17 +133,25 @@ A `chart` block holds exactly this shape; `title` is optional:
 - Mermaid is bundled with the app at a fixed version and loads only when the
   first diagram is shown. It runs in strict mode with text labels: `click`
   callbacks and links do nothing, HTML in labels stays text, and a diagram's
-  own `%%{init}%%` directive cannot loosen these settings or restyle the page.
-  The drawn SVG is cleaned again before it is shown (no scripts, links,
-  embedded HTML, images, `use` references or styles that load a URL) and is
-  kept in its own isolated subtree, so its styles only affect the diagram.
-  Nothing is loaded from other sites. At most 20 000 characters and 500
-  edges.
+  own `%%{init}%%` directive or front matter cannot loosen these settings or
+  restyle the page. The drawn SVG is cleaned again before it is shown (no
+  scripts, links, embedded HTML, images, `use` references, overlays or styles
+  that load a URL) and is kept in its own isolated subtree, so its styles only
+  affect the diagram. Nothing is loaded from other sites or from the app.
+- A diagram that would make Mermaid load something is refused with *Cannot
+  show this diagram: it refers to an image, icon, URL or escaped text*: image
+  and icon shapes (`A@{ img: … }`, `A@{ icon: … }`), sequence diagram
+  `properties`, `url(…)` in styles and class definitions, and any backslash.
+- At most 5 000 characters, 150 edges, 50 subgraphs and subgraphs nested 6
+  deep. When a diagram takes longer than half a second to draw, edits by
+  others no longer redraw it automatically: the block says *The source
+  changed* and redraws when you choose **Preview**.
 - A chart is read strictly: `type` is `bar` or `line`, `x` lists the
   category labels, and every series has a `name` and one finite number per
   label. Unknown keys, wrong types and specs over the limits are refused with
   the reason. At most 8 series, 200 points per series, 200 characters per
-  label or name and 50 000 characters in all. Labels are only ever text.
+  label or name, values up to ±1e300 and 50 000 characters in all. Labels
+  are only ever text.
 - Series use the product's chart colours, in order. The chart is announced to
   screen readers with a summary (type, title, series, categories and value
   range); **Show data table** under it lists every value, and hovering a bar

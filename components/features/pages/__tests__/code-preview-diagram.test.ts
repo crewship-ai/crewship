@@ -5,7 +5,7 @@ vi.mock("mermaid", () => ({ default: mermaid }))
 
 import { DIAGRAM_LIMITS, MERMAID_OPTIONS, renderDiagram, sanitizeDiagramSvg } from "../code-preview-diagram"
 
-afterEach(() => { mermaid.render.mockReset(); delete (window as unknown as { __ran?: boolean }).__ran })
+afterEach(() => { mermaid.render.mockReset(); mermaid.initialize.mockClear(); vi.restoreAllMocks(); delete (window as unknown as { __ran?: boolean }).__ran })
 
 const svgOf = (inner: string, id = "d") => `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" id="${id}" viewBox="0 0 100 50">${inner}</svg>`
 const shadow = (node: HTMLElement) => node.shadowRoot ?? node
@@ -50,6 +50,36 @@ describe("sanitizeDiagramSvg", () => {
     expect(svg.querySelectorAll("rect")).toHaveLength(2)
   })
 
+  it.each(["fill", "filter", "mask", "cursor", "stroke", "marker-end", "clip-path"])("drops a CSS escape or external url in a plain %s attribute", attr => {
+    const svg = sanitizeDiagramSvg(svgOf([
+      `<rect id="a" width="1" height="1" ${attr}="\\75 rl(https://evil.test/esc)"/>`,
+      `<rect id="b" width="1" height="1" ${attr}="u\\72 l(https://evil.test/esc2)"/>`,
+      `<rect id="c" width="1" height="1" ${attr}="URL( 'https://evil.test/up')"/>`,
+      `<rect id="d" width="1" height="1" ${attr}="url(#m) url(https://evil.test/two)"/>`,
+      `<rect id="e" width="1" height="1" ${attr}="url(#m)"/>`,
+    ].join("")))!
+    for (const id of ["a", "b", "c", "d"]) expect(svg.querySelector(`#${id}`)!.hasAttribute(attr)).toBe(false)
+    expect(svg.querySelector("#e")!.getAttribute(attr)).toBe("url(#m)")
+    expect(svg.outerHTML).not.toContain("evil.test")
+  })
+
+  it("drops a style sheet that targets the host and rules that position anything", () => {
+    const host = sanitizeDiagramSvg(svgOf(`<style>:host{position:fixed;inset:0;z-index:99999;background:#fff}</style><text>x</text>`))!
+    expect(host.querySelector("style")).toBeNull()
+    const positioned = sanitizeDiagramSvg(svgOf(`<style>#d .node{fill:#eee} #d .tip{position:fixed;top:0} #d .edge{stroke:#333}</style>`))!
+    const text = positioned.querySelector("style")!.textContent!
+    expect(text).toContain("fill:#eee")
+    expect(text).toContain("stroke:#333")
+    expect(text).not.toMatch(/position/)
+  })
+
+  it("reads output with HTML-only markup such as <br> instead of dropping it", () => {
+    const svg = sanitizeDiagramSvg(svgOf(`<g><text>one<br>two</text></g>`))
+    expect(svg).not.toBeNull()
+    expect(svg!.querySelector("br")).toBeNull()
+    expect(svg!.querySelector("text")!.textContent).toBe("onetwo")
+  })
+
   it("returns null for anything that is not a single SVG", () => {
     expect(sanitizeDiagramSvg("<div>no</div>")).toBeNull()
     expect(sanitizeDiagramSvg("")).toBeNull()
@@ -62,9 +92,10 @@ describe("renderDiagram", () => {
     const first = await renderDiagram("flowchart LR\n  A --> B")
     const second = await renderDiagram("flowchart LR\n  B --> C")
     expect(first.ok && second.ok).toBe(true)
-    expect(mermaid.initialize).toHaveBeenCalledTimes(1)
+    // Mermaid's settings are global and shared with chat's renderer: they are set again before every diagram.
+    expect(mermaid.initialize).toHaveBeenCalledTimes(2)
     expect(mermaid.initialize).toHaveBeenCalledWith(expect.objectContaining(MERMAID_OPTIONS))
-    expect(MERMAID_OPTIONS).toMatchObject({ startOnLoad: false, securityLevel: "strict", htmlLabels: false, flowchart: { htmlLabels: false }, maxTextSize: 20_000, maxEdges: 500, suppressErrorRendering: true })
+    expect(MERMAID_OPTIONS).toMatchObject({ startOnLoad: false, securityLevel: "strict", htmlLabels: false, flowchart: { htmlLabels: false }, maxTextSize: 5_000, maxEdges: 150, suppressErrorRendering: true })
     // Directives in a diagram cannot loosen these settings or restyle the page.
     expect(MERMAID_OPTIONS.secure).toEqual(expect.arrayContaining(["securityLevel", "htmlLabels", "flowchart", "maxTextSize", "maxEdges", "themeCSS", "fontFamily"]))
     const [[idA, textA], [idB]] = mermaid.render.mock.calls
@@ -104,7 +135,42 @@ describe("renderDiagram", () => {
 
   it("refuses empty and oversized sources without running mermaid", async () => {
     expect(await renderDiagram(" \n")).toEqual({ ok: false, error: "Nothing to show yet. Write a Mermaid diagram in Source." })
-    expect(await renderDiagram("a".repeat(DIAGRAM_LIMITS.chars + 1))).toEqual({ ok: false, error: "This diagram is longer than 20,000 characters, so only its source is shown." })
+    expect(await renderDiagram("a".repeat(DIAGRAM_LIMITS.chars + 1))).toEqual({ ok: false, error: "This diagram is longer than 5,000 characters, so only its source is shown." })
     expect(mermaid.render).not.toHaveBeenCalled()
+  })
+
+  // Mermaid draws into the live page before its output can be cleaned, so anything that would make it load
+  // an image, icon or styled URL is refused before Mermaid sees it.
+  it.each([
+    ["an image shape", 'flowchart LR\n  A@{ img: "https://evil.test/shape.png", label: "x" }\n  A-->B'],
+    ["a quoted image key", 'flowchart LR\n  A@{ "img": "/api/v1/me" }'],
+    ["an icon shape", 'flowchart LR\n  A@{ icon: "fa:user" }'],
+    ["sequence properties", 'sequenceDiagram\n  participant A\n  properties A: {"icon":"https://evil.test/seqicon.png"}'],
+    ["a classDef url", "stateDiagram-v2\n  s1-->s2\n  classDef c fill:url(https://evil.test/sc)\n  class s1 c"],
+    ["a style url", "flowchart LR\n  A-->B\n  style A fill:URL( https://evil.test/u )"],
+    ["a CSS escape", "stateDiagram-v2\n  s1-->s2\n  classDef c fill:\\75 rl(https://evil.test/esc)"],
+  ])("refuses %s without running mermaid", async (_name, source) => {
+    const result = await renderDiagram(source)
+    expect(result).toEqual({ ok: false, error: "Cannot show this diagram: it refers to an image, icon, URL or escaped text, which previews never load." })
+    expect(mermaid.render).not.toHaveBeenCalled()
+  })
+
+  it("refuses too many or too deeply nested subgraphs without running mermaid", async () => {
+    const deep = "flowchart LR\n" + Array.from({ length: DIAGRAM_LIMITS.depth + 1 }, (_, i) => `subgraph s${i}`).join("\n") + "\n  A\n" + "end\n".repeat(DIAGRAM_LIMITS.depth + 1)
+    expect(await renderDiagram(deep)).toEqual({ ok: false, error: `Cannot show this diagram: subgraphs are nested deeper than ${DIAGRAM_LIMITS.depth} levels.` })
+    const many = "flowchart LR\n" + Array.from({ length: DIAGRAM_LIMITS.subgraphs + 1 }, (_, i) => `subgraph s${i}\n  n${i}\nend`).join("\n")
+    expect(await renderDiagram(many)).toEqual({ ok: false, error: `Cannot show this diagram: it has more than ${DIAGRAM_LIMITS.subgraphs} subgraphs.` })
+    expect(mermaid.render).not.toHaveBeenCalled()
+  })
+
+  it("marks a diagram that took long to draw as slow", async () => {
+    mermaid.render.mockImplementation(async (id: string) => ({ svg: svgOf("<g/>", id) }))
+    const clock = vi.spyOn(performance, "now")
+    clock.mockReturnValueOnce(1_000).mockReturnValueOnce(1_000 + DIAGRAM_LIMITS.slowMs + 1)
+    const slow = await renderDiagram("flowchart LR\n A-->B")
+    expect(slow.ok && slow.slow).toBe(true)
+    clock.mockReturnValueOnce(1_000).mockReturnValueOnce(1_010)
+    const quick = await renderDiagram("flowchart LR\n A-->B")
+    expect(quick.ok && quick.slow).toBe(false)
   })
 })

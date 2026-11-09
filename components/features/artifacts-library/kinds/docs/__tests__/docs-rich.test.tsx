@@ -20,9 +20,13 @@ import { DocsBody, type DocsFrameReport } from "../docs-view"
 
 const env = vi.hoisted(() => ({ canWrite: true, canComment: true, comments: "ok" as "ok" | "missing" | "conflict" }))
 const request = vi.hoisted(() => vi.fn())
-// jsdom cannot lay out SVG, so mermaid's renderer is replaced by one that returns hostile output; the
+// happy-dom cannot lay out SVG, so mermaid's renderer is replaced by one that returns hostile output; the
 // real renderer is exercised in a browser harness. What reaches the page must still be safe.
-const mermaid = vi.hoisted(() => ({ initialize: vi.fn(), render: vi.fn(async (id: string) => ({ svg: `<svg xmlns="http://www.w3.org/2000/svg" id="${id}"><g onclick="window.__ran = true"><a href="javascript:window.__ran = true"><text>Start</text></a></g><foreignObject><img src="x" onerror="window.__ran = true"/></foreignObject><script>window.__ran = true</script></svg>` })) }))
+const mermaid = vi.hoisted(() => ({ initialize: vi.fn(), render: vi.fn(async (id: string, text: string) => {
+  // A diagram mentioning "Slow" takes longer than the slow-render threshold.
+  if (text.includes("Slow")) await new Promise(done => setTimeout(done, 600))
+  return { svg: `<svg xmlns="http://www.w3.org/2000/svg" id="${id}"><g onclick="window.__ran = true"><a href="javascript:window.__ran = true"><text>Start</text></a></g><foreignObject><img src="x" onerror="window.__ran = true"/></foreignObject><script>window.__ran = true</script></svg>` }
+}) }))
 vi.mock("mermaid", () => ({ default: mermaid }))
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: true, isPending: false }) }))
 vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/document-queue")>(), openDocumentDrafts: async () => ({ load: async () => [], put: async () => {}, remove: async () => {}, close: () => {}, exclusive: true }) }))
@@ -60,6 +64,7 @@ const formatted = { type: "doc", content: [
   { type: "codeBlock", attrs: { id: "notes", language: "markdown" }, content: [{ type: "text", text: MARKDOWN }] },
   { type: "codeBlock", attrs: { id: "plain-md", language: "python" }, content: [{ type: "text", text: "# not a heading" }] },
   { type: "codeBlock", attrs: { id: "flow", language: "mermaid" }, content: [{ type: "text", text: FLOW }] },
+  { type: "codeBlock", attrs: { id: "slow-flow", language: "mermaid" }, content: [{ type: "text", text: "flowchart LR\n  Slow --> B" }] },
   { type: "codeBlock", attrs: { id: "sales", language: "chart" }, content: [{ type: "text", text: SALES }] },
   { type: "codeBlock", attrs: { id: "bad-chart", language: "chart" }, content: [{ type: "text", text: "{\"type\":\"pie\",\"x\":[],\"series\":[]}" }] },
 ] }
@@ -400,6 +405,29 @@ describe("Docs diagram and chart blocks", () => {
     expect(flow.querySelector("pre")!.textContent).toBe(FLOW)
     expect(editor.editor.getJSON()).toEqual(before)
     expect(posts("/document/patch")).toHaveLength(0)
+  })
+
+  it("stops redrawing a slow diagram on remote edits until the reader chooses Preview", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    const slow = blockDom(editor, "slow-flow")
+    await waitFor(() => expect(slow.querySelector<HTMLElement>("[data-diagram-preview]")?.shadowRoot?.querySelector("svg")).toBeTruthy(), { timeout: 3000 })
+    const drawn = () => mermaid.render.mock.calls.filter(([, text]) => String(text).includes("Slow")).map(([, text]) => text)
+    const before = drawn().length
+    // An edit that does not move this reader's caret, as a collaborator's would.
+    act(() => { editor.editor.commands.command(({ tr }) => {
+      let pos = -1
+      tr.doc.descendants((node, at) => { if (node.attrs.id === "slow-flow") pos = at })
+      tr.insertText("\n  B --> C", pos + 1 + "flowchart LR\n  Slow --> B".length)
+      return true
+    }) })
+    await waitFor(() => expect(slow.querySelector("[data-code-stale]")?.textContent).toBe("The source changed. Choose Preview to draw it again."))
+    await new Promise(done => setTimeout(done, 400))
+    expect(drawn()).toHaveLength(before)
+    expect(slow.querySelector<HTMLElement>("[data-diagram-preview]")?.shadowRoot?.querySelector("svg")).toBeTruthy()
+    fireEvent.click(within(within(slow).getByRole("group", { name: "Show diagram" })).getByRole("button", { name: "Preview" }))
+    await waitFor(() => expect(drawn()).toContain("flowchart LR\n  Slow --> B\n  B --> C"))
   })
 
   it("draws a chart block with its data table, and explains a bad spec in that block only", async () => {

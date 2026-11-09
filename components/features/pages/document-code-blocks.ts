@@ -90,8 +90,12 @@ export const CodeHighlight = Extension.create({
 /** The exact characters of a code block, newlines and trailing spaces included, as the clipboard should receive them. */
 export const codeBlockText = (node: ProseMirrorNode) => node.textContent
 
-/** What a preview renderer returns: the rendered element, or why this block cannot be shown. */
-export type PreviewResult = { ok: true; node: HTMLElement } | { ok: false; error: string }
+/**
+ * What a preview renderer returns: the rendered element, or why this block
+ * cannot be shown. `slow` marks a render that took long enough to stall the
+ * tab; such a block then waits for the reader before drawing again.
+ */
+export type PreviewResult = { ok: true; node: HTMLElement; slow?: boolean } | { ok: false; error: string }
 type Renderer = (source: string) => PreviewResult | Promise<PreviewResult>
 
 /**
@@ -152,7 +156,7 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
         header.append(label, toggle, copy, status)
         pre.append(code); dom.append(header, preview, pre)
         let current = node, reset: ReturnType<typeof setTimeout> | undefined, pending: ReturnType<typeof setTimeout> | undefined, destroyed = false
-        let shown: { language: string; source: string } | null = null, ownMode: "source" | "preview" = "preview"
+        let shown: { language: string; source: string } | null = null, ownMode: "source" | "preview" = "preview", slow = false
         const blockId = () => typeof current.attrs.id === "string" ? current.attrs.id : null
         const language = () => languages && typeof current.attrs.language === "string" ? current.attrs.language : null
         const mode = () => { const id = blockId(); return (id ? modesOf(editor).get(id) : undefined) ?? ownMode }
@@ -175,6 +179,15 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
           if (caretInside()) { setMode("source"); return }
           const source = current.textContent
           if (shown && shown.language === lang && shown.source === source) return
+          // A preview that was slow to draw is not redrawn on every edit from others; the reader chooses Preview.
+          if (slow && shown && shown.language === lang) {
+            if (!preview.querySelector("[data-code-stale]")) {
+              const note = document.createElement("p"); note.dataset.codeStale = ""; note.setAttribute("role", "status")
+              note.textContent = "The source changed. Choose Preview to draw it again."
+              preview.prepend(note)
+            }
+            return
+          }
           const first = shown === null
           shown = { language: lang, source }
           preview.hidden = false
@@ -183,6 +196,7 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
             if (result.ok) {
               if (caretInside()) { setMode("source"); return }
               preview.replaceChildren(result.node); delete preview.dataset.error; pre.hidden = true
+              slow = result.slow === true
             } else {
               const message = document.createElement("p"); message.textContent = result.error; message.setAttribute("role", "status")
               preview.replaceChildren(message); preview.dataset.error = ""; pre.hidden = false
@@ -221,6 +235,8 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
             if (target) editor.view.dispatch(editor.state.tr.setSelection(target).setMeta("addToHistory", false))
           }
           if (caretInside()) return
+          // Choosing Preview always draws the current source, also after a slow render.
+          if (slow) { slow = false; shown = null }
           setMode("preview")
         })
         const followCaret = () => { if (mode() === "preview" && previewable(language()) && caretInside()) setMode("source") }
