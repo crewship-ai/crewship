@@ -36,7 +36,7 @@ the workspace's agent artifact policy to allow the crew
 | Commands | Credential | Scoped token |
 |---|---|---|
 | `status` | Any credential with access to the workspace | None |
-| `read`, `outline`, `checkpoints`, `checkpoint`, `chat-results` | Human session or CLI token | `pages:read` |
+| `read`, `outline`, `checkpoints`, `checkpoint`, `chat-results`, `presence` | Human session or CLI token | `pages:read` |
 | `initialize`, `patch`, `restore` | Human session or CLI token with edit access | `pages:read` and `pages:write` |
 | `create`, `draft` | The admitted run's `CREWSHIP_AGENT_TOKEN` only | — |
 
@@ -378,6 +378,21 @@ crewship doc patch @<artifact-id> --file patch.json
 
 An exact retry returns the original receipt with `found: true` and
 `duplicate: true`, plus the request's `schema` and the current `epoch`.
+
+## `crewship doc presence <page-slug>`
+
+Send one presence heartbeat and print who else has the document open: each
+other tab's `client`, `user_id`, the `name` the server resolved, a `color`
+index and, when that person shares it, the caret as `anchor`/`head` (base64
+Yjs relative positions). Presence lives in server memory for 6 seconds and is
+never stored. The heartbeat is authorized like a document read: without read
+access it fails with 404 and lists nobody. `--client` reuses a tab id (8–64
+letters, digits, `-` or `_`); `--leave` removes that tab at once.
+
+```bash
+crewship doc presence @<artifact-id>
+crewship doc presence @<artifact-id> --client my-script-tab --leave
+```
 
 ## `crewship doc comments <page-slug>`
 

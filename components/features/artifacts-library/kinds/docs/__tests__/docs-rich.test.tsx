@@ -1,5 +1,7 @@
 // Schema 4 formatting and the Comments drawer in the Docs page, over the real document session and
 // frame with a mocked API, as in docs-view.test.tsx.
+// Presence heartbeats are covered by document-remote-carets and the presence API tests; these tests count document writes.
+vi.mock("@/hooks/use-document-presence", () => { const none: never[] = []; return { useDocumentPresence: () => none } })
 vi.mock("@/lib/protected-document-drafts", () => ({ openProtectedDocumentDrafts: async (...args: Parameters<typeof import("@/lib/document-queue").openDocumentDrafts>) => (await import("@/lib/document-queue")).openDocumentDrafts(...args) }))
 vi.mock("@/lib/local-draft-seal", () => ({
   createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
@@ -11,7 +13,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import type { Editor } from "@tiptap/core"
-import { encodeUpdate } from "@/hooks/use-page-document"
+import { decodeUpdate, encodeUpdate } from "@/hooks/use-page-document"
 import { documentSchema } from "@/lib/documents/schema"
 import { ArtifactFrame, NO_FRAME_CAPABILITIES, type FrameLayout } from "../../../frame"
 import type { LibraryItem } from "../../../library-items"
@@ -81,12 +83,12 @@ const comments = [
 ]
 
 function serve() {
+  // The fake server stores what it acknowledges, as the real one does: Saved means it holds the editor's content.
   const doc = documentSchema.create(structuredClone(formatted), 4) as Y.Doc
-  const snapshot = encodeUpdate(Y.encodeStateAsUpdate(doc)); doc.destroy()
   let rev = 1
   request.mockImplementation(async (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
-    if (url.includes("/document/patch")) { rev += 1; return { ok: true, json: async () => ({ id: body.id, epoch: body.epoch, rev, schema: body.schema }) } }
+    if (url.includes("/document/patch")) { Y.applyUpdate(doc, decodeUpdate(body.update)); rev += 1; return { ok: true, json: async () => ({ id: body.id, epoch: body.epoch, rev, schema: body.schema }) } }
     if (url.includes("/document/comments")) {
       if (env.comments === "missing") return { ok: false, status: 404, json: async () => ({ error: "not found" }) }
       if (body) {
@@ -98,7 +100,7 @@ function serve() {
     if (url.includes("/members")) return { ok: true, json: async () => [{ id: "m1", role: "MEMBER", created_at: "", user: { id: "jana", email: "jana@example.invalid", full_name: "Jana Nováková" } }] }
     if (url.includes("/document/checkpoints")) return { ok: true, json: async () => ({ checkpoints: [] }) }
     if (url.includes("/proposals")) return { ok: true, json: async () => ({ proposals: [] }) }
-    return { ok: true, json: async () => ({ page_id: "page-docs", schema: 4, rev, epoch: "go:node:1", can_write: env.canWrite, can_comment: env.canComment, snapshot }) }
+    return { ok: true, json: async () => ({ page_id: "page-docs", schema: 4, rev, epoch: "go:node:1", can_write: env.canWrite, can_comment: env.canComment, snapshot: encodeUpdate(Y.encodeStateAsUpdate(doc)) }) }
   })
 }
 

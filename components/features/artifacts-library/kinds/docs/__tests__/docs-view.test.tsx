@@ -1,5 +1,7 @@
 // The document session is the real one (PageDocument + usePageDocument) over a mocked API and a
 // protected-store seam, as in the Pages document tests; the frame is the real ArtifactFrame.
+// Presence heartbeats are covered by document-remote-carets and the presence API tests; these tests count document writes.
+vi.mock("@/hooks/use-document-presence", () => { const none: never[] = []; return { useDocumentPresence: () => none } })
 vi.mock("@/lib/protected-document-drafts", () => ({ openProtectedDocumentDrafts: async (...args: Parameters<typeof import("@/lib/document-queue").openDocumentDrafts>) => (await import("@/lib/document-queue")).openDocumentDrafts(...args) }))
 vi.mock("@/lib/local-draft-seal", () => ({
   createLocalDraftCipher: async () => ({ seal: async (text: string) => text, open: async (text: string) => text, close() {} }),
@@ -11,7 +13,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import type { Editor } from "@tiptap/core"
-import { encodeUpdate } from "@/hooks/use-page-document"
+import { decodeUpdate, encodeUpdate } from "@/hooks/use-page-document"
 import { ArtifactFrame, NO_FRAME_CAPABILITIES, type FrameLayout } from "../../../frame"
 import type { LibraryItem } from "../../../library-items"
 import { DocsBody, type DocsFrameReport } from "../docs-view"
@@ -30,7 +32,7 @@ const item: LibraryItem = {
   projectBacked: false, empty: false, private: false, ownerLabel: "Research crew", folder: { slug: "lab", name: "Demo Lab" }, updatedAt: null,
 } as LibraryItem
 
-function savedDocument() {
+function savedDocument(): Y.Doc {
   const saved = new Y.Doc({ gc: false })
   const fragment = saved.getXmlFragment("default")
   const block = (type: string, id: string, text: string, attrs: Record<string, number> = {}) => {
@@ -39,24 +41,25 @@ function savedDocument() {
     const run = new Y.XmlText(); run.insert(0, text); node.insert(0, [run]); return node
   }
   fragment.insert(0, [block("heading", "goal", "Goal", { level: 1 }), block("paragraph", "p1", "Ship the agency offer on 2 December."), block("heading", "timeline", "Timeline", { level: 2 })])
-  const snapshot = encodeUpdate(Y.encodeStateAsUpdate(saved)); saved.destroy()
-  return snapshot
+  return saved
 }
 
 function serve() {
-  const snapshot = savedDocument()
+  // The fake server stores what it acknowledges, as the real one does: Saved means it holds the editor's content.
+  const server = savedDocument()
   let rev = 1
   request.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.includes("/document/patch")) {
       if (env.patch === "hang") return new Promise(() => {})
       const body = JSON.parse(String(init?.body))
+      Y.applyUpdate(server, decodeUpdate(body.update))
       rev += 1
       return { ok: true, json: async () => ({ id: body.id, epoch: body.epoch, rev, schema: body.schema }) }
     }
     if (url.includes("/document/checkpoints")) return { ok: true, json: async () => ({ checkpoints: [] }) }
     if (url.includes("/proposals")) return { ok: true, json: async () => ({ proposals: [] }) }
     if (env.denied) return { ok: false, status: 403, json: async () => ({ error: "document access denied" }) }
-    return { ok: true, json: async () => ({ page_id: "page-docs", schema: 2, rev, generation: 0, epoch: "go:node:1", can_write: env.canWrite, snapshot, ...(env.proposals === undefined ? {} : { proposals: env.proposals }) }) }
+    return { ok: true, json: async () => ({ page_id: "page-docs", schema: 2, rev, generation: 0, epoch: "go:node:1", can_write: env.canWrite, snapshot: encodeUpdate(Y.encodeStateAsUpdate(server)), ...(env.proposals === undefined ? {} : { proposals: env.proposals }) }) }
   })
 }
 
