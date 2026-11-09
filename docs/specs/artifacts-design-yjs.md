@@ -213,7 +213,7 @@ refuses other values with `400`.
 | `strokeWidth` | 0 to 1000 (pixels) | 1 when `stroke` is set |
 
 - The stroke is drawn inside the box on the canvas, in playback and in the HTML
-  export (an inset `box-shadow`), so a stroke never changes a layer's size or
+  export (an outline drawn inwards, above an image), so a stroke never changes a layer's size or
   position. A rounded image is clipped to its corners.
 - `fill` keeps its meaning: the paint of a rectangle. An image is drawn from its
   URL; its `fill` is not drawn.

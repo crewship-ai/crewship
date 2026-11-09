@@ -321,7 +321,10 @@ func TestRenderHTMLShapeStyle(t *testing.T) {
 	plain := map[string]any{"id": "plain", "type": "rect", "parentId": "s", "x": 10, "y": 10, "width": 100, "height": 40, "fill": "#2563eb"}
 	card := map[string]any{"id": "card", "type": "rect", "parentId": "s", "x": 10, "y": 60, "width": 200, "height": 100, "fill": "#ffffff", "radius": 16, "stroke": "#0f172a", "strokeWidth": 2}
 	photo := map[string]any{"id": "photo", "type": "image", "parentId": "s", "x": 10, "y": 200, "width": 200, "height": 100, "src": "https://example.test/a.png", "radius": 50}
-	out, err := RenderHTML(exportFixture(screen, plain, card, photo), 1<<20)
+	// An <img> fills its layer and would cover an inset box-shadow, so the
+	// stroke must be drawn above the content, as on the canvas.
+	framed := map[string]any{"id": "framed", "type": "image", "parentId": "s", "x": 10, "y": 320, "width": 200, "height": 100, "src": "https://example.test/b.png", "stroke": "#dc2626", "strokeWidth": 3}
+	out, err := RenderHTML(exportFixture(screen, plain, card, photo, framed), 1<<20)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,15 +336,18 @@ func TestRenderHTMLShapeStyle(t *testing.T) {
 		}
 		return ""
 	}
-	if strings.Contains(line("plain"), "border-radius") || strings.Contains(line("plain"), "box-shadow") {
+	if strings.Contains(line("plain"), "border-radius") || strings.Contains(line("plain"), "outline") {
 		t.Fatalf("an unstyled rectangle gained style: %s", line("plain"))
 	}
-	for _, want := range []string{"border-radius:16px", "box-shadow:inset 0 0 0 2px #0f172a"} {
+	for _, want := range []string{"border-radius:16px", "outline:2px solid #0f172a", "outline-offset:-2px"} {
 		if !strings.Contains(line("card"), want) {
 			t.Errorf("card lacks %q: %s", want, line("card"))
 		}
 	}
 	if !strings.Contains(line("photo"), "border-radius:50px") || !strings.Contains(line("photo"), "overflow:hidden") {
 		t.Errorf("rounded image not clipped: %s", line("photo"))
+	}
+	if l := line("framed"); !strings.Contains(l, "outline:3px solid #dc2626") || !strings.Contains(l, "outline-offset:-3px") || strings.Contains(l, "box-shadow") {
+		t.Errorf("image stroke is not drawn above the picture: %s", l)
 	}
 }

@@ -73,7 +73,11 @@ func shapeStyle(node *exportNode) string {
 		width = *node.StrokeWidth
 	}
 	if exportStrokeColor.MatchString(node.Stroke) && width > 0 && width <= 1000 {
-		style += ";box-shadow:inset 0 0 0 " + strconv.FormatFloat(width, 'f', -1, 64) + "px " + node.Stroke
+		// An outline drawn inwards sits above the layer's content (an <img>
+		// fills its box and would cover an inset box-shadow) and follows
+		// border-radius, as the canvas draws the stroke over the shape.
+		w := strconv.FormatFloat(width, 'f', -1, 64)
+		style += ";outline:" + w + "px solid " + node.Stroke + ";outline-offset:-" + w + "px"
 	}
 	return style
 }
