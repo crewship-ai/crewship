@@ -942,13 +942,13 @@ test('schema6: a placement commit is refused on schema 5, saved after the explic
   } finally { await f.close(); }
 });
 
-test('schema6: agent proposals stay a schema 4 feature; a Canvas document refuses them and their acceptance', async () => {
-  const model = canvasModel(6), f = await fixture(model.handle); await f.start();
+for (const schema of [5, 6]) test(`schema${schema}: agent proposals stay a schema 4 feature; the document refuses them and their acceptance`, async () => {
+  const model = canvasModel(schema), f = await fixture(model.handle); await f.start();
   try {
     const state = (await read(f)).body, hash = state.outline[0].hash;
     const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
-    assert.equal((await call(f.socket, '/v1/documents/p/propose', { id: 'p6', schema: 6, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target: 'intro', ifHash: hash, text: 'x' }, agent)).status, 409);
-    assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'acc6', proposal: 'p6', ifRev: state.rev })).status, 409);
+    assert.equal((await call(f.socket, '/v1/documents/p/propose', { id: `p${schema}`, schema, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target: 'intro', ifHash: hash, text: 'x' }, agent)).status, 409);
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', { id: `acc${schema}`, proposal: `p${schema}`, ifRev: state.rev })).status, 409);
     assert.equal(model.commits, 0);
   } finally { await f.close(); }
 });
