@@ -26,8 +26,8 @@ function documents() {
 }
 
 /** What the other person's editor sends: positions inside their own copy of the text, as relative positions. */
-function peerAt(text: Y.XmlText, anchor: number, head: number, name = "Erin Editor"): PresencePeer {
-  const wire = { client: "tab-erin-0001", user_id: "erin", name, color: 1, anchor: encodePosition(Y.createRelativePositionFromTypeIndex(text, anchor, -1)), head: encodePosition(Y.createRelativePositionFromTypeIndex(text, head, -1)) }
+function peerAt(text: Y.XmlText, anchor: number, head: number, name = "Erin Editor", client = "tab-erin-0001", color = 1): PresencePeer {
+  const wire = { client, user_id: client, name, color, anchor: encodePosition(Y.createRelativePositionFromTypeIndex(text, anchor, -1)), head: encodePosition(Y.createRelativePositionFromTypeIndex(text, head, -1)) }
   return parsePresenceReply({ peers: [wire] }).peers[0]
 }
 
@@ -84,6 +84,14 @@ describe("remote carets", () => {
     // No trailing line break hack: both people's editors keep the same text.
     expect(editor.view.dom.querySelector("br.ProseMirror-trailingBreak")).toBeNull()
     expect(editor.view.dom.textContent).toBe("Caret paragraph with words.")
+  })
+
+  it("shows both people when two carets sit at the end of the same line", () => {
+    const { editor, remoteText } = documents()
+    const end = remoteText().length
+    setRemoteCarets(editor, [peerAt(remoteText(), end, end), peerAt(remoteText(), end, end, "Rory Reader", "tab-rory-0001", 2)])
+    const names = [...editor.view.dom.querySelectorAll<HTMLElement>("[data-remote-caret]")].map(caret => caret.dataset.name).sort()
+    expect(names).toEqual(["Erin Editor", "Rory Reader"])
   })
 
   it("clears every caret on an empty list", () => {

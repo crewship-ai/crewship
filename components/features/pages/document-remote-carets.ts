@@ -60,11 +60,15 @@ function caretAttributes(peer: PresencePeer, className: string): Record<string, 
 
 function decorate(state: EditorState, placed: Placed[]): DecorationSet {
   const decorations: Decoration[] = []
+  const ends = new Set<number>()
   for (const { peer, anchor, head } of placed) {
     const from = Math.min(anchor, head), to = Math.max(anchor, head)
     if (to > from) decorations.push(Decoration.inline(from, to, { class: "document-peer-range", style: `background-color: ${peer.color}33`, "data-peer": peer.client }))
     const $head = state.doc.resolve(head)
-    if ($head.parent.inlineContent && $head.parentOffset > 0 && $head.parentOffset === $head.parent.content.size) {
+    // One person per line end (a second one there would merge into the same character); text only (a line break
+    // or an atom cannot draw it). Everyone else gets the widget.
+    if ($head.parent.inlineContent && $head.parentOffset > 0 && $head.parentOffset === $head.parent.content.size && $head.nodeBefore?.isText && !ends.has(head)) {
+      ends.add(head)
       // At the end of a line the caret is drawn on the last character (CSS, app/globals.css): a widget as the
       // block's last child makes ProseMirror add a trailing line break, which changes the editor's text.
       decorations.push(Decoration.inline(head - 1, head, caretAttributes(peer, "document-peer-caret-end"), { inclusiveEnd: false }))
