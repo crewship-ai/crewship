@@ -1,0 +1,1 @@
+- **Docs can be downloaded as Markdown.** `GET /api/v1/pages/{slug}/document/export?format=markdown` and `crewship doc export` return the confirmed document as a Markdown file with the same access as reading it; content Markdown cannot represent is refused with a reason instead of being dropped.

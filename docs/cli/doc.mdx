@@ -343,6 +343,30 @@ crewship doc outline @<artifact-id>
 [{"hash":"11afc865…","id":"intro","parent":null,"text":"Original selected text","type":"paragraph"}]
 ```
 
+## `crewship doc export <page-slug>`
+
+Download the confirmed document as Markdown. It reads what `doc read` reads,
+with the same access: you need read access to the document (scoped tokens:
+`pages:read`). Restricted members cannot export. Content Markdown cannot
+represent fails with the reason instead of a file with parts missing.
+
+The file is written atomically to `--out` (default: the server's file name,
+such as `launch-notes.md`, in the current directory) and standard output
+carries a JSON receipt with `path`, `media_type`, `byte_length` and `sha256`.
+An existing file is not replaced unless you pass `--force`. `--out -` writes
+the Markdown itself to standard output. `--as` selects the file type; `md` is
+the only one available.
+
+```bash
+crewship doc export @<artifact-id>
+crewship doc export launch-notes -o notes.md --force
+crewship doc export launch-notes -o - | less
+```
+
+```json
+{"byte_length":1834,"media_type":"text/markdown","path":"launch-notes.md","sha256":"5d41402a…"}
+```
+
 ## `crewship doc patch <page-slug>`
 
 Save an explicitly guarded update. `--file` is required; `--file -` reads stdin.
