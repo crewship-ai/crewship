@@ -1,6 +1,7 @@
 package kindguide
 
 import (
+	"fmt"
 	"os"
 	"regexp"
 	"slices"
@@ -118,5 +119,43 @@ func TestDashboardDataWritesAreEdit(t *testing.T) {
 		if !strings.Contains(flat, want) {
 			t.Errorf("dashboard guide lacks %q", want)
 		}
+	}
+}
+
+// Docs Propose exists on the proposal schema only (#5142). The declaration
+// names that schema from the real constant, the limits come from the store,
+// and the tool the guide names is the one the sidecar serves.
+func TestDocsProposeMatchesTheProposalCode(t *testing.T) {
+	g, _ := Lookup("docs")
+	if !slices.Contains(g.Modes, "propose") || slices.Contains(g.Capabilities.Unsupported, "propose") {
+		t.Fatalf("docs modes %v unsupported %v: Propose exists on schema %d", g.Modes, g.Capabilities.Unsupported, documents.ProposalSchema)
+	}
+	schema := fmt.Sprintf("propose.schema%d", documents.ProposalSchema)
+	if !slices.Contains(g.Capabilities.Supported, schema) {
+		t.Errorf("docs supported %v lacks %q", g.Capabilities.Supported, schema)
+	}
+	for v := 1; v < documents.ProposalSchema; v++ {
+		if !slices.Contains(g.Capabilities.Unsupported, fmt.Sprintf("propose.schema%d", v)) {
+			t.Errorf("docs does not declare propose unsupported on schema %d", v)
+		}
+	}
+	flat := strings.Join(strings.Fields(g.Content), " ")
+	for _, want := range []string{
+		"doc_draft_propose",
+		fmt.Sprintf("schema %d", documents.ProposalSchema),
+		fmt.Sprintf("%d open proposals", documents.ProposalOpenLimit),
+		fmt.Sprintf("%d stored", documents.ProposalLimit),
+		"a person accepts or rejects",
+	} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("docs guide lacks %q", want)
+		}
+	}
+	src, err := os.ReadFile("../../sidecar/documents_draft_mcp.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(src), `{"doc_draft_propose",`) {
+		t.Error("sidecar no longer serves doc_draft_propose")
 	}
 }

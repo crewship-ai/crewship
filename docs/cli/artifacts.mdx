@@ -800,8 +800,10 @@ shared rules moved.
 Each guide also declares `modes` (the agent modes the kind has a path for:
 `ask`, `comment`, `propose`, `edit`) and `capabilities` with `supported` and
 `unsupported` names. A client hides an unsupported feature instead of
-imitating it; neither list grants access. Today Docs and Design have no
-proposal path (`propose` is unsupported), and an App's scripts reach only
+imitating it; neither list grants access. Docs declare Propose for schema 4
+Documents only (`propose.schema4` supported, `propose.schema1` to
+`propose.schema3` unsupported), Design has no proposal path (`propose` is
+unsupported), and an App's scripts reach only
 `data.get`, `data.list`, `data.batch` and `viewer`: user profiles, presence,
 model calls, connectors, uploads, downloads, in-page comments and publishing
 are declared unsupported.
