@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const oflText = "Copyright 2020 The Fixture Project Authors\n\nThis Font Software is licensed under the SIL Open Font License, Version 1.1.\n"
+const oflText = "Copyright 2020 The Fixture Project Authors\n\nThis Font Software is licensed under the SIL Open Font License, Version 1.1.\nThis license is copied below, and is also available with a FAQ at:\nhttps://openfontlicense.org\n\n-----------------------------------------------------------\nSIL OPEN FONT LICENSE Version 1.1 - 26 February 2007\n-----------------------------------------------------------\n"
 
 func fontBytes(magic string, size int) []byte {
 	b := bytes.Repeat([]byte{0x2a}, size)
@@ -195,7 +195,117 @@ func TestLibraryPinFilesRejectACorruptCopy(t *testing.T) {
 	if _, err := s.ReadLibraryPinFiles(ctx, consumer, a); !errors.Is(err, ErrLibraryPinCorrupt) {
 		t.Fatalf("corrupt file read: %v", err)
 	}
-	if _, err := s.ReadLibraryPin(ctx, consumer, a); !errors.Is(err, ErrLibraryPinCorrupt) {
-		t.Fatalf("corrupt pin read: %v", err)
+	// Bytes are loaded and re-hashed only where they are served: the pin's
+	// metadata, its review and a retry still answer from the metadata alone.
+	if pin, err := s.ReadLibraryPin(ctx, consumer, a); err != nil || pinFile(t, pin.Files, "fonts/Inter.woff2").Status != LibraryFileCopied {
+		t.Fatalf("pin metadata read: %v", err)
+	}
+	if _, err := s.CheckLibraryUpdate(ctx, consumer, a, func(string) LibraryVersionAuthorize { return read }); err != nil {
+		t.Fatalf("pin check read the bytes: %v", err)
+	}
+}
+
+func licenceManifest(files map[string]string) VersionManifest {
+	m := VersionManifest{Files: map[string]VersionFile{}}
+	for name, content := range files {
+		m.Files[name] = VersionFile{Content: []byte(content)}
+	}
+	return m
+}
+
+// The licence fallback is conservative (#5248 review): a root licence only
+// lets undeclared fonts travel when it is itself a font licence, and only a
+// licence's title line counts, never a mention of it.
+func TestLibraryLicenceFallbackIsConservative(t *testing.T) {
+	font := string(fontDataURL("font/woff2", fontBytes("wOF2", 40)))
+	const mit = "MIT License\n\nCopyright (c) 2026 Fixture\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\n"
+	const apache = "                                 Apache License\n                           Version 2.0, January 2004\n"
+	for name, c := range map[string]struct {
+		files   map[string]string
+		status  string
+		licence string
+	}{
+		"root MIT LICENSE is the code's licence, not the font's":    {map[string]string{"LICENSE": mit, "fonts/A.woff2": font}, LibraryFileNotCopiedLicence, ""},
+		"root Apache LICENSE is the code's licence, not the font's": {map[string]string{"LICENSE": apache, "fonts/A.woff2": font}, LibraryFileNotCopiedLicence, ""},
+		"root OFL is a font licence":                                {map[string]string{"OFL.txt": oflText, "fonts/A.woff2": font}, LibraryFileCopied, "OFL-1.1"},
+		"root UFL is a font licence":                                {map[string]string{"LICENCE.txt": "-------------------------------\nUBUNTU FONT LICENCE Version 1.0\n-------------------------------\n", "fonts/A.woff2": font}, LibraryFileCopied, "UFL-1.0"},
+		"fonts.json declares the licence under a root MIT LICENSE":  {map[string]string{"LICENSE": mit, "fonts/A.woff2": font, "fonts.json": `{"schema_version":1,"fonts":[{"file":"fonts/A.woff2","family":"A","license":"OFL-1.1"}]}`}, LibraryFileCopied, "OFL-1.1"},
+		"a sibling that only mentions the OFL":                      {map[string]string{"fonts/LICENSE.txt": "This font is not under the SIL Open Font License, Version 1.1. All rights reserved.\n", "fonts/A.woff2": font}, LibraryFileNotCopiedLicence, ""},
+		"a root OFL mention is not the OFL":                         {map[string]string{"OFL.txt": "Unlike our other fonts, this one is not under the SIL Open Font License.\n", "fonts/A.woff2": font}, LibraryFileNotCopiedLicence, ""},
+		"a sibling MIT licence titled as such":                      {map[string]string{"fonts/LICENSE": mit, "fonts/A.woff2": font}, LibraryFileCopied, "MIT"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			files, err := libraryDependencies(licenceManifest(c.files))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if f := pinFile(t, files, "fonts/A.woff2"); f.Status != c.status || f.Licence != c.licence {
+				t.Fatalf("font %+v, want %s %q", f, c.status, c.licence)
+			}
+		})
+	}
+}
+
+// Licence files count inside the 4 MiB a pin may copy: four fonts of exactly
+// 1 MiB fill it alone, so the licence they travel with leaves the last one out.
+func TestLibraryPinTotalCountsLicenceFiles(t *testing.T) {
+	files := map[string]string{"fonts/OFL.txt": oflText}
+	for _, n := range []string{"A", "B", "C", "D"} {
+		files["fonts/"+n+".woff2"] = string(fontDataURL("font/woff2", fontBytes("wOF2", MaxLibraryFontBytes)))
+	}
+	deps, err := libraryDependencies(licenceManifest(files))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total int64
+	for _, f := range deps {
+		total += f.Size
+	}
+	if total > MaxLibraryPinFileBytes {
+		t.Fatalf("pin copies %d bytes, over %d", total, MaxLibraryPinFileBytes)
+	}
+	if got := strings.Join(notCopied(deps), ","); got != "fonts/D.woff2:too_large" {
+		t.Fatalf("not copied %q", got)
+	}
+	if f := pinFile(t, deps, "fonts/OFL.txt"); f.Status != LibraryFileCopied {
+		t.Fatalf("licence %+v", f)
+	}
+}
+
+// A pin made before dependencies travelled (#5223) holds the published version
+// but none of its files. The review says so and offers the copy; applying it
+// at the same version carries the files.
+func TestLibraryLegacyPinOffersItsMissingDependencies(t *testing.T) {
+	s, lib, consumer, a, read := libraryFixture(t)
+	ctx := t.Context()
+	if _, err := s.Apply(ctx, lib, libraryWithFonts(0, `{"colors":{"primary":"#111"}}`, fontBytes("wOF2", 300)), a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.PublishLibrary(ctx, lib, 1, a); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{Version: 1}, a, read); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`DELETE FROM artifact_library_pin_files`); err != nil {
+		t.Fatal(err)
+	}
+	review := func(string) LibraryVersionAuthorize { return read }
+	up, err := s.CheckLibraryUpdate(ctx, consumer, a, review)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !up.UpdateAvailable || !up.DependenciesMissing || up.PinnedVersion != 1 || up.PublishedVersion != 1 {
+		t.Fatalf("legacy pin review %+v", up)
+	}
+	if strings.Join(up.FileChanges.Added, ",") != "fonts/Extra.woff,fonts/Huge.ttf,fonts/Inter.woff2,fonts/OFL.txt,fonts/Secret.woff2" || len(up.Changes.Changed) != 0 {
+		t.Fatalf("legacy pin changes %+v", up)
+	}
+	pin, changed, err := s.PinLibrary(ctx, consumer, lib.PageID, LibraryPinExpect{Version: 1, PinnedLibrary: lib.PageID, PinnedVersion: 1}, a, read)
+	if err != nil || !changed || len(pin.Files) == 0 {
+		t.Fatalf("legacy refresh %+v %v %v", pin, changed, err)
+	}
+	if up, err = s.CheckLibraryUpdate(ctx, consumer, a, review); err != nil || up.UpdateAvailable || up.DependenciesMissing {
+		t.Fatalf("refreshed pin review %+v %v", up, err)
 	}
 }

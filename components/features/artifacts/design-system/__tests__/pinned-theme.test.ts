@@ -32,6 +32,9 @@ describe("pinned theme", () => {
     expect(pinnedThemeCss(tokens, [{ ...inter, content: "AAAA</style><script>alert(1)</script>" }])).not.toContain("<")
     expect(pinnedThemeCss(tokens, [{ ...inter, family: "x;}body{color:red" }])).not.toContain("body{")
     expect(pinnedThemeCss(tokens, [{ ...inter, media_type: "text/html" }])).not.toContain("@font-face")
+    // A quote would end the family string inside @font-face; such a face is dropped.
+    expect(pinnedThemeCss(tokens, [{ ...inter, family: 'Inter" ;src:url(x)' }])).not.toContain("@font-face")
+    expect(slideFontFaces([{ ...inter, family: 'In"ter' }], "deck")).toEqual([])
   })
 
   it("puts the pinned theme first in the head so the project's own styles still win", () => {

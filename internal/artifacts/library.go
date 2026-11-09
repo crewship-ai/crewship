@@ -79,6 +79,11 @@ type LibraryUpdate struct {
 	// "path:status".
 	FileChanges LibraryChanges `json:"file_changes"`
 	NotCopied   []string       `json:"not_copied"`
+	// DependenciesMissing is true when the pin holds the published version
+	// but not the dependency files that version carries: a pin made before
+	// dependencies travelled. UpdateAvailable is then true too, and applying
+	// the same version copies them.
+	DependenciesMissing bool `json:"dependencies_missing"`
 }
 
 func libraryTokens(m VersionManifest) ([]byte, error) {
@@ -156,11 +161,9 @@ func readLibraryPin(ctx context.Context, tx *sql.Tx, k VersionKey) (p LibraryPin
 	if sum := sha256.Sum256(p.Content); hex.EncodeToString(sum[:]) != p.SHA256 {
 		return LibraryPin{}, false, ErrLibraryPinCorrupt
 	}
-	files, err := readLibraryPinFiles(ctx, tx, k)
-	if err != nil {
+	if p.Files, err = readLibraryPinFileMeta(ctx, tx, k); err != nil {
 		return LibraryPin{}, false, err
 	}
-	p.Files = withoutContent(files)
 	return p, true, nil
 }
 
@@ -316,12 +319,24 @@ func (s *VersionStore) CheckLibraryUpdate(ctx context.Context, consumer VersionK
 		}
 		out.LibraryAvailable = true
 		out.PublishedVersion = pub.Version
-		if pub.Version == pin.LibraryVersion {
+		// A pin made by this release carries its version's dependencies, so an
+		// up-to-date pin with files needs no further look. One with none may
+		// predate them (#5223); only then is the version read again.
+		if pub.Version == pin.LibraryVersion && len(pin.Files) > 0 {
 			return nil
 		}
 		m, e := readVersion(ctx, tx, lib, pub.Version)
 		if e != nil {
 			return e
+		}
+		if pub.Version == pin.LibraryVersion {
+			deps, e := libraryDependencies(m)
+			if e != nil || len(deps) == 0 {
+				return e
+			}
+			out.FileChanges, out.NotCopied = diffLibraryFiles(pin.Files, deps), notCopied(deps)
+			out.UpdateAvailable, out.DependenciesMissing = true, true
+			return libraryRead(ctx, tx, la, pub.Version, actor)
 		}
 		next, e := libraryTokens(m)
 		if e != nil {

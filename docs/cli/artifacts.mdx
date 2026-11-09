@@ -466,7 +466,7 @@ Project previews render from this copy: see
 Read the font and licence files the pin carries, bytes in base64. Any reader of
 the project may call it; the Library is not read. A font left behind is listed
 with `status` `licence` (no redistributable licence) or `too_large` (over
-1 MiB, or past 4 MiB for the pin) and empty `content`. Each copy is checked
+1 MiB, or past 4 MiB for the pin, licence files included) and empty `content`. Each copy is checked
 against its SHA-256; a damaged one returns `409 artifact_library_pin_corrupt`.
 
 ```json
@@ -487,7 +487,7 @@ Review an update before applying it.
 {"pinned_version": 1, "published_version": 2, "library_available": true, "update_available": true,
  "changes": {"added": ["colors.accent"], "removed": [], "changed": ["colors.primary"]},
  "file_changes": {"added": ["fonts/Inter.woff2", "fonts/OFL.txt"], "removed": [], "changed": []},
- "not_copied": ["fonts/Brand.woff2:licence"]}
+ "not_copied": ["fonts/Brand.woff2:licence"], "dependencies_missing": false}
 ```
 
 `update_available` is true when the Library's published version differs from
@@ -495,8 +495,11 @@ the pinned one, including when the owner republished an older version. Paths
 are dot-joined token keys; each list holds at most 200 entries and
 `truncated` says when one was cut. `file_changes` compares the carried font
 and licence files by path and content, and `not_copied` names the published
-version's fonts an update would leave behind, as `path:reason`. When you can no
-longer read the Library,
+version's fonts an update would leave behind, as `path:reason`.
+`dependencies_missing` is true for a pin made before fonts travelled: it holds
+the published version but none of its files, `update_available` is true too,
+and `pin set --version <pinned_version>` copies the fonts without changing the
+tokens. When you can no longer read the Library,
 `library_available` is false and nothing about it is reported. Apply a reviewed
 update with `pin set --version <published_version> --if-pinned-library <library>
 --if-pinned-version <pinned_version>`.

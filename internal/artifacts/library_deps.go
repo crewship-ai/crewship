@@ -26,13 +26,15 @@ import (
 // base64 data URL ("data:font/woff2;base64,…") under a font extension. The
 // pin keeps the decoded bytes. An optional fonts.json maps font files to a
 // family, weight, style and explicit licence; a font without a redistributable
-// licence (an explicit SPDX id from the allowlist, else a sibling or root
-// licence file naming one) is listed but never copied. Nothing is fetched.
+// licence (an explicit SPDX id from the allowlist, else a sibling licence file
+// titled with one, else a root font licence) is listed but never copied.
+// Nothing is fetched.
 const (
 	LibraryFontsFile = "fonts.json"
 	// MaxLibraryFontBytes caps one decoded font file.
 	MaxLibraryFontBytes = 1 << 20
-	// MaxLibraryPinFileBytes caps every copied dependency together.
+	// MaxLibraryPinFileBytes caps every copied dependency together, fonts and
+	// the licence files they travel with.
 	MaxLibraryPinFileBytes = 4 << 20
 	// MaxLibraryPinFiles caps the dependency files a pin lists.
 	MaxLibraryPinFiles     = 32
@@ -66,15 +68,20 @@ var (
 	// Redistributable font licences by SPDX id.
 	redistributableLicences = map[string]bool{"OFL-1.1": true, "OFL-1.0": true, "Apache-2.0": true, "MIT": true, "UFL-1.0": true, "CC0-1.0": true, "Bitstream-Vera": true, "BSD-3-Clause": true}
 	licenceFileName         = regexp.MustCompile(`(?i)^(licen[cs]e|ofl|copying)([-_.][a-z0-9.-]*)?$`)
-	licenceText             = []struct {
-		id string
-		re *regexp.Regexp
+	// licenceTitles match a licence by its title line (anchored at a line
+	// start), never by a sentence that mentions it. font marks the licences
+	// written for fonts, the only ones a root licence file may grant: a
+	// repository's MIT or Apache LICENSE is usually its code's licence.
+	licenceTitles = []struct {
+		id   string
+		font bool
+		re   *regexp.Regexp
 	}{
-		{"OFL-1.1", regexp.MustCompile(`(?i)SIL\s+Open\s+Font\s+License`)},
-		{"Apache-2.0", regexp.MustCompile(`(?i)Apache\s+License,?\s+Version\s+2\.0`)},
-		{"UFL-1.0", regexp.MustCompile(`(?i)Ubuntu\s+Font\s+Licen[cs]e`)},
-		{"MIT", regexp.MustCompile(`(?i)Permission\s+is\s+hereby\s+granted,\s+free\s+of\s+charge`)},
-		{"CC0-1.0", regexp.MustCompile(`(?i)CC0\s+1\.0\s+Universal`)},
+		{"OFL-1.1", true, regexp.MustCompile(`(?im)^[ \t]*SIL[ \t]+OPEN[ \t]+FONT[ \t]+LICEN[CS]E,?[ \t]+Version[ \t]+1\.1\b`)},
+		{"UFL-1.0", true, regexp.MustCompile(`(?im)^[ \t]*UBUNTU[ \t]+FONT[ \t]+LICEN[CS]E,?[ \t]+Version[ \t]+1\.0\b`)},
+		{"Apache-2.0", false, regexp.MustCompile(`(?im)^[ \t]*Apache[ \t]+License,?[ \t]*(\r?\n[ \t]*)?Version[ \t]+2\.0\b`)},
+		{"MIT", false, regexp.MustCompile(`(?im)^[ \t]*(The[ \t]+)?MIT[ \t]+Licen[cs]e[ \t]*\r?$`)},
+		{"CC0-1.0", false, regexp.MustCompile(`(?im)^[ \t]*(Creative[ \t]+Commons[ \t]+)?(Legal[ \t]+Code[ \t]+)?CC0[ \t]+1\.0[ \t]+Universal\b`)},
 	}
 	fontFamily = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9 _-]{0,63}$`)
 	base64Body = regexp.MustCompile(`^[A-Za-z0-9+/]*={0,2}$`)
@@ -161,9 +168,11 @@ func decodeLibraryFont(name string, f VersionFile) ([]byte, string, error) {
 	return nil, "", fmt.Errorf("%w: %s is not a %s font", ErrVersionInvalid, name, media)
 }
 
-// libraryLicenceFor finds the licence that lets a font travel: the explicit
-// SPDX id wins (redistributable or not); otherwise a licence file next to the
-// font, then at the library root, whose text names a redistributable licence.
+// libraryLicenceFor finds the licence that lets a font travel. An explicit
+// SPDX id in fonts.json wins, redistributable or not. Otherwise a licence file
+// next to the font may grant any listed licence by its title line, and a
+// licence file at the library root only a font licence (OFL or UFL): the root
+// LICENSE of a repository is usually its code's, not its fonts'.
 func libraryLicenceFor(m VersionManifest, font string, decl libraryFontDecl) (id, file string) {
 	if decl.License != "" {
 		if redistributableLicences[decl.License] {
@@ -171,7 +180,11 @@ func libraryLicenceFor(m VersionManifest, font string, decl libraryFontDecl) (id
 		}
 		return "", ""
 	}
-	for _, dir := range []string{path.Dir(font), "."} {
+	dirs := []string{path.Dir(font)}
+	if dirs[0] != "." {
+		dirs = append(dirs, ".")
+	}
+	for _, dir := range dirs {
 		names := make([]string, 0)
 		for name := range m.Files {
 			if path.Dir(name) == dir && licenceFileName.MatchString(path.Base(name)) && len(m.Files[name].Content) <= maxLibraryLicenceBytes {
@@ -180,8 +193,8 @@ func libraryLicenceFor(m VersionManifest, font string, decl libraryFontDecl) (id
 		}
 		sort.Strings(names)
 		for _, name := range names {
-			for _, l := range licenceText {
-				if l.re.Match(m.Files[name].Content) {
+			for _, l := range licenceTitles {
+				if (dir != "." || l.font) && l.re.Match(m.Files[name].Content) {
 					return l.id, name
 				}
 			}
@@ -209,7 +222,16 @@ func libraryDependencies(m VersionManifest) ([]LibraryPinFile, error) {
 	sort.Strings(fonts)
 	var out []LibraryPinFile
 	licences := map[string]bool{}
+	// total counts every copied byte, licence files included, against
+	// MaxLibraryPinFileBytes; a licence is counted once, with the first font
+	// it lets travel.
 	var total int64
+	licenceCost := func(file string) int64 {
+		if file == "" || licences[file] {
+			return 0
+		}
+		return int64(len(m.Files[file].Content))
+	}
 	for _, name := range fonts {
 		raw, media, err := decodeLibraryFont(name, m.Files[name])
 		if err != nil {
@@ -221,11 +243,11 @@ func libraryDependencies(m VersionManifest) ([]LibraryPinFile, error) {
 		switch {
 		case id == "":
 			f.Status = LibraryFileNotCopiedLicence
-		case len(raw) > MaxLibraryFontBytes || total+int64(len(raw)) > MaxLibraryPinFileBytes:
+		case len(raw) > MaxLibraryFontBytes || total+int64(len(raw))+licenceCost(file) > MaxLibraryPinFileBytes:
 			f.Status = LibraryFileNotCopiedSize
 		default:
 			f.Status, f.Licence, f.Content, f.Size, f.SHA256 = LibraryFileCopied, id, raw, int64(len(raw)), sha256Hex(raw)
-			total += f.Size
+			total += f.Size + licenceCost(file)
 			if file != "" {
 				licences[file] = true
 			}
@@ -297,6 +319,27 @@ func withoutContent(files []LibraryPinFile) []LibraryPinFile {
 		out[i] = f
 	}
 	return out
+}
+
+// readLibraryPinFileMeta lists the pin's dependency files without loading
+// their bytes. Bytes are loaded, and their SHA-256 re-checked, only where they
+// are served (readLibraryPinFiles); the pin itself, its review and a retried
+// apply compare by the stored hash.
+func readLibraryPinFileMeta(ctx context.Context, tx *sql.Tx, k VersionKey) ([]LibraryPinFile, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT path,media_type,status,size,sha256,family,weight,style,licence FROM artifact_library_pin_files WHERE workspace_id=? AND page_id=? ORDER BY path`, k.WorkspaceID, k.PageID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []LibraryPinFile{}
+	for rows.Next() {
+		var f LibraryPinFile
+		if err = rows.Scan(&f.Path, &f.MediaType, &f.Status, &f.Size, &f.SHA256, &f.Family, &f.Weight, &f.Style, &f.Licence); err != nil {
+			return nil, err
+		}
+		out = append(out, f)
+	}
+	return out, rows.Err()
 }
 
 // ReadLibraryPinFiles returns the consumer's pinned dependency files, bytes

@@ -457,19 +457,38 @@ the Library's **font files** and the **licence files** that let them travel:
   ]}
   ```
 
-- A font is copied only with a redistributable licence: an explicit
-  `license` of `OFL-1.1`, `OFL-1.0`, `Apache-2.0`, `MIT`, `UFL-1.0`, `CC0-1.0`,
-  `Bitstream-Vera` or `BSD-3-Clause`, or, without one, a `LICENSE`, `OFL` or
-  `COPYING` file next to the font (or at the Library root) whose text names
-  the SIL Open Font License, Apache 2.0, the Ubuntu Font Licence, MIT or CC0.
-  An explicit licence wins over a licence file. That licence file is copied
-  with the font.
-- A font without such a licence, over 1 MiB, or past 4 MiB for the whole pin
-  is listed with the reason and never copied. Nothing is ever downloaded.
+- A font is copied only with a redistributable licence:
+  - an explicit `license` in `fonts.json` of `OFL-1.1`, `OFL-1.0`,
+    `Apache-2.0`, `MIT`, `UFL-1.0`, `CC0-1.0`, `Bitstream-Vera` or
+    `BSD-3-Clause` (any other id keeps the font out, whatever licence files
+    say);
+  - without one, a `LICENSE`, `OFL` or `COPYING` file **next to the font**
+    titled with the SIL Open Font License 1.1, Apache License 2.0, the Ubuntu
+    Font Licence 1.0, the MIT License or CC0 1.0 Universal;
+  - without either, a licence file at the **Library root** only when it is a
+    font licence (OFL or UFL). A root MIT or Apache `LICENSE` usually covers
+    the repository's code, so it never lets an undeclared font travel; declare
+    the font's `license` in `fonts.json` instead.
+
+  Only the licence's title line counts (for example
+  `SIL OPEN FONT LICENSE Version 1.1`), at the start of a line; a sentence that
+  merely mentions a licence, such as "not under the SIL Open Font License",
+  does not. The licence file is copied with the font.
+- A font without such a licence, over 1 MiB, or one that would take the pin
+  past 4 MiB is listed with the reason and never copied. The 4 MiB covers
+  every copied byte, the licence files included. Nothing is ever downloaded.
 
 Publishing refuses a version whose `fonts.json` or font files are invalid.
 `crewship page artifact pin files <slug>` returns the carried files, bytes in
-base64; each copy is checked against its SHA-256 whenever it is read.
+base64; each copy is checked against its SHA-256 whenever its bytes are read.
+The pin itself, `pin show` and `pin check` list the files without loading the
+bytes. The project's Library notice lists the fonts its pin left behind, with
+the reason.
+
+A pin made before fonts travelled with a Library holds the published version
+but no files. `pin check` then reports `dependencies_missing` together with
+`update_available`, and applying the same version copies the fonts without
+changing the tokens.
 
 ### Previews render from the pin
 

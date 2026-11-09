@@ -60,14 +60,15 @@ func artifactLibrarySchemaCatalog() (map[string]DomainSchema, map[string]any) {
 			"if_pinned_version": integer(0, "Library version currently pinned as reviewed, 0 when nothing is pinned; a mismatch returns 409 artifact_version_conflict."),
 		}, "library", "version", "if_pinned_version"),
 		"ArtifactLibraryUpdate": object(map[string]any{
-			"pinned_version":    integer(1, "Pinned Library version."),
-			"published_version": integer(0, "Library's published version; 0 when unpublished or not readable by the caller."),
-			"library_available": map[string]any{"type": "boolean", "description": "False when the caller can no longer read the published version; nothing else about the Library is reported."},
-			"update_available":  map[string]any{"type": "boolean", "description": "True when the published version differs from the pinned one."},
-			"changes":           object(map[string]any{"added": paths, "removed": paths, "changed": paths, "truncated": map[string]any{"type": "boolean"}}, "added", "removed", "changed"),
-			"file_changes":      object(map[string]any{"added": filePaths, "removed": filePaths, "changed": filePaths, "truncated": map[string]any{"type": "boolean"}}, "added", "removed", "changed"),
-			"not_copied":        map[string]any{"type": "array", "maxItems": 32, "items": map[string]any{"type": "string"}, "description": "Fonts of the published version an update would leave behind, as path:status (licence or too_large)."},
-		}, "pinned_version", "published_version", "library_available", "update_available", "changes", "file_changes", "not_copied"),
+			"pinned_version":       integer(1, "Pinned Library version."),
+			"published_version":    integer(0, "Library's published version; 0 when unpublished or not readable by the caller."),
+			"library_available":    map[string]any{"type": "boolean", "description": "False when the caller can no longer read the published version; nothing else about the Library is reported."},
+			"update_available":     map[string]any{"type": "boolean", "description": "True when the published version differs from the pinned one, or when dependencies_missing is true."},
+			"dependencies_missing": map[string]any{"type": "boolean", "description": "True when the pin holds the published version but none of the dependency files it carries (a pin made before fonts travelled); applying the same version copies them."},
+			"changes":              object(map[string]any{"added": paths, "removed": paths, "changed": paths, "truncated": map[string]any{"type": "boolean"}}, "added", "removed", "changed"),
+			"file_changes":         object(map[string]any{"added": filePaths, "removed": filePaths, "changed": filePaths, "truncated": map[string]any{"type": "boolean"}}, "added", "removed", "changed"),
+			"not_copied":           map[string]any{"type": "array", "maxItems": 32, "items": map[string]any{"type": "string"}, "description": "Fonts of the published version an update would leave behind, as path:status (licence or too_large). Pinned fonts left behind are listed in the pin's files."},
+		}, "pinned_version", "published_version", "library_available", "update_available", "changes", "file_changes", "not_copied", "dependencies_missing"),
 	}
 	routes := map[string]DomainSchema{}
 	add := func(method, suffix, response, request string, errors ...string) {

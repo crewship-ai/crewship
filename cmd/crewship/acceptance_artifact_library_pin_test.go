@@ -92,7 +92,7 @@ func TestAcceptance_LibraryPinBinary(t *testing.T) {
 				map[string]string{"path": "fonts.json", "media_type": "application/json", "content": `{"schema_version":1,"fonts":[{"file":"fonts/Inter.woff2","family":"Inter","weight":400},{"file":"fonts/Secret.woff2","family":"Secret","license":"LicenseRef-Proprietary"}]}`},
 				map[string]string{"path": "fonts/Inter.woff2", "media_type": "font/woff2", "content": "data:font/woff2;base64," + base64.StdEncoding.EncodeToString(inter)},
 				map[string]string{"path": "fonts/Secret.woff2", "media_type": "font/woff2", "content": "data:font/woff2;base64," + base64.StdEncoding.EncodeToString([]byte("wOF2secret"))},
-				map[string]string{"path": "fonts/OFL.txt", "media_type": "text/plain", "content": "This Font Software is licensed under the SIL Open Font License, Version 1.1."})
+				map[string]string{"path": "fonts/OFL.txt", "media_type": "text/plain", "content": "This Font Software is licensed under the SIL Open Font License, Version 1.1.\n\nSIL OPEN FONT LICENSE Version 1.1 - 26 February 2007\n"})
 		}
 		body, err := json.Marshal(map[string]any{"entrypoint": "index.html", "files": files})
 		if err != nil {

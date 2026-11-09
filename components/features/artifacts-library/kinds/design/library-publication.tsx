@@ -14,9 +14,10 @@ import { parsePinnedFiles, pinnedThemeCss, type PinnedFile } from "@/components/
  */
 
 export interface LibraryPublication { published_version: number; can_publish: boolean }
-export interface LibraryPin { library_page_id: string; library_version: number; library_name: string; copied_at: string }
+/** not_copied names the fonts this pin left behind, as "path:status" (#5248). */
+export interface LibraryPin { library_page_id: string; library_version: number; library_name: string; copied_at: string; not_copied: string[] }
 export interface LibraryChanges { added: string[]; removed: string[]; changed: string[]; truncated?: boolean }
-export interface LibraryUpdate { pinned_version: number; published_version: number; library_available: boolean; update_available: boolean; changes: LibraryChanges; file_changes: LibraryChanges; not_copied: string[] }
+export interface LibraryUpdate { pinned_version: number; published_version: number; library_available: boolean; update_available: boolean; changes: LibraryChanges; file_changes: LibraryChanges; not_copied: string[]; dependencies_missing: boolean }
 
 const path = (workspaceId: string, slug: string, rest: string) =>
   `/api/v1/pages/${encodeURIComponent(slug)}/artifact${rest}?${new URLSearchParams({ workspace_id: workspaceId })}`
@@ -28,8 +29,16 @@ export function parsePublication(raw: unknown): LibraryPublication | null {
   return isObject(raw) && isInt(raw.published_version) && typeof raw.can_publish === "boolean" ? { published_version: raw.published_version, can_publish: raw.can_publish } : null
 }
 export function parsePin(raw: unknown): LibraryPin | null {
-  return isObject(raw) && typeof raw.library_page_id === "string" && isInt(raw.library_version) && typeof raw.library_name === "string" && typeof raw.copied_at === "string"
-    ? { library_page_id: raw.library_page_id, library_version: raw.library_version, library_name: raw.library_name, copied_at: raw.copied_at } : null
+  if (!isObject(raw) || typeof raw.library_page_id !== "string" || !isInt(raw.library_version) || typeof raw.library_name !== "string" || typeof raw.copied_at !== "string") return null
+  // Older servers list no files; a file entry that is not well formed rejects the pin.
+  const files = raw.files ?? []
+  if (!Array.isArray(files)) return null
+  const notCopied: string[] = []
+  for (const file of files) {
+    if (!isObject(file) || typeof file.path !== "string" || typeof file.status !== "string") return null
+    if (file.status !== "copied") notCopied.push(`${file.path}:${file.status}`)
+  }
+  return { library_page_id: raw.library_page_id, library_version: raw.library_version, library_name: raw.library_name, copied_at: raw.copied_at, not_copied: notCopied }
 }
 export function parseUpdate(raw: unknown): LibraryUpdate | null {
   if (!isObject(raw) || !isInt(raw.pinned_version) || !isInt(raw.published_version) || typeof raw.library_available !== "boolean" || typeof raw.update_available !== "boolean" || !isObject(raw.changes)) return null
@@ -39,7 +48,7 @@ export function parseUpdate(raw: unknown): LibraryUpdate | null {
   const files = isObject(raw.file_changes) ? raw.file_changes : {}
   const fileAdded = strings(files.added ?? []), fileRemoved = strings(files.removed ?? []), fileChanged = strings(files.changed ?? []), notCopied = strings(raw.not_copied ?? [])
   if (!fileAdded || !fileRemoved || !fileChanged || !notCopied) return null
-  return { pinned_version: raw.pinned_version, published_version: raw.published_version, library_available: raw.library_available, update_available: raw.update_available, changes: { added, removed, changed, truncated: raw.changes.truncated === true }, file_changes: { added: fileAdded, removed: fileRemoved, changed: fileChanged }, not_copied: notCopied }
+  return { pinned_version: raw.pinned_version, published_version: raw.published_version, library_available: raw.library_available, update_available: raw.update_available, changes: { added, removed, changed, truncated: raw.changes.truncated === true }, file_changes: { added: fileAdded, removed: fileRemoved, changed: fileChanged }, not_copied: notCopied, dependencies_missing: raw.dependencies_missing === true }
 }
 
 export const libraryClient = {
@@ -150,12 +159,14 @@ function PinNotice({ workspaceId, slug }: { workspaceId: string; slug: string })
     <div className="flex flex-wrap items-center gap-2">
       <span>Uses <strong>{name}</strong> v{pin.library_version}</span>
       {update?.update_available && <>
-        <span className="rounded-[var(--radius-row)] bg-primary/12 px-1.5 text-xs text-primary-hover">Update available: v{update.published_version}</span>
+        <span className="rounded-[var(--radius-row)] bg-primary/12 px-1.5 text-xs text-primary-hover">{update.dependencies_missing ? "Fonts not copied yet" : `Update available: v${update.published_version}`}</span>
         <Button type="button" size="sm" variant="secondary" className="h-7" aria-expanded={reviewing} onClick={() => setReviewing(value => !value)}>{reviewing ? "Close review" : "Review update"}</Button>
       </>}
       {update && !update.library_available && <span className="text-xs text-muted-foreground">You can no longer open this library. This project keeps its pinned copy.</span>}
     </div>
+    {pin.not_copied.length > 0 && <ChangeList title="Not carried by this pin" items={pin.not_copied.map(notCopiedLabel)} />}
     {reviewing && update?.update_available && <div className="grid gap-2">
+      {update.dependencies_missing && <p className="text-xs text-muted-foreground">This pin was made before fonts travelled with a Library. Copying them keeps v{update.published_version} and its tokens.</p>}
       <ChangeList title="Added" items={update.changes.added} />
       <ChangeList title="Changed" items={update.changes.changed} />
       <ChangeList title="Removed" items={update.changes.removed} />
@@ -165,7 +176,7 @@ function PinNotice({ workspaceId, slug }: { workspaceId: string; slug: string })
       <ChangeList title="Not copied" items={update.not_copied.map(notCopiedLabel)} />
       {update.changes.truncated && <p className="text-xs text-muted-foreground">Only the first 200 changes of each kind are listed.</p>}
       <p className="text-xs text-muted-foreground">Nothing changes in this project until you apply the update.</p>
-      <div><Button type="button" size="sm" disabled={busy} onClick={apply}>Apply v{update.published_version}</Button></div>
+      <div><Button type="button" size="sm" disabled={busy} onClick={apply}>{update.dependencies_missing ? `Copy the fonts of v${update.published_version}` : `Apply v${update.published_version}`}</Button></div>
     </div>}
     {error && <p role="alert" className="text-xs text-destructive">{error}</p>}
   </section>

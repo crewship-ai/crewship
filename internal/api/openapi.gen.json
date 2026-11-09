@@ -2022,6 +2022,10 @@
             ],
             "type": "object"
           },
+          "dependencies_missing": {
+            "description": "True when the pin holds the published version but none of the dependency files it carries (a pin made before fonts travelled); applying the same version copies them.",
+            "type": "boolean"
+          },
           "file_changes": {
             "additionalProperties": false,
             "properties": {
@@ -2065,7 +2069,7 @@
             "type": "boolean"
           },
           "not_copied": {
-            "description": "Fonts of the published version an update would leave behind, as path:status (licence or too_large).",
+            "description": "Fonts of the published version an update would leave behind, as path:status (licence or too_large). Pinned fonts left behind are listed in the pin's files.",
             "items": {
               "type": "string"
             },
@@ -2085,7 +2089,7 @@
             "type": "integer"
           },
           "update_available": {
-            "description": "True when the published version differs from the pinned one.",
+            "description": "True when the published version differs from the pinned one, or when dependencies_missing is true.",
             "type": "boolean"
           }
         },
@@ -2096,7 +2100,8 @@
           "update_available",
           "changes",
           "file_changes",
-          "not_copied"
+          "not_copied",
+          "dependencies_missing"
         ],
         "type": "object"
       },
@@ -140803,7 +140808,7 @@
     },
     "/api/v1/pages/{slug}/artifact/library-pin": {
       "get": {
-        "description": "Return the project's self-contained copy of a Library's design-system.json. Requires read access to this project only; the Library is not read, so the copy keeps working after the Library changes or the caller's access to it ends. A copy whose SHA-256 no longer matches is never served: 409 `artifact_library_pin_corrupt`.",
+        "description": "Return the project's self-contained copy of a Library's design-system.json. Requires read access to this project only; the Library is not read, so the copy keeps working after the Library changes or the caller's access to it ends. The response lists the dependency files without their bytes; a damaged design-system.json copy is never served: 409 `artifact_library_pin_corrupt`. Font bytes, and their SHA-256 check, are served by `/library-pin/files`.",
         "operationId": "get_api_v1_pages_slug_artifact_library-pin",
         "parameters": [
           {
@@ -140924,7 +140929,7 @@
         "x-crewship-read-only": true
       },
       "put": {
-        "description": "Copy the Library's published design-system.json, its fonts that carry a redistributable licence (within 1 MiB each and 4 MiB per pin) and those licence files into this project. Requires Edit on the project (not an agent run) and the caller's own read access to the published version; the workspace admin read path does not count. `version`, `if_pinned_library` and `if_pinned_version` must match the published version and the current pin, otherwise 409 `artifact_version_conflict`; an `if_pinned_library` slug that no longer resolves is the same 409 (pass `@\u003clibrary_page_id\u003e`). Every reader of the project can read the copy, which survives unsharing the Library. Pinning the version already pinned returns `changed: false`. An absent, unpublished or unreadable Library returns the same 404.",
+        "description": "Copy the Library's published design-system.json, its fonts that carry a redistributable licence (within 1 MiB each, and 4 MiB per pin including the licence files) and those licence files into this project. Requires Edit on the project (not an agent run) and the caller's own read access to the published version; the workspace admin read path does not count. `version`, `if_pinned_library` and `if_pinned_version` must match the published version and the current pin, otherwise 409 `artifact_version_conflict`; an `if_pinned_library` slug that no longer resolves is the same 409 (pass `@\u003clibrary_page_id\u003e`). Every reader of the project can read the copy, which survives unsharing the Library. Pinning the version already pinned returns `changed: false`. An absent, unpublished or unreadable Library returns the same 404.",
         "operationId": "put_api_v1_pages_slug_artifact_library-pin",
         "parameters": [
           {
@@ -141181,7 +141186,7 @@
     },
     "/api/v1/pages/{slug}/artifact/library-pin/update": {
       "get": {
-        "description": "Compare the pin with the Library's published version and list the token paths an update adds, removes and changes, the dependency files (fonts and licences) it adds, removes and changes, and the fonts it would leave behind for their licence or size. When the caller can no longer read the Library, `library_available` is false and nothing else about it is reported. A damaged stored copy returns 409 `artifact_library_pin_corrupt`.",
+        "description": "Compare the pin with the Library's published version and list the token paths an update adds, removes and changes, the dependency files (fonts and licences) it adds, removes and changes, and the fonts it would leave behind for their licence or size. A pin made before dependencies travelled, at the published version, reports `dependencies_missing` with `update_available`; applying the same version copies them. When the caller can no longer read the Library, `library_available` is false and nothing else about it is reported. A damaged stored design-system.json copy returns 409 `artifact_library_pin_corrupt`.",
         "operationId": "get_api_v1_pages_slug_artifact_library-pin_update",
         "parameters": [
           {
