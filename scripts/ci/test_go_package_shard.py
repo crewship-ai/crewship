@@ -77,11 +77,16 @@ class GoPackageShardTests(unittest.TestCase):
     def test_split_refuses_flags_that_would_change_the_selection(self):
         # -run would silently intersect with the slice; -shuffle needs the
         # whole package for order-dependence coverage (go-shuffle keeps it).
-        for extra in (["-run", "X"], ["-run=X"], ["-shuffle=on"], ["-shuffle", "on"], ["-skip", "X"], ["-list", "."]):
+        for extra in (["-run", "X"], ["-run=X"], ["-shuffle=on"], ["-shuffle", "on"], ["-skip", "X"], ["-list", "."],
+                      ["--run=X"], ["-test.run=X"], ["-bench=."], ["-fuzz=F"], ["-tags=x"], ["-race"]):
             with self.subTest(extra=extra), patch.object(SHARD.subprocess, "run") as run, \
                     self.assertRaises(ValueError):
                 SHARD.run(0, 3, ["-count=1", *extra], split_api=True)
             run.assert_not_called()
+
+    def test_split_keeps_ordinary_flags(self):
+        self.assertEqual([SHARD._flag(a) for a in ["-count=1", "-timeout", "-test.v", "--parallel=4"]],
+                         ["-count", "-timeout", "-v", "-parallel"])
 
     def events(self, directory, lines):
         Path(directory, "go-test.jsonl").write_text("".join(json.dumps(e) + "\n" for e in lines))

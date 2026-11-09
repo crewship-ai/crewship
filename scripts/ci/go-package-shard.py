@@ -12,7 +12,8 @@ top-level test slice INDEX of COUNT of it (the same exact-cover partition the
 API race lane uses), concurrently with the package partition. Every top-level
 Test/Example/Fuzz of internal/api runs in exactly one shard; the shard proves
 from go test's own events that it executed exactly its slice. Flags that would
-change the selection (-run, -skip, -shuffle, -list) are refused: the shuffle
+change the selection or the build (-run, -skip, -shuffle, -list, -bench, -fuzz,
+-tags, -race, also as --x or -test.x) are refused: the shuffle
 lane keeps the whole package for order-dependence coverage.
 """
 import importlib.util
@@ -29,7 +30,14 @@ API = PREFIX + "internal/api"
 MIN_PACKAGES = 90
 # Packages the race costs file does not carry (they have dedicated race jobs).
 EXTRA_COSTS = {API: 2300, PREFIX + "cmd/crewship": 880}
-SELECTION_FLAGS = ("-run", "-skip", "-shuffle", "-list")
+# Flags that change which API tests run, or build a binary unlike the -list one.
+SELECTION_FLAGS = ("-run", "-skip", "-shuffle", "-list", "-bench", "-fuzz", "-tags", "-race")
+
+
+def _flag(arg):
+    """`--x`, `-test.x` and `-x=v` all name flag `-x` to go test."""
+    name = "-" + arg.lstrip("-").split("=", 1)[0]
+    return "-" + name[len("-test."):] if name.startswith("-test.") else name
 
 
 def _api_race_shard():
@@ -86,8 +94,8 @@ def verify_api_execution(directory, selected):
 def run(index, count, extra, split_api=False):
     if not 0 <= index < count:
         raise ValueError("require 0 <= index < count")
-    if split_api and any(a == f or a.startswith(f + "=") for a in extra for f in SELECTION_FLAGS):
-        raise ValueError("--split-api owns test selection; drop " + "/".join(SELECTION_FLAGS))
+    if split_api and any(a.startswith("-") and _flag(a) in SELECTION_FLAGS for a in extra):
+        raise ValueError("--split-api owns test selection and build flags; drop " + "/".join(SELECTION_FLAGS))
     baseline = json.loads((ROOT / "scripts/ci/general-race-costs.json").read_text())
     costs = dict(baseline["packages"], **EXTRA_COSTS)
     listed = subprocess.run(["go", "list", "./..."], cwd=ROOT, text=True, stdout=subprocess.PIPE, check=True)
