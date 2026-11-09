@@ -79,6 +79,11 @@ const viewOf = async (page: Page) => {
  const [scale, x, y] = (await page.getByLabel("Design canvas viewport").getAttribute("data-design-view"))!.split(" ").map(Number)
  return { scale, x, y }
 }
+// mouse.wheel does not wait for the handler or React's re-render, so read the view once it changed.
+const viewChangedFrom = async (page: Page, before: { scale: number; x: number; y: number }) => {
+ await expect.poll(async () => JSON.stringify(await viewOf(page)), { timeout: 5_000 }).not.toBe(JSON.stringify(before))
+ return viewOf(page)
+}
 const nodes = (page: Page) => page.evaluate(() => (window as unknown as { nodesJSON: () => string }).nodesJSON())
 const updates = (page: Page) => page.evaluate(() => (window as unknown as { designUpdates: number }).designUpdates)
 const cta = async (page: Page) => (await page.locator('[data-design-node="cta"] rect').first().boundingBox())!
@@ -177,7 +182,7 @@ describe.skipIf(!ready)("Design canvas viewport in Chromium", () => {
   await page.mouse.move(pointer.x, pointer.y)
   let view = await viewOf(page)
   await page.mouse.wheel(30, 120)
-  let after = await viewOf(page)
+  let after = await viewChangedFrom(page, view)
   expect(after.x - view.x).toBeCloseTo(-30, 0)
   expect(after.y - view.y).toBeCloseTo(-120, 0)
   expect(after.scale).toBe(view.scale)
@@ -190,7 +195,7 @@ describe.skipIf(!ready)("Design canvas viewport in Chromium", () => {
    await page.keyboard.down(key)
    await page.mouse.wheel(0, -100)
    await page.keyboard.up(key)
-   after = await viewOf(page)
+   after = await viewChangedFrom(page, view)
    expect(after.scale).toBeGreaterThan(view.scale)
    expect((anchor.x - after.x) / after.scale).toBeCloseTo(under.x, 1)
    expect((anchor.y - after.y) / after.scale).toBeCloseTo(under.y, 1)
@@ -323,7 +328,9 @@ describe.skipIf(!ready)("Design canvas viewport in Chromium", () => {
   const page = await open()
   await drag(page, await background(page), { x: 70, y: -40 }, "right")
   await page.mouse.move(700, 420)
+  const zoomFrom = await viewOf(page)
   await page.keyboard.down("Control"); await page.mouse.wheel(0, -100); await page.keyboard.up("Control")
+  await viewChangedFrom(page, zoomFrom)
   // The layer's centre on screen is the layer's centre on the canvas: 64+40+100, 64+40+50.
   const box = await cta(page)
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2)
@@ -381,7 +388,7 @@ describe.skipIf(!ready)("Design canvas viewport in Chromium", () => {
   expect(after.x - view.x).toBeCloseTo(40, 0)
   await page.mouse.move(600, 400)
   await page.keyboard.down("Control"); await page.mouse.wheel(0, 100); await page.keyboard.up("Control")
-  view = after; after = await viewOf(page)
+  view = after; after = await viewChangedFrom(page, view)
   expect(after.scale).toBeLessThan(view.scale)
   await page.getByRole("button", { name: "Fit" }).dispatchEvent("click")
   expect(await page.getByRole("button", { name: "Fit" }).getAttribute("aria-pressed")).toBe("true")
