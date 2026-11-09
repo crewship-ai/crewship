@@ -44,6 +44,13 @@ try {
     sync.readSyncMessage(decoder, encoder, doc, 'remote', error => { throw error })
     if (encoding.length(encoder) > 1) response = Buffer.from(encoding.toUint8Array(encoder)).toString('base64')
     if (decoding.hasContent(decoder)) throw new Error('unexpected trailing frame bytes')
+    // A reorder merged with a concurrent delete of that layer (or its screen)
+    // can leave an order entry for a missing layer. Drop it here, in the
+    // broadcast update, instead of refusing the frame: a refused client would
+    // resend the same change and be refused for good (#5201).
+    doc.transact(() => {
+      for (let i = order.length - 1; i >= 0; i--) if (typeof order.get(i) === 'string' && !nodes.has(order.get(i))) order.delete(i, 1)
+    })
   }
   if (request.replace) {
     // Restore updates existing CRDT structures, preserving connected clients.
