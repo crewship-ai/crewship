@@ -384,9 +384,13 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   useEffect(() => {
     if (pastEnd) setServerWindow({ key: serverKey, page: lastServerPage })
   }, [pastEnd, serverKey, lastServerPage])
-  // An ID address fails closed: it never falls back to a slug, which another artifact may hold now.
-  const selected = item === null ? null : items.find(entry => bySlug ? entry.slug === item : entry.pageId === item) ?? null
-  const canonical = bySlug ? selected?.pageId : undefined
+  // An ID address matches the immutable ID first: an artifact that holds this ID always wins over
+  // a slug. Only when no catalog artifact holds it is it read as an old slug address, /artifacts/<slug>
+  // (G04), which then moves to that artifact's own ID address, so the address bar names what opened.
+  // The catalog holds only what this person may open; anything else gets the same server answer below.
+  const selected = item === null ? null : bySlug ? items.find(entry => entry.slug === item) ?? null
+    : items.find(entry => entry.pageId === item) ?? items.find(entry => entry.slug === item) ?? null
+  const canonical = selected?.pageId && selected.pageId !== item ? selected.pageId : undefined
   useEffect(() => { if (canonical) onCanonical?.(canonical) }, [canonical]) // eslint-disable-line react-hooks/exhaustive-deps
   const contentRef = useRef<HTMLDivElement>(null)
   const openedSlug = selected?.slug

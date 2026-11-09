@@ -531,12 +531,27 @@ it("the folder panel steps aside while an artifact is open, and a pin keeps it o
   expect(screen.getByRole("button", { name: "Let the panel close when an artifact opens" }).getAttribute("aria-pressed")).toBe("true")
 })
 
-it("an ID address fails closed: another artifact now holding that slug never opens in its place", () => {
-  state.pages = [wire({ id: "different-page-id", slug: "page-site", name: "Replacement", artifact_kind: "project" })]
-  state.item = "page-site"
-  renderLibrary()
-  expect(screen.getByText("This artifact is not available.")).toBeTruthy()
-  expect(screen.queryByTestId("viewer-panel")).toBeNull()
+it("an ID address prefers the ID: a slug never stands in for an artifact that holds that ID", () => {
+  const canonical = vi.fn()
+  state.pages = [wire({ id: "page-site", slug: "other", name: "By ID", artifact_kind: "project" }), wire({ id: "different-page-id", slug: "page-site", name: "Replacement", artifact_kind: "project" })]
+  render(withQuery(<ArtifactsLibrary workspaceId="ws1" item="page-site" onSelect={state.select} onCanonical={canonical} />))
+  expect(screen.getByTestId("viewer-provider").dataset.slug).toBe("other")
+  expect(canonical).not.toHaveBeenCalled()
+})
+
+it("an old slug address at /artifacts/<slug> opens that artifact and hands the route its ID (#G04)", () => {
+  const canonical = vi.fn()
+  render(withQuery(<ArtifactsLibrary workspaceId="ws1" item="site" onSelect={state.select} onCanonical={canonical} />))
+  expect(screen.getByTestId("viewer-provider").dataset.slug).toBe("site")
+  expect(canonical).toHaveBeenCalledWith("page-site")
+})
+
+it("an address outside the catalog asks the server once, by ID, so no access and no artifact read alike (#G04)", () => {
+  state.access = "missing"
+  state.accessRefs = []
+  render(withQuery(<ArtifactsLibrary workspaceId="ws1" item="not-in-catalog" onSelect={state.select} />))
+  expect(new Set(state.accessRefs)).toEqual(new Set(["@not-in-catalog"]))
+  expect(screen.queryByTestId("viewer-provider")).toBeNull()
 })
 
 it("a link from before IDs opens by slug and hands the route the artifact's ID", () => {
