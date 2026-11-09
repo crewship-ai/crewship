@@ -6,7 +6,9 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 	"unicode"
@@ -39,7 +41,9 @@ const (
 	MaxDataRunIdempotent = 128
 )
 
-// Defaults for DataOptions. They are server defaults, not API contract.
+// Defaults for DataOptions. They are server defaults, not API contract;
+// DataOptionsFromEnv reads the CREWSHIP_ARTIFACT_DATA_RUN* overrides. Whatever
+// the limits, a running run is never pruned.
 const (
 	// DefaultDataRunsKept terminal runs per collection, plus the newest success.
 	DefaultDataRunsKept = 20
@@ -47,7 +51,47 @@ const (
 	DefaultDataRunsActive = 4
 	// DefaultDataRunKeyTTL after which a terminal run's idempotency key may be reused.
 	DefaultDataRunKeyTTL = 24 * time.Hour
+	// DefaultDataRunStalledAfter is when clients show a running run as stalled.
+	// The server never ends a run on its own.
+	DefaultDataRunStalledAfter = 30 * time.Minute
 )
+
+// DataOptionsFromEnv is an enabled DataOptions with the run limits read from
+// CREWSHIP_ARTIFACT_DATA_RUNS_KEPT (1–1000), CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE
+// (1–64), CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL and
+// CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER (Go durations, 1m–720h). A missing
+// or out-of-range value uses the default.
+func DataOptionsFromEnv() DataOptions {
+	count := func(name string, def, max int) int {
+		n, err := strconv.Atoi(strings.TrimSpace(os.Getenv(name)))
+		if err != nil || n < 1 || n > max {
+			return def
+		}
+		return n
+	}
+	duration := func(name string, def time.Duration) time.Duration {
+		d, err := time.ParseDuration(strings.TrimSpace(os.Getenv(name)))
+		if err != nil || d < time.Minute || d > 720*time.Hour {
+			return def
+		}
+		return d
+	}
+	return DataOptions{
+		Enabled:         true,
+		RunsKept:        count("CREWSHIP_ARTIFACT_DATA_RUNS_KEPT", DefaultDataRunsKept, 1000),
+		RunsActive:      count("CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE", DefaultDataRunsActive, 64),
+		RunKeyTTL:       duration("CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL", DefaultDataRunKeyTTL),
+		RunStalledAfter: duration("CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER", DefaultDataRunStalledAfter),
+	}
+}
+
+// StalledAfter is the configured stalled threshold clients use for running runs.
+func (s *DataStore) StalledAfter() time.Duration {
+	if s.opts.RunStalledAfter > 0 {
+		return s.opts.RunStalledAfter
+	}
+	return DefaultDataRunStalledAfter
+}
 
 var (
 	// ErrDataRunNotFound is a run id that this Page does not hold.

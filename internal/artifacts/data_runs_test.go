@@ -78,3 +78,27 @@ func TestDataRunKeyExpiresOnlyForFinishedRuns(t *testing.T) {
 		}
 	}
 }
+
+func TestDataRunOptionsFromEnvAreBoundedDefaults(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		env          map[string]string
+		kept, active int
+		ttl, stalled time.Duration
+	}{
+		{"defaults", nil, DefaultDataRunsKept, DefaultDataRunsActive, DefaultDataRunKeyTTL, DefaultDataRunStalledAfter},
+		{"configured", map[string]string{"CREWSHIP_ARTIFACT_DATA_RUNS_KEPT": "3", "CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE": "2", "CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL": "2h", "CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER": "10m"}, 3, 2, 2 * time.Hour, 10 * time.Minute},
+		{"invalid falls back", map[string]string{"CREWSHIP_ARTIFACT_DATA_RUNS_KEPT": "0", "CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE": "lots", "CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL": "-1h", "CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER": "1s"}, DefaultDataRunsKept, DefaultDataRunsActive, DefaultDataRunKeyTTL, DefaultDataRunStalledAfter},
+		{"above the bound falls back", map[string]string{"CREWSHIP_ARTIFACT_DATA_RUNS_KEPT": "100000", "CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE": "1000"}, DefaultDataRunsKept, DefaultDataRunsActive, DefaultDataRunKeyTTL, DefaultDataRunStalledAfter},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, k := range []string{"CREWSHIP_ARTIFACT_DATA_RUNS_KEPT", "CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE", "CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL", "CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER"} {
+				t.Setenv(k, tc.env[k])
+			}
+			got := DataOptionsFromEnv()
+			if !got.Enabled || got.RunsKept != tc.kept || got.RunsActive != tc.active || got.RunKeyTTL != tc.ttl || got.RunStalledAfter != tc.stalled {
+				t.Fatalf("got %+v", got)
+			}
+		})
+	}
+}

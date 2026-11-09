@@ -596,3 +596,38 @@ func TestDashboardProducerRunRetentionKeepsOverlapEvidence(t *testing.T) {
 		t.Fatalf("pruning removed the overlap evidence: %d %s", w.Code, w.Body)
 	}
 }
+
+// Lead direction: the retention and admission limits and the stalled
+// threshold are configurable server defaults; a running run is never pruned
+// whatever the limit.
+func TestDashboardProducerRunLimitsAreConfigurable(t *testing.T) {
+	t.Setenv("CREWSHIP_ARTIFACT_DATA_RUNS_KEPT", "2")
+	t.Setenv("CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE", "2")
+	t.Setenv("CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER", "10m")
+	f := newProducerRunFixture(t)
+	active := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"held"}`))
+	for i := 0; i < 5; i++ {
+		run := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", fmt.Sprintf(`{"base_version":1,"idempotency_key":"k-%d"}`, i)))
+		if w := f.do(t, f.owner, "finish", "sales", run.ID, "", `{"base_version":1,"state":"failed"}`); w.Code != 200 {
+			t.Fatal(w.Code, w.Body)
+		}
+	}
+	var running, terminal int
+	if err := f.h.db.QueryRow(`SELECT sum(state='running'), sum(state!='running') FROM artifact_data_runs WHERE workspace_id=?`, f.ws).Scan(&running, &terminal); err != nil || running != 1 || terminal != 2 {
+		t.Fatalf("configured retention kept %d running, %d terminal (%v)", running, terminal, err)
+	}
+	if w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"held"}`); w.Code != 200 || decodeRun(t, w).ID != active.ID {
+		t.Fatalf("active run pruned under a small limit: %d %s", w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"second"}`); w.Code != 201 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"third"}`); w.Code != 409 || !strings.Contains(w.Body.String(), "artifact_data_run_busy") {
+		t.Fatalf("configured admission: %d %s", w.Code, w.Body)
+	}
+	for _, user := range []string{f.owner, f.reader} {
+		if w := f.do(t, user, "list", "", "", "?version=1", ""); !strings.Contains(w.Body.String(), `"stalled_after_seconds":600`) {
+			t.Fatalf("stalled threshold not served to %s: %s", user, w.Body)
+		}
+	}
+}

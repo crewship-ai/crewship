@@ -107,7 +107,7 @@ recorded (see [Record producer runs](#record-producer-runs)), in this order:
 | Chip | When |
 |---|---|
 | **Refresh failed** | The newest run of a collection failed. The owner and editors see the reason; readers see only that it failed. The chip says whether the failed run already changed some values. |
-| **Refresh stalled** | A run has been running for more than 30 minutes without finishing. Shown by the browser only; the run stays `running` on the server. Values may be partly updated. |
+| **Refresh stalled** | A run has been running longer than the server's stalled threshold (30 minutes by default) without finishing. Shown by the browser only; the run stays `running` on the server. Values may be partly updated. |
 | **Refreshing…** | A run is in progress. Values update as the run writes them. |
 | **Stale** | A `planned` or `live` dataset is older than its maximum age. With run records the age counts from the last successful run, otherwise from the last write. |
 | **Sample data** | Any dataset is marked as sample. |
@@ -343,14 +343,19 @@ guarantee, so do not put secrets in a reason.
 - Agent runs that work through the artifact tools cannot record runs yet; use
   the CLI with a token.
 
-Limits are server defaults and may change; they are not part of the API
-contract. At most 4 runs per collection can be running at once (more fail
-with `409 artifact_data_run_busy`). The newest 20 finished runs and the newest
-success are kept; a running run is never removed. The key of a finished run
-stays reserved until 24 hours pass or the run is pruned, whichever comes
-first; do not rely on replaying a key of a run that may have been pruned. **Refresh stalled** is decided by the viewer's
-browser after 30 minutes (also a default); the server keeps such a run
-`running` until a writer finishes it.
+Limits are configurable server defaults, not part of the API contract (see
+[environment variables](/configuration/environment)): at most 4 runs per
+collection can be running at once (`CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE`; more
+fail with `409 artifact_data_run_busy`); the newest 20 finished runs and the
+newest success are kept (`CREWSHIP_ARTIFACT_DATA_RUNS_KEPT`); a running run
+is never removed, whatever the limit. The key of a finished run stays reserved
+until 24 hours pass (`CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL`) or the run is
+pruned, whichever comes first; do not rely on replaying a key of a run that
+may have been pruned. **Refresh stalled** is shown by the viewer's browser
+once a run has been running longer than the server's
+`stalled_after_seconds` (`CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER`, 30
+minutes by default); the server keeps such a run `running` until a writer
+finishes it.
 
 ## Who sees which data
 

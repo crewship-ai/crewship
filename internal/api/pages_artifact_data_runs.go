@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
 )
@@ -63,8 +64,11 @@ type artifactDataRunOverlapResponse struct {
 	Blocking []artifactDataRunResponse `json:"blocking_runs,omitempty"`
 }
 type artifactDataRunsResponse struct {
-	CodeVersion int64                            `json:"code_version"`
-	Runs        []artifactDataRunSummaryResponse `json:"runs"`
+	CodeVersion int64 `json:"code_version"`
+	// StalledAfterSeconds is the configured threshold after which clients show
+	// a running run as stalled; a display default, not an end of the run.
+	StalledAfterSeconds int64                            `json:"stalled_after_seconds"`
+	Runs                []artifactDataRunSummaryResponse `json:"runs"`
 }
 
 // The producer's raw actor (account, agent or run ids) never leaves the server.
@@ -165,7 +169,7 @@ func (h *PageHandler) StartArtifactDataRun(w http.ResponseWriter, r *http.Reques
 	}
 	collection := r.PathValue("collection")
 	auth, _ := h.artifactDataAuthority(r, k, collection, body.BaseVersion, true)
-	run, created, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).StartRun(r.Context(), k, collection, body.IdempotencyKey, auth)
+	run, created, err := artifacts.NewDataStore(h.db, artifacts.DataOptionsFromEnv()).StartRun(r.Context(), k, collection, body.IdempotencyKey, auth)
 	if err != nil {
 		artifactDataRunError(w, r, err)
 		return
@@ -197,7 +201,7 @@ func (h *PageHandler) FinishArtifactDataRun(w http.ResponseWriter, r *http.Reque
 	}
 	collection := r.PathValue("collection")
 	auth, _ := h.artifactDataAuthority(r, k, collection, body.BaseVersion, true)
-	run, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).FinishRun(r.Context(), k, collection, r.PathValue("run"), artifacts.DataRunFinish{State: body.State, Reason: body.Reason, DataGeneration: body.DataGeneration, Unchanged: body.Unchanged}, auth)
+	run, err := artifacts.NewDataStore(h.db, artifacts.DataOptionsFromEnv()).FinishRun(r.Context(), k, collection, r.PathValue("run"), artifacts.DataRunFinish{State: body.State, Reason: body.Reason, DataGeneration: body.DataGeneration, Unchanged: body.Unchanged}, auth)
 	if err != nil {
 		artifactDataRunError(w, r, err)
 		return
@@ -221,13 +225,14 @@ func (h *PageHandler) ListArtifactDataRuns(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	auth, selection := h.artifactDataAuthority(r, k, "", version, false)
-	summaries, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).RunSummaries(r.Context(), k, func() []string { return selection.collections }, auth)
+	store := artifacts.NewDataStore(h.db, artifacts.DataOptionsFromEnv())
+	summaries, err := store.RunSummaries(r.Context(), k, func() []string { return selection.collections }, auth)
 	if err != nil {
 		artifactDataError(w, err)
 		return
 	}
 	notifyDesignAdminAudit(r)
-	out := artifactDataRunsResponse{CodeVersion: version, Runs: []artifactDataRunSummaryResponse{}}
+	out := artifactDataRunsResponse{CodeVersion: version, StalledAfterSeconds: int64(store.StalledAfter() / time.Second), Runs: []artifactDataRunSummaryResponse{}}
 	showReason := selection.owner || selection.editor
 	for _, summary := range summaries {
 		entry := artifactDataRunSummaryResponse{Collection: summary.Collection, Latest: projectArtifactDataRun(r, summary.Latest, showReason), LastAttemptAt: summary.LastAttemptAt, LastSuccessAt: summary.LastSuccessAt}

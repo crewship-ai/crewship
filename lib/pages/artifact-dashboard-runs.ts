@@ -18,7 +18,12 @@ export interface DashboardRunSummary {
   reason: string | null
   startedBy: string
   partial: boolean
+  /** The server's configured threshold after which a running run is shown as stalled. */
+  stalledAfterMs: number
 }
+
+/** Used when the server does not state a threshold. A display default, not a contract. */
+export const DEFAULT_STALLED_AFTER_MS = 30 * 60 * 1000
 
 const STATES = new Set(["running", "succeeded", "failed"])
 const MAX_REASON = 500
@@ -38,6 +43,8 @@ const date = (value: unknown): Date | null | undefined => {
  */
 export function parseDashboardRuns(raw: unknown, codeVersion: number, collections: readonly string[]): DashboardRunSummary[] | null {
   if (!record(raw) || raw.code_version !== codeVersion || !Array.isArray(raw.runs) || raw.runs.length > 32) return null
+  const stalledAfter = raw.stalled_after_seconds ?? DEFAULT_STALLED_AFTER_MS / 1000
+  if (typeof stalledAfter !== "number" || !Number.isSafeInteger(stalledAfter) || stalledAfter < 60 || stalledAfter > 720 * 3600) return null
   const out: DashboardRunSummary[] = []
   for (const entry of raw.runs) {
     if (!record(entry) || !record(entry.latest) || !dashboardName(entry.collection) || entry.latest.collection !== entry.collection) return null
@@ -51,7 +58,7 @@ export function parseDashboardRuns(raw: unknown, codeVersion: number, collection
     const partial = latest.partial ?? false
     if (typeof partial !== "boolean" || (partial && latest.state !== "failed")) return null
     if (!collections.includes(entry.collection)) continue
-    out.push({ collection: entry.collection, state: latest.state as DashboardRunSummary["state"], startedAt, finishedAt, lastAttemptAt, lastSuccessAt, reason: reason || null, startedBy: latest.started_by, partial })
+    out.push({ collection: entry.collection, state: latest.state as DashboardRunSummary["state"], startedAt, finishedAt, lastAttemptAt, lastSuccessAt, reason: reason || null, startedBy: latest.started_by, partial, stalledAfterMs: stalledAfter * 1000 })
   }
   return out
 }

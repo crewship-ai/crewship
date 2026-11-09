@@ -1776,10 +1776,17 @@
             },
             "maxItems": 32,
             "type": "array"
+          },
+          "stalled_after_seconds": {
+            "description": "Configured threshold after which clients show a running run as stalled (CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER, 1800 by default). A display default; the server never ends a run.",
+            "format": "int64",
+            "minimum": 60,
+            "type": "integer"
           }
         },
         "required": [
           "code_version",
+          "stalled_after_seconds",
           "runs"
         ],
         "type": "object"
@@ -140201,7 +140208,7 @@
     },
     "/api/v1/pages/{slug}/artifact/data/{collection}/runs": {
       "post": {
-        "description": "Record that a producer started refreshing a declared collection. Needs exactly the authority of a data batch for a human caller (owner or a current Edit share; agent runs on the artifact tool path cannot record runs yet) and `base_version` equal to the latest code version. Repeating `idempotency_key` returns the same run with 200; a key used by another producer returns 409. The producer is the authenticated principal. The run records the collection's current data generation as `start_generation`. Server defaults, not contract: at most 4 running runs per collection (more return 409 `artifact_data_run_busy`), the newest 20 finished runs plus the newest success are retained, a running run is never pruned, and the key of a finished run stays reserved until 24 hours pass or the run is pruned, whichever comes first. Runs never write data or code versions; batches apply as written.",
+        "description": "Record that a producer started refreshing a declared collection. Needs exactly the authority of a data batch for a human caller (owner or a current Edit share; agent runs on the artifact tool path cannot record runs yet) and `base_version` equal to the latest code version. Repeating `idempotency_key` returns the same run with 200; a key used by another producer returns 409. The producer is the authenticated principal. The run records the collection's current data generation as `start_generation`. Configurable server defaults (`CREWSHIP_ARTIFACT_DATA_RUNS_*`), not contract: at most 4 running runs per collection (more return 409 `artifact_data_run_busy`), the newest 20 finished runs plus the newest success are retained, a running run is never pruned, and the key of a finished run stays reserved until 24 hours pass or the run is pruned, whichever comes first. Runs never write data or code versions; batches apply as written.",
         "operationId": "post_api_v1_pages_slug_artifact_data_collection_runs",
         "parameters": [
           {

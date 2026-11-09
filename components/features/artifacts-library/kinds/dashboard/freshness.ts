@@ -17,16 +17,10 @@ export interface CollectionFreshness {
   run: DashboardRunSummary | null
   /** The last successful producer run; with no run record, Stale falls back to the last write. */
   lastSuccessAt: Date | null
-  /** A run still marked running after STALLED_RUN_MS: the producer most likely died. Derived here, never stored. */
+  /** A run still marked running after the server's configured threshold (run.stalledAfterMs): the producer most likely died. Derived here, never stored. */
   stalled: boolean
 }
 
-/**
- * A run that has not finished after 30 minutes is shown as stalled, not as
- * refreshing. A UI default, not a server contract: the server never ends or
- * prunes a running run.
- */
-export const STALLED_RUN_MS = 30 * 60 * 1000
 
 export interface DashboardFreshness {
   updatedAt: Date | null
@@ -60,7 +54,7 @@ export function dashboardFreshness(collections: readonly DashboardCollection[], 
     const lastSuccessAt = run?.lastSuccessAt ?? null
     const reference = run ? lastSuccessAt : updatedAt
     const stale = Boolean(dataset && dataset.mode !== "fixed" && dataset.maxAgeSeconds && reference && now.getTime() - reference.getTime() > dataset.maxAgeSeconds * 1000)
-    const stalled = run?.state === "running" && now.getTime() - run.startedAt.getTime() > STALLED_RUN_MS
+    const stalled = run?.state === "running" && now.getTime() - run.startedAt.getTime() > run.stalledAfterMs
     return {
       name: collection.collection,
       documents: collection.documents.length,

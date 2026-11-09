@@ -3023,7 +3023,7 @@ CLI commands are `crewship page artifact data collections`, `data get` and
 | --- | --- | --- |
 | POST | `/api/v1/pages/{slug}/artifact/data/{collection}/runs` | Request body `{base_version,idempotency_key}`; response is the run `{id,collection,state,started_by,started_by_kind,started_at,start_generation}`: 201 when created, 200 when the key repeats. |
 | POST | `/api/v1/pages/{slug}/artifact/data/{collection}/runs/{run}` | Request body `{base_version,state,reason?,data_generation?,unchanged?}` with `state` `succeeded` or `failed`; response is the finished run with `finished_at`, `finished_by`, `finished_by_kind`, `data_generation`, `partial` (failed runs whose data changed) and, for a failure, `failure_reason`. |
-| GET | `/api/v1/pages/{slug}/artifact/data-runs` | Required `version` query; response `{code_version,runs:[{collection,latest,last_attempt_at,last_success_at?,active_runs?}]}` for declared collections that have a run. |
+| GET | `/api/v1/pages/{slug}/artifact/data-runs` | Required `version` query; response `{code_version,stalled_after_seconds,runs:[{collection,latest,last_attempt_at,last_success_at?,active_runs?}]}` for declared collections that have a run. |
 
 A producer records each refresh of a collection as a run. A run never writes
 data or changes a code version; the producer writes with the batch route
@@ -3059,8 +3059,8 @@ the authority of a data read and returns only collections the selected version
 declares. Only the producer that started a run can finish it as succeeded;
 any writer can finish it as failed, and the finisher is recorded. A run that
 is never finished stays `running`; there is no server timeout and a running
-run is never pruned (clients show it as stalled after 30 minutes, a UI
-default). Agent runs on the artifact tool path cannot record runs yet.
+run is never pruned (clients show it as stalled after the list route's
+`stalled_after_seconds`, 30 minutes by default). Agent runs on the artifact tool path cannot record runs yet.
 `failure_reason` is returned to the owner and editors only, never to a reader or
 an auditing workspace administrator. A failure
 reason is cleaned on the server: control and invisible characters are removed,
@@ -3070,8 +3070,13 @@ private key blocks, JWTs, Crewship, GitHub, GitLab, Google, AWS and other
 provider tokens, URL user info), and it is cut to 500 bytes. Redaction is
 pattern based, not a guarantee.
 
-**Limits (server defaults, not contract):** at most 4 running runs per
-collection; the newest 20 finished runs plus the newest success are kept; the
+**Limits (configurable server defaults, not contract):** at most 4 running
+runs per collection (`CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE`); the newest 20
+finished runs plus the newest success are kept
+(`CREWSHIP_ARTIFACT_DATA_RUNS_KEPT`), and a running run is never pruned
+whatever the limit; the stalled threshold is
+`CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER` (TTL below:
+`CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL`); the
 key of a finished run stays reserved until 24 hours pass or the run is pruned,
 whichever comes first, while the key of a running run never expires.
 

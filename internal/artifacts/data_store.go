@@ -38,6 +38,8 @@ type DataOptions struct {
 	RunsKept   int
 	RunsActive int
 	RunKeyTTL  time.Duration
+	// RunStalledAfter is only reported to clients; the server never ends a run.
+	RunStalledAfter time.Duration
 }
 type DataWrite struct {
 	ID        string          `json:"id"`

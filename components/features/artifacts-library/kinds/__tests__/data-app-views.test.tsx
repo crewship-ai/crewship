@@ -174,7 +174,7 @@ describe("Dashboard view", () => {
 
   it("shows a failed producer run with its reason and last success, and keeps the values", async () => {
     read.value = { pending: false, error: false, limitExceeded: false, collections, manifest: declared }
-    runs.value = [{ collection: "deals", state: "failed", startedAt: new Date(Date.now() - 60_000), finishedAt: new Date(), lastAttemptAt: new Date(Date.now() - 60_000), lastSuccessAt: new Date(Date.now() - 3_600_000), reason: "CRM returned 502", startedBy: "Agent", partial: false }]
+    runs.value = [{ collection: "deals", state: "failed", startedAt: new Date(Date.now() - 60_000), finishedAt: new Date(), lastAttemptAt: new Date(Date.now() - 60_000), lastSuccessAt: new Date(Date.now() - 3_600_000), reason: "CRM returned 502", startedBy: "Agent", partial: false, stalledAfterMs: 1_800_000 }]
     const data = snapshot({ manifest: { version: 4, entrypoint: "index.html", files: files('{"schema_version":1,"datasets":{"deals":{"title":"Open deals","mode":"planned","max_age_seconds":7200}}}') } })
     const reports: (KindReport | null)[] = []
     inFrame(<DashboardProjectView workspaceId="w" parts={parts({ data, previewKind: "dashboard" })} onReport={report => reports.push(report)} />)
@@ -187,7 +187,7 @@ describe("Dashboard view", () => {
 
   it("reports Refreshing while a producer run is in progress", async () => {
     read.value = { pending: false, error: false, limitExceeded: false, collections, manifest: declared }
-    runs.value = [{ collection: "deals", state: "running", startedAt: new Date(), finishedAt: null, lastAttemptAt: new Date(), lastSuccessAt: null, reason: null, startedBy: "Agent", partial: false }]
+    runs.value = [{ collection: "deals", state: "running", startedAt: new Date(), finishedAt: null, lastAttemptAt: new Date(), lastSuccessAt: null, reason: null, startedBy: "Agent", partial: false, stalledAfterMs: 1_800_000 }]
     const reports: (KindReport | null)[] = []
     inFrame(<DashboardProjectView workspaceId="w" parts={parts({ data: snapshot({ manifest: { version: 4, entrypoint: "index.html", files: files() } }), previewKind: "dashboard" })} onReport={report => reports.push(report)} />)
     await waitFor(() => expect(reports.at(-1)?.status).toMatchObject({ key: "refreshing" }))

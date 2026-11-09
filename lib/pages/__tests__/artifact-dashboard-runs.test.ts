@@ -10,7 +10,11 @@ const summary = (over: Record<string, unknown> = {}, latest: Record<string, unkn
 describe("parseDashboardRuns", () => {
   it("reads the latest run, last attempt and last success per declared collection", () => {
     const runs = parseDashboardRuns({ code_version: 2, runs: [summary()] }, 2, ["sales"])
-    expect(runs).toEqual([{ collection: "sales", state: "failed", startedAt: new Date("2026-11-08T11:00:00Z"), finishedAt: new Date("2026-11-08T11:01:00Z"), lastAttemptAt: new Date("2026-11-08T11:00:00Z"), lastSuccessAt: new Date("2026-11-08T10:00:00Z"), reason: "warehouse 502", startedBy: "Agent", partial: false }])
+    expect(runs).toEqual([{ collection: "sales", state: "failed", startedAt: new Date("2026-11-08T11:00:00Z"), finishedAt: new Date("2026-11-08T11:01:00Z"), lastAttemptAt: new Date("2026-11-08T11:00:00Z"), lastSuccessAt: new Date("2026-11-08T10:00:00Z"), reason: "warehouse 502", startedBy: "Agent", partial: false, stalledAfterMs: 30 * 60 * 1000 }])
+  })
+  it("takes the stalled threshold the server configures", () => {
+    expect(parseDashboardRuns({ code_version: 2, stalled_after_seconds: 600, runs: [summary()] }, 2, ["sales"])?.[0].stalledAfterMs).toBe(600_000)
+    expect(parseDashboardRuns({ code_version: 2, stalled_after_seconds: -5, runs: [summary()] }, 2, ["sales"])).toBeNull()
   })
   it("reads a failed refresh that already changed data as partial", () => {
     expect(parseDashboardRuns({ code_version: 2, runs: [summary({}, { partial: true })] }, 2, ["sales"])?.[0]).toMatchObject({ state: "failed", partial: true })

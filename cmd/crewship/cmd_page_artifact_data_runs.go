@@ -39,8 +39,9 @@ the server only checks it against writes made during the run.
 A failure reason is cleaned on the server (control characters and common
 credential patterns removed, at most 500 bytes) and is shown to the owner and
 editors only. The producer is the authenticated principal; it cannot be
-supplied. Starting and finishing need the same right as "data batch". Server
-defaults, not contract: at most 4 running runs per collection (more are
+supplied. Starting and finishing need the same right as "data batch". Configurable
+server defaults, not contract (CREWSHIP_ARTIFACT_DATA_RUNS_KEPT/_ACTIVE,
+CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL): at most 4 running runs per collection (more are
 refused with artifact_data_run_busy), the newest 20 finished runs plus the
 newest success are kept, a running run is never pruned, and a finished run's
 key stays reserved until 24 hours pass or the run is pruned. Agent runs that use the artifact tools
