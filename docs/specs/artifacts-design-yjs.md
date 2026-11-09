@@ -206,7 +206,10 @@ standard `y-protocols` sync and awareness messages in binary frames.
   socket with code `1008`.
 - Only editors may send document updates. A reader who sends one is
   disconnected.
-- Awareness (cursors and presence) is limited to one client ID per connection.
+- Awareness (cursors, selection and presence) is limited to one client ID per
+  connection. `cursor` is a canvas point; `selection` is the selected layer ID
+  (at most 128 characters) or `null`. Both are local view state and are never
+  written to the document; a selection naming a missing layer draws nothing.
   The server replaces the user name and ID in awareness with the authenticated
   user.
 - Incoming messages are limited to 4 MiB. A client that falls 64 frames behind
