@@ -15,6 +15,7 @@ export interface DesignNode {
   width: number
   height: number
   fill?: string
+  linkTo?: string
 }
 
 export interface DesignState {
