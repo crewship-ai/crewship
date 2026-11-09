@@ -20,6 +20,8 @@ const RICH_NAMES: Record<number, string[]> = {
   // Schema 5 also has the inline date and mention atoms; an editor without them would drop them.
   5: ["link", "bold", "italic", "strike", "underline", "textColor", "highlight", "code", "codeBlock", "blockquote", "taskList", "taskItem", "date", "mention"],
 }
+// Schema 6 adds the Canvas surface beside the Page; its Page is exactly schema 5's.
+RICH_NAMES[6] = RICH_NAMES[5]
 
 /** Block types that carry a stable `id` in this schema. */
 export function stableBlockTypes(schema: number | undefined): string[] {
@@ -27,11 +29,11 @@ export function stableBlockTypes(schema: number | undefined): string[] {
 }
 
 /** True where the schema has bold, italic, strike, quotes, checklists and code languages. */
-export const isFormattedSchema = (schema: number | undefined) => schema === 4 || schema === 5
+export const isFormattedSchema = (schema: number | undefined) => schema === 4 || schema === 5 || schema === 6
 /** True where the schema has links, inline code and code blocks. */
-export const isRichSchema = (schema: number | undefined) => schema === 3 || schema === 4 || schema === 5
+export const isRichSchema = (schema: number | undefined) => schema === 3 || schema === 4 || schema === 5 || schema === 6
 /** True where the schema has underline and palette text colour and highlight. */
-export const isStyledSchema = (schema: number | undefined) => schema === 5
+export const isStyledSchema = (schema: number | undefined) => schema === 5 || schema === 6
 
 /** The schema's own marks and nodes beyond the StarterKit base, with editing behaviour. */
 export function documentEditorExtensions(schema: number | undefined): AnyExtension[] {

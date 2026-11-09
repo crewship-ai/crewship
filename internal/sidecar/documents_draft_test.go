@@ -71,7 +71,7 @@ func TestDocumentDraftTransportIdentityAndBounds(t *testing.T) {
 	}
 }
 func TestDocumentDraftPrepareRejectsScopeAndAmbiguousJSON(t *testing.T) {
-	for _, raw := range []string{`null`, draftPrepareInput + `{}`, strings.Replace(draftPrepareInput, `"target":"p1"`, `"target":"missing"`, 1), strings.Replace(draftPrepareInput, `"schema":3`, `"schema":6`, 1), strings.Replace(draftPrepareInput, `"schema":3`, `"schema":2`, 1), strings.Replace(draftPrepareInput, `"rev":0`, `"rev":null`, 1), strings.Replace(draftPrepareInput, `"type":"paragraph"`, `"type":"table"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"B","text":"C"`, 1), strings.Replace(draftPrepareInput, `"mutation_id":"draft-one"`, `"mutation_id":"draft-one","user_id":"other"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"`+strings.Repeat("b", 64<<10)+`"`, 1)} {
+	for _, raw := range []string{`null`, draftPrepareInput + `{}`, strings.Replace(draftPrepareInput, `"target":"p1"`, `"target":"missing"`, 1), strings.Replace(draftPrepareInput, `"schema":3`, `"schema":7`, 1), strings.Replace(draftPrepareInput, `"schema":3`, `"schema":2`, 1), strings.Replace(draftPrepareInput, `"rev":0`, `"rev":null`, 1), strings.Replace(draftPrepareInput, `"type":"paragraph"`, `"type":"table"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"B","text":"C"`, 1), strings.Replace(draftPrepareInput, `"mutation_id":"draft-one"`, `"mutation_id":"draft-one","user_id":"other"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"`+strings.Repeat("b", 64<<10)+`"`, 1)} {
 		if _, err := PrepareDocumentDraft([]byte(raw)); err == nil {
 			t.Fatalf("unsafe prepare accepted: %.100s", raw)
 		}
@@ -246,7 +246,11 @@ func TestDocumentPacketsBindTheDocumentSchemaFive(t *testing.T) {
 	if parsed, err := ParseDocumentProposalPacket(raw); err != nil || parsed.Proposal.Schema != 5 {
 		t.Fatalf("schema-5 proposal round trip: %+v %v", parsed, err)
 	}
-	for _, schema := range []string{"3", "6"} {
+	// Schema 6 (Canvas) proposes exactly like 5.
+	if six, err := PrepareDocumentProposal(view("6")); err != nil || six.Proposal.Schema != 6 {
+		t.Fatalf("schema-6 proposal: %+v %v", six, err)
+	}
+	for _, schema := range []string{"3", "7"} {
 		if _, err := PrepareDocumentProposal(view(schema)); err == nil {
 			t.Fatalf("schema %s proposal prepared", schema)
 		}
@@ -255,7 +259,7 @@ func TestDocumentPacketsBindTheDocumentSchemaFive(t *testing.T) {
 		}
 	}
 	catalog, _ := json.Marshal(documentDraftMCPCatalog())
-	if !strings.Contains(string(catalog), `"enum":[3,4,5]`) || !strings.Contains(string(catalog), `"enum":[4,5]`) || strings.Contains(string(catalog), `"const":4`) {
+	if !strings.Contains(string(catalog), `"enum":[3,4,5,6]`) || !strings.Contains(string(catalog), `"enum":[4,5,6]`) || strings.Contains(string(catalog), `"const":4`) {
 		t.Fatalf("MCP schemas do not follow the capability table: %s", catalog)
 	}
 }

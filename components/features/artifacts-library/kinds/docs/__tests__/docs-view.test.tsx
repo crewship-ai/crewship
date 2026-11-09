@@ -11,19 +11,20 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import type { Editor } from "@tiptap/core"
-import { encodeUpdate } from "@/hooks/use-page-document"
+import { decodeUpdate, encodeUpdate } from "@/hooks/use-page-document"
 import { ArtifactFrame, NO_FRAME_CAPABILITIES, type FrameLayout } from "../../../frame"
 import type { LibraryItem } from "../../../library-items"
 import { DocsBody, type DocsFrameReport } from "../docs-view"
 
-const env = vi.hoisted(() => ({ proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang", denied: false, schema: 2 }))
+const env = vi.hoisted(() => ({ proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, schema: 2, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang", denied: false }))
 const request = vi.hoisted(() => vi.fn())
+const upgrades = vi.hoisted(() => ({ outcome: "ok" as "ok" | "stale" | "missing" | "lost", bodies: [] as Record<string, unknown>[], urls: [] as string[] }))
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: env.available, isPending: env.available === undefined }) }))
 vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/document-queue")>(), openDocumentDrafts: async () => ({ load: async () => env.drafts, put: async () => {}, remove: async () => {}, close: () => {}, exclusive: true }) }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "docs-human" } } }) }))
 
-afterEach(() => { cleanup(); request.mockReset(); env.proposals = undefined; env.available = true; env.canWrite = true; env.drafts = []; env.patch = "ok"; env.denied = false; env.schema = 2 })
+afterEach(() => { cleanup(); request.mockReset(); upgrades.outcome = "ok"; upgrades.bodies = []; upgrades.urls = []; env.proposals = undefined; env.available = true; env.canWrite = true; env.schema = 2; env.drafts = []; env.patch = "ok"; env.denied = false })
 
 const item: LibraryItem = {
   slug: "launch-notes", pageId: "page-docs", name: "Launch notes", kind: "word", family: "document", sharedVersion: null, native: false,
@@ -53,10 +54,22 @@ function serve() {
       rev += 1
       return { ok: true, json: async () => ({ id: body.id, epoch: body.epoch, rev, schema: body.schema }) }
     }
+    if (url.includes("/document/upgrade")) {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>
+      upgrades.bodies.push(body)
+      upgrades.urls.push(url)
+      if (upgrades.outcome === "stale") return { ok: false, status: 409, json: async () => ({ error: "original Page identity, revision and supported upgrade required" }) }
+      if (upgrades.outcome === "missing") return { ok: false, status: 404, json: async () => ({ error: "not found" }) }
+      // The first attempt is applied but its answer is lost; the exact retry gets the original receipt.
+      if (upgrades.outcome === "lost" && upgrades.bodies.length === 1) { rev += 1; env.schema = 6; throw new TypeError("network") }
+      if (upgrades.outcome === "lost") return JSON.stringify(body) === JSON.stringify(upgrades.bodies[0]) ? { ok: true, json: async () => ({ id: body.id, rev, epoch: "go:node:2", schema: 6, duplicate: true }) } : { ok: false, status: 409, json: async () => ({ error: "stale" }) }
+      rev += 1; env.schema = 6
+      return { ok: true, json: async () => ({ id: body.id, rev, epoch: "go:node:2", schema: 6 }) }
+    }
     if (url.includes("/document/checkpoints")) return { ok: true, json: async () => ({ checkpoints: [] }) }
     if (url.includes("/proposals")) return { ok: true, json: async () => ({ proposals: [] }) }
     if (env.denied) return { ok: false, status: 403, json: async () => ({ error: "document access denied" }) }
-    return { ok: true, json: async () => ({ page_id: "page-docs", schema: env.schema, rev, generation: 0, epoch: "go:node:1", can_write: env.canWrite, snapshot, ...(env.proposals === undefined ? {} : { proposals: env.proposals }) }) }
+    return { ok: true, json: async () => ({ page_id: "page-docs", schema: env.schema, rev, generation: 0, epoch: upgrades.outcome === "lost" && upgrades.bodies.length > 0 ? "go:node:2" : "go:node:1", can_write: env.canWrite, snapshot, ...(env.proposals === undefined ? {} : { proposals: env.proposals }) }) }
   })
 }
 
@@ -96,10 +109,11 @@ describe("Docs in the ArtifactFrame", () => {
     expect(within(page).queryByText("Launch notes")).toBeNull()
     expect(within(page).queryByText(/owned by/)).toBeNull()
     expect(within(page).getAllByRole("heading", { level: 1 }).map(heading => heading.textContent)).toEqual(["Goal"])
-    // Page is the one mode; Canvas has no backend and is not offered.
+    // Below content schema 6 the document is on its Page; Canvas is only offered to enable, and nothing upgrades it by itself.
     const modes = within(slot("view")!).getByRole("tablist", { name: "Mode" })
-    expect(within(modes).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Page"])
-    expect(screen.queryByText("Canvas")).toBeNull()
+    expect(within(modes).getAllByRole("tab").map(tab => [tab.textContent, tab.getAttribute("aria-selected")])).toEqual([["Page", "true"], ["Canvas", "false"]])
+    expect(screen.queryByRole("application", { name: "Canvas" })).toBeNull()
+    expect(request.mock.calls.some(([url]) => String(url).includes("/document/upgrade"))).toBe(false)
     // The outline is open on a desktop and lists the headings.
     const outline = within(slot("panel")!).getByRole("navigation", { name: "Headings" })
     expect(within(outline).getAllByRole("button").map(button => button.textContent)).toEqual(["Goal", "Timeline"])
@@ -159,6 +173,25 @@ describe("Docs in the ArtifactFrame", () => {
     expect(await within(screen.getByRole("complementary", { name: "Proposals" })).findByText("No proposals.")).toBeTruthy()
   })
 
+  it("keeps Propose and the Proposals review on a Canvas document (schema 6)", async () => {
+    env.proposals = true
+    env.schema = 6
+    serve()
+    open()
+    expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Status: Live" })).toBeTruthy())
+    fireEvent.click(within(slot("view")!).getByRole("tab", { name: "Canvas" }))
+    await screen.findByRole("application", { name: "Canvas" })
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }))
+    const modes = await screen.findByRole("radiogroup", { name: "Agent mode" })
+    fireEvent.click(within(modes).getByRole("radio", { name: "Propose" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "What should the agent change?" }), { target: { value: "Tighten the goal" } })
+    const href = new URL(screen.getByRole("link", { name: "Ask for a proposal" }).getAttribute("href")!, "https://x.test")
+    expect(href.searchParams.get("propose")).toBe("page-docs.1.0.6")
+    fireEvent.click(screen.getByRole("button", { name: "Proposals" }))
+    expect(await within(screen.getByRole("complementary", { name: "Proposals" })).findByText("No proposals.")).toBeTruthy()
+  })
+
   it("offers no Propose to a reader who cannot edit, but still the Proposals to read", async () => {
     env.proposals = true
     env.schema = 5
@@ -170,6 +203,167 @@ describe("Docs in the ArtifactFrame", () => {
     expect(screen.queryByRole("radiogroup", { name: "Agent mode" })).toBeNull()
     expect(screen.queryByRole("link", { name: "Ask for a proposal" })).toBeNull()
     expect(await screen.findByRole("button", { name: "Proposals" })).toBeTruthy()
+  })
+
+  it("offers Canvas at schema 6: the same document, a placement is saved as a patch, and the Page editor stays mounted", async () => {
+    serve()
+    env.schema = 6
+    open()
+    const editor = (await screen.findByLabelText("Document editor")) as HTMLElement & { editor: Editor }
+    await waitFor(() => expect(editor.editor.isEditable).toBe(true))
+    const modes = within(slot("view")!).getByRole("tablist", { name: "Mode" })
+    expect(within(modes).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Page", "Canvas"])
+    fireEvent.click(within(modes).getByRole("tab", { name: "Canvas" }))
+    const canvas = await screen.findByRole("application", { name: "Canvas" })
+    expect(document.querySelector("[data-docs-canvas]")!.getAttribute("data-editable")).toBe("true")
+    // Formatting and the outline belong to the Page; the editor is hidden, not unmounted.
+    expect(slot("tools")).toBeNull()
+    expect(slot("panel")).toBeNull()
+    expect(editor.closest("article")!.hidden).toBe(true)
+    fireEvent.click(screen.getByText("Add blocks (3)"))
+    fireEvent.click(screen.getByRole("button", { name: "Ship the agency offer on 2 December." }))
+    expect(canvas.querySelector('[data-placement="p1"]')).toBeTruthy()
+    await waitFor(() => expect(request.mock.calls.some(([url]) => String(url).includes("/document/patch"))).toBe(true), { timeout: 4000 })
+    const patch = request.mock.calls.find(([url]) => String(url).includes("/document/patch"))!
+    const body = JSON.parse(String(patch[1]?.body)) as { update: string; schema: number }
+    expect(body.schema).toBe(6)
+    const replica = new Y.Doc({ gc: false }); Y.applyUpdate(replica, decodeUpdate(body.update))
+    expect([...replica.getMap("surface:placements").keys()]).toEqual(["p1"])
+    replica.destroy()
+    // Back on the Page the same editor, its text unchanged by the placement.
+    fireEvent.click(within(modes).getByRole("tab", { name: "Page" }))
+    expect(screen.getByLabelText("Document editor")).toBe(editor)
+    expect(editor.textContent).toContain("Ship the agency offer on 2 December.")
+    expect(screen.queryByRole("application", { name: "Canvas" })).toBeNull()
+  })
+
+  it("offers Enable Canvas on an older document: the first switch asks, the upgrade keeps the content and opens Canvas", async () => {
+    serve()
+    env.schema = 5
+    open()
+    const editor = (await screen.findByLabelText("Document editor")) as HTMLElement & { editor: Editor }
+    await waitFor(() => expect(editor.editor.isEditable).toBe(true))
+    const modes = within(slot("view")!).getByRole("tablist", { name: "Mode" })
+    const tab = within(modes).getByRole("tab", { name: "Canvas" })
+    expect(tab.getAttribute("aria-haspopup")).toBe("dialog")
+    fireEvent.click(tab)
+    const dialog = await screen.findByRole("alertdialog", { name: "Enable Canvas for this document?" })
+    expect(dialog.textContent).toContain("The Page, its text and formatting stay exactly as they are.")
+    expect(dialog.textContent).toContain("Versions and comments are kept.")
+    expect(dialog.textContent).toContain("Open proposals can no longer be accepted")
+    // Nothing is upgraded until the person confirms.
+    expect(upgrades.bodies).toEqual([])
+    fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull())
+    expect(upgrades.bodies).toEqual([])
+    fireEvent.click(within(within(slot("view")!).getByRole("tablist", { name: "Mode" })).getByRole("tab", { name: "Canvas" }))
+    fireEvent.click(within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Enable Canvas" }))
+    expect(await screen.findByRole("application", { name: "Canvas" })).toBeTruthy()
+    expect(upgrades.bodies).toHaveLength(1)
+    expect(upgrades.bodies[0]).toMatchObject({ schema: 5, target_schema: 6, page_id: "page-docs", epoch: "go:node:1", ifRev: 1 })
+    expect(String(upgrades.bodies[0].id)).toMatch(/^[a-zA-Z0-9_-]{1,128}$/)
+    // The route is workspace-scoped like every Docs call.
+    expect(new URL(upgrades.urls[0], "https://x.test").searchParams.get("workspace_id")).toBe("ws1")
+    // The reopened session is the upgraded document, with the same Page text.
+    fireEvent.click(within(within(slot("view")!).getByRole("tablist", { name: "Mode" })).getByRole("tab", { name: "Page" }))
+    expect((await screen.findByLabelText("Document editor")).textContent).toContain("Ship the agency offer on 2 December.")
+  })
+
+  it("keeps the dialog open with a reason when the document changed meanwhile, and asks again with a fresh request", async () => {
+    serve()
+    env.schema = 5
+    upgrades.outcome = "stale"
+    open()
+    const editor = (await screen.findByLabelText("Document editor")) as HTMLElement & { editor: Editor }
+    await waitFor(() => expect(editor.editor.isEditable).toBe(true))
+    fireEvent.click(within(slot("view")!).getByRole("tab", { name: "Canvas" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
+    expect(await within(dialog).findByRole("alert")).toHaveProperty("textContent", "The document changed while you were deciding. Nothing was changed; try again.")
+    expect(screen.queryByRole("application", { name: "Canvas" })).toBeNull()
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
+    await waitFor(() => expect(upgrades.bodies).toHaveLength(2))
+    expect(upgrades.bodies[1].id).not.toBe(upgrades.bodies[0].id)
+  })
+
+  it("retries an unknown outcome as the exact same request, so an upgrade that did happen is confirmed", async () => {
+    serve()
+    env.schema = 5
+    upgrades.outcome = "lost"
+    open()
+    const editor = (await screen.findByLabelText("Document editor")) as HTMLElement & { editor: Editor }
+    await waitFor(() => expect(editor.editor.isEditable).toBe(true))
+    fireEvent.click(within(slot("view")!).getByRole("tab", { name: "Canvas" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
+    expect(await within(dialog).findByRole("alert")).toHaveProperty("textContent", "We could not confirm whether Canvas was enabled. Try again; it is never enabled twice.")
+    // The applied upgrade changed the epoch: the next poll puts the tab in "needs reopening" before the person retries.
+    await waitFor(() => expect(document.body.textContent).toMatch(/needs to be reopened/i), { timeout: 4000 })
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
+    await waitFor(() => expect(upgrades.bodies).toHaveLength(2))
+    expect(upgrades.bodies[1]).toEqual(upgrades.bodies[0])
+    expect(await screen.findByRole("application", { name: "Canvas" })).toBeTruthy()
+  })
+
+  it("never upgrades while this tab has unsaved edits: the dialog says why and nothing is sent", async () => {
+    serve()
+    env.schema = 5
+    env.patch = "hang"
+    open()
+    const editor = (await screen.findByLabelText("Document editor")) as HTMLElement & { editor: Editor }
+    await waitFor(() => expect(editor.editor.isEditable).toBe(true))
+    act(() => { editor.editor.commands.insertContent(" Unsaved") })
+    expect(await screen.findByRole("button", { name: "Status: Saving…" })).toBeTruthy()
+    fireEvent.click(within(slot("view")!).getByRole("tab", { name: "Canvas" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
+    expect(await within(dialog).findByRole("alert")).toHaveProperty("textContent", "Wait until your changes are saved, then enable Canvas.")
+    expect(upgrades.bodies).toEqual([])
+    expect(screen.queryByRole("application", { name: "Canvas" })).toBeNull()
+  })
+
+  it("treats a missing upgrade route as an error, never as lost access", async () => {
+    serve()
+    env.schema = 5
+    upgrades.outcome = "missing"
+    open()
+    const editor = (await screen.findByLabelText("Document editor")) as HTMLElement & { editor: Editor }
+    await waitFor(() => expect(editor.editor.isEditable).toBe(true))
+    fireEvent.click(within(slot("view")!).getByRole("tab", { name: "Canvas" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
+    expect(await within(dialog).findByRole("alert")).toHaveProperty("textContent", "Canvas could not be enabled. Nothing was changed.")
+    expect(screen.queryByRole("button", { name: "Status: No access" })).toBeNull()
+    expect(editor.editor.isEditable).toBe(true)
+  })
+
+  it("offers no Enable Canvas to a person who cannot edit an older document", async () => {
+    serve()
+    env.schema = 5
+    env.canWrite = false
+    open()
+    expect(await screen.findByRole("button", { name: "Status: Read-only" })).toBeTruthy()
+    expect(within(slot("view")!).queryByRole("tab", { name: "Canvas" })).toBeNull()
+  })
+
+  it("lets a read-only person open Canvas to look around but not change it", async () => {
+    serve()
+    env.schema = 6
+    env.canWrite = false
+    open()
+    expect(await screen.findByRole("button", { name: "Status: Read-only" })).toBeTruthy()
+    fireEvent.click(within(slot("view")!).getByRole("tab", { name: "Canvas" }))
+    await screen.findByRole("application", { name: "Canvas" })
+    expect(document.querySelector("[data-docs-canvas]")!.getAttribute("data-editable")).toBe("false")
+    expect(screen.queryByText(/Add blocks/)).toBeNull()
+    expect(screen.queryByRole("button", { name: "Add note" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Fit to screen" })).toBeTruthy()
+    // Trying to change the canvas from the keyboard writes nothing, even after a poll cycle.
+    const canvas = screen.getByRole("application", { name: "Canvas" })
+    fireEvent.keyDown(canvas, { key: "ArrowRight" })
+    fireEvent.keyDown(canvas, { key: "Delete" })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1200)) })
+    expect(request.mock.calls.some(([url]) => String(url).includes("/document/patch"))).toBe(false)
   })
 
   it("stays on Saving… while the receipt has not arrived", async () => {

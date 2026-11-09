@@ -45,6 +45,8 @@ export interface DocumentHistoryProps {
   onSelect: (checkpointId: string) => void
   onClose: () => void
   review?: DocumentHistoryReview
+  /** The live document's schema, to warn when a restore drops a layer the checkpoint predates (the Canvas at 6). */
+  headSchema?: number
   restore?: {
     allowed: boolean
     baseKey?: string

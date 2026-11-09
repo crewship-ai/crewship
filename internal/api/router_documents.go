@@ -42,6 +42,10 @@ func (r *Router) registerDocumentRoutes() {
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/initialize", roleInline, p.MutateDocument)
 	// openapi: responses 200,400,401,403,404,409,413,422,429,500,502,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/patch", roleInline, p.MutateDocument)
+	// Explicit human schema upgrade (enable Canvas, #5149): Edit in the
+	// authority; agents are refused here and in the engine.
+	// openapi: responses 200,400,401,403,404,409,413,422,429,500,502,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/document/upgrade", roleInline, p.MutateDocument)
 	// Anchored discussion. Reading follows document read authority; writing
 	// needs Comment authority (Edit, or a Comment/Edit grant) in the authority.
 	// openapi: responses 200,400,401,403,404,409,429,500,502,503

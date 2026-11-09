@@ -110,8 +110,8 @@ func TestDocumentSchemaThreeUpgradeRollbackAndStalePreconditions(t *testing.T) {
 	}
 }
 
-func TestDocumentSchemaFiveUpgradeFromEverySupportedSchema(t *testing.T) {
-	for _, from := range []int{1, 2, 3, 4} {
+func TestDocumentSchemaSixUpgradeFromEverySupportedSchema(t *testing.T) {
+	for _, from := range []int{1, 2, 3, 4, 5} {
 		s, _, _ := fixture(t, Options{})
 		k := Key{key.WorkspaceID, "page-c"}
 		if _, e := s.InitRequest(ctx, k, "init", "init", from, []byte("binary"), projection, allow); e != nil {
@@ -122,7 +122,7 @@ func TestDocumentSchemaFiveUpgradeFromEverySupportedSchema(t *testing.T) {
 			t.Fatal(e)
 		}
 		generation := int64(0)
-		for _, target := range []int{from, 3, 4, 6} {
+		for _, target := range []int{from, 3, 4, 5, 7} {
 			if target == LatestSchema {
 				continue
 			}
@@ -130,11 +130,11 @@ func TestDocumentSchemaFiveUpgradeFromEverySupportedSchema(t *testing.T) {
 				t.Fatalf("schema %d -> %d admitted: %v", from, target, e)
 			}
 		}
-		if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade-five", "original", from, LatestSchema, 0, &generation, allow); e != nil {
+		if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade-six", "original", from, LatestSchema, 0, &generation, allow); e != nil {
 			t.Fatalf("schema %d upgrade: %v", from, e)
 		}
 		v, e := s.Read(ctx, k, allow)
-		if e != nil || v.Schema != 5 || string(v.Snapshot) != "binary" || v.HeadRev != 1 {
+		if e != nil || v.Schema != 6 || string(v.Snapshot) != "binary" || v.HeadRev != 1 {
 			t.Fatalf("schema %d upgrade state: %+v %v", from, v, e)
 		}
 		lease, e = s.Acquire(ctx, k, "engine", allow)
@@ -142,11 +142,11 @@ func TestDocumentSchemaFiveUpgradeFromEverySupportedSchema(t *testing.T) {
 			t.Fatal(e)
 		}
 		generation = v.Generation
-		if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade-again", "original", 5, LatestSchema, 1, &generation, allow); !errors.Is(e, ErrSchema) {
-			t.Fatalf("schema 5 upgraded again: %v", e)
+		if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade-again", "original", 6, LatestSchema, 1, &generation, allow); !errors.Is(e, ErrSchema) {
+			t.Fatalf("schema 6 upgraded again: %v", e)
 		}
 	}
-	if !RichSchema(3) || !RichSchema(4) || !RichSchema(5) || RichSchema(2) || RichSchema(6) {
+	if !RichSchema(3) || !RichSchema(4) || !RichSchema(5) || !RichSchema(6) || RichSchema(2) || RichSchema(7) {
 		t.Fatal("rich schema family changed")
 	}
 }
@@ -213,5 +213,21 @@ func TestDocumentRestoreBelowLatestKeepsCheckpointSchema(t *testing.T) {
 	}
 	if after, e := s.Read(ctx, k, allow); e != nil || after.Schema != 4 {
 		t.Fatalf("schema 4 restore changed schema: %+v %v", after, e)
+	}
+}
+
+// #5149: from schema 5 on a restore never lowers a Document's schema, so a
+// schema 5 Document restoring schema 4 history stays at 5 even though 6 is
+// now the latest schema, and restoring history from before Canvas was enabled
+// keeps Canvas. Below schema 5 the checkpoint's own schema is kept.
+func TestRestoredSchema(t *testing.T) {
+	for _, tt := range []struct{ current, checkpoint, want int }{
+		{6, 5, 6}, {6, 4, 6}, {6, 2, 6}, {6, 6, 6},
+		{5, 4, 5}, {5, 3, 5}, {5, 1, 5}, {5, 5, 5},
+		{4, 3, 3}, {4, 4, 4}, {3, 2, 2}, {2, 2, 2},
+	} {
+		if got := RestoredSchema(tt.current, tt.checkpoint); got != tt.want {
+			t.Errorf("RestoredSchema(%d, %d) = %d, want %d", tt.current, tt.checkpoint, got, tt.want)
+		}
 	}
 }

@@ -20,6 +20,13 @@ package documents
 // LatestSchema never changes it, and it must have every agent capability.
 const CreateSchema = 5
 
+// MarksSchema is schema 5: underline, colours, highlights, dates and
+// mentions. From it on a restore never lowers a Document's schema.
+const MarksSchema = 5
+
+// CanvasSchema is schema 6: schema 5 plus the Docs Canvas surface.
+const CanvasSchema = 6
+
 // FormattedSchema is schema 4: bold, italic, strike, code block languages,
 // quotes and task lists. It is the oldest schema agents propose on.
 const FormattedSchema = 4
@@ -55,7 +62,11 @@ var schemaCapabilities = map[int]map[Capability]bool{
 	// Schema 3's agent path is the direct draft; its mandate never proposes.
 	3: {CapRead: true, CapEdit: true, CapDraft: true, CapRestore: true, CapExport: true, CapUpgrade: true},
 	4: {CapRead: true, CapEdit: true, CapDraft: true, CapPropose: true, CapAccept: true, CapRestore: true, CapExport: true, CapUpgrade: true},
-	5: {CapRead: true, CapEdit: true, CapDraft: true, CapPropose: true, CapAccept: true, CapRestore: true, CapExport: true},
+	5: {CapRead: true, CapEdit: true, CapDraft: true, CapPropose: true, CapAccept: true, CapRestore: true, CapExport: true, CapUpgrade: true},
+	// Schema 6 is schema 5 plus the Canvas surface. It keeps every capability
+	// schema 5 released: agents propose on Page blocks and never write the
+	// surface in v1, so enabling Canvas never takes the agent pipeline away.
+	6: {CapRead: true, CapEdit: true, CapDraft: true, CapPropose: true, CapAccept: true, CapRestore: true, CapExport: true},
 }
 
 // SchemaAllows reports whether documents of this schema support c. An

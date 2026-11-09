@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { create, validate, validateJSON, load, snapshot, outline, hash, patch, anchor, resolve, markdown, find, project, PALETTE, LATEST_VERSION, FORMATTED_VERSION } from './schema.mjs';
+import { create, validate, validateJSON, load, snapshot, outline, hash, patch, anchor, resolve, markdown, find, project, PALETTE, LATEST_VERSION, FORMATTED_VERSION, MARKS_VERSION } from './schema.mjs';
 import * as Y from 'yjs';
 
 const json = value => JSON.parse(JSON.stringify(value));
@@ -21,8 +21,8 @@ const formatted = { type: 'doc', content: [
   ] },
 ] };
 
-test('schema5 is the latest schema and its palette is a closed list of names', () => {
-  assert.equal(LATEST_VERSION, 5); assert.equal(FORMATTED_VERSION, 4);
+test('schema5 adds the marks, later schemas keep them, and its palette is a closed list of names', () => {
+  assert.equal(MARKS_VERSION, 5); assert.equal(FORMATTED_VERSION, 4); assert.ok(LATEST_VERSION >= 5);
   assert.deepEqual([...PALETTE], ['gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink']);
   assert.ok(Object.isFrozen(PALETTE));
 });
