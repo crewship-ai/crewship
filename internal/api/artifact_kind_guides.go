@@ -17,6 +17,11 @@ type artifactKindGuideSummary struct {
 	Bytes        int    `json:"bytes"`
 }
 
+// artifactKindGuideList is the catalog envelope.
+type artifactKindGuideList struct {
+	Guides []artifactKindGuideSummary `json:"guides"`
+}
+
 // ListArtifactKindGuides serves the static, embedded per-kind agent guide
 // catalog. It reads no tenant rows; any signed-in caller may read it.
 func ListArtifactKindGuides(w http.ResponseWriter, r *http.Request) {
@@ -29,7 +34,7 @@ func ListArtifactKindGuides(w http.ResponseWriter, r *http.Request) {
 	for _, g := range guides {
 		out = append(out, artifactKindGuideSummary{Kind: g.Kind, Title: g.Title, Version: g.Version, RulesVersion: g.RulesVersion, SHA256: g.SHA256, Bytes: g.Bytes})
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"guides": out})
+	writeJSON(w, http.StatusOK, artifactKindGuideList{Guides: out})
 }
 
 // GetArtifactKindGuide serves one kind's guide, resolving known aliases
