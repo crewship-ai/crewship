@@ -484,6 +484,13 @@ describe("agent Edit is offered to the page owner only", () => {
     expect(screen.queryByLabelText("Panels")).toBeNull()
   })
 
+  it("offers a crew produce only to the owner: its agents push with it", async () => {
+    mount(CREW_OWNED, { grants: jsonResponse(200, { ...GRANTS, can_delegate_agent_edit: false }) })
+    await waitFor(() => expect(grantRows()).toHaveLength(2))
+    fireEvent.change(screen.getByLabelText("Subject kind"), { target: { value: "crew" } })
+    expect(Array.from((screen.getByLabelText("Level") as HTMLSelectElement).options).map((o) => o.value)).toEqual(["read", "write"])
+  })
+
   it("still offers write to a person when the caller may not delegate agent Edit", async () => {
     mount(CREW_OWNED, { grants: jsonResponse(200, { ...GRANTS, can_delegate_agent_edit: false }) })
     await waitFor(() => expect(grantRows()).toHaveLength(2))

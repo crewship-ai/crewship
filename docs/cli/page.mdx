@@ -54,6 +54,7 @@ exception in the other direction: it prints YAML unless you ask for
 | `revoke <slug> --agent <agent-slug>` | Remove a grant |
 | `access <slug> --me` | How you reach a page: your own paths |
 | `grants <slug>` | List a page's grants |
+| `authorize-producer <page> <panel>` | As the page's owner, authorize the agent a panel names as its producer |
 | `folder list` | List the folders you can see, with how many of their pages you reach |
 | `folder create <slug> --owner crew/<slug>` | Create a folder owned by a crew |
 | `folder show <slug>` | Show a folder and the pages in it you reach |
@@ -916,9 +917,11 @@ crewship page grant fleet-201 --user  ops@example.com --level write
 
 <Note>
   Only the page's owner (the owning user, or a member of the owning crew while
-  that crew is not deleted) can grant an agent `write` or `produce`; `produce` pushes the page's data. A
-  workspace admin can grant an agent `read` and can revoke any grant, but
-  `--agent <slug> --level write` or `--level produce` from anyone but the owner
+  that crew is not deleted) can grant an agent `write` or `produce`, or a crew
+  `produce`; `produce` pushes the page's data, and a crew's agents and routines
+  push with a crew grant. A workspace admin can grant an agent `read`, a crew
+  `read` or `write`, and can revoke any grant, but `--agent <slug> --level write`,
+  `--level produce`, or `--crew <slug> --level produce` from anyone but the owner
   exits `4`. An agent `write` or `produce` grant the owner did not issue shows
   as inert in `crewship page grants`, authorises nothing, and stays ended even
   if its issuer later owns the page; the owner issues a new one. The JSON output of `page grants` carries `can_delegate_agent_edit`
@@ -973,6 +976,29 @@ crewship page grants fleet-201
 
 Lists every grant on the page: subject type, subject, level, and (for
 `produce`) which panels it covers.
+
+---
+
+## `crewship page authorize-producer <page> <panel>`
+
+```bash
+crewship page authorize-producer fleet-201 sluzby
+```
+
+A panel whose `agent/<slug>` producer the page's owner did not name reads
+"Producer not authorized by the owner" and takes no pushes from that agent.
+`crewship page get` shows such a panel with `producer_authorization`, which
+names the producer and says whether you can authorize it. This command is
+the owner's explicit fix. It authorizes the producer the spec already declares,
+writes the audit entry `page.agent_producer.authorized`, and lasts while you own
+the page. Running it again changes nothing.
+
+Only the page's owner can run it (the owning user, or a member of the owning
+crew while the crew is not deleted), and only as a person. A workspace admin,
+an Edit grantee or an agent gets exit 4 with the reason. A panel whose producer
+is not an agent, or a private artifact (which delegates nothing to agents), gets
+exit 5 (409), and an unknown page or panel gets exit 3
+(404).
 
 ---
 

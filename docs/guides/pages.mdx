@@ -314,11 +314,45 @@ code runs, then declare the producer that door can prove.
 |---|---|---|---|
 | a script on a host you control | `crewship page set <page>/<panel>` | a CLI token | `producer: script/<name>`, and the pusher is the page's owner or a workspace admin |
 | a step in a routine | the `page.write` verb | the run the dispatcher injected | `producer: routine/<slug>` — the routine that is running |
-| an agent inside a crew container | `PUT /pages/{page}/{panel}` on the sidecar | the agent's own token, held by the sidecar | `producer: agent/<slug>` — the agent that pushes |
+| an agent inside a crew container | `PUT /pages/{page}/{panel}` on the sidecar | the agent's own token, held by the sidecar | `producer: agent/<slug>` — the agent that pushes, named by the page's owner |
 | a third-party system | a panel webhook | the webhook token, bound to one panel | whatever the human who minted the token could push themselves |
 
 In every row a `produce` grant a human issued is the alternative to the
 declaration — that is what the grant is for.
+
+Naming an agent as a panel's producer hands that agent the panel's data, so
+only the page's owner does it. When a workspace admin, an Edit grantee or an
+agent creates, updates, rolls back or publishes a spec that newly names
+`agent/<slug>` as a producer, the save is refused with 403. A person who imports
+a bundle with no owner, or names a crew they belong to, owns the result, so its
+agent producers are theirs and stay live. An import that names a crew the
+importer does not belong to, or that an agent makes, is stored with its agent
+producers ended. A page an agent saves for its own crew is stored, but its agent
+producers are ended as they land, because no human owner named them. An edit that keeps a panel's producer unchanged is allowed. If
+the page changes owner, the designating owner leaves the owning crew, or the
+owning crew is deleted, the designation ends for good: the panel shows the
+reason as its fault, the agent can no longer push, and an audit entry
+`page.agent_producer.retired_not_owner` records it. Saving the page again with
+the same producer does not restore it.
+
+Such a panel reads **Producer not authorized by the owner**, names the agent,
+and says that only the page's owner can authorize it. The owner sees an
+**Authorize producer** button on the panel; anyone else is told to ask the
+owner. The button, `crewship page authorize-producer <page> <panel>` and
+`POST /api/v1/pages/{slug}/panels/{panelId}/producer/authorize` all do the same
+thing. They make the producer the spec already declares the owner's own
+designation, write the audit entry `page.agent_producer.authorized`, and the
+agent can push again. Only the owner can do this, and only as a person: an
+admin, an Edit grantee or an agent gets 403, and a private artifact, which
+delegates nothing to agents, answers 409. Like any designation, it ends if
+the page changes owner. The owner can also grant the agent `produce`, or point
+the panel at another producer, which is a new designation. The same holds
+for designations made before this rule: the upgrade reads who wrote each one
+from the page's version history and ends those the owner did not make. A page
+an agent creates for its own crew has no human owner behind its agent
+producers, so those producers push only after a member of the crew grants the
+agent `produce`. Granting a crew `produce` is owner-only for the same reason:
+the crew's agents and routines push with it.
 
 The four doors are one write. They share the schema validation, the 64 KiB
 payload cap, the push-rate floor, and the same refusal sentences — the entry

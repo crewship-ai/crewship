@@ -267,7 +267,9 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 	// the mutation transaction, against the page as it stands there. A
 	// workspace ADMIN/OWNER role still issues agent read and every human
 	// grant (mayAdministerGrants above), and may still revoke.
-	if req.SubjectType == pageSubjectAgent && (req.Level == pageGrantWrite || req.Level == pageGrantProduce) && !h.mayDelegateAgentEdit(r.Context(), wsID, user.ID, rec) {
+	// A crew produce grant delegates data Edit to every agent and routine of
+	// that crew (crewMayProduce), so it is owner-only too (#5260).
+	if pageGrantDelegatesToAgents(req.SubjectType, req.Level) && !h.mayDelegateAgentEdit(r.Context(), wsID, user.ID, rec) {
 		replyError(w, http.StatusForbidden, pageAgentEditOwnerOnlyRefusal)
 		return
 	}
@@ -588,13 +590,26 @@ func (h *PageHandler) mayAdministerGrants(ctx context.Context, wsID, userID, rol
 	return h.isPageOwner(ctx, wsID, userID, rec)
 }
 
+// pageGrantDelegatesToAgents names the grants that delegate Edit to agents:
+// agent write and produce, and crew produce, which its agents and routines
+// push with. Keep it equal to agentEditIssuerNotOwnerSQL's predicate.
+func pageGrantDelegatesToAgents(subjectType, level string) bool {
+	switch subjectType {
+	case pageSubjectAgent:
+		return level == pageGrantWrite || level == pageGrantProduce
+	case "crew":
+		return level == pageGrantProduce
+	}
+	return false
+}
+
 // pageAgentEditOwnerOnlyRefusal and pageAgentEditInertReason state R71
 // §0.14/1 where a person reads them: on the refused PUT, and on a stored row
 // the rule has made inert.
 const (
-	pageAgentEditOwnerOnlyRefusal = "only the artifact's owner can delegate Edit (write) or data Edit (produce) to an agent; " +
-		"a workspace admin can grant an agent read, or ask the owner to grant write or produce"
-	pageAgentEditInertReason = "only the artifact's owner can delegate Edit (write) or data Edit (produce) to an agent, and this grant " +
+	pageAgentEditOwnerOnlyRefusal = "only the artifact's owner can delegate Edit (write) or data Edit (produce) to an agent or an agent's crew; " +
+		"a workspace admin can grant an agent read and a crew read or write, or ask the owner to grant write or produce"
+	pageAgentEditInertReason = "only the artifact's owner can delegate Edit (write) or data Edit (produce) to an agent or an agent's crew, and this grant " +
 		"was not issued by the page's current owner (or its issuer stopped owning the page), so it has ended for good; " +
 		"the owner must issue a new grant"
 )
