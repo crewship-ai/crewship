@@ -130,19 +130,33 @@ validator still refuses them as unsupported Yjs roots.
 
 - The first tab is the existing `default` fragment: every older document is a
   one-tab document without migration, and reading tabs writes nothing.
-- Further tabs are XmlFragments named `tab:<id>`. Names, nesting and order
-  live in one `tabs` map (`{ name, parent, order }`), so renaming, reordering
-  and nesting never move content and never detach comment anchors.
-- Order keys are fractional strings over `[0-9A-Za-z]` that never end in `0`,
-  so a key between any two neighbours always exists. Nesting is at most 8 deep;
-  a tab cannot move into itself or its descendants, and a cycle formed by
-  concurrent moves is broken the same way on every replica.
+- Further tabs are XmlFragments named `tab:<id>`. Where a tab sits lives in
+  the `tabs` map (`{ parent, order }`) and its name in `tab-names`, so a
+  concurrent rename and move both survive, and renaming, reordering and
+  nesting never move content or detach comment anchors.
+- Order keys are fractional strings over `[0-9A-Za-z]` that never end in `0`.
+  Two replicas that append at once get equal keys, and a key can grow long
+  after many moves to the same place; in both cases the next insert there
+  rebalances the siblings' keys in the same write, so an insert never fails.
+- Nesting is at most 8 levels. A tab cannot move into itself or its
+  descendants; a cycle formed by concurrent moves is broken at its smallest
+  ID, and a tab that concurrent moves put below level 8 is shown under its
+  ancestor at level 7. Both depend only on the stored state, so every replica
+  shows the same tree.
 - Deleting a tab removes its content and metadata and moves its children up;
-  the first tab cannot be deleted. Content written concurrently into a deleted
+  the first tab cannot be deleted. The empty root a deleted tab leaves behind
+  is neither shown nor counted. Content written concurrently into a deleted
   tab stays visible as "Untitled tab" instead of being lost.
-- Metadata is closed and bounded (200 tabs, 120-character names, 256 KiB of
-  retained metadata history), and retained values are validated like live ones.
+- Metadata is closed and bounded, retained values included: 400 tabs at most
+  in any stored state, of which mutators create at most 200 (room for
+  concurrent creates), 120-character names, and 256 KiB of metadata history
+  counted as an upper bound of its encoded bytes. Mutators check every limit
+  before writing; the full validation walk runs once per foreign change.
 
 Admission (schema 7) still needs: the document validator to accept `tab:`
-fragments and the `tabs` map, a per-tab Page projection for outlines, Markdown
-and agents, block IDs unique across tabs, and the human-only upgrade.
+fragments and the tab maps; block IDs unique across all tabs, including
+duplicates created concurrently (a new tab refuses a block ID already used in
+this replica only); comment anchors that carry the tab and a defined outcome
+for anchors in deleted tabs; a Page projection in tree order for outlines,
+Markdown and agents; the human-only upgrade; and compaction, because the
+metadata history budget is for the document's lifetime.
