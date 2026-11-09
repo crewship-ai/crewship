@@ -20,6 +20,8 @@ const RICH_NAMES: Record<number, string[]> = {
   // Schema 5 also has the inline date and mention atoms; an editor without them would drop them.
   5: ["link", "bold", "italic", "strike", "underline", "textColor", "highlight", "code", "codeBlock", "blockquote", "taskList", "taskItem", "date", "mention"],
 }
+// Schema 6 adds the Canvas surface beside the Page; its Page is exactly schema 5's.
+RICH_NAMES[6] = RICH_NAMES[5]
 
 /** Block types that carry a stable `id` in this schema. */
 export function stableBlockTypes(schema: number | undefined): string[] {
