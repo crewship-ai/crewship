@@ -75,7 +75,9 @@ func shapeStyle(node *exportNode) string {
 	if exportStrokeColor.MatchString(node.Stroke) && width > 0 && width <= 1000 {
 		// An outline drawn inwards sits above the layer's content (an <img>
 		// fills its box and would cover an inset box-shadow) and follows
-		// border-radius, as the canvas draws the stroke over the shape.
+		// border-radius, as the canvas draws the stroke over the shape. The
+		// focus ring and the broken-link warning are !important in the
+		// stylesheet, so they still replace it on a linked layer.
 		w := strconv.FormatFloat(width, 'f', -1, 64)
 		style += ";outline:" + w + "px solid " + node.Stroke + ";outline-offset:-" + w + "px"
 	}
@@ -133,8 +135,8 @@ const exportStyle = `*{box-sizing:border-box}body{margin:0;background:#f1f5f9;co
 	`.layer{position:absolute;display:block;color:inherit;text-decoration:none}.rect{border-radius:6px}` +
 	`.text{white-space:pre;overflow:visible;font:20px/1.3 system-ui,sans-serif}.image img{display:block;width:100%;height:100%;object-fit:cover}` +
 	`.placeholder{border-radius:4px;background:#e2e8f0;color:#64748b;padding:8px 12px;font-size:14px;overflow:hidden}` +
-	`a.hotspot{cursor:pointer}a.hotspot:hover,a.hotspot:focus-visible{outline:2px solid #2563eb;outline-offset:1px}` +
-	`.broken-link{outline:2px dashed #d97706;outline-offset:1px}.empty{color:#475569}`
+	`a.hotspot{cursor:pointer}a.hotspot:hover,a.hotspot:focus-visible{outline:2px solid #2563eb!important;outline-offset:1px!important}` +
+	`.broken-link{outline:2px dashed #d97706!important;outline-offset:1px!important}.empty{color:#475569}`
 
 // RenderHTML writes one self-contained HTML document with every screen
 // (frame) of the version. Layers use the same geometry as the prototype

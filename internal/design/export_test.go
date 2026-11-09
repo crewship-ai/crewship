@@ -351,3 +351,26 @@ func TestRenderHTMLShapeStyle(t *testing.T) {
 		t.Errorf("image stroke is not drawn above the picture: %s", l)
 	}
 }
+
+// A stroke is an inline outline, which beats a stylesheet rule on the same
+// element: the focus ring of a linked layer and the broken-link warning must
+// still win, or a stroked hotspot has no visible keyboard focus (#5219).
+func TestRenderHTMLStrokeKeepsFocusAndBrokenLinkOutline(t *testing.T) {
+	a := map[string]any{"id": "a", "type": "frame", "x": 0, "y": 0, "width": 360, "height": 640}
+	b := map[string]any{"id": "b", "type": "frame", "x": 400, "y": 0, "width": 360, "height": 640}
+	cta := map[string]any{"id": "cta", "type": "rect", "parentId": "a", "x": 10, "y": 10, "width": 100, "height": 40, "fill": "#2563eb", "stroke": "#0f172a", "strokeWidth": 2, "linkTo": "b"}
+	gone := map[string]any{"id": "gone", "type": "rect", "parentId": "a", "x": 10, "y": 80, "width": 100, "height": 40, "fill": "#2563eb", "stroke": "#0f172a", "linkTo": "missing"}
+	out, err := RenderHTML(exportFixture(a, b, cta, gone), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	for _, want := range []string{"a.hotspot:focus-visible{outline:2px solid #2563eb!important", ".broken-link{outline:2px dashed #d97706!important"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("stylesheet lacks %q, so an inline stroke outline hides it", want)
+		}
+	}
+	if !strings.Contains(html, `data-node-id="cta"`) || !strings.Contains(html, "outline:2px solid #0f172a") {
+		t.Errorf("the linked layer lost its stroke")
+	}
+}
