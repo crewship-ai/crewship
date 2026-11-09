@@ -101,3 +101,22 @@ func TestDocsCapabilitiesMatchTheAuthoringValidator(t *testing.T) {
 		}
 	}
 }
+
+// Owner's decision (Q2): a Dashboard data write counts as Edit, a code change
+// as Propose. The guide must say so, and the kind must declare both modes.
+func TestDashboardDataWritesAreEdit(t *testing.T) {
+	g, err := Lookup("dashboard")
+	if err != nil {
+		t.Fatal(err)
+	}
+	modes := strings.Join(g.Modes, ",")
+	if !strings.Contains(modes, "propose") || !strings.Contains(modes, "edit") {
+		t.Fatalf("dashboard modes %v", g.Modes)
+	}
+	flat := strings.Join(strings.Fields(g.Content), " ")
+	for _, want := range []string{"Code changes are Propose", "Data writes change what readers see at once: they are Edit"} {
+		if !strings.Contains(flat, want) {
+			t.Errorf("dashboard guide lacks %q", want)
+		}
+	}
+}

@@ -806,6 +806,11 @@ proposal path (`propose` is unsupported), and an App's scripts reach only
 model calls, connectors, uploads, downloads, in-page comments and publishing
 are declared unsupported.
 
+On a Dashboard, a data write counts as Edit, not Propose: it changes what
+readers see at once, so it needs the Owner's authorization for that run. A
+code change is a Propose: a new retained version that does not move the
+shared version.
+
 ## Agent publishing policy
 
 The workspace artifact policy is the administrative ceiling for agent work on
