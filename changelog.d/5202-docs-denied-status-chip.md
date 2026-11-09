@@ -1,0 +1,1 @@
+- **A Docs page you cannot read now says "No access" (#5202).** In Artifacts, when the first read of a Docs page is refused, or access is removed before the document has loaded, the status chip shows "No access" instead of disappearing.

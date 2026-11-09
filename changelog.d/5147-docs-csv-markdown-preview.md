@@ -1,0 +1,1 @@
+- **Docs code blocks in `csv` or `markdown` can show a preview.** A `csv` block shows a table (first row as header) and a `markdown` block shows formatted text, with Source and Preview in the block header. Parsing is strict and bounded; raw HTML stays text, images are never loaded and only http, https and mailto links work. Other code blocks stay code.
