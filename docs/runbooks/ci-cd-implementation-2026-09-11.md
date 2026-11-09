@@ -32,6 +32,18 @@ aggregate, and no failed worker cancels the others. Six partitions also keep
 each test-selection argument under Linux's per-argument size limit; unexpected
 growth fails clearly instead of truncating coverage.
 
+The plain (non-race) `Go test (shard N)` lane uses the same split for
+internal/api since #5214, when the whole package reached its 20-minute
+per-binary bound with nothing failing. `go-package-shard.py run N 6 --split-api`
+removes internal/api from the six package partitions and runs top-level test
+slice N of 6 beside shard N's packages. It uses the same exact-cover partition
+as the race lane, so every Test/Example/Fuzz runs in exactly one shard. Each
+shard checks go test's terminal events against its slice and fails if a
+selected test did not run or an unselected one did. The split refuses `-run`,
+`-skip`, `-shuffle` and `-list`. `Go Shuffle (shard N)` still runs the whole
+package, because order dependence needs one shuffled binary, so it has a
+30-minute bound instead (1.5x the 1182 s measured on main).
+
 The other Go race packages run in two groups balanced by committed historical
 costs. Fresh `go list` output determines membership; timings only choose the
 group and execution order. New packages receive a default cost automatically,
