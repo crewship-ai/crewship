@@ -279,11 +279,12 @@ export function createDesignUndo(doc: Y.Doc) {
  const nodes = doc.getMap<Y.Map<unknown>>("nodes")
  const undo = new Y.UndoManager([nodes, doc.getArray("order")], { trackedOrigins: new Set(["editor"]), captureTimeout: 500 })
  // Keys are "<node id>:<property>"; "<node id>:*" stands for the whole layer.
- const touched = (changed: Map<Y.AbstractType<unknown>, Set<string | null>>) => {
+ const touched = (changed: Y.Transaction["changed"]) => {
   const keys = new Set<string>()
+  const root: unknown = nodes
   changed.forEach((subs, type) => {
-   if (type === nodes) subs.forEach(id => { if (id) keys.add(`${id}:*`) })
-   else if (type._item?.parent === nodes && typeof type._item.parentSub === "string") {
+   if (type === root) subs.forEach(id => { if (id) keys.add(`${id}:*`) })
+   else if (type._item && type._item.parent === root && typeof type._item.parentSub === "string") {
     const id = type._item.parentSub
     subs.forEach(key => { if (key) keys.add(`${id}:${key}`) })
    }
