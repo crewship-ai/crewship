@@ -44,18 +44,29 @@ export function useDocumentPresence({ workspaceId, slug, editor, enabled }: { wo
     const url = `/api/v1/pages/${encodeURIComponent(slug)}/document/presence?workspace_id=${encodeURIComponent(workspaceId)}`
     const post = (body: object, keepalive = false) => apiFetch(url, { method: "POST", keepalive, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
     let stopped = false, inflight = false, again = false, interval = 1000, lastSent = 0
+    // What the server last heard about this caret, and what was last drawn: a selection update that did not move the
+    // caret sends no extra beat, and an unchanged reply draws nothing. Otherwise anything that echoes a selection
+    // update after a redraw (a browser re-reading its selection) loops at the selection throttle's ceiling.
+    let sentCaret = "", drawn = ""
     let timer: ReturnType<typeof setTimeout> | undefined, soon: ReturnType<typeof setTimeout> | undefined, sending: Promise<unknown> | undefined
-    const show = (next: PresencePeer[]) => { if (stopped) return; setPeers(next); setRemoteCarets(editor, next) }
+    const caretKey = () => JSON.stringify(caretOf(editor))
+    const show = (next: PresencePeer[]) => {
+      if (stopped) return
+      const key = JSON.stringify(next.map(peer => [peer.client, peer.userId, peer.name, peer.color, peer.tabs, peer.anchor && encodePosition(peer.anchor), peer.head && encodePosition(peer.head)]))
+      if (key === drawn) return
+      drawn = key; setPeers(next); setRemoteCarets(editor, next)
+    }
     const beat = async () => {
       if (stopped) return
       if (inflight) { again = true; return }
       inflight = true; again = false; lastSent = Date.now()
       clearTimeout(timer)
       try {
-        const request = post({ client: client.current, ...caretOf(editor) }); sending = request
+        const caret = caretOf(editor); sentCaret = JSON.stringify(caret)
+        const request = post({ client: client.current, ...caret }); sending = request
         const response = await request
         if (stopped) return
-        if ([401, 403, 404, 503].includes(response.status)) { show([]); stopped = true; return }
+        if ([401, 403, 404, 503].includes(response.status)) { drawn = ""; show([]); stopped = true; return }
         if (response.ok) {
           const reply = parsePresenceReply(await response.json().catch(() => null))
           interval = reply.intervalMs
@@ -68,8 +79,8 @@ export function useDocumentPresence({ workspaceId, slug, editor, enabled }: { wo
       }
     }
     const moved = () => {
-      if (stopped || soon) return
-      soon = setTimeout(() => { soon = undefined; void beat() }, Math.max(0, SELECTION_THROTTLE_MS - (Date.now() - lastSent)))
+      if (stopped || soon || caretKey() === sentCaret) return
+      soon = setTimeout(() => { soon = undefined; if (caretKey() !== sentCaret) void beat() }, Math.max(0, SELECTION_THROTTLE_MS - (Date.now() - lastSent)))
     }
     // A reload or a closed tab never runs the cleanup below: tell the server now, so this tab's caret does not
     // linger next to the reopened one until it expires.
