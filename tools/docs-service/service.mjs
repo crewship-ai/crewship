@@ -6,7 +6,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
-import { VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION, schemaAllows, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown, validUserId } from './schema.mjs';
+import { VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION, CREATE_VERSION, schemaAllows, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown, validUserId } from './schema.mjs';
 import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
@@ -134,10 +134,10 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   async function execute(page, operation, context, request) {
     switch (operation) {
       case 'prepare-create': {
-        // Go names the creation schema (documents.CreateSchema); an older
-        // caller that sends blocks alone keeps the previous latest-schema build.
+        // Go names the creation schema (documents.CreateSchema); a caller that
+        // sends blocks alone gets the creation schema, never "latest".
         if (!request || typeof request !== 'object' || Array.isArray(request) || !Object.hasOwn(request,'blocks') || Object.keys(request).some(key=>!['blocks','schema'].includes(key))) throw fault(400,'closed authoring blocks required');
-        const version = Object.hasOwn(request,'schema') ? request.schema : LATEST_VERSION;
+        const version = Object.hasOwn(request,'schema') ? request.schema : CREATE_VERSION;
         if (!richSchema(version) || !schemaAllows(version,'draft')) throw fault(409,'unsupported creation schema');
         const doc=create(creationDocument(request.blocks),version);
         try { return {schema:version,snapshot:snapshot(doc),blocks:(await outline(doc,version)).map(({id,hash})=>({id,hash}))}; }

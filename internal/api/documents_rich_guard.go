@@ -86,6 +86,16 @@ func documentRichSemanticGuardFor(schema int, semantic *documentSemanticPatch, h
 		if expected != semantic.Text {
 			return documents.ErrConflict
 		}
+		// The edit is the engine's minimal one: a replacement never starts or
+		// ends with the code point it replaces. Otherwise a proof could
+		// "replace" marked text by the same unmarked text and drop its marks.
+		if edit.From < edit.To && edit.Insert != "" {
+			deleted := []rune(string(utf16.Decode(units[edit.From:edit.To])))
+			inserted := []rune(edit.Insert)
+			if deleted[0] == inserted[0] || deleted[len(deleted)-1] == inserted[len(inserted)-1] {
+				return documents.ErrConflict
+			}
+		}
 		// An atom sits at a text offset. It stays before the edit when at or
 		// before From, after it when at or after To; inside a deleted range,
 		// or exactly beside inserted text, its side would be a guess.

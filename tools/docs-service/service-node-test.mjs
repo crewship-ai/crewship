@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startService, PROTOCOL } from './service.mjs';
-import { RICH_VERSION, LATEST_VERSION, create, snapshot, initialJSON, outline, load, validate, anchor, find, encode } from './schema.mjs';
+import { RICH_VERSION, LATEST_VERSION, CREATE_VERSION, create, snapshot, initialJSON, outline, load, validate, anchor, find, encode } from './schema.mjs';
 const secret = 'a'.repeat(48);
 function call(socket, path, data, headers = {}) {
   return new Promise((resolve, reject) => {
@@ -672,7 +672,7 @@ test('semantic commit authority follows the authenticated realm', async () => {
 });
 
 
-test('prepare-create builds closed latest-schema content without Go data RPCs', async () => {
+test('prepare-create builds closed creation-schema content without Go data RPCs', async () => {
   const model=authorityModel(), f=await fixture(model.handle); await f.start();
   const baseline=model.seen.length, before=structuredClone(model.state);
   const blocks=[{type:'heading',level:1,text:'Prepared report'},{type:'paragraph',text:'Literal <script> & text'},{type:'bulletList',items:['First','Second']},{type:'orderedList',items:['Step']},{type:'codeBlock',text:'const literal = "<script>";\n'}];
@@ -681,10 +681,10 @@ test('prepare-create builds closed latest-schema content without Go data RPCs', 
     const result=await prepare({blocks},{Authorization:'Bearer agtv2.synthetic-creation'});
     assert.equal(result.status,200,'private prepare-create dispatcher must admit bounded authoring');
     assert.deepEqual(Object.keys(result.body).sort(),['blocks','schema','snapshot']);
-    assert.equal(result.body.schema,LATEST_VERSION);
+    assert.equal(result.body.schema,CREATE_VERSION);
     const doc=load(result.body.snapshot);
     try {
-      const content=validate(doc,LATEST_VERSION), prepared=await outline(doc,LATEST_VERSION);
+      const content=validate(doc,CREATE_VERSION), prepared=await outline(doc,CREATE_VERSION);
       assert.deepEqual(content.content.map(block=>block.type),['heading','paragraph','bulletList','orderedList','codeBlock']);
       assert.equal(content.content[1].content[0].text,'Literal <script> & text');
       assert.deepEqual(result.body.blocks,prepared.map(({id,hash})=>({id,hash})));

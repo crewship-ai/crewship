@@ -8931,6 +8931,23 @@
           "can_write": {
             "type": "boolean"
           },
+          "capabilities": {
+            "description": "What this Doc's content schema supports (read, edit, draft, propose, accept, restore, export, upgrade), on a read.",
+            "items": {
+              "enum": [
+                "read",
+                "edit",
+                "draft",
+                "propose",
+                "accept",
+                "restore",
+                "export",
+                "upgrade"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "content": {
             "$ref": "#/components/schemas/DocumentNode"
           },
@@ -8979,7 +8996,7 @@
             "type": "string"
           },
           "proposals": {
-            "description": "Agent proposals and their review are served on this Doc (schema 4; never for restricted members).",
+            "description": "Agent proposals and their review are served on this Doc (its schema supports them: 4 or 5; never for restricted members).",
             "type": "boolean"
           },
           "rev": {

@@ -3,8 +3,9 @@ package documents
 // Content schemas and what each one supports (#5233). Every gate on a
 // document's schema asks this table instead of comparing with one number or
 // with LatestSchema, so a new schema can never silently switch a capability
-// on or off for documents that already exist. tools/docs-service/
-// schema-capabilities.mjs mirrors it for the engine; a test keeps them equal.
+// on or off for documents that already exist. SCHEMA_CAPABILITIES in
+// tools/docs-service/schema-core.mjs mirrors it for the engine and browser;
+// a test keeps them equal.
 
 // CreateSchema is the schema new Docs are born at, from the New Doc dialog,
 // the Artifacts library and an agent's doc create. It is explicit: raising

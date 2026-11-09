@@ -108,6 +108,10 @@ func TestDocumentRichSemanticGuardSchemaFive(t *testing.T) {
 			tree(text("Tell "), text("Ann", red), text(" by "), date, text(" and "), text(" now.", under)), false},
 		{"a dropped colour", documentSemanticEdit{From: 0, To: 3, Insert: "Tell"}, "Tell Ann by  and  now.",
 			tree(text("Tell Ann by "), date, text(" and "), mention, text(" now.", under)), false},
+		{"marked text replaced by the same unmarked text", documentSemanticEdit{From: 4, To: 7, Insert: "Ann"}, "Ask Ann by  and  now.",
+			tree(text("Ask Ann by "), date, text(" and "), mention, text(" now.", under)), false},
+		{"a non-minimal edit that keeps marks", documentSemanticEdit{From: 0, To: 3, Insert: "Ask"}, "Ask Ann by  and  now.",
+			tree(text("Ask "), text("Ann", red), text(" by "), date, text(" and "), mention, text(" now.", under)), false},
 		{"a moved date", documentSemanticEdit{From: 0, To: 3, Insert: "Tell"}, "Tell Ann by  and  now.",
 			tree(text("Tell "), text("Ann", red), text(" by  and "), date, mention, text(" now.", under)), false},
 	} {
@@ -154,5 +158,51 @@ func TestDocumentProposalInputBindsSchema(t *testing.T) {
 		if _, err := documentProposalInput("prop", "f", "run", "p", schema, semantic, map[string]string{"p": hash}, 0, &generation); err == nil {
 			t.Fatalf("schema-5 content proposed at schema %d", schema)
 		}
+	}
+}
+
+// Atom edge cases (#5233 review): a leading atom, a paragraph of only an atom,
+// surrogate pairs beside an atom, and atoms in a heading.
+func TestDocumentRichSemanticGuardSchemaFiveAtomEdges(t *testing.T) {
+	block := func(kind string, content string) json.RawMessage {
+		attrs := `{"id":"p"}`
+		if kind == "heading" {
+			attrs = `{"id":"p","level":2}`
+		}
+		return json.RawMessage(`{"type":"doc","content":[{"type":"` + kind + `","attrs":` + attrs + `,"content":[` + content + `]}]}`)
+	}
+	const date = `{"type":"date","attrs":{"value":"2026-11-20"}}`
+	for _, tt := range []struct {
+		name          string
+		kind          string
+		before, after string
+		edit          documentSemanticEdit
+		text          string
+		ok            bool
+	}{
+		{"insert before a leading date", "paragraph", date + `,{"type":"text","text":"x"}`, `{"type":"text","text":"A"},` + date + `,{"type":"text","text":"x"}`, documentSemanticEdit{From: 0, To: 0, Insert: "A"}, "Ax", false},
+		{"insert into a paragraph of only a date", "paragraph", date, `{"type":"text","text":"A"},` + date, documentSemanticEdit{From: 0, To: 0, Insert: "A"}, "A", false},
+		{"emoji edit away from a date", "paragraph", `{"type":"text","text":"😀 "},` + date, `{"type":"text","text":"😁 "},` + date, documentSemanticEdit{From: 0, To: 2, Insert: "😁"}, "😁 ", true},
+		{"emoji inserted beside a date", "paragraph", `{"type":"text","text":"😀"},` + date, `{"type":"text","text":"😀😁"},` + date, documentSemanticEdit{From: 2, To: 2, Insert: "😁"}, "😀😁", false},
+		{"heading edit before a date", "heading", `{"type":"text","text":"Due "},` + date, `{"type":"text","text":"Ends "},` + date, documentSemanticEdit{From: 0, To: 3, Insert: "Ends"}, "Ends ", true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			before, after := block(tt.kind, tt.before), block(tt.kind, tt.after)
+			first, err := documentRichTreeFor(before, 5)
+			if err != nil {
+				t.Fatal(err)
+			}
+			last, err := documentRichTreeFor(after, 5)
+			if err != nil {
+				t.Fatal(err)
+			}
+			e := tt.edit
+			semantic := &documentSemanticPatch{Target: "p", Text: tt.text, Edit: &e, Rich: &documentRichProof{Before: before, After: after}}
+			hashes := map[string]string{"p": documentRichHash(documentRichFind(first, "p"))}
+			err = documentRichSemanticGuardFor(5, semantic, hashes, richTestProjection(t, last), nil)(context.Background(), nil, "agent", documents.State{Schema: 5, Projection: richTestProjection(t, first)})
+			if (err == nil) != tt.ok {
+				t.Fatalf("err=%v want ok=%v", err, tt.ok)
+			}
+		})
 	}
 }
