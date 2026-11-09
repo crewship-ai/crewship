@@ -9,9 +9,11 @@ import type { KindReport } from "../project-parts"
 
 const read = vi.hoisted(() => ({ value: { pending: false, error: false as unknown, limitExceeded: false, collections: undefined as unknown, manifest: undefined as unknown } }))
 vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-dashboard-data", () => ({ useArtifactDashboardData: () => read.value }))
+const runs = vi.hoisted(() => ({ value: null as unknown }))
+vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-dashboard-runs", () => ({ useArtifactDashboardRuns: () => runs.value }))
 
 afterEach(cleanup)
-beforeEach(() => { read.value = { pending: false, error: false, limitExceeded: false, collections: undefined, manifest: undefined } })
+beforeEach(() => { read.value = { pending: false, error: false, limitExceeded: false, collections: undefined, manifest: undefined }; runs.value = null })
 
 const snapshot = (over: Partial<ArtifactProjectSnapshot> = {}): ArtifactProjectSnapshot => ({
   page_id: "page-1", name: "Pricing site", can_write: true, latest_version: 4, shared_version: 3,
@@ -168,6 +170,29 @@ describe("Dashboard view", () => {
       await vi.advanceTimersByTimeAsync(90_000)
       await waitFor(() => expect(reports.at(-1)?.status).toMatchObject({ key: "stale" }))
     } finally { vi.useRealTimers() }
+  })
+
+  it("shows a failed producer run with its reason and last success, and keeps the values", async () => {
+    read.value = { pending: false, error: false, limitExceeded: false, collections, manifest: declared }
+    runs.value = [{ collection: "deals", state: "failed", startedAt: new Date(Date.now() - 60_000), finishedAt: new Date(), lastAttemptAt: new Date(Date.now() - 60_000), lastSuccessAt: new Date(Date.now() - 3_600_000), reason: "CRM returned 502", startedBy: "Agent" }]
+    const data = snapshot({ manifest: { version: 4, entrypoint: "index.html", files: files('{"schema_version":1,"datasets":{"deals":{"title":"Open deals","mode":"planned","max_age_seconds":7200}}}') } })
+    const reports: (KindReport | null)[] = []
+    inFrame(<DashboardProjectView workspaceId="w" parts={parts({ data, previewKind: "dashboard" })} onReport={report => reports.push(report)} />)
+    await waitFor(() => expect(reports.at(-1)?.status).toMatchObject({ key: "stale", label: "Refresh failed", detail: expect.stringContaining("CRM returned 502") }))
+    fireEvent.click(await screen.findByRole("button", { name: "Sources" }))
+    const row = document.querySelector('[data-dataset="deals"]') as HTMLElement
+    expect(row).toHaveTextContent("1 value")
+    expect(row.querySelector('[data-run-state="failed"]')).toHaveTextContent(/Refresh failed \d\d:\d\d: CRM returned 502 · Last success \d\d:\d\d/)
+  })
+
+  it("reports Refreshing while a producer run is in progress", async () => {
+    read.value = { pending: false, error: false, limitExceeded: false, collections, manifest: declared }
+    runs.value = [{ collection: "deals", state: "running", startedAt: new Date(), finishedAt: null, lastAttemptAt: new Date(), lastSuccessAt: null, reason: null, startedBy: "Agent" }]
+    const reports: (KindReport | null)[] = []
+    inFrame(<DashboardProjectView workspaceId="w" parts={parts({ data: snapshot({ manifest: { version: 4, entrypoint: "index.html", files: files() } }), previewKind: "dashboard" })} onReport={report => reports.push(report)} />)
+    await waitFor(() => expect(reports.at(-1)?.status).toMatchObject({ key: "refreshing" }))
+    fireEvent.click(await screen.findByRole("button", { name: "Sources" }))
+    expect(document.querySelector('[data-run-state="running"]')).toHaveTextContent(/Refreshing since \d\d:\d\d · No successful refresh yet/)
   })
 
   it("reports Sample data from datasets.json", async () => {

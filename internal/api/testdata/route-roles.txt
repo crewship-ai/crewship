@@ -351,6 +351,8 @@ POST /api/v1/pages/{slug}/archive roleSelf
 POST /api/v1/pages/{slug}/artifact/comments roleInline
 POST /api/v1/pages/{slug}/artifact/comments/{commentId}/reply roleInline
 POST /api/v1/pages/{slug}/artifact/data/{collection} roleInline
+POST /api/v1/pages/{slug}/artifact/data/{collection}/runs roleInline
+POST /api/v1/pages/{slug}/artifact/data/{collection}/runs/{run} roleInline
 POST /api/v1/pages/{slug}/artifact/restore roleInline
 POST /api/v1/pages/{slug}/artifact/share roleInline
 POST /api/v1/pages/{slug}/artifact/versions roleInline

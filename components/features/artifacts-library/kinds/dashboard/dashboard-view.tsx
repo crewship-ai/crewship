@@ -6,6 +6,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils"
 import type { ArtifactViewerParts } from "@/components/features/chat/artifact-context/viewer/artifact-viewer-panel"
 import { useArtifactDashboardData } from "@/components/features/chat/artifact-context/projects/use-artifact-dashboard-data"
+import { useArtifactDashboardRuns } from "@/components/features/chat/artifact-context/projects/use-artifact-dashboard-runs"
 import { ArtifactDrawerSection, ArtifactSlot, ArtifactTool, ArtifactToolSeparator, useArtifactFrame } from "../../frame"
 import { FullScreenTool, ProjectDrawer, VersionMenu, useKindReport, type KindReport } from "../project-parts"
 import { RuntimeGate } from "../app/app-view"
@@ -36,10 +37,23 @@ export function SourcesList({ freshness, codeVersion, detailed = false }: { fres
         <small className="text-xs text-muted-foreground">
           {row.updatedAt ? `Last write ${freshnessTime(row.updatedAt)}` : "Nothing written yet"}{row.sources.length ? ` · ${row.sources.join(", ")}` : ""}
         </small>
+        {row.run && <small data-run-state={row.stalled ? "stalled" : row.run.state} className={cn("text-xs", row.run.state === "failed" || row.stalled ? "font-medium text-warn" : "text-muted-foreground")}>
+          {runLine(row)}
+        </small>}
         {detailed && <small className="font-mono text-xs text-muted-foreground">Collection {row.name}{codeVersion ? ` · declared by v${codeVersion}` : ""}</small>}
       </li>)}
     </ul>
   </>
+}
+
+/** One line per collection with a producer run record: what the last attempt did and when it last succeeded. */
+function runLine(row: DashboardFreshness["collections"][number]): string {
+  const run = row.run!
+  const success = row.lastSuccessAt ? `Last success ${freshnessTime(row.lastSuccessAt)}` : "No successful refresh yet"
+  if (row.stalled) return `Refresh stalled since ${freshnessTime(run.startedAt)} · ${success}`
+  if (run.state === "running") return `Refreshing since ${freshnessTime(run.startedAt)} · ${success}`
+  if (run.state === "failed") return `Refresh failed ${freshnessTime(run.lastAttemptAt)}${run.reason ? `: ${run.reason}` : ""} · ${success}`
+  return `${success} · ${run.startedBy}`
 }
 
 const CLOCK_MS = 30_000
@@ -69,7 +83,9 @@ export function DashboardProjectView({ workspaceId, parts, onReport }: { workspa
   const datasets = React.useMemo(() => parseDashboardDatasets(data.manifest.files, read.manifest?.collections ?? []), [data.manifest.files, read.manifest])
   // An unchanged poll keeps the same collections, so a clock re-derives Stale while the dashboard stays open.
   const now = useMinuteClock()
-  const freshness = React.useMemo(() => read.collections ? dashboardFreshness(read.collections, datasets, now) : null, [read.collections, datasets, now])
+  // Producer runs only annotate the data; a missing or failed runs read never hides values.
+  const runs = useArtifactDashboardRuns({ workspaceId, pageId: data.page_id, codeVersion: version.shown, collections: read.manifest?.collections, enabled: read.enabled })
+  const freshness = React.useMemo(() => read.collections ? dashboardFreshness(read.collections, datasets, now, runs) : null, [read.collections, datasets, now, runs])
   // Host bindings (data-field) attribute each value; an interactive page draws its own numbers, so no per-value citation exists there.
   // Decided by what is drawn: an interactive project in comment-select mode shows the bound preview, with citations.
   const citations = parts.previewKind === "dashboard"

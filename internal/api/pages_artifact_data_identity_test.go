@@ -7,6 +7,7 @@ func TestArtifactDataIdentityErasurePreservesValuesAndOtherWorkspace(t *testing.
 	for _, scope := range []struct{ ws, page string }{{ws, "identity-page"}, {"identity-other-ws", "identity-other-page"}} {
 		mustExec(t, db, `INSERT INTO artifact_data_collections(workspace_id,page_id,name) VALUES(?,?,'sales')`, scope.ws, scope.page)
 		mustExec(t, db, `INSERT INTO artifact_data_documents(workspace_id,page_id,collection,id,version,value_json,updated_by,updated_at) VALUES(?,?,'sales','row',1,'{"n":42}',?,datetime('now'))`, scope.ws, scope.page, "user:"+user)
+		mustExec(t, db, `INSERT INTO artifact_data_runs(workspace_id,page_id,collection,id,idempotency_key,state,started_by,started_at) VALUES(?,?,'sales','run_1','k','running',?,datetime('now'))`, scope.ws, scope.page, user)
 	}
 	tx, err := db.BeginTx(t.Context(), nil)
 	if err != nil {
@@ -24,6 +25,13 @@ func TestArtifactDataIdentityErasurePreservesValuesAndOtherWorkspace(t *testing.
 		var version int64
 		if err := db.QueryRow(`SELECT updated_by,value_json,version FROM artifact_data_documents WHERE workspace_id=?`, scope.ws).Scan(&actor, &value, &version); err != nil || actor != scope.actor || value != `{"n":42}` || version != 1 {
 			t.Fatalf("identity/value changed: %q %q %d %v", actor, value, version, err)
+		}
+		want := scope.actor
+		if want != "erased" {
+			want = user
+		}
+		if err := db.QueryRow(`SELECT started_by FROM artifact_data_runs WHERE workspace_id=?`, scope.ws).Scan(&actor); err != nil || actor != want {
+			t.Fatalf("run producer identity: %q %v", actor, err)
 		}
 	}
 }

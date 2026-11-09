@@ -101,13 +101,24 @@ then says *The dataset details in datasets.json are invalid*. Nothing in this
 file is a server record. The last write and who made it always come from the
 server, never from the file.
 
-The status chip follows these details: **Stale** when a `planned` or `live`
-dataset is older than its maximum age, **Sample data** when any dataset is
-marked as sample, **Fixed data** when every dataset is `fixed`, and **Live**
-otherwise. Without a `max_age_seconds` nothing is ever shown as stale. The
-chip does not show producer runs: a refresh that failed and wrote nothing
-leaves no trace here, only an ageing last write. `live` describes how the
-data is expected to change; it does not run a query as the reader.
+The status chip follows these details and the producer runs the server
+recorded (see [Record producer runs](#record-producer-runs)), in this order:
+
+| Chip | When |
+|---|---|
+| **Refresh failed** | The newest run of a collection failed. The owner and editors see the reason; readers see only that it failed. |
+| **Refresh stalled** | A run has been running for more than 30 minutes without finishing. |
+| **Refreshing…** | A run is in progress. |
+| **Stale** | A `planned` or `live` dataset is older than its maximum age. With run records the age counts from the last successful run, otherwise from the last write. |
+| **Sample data** | Any dataset is marked as sample. |
+| **Fixed data** | Every dataset is `fixed`. |
+| **Live** | Otherwise. |
+
+Without a `max_age_seconds` nothing is ever shown as stale. Every state keeps
+the values as last written; a failed or running refresh never blanks a number
+or shows zero. Sources lists each collection's last run and its last success.
+`live` describes how the data is expected to change; it does not run a query as
+the reader.
 
 `dashboard.json` keeps `schema_version` 1. Version 2 is reserved for the
 planned widget profile, which is not available yet.
@@ -277,6 +288,31 @@ Read the collection again, decide what the value should be, and send a new
 batch. Do not retry the same file. The CLI never retries on its own. Agents get
 the same rule through the `artifact_data_batch` tool. The full command
 reference is in [`crewship page`](/cli/page#dashboard-data-disabled-by-default).
+
+## Record producer runs
+
+A producer that refreshes a dataset on a schedule (an agent, a routine or a
+script in a container) can record each refresh so readers see **Refreshing…**,
+**Refresh failed** and the last success instead of an ageing write. Starting
+and finishing a run needs the same right as writing data, and a run never
+writes data or publishes a version. The producer recorded is the
+authenticated caller; it cannot be supplied.
+
+```bash
+crewship page artifact data runs start <slug> sales --base-version 3 --key nightly-2026-11-09
+crewship page artifact data batch <slug> sales --file batch.json
+crewship page artifact data runs finish <slug> sales <run-id> --base-version 3 --state succeeded
+```
+
+If the refresh fails, finish with `--state failed --reason "<what went wrong>"`.
+The server removes control characters and anything that looks like a
+credential and keeps at most 500 bytes. Repeating `start` with the same `--key`
+returns the same run, so a retried job does not open a second one. Finishing
+the same run again with the same outcome is accepted; a different outcome
+fails with `409`. `crewship page artifact data runs list <slug> --version 3`
+shows the newest run, last attempt and last success per collection. The newest
+20 runs and the newest success are kept per collection. Agent runs started
+through the artifact tools cannot record runs yet; use the CLI with a token.
 
 ## Who sees which data
 

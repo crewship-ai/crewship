@@ -3016,6 +3016,43 @@ batch; there is no delete operation.
 CLI commands are `crewship page artifact data collections`, `data get` and
 `data batch`. Original-run MCP tools are `artifact_data_collections`,
 `artifact_data_read` and `artifact_data_batch`.
+
+### Dashboard producer runs
+
+| Method | Route | Request / result |
+| --- | --- | --- |
+| POST | `/api/v1/pages/{slug}/artifact/data/{collection}/runs` | Request body `{base_version,idempotency_key}`; response is the run `{id,collection,state,started_by,started_by_kind,started_at}`: 201 when created, 200 when the key repeats. |
+| POST | `/api/v1/pages/{slug}/artifact/data/{collection}/runs/{run}` | Request body `{base_version,state,reason?}` with `state` `succeeded` or `failed`; response is the finished run with `finished_at` and, for a failure, `failure_reason`. |
+| GET | `/api/v1/pages/{slug}/artifact/data-runs` | Required `version` query; response `{code_version,runs:[{collection,latest,last_attempt_at,last_success_at?}]}` for declared collections that have a run. |
+
+A producer records each refresh of a collection as a run. A run never writes
+data or changes a code version; the producer writes with the batch route
+between start and finish. `idempotency_key` is 1–128 letters, digits, `.`, `_`,
+`:` or `-`. The producer is the authenticated principal and is stored on the
+server; the request cannot supply it, and responses project it as
+`started_by` (`You`, `Contributor`, `Agent` or `Former contributor`). The
+newest 20 runs and the newest success are kept per collection.
+
+**Authentication and authority:** start and finish require exactly the
+authority of a data batch (owner, the owner's consented agent run, or a human
+with a current Edit share), `pages:write` scope, and a `base_version` equal to
+the latest code version that declares the collection. The list route requires
+the authority of a data read and returns only collections the selected version
+declares. `failure_reason` is returned to the owner and editors only. A failure
+reason is cleaned on the server: control and invisible characters are removed,
+bearer and basic credentials, `key=value` secrets, Crewship and common provider
+tokens and URL user info are redacted, and it is cut to 500 bytes.
+
+**Statuses:** 200 success or idempotent replay; 201 run created; 400 invalid
+body, key, state or version; 401 unauthenticated; 403 write authority denied;
+404 disabled, inaccessible, undeclared collection or unknown run (including a
+run of another Page or workspace); 409 stale code base, a key owned by another
+producer, or a finish whose outcome differs from the stored one
+(`artifact_data_run_conflict`); 413 storage quota; 500 internal failure; 503
+durable transaction unavailable.
+
+CLI commands are `crewship page artifact data runs start`, `runs finish` and
+`runs list`. There is no MCP tool; agents use the CLI.
 ## Artifact kind metadata
 
 Page lists and authenticated detail responses include `artifact_kind` for a

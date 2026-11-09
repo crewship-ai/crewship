@@ -77,6 +77,7 @@ artifact_data_conflict and nothing is written; the CLI never retries.`
     | crewship page artifact data batch sales-dashboard sales --file -`
 	batch.Flags().String("file", "", "Bounded JSON batch file; - reads stdin (required)")
 	root.AddCommand(batch)
+	root.AddCommand(newArtifactDataRunsCommand())
 	root.Long = `Read and write the JSON documents of a dashboard artifact.
 
 A code version declares its collections in dashboard.json, for example
