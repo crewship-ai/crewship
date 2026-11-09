@@ -235,17 +235,18 @@ ORDER BY crewship_casefold(u.full_name), u.id LIMIT ?`, args...)
 // check then decides. Private output has only its custodian and the workspace
 // administrators. Any other Document page: unrestricted members who are
 // OWNER/ADMIN, its owner, in its owning crew, or named, directly or through a
-// crew, by a grant or by its folder's ACL (or the workspace is named). Agent
-// grants never make a person a reader.
+// crew, by a live grant (the same verdict view the grant reader uses: issuer
+// in standing, not retired) or by its folder's ACL, or the workspace is named.
+// Agent grants never make a person a reader.
 func documentPeopleAudience(rec *pageRecord) (string, []any) {
 	if rec.PrivateAudience {
 		return ` AND (u.id=? OR m.role IN ('OWNER','ADMIN'))`, []any{rec.OwnerUserID}
 	}
-	const named = `(s.subject_type='workspace' OR (s.subject_type='user' AND s.subject_id=u.id) OR (s.subject_type='crew' AND s.subject_id IN (SELECT cm.crew_id FROM crew_members cm WHERE cm.user_id=u.id)))`
+	const named = `(s.subject_type='workspace' OR (s.subject_type='user' AND s.subject_id=u.id) OR (s.subject_type='crew' AND s.subject_id IN (SELECT cm.crew_id FROM crew_members cm JOIN crews c ON c.id=cm.crew_id AND c.deleted_at IS NULL WHERE cm.user_id=u.id)))`
 	return ` AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=m.user_id AND restricted.access_mode='restricted')
 AND (m.role IN ('OWNER','ADMIN') OR u.id=?
- OR EXISTS(SELECT 1 FROM crew_members cm WHERE cm.user_id=u.id AND cm.crew_id=?)
- OR EXISTS(SELECT 1 FROM page_grants s WHERE s.page_id=? AND ` + named + `)
+ OR EXISTS(SELECT 1 FROM crew_members cm JOIN crews c ON c.id=cm.crew_id AND c.deleted_at IS NULL WHERE cm.user_id=u.id AND cm.crew_id=?)
+ OR EXISTS(SELECT 1 FROM page_grant_verdicts s WHERE s.page_id=? AND s.issuer_standing=1 AND s.retired_at IS NULL AND s.level IN ('read','comment','produce','write') AND ` + named + `)
  OR EXISTS(SELECT 1 FROM page_folder_acl s WHERE s.folder_id=? AND ` + named + `))`,
 		[]any{rec.OwnerUserID, rec.OwnerCrewID, rec.ID, rec.FolderID}
 }
@@ -256,24 +257,42 @@ AND (m.role IN ('OWNER','ADMIN') OR u.id=?
 // within documentPeopleAuditWindow, not once per keystroke of the picker.
 func (h *PageHandler) replyDocumentPeople(w http.ResponseWriter, r *http.Request, tx *sql.Tx, rec *pageRecord, people []documentPerson) {
 	_ = tx.Rollback()
-	key, role := documentPeopleAuditKey(r, rec), ""
-	if user := UserFromContext(r.Context()); user != nil && user.ID != rec.OwnerUserID && key != "" {
+	ctx, workspace, user := r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context())
+	// Decide first whether this read is audited at all, so the writer is taken
+	// only for an audit that will be committed: the custodian and anyone who
+	// reaches the Document without the administrator role need none.
+	audited, role := false, ""
+	if user != nil && user.ID != rec.OwnerUserID {
 		var err error
-		role, err = h.liveContentHumanRole(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID)
-		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		role, err = h.liveContentHumanRole(ctx, workspace, user.ID)
+		if errors.Is(err, sql.ErrNoRows) {
+			role, err = "", nil
+		}
+		if err == nil && workspaceArtifactReader(role) {
+			audited = rec.PrivateAudience
+			if !audited {
+				audited, err = h.reachedOnlyByAdminRole(ctx, workspace, rec, user.ID)
+			}
+		}
+		if err != nil {
 			replyInternalError(w, h.logger, "authorize document people audit", err)
 			return
 		}
 	}
-	if !workspaceArtifactReader(role) {
+	key := documentPeopleAuditKey(r, rec, role)
+	if !audited || key == "" {
 		if !h.auditPrivateOwnerAccess(w, r, rec) {
 			return
 		}
 		writeJSON(w, 200, documentPeopleResponse{People: people})
 		return
 	}
-	// The audit is appended in a batch this handler owns, so a repeat lookup
-	// in the same session can be dropped instead of committed.
+	// Already audited for this Document, custodian, role and credential: the
+	// role and reach were re-derived above from live state, nothing is written.
+	if h.documentPeople().auditedRecently(key) {
+		writeJSON(w, 200, documentPeopleResponse{People: people})
+		return
+	}
 	r, b, err := h.startMetadataRead(r, true)
 	if err != nil {
 		replyInternalError(w, h.logger, "begin document people audit", err)
@@ -283,19 +302,20 @@ func (h *PageHandler) replyDocumentPeople(w http.ResponseWriter, r *http.Request
 	if !h.auditPrivateOwnerAccess(w, r, rec) {
 		return
 	}
-	if len(b.audits) > 0 && !h.documentPeople().auditedRecently(key) {
-		if !h.finishMetadataRead(w, r, b) {
-			return
-		}
+	if !h.finishMetadataRead(w, r, b) {
+		return
+	}
+	if len(b.audits) > 0 {
 		h.documentPeople().rememberAudit(key)
 	}
 	writeJSON(w, 200, documentPeopleResponse{People: people})
 }
 
 // documentPeopleAuditKey names one administrator read: workspace, Document,
-// its custodian and audience, and the exact credential (session or CLI token
-// digest). "" when the credential cannot be named, so every lookup is audited.
-func documentPeopleAuditKey(r *http.Request, rec *pageRecord) string {
+// its owner and audience, the reader's live role, and the exact credential
+// (session or CLI token digest). "" when the credential cannot be named, so
+// every lookup is audited.
+func documentPeopleAuditKey(r *http.Request, rec *pageRecord, role string) string {
 	user := UserFromContext(r.Context())
 	if user == nil {
 		return ""
@@ -317,7 +337,7 @@ func documentPeopleAuditKey(r *http.Request, rec *pageRecord) string {
 	default:
 		return ""
 	}
-	return strings.Join([]string{WorkspaceIDFromContext(r.Context()), user.ID, rec.ID, rec.OwnerUserID, strconv.FormatBool(rec.PrivateAudience), credential}, "\x00")
+	return strings.Join([]string{WorkspaceIDFromContext(r.Context()), user.ID, rec.ID, rec.OwnerUserID, rec.OwnerCrewID, strconv.FormatBool(rec.PrivateAudience), role, credential}, "\x00")
 }
 
 func (h *PageHandler) documentPersonFor(ctx context.Context, workspace string, rec *pageRecord, id string) (documentPerson, bool, error) {

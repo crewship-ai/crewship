@@ -311,7 +311,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
           if (request.ifRev !== state.rev) throw fault(409, 'restore precondition conflict');
           const checkpoint = await go(page, 'checkpoint-read', context, { id: request.checkpoint });
           if (checkpoint.schema !== undefined && !supportedSchema(checkpoint.schema)) throw fault(409, 'unsupported checkpoint schema');
-          resultVersion = contentSchema(checkpoint.schema??VERSION); restored = restoredSchema(state.schema, checkpoint.schema??VERSION); doc.destroy(); doc = load(checkpoint.snapshot); break;
+          resultVersion = contentSchema(checkpoint.schema??VERSION); restored = restoredSchema(state.schema, checkpoint.schema??VERSION); doc.destroy(); doc = load(checkpoint.snapshot); if (restored !== contentSchema(checkpoint.schema??VERSION)) validate(doc, restored); break;
         }
         case 'checkpoint':
           if (request.ifRev !== state.rev) throw fault(409, 'checkpoint precondition conflict');

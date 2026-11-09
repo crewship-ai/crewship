@@ -351,6 +351,13 @@ func TestDocumentPeopleSearchFindsReadersBehindManyNonReaders(t *testing.T) {
 	if strings.Join(names(found), "|") != "zcrew=Alex Z zcrew|zfolder=Alex Z zfolder|zgrant=Alex Z zgrant" {
 		t.Fatalf("readers behind non-readers: %v", names(found))
 	}
+	// A retired grant to the whole workspace reaches nobody, so it must not
+	// widen the candidates back to every member.
+	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','workspace','','comment',?)`, owner)
+	execOrFatal(t, h.db, `UPDATE page_grants SET retired_at=datetime('now') WHERE page_id='people-page' AND subject_type='workspace'`)
+	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q=alex"); len(found) != 3 {
+		t.Fatalf("retired workspace grant widened the search: %v", names(found))
+	}
 	// A grant to the whole workspace makes every unrestricted member a reader.
 	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','workspace','',?,?)`, "read", owner)
 	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q=alex"); len(found) != documentPeopleResultLimit {
@@ -414,6 +421,21 @@ func TestDocumentPeopleAdministratorAuditOncePerSession(t *testing.T) {
 			w := documentPeopleServe(t, h, documentPeopleRequest(t, h, ws, "adm", "ADMIN", "q=t"))
 			if w.Code != 200 || adminReadAudits(t, h, action, "adm", "people-page") != 2 {
 				t.Fatalf("a new session must be audited again: %d", w.Code)
+			}
+			// The same session under a changed role is a new administrator read.
+			execOrFatal(t, h.db, `UPDATE workspace_members SET role='OWNER' WHERE user_id='adm'`)
+			w = documentPeopleServe(t, h, documentPeopleSessionRequest(t, h, ws, "adm", "OWNER", "q=t", session))
+			if w.Code != 200 || adminReadAudits(t, h, action, "adm", "people-page") != 3 {
+				t.Fatalf("a changed role must be audited again: %d", w.Code)
+			}
+			if private {
+				return
+			}
+			// An administrator who also holds a grant reads without the role: no audit.
+			execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','user','adm','read',?)`, owner)
+			documentPeopleServe(t, h, documentPeopleRequest(t, h, ws, "adm", "OWNER", "q=t"))
+			if got := adminReadAudits(t, h, action, "adm", "people-page"); got != 3 {
+				t.Fatalf("granted administrator audited: %d", got)
 			}
 		})
 	}
