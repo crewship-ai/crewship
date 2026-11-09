@@ -20,7 +20,7 @@ func newArtifactsCommand() *cobra.Command {
 	return cmd
 }
 
-type kindGuideSummary struct {
+type KindGuideSummary struct {
 	Kind         string `json:"kind" yaml:"kind"`
 	Title        string `json:"title" yaml:"title"`
 	Version      string `json:"version" yaml:"version"`
@@ -30,7 +30,7 @@ type kindGuideSummary struct {
 }
 
 type kindGuide struct {
-	kindGuideSummary `yaml:",inline"`
+	KindGuideSummary `json:",inline" yaml:",inline"`
 	Content          string `json:"content" yaml:"content"`
 }
 
@@ -63,7 +63,7 @@ verification rule agents follow for that kind. Agents receive the same text.`,
 					return err
 				}
 				var body struct {
-					Guides []kindGuideSummary `json:"guides" yaml:"guides"`
+					Guides []KindGuideSummary `json:"guides" yaml:"guides"`
 				}
 				if err := cli.ReadJSON(resp, &body); err != nil {
 					return err
