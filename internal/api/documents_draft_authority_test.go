@@ -83,39 +83,46 @@ func TestDocumentDraftCreationPinsOnlyExplicitPurpose(t *testing.T) {
 }
 
 func TestDocumentDraftPrivateAuthorityAdmitsOnlyOriginalPurpose(t *testing.T) {
-	for _, enabled := range []bool{false, true} {
-		t.Run(map[bool]string{false: "legacy-one-shot", true: "explicit-drafting"}[enabled], func(t *testing.T) {
-			f, authority, token, created := newDocumentDraftFixture(t, enabled)
-			// Isolate authority from the independently tested creation binding.
-			if enabled {
-				mustExec(t, f.rig.db, `UPDATE document_creation_consents SET draft_generation=0,draft_rev=0 WHERE run_id=?`, f.a.RunID)
-			}
-			key := documents.Key{WorkspaceID: f.a.WorkspaceID, PageID: created.PageID}
-			session, err := sessions.NewDBStore(f.rig.db).Create(t.Context(), f.a.HumanUserID, "draft-control", "127.0.0.1", auth.RefreshTokenTTL)
-			if err != nil {
-				t.Fatal(err)
-			}
-			human := httptest.NewRequest("POST", "/", nil)
-			hctx := context.WithValue(human.Context(), ctxUser, &AuthUser{ID: f.a.HumanUserID, SessionID: session.ID})
-			human = human.WithContext(hctx)
-			if _, err = authority.store.Read(human.Context(), key, authority.authorize(human, key, false, false)); err != nil {
-				t.Fatalf("current human control: %v", err)
-			}
-			request := documentDraftRequest(f, token, "POST", "")
-			w := httptest.NewRecorder()
-			checked, ok := f.pages.artifactAgentRequest(w, request)
-			if !ok {
-				t.Fatalf("original run control: %d", w.Code)
-			}
-			checked.SetPathValue("operation", "state")
-			_, err = authority.store.Read(checked.Context(), key, authority.authorize(checked, key, false, false))
-			if enabled && err != nil {
-				t.Fatalf("explicit original run cannot read its own created draft: %v", err)
-			}
-			if !enabled && err == nil {
-				t.Fatal("one-shot creation acquired continuation authority")
-			}
-		})
+	for _, schema := range []int{3, documents.LatestSchema} {
+		for _, enabled := range []bool{false, true} {
+			t.Run(fmt.Sprintf("schema-%d-%s", schema, map[bool]string{false: "legacy-one-shot", true: "explicit-drafting"}[enabled]), func(t *testing.T) {
+				testDocumentDraftOriginalPurpose(t, schema, enabled)
+			})
+		}
+	}
+}
+
+func testDocumentDraftOriginalPurpose(t *testing.T, schema int, enabled bool) {
+	t.Helper()
+	f, authority, token, created := newDocumentDraftFixtureAt(t, enabled, schema)
+	// Isolate authority from the independently tested creation binding.
+	if enabled {
+		mustExec(t, f.rig.db, `UPDATE document_creation_consents SET draft_generation=0,draft_rev=0 WHERE run_id=?`, f.a.RunID)
+	}
+	key := documents.Key{WorkspaceID: f.a.WorkspaceID, PageID: created.PageID}
+	session, err := sessions.NewDBStore(f.rig.db).Create(t.Context(), f.a.HumanUserID, "draft-control", "127.0.0.1", auth.RefreshTokenTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	human := httptest.NewRequest("POST", "/", nil)
+	hctx := context.WithValue(human.Context(), ctxUser, &AuthUser{ID: f.a.HumanUserID, SessionID: session.ID})
+	human = human.WithContext(hctx)
+	if _, err = authority.store.Read(human.Context(), key, authority.authorize(human, key, false, false)); err != nil {
+		t.Fatalf("current human control: %v", err)
+	}
+	request := documentDraftRequest(f, token, "POST", "")
+	w := httptest.NewRecorder()
+	checked, ok := f.pages.artifactAgentRequest(w, request)
+	if !ok {
+		t.Fatalf("original run control: %d", w.Code)
+	}
+	checked.SetPathValue("operation", "state")
+	_, err = authority.store.Read(checked.Context(), key, authority.authorize(checked, key, false, false))
+	if enabled && err != nil {
+		t.Fatalf("explicit original run cannot read its own created draft: %v", err)
+	}
+	if !enabled && err == nil {
+		t.Fatal("one-shot creation acquired continuation authority")
 	}
 }
 
@@ -146,5 +153,36 @@ func TestDocumentDraftScopeCarriesStoredSchema(t *testing.T) {
 				t.Fatalf("schema %d gained drafting scope", tc.schema)
 			}
 		})
+	}
+}
+
+// At the schema-4 default, creation-consent drafting still belongs only to
+// the original run, chat and message: any other run of the same agent is
+// refused, so a follow-up never gains direct write through creation.
+func TestDocumentDraftSchemaFourScopeRefusesOtherRuns(t *testing.T) {
+	f, _, token, created := newDocumentDraftFixtureAt(t, true, documents.LatestSchema)
+	w := httptest.NewRecorder()
+	checked, ok := f.pages.artifactAgentRequest(w, documentDraftRequest(f, token, "POST", ""))
+	if !ok {
+		t.Fatalf("original run control: %d", w.Code)
+	}
+	original, err := documentDraftRun(checked.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.pages.documentDraftScope(checked.Context(), original, created.PageID); err != nil {
+		t.Fatalf("original run control: %v", err)
+	}
+	for name, change := range map[string]func(*artifactRunAuthority){
+		"other run":     func(a *artifactRunAuthority) { a.RunID = "followup-run" },
+		"other message": func(a *artifactRunAuthority) { a.MessageID = "followup-message" },
+		"other chat":    func(a *artifactRunAuthority) { a.ChatID = "followup-chat" },
+		"other agent":   func(a *artifactRunAuthority) { a.AgentID = "other-agent" },
+	} {
+		other := *original
+		change(&other)
+		if _, err := f.pages.documentDraftScope(checked.Context(), &other, created.PageID); err == nil {
+			t.Errorf("%s gained schema-4 drafting scope", name)
+		}
 	}
 }

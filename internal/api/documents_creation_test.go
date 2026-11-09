@@ -320,9 +320,9 @@ func TestDocumentCreationRefusesOlderPreparationSchema(t *testing.T) {
 }
 
 // A retry reports the schema the Doc was stored with, so a Doc created at
-// schema 3 before this change still replays as schema 3. This guards the
-// legacy replay; TestDocumentCreationAtomicResultAndOriginalPayloadRetry
-// proves a new Doc's retry reports 4.
+// schema 3 before this change still replays as schema 3, even after an
+// upgrade; TestDocumentCreationAtomicResultAndOriginalPayloadRetry proves a
+// new Doc's retry reports 4.
 func TestDocumentCreationReplayReportsStoredSchema(t *testing.T) {
 	h, _, _, _, call := documentCreationFixture(t)
 	first := call("first", documentCreationBody)
@@ -331,13 +331,20 @@ func TestDocumentCreationReplayReportsStoredSchema(t *testing.T) {
 	if err := json.Unmarshal(first.Body.Bytes(), &created); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := h.db.Exec(`UPDATE documents SET schema_version=3 WHERE page_id=?`, created.PageID); err != nil {
+	// A legacy Doc: created at 3, then upgraded by a person to 4. The retry
+	// still reports the creation schema, exactly as before this change.
+	if _, err := h.db.Exec(`UPDATE document_checkpoints SET schema_version=3 WHERE page_id=? AND rev=0`, created.PageID); err != nil {
 		t.Fatal(err)
 	}
-	retry := call("retry", documentCreationBody)
-	creationExpect(t, retry, 200)
-	var repeated documentCreationResult
-	if err := json.Unmarshal(retry.Body.Bytes(), &repeated); err != nil || repeated.Schema != 3 || repeated.PageID != created.PageID {
-		t.Fatalf("legacy replay schema: %s %v", retry.Body.String(), err)
+	for _, current := range []int{3, 4} {
+		if _, err := h.db.Exec(`UPDATE documents SET schema_version=? WHERE page_id=?`, current, created.PageID); err != nil {
+			t.Fatal(err)
+		}
+		retry := call("retry", documentCreationBody)
+		creationExpect(t, retry, 200)
+		var repeated documentCreationResult
+		if err := json.Unmarshal(retry.Body.Bytes(), &repeated); err != nil || repeated.Schema != 3 || repeated.PageID != created.PageID {
+			t.Fatalf("legacy replay schema with current %d: %s %v", current, retry.Body.String(), err)
+		}
 	}
 }

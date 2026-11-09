@@ -64,11 +64,12 @@ func (h *PageHandler) documentCreationReplay(ctx context.Context, a *artifactRun
 		return result, errors.New("created document was deleted; permission remains consumed")
 	}
 	var storedMutation, storedDigest string
-	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT p.id,p.workspace_id,p.slug,p.name,c.revision,c.mutation_id,c.request_digest,d.schema_version FROM document_creations c JOIN pages p ON p.id=c.page_id AND p.workspace_id=c.workspace_id JOIN documents d ON d.page_id=p.id AND d.workspace_id=p.workspace_id WHERE c.run_id=? AND p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.owner_crew_id IS NULL`, a.RunID, consent.Page.String, a.WorkspaceID, a.HumanUserID).Scan(&result.PageID, &result.WorkspaceID, &result.Slug, &result.Title, &result.Revision, &storedMutation, &storedDigest, &result.Schema)
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT p.id,p.workspace_id,p.slug,p.name,c.revision,c.mutation_id,c.request_digest,COALESCE((SELECT k.schema_version FROM document_checkpoints k WHERE k.workspace_id=p.workspace_id AND k.page_id=p.id AND k.rev=0 ORDER BY k.created_at,k.id LIMIT 1),d.schema_version) FROM document_creations c JOIN pages p ON p.id=c.page_id AND p.workspace_id=c.workspace_id JOIN documents d ON d.page_id=p.id AND d.workspace_id=p.workspace_id WHERE c.run_id=? AND p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.owner_crew_id IS NULL`, a.RunID, consent.Page.String, a.WorkspaceID, a.HumanUserID).Scan(&result.PageID, &result.WorkspaceID, &result.Slug, &result.Title, &result.Revision, &storedMutation, &storedDigest, &result.Schema)
 	if err != nil || storedMutation != mutation || storedDigest != digest {
 		return result, errors.New("document creation mutation conflicts with consumed permission")
 	}
-	// A retry reports the stored schema: Docs created before #5137 stay 3.
+	// A retry reports the schema the Doc was created at (its rev-0 checkpoint),
+	// so a Doc created at 3 before #5137 replays as 3 even after an upgrade.
 	result.Type = "document"
 	result.URL = artifactCanonicalURL(result.PageID, result.WorkspaceID)
 	return result, nil
