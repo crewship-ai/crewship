@@ -5,6 +5,7 @@ import { apiFetch, AUTH_EVENT } from "@/lib/api-fetch"
 import { cn } from "@/lib/utils"
 import { pageBrowserRequirement, supportsPageApplications } from "@/lib/pages/runtime-support"
 import { createInteractiveDataAccess, interactiveArtifactSource, InteractiveFrameSession, validateInteractiveRuntime } from "@/lib/pages/interactive-artifact"
+import { browserStorage, createViewerPrefs, viewerPrefsKey } from "@/lib/pages/viewer-prefs"
 import type { ArtifactFile, ArtifactInteractiveRuntime } from "../projects/types"
 
 interface Props {
@@ -36,10 +37,10 @@ export function ArtifactInteractivePreview(props: Props) {
   if (!supportsPageApplications(navigator.userAgent)) return <p role="alert" className="p-4 text-sm">{pageBrowserRequirement}</p>
   if (invalid) return <p role="alert" className="p-4 text-sm">{invalid}</p>
   if (!user?.id || retired) return <p role="status" className="p-4 text-sm">Sign in again to open this interactive artifact.</p>
-  return <InteractiveFrame key={JSON.stringify([user.id, props.workspaceId, props.pageId, props.codeVersion, props.path, props.canWrite, props.runtime.runtime_url])} {...props} viewerName={user.name ?? ""} />
+  return <InteractiveFrame key={JSON.stringify([user.id, props.workspaceId, props.pageId, props.codeVersion, props.path, props.canWrite, props.runtime.runtime_url])} {...props} viewerName={user.name ?? ""} userId={user.id} />
 }
 
-function InteractiveFrame({ workspaceId, pageId, codeVersion, files, path, title, runtime, canWrite, className, viewerName }: Props & { viewerName: string }) {
+function InteractiveFrame({ workspaceId, pageId, codeVersion, files, path, title, runtime, canWrite, className, viewerName, userId }: Props & { viewerName: string; userId: string }) {
   const frame = useRef<HTMLIFrameElement>(null)
   const [ready, setReady] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -55,7 +56,8 @@ function InteractiveFrame({ workspaceId, pageId, codeVersion, files, path, title
   const load = () => {
     if (typeof source === "string") return
     if (!session.current) {
-      const access = createInteractiveDataAccess({ fetcher: apiFetch, workspaceId, pageId, codeVersion, viewerName: () => name.current })
+      const prefs = createViewerPrefs(browserStorage, viewerPrefsKey(userId, workspaceId, pageId))
+      const access = createInteractiveDataAccess({ fetcher: apiFetch, workspaceId, pageId, codeVersion, viewerName: () => name.current, prefs })
       session.current = new InteractiveFrameSession(source, access, { collections: runtime.collections, canWrite, onReady: () => setReady(true) })
     }
     if (!session.current.load(frame.current?.contentWindow)) setError("The artifact navigated away from its verified document and was stopped. Reload to retry.")

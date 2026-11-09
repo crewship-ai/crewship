@@ -166,6 +166,18 @@ planned widget profile, which is not available yet.
   </Step>
 </Steps>
 
+### Your filters are your own
+
+On an interactive Dashboard, a filter you pick (a crew, say) changes only your
+view; it never changes the shared data or what anyone else sees. The page can
+ask the browser to remember it with `crewship.prefs` (see
+[Interactive artifacts](/guides/artifacts/interactive#the-runtime-window-crewship)),
+so it comes back the next time you open the Dashboard in the same browser.
+The seeded Template Crewship Dashboard does this for its crew filter; picking
+**all crews** again or its reset button forgets it. Nothing is stored on the
+server; it stays in this browser after you sign out, and a private window
+forgets it when it closes.
+
 ## See where a number came from
 
 This applies to screens that bind values with `data-field`. An interactive

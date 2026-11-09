@@ -20,11 +20,19 @@ type Get = (collection: string) => Promise<{ documents: { id: string; value: Rec
 const windows: Window[] = []
 afterEach(async () => { for (const w of windows.splice(0)) await w.happyDOM.close() })
 
-async function open(get: Get) {
+type Prefs = { get: () => Promise<{ value: Record<string, unknown> | null }>; set: (value: unknown) => Promise<{ saved: boolean }> }
+/** The host's per-viewer store as the broker exposes it; one per simulated browser profile. */
+function prefsStore(initial: Record<string, unknown> | null = null) {
+  let value = initial
+  const set = vi.fn(async (next: Record<string, unknown>) => { value = next; return { saved: true } })
+  return { prefs: { get: async () => ({ value }), set } as Prefs, set, current: () => value }
+}
+
+async function open(get: Get, prefs?: Prefs) {
   const window = new Window({ url: "https://runtime.example.test/", settings: { enableJavaScriptEvaluation: true, suppressCodeGenerationFromStringsWarning: true, disableCSSFileLoading: true, disableJavaScriptFileLoading: true, navigation: { disableChildFrameNavigation: true } } })
   windows.push(window)
   const writes = { batch: vi.fn(), set: vi.fn(), delete: vi.fn() }
-  ;(window as unknown as { crewship: unknown }).crewship = { data: { get: vi.fn(get), ...writes } }
+  ;(window as unknown as { crewship: unknown }).crewship = { data: { get: vi.fn(get), ...writes }, ...(prefs ? { prefs } : {}) }
   window.document.write(page)
   await window.happyDOM.waitUntilComplete()
   for (let i = 0; i < 5; i++) { await new Promise(resolve => setTimeout(resolve, 20)); await window.happyDOM.waitUntilComplete() }
@@ -70,5 +78,40 @@ describe("rwrx dashboard mirror runtime (B01)", () => {
     const failed = await open(async () => { throw new Error("403") })
     expect(failed.root.getAttribute("data-dash-state")).toBe("error")
     expect(failed.kpis().every(value => value === "—")).toBe(true)
+  })
+
+  it("remembers a reader's filter per viewer, restores it on reload and forgets it on reset", async () => {
+    const ada = prefsStore()
+    const first = await open(async () => ({ documents: rows }), ada.prefs)
+    const all = first.kpis()
+    await first.pick("Frontend")
+    expect(ada.current()).toEqual({ crew: "Frontend" })
+    for (const write of Object.values(first.writes)) expect(write).not.toHaveBeenCalled()
+    // Reload in the same profile: the filter comes back and every KPI follows it.
+    const reload = await open(async () => ({ documents: rows }), ada.prefs)
+    expect(reload.kpis()[0]).toBe(String(sum("Frontend", "done")))
+    expect((reload.window.document.querySelector("#cx-crew") as unknown as { value: string }).value).toBe("Frontend")
+    // Another viewer has their own store and sees the default.
+    const bob = await open(async () => ({ documents: rows }), prefsStore().prefs)
+    expect(bob.kpis()).toEqual(all)
+    // Picking the default again stores nothing to restore.
+    await reload.pick("")
+    expect(ada.current()).toEqual({})
+  })
+
+  it("opens with the default when an older host refuses prefs", async () => {
+    const refusing = { get: async () => { throw Object.assign(new Error("Unsupported request."), { code: "invalid" }) }, set: vi.fn(async () => { throw new Error("Unsupported request.") }) }
+    const page = await open(async () => ({ documents: rows }), refusing)
+    expect(page.kpis()[0]).toBe(String(sum(null, "done")))
+    await page.pick("Frontend")
+    expect(page.kpis()[0]).toBe(String(sum("Frontend", "done")))
+  })
+
+  it("ignores stored keys the page does not use and works without a host store", async () => {
+    const odd = await open(async () => ({ documents: rows }), prefsStore({ crew: 7, other: "x" }).prefs)
+    expect(odd.kpis()[0]).toBe(String(sum(null, "done")))
+    const none = await open(async () => ({ documents: rows }))
+    await none.pick("Frontend")
+    expect(none.kpis()[0]).toBe(String(sum("Frontend", "done")))
   })
 })

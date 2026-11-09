@@ -147,6 +147,16 @@ Every call returns a promise. A refused call rejects with an `Error` whose
 | `crewship.data.list()` | `{collections: [{name, documents}]}` for the declared collections that hold data. |
 | `crewship.data.batch(collection, documents)` | Writes 1–50 documents `{id, ifVersion, value}` all or nothing, then returns the written documents with their new versions (not the rest of the collection; call `get` for that). Use the `version` you read as `ifVersion`, or `0` for a new document. |
 | `crewship.viewer()` | `{name}`: the viewer's display name. Nothing else about the viewer reaches the page. |
+| `crewship.prefs.get()` | `{value}`: this viewer's saved preferences for this artifact, or `null`. |
+| `crewship.prefs.set(value)` | `{saved}`. Saves a flat object (at most 32 keys of up to 64 characters; text up to 256 characters, numbers, `true`/`false` or `null`; 4 KiB in all) for this viewer and artifact. `saved` is `false` when the browser keeps nothing, for example when storage is blocked or full. |
+
+Preferences are for view state such as a filter. They stay in the viewer's
+browser (local storage, keyed by person, workspace and artifact): they are
+never sent to the server, other Crewship accounts never get them, and anyone,
+including a reader without edit access, can save their own. They stay in this
+browser after you sign out (anyone using the same browser profile could read
+them there); clearing the browser's site data forgets them, and a private
+window forgets them when it closes.
 
 There is no delete; write a value such as `{"done": true}` instead.
 
