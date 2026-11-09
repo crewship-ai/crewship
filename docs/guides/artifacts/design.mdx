@@ -9,7 +9,8 @@ tag: Experimental
 A Design is an artifact that holds a shared canvas. You arrange screens,
 rectangles, text and images on it, and everyone who has the Design open sees
 each change, each other's cursors and the layer each person has selected
-(a dashed outline in their colour, with their name) as it happens. Crewship keeps numbered
+(a dashed outline in their colour, with their name) as it happens. Each person
+on the canvas has their own colour, the same on every screen. Crewship keeps numbered
 versions of the canvas, lets the owner share one version with readers, and
 can pass a comment on a layer to the agent of a chat you connect.
 
@@ -135,6 +136,12 @@ People with read access see a **Read only** badge next to the status.
    - **Screen**, to move a layer into another screen or to **On canvas**.
 5. To remove the selection, click **Delete layer**. Deleting a screen with
    **Delete screen and layers** also removes every layer inside it.
+
+**Undo** and **Redo** in the toolbar (or **Ctrl + Z**, **Shift + Ctrl + Z**
+and **Ctrl + Y**; **Cmd** on a Mac) take back and redo your own edits on this
+canvas since you opened it. They never take back another person's change, and
+never overwrite a value someone changed after you. In a text field the keys
+undo typing in that field.
 
 Live updates reach the people authorized to view the live canvas. Shared-only
 readers keep seeing the shared version. The editor also keeps a copy of your unsaved canvas in this browser, so a crash or a lost
@@ -349,7 +356,8 @@ A person with shared-only **read** access who opens the Design sees:
 
 - the shared snapshot, with a **Read only** badge and **View canvas** in the
   toolbar,
-- the cursors, initials and selected layers of the people editing,
+- the cursors and initials of the people editing (not which layer they have
+  selected, which belongs to the live canvas),
 - in **History**, only the shared version,
 - comments on the shared version only.
 

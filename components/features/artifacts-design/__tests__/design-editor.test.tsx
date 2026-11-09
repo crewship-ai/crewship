@@ -62,7 +62,7 @@ describe("Design editor controls", () => {
   state.peerSelection = "cta"
   const view = render(<DesignEditor workspaceId="workspace" slug="shop" />)
   const outline = screen.getByLabelText("Marie selected Buy")
-  expect(outline).toHaveAttribute("data-peer-selection", "cta")
+  expect(outline).toHaveAttribute("data-remote-selection", "cta")
   expect(outline).toHaveAttribute("transform", "translate(40,60)")
   expect(outline.querySelector("rect")).toHaveAttribute("stroke", state.peerColor)
   expect(within(outline).getByText("Marie")).toBeInTheDocument()
@@ -74,8 +74,16 @@ describe("Design editor controls", () => {
   view.unmount()
   // A selection of a layer that is gone draws nothing.
   state.peerSelection = "deleted-layer"
-  render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  const gone = render(<DesignEditor workspaceId="workspace" slug="shop" />)
   expect(screen.queryByLabelText(/Marie selected/)).toBeNull()
+  gone.unmount()
+  // A reader shares no selection of its own.
+  state.peerSelection = ""
+  state.editable = false
+  state.setSelection.mockReset()
+  render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  fireEvent.click(within(screen.getByLabelText("Layers")).getByRole("button", { name: "Buy" }))
+  expect(state.setSelection).not.toHaveBeenCalledWith("cta")
  })
  it("draws peer labels on a fill that keeps white text readable", () => {
   state.peerColor = "#059669"

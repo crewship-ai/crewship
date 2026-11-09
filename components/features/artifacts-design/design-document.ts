@@ -265,3 +265,13 @@ export function safeImageSource(value: string | undefined): string | undefined {
  if (/^data:image\/(png|jpeg|webp|gif);base64,[a-zA-Z0-9+/=]+$/.test(value)) return value
  try { const url = new URL(value); return url.protocol === "https:" ? url.href : undefined } catch { return undefined }
 }
+
+/**
+ * Undo history of one person: only transactions this client made through the
+ * editor ("editor" origin) are recorded, so undo never takes back a peer's
+ * change, and Yjs never overwrites a value a peer wrote after this person's
+ * edit. Edits within half a second form one step.
+ */
+export function createDesignUndo(doc: Y.Doc) {
+ return new Y.UndoManager([doc.getMap("nodes"), doc.getArray("order")], { trackedOrigins: new Set(["editor"]), captureTimeout: 500 })
+}

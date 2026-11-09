@@ -208,8 +208,13 @@ standard `y-protocols` sync and awareness messages in binary frames.
   disconnected.
 - Awareness (cursors, selection and presence) is limited to one client ID per
   connection. `cursor` is a canvas point; `selection` is the selected layer ID
-  (at most 128 characters) or `null`. Both are local view state and are never
-  written to the document; a selection naming a missing layer draws nothing.
+  (1 to 128 characters) or `null`. Both are view state and are never written
+  to the document; a selection naming a missing layer draws nothing.
+- `selection` is live-canvas state. The server drops it from awareness sent by
+  a person who cannot read the live canvas, and removes it from the awareness
+  it delivers to such a person, so a shared-version reader never learns layer
+  IDs of the unshared draft. Any other value is dropped. Clients share a
+  selection only from an editable live canvas, not from History.
   The server replaces the user name and ID in awareness with the authenticated
   user.
 - Incoming messages are limited to 4 MiB. A client that falls 64 frames behind

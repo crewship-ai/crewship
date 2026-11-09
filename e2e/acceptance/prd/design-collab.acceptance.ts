@@ -127,7 +127,7 @@ test.describe("design collaboration", () => {
   },
   async ({ prd }) => {
    const { a, b } = await twoPeople(prd, "awareness")
-   // Names come from the server, not the browser.
+   // Each sees the other's account name (the server overwrites the name in awareness).
    await expect(a.page.getByLabel("People on this canvas").locator("span")).toHaveCount(1, { timeout: 20_000 })
    await expect(b.page.getByLabel("People on this canvas").locator("span")).toHaveCount(1, { timeout: 20_000 })
    await expect(a.page.getByLabel("People on this canvas").getByTitle(b.name)).toBeVisible()
@@ -165,19 +165,25 @@ test.describe("design collaboration", () => {
    const avatarColor = await a.page.getByLabel("People on this canvas").getByTitle(b.name).evaluate(el => getComputedStyle(el).backgroundColor)
    const arrowFill = await cursor.locator("path").getAttribute("fill")
    expect(arrowFill).toMatch(/^#[0-9a-f]{6}$/i)
+   const hex = arrowFill!.slice(1).match(/../g)!.map(part => parseInt(part, 16))
+   expect(avatarColor, "B's avatar and pointer share one colour").toBe(`rgb(${hex.join(", ")})`)
+   const aOnB = await b.page.getByLabel("People on this canvas").getByTitle(a.name).evaluate(el => getComputedStyle(el).backgroundColor)
+   expect(aOnB, "two people on one canvas never share a colour").not.toBe(avatarColor)
 
    // Selection: B selects the button; A sees it outlined with B's name, then cleared.
    await b.page.mouse.click(target.x, target.y)
-   const outline = a.page.locator('[data-peer-selection="cta"]')
+   const outline = a.page.locator('[data-remote-selection="cta"]')
    await expect(outline).toHaveAttribute("aria-label", `${b.name} selected Call to action`, { timeout: 15_000 })
    expect(await outline.locator("rect").first().getAttribute("stroke")).toBe(arrowFill)
    const bg = (await viewport(b.page).boundingBox())!
    await b.page.mouse.click(bg.x + 12, bg.y + bg.height - 40)
-   await expect(outline).toHaveCount(0, { timeout: 15_000 })
-   // A's own selection is unaffected by B's.
-   await a.page.mouse.click((await center(a.page.locator('[data-design-node="copy"] rect').first())).x, (await center(a.page.locator('[data-design-node="copy"] rect').first())).y)
-   await expect(b.page.locator('[data-peer-selection="copy"]')).toHaveCount(1, { timeout: 15_000 })
-   await expect(a.page.locator('[data-peer-selection]')).toHaveCount(0)
+   await expect(b.page.getByLabel("Layer name"), "B's background click clears B's selection").toHaveCount(0)
+   await expect(a.page.locator("[data-remote-selection]"), "A shows no selection of B").toHaveCount(0, { timeout: 15_000 })
+   // The other way round: A selects the text; B sees A's outline, A keeps its own selection.
+   const copyOnA = await center(a.page.locator('[data-design-node="copy"] rect').first())
+   await a.page.mouse.click(copyOnA.x, copyOnA.y)
+   await expect(b.page.locator('[data-remote-selection="copy"]')).toHaveAttribute("aria-label", `${a.name} selected Copy`, { timeout: 15_000 })
+   await expect(a.page.getByLabel("Layer name")).toHaveValue("Copy")
 
    await prd.evidence("awareness-a.png", await a.page.screenshot())
    await prd.evidence("awareness-b.png", await b.page.screenshot())
@@ -196,6 +202,7 @@ test.describe("design collaboration", () => {
    annotation: [
     prdRequirement("V06.edit.different-layers", "Design: two people changing different layers keep both changes, live and after reload"),
     prdRequirement("V06.edit.same-layer", "Design: two people changing different properties of one layer keep both; one property ends with one value on both sides"),
+    prdRequirement("CO04.undo-own", "Design: undo takes back only the local person's own edit, never the other person's, and redo brings it back"),
     prdRequirement("V06.edit.delete-vs-edit", "Design: an offline edit of a layer deleted meanwhile is not silently lost: the editor offers the text back"),
    ],
   },
@@ -228,6 +235,25 @@ test.describe("design collaboration", () => {
     settled = Number(values[2])
     return new Set(values).size === 1 && [70, 90].includes(settled)
    }, { timeout: 20_000 }).toBe(true)
+   // Undo is per person: A's undo takes back A's last edit only, never B's.
+   const beforeUndo = await serverNode(a, ws.id, slug, "cta")
+   await a.page.getByLabel("x", { exact: true }).fill("150")
+   await expect.poll(async () => (await serverNode(a, ws.id, slug, "cta"))?.x, { timeout: 20_000 }).toBe(150)
+   await b.page.getByLabel("height", { exact: true }).fill("130")
+   await expect.poll(async () => (await serverNode(a, ws.id, slug, "cta"))?.height, { timeout: 20_000 }).toBe(130)
+   await viewport(a.page).focus()
+   await a.page.waitForTimeout(600) // past the undo step window
+   await a.page.getByRole("button", { name: "Undo", exact: true }).click()
+   await expect.poll(async () => { const node = await serverNode(a, ws.id, slug, "cta"); return [node?.x, node?.height] }, { timeout: 20_000 }).toEqual([beforeUndo?.x, 130])
+   await a.page.getByRole("button", { name: "Redo", exact: true }).click()
+   await expect.poll(async () => (await serverNode(a, ws.id, slug, "cta"))?.x, { timeout: 20_000 }).toBe(150)
+   // B has nothing of A's to undo: B's undo takes back B's height only.
+   await b.page.waitForTimeout(600)
+   await b.page.getByRole("button", { name: "Undo", exact: true }).click()
+   await expect.poll(async () => { const node = await serverNode(a, ws.id, slug, "cta"); return [node?.x, node?.height] }, { timeout: 20_000 }).toEqual([150, beforeUndo?.height])
+   await a.page.getByLabel("x", { exact: true }).fill("120")
+   await expect.poll(async () => (await serverNode(a, ws.id, slug, "cta"))?.x, { timeout: 20_000 }).toBe(120)
+   await prd.evidence("undo.json", { before: beforeUndo, undoneByA: "x", keptOfB: "height" })
    // Reload both: the persisted canvas.
    for (const person of [a, b]) {
     await person.page.reload()
@@ -296,7 +322,7 @@ test.describe("design collaboration", () => {
    await expect.poll(async () => {
     const status = await b.page.getByRole("status").first().innerText().catch(() => "")
     const field = b.page.getByLabel("Layer name")
-    const disabled = (await field.count()) === 0 || await field.isDisabled({ timeout: 1000 }).catch(() => true)
+    const disabled = (await field.count()) > 0 && await field.isDisabled({ timeout: 1000 }).catch(() => false)
     return /read only|Access changed|write access/i.test(status) || disabled
    }, { timeout: 45_000 }).toBe(true)
    await b.page.reload()

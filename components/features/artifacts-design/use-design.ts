@@ -12,7 +12,7 @@ import { registerDocumentDraftWriter } from "@/lib/document-queue"
 import { apiFetch, tryRefresh } from "@/lib/api-fetch"
 import { getAuthMode, resolveWsBase } from "@/lib/server-base"
 import { DesignProvider, type DesignConnection, type DesignPeer } from "./design-provider"
-import { combineDesignDrafts, designConflictIdentity, designDraftConflicts, designNodes, designStateCovered, mergeDesignConflictRecord, parseDesignConflictRecord, parseDesignDraft, serializeDesignDraft, type DesignConflict, type DesignNode } from "./design-document"
+import { combineDesignDrafts, createDesignUndo, designConflictIdentity, designDraftConflicts, designNodes, designStateCovered, mergeDesignConflictRecord, parseDesignConflictRecord, parseDesignDraft, serializeDesignDraft, type DesignConflict, type DesignNode } from "./design-document"
 
 interface DesignState {
  page_id: string
@@ -32,7 +32,16 @@ interface DesignState {
 }
 export interface DesignVersion { version: number; message?: string; actor?: string; created_at?: string }
 interface DesignVersions { versions: DesignVersion[]; latest_version: number; shared_version: number }
-const COLORS = ["#2563eb", "#c026d3", "#059669", "#ea580c", "#9333ea"]
+const COLORS = ["#2563eb", "#c026d3", "#059669", "#ea580c", "#9333ea", "#be123c", "#0e7490", "#4d7c0f"]
+/**
+ * One colour per person on this canvas, the same for everyone looking at it:
+ * the people present (the viewer included) in user ID order take the palette
+ * in turn, so nobody shares a colour until more people than colours are here.
+ */
+export function designPresenceColors(userIds: Iterable<string>): Map<string, string> {
+ const sorted = [...new Set(userIds)].sort()
+ return new Map(sorted.map((id, index) => [id, COLORS[index % COLORS.length]]))
+}
 const DRAFT_LIMIT = 2 * 1024 * 1024
 function encodeDraft(bytes: Uint8Array) {
  if (bytes.length > DRAFT_LIMIT) throw new Error("Canvas exceeds the local draft limit. Keep this tab open.")
@@ -103,6 +112,11 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const [readRevokedPage, setReadRevokedPage] = useState<string>()
  const [draftError, setDraftError] = useState(false)
  const provider = useRef<DesignProvider | null>(null)
+ const selectionRef = useRef<string | null>(null)
+ // This person's own edits only: a peer's change is never undone (Yjs never
+ // overwrites a newer value it did not write).
+ const undoRef = useRef<Y.UndoManager | null>(null)
+ const [history, setHistory] = useState({ undo: false, redo: false })
  const [draftReady, setDraftReady] = useState(false)
  // A text that lost a merge exists only here: a sealed draft keeps it over a
  // reload until the person decides, and goes with the other drafts on read loss.
@@ -241,9 +255,13 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   }
   setDoc(document)
   setNodes(designNodes(document))
+  const undo = createDesignUndo(document)
+  const historyChanged = () => setHistory({ undo: undo.canUndo(), redo: undo.canRedo() })
+  undo.on("stack-item-added", historyChanged); undo.on("stack-item-popped", historyChanged); undo.on("stack-cleared", historyChanged)
+  undoRef.current = undo
   const update = (_update: Uint8Array, origin: unknown) => {
    setNodes(designNodes(document))
-   if (origin === "editor" && initialCanEdit && userId !== "anonymous") {
+   if ((origin === "editor" || origin === undo) && initialCanEdit && userId !== "anonymous") {
     localDirty = true
     edits += 1
     storeCanvas()
@@ -295,11 +313,17 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    conflicts: found => { noticed = storeConflictsRef.current({ add: found }) },
   })
   provider.current = live
-  const awareness = () => setPeers([...live.awareness.getStates()].flatMap(([clientId, state]) => {
+  // A replaced provider (new authority, reconnect) keeps announcing the selection.
+  if (selectionRef.current) live.setSelection(selectionRef.current)
+  const awareness = () => {
+   const states = [...live.awareness.getStates()]
+   const colors = designPresenceColors([userId, ...states.flatMap(([clientId, state]) => clientId !== document.clientID && typeof state.user?.id === "string" ? [state.user.id as string] : [])])
+   setPeers(states.flatMap(([clientId, state]) => {
    if (clientId === document.clientID || !state.user) return []
    const selection = typeof state.selection === "string" && state.selection && state.selection.length <= 128 ? state.selection : undefined
-   return [{ clientId, name: String(state.user.name ?? "Collaborator"), color: String(state.user.color ?? "#2563eb"), cursor: state.cursor && Number.isFinite(state.cursor.x) && Number.isFinite(state.cursor.y) ? state.cursor : undefined, ...(selection ? { selection } : {}) }]
+   return [{ clientId, name: String(state.user.name ?? "Collaborator"), color: (typeof state.user.id === "string" && colors.get(state.user.id)) || String(state.user.color ?? "#2563eb"), cursor: state.cursor && Number.isFinite(state.cursor.x) && Number.isFinite(state.cursor.y) ? state.cursor : undefined, ...(selection ? { selection } : {}) }]
   }))
+  }
   live.awareness.on("change", awareness)
   const stop = async () => { live.setEditable(false); live.destroy(); editableRef.current = false; setDraftReady(false) }
   const unregister = registerDocumentDraftWriter(userId, stop, { suspend: async () => {
@@ -313,6 +337,8 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
    live.awareness.off("change", awareness)
    live.destroy()
    document.off("update", update)
+   if (undoRef.current === undo) undoRef.current = null
+   undo.destroy()
    document.destroy()
   }
   }
@@ -320,7 +346,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   return () => {
    active = false
    cleanup()
-   setDoc(null); setNodes([]); setPeers([]); setDraftReady(false)
+   setDoc(null); setNodes([]); setPeers([]); setDraftReady(false); setHistory({ undo: false, redo: false })
   }
  }, [canConnect, endpoint, workspaceId, slug, userId, pageId, authorityRevision, actorName, admittedActor, initialCanEdit, client, request])
  const invalidate = () => { void client.invalidateQueries({ queryKey: key }) }
@@ -341,5 +367,9 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const connectAgent = useMutation({ mutationFn: (chat_id: string) => pinnedRequest("/agent", { chat_id }), onSuccess: invalidate })
  const comment = useMutation({ mutationFn: (body: { version: number; path: string; selector: string; quote: string; text: string; send_to_agent: boolean }) => pinnedRequest<ArtifactComment>("/comments", body), onSuccess: invalidate })
  const share = useMutation({ mutationFn: (version: number) => pinnedRequest("/share", { version }), onSuccess: invalidate })
- return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, unsynced: Boolean(pageId) && unsyncedPage === pageId && readRevokedPage !== pageId, draftError, save, restore, share, comment, connectAgent, conflicts, dismissConflict: (conflict: DesignConflict) => storeConflicts({ remove: [designConflictIdentity(conflict)] }), setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor), setSelection: (id: string | null) => provider.current?.setSelection(id) }
+ return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, unsynced: Boolean(pageId) && unsyncedPage === pageId && readRevokedPage !== pageId, draftError, save, restore, share, comment, connectAgent, conflicts, dismissConflict: (conflict: DesignConflict) => storeConflicts({ remove: [designConflictIdentity(conflict)] }), setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor), setSelection: (id: string | null) => { selectionRef.current = id; provider.current?.setSelection(id) },
+  canUndo: editable && history.undo, canRedo: editable && history.redo,
+  undo: () => { if (editableRef.current) undoRef.current?.undo() }, redo: () => { if (editableRef.current) undoRef.current?.redo() },
+  /** Ends the current undo step, so the next edit is undone on its own. */
+  endUndoStep: () => undoRef.current?.stopCapturing() }
 }
