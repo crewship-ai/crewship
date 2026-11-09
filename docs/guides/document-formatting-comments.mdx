@@ -50,6 +50,29 @@ lowercase name can be typed, and an unknown one stays uncoloured.
 - Blocks longer than 20 000 characters are shown without colours so typing
   stays responsive.
 
+### Math
+
+A schema 4 code block whose language is `latex` (or `math`) is shown as a
+typeset formula. **Source** and **Preview** in the block's header switch
+between the formula and its LaTeX; the choice is yours alone, only in this
+tab, and never changes the document. Putting the caret into a formula shows
+its source, so you always see what you type. Readers see the formula too.
+
+- Math is block math: one display formula per code block. Inline math inside
+  a paragraph is not available yet; it needs a new kind of content and will
+  come with a later document schema.
+- The formula is drawn by KaTeX, bundled with the app at a fixed version
+  with its fonts, so showing it loads nothing from other sites. Commands that
+  could link, load or style (`\href`, `\url`, `\includegraphics`,
+  `\htmlClass`, `\htmlStyle` and similar) are refused and shown as plain
+  text.
+- A formula KaTeX cannot read shows *Cannot show this formula* with the
+  reason, above its source, in that block only; the rest of the page is
+  unaffected and nothing is changed. Sources longer than 10 000 characters
+  are shown as source only.
+- The stored content stays the LaTeX source, so history, comments, Copy and
+  agents see exactly what was typed.
+
 A document becomes schema 4 only explicitly: initialize it with `"schema": 4`
 (see [`crewship doc initialize`](/cli/doc)), or upgrade an older document through
 the documents service's human-only upgrade, which keeps its content, history and
