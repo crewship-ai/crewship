@@ -71,6 +71,21 @@ describe("remote carets", () => {
     expect(editor.state.doc.textContent.indexOf("paragraph")).toBe(caretOffset(editor))
   })
 
+  it("draws a caret at the end of a line on the last character, without changing the editor's text", () => {
+    const { editor, remoteText } = documents()
+    const end = remoteText().length
+    setRemoteCarets(editor, [peerAt(remoteText(), 0, end)])
+    const carets = editor.view.dom.querySelectorAll('[class*="caret"], [class*="cursor"], [data-remote-caret]')
+    expect(carets).toHaveLength(1)
+    expect((carets[0] as HTMLElement).dataset.name).toBe("Erin Editor")
+    expect(carets[0].textContent).toBe(".")
+    // It wraps a real character, which stays readable.
+    expect(carets[0].getAttribute("aria-hidden")).toBeNull()
+    // No trailing line break hack: both people's editors keep the same text.
+    expect(editor.view.dom.querySelector("br.ProseMirror-trailingBreak")).toBeNull()
+    expect(editor.view.dom.textContent).toBe("Caret paragraph with words.")
+  })
+
   it("clears every caret on an empty list", () => {
     const { editor, remoteText } = documents()
     setRemoteCarets(editor, [peerAt(remoteText(), 3, 3)])

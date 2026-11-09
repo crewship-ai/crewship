@@ -2262,8 +2262,16 @@ body {
 }
 
 /* Docs presence (#5166): another person's name above their caret, generated so it never becomes editor text. */
-.document-peer-caret::after {
+.document-peer-caret-end {
+  position: relative;
+  box-shadow: 2px 0 0 var(--peer-color);
+}
+
+.document-peer-caret::after,
+.document-peer-caret-end::after {
   content: attr(data-name);
+  /* Not announced: who is here is in the presence list. Browsers without alt text keep the line above. */
+  content: attr(data-name) / "";
   position: absolute;
   bottom: 100%;
   left: -2px;
@@ -2281,4 +2289,8 @@ body {
   background-color: var(--peer-fill);
   pointer-events: none;
   user-select: none;
+}
+
+.document-peer-caret-end::after {
+  left: 100%;
 }
