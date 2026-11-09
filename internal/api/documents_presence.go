@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
@@ -372,13 +373,28 @@ func (r *Router) documentPresence(w http.ResponseWriter, req *http.Request) {
 	if r.db.QueryRowContext(req.Context(), `SELECT coalesce(u.full_name,'') FROM users u JOIN workspace_members m ON m.user_id=u.id AND m.workspace_id=? WHERE u.id=?`, workspace, user.ID).Scan(&name) != nil || strings.TrimSpace(name) == "" {
 		name = "Workspace member"
 	}
+	if documentPresenceBeforeBeat != nil {
+		documentPresenceBeforeBeat()
+	}
 	color, peers, ok := r.documentPresenceHub.beatAs(room, user.ID, input.Client, user.SessionID, user.TokenID, name, input.Anchor, input.Head)
+	// A revocation that landed after the authorization above already ran its
+	// forget; the request's tracked credential is invalid by then, so this
+	// late beat must not put the revoked tab back for a TTL.
+	if !auth.StreamCredentialCurrent(req.Context()) {
+		r.documentPresenceHub.leave(room, user.ID, input.Client)
+		replyError(w, 404, "document page not found")
+		return
+	}
 	if !ok {
 		replyError(w, 429, "too many people on this document right now")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"peers": peers, "color": color, "ttl_ms": documentPresenceTTL.Milliseconds(), "interval_ms": documentPresenceInterval.Milliseconds()})
 }
+
+// documentPresenceBeforeBeat is a test seam that runs between the read
+// authorization and the heartbeat; it is nil in production.
+var documentPresenceBeforeBeat func()
 
 // documentPresenceReadable runs the document read authorization in a read-only transaction.
 func (r *Router) documentPresenceReadable(req *http.Request, key documents.Key) bool {

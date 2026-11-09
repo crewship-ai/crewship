@@ -338,6 +338,21 @@ func TestDocumentPresenceEndsAtOnceOnRevokeAndMembershipChange(t *testing.T) {
 			t.Fatal("a revoked token keeps its tab present until the TTL")
 		}
 	})
+	t.Run("revoked while the heartbeat is in flight", func(t *testing.T) {
+		rig := presenceFixture(t)
+		rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+		documentPresenceBeforeBeat = func() {
+			documentPresenceBeforeBeat = nil
+			rig.router.authMw.streams.NotifyTokenRevoked("clt-presence-editor")
+		}
+		t.Cleanup(func() { documentPresenceBeforeBeat = nil })
+		if code, _ := rig.beat("editor", "doc-a", caret("editor-tab-1", "e")); code == 200 {
+			t.Fatal("a heartbeat revoked mid-flight was accepted")
+		}
+		if present(rig, "Erin Editor") {
+			t.Fatal("a heartbeat that raced the revocation put the tab back until the TTL")
+		}
+	})
 	t.Run("membership removed", func(t *testing.T) {
 		rig := presenceFixture(t)
 		rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
@@ -415,4 +430,13 @@ func TestDocumentPresenceCredentialRevocationKinds(t *testing.T) {
 	if got := strings.Join(tabs(), " "); got != "tab-session2" {
 		t.Errorf("workspace gone: left %q", got)
 	}
+	hub.forget("", func(*documentPresenceEntry) bool { return true })
+	seed()
+	hub.memberAccessChanged("ws", "u1")
+	if got := strings.Join(tabs(), " "); got != "tab-session2 tab-session3" {
+		t.Errorf("member access changed: left %q", got)
+	}
+	var none *documentPresenceHub
+	none.memberAccessChanged("ws", "u1")
+	none.workspaceGone("ws")
 }

@@ -102,6 +102,7 @@ func (h *WorkspaceHandler) ApplyAccessPreset(w http.ResponseWriter, r *http.Requ
 		h.memberAccessError(w, err)
 		return
 	}
+	h.presence.memberAccessChanged(workspace, user)
 	if notify != nil {
 		notify()
 	}
