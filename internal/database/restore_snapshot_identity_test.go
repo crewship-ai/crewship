@@ -49,3 +49,31 @@ func TestRestoreSnapshotRotatesDocumentDatabaseIdentity(t *testing.T) {
 		t.Fatalf("staged restore files left behind: %v", matches)
 	}
 }
+
+// A snapshot taken before the identity's first use has an empty identity
+// table. The restore must still leave a fresh identity behind, not an empty
+// table that a later first use would fill with an unrelated value.
+func TestRestoreSnapshotWritesIdentityWhenSnapshotHasNone(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "crewship.db")
+	ctx := context.Background()
+	db := openMigratedTestDBAt(t, dbPath)
+	maxV := maxKnownMigrationVersion()
+	snapPath := filepath.Join(dir, "crewship.db.pre-migrate-v"+itoa(maxV)+"-to-v"+itoa(maxV+1)+"-20261109T000000Z.bak")
+	if err := snapshotDatabase(ctx, db.DB, snapPath); err != nil {
+		t.Fatalf("stage snapshot: %v", err)
+	}
+	db.Close()
+	if err := RestoreSnapshot(dbPath, snapPath); err != nil {
+		t.Fatalf("RestoreSnapshot: %v", err)
+	}
+	restored, err := Open("file:" + dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restored.Close()
+	var value string
+	if err := restored.QueryRowContext(ctx, `SELECT value FROM document_database_identity WHERE id=1`).Scan(&value); err != nil || len(value) != 32 {
+		t.Fatalf("restored identity %q: %v", value, err)
+	}
+}

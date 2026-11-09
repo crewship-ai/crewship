@@ -172,9 +172,10 @@ func RestoreSnapshot(dbPath, snapshotPath string) error {
 	return nil
 }
 
-// rotateStagedDocumentIdentity rotates the document database identity in the
-// staged copy. A snapshot from before the table needs nothing: the migration
-// that creates it on first boot writes a fresh identity.
+// rotateStagedDocumentIdentity writes a fresh document database identity into
+// the staged copy, also when the snapshot was taken before the identity's first
+// use. A snapshot from before the table needs nothing: its migration creates
+// the table empty and first use creates a fresh identity.
 func rotateStagedDocumentIdentity(path string) error {
 	staged, err := sql.Open("sqlite", path)
 	if err != nil {

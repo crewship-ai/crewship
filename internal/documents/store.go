@@ -146,7 +146,9 @@ func (s *Store) tx(ctx context.Context, k Key, a Authorize, fn func(*sql.Tx, str
 // creates it on first use (#5163). The migration leaves the table empty, so a
 // database copied from a migrated image never shares another one's value.
 // Backup restore replaces it. Call it inside a write transaction (or on a
-// database handle) so concurrent first uses agree on one value.
+// database handle) so concurrent first uses agree on one value, and never hand
+// out a value read in a transaction that then rolls back: the first use would
+// not have been saved.
 func DatabaseIdentity(ctx context.Context, q interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 	QueryRowContext(context.Context, string, ...any) *sql.Row
