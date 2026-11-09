@@ -2,6 +2,7 @@ package api
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -22,6 +23,7 @@ func TestCraftNativeAgentTaskNeedsOwnerOrOwnerDelegation(t *testing.T) {
 		{"human Edit grantee", "MEMBER", true, false, false},
 		{"human Edit grantee with the owner's agent grant", "MEMBER", true, true, true},
 		{"workspace admin with the owner's agent grant", "ADMIN", false, true, true},
+		{"private document: the owner's agent grant does not reach it", "ADMIN", false, true, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f, m, ctx := nativeAgentAdmissionFixture(t)
@@ -33,6 +35,9 @@ func TestCraftNativeAgentTaskNeedsOwnerOrOwnerDelegation(t *testing.T) {
 			if tc.agentEdit {
 				mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('native-agent-page','agent',?,'write',?)`, f.a.AgentID, f.rig.adminID)
 			}
+			if strings.HasPrefix(tc.name, "private") {
+				mustExec(t, f.rig.db, `UPDATE pages SET private_audience=1 WHERE id='native-agent-page'`)
+			}
 			accepted, err := m.produceTask(ctx, "@native-agent-page", craftNativeAgentTaskRequest{ChatID: f.a.ChatID, MessageID: f.a.MessageID, WholeDocument: true})
 			if tc.admitted {
 				if err != nil || accepted.WorkID == "" {
@@ -40,7 +45,9 @@ func TestCraftNativeAgentTaskNeedsOwnerOrOwnerDelegation(t *testing.T) {
 				}
 				return
 			}
-			if !errors.Is(err, errCraftNativeAgentDenied) || accepted.WorkID != "" {
+			// A private document may already be refused as unreachable; any
+			// refusal that admits nothing is the rule holding.
+			if err == nil || accepted.WorkID != "" || !strings.HasPrefix(tc.name, "private") && !errors.Is(err, errCraftNativeAgentDenied) {
 				t.Fatalf("undelegated agent task admitted: %+v %v", accepted, err)
 			}
 			var items int
