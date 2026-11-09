@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
@@ -21,9 +23,14 @@ const pageAgentProducerOwnerOnlyRefusal = "only the artifact's owner can name an
 	"keep the panel's current producer, or ask the owner to name the agent or grant it produce"
 
 // pageAgentProducerRetiredFault is the visible reason on a panel whose agent
-// producer designation has ended.
-const pageAgentProducerRetiredFault = "producer agent %q was not named by the page's current owner (or its designator stopped " +
-	"owning the page), so it may not push; only the owner names an agent producer, and the owner must grant the agent produce"
+// producer designation has ended: the state in plain words first, then who
+// can fix it and how. The owner's way out is AuthorizePanelProducer.
+const pageAgentProducerRetiredFault = "Producer not authorized by the owner: agent %q may not push this panel's data, " +
+	"because the page's current owner did not name it as the producer (or whoever named it no longer owns the page). " +
+	"Only the page's owner can authorize it: Authorize producer on this panel, or `crewship page authorize-producer <page> <panel>`."
+
+const pageAgentProducerAuthorizeRefusal = "only the artifact's owner can authorize an agent as a panel's producer (R71 §0.14/1); " +
+	"ask the page's owner to authorize it"
 
 // producerDesignator is the human a request designates producers for: the
 // authenticated person, or nobody when an agent makes the request — an agent
@@ -90,3 +97,134 @@ const agentProducerDelegatedSQL = `(pp.producer_kind <> 'agent' OR (pp.producer_
 	 OR (COALESCE(p.owner_user_id, '') = '' AND COALESCE(p.owner_crew_id, '') <> ''
 	     AND EXISTS (SELECT 1 FROM crew_members ocm JOIN crews oc ON oc.id = ocm.crew_id AND oc.deleted_at IS NULL AND oc.workspace_id = p.workspace_id
 	                 WHERE ocm.crew_id = p.owner_crew_id AND ocm.user_id = pp.producer_designated_by_user_id)))))`
+
+// pageProducerAuthorizationWire rides on a panel whose agent producer the
+// owner has not authorized: which producer, and whether THIS viewer is the
+// one who can authorize it. It is a hint for the button; the endpoint
+// decides again.
+type pageProducerAuthorizationWire struct {
+	Producer     string `json:"producer"`
+	CanAuthorize bool   `json:"can_authorize"`
+}
+
+// AuthorizePanelProducer handles
+// POST /api/v1/pages/{slug}/panels/{panelId}/producer/authorize: the page's
+// owner, a human, explicitly names the panel's current agent producer as
+// theirs. It is a new designation by the owner, so it is the owner's for as
+// long as they own the page (the triggers end it with their ownership like
+// any other), and it is audited. It never widens anything else: the producer
+// stays the one the spec declares, and every other caller is refused.
+func (h *PageHandler) AuthorizePanelProducer(w http.ResponseWriter, r *http.Request) {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		replyError(w, http.StatusUnauthorized, "Unauthorized")
+		return
+	}
+	if agent, _ := pageGrantCallerIsAgent(r); agent {
+		replyError(w, http.StatusForbidden, pageAgentProducerAuthorizeRefusal+"; an agent is never the owner")
+		return
+	}
+	wsID := WorkspaceIDFromContext(r.Context())
+	slug := r.PathValue("slug")
+	panelID := strings.TrimSpace(r.PathValue("panelId"))
+
+	tx, err := h.db.BeginTx(r.Context(), nil)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin producer authorization", err)
+		return
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(r.Context(), `UPDATE workspaces SET updated_at=updated_at WHERE id=?`, wsID); err != nil {
+		replyInternalError(w, h.logger, "fence producer authorization", err)
+		return
+	}
+	r = r.WithContext(context.WithValue(r.Context(), pageAuthReaderKey{}, tx))
+	rec, err := h.loadPage(r.Context(), wsID, slug)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			replyError(w, http.StatusNotFound, fmt.Sprintf("page %q not found", slug))
+			return
+		}
+		replyInternalError(w, h.logger, "load page for producer authorization", err)
+		return
+	}
+	if !h.pageOwnerForDelegation(r.Context(), wsID, user.ID, rec) {
+		// A caller the page is not reachable for gets the 404 an unknown
+		// slug gets, so the endpoint cannot be walked to find pages.
+		if !h.producerAuthorizationReachable(r.Context(), wsID, user.ID, rec) {
+			replyError(w, http.StatusNotFound, fmt.Sprintf("page %q not found", slug))
+			return
+		}
+		replyError(w, http.StatusForbidden, pageAgentProducerAuthorizeRefusal)
+		return
+	}
+
+	var kind, ref, designator string
+	var retired bool
+	err = tx.QueryRowContext(r.Context(), `SELECT producer_kind, producer_ref, COALESCE(producer_designated_by_user_id, ''), producer_retired_at IS NOT NULL
+		FROM page_panels WHERE page_id = ? AND panel_id = ?`, rec.ID, panelID).Scan(&kind, &ref, &designator, &retired)
+	if errors.Is(err, sql.ErrNoRows) {
+		replyError(w, http.StatusNotFound, fmt.Sprintf("page %q has no panel %q", slug, panelID))
+		return
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "read panel producer", err)
+		return
+	}
+	if kind != "agent" {
+		replyError(w, http.StatusConflict, fmt.Sprintf(
+			"panel %q is produced by %s/%s, not by an agent; only an agent producer needs the owner's authorization", panelID, kind, ref))
+		return
+	}
+	out := map[string]any{"page": rec.Slug, "panel": panelID, "producer": "agent/" + ref, "authorized": true, "changed": false}
+	if !retired && designator == user.ID {
+		writeJSON(w, http.StatusOK, out)
+		return
+	}
+	if _, err := tx.ExecContext(r.Context(), `UPDATE page_panels SET producer_designated_by_user_id = ?, producer_retired_at = NULL
+		WHERE page_id = ? AND panel_id = ?`, user.ID, rec.ID, panelID); err != nil {
+		replyInternalError(w, h.logger, "authorize panel producer", err)
+		return
+	}
+	// The insert/update triggers retire a designation the owner did not make;
+	// read it back so a race with an ownership change cannot answer 200.
+	if err := tx.QueryRowContext(r.Context(), `SELECT producer_retired_at IS NOT NULL FROM page_panels WHERE page_id = ? AND panel_id = ?`,
+		rec.ID, panelID).Scan(&retired); err != nil {
+		replyInternalError(w, h.logger, "read authorized producer", err)
+		return
+	}
+	if retired {
+		replyError(w, http.StatusForbidden, pageAgentProducerAuthorizeRefusal)
+		return
+	}
+	meta, _ := json.Marshal(map[string]any{
+		"panel_id": panelID, "producer": "agent/" + ref,
+		"previous_designated_by_user_id": designator, "previously_retired": retired || designator != user.ID,
+		"reason": "the artifact owner authorized the agent producer explicitly (R71 0.14/1)",
+	})
+	if _, err := tx.ExecContext(r.Context(), `INSERT INTO audit_logs(id, workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
+		VALUES (lower(hex(randomblob(16))), ?, ?, 'page.agent_producer.authorized', 'page', ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
+		wsID, user.ID, rec.ID, string(meta)); err != nil {
+		replyInternalError(w, h.logger, "audit producer authorization", err)
+		return
+	}
+	if err := tx.Commit(); err != nil {
+		replyInternalError(w, h.logger, "commit producer authorization", err)
+		return
+	}
+	out["changed"] = true
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (h *PageHandler) producerAuthorizationReachable(ctx context.Context, wsID, userID string, rec *pageRecord) bool {
+	panels, err := h.loadPanels(ctx, wsID, rec.ID)
+	if err != nil {
+		return false
+	}
+	viewer, err := h.loadViewer(ctx, wsID, userID)
+	if err != nil {
+		return false
+	}
+	ok, err := h.canSeePage(ctx, wsID, rec, panels, viewer)
+	return err == nil && ok
+}

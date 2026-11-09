@@ -44,6 +44,7 @@ validation.
 | GET | [`/api/v1/pages/{slug}/grants`](#list-grants) | List a page's grants |
 | PUT | [`/api/v1/pages/{slug}/grants`](#issue-a-grant) | Grant read, produce, or write |
 | DELETE | [`/api/v1/pages/{slug}/grants`](#revoke-a-grant) | Revoke a grant |
+| POST | [`/api/v1/pages/{slug}/panels/{panelId}/producer/authorize`](#authorize-a-panels-agent-producer) | The owner authorizes a panel's agent producer |
 | GET | [`/api/v1/pages/{slug}/access`](#who-reaches-a-page) | Who reaches a page, and by which paths |
 | GET | [`/api/v1/pages/access`](#what-a-subject-reaches) | Which pages one user, crew or agent reaches |
 | GET | [`/api/v1/page-folders`](#list-folders) | List the folders the caller may see |
@@ -657,6 +658,39 @@ answers **400** rather than reporting a success it did not perform.
 | 401 | No session or token. |
 | 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
+
+---
+
+## Authorize a panel's agent producer
+
+```
+POST /api/v1/pages/{slug}/panels/{panelId}/producer/authorize
+```
+
+**Authentication:** session cookie or CLI token. Only the page's **owner** (the
+owning user, or a member of the owning crew while that crew is not deleted),
+and only a person.
+
+A panel whose `agent/<slug>` producer the owner did not name carries
+`producer_authorization: {"producer": "agent/<slug>", "can_authorize": <bool>}`
+on [Get a page](#get-a-page). Its `reason` starts with "Producer not authorized
+by the owner". `can_authorize` is true only for the owner. This call makes the
+declared producer the owner's own designation. It writes the audit entry
+`page.agent_producer.authorized`, and the agent can push again. The designation
+ends if the page changes owner, like any other. No body.
+
+**Response 200:** `{"page": "fleet-201", "panel": "sluzby", "producer": "agent/writer", "authorized": true, "changed": true}`.
+`changed` is false when the owner had already authorized it.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Authorized, or already authorized by this owner. |
+| 401 | No session or token. |
+| 403 | The caller is not the page's owner, or is an agent. Only for a caller who reaches the page. |
+| 404 | No such page or panel, or a page the caller [cannot reach](#unreachable-pages-are-not-found). |
+| 409 | The panel's producer is not an agent. |
 
 ---
 

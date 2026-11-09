@@ -143,6 +143,9 @@ func (r *Router) registerPageRoutes() {
 	// openapi: responses 200,400,401,403,404,409,413,500
 	r.authedMut("POST", "/api/v1/pages/{slug}/unarchive", roleSelf, p.UnarchivePage)
 	r.authedMut("PUT", "/api/v1/pages/{slug}/panels/{panelId}/data", roleSelf, p.PushData)
+	// The page's owner authorizes the panel's agent producer explicitly (#5260).
+	// openapi: responses 200,401,403,404,409,500
+	r.authedMut("POST", "/api/v1/pages/{slug}/panels/{panelId}/producer/authorize", roleSelf, p.AuthorizePanelProducer)
 	r.authedMut("PUT", "/api/v1/pages/{slug}/grants", roleSelf, p.PutGrant)
 	r.authedMut("DELETE", "/api/v1/pages/{slug}/grants", roleSelf, p.DeleteGrant)
 

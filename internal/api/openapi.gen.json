@@ -133947,6 +133947,19 @@
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
                               },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
                               "provenance": {
                                 "properties": {
                                   "produced_at": {
@@ -134211,6 +134224,19 @@
                               "producer": {
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
+                              },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
                               },
                               "provenance": {
                                 "properties": {
@@ -135548,6 +135574,19 @@
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
                               },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
                               "provenance": {
                                 "properties": {
                                   "produced_at": {
@@ -135812,6 +135851,19 @@
                               "producer": {
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
+                              },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
                               },
                               "provenance": {
                                 "properties": {
@@ -136561,6 +136613,19 @@
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
                               },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
                               "provenance": {
                                 "properties": {
                                   "produced_at": {
@@ -137087,6 +137152,19 @@
                               "producer": {
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
+                              },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
                               },
                               "provenance": {
                                 "properties": {
@@ -156386,6 +156464,176 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/panels/{panelId}/producer/authorize": {
+      "post": {
+        "description": "Submit page panel producer authorize (POST /api/v1/pages/{slug}/panels/{panelId}/producer/authorize).",
+        "operationId": "post_api_v1_pages_slug_panels_panelId_producer_authorize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "panelId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "authorized": {
+                      "type": "boolean"
+                    },
+                    "changed": {
+                      "description": "False when this owner had already authorized it.",
+                      "type": "boolean"
+                    },
+                    "page": {
+                      "type": "string"
+                    },
+                    "panel": {
+                      "type": "string"
+                    },
+                    "producer": {
+                      "description": "agent/\u003cslug\u003e, the producer the panel's spec declares.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page panel producer authorize",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
     "/api/v1/pages/{slug}/project": {
       "get": {
         "description": "Get page project (GET /api/v1/pages/{slug}/project).",
@@ -161182,6 +161430,19 @@
                                   "producer": {
                                     "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                     "type": "string"
+                                  },
+                                  "producer_authorization": {
+                                    "properties": {
+                                      "can_authorize": {
+                                        "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                        "type": "boolean"
+                                      },
+                                      "producer": {
+                                        "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "type": "object"
                                   },
                                   "provenance": {
                                     "properties": {

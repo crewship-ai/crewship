@@ -159,6 +159,11 @@ type pagePanelWire struct {
 	Span       int    `json:"span"`
 	Public     bool   `json:"public,omitempty"`
 
+	// ProducerAuthorization is set only on a panel whose agent producer the
+	// page's owner has not authorized (#5260): the reason says so, and this
+	// tells the client which producer and whether this viewer may fix it.
+	ProducerAuthorization *pageProducerAuthorizationWire `json:"producer_authorization,omitempty"`
+
 	// Embed is the server-resolved URL for an embed.v1 panel, and nothing
 	// else ever carries one. See embedWire.
 	Embed *pageEmbedWire `json:"embed,omitempty"`
@@ -502,6 +507,9 @@ type panelRecord struct {
 	// page's owner did not make, or that has been retired (#5260): that agent
 	// may not push by being the declared producer.
 	ProducerDelegated bool
+	// ProducerUnauthorized marks the panel whose Fault is that its live agent
+	// producer awaits the owner's authorization (AuthorizePanelProducer).
+	ProducerUnauthorized bool
 	// Fault is §10b.4's stated reason: the producer was deleted, the owning
 	// crew removed. It outranks the clock — no amount of recent data makes a
 	// panel whose producer is gone current.
@@ -1795,6 +1803,7 @@ func (h *PageHandler) loadPanelsIn(ctx context.Context, wsID string, scope pageS
 			p.Fault = fmt.Sprintf("producer %s %q no longer exists", p.ProducerKind, p.ProducerRef)
 		case !p.ProducerDelegated:
 			p.Fault = fmt.Sprintf(pageAgentProducerRetiredFault, p.ProducerRef)
+			p.ProducerUnauthorized = true
 		}
 		rec := p
 		if byPageAndPanel[pageID] == nil {
@@ -2098,6 +2107,7 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 		Icon:         rec.Icon,
 		Color:        rec.Color,
 	}
+	var canAuthorize *bool
 	for _, p := range panels {
 		if viewer != nil && !h.canSeePanel(viewer, p) {
 			out.Panels = append(out.Panels, pageSealedPanelWire{
@@ -2110,6 +2120,13 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 			continue
 		}
 		wire := h.panelWire(p)
+		if p.ProducerUnauthorized {
+			if canAuthorize == nil {
+				v := viewer != nil && viewer.UserID != "" && h.pageOwnerForDelegation(ctx, WorkspaceIDFromContext(ctx), viewer.UserID, rec)
+				canAuthorize = &v
+			}
+			wire.ProducerAuthorization = &pageProducerAuthorizationWire{Producer: p.producerRef(), CanAuthorize: *canAuthorize}
+		}
 		if authored {
 			h.attachAuthoredHalf(ctx, rec.ID, p.PanelID, &wire)
 		}

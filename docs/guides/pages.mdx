@@ -323,16 +323,29 @@ declaration — that is what the grant is for.
 Naming an agent as a panel's producer hands that agent the panel's data, so
 only the page's owner does it. When a workspace admin, an Edit grantee or an
 agent creates, updates, rolls back or publishes a spec that newly names
-`agent/<slug>` as a producer, the save is refused with 403. An import makes the
-importer the page's owner, so its agent producers are the importer's own. A
-page an agent saves for its own crew is stored, but its agent producers are
-ended as they land, because no human owner named them. An edit that keeps a panel's producer unchanged is allowed. If
+`agent/<slug>` as a producer, the save is refused with 403. A person who imports
+a bundle with no owner, or names a crew they belong to, owns the result, so its
+agent producers are theirs and stay live. An import that names a crew the
+importer does not belong to, or that an agent makes, is stored with its agent
+producers ended. A page an agent saves for its own crew is stored, but its agent
+producers are ended as they land, because no human owner named them. An edit that keeps a panel's producer unchanged is allowed. If
 the page changes owner, the designating owner leaves the owning crew, or the
 owning crew is deleted, the designation ends for good: the panel shows the
 reason as its fault, the agent can no longer push, and an audit entry
-`page.agent_producer.retired_not_owner` records it. The owner restores it by
-granting the agent `produce`. Saving the page again with the same producer does
-not restore it; the owner changing a panel's producer is a new designation. The same holds
+`page.agent_producer.retired_not_owner` records it. Saving the page again with
+the same producer does not restore it.
+
+Such a panel reads **Producer not authorized by the owner**, names the agent,
+and says that only the page's owner can authorize it. The owner sees an
+**Authorize producer** button on the panel; anyone else is told to ask the
+owner. The button, `crewship page authorize-producer <page> <panel>` and
+`POST /api/v1/pages/{slug}/panels/{panelId}/producer/authorize` all do the same
+thing. They make the producer the spec already declares the owner's own
+designation, write the audit entry `page.agent_producer.authorized`, and the
+agent can push again. Only the owner can do this, and only as a person: an
+admin, an Edit grantee or an agent gets 403. Like any designation, it ends if
+the page changes owner. The owner can also grant the agent `produce`, or point
+the panel at another producer, which is a new designation. The same holds
 for designations made before this rule: the upgrade reads who wrote each one
 from the page's version history and ends those the owner did not make. A page
 an agent creates for its own crew has no human owner behind its agent
