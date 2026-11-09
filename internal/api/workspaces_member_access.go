@@ -139,6 +139,8 @@ func (h *WorkspaceHandler) PutMemberAccess(w http.ResponseWriter, r *http.Reques
 	if notify != nil {
 		notify()
 	}
+	// Restricting a member ends their Docs presence; a heartbeat re-admits whatever they can still read.
+	h.presence.memberAccessChanged(workspace, user)
 	h.writeMemberAccessPolicy(w, r, after)
 }
 

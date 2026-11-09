@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
 
@@ -28,12 +29,13 @@ import (
 // can neither stay listed nor read who else is there. Rooms are keyed by the
 // authorized workspace and Page id: presence never crosses documents.
 //
-// Removal on revoke happens on the revoked person's next heartbeat (about a
-// second) when the request still reaches this handler (a Page grant revoke).
-// When it no longer does (membership removed, session or token revoked, scope
-// lost) the middleware refuses it and the entry expires after the TTL; the
-// same bound covers a revoke landing between the authorization and the room
-// write of one heartbeat. Expired entries of every room are swept at least
+// Removal on revoke: a revoked session or CLI token, a suspended account, an
+// ended membership, a role change or a deleted workspace removes the tabs at
+// once (credentialRevoked, memberAccessChanged, workspaceGone). A Page grant
+// revoke removes the person on their next heartbeat (about a second), which
+// the live authorization refuses. Only a revoke landing between the
+// authorization and the room write of one heartbeat, or a path that bypasses
+// these signals, is bounded by the TTL. Expired entries of every room are swept at least
 // once per TTL, so tabs that vanish without a leave never accumulate.
 //
 // Identity is the server's: the user id comes from the authenticated request,
@@ -64,6 +66,9 @@ type documentPresenceEntry struct {
 	color              int
 	anchor, head       string
 	seen               time.Time
+	// The credential of the last heartbeat (a session or a CLI token row id),
+	// so revoking it removes the tab at once.
+	session, token string
 }
 
 type documentPresencePeer struct {
@@ -161,6 +166,11 @@ func (h *documentPresenceHub) sweepAll(force bool) {
 
 // beat records one authorized heartbeat and returns the other people present.
 func (h *documentPresenceHub) beat(room, user, client, name, anchor, head string) (int, []documentPresencePeer, bool) {
+	return h.beatAs(room, user, client, "", "", name, anchor, head)
+}
+
+// beatAs is beat with the credential that authorized it.
+func (h *documentPresenceHub) beatAs(room, user, client, session, token, name, anchor, head string) (int, []documentPresencePeer, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.sweepAll(false)
@@ -191,6 +201,7 @@ func (h *documentPresenceHub) beat(room, user, client, name, anchor, head string
 		h.users[user]++
 	}
 	entry.name, entry.anchor, entry.head, entry.seen = name, anchor, head, h.now()
+	entry.session, entry.token = session, token
 	peers := []documentPresencePeer{}
 	for _, other := range entries {
 		if other.user == user {
@@ -227,6 +238,66 @@ func (h *documentPresenceHub) drop(room, user string) {
 		}
 	}
 	h.sweep(room)
+}
+
+// forget removes, in the rooms whose key starts with prefix (every room when
+// it is empty), each entry that matches.
+func (h *documentPresenceHub) forget(prefix string, matches func(*documentPresenceEntry) bool) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	for room, entries := range h.rooms {
+		if prefix != "" && !strings.HasPrefix(room, prefix) {
+			continue
+		}
+		for key, entry := range entries {
+			if matches(entry) {
+				h.remove(entries, key)
+			}
+		}
+		if len(entries) == 0 {
+			delete(h.rooms, room)
+		}
+	}
+}
+
+// credentialRevoked receives every credential revocation the server makes
+// (auth.StreamCredentials: a session, all of a user's sessions, a CLI
+// token, all of a user's tokens, or the whole account). The tabs that the
+// revoked credential kept present go at once instead of after the TTL.
+func (h *documentPresenceHub) credentialRevoked(kind, id string) {
+	if id == "" {
+		return
+	}
+	switch kind {
+	case "session":
+		h.forget("", func(e *documentPresenceEntry) bool { return e.session == id })
+	case "user-session":
+		h.forget("", func(e *documentPresenceEntry) bool { return e.user == id && e.session != "" })
+	case "token":
+		h.forget("", func(e *documentPresenceEntry) bool { return e.token == id })
+	case "user-token":
+		h.forget("", func(e *documentPresenceEntry) bool { return e.user == id && e.token != "" })
+	default: // "account" and anything added later: the whole person.
+		h.forget("", func(e *documentPresenceEntry) bool { return e.user == id })
+	}
+}
+
+// memberAccessChanged removes a person from every document of a workspace
+// when their membership ends or their role changes. A person who can still
+// read comes back with their next heartbeat, which is authorized afresh.
+func (h *documentPresenceHub) memberAccessChanged(workspace, user string) {
+	if h == nil || workspace == "" || user == "" {
+		return
+	}
+	h.forget(documentPresenceRoom(workspace, ""), func(e *documentPresenceEntry) bool { return e.user == user })
+}
+
+// workspaceGone removes every tab of a deleted workspace.
+func (h *documentPresenceHub) workspaceGone(workspace string) {
+	if h == nil || workspace == "" {
+		return
+	}
+	h.forget(documentPresenceRoom(workspace, ""), func(*documentPresenceEntry) bool { return true })
 }
 
 func validPresencePosition(value string) bool {
@@ -302,13 +373,28 @@ func (r *Router) documentPresence(w http.ResponseWriter, req *http.Request) {
 	if r.db.QueryRowContext(req.Context(), `SELECT coalesce(u.full_name,'') FROM users u JOIN workspace_members m ON m.user_id=u.id AND m.workspace_id=? WHERE u.id=?`, workspace, user.ID).Scan(&name) != nil || strings.TrimSpace(name) == "" {
 		name = "Workspace member"
 	}
-	color, peers, ok := r.documentPresenceHub.beat(room, user.ID, input.Client, name, input.Anchor, input.Head)
+	if documentPresenceBeforeBeat != nil {
+		documentPresenceBeforeBeat()
+	}
+	color, peers, ok := r.documentPresenceHub.beatAs(room, user.ID, input.Client, user.SessionID, user.TokenID, name, input.Anchor, input.Head)
+	// A revocation that landed after the authorization above already ran its
+	// forget; the request's tracked credential is invalid by then, so this
+	// late beat must not put the revoked tab back for a TTL.
+	if !auth.StreamCredentialCurrent(req.Context()) {
+		r.documentPresenceHub.leave(room, user.ID, input.Client)
+		replyError(w, 404, "document page not found")
+		return
+	}
 	if !ok {
 		replyError(w, 429, "too many people on this document right now")
 		return
 	}
 	writeJSON(w, 200, map[string]any{"peers": peers, "color": color, "ttl_ms": documentPresenceTTL.Milliseconds(), "interval_ms": documentPresenceInterval.Milliseconds()})
 }
+
+// documentPresenceBeforeBeat is a test seam that runs between the read
+// authorization and the heartbeat; it is nil in production.
+var documentPresenceBeforeBeat func()
 
 // documentPresenceReadable runs the document read authorization in a read-only transaction.
 func (r *Router) documentPresenceReadable(req *http.Request, key documents.Key) bool {
