@@ -46,6 +46,10 @@ export interface DocsCanvasProps {
   onOpenComments?: (blockId: string, threadIds: string[]) => void
   /** The document session's reader-scoped people lookup, the one the Page's mentions use; without it every mention is "@Unknown member". */
   people?: MentionLabels
+  /** Other people in this document, in the shared Canvas coordinate space. */
+  peers?: readonly PresencePeer[]
+  /** This tab's ephemeral pointer and selection; null when Canvas closes. */
+  onPresence?: (presence: CanvasPresence | null) => void
 }
 
 type Drag =
