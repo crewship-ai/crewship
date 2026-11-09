@@ -42,6 +42,8 @@ export interface DocsCanvasProps {
   comments?: readonly DocumentComment[]
   /** Open these threads (the same ones the Page lists) in the Comments drawer. */
   onOpenComments?: (blockId: string, threadIds: string[]) => void
+  /** Display name for a mentioned workspace member; unknown members show as "Unknown member". */
+  memberName?: (userId: string) => string | undefined
 }
 
 type Drag =
@@ -49,7 +51,9 @@ type Drag =
   | { kind: "move" | "resize"; pointer: number; id: string; x: number; y: number; start: Rect; handle?: Handle }
 
 /** One run of a block's text with the Page marks it carries (schema 4/5 formatting). */
-export interface TextRun { text: string; bold?: boolean; italic?: boolean; strike?: boolean; underline?: boolean; code?: boolean; link?: boolean; color?: string; highlight?: string }
+export interface TextRun { text: string; bold?: boolean; italic?: boolean; strike?: boolean; underline?: boolean; code?: boolean; link?: boolean; color?: string; highlight?: string
+  /** A schema-5 inline atom: a date (ISO day) or a mention (user ID), shown as a read-only chip. */
+  atom?: { kind: "date"; value: string } | { kind: "mention"; userId: string } }
 interface BlockSummary { id: string; type: string; text: string; runs: TextRun[]; level?: number }
 
 const PALETTE = new Set(["gray", "red", "orange", "yellow", "green", "blue", "purple", "pink"])
@@ -77,12 +81,23 @@ function runsOf(node: Y.XmlElement | Y.XmlText): TextRun[] {
       return [run]
     })
   }
-  return node.toArray().flatMap((child, index) => [...(index > 0 ? [{ text: " " }] : []), ...runsOf(child as Y.XmlElement)])
+  if (node.nodeName === "date" || node.nodeName === "mention") {
+    const value = node.getAttribute(node.nodeName === "date" ? "value" : "userId") as unknown
+    if (typeof value !== "string" || !value) return []
+    return [{ text: "", atom: node.nodeName === "date" ? { kind: "date", value } : { kind: "mention", userId: value } }]
+  }
+  // Text and inline atoms of one block run together; nested blocks are separated by a space, as plain() does.
+  const inline = (child: unknown) => !isElement(child) || child.nodeName === "date" || child.nodeName === "mention"
+  const children = node.toArray()
+  return children.flatMap((child, index) => [...(index > 0 && !(inline(child) && inline(children[index - 1])) ? [{ text: " " }] : []), ...runsOf(child as Y.XmlElement)])
 }
 
 /** A card shows the Page block's formatting with the same palette as the Page editor; links are not followable on the canvas. */
-function FormattedRuns({ runs }: { runs: TextRun[] }) {
+function FormattedRuns({ runs, memberName }: { runs: TextRun[]; memberName?: (userId: string) => string | undefined }) {
   return <>{runs.map((run, index) => {
+    // Atoms are read-only chips, like on the Page: the date as its ISO day, a mention as @name (or @Unknown member).
+    if (run.atom?.kind === "date") return <time key={index} data-date={run.atom.value} dateTime={run.atom.value} className="rounded-sm bg-muted px-1">{run.atom.value}</time>
+    if (run.atom?.kind === "mention") return <span key={index} data-mention={run.atom.userId} className="rounded-sm bg-muted px-1">@{memberName?.(run.atom.userId) || "Unknown member"}</span>
     let node: React.ReactNode = run.text
     if (run.code) node = <code className="rounded bg-muted px-1 font-mono text-[0.9em]">{node}</code>
     if (run.bold) node = <strong>{node}</strong>
@@ -171,7 +186,7 @@ const handleClass: Record<string, string> = {
   se: "bottom-[-5px] right-[-5px] size-3 cursor-nwse-resize",
 }
 
-export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOpenComments }: DocsCanvasProps) {
+export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOpenComments, memberName }: DocsCanvasProps) {
   const { view: surface, blocks, error } = useSurface(doc)
   const ref = React.useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = React.useState<Viewport>({ x: -48, y: -48, scale: 1 })
@@ -376,7 +391,7 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
             className={cn("absolute overflow-hidden rounded-md border bg-card p-3 text-sm shadow-sm outline-none", editable ? "cursor-grab" : "cursor-default",
               selected === p.id && "ring-2 ring-primary")}
             style={{ left: r.x, top: r.y, width: r.w, minHeight: r.h, zIndex: p.z }}>
-            <p className={cn("whitespace-pre-wrap break-words", block.type === "heading" && "text-base font-semibold")}>{block.text ? <FormattedRuns runs={block.runs} /> : <span className="text-muted-foreground">Empty block</span>}</p>
+            <p className={cn("whitespace-pre-wrap break-words", block.type === "heading" && "text-base font-semibold")}>{block.runs.some(run => run.text.trim() || run.atom) ? <FormattedRuns runs={block.runs} memberName={memberName} /> : <span className="text-muted-foreground">Empty block</span>}</p>
             {(threads.get(p.id)?.length ?? 0) > 0 && <button type="button" data-card-comments={p.id}
               aria-label={`${threads.get(p.id)!.length} open ${threads.get(p.id)!.length === 1 ? "comment" : "comments"} on this block`}
               onPointerDown={e => e.stopPropagation()} onClick={() => onOpenComments?.(p.id, threads.get(p.id)!)}
