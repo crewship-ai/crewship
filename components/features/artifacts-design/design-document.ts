@@ -286,7 +286,8 @@ export function createDesignUndo(doc: Y.Doc) {
    if (type === root) subs.forEach(id => { if (id) keys.add(`${id}:*`) })
    else if (type._item && type._item.parent === root && typeof type._item.parentSub === "string") {
     const id = type._item.parentSub
-    subs.forEach(key => { if (key) keys.add(`${id}:${key}`) })
+    // "id" never changes, but every edit writes it again; it is no conflict.
+    subs.forEach(key => { if (key && key !== "id") keys.add(`${id}:${key}`) })
    }
   })
   return keys

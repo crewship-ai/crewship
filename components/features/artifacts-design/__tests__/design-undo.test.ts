@@ -68,5 +68,14 @@ describe("createDesignUndo", () => {
   expect(node(a, "r1")?.x).toBe(merged)
   expect(node(b, "r1")?.x).toBe(merged)
  })
+ it("keeps this person's step when a peer changes another property of the same layer", () => {
+  const { a, b } = pair()
+  const undoA = createDesignUndo(a)
+  upsertDesignNode(a, { id: "r1", x: 150 })
+  undoA.stopCapturing()
+  upsertDesignNode(b, { id: "r1", height: 130 })
+  expect(undoA.canUndo()).toBe(true)
+  undoA.undo()
+  expect(node(b, "r1")).toMatchObject({ x: 100, height: 130 })
+ })
 })
-
