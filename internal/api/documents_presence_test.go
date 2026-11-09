@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -300,5 +301,118 @@ func TestDocumentPresenceCapsTabsPerPersonServerWide(t *testing.T) {
 	}
 	if hub.users["busy-user"] != documentPresenceUserTotalLimit || hub.total != documentPresenceUserTotalLimit+1 {
 		t.Fatalf("counts drifted: user %d total %d", hub.users["busy-user"], hub.total)
+	}
+}
+
+// #5166 debt: a revoked credential, an ended membership or a role change
+// removes the person's presence at once, not after the TTL.
+func TestDocumentPresenceEndsAtOnceOnRevokeAndMembershipChange(t *testing.T) {
+	present := func(rig *presenceRig, name string) bool {
+		_, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o"))
+		for _, peer := range reply.Peers {
+			if peer.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	call := func(rig *presenceRig, who, method, path, body string) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+rig.tokens[who])
+		req.Header.Set("X-Workspace-ID", rig.ws)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		rig.router.mux.ServeHTTP(w, req)
+		return w.Code
+	}
+	t.Run("CLI token revoked", func(t *testing.T) {
+		rig := presenceFixture(t)
+		rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+		if !present(rig, "Erin Editor") {
+			t.Fatal("setup: editor not present")
+		}
+		if code := call(rig, "editor", "DELETE", "/api/v1/auth/cli-tokens/clt-presence-editor", ""); code != 200 {
+			t.Fatalf("revoke token: %d", code)
+		}
+		if present(rig, "Erin Editor") {
+			t.Fatal("a revoked token keeps its tab present until the TTL")
+		}
+	})
+	t.Run("membership removed", func(t *testing.T) {
+		rig := presenceFixture(t)
+		rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+		var member string
+		if err := rig.router.db.QueryRow(`SELECT id FROM workspace_members WHERE workspace_id=? AND user_id='presence-editor'`, rig.ws).Scan(&member); err != nil {
+			t.Fatal(err)
+		}
+		if code := call(rig, "owner", "DELETE", "/api/v1/workspaces/"+rig.ws+"/members/"+member, ""); code != 200 {
+			t.Fatalf("remove member: %d", code)
+		}
+		if present(rig, "Erin Editor") {
+			t.Fatal("a removed member stays present until the TTL")
+		}
+	})
+	t.Run("role changed", func(t *testing.T) {
+		rig := presenceFixture(t)
+		rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+		var member string
+		if err := rig.router.db.QueryRow(`SELECT id FROM workspace_members WHERE workspace_id=? AND user_id='presence-editor'`, rig.ws).Scan(&member); err != nil {
+			t.Fatal(err)
+		}
+		if code := call(rig, "owner", "PATCH", "/api/v1/workspaces/"+rig.ws+"/members/"+member, `{"role":"VIEWER"}`); code != 200 {
+			t.Fatalf("change role: %d", code)
+		}
+		if present(rig, "Erin Editor") {
+			t.Fatal("a role change keeps the old presence until the TTL")
+		}
+		// Still able to read: the next heartbeat brings the person back.
+		rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+		if !present(rig, "Erin Editor") {
+			t.Fatal("a member who can still read is not re-admitted")
+		}
+	})
+}
+
+func TestDocumentPresenceCredentialRevocationKinds(t *testing.T) {
+	hub := newDocumentPresenceHub()
+	room, other := documentPresenceRoom("ws", "a"), documentPresenceRoom("ws2", "b")
+	seed := func() {
+		hub.beatAs(room, "u1", "tab-session1", "s1", "", "U1", "", "")
+		hub.beatAs(room, "u1", "tab-token001", "", "t1", "U1", "", "")
+		hub.beatAs(other, "u1", "tab-session2", "s2", "", "U1", "", "")
+		hub.beatAs(room, "u2", "tab-session3", "s3", "", "U2", "", "")
+	}
+	tabs := func() []string {
+		out := []string{}
+		for _, entries := range hub.rooms {
+			for _, e := range entries {
+				out = append(out, e.client)
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+	for _, tc := range []struct{ kind, id, want string }{
+		{"session", "s1", "tab-session2 tab-session3 tab-token001"},
+		{"token", "t1", "tab-session1 tab-session2 tab-session3"},
+		{"user-session", "u1", "tab-session3 tab-token001"},
+		{"user-token", "u1", "tab-session1 tab-session2 tab-session3"},
+		{"account", "u1", "tab-session3"},
+	} {
+		hub.forget("", func(*documentPresenceEntry) bool { return true })
+		seed()
+		hub.credentialRevoked(tc.kind, tc.id)
+		if got := strings.Join(tabs(), " "); got != tc.want {
+			t.Errorf("%s %s: left %q, want %q", tc.kind, tc.id, got, tc.want)
+		}
+		if hub.total != len(tabs()) {
+			t.Errorf("%s: total %d for %d tabs", tc.kind, hub.total, len(tabs()))
+		}
+	}
+	hub.forget("", func(*documentPresenceEntry) bool { return true })
+	seed()
+	hub.workspaceGone("ws")
+	if got := strings.Join(tabs(), " "); got != "tab-session2" {
+		t.Errorf("workspace gone: left %q", got)
 	}
 }

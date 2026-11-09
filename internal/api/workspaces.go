@@ -123,6 +123,9 @@ type WorkspaceHandler struct {
 	// storagePath, set by SetStorageRoot.
 	storageRoot        string
 	restrictedWorkflow func() *restrictedworkflow.Service
+	// presence (#5166) loses a person's Docs presence when their membership
+	// or role changes, and every presence of a deleted workspace.
+	presence *documentPresenceHub
 }
 
 // NewWorkspaceHandler creates a WorkspaceHandler with the given database and logger.

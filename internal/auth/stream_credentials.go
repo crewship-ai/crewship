@@ -20,6 +20,22 @@ type StreamCredentials struct {
 	pendingOrder list.List
 	revocations  map[streamRevocationKey]uint64
 	active       map[*streamCredentialState]struct{}
+	listeners    []func(kind, id string)
+}
+
+// OnRevoke registers fn for every revocation this registry hears about,
+// after its own streams are invalidated. kind is "session", "user-session",
+// "token", "user-token" or "account"; id is the session or token row id,
+// or the user id for the per-user kinds. Other in-memory state bound to a
+// credential (Docs presence) uses it to end at once. fn runs outside the
+// registry lock and must not block.
+func (r *StreamCredentials) OnRevoke(fn func(kind, id string)) {
+	if fn == nil {
+		return
+	}
+	r.mu.Lock()
+	r.listeners = append(r.listeners, fn)
+	r.mu.Unlock()
 }
 
 type streamCredentialKey struct{}
@@ -206,10 +222,14 @@ func (r *StreamCredentials) revoke(key streamRevocationKey, matches func(*stream
 			revoked = append(revoked, s)
 		}
 	}
+	listeners := r.listeners
 	r.mu.Unlock()
 	// Invalidate under the lock, but invoke cancellation outside it.
 	for _, s := range revoked {
 		s.finish()
+	}
+	for _, fn := range listeners {
+		fn(key.kind, key.id)
 	}
 }
 

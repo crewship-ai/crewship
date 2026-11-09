@@ -2625,9 +2625,11 @@ different for each person while free colours remain, kept while they stay) and
 invalid credential; 403 agent credential or missing scope; 404 document
 unavailable or read access gone (every tab of the caller on this document is
 removed at the same time); 429 too many tabs on the document (at most 64, and
-8 per person); 503 Docs disabled. A revoked Page grant removes the person on
-their next heartbeat; when the credential or membership itself is gone, the
-request is refused before presence and the tab disappears after the 6 seconds. Responses use `Cache-Control: no-store`.
+8 per person); 503 Docs disabled. A revoked session or CLI token, a suspended
+account, an ended membership, a role or access change and a deleted workspace
+remove the person's tabs at once; a revoked Page grant removes them on their
+next heartbeat, which is refused. A person who can still read reappears with
+their next heartbeat. Responses use `Cache-Control: no-store`.
 CLI: `crewship doc presence <page-slug>`.
 
 Page read and list responses include `has_document`, which identifies saved native
