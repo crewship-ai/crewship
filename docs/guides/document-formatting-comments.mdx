@@ -78,12 +78,17 @@ A document becomes schema 4 or 5 only explicitly: initialize it with `"schema": 
 document through the documents service's human-only upgrade, which always goes
 to the newest schema (5), keeps its content, history and comments and only
 widens what it may hold. Restoring a version from before that upgrade keeps
-the document at schema 5, so it never silently returns to schema 4 and agent
-proposals stay unavailable. An editor that does not know a document's schema opens
-it read-only with "This document needs a newer editor" and never saves over it.
-New documents from the Artifacts library and from agents in chat are still
-schema 3, because agent drafting works on schema 3 only; an agent cannot edit
-a schema 4 or 5 document yet.
+the document at schema 5, so it never silently returns to schema 4. An editor
+that does not know a document's schema opens it read-only with "This document
+needs a newer editor" and never saves over it.
+
+New documents start at schema 5: the New Doc dialog, the Artifacts library and
+documents an agent creates from chat. Existing documents keep their schema
+until someone with edit access upgrades them. The agent run that created a
+document with your drafting permission edits it directly; any later agent
+request on a schema 4 or 5 document is a proposal at that document's schema,
+which a person accepts or rejects. Accepting keeps underline, colours,
+highlights, dates and mentions outside the changed text.
 
 ## Comments
 

@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"sort"
+
+	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 func documentDraftMCPCatalog() []memoryMCPToolDescriptor {
@@ -21,13 +23,16 @@ func documentDraftMCPCatalog() []memoryMCPToolDescriptor {
 		sort.Strings(required)
 		return map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": required}
 	}
-	patch := object(map[string]any{"id": stringField, "schema": map[string]any{"enum": []any{3, 4}}, "page_id": stringField, "epoch": stringField, "ifRev": integer, "target": stringField, "ifHash": stringField, "text": stringField})
-	pin := object(map[string]any{"id": stringField, "schema": map[string]any{"enum": []any{3, 4}}, "page_id": stringField, "epoch": stringField, "ifRev": integer})
+	// Schema enums come from documents.SchemaAllows, so a new schema reaches
+	// agents only with its capability (#5233).
+	draftSchemas, proposeSchemas := documentSchemasWith(documents.CapDraft), documentSchemasWith(documents.CapPropose)
+	patch := object(map[string]any{"id": stringField, "schema": map[string]any{"enum": draftSchemas}, "page_id": stringField, "epoch": stringField, "ifRev": integer, "target": stringField, "ifHash": stringField, "text": stringField})
+	pin := object(map[string]any{"id": stringField, "schema": map[string]any{"enum": draftSchemas}, "page_id": stringField, "epoch": stringField, "ifRev": integer})
 	packet := object(map[string]any{"generation": integer, "patch": patch, "checkpoint": pin})
 	targets := map[string]any{"type": "array", "items": object(map[string]any{"id": stringField, "type": map[string]any{"enum": []string{"paragraph", "heading"}}, "parent": map[string]any{"type": []string{"string", "null"}}, "hash": stringField, "text": stringField})}
-	view := object(map[string]any{"page_id": stringField, "schema": map[string]any{"enum": []any{3, 4}}, "rev": integer, "generation": integer, "epoch": stringField, "targets": targets})
-	proposeView := object(map[string]any{"page_id": stringField, "mode": map[string]any{"const": "propose"}, "schema": map[string]any{"const": 4}, "rev": integer, "generation": integer, "epoch": stringField, "targets": targets})
-	proposal := object(map[string]any{"id": stringField, "schema": map[string]any{"const": 4}, "page_id": stringField, "epoch": stringField, "ifRev": integer, "target": stringField, "ifHash": stringField, "text": stringField})
+	view := object(map[string]any{"page_id": stringField, "schema": map[string]any{"enum": draftSchemas}, "rev": integer, "generation": integer, "epoch": stringField, "targets": targets})
+	proposeView := object(map[string]any{"page_id": stringField, "mode": map[string]any{"const": "propose"}, "schema": map[string]any{"enum": proposeSchemas}, "rev": integer, "generation": integer, "epoch": stringField, "targets": targets})
+	proposal := object(map[string]any{"id": stringField, "schema": map[string]any{"enum": proposeSchemas}, "page_id": stringField, "epoch": stringField, "ifRev": integer, "target": stringField, "ifHash": stringField, "text": stringField})
 	proposalPacket := object(map[string]any{"generation": integer, "proposal": proposal})
 	specs := []struct {
 		name, description string
@@ -138,4 +143,16 @@ func (s *Server) respondDocumentDraftMCPToolCall(w http.ResponseWriter, r *http.
 		s.writeRoutinesMCPToolResult(w, req, status, mustJSON(out))
 	}
 	return true
+}
+
+// documentSchemasWith lists the content schemas (1 to LatestSchema) that
+// support c, for the MCP tool schemas.
+func documentSchemasWith(c documents.Capability) []any {
+	out := []any{}
+	for schema := 1; schema <= documents.LatestSchema; schema++ {
+		if documents.SchemaAllows(schema, c) {
+			out = append(out, schema)
+		}
+	}
+	return out
 }

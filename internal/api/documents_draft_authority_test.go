@@ -32,7 +32,7 @@ func newDocumentDraftFixtureAt(t *testing.T, drafting bool, schema int) (*artifa
 	f.pages.artifactMasterToken = "synthetic-draft"
 	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(f.pages.artifactMasterToken, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, f.a.RunID)
 	f.pages.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
-		return []byte(`{"schema":4,"snapshot":"c3ludGhldGlj","blocks":[{"id":"paragraph","hash":"synthetic"}]}`), 200, nil
+		return []byte(`{"schema":5,"snapshot":"c3ludGhldGlj","blocks":[{"id":"paragraph","hash":"synthetic"}]}`), 200, nil
 	}
 	w := httptest.NewRecorder()
 	f.pages.CreateDocumentAgent(w, documentDraftRequest(f, token, http.MethodPost, documentCreationBody))
@@ -40,10 +40,10 @@ func newDocumentDraftFixtureAt(t *testing.T, drafting bool, schema int) (*artifa
 		t.Fatalf("valid creation control: status=%d %s", w.Code, w.Body.String())
 	}
 	var created documentCreationResult
-	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil || created.Schema != documents.LatestSchema {
+	if err := json.Unmarshal(w.Body.Bytes(), &created); err != nil || created.Schema != documents.CreateSchema {
 		t.Fatalf("created %+v: %v", created, err)
 	}
-	if schema != documents.LatestSchema {
+	if schema != documents.CreateSchema {
 		mustExec(t, f.rig.db, `UPDATE documents SET schema_version=? WHERE page_id=?`, schema, created.PageID)
 		mustExec(t, f.rig.db, `UPDATE document_checkpoints SET schema_version=? WHERE page_id=?`, schema, created.PageID)
 		created.Schema = schema
@@ -83,7 +83,7 @@ func TestDocumentDraftCreationPinsOnlyExplicitPurpose(t *testing.T) {
 }
 
 func TestDocumentDraftPrivateAuthorityAdmitsOnlyOriginalPurpose(t *testing.T) {
-	for _, schema := range []int{3, documents.LatestSchema} {
+	for _, schema := range []int{3, documents.FormattedSchema, documents.CreateSchema} {
 		for _, enabled := range []bool{false, true} {
 			t.Run(fmt.Sprintf("schema-%d-%s", schema, map[bool]string{false: "legacy-one-shot", true: "explicit-drafting"}[enabled]), func(t *testing.T) {
 				testDocumentDraftOriginalPurpose(t, schema, enabled)
@@ -134,7 +134,7 @@ func TestDocumentDraftScopeCarriesStoredSchema(t *testing.T) {
 		ok     bool
 	}{{4, true}, {3, true}, {2, false}} {
 		t.Run(fmt.Sprintf("schema-%d", tc.schema), func(t *testing.T) {
-			f, _, token, created := newDocumentDraftFixtureAt(t, true, documents.LatestSchema)
+			f, _, token, created := newDocumentDraftFixtureAt(t, true, documents.CreateSchema)
 			mustExec(t, f.rig.db, `UPDATE documents SET schema_version=? WHERE page_id=?`, tc.schema, created.PageID)
 			w := httptest.NewRecorder()
 			checked, ok := f.pages.artifactAgentRequest(w, documentDraftRequest(f, token, "POST", ""))
@@ -160,7 +160,7 @@ func TestDocumentDraftScopeCarriesStoredSchema(t *testing.T) {
 // the original run, chat and message: any other run of the same agent is
 // refused, so a follow-up never gains direct write through creation.
 func TestDocumentDraftSchemaFourScopeRefusesOtherRuns(t *testing.T) {
-	f, _, token, created := newDocumentDraftFixtureAt(t, true, documents.LatestSchema)
+	f, _, token, created := newDocumentDraftFixtureAt(t, true, documents.CreateSchema)
 	w := httptest.NewRecorder()
 	checked, ok := f.pages.artifactAgentRequest(w, documentDraftRequest(f, token, "POST", ""))
 	if !ok {

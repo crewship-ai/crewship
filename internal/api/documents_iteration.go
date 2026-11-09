@@ -29,7 +29,7 @@ func sealDocumentIterationChat(ctx context.Context, tx *sql.Tx, receipt *chataud
 // Only personal, human-owned private Documents have DIRECT in this delivery.
 // Recheck the original immutable target, not a later slug-selected replacement.
 //
-// A schema-4 mandate is PROPOSE only (#5137). The requester must be able to
+// A mandate on a schema that supports proposals (4, 5) is PROPOSE only (#5137). The requester must be able to
 // edit the Document. On anything but their own personal private Document the
 // agent must also hold a live write grant naming it: delegating to an agent is
 // sharing, and only an owner or manager issues Edit. A read grant never

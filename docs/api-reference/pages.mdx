@@ -2472,8 +2472,8 @@ Response 200: `page_id`, `id`, `rev`, a new `epoch`, `kind: "restore"` and
 `schema` (the Document's schema after the restore) and optional `duplicate`.
 Restoration creates a new revision, preserving the retained checkpoint. A
 schema 5 Document stays at schema 5 when you restore a checkpoint from before
-its upgrade: older content is valid schema 5 content, and agent proposals,
-which need schema 4, stay unavailable. Below schema 5 the Document takes the
+its upgrade: older content is valid schema 5 content, and new agent proposals
+are made at schema 5. Below schema 5 the Document takes the
 checkpoint's schema. After an uncertain confirmation, retry the original
 packet with the same mutation ID and preconditions; an exact authorized retry
 returns the original receipt without another restoration. A lost confirmation
@@ -2590,8 +2590,9 @@ never review proposals, and restricted members have no access to this route.
 Request: path parameter `slug` only. Response: `page_id` and `proposals`, oldest
 first; each has `id`, `author`, `run_id`, `target.block_ids`, `base_rev`,
 `status` (`open`, `stale`, `accepted` or `rejected`), `text` and `created_at`.
-Proposals exist on schema 4 documents only; `GET /api/v1/pages/{slug}/document`
-reports `proposals: true` where they are served. Statuses: 200 listed; 401
+Proposals exist on documents whose schema supports them (4 and 5), each bound to
+the schema it was made at; `GET /api/v1/pages/{slug}/document` reports
+`proposals: true` where they are served and the schema's `capabilities`. Statuses: 200 listed; 401
 invalid credential; 403 missing access or an agent credential; 404 no such
 document; 409 unsupported schema; 502 invalid engine response; 503
 disabled or unavailable service.

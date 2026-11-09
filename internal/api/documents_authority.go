@@ -371,12 +371,14 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			result = documentReceiptWire(receipt)
 		default:
 			var proposal documents.ProposalInput
-			proposal, err = documentProposalInput(in.ID, in.Fingerprint, a.RunID, in.Target, in.Semantic, in.IfHashes, in.IfRev, in.Generation)
+			// The engine names the schema it proved the proposal at; the
+			// guard refuses it unless that is the Doc's stored schema.
+			proposal, err = documentProposalInput(in.ID, in.Fingerprint, a.RunID, in.Target, in.Schema, in.Semantic, in.IfHashes, in.IfRev, in.Generation)
 			if err != nil {
 				replyError(w, 400, "bounded semantic proposal required")
 				return
 			}
-			proposal.Guard = documentRichSemanticGuardFor(documents.ProposalSchema, in.Semantic, in.IfHashes, in.Blocks, h.pages.documentProposalGuard(a, k, in.Target, in.IfRev))
+			proposal.Guard = documentRichSemanticGuardFor(in.Schema, in.Semantic, in.IfHashes, in.Blocks, h.pages.documentProposalGuard(a, k, in.Target, in.IfRev))
 			var receipt documents.Receipt
 			receipt, err = h.store.Propose(ctx, k, proposal, auth)
 			result = documentReceiptWire(receipt)
@@ -447,10 +449,11 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			// The guard refuses any schema other than the stored one, so a
-			// client cannot pick a looser proof; drafts reach only 3 or 4.
+			// client cannot pick a looser proof; drafts reach only schemas
+			// that support drafting.
 			schema := 3
-			if in.Schema == documents.LatestSchema {
-				schema = documents.LatestSchema
+			if documents.SchemaAllows(in.Schema, documents.CapDraft) {
+				schema = in.Schema
 			}
 			guard = documentRichSemanticGuardFor(schema, in.Semantic, in.IfHashes, in.Blocks, h.pages.documentDraftGuard(a, k, "commit", in.IfRev))
 		} else if in.Proposal != "" {

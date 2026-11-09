@@ -1,3 +1,5 @@
+import { CREATE_VERSION, schemaAllows as engineSchemaAllows } from "../../tools/docs-service/schema-core.mjs"
+
 /** Public Document routes use opaque epochs after the authorized read. Initialize
  * alone returns a numeric durable fence; it must never hydrate the editor. */
 export interface DocumentNode {
@@ -14,9 +16,18 @@ export interface DocumentState {
   content: DocumentNode
   outline: {id: string; type: string; parent: string | null; hash: string; text: string}[]
   can_write: boolean; can_comment: boolean; can_resolve: boolean
-  /** The server serves agent proposals and their review on this Doc (schema 4; not for restricted members). */
+  /** The server serves agent proposals and their review on this Doc (its schema supports them; not for restricted members). */
   proposals?: boolean
+  /** What this Doc's schema supports, as the server declares it (#5233). */
+  capabilities?: DocumentCapability[]
 }
+export type DocumentCapability = "read" | "edit" | "draft" | "propose" | "accept" | "restore" | "export" | "upgrade"
+/** The schema new Docs are created at: explicit, never "the latest schema" (#5233). */
+export const CREATE_SCHEMA: 5 = CREATE_VERSION as 5
+/** Whether documents of this schema support a capability; the same table as the engine and Go. */
+export function schemaAllows(schema: number, capability: DocumentCapability): boolean { return engineSchemaAllows(schema, capability) }
+/** The schemas a proposal request may name: those that support proposals. */
+export type ProposalSchema = 4 | 5
 export interface MutationAttempt { id: string; epoch: string; schema: number; baselineRev: number }
 export interface MutationReceipt { id: string; epoch: string; rev: number; schema?: number }
 function record(value: unknown): Record<string, unknown> {

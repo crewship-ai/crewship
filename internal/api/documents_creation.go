@@ -54,9 +54,10 @@ func (h *PageHandler) documentCreationAuthority(ctx context.Context, a *artifact
 	return value, nil
 }
 
-// documentCreationSchema is the schema new Docs are born at (#5137): the
-// formatted schema, so creation and the editor offer the same formatting.
-const documentCreationSchema = documents.LatestSchema
+// documentCreationSchema is the schema new Docs are born at (#5137, #5233):
+// the explicit documents.CreateSchema, never "latest", so creation and the
+// editor offer the same formatting and every agent capability holds on it.
+const documentCreationSchema = documents.CreateSchema
 
 func (h *PageHandler) documentCreationReplay(ctx context.Context, a *artifactRunAuthority, consent documentCreationConsent, mutation, digest string) (documentCreationResult, error) {
 	var result documentCreationResult
@@ -151,7 +152,7 @@ func (h *PageHandler) CreateDocumentAgent(w http.ResponseWriter, r *http.Request
 	// Trusted pure computation happens before acquiring the SQL writer. Generated
 	// IDs/snapshot never participate in the original authoring fingerprint.
 	pageID := generateCUID()
-	preparedRaw, status, err := h.documentCall(r.Context(), a.WorkspaceID, "Bearer "+extractToken(r), pageID, "prepare-create", map[string]any{"blocks": request.Blocks})
+	preparedRaw, status, err := h.documentCall(r.Context(), a.WorkspaceID, "Bearer "+extractToken(r), pageID, "prepare-create", map[string]any{"schema": documentCreationSchema, "blocks": request.Blocks})
 	if err != nil {
 		replyError(w, 503, "document creation preparation unavailable; retry the same mutation_id")
 		return

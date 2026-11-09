@@ -558,8 +558,9 @@ test('mixed schema checkpoint read keeps the source version; restore onto schema
   const current=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{id:'rich-checkpoint',schema:LATEST_VERSION,page_id:'p',epoch:current.epoch,ifRev:current.rev})).status,200);
   const request={id:'restore-legacy',schema:LATEST_VERSION,page_id:'p',epoch:current.epoch,ifRev:current.rev,checkpoint:'legacy-checkpoint'};const restored=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(restored.status,200);assert.equal(restored.body.schema,LATEST_VERSION);const head=(await read(f)).body;assert.equal(head.schema,LATEST_VERSION);assert.notEqual(head.epoch,current.epoch);assert.equal(head.snapshot,old.snapshot);
   const retry=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(retry.status,200);assert.equal(retry.body.schema,LATEST_VERSION);assert.equal(retry.body.rev,restored.body.rev);assert.equal(retry.body.duplicate,true);assert.equal(model.restores,1);
-  // Restoring pre-upgrade history does not silently re-enable schema 4 proposals.
-  const proposed=await call(f.socket,'/v1/documents/p/propose',{id:'after-restore',schema:LATEST_VERSION,page_id:'p',epoch:head.epoch,ifRev:head.rev,target:'one',ifHash:'0'.repeat(64),text:'x'},{Authorization:'Bearer agtv2.synthetic-run'});assert.equal(proposed.status,409);assert.match(proposed.body.error,/proposals require a schema 4 document/);
+  // Restoring pre-upgrade history keeps schema 5: a proposal binds to schema 5, never silently to 4 (#5233).
+  const stale=await call(f.socket,'/v1/documents/p/propose',{id:'after-restore-4',schema:4,page_id:'p',epoch:head.epoch,ifRev:head.rev,target:'one',ifHash:'0'.repeat(64),text:'x'},{Authorization:'Bearer agtv2.synthetic-run'});assert.equal(stale.status,409);assert.match(stale.body.error,/unsupported client schema/);
+  const proposed=await call(f.socket,'/v1/documents/p/propose',{id:'after-restore',schema:LATEST_VERSION,page_id:'p',epoch:head.epoch,ifRev:head.rev,target:'one',ifHash:'0'.repeat(64),text:'x'},{Authorization:'Bearer agtv2.synthetic-run'});assert.equal(proposed.status,409);assert.match(proposed.body.error,/semantic precondition conflict/);
   const pinned=await call(f.socket,'/v1/documents/p/checkpoint-read',{checkpoint:'rich-checkpoint'});assert.equal(pinned.status,200);assert.equal(pinned.body.schema,LATEST_VERSION);
  }finally{await f.close()}
 });
@@ -694,7 +695,7 @@ test('prepare-create builds closed latest-schema content without Go data RPCs', 
     const repeated=await prepare({blocks});
     assert.equal(repeated.status,200);
     assert.ok(repeated.body.blocks.every(block=>!result.body.blocks.some(previous=>previous.id===block.id)),'Node owns fresh block UUIDs');
-    for(const invalid of [{blocks,operation:'initialize'},{blocks,schema:3},{blocks:[{type:'paragraph',id:'forged',text:'x'}]},{blocks:[{type:'paragraph',text:'x',marks:[]}]},{blocks:[{type:'image',src:'https://example.invalid'}]},{blocks:[{type:'paragraph',text:' '}]},null]) {
+    for(const invalid of [{blocks,operation:'initialize'},{blocks:[{type:'paragraph',id:'forged',text:'x'}]},{blocks:[{type:'paragraph',text:'x',marks:[]}]},{blocks:[{type:'image',src:'https://example.invalid'}]},{blocks:[{type:'paragraph',text:' '}]},null]) {
       assert.equal((await prepare(invalid)).status,400);
     }
     assert.equal((await prepare({blocks},{'X-Crewship-Docs-Service':'bad'})).status,403);
@@ -936,7 +937,7 @@ test('schema4 agents propose without changing content; a human accepts exactly t
       assert.ok(req.headers.authorization.startsWith('Bearer agtv2.'));
       const before = data.semantic.rich.before, after = data.semantic.rich.after;
       const find = (node, id) => node.attrs?.id === id ? node : (node.content ?? []).map(child => find(child, id)).find(Boolean);
-      proposals.set(data.id, { id: data.id, actor: 'agent:a:r', run_id: 'r', target: data.target, base_hash: data.ifHashes[data.target], text: data.semantic.text, generation: data.generation, base_rev: data.ifRev, status: 'open', created_at: 'now', base_content: find(before, data.target), proposed_content: find(after, data.target) });
+      proposals.set(data.id, { id: data.id, actor: 'agent:a:r', run_id: 'r', target: data.target, schema: data.schema, base_hash: data.ifHashes[data.target], text: data.semantic.text, generation: data.generation, base_rev: data.ifRev, status: 'open', created_at: 'now', base_content: find(before, data.target), proposed_content: find(after, data.target) });
       return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, actor: 'agent:a:r', kind: 'proposal' };
     }
     if (op === 'proposals') return [...proposals.values()].map(({ base_content: _b, proposed_content: _p, ...p }) => p);
@@ -987,29 +988,61 @@ test('schema4 agents propose without changing content; a human accepts exactly t
   } finally { await f.close(); }
 });
 
-test('proposals stay on schema 4: a schema 5 document refuses propose and accept cleanly and keeps its content (#5155)', async () => {
-  const model = authorityModel(), stored = [];
-  const body = { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'lead' }, content: [{ type: 'text', text: 'Due ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: ' and ' }, { type: 'text', text: 'under', marks: [{ type: 'underline', attrs: {} }] }] }] };
+test('schema 5 proposals bind to the document schema; marks and atoms survive accept; a schema 4 proposal is never accepted at 5 (#5233)', async () => {
+  const model = authorityModel(), proposals = new Map(), sent = [];
+  const under = { type: 'underline', attrs: {} }, red = { type: 'textColor', attrs: { color: 'red' } }, yellow = { type: 'highlight', attrs: { color: 'yellow' } };
+  const body = { type: 'doc', content: [
+    { type: 'paragraph', attrs: { id: 'lead' }, content: [{ type: 'text', text: 'Ship ' }, { type: 'text', text: 'under', marks: [under] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'red', marks: [red, yellow] }, { type: 'text', text: ' by ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: ' for ' }, { type: 'mention', attrs: { userId: 'u1' } }, { type: 'text', text: '.' }] },
+    { type: 'paragraph', attrs: { id: 'other' }, content: [{ type: 'text', text: 'Other' }] },
+  ] };
   const doc = create(body, 5); model.state = { ...model.state, schema: 5, snapshot: snapshot(doc) }; doc.destroy();
   const f = await fixture(async (op, data, req, res) => {
-    if (op === 'propose' || op === 'commit' || op === 'proposal-reject') stored.push(op);
-    if (op === 'proposal') return { id: data.id, actor: 'agent:a:r', run_id: 'r', target: 'lead', base_hash: '0'.repeat(64), text: 'Due  later', generation: 0, base_rev: 1, status: 'open', created_at: 'now' };
+    if (op === 'propose') {
+      sent.push(data);
+      const find = (node, id) => node.attrs?.id === id ? node : (node.content ?? []).map(child => find(child, id)).find(Boolean);
+      proposals.set(data.id, { id: data.id, actor: 'agent:a:r', run_id: 'r', target: data.target, schema: data.schema, base_hash: data.ifHashes[data.target], text: data.semantic.text, generation: data.generation, base_rev: data.ifRev, status: 'open', created_at: 'now', proposed_content: find(data.semantic.rich.after, data.target) });
+      return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, actor: 'agent:a:r', kind: 'proposal' };
+    }
+    if (op === 'proposal') return proposals.get(data.id);
+    if (op === 'proposal-reject') { proposals.get(data.proposal).status = 'rejected'; return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, kind: 'proposal-reject' }; }
+    if (op === 'commit' && data.proposal) proposals.get(data.proposal).status = 'accepted';
     return model.handle(op, data, req, res);
   });
   await f.start();
   try {
-    const before = (await read(f)).body, lead = before.outline.find(b => b.id === 'lead');
     const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
-    for (const schema of [4, 5]) {
-      const proposed = await call(f.socket, '/v1/documents/p/propose', { id: `p-${schema}`, schema, page_id: 'p', epoch: before.epoch, ifRev: before.rev, target: 'lead', ifHash: lead.hash, text: 'Due  and under, revised' }, agent);
-      // A schema 4 client is told to reopen; a schema 5 request is told proposals need schema 4.
-      assert.equal(proposed.status, 409, `schema ${schema} request`); assert.match(proposed.body.error, schema === 4 ? /unsupported client schema/ : /proposals require a schema 4 document/);
-    }
-    const accepted = await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-1', proposal: 'p-4', ifRev: before.rev });
-    assert.equal(accepted.status, 409); assert.match(accepted.body.error, /schema 4/);
-    assert.deepEqual(stored, []);
-    const after = (await read(f)).body;
-    assert.equal(after.rev, before.rev); assert.deepEqual(after.content, before.content); assert.equal(after.schema, 5);
+    const state = (await read(f)).body, lead = state.outline.find(b => b.id === 'lead');
+    const request = { id: 'p5', schema: 5, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target: 'lead', ifHash: lead.hash, text: 'Deliver under and red by  for .' };
+    const old = await call(f.socket, '/v1/documents/p/propose', { ...request, id: 'p4', schema: 4 }, agent);
+    assert.equal(old.status, 409); assert.match(old.body.error, /unsupported client schema/);
+    const beside = await call(f.socket, '/v1/documents/p/propose', { ...request, id: 'beside', text: 'Ship under and red by X for .' }, agent);
+    assert.equal(beside.status, 409); assert.equal(beside.body.code, 'ambiguous_inline_atom');
+    const proposed = await call(f.socket, '/v1/documents/p/propose', request, agent);
+    assert.equal(proposed.status, 200); assert.equal(model.commits, 0);
+    assert.deepEqual(sent.map(data => data.schema), [5], 'Go is told the schema the proof was made at');
+    // A schema 4 proposal on this schema 5 document can be rejected, never accepted.
+    proposals.set('legacy', { ...proposals.get('p5'), id: 'legacy', schema: 4 });
+    const legacy = await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-legacy', proposal: 'legacy', ifRev: state.rev });
+    assert.equal(legacy.status, 409); assert.equal(model.commits, 0);
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-reject', { id: 'reject-legacy', proposal: 'legacy', ifRev: state.rev })).status, 200);
+    const accepted = await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-1', proposal: 'p5', ifRev: state.rev });
+    assert.equal(accepted.status, 200); assert.equal(model.commits, 1);
+    assert.equal(model.seen.find(entry => entry.op === 'commit').data.schema, 5);
+    const after = (await read(f)).body, content = after.content.content[0].content;
+    assert.equal(after.schema, 5);
+    assert.deepEqual(after.content.content[0], proposals.get('p5').proposed_content, 'the accepted block is exactly the reviewed proposal');
+    assert.deepEqual(content.slice(1), [{ type: 'text', text: 'under', marks: [under] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'red', marks: [red, yellow] }, { type: 'text', text: ' by ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: ' for ' }, { type: 'mention', attrs: { userId: 'u1' } }, { type: 'text', text: '.' }]);
+    assert.deepEqual(after.content.content[1], body.content[1]);
+  } finally { await f.close(); }
+});
+
+test('prepare-create builds at the schema Go names and refuses one without drafting (#5233)', async () => {
+  const model=authorityModel(), f=await fixture(model.handle); await f.start();
+  const prepare=body=>call(f.socket,'/v1/documents/new/prepare-create',body,{Authorization:'Bearer agtv2.synthetic-creation'});
+  try {
+    for (const schema of [3,4,5]) { const result=await prepare({schema,blocks:[{type:'paragraph',text:'Hello'}]}); assert.equal(result.status,200); assert.equal(result.body.schema,schema); const doc=load(result.body.snapshot); try { validate(doc,schema); } finally { doc.destroy(); } }
+    for (const schema of [1,2,6,'5']) assert.equal((await prepare({schema,blocks:[{type:'paragraph',text:'x'}]})).status,409,`schema ${schema}`);
+    assert.equal((await prepare({schema:5,blocks:[],extra:1})).status,400);
   } finally { await f.close(); }
 });
 

@@ -15,8 +15,7 @@ import (
 const LatestSchema = 5
 
 // RichSchema is schema 3, 4 or 5: bound to its original Page and edited
-// through rich semantic proofs. Agent drafting stays on schema 3 (see
-// iteration intents).
+// through rich semantic proofs. What agents may do on each is SchemaAllows.
 func RichSchema(schema int) bool { return schema >= 3 && schema <= LatestSchema }
 
 func supportedSchema(schema int) bool { return schema >= 1 && schema <= LatestSchema }
@@ -61,7 +60,7 @@ func (s *Store) UpgradeRequest(ctx context.Context, k Key, lease Lease, id, fing
 		if v.HeadRev != ifRev || v.Generation != *generation {
 			return ErrConflict
 		}
-		if targetSchema != LatestSchema || fromSchema < 1 || fromSchema >= LatestSchema || v.Schema != fromSchema {
+		if targetSchema != LatestSchema || !SchemaAllows(fromSchema, CapUpgrade) || v.Schema != fromSchema {
 			return ErrSchema
 		}
 		var logBytes int

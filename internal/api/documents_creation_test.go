@@ -29,7 +29,7 @@ func documentCreationFixture(t *testing.T) (*PageHandler, string, string, string
 	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, f.a.CrewID), workspace, f.a.AgentID, f.a.RunID)
 	// Only trusted Node computation is synthetic here; admission and SQL are real.
 	h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
-		return []byte(`{"schema":4,"snapshot":"dHJ1c3RlZC1Ob2RlLXByZXBhcmF0aW9uLWZpeHR1cmU=","blocks":[{"id":"server-leaf","hash":"server-fixture-hash"}]}`), 200, nil
+		return []byte(`{"schema":5,"snapshot":"dHJ1c3RlZC1Ob2RlLXByZXBhcmF0aW9uLWZpeHR1cmU=","blocks":[{"id":"server-leaf","hash":"server-fixture-hash"}]}`), 200, nil
 	}
 	call := func(name, body string) *httptest.ResponseRecorder {
 		ctxDeadline, cancel := context.WithTimeout(t.Context(), 5*time.Second)
@@ -56,13 +56,17 @@ func TestDocumentCreationAtomicResultAndOriginalPayloadRetry(t *testing.T) {
 		if operation != "prepare-create" {
 			t.Fatal(operation)
 		}
+		// Go names the creation schema to the engine, never "latest" (#5233).
+		if request, ok := body.(map[string]any); !ok || request["schema"] != documents.CreateSchema || len(request) != 2 {
+			t.Fatalf("preparation request: %#v", body)
+		}
 		return original(ctx, ws, bearer, page, operation, body)
 	}
 	h.db.SetMaxOpenConns(1)
 	first := call("first", documentCreationBody)
 	creationExpect(t, first, 201)
 	var created documentCreationResult
-	if json.Unmarshal(first.Body.Bytes(), &created) != nil || created.PageID == "" || created.Schema != documents.LatestSchema || created.Revision != 0 || created.WorkspaceID != workspace || !strings.Contains(created.URL, "workspace_id=") {
+	if json.Unmarshal(first.Body.Bytes(), &created) != nil || created.PageID == "" || created.Schema != documents.CreateSchema || created.Revision != 0 || created.WorkspaceID != workspace || !strings.Contains(created.URL, "workspace_id=") {
 		t.Fatal(first.Body.String())
 	}
 	retry := call("retry", documentCreationBody)
@@ -82,7 +86,7 @@ func TestDocumentCreationAtomicResultAndOriginalPayloadRetry(t *testing.T) {
 	var pinID, pinActor string
 	var rev int64
 	var schema, count int
-	if err := h.db.QueryRow(`SELECT id,rev,schema_version,actor FROM document_checkpoints WHERE page_id=?`, created.PageID).Scan(&pinID, &rev, &schema, &pinActor); err != nil || rev != 0 || schema != documents.LatestSchema || pinActor != actor || len(pinID) > 128 {
+	if err := h.db.QueryRow(`SELECT id,rev,schema_version,actor FROM document_checkpoints WHERE page_id=?`, created.PageID).Scan(&pinID, &rev, &schema, &pinActor); err != nil || rev != 0 || schema != documents.CreateSchema || pinActor != actor || len(pinID) > 128 {
 		t.Fatalf("initial creation checkpoint %q %d %d %q: %v", pinID, rev, schema, pinActor, err)
 	}
 	if err := h.db.QueryRow(`SELECT count(*) FROM document_checkpoints WHERE page_id=?`, created.PageID).Scan(&count); err != nil || count != 1 {
@@ -300,8 +304,9 @@ func TestDocumentCreationDeletedResultCannotRecreateConsumedConsent(t *testing.T
 	}
 }
 
-// New Docs are born at the latest schema (#5137 WP2). A preparation from an
-// older engine is refused before any Page, consent or document row exists.
+// New Docs are born at documents.CreateSchema (#5137 WP2, #5233). A
+// preparation at any other schema is refused before any Page, consent or
+// document row exists.
 func TestDocumentCreationRefusesOlderPreparationSchema(t *testing.T) {
 	h, workspace, _, _, call := documentCreationFixture(t)
 	h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
@@ -314,7 +319,7 @@ func TestDocumentCreationRefusesOlderPreparationSchema(t *testing.T) {
 	}
 	// The unconsumed consent still admits the same mutation on a current engine.
 	h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
-		return []byte(`{"schema":4,"snapshot":"dHJ1c3RlZC1Ob2RlLXByZXBhcmF0aW9uLWZpeHR1cmU=","blocks":[{"id":"server-leaf","hash":"server-fixture-hash"}]}`), 200, nil
+		return []byte(`{"schema":5,"snapshot":"dHJ1c3RlZC1Ob2RlLXByZXBhcmF0aW9uLWZpeHR1cmU=","blocks":[{"id":"server-leaf","hash":"server-fixture-hash"}]}`), 200, nil
 	}
 	creationExpect(t, call("current engine", documentCreationBody), 201)
 }

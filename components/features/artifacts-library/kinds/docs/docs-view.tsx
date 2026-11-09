@@ -5,7 +5,7 @@ import { EditorContent, useEditorState } from "@tiptap/react"
 import { Download, FileText, GitPullRequestArrow, History, ListTree, MessageSquare, PanelLeft, Send, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Textarea } from "@/components/ui/textarea"
-import { proposalChatHref } from "@/lib/documents/proposal-request"
+import { proposalChatHref, proposalSchema } from "@/lib/documents/proposal-request"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { durabilityLabel, DocumentSaveState } from "@/components/features/pages/document-save-state"
 import { DocumentProposals } from "@/components/features/pages/document-proposals/document-proposals"
@@ -115,8 +115,10 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     target?.scrollIntoView?.({ block: "center", behavior: "smooth" })
   }
   const stats = summary?.stats ?? { words: 0, minutes: 0 }
-  // Proposals exist only where the server says so (schema 4); otherwise no Propose mode and no tab.
-  const proposalsServed = Boolean(sync.state?.proposals) && available && !sync.denied
+  // Proposals exist only where the server says so and the Doc's own schema
+  // supports them (4 or 5); otherwise no Propose mode and no tab.
+  const requestSchema = proposalSchema(sync.state?.schema)
+  const proposalsServed = Boolean(sync.state?.proposals) && requestSchema !== undefined && available && !sync.denied
   const [proposalPrompt, setProposalPrompt] = React.useState("")
 
   const editable = Boolean(sync.editable && !restoring && editor)
@@ -223,7 +225,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
             onChange={event => setProposalPrompt(event.target.value)} className="min-h-20 text-sm" />
           <p className="text-xs text-muted-foreground">The agent proposes changes in a private chat. On a shared document it needs edit access granted to it. Nothing changes until someone with edit access accepts them under Proposals.</p>
           <div className="flex justify-end">
-            <Button asChild size="sm"><a href={proposalChatHref(workspaceId, { pageId, rev: sync.state.rev, generation: sync.state.generation }, proposalPrompt.trim())}>
+            <Button asChild size="sm"><a href={proposalChatHref(workspaceId, { pageId, rev: sync.state.rev, generation: sync.state.generation, schema: requestSchema! }, proposalPrompt.trim())}>
               <Send aria-hidden />Ask for a proposal</a></Button>
           </div>
         </div>

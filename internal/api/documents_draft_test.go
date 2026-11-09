@@ -227,30 +227,31 @@ func TestDocumentDraftPinFailureDoesNotPretendCommitRolledBack(t *testing.T) {
 	}
 }
 
-// #5137 WP2: a Doc created at schema 4 is directly drafted by its original
-// run under creation consent. The proof schema is the stored one: a schema-3
-// proof against a schema-4 Doc is refused and leaves the cursor unchanged.
+// #5137 WP2, #5233: a Doc created at the creation schema is directly drafted
+// by its original run under creation consent. The proof schema is the stored
+// one: a schema-3 proof against it is refused and leaves the cursor unchanged.
 func TestDocumentDraftSchemaFourCreationCommitsDirectly(t *testing.T) {
-	f, h, token, created := newDocumentDraftFixtureAt(t, true, documents.LatestSchema)
+	f, h, token, created := newDocumentDraftFixtureAt(t, true, documents.CreateSchema)
 	f.rig.db.SetMaxOpenConns(1)
 	initializeDocumentDraftProjection(t, f, created.PageID)
 	lease := documentDraftLease(t, f, h, token, created.PageID)
 	wantCode(t, callDocumentDraftAuthority(t, f, h, token, created.PageID, "commit", documentDraftPayloadAt(t, 3, "legacy-proof", "initial", "draft one", 0, lease)), 409, "schema-3 proof on schema-4 Doc")
-	wantCode(t, callDocumentDraftAuthority(t, f, h, token, created.PageID, "commit", documentDraftPayloadAt(t, documents.LatestSchema, "draft-four", "initial", "draft one", 0, lease)), 200, "schema-4 direct draft")
+	wantCode(t, callDocumentDraftAuthority(t, f, h, token, created.PageID, "commit", documentDraftPayloadAt(t, documents.CreateSchema, "draft-four", "initial", "draft one", 0, lease)), 200, "creation-schema direct draft")
 	var head, cursor, schema int
-	if e := f.rig.db.QueryRow(`SELECT d.head_rev,c.draft_rev,d.schema_version FROM documents d JOIN document_creation_consents c ON c.result_page_id=d.page_id WHERE d.page_id=?`, created.PageID).Scan(&head, &cursor, &schema); e != nil || head != 1 || cursor != 1 || schema != documents.LatestSchema {
+	if e := f.rig.db.QueryRow(`SELECT d.head_rev,c.draft_rev,d.schema_version FROM documents d JOIN document_creation_consents c ON c.result_page_id=d.page_id WHERE d.page_id=?`, created.PageID).Scan(&head, &cursor, &schema); e != nil || head != 1 || cursor != 1 || schema != documents.CreateSchema {
 		t.Fatalf("head=%d cursor=%d schema=%d err=%v", head, cursor, schema, e)
 	}
 }
 
-// The protected draft envelope admits a direct draft at schema 3 or 4 (bound
-// to the stored schema by the handler) and a proposal only at schema 4.
+// The protected draft envelope admits a direct draft at a schema that supports
+// drafting (3, 4, 5) and a proposal at one that supports proposals (4, 5);
+// the handler then binds either to the stored schema (#5233).
 func TestValidateDocumentDraftRequestSchemas(t *testing.T) {
 	for _, tc := range []struct {
 		operation string
 		schema    int
 		ok        bool
-	}{{"patch", 3, true}, {"patch", 4, true}, {"checkpoint", 4, true}, {"patch", 2, false}, {"patch", 5, false}, {"propose", 4, true}, {"propose", 3, false}} {
+	}{{"patch", 3, true}, {"patch", 4, true}, {"patch", 5, true}, {"checkpoint", 4, true}, {"checkpoint", 5, true}, {"patch", 2, false}, {"patch", 6, false}, {"propose", 4, true}, {"propose", 5, true}, {"propose", 3, false}, {"propose", 6, false}} {
 		request := map[string]json.RawMessage{"id": json.RawMessage(`"op"`), "schema": json.RawMessage(fmt.Sprint(tc.schema)), "page_id": json.RawMessage(`"page"`), "epoch": json.RawMessage(`"e"`), "ifRev": json.RawMessage(`0`)}
 		if tc.operation != "checkpoint" {
 			request["target"], request["ifHash"], request["text"] = json.RawMessage(`"t"`), json.RawMessage(`"`+strings.Repeat("a", 64)+`"`), json.RawMessage(`"x"`)
@@ -265,7 +266,7 @@ func TestValidateDocumentDraftRequestSchemas(t *testing.T) {
 // schema of the run's scope before any engine call: a mismatch is 409 and the
 // consent cursor does not move.
 func TestMutateDocumentDraftBindsRequestSchemaToScope(t *testing.T) {
-	for _, tc := range []struct{ stored, requested int }{{4, 3}, {3, 4}} {
+	for _, tc := range []struct{ stored, requested int }{{4, 3}, {3, 4}, {5, 4}, {4, 5}} {
 		t.Run(fmt.Sprintf("stored-%d-requested-%d", tc.stored, tc.requested), func(t *testing.T) {
 			f, _, token, created := newDocumentDraftFixtureAt(t, true, tc.stored)
 			f.pages.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {

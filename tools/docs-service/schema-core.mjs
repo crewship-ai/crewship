@@ -1,5 +1,21 @@
 import { validatePositionMigrations } from './position-migrations.mjs';
 
+// What each content schema supports (#5233). Mirrors Go
+// internal/documents/schemas.go (a Go test compares the two); every engine and
+// browser gate asks this table, never "schema 4" or the latest schema.
+// Schema 3's agent path is the direct draft; its mandate never proposes.
+export const CREATE_VERSION = 5;
+export const CAPABILITY_ORDER = Object.freeze(['read', 'edit', 'draft', 'propose', 'accept', 'restore', 'export', 'upgrade']);
+export const SCHEMA_CAPABILITIES = Object.freeze({
+  1: Object.freeze(['read', 'edit', 'restore', 'export', 'upgrade']),
+  2: Object.freeze(['read', 'edit', 'restore', 'export', 'upgrade']),
+  3: Object.freeze(['read', 'edit', 'draft', 'restore', 'export', 'upgrade']),
+  4: Object.freeze(['read', 'edit', 'draft', 'propose', 'accept', 'restore', 'export', 'upgrade']),
+  5: Object.freeze(['read', 'edit', 'draft', 'propose', 'accept', 'restore', 'export']),
+});
+/** Whether documents of this schema support a capability; unknown schemas support nothing. */
+export const schemaAllows = (version, capability) => Object.hasOwn(SCHEMA_CAPABILITIES, version) && SCHEMA_CAPABILITIES[version].includes(capability);
+
 // Shared implementation instantiated with the caller's pinned Tiptap/Yjs types.
 // Browser and managed Node use identical closed validators without mixing
 // separate node_modules copies of Yjs in instanceof/relative-position checks.
