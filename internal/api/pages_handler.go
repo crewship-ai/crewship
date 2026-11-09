@@ -261,6 +261,7 @@ type pageWire struct {
 	Archived               bool   `json:"archived"`
 	ArchivedAt             string `json:"archived_at,omitempty"`
 	ArtifactKind           string `json:"artifact_kind,omitempty"`
+	ArtifactProfile        string `json:"artifact_profile,omitempty"`
 	ArtifactSharedVersion  int    `json:"artifact_shared_version,omitempty"`
 	NativeCraftApplication string `json:"native_craft_application,omitempty"`
 	HasDocument            bool   `json:"has_document"`
@@ -352,7 +353,10 @@ type pageListWire struct {
 	// Artifacts library; ArtifactSharedVersion is the version shared with
 	// readers. The latest version is left out on purpose: a reader sees only
 	// the shared pin, and the snapshot read decides who sees more.
-	ArtifactKind          string `json:"artifact_kind,omitempty"`
+	ArtifactKind string `json:"artifact_kind,omitempty"`
+	// ArtifactProfile qualifies a project from the same selected manifest:
+	// "interactive" (an App that runs its own scripts) or "design_system".
+	ArtifactProfile       string `json:"artifact_profile,omitempty"`
 	ArtifactSharedVersion int    `json:"artifact_shared_version,omitempty"`
 	HasWorkbook           bool   `json:"has_workbook,omitempty"`
 	HasMooring            bool   `json:"has_mooring,omitempty"`
@@ -703,7 +707,7 @@ type pageIndexRow struct {
 
 func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pageViewer, scope pageScope) (*pageIndex, error) {
 	slidesEnabled := h.artifactSlidesEnabled(ctx)
-	args := append([]any{slidesEnabled, viewer.UserID, h.artifactDataEnabled(ctx), slidesEnabled, wsID}, scope.args...)
+	args := append([]any{viewer.UserID, h.artifactDataEnabled(ctx), slidesEnabled, wsID}, scope.args...)
 	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
 		SELECT p.id, p.slug, p.name, COALESCE(p.description, ''),
 		       COALESCE(p.owner_user_id, ''), COALESCE(p.owner_crew_id, ''),
@@ -715,7 +719,7 @@ func (h *PageHandler) loadPageIndex(ctx context.Context, wsID string, viewer *pa
  EXISTS(SELECT 1 FROM documents WHERE page_id=p.id), p.private_audience,
  EXISTS(SELECT 1 FROM gridcraft_heads WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_documents WHERE page_id=p.id), EXISTS(SELECT 1 FROM mooring_collab_documents WHERE page_id=p.id), COALESCE((SELECT format_profile FROM mooring_collab_documents WHERE page_id=p.id),''),
  EXISTS(SELECT 1 FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id), COALESCE((SELECT schema_version FROM slides_heads WHERE page_id=p.id AND workspace_id=p.workspace_id),0),
- COALESCE(h.content_type,''), COALESCE(h.shared_version,0), COALESCE(ab.content,''),COALESCE(sb.content,''), CASE WHEN ?=1 AND length(CAST(av.manifest_json AS BLOB))<=131072 THEN CAST(av.manifest_json AS BLOB) ELSE '' END,
+ COALESCE(h.content_type,''), COALESCE(h.shared_version,0), COALESCE(ab.content,''),COALESCE(sb.content,''), CASE WHEN length(CAST(av.manifest_json AS BLOB))<=131072 THEN CAST(av.manifest_json AS BLOB) ELSE '' END,
  COALESCE((SELECT application_id FROM craft_native_documents WHERE page_id=p.id AND workspace_id=p.workspace_id),''), p.created_by_test, COALESCE(p.archived_at,'')
 		FROM pages p LEFT JOIN page_project_live l ON l.page_id=p.id
 		LEFT JOIN artifact_version_heads h ON h.workspace_id=p.workspace_id AND h.page_id=p.id
@@ -857,7 +861,8 @@ func (h *PageHandler) pageListRow(row *pageIndexRow, folders map[string]*pageFol
 		CreatedByTest: rec.CreatedByTest, Archived: rec.ArchivedAt != "", ArchivedAt: rec.ArchivedAt,
 		PrivateAudience: rec.PrivateAudience,
 		HasSlides:       rec.HasSlides, SlidesSchema: rec.SlidesSchema,
-		ArtifactKind: artifactSelectedMetadataKind(rec.ArtifactContentType, rec.ArtifactDashboardDeclaration, true, rec.ArtifactSelectedManifest, rec.ArtifactSlidesDeclaration, rec.ArtifactSlidesEnabled), ArtifactSharedVersion: rec.ArtifactSharedVersion,
+		ArtifactKind:    artifactSelectedMetadataKind(rec.ArtifactContentType, rec.ArtifactDashboardDeclaration, true, rec.ArtifactSelectedManifest, rec.ArtifactSlidesDeclaration, rec.ArtifactSlidesEnabled),
+		ArtifactProfile: artifactSelectedProfile(rec.ArtifactContentType, rec.ArtifactSelectedManifest), ArtifactSharedVersion: rec.ArtifactSharedVersion,
 		NativeCraftApplication: rec.NativeCraftApplication, HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,
 		ID:                  rec.ID,
 		Slug:                rec.Slug,
@@ -2057,10 +2062,10 @@ func (h *PageHandler) pageDocument(ctx context.Context, rec *pageRecord, panels 
 // cannot edit still sees exactly what they saw before.
 func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, panels []*panelRecord, viewer *pageViewer, authored bool) pageWire {
 	attached, _ := h.artifactProjectAttached(ctx, rec.ID)
-	kind, shared := h.artifactPageMetadata(ctx, WorkspaceIDFromContext(ctx), rec.ID)
+	kind, profile, shared := h.artifactPageMetadata(ctx, WorkspaceIDFromContext(ctx), rec.ID)
 	out := pageWire{
 		CreatedByTest: rec.CreatedByTest, Archived: rec.ArchivedAt != "", ArchivedAt: rec.ArchivedAt,
-		ArtifactKind: kind, ArtifactSharedVersion: shared,
+		ArtifactKind: kind, ArtifactProfile: profile, ArtifactSharedVersion: shared,
 		HasArtifactProject: attached,
 		HasSlides:          rec.HasSlides, SlidesSchema: rec.SlidesSchema,
 		NativeCraftApplication: rec.NativeCraftApplication, HasDocument: rec.HasDocument, HasWorkbook: rec.HasWorkbook, HasMooring: rec.HasMooring, HasCollaboration: rec.HasCollaboration, CollaborationFormat: rec.CollaborationFormat, HasProject: rec.HasProject, HasApplication: rec.HasApplication, PublicationVersion: rec.PublicationVersion,

@@ -3108,6 +3108,19 @@ Dashboard therefore does not change the kind shown to a shared Project reader.
 No artifact kind is inferred from Page names or addresses. Classification does
 not change the artifact's version storage, data authority or editor profile.
 
+The same responses carry `artifact_profile`, read from the file names of the
+same selected manifest (never from file content, never from a name):
+
+| `artifact_profile` | When | `artifact_kind` |
+|---|---|---|
+| `design_system` | The manifest holds `design-system.json` and no `deck.json` | `project` |
+| `interactive` | The manifest holds `interactive.json` and no `deck.json` or `design-system.json` | `project`, even when a `dashboard.json` declares the app's data collections |
+| absent | Anything else | unchanged |
+
+An interactive project is therefore an App, not a Dashboard, in the list, the
+`kind` catalog filter and the detail. Whether its scripts may run is still
+decided by the interactive runtime switches, not by the profile.
+
 ### Authored Slides and PDF export
 
 The `artifact_slides` workspace flag is disabled by default and requires

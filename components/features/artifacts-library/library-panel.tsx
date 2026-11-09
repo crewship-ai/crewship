@@ -8,8 +8,8 @@ import {
 import { SidebarFacetBlock, SidebarInlineFacet, useSidebarFacets } from "@/components/layout/sidebar-facets"
 import type { PageFolderView } from "@/hooks/use-page-folders"
 import { FolderGlyph } from "@/components/features/pages/folder-glyph"
-import { kindLabel, LIBRARY_KINDS, type LibraryItem } from "./library-items"
-import { kindAccent, KINDS, kindOf } from "./kinds"
+import type { LibraryItem } from "./library-items"
+import { kindAccent, KINDS, type ArtifactKind } from "./kinds"
 import {
   activeFacetCount, EMPTY_FILTERS, facetCounts, inView, OWNER_NONE,
   type Access, type LibraryFilters, type LibraryView, type Personal, type VersionState,
@@ -78,7 +78,7 @@ export function LibraryPanel({ items, folders, filters, personal, onFiltersChang
   const active = activeFacetCount(filters)
 
   const chips: { key: string; text: string; remove: () => void }[] = [
-    ...filters.kinds.map(kind => ({ key: `kind:${kind}`, text: `Kind: ${kindLabel(kind)}`, remove: () => set({ kinds: toggle(filters.kinds, kind) }) })),
+    ...filters.kinds.map(kind => ({ key: `kind:${kind}`, text: `Kind: ${KINDS[kind].label}`, remove: () => set({ kinds: toggle(filters.kinds, kind) }) })),
     ...filters.access.map(access => ({ key: `access:${access}`, text: `Who can open: ${ACCESS_LABEL[access]}`, remove: () => set({ access: toggle(filters.access, access) }) })),
     ...filters.version.map(version => ({ key: `version:${version}`, text: `Version: ${VERSION_LABEL[version]}`, remove: () => set({ version: toggle(filters.version, version) }) })),
     ...filters.owners.map(owner => ({ key: `owner:${owner}`, text: `Owner: ${ownerText(owner)}`, remove: () => set({ owners: toggle(filters.owners, owner) }) })),
@@ -103,12 +103,11 @@ export function LibraryPanel({ items, folders, filters, personal, onFiltersChang
       onClear={() => onFiltersChange({ ...EMPTY_FILTERS, view: filters.view, q: filters.q })}>
       <SidebarInlineFacet label="Kind" limit={5} allLabel={`+${Math.max(0, counts.kinds.length - 5)} more`}
         values={counts.kinds.map(([kind, n]) => {
-          // The storage kind wears the registry kind it maps to (a native Word or Sheet; a legacy doc is Docs).
-          const shown = kindOf({ kind, native: kind === "word" || kind === "sheet" }).kind
-          const Icon = KINDS[shown].icon
-          return { value: kind, label: LIBRARY_KINDS.find(entry => entry.kind === kind)!.plural, count: n, icon: <Icon className={`size-3.5 shrink-0 ${kindAccent(shown).fg}`} aria-hidden /> }
+          // UI kinds, counted by the same kindOf as every card, badge and preview (#5152).
+          const Icon = KINDS[kind].icon
+          return { value: kind, label: KINDS[kind].plural, count: n, icon: <Icon className={`size-3.5 shrink-0 ${kindAccent(kind).fg}`} aria-hidden /> }
         })}
-        selected={filters.kinds} onToggle={kind => narrow({ kinds: toggle(filters.kinds, kind as LibraryItem["kind"]) })} onClear={() => set({ kinds: [] })} />
+        selected={filters.kinds} onToggle={kind => narrow({ kinds: toggle(filters.kinds, kind as ArtifactKind) })} onClear={() => set({ kinds: [] })} />
       <SidebarInlineFacet label="Who can open" values={counts.access.map(([access, n]) => ({ value: access, label: ACCESS_LABEL[access], count: n }))}
         selected={filters.access} onToggle={access => narrow({ access: toggle(filters.access, access as Access) })} onClear={() => set({ access: [] })} />
       <SidebarInlineFacet label="Version" values={counts.version.map(([version, n]) => ({ value: version, label: VERSION_LABEL[version], count: n }))}
