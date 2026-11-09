@@ -1898,6 +1898,23 @@ jobs:
   # tests 899 s over 8,264 tests), so 15m failed at random with nothing
   # failing, and shuffle's 18m had only ~2m of margin. Measured overhead
   # 2m39s–3m07s + 20m leaves ~7m of daylight under the 30m job cap.
+  #
+  # #5214: the whole package then reached 1132.7 s (main run 42525002068)
+  # and 1200.6 s = the 20m bound with nothing failing (merge_group run
+  # 42540145391, job 128918097219). Raising the bound again only postpones
+  # that, so `--split-api` takes internal/api out of the package partitions
+  # and runs top-level test slice N of 6 of it in shard N, beside that
+  # shard's packages (the same exact-cover partition as go-race-api-shards;
+  # every Test/Example/Fuzz runs in exactly one shard, and each shard checks
+  # go test's events against its slice). 3 → 6 shards because one -run
+  # regexp for a third of the 9.4k API tests is ~137 KB, over the 120 KB
+  # argv guard; a sixth is ~69 KB. A slice is ~1/6 of ≤1200 s ≈ 200–230 s,
+  # so `-timeout 20m` per binary keeps ≥5x headroom for API slices and ~1.8x
+  # for the largest remaining binary (internal/database, 666 s in the same
+  # run). Both binaries run concurrently, so the daylight rule still reads
+  # overhead (≤3m07s, plus the API -list compile reused by its run) + 20m <
+  # 30m. The check name pattern `Go test (shard N)` is unchanged; CI Result
+  # aggregates the job id, so shards 3–5 are required through it.
   go-test:
     needs: [merge-conflict-markers, changes]
     if: needs.changes.outputs.go == 'true'
@@ -1906,7 +1923,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [0, 1, 2]
+        shard: [0, 1, 2, 3, 4, 5]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -1915,10 +1932,10 @@ jobs:
       - uses: ./.github/actions/setup-go-embed
         with:
           go-version: ${{ env.GO_VERSION }}
-      - name: Go test (package partition)
+      - name: Go test (package partition + internal/api slice)
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -timeout 20m
+        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 6 --split-api -count=1 -timeout 20m
 
   go-shuffle:
     needs: [merge-conflict-markers, changes]
@@ -1942,7 +1959,14 @@ jobs:
     #
     # 18m → 20m with #4740: internal/api alone reached ~16m here (job 18m58s
     # in run 41264884565). Overhead up to 3m07s + 20m keeps ~7m of daylight.
-    timeout-minutes: 30
+    #
+    # 20m → 30m and cap 30 → 40 with #5214: internal/api shuffled took
+    # 1182.0 s in main run 42525002068, 18 s under the bound, and the plain
+    # lane's copy hit it (1200.6 s). Unlike go-test this lane must NOT split
+    # the package by test name — order dependence needs the whole binary in
+    # one shuffled run — so it gets a bound instead: 30m is 1.5x the worst
+    # measured package, and 3m07s + 30m keeps ~7m of daylight under 40m.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -1965,7 +1989,7 @@ jobs:
         # cover `go list ./...` exactly once.
         env:
           SHARD_INDEX: ${{ matrix.shard }}
-        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -shuffle=on -timeout 20m
+        run: python3 scripts/ci/go-package-shard.py run "$SHARD_INDEX" 3 -count=1 -shuffle=on -timeout 30m
 
   # ── Go: race detector ──
   #
