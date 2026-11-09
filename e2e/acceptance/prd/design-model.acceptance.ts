@@ -20,7 +20,7 @@ test.describe("design model", () => {
   "layers, IDs, z-order, property edits, prototype links and anchored comments hold on a fixture",
   {
    annotation: [
-    prdRequirement("V05.layers", "Design: the layer list shows every layer under its screen, and selecting in the list or on the canvas selects the same layer"),
+    prdRequirement("V05.layers", "Design: the layer list shows every screen, then every layer indented as a child of a screen, and selecting in the list or on the canvas selects the same layer"),
     prdRequirement("V05.ids", "Design: layer IDs are stable across edits, saves and reloads; a new layer gets an ID the server keeps"),
     prdRequirement("V05.z-order", "Design: the canvas draws layers in the document order, and a reorder changes it live"),
     prdRequirement("V05.properties", "Design: name, position, size, colour, text and screen edited in Properties survive save and reload"),
@@ -55,7 +55,8 @@ test.describe("design model", () => {
    // Layers: every layer, children indented under their screen; list and canvas select the same layer.
    const entries = layersPanel(page).getByRole("button")
    await expect(entries).toHaveText(["Screen A", "Screen B", "Backdrop", "Title", "Next"])
-   expect(await layersPanel(page).getByRole("button", { name: "Next", exact: true }).getAttribute("class")).toContain("pl-7")
+   for (const child of ["Backdrop", "Title", "Next"]) expect(await layersPanel(page).getByRole("button", { name: child, exact: true }).getAttribute("class"), `${child} is indented as a child`).toContain("pl-7")
+   for (const screenName of ["Screen A", "Screen B"]) expect(await layersPanel(page).getByRole("button", { name: screenName, exact: true }).getAttribute("class"), `${screenName} is not indented`).not.toContain("pl-7")
    await layersPanel(page).getByRole("button", { name: "Title", exact: true }).click()
    await expect(outlined(page, "title")).toHaveCount(1)
    await expect(page.getByLabel("Layer name")).toHaveValue("Title")
@@ -107,8 +108,10 @@ test.describe("design model", () => {
 
    // Prototype: link Next to Screen B, play it, go back, exit; playing writes nothing.
    const linkField = page.getByLabel("Link to screen")
-   const prototypeShown = await page.getByRole("button", { name: "Play" }).count() > 0
+   const prototypeShown = await page.getByRole("button", { name: "Play", exact: true }).count() > 0
    found.prototype = prototypeShown ? {} : { status: "not in this build (NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE off)" }
+   // V05.prototype is a claim only when it ran: a full run on a build without playback fails it.
+   expect(prototypeShown || prd.mode === "quick", "prototype playback is part of V05; build with NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE=true").toBe(true)
    if (prototypeShown) {
     await layersPanel(page).getByRole("button", { name: "Next", exact: true }).click()
     await linkField.selectOption("screen-b")
@@ -116,7 +119,7 @@ test.describe("design model", () => {
     const stateBefore = JSON.stringify((await getDesign(context.request, ws.id, slug)).nodes)
     const versionsBefore = (await listVersions(context.request, ws.id, slug)).versions.length
     await layersPanel(page).getByRole("button", { name: "Screen A", exact: true }).click()
-    await page.getByRole("button", { name: "Play" }).click()
+    await page.getByRole("button", { name: "Play", exact: true }).click()
     const player = page.getByRole("dialog", { name: "Prototype playback" })
     await expect(player.getByRole("heading", { name: "Screen A" })).toBeVisible()
     await player.getByRole("button", { name: "Next: open Screen B" }).click()
