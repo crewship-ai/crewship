@@ -13,17 +13,21 @@ import (
 func TestDocsCreationRefusesReadOnlyRole(t *testing.T) {
 	const body = `{"name":"Team notes","slug":"team-notes","panels":[],"allow_empty":true}`
 	for _, tc := range []struct {
-		role   string
-		status int
+		role, capabilities string
+		status             int
 	}{
-		{"VIEWER", 403},
-		{"MEMBER", 403},
-		{"MANAGER", 201},
+		{"VIEWER", "", 403},
+		{"MEMBER", "", 403},
+		{"MEMBER", `["page.create"]`, 201},
+		{"MANAGER", "", 201},
 	} {
-		t.Run(tc.role, func(t *testing.T) {
+		t.Run(tc.role+tc.capabilities, func(t *testing.T) {
 			h, _, _, ws, _ := newPagesFixture(t)
 			user := "docs-" + tc.role
 			pagesSeedUser(t, h, ws, user, user+"@example.test", tc.role)
+			if tc.capabilities != "" {
+				mustExec(t, h.db, `UPDATE workspace_members SET capabilities=? WHERE workspace_id=? AND user_id=?`, tc.capabilities, ws, user)
+			}
 			req := pagesRequest(t, "POST", "/api/v1/pages", ws, user, tc.role, body)
 			req = req.WithContext(context.WithValue(req.Context(), ctxAuthKind, AuthKindSession))
 			w := httptest.NewRecorder()
