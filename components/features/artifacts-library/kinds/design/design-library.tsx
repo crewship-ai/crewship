@@ -17,6 +17,7 @@ import { ArtifactSlot, ArtifactTool, ArtifactToolSeparator, useArtifactFrame } f
 import { slidesFrameStatus } from "../slides/slides-status"
 import { ProjectDrawer, VersionMenu } from "../project-parts"
 import type { KindFrameReport } from "./design-detail"
+import { LibraryPublishControl } from "./library-publication"
 
 /** A project whose manifest carries design-system.json is a Design in Library mode (kinds.ts `kindOf`). */
 export function isDesignLibrary(snapshot: Pick<ArtifactProjectSnapshot, "manifest" | "artifact_kind"> | undefined): boolean {
@@ -92,8 +93,8 @@ export function previewHeight(html: string): number {
  * Version, Share and Edit source sit in the view and output slots; the
  * comment queue, version history and Propose go to the drawer
  * (`ProjectDrawer`). Every rule and backend call stays in the viewer.
- * There is no backend for library publishing, pinning, "Used by" or a
- * Canvas mode of a library, so those stay hidden.
+ * The owner publishes the shown version (library-publication.tsx); there is
+ * no backend for "Used by" or a Canvas mode of a library, so those stay hidden.
  */
 export function DesignLibraryProjectView({ parts, onFrame }: { parts: ArtifactViewerParts; onFrame: (report: KindFrameReport) => void }) {
   const { data, version } = parts
@@ -108,7 +109,7 @@ export function DesignLibraryProjectView({ parts, onFrame }: { parts: ArtifactVi
   const source = data.manifest.files.find(file => file.path === DESIGN_SYSTEM_FILE)?.content ?? ""
   return <>
     <LibraryView system={system} version={version.shown} source={source} extras={libraryExtras(system, data.manifest.files)} notices={parts.banners}
-      view={<><ArtifactToolSeparator /><VersionMenu parts={parts} />{parts.share}</>}
+      view={<><ArtifactToolSeparator /><VersionMenu parts={parts} />{parts.share}<LibraryPublishControl shown={version.shown} /></>}
       output={parts.editSourceHref && <Link href={parts.editSourceHref} aria-label="Edit source" title="Edit source"
         className="inline-flex h-[30px] min-w-[30px] items-center justify-center rounded-[var(--radius-row)] px-[7px] text-muted-foreground hover:bg-accent hover:text-foreground coarse:min-h-[44px] coarse:min-w-[44px]"><Code2 aria-hidden className="size-4" /></Link>} />
     <ProjectDrawer parts={parts} />

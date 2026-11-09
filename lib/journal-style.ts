@@ -348,6 +348,8 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "artifact.mooring_mandate_admitted": "page",
   "artifact.mooring_mandate_revoked": "page",
   "artifact.project_shared": "page",
+  "artifact.library_published": "page",
+  "artifact.library_pinned": "page",
   "craft.native_preview_shared": "page",
   "artifact.orphaned_workbook_deleted": "page",
   "artifact.private_output_published": "page",

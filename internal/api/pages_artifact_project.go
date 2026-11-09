@@ -140,6 +140,8 @@ func artifactProjectError(w http.ResponseWriter, err error) {
 		replyError(w, 503, "durable artifact storage is unavailable; keep your draft and contact the operator")
 	case errors.Is(err, errArtifactProjectAccess), errors.Is(err, artifacts.ErrVersionAuthority):
 		replyError(w, 403, "current artifact project write authority required")
+	case errors.Is(err, artifacts.ErrLibraryUnreadable):
+		replyError(w, 404, "library or its published version not found")
 	case errors.Is(err, artifacts.ErrVersionNotFound), errors.Is(err, artifacts.ErrVersionContentType), errors.Is(err, sql.ErrNoRows):
 		replyError(w, 404, "artifact project or selected version not found")
 	case errors.Is(err, errArtifactProjectAnchor):

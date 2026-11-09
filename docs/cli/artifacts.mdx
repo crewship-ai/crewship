@@ -369,6 +369,88 @@ never the latest one.
 
 A stale `--base-version` returns `409 artifact_version_conflict`.
 
+## Library publication and pins
+
+A Library is an artifact project with a `design-system.json`. Its owner
+publishes one version; other projects in the workspace pin a self-contained
+copy of that version's tokens. Editing, restoring or deleting the Library, or
+losing access to it, never changes a pinned project.
+
+### `crewship page artifact library show <slug>`
+
+Read the published version. Any reader of the Library may call it.
+
+```json
+{"published_version": 2, "published_by": "<user-id>", "published_at": "2026-11-09T01:00:00.000Z", "can_publish": true}
+```
+
+`published_version` is `0` while nothing is published. `can_publish` is true
+only for the Library's owner.
+
+### `crewship page artifact library publish <slug>`
+
+Publish a retained version. **Owner only**: editors save draft versions but
+cannot publish, workspace owners and admins keep their audited read access but
+cannot publish someone else's Library, and agent runs cannot publish. The
+version must contain `design-system.json`, a JSON object of at most 32 KiB.
+
+| Flag | Description |
+|---|---|
+| `--version <n>` | Retained version to publish (required). |
+
+```bash
+crewship page artifact library publish brand --version 2
+```
+
+Publishing the version already published is a no-op. A non-owner gets `403`.
+
+### `crewship page artifact pin set <slug>`
+
+Pin the Library's published version into project `<slug>`, or update the pin
+to a newer publication. You need Edit on the project and must be able to read
+the published version yourself: the owner and workspace admins read any
+version, an editor of the Library only its latest version, everyone else only
+its shared version.
+
+| Flag | Description |
+|---|---|
+| `--library <slug or @id>` | Library in this workspace (required). |
+| `--if-pinned-version <n>` | The Library version you saw pinned, `0` when nothing is pinned (required). A mismatch returns `409 artifact_version_conflict`, so an update is always a decision about a state you reviewed. |
+
+```bash
+crewship page artifact pin set pitch-deck --library brand --if-pinned-version 0
+```
+
+```json
+{"library_page_id": "<page-id>", "library_version": 1, "library_name": "Brand", "sha256": "…", "copied_by": "<user-id>", "copied_at": "…", "tokens": {"colors": {"primary": "#1d4ed8"}}, "changed": true}
+```
+
+Pinning the version already pinned returns `"changed": false`. A Library you
+cannot read, one with nothing published and one that does not exist all return
+the same `404`.
+
+### `crewship page artifact pin show <slug>`
+
+Read the pinned copy. Any reader of the project may call it; the Library is not
+read, so the copy keeps working after the Library changes or your access to it
+ends.
+
+### `crewship page artifact pin check <slug>`
+
+Review an update before applying it.
+
+```json
+{"pinned_version": 1, "published_version": 2, "library_available": true, "update_available": true,
+ "changes": {"added": ["colors.accent"], "removed": [], "changed": ["colors.primary"]}}
+```
+
+`update_available` is true when the Library's published version differs from
+the pinned one, including when the owner republished an older version. Paths
+are dot-joined token keys; each list holds at most 200 entries and
+`truncated` says when one was cut. When you can no longer read the Library,
+`library_available` is false and nothing about it is reported; apply the update
+with `pin set --if-pinned-version <pinned_version>`.
+
 ## Comments
 
 ### `crewship page artifact comment <slug>`

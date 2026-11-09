@@ -27,6 +27,7 @@ func newPageArtifactCommand() *cobra.Command {
 	})
 	cmd.AddCommand(newArtifactDataCommand())
 	cmd.AddCommand(newArtifactSlidesCommands()...)
+	cmd.AddCommand(newArtifactLibraryCommands()...)
 	cmd.AddCommand(newPageArchiveCommands()...)
 	for _, action := range []string{"create", "publish"} {
 		action := action
