@@ -62,7 +62,7 @@ type DocumentStateResponse struct {
 	CanWrite    bool                   `json:"can_write"`
 	CanComment  bool                   `json:"can_comment"`
 	CanResolve  bool                   `json:"can_resolve"`
-	// Proposals: agent proposals and their review are served here (schema 4).
+	// Proposals: agent proposals and their review are served here (schemas 4 to 6).
 	Proposals bool `json:"proposals"`
 }
 type DocumentMutationResponse struct {

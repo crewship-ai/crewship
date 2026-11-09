@@ -430,11 +430,15 @@ export function deleteConsequences(threads: number, connectors: number): { tone:
  */
 function useOwnUndo(doc: Y.Doc, origin: string) {
   const [state, setState] = React.useState({ canUndo: false, canRedo: false })
-  const manager = React.useMemo(() => new Y.UndoManager([doc.getXmlFragment("default"), ...documentSurface.ROOTS.map(name => doc.getMap(name))], { trackedOrigins: new Set([origin]), captureTimeout: 0 }), [doc, origin])
+  // The manager lives and dies with the effect, so a StrictMode remount builds a fresh one instead of reusing a destroyed one.
+  const manager = React.useRef<Y.UndoManager | null>(null)
   React.useEffect(() => {
-    const sync = () => setState({ canUndo: manager.canUndo(), canRedo: manager.canRedo() })
-    manager.on("stack-item-added", sync); manager.on("stack-item-popped", sync); manager.on("stack-cleared", sync)
-    return () => { manager.off("stack-item-added", sync); manager.off("stack-item-popped", sync); manager.off("stack-cleared", sync); manager.destroy() }
-  }, [manager])
-  return { ...state, undo: () => { manager.undo() }, redo: () => { manager.redo() } }
+    const own = new Y.UndoManager([doc.getXmlFragment("default"), ...documentSurface.ROOTS.map(name => doc.getMap(name))], { trackedOrigins: new Set([origin]), captureTimeout: 0 })
+    manager.current = own
+    const sync = () => setState({ canUndo: own.canUndo(), canRedo: own.canRedo() })
+    own.on("stack-item-added", sync); own.on("stack-item-popped", sync); own.on("stack-cleared", sync)
+    sync()
+    return () => { own.off("stack-item-added", sync); own.off("stack-item-popped", sync); own.off("stack-cleared", sync); own.destroy(); if (manager.current === own) manager.current = null }
+  }, [doc, origin])
+  return { ...state, undo: () => { manager.current?.undo() }, redo: () => { manager.current?.redo() } }
 }

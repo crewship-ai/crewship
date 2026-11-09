@@ -335,8 +335,9 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
       description="Canvas shows this document's blocks on a board you can arrange, next to notes that live only on the canvas."
       consequences={[
         { tone: "kept", text: "The Page, its text and formatting stay exactly as they are." },
-        { tone: "kept", text: "Versions, comments and open proposals are kept." },
-        { tone: "warn", text: "Everyone with edit access can use Canvas from now on. Restoring an older version keeps Canvas enabled." },
+        { tone: "kept", text: "Versions and comments are kept." },
+        { tone: "warn", text: "Open proposals can no longer be accepted; they can still be rejected, and an agent can propose again." },
+        { tone: "warn", text: "Everyone with edit access can use Canvas from now on. Restoring a version from before Canvas keeps Canvas enabled but empties its layout." },
         { tone: "warn", text: "People who have this document open must reload before they can save again." },
       ]}
       confirmLabel="Enable Canvas" onConfirm={confirmEnable}>

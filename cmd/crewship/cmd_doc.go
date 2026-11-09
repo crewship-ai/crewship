@@ -59,8 +59,8 @@ its epoch.`, `  crewship doc initialize @<artifact-id> --file initialize.json`},
 		"upgrade": {"Upgrade a document to the newest schema, for example to enable Canvas", `Send one JSON object with id, schema (the document's current schema),
 target_schema (6, the newest), page_id, epoch and ifRev from doc read. The
 upgrade only widens what the document may hold: its text, block IDs and hashes,
-versions, comments and open proposals stay as they are, and schema 6 adds the
-Canvas view. You need Edit access; agents cannot upgrade. A changed revision or
+versions and comments stay as they are, and schema 6 adds the Canvas view.
+Open proposals can afterwards only be rejected; an agent proposes again. You need Edit access; agents cannot upgrade. A changed revision or
 epoch returns 409 and nothing changes. Resend the exact request after a lost
 confirmation; the original receipt comes back with duplicate: true. Editors
 still open at the old schema must reload before they can save again.`, `  crewship doc upgrade @<artifact-id> --file upgrade.json`},

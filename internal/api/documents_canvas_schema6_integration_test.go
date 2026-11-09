@@ -283,6 +283,30 @@ func TestDocumentCanvasSchemaSixRealEngineCLI(t *testing.T) {
 	if readDoc().Schema != 5 {
 		t.Fatal("a refused upgrade changed the schema")
 	}
+	// People without Edit on this document are refused too: a workspace Viewer
+	// with a read grant, a Member with only a Comment grant and a Restricted
+	// member even with a write grant (the route is not on their allowlist).
+	for _, person := range []struct{ id, role, level string }{{"canvas6-viewer", "VIEWER", "read"}, {"canvas6-commenter", "MEMBER", "comment"}, {"canvas6-restricted", "RESTRICTED", "write"}} {
+		mustExec(t, f.rig.db, `INSERT INTO users(id,email) VALUES(?,?)`, person.id, person.id+"@example.test")
+		mustExec(t, f.rig.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,?)`, person.id+"-member", f.a.WorkspaceID, person.id, person.role)
+		mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,?,?)`, page.ID, person.id, person.level, f.a.HumanUserID)
+		token := "crewship_cli_" + strings.ReplaceAll(person.id, "-", "_")
+		sum := sha256.Sum256([]byte(token))
+		mustExec(t, f.rig.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier,scopes) VALUES(?,?,'Canvas six person',?,'STANDARD','["*"]')`, person.id+"-token", person.id, fmt.Sprintf("%x", sum))
+		packet, _ := json.Marshal(map[string]any{"id": person.id + "-enable", "schema": 5, "target_schema": 6, "page_id": page.ID, "epoch": commented.Epoch, "ifRev": commented.Rev})
+		// The token is real: Viewer and Commenter read the document; Restricted is stopped at its allowlist (403, never 401).
+		if person.role != "RESTRICTED" {
+			if status, raw, err := request(http.MethodGet, "/api/v1/pages/"+slug+"/document", token, nil); err != nil || status != http.StatusOK {
+				t.Fatalf("%s cannot read the document it was granted: %d %s %v", person.id, status, raw, err)
+			}
+		}
+		if status, raw, err := request(http.MethodPost, "/api/v1/pages/"+slug+"/document/upgrade", token, packet); err != nil || (status != http.StatusForbidden && (person.role == "RESTRICTED" || status != http.StatusNotFound)) {
+			t.Fatalf("%s (%s, %s grant) upgrade: %d %s %v", person.id, person.role, person.level, status, raw, err)
+		}
+		if readDoc().Schema != 5 {
+			t.Fatalf("%s changed the schema", person.id)
+		}
+	}
 	// A wrong target and a stale revision are refused; nothing changes.
 	for name, change := range map[string]map[string]any{"target 5": {"id": "canvas6-wrong", "target_schema": 5}, "stale rev": {"id": "canvas6-stale", "ifRev": commented.Rev - 1}} {
 		packet := map[string]any{}

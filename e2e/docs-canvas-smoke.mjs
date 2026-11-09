@@ -6,7 +6,8 @@
 // reloads. The owner places, moves and resizes blocks, removes one from the
 // canvas (the block stays on the Page), undoes, writes a canvas-only note,
 // deletes a block after its confirmation (its comment thread detaches with the
-// quote), and everything survives a reload. A Viewer pans but cannot move; two
+// quote), and everything survives a reload. A version from before Canvas is
+// restored while the co-editor is offline with an unsent edit. A Viewer pans but cannot move; two
 // editors write at once. Three real identities, no model or provider.
 // DOCS_CANVAS_OUT names where screenshots and videos go.
 import assert from 'node:assert/strict'
@@ -365,6 +366,46 @@ try {
   assert.match(final.content, /"underline"/); assert.match(final.content, /"2026-12-01"/)
   await page.screenshot({ path: join(output, '08-after-reload.png') })
   pass('save then reload keeps geometry, the note and the Page formatting')
+
+  // History/restore with a second editor offline: the co-editor types while offline, the owner restores a
+  // version from before Canvas. Canvas stays enabled with an empty layout; the offline edit never lands
+  // on the restored document, and the co-editor is told instead of losing it silently.
+  await co.getByRole('tab', { name: 'Page', exact: true }).click()
+  await co.getByLabel('Document editor', { exact: true }).waitFor()
+  await coContext.setOffline(true)
+  await co.getByText('Book the venue.', { exact: true }).click()
+  await co.keyboard.press('End'); await co.keyboard.type(' Offline edit.')
+  await co.waitForTimeout(3000)
+  assert.doesNotMatch((await surfaceOf()).content, /Offline edit/, 'the co-editor really is offline: its edit has not reached the server')
+  const list = await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document/checkpoints?${q}`)).json()
+  const checkpoints = [...list.checkpoints].sort((a, b) => a.rev - b.rev)
+  console.log('checkpoints:', JSON.stringify(checkpoints.map(c => ({ rev: c.rev, schema: c.schema }))))
+  const preCanvas = checkpoints.find(c => c.schema === 5)
+  assert.ok(preCanvas, 'History keeps a version from before Canvas')
+  await page.getByRole('button', { name: 'History', exact: true }).first().click()
+  const history = page.getByRole('region', { name: 'Document history' }).or(page.getByLabel('Document history'))
+  await history.first().waitFor()
+  await page.getByRole('list', { name: 'Confirmed checkpoints' }).getByRole('button').filter({ hasText: `Revision ${preCanvas.rev}` }).first().click()
+  await page.getByRole('button', { name: 'Restore selected checkpoint' }).click()
+  await page.screenshot({ path: join(output, '09-restore-confirmation.png') })
+  const restoredResponse = page.waitForResponse(r => r.url().includes('/document/restore') && r.request().method() === 'POST')
+  await page.getByRole('alertdialog', { name: 'Confirm checkpoint restore' }).getByRole('button', { name: 'Confirm restore' }).click()
+  assert.equal((await restoredResponse).status(), 200, 'the restore is confirmed')
+  const back = await waitFor(s => s.value.schema === 6 && Object.keys(s.placements).length === 0, 'restore stored')
+  assert.deepEqual(back.value.content, beforeUpgrade.content, 'the restored Page is the version from before Canvas, formatting included')
+  assert.deepEqual([Object.keys(back.items).length, Object.keys(back.text).length], [0, 0], 'no notes or other canvas items are left')
+  pass('restoring a version from before Canvas keeps schema 6 with an empty layout and the original formatting')
+  await coContext.setOffline(false)
+  await co.waitForTimeout(8000)
+  const afterOnline = await surfaceOf()
+  assert.doesNotMatch(afterOnline.content, /Offline edit/, 'the offline edit never lands on the restored document')
+  const coNotice = await co.locator('[role=alert], [data-docs-banner]').allInnerTexts()
+  const coStatus = await co.getByRole('button', { name: /^Status:/ }).evaluateAll(nodes => nodes.map(n => n.getAttribute('aria-label') || n.textContent))
+  console.log('offline co-editor after restore:', JSON.stringify({ notice: coNotice, status: coStatus }))
+  await co.screenshot({ path: join(output, '10-offline-coeditor-after-restore.png') })
+  assert.ok(!coStatus.some(label => /No access/.test(label ?? '')), 'a restore never looks like lost access')
+  assert.ok(coNotice.some(text => /unsaved (draft|changes)/i.test(text)), `the offline co-editor is told its unsaved draft is held: ${JSON.stringify(coNotice)}`)
+  pass('an editor offline during the restore cannot write over it and is told its unsaved draft is held')
 
   assert.deepEqual(errors, [], 'no browser runtime errors')
   const videos = [await page.video()?.path(), await viewer.video()?.path(), await co.video()?.path()]

@@ -225,6 +225,18 @@ describe("DocsCanvas", () => {
     expect(documentSurface.project(doc).placements.find(p => p.id === "intro")).toMatchObject({ x: mine.x, y: mine.y })
   })
 
+  it("Undo still works under StrictMode, where effects mount twice (the dev slots)", () => {
+    const doc = fixture()
+    documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })
+    render(<React.StrictMode><DocsCanvas doc={doc} editable origin="me" /></React.StrictMode>)
+    const undo = screen.getByRole("button", { name: "Undo my last canvas change" }) as HTMLButtonElement
+    drag(card("intro"), { x: 10, y: 10 }, { x: 110, y: 60 })
+    expect(documentSurface.project(doc).placements[0].x).not.toBe(0)
+    expect(undo.disabled).toBe(false)
+    fireEvent.click(undo)
+    expect(documentSurface.project(doc).placements[0]).toMatchObject({ x: 0, y: 0 })
+  })
+
   it("Undo of a deleted block brings it back to the Page and its placement", async () => {
     const doc = fixture()
     documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })

@@ -18,7 +18,7 @@ import { DocsBody, type DocsFrameReport } from "../docs-view"
 
 const env = vi.hoisted(() => ({ proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, schema: 2, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang", denied: false }))
 const request = vi.hoisted(() => vi.fn())
-const upgrades = vi.hoisted(() => ({ outcome: "ok" as "ok" | "stale", bodies: [] as Record<string, unknown>[] }))
+const upgrades = vi.hoisted(() => ({ outcome: "ok" as "ok" | "stale" | "missing", bodies: [] as Record<string, unknown>[] }))
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: env.available, isPending: env.available === undefined }) }))
 vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/document-queue")>(), openDocumentDrafts: async () => ({ load: async () => env.drafts, put: async () => {}, remove: async () => {}, close: () => {}, exclusive: true }) }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
@@ -58,6 +58,7 @@ function serve() {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>
       upgrades.bodies.push(body)
       if (upgrades.outcome === "stale") return { ok: false, status: 409, json: async () => ({ error: "original Page identity, revision and supported upgrade required" }) }
+      if (upgrades.outcome === "missing") return { ok: false, status: 404, json: async () => ({ error: "not found" }) }
       rev += 1; env.schema = 6
       return { ok: true, json: async () => ({ id: body.id, rev, epoch: "go:node:2", schema: 6 }) }
     }
@@ -141,6 +142,7 @@ describe("Docs in the ArtifactFrame", () => {
 
   it("registers Propose and the Proposals review only when the server serves proposals", async () => {
     env.proposals = true
+    env.schema = 5
     serve()
     open()
     expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
@@ -152,13 +154,33 @@ describe("Docs in the ArtifactFrame", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "What should the agent change?" }), { target: { value: "Tighten the goal" } })
     const href = new URL(screen.getByRole("link", { name: "Ask for a proposal" }).getAttribute("href")!, "https://x.test")
     expect(href.pathname).toBe("/chat")
-    expect(Object.fromEntries(href.searchParams)).toEqual({ workspace_id: "ws1", propose: "page-docs.1.0", prompt: "Tighten the goal", draft: "1" })
+    expect(Object.fromEntries(href.searchParams)).toEqual({ workspace_id: "ws1", propose: "page-docs.1.0.5", prompt: "Tighten the goal", draft: "1" })
+    fireEvent.click(screen.getByRole("button", { name: "Proposals" }))
+    expect(await within(screen.getByRole("complementary", { name: "Proposals" })).findByText("No proposals.")).toBeTruthy()
+  })
+
+  it("keeps Propose and the Proposals review on a Canvas document (schema 6)", async () => {
+    env.proposals = true
+    env.schema = 6
+    serve()
+    open()
+    expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Status: Live" })).toBeTruthy())
+    fireEvent.click(within(slot("view")!).getByRole("tab", { name: "Canvas" }))
+    await screen.findByRole("application", { name: "Canvas" })
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }))
+    const modes = await screen.findByRole("radiogroup", { name: "Agent mode" })
+    fireEvent.click(within(modes).getByRole("radio", { name: "Propose" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "What should the agent change?" }), { target: { value: "Tighten the goal" } })
+    const href = new URL(screen.getByRole("link", { name: "Ask for a proposal" }).getAttribute("href")!, "https://x.test")
+    expect(href.searchParams.get("propose")).toBe("page-docs.1.0.6")
     fireEvent.click(screen.getByRole("button", { name: "Proposals" }))
     expect(await within(screen.getByRole("complementary", { name: "Proposals" })).findByText("No proposals.")).toBeTruthy()
   })
 
   it("offers no Propose to a reader who cannot edit, but still the Proposals to read", async () => {
     env.proposals = true
+    env.schema = 5
     env.canWrite = false
     serve()
     open()
@@ -213,7 +235,8 @@ describe("Docs in the ArtifactFrame", () => {
     fireEvent.click(tab)
     const dialog = await screen.findByRole("alertdialog", { name: "Enable Canvas for this document?" })
     expect(dialog.textContent).toContain("The Page, its text and formatting stay exactly as they are.")
-    expect(dialog.textContent).toContain("Versions, comments and open proposals are kept.")
+    expect(dialog.textContent).toContain("Versions and comments are kept.")
+    expect(dialog.textContent).toContain("Open proposals can no longer be accepted")
     // Nothing is upgraded until the person confirms.
     expect(upgrades.bodies).toEqual([])
     fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }))
@@ -245,6 +268,38 @@ describe("Docs in the ArtifactFrame", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
     await waitFor(() => expect(upgrades.bodies).toHaveLength(2))
     expect(upgrades.bodies[1].id).not.toBe(upgrades.bodies[0].id)
+  })
+
+  it("never upgrades while this tab has unsaved edits: the dialog says why and nothing is sent", async () => {
+    serve()
+    env.schema = 5
+    env.patch = "hang"
+    open()
+    const editor = (await screen.findByLabelText("Document editor")) as HTMLElement & { editor: Editor }
+    await waitFor(() => expect(editor.editor.isEditable).toBe(true))
+    act(() => { editor.editor.commands.insertContent(" Unsaved") })
+    expect(await screen.findByRole("button", { name: "Status: Saving…" })).toBeTruthy()
+    fireEvent.click(within(slot("view")!).getByRole("tab", { name: "Canvas" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
+    expect(await within(dialog).findByRole("alert")).toHaveProperty("textContent", "Wait until your changes are saved, then enable Canvas.")
+    expect(upgrades.bodies).toEqual([])
+    expect(screen.queryByRole("application", { name: "Canvas" })).toBeNull()
+  })
+
+  it("treats a missing upgrade route as an error, never as lost access", async () => {
+    serve()
+    env.schema = 5
+    upgrades.outcome = "missing"
+    open()
+    const editor = (await screen.findByLabelText("Document editor")) as HTMLElement & { editor: Editor }
+    await waitFor(() => expect(editor.editor.isEditable).toBe(true))
+    fireEvent.click(within(slot("view")!).getByRole("tab", { name: "Canvas" }))
+    const dialog = await screen.findByRole("alertdialog")
+    fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
+    expect(await within(dialog).findByRole("alert")).toHaveProperty("textContent", "Canvas could not be enabled. Nothing was changed.")
+    expect(screen.queryByRole("button", { name: "Status: No access" })).toBeNull()
+    expect(editor.editor.isEditable).toBe(true)
   })
 
   it("offers no Enable Canvas to a person who cannot edit an older document", async () => {

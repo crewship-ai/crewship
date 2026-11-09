@@ -3,6 +3,9 @@
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { formatDateTime } from "@/lib/time"
+import { documentSurface } from "@/lib/documents/surface"
+
+const CANVAS_SCHEMA: number = documentSurface.CANVAS_SCHEMA
 import { DocumentCompare } from "./document-compare"
 import { HistoryActions } from "./history-actions"
 import { DocumentReadonly } from "../document-readonly/document-readonly"
@@ -20,7 +23,7 @@ function ConfirmedContent({ snapshot }: { snapshot: DocumentCheckpointSnapshot }
   return <DocumentReadonly schema={snapshot.schema} content={snapshot.content} accessibleLabel={`Confirmed revision ${snapshot.rev}`} />
 }
 
-export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, onSelect, onClose, restore, review }: DocumentHistoryProps) {
+export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, onSelect, onClose, restore, review, headSchema }: DocumentHistoryProps) {
   const [confirmation, setConfirmation] = useState<string>()
   const [comparing, setComparing] = useState<string>()
   // The caller must invalidate scope on current-human/workspace/Page/auth changes.
@@ -54,6 +57,7 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
     {canRestore && <Button onClick={() => setConfirmation(confirmationKey)}>Restore selected checkpoint</Button>}
     {canRestore && confirmation === confirmationKey && <div role="alertdialog" aria-label="Confirm checkpoint restore" aria-modal="true">
       <p>Restore revision {read?.rev} as a new confirmed revision? Earlier write permissions will not be renewed.</p>
+      {headSchema !== undefined && headSchema >= CANVAS_SCHEMA && read !== undefined && read.schema < CANVAS_SCHEMA && <p>This version is from before Canvas: Canvas stays enabled, but its layout and notes will be empty.</p>}
       <Button onClick={() => { setConfirmation(undefined); restore?.onConfirm() }}>Confirm restore</Button>
       <Button onClick={() => setConfirmation(undefined)}>Cancel restore</Button>
     </div>}

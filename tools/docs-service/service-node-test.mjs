@@ -63,7 +63,7 @@ function authorityModel() {
       model.state = { ...model.state, schema: data.schema, rev: model.state.rev + 1, snapshot: data.snapshot };
     } else if (op === 'checkpoint') { model.checkpoints++; model.checkpointStates.set(data.id,{schema:model.state.schema,snapshot:model.state.snapshot}); }
     else if (op === 'upgrade') { assert.equal(data.schema,model.state.schema); assert.equal(data.targetSchema,LATEST_VERSION); assert.equal(data.ifRev,model.state.rev); assert.equal(data.generation,model.state.generation); model.state = {...model.state,schema:LATEST_VERSION,rev:model.state.rev+1,epoch:model.state.epoch+1,generation:model.state.generation+1}; }
-    else if (op === 'restore') { model.restores++; const source=model.checkpointStates.get(data.checkpoint)??model.state; model.state = { ...model.state,schema:model.state.schema===5&&source.schema<5?5:source.schema,snapshot:source.snapshot, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1 }; }
+    else if (op === 'restore') { model.restores++; const source=model.checkpointStates.get(data.checkpoint)??model.state; model.state = { ...model.state,schema:model.state.schema>=5&&source.schema<model.state.schema?model.state.schema:source.schema,snapshot:source.snapshot, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1 }; }
     const receipt = { id: data.id, rev: model.state.rev, epoch: model.state.epoch, fingerprint: data.fingerprint };
     model.receipts.set(data.id, receipt); return receipt;
   };
@@ -1196,7 +1196,7 @@ test('schema6: after Canvas is enabled an agent proposes on a placed block; acce
     const after = (await read(f)).body, d = load(after.snapshot);
     try {
       assert.equal(after.schema, 6);
-      assert.deepEqual(after.content.content[0].content, [{ type: 'text', text: 'Deliver ' }, { type: 'text', text: 'under', marks: [under] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'red', marks: [red, bold] }, { type: 'text', text: ' by ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: '.' }]);
+      assert.deepEqual(after.content.content[0].content, [{ type: 'text', text: 'Deliver ' }, { type: 'text', text: 'under', marks: [under] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'red', marks: [bold, red] }, { type: 'text', text: ' by ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: '.' }], 'marks come back in schema order');
       assert.deepEqual(after.content.content[1], body.content[1]);
       assert.deepEqual(surface.project(d).placements, [{ id: 'lead', ...geometry.lead }, { id: 'other', ...geometry.other }], 'accepting a proposal keeps every placement');
       validate(d, 6);
@@ -1206,5 +1206,42 @@ test('schema6: after Canvas is enabled an agent proposes on a placed block; acce
     const before = model.commits, snap = model.state.snapshot;
     assert.equal((await call(f.socket, '/v1/documents/p/proposal-reject', { id: 'reject-6', proposal: 'p6b', ifRev: after.rev })).status, 200);
     assert.equal(model.commits, before); assert.equal(model.state.snapshot, snap, 'reject changes neither text nor geometry');
+  } finally { await f.close(); }
+});
+
+test('schema6: a proposal made before Canvas was enabled can only be rejected afterwards; restoring a pre-Canvas version keeps schema 6 with an empty layout (#5149)', async () => {
+  const model = authorityModel(), proposals = new Map();
+  const body = { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'lead' }, content: [{ type: 'text', text: 'Ship it.' }] }] };
+  const doc = create(body, 5); model.state = { ...model.state, schema: 5, snapshot: snapshot(doc) }; doc.destroy();
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'propose') { proposals.set(data.id, { id: data.id, actor: 'agent:a:r', run_id: 'r', target: data.target, schema: data.schema, base_hash: data.ifHashes[data.target], text: data.semantic.text, generation: data.generation, base_rev: data.ifRev, status: 'open', created_at: 'now' }); return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, actor: 'agent:a:r', kind: 'proposal' }; }
+    if (op === 'proposal') return proposals.get(data.id);
+    if (op === 'proposal-reject') { proposals.get(data.proposal).status = 'rejected'; return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, kind: 'proposal-reject' }; }
+    return model.handle(op, data, req, res);
+  });
+  await f.start();
+  try {
+    const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
+    const five = (await read(f)).body, lead = five.outline.find(b => b.id === 'lead');
+    assert.equal((await call(f.socket, '/v1/documents/p/checkpoint', { id: 'before-canvas', schema: 5, page_id: 'p', epoch: five.epoch, ifRev: five.rev })).status, 200);
+    assert.equal((await call(f.socket, '/v1/documents/p/propose', { id: 'old', schema: 5, page_id: 'p', epoch: five.epoch, ifRev: five.rev, target: 'lead', ifHash: lead.hash, text: 'Ship it now.' }, agent)).status, 200);
+    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', { id: 'enable-canvas', schema: 5, target_schema: 6, page_id: 'p', epoch: five.epoch, ifRev: five.rev })).status, 200);
+    const six = (await read(f)).body; assert.equal(six.schema, 6);
+    const commits = model.commits;
+    const stale = await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-old', proposal: 'old', ifRev: six.rev });
+    assert.equal(stale.status, 409, 'a pre-Canvas proposal is never accepted at 6'); assert.match(stale.body.error, /proposal is no longer open/);
+    assert.equal(model.commits, commits);
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-reject', { id: 'reject-old', proposal: 'old', ifRev: six.rev })).status, 200, 'but it can always be closed');
+    const placed = placeUpdate(six, d => surface.place(d, 'lead', { x: 40, y: 60, w: 320, h: 120, z: 1 }));
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'place', schema: 6, page_id: 'p', epoch: six.epoch, kind: 'human', update: placed })).status, 200);
+    const head = (await read(f)).body;
+    const restored = await call(f.socket, '/v1/documents/p/restore', { id: 'restore-before-canvas', schema: 6, page_id: 'p', epoch: head.epoch, ifRev: head.rev, checkpoint: 'before-canvas' });
+    assert.equal(restored.status, 200, JSON.stringify(restored.body)); assert.equal(restored.body.schema, 6);
+    const back = (await read(f)).body, d = load(back.snapshot);
+    try {
+      assert.equal(back.schema, 6, 'Canvas stays enabled'); assert.deepEqual(back.content, five.content);
+      assert.deepEqual(surface.project(d).placements, [], 'the pre-Canvas version has no layout');
+      validate(d, 6);
+    } finally { d.destroy(); }
   } finally { await f.close(); }
 });

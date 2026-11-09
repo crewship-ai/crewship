@@ -119,9 +119,9 @@ The routines MCP tools `doc_draft_view`, `doc_draft_prepare`, `doc_draft_apply`
 and `doc_draft_checkpoint` use the same permission and immutable requests. They
 do not accept raw Yjs updates or whole-document replacement.
 
-### Proposing on a schema 4 or 5 document
+### Proposing on a schema 4, 5 or 6 document
 
-On a schema 4 or 5 document an agent never edits directly: it proposes, and a
+On a schema 4, 5 or 6 document an agent never edits directly: it proposes, and a
 person with edit access accepts or rejects each proposal. The run needs a
 targeted message from the person who asked that names the document's own
 schema (`document_iteration_intent` with `"schema": 4` or `"schema": 5`; a
@@ -262,9 +262,9 @@ what the document's schema supports in `capabilities`:
 | 6 | read, edit, draft, propose, accept, restore, export |
 
 `draft` is the run that created the document with your drafting permission
-editing it directly. On a schema 4 or 5 document any other agent request is a
+editing it directly. On a schema 4, 5 or 6 document any other agent request is a
 proposal at the document's own schema, and a person accepts it; see
-[Proposing on a schema 4 or 5 document](#proposing-on-a-schema-4-or-5-document).
+[Proposing on a schema 4, 5 or 6 document](#proposing-on-a-schema-4-5-or-6-document).
 A proposal keeps every mark, date and mention outside the text it changes; one
 that would insert text beside a date or mention, or delete across one, is
 refused with `ambiguous_inline_atom`. A proposal made at one schema is never
@@ -459,8 +459,10 @@ crewship doc upgrade @<artifact-id> --file upgrade.json
 ```
 
 The upgrade only widens what the document may hold. Its text, block IDs and
-hashes, versions, comments and open proposals stay as they are, and restoring a
-version from before the upgrade keeps the new schema. You need Edit access;
+hashes, versions and comments stay as they are, and restoring a version from
+before the upgrade keeps the new schema (with an empty Canvas layout). Open
+proposals can afterwards only be rejected; an agent proposes again at the new
+schema. You need Edit access;
 agents cannot upgrade. A changed revision or epoch returns 409 and nothing
 changes: read again and send a new request. Resend the exact request after a
 lost confirmation; the original receipt comes back with `duplicate: true`.
@@ -530,7 +532,7 @@ crewship doc comment-resolve @<artifact-id> --file resolve.json
 
 ## `crewship doc proposals <page-slug>`
 
-List an agent's proposals on a schema 4 or 5 document, oldest first. Each has `id`,
+List an agent's proposals on a schema 4, 5 or 6 document, oldest first. Each has `id`,
 `author`, `run_id`, `target.block_ids`, `base_rev`, `status`, `text` and
 `created_at`. `status` is `open`, `stale` (its block changed after it was made,
 so it can no longer be accepted), `accepted` or `rejected`. Reading needs read

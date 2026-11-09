@@ -37,7 +37,8 @@ export async function enableCanvas(target: UpgradeTarget, requestId: string): Pr
   } catch { return { status: "unknown" } }
   const value = await response.json().catch(() => null) as Record<string, unknown> | null
   if (response.ok) return typeof value?.rev === "number" && Number.isSafeInteger(value.rev) && value.schema === CANVAS_SCHEMA ? { status: "done", rev: value.rev } : { status: "unknown" }
-  if ([401, 403, 404].includes(response.status)) return { status: "denied" }
+  // A 404 may be a server without this route yet: an error, never a lost session.
+  if ([401, 403].includes(response.status)) return { status: "denied" }
   if (response.status === 409) return { status: "stale" }
   if (response.status === 503) return { status: "unavailable" }
   if (response.status >= 500) return { status: "unknown" }

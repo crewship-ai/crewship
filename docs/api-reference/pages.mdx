@@ -2539,8 +2539,8 @@ document write (Edit) access; scoped CLI credentials need both `pages:read` and
 with `id` (operation ID), `schema` (the document's current schema, which must
 support upgrade), `target_schema` (6), `page_id`, `epoch` and `ifRev` from the
 current read. Nothing in the content changes: text, block IDs and hashes,
-versions, comments and open proposals stay as they are; the schema and the
-document generation advance, so editors still open at the old schema are
+versions and comments stay as they are. Open proposals can afterwards only be
+rejected, never accepted. The schema and the document generation advance, so editors still open at the old schema are
 refused with 409 and must reload. Response: a receipt with `rev` and `schema`.
 Repeating the original request after a lost confirmation returns its receipt
 with `duplicate: true` and never upgrades twice. Statuses: 200 confirmed
@@ -2613,7 +2613,7 @@ never review proposals, and restricted members have no access to this route.
 Request: path parameter `slug` only. Response: `page_id` and `proposals`, oldest
 first; each has `id`, `author`, `run_id`, `target.block_ids`, `base_rev`,
 `status` (`open`, `stale`, `accepted` or `rejected`), `text` and `created_at`.
-Proposals exist on documents whose schema supports them (4 and 5), each bound to
+Proposals exist on documents whose schema supports them (4, 5 and 6), each bound to
 the schema it was made at; `GET /api/v1/pages/{slug}/document` reports
 `proposals: true` where they are served and the schema's `capabilities`. Statuses: 200 listed; 401
 invalid credential; 403 missing access or an agent credential; 404 no such

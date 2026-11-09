@@ -23,7 +23,7 @@ func boolCount(b bool) int {
 // principal or mode supplied by a model. The host binds its human chat receipt.
 //
 // Schema names the document's own schema. On a schema that supports
-// proposals (4 and 5, see SchemaAllows) the mandate is propose-only (#5137,
+// proposals (4, 5 and 6, see SchemaAllows) the mandate is propose-only (#5137,
 // #5233): the agent may only propose, and Blocks, when present, names the
 // only blocks it may propose on. Schema 3 is the direct-draft mandate. Blocks
 // is a comma-free list of block IDs; it is never accepted with schema 3.
