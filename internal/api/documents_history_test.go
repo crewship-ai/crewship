@@ -151,4 +151,17 @@ func TestHumanDocumentHistoryReportsTheSessionLimit(t *testing.T) {
 	if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &value) != nil || len(value) != 1 {
 		t.Fatalf("unauthorized limit read leaked: %d %s", w.Code, w.Body)
 	}
+	// A signed-in person who is not a member of this workspace never learns the flag either,
+	// even when the request claims the workspace and the engine list answers.
+	if _, err := h.db.Exec(`INSERT INTO users(id,email) VALUES('history-outsider','history-outsider@example.com')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Exec(`INSERT INTO user_sessions(id,user_id,expires_at) VALUES('outsider-session','history-outsider',?)`, time.Now().Add(time.Hour).UTC().Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	outsider := humanDocumentRequest(t, "GET", "/history", ws, "history-outsider", "")
+	outsider = outsider.WithContext(withUser(outsider.Context(), &AuthUser{ID: "history-outsider", Email: "history-outsider@example.com", SessionID: "outsider-session"}))
+	if h.documentSessionHistoryFull(outsider, "human-doc-page") {
+		t.Fatal("a non-member learned the History limit")
+	}
 }

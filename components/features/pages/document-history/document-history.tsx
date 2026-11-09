@@ -68,8 +68,8 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
       <Button onClick={() => setConfirmation(undefined)}>Cancel restore</Button>
     </div>}
     {listMessage ? <p role={denied || list.status === "error" ? "alert" : "status"}>{listMessage}</p> : <>
-      {admitted && list.status === "ready" && list.data.history_limit_reached && <p role="status" aria-label="History limit" className="rounded-md border p-3 text-sm">
-        This document has reached its History limit. Your edits are still saved, but History no longer adds automatic snapshots. The current version and the revisions listed here stay available.
+      {admitted && list.status === "ready" && list.data.history_limit_reached && <p role="note" aria-label="History limit" className="rounded-md border p-3 text-sm">
+        History is not adding new automatic snapshots of this document because its storage limit is reached. Your edits are still saved, and the revisions listed here can still be compared and restored.
       </p>}
       {checkpoints.length === 0 && current === undefined ? <p>No checkpoints yet.</p> : <ul aria-label="Confirmed checkpoints" className="max-h-72 space-y-2 overflow-y-auto">
         {current !== undefined && !headListed && <li className="rounded-md border border-dashed p-3 text-sm">
