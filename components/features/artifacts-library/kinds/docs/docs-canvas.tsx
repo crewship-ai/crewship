@@ -48,7 +48,52 @@ type Drag =
   | { kind: "pan"; pointer: number; x: number; y: number }
   | { kind: "move" | "resize"; pointer: number; id: string; x: number; y: number; start: Rect; handle?: Handle }
 
-interface BlockSummary { id: string; type: string; text: string; level?: number }
+/** One run of a block's text with the Page marks it carries (schema 4/5 formatting). */
+export interface TextRun { text: string; bold?: boolean; italic?: boolean; strike?: boolean; underline?: boolean; code?: boolean; link?: boolean; color?: string; highlight?: string }
+interface BlockSummary { id: string; type: string; text: string; runs: TextRun[]; level?: number }
+
+const PALETTE = new Set(["gray", "red", "orange", "yellow", "green", "blue", "purple", "pink"])
+const paletteColor = (value: unknown): string | undefined => {
+  const color = (value as { color?: unknown } | null)?.color
+  return typeof color === "string" && PALETTE.has(color) ? color : undefined
+}
+
+/** The block's text as formatted runs, joined like plain(): child blocks are separated by a space. */
+function runsOf(node: Y.XmlElement | Y.XmlText): TextRun[] {
+  if (!isElement(node)) {
+    return (node as Y.XmlText).toDelta().flatMap((part: { insert?: unknown; attributes?: Record<string, unknown> }) => {
+      if (typeof part.insert !== "string" || !part.insert) return []
+      const marks = part.attributes ?? {}
+      const run: TextRun = { text: part.insert }
+      if (marks.bold) run.bold = true
+      if (marks.italic) run.italic = true
+      if (marks.strike) run.strike = true
+      if (marks.underline) run.underline = true
+      if (marks.code) run.code = true
+      if (marks.link) run.link = true
+      const color = paletteColor(marks.textColor), highlight = paletteColor(marks.highlight)
+      if (color) run.color = color
+      if (highlight) run.highlight = highlight
+      return [run]
+    })
+  }
+  return node.toArray().flatMap((child, index) => [...(index > 0 ? [{ text: " " }] : []), ...runsOf(child as Y.XmlElement)])
+}
+
+/** A card shows the Page block's formatting with the same palette as the Page editor; links are not followable on the canvas. */
+function FormattedRuns({ runs }: { runs: TextRun[] }) {
+  return <>{runs.map((run, index) => {
+    let node: React.ReactNode = run.text
+    if (run.code) node = <code className="rounded bg-muted px-1 font-mono text-[0.9em]">{node}</code>
+    if (run.bold) node = <strong>{node}</strong>
+    if (run.italic) node = <em>{node}</em>
+    if (run.strike) node = <s>{node}</s>
+    if (run.underline || run.link) node = <u>{node}</u>
+    if (run.highlight) node = <mark data-highlight={run.highlight}>{node}</mark>
+    if (run.color) node = <span data-text-color={run.color}>{node}</span>
+    return <React.Fragment key={index}>{node}</React.Fragment>
+  })}</>
+}
 
 const NOTE_TONES: Record<string, string> = {
   default: "bg-card", yellow: "bg-warn/15", green: "bg-success/15", blue: "bg-primary/10", red: "bg-destructive/10", purple: "bg-accent",
@@ -92,7 +137,7 @@ export function threadsByBlock(doc: Y.Doc, comments: readonly DocumentComment[])
   return result
 }
 
-/** Top-level Page blocks with their plain text, in Page order. */
+/** Top-level Page blocks with their plain text and formatted runs, in Page order. */
 export function pageBlocks(doc: Y.Doc): BlockSummary[] {
   return doc.getXmlFragment("default").toArray().flatMap(node => {
     if (!isElement(node)) return []
@@ -100,7 +145,7 @@ export function pageBlocks(doc: Y.Doc): BlockSummary[] {
     const id = element.getAttribute("id")
     if (typeof id !== "string") return []
     const level = element.getAttribute("level") as unknown
-    return [{ id, type: element.nodeName, text: plain(element).replace(/\s+/g, " ").trim(), ...(typeof level === "number" ? { level } : {}) }]
+    return [{ id, type: element.nodeName, text: plain(element).replace(/\s+/g, " ").trim(), runs: runsOf(element), ...(typeof level === "number" ? { level } : {}) }]
   })
 }
 
@@ -331,7 +376,7 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
             className={cn("absolute overflow-hidden rounded-md border bg-card p-3 text-sm shadow-sm outline-none", editable ? "cursor-grab" : "cursor-default",
               selected === p.id && "ring-2 ring-primary")}
             style={{ left: r.x, top: r.y, width: r.w, minHeight: r.h, zIndex: p.z }}>
-            <p className={cn("whitespace-pre-wrap break-words", block.type === "heading" && "text-base font-semibold")}>{block.text || <span className="text-muted-foreground">Empty block</span>}</p>
+            <p className={cn("whitespace-pre-wrap break-words", block.type === "heading" && "text-base font-semibold")}>{block.text ? <FormattedRuns runs={block.runs} /> : <span className="text-muted-foreground">Empty block</span>}</p>
             {(threads.get(p.id)?.length ?? 0) > 0 && <button type="button" data-card-comments={p.id}
               aria-label={`${threads.get(p.id)!.length} open ${threads.get(p.id)!.length === 1 ? "comment" : "comments"} on this block`}
               onPointerDown={e => e.stopPropagation()} onClick={() => onOpenComments?.(p.id, threads.get(p.id)!)}

@@ -45,6 +45,26 @@ describe("DocsCanvas", () => {
     expect(pageBlocks(doc).map(b => b.id)).toEqual(["title", "intro", "outro"])
   })
 
+  it("shows the Page block's formatting on its card: bold, palette colour, highlight, underline", () => {
+    const doc = fixture()
+    const text = ((doc.getXmlFragment("default").get(1) as Y.XmlElement).get(0) as Y.XmlText)
+    act(() => {
+      text.delete(0, text.length)
+      text.insert(0, "Agree ", {}); text.insert(6, "launch date", { bold: {} }); text.insert(17, " with ", {})
+      text.insert(23, "sales", { textColor: { color: "red" }, highlight: { color: "yellow" } }); text.insert(28, " now", { underline: {}, textColor: { color: "url(x)" } })
+    })
+    documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })
+    render(<DocsCanvas doc={doc} editable origin="me" />)
+    expect(card("intro").textContent).toContain("Agree launch date with sales now")
+    expect(card("intro").querySelector("strong")?.textContent).toBe("launch date")
+    expect(card("intro").querySelector('[data-text-color="red"]')?.textContent).toBe("sales")
+    expect(card("intro").querySelector('mark[data-highlight="yellow"]')?.textContent).toBe("sales")
+    expect(card("intro").querySelector("u")?.textContent).toBe(" now")
+    // Only palette names reach the attribute; anything else renders as plain text.
+    expect(card("intro").querySelectorAll("[data-text-color]")).toHaveLength(1)
+    expect(card("intro").getAttribute("aria-label")).toBe("Agree launch date with sales now")
+  })
+
   it("moves a placement with one write per gesture: geometry only, as the person's origin", () => {
     const doc = fixture()
     documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })

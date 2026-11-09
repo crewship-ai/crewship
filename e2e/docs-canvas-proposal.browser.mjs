@@ -6,7 +6,7 @@
 // message carries the explicit schema-6 target), then accepts one proposal and
 // rejects the other in the browser. Formatting and Canvas geometry are kept.
 import assert from 'node:assert/strict'
-import { readFile, mkdir } from 'node:fs/promises'
+import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { chromium } from 'playwright'
 import * as Y from 'yjs'
@@ -64,6 +64,19 @@ try {
     return { value, placements, block }
   }
 
+  // Evidence written next to the screenshots: the stored state (placements, block marks) and what the cards show.
+  const evidence = async (name, state) => {
+    const cards = await page.evaluate(() => {
+      const world = document.querySelector('[data-canvas-world]')
+      return { worldTransform: world?.style.transform ?? null, cards: Object.fromEntries([...document.querySelectorAll('[data-placement]')].map(card => {
+        const box = card.getBoundingClientRect()
+        return [card.dataset.placement, { style: { left: card.style.left, top: card.style.top, width: card.style.width, minHeight: card.style.minHeight }, screen: { x: Math.round(box.x), y: Math.round(box.y), w: Math.round(box.width), h: Math.round(box.height) }, text: card.textContent, bold: [...card.querySelectorAll('strong')].map(n => n.textContent), color: [...card.querySelectorAll('[data-text-color]')].map(n => [n.getAttribute('data-text-color'), n.textContent]) }]
+      })) }
+    })
+    const stored = { rev: state.value.rev, schema: state.value.schema, placements: state.placements, blocks: { lead: state.block('lead'), other: state.block('other'), tail: state.block('tail') } }
+    await writeFile(join(output, `${name}.json`), JSON.stringify({ stored, shown: cards }, null, 2))
+    return cards
+  }
   page = await owner.newPage()
   const errors = []
   page.on('pageerror', error => errors.push(error.message))
@@ -90,7 +103,12 @@ try {
   assert.deepEqual(Object.keys(placed.placements).sort(), ['lead', 'other'], 'both placements are stored')
   await page.getByRole('button', { name: 'Status: Saved' }).waitFor({ timeout: 15000 })
   const originalLead = placed.block('lead')
+  // The card shows the Page formatting: bold and the red palette colour.
+  await page.locator('[data-placement="lead"] strong', { hasText: 'launch date' }).waitFor()
+  await page.locator('[data-placement="lead"] [data-text-color="red"]', { hasText: 'sales' }).waitFor()
   await page.screenshot({ path: join(output, '01-canvas-placed.png') })
+  const shownBefore = await evidence('01-stored-before-proposal', placed)
+  for (const id of ['lead', 'other']) assert.equal(shownBefore.cards[id].style.left, `${placed.placements[id].x}px`)
   pass('two formatted blocks are placed on the Canvas')
 
   // The original human message in the private chat names the Doc, two blocks and schema 6.
@@ -180,10 +198,18 @@ try {
   const card = page.locator('[data-placement="lead"]')
   await card.waitFor()
   await page.waitForFunction(() => document.querySelector('[data-placement="lead"]')?.textContent?.includes('by Friday'), null, { timeout: 15000 })
-  const geometry = await card.evaluate(element => ({ left: element.style.left, top: element.style.top, width: element.style.width }))
-  assert.equal(geometry.left, `${placed.placements.lead.x}px`, JSON.stringify(geometry))
-  assert.equal(geometry.top, `${placed.placements.lead.y}px`, JSON.stringify(geometry))
+  await page.locator('[data-placement="lead"] strong', { hasText: 'launch date' }).waitFor()
+  await page.locator('[data-placement="lead"] [data-text-color="red"]', { hasText: 'sales' }).waitFor()
   await page.screenshot({ path: join(output, '04-canvas-after-accept.png') })
+  const shownAfter = await evidence('04-stored-after-accept', after)
+  // World coordinates are the stored ones for both cards; the screen offset is the view's pan (worldTransform), not the layout.
+  for (const id of ['lead', 'other']) {
+    const want = placed.placements[id], got = shownAfter.cards[id].style
+    assert.deepEqual([got.left, got.top, got.width, got.minHeight], [`${want.x}px`, `${want.y}px`, `${want.w}px`, `${want.h}px`], `${id}: ${JSON.stringify(got)}`)
+    assert.equal(shownAfter.cards[id].screen.y - shownAfter.cards.lead.screen.y, shownBefore.cards[id].screen.y - shownBefore.cards.lead.screen.y, 'relative positions on screen are unchanged')
+  }
+  assert.deepEqual(shownAfter.cards.lead.bold, ['launch date'])
+  assert.deepEqual(shownAfter.cards.lead.color, [['red', 'sales']])
   list = await openProposals()
   await list.getByRole('button', { name: /· accepted · revision/ }).waitFor()
   await list.getByRole('button', { name: /· rejected · revision/ }).waitFor()
