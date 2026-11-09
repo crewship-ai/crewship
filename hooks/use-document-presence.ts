@@ -57,7 +57,10 @@ export function useDocumentPresence({ workspaceId, slug, editor, enabled, canvas
     // resolves them again from their relative positions after local typing.
     let timer: ReturnType<typeof setTimeout> | undefined, soon: ReturnType<typeof setTimeout> | undefined, sending: Promise<unknown> | undefined
     let sentCaret = "", listed = ""
-    const caretKey = () => JSON.stringify({ ...caretOf(editor), ...canvasPresenceBody(canvas?.current) })
+    // The Page editor stays mounted behind Canvas. Its retained selection is
+    // not activity on Page, and must not displace this person's active tab.
+    const presenceOf = () => canvas?.current != null ? canvasPresenceBody(canvas.current) : caretOf(editor)
+    const caretKey = () => JSON.stringify(presenceOf())
     const show = (next: PresencePeer[]) => {
       if (stopped) return
       const key = JSON.stringify(next.map(peer => [peer.client, peer.userId, peer.name, peer.color, peer.tabs, peer.canvas]))
@@ -70,7 +73,7 @@ export function useDocumentPresence({ workspaceId, slug, editor, enabled, canvas
       inflight = true; again = false; lastSent = Date.now()
       clearTimeout(timer)
       try {
-        const caret = { ...caretOf(editor), ...canvasPresenceBody(canvas?.current) }; sentCaret = JSON.stringify(caret)
+        const caret = presenceOf(); sentCaret = JSON.stringify(caret)
         const request = post({ client: client.current, ...caret }); sending = request
         const response = await request
         if (stopped) return

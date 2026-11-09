@@ -89,3 +89,24 @@ it("sends this tab's Canvas pointer and selection with the heartbeat, at once wh
   hook.unmount()
   expect(channel.share).toBeUndefined()
 })
+
+it("shares only the active surface, restoring the Page caret after Canvas closes", async () => {
+  request.mockImplementation(async () => reply(200, { peers: [], ttl_ms: 6000, interval_ms: 5000 }))
+  const activeEditor = editor()
+  activeEditor.commands.setTextSelection(1)
+  const channel: CanvasPresenceChannel = { current: null }
+  const hook = renderHook(() => useDocumentPresence({ workspaceId: "w", slug: "notes", editor: activeEditor, enabled: true, canvas: channel }))
+  await waitFor(() => expect(bodies()[0]).toHaveProperty("anchor", expect.any(String)))
+  expect(bodies()[0]).toHaveProperty("head", expect.any(String))
+  channel.current = { pointer: { x: 1, y: 2 }, selection: [] }
+  act(() => { channel.share!() })
+  await waitFor(() => expect(bodies().at(-1)).toHaveProperty("canvas"))
+  expect(bodies().at(-1)).not.toHaveProperty("anchor")
+  expect(bodies().at(-1)).not.toHaveProperty("head")
+  channel.current = null
+  act(() => { channel.share!() })
+  await waitFor(() => expect(bodies().at(-1)).not.toHaveProperty("canvas"))
+  expect(bodies().at(-1)).toHaveProperty("anchor", expect.any(String))
+  expect(bodies().at(-1)).toHaveProperty("head", expect.any(String))
+  hook.unmount()
+})
