@@ -98,3 +98,51 @@ func TestEngineAcceptsPrototypeLinksAsBoundedScreenIDs(t *testing.T) {
 		t.Fatalf("link not cleared: %s (%v)", cleared.Nodes[2], err)
 	}
 }
+
+// Text style (#5161) is a set of optional, closed node fields: absent means
+// the original 20 px sans, no wrap, no clip, so older documents keep their
+// look. Each field takes only its listed values, so nothing reaches a style
+// attribute or the canvas that the renderers do not know.
+func TestEngineAcceptsBoundedTextStyleFields(t *testing.T) {
+	styled := `{"id":"title","type":"text","x":0,"y":0,"width":320,"height":120,"text":"Hello","fontFamily":"serif","fontWeight":700,"fontSize":48,"lineHeight":1.1,"textAlign":"center","textWrap":"wrap","overflow":"clip"}`
+	result, err := Run(t.Context(), Request{Operations: json.RawMessage(`[{"op":"upsert","node":` + styled + `}]`)})
+	if err != nil {
+		t.Fatalf("text style refused: %v", err)
+	}
+	var got, want map[string]any
+	if err = json.Unmarshal(result.Nodes[0], &got); err != nil {
+		t.Fatal(err)
+	}
+	_ = json.Unmarshal([]byte(styled), &want)
+	for key, value := range want {
+		if got[key] != value {
+			t.Errorf("%s = %v, want %v", key, got[key], value)
+		}
+	}
+	for _, field := range []map[string]any{
+		{"fontFamily": "Comic Sans; background:url(x)"},
+		{"fontFamily": "Inter"},
+		{"fontFamily": 3},
+		{"fontWeight": 450},
+		{"fontWeight": 1000},
+		{"fontWeight": "bold"},
+		{"fontSize": 0},
+		{"fontSize": 1001},
+		{"fontSize": "20px"},
+		{"lineHeight": 0.4},
+		{"lineHeight": 5.1},
+		{"textAlign": "justify"},
+		{"textWrap": "balance"},
+		{"overflow": "hidden"},
+		{"overflow": true},
+	} {
+		node := map[string]any{"id": "title"}
+		for key, value := range field {
+			node[key] = value
+		}
+		raw, _ := json.Marshal([]any{map[string]any{"op": "upsert", "node": node}})
+		if _, err := Run(t.Context(), Request{State: result.State, Operations: raw}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("accepted invalid text style %s: %v", raw, err)
+		}
+	}
+}

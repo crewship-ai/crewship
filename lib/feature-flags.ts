@@ -184,6 +184,16 @@ export function artifactsDesignPrototype(): boolean {
 }
 
 /**
+ * Text style controls in Design Properties (#5161). Default off for one release:
+ * a server from before #5161 refuses any Design whose layers carry text style,
+ * so the controls only turn on once no rollback past that server is expected.
+ * Stored text style is always drawn, whatever this flag says.
+ */
+export function artifactsDesignTextStyle(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_TEXT_STYLE === "true"
+}
+
+/**
  * "Export HTML" in the Design editor (#4449). Default off. Only has an effect
  * together with `artifactsDesign()`. The server export route itself follows the
  * Design workspace flag; this only hides the button.
