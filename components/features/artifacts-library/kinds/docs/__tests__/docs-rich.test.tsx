@@ -291,6 +291,23 @@ describe("Docs math blocks", () => {
     expect(from < start - 1 || from > start - 1 + editor.editor.state.doc.nodeAt(start - 1)!.nodeSize).toBe(true)
   })
 
+  it("previews the last block of the page with the caret in it by moving the caret before it", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    act(() => { editor.editor.commands.insertContentAt(editor.editor.state.doc.content.size, { type: "codeBlock", attrs: { id: "last", language: "latex" }, content: [{ type: "text", text: "a^2" }] }) })
+    let start = -1
+    editor.editor.state.doc.descendants((node, pos) => { if (node.attrs.id === "last") start = pos })
+    expect(start + editor.editor.state.doc.nodeAt(start)!.nodeSize).toBe(editor.editor.state.doc.content.size)
+    act(() => { editor.editor.commands.setTextSelection(start + 2) })
+    const block = blockDom(editor, "last")
+    expect(block.querySelector("pre")!.hidden).toBe(false)
+    fireEvent.click(within(block).getByRole("button", { name: "Preview" }))
+    await waitFor(() => expect(block.querySelector("[data-code-preview] .katex")).not.toBeNull())
+    expect(block.querySelector("pre")!.hidden).toBe(true)
+    expect(editor.editor.state.selection.from).toBeLessThan(start)
+  })
+
   it("previews math for a reader too, without a caret to follow", async () => {
     serve()
     env.canWrite = false

@@ -208,11 +208,15 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
         for (const button of [sourceButton, previewButton, copy]) button.addEventListener("mousedown", event => event.preventDefault())
         sourceButton.addEventListener("click", () => setMode("source"))
         previewButton.addEventListener("click", () => {
-          // Previewing the block being edited moves the caret past it, so the next keystroke is not hidden.
+          // Previewing the block being edited moves the caret past it (or, for the page's last block, before it),
+          // so the next keystroke is not hidden. Only the selection moves; the document does not change.
           const pos = getPos()
           if (caretInside() && typeof pos === "number") {
-            const after = Math.min(pos + current.nodeSize, editor.state.doc.content.size)
-            editor.view.dispatch(editor.state.tr.setSelection(Selection.near(editor.state.doc.resolve(after))).setMeta("addToHistory", false))
+            const doc = editor.state.doc, end = pos + current.nodeSize
+            const outside = (candidate: Selection | null) => candidate && (candidate.to <= pos || candidate.from >= end) ? candidate : null
+            const target = outside(end < doc.content.size ? Selection.findFrom(doc.resolve(end), 1, true) : null)
+              ?? outside(pos > 0 ? Selection.findFrom(doc.resolve(pos), -1, true) : null)
+            if (target) editor.view.dispatch(editor.state.tr.setSelection(target).setMeta("addToHistory", false))
           }
           if (caretInside()) return
           setMode("preview")
