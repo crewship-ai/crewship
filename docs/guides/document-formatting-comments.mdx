@@ -34,6 +34,20 @@ comments and only widens what it may hold. New documents from the Artifacts
 library and from agents in chat are still schema 3, because agent drafting
 works on schema 3 only; an agent cannot edit a schema 4 document yet.
 
+## Export
+
+**Export** in the Docs view's output tools downloads the saved document as
+**Markdown** (`.md`) or **Word** (`.docx`); these are the only formats the server
+produces. The file holds what the server has confirmed: changes this browser
+has not sent yet are not included. Word keeps headings as heading styles, lists
+as Word numbering, checklists as ☐/☑ paragraphs, quotes, tables with header
+rows, links, emphasis and code blocks in a code style; math, CSV and Markdown
+code blocks keep their source text. When a format cannot hold part of the
+document (a code block inside a table in Markdown, or lists nested deeper than
+nine levels in Word) the export stops with that reason instead of leaving the
+part out. Export needs read access to the document and is not offered to
+restricted members. From the CLI: [`crewship doc export`](/cli/doc).
+
 ## Comments
 
 Select text in a paragraph, heading or code block and choose **Comment** to

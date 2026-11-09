@@ -14,6 +14,8 @@ import type { LibraryItem } from "../../library-items"
 import { docsFrameStatus, outlineOf, readingStats, readingText, type DocNode, type OutlineEntry } from "./docs-model"
 import { DocsTools } from "./docs-tools"
 import { DocsComments } from "./docs-comments"
+import { DocsExportMenu } from "./docs-export"
+import { useAccessMode } from "@/hooks/use-access-mode"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
 import { commentTarget, setCommentHighlights, type CommentTarget } from "@/components/features/pages/document-rich-extensions"
@@ -69,6 +71,9 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const frame = useArtifactFrame()
   const layout: FrameLayout = frame?.layout ?? "desktop"
   const phone = layout === "phone"
+  // Export is a read route outside the restricted allowlist: offer it only to a
+  // trusted session that holds the confirmed document (#5147).
+  const accessMode = useAccessMode()
   const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, restoreGuard, review } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS)
   // The outline is open by default only where it does not cover the page.
   const [outlineOpen, setOutlineOpen] = React.useState(layout === "desktop")
@@ -165,6 +170,10 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
         <EditorContent editor={editor} />
       </>}
     </article>
+
+    {sync.state && !sync.denied && available && accessMode === "trusted" && <ArtifactSlot name="output" label="Output">
+      <DocsExportMenu workspaceId={workspaceId} pageId={pageId} />
+    </ArtifactSlot>}
 
     <ArtifactSlot name="view" label="View">
       <ArtifactTool icon={PanelLeft} label={outlineOpen ? "Hide outline" : "Show outline"} on={outlineOpen} onClick={() => setOutlineOpen(open => !open)} />
