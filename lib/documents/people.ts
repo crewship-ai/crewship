@@ -82,7 +82,9 @@ export const NO_DOCUMENT_PEOPLE: DocumentPeople = { label: () => UNKNOWN_MEMBER,
 export function formatDocumentDate(value: string, locale?: string): string {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
   if (!match) return value
-  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+  // setUTCFullYear keeps years 1-99 literal (Date.UTC would read them as 1900-1999).
+  const date = new Date(0)
+  date.setUTCFullYear(Number(match[1]), Number(match[2]) - 1, Number(match[3]))
   if (Number.isNaN(date.getTime())) return value
   return new Intl.DateTimeFormat(locale, { dateStyle: "medium", timeZone: "UTC" }).format(date)
 }
