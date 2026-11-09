@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 // Document mentions (#5155, schema 5) store only an opaque user id. Names are
@@ -21,7 +22,7 @@ import (
 const (
 	documentPeopleIDLimit      = 100
 	documentPeopleResultLimit  = 20
-	documentPeopleScanLimit    = 1000
+	documentPeopleCheckLimit   = 200
 	documentPeopleQueryLimit   = 100
 	documentPeopleNameMaxRunes = 200
 )
@@ -31,6 +32,11 @@ var documentPersonID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 type documentPerson struct {
 	ID   string `json:"id"`
 	Name string `json:"name"`
+}
+
+// documentPeopleResponse is the GET …/document/people body.
+type documentPeopleResponse struct {
+	People []documentPerson `json:"people"`
 }
 
 // documentReader mirrors the human read decision of the Document authority
@@ -71,7 +77,7 @@ func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	query := r.URL.Query()
-	if query.Has("ids") && query.Has("q") {
+	if len(query["ids"]) > 1 || len(query["q"]) > 1 || (query.Has("ids") && query.Has("q")) {
 		replyError(w, 400, "use either ids or q")
 		return
 	}
@@ -102,8 +108,37 @@ func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	// One read-only snapshot for the credential, the page shape and every authority check.
+	tx, err := h.db.BeginTx(r.Context(), &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		replyError(w, 503, "document people unavailable")
+		return
+	}
+	defer tx.Rollback()
+	outer := r
+	r = r.WithContext(context.WithValue(r.Context(), pageAuthReaderKey{}, tx))
 	ctx, workspace, user := r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context())
+	// The same exact credential and CLI scope the document read requires.
+	if err := validateContentHumanCredential(r, tx, "pages:read"); err != nil {
+		switch {
+		case errors.Is(err, errContentCredentialScope):
+			replyError(w, 403, "current pages:read scope required")
+		case errors.Is(err, errContentCredentialUnverified):
+			replyError(w, 503, "document people unavailable")
+		default:
+			replyError(w, 401, "current human credential required")
+		}
+		return
+	}
 	if user == nil || !rec.HasDocument || rec.HasProject || rec.HasApplication {
+		replyError(w, 404, "document page not found")
+		return
+	}
+	// A Page the document read refuses (panels or another output) names nobody either.
+	if other, err := documentPageHasOtherOutput(ctx, tx, rec.ID); err != nil {
+		replyError(w, 500, "document people unavailable")
+		return
+	} else if other {
 		replyError(w, 404, "document page not found")
 		return
 	}
@@ -112,9 +147,6 @@ func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
 		return
 	} else if !allowed {
 		replyError(w, 404, "document page not found")
-		return
-	}
-	if !h.auditPrivateOwnerAccess(w, r, rec) {
 		return
 	}
 	people := []documentPerson{}
@@ -129,12 +161,16 @@ func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
 				people = append(people, person)
 			}
 		}
-		writeJSON(w, 200, map[string]any{"people": people})
+		h.replyDocumentPeople(w, outer, tx, rec, people)
 		return
 	}
-	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `SELECT u.id, COALESCE(u.full_name,'') FROM workspace_members m
+	// The name match runs in SQL, so every member can be found; at most
+	// documentPeopleCheckLimit matching candidates get an authority check.
+	pattern := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.ToLower(search)) + "%"
+	rows, err := tx.QueryContext(ctx, `SELECT u.id, COALESCE(u.full_name,'') FROM workspace_members m
 JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL
-WHERE m.workspace_id=? ORDER BY lower(COALESCE(u.full_name,'')), u.id LIMIT ?`, workspace, documentPeopleScanLimit)
+WHERE m.workspace_id=? AND trim(COALESCE(u.full_name,''))<>'' AND lower(u.full_name) LIKE ? ESCAPE '\'
+ORDER BY lower(u.full_name), u.id LIMIT ?`, workspace, pattern, documentPeopleCheckLimit)
 	if err != nil {
 		replyError(w, 500, "document people unavailable")
 		return
@@ -147,7 +183,7 @@ WHERE m.workspace_id=? ORDER BY lower(COALESCE(u.full_name,'')), u.id LIMIT ?`, 
 			replyError(w, 500, "document people unavailable")
 			return
 		}
-		if documentPersonName(person.Name) != "" && strings.Contains(strings.ToLower(person.Name), strings.ToLower(search)) {
+		if documentPersonName(person.Name) != "" {
 			candidates = append(candidates, person)
 		}
 	}
@@ -169,7 +205,17 @@ WHERE m.workspace_id=? ORDER BY lower(COALESCE(u.full_name,'')), u.id LIMIT ?`, 
 			people = append(people, documentPerson{ID: candidate.ID, Name: documentPersonName(candidate.Name)})
 		}
 	}
-	writeJSON(w, 200, map[string]any{"people": people})
+	h.replyDocumentPeople(w, outer, tx, rec, people)
+}
+
+// replyDocumentPeople ends the read snapshot first, then records the audited
+// administrator read of private output (a write) and only then answers.
+func (h *PageHandler) replyDocumentPeople(w http.ResponseWriter, r *http.Request, tx *sql.Tx, rec *pageRecord, people []documentPerson) {
+	_ = tx.Rollback()
+	if !h.auditPrivateOwnerAccess(w, r, rec) {
+		return
+	}
+	writeJSON(w, 200, documentPeopleResponse{People: people})
 }
 
 func (h *PageHandler) documentPersonFor(ctx context.Context, workspace string, rec *pageRecord, id string) (documentPerson, bool, error) {
@@ -195,10 +241,45 @@ func (h *PageHandler) documentPersonFor(ctx context.Context, workspace string, r
 // documentPersonName is the display name only: one line, bounded, no control
 // characters. An empty result means the person is shown as Unknown member.
 func documentPersonName(name string) string {
+	name = strings.Map(func(r rune) rune {
+		if unicode.Is(unicode.Cf, r) {
+			return -1 // bidi overrides and other invisible format characters
+		}
+		return r
+	}, name)
 	name = strings.Join(strings.FieldsFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f }), " ")
 	name = strings.TrimSpace(name)
 	if runes := []rune(name); len(runes) > documentPeopleNameMaxRunes {
 		name = string(runes[:documentPeopleNameMaxRunes])
 	}
 	return name
+}
+
+// documentPageHasOtherOutput mirrors the document authority's page shape
+// check: a Page with panels or any other installed output type is not a
+// Document page, so it is refused the same way here.
+func documentPageHasOtherOutput(ctx context.Context, q pageAuthQueryer, pageID string) (bool, error) {
+	var panels int
+	if err := q.QueryRowContext(ctx, "SELECT count(*) FROM page_panels WHERE page_id=?", pageID).Scan(&panels); err != nil {
+		return false, err
+	}
+	if panels != 0 {
+		return true, nil
+	}
+	for _, table := range documentExclusiveOutputTables {
+		var installed, attached bool
+		if err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=? COLLATE NOCASE)", table).Scan(&installed); err != nil {
+			return false, err
+		}
+		if !installed {
+			continue
+		}
+		if err := q.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM "+table+" WHERE page_id=?)", pageID).Scan(&attached); err != nil {
+			return false, err
+		}
+		if attached {
+			return true, nil
+		}
+	}
+	return false, nil
 }

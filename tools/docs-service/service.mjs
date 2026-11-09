@@ -157,7 +157,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   function exportPeople(people) {
     if (people === undefined || people === null) return undefined;
     if (typeof people !== 'object' || Array.isArray(people) || Object.keys(people).length > 1000) throw fault(400, 'invalid export people');
-    for (const [id, name] of Object.entries(people)) if (!validUserId(id) || typeof name !== 'string' || !name || name.length > 200 || /[\u0000-\u001f\u007f]/.test(name)) throw fault(400, 'invalid export people');
+    for (const [id, name] of Object.entries(people)) if (!validUserId(id) || typeof name !== 'string' || !name || [...name].length > 200 || /[\u0000-\u001f\u007f]/.test(name)) throw fault(400, 'invalid export people');
     return people;
   }
   async function executeRead(page, operation, context, request) {

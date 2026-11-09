@@ -65,7 +65,13 @@ date format. A mention stores only the person's id, never their name: each
 reader sees the name of a person who can read the document, and anyone else,
 including someone without access, appears as **Unknown member**, so a document
 never reveals whether a person exists. Markdown and Word export write the date
-as `2026-11-20` and a mention as `@` and the name the exporting reader may see.
+as `2026-11-20` and a mention as `@` and a name only when the export is given
+the names the exporting reader may see; otherwise as `@Unknown member`. The
+export serializers accept those names, but no export endpoint supplies them in
+this release, so exported mentions read `@Unknown member` for now. A semantic
+`replaceText` edit that would insert text exactly beside a date or mention, or
+delete across one, is refused with `ambiguous_inline_atom`; make that edit in
+the editor.
 
 A document becomes schema 4 or 5 only explicitly: initialize it with `"schema": 4`
 (see [`crewship doc initialize`](/cli/doc)) or `"schema": 5`, or upgrade an older

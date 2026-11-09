@@ -877,7 +877,9 @@ test('schema5 initialize keeps underline, colour and highlight and exports them 
     assert.equal((await call(f.socket, '/v1/documents/p/export', {})).body.markdown, '<u>under</u> <span data-text-color="red"><mark data-highlight="yellow">red</mark></span> 2026-11-20 @Unknown member\n');
     // Go supplies the names this reader may see; the engine never looks them up.
     assert.equal((await call(f.socket, '/v1/documents/p/export', { people: { u1: 'Ada' } })).body.markdown, '<u>under</u> <span data-text-color="red"><mark data-highlight="yellow">red</mark></span> 2026-11-20 @Ada\n');
-    for (const people of [[], 'Ada', { 'bad id': 'Ada' }, { u1: '' }, { u1: 7 }, { u1: 'line\nbreak' }, { u1: 'x'.repeat(201) }]) {
+    // Names are bounded in code points, as Go bounds them: 200 emoji are one valid name.
+    assert.equal((await call(f.socket, '/v1/documents/p/export', { people: { u1: '\u{1F600}'.repeat(200) } })).status, 200);
+    for (const people of [[], 'Ada', { 'bad id': 'Ada' }, { u1: '' }, { u1: 7 }, { u1: 'line\nbreak' }, { u1: 'x'.repeat(201) }, { u1: '\u{1F600}'.repeat(201) }]) {
       assert.equal((await call(f.socket, '/v1/documents/p/export', { people })).status, 400, JSON.stringify(people));
     }
   } finally { await f.close(); }

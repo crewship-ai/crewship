@@ -61,7 +61,7 @@ func documentSchemaComponents() map[string]any {
 		"DocumentInitializeReceipt":   obj(map[string]any{"id": str(), "rev": integer(), "epoch": integer(), "actor": str(), "kind": str(), "found": boolean(), "duplicate": boolean()}, "id", "rev", "epoch", "actor", "kind", "found", "duplicate"),
 		"DocumentNode":                node, "DocumentState": state, "DocumentReceipt": receipt,
 		"DocumentComment": comment,
-		"DocumentPeople": obj(map[string]any{"people": map[string]any{"type": "array", "maxItems": 100, "items": obj(map[string]any{"id": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}, "name": map[string]any{"type": "string", "minLength": 1, "maxLength": 800}}, "id", "name"),
+		"DocumentPeople": obj(map[string]any{"people": map[string]any{"type": "array", "maxItems": 100, "items": obj(map[string]any{"id": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}, "name": map[string]any{"type": "string", "minLength": 1, "maxLength": 200}}, "id", "name"),
 			"description": "Only people who can read this Document, released only to a caller who can read it. Any other id is simply absent (shown as Unknown member), so the answer never confirms that an id exists."}}, "people"),
 		"DocumentCommentList": obj(map[string]any{"page_id": str(), "comments": map[string]any{"type": "array", "maxItems": 1000, "items": ref("DocumentComment")}, "can_comment": boolean(), "can_resolve": boolean()}, "page_id", "comments", "can_comment", "can_resolve"),
 	}

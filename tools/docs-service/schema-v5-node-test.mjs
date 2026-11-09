@@ -165,6 +165,9 @@ test('schema5 atoms are refused by schemas 1-4 and carry exactly one valid value
   for (const bad of ['2026-02-30', '2026-2-03', '2026-11-20T10:00', '20261120', '0000-01-01', ' 2026-11-20', '', null, 20261120, ['2026-11-20']]) {
     assert.throws(() => create({ type: 'doc', content: [p('x', [date(bad)])] }, 5), `date ${JSON.stringify(bad)}`);
   }
+  // Every calendar day from year 1 is a date, including years 1-99 and leap days.
+  for (const good of ['0001-01-01', '0099-12-31', '2024-02-29', '9999-12-31']) assert.equal(validateJSON({ type: 'doc', content: [p('x', [date(good)])] }, 5).content[0].content[0].attrs.value, good)
+  assert.throws(() => create({ type: 'doc', content: [p('x', [date('2025-02-29')])] }, 5))
   for (const bad of ['', 'a b', 'x'.repeat(65), 'ada@example.invalid', '../u', null, 7, { id: 'u' }]) {
     assert.throws(() => create({ type: 'doc', content: [p('x', [mention(bad)])] }, 5), `mention ${JSON.stringify(bad)}`);
   }
@@ -216,6 +219,22 @@ test('schema5 semantic replacement and comments keep dates and mentions in place
   const content = json(validate(doc, 5)).content[0].content;
   assert.deepEqual(content.filter(n => n.type !== 'text'), [date('2026-11-20'), mention('cmw8i35310007a069c4b7'), mention('user_2-B')]);
   assert.equal(resolve(doc, thread, 5).status, 'attached');
+  doc.destroy();
+});
+
+test('schema5 semantic replacement refuses edits whose side of a date or mention would be a guess', () => {
+  const doc = create(atoms, 5);
+  const before = json(validate(doc, 5));
+  const refused = text => assert.throws(() => patch(doc, { op: 'replaceText', id: 'meet', text }, 5), /date or mention/);
+  refused('Review on  with  and  later'); // appended after the trailing mention
+  refused('Review on X with  and ');      // inserted exactly before the date
+  refused('Review onwith  and ');         // a range across the date (the spaces on both sides)
+  assert.deepEqual(json(validate(doc, 5)), before);
+  // Edits inside text, or deleting up to an atom without inserting there, still apply.
+  patch(doc, { op: 'replaceText', id: 'meet', text: 'Review on  wit  and ' }, 5);
+  patch(doc, { op: 'replaceText', id: 'meet', text: 'Revie on  wit  and ' }, 5);
+  const content = json(validate(doc, 5)).content[0].content;
+  assert.deepEqual(content.map(n => n.type === 'text' ? n.text : n.type), ['Revie on ', 'date', ' wit ', 'mention', ' and ', 'mention']);
   doc.destroy();
 });
 

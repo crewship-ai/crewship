@@ -25,7 +25,8 @@ const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
 const validDate = value => {
   const match = typeof value === 'string' && DATE.exec(value);
   if (!match) return false;
-  const [year, month, day] = match.slice(1).map(Number), time = new Date(Date.UTC(year, month - 1, day));
+  // setUTCFullYear keeps years 1-99 literal (Date.UTC maps them to 1900-1999).
+  const [year, month, day] = match.slice(1).map(Number), time = new Date(0); time.setUTCFullYear(year, month - 1, day);
   return year >= 1 && time.getUTCFullYear() === year && time.getUTCMonth() === month - 1 && time.getUTCDate() === day;
 };
 const validUserId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
@@ -369,6 +370,15 @@ function patch(doc, op, version = VERSION) {
   while (suffix < before.length - localFrom && suffix < after.length - localFrom && before[before.length - suffix - 1] === after[after.length - suffix - 1]) suffix++;
   while (!textBoundary(before, before.length - suffix) || !textBoundary(after, after.length - suffix)) suffix--;
   const from = range.from + localFrom, to = range.to - suffix, replacement = after.slice(localFrom, after.length - suffix);
+  // Dates and mentions have no width in text offsets, so text inserted exactly
+  // beside one could land on either side, and a range across one would leave it
+  // stranded. Refuse both instead of guessing (#5155).
+  let atomBase = 0;
+  for (const child of block.toArray()) {
+    if (child instanceof Y.XmlText) { atomBase += child.length; continue; }
+    if (!(child instanceof Y.XmlElement) || !ATOMS.includes(child.nodeName)) continue;
+    if ((replacement && from === atomBase) || (from < atomBase && atomBase < to)) throw Object.assign(new Error('semantic edit touches a date or mention; edit that text in the editor'), { code: 'ambiguous_inline_atom' });
+  }
   if (from !== to || replacement) doc.transact(() => {
     if (texts.length === 0) { const text = new Y.XmlText(); block.insert(0, [text]); texts.push(text); }
     const insertion = textPosition(texts, from, 0);

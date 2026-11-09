@@ -67,7 +67,7 @@ describe("Docs schema 5 in the browser", () => {
     expect(region.querySelector("[data-mention]")!.textContent).toBe("@Unknown member")
     expect(region.textContent).not.toContain("u1")
     const pasted = editor(5, '<p><time data-date="2026-11-20">20 Nov</time> <span data-mention="u1">@Ada</span> <time data-date="2026-02-30">bad</time> <span data-mention="a b">@Bad</span></p>')
-    const nodes = pasted.getJSON().content![0].content!.map(node => node.type === "text" ? `text:${(node as { text?: string }).text}` : `${node.type}:${JSON.stringify(node.attrs)}`)
+    const nodes = pasted.getJSON().content![0].content!.map(node => node.type === "text" ? `text:${(node as { text?: string }).text}` : `${node.type}:${JSON.stringify((node as { attrs?: unknown }).attrs)}`)
     expect(nodes).toEqual(['date:{"value":"2026-11-20"}', "text: ", 'mention:{"userId":"u1"}', "text: bad @Bad"])
     pasted.destroy()
     cleanup()
