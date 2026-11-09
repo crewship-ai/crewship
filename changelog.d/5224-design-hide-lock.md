@@ -1,0 +1,1 @@
+- **Design: hide and lock layers (#5218).** Each Layers row can hide a layer, so it is not drawn or exported, or lock it, so it stays visible but a click or drag on the canvas leaves it alone. Both are stored in the document and survive a reload. The controls are behind `NEXT_PUBLIC_ARTIFACTS_DESIGN_HIDE_LOCK`.
