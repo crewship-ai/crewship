@@ -123,4 +123,13 @@ describe("presence wire", () => {
     const peers = parsePresenceReply({ peers: [{ client: "a", user_id: "u1", name: "Erin", color: 0 }, { client: "b", user_id: "u1", name: "Erin", color: 0 }] }).peers
     expect(presentPeople(peers)).toHaveLength(1)
   })
+
+  it("reads the server's per-person tab count, one when absent or invalid", () => {
+    const peers = parsePresenceReply({ peers: [
+      { client: "a", user_id: "u1", name: "Erin", color: 0, tabs: 3 },
+      { client: "b", user_id: "u2", name: "Rory", color: 1 },
+      { client: "c", user_id: "u3", name: "Sam", color: 2, tabs: -2 },
+    ] }).peers
+    expect(peers.map(peer => peer.tabs)).toEqual([3, 1, 1])
+  })
 })

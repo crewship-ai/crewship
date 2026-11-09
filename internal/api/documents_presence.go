@@ -66,6 +66,9 @@ type documentPresenceEntry struct {
 	color              int
 	anchor, head       string
 	seen               time.Time
+	// moved is when this tab's caret last changed (or the tab arrived): a
+	// person with several tabs is shown at the caret that moved last.
+	moved time.Time
 	// The credential of the last heartbeat (a session or a CLI token row id),
 	// so revoking it removes the tab at once.
 	session, token string
@@ -78,6 +81,8 @@ type documentPresencePeer struct {
 	Color  int    `json:"color"`
 	Anchor string `json:"anchor,omitempty"`
 	Head   string `json:"head,omitempty"`
+	// Tabs is how many of this person's tabs are on the document.
+	Tabs int `json:"tabs"`
 }
 
 type documentPresenceHub struct {
@@ -200,14 +205,29 @@ func (h *documentPresenceHub) beatAs(room, user, client, session, token, name, a
 		h.total++
 		h.users[user]++
 	}
-	entry.name, entry.anchor, entry.head, entry.seen = name, anchor, head, h.now()
+	now := h.now()
+	if entry.moved.IsZero() || entry.anchor != anchor || entry.head != head {
+		entry.moved = now
+	}
+	entry.name, entry.anchor, entry.head, entry.seen = name, anchor, head, now
 	entry.session, entry.token = session, token
-	peers := []documentPresencePeer{}
+	// Presence is per person, not per tab: each other person is one peer with
+	// their tab count and the caret of their tab that moved last. The caller's
+	// own other tabs are never peers.
+	people := map[string]*documentPresenceEntry{}
+	tabs := map[string]int{}
 	for _, other := range entries {
 		if other.user == user {
 			continue
 		}
-		peers = append(peers, documentPresencePeer{Client: other.client, UserID: other.user, Name: other.name, Color: other.color, Anchor: other.anchor, Head: other.head})
+		tabs[other.user]++
+		if shown := people[other.user]; shown == nil || other.moved.After(shown.moved) || other.moved.Equal(shown.moved) && other.client < shown.client {
+			people[other.user] = other
+		}
+	}
+	peers := make([]documentPresencePeer, 0, len(people))
+	for id, other := range people {
+		peers = append(peers, documentPresencePeer{Client: other.client, UserID: id, Name: other.name, Color: other.color, Anchor: other.anchor, Head: other.head, Tabs: tabs[id]})
 	}
 	sort.Slice(peers, func(i, j int) bool {
 		if peers[i].Name != peers[j].Name {

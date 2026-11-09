@@ -456,10 +456,11 @@ An exact retry returns the original receipt with `found: true` and
 
 ## `crewship doc presence <page-slug>`
 
-Send one presence heartbeat and print who else has the document open: each
-other tab's `client`, `user_id`, the `name` the server resolved, a `color`
-index and, when that person shares it, the caret as `anchor`/`head` (base64
-Yjs relative positions). Presence lives in server memory for 6 seconds and is
+Send one presence heartbeat and print who else has the document open: one entry
+per other person with `tabs` (how many of their tabs are open), `user_id`, the
+`name` the server resolved, a `color` index and the `client` and caret
+(`anchor`/`head`, base64 Yjs relative positions, when shared) of their tab
+that moved last. Presence lives in server memory for 6 seconds and is
 never stored. The heartbeat is authorized like a document read: without read
 access it fails with 404 and lists nobody. `--client` reuses a tab id (8–64
 letters, digits, `-` or `_`); `--leave` removes that tab at once.

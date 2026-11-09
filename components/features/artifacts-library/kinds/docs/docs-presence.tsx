@@ -15,7 +15,7 @@ export function DocsPresence({ peers }: { peers: PresencePeer[] }) {
   if (!people.length) return null
   const shown = people.slice(0, 4)
   return <ul aria-label="People on this document" className="flex -space-x-1">
-    {shown.map(peer => <li key={peer.userId} aria-label={peer.name} title={peer.name}
+    {shown.map(peer => <li key={peer.userId} aria-label={peer.name} title={peer.tabs > 1 ? `${peer.name} · ${peer.tabs} tabs` : peer.name}
       className="flex size-6 items-center justify-center rounded-full border-2 border-background text-micro font-medium text-white"
       style={{ backgroundColor: readablePeerFill(peer.color) }}><span aria-hidden>{initials(peer.name)}</span></li>)}
     {people.length > shown.length && <li aria-label={`${people.length - shown.length} more`} title={people.slice(shown.length).map(peer => peer.name).join(", ")}

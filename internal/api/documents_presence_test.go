@@ -176,13 +176,13 @@ func TestDocumentPresenceLeaveAndTTL(t *testing.T) {
 	rig := presenceFixture(t)
 	rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
 	rig.beat("editor", "doc-a", caret("editor-tab-2", "e2"))
-	if _, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o")); len(reply.Peers) != 2 || reply.Peers[0].Color != reply.Peers[1].Color {
-		t.Fatalf("one person's two tabs: %+v", reply.Peers)
+	if _, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o")); len(reply.Peers) != 1 || reply.Peers[0].Tabs != 2 {
+		t.Fatalf("one person's two tabs are one peer with a tab count: %+v", reply.Peers)
 	}
 	if code, _ := rig.beat("editor", "doc-a", `{"client":"editor-tab-1","leave":true}`); code != 200 {
 		t.Fatalf("leave %d", code)
 	}
-	if _, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o")); len(reply.Peers) != 1 || reply.Peers[0].Client != "editor-tab-2" {
+	if _, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o")); len(reply.Peers) != 1 || reply.Peers[0].Client != "editor-tab-2" || reply.Peers[0].Tabs != 1 {
 		t.Fatalf("after leave: %+v", reply.Peers)
 	}
 	base := time.Now()
@@ -276,8 +276,8 @@ func TestDocumentPresenceCapsTabsPerPerson(t *testing.T) {
 	if code, _ := rig.beat("reader", "doc-a", caret("reader-tab-extra", "r")); code != 429 {
 		t.Fatalf("a ninth tab of one person accepted with %d", code)
 	}
-	if code, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "e")); code != 200 || len(reply.Peers) != documentPresenceUserTabLimit {
-		t.Fatalf("another person locked out: %d %d", code, len(reply.Peers))
+	if code, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "e")); code != 200 || len(reply.Peers) != 1 || reply.Peers[0].Tabs != documentPresenceUserTabLimit {
+		t.Fatalf("another person locked out: %d %+v", code, reply.Peers)
 	}
 }
 
@@ -439,4 +439,38 @@ func TestDocumentPresenceCredentialRevocationKinds(t *testing.T) {
 	var none *documentPresenceHub
 	none.memberAccessChanged("ws", "u1")
 	none.workspaceGone("ws")
+}
+
+// Presence is per person (CO01: the right name and colour; two windows of one
+// Owner are not two participants): a peer with several tabs is one entry with
+// a tab count and the caret of the tab that moved last, never one caret per
+// tab. A person's own other tabs are never listed as peers.
+func TestDocumentPresenceIsOneEntryPerPerson(t *testing.T) {
+	rig := presenceFixture(t)
+	base := time.Now()
+	at := func(d time.Duration) { rig.router.documentPresenceHub.now = func() time.Time { return base.Add(d) } }
+	at(0)
+	rig.beat("owner", "doc-a", caret("owner-tab-1", "first"))
+	at(100 * time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-tab-2", "second"))
+	at(200 * time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-tab-3", "third"))
+	// Tab 1 moves last; tabs 2 and 3 keep heartbeating without moving.
+	at(300 * time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-tab-1", "moved"))
+	at(400 * time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-tab-2", "second"))
+	rig.beat("owner", "doc-a", caret("owner-tab-3", "third"))
+	code, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+	if code != 200 || len(reply.Peers) != 1 {
+		t.Fatalf("three Owner tabs must be one peer: %d %+v", code, reply.Peers)
+	}
+	peer := reply.Peers[0]
+	moved := base64.StdEncoding.EncodeToString([]byte("moved"))
+	if peer.Tabs != 3 || peer.Client != "owner-tab-1" || peer.Anchor != moved || peer.Head != moved {
+		t.Fatalf("want the last-moved tab's caret and tabs=3, got %+v", peer)
+	}
+	if _, own := rig.beat("owner", "doc-a", caret("owner-tab-2", "second")); len(own.Peers) != 1 || own.Peers[0].UserID == peer.UserID {
+		t.Fatalf("own tabs listed as peers: %+v", own.Peers)
+	}
 }
