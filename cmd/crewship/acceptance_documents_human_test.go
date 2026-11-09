@@ -208,6 +208,22 @@ func TestAcceptance_HumanDocumentsBinary(t *testing.T) {
 	if after.Rev != 1 || after.Epoch != before.Epoch || after.Outline[0].Text != "Confirmed replacement" || after.Outline[0].Hash == before.Outline[0].Hash {
 		t.Fatalf("confirmed state: %+v", after)
 	}
+	// History lists more than the initial revision: an edit made after the
+	// session interval pins its confirmed result with author and revision (#5236).
+	checkpoints := func() []map[string]any {
+		t.Helper()
+		var list struct {
+			Checkpoints []map[string]any `json:"checkpoints"`
+		}
+		out := require(writerConfig, "", "doc", "checkpoints", "human-document")
+		if json.Unmarshal(out, &list) != nil {
+			t.Fatalf("doc checkpoints: %s", out)
+		}
+		return list.Checkpoints
+	}
+	if pins := checkpoints(); len(pins) != 1 || pins[0]["rev"] != float64(0) {
+		t.Fatalf("a quick edit by the creator must not pin a session checkpoint: %v", pins)
+	}
 	unchanged := func() {
 		t.Helper()
 		var docs, head, receipts, updates int
@@ -265,6 +281,27 @@ func TestAcceptance_HumanDocumentsBinary(t *testing.T) {
 	if err := db.QueryRow(`SELECT payload FROM document_updates WHERE workspace_id=? AND page_id=? AND rev=1`, workspace, page.ID).Scan(&snapshot); err != nil || !bytes.Contains(snapshot, []byte("Confirmed replacement")) {
 		t.Fatalf("persisted synthetic update: %q %v", snapshot, err)
 	}
+	if _, err := db.Exec(`UPDATE document_checkpoints SET created_at=strftime('%Y-%m-%dT%H:%M:%fZ','now','-11 minutes') WHERE workspace_id=? AND page_id=?`, workspace, page.ID); err != nil {
+		t.Fatal(err)
+	}
+	checkpoints = func() []map[string]any {
+		t.Helper()
+		var list struct {
+			Checkpoints []map[string]any `json:"checkpoints"`
+		}
+		out := require(stagingConfig, "", "doc", "checkpoints", "human-document")
+		if json.Unmarshal(out, &list) != nil {
+			t.Fatalf("doc checkpoints: %s", out)
+		}
+		return list.Checkpoints
+	}
+	current := read(stagingConfig)
+	later, _ := json.Marshal(map[string]any{"id": "later-session", "schema": 2, "epoch": current.Epoch, "ifRev": current.Rev, "target": "intro", "ifHash": current.Outline[0].Hash, "text": "Later session"})
+	require(stagingConfig, string(later), "doc", "patch", "human-document", "--file", "-")
+	pins := checkpoints()
+	if len(pins) != 2 || pins[0]["rev"] != float64(current.Rev+1) || pins[0]["actor"] != "user:human-doc-owner" || pins[1]["rev"] != float64(0) {
+		t.Fatalf("an edit after the session interval must pin its revision with its author: %v", pins)
+	}
 }
 
 type humanBinaryEngine struct {
@@ -279,6 +316,17 @@ func newHumanBinaryEngine(socket, secret string) *humanBinaryEngine {
 	}}}}
 }
 func (e *humanBinaryEngine) call(ctx context.Context, bearer, workspace, page, operation string, body any) (map[string]any, int, error) {
+	data, status, err := e.callRaw(ctx, bearer, workspace, page, operation, body)
+	if err != nil {
+		return nil, status, err
+	}
+	var result map[string]any
+	if err := json.Unmarshal(data, &result); err != nil {
+		return nil, 502, fmt.Errorf("authority response: %s", data)
+	}
+	return result, status, nil
+}
+func (e *humanBinaryEngine) callRaw(ctx context.Context, bearer, workspace, page, operation string, body any) ([]byte, int, error) {
 	raw, err := json.Marshal(body)
 	if err != nil {
 		return nil, 500, err
@@ -303,11 +351,7 @@ func (e *humanBinaryEngine) call(ctx context.Context, bearer, workspace, page, o
 	if err != nil {
 		return nil, 502, err
 	}
-	var result map[string]any
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, 502, fmt.Errorf("authority response: %s", data)
-	}
-	return result, resp.StatusCode, nil
+	return data, resp.StatusCode, nil
 }
 func (e *humanBinaryEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-Crewship-Docs-Service") != e.secret {
@@ -373,6 +417,17 @@ func (e *humanBinaryEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		snapshot, _ := json.Marshal(doc)
 		state, status, err := call("initialize", map[string]any{"id": input.ID, "fingerprint": fingerprint, "schema": input.Schema, "snapshot": snapshot, "blocks": humanBinaryProjection(doc)})
 		reply(state, status, err)
+		return
+	}
+	if op == "checkpoints" {
+		// The real service wraps the authority's list; nothing else is decoded here.
+		list, status, err := e.callRaw(r.Context(), r.Header.Get("Authorization"), r.Header.Get("X-Workspace-ID"), page, "checkpoints", map[string]any{})
+		if err != nil || status >= 400 {
+			reply(nil, max(status, 502), err)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = fmt.Fprintf(w, `{"checkpoints":%s}`, list)
 		return
 	}
 	state, status, err := call("state", map[string]any{})

@@ -126,8 +126,10 @@ func (s *Store) Commit(ctx context.Context, k Key, c Commit, a Authorize) (r Rec
 				return err
 			}
 		}
-		_, err = t.ExecContext(ctx, "UPDATE documents SET head_rev=?,projection=?,schema_version=? WHERE workspace_id=? AND page_id=?", r.Rev, []byte(c.Projection), c.Schema, k.WorkspaceID, k.PageID)
-		return err
+		if _, err = t.ExecContext(ctx, "UPDATE documents SET head_rev=?,projection=?,schema_version=? WHERE workspace_id=? AND page_id=?", r.Rev, []byte(c.Projection), c.Schema, k.WorkspaceID, k.PageID); err != nil {
+			return err
+		}
+		return s.pinSession(ctx, t, k, r, c, actor)
 	})
 	return
 }
