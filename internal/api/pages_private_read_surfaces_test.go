@@ -181,6 +181,12 @@ func TestPrivateReadSurfacesAuditBeforeForeignOwnerOutput(t *testing.T) {
 
 func TestPrivateChatContextCustodyKeepsAgentGrantChecks(t *testing.T) {
 	h, ws, issuer := pagesAccessFixture(t)
+	// The agent's grant under test is issued by the workspace OWNER. Since
+	// R71 §0.14/1 (#5258) the fixture's agent produce grant comes from alice,
+	// the page's owner, because only the owner delegates produce; a workspace
+	// OWNER may still grant an agent read, and read is all chat context needs.
+	// A produce grant that ends never stands in for read.
+	pagesGrant(t, h, ws, issuer, "fleet-201", `{"subject_type":"agent","subject":"watcher","level":"read"}`)
 	execOrFatal(t, h.db, `UPDATE pages SET private_audience=1 WHERE slug='fleet-201'`)
 	ctx := withWorkspace(withUser(t.Context(), &AuthUser{ID: "alice"}), ws, "MEMBER")
 	resolve := func() error {
