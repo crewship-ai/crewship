@@ -1162,6 +1162,25 @@ test('schema6: copies that each stayed inside the Canvas budget are refused toge
   } finally { await f.close(); }
 });
 
+test('schema6: restoring a schema 6 version past the Canvas budget answers 413 surface_quota and stores nothing (#5149)', async () => {
+  const model = canvasModel(6), f = await fixture(model.handle); await f.start();
+  try {
+    const base = (await read(f)).body;
+    const a = load(base.snapshot), b = load(base.snapshot), vector = Y.encodeStateVector(a);
+    surface.putItem(a, 'n', { kind: 'note', x: 0, y: 0, w: 200, h: 160, z: 0, tone: 'yellow', text: 'start' });
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a, vector));
+    const big = i => 'q'.repeat(3990) + (i % 10);
+    for (let i = 0; i < 70; i++) { surface.setText(a, 'n', big(i)); surface.setText(b, 'n', big(i + 3)); }
+    Y.applyUpdate(a, Y.encodeStateAsUpdate(b));
+    model.checkpointStates.set('over', { schema: 6, snapshot: snapshot(a) });
+    a.destroy(); b.destroy();
+    const stored = model.state.snapshot, restores = model.restores;
+    const restored = await call(f.socket, '/v1/documents/p/restore', { id: 'restore-over', schema: 6, page_id: 'p', epoch: base.epoch, ifRev: base.rev, checkpoint: 'over' });
+    assert.equal(restored.status, 413, JSON.stringify(restored.body)); assert.equal(restored.body.code, 'surface_quota');
+    assert.equal(model.restores, restores); assert.equal(model.state.snapshot, stored);
+  } finally { await f.close(); }
+});
+
 test('schema6: after Canvas is enabled an agent proposes on a placed block; accept keeps formatting and geometry, reject writes nothing (#5149)', async () => {
   const model = authorityModel(), proposals = new Map(), sent = [];
   const under = { type: 'underline', attrs: {} }, red = { type: 'textColor', attrs: { color: 'red' } }, bold = { type: 'bold', attrs: {} };
@@ -1286,7 +1305,7 @@ test('schema6: schema 4 and schema 5 history restored on a Canvas document is co
         assert.equal(back.schema, 6, `schema ${source.schema} history keeps Canvas enabled`);
         assert.deepEqual(back.content, source.content, `schema ${source.schema} content, marks and atoms are kept`);
         assert.deepEqual(surface.project(d).placements, [], 'the older version has no layout');
-        validate(d, 6); upgradeContent(d, source.schema, 6);
+        validate(d, 6);
       } finally { d.destroy(); }
       // Still editable at 6: a block can be placed again, with valid geometry.
       assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: `place-after-${checkpoint}`, schema: 6, page_id: 'p', epoch: back.epoch, kind: 'human', update: placeUpdate(back, d => surface.place(d, 'lead', geometry)) })).status, 200);

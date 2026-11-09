@@ -85,7 +85,8 @@ describe("mention names", () => {
     const broken: string[] = []
     const down = createMentionNames("ws", "p", people({ ada: "Ada" }, broken, () => 500))
     down.want(["ada"])
-    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    // Backoff 2, 4, 8 and 16 s, then five requests in all.
+    await vi.advanceTimersByTimeAsync(2 * 60_000)
     expect(broken).toHaveLength(5)
     expect(mentionLabel(down, "ada")).toBe("@Unknown member")
   })
@@ -95,17 +96,26 @@ describe("mention names", () => {
     const calls: string[] = []
     const readers: Record<string, string> = { ada: "Ada" }
     const names = createMentionNames("ws", "p", people(readers, calls))
-    const stop = names.subscribe(() => {})
+    const seen = vi.fn()
+    names.subscribe(seen)
     names.want(["ada"])
     await vi.advanceTimersByTimeAsync(0)
     expect(mentionLabel(names, "ada")).toBe("@Ada")
+    // An unchanged answer re-renders nothing.
+    await vi.advanceTimersByTimeAsync(REFRESH_MS + 10)
+    expect(calls).toHaveLength(2)
+    expect(seen).toHaveBeenCalledTimes(1)
+    // Not before the answer is five minutes old, and within one 30 s check after.
     delete readers.ada
-    await vi.advanceTimersByTimeAsync(REFRESH_MS - 1)
+    calls.length = 1
+    await vi.advanceTimersByTimeAsync(REFRESH_MS - 30_000 - 20)
     expect(calls).toHaveLength(1)
-    await vi.advanceTimersByTimeAsync(10)
+    await vi.advanceTimersByTimeAsync(90_000)
     expect(calls).toHaveLength(2)
     expect(mentionLabel(names, "ada")).toBe("@Unknown member")
-    stop()
+    expect(seen).toHaveBeenCalledTimes(2)
+    // Once nothing shows the mention it is not asked again.
+    names.release(["ada"])
     await vi.advanceTimersByTimeAsync(3 * REFRESH_MS)
     expect(calls).toHaveLength(2)
     // A session that ended sends nothing it had queued.
@@ -114,5 +124,26 @@ describe("mention names", () => {
     closed.want(["ada"]); closed.dispose()
     await vi.advanceTimersByTimeAsync(1000)
     expect(ended).toHaveLength(0)
+    // A remount (React StrictMode) that wants the ids again asks for them.
+    closed.want(["ada"])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(ended).toHaveLength(1)
+  })
+
+  it("keeps the server's wait after giving up on a rate limit", async () => {
+    vi.useFakeTimers()
+    const calls: string[] = []
+    const names = createMentionNames("ws", "p", people({ ada: "Ada", bea: "Bea" }, calls, () => calls.length <= 5 ? 429 : 200))
+    names.want(["ada"])
+    // Requests at 0, 1, 2, 3 and 4 s; the fifth 429 gives up but still asks for 1 s of quiet.
+    await vi.advanceTimersByTimeAsync(4500)
+    expect(calls).toHaveLength(5)
+    expect(mentionLabel(names, "ada")).toBe("@Unknown member")
+    names.want(["bea"])
+    await vi.advanceTimersByTimeAsync(499)
+    expect(calls).toHaveLength(5)
+    await vi.advanceTimersByTimeAsync(1)
+    expect(calls).toHaveLength(6)
+    expect(mentionLabel(names, "bea")).toBe("@Bea")
   })
 })

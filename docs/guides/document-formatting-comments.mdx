@@ -69,10 +69,11 @@ never reveals whether a person exists. The Page editor and the Canvas cards use
 the same rule: both ask the document's people lookup (`GET
 /api/v1/pages/{slug}/document/people?ids=`, `crewship doc people`) for the ids
 they show, batched in requests of at most 100 ids, and never use the workspace
-member list. An answer is kept for the open document and asked again every
-five minutes while it is shown, so a person who loses access stops being named
-without a reload. Until the answer arrives, or when the lookup is refused or
-keeps failing, a mention reads **@Unknown member**. Markdown and Word export write the date
+member list. An answer is kept for the open document and, while the mention
+is shown, asked again once it is five minutes old (checked every 30 seconds),
+so a person who loses access stops being named without a reload. Until the
+answer arrives, or when the lookup is refused or still fails after five
+requests, a mention reads **@Unknown member**. Markdown and Word export write the date
 as `2026-11-20` and a mention as `@` and a name only when the export is given
 the names the exporting reader may see; otherwise as `@Unknown member`. The
 export serializers accept those names, but no export endpoint supplies them in

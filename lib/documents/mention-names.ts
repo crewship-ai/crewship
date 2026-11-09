@@ -8,26 +8,30 @@ import { apiFetch } from "@/lib/api-fetch"
  * reader of it; this client never uses the workspace member list.
  *
  * Ids rendered in the same turn are asked together, in requests of at most 100
- * ids (the lookup's bound). An answer is kept for this session and asked again
- * after REFRESH_MS while anything still shows it, so a revoked reader's name
- * disappears without a reload. A rate limit is waited out as the server asks,
- * and a network or server failure is retried with backoff, both at most
- * MAX_ATTEMPTS times; a refusal (401/403/404) leaves the neutral label.
+ * ids (the lookup's bound). Each surface holds the ids it shows (`want`, then
+ * `release`); an answer for a held id is asked again once it is REFRESH_MS
+ * old, so a reader who lost access stops being named without a reload. A rate
+ * limit is waited out as the server asks and a network or server failure is
+ * retried with backoff, in at most MAX_ATTEMPTS requests; after that, or on a
+ * refusal (401/403/404), the mention shows the neutral label.
  */
 
 export const UNKNOWN_MEMBER = "Unknown member"
 const ID = /^[A-Za-z0-9_-]{1,64}$/
 const BATCH = 100
 export const REFRESH_MS = 5 * 60_000
+const TICK_MS = 30_000
 const MAX_ATTEMPTS = 5
 
 export interface MentionNames {
   /** The name this reader may see, or undefined while unknown or not released. */
   name(userId: string): string | undefined
-  /** Ask for these ids; listeners hear when any answer arrives. */
+  /** A surface shows these ids: ask for any not yet answered, and keep them fresh until released. */
   want(userIds: Iterable<string>): void
+  /** The surface no longer shows these ids (once per `want`). */
+  release(userIds: Iterable<string>): void
   subscribe(listener: () => void): () => void
-  /** Changes whenever a name arrives, for external-store reads. */
+  /** Changes whenever a shown name changes, for external-store reads. */
   version(): number
   /** Stops pending and periodic lookups (the session ended); a later `want` starts again. */
   dispose(): void
@@ -42,30 +46,39 @@ export function mentionLabel(names: MentionNames | undefined, userId: string): s
 export function createMentionNames(workspaceId: string, pageId: string, fetcher: Fetcher = apiFetch): MentionNames {
   const base = `/api/v1/pages/${encodeURIComponent(`@${pageId}`)}/document/people`
   const settled = new Map<string, { name: string | null; at: number }>()
-  const attempts = new Map<string, number>()
+  const attempts = new Map<string, number>(), held = new Map<string, number>()
   const queued = new Set<string>(), asking = new Set<string>()
   const listeners = new Set<() => void>()
   let version = 0, quietUntil = 0, disposed = false
-  let timer: ReturnType<typeof setTimeout> | undefined, refresher: ReturnType<typeof setInterval> | undefined
+  let timer: ReturnType<typeof setTimeout> | undefined, ticker: ReturnType<typeof setInterval> | undefined
   const notify = () => { version++; for (const listener of [...listeners]) listener() }
   // A new id never cuts a wait short.
   const schedule = (delay: number) => {
-    if (timer !== undefined) return
+    if (timer !== undefined || disposed) return
     timer = setTimeout(() => { timer = undefined; void flush() }, Math.max(delay, quietUntil - Date.now()))
   }
-  const settle = (id: string, name: string | null) => { settled.set(id, { name, at: Date.now() }); attempts.delete(id) }
-  /** Asks for one batch; returns how long to wait before asking again (0 when settled). */
-  const ask = async (ids: string[]): Promise<number> => {
+  /** Records an answer; true when what this id shows changed. */
+  const settle = (id: string, name: string | null) => {
+    const before = settled.get(id)
+    settled.set(id, { name, at: Date.now() }); attempts.delete(id)
+    return (before?.name ?? null) !== name
+  }
+  /** Asks for one batch: how long to wait before the next request, whether the batch must be asked again, and whether a shown name changed. */
+  const ask = async (ids: string[]): Promise<{ wait: number; again: boolean; changed: boolean }> => {
     let response: Response
     try {
       response = await fetcher(`${base}?ids=${encodeURIComponent(ids.join(","))}&workspace_id=${encodeURIComponent(workspaceId)}`, { cache: "no-store" })
     } catch { response = new Response(null, { status: 599 }) }
+    let changed = false
     if (response.status === 429 || response.status >= 500) {
       const tries = Math.max(...ids.map(id => (attempts.get(id) ?? 0) + 1))
       ids.forEach(id => attempts.set(id, tries))
-      if (tries >= MAX_ATTEMPTS) { ids.forEach(id => settle(id, settled.get(id)?.name ?? null)); return 0 }
       const after = Number(response.headers.get("Retry-After"))
-      return response.status === 429 && Number.isFinite(after) && after > 0 ? Math.min(after, 60) * 1000 : Math.min(2 ** tries, 60) * 1000
+      const wait = response.status === 429 && Number.isFinite(after) && after > 0 ? Math.min(after, 60) * 1000 : Math.min(2 ** tries, 60) * 1000
+      if (tries < MAX_ATTEMPTS) return { wait, again: true, changed }
+      // Given up: no name is kept on an answer that could not be confirmed, and the wait still applies.
+      for (const id of ids) changed = settle(id, null) || changed
+      return { wait, again: false, changed }
     }
     const named = new Map<string, string>()
     if (response.ok) {
@@ -75,57 +88,64 @@ export function createMentionNames(workspaceId: string, pageId: string, fetcher:
         if (typeof id === "string" && typeof name === "string" && name.trim() && ids.includes(id)) named.set(id, name)
       }
     }
-    for (const id of ids) settle(id, named.get(id) ?? null)
-    return 0
+    for (const id of ids) changed = settle(id, named.get(id) ?? null) || changed
+    return { wait: 0, again: false, changed }
   }
   const flush = async () => {
     const ids = [...queued].sort()
     queued.clear()
-    let wait = 0
+    let wait = 0, changed = false
     for (let start = 0; start < ids.length; start += BATCH) {
       const batch = ids.slice(start, start + BATCH)
-      if (wait) { batch.forEach(id => queued.add(id)); continue }
+      if (wait || disposed) { if (!disposed) batch.forEach(id => queued.add(id)); continue }
       batch.forEach(id => asking.add(id))
-      wait = await ask(batch)
+      const answer = await ask(batch)
       batch.forEach(id => asking.delete(id))
-      if (wait) batch.forEach(id => queued.add(id))
+      wait = answer.wait; changed = answer.changed || changed
+      if (answer.again && !disposed) batch.forEach(id => queued.add(id))
     }
     if (wait) quietUntil = Date.now() + wait
-    notify()
-    if (queued.size && !disposed) schedule(wait)
+    if (changed) notify()
+    if (queued.size) schedule(wait)
   }
   const stale = (id: string) => { const entry = settled.get(id); return !entry || Date.now() - entry.at >= REFRESH_MS }
-  const want = (userIds: Iterable<string>) => {
-    disposed = false
-    if (listeners.size && refresher === undefined) refresher = setInterval(refresh, REFRESH_MS)
-    let added = false
-    for (const id of userIds) {
-      if (!ID.test(id)) { settled.set(id, { name: null, at: Infinity }); continue }
-      if (!stale(id) || asking.has(id) || queued.has(id)) continue
-      queued.add(id); added = true
-    }
-    if (added) schedule(0)
+  const ask_ = (ids: Iterable<string>) => {
+    for (const id of ids) if (ID.test(id) && stale(id) && !asking.has(id)) queued.add(id)
+    if (queued.size) schedule(0)
   }
-  // While something shows names, answers older than REFRESH_MS are asked again; the old name stays until then.
-  const refresh = () => want([...settled.keys()].filter(id => ID.test(id)))
+  // Held ids whose answer has grown old are asked again; the old name stays until the answer.
+  const tick = () => ask_(held.keys())
+  const syncTicker = () => {
+    if (held.size && !disposed && ticker === undefined) ticker = setInterval(tick, TICK_MS)
+    if ((!held.size || disposed) && ticker !== undefined) { clearInterval(ticker); ticker = undefined }
+  }
   return {
     name: userId => settled.get(userId)?.name ?? undefined,
-    want,
-    subscribe(listener) {
-      listeners.add(listener)
-      if (refresher === undefined) refresher = setInterval(refresh, REFRESH_MS)
-      return () => {
-        listeners.delete(listener)
-        if (!listeners.size && refresher !== undefined) { clearInterval(refresher); refresher = undefined }
+    want(userIds) {
+      disposed = false
+      const ids = [...userIds]
+      for (const id of ids) {
+        if (!ID.test(id)) { settled.set(id, { name: null, at: Infinity }); continue }
+        held.set(id, (held.get(id) ?? 0) + 1)
       }
+      syncTicker()
+      ask_(ids)
     },
+    release(userIds) {
+      for (const id of userIds) {
+        const count = held.get(id)
+        if (count === undefined) continue
+        if (count > 1) held.set(id, count - 1); else held.delete(id)
+      }
+      syncTicker()
+    },
+    subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener) } },
     version: () => version,
     dispose() {
       disposed = true
       if (timer !== undefined) clearTimeout(timer)
-      if (refresher !== undefined) clearInterval(refresher)
-      timer = refresher = undefined
-      queued.clear()
+      timer = undefined
+      queued.clear(); syncTicker()
     },
   }
 }

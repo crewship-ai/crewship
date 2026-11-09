@@ -93,7 +93,6 @@ function runsOf(node: Y.XmlElement | Y.XmlText): TextRun[] {
   return children.flatMap((child, index) => [...(index > 0 && !(inline(child) && inline(children[index - 1])) ? [{ text: " " }] : []), ...runsOf(child as Y.XmlElement)])
 }
 
-/** A card shows the Page block's formatting with the same palette as the Page editor; links are not followable on the canvas. */
 const noSubscription = () => () => {}
 /** Re-renders when the shared mention lookup answers. */
 function useMentionVersion(mentions?: MentionNames) {
@@ -104,9 +103,15 @@ export function runsLabel(runs: TextRun[], mentions?: MentionNames) {
   return runs.map(run => run.atom?.kind === "date" ? run.atom.value : run.atom?.kind === "mention" ? mentionLabel(mentions, run.atom.userId) : run.text).join("")
 }
 
+/** A card shows the Page block's formatting with the same palette as the Page editor; links are not followable on the canvas. */
 function FormattedRuns({ runs, mentions }: { runs: TextRun[]; mentions?: MentionNames }) {
   const key = JSON.stringify(runs.flatMap(run => run.atom?.kind === "mention" ? [run.atom.userId] : []))
-  React.useEffect(() => { const ids = JSON.parse(key) as string[]; if (ids.length) mentions?.want(ids) }, [mentions, key])
+  React.useEffect(() => {
+    const ids = JSON.parse(key) as string[]
+    if (!mentions || !ids.length) return
+    mentions.want(ids)
+    return () => mentions.release(ids)
+  }, [mentions, key])
   useMentionVersion(mentions)
   return <>{runs.map((run, index) => {
     // Atoms are read-only chips, like on the Page: the date as its ISO day, a mention by the Page's reader-scoped rule.
@@ -401,7 +406,8 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
         {placements.map(p => {
           const block = byId.get(p.id), r = shown(p)
           if (!block) return null
-          return <div key={p.id} role="group" aria-label={runsLabel(block.runs, mentions).trim() ? runsLabel(block.runs, mentions) : "Empty block"} data-placement={p.id} data-selected={selected === p.id ? "true" : undefined}
+          const label = runsLabel(block.runs, mentions)
+          return <div key={p.id} role="group" aria-label={label.trim() ? label : "Empty block"} data-placement={p.id} data-selected={selected === p.id ? "true" : undefined}
             tabIndex={0} onFocus={() => setSelected(p.id)}
             onPointerDown={e => onPointerDown(e, { id: p.id })} onDoubleClick={() => onOpenInPage?.(p.id)}
             className={cn("absolute overflow-hidden rounded-md border bg-card p-3 text-sm shadow-sm outline-none", editable ? "cursor-grab" : "cursor-default",

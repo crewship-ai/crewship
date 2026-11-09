@@ -160,10 +160,12 @@ function namedMention(base: AnyExtension, mentions: MentionNames): AnyExtension 
           dom: chip,
           update: (next: ProseMirrorNode) => {
             if (next.type !== node.type) return false
-            userId = String(next.attrs.userId ?? ""); render(); mentions.want([userId]); return true
+            const id = String(next.attrs.userId ?? "")
+            if (id !== userId) { mentions.release([userId]); userId = id; mentions.want([userId]) }
+            render(); return true
           },
           ignoreMutation: () => true,
-          destroy: unsubscribe,
+          destroy: () => { unsubscribe(); mentions.release([userId]) },
         }
       }
     },
