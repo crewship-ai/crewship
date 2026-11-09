@@ -3,7 +3,7 @@
   "protected_files": {
     ".github/workflows/ci.yml": "8f98af8f925727d0175e822565476ca092edd357e598288dff99211fd4da6685",
     ".github/workflows/security.yml": "c33ba55a4650e15787eca0ea994de968fcf74fa0a0b61eb68211ff133b8fd505",
-    ".github/workflows/codeql.yml": "08ba82c71afd5cf02aa224e9f26c543469bfe8bf3417c1e51d7eb76ae095c8bf",
+    ".github/workflows/codeql.yml": "038fe782e7e51451323b3da67409bcef5ee08081579825aafa5bfff95ea813ef",
     "scripts/ci/plan.py": "960710f8534588821b2c8f687450dc9414ec779b877d3e96b90de78342e2de49",
     "scripts/ci/verdict.py": "8ebc9e4df4b2cdd222049baba89f722d5e478918d7118023591e173c0da62d3c"
   },
