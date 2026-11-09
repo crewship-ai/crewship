@@ -255,6 +255,11 @@ test('checkpoint and restore retry receipts survive generation changes; readines
     const restored = await call(f.socket, '/v1/documents/p/restore', restore); assert.equal(restored.status, 200); assert.notEqual(restored.body.epoch, state.epoch);
     assert.equal((await call(f.socket, '/v1/documents/p/restore', restore)).body.duplicate, true);
     assert.equal(model.checkpoints, 1); assert.equal(model.restores, 1);
+    // #5165: the restore carries the replaced head's full state, so History keeps it.
+    const sent = model.seen.find(({ op }) => op === 'restore');
+    const head = new Y.Doc(); Y.applyUpdate(head, Buffer.from(state.snapshot, 'base64'));
+    const kept = new Y.Doc(); Y.applyUpdate(kept, Buffer.from(sent.data.snapshot, 'base64'));
+    assert.deepEqual(kept.getXmlFragment('default').toJSON(), head.getXmlFragment('default').toJSON());
     model.compatible = false; assert.equal((await call(f.socket, '/health/ready')).status, 503);
     model.compatible = true; assert.equal((await call(f.socket, '/health/ready')).status, 200);
     await new Promise(resolve => f.authority.close(resolve)); assert.equal((await call(f.socket, '/health/ready')).status, 503);
