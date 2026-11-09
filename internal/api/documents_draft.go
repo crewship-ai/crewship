@@ -107,7 +107,7 @@ func (h *PageHandler) GetDocumentDraftAgent(w http.ResponseWriter, r *http.Reque
 		Epoch      string                 `json:"epoch"`
 		Outline    []DocumentOutlineBlock `json:"outline"`
 	}
-	schema := 3
+	schema := scope.Schema
 	if scope.Propose {
 		schema = documents.ProposalSchema
 	}
@@ -191,7 +191,9 @@ func (h *PageHandler) MutateDocumentDraftAgent(w http.ResponseWriter, r *http.Re
 		documentAuthorityError(w, errDocumentAccess)
 		return
 	}
-	if page != scope.PageID || generation != scope.Generation {
+	var schema int
+	_ = json.Unmarshal(request["schema"], &schema)
+	if page != scope.PageID || generation != scope.Generation || (!scope.Propose && schema != scope.Schema) {
 		documentAuthorityError(w, documents.ErrConflict)
 		return
 	}
@@ -306,11 +308,9 @@ func validateDocumentDraftRequest(operation string, request map[string]json.RawM
 	}
 	var schema int
 	var rev int64
-	want := 3
-	if operation == "propose" {
-		want = documents.ProposalSchema
-	}
-	if json.Unmarshal(request["schema"], &schema) != nil || schema != want || json.Unmarshal(request["ifRev"], &rev) != nil || rev < 0 {
+	// A direct draft names schema 3 or 4; the handler then binds it to the
+	// stored schema of the scoped Doc. A proposal is always schema 4.
+	if json.Unmarshal(request["schema"], &schema) != nil || (operation == "propose" && schema != documents.ProposalSchema) || (schema != 3 && schema != documents.ProposalSchema) || json.Unmarshal(request["ifRev"], &rev) != nil || rev < 0 {
 		return errors.New("original schema/revision required")
 	}
 	for _, name := range []string{"id", "page_id", "epoch"} {

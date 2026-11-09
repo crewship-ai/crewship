@@ -26,6 +26,8 @@ type documentDraftScope struct {
 	PageID     string
 	Generation int64
 	Rev        int64
+	// Schema is the stored content schema the run drafts against (3 or 4).
+	Schema int
 	// Propose is a schema-4 mandate (#5137): proposals only, never commits.
 	Propose bool
 	// Blocks, comma-separated, are the only blocks a proposal may target; "" is the whole document.
@@ -85,12 +87,12 @@ func (h *PageHandler) documentDraftScope(ctx context.Context, a *artifactRunAuth
 	}
 	var generation, head int64
 	var slug string
-	err = h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT p.id,p.slug,c.draft_generation,c.draft_rev,d.generation,d.head_rev
+	err = h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT p.id,p.slug,c.draft_generation,c.draft_rev,d.generation,d.head_rev,d.schema_version
  FROM document_creation_consents c
  JOIN document_creations origin ON origin.page_id=c.result_page_id AND origin.workspace_id=c.workspace_id AND origin.run_id=c.run_id AND origin.human_user_id=c.human_user_id AND origin.source_chat_id=c.chat_id AND origin.submission_id=c.submission_id
  JOIN pages p ON p.id=c.result_page_id AND p.workspace_id=c.workspace_id AND p.owner_user_id=c.human_user_id AND p.owner_crew_id IS NULL
- JOIN documents d ON d.page_id=p.id AND d.workspace_id=p.workspace_id AND d.schema_version=3
- WHERE c.run_id=? AND c.workspace_id=? AND c.human_user_id=? AND c.chat_id=? AND c.message_id=? AND c.drafting_allowed=1 AND origin.agent_id=?`, a.RunID, a.WorkspaceID, a.HumanUserID, a.ChatID, a.MessageID, a.AgentID).Scan(&scope.PageID, &slug, &scope.Generation, &scope.Rev, &generation, &head)
+ JOIN documents d ON d.page_id=p.id AND d.workspace_id=p.workspace_id AND d.schema_version IN (3,4)
+ WHERE c.run_id=? AND c.workspace_id=? AND c.human_user_id=? AND c.chat_id=? AND c.message_id=? AND c.drafting_allowed=1 AND origin.agent_id=?`, a.RunID, a.WorkspaceID, a.HumanUserID, a.ChatID, a.MessageID, a.AgentID).Scan(&scope.PageID, &slug, &scope.Generation, &scope.Rev, &generation, &head, &scope.Schema)
 	if err != nil {
 		return scope, errDocumentAccess
 	}

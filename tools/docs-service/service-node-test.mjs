@@ -674,7 +674,7 @@ test('semantic commit authority follows the authenticated realm', async () => {
 });
 
 
-test('prepare-create builds closed schema3 content without Go data RPCs', async () => {
+test('prepare-create builds closed latest-schema content without Go data RPCs', async () => {
   const model=authorityModel(), f=await fixture(model.handle); await f.start();
   const baseline=model.seen.length, before=structuredClone(model.state);
   const blocks=[{type:'heading',level:1,text:'Prepared report'},{type:'paragraph',text:'Literal <script> & text'},{type:'bulletList',items:['First','Second']},{type:'orderedList',items:['Step']},{type:'codeBlock',text:'const literal = "<script>";\n'}];
@@ -683,10 +683,10 @@ test('prepare-create builds closed schema3 content without Go data RPCs', async 
     const result=await prepare({blocks},{Authorization:'Bearer agtv2.synthetic-creation'});
     assert.equal(result.status,200,'private prepare-create dispatcher must admit bounded authoring');
     assert.deepEqual(Object.keys(result.body).sort(),['blocks','schema','snapshot']);
-    assert.equal(result.body.schema,RICH_VERSION);
+    assert.equal(result.body.schema,LATEST_VERSION);
     const doc=load(result.body.snapshot);
     try {
-      const content=validate(doc,RICH_VERSION), prepared=await outline(doc,RICH_VERSION);
+      const content=validate(doc,LATEST_VERSION), prepared=await outline(doc,LATEST_VERSION);
       assert.deepEqual(content.content.map(block=>block.type),['heading','paragraph','bulletList','orderedList','codeBlock']);
       assert.equal(content.content[1].content[0].text,'Literal <script> & text');
       assert.deepEqual(result.body.blocks,prepared.map(({id,hash})=>({id,hash})));

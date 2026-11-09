@@ -12,7 +12,7 @@ vi.mock("@/lib/mooring/wordcraft-command-session",()=>({commandRequest:mocks.ope
 afterEach(()=>{cleanup();mocks.fetch.mockReset();mocks.allowed=true;mocks.enabled=true;mocks.commands=false;mocks.native=false;mocks.sdkPrefix=undefined;mocks.checkpoint.mockReset();mocks.openNative.mockReset();mocks.openCommand.mockReset()})
 function mount(){const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{retry:false}}});const created=vi.fn();render(<QueryClientProvider client={client}><NewDocumentDialog workspaceId="workspace" onClose={vi.fn()} onCreated={created} /></QueryClientProvider>);fireEvent.change(screen.getByLabelText("Name"),{target:{value:"Notes"}});return {created,client}}
 const response=(value:unknown,status=200)=>Promise.resolve({ok:status<400,status,json:async()=>value})
-it("retries numeric initialization with the original Page and schema3 payload",async()=>{
+it("retries numeric initialization with the original Page and schema4 payload",async()=>{
   let attempts=0
   mocks.fetch.mockImplementation((url:string,init?:RequestInit)=>{
     if(url.includes("/initialize")){attempts++;const body=JSON.parse(init!.body as string);return attempts===1?response({error:"lost acknowledgment"},503):response({id:body.id,rev:0,epoch:1,actor:"human",kind:"init",found:true,duplicate:true})}
@@ -27,7 +27,7 @@ it("retries numeric initialization with the original Page and schema3 payload",a
   const calls=mocks.fetch.mock.calls
   expect(calls.filter(([url])=>!url.includes("/initialize"))).toHaveLength(1)
   const bodies=calls.filter(([url])=>url.includes("/initialize")).map(([,init])=>JSON.parse(init.body))
-  expect(bodies[0]).toEqual(bodies[1]);expect(bodies[0]).toMatchObject({schema:3,page_id:"stable-page"})
+  expect(bodies[0]).toEqual(bodies[1]);expect(bodies[0]).toMatchObject({schema:4,page_id:"stable-page"})
   expect(calls[0][1].body).not.toContain("owner")
   client.clear()
 })

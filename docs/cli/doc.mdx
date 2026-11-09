@@ -121,7 +121,8 @@ do not accept raw Yjs updates or whole-document replacement.
 
 ### Proposing on a schema 4 document
 
-On a schema 4 document an agent never edits directly: it proposes, and a person
+Apart from the run that created it with your drafting permission, an agent never
+edits a schema 4 document directly: it proposes, and a person
 with edit access accepts or rejects each proposal. The run needs a schema 4
 targeted message from the person who asked (`document_iteration_intent` with
 `"schema": 4`, optionally `"blocks": ["<block-id>", …]` to limit it to up to 16
@@ -207,8 +208,10 @@ Schema 4 nodes and marks:
 {"type":"taskList","attrs":{"id":"todo"},"content":[{"type":"taskItem","attrs":{"id":"todo-1","checked":true},"content":[{"type":"paragraph","attrs":{"id":"todo-1-p"},"content":[{"type":"text","text":"Ship it","marks":[{"type":"bold","attrs":{}}]}]}]}]}
 ```
 
-Agent drafting and document creation from chat still produce schema 3. On a
-schema 4 document an agent proposes and a person accepts; see
+New documents, from the New Doc dialog, New artifact or `doc create`, start at
+schema 4. A run with creation consent drafts its own new document directly at
+schema 4; documents created earlier stay at schema 3. On any other schema 4
+document an agent proposes and a person accepts; see
 [Proposing on a schema 4 document](#proposing-on-a-schema-4-document).
 
 `--file` is required. Use `--file -` to read stdin. The file must contain one JSON
