@@ -90,7 +90,7 @@ func (h *PageHandler) ResolvePageChatContext(ctx context.Context, workspaceID, u
 	}
 	// The kind is derived from the same server metadata the library shows,
 	// for the version this human may read; it only names a static guide.
-	storage, _ := h.artifactPageMetadata(ctx, workspaceID, rec.ID)
+	storage, _, _ := h.artifactPageMetadata(ctx, workspaceID, rec.ID)
 	designSystem := storage == "project" && h.artifactPageHasDesignSystem(ctx, workspaceID, rec.ID)
 	if kind := pageChatKind(rec.HasDocument, rec.HasSlides, storage, designSystem); kind != "" {
 		if guide, err := kindguide.Lookup(kind); err == nil {
