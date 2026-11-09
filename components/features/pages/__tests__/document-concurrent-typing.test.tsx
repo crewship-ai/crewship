@@ -33,7 +33,7 @@ function mount(doc: Y.Doc, schema = 2): Editor {
 
 const blockText = (doc: Y.Doc, index: number) => {
   const block = doc.getXmlFragment("default").get(index) as Y.XmlElement
-  return block.toArray().map(part => (part instanceof Y.XmlText ? part.toString() : "")).join("").replace(/<[^>]+>/g, "")
+  return block.toArray().map(part => (part instanceof Y.XmlText ? (part.toDelta() as { insert?: unknown }[]).map(op => (typeof op.insert === "string" ? op.insert : "")).join("") : "")).join("")
 }
 
 /**
