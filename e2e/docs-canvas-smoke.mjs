@@ -337,11 +337,15 @@ try {
   await page.getByRole('button', { name: 'Fit to screen' }).click()
   await select('outro')
   const handle = page.locator('[data-placement="outro"] [data-handle="se"]')
-  const hb = await handle.boundingBox()
   const sized = await surfaceOf()
-  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down()
-  for (let i = 1; i <= 8; i++) await page.mouse.move(hb.x + i * 12, hb.y + i * 8)
+  // hover() waits until the handle itself receives the pointer (nothing covers it), then the drag starts there.
+  await handle.hover()
+  const hb = await handle.boundingBox()
+  const cx = hb.x + hb.width / 2, cy = hb.y + hb.height / 2
+  await page.mouse.down()
+  for (let i = 1; i <= 8; i++) await page.mouse.move(cx + i * 12, cy + i * 8)
   await page.mouse.up()
+  console.log('after resize, selected:', await page.locator('[data-placement][data-selected="true"]').getAttribute('data-placement').catch(() => null))
   const resizedState = await waitFor(s => s.placements.outro.w > sized.placements.outro.w, 'resize stored')
   assert.ok(resizedState.placements.outro.h >= sized.placements.outro.h)
   assert.equal(resizedState.content, sized.content, 'a resize changes only geometry')
