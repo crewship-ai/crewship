@@ -34,7 +34,16 @@ func documentDraftPayloadAt(t *testing.T, schema int, id, before, after string, 
 	if e != nil {
 		t.Fatal(e)
 	}
-	return map[string]any{"id": id, "fingerprint": id, "schema": schema, "kind": "agent", "generation": 0, "ifRev": rev, "epoch": lease.Epoch, "leaseToken": lease.Writer, "leaseOwner": lease.Owner, "snapshot": []byte("synthetic candidate " + after), "update": []byte("synthetic delta " + after), "blocks": json.RawMessage(richTestProjection(t, last)), "ifHashes": map[string]string{"paragraph": documentRichHash(documentRichFind(first, "paragraph"))}, "semantic": documentSemanticPatch{Target: "paragraph", Text: after, Edit: &documentSemanticEdit{From: 0, To: len(before), Insert: after}, Rich: &documentRichProof{Before: rawBefore, After: rawAfter}}}
+	// The engine's minimal edit (ASCII fixtures): common prefix, then suffix.
+	from, suffix := 0, 0
+	for from < len(before) && from < len(after) && before[from] == after[from] {
+		from++
+	}
+	for suffix < len(before)-from && suffix < len(after)-from && before[len(before)-suffix-1] == after[len(after)-suffix-1] {
+		suffix++
+	}
+	edit := &documentSemanticEdit{From: from, To: len(before) - suffix, Insert: after[from : len(after)-suffix]}
+	return map[string]any{"id": id, "fingerprint": id, "schema": schema, "kind": "agent", "generation": 0, "ifRev": rev, "epoch": lease.Epoch, "leaseToken": lease.Writer, "leaseOwner": lease.Owner, "snapshot": []byte("synthetic candidate " + after), "update": []byte("synthetic delta " + after), "blocks": json.RawMessage(richTestProjection(t, last)), "ifHashes": map[string]string{"paragraph": documentRichHash(documentRichFind(first, "paragraph"))}, "semantic": documentSemanticPatch{Target: "paragraph", Text: after, Edit: edit, Rich: &documentRichProof{Before: rawBefore, After: rawAfter}}}
 }
 func callDocumentDraftAuthority(t *testing.T, f *artifactPrincipalFixture, h *documentAuthority, token, page, op string, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()

@@ -6,6 +6,14 @@ package documents
 // on or off for documents that already exist. SCHEMA_CAPABILITIES in
 // tools/docs-service/schema-core.mjs mirrors it for the engine and browser;
 // a test keeps them equal.
+//
+// Adding a schema (for example Canvas at 6): add its row here and in
+// SCHEMA_CAPABILITIES, raise LatestSchema, and move CreateSchema only on
+// purpose. Agent Propose on it also needs the Go semantic guard to know its
+// tree (documentRichTreeFor in internal/api), a migration widening the closed
+// schema CHECKs on document_iteration_intents and document_proposals, and a
+// real-engine proposal acceptance at that schema like
+// TestDocumentProposalSchemaFiveRealEngineCLI.
 
 // CreateSchema is the schema new Docs are born at, from the New Doc dialog,
 // the Artifacts library and an agent's doc create. It is explicit: raising

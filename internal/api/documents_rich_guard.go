@@ -43,7 +43,10 @@ func documentRichSemanticGuard(semantic *documentSemanticPatch, hashes map[strin
 // replacement of one paragraph or heading's text. Proposals and drafts use
 // the Doc's own stored schema. Schema 5 dates and mentions have no width in
 // text offsets; an edit that inserts beside one or deletes across one is
-// refused, as the engine refuses it (ambiguous_inline_atom).
+// refused. The engine's rule (ambiguous_inline_atom) is stricter: it also
+// refuses every position a change could slide to within the agent's range,
+// which Go does not see. This guard is the necessary condition: the result is
+// exactly Go's own reconstruction of the declared edit, so no atom moves.
 func documentRichSemanticGuardFor(schema int, semantic *documentSemanticPatch, hashes map[string]string, projection json.RawMessage, next documents.MutationGuard) documents.MutationGuard {
 	return func(ctx context.Context, tx *sql.Tx, actor string, state documents.State) error {
 		if state.Schema != schema {
@@ -86,9 +89,12 @@ func documentRichSemanticGuardFor(schema int, semantic *documentSemanticPatch, h
 		if expected != semantic.Text {
 			return documents.ErrConflict
 		}
-		// The edit is the engine's minimal one: a replacement never starts or
-		// ends with the code point it replaces. Otherwise a proof could
+		// A replacement never starts or ends with the code point it replaces,
+		// as the engine's minimal edit never does. Otherwise a proof could
 		// "replace" marked text by the same unmarked text and drop its marks.
+		// A pure deletion or insertion may sit at any equivalent position:
+		// the agent picks among them with its range, deleting is within its
+		// authority, and inserted text never carries marks.
 		if edit.From < edit.To && edit.Insert != "" {
 			deleted := []rune(string(utf16.Decode(units[edit.From:edit.To])))
 			inserted := []rune(edit.Insert)

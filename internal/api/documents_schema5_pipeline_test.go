@@ -98,7 +98,7 @@ func TestDocumentRichSemanticGuardSchemaFive(t *testing.T) {
 			tree(text("Tell "), text("Ann", red), text(" by "), date, text(" and "), mention, text(" now.", under)), true},
 		{"edit inside marked text after the mention", documentSemanticEdit{From: 17, To: 20, Insert: "today"}, "Ask Ann by  and  today.",
 			tree(text("Ask "), text("Ann", red), text(" by "), date, text(" and "), mention, text(" ", under), text("today"), text(".", under)), true},
-		{"delete right before the date", documentSemanticEdit{From: 10, To: 11}, "Ask Ann by and  now.",
+		{"delete right before the date (Go reconstructs it exactly; the engine refuses the slide)", documentSemanticEdit{From: 10, To: 11}, "Ask Ann by and  now.",
 			tree(text("Ask "), text("Ann", red), text(" by"), date, text(" and "), mention, text(" now.", under)), true},
 		{"insert beside the date", documentSemanticEdit{From: 11, To: 11, Insert: "X"}, "Ask Ann by X and  now.",
 			tree(text("Ask "), text("Ann", red), text(" by "), date, text("X and "), mention, text(" now.", under)), false},
