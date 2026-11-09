@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"sort"
@@ -160,7 +161,7 @@ func TestDocumentPeopleRequiresADocumentPage(t *testing.T) {
 }
 
 func TestDocumentPersonNameIsOneBoundedLine(t *testing.T) {
-	for in, want := range map[string]string{"Eve\u202egnirts": "Evegnirts", "  Ada \n Owner\t": "Ada   Owner", "\x00\x1f": "", strings.Repeat("é", 250): strings.Repeat("é", 200)} {
+	for in, want := range map[string]string{"Eve\u202egnirts": "Evegnirts", "Ada\u2028Owner\u0085X": "Ada Owner X", "👩\u200d💻 Dev": "👩\u200d💻 Dev", "  Ada \n Owner\t": "Ada   Owner", "\x00\x1f": "", strings.Repeat("é", 250): strings.Repeat("é", 200)} {
 		if got := documentPersonName(in); got != want {
 			t.Fatalf("%q -> %q, want %q", in, got, want)
 		}
@@ -241,5 +242,58 @@ func TestDocumentPeopleSearchMatchesInSQLAndTreatsWildcardsAsText(t *testing.T) 
 	}
 	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="+url.QueryEscape("%")); len(found) != 1 {
 		t.Fatalf("%% must match only a literal percent sign: %v", names(found))
+	}
+}
+
+func TestDocumentPeopleSearchFoldsUnicodeCase(t *testing.T) {
+	h, ws, owner := documentPeopleFixture(t, false)
+	execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES('sarka','sarka@example.invalid','Šárka Nováková')`)
+	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('sarka-m',?,'sarka','MEMBER')`, ws)
+	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','user','sarka','read',?)`, owner)
+	for _, q := range []string{"šá", "ŠÁRKA", "nováková"} {
+		if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="+url.QueryEscape(q)); strings.Join(names(found), "|") != "sarka=Šárka Nováková" {
+			t.Fatalf("%q: %v", q, names(found))
+		}
+	}
+}
+
+func TestDocumentPeopleOnPrivateOutputSearchesOnlyItsPossibleReaders(t *testing.T) {
+	h, ws, owner := documentPeopleFixture(t, true)
+	// Many members sort ahead of the custodian; none of them can read private output.
+	for i := 0; i < 250; i++ {
+		id := fmt.Sprintf("aa%04d", i)
+		execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, id, id+"@example.invalid", "Aa "+id)
+		execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, id+"-m", ws, id)
+	}
+	execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES('adm','adm@example.invalid','Zed Admin')`)
+	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('adm-m',?,'adm','ADMIN')`, ws)
+	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="); strings.Join(names(found), "|") != "adm=Zed Admin|test-user-id=Test User" {
+		t.Fatalf("private search: %v", names(found))
+	}
+}
+
+func TestDocumentPeopleAdministratorReadIsAudited(t *testing.T) {
+	for _, private := range []bool{true, false} {
+		t.Run(fmt.Sprint("private=", private), func(t *testing.T) {
+			h, ws, owner := documentPeopleFixture(t, private)
+			execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES('adm','adm@example.invalid','Zed Admin')`)
+			execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('adm-m',?,'adm','ADMIN')`, ws)
+			action := auditActionWorkspaceAdminArtifactRead
+			if private {
+				action = auditActionPrivateArtifactRead
+			}
+			before := adminReadAudits(t, h, action, "adm", "people-page")
+			if status, people := documentPeopleCall(t, h, ws, "adm", "ADMIN", "ids="+owner); status != 200 || len(people) != 1 {
+				t.Fatalf("admin read: %d %v", status, people)
+			}
+			if after := adminReadAudits(t, h, action, "adm", "people-page"); after != before+1 {
+				t.Fatalf("audit rows %d -> %d", before, after)
+			}
+			// The custodian's own read is not an administrator read.
+			documentPeopleCall(t, h, ws, owner, "OWNER", "ids="+owner)
+			if after := adminReadAudits(t, h, action, owner, "people-page"); after != 0 {
+				t.Fatalf("owner read audited: %d", after)
+			}
+		})
 	}
 }

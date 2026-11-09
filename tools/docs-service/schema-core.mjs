@@ -373,11 +373,21 @@ function patch(doc, op, version = VERSION) {
   // Dates and mentions have no width in text offsets, so text inserted exactly
   // beside one could land on either side, and a range across one would leave it
   // stranded. Refuse both instead of guessing (#5155).
+  // The same text change can often slide (deleting one "a" from "aa"): matching
+  // the common suffix first gives the leftmost equivalent position, so
+  // [slideFrom, to] is every place the change could mean.
+  let tail = 0;
+  while (tail < before.length && tail < after.length && before[before.length - tail - 1] === after[after.length - tail - 1]) tail++;
+  while (!textBoundary(before, before.length - tail) || !textBoundary(after, after.length - tail)) tail--;
+  let head = 0;
+  while (head < before.length - tail && head < after.length - tail && before[head] === after[head]) head++;
+  while (!textBoundary(before, head) || !textBoundary(after, head)) head--;
+  const slideFrom = range.from + head;
   let atomBase = 0;
   for (const child of block.toArray()) {
     if (child instanceof Y.XmlText) { atomBase += child.length; continue; }
     if (!(child instanceof Y.XmlElement) || !ATOMS.includes(child.nodeName)) continue;
-    if ((replacement && from === atomBase) || (from < atomBase && atomBase < to)) throw Object.assign(new Error('semantic edit touches a date or mention; edit that text in the editor'), { code: 'ambiguous_inline_atom' });
+    if ((slideFrom < atomBase && atomBase < to) || (replacement && (atomBase === slideFrom || atomBase === to))) throw Object.assign(new Error('semantic edit touches a date or mention; edit that text in the editor'), { code: 'ambiguous_inline_atom' });
   }
   if (from !== to || replacement) doc.transact(() => {
     if (texts.length === 0) { const text = new Y.XmlText(); block.insert(0, [text]); texts.push(text); }

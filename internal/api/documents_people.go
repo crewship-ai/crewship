@@ -118,6 +118,11 @@ func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
 	outer := r
 	r = r.WithContext(context.WithValue(r.Context(), pageAuthReaderKey{}, tx))
 	ctx, workspace, user := r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context())
+	// Owner and audience come from the same snapshot as every check below.
+	if rec, err = h.loadPageForRead(ctx, workspace, r.PathValue("slug")); err != nil {
+		replyError(w, 404, "document page not found")
+		return
+	}
 	// The same exact credential and CLI scope the document read requires.
 	if err := validateContentHumanCredential(r, tx, "pages:read"); err != nil {
 		switch {
@@ -166,11 +171,18 @@ func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
 	}
 	// The name match runs in SQL, so every member can be found; at most
 	// documentPeopleCheckLimit matching candidates get an authority check.
-	pattern := "%" + strings.NewReplacer(`\`, `\\`, "%", `\%`, "_", `\_`).Replace(strings.ToLower(search)) + "%"
+	// Unicode case folding, as other name searches do; on private output only
+	// its custodian and the workspace administrators can be readers at all.
+	audience, args := "", []any{workspace, search}
+	if rec.PrivateAudience {
+		audience = ` AND (u.id=? OR m.role IN ('OWNER','ADMIN'))`
+		args = append(args, rec.OwnerUserID)
+	}
+	args = append(args, documentPeopleCheckLimit)
 	rows, err := tx.QueryContext(ctx, `SELECT u.id, COALESCE(u.full_name,'') FROM workspace_members m
 JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL
-WHERE m.workspace_id=? AND trim(COALESCE(u.full_name,''))<>'' AND lower(u.full_name) LIKE ? ESCAPE '\'
-ORDER BY lower(u.full_name), u.id LIMIT ?`, workspace, pattern, documentPeopleCheckLimit)
+WHERE m.workspace_id=? AND trim(COALESCE(u.full_name,''))<>'' AND instr(crewship_casefold(u.full_name), crewship_casefold(?))>0`+audience+`
+ORDER BY crewship_casefold(u.full_name), u.id LIMIT ?`, args...)
 	if err != nil {
 		replyError(w, 500, "document people unavailable")
 		return
@@ -242,12 +254,12 @@ func (h *PageHandler) documentPersonFor(ctx context.Context, workspace string, r
 // characters. An empty result means the person is shown as Unknown member.
 func documentPersonName(name string) string {
 	name = strings.Map(func(r rune) rune {
-		if unicode.Is(unicode.Cf, r) {
-			return -1 // bidi overrides and other invisible format characters
+		if unicode.Is(unicode.Bidi_Control, r) {
+			return -1 // direction overrides and isolates; joiners stay for emoji and scripts
 		}
 		return r
 	}, name)
-	name = strings.Join(strings.FieldsFunc(name, func(r rune) bool { return r < 0x20 || r == 0x7f }), " ")
+	name = strings.Join(strings.FieldsFunc(name, func(r rune) bool { return unicode.IsControl(r) || unicode.In(r, unicode.Zl, unicode.Zp) }), " ")
 	name = strings.TrimSpace(name)
 	if runes := []rune(name); len(runes) > documentPeopleNameMaxRunes {
 		name = string(runes[:documentPeopleNameMaxRunes])
