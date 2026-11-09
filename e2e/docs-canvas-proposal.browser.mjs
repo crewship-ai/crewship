@@ -95,7 +95,6 @@ try {
 
   // The original human message in the private chat names the Doc, two blocks and schema 6.
   const target = { submission_id: 'canvas-browser-proposal', page_id: pageId, schema: 6, rev: placed.value.rev, generation: placed.value.generation, blocks: ['lead', 'other'] }
-  await owner.request.get(`${base}/api/v1/chats/${fixture.chat}/execution-profile?${q}`)
   const chat = await owner.newPage()
   await chat.goto(`${base}/`)
   await chat.evaluate(async ({ server, chat, workspace, target }) => {

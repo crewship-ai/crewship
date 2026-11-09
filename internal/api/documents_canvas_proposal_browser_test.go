@@ -28,6 +28,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -219,6 +220,9 @@ func TestDocumentCanvasProposalBrowser(t *testing.T) {
 	command.Dir = repo
 	command.Env = append(os.Environ(), "CREWSHIP_DOCS_CANVAS_FIXTURE="+fixturePath, "CREWSHIP_DOCS_CANVAS_OUTPUT="+evidence)
 	command.Stdout, command.Stderr = os.Stdout, os.Stderr
+	// On cancellation the browser script gets SIGTERM and time to close Chromium.
+	command.Cancel = func() error { return command.Process.Signal(syscall.SIGTERM) }
+	command.WaitDelay = 10 * time.Second
 	if err = command.Run(); err != nil {
 		t.Fatal("Canvas proposal browser acceptance", err)
 	}
@@ -228,9 +232,10 @@ func TestDocumentCanvasProposalBrowser(t *testing.T) {
 	// The proposals trace to one admitted run bound to the mirrored original
 	// human message and its schema-6 mandate.
 	var n int
-	err = db.QueryRow(`SELECT count(*) FROM document_proposals dp JOIN document_iteration_intents i ON i.run_id=dp.run_id AND i.schema_version=6 JOIN artifact_run_principals p ON p.run_id=i.run_id AND p.message_id=i.message_id JOIN conversation_messages m ON m.id=i.message_id AND m.author_user_id=p.human_user_id WHERE i.chat_id=? AND dp.schema_version=6`, f.a.ChatID).Scan(&n)
-	if err != nil || n != 2 {
-		t.Fatalf("two schema-6 proposals from the admitted human-bound run: count %d: %v", n, err)
+	var decided string
+	err = db.QueryRow(`SELECT count(DISTINCT dp.id),group_concat(DISTINCT dp.status) FROM document_proposals dp JOIN pages pg ON pg.id=dp.page_id AND pg.workspace_id=? AND pg.slug='canvas-proposals' JOIN document_iteration_intents i ON i.run_id=dp.run_id AND i.page_id=dp.page_id AND i.schema_version=6 JOIN artifact_run_principals p ON p.run_id=i.run_id AND p.message_id=i.message_id JOIN conversation_messages m ON m.id=i.message_id AND m.author_user_id=p.human_user_id WHERE i.chat_id=? AND dp.schema_version=6`, workspace, f.a.ChatID).Scan(&n, &decided)
+	if err != nil || n != 2 || !strings.Contains(decided, "accepted") || !strings.Contains(decided, "rejected") {
+		t.Fatalf("two decided schema-6 proposals from the admitted human-bound run: count %d statuses %q: %v", n, decided, err)
 	}
 }
 

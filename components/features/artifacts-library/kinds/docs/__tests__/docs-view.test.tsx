@@ -69,7 +69,7 @@ function serve() {
     if (url.includes("/document/checkpoints")) return { ok: true, json: async () => ({ checkpoints: [] }) }
     if (url.includes("/proposals")) return { ok: true, json: async () => ({ proposals: [] }) }
     if (env.denied) return { ok: false, status: 403, json: async () => ({ error: "document access denied" }) }
-    return { ok: true, json: async () => ({ page_id: "page-docs", schema: env.schema, rev, generation: 0, epoch: "go:node:1", can_write: env.canWrite, snapshot, ...(env.proposals === undefined ? {} : { proposals: env.proposals }) }) }
+    return { ok: true, json: async () => ({ page_id: "page-docs", schema: env.schema, rev, generation: 0, epoch: upgrades.outcome === "lost" && upgrades.bodies.length > 0 ? "go:node:2" : "go:node:1", can_write: env.canWrite, snapshot, ...(env.proposals === undefined ? {} : { proposals: env.proposals }) }) }
   })
 }
 
@@ -297,6 +297,8 @@ describe("Docs in the ArtifactFrame", () => {
     const dialog = await screen.findByRole("alertdialog")
     fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
     expect(await within(dialog).findByRole("alert")).toHaveProperty("textContent", "We could not confirm whether Canvas was enabled. Try again; it is never enabled twice.")
+    // The applied upgrade changed the epoch: the next poll puts the tab in "needs reopening" before the person retries.
+    await waitFor(() => expect(document.body.textContent).toMatch(/needs to be reopened/i), { timeout: 4000 })
     fireEvent.click(within(dialog).getByRole("button", { name: "Enable Canvas" }))
     await waitFor(() => expect(upgrades.bodies).toHaveLength(2))
     expect(upgrades.bodies[1]).toEqual(upgrades.bodies[0])
