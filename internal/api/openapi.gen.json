@@ -8378,6 +8378,13 @@
             },
             "type": "array"
           },
+          "contentGeneration": {
+            "minimum": 0,
+            "type": "integer"
+          },
+          "database": {
+            "type": "string"
+          },
           "epoch": {
             "minimum": 0,
             "type": "integer"
@@ -8417,6 +8424,8 @@
           "epoch",
           "generation",
           "incarnation",
+          "database",
+          "contentGeneration",
           "snapshot",
           "snapshotRev",
           "updates",

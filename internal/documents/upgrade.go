@@ -79,7 +79,7 @@ func (s *Store) UpgradeRequest(ctx context.Context, k Key, lease Lease, id, fing
 		if _, e = tx.ExecContext(ctx, "INSERT INTO document_updates VALUES(?,?,?,?)", k.WorkspaceID, k.PageID, r.Rev, []byte{0, 0}); e != nil {
 			return e
 		}
-		if _, e = tx.ExecContext(ctx, "UPDATE documents SET schema_version=?,head_rev=?,epoch=?,generation=generation+1,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?", targetSchema, r.Rev, r.Epoch, k.WorkspaceID, k.PageID); e != nil {
+		if _, e = tx.ExecContext(ctx, "UPDATE documents SET schema_version=?,head_rev=?,epoch=?,generation=generation+1,content_generation=content_generation+1,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?", targetSchema, r.Rev, r.Epoch, k.WorkspaceID, k.PageID); e != nil {
 			return e
 		}
 		_, e = tx.ExecContext(ctx, "INSERT INTO document_receipts(workspace_id,page_id,id,digest,fingerprint,rev,epoch,actor,kind) VALUES(?,?,?,?,?,?,?,?,?)", k.WorkspaceID, k.PageID, id, digest, fingerprint, r.Rev, r.Epoch, actor, r.Kind)

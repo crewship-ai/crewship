@@ -51,9 +51,16 @@ type Update struct {
 type State struct {
 	Schema                                  int
 	HeadRev, Epoch, SnapshotRev, Generation int64
-	Snapshot                                []byte
-	Projection                              json.RawMessage
-	Updates                                 []Update
+	// Database and ContentGeneration name the content lineage the public Docs
+	// epoch is derived from (#5163). Database is this installation's identity,
+	// rotated only by backup restore; ContentGeneration advances when content
+	// is replaced (History restore, schema upgrade, backup restore), never on
+	// a boot fence, so a plain restart keeps the public epoch.
+	Database          string
+	ContentGeneration int64
+	Snapshot          []byte
+	Projection        json.RawMessage
+	Updates           []Update
 }
 
 // MutationGuard enforces application-specific immutable request bounds inside the writer transaction.
@@ -134,11 +141,37 @@ func (s *Store) tx(ctx context.Context, k Key, a Authorize, fn func(*sql.Tx, str
 	}
 	return t.Commit()
 }
-func state(ctx context.Context, t *sql.Tx, k Key) (v State, e error) {
-	e = t.QueryRowContext(ctx, "SELECT schema_version,head_rev,epoch,snapshot_rev,snapshot,projection,generation FROM documents WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection, &v.Generation)
-	if errors.Is(e, sql.ErrNoRows) {
-		e = ErrNotFound
+
+// DatabaseIdentity returns this installation's Docs database identity and
+// creates it on first use (#5163). The migration leaves the table empty, so a
+// database copied from a migrated image never shares another one's value.
+// Backup restore replaces it. Call it inside a write transaction (or on a
+// database handle) so concurrent first uses agree on one value, and never hand
+// out a value read in a transaction that then rolls back: the first use would
+// not have been saved.
+func DatabaseIdentity(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}) (string, error) {
+	if _, err := q.ExecContext(ctx, `INSERT OR IGNORE INTO document_database_identity(id,value) VALUES(1,lower(hex(randomblob(16))))`); err != nil {
+		return "", fmt.Errorf("documents: create database identity: %w", err)
 	}
+	var value string
+	if err := q.QueryRowContext(ctx, `SELECT value FROM document_database_identity WHERE id=1`).Scan(&value); err != nil {
+		return "", fmt.Errorf("documents: read database identity: %w", err)
+	}
+	return value, nil
+}
+
+func state(ctx context.Context, t *sql.Tx, k Key) (v State, e error) {
+	e = t.QueryRowContext(ctx, "SELECT schema_version,head_rev,epoch,snapshot_rev,snapshot,projection,generation,content_generation FROM documents WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection, &v.Generation, &v.ContentGeneration)
+	if errors.Is(e, sql.ErrNoRows) {
+		return v, ErrNotFound
+	}
+	if e != nil {
+		return
+	}
+	v.Database, e = DatabaseIdentity(ctx, t)
 	return
 }
 func (s *Store) Read(ctx context.Context, k Key, a Authorize) (v State, e error) {
