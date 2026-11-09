@@ -8,8 +8,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/storageheadroom"
 )
 
 // Session checkpoints make History show more than the initial revision.
@@ -44,7 +47,10 @@ const (
 
 // sessionSkips remembers, per document, when an automatic snapshot was last
 // skipped for lack of space. Process-local and bounded; a restart forgets it,
-// and SessionHistoryFull then falls back to its size estimate.
+// and SessionHistoryFull then falls back to its size estimate. Several server
+// processes sharing one database would each keep their own copy, which only
+// affects how promptly the flag appears. A skip is recorded before the outer
+// commit, so a rolled-back edit can still leave it for one interval.
 var sessionSkips = struct {
 	sync.Mutex
 	at map[Key]time.Time
@@ -85,7 +91,10 @@ func (s *Store) pinSession(ctx context.Context, t *sql.Tx, k Key, r Receipt, c C
 		return nil
 	}
 	if err := s.insertSessionPin(ctx, t, k, r, c, actor, need); err != nil {
-		recordSessionSkip(k)
+		// Only a lack of space is reported as the History limit; other failures are just skipped.
+		if errors.Is(err, errSessionPinSkipped) || errors.Is(err, storageheadroom.ErrInsufficient) || strings.Contains(err.Error(), "artifact_storage_quota") {
+			recordSessionSkip(k)
+		}
 		// If even the rollback fails (a cancelled context, or SQLite already
 		// rolled the whole transaction back after SQLITE_FULL or an I/O error),
 		// the outer transaction cannot commit either, so returning that error
@@ -102,23 +111,31 @@ func (s *Store) pinSession(ctx context.Context, t *sql.Tx, k Key, r Receipt, c C
 // from this result. An unreadable or future timestamp counts as due, so History
 // cannot stall on it.
 func (s *Store) sessionPinDue(ctx context.Context, t *sql.Tx, k Key, actor string, snapshot []byte) bool {
-	var lastActor string
+	// Runs on every commit inside the writer transaction: read metadata only.
+	var lastID, lastActor string
 	var ageSeconds sql.NullFloat64
-	var lastSnapshot []byte
-	err := t.QueryRowContext(ctx, `SELECT actor,(julianday('now')-julianday(created_at))*86400.0,snapshot FROM document_checkpoints WHERE workspace_id=? AND page_id=? ORDER BY rev DESC,created_at DESC LIMIT 1`, k.WorkspaceID, k.PageID).Scan(&lastActor, &ageSeconds, &lastSnapshot)
+	var lastSize int
+	err := t.QueryRowContext(ctx, `SELECT id,actor,(julianday('now')-julianday(created_at))*86400.0,length(snapshot) FROM document_checkpoints WHERE workspace_id=? AND page_id=? ORDER BY rev DESC,created_at DESC LIMIT 1`, k.WorkspaceID, k.PageID).Scan(&lastID, &lastActor, &ageSeconds, &lastSize)
 	if err != nil {
 		// No checkpoint (documents created before initial checkpoints) starts History;
 		// a read failure skips the pin rather than the edit.
 		return errors.Is(err, sql.ErrNoRows)
 	}
-	if bytes.Equal(lastSnapshot, snapshot) {
-		return false
+	if ageSeconds.Valid && ageSeconds.Float64 >= 0 {
+		age := time.Duration(ageSeconds.Float64 * float64(time.Second))
+		if age < sessionCheckpointInterval && (lastActor == actor || age < sessionAuthorChangeGap) {
+			return false
+		}
 	}
-	if !ageSeconds.Valid || ageSeconds.Float64 < 0 {
+	// Due: only now, and only for an equal length, compare the newest checkpoint's bytes.
+	if lastSize != len(snapshot) {
 		return true
 	}
-	age := time.Duration(ageSeconds.Float64 * float64(time.Second))
-	return age >= sessionCheckpointInterval || (lastActor != actor && age >= sessionAuthorChangeGap)
+	var lastSnapshot []byte
+	if err = t.QueryRowContext(ctx, `SELECT snapshot FROM document_checkpoints WHERE workspace_id=? AND page_id=? AND id=?`, k.WorkspaceID, k.PageID, lastID).Scan(&lastSnapshot); err != nil {
+		return false
+	}
+	return !bytes.Equal(lastSnapshot, snapshot)
 }
 
 // sessionAllowance is how many bytes session pins may use in total, and how many they use now.

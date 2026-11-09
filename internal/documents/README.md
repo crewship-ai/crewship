@@ -54,8 +54,10 @@ byte budget, and pause while workspace or instance storage would be more than
 No checkpoint is deleted while its page exists (retention is a separate
 decision, R71 §0.11). A skip is remembered in-process for one interval, which
 bounds the cost of a full document and lets `SessionHistoryFull` report it
-(`history_limit_reached`). The `session-` prefix is reserved for new
-explicit checkpoints.
+(`history_limit_reached`). Because the instance-wide storage high-water mark
+also pauses pins, a reader can learn one coarse bit about instance usage from
+that flag; this is accepted (administrators already see storage usage). The
+`session-` prefix is reserved for new explicit checkpoints.
 
 Restoration creates a new head revision, advances its epoch and generation,
 and clears the writer lease. It replaces the replay log while retaining pinned
