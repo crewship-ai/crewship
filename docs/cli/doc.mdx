@@ -309,8 +309,14 @@ current editor and unsaved draft. Browsing does not restore or overwrite content
 ## `crewship doc checkpoints <page-slug>`
 
 `crewship doc checkpoints <page-slug>` lists at most the latest 1,000 retained
-checkpoint pins, ordered by revision and identity. Checkpoints are explicit saved
-pins, not every editor keystroke. Older pins remain retained and can be read by ID.
+checkpoint pins, ordered by revision and identity. Checkpoints are saved pins,
+not every editor keystroke: the initial state, explicit checkpoints, and a
+session checkpoint of the confirmed result when an edit arrives more than ten
+minutes after the newest checkpoint, or at least a minute after another
+author's. Session checkpoints share at most half of the document's History
+budget and never refuse an edit. When that half is full, the oldest session
+checkpoints are dropped to keep the newest; the initial and explicit
+checkpoints are kept. Older pins remain retained and can be read by ID.
 Each entry in `checkpoints` has `id`, `rev`, `schema`, `actor` and `created_at`.
 A valid document with no retained pins returns an empty `checkpoints` list.
 `404 document history unavailable` means the document state or selected

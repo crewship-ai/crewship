@@ -43,7 +43,14 @@ Initialization atomically retains revision 0 under an `initial-` ID derived from
 the initialization request digest, with the same trusted actor and history byte
 budget. Exact retries retain that one checkpoint without another receipt. Later
 human edits leave the initial version readable; existing documents are not
-backfilled and individual edits do not automatically create checkpoints.
+backfilled. Individual edits are not all pinned: a commit pins its confirmed
+result as a `session-` checkpoint when the newest checkpoint is older than ten
+minutes, or was written by another actor at least one minute ago. Session pins
+are best effort (they never refuse the edit; a pin refused by the History,
+workspace storage or disk budget is undone in a savepoint), write no receipt,
+and share at most half of the History byte budget, so explicit checkpoints and
+restores keep their headroom. When that half is full the oldest session pins
+are dropped for the newest; initial and explicit checkpoints never are.
 Restoration creates a new head revision, advances its epoch and generation,
 and clears the writer lease. It replaces the replay log while retaining pinned
 checkpoints and retry receipts. Checkpoint and restore retries bind the original
