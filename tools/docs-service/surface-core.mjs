@@ -59,7 +59,8 @@ export function createSurface({ Y }) {
   // and right origin IDs (client and clock varuints, at most 8 bytes each), the
   // parent root name and key strings, the content length, and one delete-set
   // range (clock and length) once it is overwritten or deleted.
-  const ITEM = 1 + 2 * 16 + 1 + 5 + 5 + 5 + 16;
+  // Fields are bounded generously; the slack also covers GC structs between items.
+  const ITEM = 1 + 2 * 16 + 1 + 5 + 5 + 8 + 16;
   const encoded = (root, key, values) => ITEM + utf8(root) + utf8(key) + values.reduce((sum, v) => sum + any(v), 0);
   // Per writer: a struct-run header (count, client, clock) and a delete-set client entry.
   const WRITER = 5 + 8 + 8 + 8 + 5;
