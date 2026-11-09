@@ -19,6 +19,9 @@ const textBoundary = (text, index) => index === 0 || index === text.length ||
 const contentSchema = version => version === 1 ? VERSION : version;
 const PROPOSAL_VERSION = FORMATTED_VERSION;
 const supportedSchema = version => [1, VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION].includes(version);
+// Mirrors Go documents.RestoredSchema (#5155): a restore never takes a schema 5
+// Document below schema 5, so schema 4 proposals are never silently re-enabled.
+const restoredSchema = (current, checkpoint) => current === LATEST_VERSION && checkpoint < LATEST_VERSION ? LATEST_VERSION : checkpoint;
 // Schemas 3, 4 and 5 are bound to their original Page and carry rich semantic proofs.
 const richSchema = version => version === RICH_VERSION || version === FORMATTED_VERSION || version === LATEST_VERSION;
 async function verifyTargets(doc, targets, version = VERSION) {
@@ -224,7 +227,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint });
     if (receipt.found) {
       let schema = operation === 'upgrade' ? request.target_schema : request.schema;
-      if (operation === 'restore') { const pinned = await go(page,'checkpoint-read',context,{id:request.checkpoint}); schema = pinned.schema ?? VERSION; }
+      if (operation === 'restore') { const pinned = await go(page,'checkpoint-read',context,{id:request.checkpoint}); schema = restoredSchema(state.schema, pinned.schema ?? VERSION); }
       return { ...receipt, schema, epoch:syncEpoch(state), duplicate: true };
     }
     if (request.schema !== state.schema && !(state.schema === 1 && request.schema === VERSION)) throw fault(409,'unsupported client schema; reopen the confirmed document');
@@ -281,7 +284,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         leases.delete(key);
         return {...result,schema:LATEST_VERSION,epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
       }
-      const hashes = {}; let semantic; let resultVersion = version;
+      const hashes = {}; let semantic; let resultVersion = version; let restored;
       switch (operation) {
         case 'patch':
           if (request.kind === 'human') {
@@ -308,7 +311,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
           if (request.ifRev !== state.rev) throw fault(409, 'restore precondition conflict');
           const checkpoint = await go(page, 'checkpoint-read', context, { id: request.checkpoint });
           if (checkpoint.schema !== undefined && !supportedSchema(checkpoint.schema)) throw fault(409, 'unsupported checkpoint schema');
-          resultVersion = contentSchema(checkpoint.schema??VERSION); doc.destroy(); doc = load(checkpoint.snapshot); break;
+          resultVersion = contentSchema(checkpoint.schema??VERSION); restored = restoredSchema(state.schema, checkpoint.schema??VERSION); doc.destroy(); doc = load(checkpoint.snapshot); break;
         }
         case 'checkpoint':
           if (request.ifRev !== state.rev) throw fault(409, 'checkpoint precondition conflict');
@@ -320,7 +323,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       const blocks = (await outline(doc,resultVersion)).map(({ id, hash }) => ({ id, hash }));
       const renewal=await go(page, 'renew', context, { owner, epoch: lease.epoch, token: lease.token });
       if(renewal.expiresAt)lease.expiresAt=renewal.expiresAt;
-      if (operation === 'restore') return {...await go(page, 'restore', context, { id: request.id, fingerprint, checkpoint: request.checkpoint, ifRev: state.rev,generation:state.generation??0, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner }),epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
+      if (operation === 'restore') return {...await go(page, 'restore', context, { id: request.id, fingerprint, checkpoint: request.checkpoint, ifRev: state.rev,generation:state.generation??0, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner }),schema:restored,epoch:syncEpoch({...state,generation:(state.generation??0)+1})};
       if (operation === 'checkpoint') return {...await go(page, 'checkpoint', context, { id: request.id, fingerprint, epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, ifRev: state.rev,generation:state.generation??0, snapshot: snapshot(doc) }),epoch:syncEpoch(state)};
       return {...await go(page, 'commit', context, { id: request.id, fingerprint, kind: operation === 'patch' ? (context.authorization.startsWith('Bearer agtv2.') ? 'agent' : 'human') : operation, ...(operation === 'patch' && context.authorization.startsWith('Bearer agtv2.') ? { semantic } : {}), epoch: lease.epoch, leaseToken: lease.token, leaseOwner: owner, update: Buffer.from(Y.encodeStateAsUpdate(doc, baseVector)).toString('base64'), ifRev: state.rev, generation:state.generation??0, schema: version, snapshot: snapshot(doc), blocks, ifHashes: hashes, checkpoint: request.checkpoint }),epoch:syncEpoch(state)};
     } finally {

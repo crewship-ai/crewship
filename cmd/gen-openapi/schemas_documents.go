@@ -102,7 +102,7 @@ func documentSchemaCatalog() map[string]DomainSchema {
 		contract.SuccessHeaders = map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}}
 		out["GET "+path] = contract
 	}
-	out["GET "+base+"/people"] = DomainSchema{NoRequest: true, Response: ref("DocumentPeople"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "500", "503"},
+	out["GET "+base+"/people"] = DomainSchema{NoRequest: true, Response: ref("DocumentPeople"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "429", "500", "503"},
 		SuccessHeaders: map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}},
 		Parameters: []map[string]any{
 			{"name": "ids", "in": "query", "required": false, "schema": map[string]any{"type": "string"}, "description": "Comma-separated mention user ids (at most 100) to name for this reader."},

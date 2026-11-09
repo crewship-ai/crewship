@@ -64,6 +64,9 @@ type PageHandler struct {
 	designOnce sync.Once
 	design     *designHTTP
 
+	peopleOnce  sync.Once
+	peopleGuard *documentPeopleGuard
+
 	artifactMasterToken              string
 	documentStoreOptions             documents.Options
 	documentCall                     func(context.Context, string, string, string, string, any) ([]byte, int, error)

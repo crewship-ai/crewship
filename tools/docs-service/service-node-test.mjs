@@ -62,7 +62,7 @@ function authorityModel() {
       model.state = { ...model.state, schema: data.schema, rev: model.state.rev + 1, snapshot: data.snapshot };
     } else if (op === 'checkpoint') { model.checkpoints++; model.checkpointStates.set(data.id,{schema:model.state.schema,snapshot:model.state.snapshot}); }
     else if (op === 'upgrade') { assert.equal(data.schema,model.state.schema); assert.equal(data.targetSchema,LATEST_VERSION); assert.equal(data.ifRev,model.state.rev); assert.equal(data.generation,model.state.generation); model.state = {...model.state,schema:LATEST_VERSION,rev:model.state.rev+1,epoch:model.state.epoch+1,generation:model.state.generation+1}; }
-    else if (op === 'restore') { model.restores++; const source=model.checkpointStates.get(data.checkpoint)??model.state; model.state = { ...model.state,schema:source.schema,snapshot:source.snapshot, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1 }; }
+    else if (op === 'restore') { model.restores++; const source=model.checkpointStates.get(data.checkpoint)??model.state; model.state = { ...model.state,schema:model.state.schema===5&&source.schema<5?5:source.schema,snapshot:source.snapshot, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1 }; }
     const receipt = { id: data.id, rev: model.state.rev, epoch: model.state.epoch, fingerprint: data.fingerprint };
     model.receipts.set(data.id, receipt); return receipt;
   };
@@ -550,14 +550,16 @@ test('schema3 raw human marks are versioned; old clients and unqualified semanti
   const saved=await call(f.socket,'/v1/documents/p/patch',{id:'human-link',schema:LATEST_VERSION,page_id:'p',epoch:current.epoch,kind:'human',update});assert.equal(saved.status,200);const rich=(await read(f)).body;assert.equal(rich.schema,LATEST_VERSION);assert.equal(rich.content.content.find(node=>node.attrs?.id==='intro').content[0].marks[0].attrs.href,'https://example.invalid/');
  }finally{await f.close()}
 });
-test('mixed schema checkpoint read and restore use the actual source version without a silent upgrade',async()=>{
+test('mixed schema checkpoint read keeps the source version; restore onto schema 5 stays schema 5 and says so (#5155)',async()=>{
  const model=authorityModel(),f=await fixture(model.handle);await f.start();
  try {
   const old=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{id:'legacy-checkpoint',schema:2,epoch:old.epoch,ifRev:old.rev})).status,200);
   assert.equal((await call(f.socket,'/v1/documents/p/upgrade',{id:'mixed-upgrade',schema:2,target_schema:LATEST_VERSION,page_id:'p',epoch:old.epoch,ifRev:old.rev})).status,200);
   const current=(await read(f)).body;assert.equal((await call(f.socket,'/v1/documents/p/checkpoint',{id:'rich-checkpoint',schema:LATEST_VERSION,page_id:'p',epoch:current.epoch,ifRev:current.rev})).status,200);
-  const request={id:'restore-legacy',schema:LATEST_VERSION,page_id:'p',epoch:current.epoch,ifRev:current.rev,checkpoint:'legacy-checkpoint'};const restored=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(restored.status,200);const head=(await read(f)).body;assert.equal(head.schema,2);assert.notEqual(head.epoch,current.epoch);assert.equal(head.snapshot,old.snapshot);
-  const retry=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(retry.status,200);assert.equal(retry.body.schema,2);assert.equal(retry.body.rev,restored.body.rev);assert.equal(retry.body.duplicate,true);assert.equal(model.restores,1);
+  const request={id:'restore-legacy',schema:LATEST_VERSION,page_id:'p',epoch:current.epoch,ifRev:current.rev,checkpoint:'legacy-checkpoint'};const restored=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(restored.status,200);assert.equal(restored.body.schema,LATEST_VERSION);const head=(await read(f)).body;assert.equal(head.schema,LATEST_VERSION);assert.notEqual(head.epoch,current.epoch);assert.equal(head.snapshot,old.snapshot);
+  const retry=await call(f.socket,'/v1/documents/p/restore',request);assert.equal(retry.status,200);assert.equal(retry.body.schema,LATEST_VERSION);assert.equal(retry.body.rev,restored.body.rev);assert.equal(retry.body.duplicate,true);assert.equal(model.restores,1);
+  // Restoring pre-upgrade history does not silently re-enable schema 4 proposals.
+  const proposed=await call(f.socket,'/v1/documents/p/propose',{id:'after-restore',schema:LATEST_VERSION,page_id:'p',epoch:head.epoch,ifRev:head.rev,target:'one',ifHash:'0'.repeat(64),text:'x'},{Authorization:'Bearer agtv2.synthetic-run'});assert.equal(proposed.status,409);assert.match(proposed.body.error,/proposals require a schema 4 document/);
   const pinned=await call(f.socket,'/v1/documents/p/checkpoint-read',{checkpoint:'rich-checkpoint'});assert.equal(pinned.status,200);assert.equal(pinned.body.schema,LATEST_VERSION);
  }finally{await f.close()}
 });

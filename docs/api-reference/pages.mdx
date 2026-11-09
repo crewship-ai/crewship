@@ -2404,12 +2404,19 @@ no request body. Response: `people`, an array of `{id, name}`. With `ids`, only
 the listed people who can currently read this document are named; anyone else,
 including an unknown id, is simply absent, so the answer never reveals whether
 an id exists. With `q`, at most 20 such readers whose name contains the text
-(an empty `q` lists the first 20); the name match covers every member, and at most
-200 matching members are checked for access per request. Email addresses are never matched or returned.
+(an empty `q` lists the first 20). The name match and a first access filter
+both cover every member, so a reader is found however many other members share
+the text; at most 200 of those candidates get the exact access check per
+request. Email addresses are never matched or returned.
 A caller who cannot read the document gets 404, as for a missing Page.
+Each person may make 30 lookups at once and 2 per second after that, per
+workspace; beyond that the answer is 429 with `Retry-After` and code
+`document_people_rate_limit`. A workspace owner's or administrator's lookup
+that only their role makes possible is audited once per document and session
+(or CLI token) per hour, not once per keystroke.
 Statuses: 200 people; 400 invalid ids, both selectors, a repeated parameter or too-long text;
 401 invalid credential; 403 agent or missing scope; 404 unavailable Page or
-document; 500 storage failure; 503 disabled service. Responses use
+document; 429 lookup limit; 500 storage or audit failure; 503 disabled service. Responses use
 `Cache-Control: no-store`. CLI: `crewship doc people`.
 
 ## List saved document checkpoints
@@ -2455,15 +2462,19 @@ refused. Reading somebody else's private document as workspace OWNER requires
 an audit entry before disclosure; earlier checkpoint permissions are not reused.
 
 Request: one JSON object of at most 4096 bytes, with exactly `page_id`, `id`,
-`schema` (2, 3 or 4), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
+`schema` (2 to 5), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
 the current editing epoch and revision, a retained checkpoint ID and a new
 mutation ID. Page, mutation and checkpoint IDs contain 1–128 ASCII letters,
 digits, underscores or hyphens. A changed Page identity, revision or epoch
 refuses the operation; the server does not select a replacement checkpoint.
 
 Response 200: `page_id`, `id`, `rev`, a new `epoch`, `kind: "restore"` and
-optional `schema` and `duplicate`. Restoration creates a new revision, preserving
-the retained checkpoint. After an uncertain confirmation, retry the original
+`schema` (the Document's schema after the restore) and optional `duplicate`.
+Restoration creates a new revision, preserving the retained checkpoint. A
+schema 5 Document stays at schema 5 when you restore a checkpoint from before
+its upgrade: older content is valid schema 5 content, and agent proposals,
+which need schema 4, stay unavailable. Below schema 5 the Document takes the
+checkpoint's schema. After an uncertain confirmation, retry the original
 packet with the same mutation ID and preconditions; an exact authorized retry
 returns the original receipt without another restoration. A lost confirmation
 is not evidence that the write failed.

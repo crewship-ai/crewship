@@ -310,8 +310,10 @@ Document first and confirm the intended checkpoint. Keep the exact same packet
 for a retry after uncertain confirmation; never refresh its revision or epoch.
 The server checks current human write access. A successful restore increments
 the revision and generation and invalidates the previous writer epoch. The
-receipt has `page_id`, `id`, `rev`, `epoch` and `kind`. The first commit may
-omit `schema`; a replay may include it and `duplicate`.
+receipt has `page_id`, `id`, `rev`, `epoch`, `kind` and `schema`, the
+document's schema after the restore; a replay also has `duplicate`. A schema 5
+document stays at schema 5 when you restore a checkpoint from before its
+upgrade, so agent proposals (schema 4 only) stay unavailable.
 
 ```bash
 crewship doc restore @<artifact-id> --file restore.json
@@ -515,7 +517,9 @@ Name the people mentioned in a schema 5 document, or find people to mention.
 at most 20 people whose name contains the text. Only people who can read this
 document appear, and only when you can read it. Any other id is simply left out,
 so the answer never says whether an id exists; readers show it as
-**Unknown member**.
+**Unknown member**. Lookups are limited per person (30 at once, then 2 per
+second); past that the command fails with HTTP 429 and you retry after the
+`Retry-After` time.
 
 ```bash
 crewship doc people @<artifact-id> --ids <user-id>,<user-id>

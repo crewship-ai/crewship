@@ -77,7 +77,9 @@ A document becomes schema 4 or 5 only explicitly: initialize it with `"schema": 
 (see [`crewship doc initialize`](/cli/doc)) or `"schema": 5`, or upgrade an older
 document through the documents service's human-only upgrade, which always goes
 to the newest schema (5), keeps its content, history and comments and only
-widens what it may hold. An editor that does not know a document's schema opens
+widens what it may hold. Restoring a version from before that upgrade keeps
+the document at schema 5, so it never silently returns to schema 4 and agent
+proposals stay unavailable. An editor that does not know a document's schema opens
 it read-only with "This document needs a newer editor" and never saves over it.
 New documents from the Artifacts library and from agents in chat are still
 schema 3, because agent drafting works on schema 3 only; an agent cannot edit

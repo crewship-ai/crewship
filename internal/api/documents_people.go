@@ -2,10 +2,14 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
+	"math"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -104,6 +108,14 @@ func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "search text too long")
 		return
 	}
+	// The picker asks on every keystroke; each person has a bounded budget.
+	if user := UserFromContext(r.Context()); user != nil {
+		if wait := h.documentPeople().take(WorkspaceIDFromContext(r.Context()), user.ID); wait > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(int(math.Ceil(wait.Seconds()))))
+			writeJSON(w, 429, map[string]string{"error": "too many people lookups; wait and retry", "code": "document_people_rate_limit"})
+			return
+		}
+	}
 	// Resolves the Page and answers 503/404 the way the document read does;
 	// the record itself is read again inside the snapshot below.
 	if _, ok := h.documentPage(w, r); !ok {
@@ -171,16 +183,12 @@ func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
 		h.replyDocumentPeople(w, outer, tx, rec, people)
 		return
 	}
-	// The name match runs in SQL, so every member can be found; at most
-	// documentPeopleCheckLimit matching candidates get an authority check.
-	// Unicode case folding, as other name searches do; on private output only
-	// its custodian and the workspace administrators can be readers at all.
-	audience, args := "", []any{workspace, search}
-	if rec.PrivateAudience {
-		audience = ` AND (u.id=? OR m.role IN ('OWNER','ADMIN'))`
-		args = append(args, rec.OwnerUserID)
-	}
-	args = append(args, documentPeopleCheckLimit)
+	// The name match and the access filter both run in SQL before the limit,
+	// so a reader is found however many non-readers share the search text; at
+	// most documentPeopleCheckLimit candidates then get the exact authority
+	// check. Unicode case folding, as other name searches do.
+	audience, audienceArgs := documentPeopleAudience(rec)
+	args := append(append([]any{workspace, search}, audienceArgs...), documentPeopleCheckLimit)
 	rows, err := tx.QueryContext(ctx, `SELECT u.id, COALESCE(u.full_name,'') FROM workspace_members m
 JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL
 WHERE m.workspace_id=? AND trim(COALESCE(u.full_name,''))<>'' AND instr(crewship_casefold(u.full_name), crewship_casefold(?))>0`+audience+`
@@ -222,14 +230,94 @@ ORDER BY crewship_casefold(u.full_name), u.id LIMIT ?`, args...)
 	h.replyDocumentPeople(w, outer, tx, rec, people)
 }
 
+// documentPeopleAudience narrows the search to the people who can possibly
+// read this Document, in SQL: a superset of documentReader that the exact
+// check then decides. Private output has only its custodian and the workspace
+// administrators. Any other Document page: unrestricted members who are
+// OWNER/ADMIN, its owner, in its owning crew, or named, directly or through a
+// crew, by a grant or by its folder's ACL (or the workspace is named). Agent
+// grants never make a person a reader.
+func documentPeopleAudience(rec *pageRecord) (string, []any) {
+	if rec.PrivateAudience {
+		return ` AND (u.id=? OR m.role IN ('OWNER','ADMIN'))`, []any{rec.OwnerUserID}
+	}
+	const named = `(s.subject_type='workspace' OR (s.subject_type='user' AND s.subject_id=u.id) OR (s.subject_type='crew' AND s.subject_id IN (SELECT cm.crew_id FROM crew_members cm WHERE cm.user_id=u.id)))`
+	return ` AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=m.user_id AND restricted.access_mode='restricted')
+AND (m.role IN ('OWNER','ADMIN') OR u.id=?
+ OR EXISTS(SELECT 1 FROM crew_members cm WHERE cm.user_id=u.id AND cm.crew_id=?)
+ OR EXISTS(SELECT 1 FROM page_grants s WHERE s.page_id=? AND ` + named + `)
+ OR EXISTS(SELECT 1 FROM page_folder_acl s WHERE s.folder_id=? AND ` + named + `))`,
+		[]any{rec.OwnerUserID, rec.OwnerCrewID, rec.ID, rec.FolderID}
+}
+
 // replyDocumentPeople ends the read snapshot first, then records the audited
-// administrator read of private output (a write) and only then answers.
+// administrator read (a write) and only then answers. An administrator's
+// role-only lookups are audited once per Document, custodian and credential
+// within documentPeopleAuditWindow, not once per keystroke of the picker.
 func (h *PageHandler) replyDocumentPeople(w http.ResponseWriter, r *http.Request, tx *sql.Tx, rec *pageRecord, people []documentPerson) {
 	_ = tx.Rollback()
+	key, role := documentPeopleAuditKey(r, rec), ""
+	if user := UserFromContext(r.Context()); user != nil && user.ID != rec.OwnerUserID && key != "" {
+		var err error
+		role, err = h.liveContentHumanRole(r.Context(), WorkspaceIDFromContext(r.Context()), user.ID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			replyInternalError(w, h.logger, "authorize document people audit", err)
+			return
+		}
+	}
+	if !workspaceArtifactReader(role) {
+		if !h.auditPrivateOwnerAccess(w, r, rec) {
+			return
+		}
+		writeJSON(w, 200, documentPeopleResponse{People: people})
+		return
+	}
+	// The audit is appended in a batch this handler owns, so a repeat lookup
+	// in the same session can be dropped instead of committed.
+	r, b, err := h.startMetadataRead(r, true)
+	if err != nil {
+		replyInternalError(w, h.logger, "begin document people audit", err)
+		return
+	}
+	defer b.tx.Rollback()
 	if !h.auditPrivateOwnerAccess(w, r, rec) {
 		return
 	}
+	if len(b.audits) > 0 && !h.documentPeople().auditedRecently(key) {
+		if !h.finishMetadataRead(w, r, b) {
+			return
+		}
+		h.documentPeople().rememberAudit(key)
+	}
 	writeJSON(w, 200, documentPeopleResponse{People: people})
+}
+
+// documentPeopleAuditKey names one administrator read: workspace, Document,
+// its custodian and audience, and the exact credential (session or CLI token
+// digest). "" when the credential cannot be named, so every lookup is audited.
+func documentPeopleAuditKey(r *http.Request, rec *pageRecord) string {
+	user := UserFromContext(r.Context())
+	if user == nil {
+		return ""
+	}
+	var credential string
+	switch AuthKindFromContext(r.Context()) {
+	case AuthKindSession:
+		if user.SessionID == "" {
+			return ""
+		}
+		credential = "session:" + user.SessionID
+	case AuthKindCLIToken:
+		token := extractToken(r)
+		if token == "" {
+			return ""
+		}
+		sum := sha256.Sum256([]byte(token))
+		credential = "cli:" + hex.EncodeToString(sum[:])
+	default:
+		return ""
+	}
+	return strings.Join([]string{WorkspaceIDFromContext(r.Context()), user.ID, rec.ID, rec.OwnerUserID, strconv.FormatBool(rec.PrivateAudience), credential}, "\x00")
 }
 
 func (h *PageHandler) documentPersonFor(ctx context.Context, workspace string, rec *pageRecord, id string) (documentPerson, bool, error) {

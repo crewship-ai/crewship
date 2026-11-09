@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/auth/sessions"
@@ -48,13 +49,7 @@ func documentPeopleFixture(t *testing.T, private bool) (*PageHandler, string, st
 
 func documentPeopleCall(t *testing.T, h *PageHandler, ws, caller, role, query string) (int, []documentPerson) {
 	t.Helper()
-	r := documentPeopleRequest(t, h, ws, caller, role, query)
-	h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
-		t.Fatal("people must never call the document engine")
-		return nil, 0, nil
-	}
-	w := httptest.NewRecorder()
-	h.DocumentPeople(w, r)
+	w := documentPeopleServe(t, h, documentPeopleRequest(t, h, ws, caller, role, query))
 	if w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("people response must not be cached: %q", w.Header().Get("Cache-Control"))
 	}
@@ -70,16 +65,39 @@ func documentPeopleCall(t *testing.T, h *PageHandler, ws, caller, role, query st
 	return w.Code, body.People
 }
 
-// documentPeopleRequest: a current browser session for caller.
+// documentPeopleServe answers r with an engine that must never be called.
+func documentPeopleServe(t *testing.T, h *PageHandler, r *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
+	h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
+		t.Fatal("people must never call the document engine")
+		return nil, 0, nil
+	}
+	w := httptest.NewRecorder()
+	h.DocumentPeople(w, r)
+	return w
+}
+
+// documentPeopleRequest: a new current browser session for caller.
 func documentPeopleRequest(t *testing.T, h *PageHandler, ws, caller, role, query string) *http.Request {
+	t.Helper()
+	return documentPeopleSessionRequest(t, h, ws, caller, role, query, documentPeopleSession(t, h, caller))
+}
+
+func documentPeopleSession(t *testing.T, h *PageHandler, caller string) string {
 	t.Helper()
 	session, err := sessions.NewDBStore(h.db).Create(t.Context(), caller, "document-people", "127.0.0.1", auth.RefreshTokenTTL)
 	if err != nil {
 		t.Fatal(err)
 	}
+	return session.ID
+}
+
+// documentPeopleSessionRequest: a request on an existing session.
+func documentPeopleSessionRequest(t *testing.T, h *PageHandler, ws, caller, role, query, sessionID string) *http.Request {
+	t.Helper()
 	r := pagesRequest(t, "GET", "/api/v1/pages/people-doc/document/people?"+query, ws, caller, role, "")
 	ctx := context.WithValue(r.Context(), ctxAuthKind, AuthKindSession)
-	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: caller, SessionID: session.ID})
+	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: caller, SessionID: sessionID})
 	r = r.WithContext(ctx)
 	r.SetPathValue("slug", "people-doc")
 	return r
@@ -302,6 +320,100 @@ func TestDocumentPeopleAdministratorReadIsAudited(t *testing.T) {
 			documentPeopleCall(t, h, ws, owner, "OWNER", "ids="+owner)
 			if after := adminReadAudits(t, h, action, owner, "people-page"); after != 0 {
 				t.Fatalf("owner read audited: %d", after)
+			}
+		})
+	}
+}
+
+// Review round 4, nit 1: the access filter runs before the candidate limit, so
+// a reader is found however many non-readers share the search text, through
+// every way a person reaches a Document page: a user grant, a crew grant and
+// the folder ACL (a Document page is always owned by a person).
+func TestDocumentPeopleSearchFindsReadersBehindManyNonReaders(t *testing.T) {
+	h, ws, owner := documentPeopleFixture(t, false)
+	for i := 0; i < 300; i++ {
+		id := fmt.Sprintf("al%04d", i)
+		execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, id, id+"@example.invalid", "Alex "+id)
+		execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, id+"-m", ws, id)
+	}
+	for _, person := range []string{"zgrant", "zcrew", "zfolder"} {
+		execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, person, person+"@example.invalid", "Alex Z "+person)
+		execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, person+"-m", ws, person)
+	}
+	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','user','zgrant','read',?)`, owner)
+	execOrFatal(t, h.db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('crew-granted',?,'Granted','granted')`, ws)
+	execOrFatal(t, h.db, `INSERT INTO crew_members(id,crew_id,user_id) VALUES('cm-zcrew','crew-granted','zcrew')`)
+	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','crew','crew-granted','read',?)`, owner)
+	execOrFatal(t, h.db, `INSERT INTO page_folders(id,workspace_id,slug,name,owner_crew_id,created_at,updated_at) VALUES('people-folder',?,'people-folder','Folder','crew-lookout',datetime('now'),datetime('now'))`, ws)
+	execOrFatal(t, h.db, `INSERT INTO page_folder_acl(folder_id,subject_type,subject_id,can_read,can_write,set_at) VALUES('people-folder','user','zfolder',1,0,datetime('now'))`)
+	execOrFatal(t, h.db, `UPDATE pages SET folder_id='people-folder' WHERE id='people-page'`)
+	_, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q=alex")
+	if strings.Join(names(found), "|") != "zcrew=Alex Z zcrew|zfolder=Alex Z zfolder|zgrant=Alex Z zgrant" {
+		t.Fatalf("readers behind non-readers: %v", names(found))
+	}
+	// A grant to the whole workspace makes every unrestricted member a reader.
+	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','workspace','',?,?)`, "read", owner)
+	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q=alex"); len(found) != documentPeopleResultLimit {
+		t.Fatalf("workspace grant: %d people", len(found))
+	}
+}
+
+// Review round 4, nit 2: lookups are rate limited per person and workspace,
+// with Retry-After; another person is unaffected.
+func TestDocumentPeopleIsRateLimitedPerPerson(t *testing.T) {
+	h, ws, owner := documentPeopleFixture(t, false)
+	frozen := time.Now()
+	h.documentPeople().now = func() time.Time { return frozen }
+	limited := 0
+	for i := 0; i < documentPeopleBurst+5; i++ {
+		w := documentPeopleServe(t, h, documentPeopleRequest(t, h, ws, owner, "OWNER", "q=b"))
+		if w.Code == http.StatusTooManyRequests {
+			limited++
+			if w.Header().Get("Retry-After") == "" {
+				t.Fatal("429 without Retry-After")
+			}
+		} else if w.Code != 200 {
+			t.Fatalf("call %d: %d", i, w.Code)
+		}
+	}
+	if limited != 5 {
+		t.Fatalf("limited %d of %d calls", limited, documentPeopleBurst+5)
+	}
+	if status, _ := documentPeopleCall(t, h, ws, "bea", "MEMBER", "q=b"); status != 200 {
+		t.Fatalf("another reader limited: %d", status)
+	}
+	// The budget refills over time.
+	frozen = frozen.Add(time.Second)
+	if status, _ := documentPeopleCall(t, h, ws, owner, "OWNER", "q=b"); status != 200 {
+		t.Fatalf("refilled budget refused: %d", status)
+	}
+}
+
+// Review round 4, nit 3: an administrator's role-only lookups are audited once
+// per Document and session, not once per keystroke; a new session is a new read.
+func TestDocumentPeopleAdministratorAuditOncePerSession(t *testing.T) {
+	for _, private := range []bool{true, false} {
+		t.Run(fmt.Sprint("private=", private), func(t *testing.T) {
+			h, ws, owner := documentPeopleFixture(t, private)
+			execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES('adm','adm@example.invalid','Zed Admin')`)
+			execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('adm-m',?,'adm','ADMIN')`, ws)
+			action := auditActionWorkspaceAdminArtifactRead
+			if private {
+				action = auditActionPrivateArtifactRead
+			}
+			session := documentPeopleSession(t, h, "adm")
+			for _, q := range []string{"q=t", "q=te", "q=tes", "ids=" + owner} {
+				w := documentPeopleServe(t, h, documentPeopleSessionRequest(t, h, ws, "adm", "ADMIN", q, session))
+				if w.Code != 200 {
+					t.Fatalf("%s: %d", q, w.Code)
+				}
+			}
+			if got := adminReadAudits(t, h, action, "adm", "people-page"); got != 1 {
+				t.Fatalf("one session audited %d times", got)
+			}
+			w := documentPeopleServe(t, h, documentPeopleRequest(t, h, ws, "adm", "ADMIN", "q=t"))
+			if w.Code != 200 || adminReadAudits(t, h, action, "adm", "people-page") != 2 {
+				t.Fatalf("a new session must be audited again: %d", w.Code)
 			}
 		})
 	}
