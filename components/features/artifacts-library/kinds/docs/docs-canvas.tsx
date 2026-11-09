@@ -9,6 +9,7 @@ import { cn } from "@/lib/utils"
 import { fitAll, focusRect, moved, nextPlacement, nudged, pan, resized, toWorld, wheelFactor, zoomAt, type Handle, type Rect, type Viewport } from "@/lib/documents/canvas-viewport"
 import { documentSurface, type SurfaceItem, type SurfacePlacement, type SurfaceView } from "@/lib/documents/surface"
 import type { DocumentComment } from "@/hooks/use-document-comments"
+import { mentionLabel, type MentionNames } from "@/lib/documents/mention-names"
 
 /**
  * The Canvas view of one Docs document (R71 rev 2 §0.4). It shows the same
@@ -42,8 +43,8 @@ export interface DocsCanvasProps {
   comments?: readonly DocumentComment[]
   /** Open these threads (the same ones the Page lists) in the Comments drawer. */
   onOpenComments?: (blockId: string, threadIds: string[]) => void
-  /** Display name for a mentioned workspace member; unknown members show as "Unknown member". */
-  memberName?: (userId: string) => string | undefined
+  /** The session's reader-scoped mention lookup, shared with the Page; without it every mention is "@Unknown member". */
+  mentions?: MentionNames
 }
 
 type Drag =
@@ -93,11 +94,15 @@ function runsOf(node: Y.XmlElement | Y.XmlText): TextRun[] {
 }
 
 /** A card shows the Page block's formatting with the same palette as the Page editor; links are not followable on the canvas. */
-function FormattedRuns({ runs, memberName }: { runs: TextRun[]; memberName?: (userId: string) => string | undefined }) {
+function FormattedRuns({ runs, mentions }: { runs: TextRun[]; mentions?: MentionNames }) {
+  const ids = runs.flatMap(run => run.atom?.kind === "mention" ? [run.atom.userId] : []).join(",")
+  React.useEffect(() => { if (ids) mentions?.want(ids.split(",")) }, [mentions, ids])
+  const none = React.useCallback(() => () => {}, [])
+  React.useSyncExternalStore(mentions ? mentions.subscribe : none, () => mentions?.version() ?? 0, () => 0)
   return <>{runs.map((run, index) => {
-    // Atoms are read-only chips, like on the Page: the date as its ISO day, a mention as @name (or @Unknown member).
+    // Atoms are read-only chips, like on the Page: the date as its ISO day, a mention by the Page's reader-scoped rule.
     if (run.atom?.kind === "date") return <time key={index} data-date={run.atom.value} dateTime={run.atom.value} className="rounded-sm bg-muted px-1">{run.atom.value}</time>
-    if (run.atom?.kind === "mention") return <span key={index} data-mention={run.atom.userId} className="rounded-sm bg-muted px-1">@{memberName?.(run.atom.userId) || "Unknown member"}</span>
+    if (run.atom?.kind === "mention") return <span key={index} data-mention={run.atom.userId} className="rounded-sm bg-muted px-1">{mentionLabel(mentions, run.atom.userId)}</span>
     let node: React.ReactNode = run.text
     if (run.code) node = <code className="rounded bg-muted px-1 font-mono text-[0.9em]">{node}</code>
     if (run.bold) node = <strong>{node}</strong>
@@ -186,7 +191,7 @@ const handleClass: Record<string, string> = {
   se: "bottom-[-5px] right-[-5px] size-3 cursor-nwse-resize",
 }
 
-export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOpenComments, memberName }: DocsCanvasProps) {
+export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOpenComments, mentions }: DocsCanvasProps) {
   const { view: surface, blocks, error } = useSurface(doc)
   const ref = React.useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = React.useState<Viewport>({ x: -48, y: -48, scale: 1 })
@@ -391,7 +396,7 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
             className={cn("absolute overflow-hidden rounded-md border bg-card p-3 text-sm shadow-sm outline-none", editable ? "cursor-grab" : "cursor-default",
               selected === p.id && "ring-2 ring-primary")}
             style={{ left: r.x, top: r.y, width: r.w, minHeight: r.h, zIndex: p.z }}>
-            <p className={cn("whitespace-pre-wrap break-words", block.type === "heading" && "text-base font-semibold")}>{block.runs.some(run => run.text.trim() || run.atom) ? <FormattedRuns runs={block.runs} memberName={memberName} /> : <span className="text-muted-foreground">Empty block</span>}</p>
+            <p className={cn("whitespace-pre-wrap break-words", block.type === "heading" && "text-base font-semibold")}>{block.runs.some(run => run.text.trim() || run.atom) ? <FormattedRuns runs={block.runs} mentions={mentions} /> : <span className="text-muted-foreground">Empty block</span>}</p>
             {(threads.get(p.id)?.length ?? 0) > 0 && <button type="button" data-card-comments={p.id}
               aria-label={`${threads.get(p.id)!.length} open ${threads.get(p.id)!.length === 1 ? "comment" : "comments"} on this block`}
               onPointerDown={e => e.stopPropagation()} onClick={() => onOpenComments?.(p.id, threads.get(p.id)!)}

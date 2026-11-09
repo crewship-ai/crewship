@@ -97,7 +97,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const frame = useArtifactFrame()
   const layout: FrameLayout = frame?.layout ?? "desktop"
   const phone = layout === "phone"
-  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, restoreGuard, review } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS)
+  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, mentions, hasLocalDraft, downloadDraft, empty, restoreGuard, review } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS)
   // The outline is open by default only where it does not cover the page.
   const [outlineOpen, setOutlineOpen] = React.useState(layout === "desktop")
   const [sent, setSent] = React.useState(false)
@@ -143,10 +143,6 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     const target = [...editor.view.dom.querySelectorAll<HTMLElement>("[data-block-id]")].find(node => node.dataset.blockId === comment.block)
     target?.scrollIntoView?.({ block: "center", behavior: "smooth" })
   }
-  const memberName = React.useCallback((userId: string) => {
-    const member = (members.members ?? []).find(entry => entry.user.id === userId)
-    return member?.user.full_name || member?.user.email || undefined
-  }, [members.members])
   const stats = summary?.stats ?? { words: 0, minutes: 0 }
   // Proposals exist only where the server says so and the Doc's own schema
   // supports them (4, 5 or 6); otherwise no Propose mode and no tab.
@@ -261,7 +257,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     {view === "canvas" && <div id="docs-view-canvas" role="tabpanel" aria-labelledby="docs-mode-canvas" className="h-[calc(100dvh-8rem)] min-h-[480px] w-full px-2 pb-16 pt-14 md:px-4 md:pb-4">
       {banner}
       <DocsCanvas doc={sync.doc} editable={editable} origin={canvasOrigin} onOpenInPage={openInPage}
-        comments={discussion?.comments} onOpenComments={discussion ? openCanvasComments : undefined} memberName={memberName} />
+        comments={discussion?.comments} onOpenComments={discussion ? openCanvasComments : undefined} mentions={mentions} />
     </div>}
 
     <ArtifactSlot name="view" label="View">

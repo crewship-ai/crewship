@@ -158,6 +158,32 @@ func TestDocumentPeopleNamesOnlyReadersAndOnlyToReaders(t *testing.T) {
 	}
 }
 
+// A Canvas Document (schema 6) renders mentions on the Page and on its cards
+// through this one lookup, so the rule must not depend on the schema: a name
+// only for a current reader of this Document, only to a reader, and it follows
+// a revoked grant on the next lookup.
+func TestDocumentPeopleOnACanvasDocumentNamesOnlyCurrentReaders(t *testing.T) {
+	h, ws, owner := documentPeopleFixture(t, false)
+	execOrFatal(t, h.db, `UPDATE documents SET schema_version=6 WHERE page_id='people-page'`)
+	status, people := documentPeopleCall(t, h, ws, owner, "OWNER", "ids="+url.QueryEscape("bea,cid,zed,sus,res,nobody"))
+	if status != 200 || strings.Join(names(people), "|") != "bea=Bea Member" {
+		t.Fatalf("canvas names = %d %v", status, names(people))
+	}
+	if status, people := documentPeopleCall(t, h, ws, "bea", "MEMBER", "ids="+url.QueryEscape("cid,"+owner)); status != 200 || strings.Join(names(people), "|") != "test-user-id=Test User" {
+		t.Fatalf("canvas reader = %d %v", status, names(people))
+	}
+	if status, _ := documentPeopleCall(t, h, ws, "cid", "MEMBER", "ids=bea"); status != 404 {
+		t.Fatalf("canvas non-reader got %d", status)
+	}
+	execOrFatal(t, h.db, `DELETE FROM page_grants WHERE page_id='people-page' AND subject_id='bea'`)
+	if _, people := documentPeopleCall(t, h, ws, owner, "OWNER", "ids=bea"); len(people) != 0 {
+		t.Fatalf("revoked reader still named: %v", names(people))
+	}
+	if status, _ := documentPeopleCall(t, h, ws, "bea", "MEMBER", "ids="+owner); status != 404 {
+		t.Fatalf("revoked reader may still look people up: %d", status)
+	}
+}
+
 func TestDocumentPeopleOnPrivateOutputFollowsThePrivateAudience(t *testing.T) {
 	h, ws, owner := documentPeopleFixture(t, true)
 	// A grant does not open private output; only its custodian (and the

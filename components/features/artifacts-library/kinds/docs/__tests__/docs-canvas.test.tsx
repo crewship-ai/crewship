@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import { documentSurface } from "@/lib/documents/surface"
+import { createMentionNames } from "@/lib/documents/mention-names"
 import { DocsCanvas, deleteConsequences, pageBlocks, threadsByBlock } from "../docs-canvas"
 import type { DocumentComment } from "@/hooks/use-document-comments"
 
@@ -65,7 +66,7 @@ describe("DocsCanvas", () => {
     expect(card("intro").getAttribute("aria-label")).toBe("Agree launch date with sales now")
   })
 
-  it("shows schema-5 date and mention atoms on the card as read-only chips, in place, like the Page", () => {
+  it("shows schema-5 date and mention atoms on the card as read-only chips, in place, like the Page", async () => {
     const doc = fixture()
     const intro = doc.getXmlFragment("default").get(1) as Y.XmlElement
     act(() => {
@@ -80,7 +81,9 @@ describe("DocsCanvas", () => {
       intro.insert(1, [date, mid, known, sep, unknown, tail])
     })
     documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })
-    render(<DocsCanvas doc={doc} editable origin="me" memberName={id => id === "user-ada" ? "Ada Lovelace" : undefined} />)
+    const names = createMentionNames("ws", "page", async url => Response.json({ people: new URL(url, "http://x").searchParams.get("ids")!.split(",").filter(id => id === "user-ada").map(id => ({ id, name: "Ada Lovelace" })) }))
+    render(<DocsCanvas doc={doc} editable origin="me" mentions={names} />)
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0)) })
     const shown = card("intro")
     expect(shown.querySelector("p")?.textContent).toBe("Due 2026-12-01 for @Ada Lovelace and @Unknown member.")
     const date = shown.querySelector("time[data-date]")
