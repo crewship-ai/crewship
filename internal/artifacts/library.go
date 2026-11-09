@@ -330,9 +330,12 @@ func (s *VersionStore) CheckLibraryUpdate(ctx context.Context, consumer VersionK
 			return e
 		}
 		if pub.Version == pin.LibraryVersion {
+			// A publication from before dependency validation may hold a font
+			// that is not a data URL; it has nothing a pin could copy, so the
+			// review stays as it was rather than failing.
 			deps, e := libraryDependencies(m)
 			if e != nil || len(deps) == 0 {
-				return e
+				return nil
 			}
 			out.FileChanges, out.NotCopied = diffLibraryFiles(pin.Files, deps), notCopied(deps)
 			out.UpdateAvailable, out.DependenciesMissing = true, true

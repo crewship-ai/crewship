@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -77,8 +78,7 @@ func TestArtifactLibraryPinFilesShareThePinAuthority(t *testing.T) {
 	mustExec(t, db, `INSERT INTO conversation_messages(id,session_id,agent_id,role,content,ts,author_user_id) VALUES('pin-message','pin-chat','pin-agent','user','use the brand fonts','2026-11-09T00:00:00Z',?)`, f.owner)
 	mustExec(t, db, `INSERT INTO artifact_run_principals(run_id,workspace_id,agent_id,crew_id,human_user_id,chat_id,message_id,member_id,member_revision,chat_generation,chat_revision,expires_at) VALUES('pin-run',?,'pin-agent','pin-crew',?,'pin-chat','pin-message','m',1,'g',1,'2099-01-01T00:00:00Z')`, f.ws, f.owner)
 	mustExec(t, db, `INSERT INTO artifact_project_run_consents(run_id,workspace_id,human_user_id,chat_id,message_id,expires_at,created_at,result_page_id) VALUES('pin-run',?,?,'pin-chat','pin-message','2099-01-01T00:00:00Z','2026-11-09T00:00:00Z',?)`, f.ws, f.owner, f.libID)
-	run := &artifactRunAuthority{WorkspaceID: f.ws, AgentID: "pin-agent", CrewID: "pin-crew", RunID: "pin-run", HumanUserID: f.owner}
-	for _, route := range []string{"library-pin", "library-pin/files"} {
+	runGet := func(run *artifactRunAuthority, route string) *httptest.ResponseRecorder {
 		req := httptest.NewRequest("GET", "/api/v1/pages/deck/artifact/"+route, nil)
 		req.Header.Set("Authorization", "Bearer "+f.tokens[f.owner])
 		ctx := withWorkspace(withUser(req.Context(), &AuthUser{ID: f.owner}), f.ws, "OWNER")
@@ -91,8 +91,63 @@ func TestArtifactLibraryPinFilesShareThePinAuthority(t *testing.T) {
 		} else {
 			f.h.GetArtifactLibraryPinFiles(w, req)
 		}
-		if w.Code != 404 || strings.Contains(w.Body.String(), "fonts/") {
+		return w
+	}
+	run := &artifactRunAuthority{WorkspaceID: f.ws, AgentID: "pin-agent", CrewID: "pin-crew", RunID: "pin-run", HumanUserID: f.owner}
+	for _, route := range []string{"library-pin", "library-pin/files"} {
+		if w := runGet(run, route); w.Code != 404 || strings.Contains(w.Body.String(), "fonts/") {
 			t.Fatalf("run bound to another page read %s: %d %s", route, w.Code, w.Body)
+		}
+	}
+}
+
+// Positive control for the binding above: an admitted run whose consent binds
+// it to the consumer reads the pin and its files.
+func TestArtifactLibraryPinFilesAdmittedRunBoundToTheConsumer(t *testing.T) {
+	t.Setenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED", "true")
+	f := artifactProjectOriginalRunFixture(t)
+	f.admit(t)
+	token := mintTokenFor(t, f.rig.db, f.a.HumanUserID, "library-pin-run")
+	human := func(method, slug, rest, body string, handler http.HandlerFunc) *httptest.ResponseRecorder {
+		r := pagesRequest(t, method, "/api/v1/pages/"+slug+rest, f.a.WorkspaceID, f.a.HumanUserID, "OWNER", body)
+		r.Header.Set("Authorization", "Bearer "+token)
+		r = r.WithContext(context.WithValue(r.Context(), ctxAuthKind, AuthKindCLIToken))
+		r.SetPathValue("slug", slug)
+		w := httptest.NewRecorder()
+		handler(w, r)
+		return w
+	}
+	must := func(code int, w *httptest.ResponseRecorder, what string) {
+		t.Helper()
+		if w.Code != code {
+			t.Fatalf("%s: %d %s", what, w.Code, w.Body)
+		}
+	}
+	font := "data:font/woff2;base64," + base64.StdEncoding.EncodeToString(append([]byte("wOF2"), make([]byte, 64)...))
+	lib := fmt.Sprintf(`{"slug":"run-lib","name":"Run library","base_version":0,"entrypoint":"index.html","files":[{"path":"index.html","media_type":"text/html","content":"<main>Library</main>"},{"path":"design-system.json","media_type":"application/json","content":%q},{"path":"fonts/Inter.woff2","media_type":"font/woff2","content":%q},{"path":"fonts/OFL.txt","media_type":"text/plain","content":"SIL Open Font License, Version 1.1"}]}`, `{"colors":{"primary":"#111"}}`, font)
+	must(201, human("POST", "artifacts", "", lib, f.pages.CreateArtifactProject), "create library")
+	must(201, human("POST", "artifacts", "", `{"slug":"run-deck","name":"Run deck",`+strings.TrimPrefix(artifactProjectBody(0, "Deck"), "{"), f.pages.CreateArtifactProject), "create deck")
+	must(200, human("POST", "run-lib", "/artifact/library/publish", `{"version":1}`, f.pages.PublishArtifactLibrary), "publish")
+	must(200, human("PUT", "run-deck", "/artifact/library-pin", `{"library":"run-lib","version":1,"if_pinned_version":0}`, f.pages.PutArtifactLibraryPin), "pin")
+	var deck string
+	if err := f.rig.db.QueryRow(`SELECT id FROM pages WHERE slug='run-deck'`).Scan(&deck); err != nil {
+		t.Fatal(err)
+	}
+	must(200, human("POST", "artifacts", "/consent", `{"run_id":"`+f.a.RunID+`","page_id":"`+deck+`"}`, f.pages.GrantArtifactProjectRunConsent), "consent")
+	for _, route := range []string{"library-pin", "library-pin/files"} {
+		r := pagesRequest(t, "GET", "/api/v1/pages/run-deck/artifact/"+route, f.a.WorkspaceID, f.a.HumanUserID, "OWNER", "")
+		r.Header.Set("Authorization", "Bearer "+token)
+		ctx := context.WithValue(context.WithValue(r.Context(), ctxAuthKind, AuthKindCLIToken), artifactRunKey{}, &f.a)
+		r = r.WithContext(ctx)
+		r.SetPathValue("slug", "run-deck")
+		w := httptest.NewRecorder()
+		if route == "library-pin" {
+			f.pages.GetArtifactLibraryPin(w, r)
+		} else {
+			f.pages.GetArtifactLibraryPinFiles(w, r)
+		}
+		if w.Code != 200 || !strings.Contains(w.Body.String(), "fonts/Inter.woff2") {
+			t.Fatalf("run bound to the consumer read %s: %d %s", route, w.Code, w.Body)
 		}
 	}
 }

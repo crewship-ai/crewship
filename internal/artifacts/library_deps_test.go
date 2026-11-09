@@ -309,3 +309,32 @@ func TestLibraryLegacyPinOffersItsMissingDependencies(t *testing.T) {
 		t.Fatalf("refreshed pin review %+v %v", up, err)
 	}
 }
+
+// An older publication may hold a font that is not a data URL (it predates
+// dependency validation). Reviewing a legacy pin of that version answers
+// without dependencies_missing instead of failing the check.
+func TestLibraryLegacyPinOfAnUnvalidatedPublicationStillReviews(t *testing.T) {
+	s, lib, consumer, a, read := libraryFixture(t)
+	ctx := t.Context()
+	tokens := `{"colors":{"primary":"#111"}}`
+	r := libraryWithFonts(0, tokens, fontBytes("wOF2", 300))
+	r.Files["fonts/Inter.woff2"] = VersionFile{Content: []byte("https://fonts.example/Inter.woff2"), MediaType: "font/woff2"}
+	if _, err := s.Apply(ctx, lib, r, a); err != nil {
+		t.Fatal(err)
+	}
+	// What a release before #5248 left behind: a publication and a pin with
+	// no dependency files, written without today's validation.
+	if _, err := s.db.Exec(`INSERT INTO artifact_library_publications(workspace_id,page_id,version,published_by,published_at) VALUES(?,?,1,'user-1','2026-11-01T00:00:00.000Z')`, lib.WorkspaceID, lib.PageID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.db.Exec(`INSERT INTO artifact_library_pins(workspace_id,page_id,library_page_id,library_version,library_name,content,sha256,copied_by,copied_at) VALUES(?,?,?,1,'Library',?,?,'user-1','2026-11-01T00:00:00.000Z')`, consumer.WorkspaceID, consumer.PageID, lib.PageID, []byte(tokens), sha256Hex([]byte(tokens))); err != nil {
+		t.Fatal(err)
+	}
+	up, err := s.CheckLibraryUpdate(ctx, consumer, a, func(string) LibraryVersionAuthorize { return read })
+	if err != nil {
+		t.Fatalf("review failed on an unvalidated publication: %v", err)
+	}
+	if up.UpdateAvailable || up.DependenciesMissing || up.PublishedVersion != 1 || !up.LibraryAvailable {
+		t.Fatalf("review %+v", up)
+	}
+}
