@@ -7,10 +7,11 @@
  * - `/pages[?…]` (and a `?ref=` that is not exactly one ID) → `/artifacts`
  * - `/pages/<slug>[?…]` → `/artifacts?item=<slug>`, which the restricted
  *   catalog answers for a granted artifact and gates for any other
- * - `/pages/@<id>`, `/pages?ref=<id>` → `/artifacts/<id>`, which is gated:
- *   the catalog names artifacts by slug only, so an ID never proves a grant
- * - `/pages/craft/editor?page_id=<id>` → `/artifacts/<id>`, gated like any ID;
- *   the route first runs the native read-loss proof (allowlisted `draft-key`)
+ * - `/pages/@<id>`, `/pages?ref=<id>` → `/artifacts/<id>`, which the
+ *   restricted catalog answers by its entries' `id` (#5135) and gates for any
+ *   other ID, with the same ID-free catalog read
+ * - `/pages/craft/editor?page_id=<id>` → `/artifacts/<id>`, matched like any
+ *   ID; the route first runs the native read-loss proof (allowlisted `draft-key`)
  *
  * Only the workspace link survives; versions, modes and project flags have
  * nothing to open in the restricted catalog.

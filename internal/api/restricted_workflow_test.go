@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -200,6 +201,27 @@ func TestRestrictedOrdinaryRoutineAndDeclaredPageUsePrivateQueue(t *testing.T) {
 	var shown []restrictedPage
 	if err = json.Unmarshal(pageCatalog.Body.Bytes(), &shown); err != nil || len(shown) != 1 {
 		t.Fatal("missing Page fingerprint", err)
+	}
+	// #5135: a granted entry carries the immutable page ID behind the member's
+	// /artifacts/<id> address, and exactly the declared catalog keys.
+	var keys []map[string]json.RawMessage
+	if err = json.Unmarshal(pageCatalog.Body.Bytes(), &keys); err != nil || len(keys) != 1 {
+		t.Fatal("catalog shape", err)
+	}
+	if string(keys[0]["id"]) != `"wf-page"` || string(keys[0]["slug"]) != `"private-page"` {
+		t.Fatalf("granted Page entry lacks its ID %s", pageCatalog.Body.String())
+	}
+	var names []string
+	for key := range keys[0] {
+		names = append(names, key)
+	}
+	sort.Strings(names)
+	if strings.Join(names, ",") != "actions,id,name,slug" {
+		t.Fatalf("restricted Page entry keys %v", names)
+	}
+	// A member without the grant learns neither the slug nor the ID.
+	if strings.Contains(otherCatalog.Body.String(), "wf-page") {
+		t.Fatalf("ungranted catalog named the page ID %s", otherCatalog.Body.String())
 	}
 	intent := shown[0].Actions[0].Intent
 	if intent == "" {

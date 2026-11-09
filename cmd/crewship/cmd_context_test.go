@@ -187,3 +187,29 @@ func TestContextChatStreamRequiresSuccessfulTerminal(t *testing.T) {
 		}
 	}
 }
+
+// #5135: `crewship context pages` prints each granted entry's immutable ID,
+// the member's /artifacts/<id> address, next to its slug.
+func TestContextPagesPrintsCatalogID(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"id":"page-brief","slug":"brief","name":"Brief","actions":[]}]`))
+	}))
+	defer server.Close()
+	cmd, args, err := newContextCommand().Find([]string{"pages"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = cmd.ParseFlags(args); err != nil {
+		t.Fatal(err)
+	}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	client := cli.NewClient(server.URL, "synthetic-token", "c0000000000000000000000000")
+	if err = executeContextCommand(cmd, client, "pages-list", cmd.Flags().Args()); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), `"id": "page-brief"`) || !strings.Contains(out.String(), `"slug": "brief"`) {
+		t.Fatalf("catalog output lacks the ID: %s", out.String())
+	}
+}
