@@ -152,6 +152,15 @@ func TestAcceptance_PageOwnerAuthorizesAgentProducer(t *testing.T) {
 	if err := db.QueryRow(`SELECT producer_retired_at IS NULL AND producer_designated_by_user_id='pa-owner' FROM page_panels WHERE panel_id='state'`).Scan(&live); err != nil || !live {
 		t.Fatalf("designation after authorize-producer: live=%v err=%v", live, err)
 	}
+	if out, code := run("owner", "page", "authorize-producer", "notes", "nope"); code != 3 {
+		t.Fatalf("owner authorize-producer on a missing panel: exit %d, want 3\n%s", code, out)
+	}
+	if _, err := db.Exec(`UPDATE page_panels SET producer_kind='script', producer_ref='state.sh' WHERE panel_id='state'`); err != nil {
+		t.Fatal(err)
+	}
+	if out, code := run("owner", "page", "authorize-producer", "notes", "state"); code != 5 {
+		t.Fatalf("owner authorize-producer on a script producer: exit %d, want 5\n%s", code, out)
+	}
 	var audits int
 	if err := db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='page.agent_producer.authorized'`).Scan(&audits); err != nil || audits != 1 {
 		t.Fatalf("authorization audits = %d (%v), want 1", audits, err)

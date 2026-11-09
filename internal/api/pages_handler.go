@@ -993,7 +993,11 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// document the editor renders is the whole page rather than a copy that
 	// loses its gates on save.
 	authored := h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec)
-	out := h.pageDocumentFor(r.Context(), rec, panels, viewer, authored)
+	docCtx := r.Context()
+	if agent, _ := pageGrantCallerIsAgent(r); agent {
+		docCtx = context.WithValue(docCtx, producerAuthorizationCallerKey{}, true)
+	}
+	out := h.pageDocumentFor(docCtx, rec, panels, viewer, authored)
 	if !h.finishMetadataRead(w, r, read) {
 		return
 	}
@@ -2122,7 +2126,7 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 		wire := h.panelWire(p)
 		if p.ProducerUnauthorized {
 			if canAuthorize == nil {
-				v := viewer != nil && viewer.UserID != "" && h.pageOwnerForDelegation(ctx, WorkspaceIDFromContext(ctx), viewer.UserID, rec)
+				v := h.mayAuthorizeProducersFor(ctx, viewer, rec)
 				canAuthorize = &v
 			}
 			wire.ProducerAuthorization = &pageProducerAuthorizationWire{Producer: p.producerRef(), CanAuthorize: *canAuthorize}

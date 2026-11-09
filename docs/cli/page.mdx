@@ -996,7 +996,8 @@ the page. Running it again changes nothing.
 Only the page's owner can run it (the owning user, or a member of the owning
 crew while the crew is not deleted), and only as a person. A workspace admin,
 an Edit grantee or an agent gets exit 4 with the reason. A panel whose producer
-is not an agent gets exit 5 (409), and an unknown page or panel gets exit 3
+is not an agent, or a private artifact (which delegates nothing to agents), gets
+exit 5 (409), and an unknown page or panel gets exit 3
 (404).
 
 ---

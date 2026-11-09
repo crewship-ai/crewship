@@ -27,7 +27,8 @@ var pageAuthorizeProducerCmd = &cobra.Command{
 	Long: `Authorize the agent a panel names as its producer, so it may push that
 panel's data. Only the page's owner can do this (the owning user, or a member
 of the owning crew while the crew is not deleted), and only a person: a
-workspace admin, an Edit grantee or an agent is refused with exit 4.
+workspace admin, an Edit grantee or an agent is refused with exit 4. A
+private artifact delegates nothing to agents and answers exit 5.
 
 A panel whose agent producer the owner did not name reads "Producer not
 authorized by the owner" and takes no pushes from that agent. That happens

@@ -343,7 +343,8 @@ owner. The button, `crewship page authorize-producer <page> <panel>` and
 thing. They make the producer the spec already declares the owner's own
 designation, write the audit entry `page.agent_producer.authorized`, and the
 agent can push again. Only the owner can do this, and only as a person: an
-admin, an Edit grantee or an agent gets 403. Like any designation, it ends if
+admin, an Edit grantee or an agent gets 403, and a private artifact, which
+delegates nothing to agents, answers 409. Like any designation, it ends if
 the page changes owner. The owner can also grant the agent `produce`, or point
 the panel at another producer, which is a new designation. The same holds
 for designations made before this rule: the upgrade reads who wrote each one

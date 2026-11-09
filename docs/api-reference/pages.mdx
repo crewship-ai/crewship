@@ -680,7 +680,7 @@ declared producer the owner's own designation. It writes the audit entry
 ends if the page changes owner, like any other. No body.
 
 **Response 200:** `{"page": "fleet-201", "panel": "sluzby", "producer": "agent/writer", "authorized": true, "changed": true}`.
-`changed` is false when the owner had already authorized it.
+`changed` is false when the designation was already live under the page's owner (on a crew-owned page, any member's live designation counts, and it is not re-attributed). `can_authorize` is false on a private artifact.
 
 **Statuses:**
 
@@ -690,7 +690,7 @@ ends if the page changes owner, like any other. No body.
 | 401 | No session or token. |
 | 403 | The caller is not the page's owner, or is an agent. Only for a caller who reaches the page. |
 | 404 | No such page or panel, or a page the caller [cannot reach](#unreachable-pages-are-not-found). |
-| 409 | The panel's producer is not an agent. |
+| 409 | The panel's producer is not an agent, or the page is a private artifact, which delegates nothing to agents. |
 
 ---
 

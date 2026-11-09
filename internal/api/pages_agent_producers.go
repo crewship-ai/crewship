@@ -29,6 +29,9 @@ const pageAgentProducerRetiredFault = "Producer not authorized by the owner: age
 	"because the page's current owner did not name it as the producer (or whoever named it no longer owns the page). " +
 	"Only the page's owner can authorize it: Authorize producer on this panel, or `crewship page authorize-producer <page> <panel>`."
 
+const pageAgentProducerPrivateRefusal = "private artifact audience delegates nothing to agents; " +
+	"an agent producer on a private artifact stays unauthorized"
+
 const pageAgentProducerAuthorizeRefusal = "only the artifact's owner can authorize an agent as a panel's producer (R71 §0.14/1); " +
 	"ask the page's owner to authorize it"
 
@@ -151,18 +154,31 @@ func (h *PageHandler) AuthorizePanelProducer(w http.ResponseWriter, r *http.Requ
 	if !h.pageOwnerForDelegation(r.Context(), wsID, user.ID, rec) {
 		// A caller the page is not reachable for gets the 404 an unknown
 		// slug gets, so the endpoint cannot be walked to find pages.
-		if !h.producerAuthorizationReachable(r.Context(), wsID, user.ID, rec) {
+		reachable, err := h.producerAuthorizationReachable(r.Context(), wsID, user.ID, rec)
+		if err != nil {
+			replyInternalError(w, h.logger, "resolve page reach for producer authorization", err)
+			return
+		}
+		if !reachable {
 			replyError(w, http.StatusNotFound, fmt.Sprintf("page %q not found", slug))
 			return
 		}
 		replyError(w, http.StatusForbidden, pageAgentProducerAuthorizeRefusal)
 		return
 	}
+	// A private artifact delegates nothing to agents (mayDelegateAgentEdit);
+	// authorizing a producer would hand an agent standing Edit of its data.
+	if rec.PrivateAudience {
+		replyError(w, http.StatusConflict, pageAgentProducerPrivateRefusal)
+		return
+	}
 
 	var kind, ref, designator string
-	var retired bool
-	err = tx.QueryRowContext(r.Context(), `SELECT producer_kind, producer_ref, COALESCE(producer_designated_by_user_id, ''), producer_retired_at IS NOT NULL
-		FROM page_panels WHERE page_id = ? AND panel_id = ?`, rec.ID, panelID).Scan(&kind, &ref, &designator, &retired)
+	var wasRetired, delegated bool
+	err = tx.QueryRowContext(r.Context(), `SELECT pp.producer_kind, pp.producer_ref, COALESCE(pp.producer_designated_by_user_id, ''),
+		pp.producer_retired_at IS NOT NULL, `+agentProducerDelegatedSQL+`
+		FROM page_panels pp JOIN pages p ON p.id = pp.page_id WHERE pp.page_id = ? AND pp.panel_id = ?`,
+		rec.ID, panelID).Scan(&kind, &ref, &designator, &wasRetired, &delegated)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, fmt.Sprintf("page %q has no panel %q", slug, panelID))
 		return
@@ -177,7 +193,9 @@ func (h *PageHandler) AuthorizePanelProducer(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	out := map[string]any{"page": rec.Slug, "panel": panelID, "producer": "agent/" + ref, "authorized": true, "changed": false}
-	if !retired && designator == user.ID {
+	// Already live under the page's owner (this person, or another member of
+	// the owning crew): nothing to do, and nothing is re-attributed.
+	if delegated {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
@@ -186,20 +204,21 @@ func (h *PageHandler) AuthorizePanelProducer(w http.ResponseWriter, r *http.Requ
 		replyInternalError(w, h.logger, "authorize panel producer", err)
 		return
 	}
+	var retiredNow bool
 	// The insert/update triggers retire a designation the owner did not make;
 	// read it back so a race with an ownership change cannot answer 200.
 	if err := tx.QueryRowContext(r.Context(), `SELECT producer_retired_at IS NOT NULL FROM page_panels WHERE page_id = ? AND panel_id = ?`,
-		rec.ID, panelID).Scan(&retired); err != nil {
+		rec.ID, panelID).Scan(&retiredNow); err != nil {
 		replyInternalError(w, h.logger, "read authorized producer", err)
 		return
 	}
-	if retired {
+	if retiredNow {
 		replyError(w, http.StatusForbidden, pageAgentProducerAuthorizeRefusal)
 		return
 	}
 	meta, _ := json.Marshal(map[string]any{
 		"panel_id": panelID, "producer": "agent/" + ref,
-		"previous_designated_by_user_id": designator, "previously_retired": retired || designator != user.ID,
+		"previous_designated_by_user_id": designator, "previously_retired": wasRetired,
 		"reason": "the artifact owner authorized the agent producer explicitly (R71 0.14/1)",
 	})
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO audit_logs(id, workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
@@ -216,15 +235,30 @@ func (h *PageHandler) AuthorizePanelProducer(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (h *PageHandler) producerAuthorizationReachable(ctx context.Context, wsID, userID string, rec *pageRecord) bool {
+func (h *PageHandler) producerAuthorizationReachable(ctx context.Context, wsID, userID string, rec *pageRecord) (bool, error) {
 	panels, err := h.loadPanels(ctx, wsID, rec.ID)
 	if err != nil {
-		return false
+		return false, err
 	}
 	viewer, err := h.loadViewer(ctx, wsID, userID)
 	if err != nil {
+		return false, err
+	}
+	return h.canSeePage(ctx, wsID, rec, panels, viewer)
+}
+
+// producerAuthorizationCallerKey marks a page read made by an agent, so the
+// document never offers it the owner's authorize button.
+type producerAuthorizationCallerKey struct{}
+
+// mayAuthorizeProducersFor is can_authorize on the wire: a person who owns
+// the page as delegation reads it, on a page that is not private.
+func (h *PageHandler) mayAuthorizeProducersFor(ctx context.Context, viewer *pageViewer, rec *pageRecord) bool {
+	if agent, _ := ctx.Value(producerAuthorizationCallerKey{}).(bool); agent {
 		return false
 	}
-	ok, err := h.canSeePage(ctx, wsID, rec, panels, viewer)
-	return err == nil && ok
+	if viewer == nil || viewer.UserID == "" || rec.PrivateAudience {
+		return false
+	}
+	return h.pageOwnerForDelegation(ctx, WorkspaceIDFromContext(ctx), viewer.UserID, rec)
 }
