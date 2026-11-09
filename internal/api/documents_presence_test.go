@@ -580,4 +580,44 @@ func TestDocumentPresenceCanvasTracksTheActiveTab(t *testing.T) {
 	if len(reply.Peers) != 1 || reply.Peers[0].Canvas != nil || reply.Peers[0].Client != "owner-page-1" {
 		t.Fatalf("Canvas hid the newly active Page tab: %+v", reply.Peers)
 	}
+	now = now.Add(time.Millisecond)
+	rig.beat("owner", "doc-a", canvasBeat("owner-canvas-1", `{"pointer":{"x":30,"y":40},"selection":["intro"]}`))
+	_, reply = rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+	if len(reply.Peers) != 1 || reply.Peers[0].Canvas == nil || reply.Peers[0].Canvas.Pointer == nil || reply.Peers[0].Canvas.Pointer.X == nil || *reply.Peers[0].Canvas.Pointer.X != 30 || reply.Peers[0].Client != "owner-canvas-1" {
+		t.Fatalf("a moving Canvas tab did not regain activity: %+v", reply.Peers)
+	}
+}
+
+func TestDocumentPresenceCanvasRevocation(t *testing.T) {
+	t.Run("grant revoked", func(t *testing.T) {
+		rig := presenceFixture(t)
+		body := canvasBeat("reader-canvas-1", `{"pointer":{"x":1,"y":2},"selection":["intro"]}`)
+		rig.beat("owner", "doc-a", canvasBeat("owner-canvas-1", `{"pointer":{"x":3,"y":4}}`))
+		if code, reply := rig.beat("reader", "doc-a", body); code != 200 || len(reply.Peers) != 1 || reply.Peers[0].Canvas == nil {
+			t.Fatalf("setup: reader cannot see Canvas presence: %d %+v", code, reply)
+		}
+		mustExec(t, rig.router.db, `DELETE FROM page_grants WHERE page_id='doc-a' AND subject_id='presence-reader'`)
+		if code, reply := rig.beat("reader", "doc-a", body); code != 404 || len(reply.Peers) != 0 {
+			t.Fatalf("revoked Canvas reader got %d %+v", code, reply)
+		}
+		if _, reply := rig.beat("owner", "doc-a", caret("owner-canvas-1", "o")); len(reply.Peers) != 0 {
+			t.Fatalf("revoked reader Canvas remains visible: %+v", reply.Peers)
+		}
+	})
+	t.Run("credential revoked in flight", func(t *testing.T) {
+		rig := presenceFixture(t)
+		body := canvasBeat("editor-canvas-1", `{"pointer":{"x":1,"y":2},"selection":["intro"]}`)
+		rig.beat("editor", "doc-a", body)
+		documentPresenceBeforeBeat = func() {
+			documentPresenceBeforeBeat = nil
+			rig.router.authMw.streams.NotifyTokenRevoked("clt-presence-editor")
+		}
+		t.Cleanup(func() { documentPresenceBeforeBeat = nil })
+		if code, reply := rig.beat("editor", "doc-a", body); code == 200 || len(reply.Peers) != 0 {
+			t.Fatalf("Canvas heartbeat raced revocation: %d %+v", code, reply)
+		}
+		if _, reply := rig.beat("owner", "doc-a", caret("owner-page-1", "o")); len(reply.Peers) != 0 {
+			t.Fatalf("late heartbeat resurrected revoked Canvas: %+v", reply.Peers)
+		}
+	})
 }
