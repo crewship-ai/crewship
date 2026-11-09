@@ -44,15 +44,20 @@ export function createTabs({ Y }) {
     : 6 + Object.entries(v).reduce((sum, [k, x]) => sum + 5 + utf8(k) + any(x), 0);
   const encoded = (root, key, values) => 1 + 32 + 1 + 5 + utf8(root) + 5 + utf8(key) + 8 + 16 + values.reduce((sum, v) => sum + any(v), 0);
   const WRITER = 34;
-  // Read without creating roots: a read must never write.
-  const read = (doc, name) => { const type = doc.share.get(name); return type instanceof Y.Map ? type : null; };
+  // Live entries of a map root without creating or converting it: a read must
+  // never write, and a freshly loaded root is still an untyped AbstractType.
+  const liveOf = (doc, name) => {
+    const type = doc.share.get(name), out = new Map();
+    if (type) for (const [key, item] of type._map) if (!item.deleted) out.set(key, item.content.getContent().at(-1));
+    return out;
+  };
 
   /**
    * Validate the tab maps, live and retained, and every `tab:` root's shape.
    * Returns { place, names, fragments, retained }. The content inside each
    * fragment is the document schema's job, as `default` is.
    */
-  function validateTabs(doc) {
+  function tabRoots(doc) {
     const fragments = new Set([DEFAULT]);
     for (const [name, type] of doc.share) {
       if (!name.startsWith(PREFIX)) continue;
@@ -62,6 +67,10 @@ export function createTabs({ Y }) {
       if (!(type instanceof Y.XmlFragment || type.constructor === Y.AbstractType) || type._map.size !== 0) fail('invalid tab root');
       fragments.add(id);
     }
+    return fragments;
+  }
+  function validateTabs(doc) {
+    const fragments = tabRoots(doc);
     const roots = new Map(), place = new Map(), names = new Map();
     for (const [name, target] of [[TABS, place], [NAMES, names]]) {
       const root = doc.share.get(name);
@@ -94,7 +103,7 @@ export function createTabs({ Y }) {
       if (retained > LIMITS.retainedBytes) fail('tab history limit');
     }
     if (visible(doc, { place, names, fragments }).size > LIMITS.tabs) fail('tab limit');
-    return { place, names, fragments, retained };
+    return { place, names, fragments, retained, writers };
   }
 
   // Shown tabs: `default`, any tab with metadata, and a fragment whose metadata was
@@ -190,22 +199,26 @@ export function createTabs({ Y }) {
   // add their counted cost, so typing a name is not O(history) per keystroke.
   const budgets = new WeakMap();
   const vector = doc => { let out = ''; for (const b of Y.encodeStateVector(doc)) out += String.fromCharCode(b); return out; };
-  const entries = map => new Map(map ? [...map.entries()] : []);
+  // Mutators stop at three quarters of the history budget: room for replicas that write concurrently.
+  const SOFT = Math.floor(LIMITS.retainedBytes * 3 / 4);
   function prepare(doc) {
     const cached = budgets.get(doc);
     let state;
     if (cached && cached.vector === vector(doc)) {
-      const fragments = new Set([DEFAULT, ...[...doc.share.keys()].filter(name => name.startsWith(PREFIX)).map(name => name.slice(PREFIX.length))]);
-      state = { place: entries(read(doc, TABS)), names: entries(read(doc, NAMES)), fragments, retained: cached.retained };
+      state = { place: liveOf(doc, TABS), names: liveOf(doc, NAMES), fragments: tabRoots(doc), retained: cached.retained, writers: cached.writers, estimated: true };
     } else state = validateTabs(doc);
     const rows = flat(treeOf(doc, state));
     return { state, rows, find: id => rows.find(n => n.id === id) };
   }
+  // writes: [root, key, value]. The same formula as the validator's walk, which may
+  // count less (overwritten values of one writer merge into one item); an estimate
+  // that reaches the soft cap is replaced by a fresh walk before anything is refused.
   function commit(doc, state, writes, action, origin) {
-    const cost = WRITER + writes.reduce((sum, [key, value]) => sum + encoded(NAMES, key, [value]), 0);
-    if (state.retained + cost > LIMITS.retainedBytes) fail('tab history limit');
+    const cost = (state.writers.has(doc.clientID) ? 0 : WRITER) + writes.reduce((sum, [root, key, value]) => sum + encoded(root, key, [value]), 0);
+    if (state.retained + cost > SOFT && state.estimated) { const fresh = validateTabs(doc); state.retained = fresh.retained; state.writers = fresh.writers; }
+    if (state.retained + cost > SOFT) fail('tab history limit');
     doc.transact(action, origin);
-    budgets.set(doc, { vector: vector(doc), retained: state.retained + cost });
+    budgets.set(doc, { vector: vector(doc), retained: state.retained + cost, writers: new Set([...state.writers, doc.clientID]) });
   }
   const height = n => 1 + Math.max(0, ...n.children.map(height));
   function blockIds(doc) {
@@ -214,7 +227,8 @@ export function createTabs({ Y }) {
       if (node instanceof Y.XmlElement && typeof node.getAttribute('id') === 'string') ids.add(node.getAttribute('id'));
       if (node instanceof Y.XmlElement || node instanceof Y.XmlFragment) for (const child of node.toArray()) visit(child);
     };
-    for (const [name, type] of doc.share) if ((name === DEFAULT || name.startsWith(PREFIX)) && type instanceof Y.XmlFragment) visit(type);
+    // Only called inside a write: typing a loaded root as a fragment emits nothing.
+    for (const name of [...doc.share.keys()]) if (name === DEFAULT || name.startsWith(PREFIX)) visit(doc.getXmlFragment(name));
     return ids;
   }
 
@@ -230,7 +244,7 @@ export function createTabs({ Y }) {
     if (!validID(blockId) || blockIds(doc).has(blockId)) fail('new block ID required');
     const { order, moves } = slot(doc, rows, state, parent, before, id);
     const value = { parent, order };
-    commit(doc, state, [[id, value], [id, name], ...moves], () => {
+    commit(doc, state, [[TABS, id, value], [NAMES, id, name], ...moves.map(([sibling, key]) => [TABS, sibling, { parent: state.place.get(sibling)?.parent ?? null, order: key }])], () => {
       const paragraph = new Y.XmlElement('paragraph'); paragraph.setAttribute('id', blockId);
       doc.getXmlFragment(fragmentName(id)).insert(0, [paragraph]);
       for (const [sibling, key] of moves) doc.getMap(TABS).set(sibling, { parent: state.place.get(sibling)?.parent ?? null, order: key });
@@ -246,7 +260,7 @@ export function createTabs({ Y }) {
     if (!find(id)) fail('tab required');
     if (!validName(name)) fail('invalid tab name');
     if (state.names.get(id) === name) return;
-    commit(doc, state, [[id, name]], () => doc.getMap(NAMES).set(id, name), origin);
+    commit(doc, state, [[NAMES, id, name]], () => doc.getMap(NAMES).set(id, name), origin);
   }
 
   /** Reorder or nest: placement only; the tab's content, name and comments are untouched. */
@@ -261,7 +275,7 @@ export function createTabs({ Y }) {
     }
     const { order, moves } = slot(doc, rows, state, parent, before, id);
     const value = { parent, order };
-    commit(doc, state, [[id, value], ...moves], () => {
+    commit(doc, state, [[TABS, id, value], ...moves.map(([sibling, key]) => [TABS, sibling, { parent: state.place.get(sibling)?.parent ?? null, order: key }])], () => {
       for (const [sibling, key] of moves) doc.getMap(TABS).set(sibling, { parent: state.place.get(sibling)?.parent ?? null, order: key });
       doc.getMap(TABS).set(id, value);
     }, origin);
@@ -277,15 +291,15 @@ export function createTabs({ Y }) {
     if (id === DEFAULT) fail('the first tab cannot be deleted');
     const self = find(id);
     if (!self) fail('tab required');
-    const children = rows.filter(n => n.parent === id).map(n => n.id);
-    const order = child => state.place.get(child)?.order ?? IMPLICIT.orphan;
-    const writes = children.map(child => [child, { parent: self.parent, order: order(child) }]);
+    // Children by the stored parent, not the displayed one (the depth clamp may show a child elsewhere).
+    const up = state.place.get(id)?.parent ?? null;
+    const writes = [...state.place].filter(([, v]) => v.parent === id).map(([child, v]) => [TABS, child, { parent: up, order: v.order }]);
     commit(doc, state, writes, () => {
-      for (const [child, value] of writes) doc.getMap(TABS).set(child, value);
+      for (const [, child, value] of writes) doc.getMap(TABS).set(child, value);
       const fragment = doc.getXmlFragment(fragmentName(id));
       if (fragment.length) fragment.delete(0, fragment.length);
-      if (read(doc, TABS)?.has(id)) doc.getMap(TABS).delete(id);
-      if (read(doc, NAMES)?.has(id)) doc.getMap(NAMES).delete(id);
+      if (state.place.has(id)) doc.getMap(TABS).delete(id);
+      if (state.names.has(id)) doc.getMap(NAMES).delete(id);
     }, origin);
   }
 

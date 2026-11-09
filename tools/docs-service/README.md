@@ -151,7 +151,11 @@ validator still refuses them as unsupported Yjs roots.
   in any stored state, of which mutators create at most 200 (room for
   concurrent creates), 120-character names, and 256 KiB of metadata history
   counted as an upper bound of its encoded bytes. Mutators check every limit
-  before writing; the full validation walk runs once per foreign change.
+  before writing and stop at three quarters of the history budget, leaving room
+  for concurrent replicas; the full validation walk runs once per foreign change.
+  A raw update can carry bytes its decoded values do not (an own `__proto__`
+  key is dropped by the decoder); the service never stores raw request bytes,
+  only the re-encoded document state and diff, so they never reach history.
 
 Admission (schema 7) still needs: the document validator to accept `tab:`
 fragments and the tab maps; block IDs unique across all tabs, including

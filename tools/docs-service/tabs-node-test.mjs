@@ -190,6 +190,43 @@ test('a new tab refuses a block ID another tab already uses, and reads never cre
   doc.destroy();
 });
 
+test('every mutator works on a freshly loaded document, whose maps are still untyped', () => {
+  const a = fixture();
+  createTab(a, { id: 'p', name: 'P', blockId: 'p-p' }); createTab(a, { id: 'c', name: 'C', parent: 'p', blockId: 'c-p' }); createTab(a, { id: 'q', name: 'Q', blockId: 'q-p' });
+  const moved = load(snapshot(a));
+  renameTab(moved, 'q', 'Queue'); moveTab(moved, 'q', { parent: null, before: 'p' });
+  assert.deepEqual(shape(tree(moved)), [['default', 'Tab 1'], ['q', 'Queue'], ['p', 'P', [['c', 'C']]]]);
+  const deleted = load(snapshot(a));
+  renameTab(deleted, 'q', 'Queue'); deleteTab(deleted, 'p');
+  assert.deepEqual(shape(tree(load(snapshot(deleted)))), [['default', 'Tab 1'], ['c', 'C'], ['q', 'Queue']], 'p is gone with its metadata; c moved up and keeps its own order');
+  const reused = load(snapshot(a));
+  assert.throws(() => createTab(reused, { id: 'n', name: 'N', blockId: 'c-p' }), /new block ID required/);
+  for (const d of [a, moved, deleted, reused]) d.destroy();
+});
+
+test('deleting a tab moves its stored children up, even one the depth clamp shows elsewhere', () => {
+  const a = fixture();
+  let parent = null;
+  for (let i = 0; i < 4; i++) { createTab(a, { id: 'a' + i, name: 'A' + i, parent, blockId: 'a' + i + '-p' }); parent = 'a' + i; }
+  createTab(a, { id: 'b0', name: 'B0', blockId: 'b0-p' }); parent = 'b0';
+  for (let i = 1; i < 4; i++) { createTab(a, { id: 'b' + i, name: 'B' + i, parent, blockId: 'b' + i + '-p' }); parent = 'b' + i; }
+  const b = load(snapshot(a));
+  moveTab(a, 'b0', { parent: 'a3' }); moveTab(b, 'a0', { parent: 'default' });
+  sync(a, b);
+  deleteTab(a, 'b2');
+  assert.equal(a.getMap(TABS).get('b3').parent, 'b1');
+  a.destroy(); b.destroy();
+});
+
+test('renames are refused near the history budget by the real count, not an estimate', () => {
+  const doc = fixture(); createTab(doc, { id: 'r', name: 'R', blockId: 'r-p' });
+  let n = 0;
+  try { for (; n < 100000; n++) renameTab(doc, 'r', 'Name ' + n); } catch (error) { assert.match(error.message, /tab history limit/); }
+  const used = validateTabs(load(snapshot(doc))).retained;
+  assert.ok(used > LIMITS.retainedBytes * 0.7 && used <= LIMITS.retainedBytes * 0.75, `refused at ${used} counted bytes after ${n} renames`);
+  doc.destroy();
+});
+
 test('fractional order keys stay strictly ordered under repeated inserts', () => {
   const keys = ['1'];
   for (let i = 0; i < 150; i++) {
