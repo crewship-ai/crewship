@@ -202,9 +202,17 @@ END;
 
 -- Provenance of the agent producers stored today: the human author of the
 -- first version in the latest unbroken run of versions naming this producer
--- for this panel. An agent author, or no version at all, is nobody.
+-- for this panel. An agent author, or no version at all, is nobody. So is a
+-- run that reaches back to the oldest kept version when that is not version
+-- 1: history was trimmed (trimPageVersions) and whoever named the producer is
+-- gone from it.
 UPDATE page_panels SET producer_designated_by_user_id=(
-  SELECT pv.author_user_id FROM page_versions pv
+  SELECT CASE
+          WHEN pv.author_agent_id IS NOT NULL THEN NULL
+          WHEN pv.seq > 1 AND NOT EXISTS(SELECT 1 FROM page_versions older WHERE older.page_id=pv.page_id AND older.seq < pv.seq) THEN NULL
+          ELSE pv.author_user_id
+         END
+    FROM page_versions pv
    WHERE pv.page_id=page_panels.page_id
      AND pv.seq > COALESCE((SELECT max(pb.seq) FROM page_versions pb
                              WHERE pb.page_id=page_panels.page_id

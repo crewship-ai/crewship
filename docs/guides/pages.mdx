@@ -322,13 +322,16 @@ declaration — that is what the grant is for.
 
 Naming an agent as a panel's producer hands that agent the panel's data, so
 only the page's owner does it. When a workspace admin, an Edit grantee or an
-agent saves a spec that newly names `agent/<slug>` as a producer, the save is
-refused with 403. An edit that keeps a panel's producer unchanged is allowed. If
+agent creates, updates, rolls back or publishes a spec that newly names
+`agent/<slug>` as a producer, the save is refused with 403. An import, and a
+page an agent saves for its own crew, are stored, but such a designation is
+ended as it lands. An edit that keeps a panel's producer unchanged is allowed. If
 the page changes owner, the designating owner leaves the owning crew, or the
 owning crew is deleted, the designation ends for good: the panel shows the
 reason as its fault, the agent can no longer push, and an audit entry
 `page.agent_producer.retired_not_owner` records it. The owner restores it by
-granting the agent `produce` or by naming the producer again. The same holds
+granting the agent `produce`; saving the page again with the same producer does
+not. The same holds
 for designations made before this rule: the upgrade reads who wrote each one
 from the page's version history and ends those the owner did not make. A page
 an agent creates for its own crew has no human owner behind its agent

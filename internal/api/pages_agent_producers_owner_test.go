@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -283,4 +284,58 @@ func TestPageVersionSpecCarriesPanelProducers(t *testing.T) {
 		pageID, pagesProducerAgentSlug).Scan(&n); err != nil || n == 0 {
 		t.Fatalf("no version names sluzby's agent producer at $.spec.panels: n=%d err=%v", n, err)
 	}
+}
+
+func TestAgentProducerDesignationIsRefusedOnEveryRefusingWriter(t *testing.T) {
+	t.Run("create by an agent caller", func(t *testing.T) {
+		h, wsID, _, _ := pagesProducerFixture(t)
+		body := strings.Replace(pagesInternalSpec("fleet-202"), "routine/"+pagesRoutineSlug, "agent/"+pagesProducerAgentSlug, 1)
+		rr := httptest.NewRecorder()
+		h.Create(rr, pagesRequest(t, "POST", "/api/v1/pages", wsID, "admin", "ADMIN", body))
+		if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "owner") {
+			t.Fatalf("agent-made create naming an agent producer: %d %s", rr.Code, rr.Body.String())
+		}
+		rr = httptest.NewRecorder()
+		h.Create(rr, pagesGrantRequest(t, "POST", "/api/v1/pages", wsID, "admin", "ADMIN", body))
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("a person creating their own page with an agent producer: %d %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("rollback by a non-owner to a version naming an agent producer", func(t *testing.T) {
+		h, wsID, ownerID, _ := pagesProducerFixture(t)
+		for _, producer := range []string{"agent/" + pagesProducerAgentSlug, "routine/" + pagesRoutineSlug} {
+			if rr := pagesPatchAs(t, h, wsID, ownerID, "OWNER", pagesPanelsWithProducer(producer, "Jede to?")); rr.Code != http.StatusOK {
+				t.Fatalf("owner sets %s: %d %s", producer, rr.Code, rr.Body.String())
+			}
+		}
+		var seq int64
+		if err := h.db.QueryRow(`SELECT max(pv.seq) FROM page_versions pv JOIN pages p ON p.id=pv.page_id, json_each(pv.spec_json,'$.spec.panels') j
+			WHERE p.slug='fleet-201' AND json_extract(j.value,'$.producer')='agent/'||?`, pagesProducerAgentSlug).Scan(&seq); err != nil {
+			t.Fatalf("find the agent-producer version: %v", err)
+		}
+		req := pagesGrantRequest(t, "POST", "/api/v1/pages/fleet-201/rollback", wsID, "admin", "ADMIN", `{"to": `+strconv.FormatInt(seq, 10)+`}`)
+		req.SetPathValue("slug", "fleet-201")
+		rr := httptest.NewRecorder()
+		h.Rollback(rr, req)
+		if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "owner") {
+			t.Fatalf("admin rollback re-naming an agent producer: %d %s", rr.Code, rr.Body.String())
+		}
+	})
+
+	t.Run("a non-owner re-pointing a retired agent producer", func(t *testing.T) {
+		h, wsID, ownerID, pageID := pagesProducerFixture(t)
+		if _, err := h.db.Exec(`INSERT INTO agents (id, workspace_id, crew_id, name, slug) VALUES ('agent-other', ?, ?, 'Other', 'other')`, wsID, pagesCrewID); err != nil {
+			t.Fatalf("insert agent: %v", err)
+		}
+		if rr := pagesPatchAs(t, h, wsID, ownerID, "OWNER", pagesPanelsWithProducer("agent/"+pagesProducerAgentSlug, "Jede to?")); rr.Code != http.StatusOK {
+			t.Fatalf("owner names the producer: %d %s", rr.Code, rr.Body.String())
+		}
+		if _, err := h.db.Exec(`UPDATE page_panels SET producer_designated_by_user_id='admin' WHERE page_id=? AND panel_id='sluzby'`, pageID); err != nil {
+			t.Fatalf("re-attribute: %v", err)
+		}
+		if rr := pagesPatchAs(t, h, wsID, "admin", "ADMIN", pagesPanelsWithProducer("agent/other", "Jede to?")); rr.Code != http.StatusForbidden {
+			t.Fatalf("admin re-pointing a retired agent producer: %d %s", rr.Code, rr.Body.String())
+		}
+	})
 }

@@ -23,7 +23,7 @@ const pageAgentProducerOwnerOnlyRefusal = "only the artifact's owner can name an
 // pageAgentProducerRetiredFault is the visible reason on a panel whose agent
 // producer designation has ended.
 const pageAgentProducerRetiredFault = "producer agent %q was not named by the page's current owner (or its designator stopped " +
-	"owning the page), so it may not push; only the owner names an agent producer, and the owner must grant the agent produce or name it again"
+	"owning the page), so it may not push; only the owner names an agent producer, and the owner must grant the agent produce"
 
 // producerDesignator is the human a request designates producers for: the
 // authenticated person, or nobody when an agent makes the request — an agent
@@ -35,39 +35,41 @@ func producerDesignator(r *http.Request, userID string) string {
 	return userID
 }
 
-// retiredAgentProducers is the set of this page's panels whose agent producer
-// designation is retired, read inside the write's transaction.
-func retiredAgentProducers(ctx context.Context, tx *sql.Tx, pageID string) (map[string]bool, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT panel_id FROM page_panels WHERE page_id=? AND producer_kind='agent' AND producer_retired_at IS NOT NULL`, pageID)
+// retiredAgentProducers maps each of this page's panels whose agent producer
+// designation is retired to that producer and its retirement stamp, read
+// inside the write's transaction.
+func retiredAgentProducers(ctx context.Context, tx *sql.Tx, pageID string) (map[string]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT panel_id, producer_ref || '@' || producer_retired_at FROM page_panels WHERE page_id=? AND producer_kind='agent' AND producer_retired_at IS NOT NULL`, pageID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := map[string]bool{}
+	out := map[string]string{}
 	for rows.Next() {
-		var id string
-		if err := rows.Scan(&id); err != nil {
+		var id, state string
+		if err := rows.Scan(&id, &state); err != nil {
 			return nil, err
 		}
-		out[id] = true
+		out[id] = state
 	}
 	return out, rows.Err()
 }
 
 // refuseUndelegatedAgentProducers answers 403 when this write designated an
 // agent producer the owner did not: the triggers retired it as it landed, so
-// any agent designation retired now and not before the write is this
-// request's. It reports whether it replied; the caller's deferred rollback
-// discards the write.
-func (h *PageHandler) refuseUndelegatedAgentProducers(w http.ResponseWriter, r *http.Request, tx *sql.Tx, pageID string, before map[string]bool) bool {
+// any agent designation retired now that was not retired before the write, or
+// was retired under another producer or at another moment (re-pointed, then
+// retired again), is this request's. It reports whether it replied; the
+// caller's deferred rollback discards the write.
+func (h *PageHandler) refuseUndelegatedAgentProducers(w http.ResponseWriter, r *http.Request, tx *sql.Tx, pageID string, before map[string]string) bool {
 	after, err := retiredAgentProducers(r.Context(), tx, pageID)
 	if err != nil {
 		replyInternalError(w, h.logger, "read agent producer designations", err)
 		return true
 	}
 	var fresh []string
-	for id := range after {
-		if !before[id] {
+	for id, state := range after {
+		if before[id] != state {
 			fresh = append(fresh, id)
 		}
 	}

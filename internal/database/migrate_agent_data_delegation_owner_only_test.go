@@ -44,6 +44,16 @@ func TestAgentDataDelegationOwnerOnlyMigration(t *testing.T) {
 		mustExec(t, db, `INSERT INTO page_panels(id,page_id,panel_id,schema,owner_crew_id,producer_kind,producer_ref,sla_seconds) VALUES(?,'p-page',?,'status.v1','p-crew','agent','writer',30)`, "pp-"+id, id)
 	}
 	mustExec(t, db, `INSERT INTO page_panels(id,page_id,panel_id,schema,owner_crew_id,producer_kind,producer_ref,sla_seconds) VALUES('pp-d','p-page','d','status.v1','p-crew','routine','nightly',30)`)
+	// A page whose history was trimmed: every kept version names the producer,
+	// but the oldest kept is not the first, so who named it is unknown.
+	mustExec(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('p-trim','p-ws','t','T','p-owner','{}')`)
+	mustExec(t, db, `INSERT INTO page_versions(page_id,seq,spec_json,author_user_id) VALUES('p-trim',7,?,'p-owner'),('p-trim',8,?,'p-owner')`,
+		spec(panel("y", "agent/writer")), spec(panel("y", "agent/writer")))
+	mustExec(t, db, `INSERT INTO page_panels(id,page_id,panel_id,schema,owner_crew_id,producer_kind,producer_ref,sla_seconds) VALUES('pp-trim','p-trim','y','status.v1','p-crew','agent','writer',30)`)
+	// A version an agent authored names nobody.
+	mustExec(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('p-agent','p-ws','g','G','p-owner','{}')`)
+	mustExec(t, db, `INSERT INTO page_versions(page_id,seq,spec_json,author_user_id,author_agent_id) VALUES('p-agent',1,?,'p-owner','p-agent')`, spec(panel("z", "agent/writer")))
+	mustExec(t, db, `INSERT INTO page_panels(id,page_id,panel_id,schema,owner_crew_id,producer_kind,producer_ref,sla_seconds) VALUES('pp-agentv','p-agent','z','status.v1','p-crew','agent','writer',30)`)
 	// A page whose only version does not parse: its agent producer is nobody's.
 	mustExec(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('p-bad','p-ws','b','B','p-owner','{}')`)
 	mustExec(t, db, `INSERT INTO page_versions(page_id,seq,spec_json,author_user_id) VALUES('p-bad',1,'not json','p-owner')`)
@@ -106,12 +116,16 @@ func TestAgentDataDelegationOwnerOnlyMigration(t *testing.T) {
 	if err := db.QueryRow(`SELECT count(*) FROM audit_logs WHERE action='page.agent_grant.retired_not_owner' AND json_extract(metadata,'$.subject_type')='crew'`).Scan(&grantAudits); err != nil {
 		t.Fatal(err)
 	}
+	var unknown int
+	if err := db.QueryRow(`SELECT count(*) FROM page_panels WHERE page_id IN ('p-trim','p-agent') AND producer_retired_at IS NOT NULL AND producer_designated_by_user_id IS NULL`).Scan(&unknown); err != nil || unknown != 2 {
+		t.Fatalf("trimmed or agent-authored history credited a human: %d %v", unknown, err)
+	}
 	var bad int
 	if err := db.QueryRow(`SELECT count(*) FROM page_panels WHERE page_id='p-bad' AND producer_retired_at IS NOT NULL AND producer_designated_by_user_id IS NULL`).Scan(&bad); err != nil || bad != 1 {
 		t.Fatalf("an unparseable history kept an agent producer live: %d %v", bad, err)
 	}
-	if crewProduceRetired != 1 || crewOthersRetired != 0 || audits != 3 || grantAudits != 1 {
-		t.Fatalf("crew produce retired=%d, other crew levels retired=%d, producer audits=%d, crew grant audits=%d; want 1,0,3,1",
+	if crewProduceRetired != 1 || crewOthersRetired != 0 || audits != 5 || grantAudits != 1 {
+		t.Fatalf("crew produce retired=%d, other crew levels retired=%d, producer audits=%d, crew grant audits=%d; want 1,0,5,1",
 			crewProduceRetired, crewOthersRetired, audits, grantAudits)
 	}
 
