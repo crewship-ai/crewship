@@ -65,8 +65,9 @@ test.describe("design tools", () => {
    await page.mouse.move(grip.x + 150, grip.y + 100, { steps: 5 })
    await page.keyboard.press("Escape")
    await page.mouse.up()
-   await page.waitForTimeout(1000)
-   expect(await server("over")).toMatchObject(resized)
+   await expect.poll(() => server("over"), { timeout: 20_000 }).toMatchObject(resized)
+   await page.waitForTimeout(1500)
+   expect(await server("over"), "the restored box stays").toMatchObject(resized)
    found.resize = { resized, escapeRestored: true }
 
    // Keyboard nudge on the focused canvas.
@@ -78,11 +79,11 @@ test.describe("design tools", () => {
    // Order: "over" is drawn last; Send to back in Properties, then ] brings it forward again.
    expect(await drawnOrder(page)).toEqual(["screen", "under", "over"])
    await page.getByRole("group", { name: "Layer order" }).getByRole("button", { name: "Send to back" }).click()
-   await expect.poll(async () => (await getDesign(context.request, ws.id, slug)).nodes.map(node => node.id), { timeout: 20_000 }).toEqual(["screen", "over", "under"])
+   await expect.poll(async () => (await getDesign(context.request, ws.id, slug)).order, { timeout: 20_000 }).toEqual(["screen", "over", "under"])
    await expect.poll(() => drawnOrder(page)).toEqual(["screen", "over", "under"])
    await viewport.focus()
    await page.keyboard.press("]")
-   await expect.poll(async () => (await getDesign(context.request, ws.id, slug)).nodes.map(node => node.id), { timeout: 20_000 }).toEqual(["screen", "under", "over"])
+   await expect.poll(async () => (await getDesign(context.request, ws.id, slug)).order, { timeout: 20_000 }).toEqual(["screen", "under", "over"])
    found.order = { afterSendToBack: ["screen", "over", "under"], afterBracket: await drawnOrder(page) }
 
    // A comment on "under", then Delete removes the layer; the comment says so.

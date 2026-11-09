@@ -271,35 +271,34 @@ export type DesignOrderMove = "forward" | "backward" | "front" | "back"
 /**
  * Changes a layer's stacking order among its siblings: layers with the same
  * screen (or none), screens among screens. Drawing follows the document order,
- * so this moves the ID in `order`; nothing else changes. Returns false when the
+ * so this moves the one ID in `order` (its entry is deleted and inserted again
+ * next to its new neighbour); every other entry stays, so a concurrent edit,
+ * delete or reorder of another layer keeps its effect. Returns false when the
  * layer is already at that end.
  */
 export function reorderDesignNode(doc: Y.Doc, id: string, move: DesignOrderMove): boolean {
  const nodes = doc.getMap<Y.Map<unknown>>("nodes")
- const target = nodes.get(id)
- if (!(target instanceof Y.Map)) return false
+ if (!(nodes.get(id) instanceof Y.Map)) return false
  const order = doc.getArray<string>("order")
  const listed = order.toArray()
- const full = [...new Set([...listed, ...nodes.keys()])].filter(key => nodes.get(key) instanceof Y.Map)
  const group = (key: string) => {
-  const node = nodes.get(key)!
-  return node.get("type") === "frame" ? "frame" : `layer:${String(node.get("parentId") ?? "")}`
+  const node = nodes.get(key)
+  return !(node instanceof Y.Map) ? null : node.get("type") === "frame" ? "frame" : `layer:${String(node.get("parentId") ?? "")}`
  }
- const siblings = full.filter(key => group(key) === group(id))
+ const mine = group(id)
+ // Siblings in drawing order: listed first (first entry wins), then unlisted ones.
+ const siblings = [...new Set([...listed, ...nodes.keys()])].filter(key => group(key) === mine)
  const at = siblings.indexOf(id)
  const to = move === "forward" ? at + 1 : move === "backward" ? at - 1 : move === "front" ? siblings.length - 1 : 0
  if (to < 0 || to >= siblings.length || to === at) return false
- siblings.splice(at, 1)
- siblings.splice(to, 0, id)
- // Put the siblings back into their own slots, in the new order.
- let next = 0
- const result = full.map(key => group(key) === group(id) ? siblings[next++] : key)
+ const neighbour = siblings[to]
  doc.transact(() => {
-  // Rewrite only from the first changed slot, so a concurrent edit elsewhere keeps its place.
-  let first = 0
-  while (first < result.length && first < listed.length && result[first] === listed[first]) first++
-  order.delete(first, listed.length - first)
-  order.insert(first, result.slice(first))
+  // Remove this ID's own entries only, from the end so indexes stay valid.
+  for (let index = listed.length - 1; index >= 0; index--) if (listed[index] === id) order.delete(index, 1)
+  const now = order.toArray()
+  let anchor = now.indexOf(neighbour)
+  if (anchor < 0) { order.push([neighbour]); anchor = now.length }
+  order.insert(to > at ? anchor + 1 : anchor, [id])
  }, "editor")
  return true
 }

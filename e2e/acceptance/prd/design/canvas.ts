@@ -25,6 +25,7 @@ export interface DesignState {
   can_comment?: boolean
   origin?: { chat_id: string; agent_id: string } | null
   nodes: DesignNode[]
+  order?: string[]
 }
 
 export interface DesignVersion {

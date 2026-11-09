@@ -330,8 +330,8 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
    const nudge: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
    const by = event.shiftKey ? 10 : 1
    if (nudge[event.key] && !event.altKey && !event.ctrlKey && !event.metaKey) { upsertDesignNode(design.doc, { id: selected.id, x: (Number(selected.x) || 0) + nudge[event.key][0] * by, y: (Number(selected.y) || 0) + nudge[event.key][1] * by }); event.preventDefault(); return }
-   if (event.key === "Delete" || event.key === "Backspace") { removeDesignNode(design.doc, selected.id); setSelectedId(null); event.preventDefault(); return }
-   if (event.key === "]" || event.key === "[") { order(event.key === "]" ? (event.ctrlKey || event.metaKey ? "front" : "forward") : (event.ctrlKey || event.metaKey ? "back" : "backward")); event.preventDefault(); return }
+   if ((event.key === "Delete" || event.key === "Backspace") && selected.type !== "frame") { removeDesignNode(design.doc, selected.id); setSelectedId(null); event.preventDefault(); return }
+   if (event.key === "]" || event.key === "[") { const toEnd = (event.ctrlKey || event.metaKey) && !event.altKey; order(event.key === "]" ? (toEnd ? "front" : "forward") : (toEnd ? "back" : "backward")); event.preventDefault(); return }
   }
   const pan: Record<string, [number, number]> = { ArrowLeft: [40, 0], ArrowRight: [-40, 0], ArrowUp: [0, 40], ArrowDown: [0, -40] }
   if (pan[event.key]) { setView(panBy(view, ...pan[event.key])); event.preventDefault() }
@@ -512,7 +512,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     <DesignNodeShape node={node} width={w} height={h} />
     {selectedId === node.id && <rect width={w} height={h} fill="none" stroke="#2563eb" strokeWidth={2 / scale} pointerEvents="none" />}
     {selectedId === node.id && canChange && RESIZE_HANDLES.map(handle => {
-     const size = (phone ? 14 : 9) / scale
+     const size = 9 / scale
      const hx = handle.includes("w") ? 0 : handle.includes("e") ? w : w / 2, hy = handle.includes("n") ? 0 : handle.includes("s") ? h : h / 2
      return <rect key={handle} data-design-handle={handle} aria-hidden x={hx - size / 2} y={hy - size / 2} width={size} height={size} fill="white" stroke="#3b82f6" strokeWidth={1.5 / scale} style={{ cursor: `${handle}-resize` }} />
     })}
