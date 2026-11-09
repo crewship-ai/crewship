@@ -14,6 +14,16 @@ export function peerColor(index: number): string {
   return PEER_COLORS[Number.isSafeInteger(index) && index >= 0 ? index % PEER_COLORS.length : 0]
 }
 
+/**
+ * Where a person is on the Canvas view (#5149 C06): their pointer in canvas
+ * (world) coordinates, absent once it leaves the canvas, and the cards they
+ * selected. Sent with the same heartbeat as the caret and as ephemeral.
+ */
+export interface CanvasPresence {
+  pointer?: { x: number; y: number }
+  selection: string[]
+}
+
 export interface PresencePeer {
   client: string
   userId: string
@@ -23,6 +33,34 @@ export interface PresencePeer {
   tabs: number
   anchor?: Y.RelativePosition
   head?: Y.RelativePosition
+  canvas?: CanvasPresence
+}
+
+/** The server's bounds: the surface's coordinate limit and at most 8 selected cards with surface IDs. */
+export const CANVAS_PRESENCE_LIMITS = Object.freeze({ coordinate: 1_000_000, selection: 8 })
+const CARD_ID = /^[a-zA-Z0-9_-]{1,80}$/
+const coordinate = (value: unknown) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= CANVAS_PRESENCE_LIMITS.coordinate
+
+/** A peer's canvas presence from the wire, or nothing when it is absent or out of bounds. */
+export function parseCanvasPresence(value: unknown): CanvasPresence | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const raw = value as Record<string, unknown>
+  const point = raw.pointer as Record<string, unknown> | undefined
+  const pointer = point && typeof point === "object" && coordinate(point.x) && coordinate(point.y) ? { x: point.x as number, y: point.y as number } : undefined
+  const ids = Array.isArray(raw.selection) ? raw.selection : []
+  const selection = ids.length <= CANVAS_PRESENCE_LIMITS.selection && ids.every(id => typeof id === "string" && CARD_ID.test(id)) ? [...new Set(ids as string[])] : []
+  return pointer || selection.length ? { ...(pointer ? { pointer } : {}), selection } : undefined
+}
+
+/** This tab's canvas presence for a heartbeat body: rounded to whole canvas units, bounded, or nothing to send. */
+export function canvasPresenceBody(canvas: CanvasPresence | null | undefined): { canvas?: { pointer?: { x: number; y: number }; selection?: string[] } } {
+  if (!canvas) return {}
+  const limit = CANVAS_PRESENCE_LIMITS.coordinate
+  const clamp = (value: number) => Math.max(-limit, Math.min(limit, Math.round(value)))
+  const pointer = canvas.pointer && Number.isFinite(canvas.pointer.x) && Number.isFinite(canvas.pointer.y) ? { x: clamp(canvas.pointer.x), y: clamp(canvas.pointer.y) } : undefined
+  const selection = [...new Set(canvas.selection.filter(id => CARD_ID.test(id)))].slice(0, CANVAS_PRESENCE_LIMITS.selection)
+  if (!pointer && !selection.length) return {}
+  return { canvas: { ...(pointer ? { pointer } : {}), ...(selection.length ? { selection } : {}) } }
 }
 
 export interface PresenceReply {
@@ -53,8 +91,8 @@ export function parsePresenceReply(value: unknown): PresenceReply {
     if (!raw || typeof raw !== "object") continue
     const peer = raw as Record<string, unknown>
     if (typeof peer.client !== "string" || typeof peer.user_id !== "string" || typeof peer.name !== "string" || !peer.name.trim()) continue
-    const anchor = decodePosition(peer.anchor), head = decodePosition(peer.head)
-    peers.push({ client: peer.client, userId: peer.user_id, name: peer.name.trim().slice(0, 80), color: peerColor(Number(peer.color)), tabs: Number.isSafeInteger(peer.tabs) && Number(peer.tabs) > 0 ? Number(peer.tabs) : 1, ...(anchor && head ? { anchor, head } : {}) })
+    const anchor = decodePosition(peer.anchor), head = decodePosition(peer.head), canvas = parseCanvasPresence(peer.canvas)
+    peers.push({ client: peer.client, userId: peer.user_id, name: peer.name.trim().slice(0, 80), color: peerColor(Number(peer.color)), tabs: Number.isSafeInteger(peer.tabs) && Number(peer.tabs) > 0 ? Number(peer.tabs) : 1, ...(anchor && head ? { anchor, head } : {}), ...(canvas ? { canvas } : {}) })
   }
   const interval = Number(reply.interval_ms)
   return { peers, color: typeof reply.color === "number" ? peerColor(reply.color) : undefined, intervalMs: Number.isFinite(interval) ? Math.min(Math.max(interval, 500), 5000) : 1000 }

@@ -454,22 +454,6 @@ crewship doc patch @<artifact-id> --file patch.json
 An exact retry returns the original receipt with `found: true` and
 `duplicate: true`, plus the request's `schema` and the current `epoch`.
 
-## `crewship doc presence <page-slug>`
-
-Send one presence heartbeat and print who else has the document open: one entry
-per other person with `tabs` (how many of their tabs are open), `user_id`, the
-`name` the server resolved, a `color` index and the `client` and caret
-(`anchor`/`head`, base64 Yjs relative positions, when shared) of their tab
-that moved last. Presence lives in server memory for 6 seconds and is
-never stored. The heartbeat is authorized like a document read: without read
-access it fails with 404 and lists nobody. `--client` reuses a tab id (8–64
-letters, digits, `-` or `_`); `--leave` removes that tab at once.
-
-```bash
-crewship doc presence @<artifact-id>
-crewship doc presence @<artifact-id> --client my-script-tab --leave
-```
-
 ## `crewship doc upgrade <page-slug>`
 
 Upgrade a document to the newest schema. Today that enables the Canvas
@@ -494,6 +478,29 @@ changes: read again and send a new request. Resend the exact request after a
 lost confirmation; the original receipt comes back with `duplicate: true`.
 Editors still open at the old schema are refused when they save and must
 reload.
+
+## `crewship doc presence <page-slug>`
+
+Send one presence heartbeat and print who else has the document open: one entry
+per other person with `tabs` (how many of their tabs are open), `user_id`, the
+`name` the server resolved, a `color` index and the `client` and caret
+(`anchor`/`head`, base64 Yjs relative positions, when shared) of their tab
+that moved last. Presence lives in server memory for 6 seconds and is
+never stored. The heartbeat is authorized like a document read: without read
+access it fails with 404 and lists nobody. `--client` reuses a tab id (8–64
+letters, digits, `-` or `_`); `--leave` removes that tab at once.
+
+People on the Canvas view (schema 6 documents; the server relays it as given
+and checks only its bounds) also carry a `canvas` object: their `pointer` (`x`, `y` in canvas coordinates, absent once it leaves
+the canvas) and the cards they selected (`selection`, Page block or canvas item
+IDs). `--pointer X,Y` (each between -1000000 and 1000000) and `--select ID,ID`
+(at most 8 different IDs) send this tab's own; neither combines with `--leave`.
+
+```bash
+crewship doc presence @<artifact-id>
+crewship doc presence @<artifact-id> --pointer 240,120 --select intro
+crewship doc presence @<artifact-id> --client my-script-tab --leave
+```
 
 ## `crewship doc comments <page-slug>`
 
