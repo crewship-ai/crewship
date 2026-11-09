@@ -126,6 +126,7 @@ Readers can pan and zoom too.
 | Zoom around the pointer | **Ctrl** + wheel (**Cmd** + wheel on a Mac), or pinch on a trackpad | Pinch with two fingers |
 | Zoom in steps, fit | **Zoom in**, **Zoom out** and **Fit** in the artifact bar (in the canvas toolbar when the editor is opened on its own) | Same |
 | Move a layer | Drag it with the left button | Drag it with one finger |
+| Resize a layer | Select it, then drag one of the eight handles on its corners and edges | Same, with one finger |
 | Clear the selection | Click an empty part of the canvas | Tap an empty part of the canvas |
 
 A pan never moves or selects a layer, also when the drag starts on one. Inside
@@ -137,9 +138,13 @@ or text field has focus, so **Space** still presses a focused button. **Fit**
 shows every artboard and every layer placed directly on the canvas.
 
 With the canvas focused, **+** and **−** zoom, **Shift + 1** fits, **Shift + 0**
-goes to 100 % and the arrow keys pan. **Escape** cancels a drag or pan in
-progress and puts the layer or the view back where it started; with nothing in
-progress it clears the selection. Switching to another window, or the browser
+goes to 100 % and the arrow keys pan. With a layer selected, the arrow keys move
+it by 1 pixel (**Shift**: 10), **Delete** or **Backspace** removes it (a screen, with everything in it,
+only through **Delete screen and layers**), **]** and
+**[** bring it forward or send it backward, and **Ctrl + ]** / **Ctrl + [**
+(**Cmd** on a Mac) bring it to the front or send it to the back. **Escape**
+cancels a drag, resize or pan in progress and puts the layer or the view back
+where it started; with nothing in progress it clears the selection. Switching to another window, or the browser
 cancelling the pointer, does the same as **Escape**.
 
 **Next artboard** and **Previous artboard** bring the artboard to the top left
@@ -177,6 +182,9 @@ at the current zoom. On a phone, **Fit** fits the artboard's width.
    - **Image URL** for an image: an `https://` address, or an embedded PNG,
      JPEG, WebP or GIF data URL. Other addresses are not drawn.
    - **Screen**, to move a layer into another screen or to **On canvas**.
+   - **Order**: **Send to back**, **Send backward**, **Bring forward** and
+     **Bring to front**. A layer moves among the layers of its own screen, a
+     screen among screens; layers later in the order are drawn on top.
 5. To remove the selection, click **Delete layer**. Deleting a screen with
    **Delete screen and layers** also removes every layer inside it.
 
@@ -409,8 +417,10 @@ Comments are tied to one layer in one version.
 3. Click **Save comment**, or **Send to agent** if an agent chat is connected.
 
 The comment appears in the list with its version and layer, for example
-`v4 · Screen 1`. Click that line to select the layer again. Your unsent comment
-draft stays in this browser if you close the Design.
+`v4 · Screen 1`. Click that line to select the layer again. If the layer has
+been deleted since, the comment stays and says that the layer is no longer on
+the canvas; open its version in **History** to see the layer. Your unsent
+comment draft stays in this browser if you close the Design.
 
 ## Send feedback to an agent
 

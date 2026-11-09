@@ -125,3 +125,24 @@ export function typingTarget(target: EventTarget | null): boolean {
  if (!target || typeof (target as Element).closest !== "function") return false
  return Boolean((target as Element).closest("input, textarea, select, [contenteditable=''], [contenteditable='true']"))
 }
+
+/** A corner or edge handle of the selected layer. */
+export type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w"
+export const RESIZE_HANDLES: readonly ResizeHandle[] = ["nw", "n", "ne", "e", "se", "s", "sw", "w"]
+/** A layer's box in its screen's coordinates. */
+export interface DesignBox { x: number; y: number; width: number; height: number }
+
+/**
+ * The box after dragging `handle` by (dx, dy) canvas units. The opposite edge
+ * stays put; a box never gets smaller than 1 × 1 (a drag past the opposite
+ * edge stops there). Values are rounded to whole units like a move.
+ */
+export function resizeBox(box: DesignBox, handle: ResizeHandle, dx: number, dy: number): DesignBox {
+ let { x, y, width, height } = box
+ const right = x + width, bottom = y + height
+ if (handle.includes("e")) width = Math.max(1, Math.round(width + dx))
+ if (handle.includes("s")) height = Math.max(1, Math.round(height + dy))
+ if (handle.includes("w")) { x = Math.min(right - 1, Math.round(x + dx)); width = right - x }
+ if (handle.includes("n")) { y = Math.min(bottom - 1, Math.round(y + dy)); height = bottom - y }
+ return { x, y, width, height }
+}
