@@ -156490,6 +156490,8 @@
           "content": {
             "application/json": {
               "schema": {
+                "additionalProperties": false,
+                "properties": {},
                 "type": "object"
               }
             }

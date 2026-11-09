@@ -389,6 +389,7 @@ POST /api/v1/pages/{slug}/draft-key roleInline
 POST /api/v1/pages/{slug}/mooring/commands roleInline
 POST /api/v1/pages/{slug}/mooring/mandates roleInline
 POST /api/v1/pages/{slug}/panels/{panelId}/actions/{actionId} roleCreate
+POST /api/v1/pages/{slug}/panels/{panelId}/producer/authorize roleSelf
 POST /api/v1/pages/{slug}/project/build roleSelf
 POST /api/v1/pages/{slug}/project/check roleSelf
 POST /api/v1/pages/{slug}/project/publish roleSelf

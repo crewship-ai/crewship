@@ -34,6 +34,8 @@ func TestAcceptance_PageOwnerAuthorizesAgentProducer(t *testing.T) {
 		`INSERT INTO agents(id,crew_id,workspace_id,name,slug) VALUES('pa-agent','pa-crew','` + ws + `','Scribe','scribe')`,
 		`INSERT INTO users(id,email,full_name) VALUES('pa-owner','owner@producerauthz.invalid','Owner'),('pa-admin','admin@producerauthz.invalid','Admin')`,
 		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('pa-m1','` + ws + `','pa-owner','MANAGER'),('pa-m2','` + ws + `','pa-admin','ADMIN')`,
+		// Both see the panel (crew/ops owns it), so only the producer rule differs.
+		`INSERT INTO crew_members(id,crew_id,user_id,role) VALUES('pa-cm1','pa-crew','pa-owner','MEMBER'),('pa-cm2','pa-crew','pa-admin','MEMBER')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(err)

@@ -193,8 +193,12 @@ func TestAuthorizePanelProducerEdges(t *testing.T) {
 		if rr := pagesAuthorizeProducer(t, h, wsID, ownerID, "OWNER", "sluzby", false); rr.Code != http.StatusConflict || !strings.Contains(rr.Body.String(), "private") {
 			t.Fatalf("owner on a private artifact: %d %s, want 409", rr.Code, rr.Body.String())
 		}
-		if !pagesProducerRetired(t, h, pageID) || pagesAgentPush(t, h, wsID) != http.StatusForbidden {
-			t.Fatal("a private artifact's agent producer became live")
+		if !pagesProducerRetired(t, h, pageID) {
+			t.Fatal("a private artifact's agent producer designation became live")
+		}
+		// Refused either way; the push path may answer a private page 404.
+		if code := pagesAgentPush(t, h, wsID); code == http.StatusOK || code == http.StatusAccepted {
+			t.Fatalf("the agent pushed to a private artifact's panel: %d", code)
 		}
 		auth, _ := pagesPanelWire(t, h, wsID, ownerID, "OWNER", "sluzby")["producer_authorization"].(map[string]any)
 		if auth == nil || auth["can_authorize"] != false {
@@ -236,6 +240,11 @@ func TestAuthorizePanelProducerEdges(t *testing.T) {
 		var by string
 		if err := h.db.QueryRow(`SELECT COALESCE(user_id,'') FROM audit_logs WHERE action='page.agent_producer.authorized' AND entity_id=?`, pageID).Scan(&by); err != nil || by != ownerID {
 			t.Fatalf("audit user = %q (%v), want the owner", by, err)
+		}
+		// The access change is on the chained journal too, in the same transaction.
+		var chained int
+		if err := h.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE workspace_id=? AND json_extract(payload,'$.action')='page.agent_producer.authorized' AND json_extract(payload,'$.entity_id')=?`, wsID, pageID).Scan(&chained); err != nil || chained != 1 {
+			t.Fatalf("chained journal entries = %d (%v), want 1", chained, err)
 		}
 	})
 

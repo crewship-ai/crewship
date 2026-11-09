@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // #5260, R71 §0.14/1: naming `agent/<slug>` as a panel's producer lets that
@@ -216,20 +218,43 @@ func (h *PageHandler) AuthorizePanelProducer(w http.ResponseWriter, r *http.Requ
 		replyError(w, http.StatusForbidden, pageAgentProducerAuthorizeRefusal)
 		return
 	}
-	meta, _ := json.Marshal(map[string]any{
+	metadata := map[string]any{
 		"panel_id": panelID, "producer": "agent/" + ref,
 		"previous_designated_by_user_id": designator, "previously_retired": wasRetired,
 		"reason": "the artifact owner authorized the agent producer explicitly (R71 0.14/1)",
-	})
+	}
+	meta, err := json.Marshal(metadata)
+	if err != nil {
+		replyInternalError(w, h.logger, "encode producer authorization audit", err)
+		return
+	}
 	if _, err := tx.ExecContext(r.Context(), `INSERT INTO audit_logs(id, workspace_id, user_id, action, entity_type, entity_id, metadata, created_at)
 		VALUES (lower(hex(randomblob(16))), ?, ?, 'page.agent_producer.authorized', 'page', ?, ?, strftime('%Y-%m-%dT%H:%M:%fZ','now'))`,
 		wsID, user.ID, rec.ID, string(meta)); err != nil {
 		replyInternalError(w, h.logger, "audit producer authorization", err)
 		return
 	}
+	// An authorization delegates data Edit to an agent: an access change, so
+	// it is also appended to the chained journal in the same transaction. The
+	// page is never private here (refused above), so the journal's
+	// workspace-wide audience reveals nothing the audit listing would not.
+	notify, err := appendAuthorizationAudit(r.Context(), tx, h.journal, journal.Entry{
+		WorkspaceID: wsID, Type: journal.EntryAuditEntityUpdated, Severity: journal.SeverityNotice,
+		ActorType: journal.ActorUser, ActorID: user.ID,
+		Summary: fmt.Sprintf("Page owner authorized agent/%s as the producer of panel %s", ref, panelID),
+		Payload: map[string]any{"action": "page.agent_producer.authorized", "entity_type": "page", "entity_id": rec.ID, "metadata": metadata},
+		Refs:    map[string]any{"entity_type": "page", "entity_id": rec.ID},
+	})
+	if err != nil {
+		replyInternalError(w, h.logger, "journal producer authorization", err)
+		return
+	}
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit producer authorization", err)
 		return
+	}
+	if notify != nil {
+		notify()
 	}
 	out["changed"] = true
 	writeJSON(w, http.StatusOK, out)
