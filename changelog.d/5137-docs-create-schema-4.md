@@ -1,0 +1,1 @@
+- New Docs start at schema 4, so bold, italic, strikethrough, quotes and task lists are available from the first edit. A run with creation consent still drafts its own new Doc directly; existing schema 3 Docs are unchanged. (#5137)

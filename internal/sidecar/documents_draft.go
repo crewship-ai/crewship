@@ -160,7 +160,7 @@ func PrepareDocumentDraft(raw []byte) (DocumentDraftPacket, error) {
 	if v.Mode != "" {
 		return DocumentDraftPacket{}, errors.New("this run may only propose; use doc draft prepare, then doc draft propose")
 	}
-	if v.Schema != 3 || v.Rev < 0 || v.Rev == math.MaxInt64 || v.Generation < 0 || !draftID.MatchString(v.PageID) || v.Epoch == "" || len(v.Epoch) > 2048 || !draftID.MatchString(in.MutationID) || !draftID.MatchString(in.MutationID+"-checkpoint") || !draftID.MatchString(in.Target) {
+	if (v.Schema != 3 && v.Schema != 4) || v.Rev < 0 || v.Rev == math.MaxInt64 || v.Generation < 0 || !draftID.MatchString(v.PageID) || v.Epoch == "" || len(v.Epoch) > 2048 || !draftID.MatchString(in.MutationID) || !draftID.MatchString(in.MutationID+"-checkpoint") || !draftID.MatchString(in.Target) {
 		return DocumentDraftPacket{}, errors.New("invalid original draft view or mutation identity")
 	}
 	seen := map[string]bool{}
@@ -352,7 +352,7 @@ func ParseDocumentDraftPacket(raw []byte) (DocumentDraftPacket, error) {
 		return p, err
 	}
 	a, b := p.Patch, p.Checkpoint
-	if p.Generation < 0 || a.Schema != 3 || b.Schema != a.Schema || !draftID.MatchString(a.ID) || !draftID.MatchString(a.PageID) || !draftID.MatchString(a.Target) || !draftHash.MatchString(a.IfHash) || a.Epoch == "" || len(a.Epoch) > 2048 || a.IfRev < 0 || a.IfRev == math.MaxInt64 || !draftID.MatchString(b.ID) || b.ID != a.ID+"-checkpoint" || b.PageID != a.PageID || b.Epoch != a.Epoch || b.IfRev != a.IfRev+1 {
+	if p.Generation < 0 || (a.Schema != 3 && a.Schema != 4) || b.Schema != a.Schema || !draftID.MatchString(a.ID) || !draftID.MatchString(a.PageID) || !draftID.MatchString(a.Target) || !draftHash.MatchString(a.IfHash) || a.Epoch == "" || len(a.Epoch) > 2048 || a.IfRev < 0 || a.IfRev == math.MaxInt64 || !draftID.MatchString(b.ID) || b.ID != a.ID+"-checkpoint" || b.PageID != a.PageID || b.Epoch != a.Epoch || b.IfRev != a.IfRev+1 {
 		return p, errors.New("inconsistent immutable draft packet")
 	}
 	return p, nil

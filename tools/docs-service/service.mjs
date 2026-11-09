@@ -136,8 +136,8 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     switch (operation) {
       case 'prepare-create': {
         if (!request || typeof request !== 'object' || Object.keys(request).length !== 1 || !Object.hasOwn(request,'blocks')) throw fault(400,'closed authoring blocks required');
-        const doc=create(creationDocument(request.blocks),RICH_VERSION);
-        try { return {schema:RICH_VERSION,snapshot:snapshot(doc),blocks:(await outline(doc,RICH_VERSION)).map(({id,hash})=>({id,hash}))}; }
+        const doc=create(creationDocument(request.blocks),LATEST_VERSION);
+        try { return {schema:LATEST_VERSION,snapshot:snapshot(doc),blocks:(await outline(doc,LATEST_VERSION)).map(({id,hash})=>({id,hash}))}; }
         finally { doc.destroy(); }
       }
       case 'read': return executeRead(page, 'read', context, request);

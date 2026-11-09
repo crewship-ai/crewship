@@ -21,11 +21,11 @@ func documentDraftMCPCatalog() []memoryMCPToolDescriptor {
 		sort.Strings(required)
 		return map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": required}
 	}
-	patch := object(map[string]any{"id": stringField, "schema": map[string]any{"const": 3}, "page_id": stringField, "epoch": stringField, "ifRev": integer, "target": stringField, "ifHash": stringField, "text": stringField})
-	pin := object(map[string]any{"id": stringField, "schema": map[string]any{"const": 3}, "page_id": stringField, "epoch": stringField, "ifRev": integer})
+	patch := object(map[string]any{"id": stringField, "schema": map[string]any{"enum": []any{3, 4}}, "page_id": stringField, "epoch": stringField, "ifRev": integer, "target": stringField, "ifHash": stringField, "text": stringField})
+	pin := object(map[string]any{"id": stringField, "schema": map[string]any{"enum": []any{3, 4}}, "page_id": stringField, "epoch": stringField, "ifRev": integer})
 	packet := object(map[string]any{"generation": integer, "patch": patch, "checkpoint": pin})
 	targets := map[string]any{"type": "array", "items": object(map[string]any{"id": stringField, "type": map[string]any{"enum": []string{"paragraph", "heading"}}, "parent": map[string]any{"type": []string{"string", "null"}}, "hash": stringField, "text": stringField})}
-	view := object(map[string]any{"page_id": stringField, "schema": map[string]any{"const": 3}, "rev": integer, "generation": integer, "epoch": stringField, "targets": targets})
+	view := object(map[string]any{"page_id": stringField, "schema": map[string]any{"enum": []any{3, 4}}, "rev": integer, "generation": integer, "epoch": stringField, "targets": targets})
 	proposeView := object(map[string]any{"page_id": stringField, "mode": map[string]any{"const": "propose"}, "schema": map[string]any{"const": 4}, "rev": integer, "generation": integer, "epoch": stringField, "targets": targets})
 	proposal := object(map[string]any{"id": stringField, "schema": map[string]any{"const": 4}, "page_id": stringField, "epoch": stringField, "ifRev": integer, "target": stringField, "ifHash": stringField, "text": stringField})
 	proposalPacket := object(map[string]any{"generation": integer, "proposal": proposal})

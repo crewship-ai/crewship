@@ -446,7 +446,13 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 				replyError(w, 403, "a proposal is accepted by a human")
 				return
 			}
-			guard = documentRichSemanticGuard(in.Semantic, in.IfHashes, in.Blocks, h.pages.documentDraftGuard(a, k, "commit", in.IfRev))
+			// The guard refuses any schema other than the stored one, so a
+			// client cannot pick a looser proof; drafts reach only 3 or 4.
+			schema := 3
+			if in.Schema == documents.LatestSchema {
+				schema = documents.LatestSchema
+			}
+			guard = documentRichSemanticGuardFor(schema, in.Semantic, in.IfHashes, in.Blocks, h.pages.documentDraftGuard(a, k, "commit", in.IfRev))
 		} else if in.Proposal != "" {
 			// Accepting is an ordinary human commit bound to exactly one open
 			// proposal, marked accepted in the same transaction.

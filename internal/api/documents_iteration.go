@@ -48,6 +48,7 @@ func (h *PageHandler) documentIterationPage(ctx context.Context, workspace, huma
 		return scope, 0, errDocumentAccess
 	}
 	scope.PageID = intent.PageID
+	scope.Schema = schema
 	scope.Propose = intent.Propose()
 	scope.Blocks = intent.Blocks
 	role, err := h.liveContentHumanRole(ctx, workspace, human)
