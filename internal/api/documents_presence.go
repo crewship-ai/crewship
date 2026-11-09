@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -27,6 +28,14 @@ import (
 // can neither stay listed nor read who else is there. Rooms are keyed by the
 // authorized workspace and Page id: presence never crosses documents.
 //
+// Removal on revoke happens on the revoked person's next heartbeat (about a
+// second) when the request still reaches this handler (a Page grant revoke).
+// When it no longer does (membership removed, session or token revoked, scope
+// lost) the middleware refuses it and the entry expires after the TTL; the
+// same bound covers a revoke landing between the authorization and the room
+// write of one heartbeat. Expired entries of every room are swept at least
+// once per TTL, so tabs that vanish without a leave never accumulate.
+//
 // Identity is the server's: the user id comes from the authenticated request,
 // the name from the user record of that workspace member, the colour from a
 // per-document assignment. A client only says which tab it is and where its
@@ -38,6 +47,8 @@ const (
 	// Per document and per server: bounded memory whatever clients send.
 	documentPresenceRoomLimit  = 64
 	documentPresenceTotalLimit = 20000
+	// Tabs of one person on one document, so nobody can fill a room alone.
+	documentPresenceUserTabLimit = 8
 	// One encoded Yjs relative position: a client id and clock, or a type key, plus assoc.
 	documentPresencePositionLimit = 192
 )
@@ -64,6 +75,7 @@ type documentPresenceHub struct {
 	mu    sync.Mutex
 	now   func() time.Time
 	total int
+	swept time.Time
 	rooms map[string]map[string]*documentPresenceEntry
 }
 
@@ -113,15 +125,39 @@ func documentPresenceColour(entries map[string]*documentPresenceEntry, room, use
 	return start
 }
 
+// sweepAll removes expired entries of every room at most once per TTL (or
+// whenever the server-wide limit is reached); the caller holds mu.
+func (h *documentPresenceHub) sweepAll(force bool) {
+	now := h.now()
+	if !force && now.Sub(h.swept) < documentPresenceTTL {
+		return
+	}
+	h.swept = now
+	for room := range h.rooms {
+		h.sweep(room)
+	}
+}
+
 // beat records one authorized heartbeat and returns the other people present.
 func (h *documentPresenceHub) beat(room, user, client, name, anchor, head string) (int, []documentPresencePeer, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
+	h.sweepAll(false)
 	entries := h.sweep(room)
 	key := documentPresenceKey(user, client)
 	entry := entries[key]
 	if entry == nil {
-		if len(entries) >= documentPresenceRoomLimit || h.total >= documentPresenceTotalLimit {
+		if h.total >= documentPresenceTotalLimit {
+			h.sweepAll(true)
+			entries = h.rooms[room]
+		}
+		tabs := 0
+		for _, other := range entries {
+			if other.user == user {
+				tabs++
+			}
+		}
+		if len(entries) >= documentPresenceRoomLimit || h.total >= documentPresenceTotalLimit || tabs >= documentPresenceUserTabLimit {
 			return 0, nil, false
 		}
 		if entries == nil {
@@ -220,6 +256,7 @@ func (r *Router) documentPresence(w http.ResponseWriter, req *http.Request) {
 	}
 	rec, err := p.loadPageForRead(req.Context(), workspace, req.PathValue("slug"))
 	if err != nil {
+		// No room id without the page; entries of a deleted page expire with the TTL.
 		replyError(w, 404, "document page not found")
 		return
 	}
@@ -240,8 +277,10 @@ func (r *Router) documentPresence(w http.ResponseWriter, req *http.Request) {
 		writeJSON(w, 200, map[string]any{"peers": []documentPresencePeer{}})
 		return
 	}
+	// The member's display name only: an email is never shown to co-readers,
+	// who may hold no more than a grant on this one page.
 	var name string
-	if r.db.QueryRowContext(req.Context(), `SELECT coalesce(nullif(u.full_name,''),u.email,u.id) FROM users u JOIN workspace_members m ON m.user_id=u.id AND m.workspace_id=? WHERE u.id=?`, workspace, user.ID).Scan(&name) != nil {
+	if r.db.QueryRowContext(req.Context(), `SELECT coalesce(u.full_name,'') FROM users u JOIN workspace_members m ON m.user_id=u.id AND m.workspace_id=? WHERE u.id=?`, workspace, user.ID).Scan(&name) != nil || strings.TrimSpace(name) == "" {
 		name = "Workspace member"
 	}
 	color, peers, ok := r.documentPresenceHub.beat(room, user.ID, input.Client, name, input.Anchor, input.Head)

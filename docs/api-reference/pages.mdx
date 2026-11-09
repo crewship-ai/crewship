@@ -2617,15 +2617,17 @@ the caret and range as base64 Yjs relative positions (at most 192 bytes each);
 `leave: true` removes this tab at once. A client cannot name itself or choose
 a colour.
 Response 200: `peers`, the other people's tabs on this document (never the
-caller's own), each with `client`, `user_id`, `name` (the server's name for
-that workspace member), `color` (an index the server assigns per document,
+caller's own), each with `client`, `user_id`, `name` (the member's display
+name, or `Workspace member` when they have none; never an email), `color` (an index the server assigns per document,
 different for each person while free colours remain, kept while they stay) and
 `anchor`/`head` when shared; plus the caller's own `color`, `ttl_ms` and
 `interval_ms`. Statuses: 200 heartbeat recorded; 400 invalid request; 401
 invalid credential; 403 agent credential or missing scope; 404 document
 unavailable or read access gone (every tab of the caller on this document is
-removed at the same time); 429 too many tabs on the document; 503 Docs
-disabled. Responses use `Cache-Control: no-store`.
+removed at the same time); 429 too many tabs on the document (at most 64, and
+8 per person); 503 Docs disabled. A revoked Page grant removes the person on
+their next heartbeat; when the credential or membership itself is gone, the
+request is refused before presence and the tab disappears after the 6 seconds. Responses use `Cache-Control: no-store`.
 CLI: `crewship doc presence <page-slug>`.
 
 Page read and list responses include `has_document`, which identifies saved native

@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -226,5 +227,55 @@ func TestDocumentPresenceIsReadScopedAndHumanOnly(t *testing.T) {
 	rig.router.mux.ServeHTTP(w, req)
 	if w.Code == 200 {
 		t.Fatal("an agent credential joined human presence")
+	}
+}
+
+func TestDocumentPresenceNeverShowsAnEmailAsTheName(t *testing.T) {
+	rig := presenceFixture(t)
+	mustExec(t, rig.router.db, `UPDATE users SET full_name='' WHERE id='presence-reader'`)
+	rig.beat("reader", "doc-a", caret("reader-tab-1", "r"))
+	_, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o"))
+	if got := names(reply.Peers); len(got) != 1 || got[0] != "Workspace member" {
+		t.Fatalf("a member without a display name is shown as %v", got)
+	}
+}
+
+// Tabs that vanish without a leave expire server-wide: stale entries in rooms
+// nobody opens again never fill the server-wide limit.
+func TestDocumentPresenceStaleRoomsNeverExhaustTheServer(t *testing.T) {
+	hub := newDocumentPresenceHub()
+	base := time.Now()
+	hub.now = func() time.Time { return base }
+	for i := 0; hub.total < documentPresenceTotalLimit; i++ {
+		room := documentPresenceRoom("ws", "page-"+strconv.Itoa(i))
+		if _, _, ok := hub.beat(room, "user-"+strconv.Itoa(i), "tab-00000001", "Name", "", ""); !ok {
+			t.Fatalf("filling the hub refused at %d", hub.total)
+		}
+	}
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "fresh"), "late-user", "tab-00000001", "Late", "", ""); ok {
+		t.Fatal("the server-wide limit must hold while entries are live")
+	}
+	hub.now = func() time.Time { return base.Add(documentPresenceTTL + time.Second) }
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "fresh"), "late-user", "tab-00000001", "Late", "", ""); !ok {
+		t.Fatal("expired entries in untouched rooms still block new people")
+	}
+	if hub.total != 1 || len(hub.rooms) != 1 {
+		t.Fatalf("expired entries kept: total %d rooms %d", hub.total, len(hub.rooms))
+	}
+}
+
+// One person cannot fill a document's room with made-up tab ids.
+func TestDocumentPresenceCapsTabsPerPerson(t *testing.T) {
+	rig := presenceFixture(t)
+	for i := 0; i < documentPresenceUserTabLimit; i++ {
+		if code, _ := rig.beat("reader", "doc-a", caret("reader-tab-"+strconv.Itoa(i), "r")); code != 200 {
+			t.Fatalf("tab %d refused with %d", i, code)
+		}
+	}
+	if code, _ := rig.beat("reader", "doc-a", caret("reader-tab-extra", "r")); code != 429 {
+		t.Fatalf("a ninth tab of one person accepted with %d", code)
+	}
+	if code, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "e")); code != 200 || len(reply.Peers) != documentPresenceUserTabLimit {
+		t.Fatalf("another person locked out: %d %d", code, len(reply.Peers))
 	}
 }
