@@ -509,8 +509,15 @@ never stored. The heartbeat is authorized like a document read: without read
 access it fails with 404 and lists nobody. `--client` reuses a tab id (8–64
 letters, digits, `-` or `_`); `--leave` removes that tab at once.
 
+People on the Canvas view (schema 6 documents; the server relays it as given
+and checks only its bounds) also carry a `canvas` object: their `pointer` (`x`, `y` in canvas coordinates, absent once it leaves
+the canvas) and the cards they selected (`selection`, Page block or canvas item
+IDs). `--pointer X,Y` (each between -1000000 and 1000000) and `--select ID,ID`
+(at most 8 different IDs) send this tab's own; neither combines with `--leave`.
+
 ```bash
 crewship doc presence @<artifact-id>
+crewship doc presence @<artifact-id> --pointer 240,120 --select intro
 crewship doc presence @<artifact-id> --client my-script-tab --leave
 ```
 

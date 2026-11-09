@@ -151112,6 +151112,43 @@
                     "maxLength": 256,
                     "type": "string"
                   },
+                  "canvas": {
+                    "additionalProperties": false,
+                    "description": "Where this tab is on the Canvas view (schema 6): its pointer in canvas coordinates, absent once it leaves the canvas, and the cards it selected. Replaced by every heartbeat; gone with the tab after the TTL.",
+                    "properties": {
+                      "pointer": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "x": {
+                            "maximum": 1000000,
+                            "minimum": -1000000,
+                            "type": "number"
+                          },
+                          "y": {
+                            "maximum": 1000000,
+                            "minimum": -1000000,
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y"
+                        ],
+                        "type": "object"
+                      },
+                      "selection": {
+                        "description": "Selected cards: Page block IDs (placements) or canvas item IDs.",
+                        "items": {
+                          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+                          "type": "string"
+                        },
+                        "maxItems": 8,
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "type": "object"
+                  },
                   "client": {
                     "description": "This tab's id.",
                     "pattern": "^[A-Za-z0-9_-]{8,64}$",
@@ -151159,6 +151196,43 @@
                             "description": "Base64 encoded Yjs relative position (at most 192 bytes).",
                             "maxLength": 256,
                             "type": "string"
+                          },
+                          "canvas": {
+                            "additionalProperties": false,
+                            "description": "Where this tab is on the Canvas view (schema 6): its pointer in canvas coordinates, absent once it leaves the canvas, and the cards it selected. Replaced by every heartbeat; gone with the tab after the TTL.",
+                            "properties": {
+                              "pointer": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "x": {
+                                    "maximum": 1000000,
+                                    "minimum": -1000000,
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "maximum": 1000000,
+                                    "minimum": -1000000,
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "x",
+                                  "y"
+                                ],
+                                "type": "object"
+                              },
+                              "selection": {
+                                "description": "Selected cards: Page block IDs (placements) or canvas item IDs.",
+                                "items": {
+                                  "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+                                  "type": "string"
+                                },
+                                "maxItems": 8,
+                                "type": "array",
+                                "uniqueItems": true
+                              }
+                            },
+                            "type": "object"
                           },
                           "client": {
                             "type": "string"

@@ -2735,15 +2735,19 @@ only its owner takes part (nobody else is ever listed there).
 Request body (at most 2 KiB, unknown fields refused): `client`, this tab's id
 (8–64 of `A-Z a-z 0-9 - _`); optionally `anchor` and `head`, both or neither,
 the caret and range as base64 Yjs relative positions (at most 192 bytes each);
-`leave: true` removes this tab at once. A client cannot name itself or choose
-a colour.
+`leave: true` removes this tab at once. Optional `canvas` carries a `pointer`
+with both `x` and `y` in canvas coordinates (absolute value at most 1000000),
+and `selection`, at most 8 unique Page block or canvas item IDs matching
+`^[a-zA-Z0-9_-]{1,80}$`. An empty `canvas` counts as none; omit it after
+leaving Canvas. These fields share the same read authorization and TTL. A
+client cannot name itself or choose a colour.
 Response 200: `peers`, the other people on this document, one entry per
 person however many tabs they have open (never the caller, nor the caller's
 other tabs), each with `tabs` (how many of that person's tabs are present),
-`client` and `anchor`/`head` of the tab whose caret moved last (a tab sharing a caret is preferred to one without), `user_id`, `name` (the member's display
+`client` and `anchor`/`head` of the tab whose caret or Canvas presence moved last (a tab sharing either is preferred to one without), `user_id`, `name` (the member's display
 name, or `Workspace member` when they have none; never an email), `color` (an index the server assigns per document,
 different for each person while free colours remain, kept while they stay) and
-`anchor`/`head` when that tab shares them; plus the caller's own `color`, `ttl_ms` and
+`anchor`/`head` and `canvas` when that tab shares them; plus the caller's own `color`, `ttl_ms` and
 `interval_ms`. Statuses: 200 heartbeat recorded; 400 invalid request; 401
 invalid credential; 403 agent credential or missing scope; 404 document
 unavailable or read access gone (every tab of the caller on this document is

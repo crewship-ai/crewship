@@ -200,7 +200,7 @@ func TestDocumentPresenceColoursAvoidCollisionsPerDocument(t *testing.T) {
 	seen := map[int]string{}
 	for i := 0; i < documentPresenceColors; i++ {
 		user := "user-" + string(rune('a'+i))
-		color, _, ok := hub.beat(room, user, "tab-"+user+"-0001", user, "", "")
+		color, _, ok := hub.beat(room, user, "tab-"+user+"-0001", user, "", "", nil)
 		if !ok {
 			t.Fatal("room full too early")
 		}
@@ -209,7 +209,7 @@ func TestDocumentPresenceColoursAvoidCollisionsPerDocument(t *testing.T) {
 		}
 		seen[color] = user
 		// Deterministic: the same person on the same document keeps their colour.
-		if again, _, _ := hub.beat(room, user, "tab-"+user+"-0001", user, "", ""); again != color {
+		if again, _, _ := hub.beat(room, user, "tab-"+user+"-0001", user, "", "", nil); again != color {
 			t.Fatalf("%s colour changed %d -> %d", user, color, again)
 		}
 	}
@@ -249,15 +249,15 @@ func TestDocumentPresenceStaleRoomsNeverExhaustTheServer(t *testing.T) {
 	hub.now = func() time.Time { return base }
 	for i := 0; hub.total < documentPresenceTotalLimit; i++ {
 		room := documentPresenceRoom("ws", "page-"+strconv.Itoa(i))
-		if _, _, ok := hub.beat(room, "user-"+strconv.Itoa(i), "tab-00000001", "Name", "", ""); !ok {
+		if _, _, ok := hub.beat(room, "user-"+strconv.Itoa(i), "tab-00000001", "Name", "", "", nil); !ok {
 			t.Fatalf("filling the hub refused at %d", hub.total)
 		}
 	}
-	if _, _, ok := hub.beat(documentPresenceRoom("ws", "fresh"), "late-user", "tab-00000001", "Late", "", ""); ok {
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "fresh"), "late-user", "tab-00000001", "Late", "", "", nil); ok {
 		t.Fatal("the server-wide limit must hold while entries are live")
 	}
 	hub.now = func() time.Time { return base.Add(documentPresenceTTL + time.Second) }
-	if _, _, ok := hub.beat(documentPresenceRoom("ws", "fresh"), "late-user", "tab-00000001", "Late", "", ""); !ok {
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "fresh"), "late-user", "tab-00000001", "Late", "", "", nil); !ok {
 		t.Fatal("expired entries in untouched rooms still block new people")
 	}
 	if hub.total != 1 || len(hub.rooms) != 1 {
@@ -285,18 +285,18 @@ func TestDocumentPresenceCapsTabsPerPerson(t *testing.T) {
 func TestDocumentPresenceCapsTabsPerPersonServerWide(t *testing.T) {
 	hub := newDocumentPresenceHub()
 	for i := 0; i < documentPresenceUserTotalLimit; i++ {
-		if _, _, ok := hub.beat(documentPresenceRoom("ws", "page-"+strconv.Itoa(i)), "busy-user", "tab-00000001", "Busy", "", ""); !ok {
+		if _, _, ok := hub.beat(documentPresenceRoom("ws", "page-"+strconv.Itoa(i)), "busy-user", "tab-00000001", "Busy", "", "", nil); !ok {
 			t.Fatalf("tab %d refused", i)
 		}
 	}
-	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "busy-user", "tab-00000001", "Busy", "", ""); ok {
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "busy-user", "tab-00000001", "Busy", "", "", nil); ok {
 		t.Fatal("one person exceeded the server-wide tab limit")
 	}
-	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "other-user", "tab-00000001", "Other", "", ""); !ok {
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "other-user", "tab-00000001", "Other", "", "", nil); !ok {
 		t.Fatal("another person locked out")
 	}
 	hub.leave(documentPresenceRoom("ws", "page-0"), "busy-user", "tab-00000001")
-	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "busy-user", "tab-00000001", "Busy", "", ""); !ok {
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "busy-user", "tab-00000001", "Busy", "", "", nil); !ok {
 		t.Fatal("a leave must free the person's slot")
 	}
 	if hub.users["busy-user"] != documentPresenceUserTotalLimit || hub.total != documentPresenceUserTotalLimit+1 {
@@ -478,5 +478,106 @@ func TestDocumentPresenceIsOneEntryPerPerson(t *testing.T) {
 	}
 	if _, own := rig.beat("owner", "doc-a", caret("owner-tab-2", "second")); len(own.Peers) != 1 || own.Peers[0].UserID == peer.UserID {
 		t.Fatalf("own tabs listed as peers: %+v", own.Peers)
+	}
+}
+
+func canvasBeat(client, canvas string) string {
+	return `{"client":"` + client + `","canvas":` + canvas + `}`
+}
+
+// Canvas presence (#5149 C06): the pointer in canvas coordinates and the selected cards ride on the same
+// heartbeat, under the same live read check and TTL, and are relayed to the other people on the document.
+func TestDocumentPresenceRelaysCanvasPointerAndSelection(t *testing.T) {
+	rig := presenceFixture(t)
+	if code, _ := rig.beat("owner", "doc-a", canvasBeat("owner-tab-1", `{"pointer":{"x":120.5,"y":-40},"selection":["intro","note-1"]}`)); code != 200 {
+		t.Fatalf("canvas heartbeat refused with %d", code)
+	}
+	_, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "editor-caret"))
+	if len(reply.Peers) != 1 || reply.Peers[0].Canvas == nil {
+		t.Fatalf("editor does not see the owner's canvas presence: %+v", reply.Peers)
+	}
+	got := reply.Peers[0].Canvas
+	if got.Pointer == nil || got.Pointer.X == nil || *got.Pointer.X != 120.5 || *got.Pointer.Y != -40 || strings.Join(got.Selection, ",") != "intro,note-1" {
+		t.Fatalf("canvas presence relayed as %+v", got)
+	}
+	// Back on the Page (or the pointer left the canvas with nothing selected): the next heartbeat clears it.
+	rig.beat("owner", "doc-a", caret("owner-tab-1", "owner-caret"))
+	if _, reply = rig.beat("editor", "doc-a", caret("editor-tab-1", "editor-caret")); reply.Peers[0].Canvas != nil {
+		t.Fatalf("canvas presence outlived the view: %+v", reply.Peers[0].Canvas)
+	}
+	rig.beat("owner", "doc-a", canvasBeat("owner-tab-1", `{}`))
+	if _, reply = rig.beat("editor", "doc-a", caret("editor-tab-1", "editor-caret")); reply.Peers[0].Canvas != nil {
+		t.Fatalf("an empty canvas is relayed: %+v", reply.Peers[0].Canvas)
+	}
+	// A selection alone (pointer outside the canvas) is relayed without a pointer.
+	rig.beat("owner", "doc-a", canvasBeat("owner-tab-1", `{"selection":["intro"]}`))
+	if _, reply = rig.beat("editor", "doc-a", caret("editor-tab-1", "editor-caret")); reply.Peers[0].Canvas == nil || reply.Peers[0].Canvas.Pointer != nil {
+		t.Fatalf("selection-only presence relayed as %+v", reply.Peers[0].Canvas)
+	}
+	nine := `["a","b","c","d","e","f","g","h","i"]`
+	for _, forged := range []string{
+		`{"pointer":{"x":1000001,"y":0}}`,
+		`{"pointer":{"x":0,"y":-1000001}}`,
+		`{"pointer":{"x":0,"y":0,"z":1}}`,
+		`{"pointer":{"x":"1","y":0}}`,
+		`{"pointer":{}}`,
+		`{"pointer":{"x":5}}`,
+		`{"pointer":{"x":null,"y":null}}`,
+		`{"pointer":{"x":1e400,"y":0}}`,
+		`{"selection":[null]}`,
+		`{"selection":` + nine + `}`,
+		`{"selection":["intro","intro"]}`,
+		`{"selection":["has space"]}`,
+		`{"selection":["` + strings.Repeat("a", 81) + `"]}`,
+		`{"color":1}`,
+		`{"name":"Someone else"}`,
+		`"canvas"`,
+	} {
+		if code, _ := rig.beat("owner", "doc-a", canvasBeat("owner-tab-1", forged)); code != 400 {
+			t.Errorf("canvas presence %s accepted with %d", forged, code)
+		}
+	}
+	// The most a heartbeat may carry still fits the 2 KiB body bound.
+	ids := []string{}
+	for i := 0; i < documentPresenceCanvasSelection; i++ {
+		ids = append(ids, `"`+strings.Repeat(strconv.Itoa(i), 80)+`"`)
+	}
+	position := base64.StdEncoding.EncodeToString(make([]byte, documentPresencePositionLimit))
+	full := `{"client":"` + strings.Repeat("t", 64) + `","anchor":"` + position + `","head":"` + position + `","canvas":{"pointer":{"x":-999999.125,"y":999999.125},"selection":[` + strings.Join(ids, ",") + `]}}`
+	if code, _ := rig.beat("owner", "doc-a", full); code != 200 {
+		t.Fatalf("largest valid heartbeat (%d bytes) refused with %d", len(full), code)
+	}
+}
+
+func TestDocumentPresenceCanvasExpiresWithTheTab(t *testing.T) {
+	rig := presenceFixture(t)
+	now := time.Now()
+	rig.router.documentPresenceHub.now = func() time.Time { return now }
+	rig.beat("owner", "doc-a", canvasBeat("owner-tab-1", `{"pointer":{"x":1,"y":2},"selection":["intro"]}`))
+	now = now.Add(documentPresenceTTL + time.Millisecond)
+	if _, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "editor-caret")); len(reply.Peers) != 0 {
+		t.Fatalf("canvas presence outlived the TTL: %+v", reply.Peers)
+	}
+}
+
+// A moving Canvas tab must not disappear behind another tab's unchanged Page caret.
+func TestDocumentPresenceCanvasTracksTheActiveTab(t *testing.T) {
+	rig := presenceFixture(t)
+	now := time.Now()
+	rig.router.documentPresenceHub.now = func() time.Time { return now }
+	rig.beat("owner", "doc-a", caret("owner-page-1", "page-caret"))
+	now = now.Add(time.Millisecond)
+	rig.beat("owner", "doc-a", canvasBeat("owner-canvas-1", `{"pointer":{"x":10,"y":20},"selection":["intro"]}`))
+	now = now.Add(time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-page-1", "page-caret"))
+	_, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+	if len(reply.Peers) != 1 || reply.Peers[0].Tabs != 2 || reply.Peers[0].Canvas == nil || reply.Peers[0].Client != "owner-canvas-1" {
+		t.Fatalf("active Canvas hidden by unchanged Page caret: %+v", reply.Peers)
+	}
+	now = now.Add(time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-page-1", "moved-page-caret"))
+	_, reply = rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+	if len(reply.Peers) != 1 || reply.Peers[0].Canvas != nil || reply.Peers[0].Client != "owner-page-1" {
+		t.Fatalf("Canvas hid the newly active Page tab: %+v", reply.Peers)
 	}
 }

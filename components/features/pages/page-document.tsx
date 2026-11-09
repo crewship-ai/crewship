@@ -31,7 +31,7 @@ import { documentReviewActions } from "@/lib/feature-flags"
 import { createDocumentPeople, type DocumentPeople } from "@/lib/documents/people"
 import { DocumentCaretKeeper } from "./document-caret-keeper"
 import { DocumentRemoteCarets } from "./document-remote-carets"
-import { useDocumentPresence } from "@/hooks/use-document-presence"
+import { useDocumentPresence, type CanvasPresenceChannel } from "@/hooks/use-document-presence"
 import { DocsPresence } from "@/components/features/artifacts-library/kinds/docs/docs-presence"
 import { CommentHighlights, documentEditorExtensions, isRichSchema, KeptSelection, stableBlockTypes } from "./document-rich-extensions"
 
@@ -114,7 +114,7 @@ const PAGES_EDITOR_CLASS = "min-h-64 max-w-none p-6 outline-none [&_p]:my-3 [&_h
  * sync says so and no restore is pending; a restore confirmed while this tab
  * still holds local edits never reopens over them.
  */
-export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyChange, onRestored }: Pick<DocumentWorkspaceProps, "workspaceId" | "pageId" | "slug" | "sync" | "onDirtyChange" | "onRestored">, editorClass = PAGES_EDITOR_CLASS) {
+export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyChange, onRestored }: Pick<DocumentWorkspaceProps, "workspaceId" | "pageId" | "slug" | "sync" | "onDirtyChange" | "onRestored">, editorClass = PAGES_EDITOR_CLASS, presenceCanvas?: CanvasPresenceChannel) {
   const [actionError, setActionError] = useState<string>()
   const [restoring, setRestoring] = useState(false)
   const reviewEnabled = documentReviewActions()
@@ -141,7 +141,7 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
   }, [sync.doc,sync.state?.schema,people])
   useEffect(() => { editor?.setEditable(sync.editable && !restoring) }, [editor, sync.editable, restoring])
   // Who else is here and where their caret is (#5166): only while this session holds an authorized read.
-  const peers = useDocumentPresence({ workspaceId, slug, editor, enabled: Boolean(sync.state) && !sync.denied })
+  const peers = useDocumentPresence({ workspaceId, slug, editor, enabled: Boolean(sync.state) && !sync.denied, canvas: presenceCanvas })
   const empty = useEditorState({ editor, selector: ({ editor }) => editor ? isEmptyDocument(editor.state.doc) : false })
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || sync.recovery); return () => onDirtyChange?.(false) }, [sync.pending, sync.recovery, onDirtyChange])
   // Collaboration's Yjs undo tracks only this editor's own transactions, so it never takes back confirmed work from others.

@@ -146,13 +146,17 @@ func documentSchemaCatalog() map[string]DomainSchema {
 	}
 	// Ephemeral presence (#5166): the server names people and assigns colours; a client sends only its tab and caret.
 	position := map[string]any{"type": "string", "maxLength": 256, "description": "Base64 encoded Yjs relative position (at most 192 bytes)."}
+	coordinate := map[string]any{"type": "number", "minimum": -1000000, "maximum": 1000000}
+	canvasPresence := map[string]any{"type": "object", "additionalProperties": false, "description": "Where this tab is on the Canvas view (schema 6): its pointer in canvas coordinates, absent once it leaves the canvas, and the cards it selected. Replaced by every heartbeat; gone with the tab after the TTL.", "properties": map[string]any{
+		"pointer":   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"x", "y"}, "properties": map[string]any{"x": coordinate, "y": coordinate}},
+		"selection": map[string]any{"type": "array", "maxItems": 8, "uniqueItems": true, "items": map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,80}$"}, "description": "Selected cards: Page block IDs (placements) or canvas item IDs."}}}
 	peer := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"client", "user_id", "name", "color"}, "properties": map[string]any{
 		"client": str(), "user_id": str(), "name": map[string]any{"type": "string", "description": "The member's display name, or Workspace member; never an email."},
-		"color": map[string]any{"type": "integer", "minimum": 0, "maximum": 7, "description": "Per-document colour index assigned by the server."}, "anchor": position, "head": position}}
+		"color": map[string]any{"type": "integer", "minimum": 0, "maximum": 7, "description": "Per-document colour index assigned by the server."}, "anchor": position, "head": position, "canvas": canvasPresence}}
 	out["POST "+base+"/presence"] = DomainSchema{
 		Request: map[string]any{"type": "object", "additionalProperties": false, "required": []string{"client"}, "properties": map[string]any{
 			"client": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$", "description": "This tab's id."},
-			"anchor": position, "head": position,
+			"anchor": position, "head": position, "canvas": canvasPresence,
 			"leave": map[string]any{"type": "boolean", "description": "Remove this tab at once."}}},
 		RequestRequired: true,
 		Response: map[string]any{"type": "object", "required": []string{"peers"}, "properties": map[string]any{

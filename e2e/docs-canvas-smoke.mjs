@@ -322,6 +322,63 @@ try {
   await page.screenshot({ path: join(output, '05-owner-sees-placement.png') })
   pass('two editors write at once: both changes are stored and each sees the other live')
 
+  // C06: canvas presence over the Docs presence channel. The co-editor pans so the two views differ;
+  // the owner's pointer over a card must still land on that card for the co-editor (canvas coordinates).
+  const pointerOf = (target, name) => target.locator(`[data-peer-pointer="${name}"]`)
+  const coCanvas = co.getByRole('application', { name: 'Canvas' })
+  const coBox = await coCanvas.boundingBox()
+  await co.mouse.move(coBox.x + coBox.width - 40, coBox.y + coBox.height - 40); await co.mouse.down()
+  for (let i = 1; i <= 6; i++) await co.mouse.move(coBox.x + coBox.width - 40 - i * 25, coBox.y + coBox.height - 40 - i * 12)
+  await co.mouse.up()
+  // And zooms in: screen coordinates would now land far from the card the owner points at.
+  await co.getByRole('button', { name: 'Zoom in' }).click(); await co.getByRole('button', { name: 'Zoom in' }).click()
+  await co.mouse.move(coBox.x + 5, coBox.y + coBox.height + 40) // off the canvas: the co-editor shares no pointer
+  assert.notEqual(await world(co), await world(page), 'the two people look at the canvas with different pan and zoom')
+  const target = await page.locator('[data-placement="outro"]').boundingBox()
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 4 })
+  await pointerOf(co, 'Canvas Editor').waitFor({ timeout: 10000 })
+  const seen = await pointerOf(co, 'Canvas Editor').boundingBox(), coOutro = await co.locator('[data-placement="outro"]').boundingBox()
+  assert.ok(seen.x >= coOutro.x && seen.x <= coOutro.x + coOutro.width && seen.y >= coOutro.y && seen.y <= coOutro.y + coOutro.height,
+    `the owner's pointer is over the same card for the co-editor (${JSON.stringify(seen)} in ${JSON.stringify(coOutro)})`)
+  assert.equal(await pointerOf(co, 'Canvas Editor').textContent(), 'Canvas Editor', 'named by the server, never an email')
+  pass('a pointer is shared in canvas coordinates: it points at the same card under a different pan and zoom')
+
+  // Selection: the owner selects a card; the co-editor and the read-only viewer both see it outlined and named.
+  await page.locator('[data-placement="outro"]').click()
+  await co.waitForFunction(() => document.querySelector('[data-placement="outro"]')?.dataset.peerSelected?.includes('Canvas Editor'), null, { timeout: 10000 })
+  await viewer.waitForFunction(() => document.querySelector('[data-placement="outro"]')?.dataset.peerSelected?.includes('Canvas Editor'), null, { timeout: 10000 })
+  // A read-only person's selection is presence, not a write: the owner sees it, and the viewer still writes nothing.
+  await viewer.locator('[data-placement="intro"]').focus()
+  await page.waitForFunction(() => document.querySelector('[data-placement="intro"]')?.dataset.peerSelected?.includes('Canvas Viewer'), null, { timeout: 10000 })
+  assert.deepEqual(writes, [], 'presence sends no document writes for the viewer')
+  await co.screenshot({ path: join(output, '06-coeditor-sees-owner-pointer-and-selection.png') })
+  await page.screenshot({ path: join(output, '06-owner-sees-viewer-selection.png') })
+  pass('selections show to everyone on the canvas, including a read-only viewer\'s, and nothing is written')
+
+  // Leaving the Canvas clears that person's canvas presence at once (the next heartbeat carries none). By
+  // keyboard, so the pointer is still over the canvas: it is the Canvas closing that removes it, not the mouse.
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2)
+  await page.getByRole('tab', { name: 'Page', exact: true }).focus()
+  await page.keyboard.press('Enter')
+  await pointerOf(co, 'Canvas Editor').waitFor({ state: 'detached', timeout: 5000 })
+  await co.waitForFunction(() => !document.querySelector('[data-placement="outro"]')?.dataset.peerSelected, null, { timeout: 5000 })
+  pass('switching to the Page removes the pointer and selection from the others\' canvas')
+
+  // TTL: a person who stops sending (here offline) disappears after the presence lifetime, without a leave.
+  await page.getByRole('tab', { name: 'Canvas', exact: true }).click()
+  await page.locator('[data-placement="intro"]').waitFor()
+  const back = await page.locator('[data-placement="intro"]').boundingBox()
+  await page.mouse.move(back.x + 20, back.y + 20, { steps: 3 })
+  await pointerOf(co, 'Canvas Editor').waitFor({ timeout: 10000 })
+  await owner.setOffline(true)
+  const offlineAt = Date.now()
+  await pointerOf(co, 'Canvas Editor').waitFor({ state: 'detached', timeout: 15000 })
+  const gone = Date.now() - offlineAt
+  assert.ok(gone >= 3000, `presence outlives a missed heartbeat or two (gone after ${gone} ms)`)
+  await owner.setOffline(false)
+  report.presenceExpiryMs = gone
+  pass(`an absent person's canvas presence expires after the TTL (${gone} ms)`)
+
   const surfaceOf = async () => {
     const value = await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document?${q}`)).json()
     const d = new Y.Doc({ gc: false }); Y.applyUpdate(d, decode(value.snapshot)); for (const update of value.updates ?? []) Y.applyUpdate(d, decode(update))
