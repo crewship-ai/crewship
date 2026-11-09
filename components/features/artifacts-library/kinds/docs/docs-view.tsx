@@ -14,6 +14,8 @@ import type { LibraryItem } from "../../library-items"
 import { docsFrameStatus, outlineOf, readingStats, readingText, type DocNode, type OutlineEntry } from "./docs-model"
 import { DocsTools } from "./docs-tools"
 import { DocsComments } from "./docs-comments"
+import { DocsTabs, useTabRows } from "./docs-tabs"
+import { documentTabs, shownTab, tabFromHash, TABS_SCHEMA } from "@/lib/documents/tabs"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
 import { commentTarget, setCommentHighlights, type CommentTarget } from "@/components/features/pages/document-rich-extensions"
@@ -69,7 +71,27 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const frame = useArtifactFrame()
   const layout: FrameLayout = frame?.layout ?? "desktop"
   const phone = layout === "phone"
-  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, restoreGuard, review } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS)
+  // Tabs only where the document's schema admits them; the chosen tab is in the URL fragment (#tab=<id>).
+  const tabsReady = Boolean(sync.state && !sync.denied && sync.state.schema >= TABS_SCHEMA)
+  const [tab, setTab] = React.useState<string>(() => (typeof window === "undefined" ? null : tabFromHash(window.location.hash)) ?? documentTabs.DEFAULT)
+  React.useEffect(() => {
+    // Only a tab fragment chooses a tab; other in-page anchors leave the chosen tab alone.
+    const follow = () => { const id = tabFromHash(window.location.hash); if (id) setTab(id) }
+    window.addEventListener("hashchange", follow)
+    return () => window.removeEventListener("hashchange", follow)
+  }, [])
+  const selectTab = React.useCallback((id: string) => {
+    setTab(id)
+    const hash = `#tab=${id}`
+    if (window.location.hash !== hash) window.history.replaceState(window.history.state, "", hash)
+  }, [])
+  // One tab list and one rule (shownTab) for both the strip and the editor: the editor always shows the tab the
+  // strip marks as chosen, and an unknown or deleted tab falls back to the first, whether or not the strip is open.
+  const tabs = useTabRows(sync.doc, tabsReady)
+  const shown = tabsReady ? shownTab(tabs.rows, tab) : { id: documentTabs.DEFAULT, field: "default" }
+  // Once the tabs are read, a fallback replaces the dead ID, so a tab that comes back later never takes over the editor.
+  React.useEffect(() => { if (tabsReady && tabs.rows.length > 0 && shown.id !== tab) selectTab(shown.id) }, [tabsReady, tabs.rows.length, shown.id, tab, selectTab])
+  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, restoreGuard, review } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS, shown.field)
   // The outline is open by default only where it does not cover the page.
   const [outlineOpen, setOutlineOpen] = React.useState(layout === "desktop")
   const [sent, setSent] = React.useState(false)
@@ -178,6 +200,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     </ArtifactSlot>
 
     {outlineOpen && <ArtifactSlot name="panel" label="Outline">
+      {tabsReady && <DocsTabs doc={sync.doc} tabs={tabs} selected={shown.id} editable={editable} origin={documentTabs.ORIGIN} onSelect={selectTab} />}
       <div className="flex items-center gap-1 border-b py-1.5 pl-3 pr-1.5">
         <b className="flex-1 text-sm font-semibold">Outline</b>
         <ArtifactTool icon={X} label="Close outline" onClick={() => setOutlineOpen(false)} />

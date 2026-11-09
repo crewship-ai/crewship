@@ -157,6 +157,13 @@ validator still refuses them as unsupported Yjs roots.
   key is dropped by the decoder); the service never stores raw request bytes,
   only the re-encoded document state and diff, so they never reach history.
 
+The Docs view has the tab strip (`components/features/artifacts-library/kinds/docs/docs-tabs.tsx`):
+the tab tree above the Outline, which keeps listing the chosen tab's headings;
+add, rename, reorder, nest, un-nest and confirmed delete for people who can
+edit; the chosen tab's stable ID in the URL fragment (`#tab=<id>`); and the
+editor bound to that tab's fragment. It shows only from schema 7 on, so no
+document offers tabs until that schema is admitted.
+
 Admission (schema 7) still needs: the document validator to accept `tab:`
 fragments and the tab maps; block IDs unique across all tabs, including
 duplicates created concurrently (a new tab refuses a block ID already used in

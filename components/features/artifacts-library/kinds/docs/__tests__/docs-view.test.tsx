@@ -117,6 +117,20 @@ describe("Docs in the ArtifactFrame", () => {
     expect(await within(drawer).findByText("No checkpoints yet.")).toBeTruthy()
   })
 
+  it("offers no tabs below the schema that admits them, even with a tab in the URL fragment", async () => {
+    window.history.replaceState(null, "", "#tab=plan")
+    try {
+      serve()
+      open()
+      expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
+      await waitFor(() => expect(screen.getByRole("button", { name: "Status: Live" })).toBeTruthy())
+      expect(screen.queryByRole("tree", { name: "Tabs" })).toBeNull()
+      expect(screen.queryByRole("button", { name: "Add tab" })).toBeNull()
+      // The editor still shows the page itself.
+      expect(within(slot("panel")!).getByRole("navigation", { name: "Headings" }).textContent).toContain("Goal")
+    } finally { window.history.replaceState(null, "", "#") }
+  })
+
   it("stays on Saving… while the receipt has not arrived", async () => {
     serve()
     env.patch = "hang"

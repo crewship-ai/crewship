@@ -97,7 +97,8 @@ const PAGES_EDITOR_CLASS = "min-h-64 max-w-none p-6 outline-none [&_p]:my-3 [&_h
  * sync says so and no restore is pending; a restore confirmed while this tab
  * still holds local edits never reopens over them.
  */
-export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyChange, onRestored }: Pick<DocumentWorkspaceProps, "workspaceId" | "pageId" | "slug" | "sync" | "onDirtyChange" | "onRestored">, editorClass = PAGES_EDITOR_CLASS) {
+/** `field` is the Yjs fragment the editor shows: `default` (the page) unless a Docs tab is chosen. */
+export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyChange, onRestored }: Pick<DocumentWorkspaceProps, "workspaceId" | "pageId" | "slug" | "sync" | "onDirtyChange" | "onRestored">, editorClass = PAGES_EDITOR_CLASS, field = "default") {
   const [actionError, setActionError] = useState<string>()
   const [restoring, setRestoring] = useState(false)
   const reviewEnabled = documentReviewActions()
@@ -113,13 +114,13 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
   }, [sync.doc])
   const editor = useEditor({
     immediatelyRender: false, editable: false,
-    extensions: [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(sync.state?.schema) }), ...documentEditorExtensions(sync.state?.schema), CommentHighlights, Collaboration.configure({ document: sync.doc, field: "default" })],
+    extensions: [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(sync.state?.schema) }), ...documentEditorExtensions(sync.state?.schema), CommentHighlights, Collaboration.configure({ document: sync.doc, field })],
     // The browser moves the caret (Ctrl+End, arrows, a tap) before its selectionchange reaches ProseMirror. A key the
     // editor handles itself, such as Enter, must act where the caret is shown, so the DOM selection is read first.
     // Only for real key presses: ProseMirror replays a browser-made Enter or Backspace (iOS, Android) as a plain Event
     // in the middle of its own flush, where reading the DOM again would split twice or recurse.
     editorProps: { handleKeyDown: (view, event) => { if (event instanceof KeyboardEvent && !view.composing) (view as unknown as { domObserver: { flush(): void } }).domObserver.flush(); return false }, attributes: { class: editorClass, "aria-label": "Document editor" } },
-  }, [sync.doc,sync.state?.schema])
+  }, [sync.doc,sync.state?.schema,field])
   useEffect(() => { editor?.setEditable(sync.editable && !restoring) }, [editor, sync.editable, restoring])
   const empty = useEditorState({ editor, selector: ({ editor }) => editor ? isEmptyDocument(editor.state.doc) : false })
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || sync.recovery); return () => onDirtyChange?.(false) }, [sync.pending, sync.recovery, onDirtyChange])
