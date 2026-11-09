@@ -2620,7 +2620,7 @@ a colour.
 Response 200: `peers`, the other people on this document, one entry per
 person however many tabs they have open (never the caller, nor the caller's
 other tabs), each with `tabs` (how many of that person's tabs are present),
-`client` and `anchor`/`head` of the tab whose caret moved last, `user_id`, `name` (the member's display
+`client` and `anchor`/`head` of the tab whose caret moved last (a tab sharing a caret is preferred to one without), `user_id`, `name` (the member's display
 name, or `Workspace member` when they have none; never an email), `color` (an index the server assigns per document,
 different for each person while free colours remain, kept while they stay) and
 `anchor`/`head` when that tab shares them; plus the caller's own `color`, `ttl_ms` and

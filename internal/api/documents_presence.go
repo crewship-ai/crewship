@@ -169,6 +169,20 @@ func (h *documentPresenceHub) sweepAll(force bool) {
 	}
 }
 
+// documentPresenceShownBefore reports whether tab a represents its person
+// rather than tab b: a tab sharing a caret beats one without (a CLI heartbeat
+// or a node selection never hides a real caret), then the caret that moved
+// last, then the lower tab id.
+func documentPresenceShownBefore(a, b *documentPresenceEntry) bool {
+	if hasA, hasB := a.anchor != "", b.anchor != ""; hasA != hasB {
+		return hasA
+	}
+	if !a.moved.Equal(b.moved) {
+		return a.moved.After(b.moved)
+	}
+	return a.client < b.client
+}
+
 // beat records one authorized heartbeat and returns the other people present.
 func (h *documentPresenceHub) beat(room, user, client, name, anchor, head string) (int, []documentPresencePeer, bool) {
 	return h.beatAs(room, user, client, "", "", name, anchor, head)
@@ -221,7 +235,7 @@ func (h *documentPresenceHub) beatAs(room, user, client, session, token, name, a
 			continue
 		}
 		tabs[other.user]++
-		if shown := people[other.user]; shown == nil || other.moved.After(shown.moved) || other.moved.Equal(shown.moved) && other.client < shown.client {
+		if shown := people[other.user]; shown == nil || documentPresenceShownBefore(other, shown) {
 			people[other.user] = other
 		}
 	}
