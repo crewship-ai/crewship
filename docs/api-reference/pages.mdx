@@ -600,16 +600,22 @@ and by members of the crews that own its panels.
 
 ### Only the owner delegates Edit to an agent
 
-`write` to an `agent` subject is issued by the page's **owner** only: the owning
-user, or a member of the owning crew. A workspace ADMIN/OWNER role administers
-every other grant, can grant an agent `read` or `produce`, and can revoke any
-grant, but it does not imply the right to delegate Edit to an agent. A request
-from anyone else gets 403.
+`write` or `produce` to an `agent` subject is issued by the page's **owner**
+only: the owning user, or a member of the owning crew while that crew is not
+deleted. `produce` pushes the
+page's data, so it is Edit of the data. A workspace ADMIN/OWNER role administers
+every other grant, can grant an agent `read`, and can revoke any grant, but it
+does not imply the right to delegate Edit to an agent. A request from anyone
+else gets 403.
 
-The rule also applies at use time. An agent `write` grant whose issuer does not
-own the page today is listed with `live: false` and an `inert_reason`, and it
-authorises nothing: no spec edits, no document proposals and no collaborative
-writes. The owner must issue it.
+The rule also applies at use time. An agent `write` or `produce` grant that the
+page's owner did not issue is listed with `live: false` and an `inert_reason`,
+and it authorises nothing: no spec edits, no pushed payloads, no document
+proposals and no collaborative writes. Such a row is retired for good when it
+is stored, when the page changes owner, when its issuer leaves the owning
+crew, or when the owning crew is deleted, and each retirement writes a `page.agent_grant.retired_not_owner` audit
+entry. It stays retired if its issuer comes to own the page later. Only a new
+grant by the owner delegates again.
 
 An agent cannot hold `comment`, and neither `comment` nor `read` lets an agent
 propose a change to a document.
@@ -621,7 +627,7 @@ propose a change to a document.
 | 200 | Issued, or updated in place if the subject already held one. |
 | 400 | Unknown `subject_type` or `level`, missing subject, `produce` for the `workspace` subject, `comment` for an `agent` subject, or `panels` naming a panel the page does not have. |
 | 401 | No session. |
-| 403 | Not the owner and not an admin; `write` to an `agent` from anyone but the page's owner; or the caller is an agent rather than a human. Only for a caller who reaches the page. |
+| 403 | Not the owner and not an admin; `write` or `produce` to an `agent` from anyone but the page's owner; or the caller is an agent rather than a human. Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---

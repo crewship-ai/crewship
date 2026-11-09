@@ -114,15 +114,19 @@ func TestAcceptance_PageAgentEditIsOwnerOnly(t *testing.T) {
 		t.Fatalf("owner listing says it may not delegate agent Edit: %+v", got)
 	}
 
-	out, code := run("admin", "page", "grant", "notes", "--agent", "scribe", "--level", "write")
-	if code != 4 || !strings.Contains(out, "only the artifact's owner can delegate Edit to an agent") {
-		t.Fatalf("admin agent write: exit %d, want 4 with the owner-only reason\n%s", code, out)
+	// Produce pushes the page's data: Edit of the data, owner-only as well.
+	for _, level := range []string{"write", "produce"} {
+		out, code := run("admin", "page", "grant", "notes", "--agent", "scribe", "--level", level)
+		if code != 4 || !strings.Contains(out, "only the artifact's owner can delegate Edit") {
+			t.Fatalf("admin agent %s: exit %d, want 4 with the owner-only reason\n%s", level, code, out)
+		}
 	}
 	if got := grants("owner"); len(got.Grants) != 0 {
 		t.Fatalf("a refused grant changed the ACL: %+v", got)
 	}
 	must("admin", "page", "grant", "notes", "--agent", "scribe", "--level", "read")
 	must("owner", "page", "grant", "notes", "--agent", "scribe", "--level", "write")
+	must("owner", "page", "grant", "notes", "--agent", "scribe", "--level", "produce")
 	got := grants("owner")
 	levels := map[string]bool{}
 	for _, g := range got.Grants {
@@ -130,8 +134,8 @@ func TestAcceptance_PageAgentEditIsOwnerOnly(t *testing.T) {
 			levels[g.Level] = true
 		}
 	}
-	if !levels["read"] || !levels["write"] || len(got.Grants) != 2 {
-		t.Fatalf("grants after admin read + owner write: %+v", got)
+	if !levels["read"] || !levels["write"] || !levels["produce"] || len(got.Grants) != 3 {
+		t.Fatalf("grants after admin read + owner write and produce: %+v", got)
 	}
 	must("admin", "page", "revoke", "notes", "--agent", "scribe")
 	if got := grants("owner"); len(got.Grants) != 0 {
