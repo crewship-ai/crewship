@@ -86,7 +86,9 @@ try {
   await canvas.waitFor()
   assert.equal(await page.locator('[data-docs-canvas]').getAttribute('data-editable'), 'true')
   await page.screenshot({ path: join(output, '01-editor-empty-canvas.png') })
-  let saved = page.waitForResponse(r => r.url().includes('/document/patch') && r.request().method() === 'POST')
+  // Only a patch that carries the placement counts (the editor may save its own normalization first).
+  const placementPatch = r => r.url().includes('/document/patch') && r.request().method() === 'POST' && Buffer.from(JSON.parse(r.request().postData() || '{}').update || '', 'base64').includes('surface:placements')
+  let saved = page.waitForResponse(placementPatch)
   await page.getByText(/^Add blocks \(3\)$/).click()
   await page.getByRole('button', { name: 'Agree the launch date with sales.', exact: true }).click()
   assert.equal((await saved).status(), 200, 'placing a block saves a patch')
@@ -95,6 +97,7 @@ try {
   pass('editor placed a Page block on the canvas')
   // Move the card by dragging it: geometry only, one write for the gesture.
   const before = await card.boundingBox()
+  // A move overwrites the key, so its update names no root; the stored read-back below proves it.
   saved = page.waitForResponse(r => r.url().includes('/document/patch') && r.request().method() === 'POST')
   await page.mouse.move(before.x + 40, before.y + 20)
   await page.mouse.down()
@@ -166,6 +169,7 @@ try {
   for (let i = 1; i <= 10; i++) await viewer.mouse.move(box.x + 30 + i * 20, box.y + 15 + i * 10)
   await viewer.mouse.up()
   assert.deepEqual(await viewerCard.evaluate(element => ({ left: element.style.left, top: element.style.top })), cardBefore, 'the viewer cannot move a card')
+  assert.notEqual(await world(viewer), panAfter, 'dragging a card pans the view instead')
   await viewer.keyboard.press('Tab')
   await viewer.waitForTimeout(1500)
   assert.deepEqual(writes, [], 'the viewer sends no document writes')
