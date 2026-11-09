@@ -23,6 +23,15 @@ func TestCleanDataRunReason(t *testing.T) {
 		"invalid utf8":    {in: "bad \xff byte", keep: []string{"bad ? byte"}},
 		"bounded":         {in: strings.Repeat("ž", 400), keep: []string{"žž"}},
 		"no false secret": {in: "token bucket empty", keep: []string{"token bucket empty"}},
+		"json password":   {in: `body {"password":"hunter2","user":"bot"}`, keep: []string{`"user":"bot"`}, without: []string{"hunter2"}},
+		"json spaced":     {in: `{"api_key" : "zz9-top"}`, without: []string{"zz9-top"}},
+		"access token":    {in: "refresh failed: access_token=abc123secret&x=1", without: []string{"abc123secret"}},
+		"client secret":   {in: "client_secret=s3cr3tvalue", without: []string{"s3cr3tvalue"}},
+		"env password":    {in: "PGPASSWORD=pgpass99 psql failed", keep: []string{"psql failed"}, without: []string{"pgpass99"}},
+		"quoted value":    {in: `password = "hunter 2" rejected`, keep: []string{"rejected"}, without: []string{"hunter", " 2\""}},
+		"single quoted":   {in: `secret: 'two words' end`, keep: []string{"end"}, without: []string{"two words"}},
+		"jwt":             {in: "got eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0In0.c2lnbmF0dXJlX3Rlc3Q from idp", keep: []string{"from idp"}, without: []string{"eyJhbGciOiJIUzI1NiJ9", "c2lnbmF0dXJlX3Rlc3Q"}},
+		"aws key":         {in: "denied for AKIAIOSFODNN7EXAMPLE in us-east-1", keep: []string{"us-east-1"}, without: []string{"AKIAIOSFODNN7EXAMPLE"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			got := CleanDataRunReason(tc.in)

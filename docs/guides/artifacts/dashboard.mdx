@@ -107,7 +107,7 @@ recorded (see [Record producer runs](#record-producer-runs)), in this order:
 | Chip | When |
 |---|---|
 | **Refresh failed** | The newest run of a collection failed. The owner and editors see the reason; readers see only that it failed. |
-| **Refresh stalled** | A run has been running for more than 30 minutes without finishing. |
+| **Refresh stalled** | A run has been running for more than 30 minutes without finishing. Shown by the browser only; the run stays `running` on the server. |
 | **Refreshing…** | A run is in progress. |
 | **Stale** | A `planned` or `live` dataset is older than its maximum age. With run records the age counts from the last successful run, otherwise from the last write. |
 | **Sample data** | Any dataset is marked as sample. |
@@ -291,8 +291,9 @@ reference is in [`crewship page`](/cli/page#dashboard-data-disabled-by-default).
 
 ## Record producer runs
 
-A producer that refreshes a dataset on a schedule (an agent, a routine or a
-script in a container) can record each refresh so readers see **Refreshing…**,
+A producer that refreshes a dataset on a schedule (a script, routine step or
+job that calls the CLI or REST API with a token) can record each refresh so
+readers see **Refreshing…**,
 **Refresh failed** and the last success instead of an ageing write. Starting
 and finishing a run needs the same right as writing data, and a run never
 writes data or publishes a version. The producer recorded is the
@@ -311,8 +312,12 @@ returns the same run, so a retried job does not open a second one. Finishing
 the same run again with the same outcome is accepted; a different outcome
 fails with `409`. `crewship page artifact data runs list <slug> --version 3`
 shows the newest run, last attempt and last success per collection. The newest
-20 runs and the newest success are kept per collection. Agent runs started
+20 runs and the newest success are kept per collection. Agent runs that work
 through the artifact tools cannot record runs yet; use the CLI with a token.
+Any writer of the Dashboard may finish any of its runs, not only the producer
+that started it. **Refresh stalled** is decided by the viewer's browser after
+30 minutes; the server keeps such a run `running` until a writer finishes it.
+`--reason -` reads the reason from standard input.
 
 ## Who sees which data
 

@@ -1,9 +1,13 @@
 -- Producer run records of dashboard datasets: when a refresh of one collection
--- started, how it ended and why it failed. A producer (agent, routine or
--- container script) starts a run, writes data batches, then finishes it. The
+-- started, how it ended and why it failed. A producer (a script or job using
+-- the REST API or CLI) starts a run, writes data batches, then finishes it. The
 -- store keeps the newest 20 runs per collection plus the newest success, so
 -- the table never grows without bound. Page/workspace lifetime owns them.
 -- started_by is the authenticated host actor, never caller input.
+-- Debt: rows cascade from artifact_version_heads. A future migration that
+-- rebuilds that table (as 20261028202000 did) must copy artifact_data_runs
+-- around the rebuild like artifact_data_documents, or the run history is lost.
+-- There is no shared guard list for heads dependents yet.
 CREATE TABLE artifact_data_runs (
  workspace_id TEXT NOT NULL,
  page_id TEXT NOT NULL,

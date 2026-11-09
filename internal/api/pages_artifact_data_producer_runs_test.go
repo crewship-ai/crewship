@@ -149,11 +149,16 @@ func TestDashboardProducerRunFailureKeepsLastSuccessAndHidesReasonFromReaders(t 
 			t.Fatalf("reason kept %q: %q", secret, failed.Reason)
 		}
 	}
+	// A workspace ADMIN without a grant reads through the audited administrator
+	// read, which never makes them an owner or editor, so the reason stays hidden.
+	admin := "producer-admin"
+	mustExec(t, f.h.db, `INSERT INTO users(id,email) VALUES(?,'producer-admin@example.test')`, admin)
+	mustExec(t, f.h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'ADMIN')`, generateCUID(), f.ws, admin)
 	for _, tc := range []struct {
 		name       string
 		user       string
 		wantReason bool
-	}{{"owner", f.owner, true}, {"reader", f.reader, false}} {
+	}{{"owner", f.owner, true}, {"reader", f.reader, false}, {"workspace admin", admin, false}} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := f.do(t, tc.user, "list", "", "", "?version=1", "")
 			var got artifactDataRunsResponse

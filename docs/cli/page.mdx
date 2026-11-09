@@ -2354,12 +2354,14 @@ crewship page artifact data runs list demo --version 1
 | Command | Flags | Notes |
 |---------|-------|-------|
 | `runs start <slug> <collection>` | `--base-version` (latest code version), `--key` (1–128 of letters, digits, `.` `_` `:` `-`) | Same right as `data batch`. A repeated key from the same producer returns the same run (HTTP 200); from another producer it fails with 409. |
-| `runs finish <slug> <collection> <run-id>` | `--base-version`, `--state succeeded\|failed`, `--reason` (failed only) | The reason is cleaned on the server (no control characters or obvious credentials, at most 500 bytes) and shown to the owner and editors only. A repeated identical finish is accepted; a different outcome fails with 409 `artifact_data_run_conflict`. |
+| `runs finish <slug> <collection> <run-id>` | `--base-version`, `--state succeeded\|failed`, `--reason` (failed only; `-` reads standard input) | The reason is cleaned on the server (no control characters or obvious credentials, at most 500 bytes) and shown to the owner and editors only. A repeated identical finish is accepted; a different outcome fails with 409 `artifact_data_run_conflict`. |
 | `runs list <slug>` | `--version` | Newest run, `last_attempt_at` and `last_success_at` per declared collection with a run. Readers get the same visibility as `data get`. |
 
 The producer is the authenticated principal; it is never read from the request.
-The newest 20 runs and the newest success are kept per collection. Runs never
-change data or code versions.
+Any writer of the Dashboard may finish any of its runs. The newest 20 runs and
+the newest success are kept per collection. Runs never change data or code
+versions. Agent runs that use the artifact tools cannot record runs yet; call
+these commands with a CLI token.
 
 In the Dashboard preview (`NEXT_PUBLIC_ARTIFACT_DASHBOARDS`), every value bound
 with `data-field` shows that provenance on mouse hover and keyboard focus, for

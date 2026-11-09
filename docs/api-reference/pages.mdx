@@ -3034,11 +3034,16 @@ server; the request cannot supply it, and responses project it as
 newest 20 runs and the newest success are kept per collection.
 
 **Authentication and authority:** start and finish require exactly the
-authority of a data batch (owner, the owner's consented agent run, or a human
-with a current Edit share), `pages:write` scope, and a `base_version` equal to
+authority of a data batch for a human caller (the owner or a current Edit
+share), `pages:write` scope, and a `base_version` equal to
 the latest code version that declares the collection. The list route requires
 the authority of a data read and returns only collections the selected version
-declares. `failure_reason` is returned to the owner and editors only. A failure
+declares. Any writer may finish any run of the Page; the run does not belong to
+the producer that started it. A run that is never finished stays `running`;
+there is no server timeout (clients show it as stalled after 30 minutes).
+Agent runs on the artifact tool path cannot record runs yet.
+`failure_reason` is returned to the owner and editors only, never to a reader or
+an auditing workspace administrator. A failure
 reason is cleaned on the server: control and invisible characters are removed,
 bearer and basic credentials, `key=value` secrets, Crewship and common provider
 tokens and URL user info are redacted, and it is cut to 500 bytes.

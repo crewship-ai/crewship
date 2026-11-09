@@ -15,8 +15,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
-// Producer run records: a producer (agent, routine or container script with
-// the same write authority as a data batch) starts a run for one collection,
+// Producer run records: a producer (a script, routine or job calling the REST
+// API or CLI with the same write authority as a data batch; agent runs on the
+// artifact tool path cannot record runs yet) starts a run for one collection,
 // writes its batches and finishes the run as succeeded or failed. Readers see
 // whether a refresh is running, when one last ran and when one last
 // succeeded. Run records never change data or code versions.
@@ -53,12 +54,20 @@ var idempotencyKey = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$`)
 
 // Secrets a producer might paste into an error message. The reason is shown to
 // writers only, but it is stored, so obvious credentials never reach storage.
-var reasonSecrets = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+`),
-	regexp.MustCompile(`(?i)\b(token|password|passwd|secret|api[_-]?key|authorization|cookie)(\s*[=:]\s*)\S+`),
-	regexp.MustCompile(`\bcrewship_[a-z]+_[A-Za-z0-9_]+`),
-	regexp.MustCompile(`\b(sk|pk|ghp|gho|ghs|xox[abp])[-_][A-Za-z0-9_-]{8,}`),
-	regexp.MustCompile(`://[^/\s:@]+:[^/\s@]+@`),
+// Key names match inside identifiers (access_token, client_secret,
+// PGPASSWORD), a closing quote may sit before the separator (JSON), and a
+// quoted value is taken whole so a space inside it does not leak the rest.
+var reasonSecrets = []struct {
+	pattern *regexp.Regexp
+	replace string
+}{
+	{regexp.MustCompile(`(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]+`), "$1 [redacted]"},
+	{regexp.MustCompile(`(?i)([A-Za-z0-9_-]*(?:token|password|passwd|pwd|secret|api[_-]?key|authorization|cookie|credential)[A-Za-z0-9_-]*["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s&,;"'}]+)`), "$1[redacted]"},
+	{regexp.MustCompile(`\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*`), "[redacted]"},
+	{regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`), "[redacted]"},
+	{regexp.MustCompile(`\bcrewship_[a-z]+_[A-Za-z0-9_]+`), "[redacted]"},
+	{regexp.MustCompile(`\b(sk|pk|ghp|gho|ghs|xox[abp])[-_][A-Za-z0-9_-]{8,}`), "[redacted]"},
+	{regexp.MustCompile(`://[^/\s:@]+:[^/\s@]+@`), "://[redacted]@"},
 }
 
 // CleanDataRunReason bounds a failure reason to plain text: no control
@@ -77,17 +86,8 @@ func CleanDataRunReason(reason string) string {
 		}
 		return r
 	}, reason)
-	for i, pattern := range reasonSecrets {
-		switch i {
-		case 0:
-			reason = pattern.ReplaceAllString(reason, "$1 [redacted]")
-		case 1:
-			reason = pattern.ReplaceAllString(reason, "$1$2[redacted]")
-		case 4:
-			reason = pattern.ReplaceAllString(reason, "://[redacted]@")
-		default:
-			reason = pattern.ReplaceAllString(reason, "[redacted]")
-		}
+	for _, secret := range reasonSecrets {
+		reason = secret.pattern.ReplaceAllString(reason, secret.replace)
 	}
 	reason = strings.TrimSpace(reason)
 	for len(reason) > MaxDataRunReason {
@@ -199,7 +199,7 @@ func (s *DataStore) FinishRun(ctx context.Context, key VersionKey, collection, i
 		if reason != "" {
 			stored = reason
 		}
-		if _, err := tx.ExecContext(ctx, `UPDATE artifact_data_runs SET state=?,finished_at=?,failure_reason=? WHERE workspace_id=? AND page_id=? AND id=? AND state='running'`, state, stamp, stored, key.WorkspaceID, key.PageID, id); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE artifact_data_runs SET state=?,finished_at=?,failure_reason=? WHERE workspace_id=? AND page_id=? AND collection=? AND id=? AND state='running'`, state, stamp, stored, key.WorkspaceID, key.PageID, collection, id); err != nil {
 			return err
 		}
 		run.State, run.FinishedAt, run.Reason = state, stamp, reason

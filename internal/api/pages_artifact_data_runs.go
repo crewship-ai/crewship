@@ -13,8 +13,9 @@ import (
 
 // Producer run records of a dashboard's datasets. Starting and finishing a
 // run takes exactly the authority of a data batch (artifactDataAuthority with
-// write=true: the owner, the owner's consented run, or a human Edit share, on
-// the latest code version that declares the collection). Reading takes the
+// write=true: the owner or a human Edit share on REST; agent runs have no run
+// operation on the artifact tool path yet), on the latest code version that
+// declares the collection. Any writer may finish any run. Reading takes the
 // authority of a data read and only lists collections that version declares.
 // The failure reason is shown to the owner and editors only.
 
@@ -51,6 +52,8 @@ type artifactDataRunsResponse struct {
 }
 
 // The producer's raw actor (account, agent or run ids) never leaves the server.
+// The "agent:" branch is for future agent-run producers and restored rows; the
+// artifact tool path has no run operations yet, so live requests record humans.
 func projectArtifactDataRun(r *http.Request, run *artifacts.DataRun, showReason bool) artifactDataRunResponse {
 	label, kind := "Contributor", "human"
 	user := UserFromContext(r.Context())

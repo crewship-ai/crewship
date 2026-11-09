@@ -124,7 +124,8 @@ func TestAcceptance_DashboardDataRunsBinary(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second start: %v %s", err, second)
 	}
-	if out, err := run("owner", "", "data", "runs", "finish", "runs-board", "sales", decode(second)["id"].(string), "--base-version", "1", "--state", "failed", "--reason", "warehouse 502 password=hunter2"); err != nil || bytes.Contains(out, []byte("hunter2")) {
+	// --reason - reads the reason from standard input.
+	if out, err := run("owner", "warehouse 502 password=hunter2\n", "data", "runs", "finish", "runs-board", "sales", decode(second)["id"].(string), "--base-version", "1", "--state", "failed", "--reason", "-"); err != nil || bytes.Contains(out, []byte("hunter2")) || !bytes.Contains(out, []byte("warehouse 502")) {
 		t.Fatalf("failed finish: %v %s", err, out)
 	}
 	if out, err := run("reader", "", "data", "runs", "start", "runs-board", "sales", "--base-version", "1", "--key", "reader"); err == nil {
