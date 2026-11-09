@@ -1,12 +1,15 @@
 import { cleanup, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it } from "vitest"
-import { Editor } from "@tiptap/core"
+import { Editor, Extension } from "@tiptap/core"
 import StarterKit from "@tiptap/starter-kit"
 import { Table, TableCell, TableHeader, TableRow } from "@tiptap/extension-table"
 import { DocumentReadonly } from "../document-readonly/document-readonly"
-import { documentEditorExtensions, isFormattedSchema, isRichSchema, isStyledSchema, stableBlockTypes } from "../document-rich-extensions"
+import { CommentHighlights, commentTarget, documentEditorExtensions, isFormattedSchema, parentOffsetIn, setCommentHighlights, textOffsetIn, isRichSchema, isStyledSchema, stableBlockTypes } from "../document-rich-extensions"
 
 afterEach(cleanup)
+
+/** Block ids, as StableIDs gives them in the app. */
+const BlockIDs = Extension.create({ name: "testBlockIds", addGlobalAttributes: () => [{ types: ["paragraph"], attributes: { id: { default: null } } }] })
 
 const styled = { type: "doc", content: [{ type: "paragraph", attrs: { id: "p" }, content: [
   { type: "text", text: "under", marks: [{ type: "underline", attrs: {} }] },
@@ -73,5 +76,26 @@ describe("Docs schema 5 in the browser", () => {
     cleanup()
     render(<DocumentReadonly schema={4} content={atoms} accessibleLabel="Saved document" />)
     expect(screen.getByRole("status").textContent).toContain("Document unavailable")
+  })
+  it("anchors and draws comments in text-only offsets around dates and mentions, as the engine counts them", () => {
+    const content = { type: "doc", content: [{ type: "paragraph", attrs: { id: "p" }, content: [
+      { type: "text", text: "Ask " }, { type: "mention", attrs: { userId: "ada" } }, { type: "text", text: " about the plan" }, { type: "date", attrs: { value: "2026-12-01" } },
+    ] }] }
+    const ed = new Editor({ extensions: [StarterKit.configure({ undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false }), ...documentEditorExtensions(5), CommentHighlights, BlockIDs], content })
+    // "plan" is text offsets 15..19 (the mention takes no place), editor offsets 16..20.
+    const block = ed.state.doc.firstChild!
+    expect([textOffsetIn(block, 16), textOffsetIn(block, 20), textOffsetIn(block, 21)]).toEqual([15, 19, 19])
+    expect([parentOffsetIn(block, 4, true), parentOffsetIn(block, 4, false), parentOffsetIn(block, 19, false), parentOffsetIn(block, 20, false)]).toEqual([5, 4, 20, null])
+    ed.commands.setTextSelection({ from: 17, to: 21 })
+    expect(commentTarget(ed)).toEqual({ block: "p", from: 15, to: 19, quote: "plan" })
+    // A selection to the end of the paragraph stays inside the text length.
+    ed.commands.setTextSelection({ from: 17, to: 22 })
+    expect(commentTarget(ed)).toMatchObject({ from: 15, to: 19 })
+    // Only an atom selected: nothing to anchor.
+    ed.commands.setNodeSelection(5)
+    expect(typeof commentTarget(ed)).toBe("string")
+    setCommentHighlights(ed, [{ id: "t1", block: "p", from: 15, to: 19 }])
+    expect(ed.view.dom.querySelector('[data-comment-anchor="t1"]')?.textContent).toBe("plan")
+    ed.destroy()
   })
 })

@@ -1000,7 +1000,8 @@ test('proposals stay on schema 4: a schema 5 document refuses propose and accept
     const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
     for (const schema of [4, 5]) {
       const proposed = await call(f.socket, '/v1/documents/p/propose', { id: `p-${schema}`, schema, page_id: 'p', epoch: before.epoch, ifRev: before.rev, target: 'lead', ifHash: lead.hash, text: 'Due  and under, revised' }, agent);
-      assert.equal(proposed.status, 409, `schema ${schema} request`); assert.match(proposed.body.error, /schema 4/);
+      // A schema 4 client is told to reopen; a schema 5 request is told proposals need schema 4.
+      assert.equal(proposed.status, 409, `schema ${schema} request`); assert.match(proposed.body.error, schema === 4 ? /unsupported client schema/ : /proposals require a schema 4 document/);
     }
     const accepted = await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-1', proposal: 'p-4', ifRev: before.rev });
     assert.equal(accepted.status, 409); assert.match(accepted.body.error, /schema 4/);
