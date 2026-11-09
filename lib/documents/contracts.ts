@@ -27,7 +27,7 @@ export const CREATE_SCHEMA: 5 = CREATE_VERSION as 5
 /** Whether documents of this schema support a capability; the same table as the engine and Go. */
 export function schemaAllows(schema: number, capability: DocumentCapability): boolean { return engineSchemaAllows(schema, capability) }
 /** The schemas a proposal request may name: those that support proposals. */
-export type ProposalSchema = 4 | 5
+export type ProposalSchema = 4 | 5 | 6
 export interface MutationAttempt { id: string; epoch: string; schema: number; baselineRev: number }
 export interface MutationReceipt { id: string; epoch: string; rev: number; schema?: number }
 function record(value: unknown): Record<string, unknown> {

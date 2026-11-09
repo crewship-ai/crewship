@@ -215,3 +215,19 @@ func TestDocumentRestoreBelowLatestKeepsCheckpointSchema(t *testing.T) {
 		t.Fatalf("schema 4 restore changed schema: %+v %v", after, e)
 	}
 }
+
+// #5149: from schema 5 on a restore never lowers a Document's schema, so a
+// schema 5 Document restoring schema 4 history stays at 5 even though 6 is
+// now the latest schema, and restoring history from before Canvas was enabled
+// keeps Canvas. Below schema 5 the checkpoint's own schema is kept.
+func TestRestoredSchema(t *testing.T) {
+	for _, tt := range []struct{ current, checkpoint, want int }{
+		{6, 5, 6}, {6, 4, 6}, {6, 2, 6}, {6, 6, 6},
+		{5, 4, 5}, {5, 3, 5}, {5, 1, 5}, {5, 5, 5},
+		{4, 3, 3}, {4, 4, 4}, {3, 2, 2}, {2, 2, 2},
+	} {
+		if got := RestoredSchema(tt.current, tt.checkpoint); got != tt.want {
+			t.Errorf("RestoredSchema(%d, %d) = %d, want %d", tt.current, tt.checkpoint, got, tt.want)
+		}
+	}
+}

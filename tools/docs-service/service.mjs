@@ -6,11 +6,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
-<<<<<<< HEAD
-import { VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION, CREATE_VERSION, schemaAllows, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown, validUserId } from './schema.mjs';
-=======
-import { VERSION, RICH_VERSION, FORMATTED_VERSION, MARKS_VERSION, CANVAS_VERSION, LATEST_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
->>>>>>> 4c582815ad (feat(documents): Docs content schema 6 with the Canvas surface and its server-side quota (#5149))
+import { VERSION, RICH_VERSION, FORMATTED_VERSION, MARKS_VERSION, CANVAS_VERSION, LATEST_VERSION, CREATE_VERSION, schemaAllows, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown, validUserId } from './schema.mjs';
 import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
@@ -21,18 +17,13 @@ const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(v
 const textBoundary = (text, index) => index === 0 || index === text.length ||
   !(text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff && text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff);
 const contentSchema = version => version === 1 ? VERSION : version;
-<<<<<<< HEAD
-const supportedSchema = version => [1, VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION].includes(version);
-// Mirrors Go documents.RestoredSchema (#5155): a restore never takes a schema 5
-// Document below schema 5, so schema 4 proposals are never silently re-enabled.
-const restoredSchema = (current, checkpoint) => current === LATEST_VERSION && checkpoint < LATEST_VERSION ? LATEST_VERSION : checkpoint;
-// Schemas 3, 4 and 5 are bound to their original Page and carry rich semantic proofs.
-const richSchema = version => version === RICH_VERSION || version === FORMATTED_VERSION || version === LATEST_VERSION;
-=======
 const supportedSchema = version => [1, VERSION, RICH_VERSION, FORMATTED_VERSION, MARKS_VERSION, CANVAS_VERSION].includes(version);
+// Mirrors Go documents.RestoredSchema (#5155): a restore never takes a schema 5
+// or later Document below its schema, so schema 4 proposals are never silently
+// re-enabled and enabling Canvas is never undone by a restore.
+const restoredSchema = (current, checkpoint) => current >= MARKS_VERSION && checkpoint < current ? current : checkpoint;
 // Schemas 3 to 6 are bound to their original Page and carry rich semantic proofs.
 const richSchema = version => Number.isInteger(version) && version >= RICH_VERSION && version <= LATEST_VERSION;
->>>>>>> 4c582815ad (feat(documents): Docs content schema 6 with the Canvas surface and its server-side quota (#5149))
 async function verifyTargets(doc, targets, version = VERSION) {
   if (!Array.isArray(targets) || targets.length < 1 || targets.length > 16) throw fault(400, 'one to sixteen selected text targets required');
   const blocks = new Map((await outline(doc,version)).map(block => [block.id, block]));
@@ -246,11 +237,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     if (request.schema !== state.schema && !(state.schema === 1 && request.schema === VERSION)) throw fault(409,'unsupported client schema; reopen the confirmed document');
     if (operation === 'upgrade') {
       if (context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human schema upgrade required');
-<<<<<<< HEAD
       if (request.page_id !== page || request.target_schema !== LATEST_VERSION || !schemaAllows(state.schema,'upgrade') || request.ifRev !== state.rev || Object.keys(request).some(key=>!['id','schema','target_schema','page_id','epoch','ifRev'].includes(key))) throw fault(409,'original Page identity, revision and supported upgrade required');
-=======
-      if (request.page_id !== page || request.target_schema !== LATEST_VERSION || ![1,VERSION,RICH_VERSION,FORMATTED_VERSION,MARKS_VERSION].includes(state.schema) || request.ifRev !== state.rev || Object.keys(request).some(key=>!['id','schema','target_schema','page_id','epoch','ifRev'].includes(key))) throw fault(409,'original Page identity, revision and supported upgrade required');
->>>>>>> 4c582815ad (feat(documents): Docs content schema 6 with the Canvas surface and its server-side quota (#5149))
     }
     let doc = load(state.snapshot); let lease;
     try {

@@ -45,7 +45,11 @@ func TestDocumentRichTreeSchemaFive(t *testing.T) {
 		{"atom with an id", paragraph(`{"type":"mention","attrs":{"userId":"u1","id":"m1"}}`), 5, false},
 		{"atom in a code block", `{"type":"doc","content":[{"type":"codeBlock","attrs":{"id":"c1"},"content":[{"type":"date","attrs":{"value":"2026-11-20"}}]}]}`, 5, false},
 		{"atom as a block", `{"type":"doc","content":[{"type":"date","attrs":{"value":"2026-11-20"}}]}`, 5, false},
-		{"schema 6", marked(`[{"type":"bold"}]`), 6, false},
+		// Schema 6 (Canvas) has exactly schema 5's Page tree.
+		{"schema 6 marks", marked(`[{"type":"bold"},{"type":"underline"},{"type":"textColor","attrs":{"color":"red"}}]`), 6, true},
+		{"schema 6 date and mention", paragraph(`{"type":"date","attrs":{"value":"2026-11-20"}},{"type":"mention","attrs":{"userId":"u1"}}`), 6, true},
+		{"schema 6 CSS colour", marked(`[{"type":"textColor","attrs":{"color":"#ff0000"}}]`), 6, false},
+		{"schema 7", marked(`[{"type":"bold"}]`), 7, false},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			if _, err := documentRichTreeFor(json.RawMessage(tt.raw), tt.schema); (err == nil) != tt.ok {

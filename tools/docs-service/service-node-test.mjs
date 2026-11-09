@@ -1155,3 +1155,56 @@ test('schema6: copies that each stayed inside the Canvas budget are refused toge
     a.destroy(); b.destroy();
   } finally { await f.close(); }
 });
+
+test('schema6: after Canvas is enabled an agent proposes on a placed block; accept keeps formatting and geometry, reject writes nothing (#5149)', async () => {
+  const model = authorityModel(), proposals = new Map(), sent = [];
+  const under = { type: 'underline', attrs: {} }, red = { type: 'textColor', attrs: { color: 'red' } }, bold = { type: 'bold', attrs: {} };
+  const body = { type: 'doc', content: [
+    { type: 'paragraph', attrs: { id: 'lead' }, content: [{ type: 'text', text: 'Ship ' }, { type: 'text', text: 'under', marks: [under] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'red', marks: [red, bold] }, { type: 'text', text: ' by ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: '.' }] },
+    { type: 'paragraph', attrs: { id: 'other' }, content: [{ type: 'text', text: 'Other' }] },
+  ] };
+  const doc = create(body, 5); model.state = { ...model.state, schema: 5, snapshot: snapshot(doc) }; doc.destroy();
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'propose') {
+      sent.push(data);
+      const find = (node, id) => node.attrs?.id === id ? node : (node.content ?? []).map(child => find(child, id)).find(Boolean);
+      proposals.set(data.id, { id: data.id, actor: 'agent:a:r', run_id: 'r', target: data.target, schema: data.schema, base_hash: data.ifHashes[data.target], text: data.semantic.text, generation: data.generation, base_rev: data.ifRev, status: 'open', created_at: 'now', proposed_content: find(data.semantic.rich.after, data.target) });
+      return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, actor: 'agent:a:r', kind: 'proposal' };
+    }
+    if (op === 'proposal') return proposals.get(data.id);
+    if (op === 'proposal-reject') { proposals.get(data.proposal).status = 'rejected'; return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, kind: 'proposal-reject' }; }
+    if (op === 'commit' && data.proposal) proposals.get(data.proposal).status = 'accepted';
+    return model.handle(op, data, req, res);
+  });
+  await f.start();
+  try {
+    const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
+    const five = (await read(f)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', { id: 'enable-canvas', schema: 5, target_schema: 6, page_id: 'p', epoch: five.epoch, ifRev: five.rev })).status, 200);
+    const six = (await read(f)).body; assert.equal(six.schema, 6); assert.deepEqual(six.content, five.content, 'enabling Canvas keeps the Page exactly');
+    const geometry = { lead: { x: 40, y: 60, w: 320, h: 120, z: 1 }, other: { x: 480, y: 60, w: 240, h: 96, z: 2 } };
+    const placed = placeUpdate(six, d => { surface.place(d, 'lead', geometry.lead); surface.place(d, 'other', geometry.other); });
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'place-both', schema: 6, page_id: 'p', epoch: six.epoch, kind: 'human', update: placed })).status, 200);
+    const state = (await read(f)).body, lead = state.outline.find(b => b.id === 'lead');
+    const request = { id: 'p6', schema: 6, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target: 'lead', ifHash: lead.hash, text: 'Deliver under and red by .' };
+    assert.equal((await call(f.socket, '/v1/documents/p/propose', { ...request, id: 'p5', schema: 5 }, agent)).status, 409, 'a proposal made at the old schema is refused');
+    const proposed = await call(f.socket, '/v1/documents/p/propose', request, agent);
+    assert.equal(proposed.status, 200, JSON.stringify(proposed.body)); assert.deepEqual(sent.map(d => d.schema), [6]);
+    const commits = model.commits;
+    const accepted = await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-6', proposal: 'p6', ifRev: state.rev });
+    assert.equal(accepted.status, 200, JSON.stringify(accepted.body)); assert.equal(model.commits, commits + 1);
+    const after = (await read(f)).body, d = load(after.snapshot);
+    try {
+      assert.equal(after.schema, 6);
+      assert.deepEqual(after.content.content[0].content, [{ type: 'text', text: 'Deliver ' }, { type: 'text', text: 'under', marks: [under] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'red', marks: [red, bold] }, { type: 'text', text: ' by ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: '.' }]);
+      assert.deepEqual(after.content.content[1], body.content[1]);
+      assert.deepEqual(surface.project(d).placements, [{ id: 'lead', ...geometry.lead }, { id: 'other', ...geometry.other }], 'accepting a proposal keeps every placement');
+      validate(d, 6);
+    } finally { d.destroy(); }
+    const otherHash = after.outline.find(b => b.id === 'other').hash;
+    assert.equal((await call(f.socket, '/v1/documents/p/propose', { ...request, id: 'p6b', epoch: after.epoch, ifRev: after.rev, target: 'other', ifHash: otherHash, text: 'Rejected' }, agent)).status, 200);
+    const before = model.commits, snap = model.state.snapshot;
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-reject', { id: 'reject-6', proposal: 'p6b', ifRev: after.rev })).status, 200);
+    assert.equal(model.commits, before); assert.equal(model.state.snapshot, snap, 'reject changes neither text nor geometry');
+  } finally { await f.close(); }
+});

@@ -12,6 +12,13 @@ package documents
 // LatestSchema never changes it, and it must have every agent capability.
 const CreateSchema = 5
 
+// MarksSchema is schema 5: underline, colours, highlights, dates and
+// mentions. From it on a restore never lowers a Document's schema.
+const MarksSchema = 5
+
+// CanvasSchema is schema 6: schema 5 plus the Docs Canvas surface.
+const CanvasSchema = 6
+
 // FormattedSchema is schema 4: bold, italic, strike, code block languages,
 // quotes and task lists. It is the oldest schema agents propose on.
 const FormattedSchema = 4
