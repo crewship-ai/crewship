@@ -1624,7 +1624,7 @@
         "additionalProperties": false,
         "properties": {
           "if_pinned_library": {
-            "description": "Library currently pinned as reviewed (slug or @\u003cpage id\u003e); required exactly when if_pinned_version is not 0.",
+            "description": "Library currently pinned as reviewed (slug or @\u003cpage id\u003e); required exactly when if_pinned_version is not 0. A slug that no longer resolves returns 409 artifact_version_conflict; @\u003cpage id\u003e always resolves.",
             "type": "string"
           },
           "if_pinned_version": {
@@ -140521,7 +140521,7 @@
     },
     "/api/v1/pages/{slug}/artifact/library-pin": {
       "get": {
-        "description": "Return the project's self-contained copy of a Library's design-system.json. Requires read access to this project only; the Library is not read, so the copy keeps working after the Library changes or the caller's access to it ends.",
+        "description": "Return the project's self-contained copy of a Library's design-system.json. Requires read access to this project only; the Library is not read, so the copy keeps working after the Library changes or the caller's access to it ends. A copy whose SHA-256 no longer matches is never served: 409 `artifact_library_pin_corrupt`.",
         "operationId": "get_api_v1_pages_slug_artifact_library-pin",
         "parameters": [
           {
@@ -140593,6 +140593,16 @@
             },
             "description": "Not Found"
           },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
           "500": {
             "content": {
               "application/json": {
@@ -140632,7 +140642,7 @@
         "x-crewship-read-only": true
       },
       "put": {
-        "description": "Copy the Library's published design-system.json into this project. Requires Edit on the project (not an agent run) and the caller's own read access to the published version; the workspace admin read path does not count. `version`, `if_pinned_library` and `if_pinned_version` must match the published version and the current pin, otherwise 409 `artifact_version_conflict`. Every reader of the project can read the copy, which survives unsharing the Library. Pinning the version already pinned returns `changed: false`. An absent, unpublished or unreadable Library returns the same 404.",
+        "description": "Copy the Library's published design-system.json into this project. Requires Edit on the project (not an agent run) and the caller's own read access to the published version; the workspace admin read path does not count. `version`, `if_pinned_library` and `if_pinned_version` must match the published version and the current pin, otherwise 409 `artifact_version_conflict`; an `if_pinned_library` slug that no longer resolves is the same 409 (pass `@\u003clibrary_page_id\u003e`). Every reader of the project can read the copy, which survives unsharing the Library. Pinning the version already pinned returns `changed: false`. An absent, unpublished or unreadable Library returns the same 404.",
         "operationId": "put_api_v1_pages_slug_artifact_library-pin",
         "parameters": [
           {
@@ -140766,7 +140776,7 @@
     },
     "/api/v1/pages/{slug}/artifact/library-pin/update": {
       "get": {
-        "description": "Compare the pin with the Library's published version and list the token paths an update adds, removes and changes. When the caller can no longer read the Library, `library_available` is false and nothing else about it is reported.",
+        "description": "Compare the pin with the Library's published version and list the token paths an update adds, removes and changes. When the caller can no longer read the Library, `library_available` is false and nothing else about it is reported. A damaged stored copy returns 409 `artifact_library_pin_corrupt`.",
         "operationId": "get_api_v1_pages_slug_artifact_library-pin_update",
         "parameters": [
           {
@@ -140837,6 +140847,16 @@
               }
             },
             "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
           },
           "500": {
             "content": {

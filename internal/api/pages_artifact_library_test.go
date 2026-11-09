@@ -394,3 +394,102 @@ func TestRejectArtifactAgentActor(t *testing.T) {
 		}
 	}
 }
+
+// A pin whose stored bytes no longer match their sha256 is refused with a
+// specific conflict rather than served or reported as a generic failure.
+func TestArtifactLibraryCorruptPinIsAConflict(t *testing.T) {
+	f := newLibraryFixture(t)
+	f.must(200, f.owner, "POST", "lib/artifact/library/publish", `{"version":1}`)
+	f.must(200, "lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"lib","version":1,"if_pinned_version":0}`)
+	mustExec(t, f.h.db, `UPDATE artifact_library_pins SET content=CAST('{"colors":{"primary":"#bad"}}' AS BLOB) WHERE page_id=?`, f.deckID)
+	for _, path := range []string{"deck/artifact/library-pin", "deck/artifact/library-pin/update"} {
+		w := f.call("lib-editor", "GET", path, "")
+		if w.Code != 409 || !strings.Contains(w.Body.String(), "The pinned copy is damaged; pin the library again.") || !strings.Contains(w.Body.String(), `"code":"artifact_library_pin_corrupt"`) {
+			t.Fatalf("%s: %d %s", path, w.Code, w.Body)
+		}
+		if strings.Contains(w.Body.String(), "#bad") {
+			t.Fatalf("%s served corrupt bytes", path)
+		}
+	}
+}
+
+// Library coverage follows every human grant source, not only direct user
+// grants: a crew (group) Edit grant covers the latest library version, a
+// folder ACL Read covers only the shared version, and a folder Read on the
+// consumer is not consumer write authority.
+func TestArtifactLibraryPinHonoursGroupAndFolderGrants(t *testing.T) {
+	f := newLibraryFixture(t)
+	db := f.h.db
+	f.must(200, f.owner, "POST", "lib/artifact/versions", libraryProjectBody(1, `{"colors":{"primary":"#222"}}`))
+	f.must(200, f.owner, "POST", "lib/artifact/library/publish", `{"version":2}`)
+	for _, slug := range []string{"crew-deck", "folder-deck", "folder-only-deck"} {
+		f.must(201, f.owner, "POST", "artifacts", `{"slug":"`+slug+`","name":"Consumer",`+strings.TrimPrefix(artifactProjectBody(0, "Consumer"), "{"))
+		f.must(200, f.owner, "POST", slug+"/artifact/share", `{"base_version":1,"version":1}`)
+	}
+	page := func(slug string) string {
+		var id string
+		if err := db.QueryRow(`SELECT id FROM pages WHERE workspace_id=? AND slug=?`, f.ws, slug).Scan(&id); err != nil {
+			t.Fatal(slug, err)
+		}
+		return id
+	}
+	f.member("crew-editor", "MEMBER")
+	f.member("folder-reader", "MEMBER")
+	mustExec(t, db, `INSERT INTO crews(id,workspace_id,name,slug) VALUES('library-crew',?,'Library crew','library-crew')`, f.ws)
+	mustExec(t, db, `INSERT INTO crew_members(id,crew_id,user_id) VALUES(?,'library-crew','crew-editor')`, generateCUID())
+	for _, id := range []string{f.libID, page("crew-deck")} {
+		mustExec(t, db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'crew','library-crew','write',?,datetime('now'))`, id, f.owner)
+	}
+	mustExec(t, db, `INSERT INTO page_folders(id,workspace_id,slug,name,owner_crew_id,created_at,updated_at) VALUES('library-folder',?,'library-folder','Folder','library-crew',datetime('now'),datetime('now'))`, f.ws)
+	mustExec(t, db, `UPDATE pages SET folder_id='library-folder' WHERE id IN (?,?)`, f.libID, page("folder-only-deck"))
+	mustExec(t, db, `INSERT INTO page_folder_acl(folder_id,subject_type,subject_id,can_read,can_write,set_at) VALUES('library-folder','user','folder-reader',1,0,datetime('now'))`)
+	f.grant(page("folder-deck"), "folder-reader", "write")
+
+	// Crew Edit covers the latest (unshared) published version.
+	if got := f.must(200, "crew-editor", "PUT", "crew-deck/artifact/library-pin", `{"library":"lib","version":2,"if_pinned_version":0}`); got["library_version"] != float64(2) {
+		t.Fatalf("crew editor pin %v", got)
+	}
+	// Folder Read covers only the shared version (1), so v2 is refused …
+	missing := f.call("folder-reader", "PUT", "folder-deck/artifact/library-pin", `{"library":"no-such-library","version":2,"if_pinned_version":0}`)
+	if w := f.call("folder-reader", "PUT", "folder-deck/artifact/library-pin", `{"library":"lib","version":2,"if_pinned_version":0}`); w.Code != 404 || w.Body.String() != missing.Body.String() {
+		t.Fatalf("folder reader pinned an unshared version %d %s", w.Code, w.Body)
+	}
+	// … until the owner shares it.
+	f.must(200, f.owner, "POST", "lib/artifact/share", `{"base_version":2,"version":2}`)
+	if got := f.must(200, "folder-reader", "PUT", "folder-deck/artifact/library-pin", `{"library":"lib","version":2,"if_pinned_version":0}`); got["library_version"] != float64(2) {
+		t.Fatalf("folder reader pin %v", got)
+	}
+	// Folder Read on a consumer is not write authority on it.
+	if w := f.call("folder-reader", "PUT", "folder-only-deck/artifact/library-pin", `{"library":"lib","version":2,"if_pinned_version":0}`); w.Code != 403 && w.Code != 404 {
+		t.Fatalf("folder reader wrote a read-only consumer %d %s", w.Code, w.Body)
+	}
+	var pins int
+	_ = db.QueryRow(`SELECT count(*) FROM artifact_library_pins WHERE page_id=?`, page("folder-only-deck")).Scan(&pins)
+	if pins != 0 {
+		t.Fatal("read-only consumer gained a pin")
+	}
+	// Leaving the crew removes library coverage; the existing copy stays.
+	mustExec(t, db, `DELETE FROM crew_members WHERE crew_id='library-crew' AND user_id='crew-editor'`)
+	mustExec(t, db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'user','crew-editor','write',?,datetime('now'))`, page("crew-deck"), f.owner)
+	if up := f.must(200, "crew-editor", "GET", "crew-deck/artifact/library-pin/update", ""); up["library_available"] != false {
+		t.Fatalf("former crew member still covers the library %v", up)
+	}
+	if got := f.must(200, "crew-editor", "GET", "crew-deck/artifact/library-pin", ""); got["library_version"] != float64(2) {
+		t.Fatalf("copy lost %v", got)
+	}
+}
+
+// An if_pinned_library slug that no longer resolves (renamed or deleted) is a
+// stale review, not a missing Library: 409, and the pin is unchanged.
+func TestArtifactLibraryUnresolvablePinnedLibraryIsAConflict(t *testing.T) {
+	f := newLibraryFixture(t)
+	f.must(200, f.owner, "POST", "lib/artifact/library/publish", `{"version":1}`)
+	f.must(200, "lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"lib","version":1,"if_pinned_version":0}`)
+	w := f.call("lib-editor", "PUT", "deck/artifact/library-pin", `{"library":"lib","version":1,"if_pinned_library":"renamed-away","if_pinned_version":1}`)
+	if w.Code != 409 || !strings.Contains(w.Body.String(), `"code":"artifact_version_conflict"`) {
+		t.Fatalf("unresolvable if_pinned_library %d %s", w.Code, w.Body)
+	}
+	if got := f.must(200, "lib-editor", "GET", "deck/artifact/library-pin", ""); got["library_version"] != float64(1) {
+		t.Fatalf("pin changed %v", got)
+	}
+}

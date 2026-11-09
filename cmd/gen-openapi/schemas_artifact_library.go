@@ -38,7 +38,7 @@ func artifactLibrarySchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"ArtifactLibraryPinRequest": object(map[string]any{
 			"library":           map[string]any{"type": "string", "minLength": 1, "description": "Library slug, or @<page id>, in this workspace."},
 			"version":           integer(1, "Published Library version the caller reviewed; a different publication returns 409 artifact_version_conflict."),
-			"if_pinned_library": map[string]any{"type": "string", "description": "Library currently pinned as reviewed (slug or @<page id>); required exactly when if_pinned_version is not 0."},
+			"if_pinned_library": map[string]any{"type": "string", "description": "Library currently pinned as reviewed (slug or @<page id>); required exactly when if_pinned_version is not 0. A slug that no longer resolves returns 409 artifact_version_conflict; @<page id> always resolves."},
 			"if_pinned_version": integer(0, "Library version currently pinned as reviewed, 0 when nothing is pinned; a mismatch returns 409 artifact_version_conflict."),
 		}, "library", "version", "if_pinned_version"),
 		"ArtifactLibraryUpdate": object(map[string]any{
@@ -61,8 +61,8 @@ func artifactLibrarySchemaCatalog() (map[string]DomainSchema, map[string]any) {
 	}
 	add("GET", "/library", "ArtifactLibraryPublication", "", "400", "401", "403", "404", "500", "503")
 	add("POST", "/library/publish", "ArtifactLibraryPublication", "ArtifactLibraryPublishRequest", "400", "401", "403", "404", "413", "500", "503")
-	add("GET", "/library-pin", "ArtifactLibraryPin", "", "400", "401", "403", "404", "500", "503")
+	add("GET", "/library-pin", "ArtifactLibraryPin", "", "400", "401", "403", "404", "409", "500", "503")
 	add("PUT", "/library-pin", "ArtifactLibraryPinResult", "ArtifactLibraryPinRequest", "400", "401", "403", "404", "409", "413", "500", "503")
-	add("GET", "/library-pin/update", "ArtifactLibraryUpdate", "", "400", "401", "403", "404", "500", "503")
+	add("GET", "/library-pin/update", "ArtifactLibraryUpdate", "", "400", "401", "403", "404", "409", "500", "503")
 	return routes, components
 }

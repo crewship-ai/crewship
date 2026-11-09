@@ -108,7 +108,8 @@ whose `extensions.code` carries the machine-readable reason:
 | 400 / 422 | 2 | `artifact_slides_unsupported` (422) | Invalid request; a version outside the Slides profile |
 | 401 / 403 | 4 | | Missing scope or role, for example a non-admin reading the policy |
 | 404 | 3 | | Unknown artifact, version, comment or undeclared collection, or a feature flag is off |
-| 409 | 5 | `artifact_version_conflict` | `--base-version` is no longer the latest version, or an owner comment targets an older version |
+| 409 | 5 | `artifact_version_conflict` | `--base-version` is no longer the latest version, an owner comment targets an older version, or a `pin set` review is stale |
+| 409 | 5 | `artifact_library_pin_corrupt` | The stored pin no longer matches its SHA-256; pin the Library again |
 | 409 | 5 | `artifact_slug_taken` | `create` with a slug that is already used |
 | 409 | 5 | `artifact_anchor_mismatch` | The comment quote does not match the selected element |
 | 409 | 5 | `artifact_data_conflict` | A document's `ifVersion` is stale |
@@ -416,7 +417,10 @@ turn that read into a copy. Agent runs cannot pin.
 
 Every flag below describes the state you reviewed. If anything differs when the
 request arrives (another published version, another pinned Library or pinned
-version), nothing changes and you get `409 artifact_version_conflict`.
+version), nothing changes and you get `409 artifact_version_conflict`. The
+same applies when `--if-pinned-library` names a slug that no longer resolves
+(the Library was renamed or deleted): pass `@<library_page_id>` from `pin show`
+instead.
 
 | Flag | Description |
 |---|---|
@@ -448,7 +452,10 @@ tokens every reader of the project may see. There is no unpin command yet.
 
 Read the pinned copy. Any reader of the project may call it; the Library is not
 read, so the copy stays available after the Library changes or your access to
-it ends. The stored SHA-256 is checked on every read.
+it ends. The stored SHA-256 is checked on every read; a copy that no longer
+matches is never served and returns `409 artifact_library_pin_corrupt` ("The
+pinned copy is damaged; pin the library again."). `pin check` reports the same
+error.
 
 The pin is a record and a review step. Project previews do not yet render with
 the pinned tokens; that is planned.
