@@ -18,6 +18,7 @@ import { DocsTools } from "./docs-tools"
 import { DocsComments } from "./docs-comments"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
+import { documentActorName } from "@/lib/documents/actor-name"
 import { commentTarget, setCommentHighlights, type CommentTarget } from "@/components/features/pages/document-rich-extensions"
 
 /** What the Docs body tells the frame: the chip, whether this person can edit now, and the chip's popover. */
@@ -102,12 +103,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const comments = useDocumentComments({ workspaceId, slug, pageId, humanId, enabled: Boolean(sync.state) && available && !sync.denied, head })
   const discussion = comments.query.isSuccess && !sync.denied ? comments.query.data : null
   const members = useMembers(discussion ? workspaceId : null)
-  const nameOf = React.useCallback((actor: string) => {
-    const [kind, id] = actor.split(":", 2)
-    if (kind === "user" && id === humanId) return "You"
-    const member = kind === "user" ? (members.members ?? []).find(entry => entry.user.id === id) : undefined
-    return member?.user.full_name || member?.user.email || (kind === "agent" ? "Agent" : "Workspace member")
-  }, [humanId, members.members])
+  const nameOf = React.useCallback((actor: string) => documentActorName(actor, { humanId, members: members.members }), [humanId, members.members])
   const [draft, setDraft] = React.useState<CommentTarget | null>(null)
   const [commentNotice, setCommentNotice] = React.useState<string | null>(null)
   const [activeThread, setActiveThread] = React.useState<string | null>(null)
