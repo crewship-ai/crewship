@@ -35,7 +35,7 @@ jobs:
           REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
         run: python3 scripts/ci/verified_commit.py "$REPO" "$SHA"
-      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af
+      - uses: actions/setup-go@802e89cd7394b98352d79117a8b463bbfc2fdacf
         with:
           go-version-file: go.mod
       - name: Test the text runner
@@ -62,7 +62,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af
+      - uses: actions/setup-go@802e89cd7394b98352d79117a8b463bbfc2fdacf
         with:
           go-version-file: go.mod
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
