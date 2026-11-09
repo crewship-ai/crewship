@@ -224,7 +224,7 @@ func TestDocumentPeopleRefusesAPageTheDocumentReadRefuses(t *testing.T) {
 	// is what the people endpoint and the document authority both apply.
 	h, ws, owner := documentPeopleFixture(t, false)
 	execOrFatal(t, h.db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('mixed-page',?,'mixed','Mixed',?,'{}')`, ws, owner)
-	execOrFatal(t, h.db, `INSERT INTO page_panels(id,page_id,panel_id,schema,producer_kind,producer_ref,sla_seconds) VALUES('mixed-panel','mixed-page','sensor','status.v1','script','script/watch.sh',60)`)
+	execOrFatal(t, h.db, `INSERT INTO page_panels(id,page_id,panel_id,schema,owner_crew_id,producer_kind,producer_ref,sla_seconds) VALUES('mixed-panel','mixed-page','sensor','status.v1','crew-lookout','script','script/watch.sh',60)`)
 	for page, want := range map[string]bool{"mixed-page": true, "people-page": false} {
 		if other, err := documentPageHasOtherOutput(t.Context(), h.db, page); err != nil || other != want {
 			t.Fatalf("%s: other output %v, %v", page, other, err)
