@@ -1,0 +1,1 @@
+- **Restoring a Docs checkpoint no longer drops the work it replaces (#5165).** The revision a restore replaces is kept in History as a checkpoint in the same commit, so later human edits stay reachable and can be restored back. When History is full the restore is refused and the document is unchanged.

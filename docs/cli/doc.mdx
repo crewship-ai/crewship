@@ -332,6 +332,15 @@ document's schema after the restore; a replay also has `duplicate`. A schema 5
 document stays at schema 5 when you restore a checkpoint from before its
 upgrade, so new agent proposals are made at schema 5, never silently at 4.
 
+The content a restore replaces stays in History (#5165): in the same commit
+the server keeps the replaced revision as a checkpoint at that revision
+(`crewship doc checkpoints` lists it, attributed to the person who restored),
+unless History already holds that exact content. When History has no room
+for it, the restore is refused (429, `Document restore refused; confirmed
+content preserved`) and nothing changes: checkpoints are never pruned, so a
+page whose History is full cannot be restored until room is made. A replay of
+the same packet adds nothing.
+
 ```bash
 crewship doc restore @<artifact-id> --file restore.json
 ```
