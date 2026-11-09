@@ -17,6 +17,10 @@ func TestRestoreSnapshotRotatesDocumentDatabaseIdentity(t *testing.T) {
 	db := openMigratedTestDBAt(t, dbPath)
 	identity := func(db *sql.DB) string {
 		t.Helper()
+		// First use creates the identity (documents.DatabaseIdentity).
+		if _, err := db.ExecContext(ctx, `INSERT OR IGNORE INTO document_database_identity(id,value) VALUES(1,lower(hex(randomblob(16))))`); err != nil {
+			t.Fatal(err)
+		}
 		var value string
 		if err := db.QueryRowContext(ctx, `SELECT value FROM document_database_identity WHERE id=1`).Scan(&value); err != nil || len(value) != 32 {
 			t.Fatalf("document database identity %q: %v", value, err)

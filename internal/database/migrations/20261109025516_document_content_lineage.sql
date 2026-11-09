@@ -3,12 +3,15 @@
 -- this installation's database identity and a per-document content generation,
 -- so a plain restart keeps it and pending edits are replayed.
 --
--- document_database_identity is created once and rotated only by backup
--- restore (logical restore and physical instance recovery). It is
--- installation-local and never part of a backup bundle.
+-- document_database_identity holds one installation-local value. The
+-- migration creates the table empty: the value is created on first use
+-- (documents.DatabaseIdentity), so every database gets its own value even
+-- when it was copied from one migrated image, and a fresh migration stays
+-- deterministic. Backup restore (logical restore, physical instance recovery,
+-- pre-migration snapshot restore) replaces it. It is never part of a backup
+-- bundle.
 --
 -- documents.content_generation advances when content is replaced (History
 -- restore, schema upgrade, backup restore), never on an engine boot fence.
 CREATE TABLE document_database_identity (id INTEGER PRIMARY KEY CHECK (id = 1), value TEXT NOT NULL CHECK (length(value) = 32));
-INSERT INTO document_database_identity(id,value) VALUES (1, lower(hex(randomblob(16))));
 ALTER TABLE documents ADD COLUMN content_generation INTEGER NOT NULL DEFAULT 0;

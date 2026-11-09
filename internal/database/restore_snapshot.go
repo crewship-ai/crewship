@@ -182,7 +182,7 @@ func rotateStagedDocumentIdentity(path string) error {
 	}
 	defer staged.Close()
 	staged.SetMaxOpenConns(1)
-	if _, err = staged.Exec(`UPDATE document_database_identity SET value=lower(hex(randomblob(16))) WHERE id=1`); err != nil {
+	if _, err = staged.Exec(`INSERT INTO document_database_identity(id,value) VALUES(1,lower(hex(randomblob(16)))) ON CONFLICT(id) DO UPDATE SET value=excluded.value`); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no such table") {
 			return nil
 		}

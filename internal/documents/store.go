@@ -141,11 +141,35 @@ func (s *Store) tx(ctx context.Context, k Key, a Authorize, fn func(*sql.Tx, str
 	}
 	return t.Commit()
 }
-func state(ctx context.Context, t *sql.Tx, k Key) (v State, e error) {
-	e = t.QueryRowContext(ctx, "SELECT d.schema_version,d.head_rev,d.epoch,d.snapshot_rev,d.snapshot,d.projection,d.generation,d.content_generation,coalesce(i.value,'') FROM documents d LEFT JOIN document_database_identity i ON i.id=1 WHERE d.workspace_id=? AND d.page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection, &v.Generation, &v.ContentGeneration, &v.Database)
-	if errors.Is(e, sql.ErrNoRows) {
-		e = ErrNotFound
+
+// DatabaseIdentity returns this installation's Docs database identity and
+// creates it on first use (#5163). The migration leaves the table empty, so a
+// database copied from a migrated image never shares another one's value.
+// Backup restore replaces it. Call it inside a write transaction (or on a
+// database handle) so concurrent first uses agree on one value.
+func DatabaseIdentity(ctx context.Context, q interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}) (string, error) {
+	if _, err := q.ExecContext(ctx, `INSERT OR IGNORE INTO document_database_identity(id,value) VALUES(1,lower(hex(randomblob(16))))`); err != nil {
+		return "", fmt.Errorf("documents: create database identity: %w", err)
 	}
+	var value string
+	if err := q.QueryRowContext(ctx, `SELECT value FROM document_database_identity WHERE id=1`).Scan(&value); err != nil {
+		return "", fmt.Errorf("documents: read database identity: %w", err)
+	}
+	return value, nil
+}
+
+func state(ctx context.Context, t *sql.Tx, k Key) (v State, e error) {
+	e = t.QueryRowContext(ctx, "SELECT schema_version,head_rev,epoch,snapshot_rev,snapshot,projection,generation,content_generation FROM documents WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Schema, &v.HeadRev, &v.Epoch, &v.SnapshotRev, &v.Snapshot, &v.Projection, &v.Generation, &v.ContentGeneration)
+	if errors.Is(e, sql.ErrNoRows) {
+		return v, ErrNotFound
+	}
+	if e != nil {
+		return
+	}
+	v.Database, e = DatabaseIdentity(ctx, t)
 	return
 }
 func (s *Store) Read(ctx context.Context, k Key, a Authorize) (v State, e error) {

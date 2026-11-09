@@ -130,10 +130,10 @@ func safeDocumentRestoreRow(table string, row map[string]any) (map[string]any, e
 func rotateDocumentDatabaseIdentity(ctx context.Context, db interface {
 	ExecContext(context.Context, string, ...any) (sql.Result, error)
 }) error {
-	if _, err := db.ExecContext(ctx, `UPDATE document_database_identity SET value=lower(hex(randomblob(16))) WHERE id=1`); err != nil {
+	if _, err := db.ExecContext(ctx, `INSERT INTO document_database_identity(id,value) VALUES(1,lower(hex(randomblob(16)))) ON CONFLICT(id) DO UPDATE SET value=excluded.value`); err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "no such table") {
-			// A database from before the table gets a fresh identity from the
-			// migration that creates it, on first boot.
+			// A database from before the table gets the empty table from its
+			// migration, and first use creates a fresh identity.
 			return nil
 		}
 		return fmt.Errorf("backup: rotate document database identity: %w", err)

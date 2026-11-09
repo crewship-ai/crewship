@@ -10,12 +10,13 @@ import (
 	"filippo.io/age"
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/database"
+	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 func documentDatabaseIdentity(t *testing.T, db *sql.DB) string {
 	t.Helper()
-	var value string
-	if err := db.QueryRow(`SELECT value FROM document_database_identity WHERE id=1`).Scan(&value); err != nil || len(value) != 32 {
+	value, err := documents.DatabaseIdentity(t.Context(), db)
+	if err != nil || len(value) != 32 {
 		t.Fatalf("document database identity %q: %v", value, err)
 	}
 	return value
