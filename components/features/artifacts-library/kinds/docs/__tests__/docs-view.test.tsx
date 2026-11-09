@@ -18,14 +18,14 @@ import { ArtifactFrame, NO_FRAME_CAPABILITIES, type FrameLayout } from "../../..
 import type { LibraryItem } from "../../../library-items"
 import { DocsBody, type DocsFrameReport } from "../docs-view"
 
-const env = vi.hoisted(() => ({ proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang" }))
+const env = vi.hoisted(() => ({ proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang", denied: false }))
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: env.available, isPending: env.available === undefined }) }))
 vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/document-queue")>(), openDocumentDrafts: async () => ({ load: async () => env.drafts, put: async () => {}, remove: async () => {}, close: () => {}, exclusive: true }) }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "docs-human" } } }) }))
 
-afterEach(() => { cleanup(); request.mockReset(); env.proposals = undefined; env.available = true; env.canWrite = true; env.drafts = []; env.patch = "ok" })
+afterEach(() => { cleanup(); request.mockReset(); env.proposals = undefined; env.available = true; env.canWrite = true; env.drafts = []; env.patch = "ok"; env.denied = false })
 
 const item: LibraryItem = {
   slug: "launch-notes", pageId: "page-docs", name: "Launch notes", kind: "word", family: "document", sharedVersion: null, native: false,
@@ -58,6 +58,7 @@ function serve() {
     }
     if (url.includes("/document/checkpoints")) return { ok: true, json: async () => ({ checkpoints: [] }) }
     if (url.includes("/proposals")) return { ok: true, json: async () => ({ proposals: [] }) }
+    if (env.denied) return { ok: false, status: 403, json: async () => ({ error: "document access denied" }) }
     return { ok: true, json: async () => ({ page_id: "page-docs", schema: 2, rev, generation: 0, epoch: "go:node:1", can_write: env.canWrite, snapshot: encodeUpdate(Y.encodeStateAsUpdate(server)), ...(env.proposals === undefined ? {} : { proposals: env.proposals }) }) }
   })
 }
@@ -185,6 +186,21 @@ describe("Docs in the ArtifactFrame", () => {
     expect(request.mock.calls.some(([url]) => String(url).includes("/document/patch"))).toBe(true)
   })
 
+  it("keeps a No access chip when the first read is refused (#5202)", async () => {
+    serve()
+    env.denied = true
+    open()
+    expect(await screen.findByRole("button", { name: "Status: No access" })).toBeTruthy()
+    expect(screen.queryByLabelText("Document editor")).toBeNull()
+  })
+  it("turns the chip into No access when access is removed while the document is open (#5202)", async () => {
+    serve()
+    open()
+    expect(await screen.findByLabelText("Document editor")).toBeTruthy()
+    env.denied = true
+    expect(await screen.findByRole("button", { name: "Status: No access" }, { timeout: 5_000 })).toBeTruthy()
+    expect(screen.queryByText("Ship the agency offer on 2 December.")).toBeNull()
+  })
   it("is Read-only without write access: no tools, a read-only editor", async () => {
     serve()
     env.canWrite = false

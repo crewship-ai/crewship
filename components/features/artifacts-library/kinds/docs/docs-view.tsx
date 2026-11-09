@@ -67,7 +67,22 @@ export function DocsBody({ workspaceId, item, fallback, onFrame }: {
     return <>{fallback}</>
   }
   return <PageDocument workspaceId={workspaceId} slug={"@" + pageId} pageId={pageId} name={item.name}
-    renderWorkspace={props => <DocsWorkspace {...props} onFrame={onFrame} />} />
+    renderWorkspace={props => <DocsWorkspace {...props} onFrame={onFrame} />}
+    renderUnhydrated={(sync, message) => <DocsUnhydrated denied={sync.denied} status={sync.status} onFrame={onFrame}>{message}</DocsUnhydrated>} />
+}
+
+/**
+ * No confirmed document: the body shows the session's own message, and the
+ * frame keeps a chip that says why — No access after a refusal or a revoke,
+ * nothing while the first read is still on its way. Dropping the chip would
+ * leave the last state (often Saved) unexplained.
+ */
+function DocsUnhydrated({ denied, status, onFrame, children }: { denied: boolean; status: string; onFrame: (report: DocsFrameReport | null) => void; children: React.ReactNode }) {
+  const chip = docsFrameStatus({ hydrated: false, denied, available: true, restoring: false, status, pending: 0, recovery: false, recoveredDrafts: 0, canWrite: false, durability: "confirmed", sentThisSession: false })
+  const chipKey = JSON.stringify(chip)
+  React.useEffect(() => { onFrame({ status: JSON.parse(chipKey) as FrameStatus | null, canEdit: false }) }, [onFrame, chipKey])
+  React.useEffect(() => () => onFrame(null), [onFrame])
+  return <div className={COLUMN}>{children}</div>
 }
 
 function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsFrameReport | null) => void }) {

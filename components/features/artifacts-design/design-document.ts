@@ -1,6 +1,34 @@
 import * as Y from "yjs"
 
 export type DesignNodeType = "frame" | "rect" | "text" | "image"
+export type DesignFontFamily = "sans" | "serif" | "mono"
+export type DesignTextAlign = "left" | "center" | "right"
+/**
+ * Text style (#5161). Every field is optional; absent means the look every
+ * older document has: 20 px sans, weight 400, line height 1.3, left, no
+ * wrap (lines break only at a newline), drawn past the box (no clip). The
+ * server accepts only these values (internal/design/engine.mjs).
+ */
+export const DESIGN_TEXT_DEFAULTS = { fontFamily: "sans", fontWeight: 400, fontSize: 20, lineHeight: 1.3, textAlign: "left", textWrap: "none", overflow: "visible" } as const
+export const DESIGN_FONT_STACKS: Record<DesignFontFamily, string> = {
+ sans: "system-ui, sans-serif",
+ serif: "Georgia, 'Times New Roman', serif",
+ mono: "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+}
+export const DESIGN_FONT_WEIGHTS = [100, 200, 300, 400, 500, 600, 700, 800, 900] as const
+export const DESIGN_FONT_SIZE = { min: 1, max: 1000 } as const
+export const DESIGN_LINE_HEIGHT = { min: 0.5, max: 5 } as const
+
+/** The text style of a node with the defaults filled in; unknown or out-of-range values read as the default. */
+export function designTextStyle(node: Partial<DesignNode>) {
+ const family = node.fontFamily && node.fontFamily in DESIGN_FONT_STACKS ? node.fontFamily : DESIGN_TEXT_DEFAULTS.fontFamily
+ const weight = DESIGN_FONT_WEIGHTS.includes(node.fontWeight as (typeof DESIGN_FONT_WEIGHTS)[number]) ? node.fontWeight! : DESIGN_TEXT_DEFAULTS.fontWeight
+ const size = typeof node.fontSize === "number" && node.fontSize >= DESIGN_FONT_SIZE.min && node.fontSize <= DESIGN_FONT_SIZE.max ? node.fontSize : DESIGN_TEXT_DEFAULTS.fontSize
+ const lineHeight = typeof node.lineHeight === "number" && node.lineHeight >= DESIGN_LINE_HEIGHT.min && node.lineHeight <= DESIGN_LINE_HEIGHT.max ? node.lineHeight : DESIGN_TEXT_DEFAULTS.lineHeight
+ const align: DesignTextAlign = node.textAlign === "center" || node.textAlign === "right" ? node.textAlign : "left"
+ return { family, stack: DESIGN_FONT_STACKS[family], weight, size, lineHeight, align, wrap: node.textWrap === "wrap", clip: node.overflow === "clip" }
+}
+
 export interface DesignNode {
  id: string
  type: DesignNodeType
@@ -15,6 +43,13 @@ export interface DesignNode {
  src?: string
  /** Prototype link (#4449): ID of the screen a click on this layer opens. Absent or "" means no link. */
  linkTo?: string
+ fontFamily?: DesignFontFamily
+ fontWeight?: number
+ fontSize?: number
+ lineHeight?: number
+ textAlign?: DesignTextAlign
+ textWrap?: "none" | "wrap"
+ overflow?: "visible" | "clip"
 }
 
 export function designNodes(doc: Y.Doc): DesignNode[] {
