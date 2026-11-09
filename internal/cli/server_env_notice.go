@@ -31,7 +31,7 @@ func IgnoredServerEnvNotice(flagServer, flagProfile string, cfg *CLIConfig) stri
 	if source == ProfileSourceDirectory {
 		why = "bound to this directory"
 	}
-	return fmt.Sprintf("warning: CREWSHIP_SERVER=%s is ignored; profile %q (%s) sends this command to %s. Use --profile, --server or CREWSHIP_PROFILE to choose the server.", env, name, why, server)
+	return fmt.Sprintf("warning: CREWSHIP_SERVER=%s is ignored; profile %q (%s) sends this command to %s. Use --profile, --server or CREWSHIP_PROFILE to choose the server.", redactUserinfo(env), name, why, redactUserinfo(server))
 }
 
 // sameServer compares scheme, host and port, treating loopback names as one host.
@@ -51,4 +51,14 @@ func sameServer(a, b string) bool {
 		return strings.ToLower(u.Scheme) + "://" + host + ":" + port
 	}
 	return key(a) == key(b)
+}
+
+// redactUserinfo drops any user:password part of a URL before it is printed.
+func redactUserinfo(raw string) string {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || u.User == nil {
+		return raw
+	}
+	u.User = nil
+	return u.String()
 }

@@ -218,6 +218,9 @@ func exitWithError(cmd *cobra.Command, err error) {
 	os.Exit(cli.ExitCodeFor(err))
 }
 
+// serverEnvNoticeOnce prints the ignored-CREWSHIP_SERVER warning at most once per process.
+var serverEnvNoticeOnce sync.Once
+
 // newAPIClient creates an authenticated API client from resolved config.
 //
 // The token is bound to the host of the *configured* server (cliCfg.Server)
@@ -227,8 +230,6 @@ func exitWithError(cmd *cobra.Command, err error) {
 // token exfiltration to an attacker-controlled host (issue #571). In the
 // common case (no --server override) the resolved host equals the configured
 // host, so there is zero friction.
-var serverEnvNoticeOnce sync.Once
-
 func newAPIClient() *cli.Client {
 	// EffectiveServer (not ResolveServer) so an active profile's server wins
 	// over a stale CREWSHIP_SERVER env left over from the #544 stopgap; the

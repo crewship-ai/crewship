@@ -34,6 +34,8 @@ func TestIgnoredServerEnvNotice(t *testing.T) {
 		{name: "explicit --profile is a deliberate choice", env: "http://localhost:8082", flagProfile: "dev3", cwd: "/tmp", cfg: cfg},
 		{name: "explicit CREWSHIP_PROFILE is a deliberate choice", env: "http://localhost:8082", envProfile: "dev3", cwd: "/tmp", cfg: cfg},
 		{name: "legacy mode honours the env", env: "http://localhost:8082", cwd: "/tmp", cfg: &CLIConfig{Server: "http://127.0.0.1:8083"}},
+		{name: "userinfo is never printed", env: "http://user:secret@localhost:8082", cwd: "/tmp", cfg: cfg,
+			want: []string{"CREWSHIP_SERVER=http://localhost:8082 is ignored"}},
 		{name: "no config", env: "http://localhost:8082", cwd: "/tmp"},
 	}
 	for _, tc := range cases {
@@ -48,6 +50,9 @@ func TestIgnoredServerEnvNotice(t *testing.T) {
 					t.Fatalf("unexpected notice %q", got)
 				}
 				return
+			}
+			if strings.Contains(got, "secret") {
+				t.Fatalf("notice leaks userinfo: %q", got)
 			}
 			for _, part := range tc.want {
 				if !strings.Contains(got, part) {
