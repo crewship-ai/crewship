@@ -1,5 +1,21 @@
 import { validatePositionMigrations } from './position-migrations.mjs';
 
+// What each content schema supports (#5233). Mirrors Go
+// internal/documents/schemas.go (a Go test compares the two); every engine and
+// browser gate asks this table, never "schema 4" or the latest schema.
+// Schema 3's agent path is the direct draft; its mandate never proposes.
+export const CREATE_VERSION = 5;
+export const CAPABILITY_ORDER = Object.freeze(['read', 'edit', 'draft', 'propose', 'accept', 'restore', 'export', 'upgrade']);
+export const SCHEMA_CAPABILITIES = Object.freeze({
+  1: Object.freeze(['read', 'edit', 'restore', 'export', 'upgrade']),
+  2: Object.freeze(['read', 'edit', 'restore', 'export', 'upgrade']),
+  3: Object.freeze(['read', 'edit', 'draft', 'restore', 'export', 'upgrade']),
+  4: Object.freeze(['read', 'edit', 'draft', 'propose', 'accept', 'restore', 'export', 'upgrade']),
+  5: Object.freeze(['read', 'edit', 'draft', 'propose', 'accept', 'restore', 'export']),
+});
+/** Whether documents of this schema support a capability; unknown schemas support nothing. */
+export const schemaAllows = (version, capability) => Object.hasOwn(SCHEMA_CAPABILITIES, version) && SCHEMA_CAPABILITIES[version].includes(capability);
+
 // Shared implementation instantiated with the caller's pinned Tiptap/Yjs types.
 // Browser and managed Node use identical closed validators without mixing
 // separate node_modules copies of Yjs in instanceof/relative-position checks.
@@ -9,16 +25,42 @@ const legacyTypes = ['heading', 'paragraph', 'table', 'tableRow', 'tableCell', '
 const RICH_VERSION = 3;
 // Schema 4 is additive over 3: bold/italic/strike marks, code block languages,
 // block quotes and task lists. Schemas 1-3 keep their exact closed contracts.
-const LATEST_VERSION = 4;
+const FORMATTED_VERSION = 4;
+// Schema 5 is additive over 4: underline, and a text colour and a highlight
+// whose value is a palette NAME. The reader's theme resolves the name; stored
+// content never carries CSS, so a colour cannot become markup or a payload.
+const LATEST_VERSION = 5;
+const PALETTE = Object.freeze(['gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink']);
+const validColor = value => typeof value === 'string' && PALETTE.includes(value);
+// Schema 5 inline atoms. A date is a calendar day, never a time or free text.
+// A mention stores only an opaque user id; the name is resolved when rendered,
+// for that reader, so no display text or address is ever part of the content.
+const ATOMS = Object.freeze(['date', 'mention']);
+const ATOM_KEY = Object.freeze({ date: 'value', mention: 'userId' });
+const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+const validDate = value => {
+  const match = typeof value === 'string' && DATE.exec(value);
+  if (!match) return false;
+  // setUTCFullYear keeps years 1-99 literal (Date.UTC maps them to 1900-1999).
+  const [year, month, day] = match.slice(1).map(Number), time = new Date(0); time.setUTCFullYear(year, month - 1, day);
+  return year >= 1 && time.getUTCFullYear() === year && time.getUTCMonth() === month - 1 && time.getUTCDate() === day;
+};
+const validUserId = value => typeof value === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(value);
+const validAtomValue = (type, value) => type === 'date' ? validDate(value) : type === 'mention' ? validUserId(value) : false;
+const UNKNOWN_MEMBER = 'Unknown member';
 const richTypes = [...legacyTypes, 'codeBlock'];
 const formattedTypes = [...richTypes, 'blockquote', 'taskList', 'taskItem'];
-const typesFor = version => { if (![1,2,3,4].includes(version)) throw new Error('unsupported content schema'); return version === 4 ? formattedTypes : version === 3 ? richTypes : legacyTypes; };
+const typesFor = version => { if (![1,2,3,4,5].includes(version)) throw new Error('unsupported content schema'); return version >= FORMATTED_VERSION ? formattedTypes : version === 3 ? richTypes : legacyTypes; };
 const isRich = version => version >= RICH_VERSION;
+const isFormatted = version => version >= FORMATTED_VERSION;
+const atomsFor = version => version >= 5 ? ATOMS : [];
+const isAtom = (type, version) => atomsFor(version).includes(type);
 // A code block language is a short lowercase identifier (python, c++, c#, objective-c), never markup.
 const LANGUAGE = /^[a-z0-9][a-z0-9+#-]{0,31}$/;
 const validLanguage = value => typeof value === 'string' && LANGUAGE.test(value);
-const formatKeys = version => version >= LATEST_VERSION ? ['link', 'code', 'bold', 'italic', 'strike'] : isRich(version) ? ['link', 'code'] : [];
-const maxMarks = version => version >= LATEST_VERSION ? 4 : isRich(version) ? 1 : 0;
+const COLOR_MARKS = ['textColor', 'highlight'];
+const formatKeys = version => version >= 5 ? ['link', 'code', 'bold', 'italic', 'strike', 'underline', ...COLOR_MARKS] : isFormatted(version) ? ['link', 'code', 'bold', 'italic', 'strike'] : isRich(version) ? ['link', 'code'] : [];
+const maxMarks = version => version >= 5 ? 7 : isFormatted(version) ? 4 : isRich(version) ? 1 : 0;
 const idsFor = types => Extension.create({
   name: 'stableIDs',
   addGlobalAttributes: () => [{ types, attributes: { id: {
@@ -47,8 +89,8 @@ function extensionsFor(version = VERSION) {
  return [
   Node.create({ name: 'doc', topNode: true, content: 'block+' }),
   Node.create({ name: 'text', group: 'inline' }),
-  Node.create({ name: 'paragraph', group: 'block', content: 'text*', parseHTML: () => [{ tag: 'p' }], renderHTML: ({ HTMLAttributes }) => ['p', HTMLAttributes, 0] }),
-  Node.create({ name: 'heading', group: 'block', content: 'text*', addAttributes: () => ({ level: { default: 1 } }), parseHTML: () => [1,2,3].map(level=>({tag:`h${level}`,attrs:{level}})), renderHTML: ({ node,HTMLAttributes }) => [`h${node.attrs.level}`, HTMLAttributes, 0] }),
+  Node.create({ name: 'paragraph', group: 'block', content: version >= 5 ? 'inline*' : 'text*', parseHTML: () => [{ tag: 'p' }], renderHTML: ({ HTMLAttributes }) => ['p', HTMLAttributes, 0] }),
+  Node.create({ name: 'heading', group: 'block', content: version >= 5 ? 'inline*' : 'text*', addAttributes: () => ({ level: { default: 1 } }), parseHTML: () => [1,2,3].map(level=>({tag:`h${level}`,attrs:{level}})), renderHTML: ({ node,HTMLAttributes }) => [`h${node.attrs.level}`, HTMLAttributes, 0] }),
   Node.create({name:'bulletList',group:'block',content:'listItem+',parseHTML:()=>[{tag:'ul'}],renderHTML:({HTMLAttributes})=>['ul',HTMLAttributes,0]}),
   Node.create({name:'orderedList',group:'block',content:'listItem+',addAttributes:()=>({start:{default:1},type:{default:null}}),parseHTML:()=>[{tag:'ol'}],renderHTML:({HTMLAttributes})=>['ol',HTMLAttributes,0]}),
   Node.create({name:'listItem',content:'paragraph block*',parseHTML:()=>[{tag:'li'}],renderHTML:({HTMLAttributes})=>['li',HTMLAttributes,0]}),
@@ -58,11 +100,33 @@ function extensionsFor(version = VERSION) {
     Mark.create({ name: 'code', code: true, excludes: 'link code', parseHTML: () => [{ tag: 'code' }], renderHTML: () => ['code', {}, 0] }),
     Node.create({ name: 'codeBlock', group: 'block', content: 'text*', marks: '', code: true, defining: true, parseHTML: () => [{ tag: 'pre', preserveWhitespace: 'full' }], renderHTML: ({ HTMLAttributes }) => ['pre', HTMLAttributes, ['code', {}, 0]] }),
   ] : []),
-  ...(version === LATEST_VERSION ? [
+  ...(isFormatted(version) ? [
     Mark.create({ name: 'link', excludes: 'link code', addAttributes: () => ({ href: { default: null } }), parseHTML: () => [{ tag: 'a[href]', getAttrs: element => validLinkHref(element.getAttribute('href')) ? { href: element.getAttribute('href') } : false }], renderHTML: ({ mark }) => ['a', { href: mark.attrs.href, rel: 'noopener noreferrer', target: '_blank' }, 0] }),
     Mark.create({ name: 'bold', parseHTML: () => [{ tag: 'strong' }, { tag: 'b' }], renderHTML: () => ['strong', {}, 0] }),
     Mark.create({ name: 'italic', parseHTML: () => [{ tag: 'em' }, { tag: 'i' }], renderHTML: () => ['em', {}, 0] }),
     Mark.create({ name: 'strike', parseHTML: () => [{ tag: 's' }, { tag: 'del' }, { tag: 'strike' }], renderHTML: () => ['s', {}, 0] }),
+    // Schema 5 marks rank after strike and before code, so schema 4 mark order
+    // (and with it every schema 4 projection and hash) is unchanged.
+    ...(version >= 5 ? [
+      Mark.create({ name: 'underline', parseHTML: () => [{ tag: 'u' }], renderHTML: () => ['u', {}, 0] }),
+      ...COLOR_MARKS.map(name => {
+        const tag = name === 'highlight' ? 'mark' : 'span', data = name === 'highlight' ? 'data-highlight' : 'data-text-color';
+        const parsed = element => validColor(element.getAttribute(data)) ? element.getAttribute(data) : null;
+        return Mark.create({ name,
+          addAttributes: () => ({ color: { default: null, parseHTML: parsed, renderHTML: () => ({}) } }),
+          parseHTML: () => [{ tag: `${tag}[${data}]`, getAttrs: element => parsed(element) ? { color: parsed(element) } : false }],
+          renderHTML: ({ mark }) => [tag, validColor(mark.attrs.color) ? { [data]: mark.attrs.color } : {}, 0] });
+      }),
+      Node.create({ name: 'date', group: 'inline', inline: true, atom: true, selectable: true, marks: '',
+        addAttributes: () => ({ value: { default: null, parseHTML: element => validDate(element.getAttribute('data-date')) ? element.getAttribute('data-date') : null, renderHTML: () => ({}) } }),
+        parseHTML: () => [{ tag: 'time[data-date]', getAttrs: element => validDate(element.getAttribute('data-date')) ? { value: element.getAttribute('data-date') } : false }],
+        renderHTML: ({ node }) => validDate(node.attrs.value) ? ['time', { 'data-date': node.attrs.value, datetime: node.attrs.value }, node.attrs.value] : ['time', {}, ''] }),
+      // The rendered label is neutral; a reader replaces it with the name it may see.
+      Node.create({ name: 'mention', group: 'inline', inline: true, atom: true, selectable: true, marks: '',
+        addAttributes: () => ({ userId: { default: null, parseHTML: element => validUserId(element.getAttribute('data-mention')) ? element.getAttribute('data-mention') : null, renderHTML: () => ({}) } }),
+        parseHTML: () => [{ tag: 'span[data-mention]', getAttrs: element => validUserId(element.getAttribute('data-mention')) ? { userId: element.getAttribute('data-mention') } : false }],
+        renderHTML: ({ node }) => ['span', validUserId(node.attrs.userId) ? { 'data-mention': node.attrs.userId } : {}, '@' + UNKNOWN_MEMBER] }),
+    ] : []),
     // Inline code stands alone in schema 4: it excludes every other mark.
     Mark.create({ name: 'code', code: true, excludes: '_', parseHTML: () => [{ tag: 'code' }], renderHTML: () => ['code', {}, 0] }),
     Node.create({ name: 'codeBlock', group: 'block', content: 'text*', marks: '', code: true, defining: true,
@@ -82,8 +146,9 @@ function extensionsFor(version = VERSION) {
 const extensions = extensionsFor(VERSION);
 const schema = getSchema(extensions);
 const richSchema = getSchema(extensionsFor(RICH_VERSION));
+const formattedSchema = getSchema(extensionsFor(FORMATTED_VERSION));
 const latestSchema = getSchema(extensionsFor(LATEST_VERSION));
-const schemaFor = (version = VERSION) => { typesFor(version); return version === LATEST_VERSION ? latestSchema : version === RICH_VERSION ? richSchema : schema; };
+const schemaFor = (version = VERSION) => { typesFor(version); return version === LATEST_VERSION ? latestSchema : version === FORMATTED_VERSION ? formattedSchema : version === RICH_VERSION ? richSchema : schema; };
 function validLinkHref(value) {
   if (typeof value !== 'string' || new TextEncoder().encode(value).length > 2048 || /[\u0000-\u0020\u007f\p{Cs}]/u.test(value)) return false;
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password && url.href === value; } catch { return false; }
@@ -93,6 +158,7 @@ function validFormat(key, value, version = RICH_VERSION) {
   if (!formatKeys(version).includes(key)) return false;
   if (value === null) return true;
   if (!object(value)) return false;
+  if (COLOR_MARKS.includes(key)) return Object.keys(value).length === 1 && validColor(value.color);
   return key === 'link' ? Object.keys(value).length === 1 && validLinkHref(value.href) : Object.keys(value).length === 0;
 }
 // Schema 4 combines bold, italic, strike and link; inline code stays alone.
@@ -148,9 +214,15 @@ function validateJSON(json, version = VERSION) {
     if (++count > 10000) throw new Error('node limit');
     if (isRich(version) && node.type === 'doc' && (depth !== 0 || Object.keys(node).some(k => !['type','content'].includes(k)))) throw new Error('closed rich root required');
     if (Object.keys(node).some(k => !['type', 'attrs', 'content', 'text', 'marks'].includes(k))) throw new Error('unsupported node properties');
-    if (node.type !== 'doc' && node.type !== 'text' && !types.includes(node.type)) throw new Error('unsupported node');
+    if (node.type !== 'doc' && node.type !== 'text' && !types.includes(node.type) && !isAtom(node.type, version)) throw new Error('unsupported node');
     validateMarks(node.marks, version);
     if (node.type !== 'text' && node.marks?.length) throw new Error('unsupported block marks');
+    if (isAtom(node.type, version)) {
+      // Exactly one attribute, no content: an atom can carry nothing else.
+      const key = ATOM_KEY[node.type];
+      if (!object(node.attrs) || Object.keys(node.attrs).length !== 1 || !validAtomValue(node.type, node.attrs[key]) || (node.content !== undefined && (!Array.isArray(node.content) || node.content.length)) || node.text !== undefined) throw new Error('invalid inline atom');
+      return;
+    }
     if (node.type === 'text' && (typeof node.text !== 'string' || node.attrs || node.content)) throw new Error('invalid text node');
     if (node.type !== 'text' && node.text !== undefined) throw new Error('unexpected text property');
     if (types.includes(node.type)) {
@@ -158,7 +230,7 @@ function validateJSON(json, version = VERSION) {
       seen.add(node.attrs.id);
     }
     const allowed = node.type === 'tableCell' || node.type === 'tableHeader' ? ['id', 'colspan', 'rowspan', 'colwidth', 'align'] : node.type === 'heading' ? ['id', 'level'] : node.type === 'orderedList' ? ['id','start','type'] :
-      version === LATEST_VERSION && node.type === 'codeBlock' ? ['id', 'language'] : node.type === 'taskItem' ? ['id', 'checked'] : ['id'];
+      isFormatted(version) && node.type === 'codeBlock' ? ['id', 'language'] : node.type === 'taskItem' ? ['id', 'checked'] : ['id'];
     if (Object.keys(node.attrs || {}).some(k => !allowed.includes(k))) throw new Error('unsupported attributes');
     if (node.type === 'codeBlock' && node.attrs.language != null && !validLanguage(node.attrs.language)) throw new Error('unsupported code block language');
     if (node.type === 'taskItem' && node.attrs.checked !== undefined && typeof node.attrs.checked !== 'boolean') throw new Error('invalid task item state');
@@ -177,29 +249,32 @@ function validateJSON(json, version = VERSION) {
 function validateRetained(doc, version, migrations) {
   const types = typesFor(version);
   const root = doc.getXmlFragment('default');
+  const atom = type => type instanceof Y.XmlElement && isAtom(type.nodeName, version);
   const supportedType = type => type === root || type instanceof Y.XmlText ||
-    (type instanceof Y.XmlElement && types.includes(type.nodeName));
+    (type instanceof Y.XmlElement && (types.includes(type.nodeName) || atom(type)));
   for (const structs of doc.store.clients.values()) for (const item of structs) {
     // GC carries no recoverable payload. Deleted Items still do.
     if (item instanceof Y.GC) continue;
     if (migrations && item.parent === migrations) continue; // Fully checked, including retained payloads, before this walk.
     if (!(item instanceof Y.Item) || !supportedType(item.parent)) throw new Error('unsupported retained Yjs parent');
+    // Atoms are leaves: nothing was ever allowed inside one, even if deleted.
+    if (item.parentSub === null && atom(item.parent)) throw new Error('unsupported retained atom content');
     const content = item.content;
     if (item.parentSub !== null) {
       const parent = item.parent;
       if (!(parent instanceof Y.XmlElement)) throw new Error('unsupported retained text attributes');
       const key = item.parentSub;
       const cell = ['tableCell', 'tableHeader'].includes(parent.nodeName);
-      const allowed = key === 'id' || (key === 'level' && parent.nodeName === 'heading') || (['start','type'].includes(key) && parent.nodeName === 'orderedList') ||
+      const allowed = atom(parent) ? key === ATOM_KEY[parent.nodeName] : key === 'id' || (key === 'level' && parent.nodeName === 'heading') || (['start','type'].includes(key) && parent.nodeName === 'orderedList') ||
         (cell && ['colspan', 'rowspan', 'colwidth', 'align'].includes(key)) ||
-        (version === LATEST_VERSION && ((key === 'language' && parent.nodeName === 'codeBlock') || (key === 'checked' && parent.nodeName === 'taskItem')));
+        (isFormatted(version) && ((key === 'language' && parent.nodeName === 'codeBlock') || (key === 'checked' && parent.nodeName === 'taskItem')));
       if (!allowed) throw new Error('unsupported retained attributes');
       if (content instanceof Y.ContentDeleted) continue;
       // Yjs coalesces adjacent deleted versions of the same scalar attribute.
       // Active attributes remain scalar; every retained value still needs validation.
       if (!(content instanceof Y.ContentAny) || content.arr.length === 0 || (!item.deleted && content.arr.length !== 1)) throw new Error('unsupported retained attribute content');
       for (const value of content.arr) {
-        const valid = key === 'id' ? value === null || (typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)) :
+        const valid = atom(parent) ? validAtomValue(parent.nodeName, value) : key === 'id' ? value === null || (typeof value === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(value)) :
           key === 'level' ? [1,2,3].includes(value) : key === 'start' ? Number.isInteger(value) && value >=1 && value<=10000 : ['colspan','rowspan'].includes(key) ? value===1 :
           key === 'language' ? value === null || validLanguage(value) : key === 'checked' ? typeof value === 'boolean' : value===null;
         if (!valid) throw new Error('unsupported retained attribute value');
@@ -226,6 +301,9 @@ function validate(doc, version = VERSION) {
     if (node instanceof Y.XmlText) {
       if (Object.keys(node.getAttributes()).length) throw new Error('unsupported text attributes');
       if (node.toDelta().some(part => typeof part.insert !== 'string' || Object.keys(part.attributes || {}).length > maxMarks(version) || !validCombination(Object.keys(part.attributes || {})) || Object.entries(part.attributes || {}).some(([key,value]) => !validFormat(key,value,version) || value === null))) throw new Error('unsupported text delta');
+    } else if (node instanceof Y.XmlElement && isAtom(node.nodeName, version)) {
+      const attrs = node.getAttributes(), key = ATOM_KEY[node.nodeName];
+      if (node.length !== 0 || Object.keys(attrs).length !== 1 || !validAtomValue(node.nodeName, attrs[key])) throw new Error('invalid inline atom');
     } else if (node instanceof Y.XmlElement || node instanceof Y.XmlFragment) {
       for (const child of node.toArray()) inspect(child, depth + 1);
     } else throw new Error('unsupported Yjs content');
@@ -308,6 +386,25 @@ function patch(doc, op, version = VERSION) {
   while (suffix < before.length - localFrom && suffix < after.length - localFrom && before[before.length - suffix - 1] === after[after.length - suffix - 1]) suffix++;
   while (!textBoundary(before, before.length - suffix) || !textBoundary(after, after.length - suffix)) suffix--;
   const from = range.from + localFrom, to = range.to - suffix, replacement = after.slice(localFrom, after.length - suffix);
+  // Dates and mentions have no width in text offsets, so text inserted exactly
+  // beside one could land on either side, and a range across one would leave it
+  // stranded. Refuse both instead of guessing (#5155).
+  // The same text change can often slide (deleting one "a" from "aa"): matching
+  // the common suffix first gives the leftmost equivalent position, so
+  // [slideFrom, to] is every place the change could mean.
+  let tail = 0;
+  while (tail < before.length && tail < after.length && before[before.length - tail - 1] === after[after.length - tail - 1]) tail++;
+  while (!textBoundary(before, before.length - tail) || !textBoundary(after, after.length - tail)) tail--;
+  let head = 0;
+  while (head < before.length - tail && head < after.length - tail && before[head] === after[head]) head++;
+  while (!textBoundary(before, head) || !textBoundary(after, head)) head--;
+  const slideFrom = range.from + head;
+  let atomBase = 0;
+  for (const child of (from === to && !replacement) ? [] : block.toArray()) {
+    if (child instanceof Y.XmlText) { atomBase += child.length; continue; }
+    if (!(child instanceof Y.XmlElement) || !ATOMS.includes(child.nodeName)) continue;
+    if ((slideFrom < atomBase && atomBase < to) || (replacement && (atomBase === slideFrom || atomBase === to))) throw Object.assign(new Error('semantic edit touches a date or mention; edit that text in the editor'), { code: 'ambiguous_inline_atom' });
+  }
   if (from !== to || replacement) doc.transact(() => {
     if (texts.length === 0) { const text = new Y.XmlText(); block.insert(0, [text]); texts.push(text); }
     const insertion = textPosition(texts, from, 0);
@@ -388,16 +485,31 @@ function create(json = initialJSON(), version = VERSION) {
   const doc = prosemirrorToYDoc(pm, 'default'); doc.gc = false; validate(doc, version); return doc;
 }
 
-function markdown(json, version = RICH_VERSION) {
+// `people` maps a mention's user id to the name this reader may see. A mention
+// without one is written as the neutral label, so an export never confirms
+// whether an id belongs to anyone.
+function markdown(json, version = RICH_VERSION, { people } = {}) {
+  const personName = id => (people && Object.hasOwn(people, id) && typeof people[id] === 'string' && people[id]) ? people[id] : UNKNOWN_MEMBER;
   // Schema 4 can produce strikethrough, so a literal tilde is escaped there only:
   // earlier documents keep their exact export.
-  const escape = version >= LATEST_VERSION ? text => text.replace(/([\\`*_{}\[\]<>#!|&~])/g, '\\$1') : text => text.replace(/([\\`*_{}\[\]<>#!|&])/g, '\\$1');
+  const escape = isFormatted(version) ? text => text.replace(/([\\`*_{}\[\]<>#!|&~])/g, '\\$1') : text => text.replace(/([\\`*_{}\[\]<>#!|&])/g, '\\$1');
   // Emphasis delimiters must touch non-space text: outer spaces stay outside.
+  // Schema 5 underline, colour and highlight have no Markdown syntax; they are
+  // written as closed inline HTML whose only attribute value is a palette name,
+  // around the emphasis. Text itself stays escaped, so it never becomes markup.
   const emphasis = (value, marks) => {
     const open = [['bold','**'],['italic','*'],['strike','~~']].filter(([type]) => marks.some(mark => mark.type === type)).map(([, d]) => d);
-    if (!open.length) return value;
+    const has = type => marks.find(mark => mark.type === type);
+    const tags = [];
+    if (has('textColor') && validColor(has('textColor').attrs?.color)) tags.push([`<span data-text-color="${has('textColor').attrs.color}">`, '</span>']);
+    if (has('highlight') && validColor(has('highlight').attrs?.color)) tags.push([`<mark data-highlight="${has('highlight').attrs.color}">`, '</mark>']);
+    if (has('underline')) tags.push(['<u>', '</u>']);
+    if (!open.length && !tags.length) return value;
     const [, lead, core, trail] = /^(\s*)([\s\S]*?)(\s*)$/.exec(value);
-    return core ? lead + open.join('') + core + [...open].reverse().join('') + trail : value;
+    // Tags wrap the emphasis, so a delimiter always touches text and stays
+    // flanking inside a word (abc<u>**def**</u>ghi).
+    const inner = open.join('') + core + [...open].reverse().join('');
+    return core ? lead + tags.map(([o]) => o).join('') + inner + tags.map(([, c]) => c).reverse().join('') + trail : value;
   };
   // GFM strips one escape before a pipe before parsing inline code. An odd
   // original backslash run cannot survive that preprocessing without turning
@@ -426,6 +538,8 @@ function markdown(json, version = RICH_VERSION) {
       if (link) return '[' + styled + '](<' + destination(link.attrs.href) + '>)';
       return styled;
     }
+    if (node.type==='date' && isAtom(node.type, version)) return escape(node.attrs.value);
+    if (node.type==='mention' && isAtom(node.type, version)) return '@' + escape(personName(node.attrs.userId).replace(/[\r\n]+/g, ' '));
     if (node.type==='codeBlock') { if (table) throw Object.assign(new Error('Markdown export cannot represent a code block inside a simple table; move it outside the table.'), {code:'unsupported_markdown'}); const value = textOf(node), fence = '`'.repeat(Math.max(2, ...(value.match(/`+/g) || []).map(run => run.length)) + 1); return fence + (validLanguage(node.attrs?.language) ? node.attrs.language : '') + '\n' + value + '\n' + fence + '\n\n'; }
     if (node.type==='blockquote') {
       if (table) throw Object.assign(new Error('Markdown export cannot represent a quote inside a simple table; move it outside the table.'), {code:'unsupported_markdown'});
@@ -439,7 +553,7 @@ function markdown(json, version = RICH_VERSION) {
     if (node.type==='paragraph') return (node.content||[]).map(n=>visit(n,depth,table)).join('')+'\n\n';
     if (node.type==='bulletList'||node.type==='orderedList') return (node.content||[]).map((n,i)=>'  '.repeat(depth)+(node.type==='bulletList'?'- ':`${(node.attrs.start||1)+i}. `)+visit(n,depth+1,table).trim().replace(/\n/g,'\n'+'  '.repeat(depth+1))).join('\n')+'\n\n';
     if (node.type==='table') {
-      const rich = node => !!node.marks?.length || ['codeBlock','blockquote','taskList'].includes(node.type) || (node.content || []).some(rich);
+      const rich = node => !!node.marks?.length || ['codeBlock','blockquote','taskList','date','mention'].includes(node.type) || (node.content || []).some(rich);
       const rows=(node.content||[]).map(r=>r.content.map(c=>(rich(c) ? (c.content||[]).map(n=>visit(n,depth,true).trimEnd()).join(' ') : escape((c.content||[]).map(textOf).join(' '))).replace(/\n/g,' ')));
       return rows.map((r,i)=>'| '+r.join(' | ')+' |'+(i===0?'\n| '+r.map(()=>'---').join(' | ')+' |':'')).join('\n')+'\n\n';
     }
@@ -448,5 +562,5 @@ function markdown(json, version = RICH_VERSION) {
   return visit(json).trimEnd()+'\n';
 }
 
-return { VERSION, RICH_VERSION, LATEST_VERSION, validLanguage, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
+return { VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION, PALETTE, validColor, ATOMS, validDate, validUserId, UNKNOWN_MEMBER, validLanguage, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
 }

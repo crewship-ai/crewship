@@ -71,7 +71,7 @@ func TestDocumentDraftTransportIdentityAndBounds(t *testing.T) {
 	}
 }
 func TestDocumentDraftPrepareRejectsScopeAndAmbiguousJSON(t *testing.T) {
-	for _, raw := range []string{`null`, draftPrepareInput + `{}`, strings.Replace(draftPrepareInput, `"target":"p1"`, `"target":"missing"`, 1), strings.Replace(draftPrepareInput, `"schema":3`, `"schema":4`, 1), strings.Replace(draftPrepareInput, `"rev":0`, `"rev":null`, 1), strings.Replace(draftPrepareInput, `"type":"paragraph"`, `"type":"table"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"B","text":"C"`, 1), strings.Replace(draftPrepareInput, `"mutation_id":"draft-one"`, `"mutation_id":"draft-one","user_id":"other"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"`+strings.Repeat("b", 64<<10)+`"`, 1)} {
+	for _, raw := range []string{`null`, draftPrepareInput + `{}`, strings.Replace(draftPrepareInput, `"target":"p1"`, `"target":"missing"`, 1), strings.Replace(draftPrepareInput, `"schema":3`, `"schema":6`, 1), strings.Replace(draftPrepareInput, `"schema":3`, `"schema":2`, 1), strings.Replace(draftPrepareInput, `"rev":0`, `"rev":null`, 1), strings.Replace(draftPrepareInput, `"type":"paragraph"`, `"type":"table"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"B","text":"C"`, 1), strings.Replace(draftPrepareInput, `"mutation_id":"draft-one"`, `"mutation_id":"draft-one","user_id":"other"`, 1), strings.Replace(draftPrepareInput, `"text":"B"`, `"text":"`+strings.Repeat("b", 64<<10)+`"`, 1)} {
 		if _, err := PrepareDocumentDraft([]byte(raw)); err == nil {
 			t.Fatalf("unsafe prepare accepted: %.100s", raw)
 		}
@@ -200,5 +200,62 @@ func TestDocumentProposalPacketStaysInsideTheProposeMandate(t *testing.T) {
 	})
 	if err != nil || out.Status != "proposed" {
 		t.Fatalf("proposal: %+v %v", out, err)
+	}
+}
+
+// Docs are created at schema 4 (#5137 WP2): a direct draft view at schema 4
+// prepares a packet that keeps schema 4 end to end and round-trips intact.
+func TestDocumentDraftPrepareKeepsSchemaFour(t *testing.T) {
+	p, err := PrepareDocumentDraft([]byte(strings.Replace(draftPrepareInput, `"schema":3`, `"schema":4`, 1)))
+	if err != nil || p.Patch.Schema != 4 || p.Checkpoint.Schema != 4 {
+		t.Fatalf("schema-4 draft: %+v %v", p, err)
+	}
+	raw, err := json.Marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := ParseDocumentDraftPacket(raw)
+	if err != nil || parsed.Patch.Schema != 4 {
+		t.Fatalf("schema-4 packet round trip: %+v %v", parsed, err)
+	}
+	mixed := strings.Replace(string(raw), `"schema":4`, `"schema":3`, 1)
+	if _, err := ParseDocumentDraftPacket([]byte(mixed)); err == nil {
+		t.Fatal("mixed-schema packet accepted")
+	}
+}
+
+// #5233: a schema-5 Doc drafts and proposes at its own schema; the packet
+// never silently becomes schema 4, and schemas without the capability refuse.
+func TestDocumentPacketsBindTheDocumentSchemaFive(t *testing.T) {
+	p, err := PrepareDocumentDraft([]byte(strings.Replace(draftPrepareInput, `"schema":3`, `"schema":5`, 1)))
+	if err != nil || p.Patch.Schema != 5 || p.Checkpoint.Schema != 5 {
+		t.Fatalf("schema-5 draft: %+v %v", p, err)
+	}
+	if raw, _ := json.Marshal(p); func() bool { _, err := ParseDocumentDraftPacket(raw); return err != nil }() {
+		t.Fatal("schema-5 draft packet does not round-trip")
+	}
+	hash := strings.Repeat("a", 64)
+	view := func(schema string) []byte {
+		return []byte(`{"view":{"page_id":"page-1","mode":"propose","schema":` + schema + `,"rev":3,"generation":0,"epoch":"opaque","targets":[{"id":"intro","type":"paragraph","parent":null,"text":"Intro","hash":"` + hash + `"}]},"target":"intro","text":"New intro","mutation_id":"proposal-1"}`)
+	}
+	packet, err := PrepareDocumentProposal(view("5"))
+	if err != nil || packet.Proposal.Schema != 5 {
+		t.Fatalf("schema-5 proposal: %+v %v", packet, err)
+	}
+	raw, _ := json.Marshal(packet)
+	if parsed, err := ParseDocumentProposalPacket(raw); err != nil || parsed.Proposal.Schema != 5 {
+		t.Fatalf("schema-5 proposal round trip: %+v %v", parsed, err)
+	}
+	for _, schema := range []string{"3", "6"} {
+		if _, err := PrepareDocumentProposal(view(schema)); err == nil {
+			t.Fatalf("schema %s proposal prepared", schema)
+		}
+		if _, err := ParseDocumentProposalPacket([]byte(strings.Replace(string(raw), `"schema":5`, `"schema":`+schema, 1))); err == nil {
+			t.Fatalf("schema %s proposal packet parsed", schema)
+		}
+	}
+	catalog, _ := json.Marshal(documentDraftMCPCatalog())
+	if !strings.Contains(string(catalog), `"enum":[3,4,5]`) || !strings.Contains(string(catalog), `"enum":[4,5]`) || strings.Contains(string(catalog), `"const":4`) {
+		t.Fatalf("MCP schemas do not follow the capability table: %s", catalog)
 	}
 }

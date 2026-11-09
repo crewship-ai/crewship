@@ -75,8 +75,8 @@ func (h *PageHandler) RestoreDocumentCheckpoint(w http.ResponseWriter, r *http.R
 		replyError(w, 502, "Document restore confirmation unavailable; retry the original packet")
 		return
 	}
-	// First-commit responses omit schema; replay may include the pinned schema.
-	// Do not invent a schema or expose internal snapshot/lease/actor fields.
+	// The receipt reports the Document's schema after the restore (a schema 5
+	// Document stays at 5, documents.RestoredSchema). Do not invent a schema or expose internal snapshot/lease/actor fields.
 	if receipt.Schema != 0 && (receipt.Schema < 1 || receipt.Schema > documents.LatestSchema) {
 		replyError(w, 409, "unsupported restored Document schema")
 		return

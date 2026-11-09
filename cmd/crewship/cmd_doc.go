@@ -7,6 +7,7 @@ package main
 // GET /api/v1/pages/{slug}/document/comments doc comments
 // POST /api/v1/pages/{slug}/document/comments doc comment
 // POST /api/v1/pages/{slug}/document/comments/resolve doc comment-resolve
+// GET /api/v1/pages/{slug}/document/people doc people
 
 import (
 	"bytes"
@@ -14,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -36,7 +38,7 @@ block hash from this output when preparing a patch.`, `  crewship doc read @<art
 parent is null at the top level. Reads the same state as read and never
 changes the document.`, `  crewship doc outline @<artifact-id>`},
 		"patch": {"Apply a guarded text replacement to one block", `Send one JSON object (at most 2 MiB) with id, schema, epoch, target, text, ifRev
-and ifHash; schemas 3 and 4 also need page_id. A changed revision, hash or epoch
+and ifHash; schemas 3, 4 and 5 also need page_id. A changed revision, hash or epoch
 refuses the edit and nothing is saved. Resend the exact request with the same id
 after a lost confirmation; the original receipt comes back with found: true
 and duplicate: true. A stale epoch, revision or hash returns 409.`, `  crewship doc patch @<artifact-id> --file patch.json
@@ -44,9 +46,10 @@ and duplicate: true. A stale epoch, revision or hash returns 409.`, `  crewship 
 		"status": {"Show whether native documents are enabled on this server", `Print enabled, wordcraft_native and gridcraft_native for the selected server.
 enabled is false unless the server starts with CREWSHIP_DOCUMENTS_ENABLED=true.`, `  crewship doc status
   crewship doc status -f yaml`},
-		"initialize": {"Write the first content of an empty artifact as a document", `Send one JSON object (at most 2 MiB) with an operation id, schema (2, 3 or 4)
-and a body document tree; schemas 3 and 4 also need page_id. Schema 4 adds
-bold, italic and strike marks, code block languages, quotes and checklists. Resend the exact request
+		"initialize": {"Write the first content of an empty artifact as a document", `Send one JSON object (at most 2 MiB) with an operation id, schema (2, 3, 4 or 5)
+and a body document tree; schemas 3, 4 and 5 also need page_id. Schema 4 adds
+bold, italic and strike marks, code block languages, quotes and checklists;
+schema 5 adds underline and palette text colour and highlight. Resend the exact request
 after a lost confirmation; the original receipt comes back with duplicate: true.
 The artifact must be empty and owned by you, not by a crew (for example one made
 with crewship page create --allow-empty). Read the document afterwards to obtain
@@ -57,12 +60,12 @@ text, block and status (attached, collapsed, detached or resolved); a reply has
 parent, the thread it answers. Reading needs read access to the document.`, `  crewship doc comments @<artifact-id>
   crewship doc comments <slug> -f yaml`},
 		"comment": {"Start a comment thread on quoted text, or reply to one", `Send one JSON object with id, schema, epoch, ifRev and text, plus page_id for
-schemas 3 and 4. A new thread also names block, from and to: the UTF-16 range
+schemas 3, 4 and 5. A new thread also names block, from and to: the UTF-16 range
 of the quoted text inside one paragraph, heading or code block (see doc outline).
 A reply names parent, the thread's id, instead. Comments never change content.
 You need Comment or Edit access. Resend the exact request after a lost
 confirmation; a changed revision returns 409.`, `  crewship doc comment @<artifact-id> --file comment.json`},
-		"comment-resolve": {"Resolve or reopen a comment thread", `Send one JSON object with id, schema, epoch, ifRev, page_id (schemas 3 and 4),
+		"comment-resolve": {"Resolve or reopen a comment thread", `Send one JSON object with id, schema, epoch, ifRev, page_id (schemas 3, 4 and 5),
 comment (the thread id), version (from doc comments) and resolved (true or
 false). A changed version or revision returns 409. You need Comment or Edit
 access.`, `  crewship doc comment-resolve @<artifact-id> --file resolve.json`},
@@ -164,7 +167,46 @@ access.`, `  crewship doc comment-resolve @<artifact-id> --file resolve.json`},
 	root.AddCommand(newDocResultsCommand())
 	root.AddCommand(newDocHistoryCommands()...)
 	root.AddCommand(newDocProposalCommands()...)
+	root.AddCommand(newDocPeopleCommand())
 	return root
+}
+
+// newDocPeopleCommand wraps GET /api/v1/pages/{slug}/document/people (#5155).
+func newDocPeopleCommand() *cobra.Command {
+	cmd := &cobra.Command{Use: "people <page-slug>", Short: "Name mentioned people, or search people to mention, for this reader",
+		Long: `Mentions in a schema 5 document store only a user id. With --ids, print the
+names of those people as {"people":[{id,name}]}; with --query (or neither
+flag), list at most 20 people whose name contains the text. Only people who can
+read this document appear, and only when you can read it. Any other id is simply
+absent, which a reader shows as Unknown member; the answer never says whether
+an id exists. Reading needs read access to the document.`,
+		Example: `  crewship doc people @<artifact-id> --ids <user-id>,<user-id>
+  crewship doc people <slug> --query ada`,
+		Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+			ids, _ := cmd.Flags().GetString("ids")
+			search, _ := cmd.Flags().GetString("query")
+			if ids != "" && search != "" {
+				return fmt.Errorf("use either --ids or --query")
+			}
+			client, err := pageClient()
+			if err != nil {
+				return err
+			}
+			query := url.Values{}
+			if ids != "" {
+				query.Set("ids", ids)
+			} else {
+				query.Set("q", search)
+			}
+			response, err := client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/document/people?" + query.Encode())
+			if err != nil {
+				return err
+			}
+			return printPageArtifactResponse(cmd, response)
+		}}
+	cmd.Flags().String("ids", "", "Comma-separated mention user ids to name (at most 100)")
+	cmd.Flags().String("query", "", "Name text to search for people who can read this document")
+	return cmd
 }
 
 // Re-encode JSON even for human output: untrusted source stays escaped text,

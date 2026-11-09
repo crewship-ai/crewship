@@ -18,7 +18,7 @@ func proposeIterationFixture(t *testing.T, blocks string) (*artifactPrincipalFix
 	t.Helper()
 	f, _, token, intent := iterationFixtureFor(t, func(f *artifactPrincipalFixture, intent *documents.IterationIntent) {
 		mustExec(t, f.rig.db, `UPDATE documents SET schema_version=4 WHERE page_id=?`, intent.PageID)
-		intent.Schema = documents.ProposalSchema
+		intent.Schema = documents.FormattedSchema
 		intent.Blocks = blocks
 	})
 	return f, token, intent
@@ -159,6 +159,7 @@ func TestDocumentDraftProposeModeFiltersViewAndRefusesOutsideMandate(t *testing.
 		{"patch on a propose mandate", request("patch", "intro", 3), 403},
 		{"target outside the mandate", request("propose", "body", 4), 403},
 		{"propose with schema 3", request("propose", "intro", 3), 400},
+		{"propose at another schema than the Doc's", request("propose", "intro", 5), 409},
 		{"propose inside the mandate", request("propose", "intro", 4), 200},
 	}
 	for _, tt := range tests {
@@ -254,7 +255,8 @@ func TestIterationIntentBlocksRoundTrip(t *testing.T) {
 		{"duplicate blocks", `{"submission_id":"s","page_id":"p","schema":4,"generation":0,"rev":0,"blocks":["a","a"]}`, false},
 		{"empty blocks", `{"submission_id":"s","page_id":"p","schema":4,"generation":0,"rev":0,"blocks":[]}`, false},
 		{"bad block id", `{"submission_id":"s","page_id":"p","schema":4,"generation":0,"rev":0,"blocks":["a b"]}`, false},
-		{"schema 5", `{"submission_id":"s","page_id":"p","schema":5,"generation":0,"rev":0}`, false},
+		{"schema 5 with blocks", `{"submission_id":"s","page_id":"p","schema":5,"generation":0,"rev":0,"blocks":["a"]}`, true},
+		{"schema 6", `{"submission_id":"s","page_id":"p","schema":6,"generation":0,"rev":0}`, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

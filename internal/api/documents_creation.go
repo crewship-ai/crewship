@@ -54,17 +54,24 @@ func (h *PageHandler) documentCreationAuthority(ctx context.Context, a *artifact
 	return value, nil
 }
 
+// documentCreationSchema is the schema new Docs are born at (#5137, #5233):
+// the explicit documents.CreateSchema, never "latest", so creation and the
+// editor offer the same formatting and every agent capability holds on it.
+const documentCreationSchema = documents.CreateSchema
+
 func (h *PageHandler) documentCreationReplay(ctx context.Context, a *artifactRunAuthority, consent documentCreationConsent, mutation, digest string) (documentCreationResult, error) {
 	var result documentCreationResult
 	if !consent.Page.Valid {
 		return result, errors.New("created document was deleted; permission remains consumed")
 	}
 	var storedMutation, storedDigest string
-	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT p.id,p.workspace_id,p.slug,p.name,c.revision,c.mutation_id,c.request_digest FROM document_creations c JOIN pages p ON p.id=c.page_id AND p.workspace_id=c.workspace_id JOIN documents d ON d.page_id=p.id AND d.workspace_id=p.workspace_id WHERE c.run_id=? AND p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.owner_crew_id IS NULL`, a.RunID, consent.Page.String, a.WorkspaceID, a.HumanUserID).Scan(&result.PageID, &result.WorkspaceID, &result.Slug, &result.Title, &result.Revision, &storedMutation, &storedDigest)
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT p.id,p.workspace_id,p.slug,p.name,c.revision,c.mutation_id,c.request_digest,COALESCE((SELECT k.schema_version FROM document_checkpoints k WHERE k.workspace_id=p.workspace_id AND k.page_id=p.id AND k.rev=0 ORDER BY k.created_at,k.id LIMIT 1),d.schema_version) FROM document_creations c JOIN pages p ON p.id=c.page_id AND p.workspace_id=c.workspace_id JOIN documents d ON d.page_id=p.id AND d.workspace_id=p.workspace_id WHERE c.run_id=? AND p.id=? AND p.workspace_id=? AND p.owner_user_id=? AND p.owner_crew_id IS NULL`, a.RunID, consent.Page.String, a.WorkspaceID, a.HumanUserID).Scan(&result.PageID, &result.WorkspaceID, &result.Slug, &result.Title, &result.Revision, &storedMutation, &storedDigest, &result.Schema)
 	if err != nil || storedMutation != mutation || storedDigest != digest {
 		return result, errors.New("document creation mutation conflicts with consumed permission")
 	}
-	result.Type, result.Schema = "document", 3
+	// A retry reports the schema the Doc was created at (its rev-0 checkpoint),
+	// so a Doc created at 3 before #5137 replays as 3 even after an upgrade.
+	result.Type = "document"
 	result.URL = artifactCanonicalURL(result.PageID, result.WorkspaceID)
 	return result, nil
 }
@@ -145,7 +152,7 @@ func (h *PageHandler) CreateDocumentAgent(w http.ResponseWriter, r *http.Request
 	// Trusted pure computation happens before acquiring the SQL writer. Generated
 	// IDs/snapshot never participate in the original authoring fingerprint.
 	pageID := generateCUID()
-	preparedRaw, status, err := h.documentCall(r.Context(), a.WorkspaceID, "Bearer "+extractToken(r), pageID, "prepare-create", map[string]any{"blocks": request.Blocks})
+	preparedRaw, status, err := h.documentCall(r.Context(), a.WorkspaceID, "Bearer "+extractToken(r), pageID, "prepare-create", map[string]any{"schema": documentCreationSchema, "blocks": request.Blocks})
 	if err != nil {
 		replyError(w, 503, "document creation preparation unavailable; retry the same mutation_id")
 		return
@@ -161,7 +168,7 @@ func (h *PageHandler) CreateDocumentAgent(w http.ResponseWriter, r *http.Request
 		Snapshot []byte          `json:"snapshot"`
 		Blocks   json.RawMessage `json:"blocks"`
 	}
-	if json.Unmarshal(preparedRaw, &prepared) != nil || prepared.Schema != 3 || len(prepared.Snapshot) == 0 || len(prepared.Snapshot) > 1<<20 {
+	if json.Unmarshal(preparedRaw, &prepared) != nil || prepared.Schema != documentCreationSchema || len(prepared.Snapshot) == 0 || len(prepared.Snapshot) > 1<<20 {
 		replyError(w, 502, "invalid document creation preparation")
 		return
 	}
@@ -221,7 +228,7 @@ func (h *PageHandler) CreateDocumentAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	store := documents.New(h.db, h.documentStoreOptions)
-	initialized, initErr := store.InitRequestTx(ctx, tx, documents.Key{WorkspaceID: a.WorkspaceID, PageID: pageID}, request.MutationID, digest, 3, prepared.Snapshot, prepared.Blocks, "agent:"+a.AgentID+":"+a.RunID)
+	initialized, initErr := store.InitRequestTx(ctx, tx, documents.Key{WorkspaceID: a.WorkspaceID, PageID: pageID}, request.MutationID, digest, documentCreationSchema, prepared.Snapshot, prepared.Blocks, "agent:"+a.AgentID+":"+a.RunID)
 	if initErr != nil {
 		err = initErr
 		h.logger.Error("created document initialization failed", "error", err)
@@ -254,5 +261,5 @@ func (h *PageHandler) CreateDocumentAgent(w http.ResponseWriter, r *http.Request
 		return
 	}
 	broadcastWorkspaceEvent(h.hub, a.WorkspaceID, "page.updated", map[string]any{})
-	writeJSON(w, 201, documentCreationResult{PageID: pageID, WorkspaceID: a.WorkspaceID, Slug: request.Slug, Title: request.Name, Type: "document", Schema: 3, Revision: 0, URL: artifactCanonicalURL(pageID, a.WorkspaceID)})
+	writeJSON(w, 201, documentCreationResult{PageID: pageID, WorkspaceID: a.WorkspaceID, Slug: request.Slug, Title: request.Name, Type: "document", Schema: documentCreationSchema, Revision: 0, URL: artifactCanonicalURL(pageID, a.WorkspaceID)})
 }

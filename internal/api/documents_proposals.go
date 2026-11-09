@@ -1,8 +1,9 @@
 package api
 
-// Agent proposals on schema-4 Docs (#5137). An agent run admitted by a human's
-// explicit schema-4 targeted message proposes a replacement of one block's
-// text; a human with Edit accepts (an ordinary commit bound to the proposal)
+// Agent proposals (#5137, #5233) on every schema that supports them
+// (documents.SchemaAllows). An agent run admitted by a human's explicit
+// targeted message naming the Doc's own schema proposes a replacement of one
+// block's text; a human with Edit accepts (an ordinary commit bound to the proposal)
 // or rejects it. Wire shape: FE-REQ-F3-4 (lib/documents/proposals.ts).
 import (
 	"context"
@@ -20,16 +21,16 @@ var documentProposalID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 // documentProposalInput extracts the stored proposal from the engine's
 // semantic proof. The proof itself is re-verified by the semantic guard inside
 // the writer transaction; this only reads the target's subtree and ancestry.
-func documentProposalInput(id, fingerprint, run, target string, semantic *documentSemanticPatch, hashes map[string]string, ifRev int64, generation *int64) (documents.ProposalInput, error) {
+func documentProposalInput(id, fingerprint, run, target string, schema int, semantic *documentSemanticPatch, hashes map[string]string, ifRev int64, generation *int64) (documents.ProposalInput, error) {
 	var in documents.ProposalInput
-	if semantic == nil || semantic.Rich == nil || semantic.Target != target || !documentRichID.MatchString(target) || len(hashes) != 1 || generation == nil {
+	if !documents.SchemaAllows(schema, documents.CapPropose) || semantic == nil || semantic.Rich == nil || semantic.Target != target || !documentRichID.MatchString(target) || len(hashes) != 1 || generation == nil {
 		return in, documents.ErrInvalidProposal
 	}
-	before, err := documentRichTreeFor(semantic.Rich.Before, documents.ProposalSchema)
+	before, err := documentRichTreeFor(semantic.Rich.Before, schema)
 	if err != nil {
 		return in, documents.ErrInvalidProposal
 	}
-	after, err := documentRichTreeFor(semantic.Rich.After, documents.ProposalSchema)
+	after, err := documentRichTreeFor(semantic.Rich.After, schema)
 	if err != nil {
 		return in, documents.ErrInvalidProposal
 	}
@@ -46,7 +47,7 @@ func documentProposalInput(id, fingerprint, run, target string, semantic *docume
 	if err != nil {
 		return in, err
 	}
-	in = documents.ProposalInput{ID: id, Fingerprint: fingerprint, RunID: run, Target: target, BaseHash: documentRichHash(base), ProposedHash: documentRichHash(proposed),
+	in = documents.ProposalInput{ID: id, Fingerprint: fingerprint, RunID: run, Target: target, Schema: schema, BaseHash: documentRichHash(base), ProposedHash: documentRichHash(proposed),
 		Text: semantic.Text, Ancestors: ancestors, Base: baseJSON, Proposed: proposedJSON, IfRev: ifRev, Generation: generation}
 	if hashes[target] != in.BaseHash {
 		return in, documents.ErrInvalidProposal
@@ -99,7 +100,7 @@ func (h *PageHandler) documentProposalGuard(a *artifactRunAuthority, k documents
 		if !scope.Propose || !scope.admits(target) {
 			return errDocumentAccess
 		}
-		if k.WorkspaceID != a.WorkspaceID || actor != "agent:"+a.AgentID+":"+a.RunID || ifRev != state.HeadRev || state.HeadRev != scope.Rev || state.Generation != scope.Generation || state.Schema != documents.ProposalSchema {
+		if k.WorkspaceID != a.WorkspaceID || actor != "agent:"+a.AgentID+":"+a.RunID || ifRev != state.HeadRev || state.HeadRev != scope.Rev || state.Generation != scope.Generation || state.Schema != scope.Schema || !documents.SchemaAllows(state.Schema, documents.CapPropose) {
 			return documents.ErrConflict
 		}
 		return nil

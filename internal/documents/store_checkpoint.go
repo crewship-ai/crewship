@@ -172,7 +172,7 @@ func (s *Store) RestoreRequestWithFingerprintAtGeneration(ctx context.Context, k
 			return err
 		}
 		r = Receipt{requestID, v.HeadRev + 1, v.Epoch + 1, actor, "restore"}
-		if _, err = t.ExecContext(ctx, "UPDATE documents SET head_rev=?,epoch=?,generation=generation+1,schema_version=?,snapshot=?,snapshot_rev=?,projection=?,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?", r.Rev, r.Epoch, c.Schema, c.Snapshot, r.Rev, []byte(c.Projection), k.WorkspaceID, k.PageID); err != nil {
+		if _, err = t.ExecContext(ctx, "UPDATE documents SET head_rev=?,epoch=?,generation=generation+1,schema_version=?,snapshot=?,snapshot_rev=?,projection=?,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?", r.Rev, r.Epoch, RestoredSchema(v.Schema, c.Schema), c.Snapshot, r.Rev, []byte(c.Projection), k.WorkspaceID, k.PageID); err != nil {
 			return err
 		}
 		if _, err = t.ExecContext(ctx, "DELETE FROM document_updates WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID); err != nil {
@@ -220,4 +220,18 @@ func (s *Store) Stats(ctx context.Context, k Key, a Authorize) (v Stats, e error
 		return t.QueryRowContext(ctx, "SELECT count(*) FROM document_receipts WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&v.Receipts)
 	})
 	return
+}
+
+// RestoredSchema is the schema a Document has after restoring a checkpoint
+// recorded at checkpoint while it is at current (#5155). A Document at the
+// latest schema stays there: every older schema reaches the latest one by a
+// pure schema bump (UpgradeRequest), so older content is valid latest content,
+// and a silent downgrade would re-enable schema 4 agent proposals on a
+// Document that may hold dates and mentions. Below the latest schema a
+// restore keeps the checkpoint's own schema, as before.
+func RestoredSchema(current, checkpoint int) int {
+	if current == LatestSchema && checkpoint < LatestSchema {
+		return LatestSchema
+	}
+	return checkpoint
 }

@@ -199,12 +199,12 @@ describe("ChatPanel — chip double-click during session create (#2121)", () => 
 
   it("sends one schema-4 proposal request with the next message, then none", async () => {
     sendMessage.mockReturnValue(true)
-    render(<ChatPanel {...panelProps} proposalRequest={{ pageId: "page-docs", rev: 3, generation: 1 }} />)
+    render(<ChatPanel {...panelProps} proposalRequest={{ pageId: "page-docs", rev: 3, generation: 1, schema: 5 }} />)
     expect(await screen.findByTestId("proposal-request-chip")).toBeInTheDocument()
     fireEvent.click(await firstChip())
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))
     const intent = sendMessage.mock.calls[0][1]?.document_iteration_intent
-    expect(intent).toEqual({ submission_id: expect.any(String), page_id: "page-docs", schema: 4, rev: 3, generation: 1 })
+    expect(intent).toEqual({ submission_id: expect.any(String), page_id: "page-docs", schema: 5, rev: 3, generation: 1 })
     expect(sendMessage.mock.calls[0][1]?.page_context).toBeUndefined()
     await waitFor(() => expect(screen.queryByTestId("proposal-request-chip")).toBeNull())
     fireEvent.click(await firstChip())
@@ -214,7 +214,7 @@ describe("ChatPanel — chip double-click during session create (#2121)", () => 
   })
 
   it("does not send a proposal request after it is removed", async () => {
-    render(<ChatPanel {...panelProps} proposalRequest={{ pageId: "page-docs", rev: 3, generation: 1 }} />)
+    render(<ChatPanel {...panelProps} proposalRequest={{ pageId: "page-docs", rev: 3, generation: 1, schema: 4 }} />)
     fireEvent.click(await screen.findByRole("button", { name: "Remove proposal request" }))
     fireEvent.click(await firstChip())
     await waitFor(() => expect(sendMessage).toHaveBeenCalledTimes(1))

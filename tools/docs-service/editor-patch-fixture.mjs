@@ -24,8 +24,8 @@ const authority = http.createServer(async (req, res) => {
     const op = req.url.split('/').at(-1);
     let result;
     switch (op) {
-      case 'recover': state.generation++; state.epoch++; result = { recovered: true, protocol: PROTOCOL, schema: 4 }; break;
-      case 'ready': result = { protocol: PROTOCOL, schema: 4 }; break;
+      case 'recover': state.generation++; state.epoch++; result = { recovered: true, protocol: PROTOCOL, schema: 5 }; break;
+      case 'ready': result = { protocol: PROTOCOL, schema: 5 }; break;
       case 'state': result = state; break;
       case 'lease': result = { epoch: state.epoch, token: 'fixture-lease', expiresAt: new Date(Date.now() + 30000).toISOString() }; break;
       case 'renew': result = { expiresAt: new Date(Date.now() + 30000).toISOString() }; break;

@@ -92,7 +92,7 @@ func TestHumanDocumentHistoryRestoreRejectsChangedScope(t *testing.T) {
 	for _, body := range []string{
 		strings.Replace(historyRestorePacket, "human-doc-page", "other-page", 1),
 		strings.Replace(historyRestorePacket, `"schema":3`, `"schema":99`, 1),
-		strings.Replace(historyRestorePacket, `"schema":3`, `"schema":5`, 1),
+		strings.Replace(historyRestorePacket, `"schema":3`, `"schema":6`, 1),
 		strings.Replace(historyRestorePacket, `"ifRev":8`, `"ifRev":-1`, 1),
 		strings.Replace(historyRestorePacket, `"id":"restore-one"`, `"id":"restore-one","id":"other"`, 1),
 		strings.TrimSuffix(historyRestorePacket, "}") + `,"run_id":"old-run"}`,

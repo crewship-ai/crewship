@@ -17,17 +17,21 @@ const BASE_BLOCKS = ["paragraph", "heading", "bulletList", "orderedList", "listI
 const RICH_NAMES: Record<number, string[]> = {
   3: ["link", "code", "codeBlock"],
   4: ["link", "bold", "italic", "strike", "code", "codeBlock", "blockquote", "taskList", "taskItem"],
+  // Schema 5 also has the inline date and mention atoms; an editor without them would drop them.
+  5: ["link", "bold", "italic", "strike", "underline", "textColor", "highlight", "code", "codeBlock", "blockquote", "taskList", "taskItem", "date", "mention"],
 }
 
 /** Block types that carry a stable `id` in this schema. */
 export function stableBlockTypes(schema: number | undefined): string[] {
-  return [...BASE_BLOCKS, ...(schema === 3 || schema === 4 ? ["codeBlock"] : []), ...(schema === 4 ? ["blockquote", "taskList", "taskItem"] : [])]
+  return [...BASE_BLOCKS, ...(isRichSchema(schema) ? ["codeBlock"] : []), ...(isFormattedSchema(schema) ? ["blockquote", "taskList", "taskItem"] : [])]
 }
 
 /** True where the schema has bold, italic, strike, quotes, checklists and code languages. */
-export const isFormattedSchema = (schema: number | undefined) => schema === 4
+export const isFormattedSchema = (schema: number | undefined) => schema === 4 || schema === 5
 /** True where the schema has links, inline code and code blocks. */
-export const isRichSchema = (schema: number | undefined) => schema === 3 || schema === 4
+export const isRichSchema = (schema: number | undefined) => schema === 3 || schema === 4 || schema === 5
+/** True where the schema has underline and palette text colour and highlight. */
+export const isStyledSchema = (schema: number | undefined) => schema === 5
 
 /** The schema's own marks and nodes beyond the StarterKit base, with editing behaviour. */
 export function documentEditorExtensions(schema: number | undefined): AnyExtension[] {
@@ -36,7 +40,7 @@ export function documentEditorExtensions(schema: number | undefined): AnyExtensi
   const own = (documentSchema.extensionsFor(schema) as AnyExtension[]).filter(extension => names.includes(extension.name))
     .map(extension => extension.name === "taskItem" ? interactiveTaskItem(extension)
       : extension.name === "codeBlock" ? codeBlockView(extension, { languages: isFormattedSchema(schema) }) : extension)
-  return isFormattedSchema(schema) ? [...own, FormatShortcuts, CodeHighlight] : own
+  return isStyledSchema(schema) ? [...own, FormatShortcuts, CodeHighlight, StyleShortcuts] : isFormattedSchema(schema) ? [...own, FormatShortcuts, CodeHighlight] : own
 }
 
 const FormatShortcuts = Extension.create({
@@ -47,6 +51,27 @@ const FormatShortcuts = Extension.create({
       "Mod-i": () => this.editor.commands.toggleMark("italic"),
       "Mod-Shift-s": () => this.editor.commands.toggleMark("strike"),
       "Mod-e": () => this.editor.commands.toggleMark("code"),
+    }
+  },
+})
+
+/** Inline formatting that "Clear formatting" removes. Links are content, not formatting, and stay. */
+export const CLEARABLE_MARKS = ["bold", "italic", "strike", "underline", "textColor", "highlight", "code"] as const
+
+/** Removes every clearable mark this schema has from the selection, as one undoable step. */
+export function clearFormatting(editor: Editor, chain = editor.chain()): boolean {
+  const present = CLEARABLE_MARKS.filter(name => editor.schema.marks[name])
+  if (!present.length) return false
+  return present.reduce((next, name) => next.unsetMark(name, { extendEmptyMarkRange: false }), chain).run()
+}
+
+/** Schema 5: underline, and clearing inline formatting from the selection. */
+const StyleShortcuts = Extension.create({
+  name: "documentStyleShortcuts",
+  addKeyboardShortcuts() {
+    return {
+      "Mod-u": () => this.editor.commands.toggleMark("underline"),
+      "Mod-\\": () => clearFormatting(this.editor),
     }
   },
 })
@@ -113,6 +138,33 @@ export interface CommentHighlight { id: string; block: string; from: number; to:
 type HighlightState = { ranges: CommentHighlight[]; active: string | null; set: DecorationSet }
 const highlightKey = new PluginKey<HighlightState>("documentCommentHighlights")
 
+/**
+ * The engine counts comment offsets in text only: a schema 5 date or mention
+ * takes no place (#5155), while the editor counts it as one position. These
+ * convert between the two inside one text block.
+ */
+export function textOffsetIn(block: ProseMirrorNode, parentOffset: number): number {
+  let text = 0
+  block.forEach((child, offset) => { if (child.isText) text += Math.min(child.nodeSize, Math.max(0, parentOffset - offset)) })
+  return text
+}
+/** The editor offset of a text offset; `start` places it after any atoms at that point, otherwise before them. */
+export function parentOffsetIn(block: ProseMirrorNode, textOffset: number, start: boolean): number | null {
+  let text = 0, found: number | null = null
+  block.forEach((child, offset) => {
+    if (found !== null || !child.isText) return
+    if (start ? textOffset < text + child.nodeSize : textOffset <= text + child.nodeSize) found = offset + textOffset - text
+    text += child.nodeSize
+  })
+  if (found !== null) return found
+  return textOffset === text ? (start ? block.content.size : lastTextEnd(block)) : null
+}
+function lastTextEnd(block: ProseMirrorNode): number {
+  let end = 0
+  block.forEach((child, offset) => { if (child.isText) end = offset + child.nodeSize })
+  return end
+}
+
 function decorate(doc: ProseMirrorNode, ranges: CommentHighlight[], active: string | null): DecorationSet {
   if (!ranges.length) return DecorationSet.empty
   const blocks = new Map<string, { pos: number; node: ProseMirrorNode }>()
@@ -120,8 +172,10 @@ function decorate(doc: ProseMirrorNode, ranges: CommentHighlight[], active: stri
   const decorations: Decoration[] = []
   for (const range of ranges) {
     const target = blocks.get(range.block)
-    if (!target || range.from < 0 || range.to <= range.from || range.to > target.node.content.size) continue
-    decorations.push(Decoration.inline(target.pos + 1 + range.from, target.pos + 1 + range.to, {
+    if (!target || range.from < 0 || range.to <= range.from) continue
+    const from = parentOffsetIn(target.node, range.from, true), to = parentOffsetIn(target.node, range.to, false)
+    if (from === null || to === null || to <= from) continue
+    decorations.push(Decoration.inline(target.pos + 1 + from, target.pos + 1 + to, {
       class: range.id === active ? "document-comment document-comment-active" : "document-comment", "data-comment-anchor": range.id,
     }))
   }
@@ -174,5 +228,8 @@ export function commentTarget(editor: Editor): CommentTarget | string {
     return "Select text inside one paragraph, heading or code block."
   }
   const start = $from.parentOffset, end = $to.parentOffset
-  return { block: block.attrs.id, from: start, to: end, quote: block.textBetween(start, end) }
+  const textFrom = textOffsetIn(block, start), textTo = textOffsetIn(block, end)
+  if (textFrom === textTo) return "Select some text, not only a date or mention."
+  return { block: block.attrs.id, from: textFrom, to: textTo, quote: block.textBetween(start, end) }
 }
+
