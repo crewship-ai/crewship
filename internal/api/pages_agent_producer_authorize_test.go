@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // #5260 refinement: a panel whose agent producer the owner did not authorize
@@ -286,4 +288,144 @@ func TestAuthorizePanelProducerEdges(t *testing.T) {
 			t.Fatal("the deleted crew's designation is still live")
 		}
 	})
+}
+
+// producerState is everything a refused authorization or a refused push must
+// leave untouched: the designation, the audit trail, the panel's data and
+// the page's revision.
+type producerState struct {
+	Designator, Retired     string
+	Audits, Journal, Rows   int
+	MaxSeq, PagesVersion    int64
+	LatestPayload, LatestAt string
+}
+
+func pagesProducerState(t *testing.T, h *PageHandler, wsID, pageID string) producerState {
+	t.Helper()
+	var s producerState
+	if err := h.db.QueryRow(`SELECT COALESCE(producer_designated_by_user_id,''), COALESCE(producer_retired_at,'') FROM page_panels WHERE page_id=? AND panel_id='sluzby'`, pageID).Scan(&s.Designator, &s.Retired); err != nil {
+		t.Fatalf("designation: %v", err)
+	}
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM audit_logs WHERE entity_id=? AND action LIKE 'page.agent_producer.%'`, pageID).Scan(&s.Audits); err != nil {
+		t.Fatalf("audits: %v", err)
+	}
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM journal_entries WHERE workspace_id=? AND json_extract(payload,'$.action') LIKE 'page.agent_producer.%'`, wsID).Scan(&s.Journal); err != nil {
+		t.Fatalf("journal: %v", err)
+	}
+	if err := h.db.QueryRow(`SELECT COUNT(d.seq), COALESCE(MAX(d.seq),0),
+		COALESCE((SELECT payload_json FROM page_panel_data x WHERE x.panel_id=pp.id ORDER BY seq DESC LIMIT 1),''),
+		COALESCE((SELECT produced_at FROM page_panel_data x WHERE x.panel_id=pp.id ORDER BY seq DESC LIMIT 1),'')
+		FROM page_panels pp LEFT JOIN page_panel_data d ON d.panel_id=pp.id WHERE pp.page_id=? AND pp.panel_id='sluzby'`, pageID).Scan(&s.Rows, &s.MaxSeq, &s.LatestPayload, &s.LatestAt); err != nil {
+		t.Fatalf("panel data: %v", err)
+	}
+	if err := h.db.QueryRow(`SELECT pages_version FROM pages WHERE id=?`, pageID).Scan(&s.PagesVersion); err != nil {
+		t.Fatalf("pages_version: %v", err)
+	}
+	return s
+}
+
+// The opposition's security question (#5260): after the owner's
+// authorization was refused on a private artifact, did the agent's push go
+// through? It did not. The push path loads the page with no person in
+// context, and loadPage answers a private page to that caller as not found,
+// so the push is refused with 404 before any producer rule is read. The
+// same push on the page made ordinary is refused 403 by the producer rule.
+// Nothing is written either way, and only an explicit owner authorization
+// on an ordinary page lets the agent push.
+func TestPrivateArtifactRefusedAuthorizationAdmitsNoPush(t *testing.T) {
+	setTestEncryptionKey(t) // the chain verification at the end needs the key
+	h, wsID, ownerID, pageID := pagesUnauthorizedProducer(t)
+
+	// (1) Nothing else lets this agent, or its crew, push: no live agent or
+	// crew produce/write grant, and the designation is a non-owner's, retired.
+	var liveGrants int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM page_grants WHERE page_id=? AND subject_type IN ('agent','crew') AND level IN ('produce','write') AND retired_at IS NULL`, pageID).Scan(&liveGrants); err != nil || liveGrants != 0 {
+		t.Fatalf("live agent/crew produce or write grants = %d (%v), want 0", liveGrants, err)
+	}
+	before := pagesProducerState(t, h, wsID, pageID)
+	if before.Designator != "admin" || before.Retired == "" || before.Rows != 0 {
+		t.Fatalf("precondition: %+v, want a retired admin designation and no data", before)
+	}
+
+	if _, err := h.db.Exec(`UPDATE pages SET private_audience=1 WHERE id=?`, pageID); err != nil {
+		t.Fatal(err)
+	}
+	before = pagesProducerState(t, h, wsID, pageID)
+
+	// (2) The refused authorization changes nothing.
+	if rr := pagesAuthorizeProducer(t, h, wsID, ownerID, "OWNER", "sluzby", false); rr.Code != http.StatusConflict {
+		t.Fatalf("owner on a private artifact: %d %s, want 409", rr.Code, rr.Body.String())
+	}
+	if got := pagesProducerState(t, h, wsID, pageID); got != before {
+		t.Fatalf("a refused authorization changed state:\nbefore %+v\nafter  %+v", before, got)
+	}
+
+	// (3) The agent's push is refused and writes nothing.
+	push := func() *httptest.ResponseRecorder {
+		body := pagesInternalBody(wsID, "sluzby", pagesStatusData())
+		body["author_run_id"] = ""
+		body["agent_id"] = "agent-writer"
+		return pagesInternalPush(t, h, "fleet-201", body)
+	}
+	if rr := push(); rr.Code != http.StatusNotFound || !strings.Contains(rr.Body.String(), "not found") {
+		t.Fatalf("agent push on a private artifact: %d %s, want the 404 refusal", rr.Code, rr.Body.String())
+	}
+	if got := pagesProducerState(t, h, wsID, pageID); got != before {
+		t.Fatalf("a refused push changed state:\nbefore %+v\nafter  %+v", before, got)
+	}
+
+	// The same page made ordinary: the producer rule itself refuses (403).
+	if _, err := h.db.Exec(`UPDATE pages SET private_audience=0 WHERE id=?`, pageID); err != nil {
+		t.Fatal(err)
+	}
+	before = pagesProducerState(t, h, wsID, pageID)
+	if rr := push(); rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "holds no produce grant covering the panel") {
+		t.Fatalf("agent push with an unauthorized designation: %d %s, want the producer-rule 403", rr.Code, rr.Body.String())
+	}
+	if got := pagesProducerState(t, h, wsID, pageID); got != before {
+		t.Fatalf("a refused push changed state:\nbefore %+v\nafter  %+v", before, got)
+	}
+
+	// (4) The owner's explicit authorization works, with one audit row and
+	// one chained journal entry naming the owner, and the push lands.
+	rr := pagesAuthorizeProducer(t, h, wsID, ownerID, "OWNER", "sluzby", false)
+	if rr.Code != http.StatusOK || !strings.Contains(rr.Body.String(), `"changed":true`) {
+		t.Fatalf("owner authorizes: %d %s", rr.Code, rr.Body.String())
+	}
+	after := pagesProducerState(t, h, wsID, pageID)
+	if after.Designator != ownerID || after.Retired != "" || after.Audits != before.Audits+1 || after.Journal != before.Journal+1 || after.Rows != 0 {
+		t.Fatalf("after authorization: %+v (before %+v)", after, before)
+	}
+	var actor, meta string
+	if err := h.db.QueryRow(`SELECT actor_id, json_extract(payload,'$.metadata') FROM journal_entries WHERE workspace_id=? AND json_extract(payload,'$.action')='page.agent_producer.authorized' AND json_extract(payload,'$.entity_id')=?`, wsID, pageID).Scan(&actor, &meta); err != nil {
+		t.Fatalf("chained journal entry: %v", err)
+	}
+	if actor != ownerID || !strings.Contains(meta, `"previously_retired":true`) || !strings.Contains(meta, `"previous_designated_by_user_id":"admin"`) {
+		t.Fatalf("chained journal entry: actor %q metadata %s", actor, meta)
+	}
+	// "Chained": the entry has a seq and hashes, links onto the entry
+	// before it, and the workspace chain verifies end to end.
+	var seq int64
+	var prev, hash string
+	if err := h.db.QueryRow(`SELECT seq, COALESCE(prev_hash,''), COALESCE(entry_hash,'') FROM journal_entries WHERE workspace_id=? AND json_extract(payload,'$.action')='page.agent_producer.authorized' AND json_extract(payload,'$.entity_id')=?`, wsID, pageID).Scan(&seq, &prev, &hash); err != nil {
+		t.Fatalf("chain fields: %v", err)
+	}
+	if seq <= 0 || prev == "" || hash == "" {
+		t.Fatalf("journal entry is not chained: seq %d prev %q hash %q", seq, prev, hash)
+	}
+	if seq > 1 {
+		var tip string
+		if err := h.db.QueryRow(`SELECT COALESCE(entry_hash,'') FROM journal_entries WHERE workspace_id=? AND seq=?`, wsID, seq-1).Scan(&tip); err != nil || tip != prev {
+			t.Fatalf("prev_hash %q does not link onto the previous tip %q (%v)", prev, tip, err)
+		}
+	}
+	if res, err := journal.VerifyChain(t.Context(), h.db, wsID); err != nil || !res.OK {
+		t.Fatalf("workspace journal chain does not verify: %+v %v", res, err)
+	}
+	if rr := push(); rr.Code != http.StatusOK {
+		t.Fatalf("push after the owner's authorization: %d %s", rr.Code, rr.Body.String())
+	}
+	if got := pagesProducerState(t, h, wsID, pageID); got.Rows != 1 || got.MaxSeq != 1 {
+		t.Fatalf("the authorized push did not land once: %+v", got)
+	}
 }
