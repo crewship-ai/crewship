@@ -470,6 +470,12 @@ func TestDocumentPresenceIsOneEntryPerPerson(t *testing.T) {
 	if peer.Tabs != 3 || peer.Client != "owner-tab-1" || peer.Anchor != moved || peer.Head != moved {
 		t.Fatalf("want the last-moved tab's caret and tabs=3, got %+v", peer)
 	}
+	// A later heartbeat without a caret (the CLI, a node selection) never hides that caret.
+	at(500 * time.Millisecond)
+	rig.beat("owner", "doc-a", `{"client":"owner-cli-0001"}`)
+	if _, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "e")); len(reply.Peers) != 1 || reply.Peers[0].Client != "owner-tab-1" || reply.Peers[0].Tabs != 4 {
+		t.Fatalf("a caretless tab hid the moved caret: %+v", reply.Peers)
+	}
 	if _, own := rig.beat("owner", "doc-a", caret("owner-tab-2", "second")); len(own.Peers) != 1 || own.Peers[0].UserID == peer.UserID {
 		t.Fatalf("own tabs listed as peers: %+v", own.Peers)
 	}

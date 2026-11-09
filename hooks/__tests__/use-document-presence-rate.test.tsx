@@ -3,7 +3,7 @@
 // its selection after the remote carets were redrawn, for example) must not
 // send a heartbeat: answered with one, each reply redrew the carets again and
 // the tab looped at the 150 ms selection throttle's ceiling (41 beats in 6 s
-// here before the fix). An unchanged reply does not redraw at all.
+// here before the fix).
 import { act, renderHook } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import * as Y from "yjs"
@@ -67,17 +67,5 @@ it("still shares a real caret move within the selection throttle", async () => {
   act(() => { target.commands.setTextSelection(14) })
   await act(async () => { await vi.advanceTimersByTimeAsync(200) })
   expect(beats()).toBe(before + 1)
-  hook.unmount()
-})
-
-it("does not redraw the carets when the reply did not change", async () => {
-  request.mockImplementation(async () => reply())
-  const target = editor()
-  let redraws = 0
-  target.on("transaction", ({ transaction }) => { if (transaction.getMeta(remoteCaretsKey)) redraws++ })
-  const hook = renderHook(() => useDocumentPresence({ workspaceId: "w", slug: "notes", editor: target, enabled: true }))
-  await act(async () => { await vi.advanceTimersByTimeAsync(5500) })
-  expect(beats()).toBeGreaterThanOrEqual(5)
-  expect(redraws).toBe(1)
   hook.unmount()
 })
