@@ -101,6 +101,9 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  // it ends with a confirmation, never with a replacement or a new connection.
  const [unsyncedPage, setUnsyncedPage] = useState<string>()
  const [readRevokedPage, setReadRevokedPage] = useState<string>()
+ // The Page this tab has read at least once. A refusal before that is not a
+ // loss of access: nothing was ever shown here, so nothing was "removed" (#5144).
+ const [readPage, setReadPage] = useState<string>()
  const [draftError, setDraftError] = useState(false)
  const provider = useRef<DesignProvider | null>(null)
  const [draftReady, setDraftReady] = useState(false)
@@ -340,5 +343,11 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const connectAgent = useMutation({ mutationFn: (chat_id: string) => pinnedRequest("/agent", { chat_id }), onSuccess: invalidate })
  const comment = useMutation({ mutationFn: (body: { version: number; path: string; selector: string; quote: string; text: string; send_to_agent: boolean }) => pinnedRequest<ArtifactComment>("/comments", body), onSuccess: invalidate })
  const share = useMutation({ mutationFn: (version: number) => pinnedRequest("/share", { version }), onSuccess: invalidate })
- return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, unsynced: Boolean(pageId) && unsyncedPage === pageId && readRevokedPage !== pageId, draftError, save, restore, share, comment, connectAgent, conflicts, dismissConflict: (conflict: DesignConflict) => storeConflicts({ remove: [designConflictIdentity(conflict)] }), setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
+ useEffect(() => { if (pageId && query.data && !query.isError) setReadPage(pageId) }, [pageId, query.data, query.isError])
+ // Before the first read names the Page there is no Page to have lost: only
+ // a refused read (403/404) counts then, never a read that is still open or a
+ // server failure, which keeps its own error text.
+ const refusedStatus = (query.error as (Error & { status?: number }) | null)?.status
+ const readRevoked = pageId ? readRevokedPage === pageId : refusedStatus === 403 || refusedStatus === 404
+ return { readRevoked, everRead: Boolean(pageId) && readPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, unsynced: Boolean(pageId) && unsyncedPage === pageId && readRevokedPage !== pageId, draftError, save, restore, share, comment, connectAgent, conflicts, dismissConflict: (conflict: DesignConflict) => storeConflicts({ remove: [designConflictIdentity(conflict)] }), setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor) }
 }

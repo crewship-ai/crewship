@@ -64,6 +64,8 @@ type DocumentProps = {
   workspaceId: string; slug: string; pageId: string; name?: string; onDirtyChange?: (dirty: boolean) => void
   /** Another layout for the same session (the Artifacts Docs view); every gate, sync and restore rule stays here. */
   renderWorkspace?: (props: DocumentWorkspaceProps) => ReactNode
+  /** Wraps the message shown while there is no confirmed document (loading, refused, revoked), so a frame can still report its state. */
+  renderUnhydrated?: (sync: ReturnType<typeof usePageDocument>, message: ReactNode) => ReactNode
 }
 export function PageDocument(props: DocumentProps) {
   const session = useSessionSafe()
@@ -93,7 +95,10 @@ function DocumentLiveSession(props: DocumentProps & {available:boolean; humanId:
   const sync = usePageDocument(props.workspaceId, props.slug, props.pageId, props.available)
   // Bind ProseMirror only after hydration, so its empty default paragraph is
   // never merged into a document which already contains saved content.
-  if (!sync.state) return <p role={sync.denied ? "alert" : "status"} className="p-6">{sync.status}{sync.error ? ` · ${sync.error}` : ""}</p>
+  if (!sync.state) {
+    const message = <p role={sync.denied ? "alert" : "status"} className="p-6">{sync.status}{sync.error ? ` · ${sync.error}` : ""}</p>
+    return props.renderUnhydrated ? props.renderUnhydrated(sync, message) : message
+  }
   const workspace = { ...props, sync, historyExpired }
   return props.renderWorkspace ? props.renderWorkspace(workspace) : <DocumentWorkspace {...workspace} />
 }
