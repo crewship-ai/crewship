@@ -57,7 +57,7 @@
     var root = document.getElementById("dash-root")
     if (!root) return
     var marks = root.querySelectorAll("[data-source]")
-    var any = { loading: false, error: false }
+    var any = { loading: false, error: false, empty: false }
     for (var i = 0; i < marks.length; i++) {
       var el = marks[i]
       var ids = (el.getAttribute("data-source") || "").split(/\s+/).filter(Boolean)
@@ -65,7 +65,8 @@
       for (var j = 0; j < ids.length; j++) {
         var s = read(ids[j]).status
         if (s === "loading") { state = "loading"; any.loading = true }
-        else if (s !== "ok" && state !== "loading") { state = "error"; any.error = true }
+        else if (s === "empty" && !state) { state = "empty"; any.empty = true }
+        else if (s !== "ok" && s !== "empty" && state !== "loading") { state = "error"; any.error = true }
       }
       if (!state && el.tagName !== "TABLE" && el.textContent.trim() === "—" && !el.querySelector("svg")) state = "empty"
       if (state) el.setAttribute("data-dash-source-state", state)
@@ -73,6 +74,7 @@
     }
     if (any.loading) root.setAttribute("data-dash-state", "loading")
     else if (any.error) root.setAttribute("data-dash-state", "error")
+    else if (any.empty) root.setAttribute("data-dash-state", "empty")
     else root.removeAttribute("data-dash-state")
   }
 
@@ -110,7 +112,10 @@
     api.get(id).then(function (result) {
       var docs = (result && result.documents || []).slice().sort(function (a, b) { return a.id < b.id ? -1 : a.id > b.id ? 1 : 0 })
       var rows = docs.map(function (d) { return d.value })
-      loaded[id] = { status: "ok", data: rows, columns: columnsOf(rows), message: "", refreshing: false, meta: [] }
+      // No rows is its own state, so calcs over it show a dash instead of 0 or NaN.
+      loaded[id] = rows.length
+        ? { status: "ok", data: rows, columns: columnsOf(rows), message: "", refreshing: false, meta: [] }
+        : { status: "empty", data: [], columns: [], message: "No rows yet.", refreshing: false, meta: [] }
       schedule()
     }, function (error) {
       loaded[id] = { status: "error", data: [], columns: [], message: String(error && error.message || error), refreshing: false, meta: [] }

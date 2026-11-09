@@ -42,6 +42,13 @@ def main() -> None:
         "<script>window.__dashStart()</script>\n"
         "</body>\n</html>\n"
     )
+    # The dataset's own details (title, description, fixed flag) go to datasets.json.
+    # The original names its rows "Sample" and describes them as invented, hence sample.
+    meta = store["datasets/tasks"]
+    datasets = {"schema_version": 1, "datasets": {"tasks": {
+        "title": meta["title"], "description": meta["description"],
+        "mode": "fixed" if meta["fixed"] else "planned", "sample": True,
+    }}}
     manifest = {
         "entrypoint": "index.html",
         "files": [
@@ -49,6 +56,7 @@ def main() -> None:
             {"path": "theme.css", "media_type": "text/css", "content": theme},
             {"path": "interactive.json", "media_type": "application/json", "content": '{"schema_version": 1}'},
             {"path": "dashboard.json", "media_type": "application/json", "content": '{"schema_version": 1, "collections": ["tasks"]}'},
+            {"path": "datasets.json", "media_type": "application/json", "content": json.dumps(datasets, ensure_ascii=False)},
         ],
         "message": "Mirror of the reference dashboard",
     }

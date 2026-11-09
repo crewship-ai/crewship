@@ -45,14 +45,24 @@ The dashboard type keeps its content in the artifact's store:
 
 ## Known gaps
 
-- **Sources panel and per-number citations.** The host's Sources drawer, its
-  hover-a-number citation and the data-mark check are not reproduced; the
-  `data-source`/`data-field` marks are kept in the page but nothing reads them.
-  The Crewship frame's own Sources list shows the `tasks` collection instead.
-- **Dataset metadata.** The dataset's title, description and "fixed" flag
-  (`original/store.json`) have no place in a Crewship data collection.
-- **Filter state.** The crew filter lives in the open page only; the host keeps
-  it per viewer across visits.
+- **Per-number citations.** The host's hover-a-number citation and the
+  data-mark check are not reproduced; the `data-source`/`data-field` marks are
+  kept in the page but nothing reads them. The Crewship Sources drawer says
+  that this dashboard's values carry no per-number citation and lists the
+  `tasks` dataset with its title, description, mode, row count, last write
+  and the code version that declares it.
+- **Dataset metadata** is carried in `datasets.json`: the title and
+  description from `original/store.json`, `mode: "fixed"` from its `fixed`
+  flag, and `sample: true` because the original names the rows "Sample" and
+  describes them as invented. The frame chip therefore reads **Sample data**.
+  The original's `source` (file name and blob URL) and its `edit`/`updated`
+  stamps are not copied: the last write and its writer come from the server.
+- **Filter state.** The crew filter lives in the open page only, per reader:
+  it never writes the shared data and a second reader is not affected. It is
+  not kept across visits (the host keeps it per viewer); a reload starts from
+  the page default.
+- **Empty data.** `host/runtime.js` reports a collection with no rows as its
+  own `empty` state, so the page's KPIs show a dash instead of `0`/`NaN`.
 - **Fonts.** "Anthropic Sans/Serif" are not shipped; the original's own
   fallbacks (system UI and Georgia) are used.
 - **Editing.** The host's in-place page editor, remix and Ask Claude about a
