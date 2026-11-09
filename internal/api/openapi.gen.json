@@ -7511,6 +7511,28 @@
           "fill": {
             "type": "string"
           },
+          "fontFamily": {
+            "description": "Text style: system font stack. Absent means sans.",
+            "enum": [
+              "sans",
+              "serif",
+              "mono"
+            ],
+            "type": "string"
+          },
+          "fontSize": {
+            "description": "Text style: size in pixels. Absent means 20.",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "number"
+          },
+          "fontWeight": {
+            "description": "Text style: weight. Absent means 400.",
+            "maximum": 900,
+            "minimum": 100,
+            "multipleOf": 100,
+            "type": "integer"
+          },
           "height": {
             "maximum": 1000000,
             "minimum": 0,
@@ -7521,12 +7543,26 @@
             "minLength": 1,
             "type": "string"
           },
+          "lineHeight": {
+            "description": "Text style: line height as a multiple of the size. Absent means 1.3.",
+            "maximum": 5,
+            "minimum": 0.5,
+            "type": "number"
+          },
           "linkTo": {
             "description": "Prototype link: ID of the screen (frame) a click on this layer opens in Play mode. Empty string clears it. A target that no longer exists is kept and plays as an inert hotspot.",
             "maxLength": 128,
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "overflow": {
+            "description": "Text style: clip cuts text outside the box. Absent means visible.",
+            "enum": [
+              "visible",
+              "clip"
+            ],
             "type": "string"
           },
           "parentId": {
@@ -7538,6 +7574,23 @@
           },
           "text": {
             "maxLength": 100000,
+            "type": "string"
+          },
+          "textAlign": {
+            "description": "Text style: alignment in the layer's box. Absent means left.",
+            "enum": [
+              "left",
+              "center",
+              "right"
+            ],
+            "type": "string"
+          },
+          "textWrap": {
+            "description": "Text style: none breaks lines only at a newline; wrap breaks at the box width. Absent means none.",
+            "enum": [
+              "none",
+              "wrap"
+            ],
             "type": "string"
           },
           "type": {
@@ -7582,6 +7635,28 @@
           "fill": {
             "type": "string"
           },
+          "fontFamily": {
+            "description": "Text style: system font stack. Absent means sans.",
+            "enum": [
+              "sans",
+              "serif",
+              "mono"
+            ],
+            "type": "string"
+          },
+          "fontSize": {
+            "description": "Text style: size in pixels. Absent means 20.",
+            "maximum": 1000,
+            "minimum": 1,
+            "type": "number"
+          },
+          "fontWeight": {
+            "description": "Text style: weight. Absent means 400.",
+            "maximum": 900,
+            "minimum": 100,
+            "multipleOf": 100,
+            "type": "integer"
+          },
           "height": {
             "maximum": 1000000,
             "minimum": 0,
@@ -7592,12 +7667,26 @@
             "minLength": 1,
             "type": "string"
           },
+          "lineHeight": {
+            "description": "Text style: line height as a multiple of the size. Absent means 1.3.",
+            "maximum": 5,
+            "minimum": 0.5,
+            "type": "number"
+          },
           "linkTo": {
             "description": "Prototype link: ID of the screen (frame) a click on this layer opens in Play mode. Empty string clears it. A target that no longer exists is kept and plays as an inert hotspot.",
             "maxLength": 128,
             "type": "string"
           },
           "name": {
+            "type": "string"
+          },
+          "overflow": {
+            "description": "Text style: clip cuts text outside the box. Absent means visible.",
+            "enum": [
+              "visible",
+              "clip"
+            ],
             "type": "string"
           },
           "parentId": {
@@ -7609,6 +7698,23 @@
           },
           "text": {
             "maxLength": 100000,
+            "type": "string"
+          },
+          "textAlign": {
+            "description": "Text style: alignment in the layer's box. Absent means left.",
+            "enum": [
+              "left",
+              "center",
+              "right"
+            ],
+            "type": "string"
+          },
+          "textWrap": {
+            "description": "Text style: none breaks lines only at a newline; wrap breaks at the box width. Absent means none.",
+            "enum": [
+              "none",
+              "wrap"
+            ],
             "type": "string"
           },
           "type": {

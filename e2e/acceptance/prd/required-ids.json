@@ -471,6 +471,7 @@
     "role.design.member-removal",
     "role.design.stale-merge",
     "role.design.conflict",
+    "V02.text-style",
     "role.project.revoke-draft",
     "role.project.revoke-read-draft",
     "role.design.revoke-draft",

@@ -247,3 +247,50 @@ func TestRenderHTMLDeepChainIsLinear(t *testing.T) {
 		t.Fatal("deepest layer is not placed at the sum of its ancestors")
 	}
 }
+
+// Text style (#5161) reaches the exported style attribute only as the closed
+// values the engine accepts; a layer without style exports exactly as before.
+func TestRenderHTMLTextStyle(t *testing.T) {
+	screen := map[string]any{"id": "s", "type": "frame", "x": 0, "y": 0, "width": 360, "height": 640}
+	plain := map[string]any{"id": "plain", "type": "text", "parentId": "s", "x": 10, "y": 10, "width": 200, "height": 30, "text": "Plain"}
+	before, err := RenderHTML(exportFixture(screen, plain), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(before), "font-family:") || strings.Contains(string(before), "pre-wrap") {
+		t.Fatalf("unstyled text gained style:\n%s", before)
+	}
+	styled := map[string]any{"id": "title", "type": "text", "parentId": "s", "x": 10, "y": 60, "width": 200, "height": 90, "text": "Title", "fontFamily": "serif", "fontWeight": 700, "fontSize": 48, "lineHeight": 1.1, "textAlign": "center", "textWrap": "wrap", "overflow": "clip"}
+	hostile := map[string]any{"id": "bad", "type": "text", "parentId": "s", "x": 10, "y": 200, "width": 200, "height": 30, "text": "Bad", "fontFamily": "x;background:url(https://evil.test)", "fontWeight": 450, "fontSize": -3, "lineHeight": 99, "textAlign": "justify;color:red", "textWrap": "balance", "overflow": "auto"}
+	out, err := RenderHTML(exportFixture(screen, plain, styled, hostile), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(out)
+	for _, want := range []string{"font-family:Georgia,'Times New Roman',serif", "font-weight:700", "font-size:48px", "line-height:1.1", "text-align:center", "white-space:pre-wrap;overflow-wrap:anywhere", "overflow:hidden"} {
+		if !strings.Contains(page, want) {
+			t.Errorf("export lacks %q:\n%s", want, page)
+		}
+	}
+	layerLine := func(page, id string) string {
+		for _, line := range strings.Split(page, "\n") {
+			if strings.Contains(line, `data-node-id="`+id+`"`) {
+				return line
+			}
+		}
+		return ""
+	}
+	plainLine := func(page string) string { return layerLine(page, "plain") }
+	bad := layerLine(page, "bad")
+	if bad == "" {
+		t.Fatal("hostile layer not exported")
+	}
+	for _, forbidden := range []string{"evil.test", "font-", "line-height", "text-align", "justify", "balance", "white-space", "overflow"} {
+		if strings.Contains(bad, forbidden) || strings.Contains(page, "evil.test") {
+			t.Errorf("hostile layer exports %q: %s", forbidden, bad)
+		}
+	}
+	if plainLine(string(before)) == "" || plainLine(string(before)) != plainLine(page) {
+		t.Errorf("plain layer changed:\n%s\n%s", plainLine(string(before)), plainLine(page))
+	}
+}
