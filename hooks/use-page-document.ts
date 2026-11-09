@@ -21,6 +21,10 @@ export const documentKeys = { all: (workspace: string) => ["page-document",works
 /** Journal writes of edits that arrive in separate tasks are merged within this window; the barrier before a send never waits for it. */
 const JOURNAL_COALESCE_MS = 200
 export class UnconfirmedReceipt extends Error {}
+/** The editor's shared content (the Collaboration field). */
+const CONTENT_FIELD = "default"
+/** Nothing is queued, yet the confirmed document is not what this editor shows: never call that Saved (#5162). */
+export const NOT_CONFIRMED = "Not confirmed · the saved document differs from this editor. Download your changes before reopening."
 export function decodeUpdate(value: string): Uint8Array { return Uint8Array.from(atob(value), c => c.charCodeAt(0)) }
 export function encodeUpdate(value: Uint8Array): string { let text = ""; for (const byte of value) text += String.fromCharCode(byte); return btoa(text) }
 /** Where unsent work stands. Only "confirmed" means the server holds everything. */
@@ -115,6 +119,8 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     let storage: DocumentDraftStore | undefined, schema = 0, durableOff = false
     let journalBroken = false, unverifiedStaged: DocumentDraft[] | undefined, blockedOther = false, opening: Promise<void> | undefined, retryAt = 0, retryDelay = 5000, tried = false
     const stored = new Set<string>()
+    // The content of the last confirmed read: "Saved" is said only while this editor shows exactly that.
+    let serverText: string | undefined
     let restored: DocumentDraft[] = []
     // Bounded journal: one writer loop, one pending row per draft. Edits made
     // while a write is in flight coalesce into the next write of the same draft.
@@ -206,14 +212,15 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
         if (!Number.isSafeInteger(next.rev) || next.rev<0 || typeof next.epoch!=="string" || !next.epoch || next.epoch.length>256 || typeof next.snapshot!=="string" || typeof next.can_write!=="boolean" || (next.updates!==undefined && (!Array.isArray(next.updates) || next.updates.some(update=>typeof update!=="string")))) throw new DocumentAPIError("Invalid confirmed document metadata; content preserved.",400)
         if (![1,2,3,4].includes(next.schema)) { blocked = blockedOther = true; setRecovery(queue.size > 0); setDenied(true); setStatus("This document needs a newer editor."); return false }
         if (next.page_id !== pageId) throw new DocumentAPIError("The original Page identity changed. Recover your draft before reopening.",409)
-        let remote: Y.Doc | undefined
-        try { const loaded = documentSchema.load(next.snapshot); if (!(loaded instanceof Y.Doc)) throw new Error("Invalid document binary type"); remote=loaded; for (const update of next.updates ?? []) Y.applyUpdate(loaded,decodeUpdate(update)); documentSchema.validate(loaded,next.schema) } catch(cause) { throw new DocumentAPIError(cause instanceof Error ? `Confirmed document content rejected: ${cause.message}` : "Confirmed document content rejected.",400) } finally { remote?.destroy() }
+        let remote: Y.Doc | undefined, confirmedText: string
+        try { const loaded = documentSchema.load(next.snapshot); if (!(loaded instanceof Y.Doc)) throw new Error("Invalid document binary type"); remote=loaded; for (const update of next.updates ?? []) Y.applyUpdate(loaded,decodeUpdate(update)); documentSchema.validate(loaded,next.schema); confirmedText = loaded.getXmlFragment(CONTENT_FIELD).toString() } catch(cause) { throw new DocumentAPIError(cause instanceof Error ? `Confirmed document content rejected: ${cause.message}` : "Confirmed document content rejected.",400) } finally { remote?.destroy() }
         if (epoch !== undefined && next.epoch !== epoch) {
           // An opaque epoch change invalidates earlier attempts. Never replay a draft automatically.
           blocked = blockedOther = true; setRecovery(true); setStatus("Document needs to be reopened. Recover your draft first."); return false
         }
         epoch = next.epoch
         schema = next.schema
+        serverText = confirmedText
         if (next.snapshot) Y.applyUpdate(doc, decodeUpdate(next.snapshot), "remote")
         for (const update of next.updates ?? []) Y.applyUpdate(doc, decodeUpdate(update), "remote")
         setState(next)
@@ -329,7 +336,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
           if (!accept(next)) return
           recount()
         }
-        setError(undefined); setStatus(queue.size ? "Saving…" : next.can_write ? "Saved" : "Read only")
+        setError(undefined); setStatus(queue.size ? "Saving…" : !next.can_write ? "Read only" : serverText === doc.getXmlFragment(CONTENT_FIELD).toString() ? "Saved" : NOT_CONFIRMED)
       } catch (cause) {
         if (!active) return
         recount()

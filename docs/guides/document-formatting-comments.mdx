@@ -57,6 +57,18 @@ comments and only widens what it may hold. New documents from the Artifacts
 library and from agents in chat are still schema 3, because agent drafting
 works on schema 3 only; an agent cannot edit a schema 4 document yet.
 
+## Editing together
+
+Several people can type in one Docs page at the same time, also in the same
+paragraph. Every editor merges the others' changes as they arrive (about every
+half second) and keeps your caret on the character you typed last, so your own
+text stays in the order you typed it wherever the others type.
+
+The status chip says **Saved** only when the server has confirmed your changes
+and its copy is exactly what your editor shows. If the confirmed copy differs,
+the chip says the document needs attention and offers **Download my changes**;
+it never reports that state as saved.
+
 ## Comments
 
 Select text in a paragraph, heading or code block and choose **Comment** to
