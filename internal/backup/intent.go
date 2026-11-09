@@ -102,13 +102,15 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"slides_object_ids":          IntentInclude,
 	"slides_writer_fence":        IntentExcludeRuntime, // installation-local serialization singleton
 
-	"document_creations":    IntentInclude, // durable provenance, never live creation consent
-	"documents":             IntentInclude,
-	"document_updates":      IntentInclude,
-	"document_receipts":     IntentInclude,
-	"document_checkpoints":  IntentInclude,
-	"document_comments":     IntentInclude,
-	"document_writer_fence": IntentExcludeRuntime, // installation-local SQL serialization singleton
+	"document_creations":         IntentInclude, // durable provenance, never live creation consent
+	"documents":                  IntentInclude,
+	"document_updates":           IntentInclude,
+	"document_receipts":          IntentInclude,
+	"document_checkpoints":       IntentInclude,
+	"document_comments":          IntentInclude,
+	"document_proposals":         IntentInclude,        // reviewable agent proposals; accept re-checks live rights and the target
+	"document_writer_fence":      IntentExcludeRuntime, // installation-local SQL serialization singleton
+	"document_database_identity": IntentExcludeRuntime, // installation-local; rotated by every restore, never restored
 
 	"workspace_artifact_creation_policy":    IntentInclude,
 	"workspace_artifact_creation_crews":     IntentInclude,

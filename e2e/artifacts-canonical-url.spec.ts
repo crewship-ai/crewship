@@ -56,6 +56,40 @@ for (const [name, link] of [
   })
 }
 
+// G04 (#5240): the old Artifacts forms. `/artifacts/<slug>` resolves inside the
+// person's own catalog; `/artifacts/@<id>` moves by address alone.
+for (const [name, link, kept] of [
+  ["an /artifacts/<slug> link", `/artifacts/${PAGE.slug}?workspace_id=${WORKSPACE.id}&ref=chat`, { ref: "chat" }],
+  ["an /artifacts/@<id> link", `/artifacts/%40${PAGE.id}?workspace_id=${WORKSPACE.id}&version=2`, { version: "2" }],
+] as const) {
+  test(`${name} ends on the artifact's one address`, async ({ page }) => {
+    test.skip(!library, "the library is off in this build")
+    await trustedSession(page, [])
+    await page.goto("/routines")
+    await page.goto(link)
+    await page.waitForURL(url => url.pathname === `/artifacts/${PAGE.id}`, { timeout: 20_000 })
+    const params = new URL(page.url()).searchParams
+    expect(params.get("workspace_id")).toBe(WORKSPACE.id)
+    for (const [key, value] of Object.entries(kept)) expect(params.get(key)).toBe(value)
+    await page.goBack()
+    await page.waitForURL(url => url.pathname === "/routines", { timeout: 10_000 })
+  })
+}
+
+test("an /artifacts/<slug> outside the catalog answers like one that does not exist", async ({ page }) => {
+  test.skip(!library, "the library is off in this build")
+  const probes: string[] = []
+  await trustedSession(page, [])
+  // The server answers 404 alike for a page that is missing and one that is not the caller's.
+  await page.route("**/api/v1/pages/%40*", async route => { probes.push(new URL(route.request().url()).pathname); await route.fulfill({ status: 404, contentType: "application/json", body: JSON.stringify({ error: "not found" }) }) })
+  for (const slug of ["someone-elses-doc", "never-existed"]) {
+    await page.goto(`/artifacts/${slug}?workspace_id=${WORKSPACE.id}`)
+    await expect(page.getByText("This artifact doesn’t exist")).toBeVisible({ timeout: 20_000 })
+    expect(new URL(page.url()).pathname).toBe(`/artifacts/${slug}`)
+  }
+  expect([...new Set(probes)]).toEqual(["/api/v1/pages/%40someone-elses-doc", "/api/v1/pages/%40never-existed"])
+})
+
 test("the public share address is not touched", async ({ page }) => {
   await trustedSession(page, [])
   await page.goto("/p/_")

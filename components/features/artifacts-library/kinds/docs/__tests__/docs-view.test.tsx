@@ -16,14 +16,14 @@ import { ArtifactFrame, NO_FRAME_CAPABILITIES, type FrameLayout } from "../../..
 import type { LibraryItem } from "../../../library-items"
 import { DocsBody, type DocsFrameReport } from "../docs-view"
 
-const env = vi.hoisted(() => ({ available: true as boolean | undefined, canWrite: true, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang" }))
+const env = vi.hoisted(() => ({ proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang", denied: false }))
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: env.available, isPending: env.available === undefined }) }))
 vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/document-queue")>(), openDocumentDrafts: async () => ({ load: async () => env.drafts, put: async () => {}, remove: async () => {}, close: () => {}, exclusive: true }) }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "docs-human" } } }) }))
 
-afterEach(() => { cleanup(); request.mockReset(); env.available = true; env.canWrite = true; env.drafts = []; env.patch = "ok" })
+afterEach(() => { cleanup(); request.mockReset(); env.proposals = undefined; env.available = true; env.canWrite = true; env.drafts = []; env.patch = "ok"; env.denied = false })
 
 const item: LibraryItem = {
   slug: "launch-notes", pageId: "page-docs", name: "Launch notes", kind: "word", family: "document", sharedVersion: null, native: false,
@@ -55,7 +55,8 @@ function serve() {
     }
     if (url.includes("/document/checkpoints")) return { ok: true, json: async () => ({ checkpoints: [] }) }
     if (url.includes("/proposals")) return { ok: true, json: async () => ({ proposals: [] }) }
-    return { ok: true, json: async () => ({ page_id: "page-docs", schema: 2, rev, epoch: "go:node:1", can_write: env.canWrite, snapshot }) }
+    if (env.denied) return { ok: false, status: 403, json: async () => ({ error: "document access denied" }) }
+    return { ok: true, json: async () => ({ page_id: "page-docs", schema: 2, rev, generation: 0, epoch: "go:node:1", can_write: env.canWrite, snapshot, ...(env.proposals === undefined ? {} : { proposals: env.proposals }) }) }
   })
 }
 
@@ -114,7 +115,50 @@ describe("Docs in the ArtifactFrame", () => {
     fireEvent.click(screen.getByRole("button", { name: "History" }))
     const drawer = screen.getByRole("complementary", { name: "History" })
     expect(within(drawer).getByText("Restore creates a new version with this content. Later changes stay in History.")).toBeTruthy()
-    expect(await within(drawer).findByText("No checkpoints yet.")).toBeTruthy()
+    // The saved head is listed even before any checkpoint exists (dev2 baseline G05).
+    expect(await within(drawer).findByText("Current version")).toBeTruthy()
+  })
+
+  it.each([[undefined], [false]] as const)("offers no Propose mode and no Proposals tab when the server does not serve proposals (%s)", async proposals => {
+    env.proposals = proposals
+    serve()
+    open()
+    expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Status: Live" })).toBeTruthy())
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }))
+    expect(screen.queryByRole("radiogroup", { name: "Agent mode" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "Proposals" })).toBeNull()
+    expect(request.mock.calls.some(([url]) => String(url).includes("/proposals"))).toBe(false)
+  })
+
+  it("registers Propose and the Proposals review only when the server serves proposals", async () => {
+    env.proposals = true
+    serve()
+    open()
+    expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
+    await waitFor(() => expect(screen.getByRole("button", { name: "Status: Live" })).toBeTruthy())
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }))
+    const modes = await screen.findByRole("radiogroup", { name: "Agent mode" })
+    expect(within(modes).getAllByRole("radio").map(radio => radio.textContent)).toEqual(["Ask", "Propose"])
+    fireEvent.click(within(modes).getByRole("radio", { name: "Propose" }))
+    fireEvent.change(screen.getByRole("textbox", { name: "What should the agent change?" }), { target: { value: "Tighten the goal" } })
+    const href = new URL(screen.getByRole("link", { name: "Ask for a proposal" }).getAttribute("href")!, "https://x.test")
+    expect(href.pathname).toBe("/chat")
+    expect(Object.fromEntries(href.searchParams)).toEqual({ workspace_id: "ws1", propose: "page-docs.1.0", prompt: "Tighten the goal", draft: "1" })
+    fireEvent.click(screen.getByRole("button", { name: "Proposals" }))
+    expect(await within(screen.getByRole("complementary", { name: "Proposals" })).findByText("No proposals.")).toBeTruthy()
+  })
+
+  it("offers no Propose to a reader who cannot edit, but still the Proposals to read", async () => {
+    env.proposals = true
+    env.canWrite = false
+    serve()
+    open()
+    expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
+    fireEvent.click(screen.getByRole("button", { name: "Agent" }))
+    expect(screen.queryByRole("radiogroup", { name: "Agent mode" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Ask for a proposal" })).toBeNull()
+    expect(await screen.findByRole("button", { name: "Proposals" })).toBeTruthy()
   })
 
   it("stays on Saving… while the receipt has not arrived", async () => {
@@ -140,6 +184,21 @@ describe("Docs in the ArtifactFrame", () => {
     expect(request.mock.calls.some(([url]) => String(url).includes("/document/patch"))).toBe(true)
   })
 
+  it("keeps a No access chip when the first read is refused (#5202)", async () => {
+    serve()
+    env.denied = true
+    open()
+    expect(await screen.findByRole("button", { name: "Status: No access" })).toBeTruthy()
+    expect(screen.queryByLabelText("Document editor")).toBeNull()
+  })
+  it("turns the chip into No access when access is removed while the document is open (#5202)", async () => {
+    serve()
+    open()
+    expect(await screen.findByLabelText("Document editor")).toBeTruthy()
+    env.denied = true
+    expect(await screen.findByRole("button", { name: "Status: No access" }, { timeout: 5_000 })).toBeTruthy()
+    expect(screen.queryByText("Ship the agency offer on 2 December.")).toBeNull()
+  })
   it("is Read-only without write access: no tools, a read-only editor", async () => {
     serve()
     env.canWrite = false

@@ -81,10 +81,19 @@ If no profile is selected, the CLI falls back to the legacy top-level
 keep working unchanged.
 
 The selected profile's `server`, `token`, and `workspace` then flow through the
-normal resolution chain. An explicit `--server` still overrides the dial target;
-`CREWSHIP_SERVER` is only consulted when the active profile does not already
-define a server URL (and a host mismatch still fails if the token was minted for
-a different host).
+normal resolution chain. An explicit `--server` still overrides the dial target.
+While a profile is selected, `CREWSHIP_SERVER` is not consulted: a profile
+without a server URL fails closed instead (and a host mismatch still fails if
+the token was minted for a different host). When `CREWSHIP_SERVER` is exported
+but a directory binding or the `server use` default selects a profile on
+another server, commands that call the API print one line on stderr, for
+example:
+
+```
+warning: CREWSHIP_SERVER=http://localhost:8082 is ignored; profile "dev3" (the `crewship server use` default) sends this command to http://127.0.0.1:8083. Use --profile, --server or CREWSHIP_PROFILE to choose the server.
+```
+
+An explicitly selected profile (`--profile`, `CREWSHIP_PROFILE`) prints nothing.
 
 <Note>
 Because a directory match (layer 3) outranks the persisted `current` default

@@ -189,8 +189,9 @@ item and <kbd>K</kbd> for the previous one; the preview follows. On a phone,
 a tap opens the artifact directly.
 
 An open artifact has its own address, `/artifacts/<id>`, where `<id>` is the
-artifact's permanent ID. Links in the older form `/artifacts?item=<slug>`
-still work and move to the ID address. To go back to the list, click
+artifact's permanent ID. Links in the older forms `/artifacts?item=<slug>`,
+`/artifacts/<slug>` and `/artifacts/@<id>` still work and move to the ID
+address. To go back to the list, click
 **All artifacts** or press <kbd>Esc</kbd>.
 
 ### What the detail view shows
@@ -437,7 +438,14 @@ NEXT_PUBLIC_ARTIFACTS_LIBRARY=true NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS=true NEXT_
    token file, or supply those files through `crewship page artifact create`.
 2. Open the artifact in the library. The viewer badge reads **Design System**.
    It displays color swatches, typography samples, spacing and radius samples,
-   and optional component names and descriptions.
+   and optional component names and descriptions. With the Library view
+   (Design · Library), a system with more than one theme shows a theme switch
+   beside the search box: each swatch and each component preview then uses
+   that theme's values. Every swatch shows the contrast ratio of white or
+   black text on it (whichever is higher) and its WCAG 2 level (**AAA**,
+   **AA**, **AA large** or **Low**), plus the colour's usage note and, when the system has more than one
+   theme, its value in every theme. The chat artifact pane lists every
+   theme's value and usage note too. Text styles are grouped when the file names groups.
 3. Use the version picker to inspect retained token values you may read. The
    owner can restore an old version as a new version and share it separately.
    The preview has no token editor; publish a complete manifest to change it.
@@ -455,6 +463,46 @@ A minimal `design-system.json` is:
   "components": [{"name": "Button", "description": "Primary action"}]
 }
 ```
+
+### Themes (schema 2)
+
+Schema 2 adds themes. A schema 1 file keeps working exactly as before;
+nothing converts it, and its download is the file as stored.
+
+```json
+{
+  "schema_version": 2,
+  "name": "Harbor",
+  "themes": [{"id": "light", "name": "Light"}, {"id": "dark", "name": "Dark"}],
+  "colors": {
+    "surface": {"value": {"light": "#f4f1ea", "dark": "#0b1726"}, "usage": "Page background."},
+    "ink": {"value": {"light": "#0f1f33", "dark": "{surface}"}},
+    "accent": "#e8833a"
+  },
+  "typography": {"body": {"size": 15, "weight": 400, "group": "Text"}},
+  "spacing": {"md": 16},
+  "radii": {"sm": 4}
+}
+```
+
+- `themes` is required in schema 2: 1 to 8 entries with a unique `id` (a
+  token name) and a `name` of at most 40 characters. The first theme is the
+  default.
+- A colour is a hex value (the same in every theme), an alias such as
+  `"{surface}"`, or `{"value": {<theme id>: hex or alias}, "usage": …}`.
+  The value must name the first theme; a theme it leaves out takes the first
+  theme's value. Naming a theme that `themes` does not declare rejects the file.
+- An alias names another colour and resolves in each theme separately, up to
+  16 steps. An alias to a missing colour, or a cycle, rejects the file.
+- `usage` is plain text of at most 280 characters.
+- A text style may have a `group` of at most 40 characters.
+- Aliases, `usage`, `themes` and `group` are rejected in a schema 1 file.
+
+A file with a `schema_version` newer than this version of Crewship reads
+shows **This Design System uses format version N, which this version of
+Crewship cannot show. The file is unchanged.** instead of a partial view.
+
+### Limits
 
 The file must be at most 32 KiB and have exactly one entry in the manifest.
 `schema_version`, `colors`, `typography`, `spacing` and `radii` are required;

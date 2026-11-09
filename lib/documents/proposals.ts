@@ -1,6 +1,6 @@
 import { apiFetch } from "@/lib/api-fetch"
 
-/** Proposed contract FE-REQ-F3-4. Not implemented by the backend yet. */
+/** Contract FE-REQ-F3-4, served by GET/POST /api/v1/pages/{slug}/document/proposals (schema-4 Docs, #5137). */
 export type ProposalStatus = "open" | "accepted" | "rejected" | "conflict" | "stale"
 export interface DocumentProposal {
   id: string
@@ -11,6 +11,8 @@ export interface DocumentProposal {
   baseRev: number
   status: ProposalStatus
   createdAt: string
+  /** The replacement text the agent proposed, when the server states it. */
+  text?: string
 }
 export interface DocumentProposalDetail extends DocumentProposal {
   baseContent: unknown
@@ -23,7 +25,7 @@ export interface DocumentProposalClient {
   read(id: string): Promise<DocumentProposalDetail>
   /** `expectedRev` is the head the reviewer was looking at; `requestId` is stable across retries of one decision. */
   accept(id: string, expectedRev: number, requestId: string): Promise<ProposalDecision>
-  reject(id: string, requestId: string): Promise<ProposalDecision>
+  reject(id: string, expectedRev: number, requestId: string): Promise<ProposalDecision>
 }
 
 const STATUSES: readonly string[] = ["open", "accepted", "rejected", "conflict", "stale"]
@@ -32,13 +34,13 @@ const isObject = (value: unknown): value is Record<string, unknown> => value !==
 /** The wire is snake_case (FE-REQ-F3-4); anything that does not match is unreadable, never guessed. */
 function proposalFromWire(value: unknown): DocumentProposal {
   if (!isObject(value)) throw new Error("proposals unreadable")
-  const { id, author, run_id: runId, target, base_rev: baseRev, status, created_at: createdAt } = value
+  const { id, author, run_id: runId, target, base_rev: baseRev, status, created_at: createdAt, text } = value
   const ids = isObject(target) && Array.isArray(target.block_ids) ? target.block_ids : undefined
   const scope = target === "document" || (isObject(target) && target.kind === "document") ? { kind: "document" as const }
     : ids && ids.length > 0 && ids.every(item => typeof item === "string") ? { kind: "blocks" as const, blockIds: ids as string[] } : undefined
   if (typeof id !== "string" || typeof author !== "string" || !scope || !Number.isSafeInteger(baseRev) || typeof status !== "string" || !STATUSES.includes(status) || typeof createdAt !== "string"
-    || (runId !== undefined && runId !== null && typeof runId !== "string")) throw new Error("proposals unreadable")
-  return { id, author, ...(typeof runId === "string" ? { runId } : {}), target: scope, baseRev: baseRev as number, status: status as ProposalStatus, createdAt }
+    || (runId !== undefined && runId !== null && typeof runId !== "string") || (text !== undefined && typeof text !== "string")) throw new Error("proposals unreadable")
+  return { id, author, ...(typeof runId === "string" ? { runId } : {}), target: scope, baseRev: baseRev as number, status: status as ProposalStatus, createdAt, ...(typeof text === "string" ? { text } : {}) }
 }
 
 const statusOf = (code: number): ProposalDecision => code === 409 ? { status: "conflict" } : [401, 403, 404].includes(code) ? { status: "denied" } : code === 503 ? { status: "unavailable" } : code >= 500 ? { status: "unknown" } : { status: "error" }
@@ -67,6 +69,6 @@ export function createHttpProposalClient(workspaceId: string, pageId: string): D
       return { ...proposalFromWire(value), baseContent: value.base_content, proposedContent: value.proposed_content }
     },
     accept: (id, expectedRev, requestId) => decide(`/${encodeURIComponent(id)}/accept`, { expected_rev: expectedRev }, requestId),
-    reject: (id, requestId) => decide(`/${encodeURIComponent(id)}/reject`, {}, requestId),
+    reject: (id, expectedRev, requestId) => decide(`/${encodeURIComponent(id)}/reject`, { expected_rev: expectedRev }, requestId),
   }
 }

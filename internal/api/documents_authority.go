@@ -87,7 +87,7 @@ func (h *documentAuthority) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	r.SetPathValue("page", parts[3])
 	r.SetPathValue("operation", parts[4])
-	if parts[4] == "state" || parts[4] == "checkpoints" || parts[4] == "checkpoint-read" || parts[4] == "comments" {
+	if parts[4] == "state" || parts[4] == "checkpoints" || parts[4] == "checkpoint-read" || parts[4] == "comments" || parts[4] == "proposals" || parts[4] == "proposal" {
 		// This marker cannot be supplied by a public client. Service-secret
 		// authentication and exact method/path parsing have already succeeded.
 		r = r.WithContext(context.WithValue(r.Context(), documentPrivateReadKey{}, documentPrivateReadAdmission{pageID: parts[3]}))
@@ -246,7 +246,7 @@ func documentAuthorityError(w http.ResponseWriter, err error) {
 	case errors.Is(err, artifacts.ErrUnsupported):
 		status = 409
 		message = "unsupported document operation or schema"
-	case errors.Is(err, documents.ErrInvalidComment):
+	case errors.Is(err, documents.ErrInvalidComment), errors.Is(err, documents.ErrInvalidProposal):
 		status = 400
 		message = err.Error()
 	case errors.Is(err, documents.ErrConflict), errors.Is(err, documents.ErrFence), errors.Is(err, documents.ErrSchema), errors.Is(err, documents.ErrDuplicate):
@@ -263,7 +263,7 @@ func (h *documentAuthority) documentStateWire(s documents.State) map[string]any 
 	for _, u := range s.Updates {
 		updates = append(updates, u.Payload)
 	}
-	return map[string]any{"schema": s.Schema, "rev": s.HeadRev, "epoch": s.Epoch, "generation": s.Generation, "incarnation": h.incarnation, "snapshot": s.Snapshot, "snapshotRev": s.SnapshotRev, "updates": updates, "blocks": s.Projection}
+	return map[string]any{"schema": s.Schema, "rev": s.HeadRev, "epoch": s.Epoch, "generation": s.Generation, "incarnation": h.incarnation, "database": s.Database, "contentGeneration": s.ContentGeneration, "snapshot": s.Snapshot, "snapshotRev": s.SnapshotRev, "updates": updates, "blocks": s.Projection}
 }
 func documentReceiptWire(r documents.Receipt) map[string]any {
 	return map[string]any{"id": r.ID, "rev": r.Rev, "epoch": r.Epoch, "actor": r.Actor, "kind": r.Kind}
@@ -296,6 +296,8 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		Comment      string                 `json:"comment"`
 		Version      int64                  `json:"version"`
 		Resolved     bool                   `json:"resolved"`
+		Target       string                 `json:"target"`
+		Proposal     string                 `json:"proposal"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 3<<20)
 	decoder := json.NewDecoder(r.Body)
@@ -308,9 +310,9 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 400, "one authority JSON object required")
 		return
 	}
-	read := op == "state" || op == "receipt" || op == "checkpoint-read" || op == "checkpoints" || op == "comments"
+	read := op == "state" || op == "receipt" || op == "checkpoint-read" || op == "checkpoints" || op == "comments" || op == "proposals" || op == "proposal"
 	_, agent := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
-	auditNeeded := !agent && (op == "state" || op == "checkpoints" || op == "checkpoint-read" || op == "comments")
+	auditNeeded := !agent && (op == "state" || op == "checkpoints" || op == "checkpoint-read" || op == "comments" || op == "proposals" || op == "proposal")
 	var readRecord *pageRecord
 	var capture func(*pageRecord)
 	if auditNeeded {
@@ -347,6 +349,34 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		result = h.documentStateWire(s)
 	case "comments":
 		result, err = h.store.Comments(ctx, k, auth)
+	case "proposals", "proposal", "propose", "proposal-reject":
+		// Review is human; only a live agent run proposes (#5137).
+		a, isAgent := ctx.Value(artifactRunKey{}).(*artifactRunAuthority)
+		if isAgent != (op == "propose") {
+			replyError(w, 403, "agent proposals and human review only")
+			return
+		}
+		switch op {
+		case "proposals":
+			result, err = h.store.Proposals(ctx, k, auth)
+		case "proposal":
+			result, err = h.store.ProposalRead(ctx, k, in.ID, auth)
+		case "proposal-reject":
+			var receipt documents.Receipt
+			receipt, err = h.store.RejectProposal(ctx, k, in.ID, in.Fingerprint, in.Proposal, in.IfRev, in.Generation, auth)
+			result = documentReceiptWire(receipt)
+		default:
+			var proposal documents.ProposalInput
+			proposal, err = documentProposalInput(in.ID, in.Fingerprint, a.RunID, in.Target, in.Semantic, in.IfHashes, in.IfRev, in.Generation)
+			if err != nil {
+				replyError(w, 400, "bounded semantic proposal required")
+				return
+			}
+			proposal.Guard = documentRichSemanticGuardFor(documents.ProposalSchema, in.Semantic, in.IfHashes, in.Blocks, h.pages.documentProposalGuard(a, k, in.Target, in.IfRev))
+			var receipt documents.Receipt
+			receipt, err = h.store.Propose(ctx, k, proposal, auth)
+			result = documentReceiptWire(receipt)
+		}
 	case "comment":
 		if agent {
 			replyError(w, 403, "human comment required")
@@ -408,7 +438,15 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 		var receipt documents.Receipt
 		var guard documents.MutationGuard
 		if agent {
+			if in.Proposal != "" {
+				replyError(w, 403, "a proposal is accepted by a human")
+				return
+			}
 			guard = documentRichSemanticGuard(in.Semantic, in.IfHashes, in.Blocks, h.pages.documentDraftGuard(a, k, "commit", in.IfRev))
+		} else if in.Proposal != "" {
+			// Accepting is an ordinary human commit bound to exactly one open
+			// proposal, marked accepted in the same transaction.
+			guard = documents.AcceptProposalGuard(k, in.Proposal, in.ID, in.Blocks)
 		}
 		receipt, err = operations.Apply(ctx, k, documents.Commit{Lease: lease, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, IfGeneration: in.Generation, Schema: in.Schema, Update: in.Update, CandidateSnapshot: in.Snapshot, Projection: in.Blocks, IfHashes: in.IfHashes, Kind: in.Kind, Guard: guard}, auth)
 		result = documentReceiptWire(receipt)

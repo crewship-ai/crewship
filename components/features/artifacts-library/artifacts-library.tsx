@@ -320,6 +320,11 @@ interface ArtifactsLibraryProps {
  * searches, filters and switches views; Home offers what can be made. Empty
  * items and repeated runs have their own views and are never deleted here.
  */
+/** Generated page IDs: "c", a base36 time, then hex (internal/api/cuid.go). */
+export function looksLikeArtifactId(address: string): boolean {
+  return /^c[0-9a-z]{19,31}$/.test(address)
+}
+
 export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect, onCanonical, filters: controlled, onFiltersChange, edit, onEditChange }: ArtifactsLibraryProps) {
   const { pages, loading, error, refresh } = usePages(workspaceId, undefined, CATALOG)
   const { folders } = usePageFolders(workspaceId)
@@ -384,9 +389,15 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   useEffect(() => {
     if (pastEnd) setServerWindow({ key: serverKey, page: lastServerPage })
   }, [pastEnd, serverKey, lastServerPage])
-  // An ID address fails closed: it never falls back to a slug, which another artifact may hold now.
-  const selected = item === null ? null : items.find(entry => bySlug ? entry.slug === item : entry.pageId === item) ?? null
-  const canonical = bySlug ? selected?.pageId : undefined
+  // An ID address matches the immutable ID first: an artifact that holds this ID always wins over
+  // a slug. Only when no catalog artifact holds it is it read as an old slug address, /artifacts/<slug>
+  // (G04), which then moves to that artifact's own ID address, so the address bar names what opened.
+  // The catalog holds only what this person may open; anything else gets the same server answer below.
+  // An address shaped like a generated ID never falls back to a slug: anyone may create a slug that
+  // equals another artifact's ID, and a link to a deleted or unreachable artifact must not open theirs.
+  const selected = item === null ? null : bySlug ? items.find(entry => entry.slug === item) ?? null
+    : items.find(entry => entry.pageId === item) ?? (looksLikeArtifactId(item) ? null : items.find(entry => entry.slug === item) ?? null)
+  const canonical = selected?.pageId && selected.pageId !== item ? selected.pageId : undefined
   useEffect(() => { if (canonical) onCanonical?.(canonical) }, [canonical]) // eslint-disable-line react-hooks/exhaustive-deps
   const contentRef = useRef<HTMLDivElement>(null)
   const openedSlug = selected?.slug

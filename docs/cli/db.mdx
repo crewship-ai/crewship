@@ -82,6 +82,11 @@ Restores a pre-migration snapshot created beside the local database. Before an
 actual restore, the current database is copied to a reversible
 `.before-restore-*` file. Stop the server first.
 
+The restored database gets a new document identity, so open Docs editors
+hold unsaved edits as a draft to recover instead of replaying them onto the
+older content. Copying a
+database file back by hand skips this; use this command or a backup restore.
+
 ```bash
 crewship db restore-snapshot --list --local        # list snapshots only
 crewship db restore-snapshot --local               # restore newest, with confirmation

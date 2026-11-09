@@ -1,12 +1,14 @@
 package database
 
 import (
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -144,6 +146,17 @@ func RestoreSnapshot(dbPath, snapshotPath string) error {
 		return fmt.Errorf("stage restored db: %w", err)
 	}
 	defer os.Remove(tmp) // no-op after a successful rename
+	defer func() {
+		for _, suffix := range []string{"-wal", "-shm", "-journal"} {
+			_ = os.Remove(tmp + suffix)
+		}
+	}()
+	// The snapshot rewinds document content: give it a new document database
+	// identity before it goes live, so the public Docs epoch changes and no
+	// browser replays pending edits onto the older content (#5163).
+	if err := rotateStagedDocumentIdentity(tmp); err != nil {
+		return fmt.Errorf("stage restored db: %w", err)
+	}
 
 	// Drop WAL/SHM so a stale WAL isn't replayed over the restored file, then
 	// atomically swap the staged copy into place. If the rename fails the
@@ -157,6 +170,29 @@ func RestoreSnapshot(dbPath, snapshotPath string) error {
 		return fmt.Errorf("swap restored db into place: %w", err)
 	}
 	return nil
+}
+
+// rotateStagedDocumentIdentity writes a fresh document database identity into
+// the staged copy, also when the snapshot was taken before the identity's first
+// use. A snapshot from before the table needs nothing: its migration creates
+// the table empty and first use creates a fresh identity.
+func rotateStagedDocumentIdentity(path string) error {
+	staged, err := sql.Open("sqlite", path)
+	if err != nil {
+		return err
+	}
+	defer staged.Close()
+	staged.SetMaxOpenConns(1)
+	if _, err = staged.Exec(`INSERT INTO document_database_identity(id,value) VALUES(1,lower(hex(randomblob(16)))) ON CONFLICT(id) DO UPDATE SET value=excluded.value`); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no such table") {
+			return nil
+		}
+		return fmt.Errorf("rotate document database identity: %w", err)
+	}
+	if _, err = staged.Exec(`PRAGMA wal_checkpoint(TRUNCATE)`); err != nil {
+		return fmt.Errorf("checkpoint staged db: %w", err)
+	}
+	return staged.Close()
 }
 
 // Allocate each restore file exclusively: a predictable name can already be

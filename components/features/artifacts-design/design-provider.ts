@@ -7,7 +7,8 @@ import { designConflicts, designNodes, type DesignConflict } from "./design-docu
 
 export type DesignConnection = "connecting" | "connected" | "offline" | "denied" | "rejected" | "quota"
 export type DesignAdmission = "ready" | "denied" | "retry"
-export interface DesignPeer { clientId: number; name: string; color: string; cursor?: { x: number; y: number } }
+/** Another person on the canvas: name and colour from the server, pointer and selected layer from their browser. */
+export interface DesignPeer { clientId: number; name: string; color: string; cursor?: { x: number; y: number }; selection?: string }
 const REMOTE = "design-server"
 // A paced turn refreshes the stored mark and sends a barrier. Every sync request
 // spends from the server's bucket: a burst of 5, then 1 a second, and it closes
@@ -246,6 +247,11 @@ export class DesignProvider {
   if (!editable || !this.answered || !this.pending.some(item => item.seq > this.sent)) return
   this.queuedUpdates = this.pending.map(item => item.update)
   this.updateTimer ??= setTimeout(() => this.flushUpdates(), 75)
+ }
+ /** The layer this person has selected, for the others to see. Never a document change. */
+ setSelection(id: string | null) {
+  const next = typeof id === "string" && id && id.length <= 128 ? id : null
+  if ((this.awareness.getLocalState()?.selection ?? null) !== next) this.awareness.setLocalStateField("selection", next)
  }
  setCursor(cursor: { x: number; y: number } | null) {
   this.cursor = cursor

@@ -267,3 +267,37 @@ describe("the editor inside the frame (?edit=1)", () => {
     expect(nav.replace).toHaveBeenLastCalledWith("/artifacts/page-brief?workspace_id=ws1&edit=1")
   })
 })
+
+describe("old artifact addresses (#G04)", () => {
+  it("moves the CLI's /artifacts/@<id> form to the canonical ID address, keeping the query", () => {
+    at("/artifacts/@page-site?workspace_id=ws1&version=2&ref=chat")
+    nav.params = new URLSearchParams("workspace_id=ws1&version=2&ref=chat")
+    render(<ArtifactRoute />)
+    expect(nav.replace).toHaveBeenCalledWith("/artifacts/page-site?workspace_id=ws1&version=2&ref=chat")
+    expect(screen.queryByTestId("library")).toBeNull()
+  })
+
+  it("an @ form with an unusable ID opens nothing and moves nowhere", () => {
+    at("/artifacts/@bad%2Fid")
+    render(<ArtifactRoute />)
+    expect(nav.replace).not.toHaveBeenCalled()
+    expect(screen.getByTestId("library").dataset.item).toBe("@bad/id")
+  })
+
+  it("a slug resolved at an ID address moves to the canonical ID with its version and reference", () => {
+    at("/artifacts/brief")
+    nav.params = new URLSearchParams("workspace_id=ws1&version=2&ref=chat")
+    render(<ArtifactRoute />)
+    fireEvent.click(screen.getByText("resolved"))
+    expect(nav.replace).toHaveBeenCalledWith("/artifacts/page-brief?workspace_id=ws1&version=2&ref=chat")
+  })
+
+  it("a restricted member's @ form moves by address alone, before any read", () => {
+    nav.access = "restricted"
+    at("/artifacts/@page-site")
+    render(<ArtifactRoute />)
+    expect(nav.replace).toHaveBeenCalledWith("/artifacts/page-site?workspace_id=ws1")
+    expect(nav.read).not.toHaveBeenCalled()
+    expect(nav.catalog).not.toHaveBeenCalled()
+  })
+})

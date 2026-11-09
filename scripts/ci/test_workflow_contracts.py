@@ -62,6 +62,24 @@ class WorkflowContracts(unittest.TestCase):
             self.assertGreaterEqual(go_timeout, 20, name)
             self.assertGreaterEqual(job_cap - go_timeout, 3 + 5, name)  # measured overhead ≤ 3m07s
 
+    def test_plain_go_lane_slices_api_and_shuffle_keeps_the_whole_package(self):
+        # #5214: the whole internal/api binary reached the 20m bound (1200.6 s,
+        # run 42540145391). The plain lane runs one exact-cover test slice of
+        # it per shard; the slice count is the matrix size, and six keeps each
+        # -run regexp under the 120 KB argv guard. go-shuffle must stay whole
+        # (order dependence), so it carries a 1.5x bound over 1182 s instead.
+        ci = self.text('ci.yml')
+        plain = self.job(ci, 'go-test')
+        self.assertIn('name: Go test (shard ${{ matrix.shard }})', plain)
+        self.assertIn('shard: [0, 1, 2, 3, 4, 5]', plain)
+        self.assertRegex(plain, r'go-package-shard\.py run "\$SHARD_INDEX" 6 --split-api ')
+        shuffle = self.job(ci, 'go-shuffle')
+        command = re.search(r'^        run: (python3 scripts/ci/go-package-shard\.py run .*)$', shuffle, re.M).group(1)
+        self.assertNotIn('--split-api', command)
+        self.assertNotRegex(command, r' -(run|skip)\b')
+        go_timeout = int(re.search(r'-timeout (\d+)m', command).group(1))
+        self.assertGreaterEqual(go_timeout * 60, 1.5 * 1182)
+
     def test_go_platforms_cap_covers_the_unpartitioned_macos_suite(self):
         # go-platforms runs `go test ./...` unpartitioned on macOS/arm64. On
         # 2026-11-01 internal/api alone took 1146 s there and the job was

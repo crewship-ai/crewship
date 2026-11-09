@@ -21,11 +21,156 @@ so a document never changes meaning on its own:
 | 4 | Schema 3 plus **bold**, *italic* and ~~strikethrough~~ (combinable, and with links), a language on each code block, block quotes and checklists |
 
 In a schema 4 document the toolbar offers Bold, Italic, Strikethrough, Quote,
-Checklist and a language for the current code block. Code blocks show their
-language above the code, use a monospace font and scroll sideways instead of
-wrapping. Tick a checklist item to mark it done. Markdown export writes
-`**bold**`, `*italic*`, `~~strike~~`, fenced code with its language, `>` quotes
-and `- [x]` checklists.
+Checklist and a language for the current code block. Tick a checklist item to
+mark it done.
+
+The documents engine can write a schema 4 document as Markdown (`**bold**`,
+`*italic*`, `~~strike~~`, fenced code with its language, `>` quotes and
+`- [x]` checklists), but no API, CLI command or Docs menu offers a Docs
+download yet, so the Docs page shows no export.
+
+### Code blocks
+
+Code blocks use a monospace font and scroll sideways instead of wrapping. A
+header above the code shows its language (in schema 4) and **Copy**, which
+puts the block's exact characters on the clipboard: tabs, trailing spaces and
+newlines included. Copy works for readers too.
+
+In a schema 4 document, code in a known language is coloured as you type:
+Bash, C, C++, C#, CSS, Go, GraphQL, HTML/XML, Java, JavaScript, JSON, Kotlin,
+Lua, Makefile, Markdown, Perl, PHP, Python, R, Ruby, Rust, SCSS, Shell, SQL,
+Swift, TypeScript, YAML and a few more, including short names such as `ts`,
+`py`, `sh` and `yml`. The language field suggests common names; any short
+lowercase name can be typed, and an unknown one stays uncoloured.
+
+- Colours are only how the editor shows the text. They are never saved, never
+  sent to collaborators and never appear in exports; the stored code, its
+  revision and comments on it stay exactly what was typed.
+- Code is never run. Markup such as `<script>` in a block stays text.
+- Blocks longer than 20 000 characters are shown without colours so typing
+  stays responsive.
+
+### Math
+
+A schema 4 code block whose language is `latex` (or `math`) is shown as a
+typeset formula. **Source** and **Preview** in the block's header switch
+between the formula and its LaTeX; the choice is yours alone, only in this
+tab, and never changes the document. Putting the caret into a formula shows
+its source, so you always see what you type. Readers see the formula too.
+
+- Math is block math: one display formula per code block. Inline math inside
+  a paragraph is not available yet; it needs a new kind of content and will
+  come with a later document schema.
+- The formula is drawn by KaTeX, bundled with the app at a fixed version
+  with its fonts, so showing it loads nothing from other sites. Commands that
+  could link, load or style (`\href`, `\url`, `\includegraphics`,
+  `\htmlClass`, `\htmlStyle` and similar) are refused and shown as plain
+  text.
+- A formula KaTeX cannot read shows *Cannot show this formula* with the
+  reason, above its source, in that block only; the rest of the page is
+  unaffected and nothing is changed. Sources longer than 10 000 characters
+  are shown as source only.
+- The stored content stays the LaTeX source, so history, comments, Copy and
+  agents see exactly what was typed.
+
+### CSV and Markdown previews
+
+Two more languages opt a schema 4 code block into **Source** and **Preview**:
+
+| Language | Preview |
+| --- | --- |
+| `csv` | A table; the first row is its header |
+| `markdown` or `md` | Formatted Markdown (GitHub flavour) |
+
+Only blocks with one of these languages are rendered. Every other code block,
+including Markdown pasted into a `python` or unlabelled block, stays code.
+
+- CSV is read strictly (RFC 4180): commas separate cells, a cell containing a
+  comma, quote or line break is wrapped in double quotes, and `""` is a quote
+  inside it. A stray quote, an unclosed quote or a row with a different number
+  of cells than the header is reported with its line, and the source stays
+  shown. At most 500 rows, 50 columns, 2 000 characters per cell and
+  100 000 characters in all.
+- Markdown shows headings, emphasis, strikethrough, inline and fenced code,
+  lists and checklists, quotes, rules, tables and links. Raw HTML is shown as
+  the characters that were typed, never as HTML. Images are shown as
+  *[Image: description]* and are never loaded. Only `http`, `https` and
+  `mailto` links become links; they open in a new tab. At most 20 000
+  characters, 12 levels of nesting and 5 000 elements.
+- Cells and text are only ever text in the page: nothing in a CSV cell or a
+  Markdown source can add markup, run script or fetch anything.
+
+### Diagram and chart previews
+
+Two more languages opt a schema 4 code block into **Source** and **Preview**:
+
+| Language | Preview |
+| --- | --- |
+| `mermaid` | A diagram drawn by Mermaid (flowcharts, sequence, class, state, Gantt and the other Mermaid types) |
+| `chart` | A bar or line chart from a small JSON spec |
+
+````
+```mermaid
+flowchart LR
+  Draft --> Review --> Published
+```
+````
+
+A `chart` block holds exactly this shape; `title` is optional:
+
+```json
+{
+  "type": "bar",
+  "title": "Runs per week",
+  "x": ["W1", "W2", "W3"],
+  "series": [
+    { "name": "Research", "values": [12, 18, 9] },
+    { "name": "Support", "values": [7, 4, 11] }
+  ]
+}
+```
+
+- Mermaid is bundled with the app at a fixed version and loads only when the
+  first diagram is shown. It never draws in the page itself: it draws in a
+  hidden frame whose security policy allows no requests at all, so whatever a
+  diagram's styles or shapes name (images, icons, masks, fonts), the browser
+  does not fetch it, from other sites or from the app. Text labels only:
+  `click` callbacks and links do nothing, HTML in labels stays text, and a
+  diagram's own `%%{init}%%` directive or front matter cannot change these
+  settings or restyle the page. The drawn SVG is cleaned again before it is
+  shown (no scripts, links, embedded HTML, images, `use` references, overlays
+  or styles that load a URL) and is kept in its own isolated subtree, so its
+  styles only affect the diagram.
+- As a second layer, a diagram that names something to load is refused with
+  *Cannot show this diagram: it refers to an image, icon, URL or escaped
+  text*: image and icon shapes (`A@{ img: … }`, `A@{ icon: … }`, quoted keys
+  too), sequence diagram `properties`, `url(…)`, `image-set(…)`,
+  `cross-fade(…)` and `image(…)` in styles and class definitions, and any
+  backslash.
+- Diagrams are drawn one at a time. At most 5 000 characters, 150
+  connections (arrows and links, in every diagram type), 300 statements, 50
+  subgraphs and nesting 6 deep (subgraphs or composite states). When a
+  diagram takes longer than half a second to draw (or to fail), edits by
+  others no longer redraw it automatically: the block says *The source
+  changed* and redraws when you choose **Preview**. Once previews on one page
+  have taken a second in all, further blocks show their source and say
+  *Previews on this page took long to draw*; choose **Preview** to draw one.
+- A chart is read strictly: `type` is `bar` or `line`, `x` lists the
+  category labels, and every series has a `name` and one finite number per
+  label. Unknown keys, wrong types and specs over the limits are refused with
+  the reason. At most 8 series, 200 points per series, 200 characters per
+  label or name, values up to ±1e300 and 50 000 characters in all. Labels
+  are only ever text.
+- Series use the product's chart colours, in order. The chart is announced to
+  screen readers with a summary (type, title, series, categories and value
+  range); **Show data table** under it lists every value, and hovering a bar
+  or point shows its value.
+- A diagram or chart that cannot be drawn shows *Cannot show this diagram* or
+  *Cannot show this chart* with the reason, above its source, in that block
+  only. Switching between Source and Preview never changes the document.
+- Comments on a diagram or chart anchor to text in its source, as in any code
+  block. Commenting on a single diagram node or chart bar is not available:
+  it needs a new kind of content and will come with a later document schema.
 
 A document becomes schema 4 only explicitly: initialize it with `"schema": 4`
 (see [`crewship doc initialize`](/cli/doc)), or upgrade an older document through

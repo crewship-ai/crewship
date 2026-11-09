@@ -1,9 +1,12 @@
 package backup
 
 import (
+	"context"
+	"database/sql"
 	"encoding/base64"
 	"fmt"
 	"math"
+	"strings"
 )
 
 // Native document bytes and project assets are not necessarily UTF-8. Keep
@@ -93,6 +96,47 @@ func safeDocumentRestoreRow(table string, row map[string]any) (map[string]any, e
 		}
 		copy["generation"] = generation + 1
 	}
+	// Restored content is a new content lineage for the public Docs epoch
+	// (#5163); bundles from before the column omit it and land at 0, which the
+	// rotated database identity already separates.
+	if value, exists := row["content_generation"]; exists {
+		var generation int64
+		switch value := value.(type) {
+		case int64:
+			generation = value
+		case int:
+			generation = int64(value)
+		case float64:
+			if value < 0 || value >= float64(math.MaxInt64) || math.Trunc(value) != value {
+				return nil, fmt.Errorf("backup: invalid document content generation")
+			}
+			generation = int64(value)
+		default:
+			return nil, fmt.Errorf("backup: invalid document content generation")
+		}
+		if generation < 0 || generation == math.MaxInt64 {
+			return nil, fmt.Errorf("backup: invalid document content generation")
+		}
+		copy["content_generation"] = generation + 1
+	}
 	copy["writer"], copy["owner"], copy["lease_until"], copy["epoch"] = "", "", int64(0), epoch+1
 	return copy, nil
+}
+
+// rotateDocumentDatabaseIdentity gives the restored database a new identity,
+// inside the restore transaction. The public Docs epoch is derived from it, so
+// no browser replays pending edits onto restored content. Only restore paths
+// call this; a plain restart keeps the identity.
+func rotateDocumentDatabaseIdentity(ctx context.Context, db interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}) error {
+	if _, err := db.ExecContext(ctx, `INSERT INTO document_database_identity(id,value) VALUES(1,lower(hex(randomblob(16)))) ON CONFLICT(id) DO UPDATE SET value=excluded.value`); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "no such table") {
+			// A database from before the table gets the empty table from its
+			// migration, and first use creates a fresh identity.
+			return nil
+		}
+		return fmt.Errorf("backup: rotate document database identity: %w", err)
+	}
+	return nil
 }

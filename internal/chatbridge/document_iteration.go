@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/documents"
@@ -49,5 +50,12 @@ func documentIterationForSend(enabled bool, opt ws.ChatMessageOption, info *Chat
 	return &copy, nil
 }
 func documentIterationRunPrompt(content string, intent *documents.IterationIntent) string {
+	if intent.Propose() {
+		scope := "any paragraph or heading"
+		if intent.Blocks != "" {
+			scope = "only the blocks " + strings.Join(intent.BlockList(), ", ")
+		}
+		return fmt.Sprintf("%s\n\nThe human explicitly asked for a PROPOSAL on existing Document %s (schema %d, generation %d). You may change nothing directly. Use doc_draft_view, doc_draft_prepare and doc_draft_propose (CLI: crewship doc draft view, crewship doc draft prepare --file -, crewship doc draft propose --file -). The view lists %s you may propose on; send one proposal per block, replacing that block's text, and preserve unrelated content and formatting. A human reviews each proposal and accepts or rejects it. Retain each exact prepared packet for uncertain retries; never regenerate preconditions or target another Page or block. On conflict, changed authority or refusal, stop and report honestly which proposals were confirmed. Do not create a replacement document or assume a later run inherits permission.", content, intent.PageID, intent.Schema, intent.Generation, scope)
+	}
 	return fmt.Sprintf("%s\n\nThe human explicitly requested updating only existing Document %s from schema %d, revision %d, generation %d. Use doc_draft_view, doc_draft_prepare and doc_draft_apply (CLI: crewship doc draft view, crewship doc draft prepare --file -, crewship doc draft apply --file -). Read the original target, preserve unrelated content and save the requested text change and checkpoint. Retain each exact prepared packet for uncertain retries; never regenerate preconditions or target another Page. A committed edit remains saved if checkpoint confirmation fails; retry the original checkpoint packet with doc_draft_checkpoint (crewship doc draft checkpoint --file -). On conflict, changed authority or refusal, stop and report the confirmed saved outcome honestly. Do not create a replacement document or assume a later run inherits permission.", content, intent.PageID, intent.Schema, intent.Rev, intent.Generation)
 }

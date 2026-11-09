@@ -139,7 +139,11 @@ Edits are a JSON object with `operations` (1 to 500) and an optional `message`.
 An upsert carries a whole node: `id`, `type` (`frame`, `rect`, `text` or
 `image`), `name`, `x`, `y`, `width`, `height`, `fill` and optionally
 `parentId`, `text`, `src` or `linkTo`. `linkTo` is the ID of the screen that a
-click on the layer opens in prototype playback; `""` removes it. Delete uses `{"op":"delete","id":"<node-id>"}` and
+click on the layer opens in prototype playback; `""` removes it. A text layer
+also takes the text style fields `fontFamily` (`sans`, `serif`, `mono`),
+`fontWeight` (100 to 900 in steps of 100), `fontSize` (1 to 1000),
+`lineHeight` (0.5 to 5), `textAlign` (`left`, `center`, `right`), `textWrap`
+(`none`, `wrap`) and `overflow` (`visible`, `clip`); other values are refused. Delete uses `{"op":"delete","id":"<node-id>"}` and
 reorder uses `{"op":"reorder","order":["<id>", …]}`. Keep the IDs of existing
 nodes. The file may be at most 1 MiB; other top-level keys are refused before
 the request (`unknown design field "extra"`).

@@ -159,3 +159,46 @@ TEST_DOCUMENT_DURABILITY=1 go test -tags docs_foundation ./cmd/crewship \
 
 `TEST_DOCUMENT_DURABILITY_EVIDENCE` names the measurements JSON file. The test
 needs Node.js 24 and records numbers only; it enforces no thresholds.
+
+## Tabs (not admitted yet)
+
+`tabs-core.mjs` is the model for Docs tabs, planned as content schema 7 after
+the Canvas surface (schema 6). No content schema admits its roots yet, so every
+validator still refuses them as unsupported Yjs roots.
+
+- The first tab is the existing `default` fragment: every older document is a
+  one-tab document without migration, and reading tabs writes nothing.
+- Further tabs are XmlFragments named `tab:<id>`. Where a tab sits lives in
+  the `tabs` map (`{ parent, order }`) and its name in `tab-names`, so a
+  concurrent rename and move both survive, and renaming, reordering and
+  nesting never move content or detach comment anchors.
+- Order keys are fractional strings over `[0-9A-Za-z]` that never end in `0`.
+  Two replicas that append at once get equal keys, and a key can grow long
+  after many moves to the same place; in both cases the next insert there
+  rebalances the siblings' keys in the same write, so an insert never fails.
+- Nesting is at most 8 levels. A tab cannot move into itself or its
+  descendants; a cycle formed by concurrent moves is broken at its smallest
+  ID, and a tab that concurrent moves put below level 8 is shown under its
+  ancestor at level 7. Both depend only on the stored state, so every replica
+  shows the same tree.
+- Deleting a tab removes its content and metadata and moves its children up;
+  the first tab cannot be deleted. The empty root a deleted tab leaves behind
+  is neither shown nor counted. Content written concurrently into a deleted
+  tab stays visible as "Untitled tab" instead of being lost.
+- Metadata is closed and bounded, retained values included: 400 tabs at most
+  in any stored state, of which mutators create at most 200 (room for
+  concurrent creates), 120-character names, and 256 KiB of metadata history
+  counted as an upper bound of its encoded bytes. Mutators check every limit
+  before writing and stop at three quarters of the history budget, leaving room
+  for concurrent replicas; the full validation walk runs once per foreign change.
+  A raw update can carry bytes its decoded values do not (an own `__proto__`
+  key is dropped by the decoder); the service never stores raw request bytes,
+  only the re-encoded document state and diff, so they never reach history.
+
+Admission (schema 7) still needs: the document validator to accept `tab:`
+fragments and the tab maps; block IDs unique across all tabs, including
+duplicates created concurrently (a new tab refuses a block ID already used in
+this replica only); comment anchors that carry the tab and a defined outcome
+for anchors in deleted tabs; a Page projection in tree order for outlines,
+Markdown and agents; the human-only upgrade; and compaction, because the
+metadata history budget is for the document's lifetime.

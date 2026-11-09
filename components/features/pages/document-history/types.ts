@@ -45,6 +45,10 @@ export interface DocumentHistoryProps {
   onSelect: (checkpointId: string) => void
   onClose: () => void
   review?: DocumentHistoryReview
+  /** Confirmed head revision; listed as the current version when it is not a checkpoint. */
+  headRev?: number
+  /** Display name for a checkpoint actor (`user:<id>`, `agent:<id>`). Must never return the raw identifier. */
+  actorName?: (actor: string) => string
   restore?: {
     allowed: boolean
     baseKey?: string

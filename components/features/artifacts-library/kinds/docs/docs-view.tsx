@@ -2,20 +2,23 @@
 
 import * as React from "react"
 import { EditorContent, useEditorState } from "@tiptap/react"
-import { Download, FileText, History, ListTree, MessageSquare, PanelLeft, X } from "lucide-react"
+import { Download, FileText, GitPullRequestArrow, History, ListTree, MessageSquare, PanelLeft, Send, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Textarea } from "@/components/ui/textarea"
+import { proposalChatHref } from "@/lib/documents/proposal-request"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { durabilityLabel, DocumentSaveState } from "@/components/features/pages/document-save-state"
 import { DocumentProposals } from "@/components/features/pages/document-proposals/document-proposals"
 import { DocumentEarlierDraftNotice, DocumentHistoryHost, DocumentRecoveryAlert, PageDocument, useDocumentWorkspace, type DocumentWorkspaceProps } from "@/components/features/pages/page-document"
 import { cn } from "@/lib/utils"
-import { ArtifactDrawerSection, ArtifactSlot, ArtifactTool, ArtifactToolSeparator, useArtifactFrame, type FrameLayout, type FrameStatus } from "../../frame"
+import { ArtifactAgentMode, ArtifactDrawerSection, ArtifactSlot, ArtifactTool, ArtifactToolSeparator, useArtifactFrame, type FrameLayout, type FrameStatus } from "../../frame"
 import type { LibraryItem } from "../../library-items"
 import { docsFrameStatus, outlineOf, readingStats, readingText, type DocNode, type OutlineEntry } from "./docs-model"
 import { DocsTools } from "./docs-tools"
 import { DocsComments } from "./docs-comments"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
+import { documentActorName } from "@/lib/documents/actor-name"
 import { commentTarget, setCommentHighlights, type CommentTarget } from "@/components/features/pages/document-rich-extensions"
 
 /** What the Docs body tells the frame: the chip, whether this person can edit now, and the chip's popover. */
@@ -30,7 +33,7 @@ export interface DocsFrameReport {
 const COLUMN = "mx-auto grid w-full max-w-[700px] grid-cols-[minmax(0,1fr)] content-start gap-4 px-4 pb-28 pt-16 md:px-8 md:pb-20"
 
 /** Reading typography (Harbor 2 v87 Docs page): a comfortable size on a phone, a calmer one on wider screens. */
-const DOCS_EDITOR_CLASS = "min-h-64 max-w-none text-lg leading-relaxed outline-none md:text-base md:leading-[1.65] [&_[data-block-id]]:scroll-mt-20 [&_p]:my-3 [&_h1]:mb-3 [&_h1]:mt-8 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-2 [&_h2]:mt-7 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-5 [&_h3]:text-lg [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_th]:text-left [&_td_p]:my-0 [&_th_p]:my-0 [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:whitespace-pre [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:text-sm [&_pre]:leading-normal [&_pre[data-language]]:relative [&_pre[data-language]]:pt-7 [&_pre[data-language]]:before:absolute [&_pre[data-language]]:before:left-3 [&_pre[data-language]]:before:top-1.5 [&_pre[data-language]]:before:font-mono [&_pre[data-language]]:before:text-xs [&_pre[data-language]]:before:text-muted-foreground [&_pre[data-language]]:before:content-[attr(data-language)] [&_code]:font-mono [&_:not(pre)>code]:rounded-sm [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:text-[0.9em] [&_a]:text-primary-hover [&_a]:underline [&_strong]:font-semibold [&_em]:italic [&_s]:line-through [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_ul[data-type=taskList]]:list-none [&_ul[data-type=taskList]]:pl-0.5 [&_li[data-type=taskItem]]:flex [&_li[data-type=taskItem]]:items-start [&_li[data-type=taskItem]]:gap-2 [&_li[data-type=taskItem]>label]:mt-[0.3em] [&_li[data-type=taskItem]>label]:flex [&_li[data-type=taskItem]>div]:min-w-0 [&_li[data-type=taskItem]>div]:flex-1 [&_li[data-type=taskItem]_p]:my-0.5 [&_li[data-checked=true]>div]:text-muted-foreground [&_li[data-checked=true]>div]:line-through [&_input[type=checkbox]]:size-4 [&_input[type=checkbox]]:cursor-pointer [&_input[type=checkbox]]:accent-primary [&_input[type=checkbox]:disabled]:cursor-default [&_.document-comment]:rounded-sm [&_.document-comment]:bg-warn/15 [&_.document-comment]:underline [&_.document-comment]:decoration-warn/60 [&_.document-comment]:underline-offset-4 [&_.document-comment-active]:bg-warn/35"
+const DOCS_EDITOR_CLASS = "min-h-64 max-w-none text-lg leading-relaxed outline-none md:text-base md:leading-[1.65] [&_[data-block-id]]:scroll-mt-20 [&_p]:my-3 [&_h1]:mb-3 [&_h1]:mt-8 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:tracking-tight [&_h2]:mb-2 [&_h2]:mt-7 [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:mb-2 [&_h3]:mt-5 [&_h3]:text-lg [&_h3]:font-semibold [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:list-decimal [&_ol]:pl-6 [&_table]:my-4 [&_table]:w-full [&_table]:border-collapse [&_td]:border [&_td]:p-2 [&_th]:border [&_th]:bg-muted [&_th]:p-2 [&_th]:text-left [&_td_p]:my-0 [&_th_p]:my-0 [&_pre]:my-4 [&_pre]:overflow-x-auto [&_pre]:whitespace-pre [&_pre]:rounded-md [&_pre]:bg-muted [&_pre]:p-3 [&_pre]:text-sm [&_pre]:leading-normal [&_code]:font-mono [&_:not(pre)>code]:rounded-sm [&_:not(pre)>code]:bg-muted [&_:not(pre)>code]:px-1 [&_:not(pre)>code]:py-0.5 [&_:not(pre)>code]:text-[0.9em] [&_a]:text-primary-hover [&_a]:underline [&_strong]:font-semibold [&_em]:italic [&_s]:line-through [&_blockquote]:my-4 [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-4 [&_blockquote]:text-muted-foreground [&_ul[data-type=taskList]]:list-none [&_ul[data-type=taskList]]:pl-0.5 [&_li[data-type=taskItem]]:flex [&_li[data-type=taskItem]]:items-start [&_li[data-type=taskItem]]:gap-2 [&_li[data-type=taskItem]>label]:mt-[0.3em] [&_li[data-type=taskItem]>label]:flex [&_li[data-type=taskItem]>div]:min-w-0 [&_li[data-type=taskItem]>div]:flex-1 [&_li[data-type=taskItem]_p]:my-0.5 [&_li[data-checked=true]>div]:text-muted-foreground [&_li[data-checked=true]>div]:line-through [&_input[type=checkbox]]:size-4 [&_input[type=checkbox]]:cursor-pointer [&_input[type=checkbox]]:accent-primary [&_input[type=checkbox]:disabled]:cursor-default [&_.document-comment]:rounded-sm [&_.document-comment]:bg-warn/15 [&_.document-comment]:underline [&_.document-comment]:decoration-warn/60 [&_.document-comment]:underline-offset-4 [&_.document-comment-active]:bg-warn/35"
 
 /**
  * A Docs page (a native Tiptap/Yjs document) inside the ArtifactFrame. The
@@ -61,7 +64,22 @@ export function DocsBody({ workspaceId, item, fallback, onFrame }: {
     return <>{fallback}</>
   }
   return <PageDocument workspaceId={workspaceId} slug={"@" + pageId} pageId={pageId} name={item.name}
-    renderWorkspace={props => <DocsWorkspace {...props} onFrame={onFrame} />} />
+    renderWorkspace={props => <DocsWorkspace {...props} onFrame={onFrame} />}
+    renderUnhydrated={(sync, message) => <DocsUnhydrated denied={sync.denied} status={sync.status} onFrame={onFrame}>{message}</DocsUnhydrated>} />
+}
+
+/**
+ * No confirmed document: the body shows the session's own message, and the
+ * frame keeps a chip that says why — No access after a refusal or a revoke,
+ * nothing while the first read is still on its way. Dropping the chip would
+ * leave the last state (often Saved) unexplained.
+ */
+function DocsUnhydrated({ denied, status, onFrame, children }: { denied: boolean; status: string; onFrame: (report: DocsFrameReport | null) => void; children: React.ReactNode }) {
+  const chip = docsFrameStatus({ hydrated: false, denied, available: true, restoring: false, status, pending: 0, recovery: false, recoveredDrafts: 0, canWrite: false, durability: "confirmed", sentThisSession: false })
+  const chipKey = JSON.stringify(chip)
+  React.useEffect(() => { onFrame({ status: JSON.parse(chipKey) as FrameStatus | null, canEdit: false }) }, [onFrame, chipKey])
+  React.useEffect(() => () => onFrame(null), [onFrame])
+  return <div className={COLUMN}>{children}</div>
 }
 
 function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsFrameReport | null) => void }) {
@@ -85,12 +103,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const comments = useDocumentComments({ workspaceId, slug, pageId, humanId, enabled: Boolean(sync.state) && available && !sync.denied, head })
   const discussion = comments.query.isSuccess && !sync.denied ? comments.query.data : null
   const members = useMembers(discussion ? workspaceId : null)
-  const nameOf = React.useCallback((actor: string) => {
-    const [kind, id] = actor.split(":", 2)
-    if (kind === "user" && id === humanId) return "You"
-    const member = kind === "user" ? (members.members ?? []).find(entry => entry.user.id === id) : undefined
-    return member?.user.full_name || member?.user.email || (kind === "agent" ? "Agent" : "Workspace member")
-  }, [humanId, members.members])
+  const nameOf = React.useCallback((actor: string) => documentActorName(actor, { humanId, members: members.members }), [humanId, members.members])
   const [draft, setDraft] = React.useState<CommentTarget | null>(null)
   const [commentNotice, setCommentNotice] = React.useState<string | null>(null)
   const [activeThread, setActiveThread] = React.useState<string | null>(null)
@@ -113,6 +126,9 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     target?.scrollIntoView?.({ block: "center", behavior: "smooth" })
   }
   const stats = summary?.stats ?? { words: 0, minutes: 0 }
+  // Proposals exist only where the server says so (schema 4); otherwise no Propose mode and no tab.
+  const proposalsServed = Boolean(sync.state?.proposals) && available && !sync.denied
+  const [proposalPrompt, setProposalPrompt] = React.useState("")
 
   const editable = Boolean(sync.editable && !restoring && editor)
   const status = docsFrameStatus({
@@ -159,7 +175,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
         <DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status}
           durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} unverifiedDraft={sync.unverifiedDrafts.length > 0} lockless={sync.storageLockless} />
       </div>
-      {reviewEnabled && sync.state && !sync.denied && <DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} />}
+      {reviewEnabled && !proposalsServed && sync.state && !sync.denied && <DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} />}
       {!sync.denied && <>
         {sync.state && empty && <p className="text-sm text-muted-foreground">{editable ? "This document is empty. Start writing below, or ask an agent in a chat to draft it." : "This document is empty."}</p>}
         <EditorContent editor={editor} />
@@ -210,6 +226,25 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
       <DocsComments data={discussion} nameOf={nameOf} draft={draft} notice={commentNotice} active={activeThread}
         onCancelDraft={() => setDraft(null)} onWrite={writeComment} onJump={jumpToComment} />
     </ArtifactDrawerSection>}
+
+    {proposalsServed && sync.state && <>
+      {sync.state.can_write && <ArtifactAgentMode mode="propose">
+        <div className="grid gap-2" data-docs-propose>
+          <Textarea aria-label="What should the agent change?" placeholder="What should the agent change?" value={proposalPrompt}
+            onChange={event => setProposalPrompt(event.target.value)} className="min-h-20 text-sm" />
+          <p className="text-xs text-muted-foreground">The agent proposes changes in a private chat. On a shared document it needs edit access granted to it. Nothing changes until someone with edit access accepts them under Proposals.</p>
+          <div className="flex justify-end">
+            <Button asChild size="sm"><a href={proposalChatHref(workspaceId, { pageId, rev: sync.state.rev, generation: sync.state.generation }, proposalPrompt.trim())}>
+              <Send aria-hidden />Ask for a proposal</a></Button>
+          </div>
+        </div>
+      </ArtifactAgentMode>}
+      <ArtifactDrawerSection tab="proposals" label="Proposals" icon={GitPullRequestArrow}>
+        <div className="grid content-start gap-3 p-3.5">
+          <DocumentProposals client={proposalClient} headRev={sync.state.rev} canDecide={sync.editable && !restoring} hasLocalDraft={hasLocalDraft} onDownloadDraft={downloadDraft} onAccepted={() => window.location.reload()} />
+        </div>
+      </ArtifactDrawerSection>
+    </>}
 
     <ArtifactDrawerSection tab="history" label="History" icon={History}>
       <div className="grid content-start gap-3 p-3.5">

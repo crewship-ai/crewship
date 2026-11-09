@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/charmbracelet/huh"
 	"github.com/crewship-ai/crewship/internal/cli"
@@ -217,6 +218,9 @@ func exitWithError(cmd *cobra.Command, err error) {
 	os.Exit(cli.ExitCodeFor(err))
 }
 
+// serverEnvNoticeOnce prints the ignored-CREWSHIP_SERVER warning at most once per process.
+var serverEnvNoticeOnce sync.Once
+
 // newAPIClient creates an authenticated API client from resolved config.
 //
 // The token is bound to the host of the *configured* server (cliCfg.Server)
@@ -231,6 +235,14 @@ func newAPIClient() *cli.Client {
 	// over a stale CREWSHIP_SERVER env left over from the #544 stopgap; the
 	// token is host-bound to that same profile server below, so the two agree.
 	server := cli.EffectiveServer(flagServer, flagProfile, cliCfg)
+	// Say so when an implicitly selected profile overrides an exported
+	// CREWSHIP_SERVER: otherwise the other server's answers (a 404, or 503
+	// "Docs are not enabled") look like a fault of the intended one.
+	serverEnvNoticeOnce.Do(func() {
+		if notice := cli.IgnoredServerEnvNotice(flagServer, flagProfile, cliCfg); notice != "" {
+			fmt.Fprintln(os.Stderr, notice)
+		}
+	})
 	workspace := cli.ResolveWorkspace(flagWorkspace, cliCfg)
 	token := ""
 	tokenHost := ""

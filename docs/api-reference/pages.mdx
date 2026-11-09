@@ -2548,6 +2548,56 @@ credential; 403 missing access/scope; 409 stale version, revision or epoch;
 503 disabled or unavailable service.
 CLI: `crewship doc comment-resolve <page-slug> --file <request.json>`.
 
+## List agent proposals on a document
+
+`GET /api/v1/pages/{slug}/document/proposals`
+
+Authentication: a human session or CLI token with read access to the document
+(`pages:read` for scoped credentials). Agent run credentials are refused; agents
+never review proposals, and restricted members have no access to this route.
+Request: path parameter `slug` only. Response: `page_id` and `proposals`, oldest
+first; each has `id`, `author`, `run_id`, `target.block_ids`, `base_rev`,
+`status` (`open`, `stale`, `accepted` or `rejected`), `text` and `created_at`.
+Proposals exist on schema 4 documents only; `GET /api/v1/pages/{slug}/document`
+reports `proposals: true` where they are served. Statuses: 200 listed; 401
+invalid credential; 403 missing access or an agent credential; 404 no such
+document; 409 unsupported schema; 502 invalid engine response; 503
+disabled or unavailable service.
+CLI: `crewship doc proposals <page-slug>`.
+
+## Read one agent proposal
+
+`GET /api/v1/pages/{slug}/document/proposals/{proposal}`
+
+Authentication: as for listing proposals. Request: path parameters `slug` and
+`proposal`. Response: the proposal with `base_content` (the target block as the
+agent saw it) and `proposed_content` (the block after the change), both
+document nodes. Statuses: 200 read; 400 invalid proposal ID; 401 invalid
+credential; 403 missing access; 404 no such proposal; 502 invalid engine
+response; 503 disabled or unavailable service.
+CLI: `crewship doc proposal <page-slug> <proposal-id>`.
+
+## Accept or reject an agent proposal
+
+`POST /api/v1/pages/{slug}/document/proposals/{proposal}/accept`
+
+`POST /api/v1/pages/{slug}/document/proposals/{proposal}/reject`
+
+Authentication: a human session or CLI token with edit access to the document
+(`pages:read` and `pages:write` for scoped credentials); agent credentials are
+refused. Request body: exactly `request_id` (the idempotency key; an
+`Idempotency-Key` header, when sent, must equal it) and `expected_rev` (the
+revision the reviewer saw). Accept applies exactly the proposed block as a new
+human revision in the same transaction that marks the proposal accepted; reject
+closes it without changing content. Response: `page_id`, `proposal`, `id`,
+`rev`, `kind` (`human` or `proposal-reject`) and `duplicate` on an exact retry.
+Statuses: 200 decided; 400 not a closed decision; 401 invalid credential; 403
+missing edit access or an agent credential; 404 no such proposal; 409 newer
+head, changed target, or a proposal that is no longer open; 429 operation
+limit; 500 storage failure; 502 invalid engine response; 503 disabled or
+unavailable service.
+CLI: `crewship doc proposal-accept|proposal-reject <page-slug> <proposal-id> --expected-rev <n> --request-id <id>`.
+
 Page read and list responses include `has_document`, which identifies saved native
 document content. They also include `has_slides` and `slides_schema`: saved Slides
 content is reported even for an unknown schema, so a viewer can refuse unsupported
