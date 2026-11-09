@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"math"
 	"regexp"
 	"strconv"
 )
@@ -39,6 +40,49 @@ type exportNode struct {
 	Text     string  `json:"text"`
 	Src      string  `json:"src"`
 	LinkTo   string  `json:"linkTo"`
+	// Text style (#5161); zero values mean "not set": the class default applies.
+	FontFamily string  `json:"fontFamily"`
+	FontWeight float64 `json:"fontWeight"`
+	FontSize   float64 `json:"fontSize"`
+	LineHeight float64 `json:"lineHeight"`
+	TextAlign  string  `json:"textAlign"`
+	TextWrap   string  `json:"textWrap"`
+	Overflow   string  `json:"overflow"`
+}
+
+// The same closed font stacks as the canvas (DESIGN_FONT_STACKS).
+var exportFontStacks = map[string]string{
+	"sans":  "system-ui,sans-serif",
+	"serif": "Georgia,'Times New Roman',serif",
+	"mono":  "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace",
+}
+
+// textStyle adds only values the engine accepts; anything else is left out,
+// so a layer without style exports exactly as it did before text style.
+func textStyle(node *exportNode) string {
+	style := ""
+	if stack, ok := exportFontStacks[node.FontFamily]; ok {
+		style += ";font-family:" + stack
+	}
+	if node.FontWeight >= 100 && node.FontWeight <= 900 && math.Mod(node.FontWeight, 100) == 0 {
+		style += ";font-weight:" + px(node.FontWeight)
+	}
+	if node.FontSize >= 1 && node.FontSize <= 1000 {
+		style += ";font-size:" + px(node.FontSize) + "px"
+	}
+	if node.LineHeight >= 0.5 && node.LineHeight <= 5 {
+		style += ";line-height:" + px(node.LineHeight)
+	}
+	if node.TextAlign == "center" || node.TextAlign == "right" || node.TextAlign == "left" {
+		style += ";text-align:" + node.TextAlign
+	}
+	if node.TextWrap == "wrap" {
+		style += ";white-space:pre-wrap;overflow-wrap:anywhere"
+	}
+	if node.Overflow == "clip" {
+		style += ";overflow:hidden"
+	}
+	return style
 }
 
 // Same image rule as the browser (safeImageSource): only base64 raster data
@@ -223,7 +267,7 @@ func writeLayer(b *bytes.Buffer, node *exportNode, geometry string, anchors map[
 	class, style, body := "layer "+node.Type, geometry, ""
 	switch node.Type {
 	case "text":
-		style += ";color:" + color(node.Fill, "#172554")
+		style += ";color:" + color(node.Fill, "#172554") + textStyle(node)
 		body = html.EscapeString(node.Text)
 	case "image":
 		if exportImage.MatchString(node.Src) {

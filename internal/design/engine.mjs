@@ -14,9 +14,26 @@ const nodeStringLimits = new Map([
   ['linkTo', 128],
 ])
 const nodeGeometryFields = new Set(['x', 'y', 'width', 'height'])
+// Text style (#5161): optional and closed. Absent means 20 px sans, weight 400,
+// line height 1.3, left, no wrap, no clip: the look every older document has.
+const nodeChoiceFields = new Map([
+  ['fontFamily', new Set(['sans', 'serif', 'mono'])],
+  ['textAlign', new Set(['left', 'center', 'right'])],
+  ['textWrap', new Set(['none', 'wrap'])],
+  ['overflow', new Set(['visible', 'clip'])],
+])
+const nodeNumberFields = new Map([
+  ['fontWeight', value => Number.isInteger(value) && value >= 100 && value <= 900 && value % 100 === 0],
+  ['fontSize', value => value >= 1 && value <= 1000],
+  ['lineHeight', value => value >= 0.5 && value <= 5],
+])
 function validateNodeFields(entries) {
   for (const [key, value] of entries) {
-    if (nodeStringLimits.has(key)) {
+    if (nodeChoiceFields.has(key)) {
+      if (typeof value !== 'string' || !nodeChoiceFields.get(key).has(value)) throw new Error(`invalid node ${key}`)
+    } else if (nodeNumberFields.has(key)) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || !nodeNumberFields.get(key)(value)) throw new Error(`invalid node ${key}`)
+    } else if (nodeStringLimits.has(key)) {
       if (typeof value !== 'string' || value.length > nodeStringLimits.get(key)) throw new Error(`invalid node ${key}`)
     } else if (nodeGeometryFields.has(key)) {
       if (typeof value !== 'number' || !Number.isFinite(value) || Math.abs(value) > 1000000) throw new Error('invalid geometry')
