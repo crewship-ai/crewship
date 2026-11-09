@@ -67,12 +67,12 @@ func documentSchemaCatalog() map[string]DomainSchema {
 	get(base+"/checkpoints", "DocumentCheckpointList")
 	get(base+"/checkpoints/{checkpoint}", "DocumentCheckpoint")
 	out["GET "+base+"/export"] = DomainSchema{NoRequest: true,
-		Response:        map[string]any{"type": "string", "description": "UTF-8 Markdown of the confirmed document, produced by the docs engine from the same state GET /document reads. Delivered as an attachment named after the page slug."},
-		ResponseMedia:   []string{"text/markdown"},
+		Response:        map[string]any{"type": "string", "format": "binary", "description": "The confirmed document as one attachment named after the page slug: UTF-8 Markdown (format=markdown) or a Word package (format=docx, at most 3 MiB), produced by the docs engine from the same state GET /document reads."},
+		ResponseMedia:   []string{"text/markdown", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
 		SuccessStatuses: []string{"200"},
 		ErrorStatuses:   []string{"400", "401", "403", "404", "409", "422", "429", "500", "502", "503"},
 		Parameters: []map[string]any{
-			{"name": "format", "in": "query", "required": false, "schema": map[string]any{"type": "string", "enum": []string{"markdown", "md"}}, "description": "Export format. Only Markdown exists; omitted means markdown."},
+			{"name": "format", "in": "query", "required": false, "schema": map[string]any{"type": "string", "enum": []string{"markdown", "md", "docx"}}, "description": "Export format: markdown (or md) or docx; omitted means markdown."},
 		},
 	}
 	out["POST "+base+"/restore"] = DomainSchema{

@@ -319,23 +319,28 @@ crewship doc outline @<artifact-id>
 
 ## `crewship doc export <page-slug>`
 
-Download the confirmed document as Markdown. It reads what `doc read` reads,
+Download the confirmed document as Markdown (`--as md`, the default) or as a
+Word document (`--as docx`). It reads what `doc read` reads,
 with the same access: you need read access to the document (scoped tokens:
 `pages:read`), and without it fails exactly as `doc read` does. Restricted
-members cannot export, not even their own private output. Content Markdown cannot
-represent fails with the reason instead of a file with parts missing.
+members cannot export, not even their own private output. Content the chosen
+format cannot represent fails with the reason instead of a file with parts
+missing: a code block inside a table has no Markdown form (Word keeps it), and
+lists nested deeper than nine levels have no Word form. Math blocks export as
+their LaTeX source in both formats.
 
 The file is written atomically to `--out` (default: the server's file name,
 such as `launch-notes.md`, in the current directory) and standard output
 carries a JSON receipt with `path`, `media_type`, `byte_length` and `sha256`.
 An existing file is not replaced unless you pass `--force`. `--out -` writes
-the Markdown itself to standard output. `--as` selects the file type; `md` is
-the only one available.
+the file itself to standard output. `--as` selects the file type: `md`
+(`text/markdown`, at most 4 MiB) or `docx` (Word package, at most 3 MiB).
 
 ```bash
 crewship doc export @<artifact-id>
 crewship doc export launch-notes -o notes.md --force
 crewship doc export launch-notes -o - | less
+crewship doc export launch-notes --as docx
 ```
 
 ```json

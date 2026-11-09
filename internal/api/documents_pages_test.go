@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -374,5 +375,57 @@ func TestHumanDocumentReadHidesCommentControlsFromRestrictedMembers(t *testing.T
 				t.Fatalf("%s %s: %d %s", mode, path, w.Code, w.Body.String())
 			}
 		}
+	}
+}
+
+// Export trusts nothing but a well-formed engine reply of the requested format:
+// the request names the format, and anything else is 502, never a file.
+func TestDocumentExportEngineReplyBoundary(t *testing.T) {
+	zipFile := base64.StdEncoding.EncodeToString([]byte("PK\x03\x04rest"))
+	for _, tc := range []struct {
+		name, format, reply, media, body string
+		status                           int
+	}{
+		{"markdown", "markdown", `{"markdown":"# T\n"}`, "text/markdown; charset=utf-8", "# T\n", 200},
+		{"docx", "docx", `{"docx":"` + zipFile + `"}`, documentDOCXMediaType, "PK\x03\x04rest", 200},
+		{"docx answered with markdown", "docx", `{"markdown":"# T\n"}`, "", "", 502},
+		{"markdown answered with docx", "markdown", `{"docx":"` + zipFile + `"}`, "", "", 502},
+		{"docx not base64", "docx", `{"docx":"%%%"}`, "", "", 502},
+		{"docx not a zip", "docx", `{"docx":"` + base64.StdEncoding.EncodeToString([]byte("<html>")) + `"}`, "", "", 502},
+		{"docx over limit", "docx", `{"docx":"` + base64.StdEncoding.EncodeToString(append([]byte("PK\x03\x04"), make([]byte, documentDOCXExportBytes)...)) + `"}`, "", "", 502},
+		{"docx extra field", "docx", `{"docx":"` + zipFile + `","markdown":"x"}`, "", "", 502},
+		{"unknown format", "pdf", `{}`, "", "", 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, ws, user := humanDocumentTransportFixture(t)
+			var sent any
+			h.documentCall = func(_ context.Context, _, _, _, op string, body any) ([]byte, int, error) {
+				if op != "export" {
+					t.Fatalf("operation %q", op)
+				}
+				sent = body
+				return []byte(tc.reply), 200, nil
+			}
+			w := httptest.NewRecorder()
+			h.GetDocument(w, humanDocumentRequest(t, "GET", "/api/v1/pages/private-doc/document/export?format="+tc.format, ws, user, ""))
+			if w.Code != tc.status {
+				t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+			}
+			if tc.status == 400 && sent != nil {
+				t.Fatal("unknown format reached the engine")
+			}
+			if tc.status != 200 {
+				return
+			}
+			wantBody := map[string]any{}
+			if tc.format == "docx" {
+				wantBody["format"] = "docx"
+			}
+			if !reflect.DeepEqual(sent, wantBody) || w.Header().Get("Content-Type") != tc.media || w.Body.String() != tc.body ||
+				w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Cache-Control") != "no-store" ||
+				!strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment; filename=private-doc.") {
+				t.Fatalf("sent=%v headers=%v body=%q", sent, w.Header(), w.Body.String())
+			}
+		})
 	}
 }

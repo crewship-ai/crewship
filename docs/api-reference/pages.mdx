@@ -2391,9 +2391,9 @@ the checkpoint endpoint below instead. Statuses: 200 document; 400 unsupported s
 502 invalid engine response; 503 disabled or unavailable service. Responses use
 `Cache-Control: no-store`. CLI: `crewship doc read` and `crewship doc outline`.
 
-## Export a native document as Markdown
+## Export a native document as Markdown or Word
 
-`GET /api/v1/pages/{slug}/document/export?format=markdown`
+`GET /api/v1/pages/{slug}/document/export?format=markdown|docx`
 
 Authentication and access are exactly those of
 [Read a native document](#read-a-native-document): a current human credential
@@ -2406,8 +2406,8 @@ exactly the error `GET /document` gives it; for private output, everyone but
 its custodian gets the same `404` as for a missing document. Restricted members
 cannot export at all (`404`), not even private output they hold custody of.
 
-`format` must be `markdown` (or `md`); any other value returns 400 before the
-engine is contacted. Response: `200` with `Content-Type: text/markdown;
+`format` must be `markdown` (or `md`, the default) or `docx`; any other value
+returns 400 before the engine is contacted. Markdown response: `200` with `Content-Type: text/markdown;
 charset=utf-8`, `Content-Disposition: attachment; filename="<slug>.md"`,
 `X-Content-Type-Options: nosniff` and `Cache-Control: no-store`. Markdown
 covers headings, paragraphs, lists, checklists, quotes, simple tables, links,
@@ -2415,7 +2415,22 @@ bold, italic, strikethrough, inline code and fenced code blocks with their
 language; LaTeX, CSV and Markdown code blocks export as their source.
 Content Markdown cannot represent (for example a code block inside a table)
 returns `422` with code `unsupported_markdown` and a reason, never a file with
-parts missing. Statuses: 200 file; 400 unsupported format or selector; 401
+parts missing.
+
+Word response (`format=docx`): `200` with `Content-Type:
+application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+`Content-Disposition: attachment; filename="<slug>.docx"` and the same
+`nosniff`/`no-store` headers. The engine's formatter writes headings 1–3 as
+Word heading styles, bullet and numbered lists as Word numbering, checklists as
+paragraphs led by ☐/☑, quotes in a Quote style, simple tables as Word tables
+with header rows, links as external hyperlinks (never fetched), bold, italic,
+strikethrough, inline code and code blocks in code styles with tabs and line
+breaks kept; LaTeX, CSV and Markdown code blocks keep their source text. Block
+IDs, comments and history are not part of the file. Content Word cannot hold
+(lists nested deeper than nine levels, characters XML cannot carry) returns
+`422` with code `unmappable-content` and the reason; a package over 3 MiB
+returns `422` `docx_export_limit`. Schema 5 formatting is refused until the
+formatter maps it. Statuses: 200 file; 400 unsupported format or selector; 401
 invalid credential; 403 missing access/scope; 404 unavailable Page/document;
 409 incompatible content; 422 not representable; 500 storage failure; 502
 invalid engine response; 503 disabled or unavailable service. CLI:

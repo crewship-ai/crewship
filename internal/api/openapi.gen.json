@@ -149028,7 +149028,7 @@
     },
     "/api/v1/pages/{slug}/document/export": {
       "get": {
-        "description": "Download the confirmed native document as one UTF-8 Markdown file. Access is decided exactly as for Get document state: the engine reads the state with the caller's own credentials, private output is visible only to its custodian (everyone else gets the same 404 as a missing document) and restricted members are denied. Content Markdown cannot express, such as a code block inside a table, returns 422 instead of a lossy file.",
+        "description": "Download the confirmed native document as one UTF-8 Markdown file or, with format=docx, one Word (.docx) package. Access is decided exactly as for Get document state: the engine reads the state with the caller's own credentials, private output is visible only to its custodian (everyone else gets the same 404 as a missing document) and restricted members are denied. Content the chosen format cannot express (Markdown: a code block inside a table; Word: lists nested deeper than nine levels) returns 422 with the reason instead of a lossy file.",
         "operationId": "get_api_v1_pages_slug_document_export",
         "parameters": [
           {
@@ -149049,14 +149049,15 @@
             }
           },
           {
-            "description": "Export format. Only Markdown exists; omitted means markdown.",
+            "description": "Export format: markdown (or md) or docx; omitted means markdown.",
             "in": "query",
             "name": "format",
             "required": false,
             "schema": {
               "enum": [
                 "markdown",
-                "md"
+                "md",
+                "docx"
               ],
               "type": "string"
             }
@@ -149065,9 +149066,17 @@
         "responses": {
           "200": {
             "content": {
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+                "schema": {
+                  "description": "The confirmed document as one attachment named after the page slug: UTF-8 Markdown (format=markdown) or a Word package (format=docx, at most 3 MiB), produced by the docs engine from the same state GET /document reads.",
+                  "format": "binary",
+                  "type": "string"
+                }
+              },
               "text/markdown": {
                 "schema": {
-                  "description": "UTF-8 Markdown of the confirmed document, produced by the docs engine from the same state GET /document reads. Delivered as an attachment named after the page slug.",
+                  "description": "The confirmed document as one attachment named after the page slug: UTF-8 Markdown (format=markdown) or a Word package (format=docx, at most 3 MiB), produced by the docs engine from the same state GET /document reads.",
+                  "format": "binary",
                   "type": "string"
                 }
               }
@@ -149266,7 +149275,7 @@
             "secureSessionCookie": []
           }
         ],
-        "summary": "Export Docs as Markdown",
+        "summary": "Export Docs as Markdown or Word",
         "tags": [
           "pages"
         ],

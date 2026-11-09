@@ -3,6 +3,7 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -169,8 +170,31 @@ func TestAcceptance_DocumentExportBinary(t *testing.T) {
 	if out := require(reader, "", "doc", "export", "export-notes", "-o", "-"); string(out) != want {
 		t.Fatalf("reader export to stdout: %q", out)
 	}
-	if out := failure(owner, "doc", "export", "export-notes", "--as", "docx"); !strings.Contains(out, "--as must be md") {
+	if out := failure(owner, "doc", "export", "export-notes", "--as", "pdf"); !strings.Contains(out, "--as must be md or docx") {
 		t.Fatalf("unsupported format: %s", out)
+	}
+	// Word: the same read, delivered as a .docx package the CLI writes intact.
+	var docxReceipt struct {
+		Path      string `json:"path"`
+		MediaType string `json:"media_type"`
+		SHA256    string `json:"sha256"`
+	}
+	if raw := require(reader, "", "doc", "export", "export-notes", "--as", "docx"); json.Unmarshal(raw, &docxReceipt) != nil || docxReceipt.Path != "export-notes.docx" || docxReceipt.MediaType != "application/vnd.openxmlformats-officedocument.wordprocessingml.document" {
+		t.Fatalf("docx receipt: %s", raw)
+	}
+	docx, err := os.ReadFile(filepath.Join(work, "export-notes.docx"))
+	docxSum := sha256.Sum256(docx)
+	if err != nil || docxReceipt.SHA256 != hex.EncodeToString(docxSum[:]) {
+		t.Fatalf("docx file (%v) receipt %+v", err, docxReceipt)
+	}
+	archive, err := zip.NewReader(bytes.NewReader(docx), int64(len(docx)))
+	if err != nil || len(archive.File) != 1 || archive.File[0].Name != "word/document.xml" {
+		t.Fatalf("exported docx does not open: %v", err)
+	}
+	part, err := archive.File[0].Open()
+	body, _ := io.ReadAll(part)
+	if err != nil || !strings.Contains(string(body), "<w:t>"+strings.TrimSuffix(want, "\n")+"</w:t>") {
+		t.Fatalf("exported docx text: %s (%v)", body, err)
 	}
 	// Export never reaches further than read: a member without a grant fails
 	// with exactly the status doc read gives it, and without content.
@@ -196,9 +220,11 @@ func TestAcceptance_DocumentExportBinary(t *testing.T) {
 	}
 	missing := failure(outsider, "doc", "export", "no-such-document")
 	for name, cfg := range map[string]string{"outsider": outsider, "reader": reader} {
-		out := failure(cfg, "doc", "export", "export-notes")
-		if status(out) != "404" || status(missing) != "404" || strings.Contains(out, "stays") || strings.Contains(out, page.ID) {
-			t.Fatalf("%s export of private output must look missing: %s (missing: %s)", name, out, missing)
+		for _, as := range []string{"md", "docx"} {
+			out := failure(cfg, "doc", "export", "export-notes", "--as", as, "-o", "-")
+			if status(out) != "404" || status(missing) != "404" || strings.Contains(out, "stays") || strings.Contains(out, page.ID) {
+				t.Fatalf("%s %s export of private output must look missing: %s (missing: %s)", name, as, out, missing)
+			}
 		}
 	}
 	if out := require(owner, "", "doc", "export", "export-notes", "-o", "-"); string(out) != want {
@@ -238,7 +264,10 @@ func (e *exportBinaryEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		e.human.ServeHTTP(w, r)
 		return
 	}
-	_, _ = io.Copy(io.Discard, io.LimitReader(r.Body, 1<<16))
+	var request struct {
+		Format string `json:"format"`
+	}
+	_ = json.NewDecoder(io.LimitReader(r.Body, 1<<16)).Decode(&request)
 	state, status, err := e.human.call(r.Context(), r.Header.Get("Authorization"), r.Header.Get("X-Workspace-ID"), parts[2], "state", map[string]any{})
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
@@ -262,5 +291,16 @@ func (e *exportBinaryEngine) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	e.exports++
-	_ = json.NewEncoder(w).Encode(map[string]any{"markdown": doc.Content[0].Content[0].Text + "\n"})
+	text := doc.Content[0].Content[0].Text
+	if request.Format == "docx" {
+		// A minimal Word package, the shape the managed formatter returns.
+		var buf bytes.Buffer
+		zw := zip.NewWriter(&buf)
+		part, _ := zw.Create("word/document.xml")
+		_, _ = fmt.Fprintf(part, `<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>%s</w:t></w:r></w:p></w:body></w:document>`, text)
+		_ = zw.Close()
+		_ = json.NewEncoder(w).Encode(map[string]any{"docx": base64.StdEncoding.EncodeToString(buf.Bytes())})
+		return
+	}
+	_ = json.NewEncoder(w).Encode(map[string]any{"markdown": text + "\n"})
 }

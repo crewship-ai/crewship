@@ -6,10 +6,14 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
-import { VERSION, RICH_VERSION, LATEST_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown } from './schema.mjs';
+import { VERSION, RICH_VERSION, LATEST_VERSION, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown, validateJSON } from './schema.mjs';
+import { createDocumentDOCXExporter, DocxExportError } from './docx-export.mjs';
 import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
+const exportDOCX = createDocumentDOCXExporter(validateJSON);
+// The Go client reads at most 4 MiB of engine reply; base64 grows by a third.
+const MAX_DOCX_BYTES = 3 << 20;
 const fault = (status, message,code) => Object.assign(new Error(message), { status,...(code?{code}:{}) });
 const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(value);
 // Offsets are ProseMirror/JavaScript UTF-16 positions. Do not admit a range
@@ -86,7 +90,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   for (const path of [socket, authoritySocket, tokenFile]) if (!isAbsolute(path) || normalize(path) !== path || Buffer.byteLength(path) > 100) throw new Error('clean absolute Unix socket path required (maximum 100 bytes)');
   const secret = await readServiceSecret(tokenFile);
   const build = createHash('sha256');
-  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'position-migrations.mjs', 'service.mjs', 'create-document.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
+  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'position-migrations.mjs', 'service.mjs', 'create-document.mjs', 'docx-export.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
   const identity = { protocol: PROTOCOL, schema: LATEST_VERSION, build: build.digest('hex') };
   const leases = new Map();
   const owner = randomUUID();const syncEpoch=state=>`${state.incarnation??"legacy"}:${owner}:${state.generation??state.epoch}`; const documents = new Map(); let queued = 0; let draining = false;let ready=false;let admitted=0;const decoding=new Set();
@@ -164,7 +168,18 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         if (!Number.isSafeInteger(request.base_rev) || request.base_rev !== state.rev) throw fault(409, 'document request revision changed');
         return { page_id: page, rev: state.rev, ...(richSchema(version) ? {schema:version} : {}), targets: await verifyTargets(doc, request.targets,version) };
       }
-      if(operation==='export') { try { return {markdown:markdown(validate(doc,version),version)}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; } }
+      if(operation==='export') {
+        // Formats are a closed set; Markdown stays the default of an empty request.
+        // Like every read, other body fields are ignored rather than interpreted.
+        if (!request || typeof request !== 'object' || Array.isArray(request) || ![undefined, 'markdown', 'docx'].includes(request.format)) throw fault(400, 'export format must be markdown or docx');
+        if (request.format === 'docx') {
+          let bytes;
+          try { ({ bytes } = exportDOCX(validate(doc,version), version)); } catch (error) { if (error instanceof DocxExportError) throw fault(422, `${error.message} (${error.path})`, error.code); throw error; }
+          if (bytes.length > MAX_DOCX_BYTES) throw fault(422, 'DOCX export exceeds the 3 MiB delivery limit', 'docx_export_limit');
+          return { docx: Buffer.from(bytes).toString('base64') };
+        }
+        try { return {markdown:markdown(validate(doc,version),version)}; } catch (error) { if (error.code === 'unsupported_markdown') throw fault(422,error.message,error.code); throw error; }
+      }
       if(operation==='checkpoints') return {checkpoints:await go(page,'checkpoints',context)};
       if(operation==='checkpoint-read') { const c=await go(page,'checkpoint-read',context,{id:request.checkpoint});const pinned=load(c.snapshot);try{return {...c,content:validate(pinned,contentSchema(c.schema??VERSION)),outline:await outline(pinned,contentSchema(c.schema??VERSION))}}finally{pinned.destroy()} };
       if (operation === 'comments') {

@@ -27,7 +27,7 @@ func (r *Router) registerDocumentRoutes() {
 	r.mux.Handle("GET /api/v1/chats/{chatId}/document-results", authed(wsCtx(http.HandlerFunc(p.ListChatDocumentResults))))
 	// openapi: responses 200,400,401,403,404,409,413,422,500,502,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/document", authed(wsCtx(http.HandlerFunc(p.GetDocument))))
-	// Markdown download of the confirmed document; same read authority as GET /document.
+	// Markdown or DOCX download of the confirmed document; same read authority as GET /document.
 	// openapi: responses 200,400,401,403,404,409,422,429,500,502,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/document/export", authed(wsCtx(http.HandlerFunc(p.GetDocument))))
 	// openapi: responses 200,400,401,403,404,409,429,500,502,503

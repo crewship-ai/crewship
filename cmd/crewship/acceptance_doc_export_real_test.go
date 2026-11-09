@@ -3,9 +3,12 @@
 package main
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"encoding/xml"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -181,6 +184,42 @@ func TestAcceptance_DocumentExportRealEngine(t *testing.T) {
 	if strings.Contains(markdown, "<b>first") {
 		t.Errorf("raw HTML from text reached the Markdown unescaped:\n%s", markdown)
 	}
+	// Word: the same document through the engine's formatter, opened as a
+	// package and read back paragraph by paragraph.
+	require("", "doc", "export", "export-real", "--as", "docx")
+	docx, err := os.ReadFile(filepath.Join(work, "export-real.docx"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence := os.Getenv("TEST_DOCUMENT_EXPORT_EVIDENCE_DIR"); evidence != "" {
+		if err := os.WriteFile(filepath.Join(evidence, "export-real.docx"), docx, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	paragraphs, tables := docxParagraphs(t, docx)
+	has := func(style, text string) bool {
+		for _, p := range paragraphs {
+			if p.style == style && p.text == text {
+				return true
+			}
+		}
+		return false
+	}
+	for _, want := range []struct{ style, text string }{
+		{"Heading1", "Launch notes"},
+		{"", "Ship only partners <b>first</b>."},
+		{"", "Owner"}, {"", "Share"}, {"", "Jana"}, {"", "40 %"},
+		{"CodeBlock", "def f():\n\treturn 1  \n"},
+		{"CodeBlock", `e^{i\pi} + 1 = 0`},
+		{"", "\u2611 Legal review"},
+	} {
+		if !has(want.style, want.text) {
+			t.Errorf("exported DOCX lacks %s paragraph %q: %+v", want.style, want.text, paragraphs)
+		}
+	}
+	if tables != 1 || !bytes.Contains(docx, []byte("PK\x03\x04")) {
+		t.Errorf("exported DOCX tables=%d", tables)
+	}
 	// What Markdown cannot represent is refused with its reason, not dropped.
 	created = require(strings.Replace(emptyDocPage, "slug: human-document", "slug: export-unmappable", 1), "page", "create", "--allow-empty", "--file", "-")
 	if json.Unmarshal(created, &page) != nil || page.ID == "" {
@@ -205,4 +244,94 @@ func TestAcceptance_DocumentExportRealEngine(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(work, "export-unmappable.md")); err == nil {
 		t.Fatal("a refused export wrote a file")
 	}
+	// Word holds a code block inside a table, so that format still works.
+	require("", "doc", "export", "export-unmappable", "--as", "docx")
+	if paragraphs, tables := docxParagraphs(t, mustRead(t, filepath.Join(work, "export-unmappable.docx"))); tables != 1 || len(paragraphs) == 0 || paragraphs[0].style != "CodeBlock" || paragraphs[0].text != "x := 1" {
+		t.Fatalf("code block in a table as DOCX: tables=%d %+v", tables, paragraphs)
+	}
+}
+
+type docxParagraph struct{ style, text string }
+
+// docxParagraphs opens a .docx package and returns word/document.xml as
+// paragraphs (style and text, tabs and breaks as \t and \n) plus the number
+// of tables, so tests check what Word would show rather than raw bytes.
+func docxParagraphs(t *testing.T, docx []byte) ([]docxParagraph, int) {
+	t.Helper()
+	archive, err := zip.NewReader(bytes.NewReader(docx), int64(len(docx)))
+	if err != nil {
+		t.Fatalf("DOCX does not open as a package: %v", err)
+	}
+	var document []byte
+	for _, f := range archive.File {
+		if f.Name == "word/document.xml" {
+			r, err := f.Open()
+			if err != nil {
+				t.Fatal(err)
+			}
+			document, _ = io.ReadAll(r)
+			r.Close()
+		}
+	}
+	if document == nil {
+		t.Fatal("DOCX has no word/document.xml")
+	}
+	decoder := xml.NewDecoder(bytes.NewReader(document))
+	var out []docxParagraph
+	var current *docxParagraph
+	tables, inText := 0, false
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("word/document.xml is not well-formed: %v", err)
+		}
+		switch v := token.(type) {
+		case xml.StartElement:
+			switch v.Name.Local {
+			case "tbl":
+				tables++
+			case "p":
+				current = &docxParagraph{}
+			case "pStyle":
+				for _, a := range v.Attr {
+					if a.Name.Local == "val" && current != nil {
+						current.style = a.Value
+					}
+				}
+			case "t":
+				inText = true
+			case "tab":
+				current.text += "\t"
+			case "br":
+				current.text += "\n"
+			}
+		case xml.EndElement:
+			switch v.Name.Local {
+			case "t":
+				inText = false
+			case "p":
+				if current != nil {
+					out = append(out, *current)
+				}
+				current = nil
+			}
+		case xml.CharData:
+			if inText && current != nil {
+				current.text += string(v)
+			}
+		}
+	}
+	return out, tables
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }

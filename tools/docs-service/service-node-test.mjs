@@ -709,7 +709,7 @@ test('authoring adapter bytes change the copied service build identity', async (
   const dir=await mkdtemp(join(tmpdir(),'docs-build-'));
   let f, service;
   try {
-    for(const file of ['pnpm-lock.yaml','schema.mjs','schema-core.mjs','position-migrations.mjs','service.mjs','create-document.mjs','secret.mjs'])await copyFile(new URL(file,import.meta.url),join(dir,file));
+    for(const file of ['pnpm-lock.yaml','schema.mjs','schema-core.mjs','position-migrations.mjs','service.mjs','create-document.mjs','docx-export.mjs','secret.mjs'])await copyFile(new URL(file,import.meta.url),join(dir,file));
     await symlink(fileURLToPath(new URL('node_modules',import.meta.url)),join(dir,'node_modules'),'dir');
     const {startService:copiedStart}=await import(pathToFileURL(join(dir,'service.mjs')).href);
     f=await fixture(authorityModel().handle);
@@ -727,6 +727,11 @@ test('authoring adapter bytes change the copied service build identity', async (
     await appendFile(join(dir,'position-migrations.mjs'),'\n// copied migration validator identity change\n');
     service=await start();
     assert.notEqual(service.identity.build,authored,'migration validator changes must invalidate service identity');
+    const migrated=service.identity.build;
+    await service.close(); service=undefined;
+    await appendFile(join(dir,'docx-export.mjs'),'\n// copied export formatter identity change\n');
+    service=await start();
+    assert.notEqual(service.identity.build,migrated,'export formatter changes must invalidate service identity');
   } finally {
     try {if(service)await service.close()} finally {try {if(f)await f.close()} finally {await rm(dir,{recursive:true})}}
   }
@@ -832,6 +837,49 @@ test('schema4 initialize is human-only, Page-bound and exports formatting to Mar
     assert.equal(state.schema, 4); assert.deepEqual(state.content, body);
     const exported = await call(f.socket, '/v1/documents/p/export', {});
     assert.equal(exported.body.markdown, '**bold**\n\n```go\nx := 1\n```\n');
+  } finally { await f.close(); }
+});
+
+test('export format docx returns the formatter package of the confirmed state, refuses what Word cannot hold', async () => {
+  const model = authorityModel();
+  const t = (text, marks) => ({ type: 'text', text, ...(marks ? { marks } : {}) });
+  const cell = (type, id, text) => ({ type, attrs: { id, colspan: 1, rowspan: 1, colwidth: null }, content: [{ type: 'paragraph', attrs: { id: `${id}p` }, content: [t(text)] }] });
+  const body = { type: 'doc', content: [
+    { type: 'heading', attrs: { id: 'h', level: 1 }, content: [t('Launch notes')] },
+    { type: 'paragraph', attrs: { id: 'p' }, content: [t('Ship '), t('only', [{ type: 'bold', attrs: {} }]), t(' <b>first</b>')] },
+    { type: 'table', attrs: { id: 't' }, content: [{ type: 'tableRow', attrs: { id: 'r1' }, content: [cell('tableHeader', 'a', 'Owner'), cell('tableHeader', 'b', 'Share')] }, { type: 'tableRow', attrs: { id: 'r2' }, content: [cell('tableCell', 'c', 'Jana'), cell('tableCell', 'd', '40 %')] }] },
+    { type: 'codeBlock', attrs: { id: 'py', language: 'python' }, content: [t('def f():\n\treturn 1')] },
+    { type: 'codeBlock', attrs: { id: 'tex', language: 'latex' }, content: [t('e^{i\\pi} + 1 = 0')] },
+  ] };
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'initialize') { model.state = { ...model.state, schema: data.schema, snapshot: data.snapshot, rev: 0 }; return model.state; }
+    return model.handle(op, data, req, res);
+  });
+  try {
+    await f.start();
+    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-docx', schema: 4, page_id: 'p', body })).status, 200);
+    const exported = await call(f.socket, '/v1/documents/p/export', { format: 'docx' });
+    assert.equal(exported.status, 200);
+    assert.deepEqual(Object.keys(exported.body).sort(), ['docx']);
+    const bytes = Buffer.from(exported.body.docx, 'base64');
+    assert.equal(bytes.subarray(0, 4).toString('latin1'), 'PK\x03\x04');
+    const { unzipSync, strFromU8 } = await import('fflate');
+    const xml = strFromU8(unzipSync(new Uint8Array(bytes))['word/document.xml']);
+    assert.match(xml, /<w:pStyle w:val="Heading1"\/><\/w:pPr><w:r><w:t xml:space="preserve">Launch notes<\/w:t>/);
+    assert.match(xml, /<w:b\/><\/w:rPr><w:t xml:space="preserve">only</);
+    assert.match(xml, /&lt;b&gt;first&lt;\/b&gt;/);
+    assert.equal((xml.match(/<w:tr>/g) || []).length, 2);
+    assert.match(xml, /<w:pStyle w:val="CodeBlock"\/><\/w:pPr><w:r><w:t xml:space="preserve">def f\(\):<\/w:t><w:br\/><w:tab\/><w:t xml:space="preserve">return 1</);
+    assert.match(xml, /e\^\{i\\pi\} \+ 1 = 0/);
+    // The same read authority: Markdown stays the default.
+    assert.equal(typeof (await call(f.socket, '/v1/documents/p/export', {})).body.markdown, 'string');
+    for (const request of [{ format: 'pdf' }, { format: 'DOCX' }, { format: 1 }, []]) assert.equal((await call(f.socket, '/v1/documents/p/export', request)).status, 400);
+    // Ten nested lists have no Word mapping: an explicit 422, never a partial file.
+    let nested = { type: 'bulletList', attrs: { id: 'l9' }, content: [{ type: 'listItem', attrs: { id: 'i9' }, content: [{ type: 'paragraph', attrs: { id: 'q9' }, content: [t('deep')] }] }] };
+    for (let level = 8; level >= 0; level--) nested = { type: 'bulletList', attrs: { id: `l${level}` }, content: [{ type: 'listItem', attrs: { id: `i${level}` }, content: [{ type: 'paragraph', attrs: { id: `q${level}` }, content: [t(String(level))] }, nested] }] };
+    model.state = { ...model.state, snapshot: snapshot(create({ type: 'doc', content: [nested] }, 4)), updates: [], rev: model.state.rev + 1 };
+    const refused = await call(f.socket, '/v1/documents/p/export', { format: 'docx' });
+    assert.equal(refused.status, 422); assert.equal(refused.body.code, 'unmappable-content'); assert.equal(refused.body.docx, undefined);
   } finally { await f.close(); }
 });
 

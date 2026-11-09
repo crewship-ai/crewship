@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"mime"
@@ -80,8 +81,8 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 		}
 	}
 	if !mutate && strings.HasSuffix(r.URL.Path, "/document/export") {
-		if format := r.URL.Query().Get("format"); format != "markdown" && format != "md" {
-			replyError(w, 400, "format must be markdown")
+		if format := r.URL.Query().Get("format"); format != "markdown" && format != "md" && format != "docx" {
+			replyError(w, 400, "format must be markdown or docx")
 			return
 		}
 	}
@@ -108,6 +109,10 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 		operation = "export"
 	}
 	var body any = map[string]any{}
+	exportDOCX := exporting && r.URL.Query().Get("format") == "docx"
+	if exportDOCX {
+		body = map[string]any{"format": "docx"}
+	}
 	if mutate {
 		operation = r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
 		if operation == "comments" {
@@ -147,6 +152,20 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 	var value map[string]any
 	if json.Unmarshal(raw, &value) != nil || value == nil {
 		replyError(w, 502, "invalid document engine response")
+		return
+	}
+	if exportDOCX {
+		encoded, ok := value["docx"].(string)
+		file, err := base64.StdEncoding.DecodeString(encoded)
+		if !ok || len(value) != 1 || err != nil || len(file) > documentDOCXExportBytes || !bytes.HasPrefix(file, []byte("PK\x03\x04")) {
+			replyError(w, 502, "invalid document engine response")
+			return
+		}
+		w.Header().Set("Content-Type", documentDOCXMediaType)
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": documentExportFilename(rec.Slug, "docx")}))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(200)
+		_, _ = w.Write(file)
 		return
 	}
 	if exporting {
@@ -191,6 +210,11 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 	}
 	writeJSON(w, 200, value)
 }
+
+// The engine's DOCX delivery limit; its base64 reply must fit the 4 MiB read.
+const documentDOCXExportBytes = 3 << 20
+
+const documentDOCXMediaType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
 // documentExportFilename names a download after the artifact slug, reduced to
 // a safe ASCII file name.
