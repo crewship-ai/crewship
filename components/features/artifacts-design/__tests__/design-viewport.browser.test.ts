@@ -355,6 +355,12 @@ describe.skipIf(!ready)("Design canvas viewport in Chromium", () => {
   await drag(page, { x: box.x + 10, y: box.y + 10 }, { x: 80, y: 40 }, "right")
   expect(await layers()).toEqual(resized)
   expect((await viewOf(page)).x).not.toBe(view.x)
+  // A plain click on one of them selects just that layer.
+  const one = await cta(page)
+  await page.mouse.click(one.x + 10, one.y + 10)
+  await expect.poll(() => page.locator("[data-design-group]").count()).toBe(0)
+  expect(await selectedOutline(page)).toBe(1)
+  expect(await layers()).toEqual(resized)
   await page.close()
  })
 

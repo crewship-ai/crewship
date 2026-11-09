@@ -138,7 +138,6 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const liveSelection = design.editable && !version
  const shareSelection = useRef(design.setSelection); shareSelection.current = design.setSelection
  const chosenKey = chosen.join("\n")
- useEffect(() => { shareSelection.current?.(liveSelection && chosenKey ? chosenKey.split("\n") : []) }, [chosenKey, liveSelection])
  const frames = design.nodes.filter(node => node.type === "frame")
  const selectedFrame = selected?.type === "frame" ? selected.id : selected?.parentId
  const position = (node: DesignNode, seen = new Set<string>()): { x: number; y: number } => {
@@ -230,7 +229,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   | { kind: "move"; pointerId: number; start: Point; id: string; x: number; y: number; moved: boolean; touch: boolean }
   | { kind: "resize"; pointerId: number; start: Point; id: string; handle: ResizeHandle; box: DesignBox; moved: boolean; touch: boolean }
   // Several selected layers move or resize together; `nodes` is the canvas when the drag began.
-  | { kind: "group"; pointerId: number; start: Point; ids: string[]; nodes: DesignNode[]; moved: boolean; touch: boolean }
+  | { kind: "group"; pointerId: number; start: Point; ids: string[]; nodes: DesignNode[]; moved: boolean; touch: boolean; tapNode: string }
   | { kind: "group-resize"; pointerId: number; start: Point; ids: string[]; nodes: DesignNode[]; handle: ResizeHandle; box: DesignBox; moved: boolean; touch: boolean }
   // A left drag on the empty canvas selects the layers wholly inside it (Shift: adds to the selection).
   | { kind: "marquee"; pointerId: number; start: Point; base: string[]; additive: boolean; moved: boolean; touch: boolean }
@@ -239,6 +238,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   | { kind: "spent" }
  const gesture = useRef<Gesture | null>(null)
  const [marquee, setMarquee] = useState<{ a: Point; b: Point } | null>(null)
+ // While a marquee is drawn the selection changes on every move; peers get the result when it ends.
+ const marqueeOpen = marquee !== null
+ useEffect(() => { if (!marqueeOpen) shareSelection.current?.(liveSelection && chosenKey ? chosenKey.split("\n") : []) }, [chosenKey, liveSelection, marqueeOpen])
  /** Writes several layers in one change, so peers and undo see one step. */
  const writeAll = (patches: (Partial<DesignNode> & { id: string })[]) => {
   const doc = design.doc
@@ -341,7 +343,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   // Dragging one of several selected layers moves them all.
   if (node && intent === "move" && many && chosen.includes(node.id)) {
    viewport.current?.focus({ preventScroll: true })
-   gesture.current = { kind: "group", pointerId: event.pointerId, start: at, ids: chosen, nodes: design.nodes, moved: false, touch: event.pointerType === "touch" }
+   gesture.current = { kind: "group", pointerId: event.pointerId, start: at, ids: chosen, nodes: design.nodes, moved: false, touch: event.pointerType === "touch", tapNode: node.id }
    capture(event)
    return
   }
@@ -398,6 +400,8 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   if (current.kind === "pan" && current.button === 2 && current.moved) menuAfterPan.current = Date.now()
   // A click on the empty canvas clears the selection; a drawn marquee keeps what it holds.
   if (current.kind === "marquee") { setMarquee(null); if (!current.moved && !current.additive) setSelectedId(null) }
+  // A plain click on one of several selected layers selects just that layer.
+  if (current.kind === "group" && !current.moved) { const node = design.nodes.find(item => item.id === current.tapNode); if (node) selectNode(node) }
   // A tap with a finger selects or clears like a click; a right or middle click changes nothing.
   if (current.kind === "pan" && current.touch && !current.moved) {
    const node = current.tapNode ? design.nodes.find(item => item.id === current.tapNode) : undefined
@@ -689,7 +693,11 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   </div> : many ? <div className="space-y-3">
    <p className="text-sm">{chosen.length} layers selected</p>
    <p className="text-xs text-muted-foreground">Drag one of them, its handles or the arrow keys to move or resize them together. Escape clears the selection.</p>
-   {canChange && <Button variant="ghost" className="w-full text-destructive" onClick={() => { const doc = design.doc; if (doc) doc.transact(() => { for (const id of selectionRoots(design.nodes, chosen)) removeDesignNode(doc, id) }, "editor"); setSelectedId(null) }}><Trash2 className="size-4" />Delete {chosen.length} layers</Button>}
+   {canChange && (() => {
+    // The same as Delete on the keyboard: the selected layers go, screens stay.
+    const layers = chosen.filter(id => design.nodes.find(node => node.id === id)?.type !== "frame")
+    return layers.length > 0 && <Button variant="ghost" className="w-full text-destructive" onClick={() => { const doc = design.doc; if (doc) doc.transact(() => { for (const id of layers) removeDesignNode(doc, id) }, "editor"); setSelectedIds(chosen.filter(id => !layers.includes(id))) }}><Trash2 className="size-4" />Delete {layers.length} {layers.length === 1 ? "layer" : "layers"}</Button>
+   })()}
   </div> : <p className="text-sm text-muted-foreground">Select a screen or layer to see its properties.{canChange && " Add your first screen using the toolbar."}</p>}
  </>
  const composer = (label: string) => <div className="mb-4 space-y-2">
