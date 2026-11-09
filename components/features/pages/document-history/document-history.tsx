@@ -7,6 +7,7 @@ import { documentSurface } from "@/lib/documents/surface"
 import { DocumentCompare } from "./document-compare"
 import { HistoryActions } from "./history-actions"
 import { DocumentReadonly } from "../document-readonly/document-readonly"
+import { documentActorName } from "@/lib/documents/actor-name"
 import type { DocumentHistoryProps, DocumentCheckpointSnapshot } from "./types"
 export type { DocumentHistoryProps } from "./types"
 
@@ -23,7 +24,9 @@ function ConfirmedContent({ snapshot }: { snapshot: DocumentCheckpointSnapshot }
   return <DocumentReadonly schema={snapshot.schema} content={snapshot.content} accessibleLabel={`Confirmed revision ${snapshot.rev}`} />
 }
 
-export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, onSelect, onClose, restore, review, headSchema }: DocumentHistoryProps) {
+const describeActor = (actor: string) => documentActorName(actor, {})
+
+export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, onSelect, onClose, restore, review, headRev, actorName = describeActor, headSchema }: DocumentHistoryProps) {
   const [confirmation, setConfirmation] = useState<string>()
   const [comparing, setComparing] = useState<string>()
   // The caller must invalidate scope on current-human/workspace/Page/auth changes.
@@ -31,6 +34,9 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
   const denied = list.status === "denied" || snapshot.status === "denied"
   const admitted = Boolean(pageId && scopeKey) && !denied && list.status === "ready" && list.scopeKey === scopeKey
   const checkpoints = admitted ? list.data.checkpoints : []
+  const current = typeof headRev === "number" && Number.isSafeInteger(headRev) && headRev >= 0 ? headRev : undefined
+  // The saved head is not always a checkpoint; show it so History never looks older than the document.
+  const headListed = current !== undefined && checkpoints.some(checkpoint => checkpoint.rev === current)
   const selected = checkpoints.find(checkpoint => checkpoint.id === selectedId)
   const read = snapshot.status === "ready" && snapshot.scopeKey === scopeKey ? snapshot.data : undefined
   const exact = selected && read && read.page_id === pageId && read.id === selected.id && read.rev === selected.rev && read.schema === selected.schema
@@ -62,13 +68,18 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
       <Button onClick={() => setConfirmation(undefined)}>Cancel restore</Button>
     </div>}
     {listMessage ? <p role={denied || list.status === "error" ? "alert" : "status"}>{listMessage}</p> : <>
-      {checkpoints.length === 0 ? <p>No checkpoints yet.</p> : <ul aria-label="Confirmed checkpoints" className="max-h-72 space-y-2 overflow-y-auto">
+      {checkpoints.length === 0 && current === undefined ? <p>No checkpoints yet.</p> : <ul aria-label="Confirmed checkpoints" className="max-h-72 space-y-2 overflow-y-auto">
+        {current !== undefined && !headListed && <li className="rounded-md border border-dashed p-3 text-sm">
+          <span className="font-medium">Current version</span> · <span>Revision {current}</span>
+          <p className="text-muted-foreground">The saved document. Earlier revisions below can be compared or restored.</p>
+        </li>}
         {checkpoints.map(checkpoint => <li key={checkpoint.id}>
           <Button type="button" variant="outline" aria-pressed={checkpoint.id === selectedId}
             className="h-auto coarse:min-h-[44px] w-full flex-wrap justify-start whitespace-normal break-all p-3 text-left"
             onClick={() => onSelect(checkpoint.id)}>
             <span>Revision {checkpoint.rev}</span>
-            <span className="font-normal">{checkpoint.actor}</span>
+            {checkpoint.rev === current && <span className="font-normal">Current version</span>}
+            <span className="font-normal">{actorName(checkpoint.actor)}</span>
             <time dateTime={checkpoint.created_at} className="font-normal">{when(checkpoint.created_at)}</time>
             {!supported(checkpoint.schema) && <span>Unsupported schema</span>}
           </Button>
