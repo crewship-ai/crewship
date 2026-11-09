@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import { EditorContent, useEditorState } from "@tiptap/react"
-import { Download, FileText, History, ListTree, MessageSquare, PanelLeft, X } from "lucide-react"
+import { Download, FileText, History, LayoutGrid, ListTree, MessageSquare, PanelLeft, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { durabilityLabel, DocumentSaveState } from "@/components/features/pages/document-save-state"
@@ -14,6 +14,8 @@ import type { LibraryItem } from "../../library-items"
 import { docsFrameStatus, outlineOf, readingStats, readingText, type DocNode, type OutlineEntry } from "./docs-model"
 import { DocsTools } from "./docs-tools"
 import { DocsComments } from "./docs-comments"
+import { DocsCanvas } from "./docs-canvas"
+import { documentSurface } from "@/lib/documents/surface"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
 import { commentTarget, setCommentHighlights, type CommentTarget } from "@/components/features/pages/document-rich-extensions"
@@ -114,6 +116,25 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   }
   const stats = summary?.stats ?? { words: 0, minutes: 0 }
 
+  // Canvas is a second view of the same Y.Doc (R71 §0.4), offered only at a schema that admits the surface.
+  // Older documents keep Page only; nothing upgrades them implicitly.
+  const canvasReady = Boolean(sync.state && !sync.denied && sync.state.schema >= documentSurface.CANVAS_SCHEMA)
+  const [mode, setMode] = React.useState<"page" | "canvas">("page")
+  const view = canvasReady ? mode : "page"
+  // The person's own transaction origin for Canvas writes: saved like every local change, never mixed with remote ones.
+  const canvasOrigin = React.useMemo(() => "canvas:" + crypto.randomUUID(), [])
+  const openInPage = (blockId: string) => {
+    setMode("page")
+    requestAnimationFrame(() => {
+      const target = [...(editor?.view.dom.querySelectorAll<HTMLElement>("[data-block-id]") ?? [])].find(node => node.dataset.blockId === blockId)
+      target?.scrollIntoView?.({ block: "center", behavior: "smooth" })
+    })
+  }
+  const openCanvasComments = (_block: string, threads: string[]) => {
+    setActiveThread(threads[0] ?? null)
+    frame?.openDrawer("comments")
+  }
+
   const editable = Boolean(sync.editable && !restoring && editor)
   const status = docsFrameStatus({
     hydrated: Boolean(sync.state), denied: sync.denied, available, restoring, status: sync.status, pending: sync.pending,
@@ -150,9 +171,18 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     if (phone) setOutlineOpen(false)
   }
 
-  return <section aria-label="Doc page" data-docs-page data-layout={layout} className={cn("touch-form min-h-full", outlineOpen && !phone && "pl-[256px]")}>
-    <article className={COLUMN}>
-      {banner}
+  const outlineShown = outlineOpen && view === "page"
+  const modeTab = (value: "page" | "canvas", Icon: typeof FileText, label: string) => <button type="button" role="tab" aria-selected={view === value}
+    onClick={() => setMode(value)} data-docs-mode={value}
+    className={cn("inline-flex h-[30px] items-center gap-1.5 rounded-[var(--radius-row)] px-2.5 text-sm font-medium coarse:min-h-[44px]",
+      view === value ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}>
+    <Icon aria-hidden className="size-4" />{label}
+  </button>
+
+  return <section aria-label="Doc page" data-docs-page data-layout={layout} data-docs-view={view} className={cn("touch-form min-h-full", outlineShown && !phone && "pl-[256px]")}>
+    {/* The Page editor stays mounted under Canvas, so unsent edits and its undo history are never unmounted. */}
+    <article className={COLUMN} hidden={view !== "page"}>
+      {view === "page" && banner}
       {/* The frame names the artifact and its Info drawer the owner and folder (Harbor 2 v87 Docs): the column starts with the document. */}
       {/* The chip is a button; this stays the one live region that announces save state. */}
       <div className="sr-only">
@@ -166,18 +196,25 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
       </>}
     </article>
 
+    {view === "canvas" && <div className="h-[calc(100dvh-8rem)] min-h-[480px] w-full px-2 pb-16 pt-14 md:px-4 md:pb-4">
+      {banner}
+      <DocsCanvas doc={sync.doc} editable={editable} origin={canvasOrigin} onOpenInPage={openInPage}
+        comments={discussion?.comments} onOpenComments={discussion ? openCanvasComments : undefined} />
+    </div>}
+
     <ArtifactSlot name="view" label="View">
-      <ArtifactTool icon={PanelLeft} label={outlineOpen ? "Hide outline" : "Show outline"} on={outlineOpen} onClick={() => setOutlineOpen(open => !open)} />
-      <ArtifactToolSeparator />
-      {/* Page is the only mode with a backend; Canvas stays hidden until it has one. */}
+      {view === "page" && <>
+        <ArtifactTool icon={PanelLeft} label={outlineOpen ? "Hide outline" : "Show outline"} on={outlineOpen} onClick={() => setOutlineOpen(open => !open)} />
+        <ArtifactToolSeparator />
+      </>}
+      {/* Canvas shows only for documents whose schema admits the surface. */}
       <span role="tablist" aria-label="Mode" className="inline-flex">
-        <button type="button" role="tab" aria-selected="true" className="inline-flex h-[30px] items-center gap-1.5 rounded-[var(--radius-row)] bg-accent px-2.5 text-sm font-medium text-foreground coarse:min-h-[44px]">
-          <FileText aria-hidden className="size-4" />Page
-        </button>
+        {modeTab("page", FileText, "Page")}
+        {canvasReady && modeTab("canvas", LayoutGrid, "Canvas")}
       </span>
     </ArtifactSlot>
 
-    {outlineOpen && <ArtifactSlot name="panel" label="Outline">
+    {outlineShown && <ArtifactSlot name="panel" label="Outline">
       <div className="flex items-center gap-1 border-b py-1.5 pl-3 pr-1.5">
         <b className="flex-1 text-sm font-semibold">Outline</b>
         <ArtifactTool icon={X} label="Close outline" onClick={() => setOutlineOpen(false)} />
@@ -197,7 +234,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
       </nav>
     </ArtifactSlot>}
 
-    {editable && editor && sync.state && <DocsTools editor={editor} schema={sync.state.schema} onError={setActionError} onComment={discussion?.canComment ? startComment : undefined} />}
+    {view === "page" && editable && editor && sync.state && <DocsTools editor={editor} schema={sync.state.schema} onError={setActionError} onComment={discussion?.canComment ? startComment : undefined} />}
 
     <ArtifactSlot name="viewport" label="Reading">
       <span className="px-2 font-mono text-xs tabular-nums text-muted-foreground">{readingText(stats)}</span>

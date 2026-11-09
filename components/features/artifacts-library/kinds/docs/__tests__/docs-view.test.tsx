@@ -11,19 +11,19 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, describe, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import type { Editor } from "@tiptap/core"
-import { encodeUpdate } from "@/hooks/use-page-document"
+import { decodeUpdate, encodeUpdate } from "@/hooks/use-page-document"
 import { ArtifactFrame, NO_FRAME_CAPABILITIES, type FrameLayout } from "../../../frame"
 import type { LibraryItem } from "../../../library-items"
 import { DocsBody, type DocsFrameReport } from "../docs-view"
 
-const env = vi.hoisted(() => ({ available: true as boolean | undefined, canWrite: true, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang" }))
+const env = vi.hoisted(() => ({ available: true as boolean | undefined, canWrite: true, schema: 2, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang" }))
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: env.available, isPending: env.available === undefined }) }))
 vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/document-queue")>(), openDocumentDrafts: async () => ({ load: async () => env.drafts, put: async () => {}, remove: async () => {}, close: () => {}, exclusive: true }) }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "docs-human" } } }) }))
 
-afterEach(() => { cleanup(); request.mockReset(); env.available = true; env.canWrite = true; env.drafts = []; env.patch = "ok" })
+afterEach(() => { cleanup(); request.mockReset(); env.available = true; env.canWrite = true; env.schema = 2; env.drafts = []; env.patch = "ok" })
 
 const item: LibraryItem = {
   slug: "launch-notes", pageId: "page-docs", name: "Launch notes", kind: "word", family: "document", sharedVersion: null, native: false,
@@ -55,7 +55,7 @@ function serve() {
     }
     if (url.includes("/document/checkpoints")) return { ok: true, json: async () => ({ checkpoints: [] }) }
     if (url.includes("/proposals")) return { ok: true, json: async () => ({ proposals: [] }) }
-    return { ok: true, json: async () => ({ page_id: "page-docs", schema: 2, rev, epoch: "go:node:1", can_write: env.canWrite, snapshot }) }
+    return { ok: true, json: async () => ({ page_id: "page-docs", schema: env.schema, rev, epoch: "go:node:1", can_write: env.canWrite, snapshot }) }
   })
 }
 
@@ -95,7 +95,7 @@ describe("Docs in the ArtifactFrame", () => {
     expect(within(page).queryByText("Launch notes")).toBeNull()
     expect(within(page).queryByText(/owned by/)).toBeNull()
     expect(within(page).getAllByRole("heading", { level: 1 }).map(heading => heading.textContent)).toEqual(["Goal"])
-    // Page is the one mode; Canvas has no backend and is not offered.
+    // Below content schema 6 Page is the one mode; Canvas is not offered and nothing upgrades the document.
     const modes = within(slot("view")!).getByRole("tablist", { name: "Mode" })
     expect(within(modes).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Page"])
     expect(screen.queryByText("Canvas")).toBeNull()
@@ -115,6 +115,53 @@ describe("Docs in the ArtifactFrame", () => {
     const drawer = screen.getByRole("complementary", { name: "History" })
     expect(within(drawer).getByText("Restore creates a new version with this content. Later changes stay in History.")).toBeTruthy()
     expect(await within(drawer).findByText("No checkpoints yet.")).toBeTruthy()
+  })
+
+  it("offers Canvas at schema 6: the same document, a placement is saved as a patch, and the Page editor stays mounted", async () => {
+    serve()
+    env.schema = 6
+    open()
+    const editor = (await screen.findByLabelText("Document editor")) as HTMLElement & { editor: Editor }
+    await waitFor(() => expect(editor.editor.isEditable).toBe(true))
+    const modes = within(slot("view")!).getByRole("tablist", { name: "Mode" })
+    expect(within(modes).getAllByRole("tab").map(tab => tab.textContent)).toEqual(["Page", "Canvas"])
+    fireEvent.click(within(modes).getByRole("tab", { name: "Canvas" }))
+    const canvas = await screen.findByRole("application", { name: "Canvas" })
+    expect(document.querySelector("[data-docs-canvas]")!.getAttribute("data-editable")).toBe("true")
+    // Formatting and the outline belong to the Page; the editor is hidden, not unmounted.
+    expect(slot("tools")).toBeNull()
+    expect(slot("panel")).toBeNull()
+    expect(editor.closest("article")!.hidden).toBe(true)
+    fireEvent.click(screen.getByText("Add blocks (3)"))
+    fireEvent.click(screen.getByRole("button", { name: "Ship the agency offer on 2 December." }))
+    expect(canvas.querySelector('[data-placement="p1"]')).toBeTruthy()
+    await waitFor(() => expect(request.mock.calls.some(([url]) => String(url).includes("/document/patch"))).toBe(true), { timeout: 4000 })
+    const patch = request.mock.calls.find(([url]) => String(url).includes("/document/patch"))!
+    const body = JSON.parse(String(patch[1]?.body)) as { update: string; schema: number }
+    expect(body.schema).toBe(6)
+    const replica = new Y.Doc({ gc: false }); Y.applyUpdate(replica, decodeUpdate(body.update))
+    expect([...replica.getMap("surface:placements").keys()]).toEqual(["p1"])
+    replica.destroy()
+    // Back on the Page the same editor, its text unchanged by the placement.
+    fireEvent.click(within(modes).getByRole("tab", { name: "Page" }))
+    expect(screen.getByLabelText("Document editor")).toBe(editor)
+    expect(editor.textContent).toContain("Ship the agency offer on 2 December.")
+    expect(screen.queryByRole("application", { name: "Canvas" })).toBeNull()
+  })
+
+  it("lets a read-only person open Canvas to look around but not change it", async () => {
+    serve()
+    env.schema = 6
+    env.canWrite = false
+    open()
+    expect(await screen.findByRole("button", { name: "Status: Read-only" })).toBeTruthy()
+    fireEvent.click(within(slot("view")!).getByRole("tab", { name: "Canvas" }))
+    await screen.findByRole("application", { name: "Canvas" })
+    expect(document.querySelector("[data-docs-canvas]")!.getAttribute("data-editable")).toBe("false")
+    expect(screen.queryByText(/Add blocks/)).toBeNull()
+    expect(screen.queryByRole("button", { name: "Add note" })).toBeNull()
+    expect(screen.getByRole("button", { name: "Fit to screen" })).toBeTruthy()
+    expect(request.mock.calls.some(([url]) => String(url).includes("/document/patch"))).toBe(false)
   })
 
   it("stays on Saving… while the receipt has not arrived", async () => {
