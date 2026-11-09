@@ -165,7 +165,6 @@ type pageGrantRecord struct {
 // Unlike issuer standing it is not retired on loss: a row is inert while its
 // issuer does not own the page and live while they do. Crew ownership is read
 // exactly as isPageOwner reads it.
-
 const agentEditIssuerNotOwnerSQL = `(v.subject_type = 'agent' AND v.level = 'write' AND NOT EXISTS (
 		SELECT 1 FROM pages op
 		WHERE op.id = v.page_id AND (
