@@ -140,6 +140,20 @@ describe("canvas and Present", () => {
     fireEvent.keyDown(dialog, { key: "Escape" }); expect(screen.queryByRole("dialog")).toBeNull()
     expect(document.activeElement).toBe(opener)
   })
+  it("leaves Present on the slide it last showed (#5150)", () => {
+    render(<Editor />)
+    fireEvent.click(screen.getByRole("button", { name: "Present" }))
+    const dialog = screen.getByRole("dialog")
+    fireEvent.keyDown(dialog, { key: "ArrowRight" })
+    fireEvent.keyDown(dialog, { key: "Escape" })
+    expect(screen.getByRole("navigation", { name: "Slides" }).querySelector("[aria-current=true]")?.textContent).toBe("Slide 2")
+  })
+  it("reports every slide Present shows", () => {
+    const shown = vi.fn()
+    render(<SlidePresent deck={sample()} initialSlideId={sample().slide_order[0]} onClose={vi.fn()} onSlideChange={shown} />)
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "End" })
+    expect(shown.mock.calls.map(call => call[0])).toEqual(sample().slide_order)
+  })
   it("does not reinterpret an invalid presentation target", () => {
     render(<SlidePresent deck={sample()} initialSlideId="deleted" onClose={vi.fn()} />)
     expect(screen.getByRole("alert").textContent).toContain("unavailable")
