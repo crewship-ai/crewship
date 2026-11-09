@@ -22,7 +22,7 @@ vi.mock("../use-design", () => ({ useDesign: (_workspaceId: string, _slug: strin
   query: { data: { page_id: state.pageId, can_edit: state.editable, can_share: state.canShare, can_comment: state.editable, latest_version: 1, comments: [] }, isError: false },
   comments: { data: { comments: state.comments }, isError: false },
   versions: { data: { versions: [{ version: 1 }], shared_version: 1 }, isError: false },
-  doc: state.doc, nodes: designNodes(state.doc!), peers: [{ clientId: 2, name: "Marie", color: state.peerColor, cursor: { x: 12, y: 24 }, ...(state.peerSelection ? { selection: state.peerSelection } : {}) }], setSelection: state.setSelection, connection: "connected", editable: state.editable && !selectedVersion, dirty: state.dirty, unsynced: state.unsynced, draftError: false,
+  doc: state.doc, nodes: designNodes(state.doc!), peers: [{ clientId: 2, name: "Marie", color: state.peerColor, cursor: { x: 12, y: 24 }, ...(state.peerSelection ? { selection: state.peerSelection.split(",") } : {}) }], setSelection: state.setSelection, connection: "connected", editable: state.editable && !selectedVersion, dirty: state.dirty, unsynced: state.unsynced, draftError: false,
   save: { ...mutation, error: state.saveError }, restore: { ...mutation, error: state.restoreError }, share: mutation, comment: mutation, connectAgent: mutation, setCursor: vi.fn(), conflicts: state.conflicts, dismissConflict: state.dismiss,
  }
 } }))
@@ -43,9 +43,10 @@ describe("Design editor controls", () => {
   fireEvent.click(within(screen.getByLabelText("Layers")).getByRole("button", { name: "Back" }))
   const orderGroup = screen.getByRole("group", { name: "Layer order" })
   fireEvent.click(within(orderGroup).getByRole("button", { name: "Bring to front" }))
-  expect(drawn()).toEqual(["s", "front", "back"])
+  const stored = () => designNodes(state.doc!).map(node => node.id)
+  expect(stored()).toEqual(["s", "front", "back"])
   fireEvent.click(within(orderGroup).getByRole("button", { name: "Send backward" }))
-  expect(drawn()).toEqual(["s", "back", "front"])
+  expect(stored()).toEqual(["s", "back", "front"])
   expect(screen.getAllByText(/This layer is no longer on the canvas/)).toHaveLength(1)
   expect(screen.getByText(/This layer is no longer on the canvas/).closest("article")).toHaveTextContent("Make it larger")
  })
@@ -89,7 +90,7 @@ describe("Design editor controls", () => {
   // My selection goes out through awareness; the document does not change.
   const before = designNodes(state.doc!)
   fireEvent.click(within(screen.getByLabelText("Layers")).getByRole("button", { name: "Buy" }))
-  expect(state.setSelection).toHaveBeenLastCalledWith("cta")
+  expect(state.setSelection).toHaveBeenLastCalledWith(["cta"])
   expect(designNodes(state.doc!)).toEqual(before)
   view.unmount()
   // A selection of a layer that is gone draws nothing.
@@ -103,7 +104,38 @@ describe("Design editor controls", () => {
   state.setSelection.mockReset()
   render(<DesignEditor workspaceId="workspace" slug="shop" />)
   fireEvent.click(within(screen.getByLabelText("Layers")).getByRole("button", { name: "Buy" }))
-  expect(state.setSelection).not.toHaveBeenCalledWith("cta")
+  expect(state.setSelection).not.toHaveBeenCalledWith(["cta"])
+ })
+ it("selects several layers with Shift or Ctrl/⌘, shares them, draws a peer's multi-selection and deletes them together", () => {
+  upsertDesignNode(state.doc!, { id: "s", type: "frame", name: "Screen", x: 0, y: 0, width: 360, height: 640, fill: "#ffffff" })
+  upsertDesignNode(state.doc!, { id: "cta", type: "rect", name: "Buy", parentId: "s", x: 40, y: 60, width: 120, height: 40, fill: "#2563eb" })
+  upsertDesignNode(state.doc!, { id: "copy", type: "text", name: "Copy", parentId: "s", x: 40, y: 140, width: 200, height: 40, fill: "#000000", text: "Hi" })
+  state.peerSelection = "cta,copy"
+  render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  // Marie's two layers are both outlined; her name shows once.
+  expect(screen.getByLabelText("Marie selected Buy")).toHaveAttribute("data-remote-selection", "cta")
+  expect(screen.getByLabelText("Marie selected Copy")).toHaveAttribute("data-remote-selection", "copy")
+  expect(screen.getAllByText("Marie", { selector: "svg text" })).toHaveLength(2) // her selection label and her cursor
+  const layers = within(screen.getByLabelText("Layers"))
+  fireEvent.click(layers.getByRole("button", { name: "Buy" }))
+  fireEvent.click(layers.getByRole("button", { name: "Copy" }), { shiftKey: true })
+  expect(state.setSelection).toHaveBeenLastCalledWith(["cta", "copy"])
+  expect(screen.getByText("2 layers selected")).toBeInTheDocument()
+  expect(document.querySelector("[data-design-group]")).toHaveAttribute("data-design-group", "2")
+  // Ctrl/⌘ click takes one out again.
+  fireEvent.click(layers.getByRole("button", { name: "Copy" }), { metaKey: true })
+  expect(state.setSelection).toHaveBeenLastCalledWith(["cta"])
+  fireEvent.click(layers.getByRole("button", { name: "Copy" }), { ctrlKey: true })
+  // Arrows move both by the same offset; Delete removes both, never the screen.
+  const viewport = screen.getByLabelText("Design canvas viewport")
+  fireEvent.keyDown(viewport, { key: "ArrowRight", shiftKey: true })
+  expect(designNodes(state.doc!).filter(node => node.id !== "s").map(node => node.x)).toEqual([50, 50])
+  fireEvent.keyDown(viewport, { key: "Escape" })
+  expect(state.setSelection).toHaveBeenLastCalledWith([])
+  fireEvent.click(layers.getByRole("button", { name: "Buy" }))
+  fireEvent.click(layers.getByRole("button", { name: "Copy" }), { shiftKey: true })
+  fireEvent.keyDown(viewport, { key: "Delete" })
+  expect(designNodes(state.doc!).map(node => node.id)).toEqual(["s"])
  })
  it("draws peer labels on a fill that keeps white text readable", () => {
   state.peerColor = "#059669"

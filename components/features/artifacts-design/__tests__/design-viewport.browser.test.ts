@@ -20,10 +20,11 @@ async function fixtureBundle(): Promise<string> {
    import { DesignEditor } from "./components/features/artifacts-design/design-editor";
    import { designNodes, upsertDesignNode } from "./components/features/artifacts-design/design-document";
    import { ArtifactFrame, NO_FRAME_CAPABILITIES } from "./components/features/artifacts-library/frame";
-   const options = Object.assign({ editable: true, layout: "desktop", framed: true, far: false }, window.fixtureOptions);
+   const options = Object.assign({ editable: true, layout: "desktop", framed: true, far: false, second: false }, window.fixtureOptions);
    const doc = new Y.Doc();
    upsertDesignNode(doc,{id:"screen",type:"frame",name:"Screen A",x:64,y:64,width:600,height:400,fill:"#ffffff"});
    upsertDesignNode(doc,{id:"cta",type:"rect",parentId:"screen",name:"Call to action",x:40,y:40,width:200,height:100,fill:"#2563eb"});
+   if (options.second) upsertDesignNode(doc,{id:"copy",type:"rect",parentId:"screen",name:"Copy block",x:320,y:200,width:160,height:80,fill:"#f59e0b"});
    if (options.far) upsertDesignNode(doc,{id:"far",type:"rect",name:"Far left",x:-500,y:-300,width:120,height:80,fill:"#16a34a"});
    window.designUpdates = 0; doc.on("update",()=>{window.designUpdates++});
    window.nodesJSON = () => JSON.stringify(designNodes(doc));
@@ -61,7 +62,7 @@ const LAYOUT = `
  .absolute{position:absolute}.left-0{left:0}.top-0{top:0}.max-w-none{max-width:none}.hidden{display:none}
 `
 
-interface FixtureOptions { editable?: boolean; layout?: "desktop" | "phone"; framed?: boolean; far?: boolean }
+interface FixtureOptions { editable?: boolean; layout?: "desktop" | "phone"; framed?: boolean; far?: boolean; second?: boolean }
 async function open(touch = false, options: FixtureOptions = {}): Promise<Page> {
  const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, hasTouch: touch })
  const page = await context.newPage()
@@ -300,6 +301,62 @@ describe.skipIf(!ready)("Design canvas viewport in Chromium", () => {
   expect((await viewOf(page)).x).toBe(view.x + 40)
   await page.context().close()
  }, 60_000)
+
+ it("selects several layers with Shift-click or a marquee, moves and resizes them together, and Escape puts them back (V04)", async () => {
+  const page = await open(false, { second: true })
+  type Box = { id: string; x: number; y: number; width: number; height: number }
+  const layers = async () => Object.fromEntries((JSON.parse(await nodes(page)) as Box[]).map(item => [item.id, item]))
+  const { scale } = await viewOf(page)
+  const start = await layers()
+  const ctaBox = await cta(page)
+  const copyBox = (await page.locator('[data-design-node="copy"] rect').first().boundingBox())!
+  // A left drag on the empty canvas draws a marquee that holds both layers, not the screen.
+  const bg = await background(page)
+  await page.mouse.move(bg.x, ctaBox.y - 8)
+  await page.mouse.down()
+  await page.mouse.move(copyBox.x + copyBox.width + 8, copyBox.y + copyBox.height + 8, { steps: 6 })
+  expect(await page.locator("[data-design-marquee]").count()).toBe(1)
+  await page.mouse.up()
+  expect(await page.locator("[data-design-marquee]").count()).toBe(0)
+  await expect.poll(() => page.locator("[data-design-group]").getAttribute("data-design-group")).toBe("2")
+  expect(await layers(), "a marquee writes nothing").toEqual(start)
+  // Dragging one of them moves both by the same offset.
+  await drag(page, { x: ctaBox.x + 20, y: ctaBox.y + 20 }, { x: 40, y: 20 })
+  let now = await layers()
+  const dx = Math.round(40 / scale), dy = Math.round(20 / scale)
+  expect([now.cta.x, now.cta.y, now.copy.x, now.copy.y]).toEqual([start.cta.x + dx, start.cta.y + dy, start.copy.x + dx, start.copy.y + dy])
+  expect(now.screen).toEqual(start.screen)
+  // The group's bottom-right handle scales both from the group's top-left corner.
+  const moved = now
+  const grip = (await page.locator('[data-design-group] [data-design-handle="se"]').boundingBox())!
+  await drag(page, { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 }, { x: 60, y: 30 })
+  now = await layers()
+  expect([now.cta.x, now.cta.y]).toEqual([moved.cta.x, moved.cta.y])
+  expect(now.copy.x + now.copy.width).toBeGreaterThan(moved.copy.x + moved.copy.width)
+  expect(now.cta.width).toBeGreaterThan(moved.cta.width)
+  // Escape during a group drag puts every layer back; a second Escape clears the selection.
+  const resized = now
+  const box = await cta(page)
+  await page.mouse.move(box.x + 10, box.y + 10)
+  await page.mouse.down()
+  await page.mouse.move(box.x + 150, box.y + 90, { steps: 4 })
+  expect((await layers()).copy.x).not.toBe(resized.copy.x)
+  await page.keyboard.press("Escape")
+  await page.mouse.up()
+  expect(await layers()).toEqual(resized)
+  await page.keyboard.press("Escape")
+  expect(await page.locator("[data-design-group]").count()).toBe(0)
+  // Shift-click builds the selection again; a right drag over it still pans and moves nothing.
+  await page.mouse.click(box.x + 10, box.y + 10)
+  const copyNow = (await page.locator('[data-design-node="copy"] rect').first().boundingBox())!
+  await page.keyboard.down("Shift"); await page.mouse.click(copyNow.x + 10, copyNow.y + 10); await page.keyboard.up("Shift")
+  await expect.poll(() => page.locator("[data-design-group]").getAttribute("data-design-group")).toBe("2")
+  const view = await viewOf(page)
+  await drag(page, { x: box.x + 10, y: box.y + 10 }, { x: 80, y: 40 }, "right")
+  expect(await layers()).toEqual(resized)
+  expect((await viewOf(page)).x).not.toBe(view.x)
+  await page.close()
+ })
 
  it("pans with one finger on the background and pinch-zooms around the fingers on touch", async () => {
   const page = await open(true)

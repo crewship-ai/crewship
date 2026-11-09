@@ -129,7 +129,9 @@ Readers can pan and zoom too.
 | Zoom in steps, fit | **Zoom in**, **Zoom out** and **Fit** in the artifact bar (in the canvas toolbar when the editor is opened on its own) | Same |
 | Move a layer | Drag it with the left button | Drag it with one finger |
 | Resize a layer | Select it, then drag one of the eight handles on its corners and edges | Same, with one finger |
-| Clear the selection | Click an empty part of the canvas | Tap an empty part of the canvas |
+| Clear the selection | Click an empty part of the canvas, or press **Escape** | Tap an empty part of the canvas |
+| Select several layers | **Shift**-click or **Ctrl**-click (**Cmd**-click on a Mac) each layer, on the canvas or in **Layers**; the same click takes one out again | — |
+| Select with a box | Drag with the left button from an empty part of the canvas: every layer wholly inside the box is selected (**Shift**: added to the selection) | — |
 
 A pan never moves or selects a layer, also when the drag starts on one. Inside
 the canvas the browser's context menu does not open, so a right-button drag
@@ -148,6 +150,12 @@ only through **Delete screen and layers**), **]** and
 cancels a drag, resize or pan in progress and puts the layer or the view back
 where it started; with nothing in progress it clears the selection. Switching to another window, or the browser
 cancelling the pointer, does the same as **Escape**.
+
+With several layers selected, dragging any of them moves them all, the handles
+around the selection resize them together from the opposite corner, the arrow
+keys move them all, and **Delete** removes the layers (screens stay; use
+**Delete N layers** in **Properties** to remove screens too). The other people
+on the canvas see every selected layer outlined in your colour.
 
 **Next artboard** and **Previous artboard** bring the artboard to the top left
 at the current zoom. On a phone, **Fit** fits the artboard's width.

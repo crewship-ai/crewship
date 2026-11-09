@@ -112,7 +112,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const [readRevokedPage, setReadRevokedPage] = useState<string>()
  const [draftError, setDraftError] = useState(false)
  const provider = useRef<DesignProvider | null>(null)
- const selectionRef = useRef<string | null>(null)
+ const selectionRef = useRef<string[]>([])
  // This person's own edits only: a peer's change is never undone (Yjs never
  // overwrites a newer value it did not write).
  const undoRef = useRef<Y.UndoManager | null>(null)
@@ -314,13 +314,15 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
   })
   provider.current = live
   // A replaced provider (new authority, reconnect) keeps announcing the selection.
-  if (selectionRef.current) live.setSelection(selectionRef.current)
+  if (selectionRef.current.length) live.setSelection(selectionRef.current)
   const awareness = () => {
    const states = [...live.awareness.getStates()]
    const colors = designPresenceColors([userId, ...states.flatMap(([clientId, state]) => clientId !== document.clientID && typeof state.user?.id === "string" ? [state.user.id as string] : [])])
    setPeers(states.flatMap(([clientId, state]) => {
    if (clientId === document.clientID || !state.user) return []
-   const selection = typeof state.selection === "string" && state.selection && state.selection.length <= 128 ? state.selection : undefined
+   const listed: unknown[] = typeof state.selection === "string" ? [state.selection] : Array.isArray(state.selection) ? state.selection.slice(0, 200) : []
+   const ids = listed.filter((id): id is string => typeof id === "string" && id.length > 0 && id.length <= 128)
+   const selection = ids.length ? ids : undefined
    return [{ clientId, name: String(state.user.name ?? "Collaborator"), color: (typeof state.user.id === "string" && colors.get(state.user.id)) || String(state.user.color ?? "#2563eb"), cursor: state.cursor && Number.isFinite(state.cursor.x) && Number.isFinite(state.cursor.y) ? state.cursor : undefined, ...(selection ? { selection } : {}) }]
   }))
   }
@@ -367,7 +369,7 @@ export function useDesign(workspaceId: string, slug: string, selectedVersion?: n
  const connectAgent = useMutation({ mutationFn: (chat_id: string) => pinnedRequest("/agent", { chat_id }), onSuccess: invalidate })
  const comment = useMutation({ mutationFn: (body: { version: number; path: string; selector: string; quote: string; text: string; send_to_agent: boolean }) => pinnedRequest<ArtifactComment>("/comments", body), onSuccess: invalidate })
  const share = useMutation({ mutationFn: (version: number) => pinnedRequest("/share", { version }), onSuccess: invalidate })
- return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, unsynced: Boolean(pageId) && unsyncedPage === pageId && readRevokedPage !== pageId, draftError, save, restore, share, comment, connectAgent, conflicts, dismissConflict: (conflict: DesignConflict) => storeConflicts({ remove: [designConflictIdentity(conflict)] }), setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor), setSelection: (id: string | null) => { selectionRef.current = id; provider.current?.setSelection(id) },
+ return { readRevoked: readRevokedPage === pageId, query, versions, comments, doc, nodes: selectedVersion || query.data?.can_edit === false ? query.data?.nodes ?? [] : nodes, peers, connection, editable, dirty, unsynced: Boolean(pageId) && unsyncedPage === pageId && readRevokedPage !== pageId, draftError, save, restore, share, comment, connectAgent, conflicts, dismissConflict: (conflict: DesignConflict) => storeConflicts({ remove: [designConflictIdentity(conflict)] }), setCursor: (cursor: { x: number; y: number } | null) => provider.current?.setCursor(cursor), setSelection: (ids: readonly string[]) => { selectionRef.current = [...ids]; provider.current?.setSelection(ids) },
   canUndo: editable && history.undo, canRedo: editable && history.redo,
   undo: () => { if (editableRef.current) undoRef.current?.undo() }, redo: () => { if (editableRef.current) undoRef.current?.redo() },
   /** Ends the current undo step, so the next edit is undone on its own. */
