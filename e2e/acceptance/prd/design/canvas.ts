@@ -5,6 +5,8 @@ import { expect, type APIRequestContext, type BrowserContext, type Page } from "
 import { trackPage } from "../created"
 
 export interface DesignNode {
+  hidden?: boolean
+  locked?: boolean
   id: string
   type: "frame" | "rect" | "text" | "image"
   name?: string

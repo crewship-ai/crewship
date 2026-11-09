@@ -35,6 +35,7 @@ variable is on shows nothing until the server reports the feature available.
 | Design canvas | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | `artifacts_design` | — |
 | Design prototype playback (**Play**, **Link to screen**) | `NEXT_PUBLIC_ARTIFACTS_DESIGN` and `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | `artifacts_design` | — |
 | Design text style controls in **Properties** | `NEXT_PUBLIC_ARTIFACTS_DESIGN` and `NEXT_PUBLIC_ARTIFACTS_DESIGN_TEXT_STYLE` | `artifacts_design` | — |
+| Design hide and lock buttons in **Layers** | `NEXT_PUBLIC_ARTIFACTS_DESIGN` and `NEXT_PUBLIC_ARTIFACTS_DESIGN_HIDE_LOCK` | `artifacts_design` | — |
 | Craft edit lease bar and draft recovery in chat | `NEXT_PUBLIC_CHAT_CRAFT_LEASE` | — | `craft_native.enabled` with a Word or Sheet profile |
 | Native Craft Word or Sheet editor at `/pages/craft/editor` and **New Doc** for native documents | — | — | `craft_native.enabled` with a qualified profile for that application |
 | Creating a Word document (Docs) | — | — | `documents.enabled` |
@@ -329,6 +330,7 @@ only when its value is exactly `true`.
 | `NEXT_PUBLIC_ARTIFACTS_DESIGN` | off | The Design canvas |
 | `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | off | Prototype playback of linked Design screens: the **Play** button and the **Link to screen** field. Needs `NEXT_PUBLIC_ARTIFACTS_DESIGN`. |
 | `NEXT_PUBLIC_ARTIFACTS_DESIGN_TEXT_STYLE` | off | Text style controls (font, weight, size, line height, alignment, wrap, clip) in Design **Properties**. Needs `NEXT_PUBLIC_ARTIFACTS_DESIGN` and a server with #5161; stored text style is drawn either way. |
+| `NEXT_PUBLIC_ARTIFACTS_DESIGN_HIDE_LOCK` | off | Hide and lock buttons per layer in Design **Layers**. Needs `NEXT_PUBLIC_ARTIFACTS_DESIGN` and a server with #5218; stored hidden and locked layers are honoured either way. |
 | `NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM` | off | Read-only Design System token preview in the artifact viewer |
 | `NEXT_PUBLIC_SLIDES_EDITOR` | off | The native Slides editor on a Page that has Slides. Edits stay a local draft. |
 | `NEXT_PUBLIC_DOCUMENT_REVIEW_ACTIONS` | off | Development only. Leave off: the server does not serve the revert and proposal endpoints this client calls. |

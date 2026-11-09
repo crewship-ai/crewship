@@ -27,9 +27,13 @@ const nodeNumberFields = new Map([
   ['fontSize', value => value >= 1 && value <= 1000],
   ['lineHeight', value => value >= 0.5 && value <= 5],
 ])
+// Hide and lock (#5218): optional booleans; absent means shown and unlocked.
+const nodeBooleanFields = new Set(['hidden', 'locked'])
 function validateNodeFields(entries) {
   for (const [key, value] of entries) {
-    if (nodeChoiceFields.has(key)) {
+    if (nodeBooleanFields.has(key)) {
+      if (typeof value !== 'boolean') throw new Error(`invalid node ${key}`)
+    } else if (nodeChoiceFields.has(key)) {
       if (typeof value !== 'string' || !nodeChoiceFields.get(key).has(value)) throw new Error(`invalid node ${key}`)
     } else if (nodeNumberFields.has(key)) {
       if (typeof value !== 'number' || !Number.isFinite(value) || !nodeNumberFields.get(key)(value)) throw new Error(`invalid node ${key}`)

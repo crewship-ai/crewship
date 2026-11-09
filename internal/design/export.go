@@ -48,6 +48,8 @@ type exportNode struct {
 	TextAlign  string  `json:"textAlign"`
 	TextWrap   string  `json:"textWrap"`
 	Overflow   string  `json:"overflow"`
+	// Hidden (#5218) leaves the layer, and everything inside a hidden screen, out of the page.
+	Hidden bool `json:"hidden"`
 }
 
 // The same closed font stacks as the canvas (DESIGN_FONT_STACKS).
@@ -115,6 +117,7 @@ func RenderHTML(in ExportInput, limit int) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	nodes = exportVisibleNodes(nodes)
 	byID := make(map[string]*exportNode, len(nodes))
 	for _, node := range nodes {
 		byID[node.ID] = node
@@ -363,4 +366,29 @@ func plural(n int, one, many string) string {
 		return one
 	}
 	return many
+}
+
+// exportVisibleNodes drops hidden layers and every layer inside a hidden one
+// (#5218), following parents with a guard against cycles.
+func exportVisibleNodes(nodes []*exportNode) []*exportNode {
+	byID := make(map[string]*exportNode, len(nodes))
+	for _, node := range nodes {
+		byID[node.ID] = node
+	}
+	out := nodes[:0:0]
+	for _, node := range nodes {
+		hidden := false
+		seen := map[string]bool{}
+		for at := node; at != nil && !seen[at.ID]; at = byID[at.ParentID] {
+			seen[at.ID] = true
+			if at.Hidden {
+				hidden = true
+				break
+			}
+		}
+		if !hidden {
+			out = append(out, node)
+		}
+	}
+	return out
 }

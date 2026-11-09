@@ -294,3 +294,22 @@ func TestRenderHTMLTextStyle(t *testing.T) {
 		t.Errorf("plain layer changed:\n%s\n%s", plainLine(string(before)), plainLine(page))
 	}
 }
+
+// A hidden layer (#5218) is left out of the exported page; a locked one is
+// exported as usual (locking only guards editing).
+func TestRenderHTMLLeavesOutHiddenLayers(t *testing.T) {
+	screen := map[string]any{"id": "s", "type": "frame", "x": 0, "y": 0, "width": 360, "height": 640}
+	shown := map[string]any{"id": "shown", "type": "text", "parentId": "s", "x": 10, "y": 10, "width": 200, "height": 30, "text": "Shown", "locked": true}
+	hidden := map[string]any{"id": "secret", "type": "text", "parentId": "s", "x": 10, "y": 60, "width": 200, "height": 30, "text": "Hidden draft", "hidden": true}
+	out, err := RenderHTML(exportFixture(screen, shown, hidden), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page := string(out)
+	if !strings.Contains(page, "Shown") {
+		t.Fatalf("a locked layer must be exported:\n%s", page)
+	}
+	if strings.Contains(page, "Hidden draft") || strings.Contains(page, `data-node-id="secret"`) {
+		t.Fatalf("a hidden layer must not be exported:\n%s", page)
+	}
+}
