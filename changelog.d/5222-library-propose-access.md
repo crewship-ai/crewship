@@ -1,0 +1,1 @@
+- **The Artifacts library shows an agent's Propose access.** The Access tab and Share dialog list it as Can propose, and the artifact's owner can move an agent between Read, Can propose and Edit.
