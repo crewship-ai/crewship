@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils"
 import { fitAll, focusRect, moved, nextPlacement, nudged, pan, resized, toWorld, wheelFactor, zoomAt, type Handle, type Rect, type Viewport } from "@/lib/documents/canvas-viewport"
 import { documentSurface, type SurfaceItem, type SurfacePlacement, type SurfaceView } from "@/lib/documents/surface"
 import type { DocumentComment } from "@/hooks/use-document-comments"
+import type { CanvasPresence, PresencePeer } from "@/lib/documents/presence"
+import { readablePeerFill } from "@/components/features/artifacts-design/peer-colors"
 
 /**
  * The Canvas view of one Docs document (R71 rev 2 §0.4). It shows the same
@@ -36,6 +38,14 @@ export interface DocsCanvasProps {
   comments?: readonly DocumentComment[]
   /** Open these threads (the same ones the Page lists) in the Comments drawer. */
   onOpenComments?: (blockId: string, threadIds: string[]) => void
+  /**
+   * Other people on this document (Docs presence). Those on the Canvas view
+   * show their pointer and their selected cards in their colour, in canvas
+   * coordinates, so they line up whatever each person's pan and zoom.
+   */
+  peers?: readonly PresencePeer[]
+  /** This person's pointer (canvas coordinates) and selection, for presence; null when the Canvas closes. */
+  onPresence?: (canvas: CanvasPresence | null) => void
 }
 
 type Drag =
@@ -113,6 +123,12 @@ function useSurface(doc: Y.Doc): { view: SurfaceView | null; blocks: BlockSummar
   return state
 }
 
+/** Another person's selection of a card: an outline in their colour (the first person's when several selected it). */
+function peerOutline(people: { color: string }[] | undefined): React.CSSProperties {
+  // An outline, not a box shadow: this person's own selection ring (a box shadow) stays visible beside it.
+  return people?.length ? { outline: `2px solid ${people[0].color}`, outlineOffset: 3 } : {}
+}
+
 const HANDLES: Handle[] = ["e", "s", "se"]
 const handleClass: Record<string, string> = {
   e: "right-[-5px] top-1/2 -translate-y-1/2 h-6 w-2.5 cursor-ew-resize",
@@ -120,7 +136,24 @@ const handleClass: Record<string, string> = {
   se: "bottom-[-5px] right-[-5px] size-3 cursor-nwse-resize",
 }
 
-export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOpenComments }: DocsCanvasProps) {
+/** The other people's canvas presence: a pointer per tab, and per card the people who selected it (one entry per person). */
+export function canvasPeers(peers: readonly PresencePeer[] | undefined) {
+  const pointers: { client: string; name: string; color: string; x: number; y: number }[] = []
+  const selections = new Map<string, { userId: string; name: string; color: string }[]>()
+  for (const peer of peers ?? []) {
+    const canvas = peer.canvas
+    if (!canvas) continue
+    if (canvas.pointer) pointers.push({ client: peer.client, name: peer.name, color: peer.color, ...canvas.pointer })
+    for (const id of canvas.selection) {
+      const list = selections.get(id) ?? []
+      if (!list.some(entry => entry.userId === peer.userId)) list.push({ userId: peer.userId, name: peer.name, color: peer.color })
+      selections.set(id, list)
+    }
+  }
+  return { pointers, selections }
+}
+
+export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOpenComments, peers, onPresence }: DocsCanvasProps) {
   const { view: surface, blocks, error } = useSurface(doc)
   const ref = React.useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = React.useState<Viewport>({ x: -48, y: -48, scale: 1 })
@@ -131,6 +164,26 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
   const pointers = React.useRef(new Map<number, { x: number; y: number }>())
   const pinch = React.useRef<number | null>(null)
   const fitted = React.useRef(false)
+  // This person's canvas presence: the last pointer position (world coordinates) and the selection.
+  const presence = React.useRef<CanvasPresence>({ selection: [] })
+  const report = React.useRef(onPresence); report.current = onPresence
+  const sharePresence = React.useCallback((change: Partial<CanvasPresence> & { leave?: boolean }) => {
+    const { leave, ...rest } = change
+    const next = { ...presence.current, ...rest }
+    if (leave) delete next.pointer
+    presence.current = next
+    report.current?.(next)
+  }, [])
+  React.useEffect(() => { sharePresence({ selection: selected ? [selected] : [] }) }, [selected, sharePresence])
+  React.useEffect(() => () => report.current?.(null), [])
+  const others = React.useMemo(() => canvasPeers(peers), [peers])
+  // A wheel pan or zoom moves the canvas under a resting pointer: share where it now points.
+  const lastLocal = React.useRef<{ x: number; y: number } | null>(null)
+  React.useEffect(() => {
+    if (!lastLocal.current || !presence.current.pointer) return
+    const world = toWorld(viewport, lastLocal.current)
+    sharePresence({ pointer: { x: world.x, y: world.y } })
+  }, [viewport, sharePresence])
 
   const byId = React.useMemo(() => new Map(blocks.map(b => [b.id, b])), [blocks])
   // Recomputed with the blocks: a Page edit that nests or moves a commented block updates its card.
@@ -197,6 +250,13 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
   }
 
   const onPointerMove = (event: React.PointerEvent) => {
+    // Presence: where this pointer is on the canvas, for the other people here (a mouse or pen hovering, or a
+    // touch drag); only the primary pointer, so a pinch does not make it jump between fingers.
+    if (event.isPrimary !== false && (event.pointerType !== "touch" || pointers.current.has(event.pointerId))) {
+      lastLocal.current = local(event)
+      const world = toWorld(viewport, lastLocal.current)
+      sharePresence({ pointer: { x: world.x, y: world.y } })
+    }
     if (pointers.current.has(event.pointerId)) pointers.current.set(event.pointerId, local(event))
     if (pinch.current !== null && pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()]
@@ -276,6 +336,7 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
     <div ref={ref} role="application" aria-roledescription="canvas" aria-label="Canvas" tabIndex={0}
       className="absolute inset-0 touch-none select-none outline-none focus-visible:ring-2 focus-visible:ring-ring"
       onPointerDown={e => onPointerDown(e)} onPointerMove={onPointerMove} onPointerUp={onPointerUp} onPointerCancel={onPointerCancel}
+      onPointerLeave={() => { lastLocal.current = null; sharePresence({ leave: true }) }}
       onContextMenu={e => e.preventDefault()} onKeyDown={onKeyDown}>
       <div data-canvas-world className="absolute left-0 top-0 origin-top-left"
         style={{ transform: `scale(${viewport.scale}) translate(${-viewport.x}px, ${-viewport.y}px)` }}>
@@ -294,7 +355,8 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
             onPointerDown={e => onPointerDown(e, { id: p.id })} onDoubleClick={() => onOpenInPage?.(p.id)}
             className={cn("absolute overflow-hidden rounded-md border bg-card p-3 text-sm shadow-sm outline-none", editable ? "cursor-grab" : "cursor-default",
               selected === p.id && "ring-2 ring-primary")}
-            style={{ left: r.x, top: r.y, width: r.w, minHeight: r.h, zIndex: p.z }}>
+            style={{ left: r.x, top: r.y, width: r.w, minHeight: r.h, zIndex: p.z, ...peerOutline(others.selections.get(p.id)) }}
+            data-peer-selected={others.selections.get(p.id)?.map(entry => entry.name).join(", ")}>
             <p className={cn("whitespace-pre-wrap break-words", block.type === "heading" && "text-base font-semibold")}>{block.text || <span className="text-muted-foreground">Empty block</span>}</p>
             {(threads.get(p.id)?.length ?? 0) > 0 && <button type="button" data-card-comments={p.id}
               aria-label={`${threads.get(p.id)!.length} open ${threads.get(p.id)!.length === 1 ? "comment" : "comments"} on this block`}
@@ -313,10 +375,27 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
             data-item={item.id} tabIndex={0} onFocus={() => setSelected(item.id)} onPointerDown={e => onPointerDown(e, { id: item.id })}
             className={cn("absolute rounded-md border p-2 text-sm outline-none", NOTE_TONES[item.tone] ?? "bg-card", item.kind === "shape" && item.shape === "ellipse" && "rounded-full",
               selected === item.id && "ring-2 ring-primary")}
-            style={{ left: r.x, top: r.y, width: r.w, height: r.h, zIndex: item.z }}>
+            style={{ left: r.x, top: r.y, width: r.w, height: r.h, zIndex: item.z, ...peerOutline(others.selections.get(item.id)) }}
+            data-peer-selected={others.selections.get(item.id)?.map(entry => entry.name).join(", ")}>
             <p className="whitespace-pre-wrap break-words">{item.text}</p>
           </div>
         })}
+        {[...others.selections].map(([id, people]) => {
+          const target = rects.find(r => r.id === id)
+          if (!target || (!byId.has(id) && !items.some(i => i.id === id))) return null
+          const r = shown(target)
+          // The names of the people who selected this card, above it and kept the same size at any zoom.
+          return <div key={`sel-${id}`} aria-hidden data-peer-selection={id} className="pointer-events-none absolute flex origin-bottom-left gap-0.5"
+            style={{ left: r.x, top: r.y, zIndex: 2_000_000, transform: `translateY(-100%) scale(${1 / viewport.scale})` }}>
+            {people.map(person => <span key={person.userId} className="whitespace-nowrap rounded-t-sm px-1.5 py-px text-[11px] font-medium text-white" style={{ backgroundColor: readablePeerFill(person.color) }}>{person.name}</span>)}
+          </div>
+        })}
+        {others.pointers.map(pointer => <div key={`ptr-${pointer.client}`} aria-hidden data-peer-pointer={pointer.name}
+          className="pointer-events-none absolute left-0 top-0 origin-top-left"
+          style={{ transform: `translate(${pointer.x}px, ${pointer.y}px) scale(${1 / viewport.scale})`, zIndex: 2_000_001 }}>
+          <svg width="16" height="16" viewBox="0 0 16 16" className="drop-shadow-sm"><path d="M1 1 L1 13 L4.5 9.5 L7 15 L9 14 L6.5 8.5 L11.5 8.5 Z" fill={pointer.color} stroke="white" strokeWidth="1" /></svg>
+          <span className="ml-3 inline-block max-w-[12rem] truncate rounded-sm px-1.5 py-px text-[11px] font-medium text-white" style={{ backgroundColor: readablePeerFill(pointer.color) }}>{pointer.name}</span>
+        </div>)}
       </div>
     </div>
 

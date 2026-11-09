@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"hash/fnv"
 	"io"
+	"math"
 	"net/http"
 	"regexp"
 	"sort"
@@ -55,14 +56,59 @@ const (
 	documentPresenceForcedSweep = time.Second
 	// One encoded Yjs relative position: a client id and clock, or a type key, plus assoc.
 	documentPresencePositionLimit = 192
+	// Canvas presence (#5149 C06): a pointer in canvas coordinates within the
+	// surface's own coordinate bound, and at most this many selected cards.
+	documentPresenceCanvasCoordinate = 1_000_000
+	documentPresenceCanvasSelection  = 8
 )
 
 var documentPresenceClientPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,64}$`)
+
+// A selected card is a placement (a Page block ID) or a canvas item ID, as the surface stores them.
+var documentPresenceCanvasIDPattern = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,80}$`)
+
+// documentPresenceCanvasPoint is a pointer position in canvas (world)
+// coordinates. Both are required: a missing or null coordinate is refused
+// rather than relayed as 0.
+type documentPresenceCanvasPoint struct {
+	X *float64 `json:"x"`
+	Y *float64 `json:"y"`
+}
+
+// documentPresenceCanvas is where a person is on the Canvas view: their
+// pointer (absent once it leaves the canvas) and the cards they selected.
+// It is as ephemeral as the caret: kept with the tab's entry, replaced by
+// every heartbeat and gone with it after the TTL.
+type documentPresenceCanvas struct {
+	Pointer   *documentPresenceCanvasPoint `json:"pointer,omitempty"`
+	Selection []string                     `json:"selection,omitempty"`
+}
+
+func validPresenceCanvas(canvas *documentPresenceCanvas) bool {
+	if canvas == nil {
+		return true
+	}
+	if p := canvas.Pointer; p != nil && (p.X == nil || p.Y == nil || math.IsNaN(*p.X) || math.IsNaN(*p.Y) || math.Abs(*p.X) > documentPresenceCanvasCoordinate || math.Abs(*p.Y) > documentPresenceCanvasCoordinate) {
+		return false
+	}
+	if len(canvas.Selection) > documentPresenceCanvasSelection {
+		return false
+	}
+	seen := map[string]bool{}
+	for _, id := range canvas.Selection {
+		if !documentPresenceCanvasIDPattern.MatchString(id) || seen[id] {
+			return false
+		}
+		seen[id] = true
+	}
+	return true
+}
 
 type documentPresenceEntry struct {
 	user, client, name string
 	color              int
 	anchor, head       string
+	canvas             *documentPresenceCanvas
 	seen               time.Time
 }
 
@@ -73,6 +119,8 @@ type documentPresencePeer struct {
 	Color  int    `json:"color"`
 	Anchor string `json:"anchor,omitempty"`
 	Head   string `json:"head,omitempty"`
+	// Canvas is present only while the person is on the Canvas view.
+	Canvas *documentPresenceCanvas `json:"canvas,omitempty"`
 }
 
 type documentPresenceHub struct {
@@ -160,7 +208,7 @@ func (h *documentPresenceHub) sweepAll(force bool) {
 }
 
 // beat records one authorized heartbeat and returns the other people present.
-func (h *documentPresenceHub) beat(room, user, client, name, anchor, head string) (int, []documentPresencePeer, bool) {
+func (h *documentPresenceHub) beat(room, user, client, name, anchor, head string, canvas *documentPresenceCanvas) (int, []documentPresencePeer, bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.sweepAll(false)
@@ -190,13 +238,13 @@ func (h *documentPresenceHub) beat(room, user, client, name, anchor, head string
 		h.total++
 		h.users[user]++
 	}
-	entry.name, entry.anchor, entry.head, entry.seen = name, anchor, head, h.now()
+	entry.name, entry.anchor, entry.head, entry.canvas, entry.seen = name, anchor, head, canvas, h.now()
 	peers := []documentPresencePeer{}
 	for _, other := range entries {
 		if other.user == user {
 			continue
 		}
-		peers = append(peers, documentPresencePeer{Client: other.client, UserID: other.user, Name: other.name, Color: other.color, Anchor: other.anchor, Head: other.head})
+		peers = append(peers, documentPresencePeer{Client: other.client, UserID: other.user, Name: other.name, Color: other.color, Anchor: other.anchor, Head: other.head, Canvas: other.canvas})
 	}
 	sort.Slice(peers, func(i, j int) bool {
 		if peers[i].Name != peers[j].Name {
@@ -259,13 +307,18 @@ func (r *Router) documentPresence(w http.ResponseWriter, req *http.Request) {
 		Anchor string `json:"anchor"`
 		Head   string `json:"head"`
 		Leave  bool   `json:"leave"`
+		// Canvas: pointer and selection on the Canvas view (unknown fields inside are refused too).
+		Canvas *documentPresenceCanvas `json:"canvas"`
 	}
 	decoder := json.NewDecoder(req.Body)
 	decoder.DisallowUnknownFields()
 	if decoder.Decode(&input) != nil || decoder.Decode(new(any)) != io.EOF || !documentPresenceClientPattern.MatchString(input.Client) ||
-		!validPresencePosition(input.Anchor) || !validPresencePosition(input.Head) || (input.Anchor == "") != (input.Head == "") {
-		replyError(w, 400, "presence needs a tab id and, optionally, both caret positions")
+		!validPresencePosition(input.Anchor) || !validPresencePosition(input.Head) || (input.Anchor == "") != (input.Head == "") || !validPresenceCanvas(input.Canvas) {
+		replyError(w, 400, "presence needs a tab id and, optionally, both caret positions and a bounded canvas pointer and selection")
 		return
+	}
+	if input.Canvas != nil && input.Canvas.Pointer == nil && len(input.Canvas.Selection) == 0 {
+		input.Canvas = nil
 	}
 	user := UserFromContext(req.Context())
 	workspace := WorkspaceIDFromContext(req.Context())
@@ -302,7 +355,7 @@ func (r *Router) documentPresence(w http.ResponseWriter, req *http.Request) {
 	if r.db.QueryRowContext(req.Context(), `SELECT coalesce(u.full_name,'') FROM users u JOIN workspace_members m ON m.user_id=u.id AND m.workspace_id=? WHERE u.id=?`, workspace, user.ID).Scan(&name) != nil || strings.TrimSpace(name) == "" {
 		name = "Workspace member"
 	}
-	color, peers, ok := r.documentPresenceHub.beat(room, user.ID, input.Client, name, input.Anchor, input.Head)
+	color, peers, ok := r.documentPresenceHub.beat(room, user.ID, input.Client, name, input.Anchor, input.Head, input.Canvas)
 	if !ok {
 		replyError(w, 429, "too many people on this document right now")
 		return

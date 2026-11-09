@@ -19,7 +19,8 @@ import { DocsComments } from "./docs-comments"
 import { DocsCanvas } from "./docs-canvas"
 import { documentSurface } from "@/lib/documents/surface"
 import { DocsPresence } from "./docs-presence"
-import { presentPeople } from "@/lib/documents/presence"
+import { presentPeople, type CanvasPresence } from "@/lib/documents/presence"
+import type { CanvasPresenceChannel } from "@/hooks/use-document-presence"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
 import { commentTarget, setCommentHighlights, type CommentTarget } from "@/components/features/pages/document-rich-extensions"
@@ -77,7 +78,19 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const frame = useArtifactFrame()
   const layout: FrameLayout = frame?.layout ?? "desktop"
   const phone = layout === "phone"
-  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, restoreGuard, review, peers } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS)
+  // Canvas presence rides on the document's presence heartbeat; a stable channel, so the heartbeat never restarts.
+  const presenceCanvas = React.useRef<CanvasPresenceChannel>({ current: null }).current
+  // A selection change, or the pointer entering or leaving, is shared at once; pointer moves at most every 500 ms.
+  const pace = React.useRef<{ at: number; key: string; timer?: ReturnType<typeof setTimeout> }>({ at: 0, key: "" })
+  React.useEffect(() => () => clearTimeout(pace.current.timer), [])
+  const shareCanvas = React.useCallback((canvas: CanvasPresence | null) => {
+    presenceCanvas.current = canvas
+    const state = pace.current, key = canvas ? `${canvas.pointer ? "in" : "out"}:${canvas.selection.join(",")}` : "closed"
+    const send = () => { state.timer = undefined; state.at = Date.now(); presenceCanvas.share?.() }
+    if (key !== state.key) { state.key = key; clearTimeout(state.timer); send(); return }
+    if (!state.timer) state.timer = setTimeout(send, Math.max(0, 500 - (Date.now() - state.at)))
+  }, [presenceCanvas])
+  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, restoreGuard, review, peers } = useDocumentWorkspace(props, DOCS_EDITOR_CLASS, presenceCanvas)
   // The outline is open by default only where it does not cover the page.
   const [outlineOpen, setOutlineOpen] = React.useState(layout === "desktop")
   const [sent, setSent] = React.useState(false)
@@ -216,7 +229,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
 
     {view === "canvas" && <div id="docs-view-canvas" role="tabpanel" aria-labelledby="docs-mode-canvas" className="h-[calc(100dvh-8rem)] min-h-[480px] w-full px-2 pb-16 pt-14 md:px-4 md:pb-4">
       {banner}
-      <DocsCanvas doc={sync.doc} editable={editable} origin={canvasOrigin} onOpenInPage={openInPage}
+      <DocsCanvas doc={sync.doc} editable={editable} origin={canvasOrigin} onOpenInPage={openInPage} peers={peers} onPresence={shareCanvas}
         comments={discussion?.comments} onOpenComments={discussion ? openCanvasComments : undefined} />
     </div>}
 

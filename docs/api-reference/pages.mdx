@@ -2614,13 +2614,18 @@ only its owner takes part (nobody else is ever listed there).
 Request body (at most 2 KiB, unknown fields refused): `client`, this tab's id
 (8–64 of `A-Z a-z 0-9 - _`); optionally `anchor` and `head`, both or neither,
 the caret and range as base64 Yjs relative positions (at most 192 bytes each);
-`leave: true` removes this tab at once. A client cannot name itself or choose
-a colour.
+`leave: true` removes this tab at once; optionally `canvas`, where this tab is
+on the Canvas view (the Docs view sends it only from the Canvas of a schema 6
+document; the server checks its bounds, not the schema): `pointer` (`x`, `y` in canvas
+coordinates, both required, each between -1000000 and 1000000; omit it once the pointer leaves
+the canvas) and `selection` (at most 8 unique Page block or canvas item IDs,
+`^[a-zA-Z0-9_-]{1,80}$`). An empty `canvas` counts as none. A client cannot
+name itself or choose a colour.
 Response 200: `peers`, the other people's tabs on this document (never the
 caller's own), each with `client`, `user_id`, `name` (the member's display
 name, or `Workspace member` when they have none; never an email), `color` (an index the server assigns per document,
 different for each person while free colours remain, kept while they stay) and
-`anchor`/`head` when shared; plus the caller's own `color`, `ttl_ms` and
+`anchor`/`head` and `canvas` when shared (each heartbeat replaces them); plus the caller's own `color`, `ttl_ms` and
 `interval_ms`. Statuses: 200 heartbeat recorded; 400 invalid request; 401
 invalid credential; 403 agent credential or missing scope; 404 document
 unavailable or read access gone (every tab of the caller on this document is
