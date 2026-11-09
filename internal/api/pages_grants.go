@@ -27,7 +27,9 @@ package api
 //     ADMIN/OWNER of the workspace (§7.1 rule 3) and it deliberately does NOT
 //     consult page_grants: a `write` grantee may rearrange the page, not widen
 //     who reaches it. Otherwise the first grant issued is the last one anybody
-//     controls.
+//     controls. One level is narrower still: Edit (`write`) to an AGENT is
+//     delegated by the page's owner only (R71 §0.14/1, mayDelegateAgentEdit);
+//     a workspace role does not imply it.
 //
 //  3. REVOKE IS SYMMETRIC WITH GRANT (§11b decision 13). Every subject kind
 //     that can be granted can be revoked by the same reference, and a revoke
@@ -94,6 +96,10 @@ type pageGrantsWire struct {
 	Page    string          `json:"page"`
 	Grants  []pageGrantWire `json:"grants"`
 	Changed int             `json:"changed,omitempty"`
+	// CanDelegateAgentEdit is whether the CALLER may grant an agent write
+	// (R71 §0.14/1: the page owner only), so a client hides the choice from
+	// everyone the server would refuse rather than offering it.
+	CanDelegateAgentEdit bool `json:"can_delegate_agent_edit"`
 }
 
 // pageGrantWriteRequest is the PUT body.
@@ -255,6 +261,15 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	// R71 §0.14/1: Edit is delegated to an agent by the page's OWNER only.
+	// Asked inside the mutation transaction, against the page as it stands
+	// there. A workspace ADMIN/OWNER role still issues every other level and
+	// every human grant (mayAdministerGrants above), and may still revoke.
+	if req.SubjectType == pageSubjectAgent && req.Level == pageGrantWrite && !h.mayDelegateAgentEdit(r.Context(), wsID, user.ID, rec) {
+		replyError(w, http.StatusForbidden, pageAgentEditOwnerOnlyRefusal)
+		return
+	}
 
 	// A scope naming a panel this page does not have is a grant that silently
 	// covers nothing. Refuse it here rather than let somebody believe an agent
@@ -553,7 +568,8 @@ func (h *PageHandler) grantPage(w http.ResponseWriter, r *http.Request, wsID str
 }
 
 // mayAdministerGrants answers §7.1 rule 3's "Grants are issued by the page
-// owner or by a workspace ADMIN/OWNER".
+// owner or by a workspace ADMIN/OWNER" — for every level except agent Edit,
+// which mayDelegateAgentEdit narrows to the owner (R71 §0.14/1).
 //
 // It does not consult page_grants, and that omission is the rule: authority to
 // widen access is not itself grantable, or the first grant issued would be the
@@ -567,6 +583,31 @@ func (h *PageHandler) mayAdministerGrants(ctx context.Context, wsID, userID, rol
 	}
 	if canRole(role, "manage") {
 		return true
+	}
+	return h.isPageOwner(ctx, wsID, userID, rec)
+}
+
+// pageAgentEditOwnerOnlyRefusal and pageAgentEditInertReason state R71
+// §0.14/1 where a person reads them: on the refused PUT, and on a stored row
+// the rule has made inert.
+const (
+	pageAgentEditOwnerOnlyRefusal = "only the artifact's owner can delegate Edit to an agent; " +
+		"a workspace admin can grant an agent read or produce, or ask the owner to grant write"
+	pageAgentEditInertReason = "only the artifact's owner can delegate Edit to an agent, and the human who issued this grant " +
+		"does not own the page; the owner must issue it"
+)
+
+// mayDelegateAgentEdit answers R71 §0.14/1 (which overrides §0.3/4): "Edit
+// agentovi uděluje jen vlastník". It is page ownership and nothing else — the
+// owning user, or a member of the owning crew. A workspace ADMIN/OWNER role
+// reads everything with audit and administers ordinary grants, but "read,
+// edit and grant access are different capabilities" and delegating Edit to
+// an agent is not implied by a workspace role. Widening this to admins needs
+// the owner's explicit approval. The use-time twin is
+// agentEditIssuerNotOwnerSQL (pages_grants_authz.go).
+func (h *PageHandler) mayDelegateAgentEdit(ctx context.Context, wsID, userID string, rec *pageRecord) bool {
+	if rec == nil || rec.PrivateAudience {
+		return false
 	}
 	return h.isPageOwner(ctx, wsID, userID, rec)
 }
@@ -687,6 +728,9 @@ func (h *PageHandler) grantsDocument(w http.ResponseWriter, r *http.Request, wsI
 		return nil, false
 	}
 	out := &pageGrantsWire{Page: rec.Slug, Grants: make([]pageGrantWire, 0, len(records)), Changed: changed}
+	if user := UserFromContext(r.Context()); user != nil {
+		out.CanDelegateAgentEdit = h.mayDelegateAgentEdit(r.Context(), wsID, user.ID, rec)
+	}
 	issuers := map[string]string{}
 	for _, g := range records {
 		issuer, seen := issuers[g.GrantedBy]

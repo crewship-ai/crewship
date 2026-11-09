@@ -146,7 +146,31 @@ type pageGrantRecord struct {
 	// WorkbookInert marks a write grant on a workbook Page that the current
 	// owner did not issue to a user: it names no editor and reaches nothing.
 	WorkbookInert bool
+	// AgentEditIssuerNotOwner marks an agent write grant whose issuer is not
+	// the page's owner today (R71 §0.14/1): only the owner delegates Edit to
+	// an agent, so such a row reaches nothing whatever the issuer's role.
+	AgentEditIssuerNotOwner bool
 }
+
+// agentEditIssuerNotOwnerSQL is the use-time half of R71 §0.14/1, evaluated
+// against the alias v of page_grant_verdicts: true for an agent write grant
+// whose issuer is not the page's owner now — the owning user, or a member of
+// the owning crew, the same standing isPageOwner reads. A workspace ADMIN or
+// OWNER role does not count. It sits in the single grant reader so every
+// consumer of agent grants (spec edit, proposals, collaboration, chat
+// document access, the Access view) inherits it without a second spelling.
+//
+// It does not look at private_audience: a private page is refused by every
+// agent consumer on its own, and issuing on one is refused (409) before this.
+// Unlike issuer standing it is not retired on loss: a row is inert while its
+// issuer does not own the page and live while they do. Crew ownership is read
+// exactly as isPageOwner reads it.
+const agentEditIssuerNotOwnerSQL = `(v.subject_type = 'agent' AND v.level = 'write' AND NOT EXISTS (
+		SELECT 1 FROM pages op
+		WHERE op.id = v.page_id AND (
+		      (COALESCE(op.owner_user_id, '') <> '' AND op.owner_user_id = v.granted_by_user_id)
+		   OR (COALESCE(op.owner_user_id, '') = '' AND COALESCE(op.owner_crew_id, '') <> ''
+		       AND EXISTS (SELECT 1 FROM crew_members ocm WHERE ocm.crew_id = op.owner_crew_id AND ocm.user_id = v.granted_by_user_id)))))`
 
 // inertReason says, in a sentence a person can act on, why a stored grant is
 // currently worth nothing. An ACL row that silently does nothing is worse than
@@ -163,6 +187,9 @@ func (g pageGrantRecord) inertReason() string {
 	}
 	if g.Retired && g.IssuerStanding {
 		return "the human who issued it lost standing after issuing it, which ended this grant; it must be issued again"
+	}
+	if g.AgentEditIssuerNotOwner && g.IssuerStanding && !g.Retired {
+		return pageAgentEditInertReason
 	}
 	if g.WorkbookInert {
 		return "on a workbook page only a user write grant issued by the current owner (workbook share) names an editor"
@@ -286,12 +313,13 @@ func (g pageGrantRecord) grant() pageGrant {
 // statement, one CASE, one definition of live, two entry points.
 func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID string) (map[string][]pageGrantRecord, error) {
 	rows, err := h.pageAuthReader(ctx).QueryContext(ctx, `
-		SELECT page_id, subject_type, subject_id, level, COALESCE(panel_ids, ''),
-		       granted_by_user_id, granted_at, issuer_role, issuer_unavailable,
-		       workbook_inert, issuer_standing, retired_at IS NOT NULL
-		FROM page_grant_verdicts
-		WHERE workspace_id = ? AND (? = '' OR page_id = ?)
-		ORDER BY subject_type, subject_id, level`,
+		SELECT v.page_id, v.subject_type, v.subject_id, v.level, COALESCE(v.panel_ids, ''),
+		       v.granted_by_user_id, v.granted_at, v.issuer_role, v.issuer_unavailable,
+		       v.workbook_inert, v.issuer_standing, v.retired_at IS NOT NULL,
+		       `+agentEditIssuerNotOwnerSQL+`
+		FROM page_grant_verdicts v
+		WHERE v.workspace_id = ? AND (? = '' OR v.page_id = ?)
+		ORDER BY v.subject_type, v.subject_id, v.level`,
 		wsID, pageID, pageID)
 	if err != nil {
 		return nil, err
@@ -304,10 +332,10 @@ func (h *PageHandler) loadPageGrantRecordsIn(ctx context.Context, wsID, pageID s
 		var onPage, panelIDs string
 		if err := rows.Scan(&onPage, &g.SubjectType, &g.SubjectID, &g.Level, &panelIDs,
 			&g.GrantedBy, &g.GrantedAt, &g.IssuerRole, &g.IssuerAccountUnavailable, &g.WorkbookInert,
-			&g.IssuerStanding, &g.Retired); err != nil {
+			&g.IssuerStanding, &g.Retired, &g.AgentEditIssuerNotOwner); err != nil {
 			return nil, err
 		}
-		g.Live = g.IssuerStanding && !g.Retired
+		g.Live = g.IssuerStanding && !g.Retired && !g.AgentEditIssuerNotOwner
 		if strings.TrimSpace(panelIDs) != "" {
 			var ids []string
 			if err := json.Unmarshal([]byte(panelIDs), &ids); err != nil {
