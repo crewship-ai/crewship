@@ -92,11 +92,13 @@ type Router struct {
 	// mux is a recording wrapper around http.ServeMux (router_mux.go).
 	// Same Handle/HandleFunc surface, plus the registered route table —
 	// which the method guards and the spec-drift test both need.
-	mux              *routeMux
-	db               *sql.DB
-	entityCursorOnce sync.Once
-	entityCursorKey  []byte
-	logger           *slog.Logger
+	mux *routeMux
+	db  *sql.DB
+	// Docs presence (#5166): in-memory only, never persisted.
+	documentPresenceHub *documentPresenceHub
+	entityCursorOnce    sync.Once
+	entityCursorKey     []byte
+	logger              *slog.Logger
 	// webhookHandler is kept so the server can build the dispatcher that
 	// EXECUTES what the webhook route accepts. Acceptance and execution are
 	// separate objects on purpose — this reference is the only thing that

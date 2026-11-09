@@ -2598,6 +2598,36 @@ limit; 500 storage failure; 502 invalid engine response; 503 disabled or
 unavailable service.
 CLI: `crewship doc proposal-accept|proposal-reject <page-slug> <proposal-id> --expected-rev <n> --request-id <id>`.
 
+## Document presence heartbeat
+
+`POST /api/v1/pages/{slug}/document/presence`
+
+Who else has the document open, and where their caret is. Presence is
+ephemeral: the server keeps it in memory only, never in the database or the
+document, and forgets a tab after 6 seconds without a heartbeat. Clients send
+one heartbeat a second and when the caret moves.
+
+Authentication: a current human credential with read access to the document;
+every heartbeat is authorized like a document read, at that moment. Scoped CLI
+credentials need `pages:read`; agent credentials are refused. On private output
+only its owner takes part (nobody else is ever listed there).
+Request body (at most 2 KiB, unknown fields refused): `client`, this tab's id
+(8–64 of `A-Z a-z 0-9 - _`); optionally `anchor` and `head`, both or neither,
+the caret and range as base64 Yjs relative positions (at most 192 bytes each);
+`leave: true` removes this tab at once. A client cannot name itself or choose
+a colour.
+Response 200: `peers`, the other people's tabs on this document (never the
+caller's own), each with `client`, `user_id`, `name` (the server's name for
+that workspace member), `color` (an index the server assigns per document,
+different for each person while free colours remain, kept while they stay) and
+`anchor`/`head` when shared; plus the caller's own `color`, `ttl_ms` and
+`interval_ms`. Statuses: 200 heartbeat recorded; 400 invalid request; 401
+invalid credential; 403 agent credential or missing scope; 404 document
+unavailable or read access gone (every tab of the caller on this document is
+removed at the same time); 429 too many tabs on the document; 503 Docs
+disabled. Responses use `Cache-Control: no-store`.
+CLI: `crewship doc presence <page-slug>`.
+
 Page read and list responses include `has_document`, which identifies saved native
 document content. They also include `has_slides` and `slides_schema`: saved Slides
 content is reported even for an unknown schema, so a viewer can refuse unsupported

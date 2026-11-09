@@ -27,6 +27,9 @@ import { createHttpHistoryActions } from "@/lib/documents/history-actions"
 import { createHttpProposalClient } from "@/lib/documents/proposals"
 import { documentReviewActions } from "@/lib/feature-flags"
 import { DocumentCaretKeeper } from "./document-caret-keeper"
+import { DocumentRemoteCarets } from "./document-remote-carets"
+import { useDocumentPresence } from "@/hooks/use-document-presence"
+import { DocsPresence } from "@/components/features/artifacts-library/kinds/docs/docs-presence"
 import { CommentHighlights, documentEditorExtensions, isRichSchema, stableBlockTypes } from "./document-rich-extensions"
 
 const StableIDs = Extension.create({
@@ -47,7 +50,7 @@ const StableIDs = Extension.create({
 })
 /** The editor of one document session: the schema's nodes and marks, stable block ids, comment highlights and the shared CRDT. */
 export function documentSessionExtensions(doc: Y.Doc, schema: number | undefined) {
-  return [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(schema) }), ...documentEditorExtensions(schema), CommentHighlights, Collaboration.configure({ document: doc, field: "default" }), DocumentCaretKeeper]
+  return [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(schema) }), ...documentEditorExtensions(schema), CommentHighlights, Collaboration.configure({ document: doc, field: "default" }), DocumentCaretKeeper, DocumentRemoteCarets]
 }
 /** Saves text as a local file: the draft downloads. Nothing is sent. */
 export function downloadText(name: string, content: string) {
@@ -127,6 +130,8 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
     editorProps: { handleKeyDown: (view, event) => { if (event instanceof KeyboardEvent && !view.composing) (view as unknown as { domObserver: { flush(): void } }).domObserver.flush(); return false }, attributes: { class: editorClass, "aria-label": "Document editor" } },
   }, [sync.doc,sync.state?.schema])
   useEffect(() => { editor?.setEditable(sync.editable && !restoring) }, [editor, sync.editable, restoring])
+  // Who else is here and where their caret is (#5166): only while this session holds an authorized read.
+  const peers = useDocumentPresence({ workspaceId, slug, editor, enabled: Boolean(sync.state) && !sync.denied })
   const empty = useEditorState({ editor, selector: ({ editor }) => editor ? isEmptyDocument(editor.state.doc) : false })
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || sync.recovery); return () => onDirtyChange?.(false) }, [sync.pending, sync.recovery, onDirtyChange])
   // Collaboration's Yjs undo tracks only this editor's own transactions, so it never takes back confirmed work from others.
@@ -141,14 +146,14 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
     },
   }
   const review: DocumentHistoryReview = { currentContent: sync.state?.content, headRev: sync.state?.rev ?? 0, hasLocalDraft, actions: reviewEnabled && sync.editable && !restoring ? revertActions : undefined, onDownloadDraft: downloadDraft, onActionDone: () => window.location.reload() }
-  return { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, history, restoreGuard, review }
+  return { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, history, restoreGuard, review, peers }
 }
 
 function DocumentWorkspace({ workspaceId, pageId, humanId, slug, name, available, historyExpired, onDirtyChange, sync, onRestored }: DocumentWorkspaceProps) {
   const [linkAddress, setLinkAddress] = useState("")
-  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, history, restoreGuard, review } = useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyChange, onRestored })
+  const { editor, restoring, actionError, setActionError, reviewEnabled, proposalClient, hasLocalDraft, downloadDraft, empty, history, restoreGuard, review, peers } = useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyChange, onRestored })
   return <section aria-label="Doc page" className="touch-form space-y-3 overflow-auto">
-    <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status} durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} unverifiedDraft={sync.unverifiedDrafts.length > 0} lockless={sync.storageLockless} /></div>
+    <div className="flex flex-wrap items-center gap-2 border-b p-3"><h1 className="mr-auto font-semibold">{name ?? slug}</h1><DocsPresence peers={peers} /><DocumentSaveState status={restoring ? "Restore confirmation pending · current editor preserved" : !available && !sync.denied ? "Documents are unavailable · local changes retained" : sync.status} durability={sync.durability} storageUnavailable={sync.storageUnavailable} storageBusy={sync.storageBusy} unverifiedDraft={sync.unverifiedDrafts.length > 0} lockless={sync.storageLockless} /></div>
     {(sync.error || actionError) && <p role="alert" className="px-6 text-sm text-destructive">{actionError ?? sync.error}</p>}
     <DocumentRecoveryAlert sync={sync} available={available} slug={slug} editor={editor} onError={setActionError} className="space-y-2 border p-4" />
     <DocumentEarlierDraftNotice sync={sync} slug={slug} onError={setActionError} className="space-y-2 border p-4" />
