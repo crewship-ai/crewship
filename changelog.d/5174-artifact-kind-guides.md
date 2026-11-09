@@ -1,0 +1,1 @@
+- **Every artifact kind has a versioned agent guide.** `crewship artifacts kind-guide [kind]` and `GET /api/v1/artifact-kind-guides[/{kind}]` show what agents are told for Docs, Slides, Design, Library, Dashboard and App: data shapes and limits, write order, version check, conflict rule, agent modes and when not to verify.

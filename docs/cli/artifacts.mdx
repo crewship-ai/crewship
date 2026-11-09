@@ -765,6 +765,38 @@ for `archive`.
 crewship page artifact unarchive quarterly-review --dry-run --pages-version 1
 ```
 
+## Agent guides per kind
+
+Each artifact kind ships a versioned guide that agents follow when they work
+on an artifact of that kind: the exact data shapes and size limits, the write
+order (on create the index first; on revise the data first and the index
+last), the read-before-write version check, the conflict rule (stop after the
+third refusal and report), the agent modes (Ask, Comment, Propose, Edit; only
+the Owner delegates Edit, and a comment is never a proposal) and when not to
+verify. The guides are built into the server; they describe what the server
+enforces and grant nothing.
+
+### `crewship artifacts kind-guide [kind]`
+
+Without a kind, list the guides with their version, shared-rules version and
+SHA-256 digest. With a kind (`docs`, `slides`, `design`, `library`,
+`dashboard`, `app`; `design-system` and `project` are accepted as aliases),
+print that guide. Word and Sheet are Craft documents and have no artifact
+guide (`404`).
+
+```bash
+crewship artifacts kind-guide -f json
+crewship artifacts kind-guide docs
+crewship artifacts kind-guide design-system -f json
+```
+
+```json
+{"kind": "library", "title": "Library (design system)", "version": "1.0.0", "rules_version": "1.0.0", "sha256": "…", "bytes": 4210, "content": "# Library agent guide\n…"}
+```
+
+The digest is over `content`, so a changed guide is visible even when only the
+shared rules moved.
+
 ## Agent publishing policy
 
 The workspace artifact policy is the administrative ceiling for agent work on

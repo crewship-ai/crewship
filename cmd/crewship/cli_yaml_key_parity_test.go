@@ -38,6 +38,8 @@ func yamlParityTypes() []any {
 	return []any{
 		SharedRoutineRun{}, sharedRoutineRunResult{},
 		sharedProjectMilestone{}, sharedProjectDetails{}, sharedIssue{}, sharedIssueProject{}, sharedIssueComment{}, projectGuestIntake{}, issueComment{},
+		// cmd_artifacts_kind_guide.go
+		KindGuideSummary{}, kindGuide{},
 		// cmd_share.go
 		objectShareRow{},
 		// cmd_doctor_cleanup.go
