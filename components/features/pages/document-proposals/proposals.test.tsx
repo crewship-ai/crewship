@@ -21,6 +21,18 @@ async function open(c: DocumentProposalClient, canDecide = true, headRev = 4, ha
 }
 
 describe("proposal review", () => {
+  it("closes an out-of-date proposal by rejecting it; it cannot be accepted", async () => {
+    const stale = detail({ status: "stale" })
+    const c = client({ list: async () => [stale], read: async () => stale })
+    render(<DocumentProposals client={c} headRev={4} canDecide hasLocalDraft={false} onDownloadDraft={vi.fn()} />)
+    await userEvent.click(await screen.findByRole("button", { name: /Research agent · stale/ }))
+    await screen.findByText(/can no longer be accepted/)
+    expect(screen.queryByRole("button", { name: "Accept proposal" })).toBeNull()
+    await userEvent.click(screen.getByRole("button", { name: "Reject proposal" }))
+    await userEvent.click(screen.getByRole("button", { name: "Confirm reject" }))
+    await waitFor(() => expect(c.reject).toHaveBeenCalledWith("pr1", 4, expect.any(String)))
+  })
+
   it("shows the diff before anything is applied", async () => {
     await open(client())
     expect(screen.getByText("old text")).toBeInTheDocument()
@@ -39,7 +51,7 @@ describe("proposal review", () => {
     await userEvent.click(screen.getByRole("button", { name: "Reject proposal" }))
     expect(c.reject).not.toHaveBeenCalled()
     await userEvent.click(screen.getByRole("button", { name: "Confirm reject" }))
-    await waitFor(() => expect(c.reject).toHaveBeenCalledWith("pr1", expect.any(String)))
+    await waitFor(() => expect(c.reject).toHaveBeenCalledWith("pr1", expect.any(Number), expect.any(String)))
   })
   it("a conflict refuses the whole proposal and says nothing was applied", async () => {
     const c = client({ accept: vi.fn().mockResolvedValue({ status: "conflict" }) }); const onAccepted = await open(c, true, 7)

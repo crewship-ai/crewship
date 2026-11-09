@@ -393,6 +393,18 @@ try {
         assert.equal(await page.getByRole("tablist", { name: "Artifact detail" }).count(), 0, "no legacy Preview/History/Comments tabs")
         await page.getByRole("toolbar", { name: "View" }).getByRole("button", { name: "Version: v1 · Latest" }).waitFor()
         await page.getByRole("group", { name: "Output" }).getByRole("link", { name: "Edit source" }).waitFor()
+        // L01: the mirrored system's 12 tokens once each, in its two real themes (#5145), not 24 "-dark" swatches.
+        const colors = page.getByRole("region", { name: "Colors" })
+        assert.equal(await colors.locator("[data-token^='color.']").count(), 12, "each token once")
+        assert.equal(await colors.locator("[data-token$='-dark']").count(), 0, "no -dark swatches")
+        const surface = colors.locator('[data-token="color.surface"]')
+        assert.equal(await surface.getAttribute("data-theme-value"), "#f4f1ea")
+        assert.match(await surface.locator("[data-contrast]").innerText(), /^\d+\.\d:1 (AAA|AA|AA large|Low)$/)
+        await page.getByRole("radiogroup", { name: "Theme" }).getByRole("radio", { name: "Theme: Tmavé" }).click()
+        assert.equal(await surface.getAttribute("data-theme-value"), "#0b1726", "the theme switch drives the swatches")
+        assert.match(await page.getByTitle("Cover preview").getAttribute("srcdoc"), /--surface:#0b1726/, "and the component preview")
+        await shot("07b-design-library-dark-theme")
+        await page.getByRole("radiogroup", { name: "Theme" }).getByRole("radio", { name: "Theme: Světlé" }).click()
       }
       if (entry.kind === "design" && !entry.library) {
         await page.getByRole("region", { name: "Design editor" }).getByRole("img", { name: "Design canvas" }).waitFor()

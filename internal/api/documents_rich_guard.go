@@ -22,6 +22,10 @@ const documentRichProofLimit = 500000
 
 var documentRichID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,80}$`)
 
+// A schema-4 code block language is a short lowercase identifier, never markup
+// (tools/docs-service/schema-core.mjs LANGUAGE).
+var documentRichLanguage = regexp.MustCompile(`^[a-z0-9][a-z0-9+#-]{0,31}$`)
+
 // The engine supplies this private proof, never a fresh client-owned scope.
 // Every nontext node has a unique ID and a FULL subtree hash. Exact preorder
 // authenticates root ordering too; the root itself has no attributes or marks.
@@ -31,18 +35,25 @@ type documentRichProof struct {
 }
 
 func documentRichSemanticGuard(semantic *documentSemanticPatch, hashes map[string]string, projection json.RawMessage, next documents.MutationGuard) documents.MutationGuard {
+	return documentRichSemanticGuardFor(3, semantic, hashes, projection, next)
+}
+
+// documentRichSemanticGuardFor proves, for exactly one content schema, that
+// the engine's candidate differs from the confirmed head only by the declared
+// replacement of one paragraph or heading's text. Proposals use schema 4.
+func documentRichSemanticGuardFor(schema int, semantic *documentSemanticPatch, hashes map[string]string, projection json.RawMessage, next documents.MutationGuard) documents.MutationGuard {
 	return func(ctx context.Context, tx *sql.Tx, actor string, state documents.State) error {
-		if state.Schema != 3 {
+		if state.Schema != schema {
 			return documents.ErrSchema
 		}
 		if semantic == nil || semantic.Edit == nil || semantic.Rich == nil || len(hashes) != 1 {
 			return documents.ErrConflict
 		}
-		before, err := documentRichTree(semantic.Rich.Before)
+		before, err := documentRichTreeFor(semantic.Rich.Before, schema)
 		if err != nil {
 			return documents.ErrConflict
 		}
-		after, err := documentRichTree(semantic.Rich.After)
+		after, err := documentRichTreeFor(semantic.Rich.After, schema)
 		if err != nil {
 			return documents.ErrConflict
 		}
@@ -111,6 +122,17 @@ func documentRichSemanticGuard(semantic *documentSemanticPatch, hashes map[strin
 }
 
 func documentRichTree(raw json.RawMessage) (map[string]any, error) {
+	return documentRichTreeFor(raw, 3)
+}
+
+// documentRichTreeFor validates a closed rich projection for schema 3 or 4.
+// Schema 4 adds bold, italic and strike (combinable with each other and a
+// link; inline code stays alone), code block languages, quotes and task lists.
+func documentRichTreeFor(raw json.RawMessage, schema int) (map[string]any, error) {
+	if schema != 3 && schema != 4 {
+		return nil, fmt.Errorf("unsupported rich schema")
+	}
+	formatted := schema == 4
 	if len(raw) == 0 || len(raw) > documentRichProofLimit {
 		return nil, fmt.Errorf("bounded rich proof required")
 	}
@@ -147,24 +169,34 @@ func documentRichTree(raw json.RawMessage) (map[string]any, error) {
 			}
 			if marks, exists := node["marks"]; exists {
 				list, ok := marks.([]any)
-				if !ok || len(list) > 1 {
+				limit := 1
+				if formatted {
+					limit = 4
+				}
+				if !ok || len(list) > limit {
 					return fmt.Errorf("marks shape")
 				}
+				kinds := map[any]bool{}
 				for _, value := range list {
 					mark, ok := value.(map[string]any)
 					if !ok {
 						return fmt.Errorf("mark shape")
 					}
 					kind := mark["type"]
-					if kind != "link" && kind != "code" {
+					emphasis := formatted && (kind == "bold" || kind == "italic" || kind == "strike")
+					if kind != "link" && kind != "code" && !emphasis {
 						return fmt.Errorf("mark type")
 					}
+					if kinds[kind] || (kind == "code" && len(list) > 1) {
+						return fmt.Errorf("mark combination")
+					}
+					kinds[kind] = true
 					for key := range mark {
 						if key != "type" && key != "attrs" {
 							return fmt.Errorf("mark field")
 						}
 					}
-					if kind == "code" {
+					if kind == "code" || emphasis {
 						if attrs, exists := mark["attrs"]; exists {
 							m, ok := attrs.(map[string]any)
 							if !ok || len(m) != 0 {
@@ -203,7 +235,20 @@ func documentRichTree(raw json.RawMessage) (map[string]any, error) {
 			}
 			allowed := map[string]bool{"id": true}
 			switch typ {
-			case "paragraph", "table", "tableRow", "bulletList", "listItem", "codeBlock":
+			case "paragraph", "table", "tableRow", "bulletList", "listItem":
+			case "codeBlock":
+				if formatted {
+					allowed["language"] = true
+				}
+			case "blockquote", "taskList":
+				if !formatted {
+					return fmt.Errorf("block type")
+				}
+			case "taskItem":
+				if !formatted {
+					return fmt.Errorf("block type")
+				}
+				allowed["checked"] = true
 			case "heading":
 				allowed["level"] = true
 			case "orderedList":
@@ -251,6 +296,14 @@ func documentRichTree(raw json.RawMessage) (map[string]any, error) {
 				case "colspan", "rowspan":
 					if value != json.Number("1") {
 						return fmt.Errorf("simple table span")
+					}
+				case "language":
+					if language, ok := value.(string); !ok || !documentRichLanguage.MatchString(language) {
+						return fmt.Errorf("code block language")
+					}
+				case "checked":
+					if _, ok := value.(bool); !ok {
+						return fmt.Errorf("task item state")
 					}
 				case "type", "colwidth", "align":
 					if value != nil {

@@ -1,6 +1,6 @@
 "use client"
 import { useMemo, type ReactNode } from "react"
-import { parseDesignSystem, type DesignSystem } from "./manifest"
+import { designSystemSchemaVersion, designSystemUnreadable, parseDesignSystem, type DesignSystem } from "./manifest"
 
 const SAMPLE = "Ship the crew, keep the log."
 
@@ -15,18 +15,24 @@ function Section({ title, count, children }: { title: string; count: number; chi
 export function DesignSystemSheet({ system }: { system: DesignSystem }) {
   return <div className="space-y-6 p-4 text-foreground">
     {system.name && <h2 className="text-lg font-semibold">{system.name}</h2>}
+    {system.themes.length > 1 && <p className="text-xs text-muted-foreground">Themes: {system.themes.map((theme, index) => index === 0 ? `${theme.name} (default)` : theme.name).join(", ")}</p>}
     <Section title="Colors" count={system.colors.length}>
       <ul className="grid grid-cols-[repeat(auto-fill,minmax(120px,1fr))] gap-3">
         {system.colors.map(color => <li key={color.name} data-token={`color.${color.name}`} className="overflow-hidden rounded-md border">
           <div aria-hidden className="h-14" style={{ backgroundColor: color.value }} />
-          <div className="px-2 py-1.5 text-xs"><b className="block truncate font-medium">{color.name}</b><code className="text-muted-foreground">{color.value}</code></div>
+          <div className="px-2 py-1.5 text-xs"><b className="block truncate font-medium">{color.name}</b>
+            {system.themes.length > 1
+              ? system.themes.map(theme => <code key={theme.id} className="block text-muted-foreground">{theme.name} {color.values[theme.id]}{color.aliases[theme.id] ? ` {${color.aliases[theme.id]}}` : ""}</code>)
+              : <code className="text-muted-foreground">{color.value}{system.themes[0] && color.aliases[system.themes[0].id] ? ` {${color.aliases[system.themes[0].id]}}` : ""}</code>}
+            {color.usage && <p className="text-muted-foreground">{color.usage}</p>}
+          </div>
         </li>)}
       </ul>
     </Section>
     <Section title="Typography" count={system.typography.length}>
       <ul className="divide-y rounded-md border">
         {system.typography.map(style => <li key={style.name} data-token={`typography.${style.name}`} className="grid gap-1 px-3 py-2 sm:grid-cols-[160px_minmax(0,1fr)] sm:items-baseline">
-          <span className="text-xs text-muted-foreground"><b className="font-medium text-foreground">{style.name}</b> · {style.size}px{style.weight ? ` / ${style.weight}` : ""}{style.lineHeight ? ` / ${style.lineHeight}` : ""}{style.fontFamily ? ` · ${style.fontFamily}` : ""}</span>
+          <span className="text-xs text-muted-foreground"><b className="font-medium text-foreground">{style.name}</b>{style.group ? ` · ${style.group}` : ""} · {style.size}px{style.weight ? ` / ${style.weight}` : ""}{style.lineHeight ? ` / ${style.lineHeight}` : ""}{style.fontFamily ? ` · ${style.fontFamily}` : ""}</span>
           <span className="truncate" style={{ fontSize: style.size, fontWeight: style.weight ?? undefined, lineHeight: style.lineHeight ?? undefined, fontFamily: style.fontFamily ?? undefined }}>{SAMPLE}</span>
         </li>)}
       </ul>
@@ -60,6 +66,6 @@ export function DesignSystemSheet({ system }: { system: DesignSystem }) {
 export function ArtifactDesignSystemPreview({ files, title }: { files: readonly { path: string; content: string }[]; title: string }) {
   const system = useMemo(() => parseDesignSystem(files), [files])
   return <div aria-label={title} className="h-full overflow-auto bg-background">
-    {system ? <DesignSystemSheet system={system} /> : <p role="alert" className="p-4 text-sm">This Design System file is invalid or uses an unsupported format.</p>}
+    {system ? <DesignSystemSheet system={system} /> : <p role="alert" className="p-4 text-sm">{designSystemUnreadable(designSystemSchemaVersion(files))}</p>}
   </div>
 }

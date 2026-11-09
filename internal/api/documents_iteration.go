@@ -28,7 +28,15 @@ func sealDocumentIterationChat(ctx context.Context, tx *sql.Tx, receipt *chataud
 
 // Only personal, human-owned private Documents have DIRECT in this delivery.
 // Recheck the original immutable target, not a later slug-selected replacement.
-func (h *PageHandler) documentIterationPage(ctx context.Context, workspace, human string, intent documents.IterationIntent) (documentDraftScope, int64, error) {
+//
+// A schema-4 mandate is PROPOSE only (#5137). The requester must be able to
+// edit the Document. On anything but their own personal private Document the
+// agent must also hold a live write grant naming it: delegating to an agent is
+// sharing, and only an owner or manager issues Edit. A read grant never
+// proposes. Another person's private Document is never reachable. The head may
+// move while the proposal is prepared; each proposal carries its own revision
+// and target hash, so only the generation must still match.
+func (h *PageHandler) documentIterationPage(ctx context.Context, workspace, human, agent string, intent documents.IterationIntent) (documentDraftScope, int64, error) {
 	var scope documentDraftScope
 	var slug string
 	var schema int
@@ -40,6 +48,8 @@ func (h *PageHandler) documentIterationPage(ctx context.Context, workspace, huma
 		return scope, 0, errDocumentAccess
 	}
 	scope.PageID = intent.PageID
+	scope.Propose = intent.Propose()
+	scope.Blocks = intent.Blocks
 	role, err := h.liveContentHumanRole(ctx, workspace, human)
 	if err != nil {
 		return scope, 0, errDocumentAccess
@@ -49,11 +59,21 @@ func (h *PageHandler) documentIterationPage(ctx context.Context, workspace, huma
 	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: human})
 	ctx = context.WithValue(ctx, ctxRole, role)
 	rec, err := h.loadPage(ctx, workspace, slug)
-	if err != nil || rec.ID != intent.PageID || rec.OwnerUserID != human || !h.mayEditSpec(ctx, workspace, human, role, rec) {
+	if err != nil || rec.ID != intent.PageID || !h.mayEditSpec(ctx, workspace, human, role, rec) {
 		return scope, 0, errDocumentAccess
 	}
-	if !rec.PrivateAudience || rec.FolderID != "" || rec.OwnerCrewID != "" {
-		return scope, 0, errDocumentIterationProposalUnavailable
+	personal := rec.PrivateAudience && rec.FolderID == "" && rec.OwnerCrewID == "" && rec.OwnerUserID == human
+	if !scope.Propose {
+		if rec.OwnerUserID != human {
+			return scope, 0, errDocumentAccess
+		}
+		if !personal {
+			return scope, 0, errDocumentIterationProposalUnavailable
+		}
+	} else if !personal {
+		if rec.PrivateAudience || !h.agentMayProposeOn(ctx, workspace, rec, agent) {
+			return scope, 0, errDocumentAccess
+		}
 	}
 	if rec.HasProject || rec.HasApplication {
 		return scope, 0, errDocumentAccess
@@ -62,10 +82,28 @@ func (h *PageHandler) documentIterationPage(ctx context.Context, workspace, huma
 	if h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT count(*) FROM page_panels WHERE page_id=?`, rec.ID).Scan(&panels) != nil || panels != 0 {
 		return scope, 0, errDocumentAccess
 	}
-	if schema != intent.Schema || scope.Generation != intent.Generation || scope.Rev != intent.Rev {
+	if schema != intent.Schema || scope.Generation != intent.Generation || (!scope.Propose && scope.Rev != intent.Rev) || scope.Rev < intent.Rev {
 		return scope, 0, documents.ErrConflict
 	}
 	return scope, rec.PagesVersion, nil
+}
+
+// agentMayProposeOn: a live page grant naming this agent at write level.
+// Crew grants do not reach agents (pages_grants_authz.go §7.1b).
+func (h *PageHandler) agentMayProposeOn(ctx context.Context, workspace string, rec *pageRecord, agent string) bool {
+	if agent == "" {
+		return false
+	}
+	grants, err := h.agentGrants(ctx, workspace, rec, agent)
+	if err != nil {
+		return false
+	}
+	for _, g := range grants {
+		if g.Level == pageGrantWrite {
+			return true
+		}
+	}
+	return false
 }
 
 // Called by the trusted human send boundary after SyncSession and successful
@@ -94,13 +132,13 @@ func (h *PageHandler) persistDocumentIterationIntent(r *http.Request, receipt *c
 	}
 	currentIntent := intent
 	var cursor int64
-	existingErr := tx.QueryRowContext(ctx, `SELECT draft_rev FROM document_iteration_intents WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND page_id=? AND schema_version=? AND document_generation=? AND original_rev=? AND revoked_at IS NULL`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, intent.PageID, intent.Schema, intent.Generation, intent.Rev).Scan(&cursor)
+	existingErr := tx.QueryRowContext(ctx, `SELECT draft_rev FROM document_iteration_intents WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND page_id=? AND schema_version=? AND document_generation=? AND original_rev=? AND scope_blocks IS ? AND revoked_at IS NULL`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, intent.PageID, intent.Schema, intent.Generation, intent.Rev, intent.ScopeBlocksJSON()).Scan(&cursor)
 	if existingErr == nil {
 		currentIntent.Rev = cursor
 	} else if existingErr != sql.ErrNoRows {
 		return existingErr
 	}
-	_, version, err := h.documentIterationPage(ctx, receipt.WorkspaceID, receipt.UserID, currentIntent)
+	_, version, err := h.documentIterationPage(ctx, receipt.WorkspaceID, receipt.UserID, receipt.AgentID, currentIntent)
 	if err != nil {
 		return err
 	}
@@ -113,12 +151,12 @@ func (h *PageHandler) persistDocumentIterationIntent(r *http.Request, receipt *c
 	if err = tx.QueryRowContext(ctx, `SELECT version FROM workspace_artifact_creation_policy WHERE workspace_id=? AND enabled=1`, receipt.WorkspaceID).Scan(&policy); err != nil {
 		return errDocumentAccess
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO document_iteration_intents(message_id,workspace_id,human_user_id,chat_id,submission_id,page_id,schema_version,document_generation,original_rev,draft_rev,pages_version,policy_version,member_id,member_revision,chat_generation,chat_revision) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(message_id) DO NOTHING`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, intent.PageID, intent.Schema, intent.Generation, intent.Rev, intent.Rev, version, policy, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision)
+	_, err = tx.ExecContext(ctx, `INSERT INTO document_iteration_intents(message_id,workspace_id,human_user_id,chat_id,submission_id,page_id,schema_version,document_generation,original_rev,draft_rev,pages_version,policy_version,member_id,member_revision,chat_generation,chat_revision,scope_blocks) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(message_id) DO NOTHING`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, intent.PageID, intent.Schema, intent.Generation, intent.Rev, intent.Rev, version, policy, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, intent.ScopeBlocksJSON())
 	if err != nil {
 		return err
 	}
 	var same int
-	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM document_iteration_intents WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND page_id=? AND schema_version=? AND document_generation=? AND original_rev=? AND pages_version=? AND policy_version=? AND member_id=? AND member_revision=? AND chat_generation=? AND chat_revision=? AND revoked_at IS NULL`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, intent.PageID, intent.Schema, intent.Generation, intent.Rev, version, policy, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision).Scan(&same)
+	err = tx.QueryRowContext(ctx, `SELECT count(*) FROM document_iteration_intents WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND page_id=? AND schema_version=? AND document_generation=? AND original_rev=? AND pages_version=? AND policy_version=? AND member_id=? AND member_revision=? AND chat_generation=? AND chat_revision=? AND scope_blocks IS ? AND revoked_at IS NULL`, message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID, intent.SubmissionID, intent.PageID, intent.Schema, intent.Generation, intent.Rev, version, policy, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, intent.ScopeBlocksJSON()).Scan(&same)
 	if err != nil || same != 1 {
 		return errDocumentAccess
 	}
@@ -143,7 +181,7 @@ func bindDocumentIterationRunTx(r *http.Request, db *sql.DB, tx *sql.Tx, run, me
 		return errDocumentAccess
 	}
 	var bound sql.NullString
-	err = tx.QueryRowContext(ctx, `SELECT run_id FROM document_iteration_intents WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND page_id=? AND schema_version=? AND document_generation=? AND original_rev=? AND member_id=? AND member_revision=? AND chat_generation=? AND chat_revision=? AND revoked_at IS NULL`, message, a.WorkspaceID, a.HumanUserID, a.ChatID, intent.SubmissionID, intent.PageID, intent.Schema, intent.Generation, intent.Rev, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision).Scan(&bound)
+	err = tx.QueryRowContext(ctx, `SELECT run_id FROM document_iteration_intents WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND page_id=? AND schema_version=? AND document_generation=? AND original_rev=? AND member_id=? AND member_revision=? AND chat_generation=? AND chat_revision=? AND scope_blocks IS ? AND revoked_at IS NULL`, message, a.WorkspaceID, a.HumanUserID, a.ChatID, intent.SubmissionID, intent.PageID, intent.Schema, intent.Generation, intent.Rev, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, intent.ScopeBlocksJSON()).Scan(&bound)
 	if err != nil || (bound.Valid && bound.String != run) {
 		return errDocumentAccess
 	}
@@ -152,11 +190,11 @@ func bindDocumentIterationRunTx(r *http.Request, db *sql.DB, tx *sql.Tx, run, me
 		_, err = h.documentIterationScope(ctx, &a, intent.PageID)
 		return err
 	}
-	_, version, err := h.documentIterationPage(ctx, a.WorkspaceID, a.HumanUserID, intent)
+	_, version, err := h.documentIterationPage(ctx, a.WorkspaceID, a.HumanUserID, a.AgentID, intent)
 	if err != nil {
 		return err
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE document_iteration_intents SET run_id=?,expires_at=? WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND page_id=? AND schema_version=? AND document_generation=? AND original_rev=? AND draft_rev=original_rev AND pages_version=? AND member_id=? AND member_revision=? AND chat_generation=? AND chat_revision=? AND revoked_at IS NULL AND (run_id IS NULL OR run_id=?) AND policy_version=(SELECT version FROM workspace_artifact_creation_policy WHERE workspace_id=? AND enabled=1)`, run, expiry, message, a.WorkspaceID, a.HumanUserID, a.ChatID, intent.SubmissionID, intent.PageID, intent.Schema, intent.Generation, intent.Rev, version, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, run, a.WorkspaceID)
+	result, err := tx.ExecContext(ctx, `UPDATE document_iteration_intents SET run_id=?,expires_at=? WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=? AND submission_id=? AND page_id=? AND schema_version=? AND document_generation=? AND original_rev=? AND draft_rev=original_rev AND pages_version=? AND member_id=? AND member_revision=? AND chat_generation=? AND chat_revision=? AND scope_blocks IS ? AND revoked_at IS NULL AND (run_id IS NULL OR run_id=?) AND policy_version=(SELECT version FROM workspace_artifact_creation_policy WHERE workspace_id=? AND enabled=1)`, run, expiry, message, a.WorkspaceID, a.HumanUserID, a.ChatID, intent.SubmissionID, intent.PageID, intent.Schema, intent.Generation, intent.Rev, version, receipt.MemberID, receipt.MemberRevision, receipt.ChatGeneration, receipt.ChatRevision, intent.ScopeBlocksJSON(), run, a.WorkspaceID)
 	if err != nil {
 		return err
 	}
@@ -175,12 +213,16 @@ func (h *PageHandler) documentIterationScope(ctx context.Context, a *artifactRun
 	var intent documents.IterationIntent
 	var version, policy, currentPolicy int64
 	var expiry string
-	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT i.submission_id,i.page_id,i.schema_version,i.document_generation,i.draft_rev,i.pages_version,i.policy_version,p.version,i.expires_at FROM document_iteration_intents i JOIN workspace_artifact_creation_policy p ON p.workspace_id=i.workspace_id AND p.enabled=1 JOIN artifact_run_principals a ON a.run_id=i.run_id AND a.member_id=i.member_id AND a.member_revision=i.member_revision AND a.chat_generation=i.chat_generation AND a.chat_revision=i.chat_revision JOIN conversation_messages m ON m.id=i.message_id AND m.session_id=i.chat_id AND m.author_user_id=i.human_user_id AND m.agent_id=a.agent_id AND m.role='user' JOIN chats c ON c.id=i.chat_id AND c.created_by=i.human_user_id AND c.visibility='private' AND c.private_artifact_author_user_id=i.human_user_id WHERE i.run_id=? AND i.message_id=? AND i.workspace_id=? AND i.human_user_id=? AND i.chat_id=? AND i.revoked_at IS NULL`, a.RunID, a.MessageID, a.WorkspaceID, a.HumanUserID, a.ChatID).Scan(&intent.SubmissionID, &intent.PageID, &intent.Schema, &intent.Generation, &intent.Rev, &version, &policy, &currentPolicy, &expiry)
+	var blocks sql.NullString
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT i.submission_id,i.page_id,i.schema_version,i.document_generation,i.draft_rev,i.pages_version,i.policy_version,p.version,i.expires_at,i.scope_blocks FROM document_iteration_intents i JOIN workspace_artifact_creation_policy p ON p.workspace_id=i.workspace_id AND p.enabled=1 JOIN artifact_run_principals a ON a.run_id=i.run_id AND a.member_id=i.member_id AND a.member_revision=i.member_revision AND a.chat_generation=i.chat_generation AND a.chat_revision=i.chat_revision JOIN conversation_messages m ON m.id=i.message_id AND m.session_id=i.chat_id AND m.author_user_id=i.human_user_id AND m.agent_id=a.agent_id AND m.role='user' JOIN chats c ON c.id=i.chat_id AND c.created_by=i.human_user_id AND c.visibility='private' AND c.private_artifact_author_user_id=i.human_user_id WHERE i.run_id=? AND i.message_id=? AND i.workspace_id=? AND i.human_user_id=? AND i.chat_id=? AND i.revoked_at IS NULL`, a.RunID, a.MessageID, a.WorkspaceID, a.HumanUserID, a.ChatID).Scan(&intent.SubmissionID, &intent.PageID, &intent.Schema, &intent.Generation, &intent.Rev, &version, &policy, &currentPolicy, &expiry, &blocks)
 	deadline, parseErr := time.Parse(time.RFC3339, expiry)
+	if err == nil {
+		intent.Blocks, err = documents.IterationBlocksFromJSON(blocks)
+	}
 	if err != nil || parseErr != nil || !time.Now().Before(deadline) || policy != currentPolicy || (page != "" && page != intent.PageID) {
 		return scope, errDocumentAccess
 	}
-	scope, currentVersion, err := h.documentIterationPage(ctx, a.WorkspaceID, a.HumanUserID, intent)
+	scope, currentVersion, err := h.documentIterationPage(ctx, a.WorkspaceID, a.HumanUserID, a.AgentID, intent)
 	if err != nil {
 		return scope, err
 	}
@@ -196,6 +238,10 @@ func (h *PageHandler) documentIterationGuard(a *artifactRunAuthority, k document
 		scope, err := h.documentIterationScope(ctx, a, k.PageID)
 		if err != nil {
 			return err
+		}
+		if scope.Propose {
+			// A propose mandate never commits or pins content directly.
+			return errDocumentAccess
 		}
 		if k.WorkspaceID != a.WorkspaceID || actor != "agent:"+a.AgentID+":"+a.RunID || ifRev != scope.Rev || state.HeadRev != scope.Rev || state.Generation != scope.Generation {
 			return documents.ErrConflict
