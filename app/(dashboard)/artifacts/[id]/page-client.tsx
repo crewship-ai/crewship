@@ -20,7 +20,7 @@ export function ArtifactDetailRoute() {
   // Moves by address alone, before any read, so it answers the same for every ID.
   const atId = id === null ? null : AT_ID.exec(id)?.[1] ?? null
   useEffect(() => {
-    if (atId) router.replace(`/artifacts/${encodeURIComponent(atId)}${params?.size ? `?${params}` : ""}`)
+    if (atId) router.replace(`/artifacts/${encodeURIComponent(atId)}${params?.toString() ? `?${params.toString()}` : ""}`)
   }, [atId]) // eslint-disable-line react-hooks/exhaustive-deps
   if (id === null || atId) return <Skeleton className="m-6 h-12" />
   return <ArtifactsRoute item={id !== "_" ? id : null} />

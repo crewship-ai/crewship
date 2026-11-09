@@ -84,7 +84,7 @@ vi.mock("../sharing/bulk-actions", () => ({
 }))
 
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { ArtifactsLibrary } from "../artifacts-library"
+import { ArtifactsLibrary, looksLikeArtifactId } from "../artifacts-library"
 let client = new QueryClient()
 beforeEach(() => { client = new QueryClient({ defaultOptions: { queries: { retry: false } } }) })
 const withQuery = (ui: React.ReactElement) => <QueryClientProvider client={client}>{ui}</QueryClientProvider>
@@ -529,6 +529,22 @@ it("the folder panel steps aside while an artifact is open, and a pin keeps it o
   expect(pin.getAttribute("aria-pressed")).toBe("false")
   fireEvent.click(pin)
   expect(screen.getByRole("button", { name: "Let the panel close when an artifact opens" }).getAttribute("aria-pressed")).toBe("true")
+})
+
+it("an ID-shaped address fails closed: an artifact whose slug equals a deleted or unreachable ID never opens in its place", () => {
+  const canonical = vi.fn()
+  state.access = "missing"
+  state.accessRefs = []
+  state.pages = [wire({ id: "cmw93squat0008aaaabbbbcc", slug: "cmw93ccn50008d92856ac", name: "Squatter", artifact_kind: "project" })]
+  render(withQuery(<ArtifactsLibrary workspaceId="ws1" item="cmw93ccn50008d92856ac" onSelect={state.select} onCanonical={canonical} />))
+  expect(screen.queryByTestId("viewer-provider")).toBeNull()
+  expect(canonical).not.toHaveBeenCalled()
+  expect(new Set(state.accessRefs)).toEqual(new Set(["@cmw93ccn50008d92856ac"]))
+})
+
+it("recognises generated IDs only", () => {
+  expect(looksLikeArtifactId("cmw93ccn50008d92856ac")).toBe(true)
+  for (const slug of ["site", "page-site", "cooking-recipes", "c", "Cmw93ccn50008d92856ac"]) expect(looksLikeArtifactId(slug)).toBe(false)
 })
 
 it("an ID address prefers the ID: a slug never stands in for an artifact that holds that ID", () => {
