@@ -1,0 +1,1 @@
+- **Design: select several layers (#5217).** Shift- or Ctrl/⌘-click toggles a layer in the selection, and a left drag from the empty canvas selects every layer inside the box. The selection moves, resizes, nudges and deletes together, Escape clears it, and collaborators see every selected layer outlined in your colour.
