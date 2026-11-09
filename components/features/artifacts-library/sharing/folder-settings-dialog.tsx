@@ -96,7 +96,7 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
         : <ul aria-label="Folder access" className="flex flex-col divide-y divide-border/40 rounded-md border border-border/50">
           {entries.map(entry => <li key={entryKey(entry)} className="flex items-center gap-2 px-2.5 py-1.5">
             <span className="min-w-0 flex-1 truncate">{entry.label}</span>
-            <LevelSelect label={`Level for ${entry.label}`} levels={levels} value={entry.level} onChange={next => setEntryLevel(entryKey(entry), next)} />
+            <LevelSelect label={`Level for ${entry.label}`} levels={levels} value={entry.level as ShareLevel /* a folder entry is Read or Edit: readFolder never yields propose */} onChange={next => setEntryLevel(entryKey(entry), next)} />
             <Button type="button" variant="ghost" size="xs" aria-label={`Remove ${entry.label}`} onClick={() => remove(entryKey(entry))}>Remove</Button>
           </li>)}
         </ul>}

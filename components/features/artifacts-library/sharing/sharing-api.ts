@@ -47,14 +47,28 @@ export const SHARE_LEVEL_MEANING: Record<ShareLevel, string> = {
   comment: "Opens the shared version and leaves comments for the agent. Cannot change content, versions or sharing.",
   write: "Opens and edits, publishes versions and restores older ones.",
 }
-export const levelRank = (level: ShareLevel) => SHARE_LEVELS.indexOf(level)
+/**
+ * Every level the Access list can show. `propose` is an agent's only (R71
+ * §0.14/7): it reads and proposes, a person accepts or rejects, and it never
+ * edits. People never hold it, and the Share picker never offers it.
+ */
+export type AccessLevel = ShareLevel | "propose"
+export const AGENT_LEVELS = ["read", "propose", "write"] as const
+export type AgentLevel = (typeof AGENT_LEVELS)[number]
+export const ACCESS_LEVEL_LABEL: Record<AccessLevel, string> = { ...SHARE_LEVEL_LABEL, propose: "Can propose" }
+export const ACCESS_LEVEL_MEANING: Record<AccessLevel, string> = {
+  ...SHARE_LEVEL_MEANING,
+  propose: "An agent that reads and proposes changes; a person accepts or rejects each one. It never edits.",
+}
+const ACCESS_RANK: Record<AccessLevel, number> = { read: 0, comment: 1, propose: 2, write: 3 }
+export const levelRank = (level: AccessLevel) => ACCESS_RANK[level]
 
 export interface AccessEntry {
   subjectType: AccessSubjectType
   /** Empty for the workspace. */
   subjectId: string
   label: string
-  level: ShareLevel
+  level: AccessLevel
   via: AccessVia
   folderSlug?: string
   folderName?: string
@@ -101,7 +115,7 @@ export interface BulkItemResult {
 }
 export interface BulkResult { dryRun: boolean; items: BulkItemResult[] }
 
-export interface ShareInput { subjectType: ShareSubjectType | "agent"; subjectId: string; label: string; level: ShareLevel }
+export interface ShareInput { subjectType: ShareSubjectType | "agent"; subjectId: string; label: string; level: AccessLevel }
 
 /** Archive and test state the list needs before the page fields arrive. */
 export interface LibraryState { archived: ReadonlySet<string>; test: ReadonlySet<string>; moved?: ReadonlyMap<string, { slug: string; name: string } | null> }
@@ -160,10 +174,13 @@ function permissionLevel(p: unknown): ShareLevel | null {
   return perms.edit ? "write" : perms.comment ? "comment" : perms.read ? "read" : null
 }
 const HUMAN_LEVEL = (level: string): level is ShareLevel => (SHARE_LEVELS as readonly string[]).includes(level)
+/** A level this list shows for the subject: people climb the human ladder, agents read, propose or edit. */
+const LISTED_LEVEL = (type: AccessSubjectType, level: string): level is AccessLevel =>
+  type === "agent" ? (AGENT_LEVELS as readonly string[]).includes(level) : HUMAN_LEVEL(level)
 const SUBJECT_TYPES = ["user", "crew", "workspace", "agent"] as const
 const subjectType = (value: unknown): AccessSubjectType | null => (SUBJECT_TYPES as readonly unknown[]).includes(value) ? value as AccessSubjectType : null
 
-interface WireGrant { subject_type: AccessSubjectType; subject: string; subject_id: string; level: ShareLevel; live: boolean; inert_reason?: string }
+interface WireGrant { subject_type: AccessSubjectType; subject: string; subject_id: string; level: AccessLevel; live: boolean; inert_reason?: string }
 
 /** The direct grants: the only rows Remove and a level change act on (Codex 1, 20:16). */
 function grantRows(body: unknown): WireGrant[] {
@@ -172,7 +189,7 @@ function grantRows(body: unknown): WireGrant[] {
     if (!isRecord(raw)) return []
     const type = subjectType(raw.subject_type)
     const level = str(raw.level)
-    if (!type || !HUMAN_LEVEL(level)) return []
+    if (!type || !LISTED_LEVEL(type, level)) return []
     return [{ subject_type: type, subject: str(raw.subject), subject_id: type === "workspace" ? "" : str(raw.subject_id), level, live: raw.live !== false, ...(str(raw.inert_reason) ? { inert_reason: str(raw.inert_reason) } : {}) }]
   })
 }
@@ -251,7 +268,7 @@ export function httpSharingApi(workspaceId: string, guard?: RequestGuard, operat
   const ws = `workspace_id=${encodeURIComponent(workspaceId)}`
   const page = (slug: string) => `/api/v1/pages/${encodeURIComponent(slug)}`
   const folder = (slug: string) => `/api/v1/page-folders/${encodeURIComponent(slug)}`
-  const grantQuery = (type: AccessSubjectType, id: string, level?: ShareLevel) =>
+  const grantQuery = (type: AccessSubjectType, id: string, level?: AccessLevel) =>
     `${ws}&subject_type=${type}${type === "workspace" ? "" : `&subject=${encodeURIComponent(id)}`}${level ? `&level=${level}` : ""}`
   const readGrants = async (slug: string, signal?: AbortSignal) => grantRows(await call(`${page(slug)}/grants?${ws}`, { signal }))
   const heldLevels = (grants: WireGrant[], type: AccessSubjectType, id: string) =>
@@ -288,9 +305,9 @@ export function httpSharingApi(workspaceId: string, guard?: RequestGuard, operat
     return { slug, defaultAudience: null, entries }
   }
 
-  const put = (slug: string, type: AccessSubjectType, id: string, level: ShareLevel) =>
+  const put = (slug: string, type: AccessSubjectType, id: string, level: AccessLevel) =>
     call(`${page(slug)}/grants?${ws}`, JSON_INIT("PUT", { subject_type: type, ...(type === "workspace" ? {} : { subject: id }), level }))
-  const remove = (slug: string, type: AccessSubjectType, id: string, level: ShareLevel) =>
+  const remove = (slug: string, type: AccessSubjectType, id: string, level: AccessLevel) =>
     call(`${page(slug)}/grants?${grantQuery(type, id, level)}`, { method: "DELETE" })
 
   return {
@@ -304,7 +321,7 @@ export function httpSharingApi(workspaceId: string, guard?: RequestGuard, operat
       for (const level of held) {
         if (level === input.level) continue
         try { await remove(item.slug, input.subjectType, input.subjectId, level) } catch (error) {
-          throw new SharingError(`${SHARE_LEVEL_LABEL[input.level]} was added, but ${input.label} still has ${SHARE_LEVEL_LABEL[level]}: ${reasonOf(error)}`, error instanceof SharingError ? error.status : 500)
+          throw new SharingError(`${ACCESS_LEVEL_LABEL[input.level]} was added, but ${input.label} still has ${ACCESS_LEVEL_LABEL[level]}: ${reasonOf(error)}`, error instanceof SharingError ? error.status : 500)
         }
       }
     },

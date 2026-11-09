@@ -9,10 +9,10 @@ import {
 import { StatusPill } from "@/components/ui/status-pill"
 import { useIssuePeople } from "@/hooks/use-issue-people"
 import type { LibraryItem } from "../library-items"
-import { accessVia, byAccess, LEVEL_TONE, LEVELS_DESC, lockedReason } from "./access-reason"
+import { accessVia, AGENT_LEVELS_DESC, byAccess, LEVEL_TONE, LEVELS_DESC, lockedReason } from "./access-reason"
 import {
-  entryKey, SHARE_LEVEL_LABEL, SHARE_LEVEL_MEANING, useAccess, useSharingHuman, useSharingMutation,
-  type AccessEntry, type ShareInput, type ShareLevel,
+  ACCESS_LEVEL_LABEL, entryKey, SHARE_LEVEL_LABEL, SHARE_LEVEL_MEANING, useAccess, useSharingHuman, useSharingMutation,
+  type AccessEntry, type AccessLevel, type ShareInput, type ShareLevel,
 } from "./sharing-api"
 import { shownLabel } from "./share-controls"
 
@@ -40,7 +40,7 @@ export function ShareDialog({ workspaceId, item, open, onOpenChange }: ShareDial
   </CreateSurface>
 }
 
-type RowChange = { entry: AccessEntry; level: ShareLevel | null }
+type RowChange = { entry: AccessEntry; level: AccessLevel | null }
 
 function ShareBody({ workspaceId, item }: { workspaceId: string; item: LibraryItem }) {
   const { humanId } = useSharingHuman()
@@ -90,7 +90,8 @@ function ShareBody({ workspaceId, item }: { workspaceId: string; item: LibraryIt
         : <ul className="flex flex-col divide-y">
           {entries.map(entry => {
             const key = entryKey(entry)
-            const locked = lockedReason(entry)
+            const locked = lockedReason(entry, item.ownedByMe === true)
+            const rowLevels: readonly AccessLevel[] = entry.subjectType === "agent" ? AGENT_LEVELS_DESC : LEVELS_DESC
             const busy = busyKey === key
             return <li key={`${key}:${entry.via}:${entry.folderSlug ?? ""}`} data-entry={key} aria-busy={busy || undefined} className="flex flex-wrap items-center gap-2 py-2">
               <div className="min-w-0 flex-1">
@@ -99,11 +100,11 @@ function ShareBody({ workspaceId, item }: { workspaceId: string; item: LibraryIt
               </div>
               {locked ? <span title={locked} className="flex items-center gap-1.5">
                 <Lock aria-hidden className="size-3 text-muted-foreground" />
-                <StatusPill tone={LEVEL_TONE[entry.level]} label={SHARE_LEVEL_LABEL[entry.level]} />
+                <StatusPill tone={LEVEL_TONE[entry.level]} label={ACCESS_LEVEL_LABEL[entry.level]} />
               </span> : <>
                 <select aria-label={`Level for ${entry.label}`} className={SELECT} value={busy && change.variables?.level ? change.variables.level : entry.level} disabled={change.isPending}
-                  onChange={e => change.mutate({ entry, level: e.target.value as ShareLevel })}>
-                  {LEVELS_DESC.map(l => <option key={l} value={l}>{SHARE_LEVEL_LABEL[l]}</option>)}
+                  onChange={e => change.mutate({ entry, level: e.target.value as AccessLevel })}>
+                  {rowLevels.map(l => <option key={l} value={l}>{ACCESS_LEVEL_LABEL[l]}</option>)}
                 </select>
                 <Button type="button" size="sm" variant="ghost" className="h-8 text-xs" aria-label={`Remove ${entry.label}`} disabled={change.isPending}
                   onClick={() => change.mutate({ entry, level: null })}>{busy && change.variables?.level === null ? "Removing…" : "Remove"}</Button>
