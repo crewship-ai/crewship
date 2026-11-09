@@ -916,11 +916,12 @@ crewship page grant fleet-201 --user  ops@example.com --level write
 
 <Note>
   Only the page's owner (the owning user, or a member of the owning crew) can
-  grant an agent `write`. A workspace admin can grant an agent `read` or
-  `produce` and can revoke any grant, but `--agent <slug> --level write` from
-  anyone but the owner exits `4`. An agent `write` grant issued by someone who
-  does not own the page shows as inert in `crewship page grants` and authorises
-  nothing. The JSON output of `page grants` carries `can_delegate_agent_edit`
+  grant an agent `write` or `produce`; `produce` pushes the page's data. A
+  workspace admin can grant an agent `read` and can revoke any grant, but
+  `--agent <slug> --level write` or `--level produce` from anyone but the owner
+  exits `4`. An agent `write` or `produce` grant the owner did not issue shows
+  as inert in `crewship page grants`, authorises nothing, and stays ended even
+  if its issuer later owns the page; the owner issues a new one. The JSON output of `page grants` carries `can_delegate_agent_edit`
   for the caller.
 </Note>
 

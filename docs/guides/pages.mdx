@@ -1086,16 +1086,22 @@ declared producer for a panel may push its payload — see
 
 ### Only the owner delegates Edit to an agent
 
-Giving an agent `write` is a delegation, and only the page's owner makes it:
-the owning user, or a member of the owning crew. A workspace admin can still
-grant an agent `read` or `produce`, grant people and crews any level, and
+Giving an agent `write` or `produce` is a delegation, and only the page's
+owner makes it: the owning user, or a member of the owning crew. `produce`
+lets the agent push the page's data, so it is Edit of the data. A workspace
+admin can still grant an agent `read`, grant people and crews any level, and
 revoke any grant, but the admin role alone does not let anyone hand an agent
-Edit. In the Access form the `write` level is not offered for an agent unless
-you own the page.
+Edit. In the Access form an agent is offered only `read` unless you own the
+page.
 
-The rule holds at use time too. If an agent `write` grant was issued by
-someone who does not own the page, it shows as inert with the reason and
-authorises nothing until the owner issues it.
+The rule holds at use time too. An agent `write` or `produce` grant that the
+owner did not issue shows as inert with the reason and authorises nothing.
+Crewship ends such a grant for good, with an audit entry, when it is stored,
+when the page changes owner, when its issuer leaves the owning crew, and when
+the owning crew is deleted. A deleted crew's members no longer count as the
+owner for delegating to an agent or for lending an agent run their write. It
+does not come back if its issuer later owns the page; the owner issues a new
+grant instead.
 
 The same rule covers an agent you start from a chat or from a document. The
 agent edits an artifact with your rights only while you own it. You may be able

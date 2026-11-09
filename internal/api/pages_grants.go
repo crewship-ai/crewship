@@ -262,11 +262,12 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	// R71 §0.14/1: Edit is delegated to an agent by the page's OWNER only.
-	// Asked inside the mutation transaction, against the page as it stands
-	// there. A workspace ADMIN/OWNER role still issues every other level and
-	// every human grant (mayAdministerGrants above), and may still revoke.
-	if req.SubjectType == pageSubjectAgent && req.Level == pageGrantWrite && !h.mayDelegateAgentEdit(r.Context(), wsID, user.ID, rec) {
+	// R71 §0.14/1: Edit is delegated to an agent by the page's OWNER only,
+	// Edit of the spec (write) and of the data (produce) alike. Asked inside
+	// the mutation transaction, against the page as it stands there. A
+	// workspace ADMIN/OWNER role still issues agent read and every human
+	// grant (mayAdministerGrants above), and may still revoke.
+	if req.SubjectType == pageSubjectAgent && (req.Level == pageGrantWrite || req.Level == pageGrantProduce) && !h.mayDelegateAgentEdit(r.Context(), wsID, user.ID, rec) {
 		replyError(w, http.StatusForbidden, pageAgentEditOwnerOnlyRefusal)
 		return
 	}
@@ -591,10 +592,10 @@ func (h *PageHandler) mayAdministerGrants(ctx context.Context, wsID, userID, rol
 // §0.14/1 where a person reads them: on the refused PUT, and on a stored row
 // the rule has made inert.
 const (
-	pageAgentEditOwnerOnlyRefusal = "only the artifact's owner can delegate Edit to an agent; " +
-		"a workspace admin can grant an agent read or produce, or ask the owner to grant write"
-	pageAgentEditInertReason = "only the artifact's owner can delegate Edit to an agent, and the human who issued this grant " +
-		"does not own the page; the owner must issue it"
+	pageAgentEditOwnerOnlyRefusal = "only the artifact's owner can delegate Edit (write) or data Edit (produce) to an agent; " +
+		"a workspace admin can grant an agent read, or ask the owner to grant write or produce"
+	pageAgentEditInertReason = "only the artifact's owner can delegate Edit (write) or data Edit (produce) to an agent, and the page's owner " +
+		"did not issue this grant, so it has ended for good; the owner must issue a new grant"
 )
 
 // mayDelegateAgentEdit answers R71 §0.14/1 (which overrides §0.3/4): "Edit
@@ -602,14 +603,39 @@ const (
 // owning user, or a member of the owning crew. A workspace ADMIN/OWNER role
 // reads everything with audit and administers ordinary grants, but "read,
 // edit and grant access are different capabilities" and delegating Edit to
-// an agent is not implied by a workspace role. Widening this to admins needs
-// the owner's explicit approval. The use-time twin is
-// agentEditIssuerNotOwnerSQL (pages_grants_authz.go).
+// an agent is not implied by a workspace role. It gates agent write and
+// produce: produce pushes the artifact's data, which is Edit of its data.
+// Widening this to admins needs the owner's explicit approval. The use-time
+// twin is agentEditIssuerNotOwnerSQL (pages_grants_authz.go), and migration
+// 20261109132621 retires non-owner-issued rows for good.
 func (h *PageHandler) mayDelegateAgentEdit(ctx context.Context, wsID, userID string, rec *pageRecord) bool {
 	if rec == nil || rec.PrivateAudience {
 		return false
 	}
-	return h.isPageOwner(ctx, wsID, userID, rec)
+	return h.pageOwnerForDelegation(ctx, wsID, userID, rec)
+}
+
+// pageOwnerForDelegation is ownership as delegation to an agent reads it: the
+// owning user, or a member of the owning crew while that crew is not deleted.
+// A deleted crew owns nothing it can hand an agent. The SQL twins are
+// agentEditIssuerNotOwnerSQL and the triggers of migration 20261109132621.
+// isPageOwner, pageGrantIssuerCurrent and the issuer_standing arm of the view
+// page_grant_verdicts, which other owner checks use, still count a deleted
+// crew's members (#5259).
+func (h *PageHandler) pageOwnerForDelegation(ctx context.Context, wsID, userID string, rec *pageRecord) bool {
+	if userID == "" {
+		return false
+	}
+	if rec.OwnerUserID != "" {
+		return rec.OwnerUserID == userID
+	}
+	if rec.OwnerCrewID == "" {
+		return false
+	}
+	var owner bool
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM crew_members cm JOIN crews c ON c.id=cm.crew_id
+		WHERE cm.crew_id=? AND cm.user_id=? AND c.workspace_id=? AND c.deleted_at IS NULL)`, rec.OwnerCrewID, userID, wsID).Scan(&owner)
+	return err == nil && owner
 }
 
 // agentRunMayWrite is R71 §0.14/1 and §0.3/4 at use time for an agent RUN —
@@ -637,7 +663,7 @@ func (h *PageHandler) humanAgentMayWrite(ctx context.Context, wsID, pageID, huma
 	if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT coalesce(owner_user_id,''),coalesce(owner_crew_id,''),private_audience FROM pages WHERE workspace_id=? AND id=?`, wsID, pageID).Scan(&rec.OwnerUserID, &rec.OwnerCrewID, &rec.PrivateAudience); err != nil {
 		return false
 	}
-	if h.isPageOwner(ctx, wsID, humanID, rec) {
+	if h.pageOwnerForDelegation(ctx, wsID, humanID, rec) {
 		return true
 	}
 	return !rec.PrivateAudience && h.agentMayEditSpec(ctx, wsID, rec, agentID)
