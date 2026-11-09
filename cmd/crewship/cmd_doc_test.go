@@ -175,3 +175,31 @@ func TestHumanDocCLIEmptyPageGuards(t *testing.T) {
 		})
 	}
 }
+
+func TestHumanDocCLIPresence(t *testing.T) {
+	guardCLIState(t)
+	stub := pageStub(t)
+	resetHumanDocCommand(t)
+	var bodies []map[string]any
+	stub.OnPost("/api/v1/pages/report/document/presence", func(_ *http.Request, raw []byte) (int, []byte, string) {
+		var body map[string]any
+		if err := json.Unmarshal(raw, &body); err != nil {
+			t.Fatal(err)
+		}
+		bodies = append(bodies, body)
+		return 200, []byte(`{"peers":[{"client":"tab-1","user_id":"u1","name":"Erin Editor","color":2}],"color":0}`), "application/json"
+	})
+	out, err := runPageCLI(t, "", "doc", "presence", "report", "--client", "script-tab-1")
+	if err != nil || !strings.Contains(out, "Erin Editor") {
+		t.Fatalf("presence: %v %s", err, out)
+	}
+	if _, err := runPageCLI(t, "", "doc", "presence", "report", "--client", "script-tab-1", "--leave"); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 || bodies[0]["client"] != "script-tab-1" || bodies[0]["leave"] != nil || bodies[1]["leave"] != true {
+		t.Fatalf("presence bodies %v", bodies)
+	}
+	if _, err := runPageCLI(t, "", "doc", "presence", "report", "--client", "bad id"); err == nil {
+		t.Fatal("an invalid tab id was sent")
+	}
+}

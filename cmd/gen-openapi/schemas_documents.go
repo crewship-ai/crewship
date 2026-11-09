@@ -144,6 +144,24 @@ func documentSchemaCatalog() map[string]DomainSchema {
 	for _, verb := range []string{"accept", "reject"} {
 		out["POST "+base+"/proposals/{proposal}/"+verb] = DomainSchema{Request: decision, RequestRequired: true, Response: ref("DocumentProposalReceipt"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "409", "413", "429", "500", "502", "503"}}
 	}
+	// Ephemeral presence (#5166): the server names people and assigns colours; a client sends only its tab and caret.
+	position := map[string]any{"type": "string", "maxLength": 256, "description": "Base64 encoded Yjs relative position (at most 192 bytes)."}
+	peer := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"client", "user_id", "name", "color"}, "properties": map[string]any{
+		"client": str(), "user_id": str(), "name": map[string]any{"type": "string", "description": "The member's display name, or Workspace member; never an email."},
+		"color": map[string]any{"type": "integer", "minimum": 0, "maximum": 7, "description": "Per-document colour index assigned by the server."}, "anchor": position, "head": position}}
+	out["POST "+base+"/presence"] = DomainSchema{
+		Request: map[string]any{"type": "object", "additionalProperties": false, "required": []string{"client"}, "properties": map[string]any{
+			"client": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$", "description": "This tab's id."},
+			"anchor": position, "head": position,
+			"leave": map[string]any{"type": "boolean", "description": "Remove this tab at once."}}},
+		RequestRequired: true,
+		Response: map[string]any{"type": "object", "required": []string{"peers"}, "properties": map[string]any{
+			"peers": map[string]any{"type": "array", "maxItems": 64, "items": peer}, "color": map[string]any{"type": "integer", "minimum": 0, "maximum": 7},
+			"ttl_ms": integer(), "interval_ms": integer()}},
+		SuccessStatuses: []string{"200"},
+		ErrorStatuses:   []string{"400", "401", "403", "404", "429", "503"},
+		SuccessHeaders:  map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}},
+	}
 	for key, schema := range out {
 		if len(key) > 5 && key[:5] == "POST " {
 			schema.ErrorMedia = []string{"application/json"}

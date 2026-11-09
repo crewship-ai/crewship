@@ -12,7 +12,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import { documentSchema } from "@/lib/documents/schema"
 import { DocumentSaveState } from "@/components/features/pages/document-save-state"
-import { usePageDocument } from "../use-page-document"
+import { decodeUpdate, usePageDocument } from "../use-page-document"
 
 const fetchMock = vi.hoisted(() => vi.fn())
 const journal = vi.hoisted(() => ({ rows: new Map<string, unknown>(), put: vi.fn(), remove: vi.fn(), open: vi.fn(), load: vi.fn() }))
@@ -54,7 +54,7 @@ it("confirms a save by the server in no-journal mode and says the browser storag
   journal.open.mockRejectedValue(await storageError())
   const server = model()
   let rev = 4
-  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); Y.applyUpdate(server, decodeUpdate(body.update)); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
   const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
   try {
     await waitFor(() => expect(result.current.editable).toBe(true))
@@ -158,7 +158,7 @@ it("sends queued edits while a slow retry is pending, then recovers and clears t
   let finish: ((value: ReturnType<typeof store>) => void) | undefined
   journal.open.mockRejectedValueOnce(await storageError()).mockImplementationOnce(() => new Promise(resolve => { finish = resolve }))
   let rev = 4
-  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); Y.applyUpdate(server, decodeUpdate(body.update)); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
   const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
   try {
     await waitFor(() => expect(result.current.storageUnavailable).toBe(true))
@@ -178,7 +178,7 @@ it("keeps session edits in the pending count and sends them once the held draft 
   journal.rows.set("d1", heldDraft(server))
   journal.open.mockRejectedValueOnce(await storageError())
   let rev = 4
-  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); Y.applyUpdate(server, decodeUpdate(body.update)); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
   const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
   try {
     await waitFor(() => expect(result.current.storageUnavailable).toBe(true))
@@ -187,7 +187,7 @@ it("keeps session edits in the pending count and sends them once the held draft 
     later()
     await waitFor(() => expect(result.current.recoveredDrafts).toHaveLength(1), { timeout: 4000 })
     expect(result.current.pending).toBe(2)
-    fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
+    fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); Y.applyUpdate(server, decodeUpdate(body.update)); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
     await act(async () => { await result.current.discardRecoveredDrafts() })
     await waitFor(() => expect(result.current.pending).toBe(0), { timeout: 4000 })
     expect(result.current.recoveredDrafts).toHaveLength(0)
@@ -244,7 +244,7 @@ it("treats a journal owned by another tab as busy: nothing is shown as recovery 
   const { DocumentStorageBusy } = await import("@/lib/document-queue")
   journal.open.mockRejectedValue(new DocumentStorageBusy("busy"))
   let rev = 4
-  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
+  fetchMock.mockImplementation((_u: string, init?: RequestInit) => { if (init?.method === "POST") { const body = JSON.parse(init.body as string); Y.applyUpdate(server, decodeUpdate(body.update)); rev = 5; return response({ id: body.id, epoch: body.epoch, rev: 5 }) } return response({ ...head(server), rev }) })
   const { result, unmount } = renderHook(() => usePageDocument("w", "slug", "page"))
   try {
     await waitFor(() => expect(result.current.editable).toBe(true))
