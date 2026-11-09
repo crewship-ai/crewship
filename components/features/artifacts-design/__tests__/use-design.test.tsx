@@ -769,6 +769,27 @@ describe("Design local draft identity", () => {
   expect(drafts.get(legacyKey)).toBe(legacyDraft)
  })
 })
+describe("A refused first read is not a loss of access (#5144)", () => {
+ it("never claims access was removed to a person who could not read the Design in this tab", async () => {
+  server.status = 404
+  const view = mount()
+  await waitFor(() => expect(view.result.current.readRevoked).toBe(true))
+  expect(view.result.current.everRead).toBe(false)
+ })
+ it("does not report a refusal while the first read is still open", () => {
+  const view = mount()
+  expect(view.result.current.query.data).toBeUndefined()
+  expect(view.result.current.readRevoked).toBe(false)
+ })
+ it("counts a read that worked before the refusal", async () => {
+  const view = await mounted()
+  await waitFor(() => expect(view.result.current.query.data).toBeDefined())
+  server.status = 404
+  await act(async () => { await clients[0].invalidateQueries({ queryKey: ["artifact-design"] }) })
+  await waitFor(() => expect(view.result.current.readRevoked).toBe(true))
+  expect(view.result.current.everRead).toBe(true)
+ })
+})
 describe("Design local drafts after access loss", () => {
  it("deletes the canvas and comment drafts when the Page answers 404", async () => {
   server.pageId = "old-private-page"
