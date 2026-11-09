@@ -7,6 +7,7 @@ package main
 // GET /api/v1/pages/{slug}/document/comments doc comments
 // POST /api/v1/pages/{slug}/document/comments doc comment
 // POST /api/v1/pages/{slug}/document/comments/resolve doc comment-resolve
+// GET /api/v1/pages/{slug}/document/people doc people
 
 import (
 	"bytes"
@@ -14,6 +15,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 
 	"github.com/spf13/cobra"
@@ -165,7 +167,46 @@ access.`, `  crewship doc comment-resolve @<artifact-id> --file resolve.json`},
 	root.AddCommand(newDocResultsCommand())
 	root.AddCommand(newDocHistoryCommands()...)
 	root.AddCommand(newDocProposalCommands()...)
+	root.AddCommand(newDocPeopleCommand())
 	return root
+}
+
+// newDocPeopleCommand wraps GET /api/v1/pages/{slug}/document/people (#5155).
+func newDocPeopleCommand() *cobra.Command {
+	cmd := &cobra.Command{Use: "people <page-slug>", Short: "Name mentioned people, or search people to mention, for this reader",
+		Long: `Mentions in a schema 5 document store only a user id. With --ids, print the
+names of those people as {"people":[{id,name}]}; with --query (or neither
+flag), list at most 20 people whose name contains the text. Only people who can
+read this document appear, and only when you can read it. Any other id is simply
+absent, which a reader shows as Unknown member; the answer never says whether
+an id exists. Reading needs read access to the document.`,
+		Example: `  crewship doc people @<artifact-id> --ids <user-id>,<user-id>
+  crewship doc people <slug> --query ada`,
+		Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {
+			ids, _ := cmd.Flags().GetString("ids")
+			search, _ := cmd.Flags().GetString("query")
+			if ids != "" && search != "" {
+				return fmt.Errorf("use either --ids or --query")
+			}
+			client, err := pageClient()
+			if err != nil {
+				return err
+			}
+			query := url.Values{}
+			if ids != "" {
+				query.Set("ids", ids)
+			} else {
+				query.Set("q", search)
+			}
+			response, err := client.Get("/api/v1/pages/" + pagePathEscape(args[0]) + "/document/people?" + query.Encode())
+			if err != nil {
+				return err
+			}
+			return printPageArtifactResponse(cmd, response)
+		}}
+	cmd.Flags().String("ids", "", "Comma-separated mention user ids to name (at most 100)")
+	cmd.Flags().String("query", "", "Name text to search for people who can read this document")
+	return cmd
 }
 
 // Re-encode JSON even for human output: untrusted source stays escaped text,
