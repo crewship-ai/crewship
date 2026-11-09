@@ -36,12 +36,21 @@ const blockText = (doc: Y.Doc, index: number) => {
   return block.toArray().map(part => (part instanceof Y.XmlText ? part.toString() : "")).join("").replace(/<[^>]+>/g, "")
 }
 
-/** The other person's editor, seen as Yjs: it appends at the end of `block` what it believes the end is. */
-function typeRemote(doc: Y.Doc, block: number, char: string): Uint8Array {
-  const before = Y.encodeStateVector(doc)
-  const text = (doc.getXmlFragment("default").get(block) as Y.XmlElement).get(0) as Y.XmlText
-  text.insert(text.length, char)
-  return Y.encodeStateAsUpdate(doc, before)
+/**
+ * The other person's editor, seen as Yjs: it types after its own last
+ * character (its caret follows its own text, as this fix makes every editor
+ * do), starting from the end of `block`.
+ */
+function remoteTypist(doc: Y.Doc, block: number) {
+  const text = () => (doc.getXmlFragment("default").get(block) as Y.XmlElement).get(0) as Y.XmlText
+  let caret = Y.createRelativePositionFromTypeIndex(text(), text().length, -1)
+  return (char: string): Uint8Array => {
+    const before = Y.encodeStateVector(doc)
+    const at = Y.createAbsolutePositionFromRelativePosition(caret, doc)!.index
+    text().insert(at, char)
+    caret = Y.createRelativePositionFromTypeIndex(text(), at + 1, -1)
+    return Y.encodeStateAsUpdate(doc, before)
+  }
 }
 
 /**
@@ -56,12 +65,13 @@ function race({ localId, remoteId, localBlock, remoteBlock, mine, theirs, lag }:
   const local = client(localId), remote = client(remoteId)
   Y.applyUpdate(local, base, "remote"); Y.applyUpdate(remote, base)
   const editor = mount(local)
+  const typeRemote = remoteTypist(remote, remoteBlock)
   // The caret at the end of the local paragraph, as a click + End leaves it.
   const end = (() => { let pos = 0; editor.state.doc.forEach((node, offset, index) => { if (index === localBlock) pos = offset + node.nodeSize - 1 }); return pos })()
   editor.commands.setTextSelection(end)
   for (let i = 0; i < Math.max(mine.length, theirs.length); i++) {
     if (i < mine.length) editor.view.dispatch(editor.state.tr.insertText(mine[i]))
-    if (i < theirs.length) Y.applyUpdate(local, typeRemote(remote, remoteBlock, theirs[i]), "remote")
+    if (i < theirs.length) Y.applyUpdate(local, typeRemote(theirs[i]), "remote")
     if (i % lag === lag - 1) Y.applyUpdate(remote, Y.encodeStateAsUpdate(local, Y.encodeStateVector(remote)))
   }
   // Both converge on one text once everything is exchanged.
@@ -79,8 +89,9 @@ describe("#5162 concurrent typing in one paragraph", () => {
         const shown = editor.state.doc.child(0).textContent
         expect(shown).toBe(blockText(local, 0))
         expect(blockText(local, 0)).toBe(blockText(remote, 0))
-        // The typist's own run is contiguous and in typing order: the caret never fell behind their last character.
-        expect(shown).toContain("[editor-same]")
+        // Each person's run is contiguous and in typing order: neither caret fell behind its own last character.
+        expect(shown).toContain(" [editor-same]")
+        expect(shown).toContain(" [owner-same]")
       })
     }
   }
