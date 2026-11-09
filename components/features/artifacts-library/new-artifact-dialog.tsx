@@ -136,9 +136,13 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
 
   const duplicate = trimmed && kind ? pages.find(p => artifactKindOfPage(p) === kind.key && (p.folder?.slug ?? "") === (folder?.slug ?? "") && p.name.trim().toLowerCase() === trimmed.toLowerCase()) : undefined
 
+  // Word never sends the Doc format: that opens as Docs. With only the Doc
+  // format and commands confirmed, Word uses commands (#5153 review).
+  const wordFormat = word.wordFormat === "doc" && caps.words === true && word.availability.wordcraftCommands === true ? "commands" as const : word.wordFormat
+  const wordFormatAvailable = wordFormat === "commands" ? word.availability.wordcraftCommands === true : word.wordFormatAvailable
   const create = useMutation<Created, Error, ArtifactKindEntry>({ mutationFn: async k => {
     if (k.key === "word" || k.key === "sheet" || k.key === "docs") {
-      const doc = await word.create.mutateAsync(k.key === "word" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: word.wordFormat }
+      const doc = await word.create.mutateAsync(k.key === "word" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: wordFormat }
         : k.key === "docs" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: "doc" }
         : { name: trimmed, slug: freeSlug(trimmed, "sheet", pages), format: "sheet" })
       return { slug: doc.slug, pagesVersion: doc.pagesVersion, ...(doc.nativePageId ? { id: doc.nativePageId } : {}) }
@@ -191,7 +195,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
 
   const canSubmit = Boolean(kind) && !busy && (created ? true
     : handoff ? start === "tmpl" || Boolean(prompt.trim() || trimmed)
-    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && word.wordFormatAvailable)) && (kind?.key !== "sheet" || (word.allowed && word.availability.gridcraftNative === true)) && (kind?.key !== "docs" || (word.allowed && word.availability.data === true)))
+    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && wordFormatAvailable)) && (kind?.key !== "sheet" || (word.allowed && word.availability.gridcraftNative === true)) && (kind?.key !== "docs" || (word.allowed && word.availability.data === true)))
   const primaryLabel = created ? "Open it" : handoff ? "Continue in chat" : busy ? "Creating…" : word.retrying && (kind?.key === "word" || kind?.key === "sheet" || kind?.key === "docs") ? "Retry initialization" : kind?.make === "panels" ? "Create page" : "Create and edit"
   const refusal = created ? `${created.name} was created but not put in ${created.folder}: ${created.error}` : create.error?.message ?? null
 

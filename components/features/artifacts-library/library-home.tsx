@@ -16,7 +16,7 @@ import { KIND_ORDER, KINDS, kindOf, uiKindCounts, type ArtifactKind } from "./ki
 import { KindBadge, KindTile } from "./kind-tile"
 import { KindThumb } from "./kind-thumb"
 
-/** The existing creation flow behind each kind, first live one wins. Docs has none yet, so it is not offered. */
+/** The existing creation flow behind each kind, first live one wins. */
 export const CREATE_FLOW: Record<ArtifactKind, readonly ArtifactKindKey[]> = {
   docs: ["docs"], dashboard: ["dashboard"], slides: ["slides"], design: ["design"], app: ["project", "page"], word: ["word"], sheet: ["sheet"],
 }
