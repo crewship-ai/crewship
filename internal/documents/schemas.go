@@ -47,7 +47,11 @@ var schemaCapabilities = map[int]map[Capability]bool{
 	// Schema 3's agent path is the direct draft; its mandate never proposes.
 	3: {CapRead: true, CapEdit: true, CapDraft: true, CapRestore: true, CapExport: true, CapUpgrade: true},
 	4: {CapRead: true, CapEdit: true, CapDraft: true, CapPropose: true, CapAccept: true, CapRestore: true, CapExport: true, CapUpgrade: true},
-	5: {CapRead: true, CapEdit: true, CapDraft: true, CapPropose: true, CapAccept: true, CapRestore: true, CapExport: true},
+	5: {CapRead: true, CapEdit: true, CapDraft: true, CapPropose: true, CapAccept: true, CapRestore: true, CapExport: true, CapUpgrade: true},
+	// Schema 6 is schema 5 plus the Canvas surface. It keeps every capability
+	// schema 5 released: agents propose on Page blocks and never write the
+	// surface in v1, so enabling Canvas never takes the agent pipeline away.
+	6: {CapRead: true, CapEdit: true, CapDraft: true, CapPropose: true, CapAccept: true, CapRestore: true, CapExport: true},
 }
 
 // SchemaAllows reports whether documents of this schema support c. An

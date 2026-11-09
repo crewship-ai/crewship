@@ -25,10 +25,12 @@ export function createSurface({ Y }) {
   const RESERVED = new Set(['__proto__', 'constructor', 'prototype']);
   const validID = id => typeof id === 'string' && ID_PATTERN.test(id) && !RESERVED.has(id);
   // `retainedBytes` bounds every value ever written to the surface, including
-  // deleted ones (gc:false keeps them). It equals the whole-document binary
-  // limit, so the surface cannot fail before the document itself would.
+  // deleted ones (gc:false keeps them). It is half of the whole-document binary
+  // limit: the Canvas can never take the room the Page needs. Every commit is
+  // validated on the merged state, so copies that each stayed inside their own
+  // budget are refused together once merged past it (server-side quota).
   const LIMITS = Object.freeze({ entries: 2000, coordinate: 1_000_000, minW: 40, maxW: 4000, minH: 24, maxH: 4000, z: 1_000_000,
-    text: 4000, textBytes: 12288, label: 200, valueBytes: 4096, retainedBytes: 1 << 20 });
+    text: 4000, textBytes: 12288, label: 200, valueBytes: 4096, retainedBytes: 512 * 1024 });
   const TONES = Object.freeze(['default', 'yellow', 'green', 'blue', 'red', 'purple']);
   const SHAPES = Object.freeze(['rect', 'ellipse', 'diamond']);
   const ORIGIN = 'surface';

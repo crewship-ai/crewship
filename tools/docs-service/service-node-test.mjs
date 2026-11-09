@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startService, PROTOCOL } from './service.mjs';
+import { createSurface } from './surface-core.mjs';
 import { RICH_VERSION, LATEST_VERSION, CREATE_VERSION, create, snapshot, initialJSON, outline, load, validate, anchor, find, encode } from './schema.mjs';
 const secret = 'a'.repeat(48);
 function call(socket, path, data, headers = {}) {
@@ -520,7 +521,7 @@ test('public comment responses resolve spans without exposing the private anchor
 });
 
 test('startup rejects missing, old or future Go content capability before admitting documents', async () => {
- for (const schema of [undefined, 2, 3, 4, 6]) {
+ for (const schema of [undefined, 2, 3, 4, 5, 7]) {
   const f = await fixture((op,data) => { assert.equal(op,'recover'); assert.equal(data.schema,LATEST_VERSION); return {recovered:true,protocol:PROTOCOL,...(schema === undefined ? {} : {schema})}; });
   try { await assert.rejects(f.start(),/compatible engine recovery/); await assert.rejects(call(f.socket,'/v1/documents/p/read',{})); } finally { await f.close(); }
  }
@@ -712,7 +713,7 @@ test('authoring adapter bytes change the copied service build identity', async (
   const dir=await mkdtemp(join(tmpdir(),'docs-build-'));
   let f, service;
   try {
-    for(const file of ['pnpm-lock.yaml','schema.mjs','schema-core.mjs','position-migrations.mjs','service.mjs','create-document.mjs','secret.mjs'])await copyFile(new URL(file,import.meta.url),join(dir,file));
+    for(const file of ['pnpm-lock.yaml','schema.mjs','schema-core.mjs','surface-core.mjs','position-migrations.mjs','service.mjs','create-document.mjs','secret.mjs'])await copyFile(new URL(file,import.meta.url),join(dir,file));
     await symlink(fileURLToPath(new URL('node_modules',import.meta.url)),join(dir,'node_modules'),'dir');
     const {startService:copiedStart}=await import(pathToFileURL(join(dir,'service.mjs')).href);
     f=await fixture(authorityModel().handle);
@@ -827,7 +828,7 @@ test('schema4 initialize is human-only, Page-bound and exports formatting to Mar
     await f.start();
     assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, body })).status, 409);
     assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, page_id: 'p', body }, { Authorization: 'Bearer agtv2.synthetic' })).status, 403);
-    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-six', schema: 6, page_id: 'p', body })).status, 400);
+    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-seven', schema: 7, page_id: 'p', body })).status, 400);
     const bad = structuredClone(body); bad.content[1].attrs.language = 'Go<script>';
     assert.notEqual((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-bad', schema: 4, page_id: 'p', body: bad })).status, 200);
     assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, page_id: 'p', body })).status, 200);
@@ -841,6 +842,7 @@ test('schema4 initialize is human-only, Page-bound and exports formatting to Mar
 for (const [from, body] of [
   [3, { type: 'doc', content: [{ type: 'codeBlock', attrs: { id: 'c' }, content: [{ type: 'text', text: 'x' }] }] }],
   [4, { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'b' }, content: [{ type: 'text', text: 'bold', marks: [{ type: 'bold', attrs: {} }] }] }] }],
+  [5, { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'u' }, content: [{ type: 'text', text: 'under', marks: [{ type: 'underline', attrs: {} }] }] }] }],
 ]) test(`schema${from} documents upgrade to ${LATEST_VERSION} explicitly with unchanged content; the latest cannot upgrade again or to 4`, async () => {
   const model = authorityModel();
   const doc = create(body, from);
@@ -1091,5 +1093,65 @@ test('schema3 documents refuse proposals; agent patch and checkpoint paths are u
     assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'acc3', proposal: 'p3', ifRev: state.rev })).status, 409);
     assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'd3', schema: 3, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target: 'a', ifHash: hash, text: 'Alpha two' }, agent)).status, 200);
     assert.equal(model.commits, 1);
+  } finally { await f.close(); }
+});
+
+// Schema 6: the Canvas surface through the real engine write path.
+const surface = createSurface({ Y });
+const canvasModel = schema => {
+  const model = authorityModel(), doc = create({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'intro' }, content: [{ type: 'text', text: 'Shared' }] }, { type: 'paragraph', attrs: { id: 'outro' }, content: [{ type: 'text', text: 'Last' }] }] }, schema);
+  model.state = { ...model.state, schema, snapshot: snapshot(doc) }; doc.destroy(); return model;
+};
+const placeUpdate = (state, mutate) => { const doc = load(state.snapshot), vector = Y.encodeStateVector(doc); mutate(doc); const update = encode(Y.encodeStateAsUpdate(doc, vector)); doc.destroy(); return update; };
+
+test('schema6: a placement commit is refused on schema 5, saved after the explicit human upgrade, and reads back after reload', async () => {
+  const model = canvasModel(5), f = await fixture(model.handle); await f.start();
+  try {
+    const old = (await read(f)).body;
+    const update = placeUpdate(old, doc => surface.place(doc, 'intro', { x: 40, y: 60, w: 320, h: 120, z: 1 }));
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'place-on-five', schema: 5, page_id: 'p', epoch: old.epoch, kind: 'human', update })).status, 400);
+    assert.equal(model.commits, 0, 'schema 5 never stores a surface');
+    const upgrade = { id: 'enable-canvas', schema: 5, target_schema: 6, page_id: 'p', epoch: old.epoch, ifRev: old.rev };
+    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', upgrade, { Authorization: 'Bearer agtv2.synthetic' })).status, 403, 'agents cannot enable Canvas');
+    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', upgrade)).status, 200);
+    const six = (await read(f)).body; assert.equal(six.schema, 6); assert.deepEqual(six.content, old.content); assert.deepEqual(six.outline, old.outline);
+    const placed = placeUpdate(six, doc => surface.place(doc, 'intro', { x: 40, y: 60, w: 320, h: 120, z: 1 }));
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'place-on-six', schema: 6, page_id: 'p', epoch: six.epoch, kind: 'human', update: placed })).status, 200);
+    const reloaded = (await read(f)).body, doc = load(reloaded.snapshot);
+    assert.deepEqual(surface.project(doc).placements, [{ id: 'intro', x: 40, y: 60, w: 320, h: 120, z: 1 }]);
+    assert.deepEqual(reloaded.outline, six.outline, 'placing a block changes no block hash');
+    doc.destroy();
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'old-editor', schema: 5, page_id: 'p', epoch: reloaded.epoch, kind: 'human', update: placed })).status, 409, 'an older editor cannot write over a Canvas document');
+  } finally { await f.close(); }
+});
+
+test('schema6: an invalid surface value is refused and nothing is stored', async () => {
+  const model = canvasModel(6), f = await fixture(model.handle); await f.start();
+  try {
+    const state = (await read(f)).body;
+    const update = placeUpdate(state, doc => doc.getMap(surface.PLACEMENTS).set('intro', { x: 0, y: 0, w: 320, h: 120, z: 1, html: '<img>' }));
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'bad-surface', schema: 6, page_id: 'p', epoch: state.epoch, kind: 'human', update })).status, 400);
+    assert.equal(model.commits, 0);
+  } finally { await f.close(); }
+});
+
+test('schema6: copies that each stayed inside the Canvas budget are refused together once merged (server-side quota)', async () => {
+  const model = canvasModel(6), f = await fixture(model.handle); await f.start();
+  try {
+    const base = (await read(f)).body;
+    const a = load(base.snapshot), b = load(base.snapshot), vector = Y.encodeStateVector(a);
+    surface.putItem(a, 'n', { kind: 'note', x: 0, y: 0, w: 200, h: 160, z: 0, tone: 'yellow', text: 'start' });
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a, vector));
+    const shared = Y.encodeStateVector(b);
+    const big = i => 'q'.repeat(3990) + (i % 10);
+    for (let i = 0; i < 70; i++) { surface.setText(a, 'n', big(i)); surface.setText(b, 'n', big(i + 3)); }
+    const first = await call(f.socket, '/v1/documents/p/patch', { id: 'copy-a', schema: 6, page_id: 'p', epoch: base.epoch, kind: 'human', update: encode(Y.encodeStateAsUpdate(a, vector)) });
+    assert.equal(first.status, 200);
+    const stored = model.state.snapshot, commits = model.commits;
+    const second = await call(f.socket, '/v1/documents/p/patch', { id: 'copy-b', schema: 6, page_id: 'p', epoch: base.epoch, kind: 'human', update: encode(Y.encodeStateAsUpdate(b, shared)) });
+    assert.equal(second.status, 413); assert.equal(second.body.code, 'surface_quota'); assert.match(second.body.error, /Canvas history is full/);
+    assert.equal(model.commits, commits); assert.equal(model.state.snapshot, stored, 'the stored document stays valid and unchanged');
+    validate(load(model.state.snapshot), 6);
+    a.destroy(); b.destroy();
   } finally { await f.close(); }
 });
