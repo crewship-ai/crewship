@@ -137,6 +137,29 @@ try {
   await page.screenshot({ path: join(output, '03-editor-after-reload.png') })
   pass('save then reload keeps the placement')
 
+  // Zoom and fit in the browser: the zoom readout follows, the card stays where it was saved.
+  await page.getByRole('button', { name: 'Zoom in' }).click()
+  assert.equal(await page.locator('[data-zoom]').innerText(), '120%')
+  await page.getByRole('button', { name: 'Fit to screen' }).click()
+  assert.notEqual(await page.locator('[data-zoom]').innerText(), '120%')
+  pass('zoom and fit change only the view')
+
+  // C05: a thread on the Page block shows on its card and opens the same thread.
+  const head = await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document?${q}`)).json()
+  const thread = await owner.request.post(`${base}/api/v1/pages/canvas-plan/document/comments?${q}`, { data: { id: crypto.randomUUID(), schema: head.schema, page_id: pageId, epoch: head.epoch, ifRev: head.rev, block: 'intro', from: 0, to: 5, text: 'Is the date confirmed?' } })
+  assert.ok(thread.status() < 300, await thread.text())
+  await page.reload()
+  await page.getByLabel('Document editor', { exact: true }).waitFor()
+  await page.getByRole('tab', { name: 'Canvas', exact: true }).click()
+  const badge = page.locator('[data-card-comments="intro"]')
+  await badge.waitFor({ timeout: 15000 })
+  assert.equal(await badge.getAttribute('aria-label'), '1 open comment on this block')
+  await badge.click()
+  await page.getByRole('complementary', { name: 'Comments' }).getByText('Is the date confirmed?').waitFor()
+  await page.screenshot({ path: join(output, '03b-editor-card-comment.png') })
+  assert.equal((await read()).placement.x, stored.placement.x, 'commenting does not move the card')
+  pass('a block comment shows on its card and opens the same thread')
+
   // Read-only: a Viewer in their own browser context.
   const viewerContext = await browser.newContext({ viewport, reducedMotion: 'reduce', recordVideo: video })
   const csrf = (await (await viewerContext.request.get(`${base}/api/auth/csrf`)).json()).csrfToken
