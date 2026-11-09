@@ -80,7 +80,9 @@ describe("DocsCanvas", () => {
       intro.insert(1, [date, mid, known, sep, unknown, tail])
     })
     documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })
-    render(<DocsCanvas doc={doc} editable origin="me" memberName={id => id === "user-ada" ? "Ada Lovelace" : undefined} />)
+    // The Page's people lookup names only readers; anyone else is "Unknown member".
+    const people = { label: (id: string) => id === "user-ada" ? "Ada Lovelace" : "Unknown member", subscribe: () => () => {} }
+    render(<DocsCanvas doc={doc} editable origin="me" people={people} />)
     const shown = card("intro")
     expect(shown.querySelector("p")?.textContent).toBe("Due 2026-12-01 for @Ada Lovelace and @Unknown member.")
     const date = shown.querySelector("time[data-date]")

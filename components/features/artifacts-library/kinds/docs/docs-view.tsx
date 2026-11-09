@@ -18,7 +18,7 @@ import type { LibraryItem } from "../../library-items"
 import { docsFrameStatus, outlineOf, readingStats, readingText, type DocNode, type OutlineEntry } from "./docs-model"
 import { DocsTools } from "./docs-tools"
 import { DocsComments } from "./docs-comments"
-import { DocsCanvas } from "./docs-canvas"
+import { DocsCanvas, type MentionLabels } from "./docs-canvas"
 import { documentSurface } from "@/lib/documents/surface"
 import { DocsPresence } from "./docs-presence"
 import { presentPeople } from "@/lib/documents/presence"
@@ -89,6 +89,17 @@ export function DocsBody({ workspaceId, item, fallback, onFrame }: {
  * nothing while the first read is still on its way. Dropping the chip would
  * leave the last state (often Saved) unexplained.
  */
+/**
+ * The session's reader-scoped people lookup, as the Page editor's mention
+ * support (DocumentMentions) carries it, so Canvas cards name people exactly as
+ * the Page does. An editor without it (an older schema, or a build without that
+ * support) has none, and every mention reads "@Unknown member".
+ */
+export function sessionPeople(editor: { storage: unknown } | null | undefined): MentionLabels | undefined {
+  const people = (editor?.storage as Record<string, { people?: Partial<MentionLabels> } | undefined> | undefined)?.documentMentions?.people
+  return typeof people?.label === "function" && typeof people.subscribe === "function" ? people as MentionLabels : undefined
+}
+
 function DocsUnhydrated({ denied, status, onFrame, children }: { denied: boolean; status: string; onFrame: (report: DocsFrameReport | null) => void; children: React.ReactNode }) {
   const chip = docsFrameStatus({ hydrated: false, denied, available: true, restoring: false, status, pending: 0, recovery: false, recoveredDrafts: 0, canWrite: false, durability: "confirmed", sentThisSession: false })
   const chipKey = JSON.stringify(chip)
@@ -143,10 +154,6 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     const target = [...editor.view.dom.querySelectorAll<HTMLElement>("[data-block-id]")].find(node => node.dataset.blockId === comment.block)
     target?.scrollIntoView?.({ block: "center", behavior: "smooth" })
   }
-  const memberName = React.useCallback((userId: string) => {
-    const member = (members.members ?? []).find(entry => entry.user.id === userId)
-    return member?.user.full_name || member?.user.email || undefined
-  }, [members.members])
   const stats = summary?.stats ?? { words: 0, minutes: 0 }
   // Proposals exist only where the server says so and the Doc's own schema
   // supports them (4, 5 or 6); otherwise no Propose mode and no tab.
@@ -265,7 +272,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     {view === "canvas" && <div id="docs-view-canvas" role="tabpanel" aria-labelledby="docs-mode-canvas" className="h-[calc(100dvh-8rem)] min-h-[480px] w-full px-2 pb-16 pt-14 md:px-4 md:pb-4">
       {banner}
       <DocsCanvas doc={sync.doc} editable={editable} origin={canvasOrigin} onOpenInPage={openInPage}
-        comments={discussion?.comments} onOpenComments={discussion ? openCanvasComments : undefined} memberName={memberName} />
+        comments={discussion?.comments} onOpenComments={discussion ? openCanvasComments : undefined} people={sessionPeople(editor)} />
     </div>}
 
     <ArtifactSlot name="view" label="View">

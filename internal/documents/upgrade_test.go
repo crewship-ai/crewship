@@ -194,6 +194,59 @@ func TestDocumentRestoreKeepsLatestSchema(t *testing.T) {
 	}
 }
 
+// Lead decision (#5149): once a Document is at schema 5 or later, a restore
+// lands at max(current, checkpoint). History from before schema 5 restored on
+// a schema 6 (Canvas) Document stays 6, on a schema 5 Document it stays 5, and
+// history from before Canvas restored on schema 6 stays 6. The checkpoint's
+// content is kept byte for byte: the upgrade is a pure schema bump.
+func TestDocumentRestoreKeepsTheCurrentSchemaFromFiveOn(t *testing.T) {
+	for _, tt := range []struct{ from, to int }{
+		{1, 6}, {2, 6}, {3, 6}, {4, 6}, {5, 6},
+		{1, 5}, {2, 5}, {3, 5}, {4, 5},
+	} {
+		s, db, _ := fixture(t, Options{})
+		k := Key{key.WorkspaceID, "page-c"}
+		if _, e := s.InitRequest(ctx, k, "init", "init", tt.from, []byte("binary"), projection, allow); e != nil {
+			t.Fatal(tt, e)
+		}
+		lease, e := s.Acquire(ctx, k, "engine", allow)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if _, e = s.Checkpoint(ctx, k, lease, "history", []byte("old content"), 0, allow); e != nil {
+			t.Fatal(tt, e)
+		}
+		v, e := s.Read(ctx, k, allow)
+		if e != nil {
+			t.Fatal(e)
+		}
+		generation := v.Generation
+		// Upgrades now go only to the latest schema; a schema 5 Document with
+		// older history is one upgraded while 5 was the latest.
+		if tt.to == LatestSchema {
+			if _, e = s.UpgradeRequest(ctx, k, lease, "upgrade", "original", tt.from, tt.to, v.HeadRev, &generation, allow); e != nil {
+				t.Fatalf("%v upgrade: %v", tt, e)
+			}
+			// The upgrade ends the lease.
+			if lease, e = s.Acquire(ctx, k, "engine", allow); e != nil {
+				t.Fatal(e)
+			}
+		} else if _, e = db.Exec(`UPDATE documents SET schema_version=? WHERE workspace_id=? AND page_id=?`, tt.to, k.WorkspaceID, k.PageID); e != nil {
+			t.Fatal(e)
+		}
+		if v, e = s.Read(ctx, k, allow); e != nil || v.Schema != tt.to {
+			t.Fatalf("%v before restore: %+v %v", tt, v, e)
+		}
+		if _, e = s.RestoreRequest(ctx, k, lease, "history", "restore", v.HeadRev, allow); e != nil {
+			t.Fatalf("%v restore: %v", tt, e)
+		}
+		after, e := s.Read(ctx, k, allow)
+		if e != nil || after.Schema != tt.to || string(after.Snapshot) != "old content" {
+			t.Fatalf("schema %d history restored on a schema %d Document: schema %d snapshot %q %v", tt.from, tt.to, after.Schema, after.Snapshot, e)
+		}
+	}
+}
+
 // Below the latest schema a restore keeps the checkpoint's own schema.
 func TestDocumentRestoreBelowLatestKeepsCheckpointSchema(t *testing.T) {
 	s, _, _ := fixture(t, Options{})

@@ -42,8 +42,8 @@ export interface DocsCanvasProps {
   comments?: readonly DocumentComment[]
   /** Open these threads (the same ones the Page lists) in the Comments drawer. */
   onOpenComments?: (blockId: string, threadIds: string[]) => void
-  /** Display name for a mentioned workspace member; unknown members show as "Unknown member". */
-  memberName?: (userId: string) => string | undefined
+  /** The document session's reader-scoped people lookup, the one the Page's mentions use; without it every mention is "@Unknown member". */
+  people?: MentionLabels
 }
 
 type Drag =
@@ -92,12 +92,29 @@ function runsOf(node: Y.XmlElement | Y.XmlText): TextRun[] {
   return children.flatMap((child, index) => [...(index > 0 && !(inline(child) && inline(children[index - 1])) ? [{ text: " " }] : []), ...runsOf(child as Y.XmlElement)])
 }
 
+const noSubscription = () => () => {}
+/**
+ * The part of the Page's reader-scoped people lookup (DocumentPeople) a card
+ * needs: `label` names a person only when the server releases the name to this
+ * reader and otherwise answers "Unknown member"; `subscribe` reports arriving
+ * names. The Canvas has no lookup of its own.
+ */
+export interface MentionLabels {
+  label(userId: string): string
+  subscribe(listener: () => void): () => void
+}
+const mentionText = (people: MentionLabels | undefined, userId: string) => "@" + (people ? people.label(userId) : "Unknown member")
+/** The card's accessible name: its text with dates and mentions as they are shown. */
+export function runsLabel(runs: TextRun[], people?: MentionLabels) {
+  return runs.map(run => run.atom?.kind === "date" ? run.atom.value : run.atom?.kind === "mention" ? mentionText(people, run.atom.userId) : run.text).join("")
+}
+
 /** A card shows the Page block's formatting with the same palette as the Page editor; links are not followable on the canvas. */
-function FormattedRuns({ runs, memberName }: { runs: TextRun[]; memberName?: (userId: string) => string | undefined }) {
+function FormattedRuns({ runs, people }: { runs: TextRun[]; people?: MentionLabels }) {
   return <>{runs.map((run, index) => {
-    // Atoms are read-only chips, like on the Page: the date as its ISO day, a mention as @name (or @Unknown member).
+    // Atoms are read-only chips, like on the Page: the date as its ISO day, a mention through the Page's people lookup.
     if (run.atom?.kind === "date") return <time key={index} data-date={run.atom.value} dateTime={run.atom.value} className="rounded-sm bg-muted px-1">{run.atom.value}</time>
-    if (run.atom?.kind === "mention") return <span key={index} data-mention={run.atom.userId} className="rounded-sm bg-muted px-1">@{memberName?.(run.atom.userId) || "Unknown member"}</span>
+    if (run.atom?.kind === "mention") return <span key={index} data-mention={run.atom.userId} className="rounded-sm bg-muted px-1">{mentionText(people, run.atom.userId)}</span>
     let node: React.ReactNode = run.text
     if (run.code) node = <code className="rounded bg-muted px-1 font-mono text-[0.9em]">{node}</code>
     if (run.bold) node = <strong>{node}</strong>
@@ -186,8 +203,11 @@ const handleClass: Record<string, string> = {
   se: "bottom-[-5px] right-[-5px] size-3 cursor-nwse-resize",
 }
 
-export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOpenComments, memberName }: DocsCanvasProps) {
+export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOpenComments, people }: DocsCanvasProps) {
   const { view: surface, blocks, error } = useSurface(doc)
+  // Cards (and their names) re-render when the people lookup answers.
+  const [, namesArrived] = React.useReducer((n: number) => n + 1, 0)
+  React.useEffect(() => people?.subscribe(namesArrived), [people])
   const ref = React.useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = React.useState<Viewport>({ x: -48, y: -48, scale: 1 })
   const [selected, setSelected] = React.useState<string | null>(null)
@@ -385,13 +405,14 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
         {placements.map(p => {
           const block = byId.get(p.id), r = shown(p)
           if (!block) return null
-          return <div key={p.id} role="group" aria-label={block.text || "Empty block"} data-placement={p.id} data-selected={selected === p.id ? "true" : undefined}
+          const label = runsLabel(block.runs, people)
+          return <div key={p.id} role="group" aria-label={label.trim() ? label : "Empty block"} data-placement={p.id} data-selected={selected === p.id ? "true" : undefined}
             tabIndex={0} onFocus={() => setSelected(p.id)}
             onPointerDown={e => onPointerDown(e, { id: p.id })} onDoubleClick={() => onOpenInPage?.(p.id)}
             className={cn("absolute overflow-hidden rounded-md border bg-card p-3 text-sm shadow-sm outline-none", editable ? "cursor-grab" : "cursor-default",
               selected === p.id && "ring-2 ring-primary")}
             style={{ left: r.x, top: r.y, width: r.w, minHeight: r.h, zIndex: p.z }}>
-            <p className={cn("whitespace-pre-wrap break-words", block.type === "heading" && "text-base font-semibold")}>{block.runs.some(run => run.text.trim() || run.atom) ? <FormattedRuns runs={block.runs} memberName={memberName} /> : <span className="text-muted-foreground">Empty block</span>}</p>
+            <p className={cn("whitespace-pre-wrap break-words", block.type === "heading" && "text-base font-semibold")}>{block.runs.some(run => run.text.trim() || run.atom) ? <FormattedRuns runs={block.runs} people={people} /> : <span className="text-muted-foreground">Empty block</span>}</p>
             {(threads.get(p.id)?.length ?? 0) > 0 && <button type="button" data-card-comments={p.id}
               aria-label={`${threads.get(p.id)!.length} open ${threads.get(p.id)!.length === 1 ? "comment" : "comments"} on this block`}
               onPointerDown={e => e.stopPropagation()} onClick={() => onOpenComments?.(p.id, threads.get(p.id)!)}

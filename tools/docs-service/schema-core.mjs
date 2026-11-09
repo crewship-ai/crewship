@@ -577,5 +577,18 @@ function markdown(json, version = RICH_VERSION, { people } = {}) {
   return visit(json).trimEnd()+'\n';
 }
 
-return { VERSION, RICH_VERSION, FORMATTED_VERSION, MARKS_VERSION, CANVAS_VERSION, LATEST_VERSION, PALETTE, validColor, ATOMS, validDate, validUserId, UNKNOWN_MEMBER, validLanguage, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
+// The one conversion of older content into a newer schema, used by Enable
+// Canvas (upgrade) and by restoring older history onto a schema 5 or 6
+// Document (#5149). Each schema so far only adds node and mark types or the
+// Canvas surface roots and never changes an existing type, so the conversion
+// is the proof that the older Yjs content is valid content of the target
+// schema: no bytes are rewritten and nothing is dropped, and content the
+// target refuses is refused here. A later schema that changes an existing type
+// adds its transform in this function, for both paths at once.
+const upgradeContent = (doc, from, to) => {
+  const source = from === 1 ? VERSION : from;
+  if (!Object.hasOwn(SCHEMA_CAPABILITIES, source) || !Object.hasOwn(SCHEMA_CAPABILITIES, to) || to < source || (to !== source && !schemaAllows(source, 'upgrade'))) throw new Error('unsupported schema conversion');
+  return validate(doc, to);
+};
+return { VERSION, RICH_VERSION, FORMATTED_VERSION, MARKS_VERSION, CANVAS_VERSION, LATEST_VERSION, PALETTE, validColor, ATOMS, validDate, validUserId, UNKNOWN_MEMBER, validLanguage, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, upgradeContent, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
 }

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -271,7 +272,14 @@ func TestIterationIntentBlocksRoundTrip(t *testing.T) {
 		{"empty blocks", `{"submission_id":"s","page_id":"p","schema":4,"generation":0,"rev":0,"blocks":[]}`, false},
 		{"bad block id", `{"submission_id":"s","page_id":"p","schema":4,"generation":0,"rev":0,"blocks":["a b"]}`, false},
 		{"schema 5 with blocks", `{"submission_id":"s","page_id":"p","schema":5,"generation":0,"rev":0,"blocks":["a"]}`, true},
-		{"schema 6", `{"submission_id":"s","page_id":"p","schema":6,"generation":0,"rev":0}`, false},
+		// Canvas (schema 6) documents take propose mandates (#5149): the blocks
+		// named on the Page round-trip exactly. A mandate never carries Canvas
+		// geometry; placements are document state, kept by accept (see
+		// TestDocumentCanvasSchemaSixRealEngineCLI).
+		{"schema 6 with blocks", `{"submission_id":"s","page_id":"p","schema":6,"generation":3,"rev":7,"blocks":["lead","other"]}`, true},
+		{"schema 6 whole document", `{"submission_id":"s","page_id":"p","schema":6,"generation":0,"rev":0}`, true},
+		{"schema 6 with placements", `{"submission_id":"s","page_id":"p","schema":6,"generation":0,"rev":0,"blocks":["lead"],"placements":{"lead":{"x":0,"y":0}}}`, false},
+		{"schema 7", `{"submission_id":"s","page_id":"p","schema":7,"generation":0,"rev":0}`, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -293,6 +301,18 @@ func TestIterationIntentBlocksRoundTrip(t *testing.T) {
 			var back documents.IterationIntent
 			if json.Unmarshal(again, &back) != nil || back != intent {
 				t.Fatalf("round trip: %s -> %+v", again, back)
+			}
+			var source struct {
+				Schema     int      `json:"schema"`
+				Rev        int64    `json:"rev"`
+				Generation int64    `json:"generation"`
+				Blocks     []string `json:"blocks"`
+			}
+			if err := json.Unmarshal([]byte(tt.raw), &source); err != nil {
+				t.Fatal(err)
+			}
+			if back.Schema != source.Schema || back.Rev != source.Rev || back.Generation != source.Generation || !slices.Equal(back.BlockList(), source.Blocks) || !back.Propose() {
+				t.Fatalf("round trip lost the mandate: %s -> %+v (blocks %v)", tt.raw, back, back.BlockList())
 			}
 		})
 	}

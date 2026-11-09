@@ -6,7 +6,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
-import { VERSION, RICH_VERSION, FORMATTED_VERSION, MARKS_VERSION, CANVAS_VERSION, LATEST_VERSION, CREATE_VERSION, schemaAllows, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown, validUserId } from './schema.mjs';
+import { VERSION, RICH_VERSION, FORMATTED_VERSION, MARKS_VERSION, CANVAS_VERSION, LATEST_VERSION, CREATE_VERSION, schemaAllows, create, load, snapshot, outline, validate, upgradeContent, patch, hash, decode, anchor, resolve, markdown, validUserId } from './schema.mjs';
 import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
@@ -291,7 +291,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       const key=`${context.workspace}/${page}`;
       lease=await writerLease(page,context,state);
       if (operation === 'upgrade') {
-        validate(doc,LATEST_VERSION);
+        upgradeContent(doc,state.schema,LATEST_VERSION);
         const result = await go(page,'upgrade',context,{id:request.id,fingerprint,schema:state.schema,targetSchema:LATEST_VERSION,ifRev:state.rev,generation:state.generation??0,epoch:lease.epoch,leaseToken:lease.token,leaseOwner:owner});
         leases.delete(key);
         return {...result,schema:LATEST_VERSION,epoch:syncEpoch(advanced(state))};
@@ -323,7 +323,11 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
           if (request.ifRev !== state.rev) throw fault(409, 'restore precondition conflict');
           const checkpoint = await go(page, 'checkpoint-read', context, { id: request.checkpoint });
           if (checkpoint.schema !== undefined && !supportedSchema(checkpoint.schema)) throw fault(409, 'unsupported checkpoint schema');
-          resultVersion = contentSchema(checkpoint.schema??VERSION); restored = restoredSchema(state.schema, checkpoint.schema??VERSION); replaced = snapshot(doc); doc.destroy(); doc = load(checkpoint.snapshot); if (restored !== contentSchema(checkpoint.schema??VERSION)) validate(doc, restored); break;
+          restored = restoredSchema(state.schema, checkpoint.schema??VERSION); replaced = snapshot(doc); doc.destroy(); doc = load(checkpoint.snapshot);
+          // Older history restored onto a schema 5 or 6 Document goes through the
+          // same explicit conversion as Enable Canvas (#5149). Same-schema history needs
+          // none; the checks below (with the Canvas quota mapping) cover both.
+          resultVersion = contentSchema(restored); if (resultVersion !== contentSchema(checkpoint.schema??VERSION)) upgradeContent(doc, checkpoint.schema??VERSION, resultVersion); break;
         }
         case 'checkpoint':
           if (request.ifRev !== state.rev) throw fault(409, 'checkpoint precondition conflict');
