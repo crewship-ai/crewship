@@ -279,16 +279,21 @@ try {
   await co.getByRole('button', { name: /^Status: (Live|Recovered|Saved)/ }).waitFor({ timeout: 15000 }).catch(() => {})
   await co.getByRole('tab', { name: 'Canvas', exact: true }).click()
   await co.locator('[data-placement="intro"]').waitFor()
+  // Both views fit first so the card is fully on screen; a drag that starts off screen moves nothing.
+  await page.getByRole('button', { name: 'Fit to screen' }).click()
   const ownerCard = page.locator('[data-placement="intro"]')
   const from = await ownerCard.boundingBox()
-  const ownerSaved = page.waitForResponse(r => r.url().includes('/document/patch') && r.request().method() === 'POST')
-  const coSaved = co.waitForResponse(r => r.url().includes('/document/patch') && r.request().method() === 'POST')
+  // Handled at once so a timeout reaches the failure screenshots instead of crashing the process.
+  const settle = promise => { promise.catch(() => {}); return promise }
+  const ownerSaved = settle(page.waitForResponse(r => r.url().includes('/document/patch') && r.request().method() === 'POST'))
+  const coSaved = settle(co.waitForResponse(r => r.url().includes('/document/patch') && r.request().method() === 'POST'))
   await co.getByText(/^Add blocks \(3\)$/).click()
   await page.mouse.move(from.x + 40, from.y + 20); await page.mouse.down()
   for (let i = 1; i <= 8; i++) await page.mouse.move(from.x + 40 + i * 15, from.y + 20 + i * 20)
   await co.getByRole('button', { name: 'Book the venue.', exact: true }).click()
   await page.mouse.up()
-  assert.equal((await ownerSaved).status(), 200); assert.equal((await coSaved).status(), 200)
+  assert.equal((await ownerSaved.catch(e => { throw new Error(`the owner's move was never saved: ${e.message}`) })).status(), 200)
+  assert.equal((await coSaved.catch(e => { throw new Error(`the co-editor's placement was never saved: ${e.message}`) })).status(), 200)
   let merged
   for (let i = 0; i < 60; i++) { merged = await read(); if (merged.placement.x !== stored.placement.x) break; await new Promise(r => setTimeout(r, 250)) }
   const doc = new Y.Doc({ gc: false }); const latest = await (await owner.request.get(`${base}/api/v1/pages/canvas-plan/document?${q}`)).json()
