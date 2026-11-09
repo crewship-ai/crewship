@@ -21,7 +21,7 @@ import { KindThumb } from "./kind-thumb"
  * A Page with panels shows as a Dashboard (kindOf), so it is made from New Dashboard, never New App (#5152).
  */
 export const CREATE_FLOW: Record<ArtifactKind, readonly ArtifactKindKey[]> = {
-  docs: [], dashboard: ["dashboard", "page"], slides: ["slides"], design: ["design"], app: ["project"], word: ["word"], sheet: ["sheet"],
+  docs: ["docs"], dashboard: ["dashboard", "page"], slides: ["slides"], design: ["design"], app: ["project"], word: ["word"], sheet: ["sheet"],
 }
 
 export function creatableUiKinds(creatable: readonly ArtifactKindKey[]): { kind: ArtifactKind; flow: ArtifactKindKey }[] {
