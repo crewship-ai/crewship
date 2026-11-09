@@ -269,9 +269,59 @@ export function safeImageSource(value: string | undefined): string | undefined {
 /**
  * Undo history of one person: only transactions this client made through the
  * editor ("editor" origin) are recorded, so undo never takes back a peer's
- * change, and Yjs never overwrites a value a peer wrote after this person's
- * edit. Edits within half a second form one step.
+ * change. Edits within half a second form one step. When a peer changes a
+ * property (or deletes a layer) that a step in this history also changed, that
+ * step is dropped: undoing it after concurrent edits could otherwise delete or
+ * overwrite the value both sides agreed on. Layer order is not tracked this way,
+ * since order edits from both sides merge without losing entries.
  */
 export function createDesignUndo(doc: Y.Doc) {
- return new Y.UndoManager([doc.getMap("nodes"), doc.getArray("order")], { trackedOrigins: new Set(["editor"]), captureTimeout: 500 })
+ const nodes = doc.getMap<Y.Map<unknown>>("nodes")
+ const undo = new Y.UndoManager([nodes, doc.getArray("order")], { trackedOrigins: new Set(["editor"]), captureTimeout: 500 })
+ // Keys are "<node id>:<property>"; "<node id>:*" stands for the whole layer.
+ const touched = (changed: Map<Y.AbstractType<unknown>, Set<string | null>>) => {
+  const keys = new Set<string>()
+  changed.forEach((subs, type) => {
+   if (type === nodes) subs.forEach(id => { if (id) keys.add(`${id}:*`) })
+   else if (type._item?.parent === nodes && typeof type._item.parentSub === "string") {
+    const id = type._item.parentSub
+    subs.forEach(key => { if (key) keys.add(`${id}:${key}`) })
+   }
+  })
+  return keys
+ }
+ const overlaps = (mine: Set<string> | undefined, theirs: Set<string>) => {
+  if (!mine) return false
+  for (const key of mine) {
+   if (theirs.has(key)) return true
+   const id = key.slice(0, key.lastIndexOf(":"))
+   if (theirs.has(`${id}:*`) || (key.endsWith(":*") && [...theirs].some(other => other.startsWith(`${id}:`)))) return true
+  }
+  return false
+ }
+ const onTransaction = (tr: Y.Transaction) => {
+  const keys = touched(tr.changed)
+  if (keys.size === 0) return
+  const local = tr.local && (tr.origin === "editor" || tr.origin === undo)
+  if (local) {
+   // Tag the step this transaction joined (or the redo step it created).
+   const item = tr.origin === undo ? (undo.redoing ? undo.undoStack : undo.undoing ? undo.redoStack : undo.undoStack).at(-1) : undo.undoStack.at(-1)
+   if (!item) return
+   const mine = (item.meta.get("keys") as Set<string> | undefined) ?? new Set<string>()
+   keys.forEach(key => mine.add(key))
+   item.meta.set("keys", mine)
+   return
+  }
+  const before = undo.undoStack.length + undo.redoStack.length
+  undo.undoStack = undo.undoStack.filter(item => !overlaps(item.meta.get("keys") as Set<string> | undefined, keys))
+  undo.redoStack = undo.redoStack.filter(item => !overlaps(item.meta.get("keys") as Set<string> | undefined, keys))
+  if (undo.undoStack.length + undo.redoStack.length !== before) {
+   undo.stopCapturing()
+   undo.emit("stack-cleared", [{ undoStackCleared: true, redoStackCleared: true }])
+  }
+ }
+ doc.on("afterTransaction", onTransaction)
+ const destroy = undo.destroy.bind(undo)
+ undo.destroy = () => { doc.off("afterTransaction", onTransaction); destroy() }
+ return undo
 }

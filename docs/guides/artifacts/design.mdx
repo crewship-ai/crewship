@@ -139,9 +139,12 @@ People with read access see a **Read only** badge next to the status.
 
 **Undo** and **Redo** in the toolbar (or **Ctrl + Z**, **Shift + Ctrl + Z**
 and **Ctrl + Y**; **Cmd** on a Mac) take back and redo your own edits on this
-canvas since you opened it. They never take back another person's change, and
-never overwrite a value someone changed after you. In a text field the keys
-undo typing in that field.
+canvas since you opened it. They never take back another person's change.
+When someone else changes a property you also changed (or deletes that
+layer), your step for it leaves the history, so undo never overwrites or
+removes their value. In a text field the keys undo typing in that field.
+Colours follow the people present, so one may change when someone joins or
+leaves.
 
 Live updates reach the people authorized to view the live canvas. Shared-only
 readers keep seeing the shared version. The editor also keeps a copy of your unsaved canvas in this browser, so a crash or a lost

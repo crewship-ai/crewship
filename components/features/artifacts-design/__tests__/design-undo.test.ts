@@ -48,4 +48,25 @@ describe("createDesignUndo", () => {
   expect(node(b, "r1")).toMatchObject({ x: 100, name: "One" })
   expect(a.getArray<string>("order").toArray()).toEqual(["r1", "r2"])
  })
+
+ it.each([[1, 2], [2, 1]])("never deletes or overwrites a value after concurrent edits of the same property (A clientID %i, B %i)", (idA, idB) => {
+  const a = new Y.Doc(), b = new Y.Doc()
+  a.clientID = idA; b.clientID = idB
+  upsertDesignNode(a, { id: "r1", type: "rect", name: "One", x: 100, y: 100, width: 50, height: 50, fill: "#000000" })
+  Y.applyUpdate(b, Y.encodeStateAsUpdate(a), "remote")
+  const undoA = createDesignUndo(a)
+  // Offline on both sides: A and B set x at the same time.
+  upsertDesignNode(a, { id: "r1", x: 180 })
+  upsertDesignNode(b, { id: "r1", x: 250 })
+  Y.applyUpdate(a, Y.encodeStateAsUpdate(b), "remote")
+  Y.applyUpdate(b, Y.encodeStateAsUpdate(a), "remote")
+  const merged = node(a, "r1")?.x
+  expect(merged).toBe(node(b, "r1")?.x)
+  a.on("update", (update: Uint8Array) => Y.applyUpdate(b, update, "remote"))
+  undoA.undo()
+  // Whoever won, A's undo leaves a value both sides agree on and never deletes it.
+  expect(node(a, "r1")?.x).toBe(merged)
+  expect(node(b, "r1")?.x).toBe(merged)
+ })
 })
+
