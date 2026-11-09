@@ -46,12 +46,10 @@ function caretWidget(peer: PresencePeer): HTMLElement {
   caret.setAttribute("aria-hidden", "true")
   caret.contentEditable = "false"
   Object.assign(caret.style, { position: "relative", display: "inline-block", width: "0", height: "1.2em", marginLeft: "-1px", marginRight: "-1px", borderLeft: `2px solid ${peer.color}`, verticalAlign: "text-bottom", pointerEvents: "none", userSelect: "none" })
-  const label = document.createElement("span")
-  label.className = "document-peer-name"
-  // The name is drawn by CSS from an attribute, so it is never part of the editor's text (copy, innerText, find).
-  label.dataset.name = peer.name
-  Object.assign(label.style, { position: "absolute", bottom: "100%", left: "-2px", maxWidth: "12rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", padding: "1px 5px", borderRadius: "4px 4px 4px 0", fontSize: "11px", fontWeight: "500", lineHeight: "1.4", fontStyle: "normal", color: "#ffffff", backgroundColor: readablePeerFill(peer.color), pointerEvents: "none", userSelect: "none" })
-  caret.append(label)
+  // The name is the caret's generated ::after content (app/globals.css), not a child element: it is never part
+  // of the editor's text (copy, find, innerText) and does not break lines.
+  caret.dataset.name = peer.name
+  caret.style.setProperty("--peer-fill", readablePeerFill(peer.color))
   return caret
 }
 

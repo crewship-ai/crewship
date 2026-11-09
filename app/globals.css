@@ -2262,6 +2262,23 @@ body {
 }
 
 /* Docs presence (#5166): another person's name above their caret, generated so it never becomes editor text. */
-.document-peer-name::after {
+.document-peer-caret::after {
   content: attr(data-name);
+  position: absolute;
+  bottom: 100%;
+  left: -2px;
+  max-width: 12rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 1px 5px;
+  border-radius: 4px 4px 4px 0;
+  font-size: 11px;
+  font-weight: 500;
+  font-style: normal;
+  line-height: 1.4;
+  color: #ffffff;
+  background-color: var(--peer-fill);
+  pointer-events: none;
+  user-select: none;
 }
