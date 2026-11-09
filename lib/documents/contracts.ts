@@ -34,7 +34,7 @@ export function verifyInitialization(value: unknown, id: string): void {
   if (!revision(state.rev) || !revision(state.epoch)) throw new Error("Document initialization could not be confirmed. Retry the original request.")
   if (state.id !== undefined) {
     if (state.id !== id || typeof state.actor !== "string" || state.kind !== "init" || state.found !== true || state.duplicate !== true) throw new Error("Document initialization receipt could not be confirmed.")
-  } else if ((state.schema !== 3 && state.schema !== 4 && state.schema !== 5) || !revision(state.generation) || typeof state.incarnation !== "string" || !state.incarnation || typeof state.snapshot !== "string" || !revision(state.snapshotRev) || !Array.isArray(state.updates) || state.updates.some(item=>typeof item !== "string") || !Array.isArray(state.blocks)) {
+  } else if ((state.schema !== 3 && state.schema !== 4 && state.schema !== 5 && state.schema !== 6) || !revision(state.generation) || typeof state.incarnation !== "string" || !state.incarnation || typeof state.snapshot !== "string" || !revision(state.snapshotRev) || !Array.isArray(state.updates) || state.updates.some(item=>typeof item !== "string") || !Array.isArray(state.blocks)) {
     throw new Error("Document initialization state could not be confirmed.")
   }
 }

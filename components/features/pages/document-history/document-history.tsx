@@ -9,7 +9,7 @@ import { DocumentReadonly } from "../document-readonly/document-readonly"
 import type { DocumentHistoryProps, DocumentCheckpointSnapshot } from "./types"
 export type { DocumentHistoryProps } from "./types"
 
-function supported(schema: number): schema is 2 | 3 | 4 | 5 { return schema === 2 || schema === 3 || schema === 4 || schema === 5 }
+function supported(schema: number): schema is 2 | 3 | 4 | 5 | 6 { return schema === 2 || schema === 3 || schema === 4 || schema === 5 || schema === 6 }
 function when(value: string) {
   return Number.isFinite(Date.parse(value)) ? formatDateTime(value) : "Date unavailable"
 }

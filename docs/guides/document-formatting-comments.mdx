@@ -20,6 +20,7 @@ so a document never changes meaning on its own:
 | 3 | Schema 2 plus web links, inline code and code blocks |
 | 4 | Schema 3 plus **bold**, *italic* and ~~strikethrough~~ (combinable, and with links), a language on each code block, block quotes and checklists |
 | 5 | Schema 4 plus underline, a text colour and a highlight, each combinable with the other marks |
+| 6 | Schema 5 plus the Canvas surface: block placements, notes and shapes beside the page |
 
 In a schema 4 document the toolbar offers Bold, Italic, Strikethrough, Quote,
 Checklist and a language for the current code block. Code blocks show their
@@ -37,15 +38,21 @@ it. Markdown has no syntax for these marks, so Markdown export writes
 and highlight and show coloured text plainly. Word export uses the light
 theme's shades.
 
-A document becomes schema 4 or 5 only explicitly: initialize it with `"schema": 4`
-(see [`crewship doc initialize`](/cli/doc)) or `"schema": 5`, or upgrade an older
+A document becomes schema 4, 5 or 6 only explicitly: initialize it with `"schema": 4`
+(see [`crewship doc initialize`](/cli/doc)), `"schema": 5` or `"schema": 6`, or upgrade an older
 document through the documents service's human-only upgrade, which always goes
-to the newest schema (5), keeps its content, history and comments and only
+to the newest schema (6), keeps its content, history and comments and only
 widens what it may hold. An editor that does not know a document's schema opens
 it read-only with "This document needs a newer editor" and never saves over it.
 New documents from the Artifacts library and from agents in chat are still
 schema 3, because agent drafting works on schema 3 only; an agent cannot edit
-a schema 4 or 5 document yet.
+a schema 4, 5 or 6 document yet.
+
+At schema 6 the Canvas surface lives beside the page and never changes it:
+placing or moving a block on the canvas changes only its position, so the
+page text, block hashes, Markdown export and comment anchors stay as they were.
+Canvas history has its own budget of 512 KiB; a save past it is refused and
+kept in your draft, and the page still has room for text.
 
 ## Comments
 

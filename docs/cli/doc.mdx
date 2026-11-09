@@ -162,12 +162,13 @@ does require one, so the same artifact is not a valid
 [`slides initialize`](/cli/slides) target.)
 
 Then supply a JSON request
-containing an operation `id`, explicit `schema` (2, 3, 4 or 5), and a `body` document
-tree. Schemas 3, 4 and 5 also require the original `page_id`. Headings, paragraphs,
+containing an operation `id`, explicit `schema` (2, 3, 4, 5 or 6), and a `body` document
+tree. Schemas 3 to 6 also require the original `page_id`. Headings, paragraphs,
 lists and simple tables use schema 2; schema 3 adds links, inline code and code
 blocks; schema 4 adds bold, italic and strikethrough, a code block `language`,
 block quotes and checklists; schema 5 adds underline, text colour and
-highlight. Initialization does not silently upgrade an
+highlight; schema 6 adds the Canvas surface and accepts the same `body` as
+schema 5, starting with an empty canvas. Initialization does not silently upgrade an
 existing document.
 
 Schema 4 nodes and marks:
@@ -200,8 +201,15 @@ with each other, with emphasis and with `link`; inline `code` still stands alone
 {"type":"taskList","attrs":{"id":"todo"},"content":[{"type":"taskItem","attrs":{"id":"todo-1","checked":true},"content":[{"type":"paragraph","attrs":{"id":"todo-1-p"},"content":[{"type":"text","text":"Ship it","marks":[{"type":"bold","attrs":{}}]}]}]}]}
 ```
 
+Schema 6 stores Canvas placements, notes and shapes beside the page in their own
+roots. Moving a block on the canvas never changes its text, block ID or hash, so
+the page, its Markdown and its comment anchors are the same as at schema 5. The
+canvas has its own share of the document budget (512 KiB of history); a save
+that would exceed it is refused with status 413 and code `surface_quota`, and
+the page keeps room for text.
+
 Agent drafting and document creation from chat still produce schema 3; an agent
-cannot edit a schema 4 or 5 document yet.
+cannot edit a schema 4, 5 or 6 document yet.
 
 `--file` is required. Use `--file -` to read stdin. The file must contain one JSON
 object of at most 2 MiB. Keep the same operation ID and contents when retrying

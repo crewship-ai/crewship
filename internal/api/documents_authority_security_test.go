@@ -45,13 +45,13 @@ func TestDocumentEngineProtocolRecoveryCannotFenceAnIncompatiblePair(t *testing.
 		}
 		return w
 	}
-	for _, body := range []string{`{"boot":"synthetic-legacy-engine-boot"}`, `{"boot":"synthetic-legacy-engine-boot","protocol":1}`, `{"boot":"synthetic-legacy-engine-boot","protocol":2}`, `{"boot":"synthetic-old-content","protocol":3}`, `{"boot":"synthetic-old-content","protocol":3,"schema":2}`, `{"boot":"synthetic-old-content","protocol":3,"schema":3}`, `{"boot":"synthetic-old-content","protocol":3,"schema":4}`, `{"boot":"synthetic-future-content","protocol":3,"schema":6}`} {
+	for _, body := range []string{`{"boot":"synthetic-legacy-engine-boot"}`, `{"boot":"synthetic-legacy-engine-boot","protocol":1}`, `{"boot":"synthetic-legacy-engine-boot","protocol":2}`, `{"boot":"synthetic-old-content","protocol":3}`, `{"boot":"synthetic-old-content","protocol":3,"schema":2}`, `{"boot":"synthetic-old-content","protocol":3,"schema":3}`, `{"boot":"synthetic-old-content","protocol":3,"schema":4}`, `{"boot":"synthetic-old-content","protocol":3,"schema":5}`, `{"boot":"synthetic-future-content","protocol":3,"schema":7}`} {
 		call(body, 409)
 		if _, err := store.Renew(t.Context(), key, lease, allow); err != nil {
 			t.Fatalf("incompatible recovery fenced live writer: %v", err)
 		}
 	}
-	w := call(`{"boot":"synthetic-compatible-engine-boot","protocol":3,"schema":5}`, 200)
+	w := call(`{"boot":"synthetic-compatible-engine-boot","protocol":3,"schema":6}`, 200)
 	var ack struct {
 		Protocol  int  `json:"protocol"`
 		Schema    int  `json:"schema"`

@@ -2,9 +2,11 @@
 // our `default` fragment. Numeric identities are metadata, never authorization.
 // Keep these bounds over retained Items too: deleting a map entry does not erase
 // its payload from a gc:false snapshot. Existing document byte limits also apply.
-export function validatePositionMigrations(doc, Y) {
+// `admitted` names further roots a content schema validates itself (schema 6:
+// the Canvas surface); every other root stays refused.
+export function validatePositionMigrations(doc, Y, admitted = []) {
   const name = '__tiptap_position_migrations:root:default';
-  for (const key of doc.share.keys()) if (key !== 'default' && key !== name) throw new Error('unsupported Yjs root');
+  for (const key of doc.share.keys()) if (key !== 'default' && key !== name && !admitted.includes(key)) throw new Error('unsupported Yjs root');
   if (!doc.share.has(name)) return null;
   const fail = () => { throw new Error('unsupported position migration metadata'); };
   const limit = () => { throw new Error('position migration metadata limit'); };
