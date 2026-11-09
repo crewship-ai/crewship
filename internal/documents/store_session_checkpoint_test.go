@@ -338,3 +338,25 @@ func resetSessionSkips() {
 	sessionSkips.at = map[Key]time.Time{}
 	sessionSkips.Unlock()
 }
+
+// A due commit whose result has the same length but different bytes than the
+// newest checkpoint is pinned; an identical one is not.
+func TestSessionPinComparesBytesOnlyWhenDue(t *testing.T) {
+	s, db, _ := fixture(t, Options{})
+	l := acquire(t, s)
+	ageCheckpoints(t, db)
+	c := commit(l, "same-length", 0)
+	c.CandidateSnapshot = []byte("baselinf") // same length as the initial "baseline"
+	if _, e := s.Commit(ctx, key, c, allow); e != nil {
+		t.Fatal(e)
+	}
+	ageCheckpoints(t, db)
+	c = commit(l, "identical", 1)
+	c.CandidateSnapshot = []byte("baselinf")
+	if _, e := s.Commit(ctx, key, c, allow); e != nil {
+		t.Fatal(e)
+	}
+	if ids, _ := checkpointRows(t, db); len(ids) != 2 {
+		t.Fatalf("want one pin for the changed bytes and none for the identical result: %v", ids)
+	}
+}
