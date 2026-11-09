@@ -251,6 +251,15 @@ func (h *PageHandler) producerAuthorizationReachable(ctx context.Context, wsID, 
 // document never offers it the owner's authorize button.
 type producerAuthorizationCallerKey struct{}
 
+// producerAuthorizationContext is the request's context, marked when an
+// agent makes the request, for every page document a request renders.
+func producerAuthorizationContext(r *http.Request) context.Context {
+	if agent, _ := pageGrantCallerIsAgent(r); agent {
+		return context.WithValue(r.Context(), producerAuthorizationCallerKey{}, true)
+	}
+	return r.Context()
+}
+
 // mayAuthorizeProducersFor is can_authorize on the wire: a person who owns
 // the page as delegation reads it, on a page that is not private.
 func (h *PageHandler) mayAuthorizeProducersFor(ctx context.Context, viewer *pageViewer, rec *pageRecord) bool {

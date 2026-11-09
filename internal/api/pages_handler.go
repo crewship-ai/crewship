@@ -993,11 +993,7 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// document the editor renders is the whole page rather than a copy that
 	// loses its gates on save.
 	authored := h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec)
-	docCtx := r.Context()
-	if agent, _ := pageGrantCallerIsAgent(r); agent {
-		docCtx = context.WithValue(docCtx, producerAuthorizationCallerKey{}, true)
-	}
-	out := h.pageDocumentFor(docCtx, rec, panels, viewer, authored)
+	out := h.pageDocumentFor(producerAuthorizationContext(r), rec, panels, viewer, authored)
 	if !h.finishMetadataRead(w, r, read) {
 		return
 	}
@@ -1404,7 +1400,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		broadcastWorkspaceEvent(h.hub, wsID, "page.updated", pageWorkspaceInvalidation(updated, len(panels) != 0))
-		writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)))
+		writeJSON(w, http.StatusOK, h.pageDocument(producerAuthorizationContext(r), updated, panels, h.reviewViewer(r.Context(), wsID)))
 		return
 	}
 
@@ -1504,7 +1500,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.emitPageSpecChanged(r.Context(), wsID, updated, base, false, after)
 	}
 	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", pageWorkspaceInvalidation(updated, len(panels) != 0))
-	writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)))
+	writeJSON(w, http.StatusOK, h.pageDocument(producerAuthorizationContext(r), updated, panels, h.reviewViewer(r.Context(), wsID)))
 }
 
 // ── 5. Delete — DELETE /api/v1/pages/{slug} ────────────────────────────────

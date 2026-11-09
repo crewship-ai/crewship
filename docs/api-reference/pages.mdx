@@ -686,7 +686,7 @@ ends if the page changes owner, like any other. No body.
 
 | Status | Condition |
 |---|---|
-| 200 | Authorized, or already authorized by this owner. |
+| 200 | Authorized, or already live under the page's owner. |
 | 401 | No session or token. |
 | 403 | The caller is not the page's owner, or is an agent. Only for a caller who reaches the page. |
 | 404 | No such page or panel, or a page the caller [cannot reach](#unreachable-pages-are-not-found). |
