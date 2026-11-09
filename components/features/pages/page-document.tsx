@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Extension } from "@tiptap/core"
 import { EditorContent, useEditor, useEditorState } from "@tiptap/react"
 import StarterKit from "@tiptap/starter-kit"
@@ -19,6 +19,8 @@ import { DocumentSaveState } from "./document-save-state"
 import { usePageDocument } from "@/hooks/use-page-document"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useDocumentHistory, useDocumentHistoryRestore } from "@/hooks/use-document-history"
+import { useMembers } from "@/components/features/settings/members/use-members"
+import { documentActorName } from "@/lib/documents/actor-name"
 import { DocumentHistory } from "./document-history/document-history"
 import type { DocumentHistoryReview } from "./document-history/types"
 import { DocumentProposals } from "./document-proposals/document-proposals"
@@ -241,14 +243,18 @@ export function DocumentHistoryHost({ workspaceId, pageId, humanId, available, d
   useEffect(() => { if (controlled) setSettling(restoring) }, [controlled, restoring])
   useEffect(() => { if (!eligible && !restoring && !controlled) setOwnOpen(false) }, [eligible, restoring, controlled])
   const close = () => { setOpen(false); opener.current?.focus() }
+  // Names come from the roster this person can already read; until it loads, authors are described, never shown as raw IDs.
+  const roster = useMembers(visible ? workspaceId : null).members
+  const actorName = useCallback((actor: string) => documentActorName(actor, { humanId, members: roster }), [humanId, roster])
+  const headRev = head?.page_id === pageId ? head.rev : undefined
   if (control) return !eligible ? <p role="status" className="text-sm text-muted-foreground">History is unavailable.</p>
-    : visible ? <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} /> : null
+    : visible ? <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headRev={headRev} actorName={actorName} /> : null
   return <div className="space-y-3 px-3">
     <Button ref={opener} type="button" variant="outline" disabled={!eligible || restoring} aria-expanded={visible} onClick={() => {
       if (!eligible || restoring) return
       if (open) close()
       else { setOpenEpoch(value => value + 1); setOpen(true) }
     }}>History</Button>
-    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} />}
+    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headRev={headRev} actorName={actorName} />}
   </div>
 }
