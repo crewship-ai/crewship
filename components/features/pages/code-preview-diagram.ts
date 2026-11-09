@@ -5,40 +5,72 @@ import type { PreviewResult } from "./document-code-blocks"
  * Diagram preview for Docs code blocks whose language is `mermaid`.
  *
  * Mermaid is pinned (package.json) and loaded only when a diagram is first
- * shown. It runs with `securityLevel: "strict"` and SVG text labels (no HTML
- * labels), so click callbacks and links are not bound; directives inside a
- * diagram cannot change those settings or inject page CSS. Sources that
- * would make Mermaid load an image, icon or URL are refused before it runs,
- * because it draws into the live page before its output is cleaned. Its SVG is then
- * sanitized again: no scripts, links, foreign (HTML) content, images, `use`
- * references, event handlers, or styles and attributes that could load a
- * URL. The SVG is placed in its own shadow root so its style sheet can only
- * style the diagram. Nothing is fetched. A diagram Mermaid cannot read shows
- * the reason in that block, above its source; the source is never changed.
+ * shown. It never draws in the page itself: it runs in its `sandbox` mode,
+ * and the document it draws in sits inside a hidden frame whose own Content
+ * Security Policy allows no requests at all (`default-src 'none'`, inline
+ * styles only) and which runs no script of its own. Whatever a diagram's
+ * styles or shapes name (images, icons, masks, fonts), the browser refuses to
+ * fetch it. Sources that name images, icons, URLs or CSS escapes are also
+ * refused before Mermaid runs, as a second layer.
+ *
+ * Mermaid runs with SVG text labels (no HTML labels) and directives inside a
+ * diagram cannot change its settings. The SVG it returns is cleaned again: no
+ * scripts, links, foreign (HTML) content, images, `use` references, event
+ * handlers, or styles and attributes that could load a URL. It is shown in
+ * its own shadow root so its style sheet can only style the diagram. A
+ * diagram Mermaid cannot read shows the reason in that block, above its
+ * source; the source is never changed.
  */
 
 /**
- * Bounds that keep one diagram from freezing the tab: source length, edges,
- * subgraph count and nesting. A render slower than `slowMs` is reported as
- * slow, and the block then waits for the reader before drawing again.
+ * Bounds that keep one diagram from freezing the tab, for every diagram type:
+ * source length, connections (arrows and links; `edges`), statements,
+ * subgraph count and nesting. They are checked before Mermaid runs.
  */
-export const DIAGRAM_LIMITS = { chars: 5_000, edges: 150, subgraphs: 50, depth: 6, slowMs: 500 }
+export const DIAGRAM_LIMITS = { chars: 5_000, edges: 150, subgraphs: 50, depth: 6, statements: 300 }
 
 /**
- * Mermaid draws into a temporary element in the live page before its output
- * can be cleaned, so a source that names an image, an icon, a URL or uses CSS
- * escapes is refused before Mermaid sees it: image and icon shapes, sequence
- * `properties` (participant icons), `url(` in styles and class definitions,
- * and any backslash.
+ * A second layer behind the network-free render surface: sources that name an
+ * image, an icon, a URL or use escapes are refused before Mermaid sees them.
+ * Image and icon shapes (any key quoting), sequence `properties` (participant
+ * icons), `url(` (also entity-encoded as `url#40;`), `image-set`,
+ * `cross-fade`, `image()`, `element()`, `src()` and any backslash.
  */
-const LOADING_SOURCE = /url\s*\(|\\|\b(?:img|icon)\s*:|"(?:img|icon)"\s*:|\bproperties\b/i
+const LOADING_SOURCE = /url\s*(?:\(|#)|\\|image-set|cross-fade|\b(?:image|element|src)\s*\(|\b(?:img|icon)['"]?\s*:|\bproperties\b/i
+
+/** Connections in any diagram type: flowchart, state, class, ER and sequence arrows, and links. */
+const CONNECTION = /<?[-=.~]{2,}[>x)o|*]*|<\|--|\|\|--|}o--|-[>x)]+/g
+
+/** Why this source is refused before Mermaid runs, or null when it may be drawn. */
+export function refuseDiagram(source: string): string | null {
+  if (LOADING_SOURCE.test(source)) return "it refers to an image, icon, URL or escaped text, which previews never load"
+  let depth = 0, deepest = 0, subgraphs = 0
+  // Subgraphs can be opened and closed anywhere on a line (`subgraph a; subgraph b; … end; end`). The total
+  // count is the hard bound; depth is approximate, since a label may also contain the word "end".
+  for (const [token] of source.matchAll(/\b(?:subgraph|end)\b/g)) {
+    if (token === "subgraph") { subgraphs++; deepest = Math.max(deepest, ++depth) } else depth = Math.max(0, depth - 1)
+  }
+  // State diagrams nest composite states with braces (other types use braces for shapes and relations).
+  if (/^\s*stateDiagram/m.test(source)) {
+    let braces = 0
+    for (const char of source) { if (char === "{") deepest = Math.max(deepest, ++braces); else if (char === "}") braces = Math.max(0, braces - 1) }
+  }
+  if (deepest > DIAGRAM_LIMITS.depth) return `it is nested deeper than ${DIAGRAM_LIMITS.depth} levels`
+  if (subgraphs > DIAGRAM_LIMITS.subgraphs) return `it has more than ${DIAGRAM_LIMITS.subgraphs} subgraphs`
+  const connections = source.match(CONNECTION)?.length ?? 0
+  if (connections > DIAGRAM_LIMITS.edges) return `it has more than ${DIAGRAM_LIMITS.edges} connections`
+  const statements = source.split(/[\n;]/).filter(part => part.trim()).length
+  if (statements > DIAGRAM_LIMITS.statements) return `it has more than ${DIAGRAM_LIMITS.statements} statements`
+  return null
+}
 
 /** Settings a diagram's own `%%{init}%%` directive may not override. */
 const SECURE_KEYS = ["secure", "securityLevel", "startOnLoad", "maxTextSize", "maxEdges", "suppressErrorRendering", "htmlLabels", "flowchart", "themeCSS", "themeVariables", "fontFamily", "altFontFamily", "dompurifyConfig", "theme", "darkMode", "look", "layout", "elk", "icons"]
 
 export const MERMAID_OPTIONS = {
   startOnLoad: false,
-  securityLevel: "strict",
+  // Mermaid draws in a frame it creates inside the network-free surface below; it returns that frame as markup.
+  securityLevel: "sandbox",
   htmlLabels: false,
   flowchart: { htmlLabels: false },
   maxTextSize: DIAGRAM_LIMITS.chars,
@@ -140,29 +172,131 @@ const load = () => ready ??= import("mermaid").then(module => module.default)
 let sequence = 0
 const nextId = () => `docs-diagram-${++sequence}-${Math.random().toString(36).slice(2, 8)}`
 
-export async function renderDiagram(source: string): Promise<PreviewResult> {
+/** The policy of the document Mermaid draws in: no request of any kind, inline styles only, no script. */
+export const SURFACE_CSP = "default-src 'none'; style-src 'unsafe-inline'"
+
+class Unavailable extends Error {}
+
+/**
+ * A hidden frame whose document allows no requests (its own CSP) and runs no
+ * script (sandboxed without `allow-scripts`). It shares this page's origin
+ * only so this page can lay the diagram out inside it. Mermaid's own sandbox
+ * frame is created inside it and inherits its policy; the policy is also set
+ * on that frame's document before anything is drawn.
+ */
+async function openSurface() {
+  const frame = document.createElement("iframe")
+  frame.setAttribute("sandbox", "allow-same-origin")
+  frame.setAttribute("aria-hidden", "true")
+  frame.tabIndex = -1
+  frame.style.cssText = "position:fixed;left:-20000px;top:0;width:1600px;height:1200px;border:0;visibility:hidden;pointer-events:none"
+  frame.srcdoc = `<!doctype html><html><head><meta http-equiv="Content-Security-Policy" content="${SURFACE_CSP}"></head><body></body></html>`
+  const loaded = new Promise<void>((resolve, reject) => {
+    frame.addEventListener("load", () => resolve(), { once: true })
+    setTimeout(() => reject(new Unavailable()), 5_000)
+  })
+  document.body.append(frame)
+  try { await loaded } catch (cause) { frame.remove(); throw cause }
+  const doc = frame.contentDocument
+  if (!doc?.body || !locked(doc)) { frame.remove(); throw new Unavailable() }
+  const container = doc.createElement("div")
+  // Mermaid appends its sandbox frame here and draws in that frame's document at once: lock that document
+  // as it is attached, before anything is drawn in it.
+  const append = container.appendChild.bind(container)
+  container.appendChild = <T extends Node>(child: T): T => {
+    const added = append(child)
+    if ((child as unknown as Element).localName === "iframe") {
+      const inner = (child as unknown as HTMLIFrameElement).contentDocument
+      if (!inner) throw new Unavailable()
+      lock(inner)
+    }
+    return added
+  }
+  doc.body.append(container)
+  return { doc, container, close: () => frame.remove() }
+}
+
+const locked = (doc: Document) => [...doc.querySelectorAll('head > meta[http-equiv="Content-Security-Policy"]')].some(meta => meta.getAttribute("content") === SURFACE_CSP)
+
+function lock(doc: Document) {
+  if (locked(doc)) return
+  const meta = doc.createElement("meta")
+  meta.httpEquiv = "Content-Security-Policy"; meta.content = SURFACE_CSP
+  ;(doc.head ?? doc.documentElement).prepend(meta)
+}
+
+/**
+ * Mermaid finds its sandbox frame by id in the page's document. The frame
+ * lives inside the surface instead, so the page gets a hidden stand-in with
+ * that id that hands Mermaid the frame's (locked) document.
+ */
+function standIn(id: string, surface: Document) {
+  const node = document.createElement("div")
+  node.id = `i${id}`; node.hidden = true
+  Object.defineProperty(node, "contentDocument", {
+    get: () => {
+      const doc = (surface.getElementById(`i${id}`) as HTMLIFrameElement | null)?.contentDocument ?? null
+      if (doc) lock(doc)
+      return doc
+    },
+  })
+  document.body.append(node)
+  return node
+}
+
+/** The SVG markup inside Mermaid's sandbox result (a frame with a base64 data: document), or null. */
+export function svgFromSandboxed(markup: string): string | null {
+  const match = /src="data:text\/html;charset=UTF-8;base64,([A-Za-z0-9+/=]+)"/.exec(markup)
+  if (!match) return null
+  let html: string
+  try { html = new TextDecoder().decode(Uint8Array.from(atob(match[1]), char => char.charCodeAt(0))) } catch { return null }
+  const body = /^<body[^>]*>([\s\S]*)<\/body>$/.exec(html.trim())
+  return body ? body[1] : null
+}
+
+const PageImage = typeof window === "undefined" ? undefined as unknown as typeof Image : window.Image
+
+// One diagram at a time: Mermaid's settings are global (shared with chat's renderer) and set for each render.
+let queue: Promise<unknown> = Promise.resolve()
+
+export function renderDiagram(source: string): Promise<PreviewResult> {
+  const run = queue.then(() => draw(source), () => draw(source))
+  queue = run
+  return run
+}
+
+async function draw(source: string): Promise<PreviewResult> {
   if (!source.trim()) return { ok: false, error: "Nothing to show yet. Write a Mermaid diagram in Source." }
   if (source.length > DIAGRAM_LIMITS.chars) return { ok: false, error: `This diagram is longer than ${DIAGRAM_LIMITS.chars.toLocaleString("en-US")} characters, so only its source is shown.` }
-  if (LOADING_SOURCE.test(source)) return { ok: false, error: "Cannot show this diagram: it refers to an image, icon, URL or escaped text, which previews never load." }
-  let depth = 0, deepest = 0, subgraphs = 0
-  for (const line of source.split("\n")) {
-    if (/^\s*subgraph\b/.test(line)) { subgraphs++; deepest = Math.max(deepest, ++depth) } else if (/^\s*end\s*$/.test(line)) depth = Math.max(0, depth - 1)
-  }
-  if (deepest > DIAGRAM_LIMITS.depth) return { ok: false, error: `Cannot show this diagram: subgraphs are nested deeper than ${DIAGRAM_LIMITS.depth} levels.` }
-  if (subgraphs > DIAGRAM_LIMITS.subgraphs) return { ok: false, error: `Cannot show this diagram: it has more than ${DIAGRAM_LIMITS.subgraphs} subgraphs.` }
-  let markup: string
+  const refused = refuseDiagram(source)
+  if (refused) return { ok: false, error: `Cannot show this diagram: ${refused}.` }
+  const mermaid = await load().catch(() => null)
+  if (!mermaid) return { ok: false, error: "The preview could not be loaded. The source is unchanged." }
   const started = performance.now()
+  const ms = () => performance.now() - started
+  let markup: string
+  let surface: Awaited<ReturnType<typeof openSurface>> | undefined
+  let stand: HTMLElement | undefined
   try {
-    const mermaid = await load()
-    // Mermaid's settings are global and shared with the chat renderer, so they are set again for every diagram.
+    surface = await openSurface()
+    const id = nextId()
+    stand = standIn(id, surface.doc)
     mermaid.initialize(MERMAID_OPTIONS)
-    markup = (await mermaid.render(nextId(), source)).svg
+    // Image shapes measure their picture with `new Image()`, which belongs to this page. While Mermaid draws,
+    // such images are created in the locked surface instead, so the browser refuses to fetch them there too.
+    const surfaceDoc = surface.doc
+    window.Image = function Image() { return surfaceDoc.createElement("img") } as unknown as typeof window.Image
+    try { markup = (await mermaid.render(id, source, surface.container)).svg } finally { window.Image = PageImage }
   } catch (cause) {
+    if (cause instanceof Unavailable) return { ok: false, error: "Cannot show this diagram: this browser cannot draw it in isolation.", ms: ms() }
     const message = cause instanceof Error && cause.message ? cause.message.replace(/\s+/g, " ").trim() : "it could not be read"
-    return { ok: false, error: `Cannot show this diagram: ${message.slice(0, 300)}` }
+    return { ok: false, error: `Cannot show this diagram: ${message.slice(0, 300)}`, ms: ms() }
+  } finally {
+    stand?.remove(); surface?.close()
   }
-  const svg = sanitizeDiagramSvg(markup)
-  if (!svg) return { ok: false, error: "Cannot show this diagram: it could not be drawn safely." }
+  const inner = svgFromSandboxed(markup)
+  const svg = inner === null ? null : sanitizeDiagramSvg(inner)
+  if (!svg) return { ok: false, error: "Cannot show this diagram: it could not be drawn safely.", ms: ms() }
   svg.setAttribute("role", "img")
   if (!svg.getAttribute("aria-label")) svg.setAttribute("aria-label", "Diagram")
   svg.style.maxWidth = svg.style.maxWidth || "100%"
@@ -170,5 +304,5 @@ export async function renderDiagram(source: string): Promise<PreviewResult> {
   host.dataset.diagramPreview = ""
   const shadow = host.attachShadow({ mode: "open" })
   shadow.append(svg)
-  return { ok: true, node: host, slow: performance.now() - started > DIAGRAM_LIMITS.slowMs }
+  return { ok: true, node: host, ms: ms() }
 }

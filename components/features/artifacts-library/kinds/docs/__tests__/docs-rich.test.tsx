@@ -22,10 +22,15 @@ const env = vi.hoisted(() => ({ canWrite: true, canComment: true, comments: "ok"
 const request = vi.hoisted(() => vi.fn())
 // happy-dom cannot lay out SVG, so mermaid's renderer is replaced by one that returns hostile output; the
 // real renderer is exercised in a browser harness. What reaches the page must still be safe.
-const mermaid = vi.hoisted(() => ({ initialize: vi.fn(), render: vi.fn(async (id: string, text: string) => {
+const mermaid = vi.hoisted(() => ({ initialize: vi.fn(), render: vi.fn(async (id: string, text: string, container: HTMLElement) => {
   // A diagram mentioning "Slow" takes longer than the slow-render threshold.
   if (text.includes("Slow")) await new Promise(done => setTimeout(done, 600))
-  return { svg: `<svg xmlns="http://www.w3.org/2000/svg" id="${id}"><g onclick="window.__ran = true"><a href="javascript:window.__ran = true"><text>Start</text></a></g><foreignObject><img src="x" onerror="window.__ran = true"/></foreignObject><script>window.__ran = true</script></svg>` }
+  // Like mermaid's sandbox mode: draw in a frame inside the given container and return that frame as markup.
+  // insertBefore: happy-dom gives a frame no document until it loads one (the lock on attach is covered in the browser probe).
+  const frame = container.ownerDocument.createElement("iframe"); frame.id = `i${id}`; container.insertBefore(frame, null)
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" id="${id}"><g onclick="window.__ran = true"><a href="javascript:window.__ran = true"><text>Start</text></a></g><foreignObject><img src="x" onerror="window.__ran = true"/></foreignObject><script>window.__ran = true</script></svg>`
+  const bytes = new TextEncoder().encode(`<body style="margin:0">${svg}</body>`)
+  return { svg: `<iframe src="data:text/html;charset=UTF-8;base64,${btoa(Array.from(bytes, byte => String.fromCodePoint(byte)).join(""))}" sandbox=""></iframe>` }
 }) }))
 vi.mock("mermaid", () => ({ default: mermaid }))
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: true, isPending: false }) }))
@@ -394,7 +399,7 @@ describe("Docs diagram and chart blocks", () => {
     const flow = blockDom(editor, "flow")
     await waitFor(() => expect(flow.querySelector<HTMLElement>("[data-diagram-preview]")?.shadowRoot?.querySelector("svg")).toBeTruthy())
     const root = flow.querySelector<HTMLElement>("[data-diagram-preview]")!.shadowRoot!
-    expect(mermaid.render).toHaveBeenCalledWith(expect.stringMatching(/^docs-diagram-/), FLOW)
+    expect(mermaid.render).toHaveBeenCalledWith(expect.stringMatching(/^docs-diagram-/), FLOW, expect.anything())
     expect(root.querySelector("svg")!.getAttribute("role")).toBe("img")
     expect(root.querySelector("text")!.textContent).toBe("Start")
     expect(root.querySelector("a, script, foreignObject, img, [onclick], [href]")).toBeNull()
@@ -429,6 +434,27 @@ describe("Docs diagram and chart blocks", () => {
     fireEvent.click(within(within(slow).getByRole("group", { name: "Show diagram" })).getByRole("button", { name: "Preview" }))
     await waitFor(() => expect(drawn()).toContain("flowchart LR\n  Slow --> B\n  B --> C"))
   })
+
+  it("lets further blocks wait for the reader once the page's preview time is spent", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    const fixture = blockDom(editor, "slow-flow")
+    await waitFor(() => expect(fixture.querySelector<HTMLElement>("[data-diagram-preview]")?.shadowRoot?.querySelector("svg")).toBeTruthy(), { timeout: 3000 })
+    // Two more slow diagrams arrive (as from a collaborator); the first spends the rest of the budget.
+    act(() => { editor.editor.commands.command(({ tr }) => {
+      const block = (id: string, text: string) => editor.editor.schema.nodes.codeBlock.create({ id, language: "mermaid" }, editor.editor.schema.text(text))
+      tr.insert(tr.doc.content.size, [block("slow-2", "flowchart LR\n  Slow --> Two"), block("slow-3", "flowchart LR\n  Slow --> Three")])
+      return true
+    }) })
+    const third = () => blockDom(editor, "slow-3")
+    await waitFor(() => expect(third().querySelector("[data-code-paused]")?.textContent).toBe("Previews on this page took long to draw. Choose Preview to draw this one."), { timeout: 4000 })
+    expect(blockDom(editor, "slow-2").querySelector<HTMLElement>("[data-diagram-preview]")?.shadowRoot?.querySelector("svg")).toBeTruthy()
+    expect(third().querySelector("pre")!.hidden).toBe(false)
+    expect(mermaid.render.mock.calls.some(([, text]) => String(text).includes("Three"))).toBe(false)
+    fireEvent.click(within(within(third()).getByRole("group", { name: "Show diagram" })).getByRole("button", { name: "Preview" }))
+    await waitFor(() => expect(third().querySelector<HTMLElement>("[data-diagram-preview]")?.shadowRoot?.querySelector("svg")).toBeTruthy(), { timeout: 3000 })
+  }, 15_000)
 
   it("draws a chart block with its data table, and explains a bad spec in that block only", async () => {
     serve()

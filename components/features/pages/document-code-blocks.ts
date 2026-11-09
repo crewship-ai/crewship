@@ -92,10 +92,11 @@ export const codeBlockText = (node: ProseMirrorNode) => node.textContent
 
 /**
  * What a preview renderer returns: the rendered element, or why this block
- * cannot be shown. `slow` marks a render that took long enough to stall the
- * tab; such a block then waits for the reader before drawing again.
+ * cannot be shown. `ms` is how long the render itself took when the renderer
+ * measures it (for example, excluding time spent waiting for other renders);
+ * otherwise the block measures the call.
  */
-export type PreviewResult = { ok: true; node: HTMLElement; slow?: boolean } | { ok: false; error: string }
+export type PreviewResult = ({ ok: true; node: HTMLElement } | { ok: false; error: string }) & { ms?: number }
 type Renderer = (source: string) => PreviewResult | Promise<PreviewResult>
 
 /**
@@ -127,6 +128,20 @@ const modesOf = (editor: Editor) => { let map = modes.get(editor); if (!map) { m
 /** How long a changed previewed block waits before it is rendered again, so typing and remote edits stay smooth. */
 export const PREVIEW_DELAY_MS = 250
 
+/** A render that took longer than this is slow: that block is not redrawn on others' edits until the reader chooses Preview. */
+export const SLOW_PREVIEW_MS = 500
+
+/** Render time one document may spend on previews before further blocks wait for the reader to choose Preview. */
+export const PREVIEW_BUDGET_MS = 1_000
+
+/**
+ * Per editor: previews render one at a time, and their render time is added
+ * up. Once the budget is spent, a block shows its source and draws only when
+ * the reader chooses Preview, so many heavy blocks cannot stall opening a page.
+ */
+const budgets = new WeakMap<Editor, { spent: number; queue: Promise<void> }>()
+const budgetOf = (editor: Editor) => { let budget = budgets.get(editor); if (!budget) { budget = { spent: 0, queue: Promise.resolve() }; budgets.set(editor, budget) } return budget }
+
 /**
  * The code block with its header: the language (or "Code"), Source and
  * Preview for languages that opt in, and Copy, which puts the block's exact
@@ -156,7 +171,7 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
         header.append(label, toggle, copy, status)
         pre.append(code); dom.append(header, preview, pre)
         let current = node, reset: ReturnType<typeof setTimeout> | undefined, pending: ReturnType<typeof setTimeout> | undefined, destroyed = false
-        let shown: { language: string; source: string } | null = null, ownMode: "source" | "preview" = "preview", slow = false
+        let shown: { language: string; source: string } | null = null, ownMode: "source" | "preview" = "preview", slow = false, forced = false
         const blockId = () => typeof current.attrs.id === "string" ? current.attrs.id : null
         const language = () => languages && typeof current.attrs.language === "string" ? current.attrs.language : null
         const mode = () => { const id = blockId(); return (id ? modesOf(editor).get(id) : undefined) ?? ownMode }
@@ -191,12 +206,12 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
           const first = shown === null
           shown = { language: lang, source }
           preview.hidden = false
+          const stillWanted = () => !destroyed && shown?.source === source && shown.language === lang && mode() === "preview"
           const draw = (result: PreviewResult) => {
-            if (destroyed || shown?.source !== source || shown.language !== lang || mode() !== "preview") return
+            if (!stillWanted()) return
             if (result.ok) {
               if (caretInside()) { setMode("source"); return }
               preview.replaceChildren(result.node); delete preview.dataset.error; pre.hidden = true
-              slow = result.slow === true
             } else {
               const message = document.createElement("p"); message.textContent = result.error; message.setAttribute("role", "status")
               preview.replaceChildren(message); preview.dataset.error = ""; pre.hidden = false
@@ -206,7 +221,29 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
           // Render the latest text once edits pause; a burst of keystrokes or remote updates renders once.
           clearTimeout(pending)
           pending = setTimeout(() => {
-            PREVIEWS[lang].load().then(render => render(source)).then(draw, () => draw({ ok: false, error: "The preview could not be loaded. The source is unchanged." }))
+            const budget = budgetOf(editor)
+            budget.queue = budget.queue.then(async () => {
+              if (!stillWanted()) return
+              if (budget.spent > PREVIEW_BUDGET_MS && !forced) {
+                const note = document.createElement("p"); note.dataset.codePaused = ""; note.setAttribute("role", "status")
+                note.textContent = "Previews on this page took long to draw. Choose Preview to draw this one."
+                preview.replaceChildren(note); delete preview.dataset.error; pre.hidden = false; slow = true
+                return
+              }
+              forced = false
+              let result: PreviewResult
+              let started = 0
+              try {
+                const render = await PREVIEWS[lang].load()
+                started = performance.now()
+                result = await render(source)
+              } catch { result = { ok: false, error: "The preview could not be loaded. The source is unchanged." } }
+              const ms = result.ms ?? (started ? performance.now() - started : 0)
+              budget.spent += ms
+              // Errors count too: a source that takes long to refuse is as costly to redraw.
+              slow = ms > SLOW_PREVIEW_MS
+              draw(result)
+            })
           }, first ? 0 : PREVIEW_DELAY_MS)
         }
 
@@ -236,7 +273,7 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
           }
           if (caretInside()) return
           // Choosing Preview always draws the current source, also after a slow render.
-          if (slow) { slow = false; shown = null }
+          if (slow) { slow = false; forced = true; shown = null }
           setMode("preview")
         })
         const followCaret = () => { if (mode() === "preview" && previewable(language()) && caretInside()) setMode("source") }
