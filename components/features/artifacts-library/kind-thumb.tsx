@@ -77,7 +77,7 @@ export function KindThumb({ kind, mode, empty, className }: { kind: ArtifactKind
     className={cn("relative h-[104px] overflow-hidden rounded-md bg-[color-mix(in_srgb,var(--kind)_12%,var(--muted))]", className)}>
     {empty ? <span className="absolute inset-0 grid place-items-center text-xs text-muted-foreground">Nothing here yet</span> : <>
       <Drawing kind={kind} mode={mode} />
-      <span className="absolute bottom-1.5 left-1.5 rounded-[var(--radius-row)] bg-card/90 px-1.5 py-0.5 text-[10px] font-medium leading-none text-muted-foreground shadow-xs">{KINDS[kind].label} · no preview</span>
+      <span className="absolute bottom-1.5 left-1.5 rounded-[var(--radius-row)] bg-card/90 px-1.5 py-0.5 text-micro font-medium leading-none text-muted-foreground shadow-xs">{KINDS[kind].label} · no preview</span>
     </>}
   </div>
 }
