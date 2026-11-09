@@ -427,7 +427,7 @@ A thread names the text it is about: `block` is a paragraph, heading or code
 block ID from `crewship doc outline`, and `from`/`to` are the UTF-16 offsets of
 the quoted text inside it. A reply names `parent` instead. Both need `id`,
 `schema`, the confirmed `epoch` and `ifRev` and `text` (1–10,000 characters);
-schemas 3 and 4 also need `page_id`.
+schemas 3 to 6 also need `page_id`.
 
 ```bash
 crewship doc comment @<artifact-id> --file comment.json
@@ -449,7 +449,7 @@ does a changed revision or epoch. Read again and send a new request.
 
 Resolve a thread, or reopen it with `"resolved": false`. `--file` is required;
 `--file -` reads stdin. The request has `id`, `schema`, `epoch`, `ifRev`,
-`page_id` (schemas 3 and 4), `comment` (the thread ID), `version` (from
+`page_id` (schemas 3 to 6), `comment` (the thread ID), `version` (from
 `crewship doc comments`) and `resolved`. A changed `version` returns 409, so two
 people cannot silently undo each other. You need Comment or Edit access.
 

@@ -2462,7 +2462,7 @@ CLI: `crewship doc restore <page-slug> --file <request.json>`.
 Authentication: a current human credential owning an empty Page, with current
 write permission; scoped CLI credentials need both `pages:read` and `pages:write`.
 Request body: one JSON object of at most 2 MiB containing `id`, `schema` (2, 3 or 4)
-and `body`. Schemas 3 and 4 also require the original `page_id`. Schema 4 adds
+and `body`. Schemas 3 to 6 also require the original `page_id`. Schema 4 adds
 `bold`, `italic` and `strike` marks, a code block `language`, `blockquote` and
 `taskList`/`taskItem` (`checked`); see [`crewship doc initialize`](/cli/doc). Stage a Page through
 `POST /api/v1/pages` with `panels: []` and `allow_empty: true`; this is an explicit
@@ -2484,7 +2484,7 @@ Authentication: a current human credential with current document write access;
 scoped CLI credentials need both `pages:read` and `pages:write`. Request body:
 one JSON object of at most 2 MiB. Semantic replacement requires `id`, `schema`,
 `epoch`, `target`, `text`, `ifRev` and `ifHash`. The editor's incremental form
-uses `kind: "human"` and base64 `update`; schemas 3 and 4 require the original
+uses `kind: "human"` and base64 `update`; schemas 3 to 6 require the original
 `page_id`. The service rechecks the exact credential and permission within the
 storage transaction. Response: a receipt for the confirmed revision. Repeating
 the original operation after a lost confirmation returns its receipt without
@@ -2524,7 +2524,7 @@ Authentication: a current human credential with Comment or Edit access to the
 document (Edit, or a Comment or Edit grant); on private output only its owner.
 Scoped CLI credentials need `pages:write`; agent credentials are refused.
 Request body: `id`, `schema`, `epoch`, `ifRev`, `text` (1–10,000 characters) and,
-for schemas 3 and 4, `page_id`. A new thread adds `block`, `from` and `to` (the
+for schemas 3 to 6, `page_id`. A new thread adds `block`, `from` and `to` (the
 quoted UTF-16 range in one paragraph, heading or code block); a reply adds
 `parent` instead. Response: a receipt with `id`, `rev`, `epoch`, `actor` and
 `kind: "comment"`; an exact retry returns it again. Comments never change
@@ -2540,7 +2540,7 @@ CLI: `crewship doc comment <page-slug> --file <request.json>`.
 `POST /api/v1/pages/{slug}/document/comments/resolve`
 
 Authentication: as for commenting. Request body: `id`, `schema`, `epoch`,
-`ifRev`, `page_id` (schemas 3 and 4), `comment` (thread ID), `version` (current)
+`ifRev`, `page_id` (schemas 3 to 6), `comment` (thread ID), `version` (current)
 and `resolved` (`true` resolves, `false` reopens). Response: a receipt with
 `kind: "resolve"`. Statuses: 200 confirmed; 400 invalid request; 401 invalid
 credential; 403 missing access/scope; 409 stale version, revision or epoch;

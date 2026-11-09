@@ -8387,7 +8387,7 @@
                 "type": "string"
               },
               "language": {
-                "description": "Schema 4 code block language.",
+                "description": "Schema 4 and later code block language.",
                 "nullable": true,
                 "pattern": "^[a-z0-9][a-z0-9+#-]{0,31}$",
                 "type": "string"
