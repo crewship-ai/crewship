@@ -36,7 +36,7 @@ export function SourcesList({ freshness, codeVersion, detailed = false }: { fres
         <small className="text-xs text-muted-foreground">
           {row.updatedAt ? `Last write ${freshnessTime(row.updatedAt)}` : "Nothing written yet"}{row.sources.length ? ` · ${row.sources.join(", ")}` : ""}
         </small>
-        {detailed && <small className="font-mono text-[11px] text-muted-foreground">Collection {row.name}{codeVersion ? ` · declared by v${codeVersion}` : ""}</small>}
+        {detailed && <small className="font-mono text-xs text-muted-foreground">Collection {row.name}{codeVersion ? ` · declared by v${codeVersion}` : ""}</small>}
       </li>)}
     </ul>
   </>
