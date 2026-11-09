@@ -67,9 +67,13 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
     if (slug) next.set("item", slug)
     router.push(`/artifacts${next.size ? `?${next}` : ""}`)
   }
-  // A link from before IDs, /artifacts?item=<slug>, moves to the ID address once the slug resolves.
+  // A link from before IDs, /artifacts?item=<slug> or /artifacts/<slug>, moves to the ID address
+  // once the slug resolves, keeping the version it pins and the reference it came from.
   const canonical = (id: string) => {
     const next = filtersToParams(filters, workspaceQuery)
+    if (pinned !== undefined) next.set("version", String(pinned))
+    const ref = params?.get("ref")
+    if (ref) next.set("ref", ref)
     if (params?.get("edit") === "1") next.set("edit", "1")
     router.replace(artifactHref(id, next))
   }
