@@ -195,6 +195,9 @@ unlocked, so older documents are unchanged.
   and edited in **Layers** and **Properties**.
 - Both are document state: every viewer sees them, and undo takes them back
   like any other edit.
+- A hidden screen is skipped by next and previous artboard, the artboard
+  picker, **Fit** and **Play** (#5228); it is still counted when a new screen
+  is named and placed.
 - Rollout is the same two steps as text style: this server accepts and
   honours the fields, and the **Layers** buttons stay behind the build-time
   `NEXT_PUBLIC_ARTIFACTS_DESIGN_HIDE_LOCK` (default off) until no rollback past
@@ -215,8 +218,11 @@ refuses other values with `400`.
 - The stroke is drawn inside the box on the canvas, in playback and in the HTML
   export (an outline drawn inwards, above an image), so a stroke never changes a layer's size or
   position. A rounded image is clipped to its corners.
-- `fill` keeps its meaning: the paint of a rectangle. An image is drawn from its
-  URL; its `fill` is not drawn.
+- `fill` is the paint of a rectangle. On an image it is painted behind the
+  picture (#5228), on the canvas and in the export, so a transparent image
+  shows it; an image without a `fill` has no backing.
+- **Remove stroke** in Properties deletes `stroke` and `strokeWidth` from the
+  layer, so it is drawn as if it never had one.
 - Rollout is the same two steps as text style, behind the build-time
   `NEXT_PUBLIC_ARTIFACTS_DESIGN_SHAPE_STYLE` (default off).
 

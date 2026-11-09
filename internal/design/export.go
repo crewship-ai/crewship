@@ -307,6 +307,10 @@ func writeLayer(b *bytes.Buffer, node *exportNode, geometry string, anchors map[
 	case "image":
 		style += shapeStyle(node)
 		if exportImage.MatchString(node.Src) {
+			// The fill is painted behind the picture, as on the canvas (#5228).
+			if exportColor.MatchString(node.Fill) {
+				style += ";background:" + node.Fill
+			}
 			body = "<img src=\"" + html.EscapeString(node.Src) + "\" alt=\"" + html.EscapeString(node.Name) + "\">"
 		} else {
 			class += " placeholder"
