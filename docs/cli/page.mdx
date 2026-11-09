@@ -2398,6 +2398,13 @@ may set `weight` (100–900 in steps of 100), `line_height` (0.5–4) and a plai
 CSS expressions or URLs make the preview refuse the whole file; the server still
 stores it as a normal project file.
 
+`schema_version: 2` adds a required `themes` list (1–8 `{id, name}`, the first
+is the default), per-theme colours `{"value": {"light": "#…", "dark": "#…"},
+"usage": "…"}`, colour aliases such as `"{surface}"` and an optional `group`
+per type style. A theme a colour leaves out takes the first theme's value.
+Schema 1 files are read unchanged. See
+[Themes (schema 2)](/guides/artifacts/library#themes-schema-2) for the full rules.
+
 ### `crewship page artifact slides <slug-or-id>`
 
 Read the authorized Slides projection and authored comment anchors. Both

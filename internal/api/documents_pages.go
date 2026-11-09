@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/access"
+	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 // documentServiceCall carries the caller's credential to the independent engine.
@@ -149,15 +150,23 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 		// The same rule the authority applies to every comment write: Comment
 		// authority, and on private output only its custodian.
 		canComment := user != nil && role != "" && h.mayCommentPage(r.Context(), workspace, user.ID, role, rec) && (!rec.PrivateAudience || rec.OwnerUserID == user.ID)
-		if canComment {
-			// A restricted member's comment writes are outside its route
-			// allowlist, so it must not be offered the controls.
-			if restricted, err := (access.Store{DB: h.db}).HasRestrictedMembership(r.Context(), user.ID); err != nil || restricted {
-				canComment = false
+		// A restricted member's comment and proposal routes are outside its
+		// route allowlist, so it must not be offered those controls.
+		restricted := true
+		if user != nil {
+			if found, err := (access.Store{DB: h.db}).HasRestrictedMembership(r.Context(), user.ID); err == nil {
+				restricted = found
 			}
+		}
+		if restricted {
+			canComment = false
 		}
 		if operation == "read" {
 			value["can_write"] = canWrite
+			// Agent proposals and their review exist on schema 4 only (#5137).
+			// This states the capability; accept and reject still need Edit.
+			schema, _ := value["schema"].(float64)
+			value["proposals"] = int(schema) == documents.ProposalSchema && !restricted
 		}
 		value["can_comment"] = canComment
 		value["can_resolve"] = canComment

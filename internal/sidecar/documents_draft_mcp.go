@@ -24,13 +24,18 @@ func documentDraftMCPCatalog() []memoryMCPToolDescriptor {
 	patch := object(map[string]any{"id": stringField, "schema": map[string]any{"const": 3}, "page_id": stringField, "epoch": stringField, "ifRev": integer, "target": stringField, "ifHash": stringField, "text": stringField})
 	pin := object(map[string]any{"id": stringField, "schema": map[string]any{"const": 3}, "page_id": stringField, "epoch": stringField, "ifRev": integer})
 	packet := object(map[string]any{"generation": integer, "patch": patch, "checkpoint": pin})
-	view := object(map[string]any{"page_id": stringField, "schema": map[string]any{"const": 3}, "rev": integer, "generation": integer, "epoch": stringField, "targets": map[string]any{"type": "array", "items": object(map[string]any{"id": stringField, "type": map[string]any{"enum": []string{"paragraph", "heading"}}, "parent": map[string]any{"type": []string{"string", "null"}}, "hash": stringField, "text": stringField})}})
+	targets := map[string]any{"type": "array", "items": object(map[string]any{"id": stringField, "type": map[string]any{"enum": []string{"paragraph", "heading"}}, "parent": map[string]any{"type": []string{"string", "null"}}, "hash": stringField, "text": stringField})}
+	view := object(map[string]any{"page_id": stringField, "schema": map[string]any{"const": 3}, "rev": integer, "generation": integer, "epoch": stringField, "targets": targets})
+	proposeView := object(map[string]any{"page_id": stringField, "mode": map[string]any{"const": "propose"}, "schema": map[string]any{"const": 4}, "rev": integer, "generation": integer, "epoch": stringField, "targets": targets})
+	proposal := object(map[string]any{"id": stringField, "schema": map[string]any{"const": 4}, "page_id": stringField, "epoch": stringField, "ifRev": integer, "target": stringField, "ifHash": stringField, "text": stringField})
+	proposalPacket := object(map[string]any{"generation": integer, "proposal": proposal})
 	specs := []struct {
 		name, description string
 		props             map[string]any
 	}{
 		{"doc_draft_view", "Read only this live run's explicitly admitted new or existing Document drafting view. No arbitrary Page, human profile, raw Yjs or renewed authority.", map[string]any{}},
-		{"doc_draft_prepare", "Prepare UNSAVED replaceText and checkpoint packets from the permitted view. Select a paragraph/heading ID and text; the tool copies server hashes and original revision/generation/epoch. Retain this exact packet for uncertain retries.", map[string]any{"view": view, "target": stringField, "text": stringField, "mutation_id": stringField}},
+		{"doc_draft_prepare", "Prepare UNSAVED replaceText and checkpoint packets from the permitted view. Select a paragraph/heading ID and text; the tool copies server hashes and original revision/generation/epoch. Retain this exact packet for uncertain retries. A view with mode propose returns a proposal packet for doc_draft_propose instead.", map[string]any{"view": map[string]any{"oneOf": []any{view, proposeView}}, "target": stringField, "text": stringField, "mutation_id": stringField}},
+		{"doc_draft_propose", "Send an immutable proposal packet (from doc_draft_prepare on a mode propose view). The document is unchanged; a human reviews and accepts or rejects the proposal. Retry only with the same packet.", map[string]any{"packet": proposalPacket}},
 		{"doc_draft_apply", "Apply an immutable prepared packet, then pin its committed revision. No reread or rederived retries. committed_checkpoint_pending means the patch is already durable; retry checkpoint with the same packet.", map[string]any{"packet": packet}},
 		{"doc_draft_checkpoint", "Retry only the exact pin from a retained immutable packet. Does not apply new text or renew run authority; unknown responses do not mean rollback.", map[string]any{"packet": packet}},
 	}
@@ -43,7 +48,7 @@ func documentDraftMCPCatalog() []memoryMCPToolDescriptor {
 }
 
 func (s *Server) respondDocumentDraftMCPToolCall(w http.ResponseWriter, r *http.Request, req memoryMCPRequest, name string, raw []byte) bool {
-	if name != "doc_draft_view" && name != "doc_draft_prepare" && name != "doc_draft_apply" && name != "doc_draft_checkpoint" {
+	if name != "doc_draft_view" && name != "doc_draft_prepare" && name != "doc_draft_apply" && name != "doc_draft_checkpoint" && name != "doc_draft_propose" {
 		return false
 	}
 	identity := &documentCreateMCPRecorder{header: http.Header{}}
@@ -75,12 +80,31 @@ func (s *Server) respondDocumentDraftMCPToolCall(w http.ResponseWriter, r *http.
 	}
 	switch name {
 	case "doc_draft_prepare":
-		packet, err := PrepareDocumentDraft(raw)
+		packet, err := PrepareDocumentDraftOrProposal(raw)
 		if err != nil {
 			fail(err)
 			return true
 		}
 		s.writeRoutinesMCPToolResult(w, req, 200, mustJSON(map[string]any{"status": "prepared_unsaved", "packet": packet}))
+	case "doc_draft_propose":
+		var args struct {
+			Packet json.RawMessage `json:"packet"`
+		}
+		if err := DecodeDocumentDraft(raw, &args); err != nil {
+			fail(err)
+			return true
+		}
+		p, err := ParseDocumentProposalPacket(args.Packet)
+		if err != nil {
+			fail(err)
+			return true
+		}
+		out, err := ApplyDocumentProposal(p, exchange)
+		status := 200
+		if err != nil {
+			status = 503
+		}
+		s.writeRoutinesMCPToolResult(w, req, status, mustJSON(out))
 	case "doc_draft_view":
 		args := map[string]json.RawMessage{}
 		if err := DecodeDocumentDraft(raw, &args); err != nil || len(args) != 0 {

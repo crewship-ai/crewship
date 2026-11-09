@@ -102,7 +102,7 @@ func TestDocumentDraftMCPCatalogIsClosedAndDeterministic(t *testing.T) {
 		t.Fatal("catalog order changed")
 	}
 	tools := documentDraftMCPCatalog()
-	if len(tools) != 4 {
+	if len(tools) != 5 {
 		t.Fatal("missing bounded tools")
 	}
 	for _, tool := range tools {
@@ -160,5 +160,45 @@ func TestDocumentDraftDerivedOperationIDBounds(t *testing.T) {
 	raw, _ := json.Marshal(p)
 	if _, err := ParseDocumentDraftPacket(raw); err == nil {
 		t.Fatal("packet accepted a checkpoint ID over the deployed Node limit")
+	}
+}
+
+func TestDocumentProposalPacketStaysInsideTheProposeMandate(t *testing.T) {
+	hash := strings.Repeat("a", 64)
+	view := func(mode string) string {
+		return `{"page_id":"page-1","mode":"` + mode + `","schema":4,"rev":3,"generation":0,"epoch":"opaque","targets":[{"id":"intro","type":"paragraph","parent":null,"text":"Intro","hash":"` + hash + `"}]}`
+	}
+	input := func(v, target string) []byte {
+		return []byte(`{"view":` + v + `,"target":"` + target + `","text":"New intro","mutation_id":"proposal-1"}`)
+	}
+	packet, err := PrepareDocumentDraftOrProposal(input(view("propose"), "intro"))
+	proposal, ok := packet.(DocumentProposalPacket)
+	if err != nil || !ok || proposal.Proposal.Schema != 4 || proposal.Proposal.IfRev != 3 || proposal.Proposal.IfHash != hash {
+		t.Fatalf("propose packet: %+v %v", packet, err)
+	}
+	if _, err := PrepareDocumentProposal(input(view("propose"), "outside")); err == nil {
+		t.Fatal("target outside the mandate prepared")
+	}
+	if _, err := PrepareDocumentDraft(input(view("propose"), "intro")); err == nil {
+		t.Fatal("a propose view prepared a direct edit")
+	}
+	for _, body := range []string{
+		`{"id":"proposal-1","rev":4,"epoch":"opaque","kind":"agent"}`,
+		`{"id":"proposal-1","rev":3,"epoch":"opaque","kind":"agent"}`,
+		`{"id":"other","rev":3,"epoch":"opaque","kind":"proposal"}`,
+	} {
+		out, err := ApplyDocumentProposal(proposal, func(string, []byte) (int, []byte, error) { return 200, []byte(body), nil })
+		if err == nil || out.Status == "proposed" {
+			t.Fatalf("unconfirmed proposal reported proposed: %s", body)
+		}
+	}
+	out, err := ApplyDocumentProposal(proposal, func(_ string, body []byte) (int, []byte, error) {
+		if !strings.Contains(string(body), `"operation":"propose"`) {
+			t.Fatalf("wrong operation: %s", body)
+		}
+		return 200, []byte(`{"id":"proposal-1","rev":3,"epoch":"opaque","kind":"proposal"}`), nil
+	})
+	if err != nil || out.Status != "proposed" {
+		t.Fatalf("proposal: %+v %v", out, err)
 	}
 }

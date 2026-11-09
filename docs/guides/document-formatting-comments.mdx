@@ -23,11 +23,34 @@ so a document never changes meaning on its own:
 | 6 | Schema 5 plus the Canvas surface: block placements, notes and shapes beside the page |
 
 In a schema 4 document the toolbar offers Bold, Italic, Strikethrough, Quote,
-Checklist and a language for the current code block. Code blocks show their
-language above the code, use a monospace font and scroll sideways instead of
-wrapping. Tick a checklist item to mark it done. Markdown export writes
-`**bold**`, `*italic*`, `~~strike~~`, fenced code with its language, `>` quotes
-and `- [x]` checklists.
+Checklist and a language for the current code block. Tick a checklist item to
+mark it done.
+
+The documents engine can write a schema 4 document as Markdown (`**bold**`,
+`*italic*`, `~~strike~~`, fenced code with its language, `>` quotes and
+`- [x]` checklists), but no API, CLI command or Docs menu offers a Docs
+download yet, so the Docs page shows no export.
+
+### Code blocks
+
+Code blocks use a monospace font and scroll sideways instead of wrapping. A
+header above the code shows its language (in schema 4) and **Copy**, which
+puts the block's exact characters on the clipboard: tabs, trailing spaces and
+newlines included. Copy works for readers too.
+
+In a schema 4 document, code in a known language is coloured as you type:
+Bash, C, C++, C#, CSS, Go, GraphQL, HTML/XML, Java, JavaScript, JSON, Kotlin,
+Lua, Makefile, Markdown, Perl, PHP, Python, R, Ruby, Rust, SCSS, Shell, SQL,
+Swift, TypeScript, YAML and a few more, including short names such as `ts`,
+`py`, `sh` and `yml`. The language field suggests common names; any short
+lowercase name can be typed, and an unknown one stays uncoloured.
+
+- Colours are only how the editor shows the text. They are never saved, never
+  sent to collaborators and never appear in exports; the stored code, its
+  revision and comments on it stay exactly what was typed.
+- Code is never run. Markup such as `<script>` in a block stays text.
+- Blocks longer than 20 000 characters are shown without colours so typing
+  stays responsive.
 
 Schema 5 colours come from a fixed palette of eight names (gray, red,
 orange, yellow, green, blue, purple, pink). The document stores the name, never

@@ -17,6 +17,13 @@ import (
 
 func iterationFixture(t *testing.T, expiry ...string) (*artifactPrincipalFixture, *documentAuthority, string, documents.IterationIntent) {
 	t.Helper()
+	return iterationFixtureFor(t, nil, expiry...)
+}
+
+// iterationFixtureFor lets a test change the Page and the intent before the
+// human send admits it (for example a schema-4 propose mandate).
+func iterationFixtureFor(t *testing.T, prepare func(*artifactPrincipalFixture, *documents.IterationIntent), expiry ...string) (*artifactPrincipalFixture, *documentAuthority, string, documents.IterationIntent) {
+	t.Helper()
 	f, authority, _, created := newDocumentDraftFixture(t, true)
 	f.a.RunID = "iteration-run"
 	f.a.ChatID = "iteration-chat"
@@ -33,6 +40,9 @@ func iterationFixture(t *testing.T, expiry ...string) (*artifactPrincipalFixture
 	}
 	mustExec(t, f.rig.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('iteration-start',?,'principal-crew','principal-agent','run.started','system','test',?)`, f.a.WorkspaceID, f.a.RunID)
 	intent := documents.IterationIntent{SubmissionID: "followup", PageID: created.PageID, Schema: 3}
+	if prepare != nil {
+		prepare(f, &intent)
+	}
 	if len(expiry) != 0 {
 		mustExec(t, f.rig.db, `UPDATE artifact_run_principals SET expires_at=? WHERE run_id=?`, expiry[0], f.a.RunID)
 	}
@@ -164,7 +174,7 @@ func TestDocumentIterationGuardAdvancesOnlyAtomicAuthorizedWrites(t *testing.T) 
 func TestDocumentIterationSharedDefaultNeverFallsBackToDirect(t *testing.T) {
 	f, _, _, intent := iterationFixture(t)
 	mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, intent.PageID)
-	_, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, intent)
+	_, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, intent)
 	if !errors.Is(err, errDocumentIterationProposalUnavailable) {
 		t.Fatalf("shared default did not require proposal: %v", err)
 	}

@@ -1,74 +1,151 @@
 {
- "schema_version": 1,
+ "schema_version": 2,
  "name": "Template Crewship Design System",
+ "themes": [
+  {
+   "id": "light",
+   "name": "Světlé"
+  },
+  {
+   "id": "dark",
+   "name": "Tmavé"
+  }
+ ],
  "colors": {
-  "surface": "#F4F1EA",
-  "panel": "#FFFDF8",
-  "ink": "#0F1F33",
-  "ink-muted": "#4A5568",
-  "line": "#E2DCCF",
-  "deep": "#0F1F33",
-  "deck": "#16304F",
-  "signal": "#E8833A",
-  "ink-on-signal": "#0F1F33",
-  "signal-text": "#B85E1F",
-  "ok": "#1F5E40",
-  "ok-tint": "#DDEFE6",
-  "surface-dark": "#0B1726",
-  "panel-dark": "#13253C",
-  "ink-dark": "#F4F1EA",
-  "ink-muted-dark": "#BFCBD8",
-  "line-dark": "#2A4566",
-  "deep-dark": "#16304F",
-  "deck-dark": "#1E3E63",
-  "signal-dark": "#F0954F",
-  "ink-on-signal-dark": "#0F1F33",
-  "signal-text-dark": "#F0954F",
-  "ok-dark": "#7FD1A6",
-  "ok-tint-dark": "#173A2A"
+  "surface": {
+   "value": {
+    "light": "#F4F1EA",
+    "dark": "#0B1726"
+   },
+   "usage": "Pozadí stránky."
+  },
+  "panel": {
+   "value": {
+    "light": "#FFFDF8",
+    "dark": "#13253C"
+   },
+   "usage": "Karty a panely na surface."
+  },
+  "ink": {
+   "value": {
+    "light": "#0F1F33",
+    "dark": "#F4F1EA"
+   },
+   "usage": "Hlavní text na surface a panel."
+  },
+  "ink-muted": {
+   "value": {
+    "light": "#4A5568",
+    "dark": "#BFCBD8"
+   },
+   "usage": "Vedlejší text, popisky, metadata."
+  },
+  "line": {
+   "value": {
+    "light": "#E2DCCF",
+    "dark": "#2A4566"
+   },
+   "usage": "Hairline okraje karet a oddělovače."
+  },
+  "deep": {
+   "value": {
+    "light": "#0F1F33",
+    "dark": "#16304F"
+   },
+   "usage": "Tmavá hlavička aplikace, titulní slidy."
+  },
+  "deck": {
+   "value": {
+    "light": "#16304F",
+    "dark": "#1E3E63"
+   },
+   "usage": "Druhý tón na deep: přepínače, boxy diagramů."
+  },
+  "signal": {
+   "value": {
+    "light": "#E8833A",
+    "dark": "#F0954F"
+   },
+   "usage": "Jediný akcent: primární tlačítko, zvýrazněná hodnota. Text na něm je ink-on-signal."
+  },
+  "ink-on-signal": {
+   "value": {
+    "light": "#0F1F33",
+    "dark": "#0F1F33"
+   },
+   "usage": "Text na signal."
+  },
+  "signal-text": {
+   "value": {
+    "light": "#B85E1F",
+    "dark": "#F0954F"
+   },
+   "usage": "Akcent jako text (eyebrow, odkazy) na surface."
+  },
+  "ok": {
+   "value": {
+    "light": "#1F5E40",
+    "dark": "#7FD1A6"
+   },
+   "usage": "Stav Hotovo, kladná změna."
+  },
+  "ok-tint": {
+   "value": {
+    "light": "#DDEFE6",
+    "dark": "#173A2A"
+   },
+   "usage": "Pozadí pilulky Hotovo."
+  }
  },
  "typography": {
   "display": {
    "size": 56,
    "font_family": "\"IBM Plex Sans\", Arial, sans-serif",
    "weight": 700,
-   "line_height": 1.0714
+   "line_height": 1.0714,
+   "group": "Nadpisy"
   },
   "title": {
    "size": 32,
    "font_family": "\"IBM Plex Sans\", Arial, sans-serif",
    "weight": 700,
-   "line_height": 1.1875
+   "line_height": 1.1875,
+   "group": "Nadpisy"
   },
   "heading": {
    "size": 20,
    "font_family": "\"IBM Plex Sans\", Arial, sans-serif",
    "weight": 600,
-   "line_height": 1.3
+   "line_height": 1.3,
+   "group": "Nadpisy"
   },
   "body": {
    "size": 15,
    "font_family": "\"IBM Plex Sans\", Arial, sans-serif",
    "weight": 400,
-   "line_height": 1.4667
+   "line_height": 1.4667,
+   "group": "Text"
   },
   "caption": {
    "size": 13,
    "font_family": "\"IBM Plex Sans\", Arial, sans-serif",
    "weight": 400,
-   "line_height": 1.3846
+   "line_height": 1.3846,
+   "group": "Text"
   },
   "code": {
    "size": 13,
    "font_family": "\"JetBrains Mono\", \"Courier New\", monospace",
    "weight": 400,
-   "line_height": 1.5385
+   "line_height": 1.5385,
+   "group": "Mono"
   },
   "eyebrow": {
    "size": 12,
    "font_family": "\"JetBrains Mono\", \"Courier New\", monospace",
    "weight": 600,
-   "line_height": 1.3333
+   "line_height": 1.3333,
+   "group": "Mono"
   }
  },
  "spacing": {
