@@ -41,7 +41,7 @@ func TestAgentEditDelegationIsOwnerOnly(t *testing.T) {
 		{"another workspace owner may not delegate agent Edit", "wsowner", "OWNER", agentWrite, http.StatusForbidden},
 		{"page owner delegates agent Edit", "", "OWNER", agentWrite, http.StatusOK},
 		{"admin still grants an agent read", "admin", "ADMIN", `{"subject_type":"agent","subject":"scribe","level":"read"}`, http.StatusOK},
-		{"admin still grants an agent produce", "admin", "ADMIN", `{"subject_type":"agent","subject":"scribe","level":"produce","panels":["sluzby"]}`, http.StatusOK},
+		{"admin may not delegate agent produce either: it edits the data", "admin", "ADMIN", `{"subject_type":"agent","subject":"scribe","level":"produce","panels":["sluzby"]}`, http.StatusForbidden},
 		{"admin still grants a person write", "admin", "ADMIN", `{"subject_type":"user","subject":"member@example.com","level":"write"}`, http.StatusOK},
 		{"admin still grants the workspace write", "admin", "ADMIN", `{"subject_type":"workspace","level":"write"}`, http.StatusOK},
 		{"admin still grants a crew write", "admin", "ADMIN", `{"subject_type":"crew","subject":"engine","level":"write"}`, http.StatusOK},

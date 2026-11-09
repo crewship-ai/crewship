@@ -77,9 +77,10 @@ export function pageGrantLevelsFor(
   canDelegateAgentEdit = false,
 ): readonly PageGrantLevel[] {
   if (subjectType === "workspace") return ["read", "write"]
-  // Only the page's owner delegates Edit to an agent; everyone else is not
-  // offered the choice the server would refuse.
-  if (subjectType === "agent" && !canDelegateAgentEdit) return PAGE_GRANT_LEVELS.filter((l) => l !== "write")
+  // Only the page's owner delegates Edit to an agent, of the spec (write) or
+  // of the data (produce); everyone else is not offered the choice the server
+  // would refuse.
+  if (subjectType === "agent" && !canDelegateAgentEdit) return ["read"]
   return PAGE_GRANT_LEVELS
 }
 

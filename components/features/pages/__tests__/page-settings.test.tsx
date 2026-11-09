@@ -456,8 +456,9 @@ describe("granting to everyone in this workspace", () => {
   })
 })
 
-// R71 §0.14/1: only the page's owner delegates Edit to an agent. The server
-// says whether the caller may; the form hides the choice otherwise.
+// R71 §0.14/1: only the page's owner delegates Edit to an agent, of the spec
+// (write) or of the data (produce). The server says whether the caller may;
+// the form hides the choice otherwise.
 describe("agent Edit is offered to the page owner only", () => {
   const levelsForAgent = async (grants: Response) => {
     mount(CREW_OWNED, { grants })
@@ -467,11 +468,20 @@ describe("agent Edit is offered to the page owner only", () => {
   }
 
   it.each([
-    ["the server says the caller may not", { ...GRANTS, can_delegate_agent_edit: false }, ["read", "produce"]],
-    ["the server does not say", GRANTS, ["read", "produce"]],
+    ["the server says the caller may not", { ...GRANTS, can_delegate_agent_edit: false }, ["read"]],
+    ["the server does not say", GRANTS, ["read"]],
     ["the caller owns the page", { ...GRANTS, can_delegate_agent_edit: true }, ["read", "produce", "write"]],
   ])("when %s", async (_name, body, want) => {
     expect(await levelsForAgent(jsonResponse(200, body))).toEqual(want)
+  })
+
+  it("moves a non-owner's produce choice to read on switching to an agent", async () => {
+    mount(CREW_OWNED, { grants: jsonResponse(200, { ...GRANTS, can_delegate_agent_edit: false }) })
+    await waitFor(() => expect(grantRows()).toHaveLength(2))
+    expect((screen.getByLabelText("Level") as HTMLSelectElement).value).toBe("produce")
+    fireEvent.change(screen.getByLabelText("Subject kind"), { target: { value: "agent" } })
+    expect((screen.getByLabelText("Level") as HTMLSelectElement).value).toBe("read")
+    expect(screen.queryByLabelText("Panels")).toBeNull()
   })
 
   it("still offers write to a person when the caller may not delegate agent Edit", async () => {
