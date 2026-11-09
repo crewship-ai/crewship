@@ -1,0 +1,1 @@
+- **Agents can be granted Propose on a page.** A Propose grant lets an agent read a shared Document and propose changes that a person accepts or rejects; it never edits. Naming an agent without a level now grants Propose, and Edit has to be chosen explicitly. Existing grants keep their meaning.
