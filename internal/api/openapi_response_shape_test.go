@@ -145,6 +145,8 @@ var responseShapeContracts = []struct {
 	{name: "DocumentCheckpointList", pointer: "/components/schemas/DocumentCheckpointList", value: documentCheckpointListResponse{}},
 	{name: "DocumentCheckpointSummary", pointer: "/components/schemas/DocumentCheckpointList/properties/checkpoints/items", value: documentCheckpointSummary{}},
 	{name: "DocumentCheckpoint", pointer: "/components/schemas/DocumentCheckpoint", value: documentCheckpointResponse{}},
+	{name: "DocumentPeople", pointer: "/components/schemas/DocumentPeople", value: documentPeopleResponse{}},
+	{name: "DocumentPerson", pointer: "/components/schemas/DocumentPeople/properties/people/items", value: documentPerson{}},
 	{name: "DocumentRestoreReceipt", pointer: "/components/schemas/DocumentRestoreReceipt", value: documentRestoreResponse{}},
 	{name: "DocumentProposalList", pointer: "/components/schemas/DocumentProposalList", value: DocumentProposalList{}},
 	{name: "DocumentProposal", pointer: "/components/schemas/DocumentProposal", value: DocumentProposalWire{}},

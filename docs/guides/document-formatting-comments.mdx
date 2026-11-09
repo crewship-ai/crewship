@@ -1,6 +1,6 @@
 ---
 title: "Document formatting and comments"
-description: "What a Docs page can hold in schema 4, how a document gets it, and how comment threads work."
+description: "What a Docs page can hold in schemas 4 and 5, how a document gets them, and how comment threads work."
 icon: "message-square"
 stability: experimental
 tag: Experimental
@@ -19,6 +19,7 @@ so a document never changes meaning on its own:
 | 2 | Headings (levels 1–3), paragraphs, bulleted and numbered lists, simple tables |
 | 3 | Schema 2 plus web links, inline code and code blocks |
 | 4 | Schema 3 plus **bold**, *italic* and ~~strikethrough~~ (combinable, and with links), a language on each code block, block quotes and checklists |
+| 5 | Schema 4 plus underline, a text colour and a highlight, each combinable with the other marks, and inline dates and mentions |
 
 In a schema 4 document the toolbar offers Bold, Italic, Strikethrough, Quote,
 Checklist and a language for the current code block. Tick a checklist item to
@@ -100,14 +101,39 @@ including Markdown pasted into a `python` or unlabelled block, stays code.
 - Cells and text are only ever text in the page: nothing in a CSV cell or a
   Markdown source can add markup, run script or fetch anything.
 
+Schema 5 colours come from a fixed palette of eight names (gray, red,
+orange, yellow, green, blue, purple, pink). The document stores the name, never
+a CSS value, and light and dark themes each show their own readable shade of
+it. Markdown has no syntax for these marks, so Markdown export writes
+`<u>…</u>`, `<span data-text-color="red">…</span>` and
+`<mark data-highlight="yellow">…</mark>`; most Markdown viewers show underline
+and highlight and show coloured text plainly. Word export uses the light
+theme's shades.
+
+A schema 5 date is one calendar day (`2026-11-20`), shown in each reader's own
+date format. A mention stores only the person's id, never their name: each
+reader sees the name of a person who can read the document, and anyone else,
+including someone without access, appears as **Unknown member**, so a document
+never reveals whether a person exists. Markdown and Word export write the date
+as `2026-11-20` and a mention as `@` and a name only when the export is given
+the names the exporting reader may see; otherwise as `@Unknown member`. The
+export serializers accept those names, but no export endpoint supplies them in
+this release, so exported mentions read `@Unknown member` for now. A semantic
+`replaceText` edit that would insert text exactly beside a date or mention, or
+delete across one, is refused with `ambiguous_inline_atom`; make that edit in
+the editor.
+
 New documents start at schema 4: the New Doc dialog, the Artifacts library and
 documents an agent creates from chat. The agent run that created a document with
 your drafting permission edits it directly; any later agent request on a schema 4
 document is a proposal that a person accepts or rejects. Documents created
 earlier stay at schema 3 until someone with edit access upgrades them through the
-documents service's human-only upgrade, which keeps their content, history and
-comments and only widens what they may hold. You can also initialize a document
-with `"schema": 4` (see [`crewship doc initialize`](/cli/doc)).
+documents service's human-only upgrade, which always goes to the newest schema (5),
+keeps their content, history and comments and only widens what they may hold.
+A document becomes schema 5 only explicitly: initialize it with `"schema": 5`
+(see [`crewship doc initialize`](/cli/doc)) or upgrade it. An editor that does
+not know a document's schema opens it read-only with "This document needs a
+newer editor" and never saves over it.
 
 ## Comments
 

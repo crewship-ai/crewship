@@ -2421,6 +2421,27 @@ invalid credential; 403 missing access/scope; 404 unavailable Page/document;
 invalid engine response; 503 disabled or unavailable service. CLI:
 `crewship doc export`.
 
+## Name the people mentioned in a native document
+
+`GET /api/v1/pages/{slug}/document/people`
+
+Authentication: a current human session, or a current CLI token with `pages:read`, with current read
+access to the Page and its document; agent run credentials are refused with 403.
+Request: the Page slug or immutable `@PageID` and current workspace; query
+parameters `ids` (a comma-separated list of at most 100 mention user ids) or
+`q` (at most 100 characters of name text for the @-mention picker), never both;
+no request body. Response: `people`, an array of `{id, name}`. With `ids`, only
+the listed people who can currently read this document are named; anyone else,
+including an unknown id, is simply absent, so the answer never reveals whether
+an id exists. With `q`, at most 20 such readers whose name contains the text
+(an empty `q` lists the first 20); the name match covers every member, and at most
+200 matching members are checked for access per request. Email addresses are never matched or returned.
+A caller who cannot read the document gets 404, as for a missing Page.
+Statuses: 200 people; 400 invalid ids, both selectors, a repeated parameter or too-long text;
+401 invalid credential; 403 agent or missing scope; 404 unavailable Page or
+document; 500 storage failure; 503 disabled service. Responses use
+`Cache-Control: no-store`. CLI: `crewship doc people`.
+
 ## List saved document checkpoints
 
 `GET /api/v1/pages/{slug}/document/checkpoints`
