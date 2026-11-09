@@ -24,7 +24,7 @@ export function highlightable(language: unknown): language is string {
 }
 
 /** Suggestions offered by the language field; any valid language name can still be typed. */
-export const SUGGESTED_LANGUAGES = ["bash", "c", "cpp", "csharp", "css", "csv", "go", "html", "java", "javascript", "json", "kotlin", "latex", "markdown", "php", "python", "ruby", "rust", "sql", "swift", "typescript", "yaml"]
+export const SUGGESTED_LANGUAGES = ["bash", "c", "chart", "cpp", "csharp", "css", "csv", "go", "html", "java", "javascript", "json", "kotlin", "latex", "markdown", "mermaid", "php", "python", "ruby", "rust", "sql", "swift", "typescript", "yaml"]
 
 /** One highlighted run inside a block's text: plain-text offsets and the token classes. */
 export interface CodeToken { from: number; to: number; className: string }
@@ -92,7 +92,7 @@ export const codeBlockText = (node: ProseMirrorNode) => node.textContent
 
 /** What a preview renderer returns: the rendered element, or why this block cannot be shown. */
 export type PreviewResult = { ok: true; node: HTMLElement } | { ok: false; error: string }
-type Renderer = (source: string) => PreviewResult
+type Renderer = (source: string) => PreviewResult | Promise<PreviewResult>
 
 /**
  * Languages that opt a code block into a rendered preview, and their
@@ -105,6 +105,8 @@ const PREVIEWS: Record<string, { name: string; load: () => Promise<Renderer> }> 
   csv: { name: "table", load: () => import("./code-preview-csv").then(module => module.renderCsv) },
   markdown: { name: "Markdown", load: () => import("./code-preview-markdown").then(module => module.renderMarkdown) },
   md: { name: "Markdown", load: () => import("./code-preview-markdown").then(module => module.renderMarkdown) },
+  mermaid: { name: "diagram", load: () => import("./code-preview-diagram").then(module => module.renderDiagram) },
+  chart: { name: "chart", load: () => import("./code-preview-chart").then(module => module.renderChart) },
 }
 
 /** True when a block with this language offers Source and Preview. */
@@ -190,7 +192,7 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
           // Render the latest text once edits pause; a burst of keystrokes or remote updates renders once.
           clearTimeout(pending)
           pending = setTimeout(() => {
-            PREVIEWS[lang].load().then(render => draw(render(source)), () => draw({ ok: false, error: "The preview could not be loaded. The source is unchanged." }))
+            PREVIEWS[lang].load().then(render => render(source)).then(draw, () => draw({ ok: false, error: "The preview could not be loaded. The source is unchanged." }))
           }, first ? 0 : PREVIEW_DELAY_MS)
         }
 

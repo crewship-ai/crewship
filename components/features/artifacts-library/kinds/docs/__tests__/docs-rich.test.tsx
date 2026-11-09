@@ -20,6 +20,10 @@ import { DocsBody, type DocsFrameReport } from "../docs-view"
 
 const env = vi.hoisted(() => ({ canWrite: true, canComment: true, comments: "ok" as "ok" | "missing" | "conflict" }))
 const request = vi.hoisted(() => vi.fn())
+// jsdom cannot lay out SVG, so mermaid's renderer is replaced by one that returns hostile output; the
+// real renderer is exercised in a browser harness. What reaches the page must still be safe.
+const mermaid = vi.hoisted(() => ({ initialize: vi.fn(), render: vi.fn(async (id: string) => ({ svg: `<svg xmlns="http://www.w3.org/2000/svg" id="${id}"><g onclick="window.__ran = true"><a href="javascript:window.__ran = true"><text>Start</text></a></g><foreignObject><img src="x" onerror="window.__ran = true"/></foreignObject><script>window.__ran = true</script></svg>` })) }))
+vi.mock("mermaid", () => ({ default: mermaid }))
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: true, isPending: false }) }))
 vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/document-queue")>(), openDocumentDrafts: async () => ({ load: async () => [], put: async () => {}, remove: async () => {}, close: () => {}, exclusive: true }) }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
@@ -36,6 +40,8 @@ const item = {
 const MARKUP = "<script>window.__ran = true</script>\n\t<img src=x onerror=\"window.__ran = true\">  \n"
 const CSV = "name,role\n\"Doe, Jane\",<b>lead</b>\n"
 const MARKDOWN = "## Plan\n\n- [x] **ship**\n- read [docs](https://example.com/docs)\n\n<img src=x onerror=\"window.__ran = true\">\n\n![chart](https://example.test/chart.png)"
+const FLOW = "flowchart LR\n  A[Start] --> B[Done]\n  click A \"javascript:window.__ran = true\""
+const SALES = JSON.stringify({ type: "bar", title: "Sales", x: ["Q1", "Q2"], series: [{ name: "<b>North</b>", values: [10, 20] }] })
 const p = (id: string, text: string, marks?: { type: string; attrs: object }[]) => ({ type: "paragraph", attrs: { id }, content: [{ type: "text", text, ...(marks ? { marks } : {}) }] })
 const formatted = { type: "doc", content: [
   p("goal", "Ship the agency offer on 2 December."),
@@ -53,6 +59,9 @@ const formatted = { type: "doc", content: [
   { type: "codeBlock", attrs: { id: "ragged", language: "csv" }, content: [{ type: "text", text: "a,b\n1,2,3" }] },
   { type: "codeBlock", attrs: { id: "notes", language: "markdown" }, content: [{ type: "text", text: MARKDOWN }] },
   { type: "codeBlock", attrs: { id: "plain-md", language: "python" }, content: [{ type: "text", text: "# not a heading" }] },
+  { type: "codeBlock", attrs: { id: "flow", language: "mermaid" }, content: [{ type: "text", text: FLOW }] },
+  { type: "codeBlock", attrs: { id: "sales", language: "chart" }, content: [{ type: "text", text: SALES }] },
+  { type: "codeBlock", attrs: { id: "bad-chart", language: "chart" }, content: [{ type: "text", text: "{\"type\":\"pie\",\"x\":[],\"series\":[]}" }] },
 ] }
 
 const comments = [
@@ -366,6 +375,53 @@ describe("Docs CSV and Markdown blocks", () => {
     expect(plain.querySelector<HTMLElement>("[data-code-preview]")!.hidden).toBe(true)
     expect(within(plain).queryByRole("button", { name: "Preview" })).toBeNull()
     expect(plain.querySelector("pre")!.textContent).toBe("# not a heading")
+  })
+})
+
+describe("Docs diagram and chart blocks", () => {
+  const blockDom = (editor: HTMLElement, id: string) => editor.querySelector<HTMLElement>(`[data-code-block][data-block-id="${id}"]`)!
+
+  it("draws a mermaid block from its sanitized SVG and shows its source on request", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    const before = structuredClone(editor.editor.getJSON())
+    const flow = blockDom(editor, "flow")
+    await waitFor(() => expect(flow.querySelector<HTMLElement>("[data-diagram-preview]")?.shadowRoot?.querySelector("svg")).toBeTruthy())
+    const root = flow.querySelector<HTMLElement>("[data-diagram-preview]")!.shadowRoot!
+    expect(mermaid.render).toHaveBeenCalledWith(expect.stringMatching(/^docs-diagram-/), FLOW)
+    expect(root.querySelector("svg")!.getAttribute("role")).toBe("img")
+    expect(root.querySelector("text")!.textContent).toBe("Start")
+    expect(root.querySelector("a, script, foreignObject, img, [onclick], [href]")).toBeNull()
+    expect((window as unknown as { __ran?: boolean }).__ran).toBeUndefined()
+    expect(flow.querySelector("pre")!.hidden).toBe(true)
+    fireEvent.click(within(within(flow).getByRole("group", { name: "Show diagram" })).getByRole("button", { name: "Source" }))
+    expect(flow.querySelector("pre")!.hidden).toBe(false)
+    expect(flow.querySelector("pre")!.textContent).toBe(FLOW)
+    expect(editor.editor.getJSON()).toEqual(before)
+    expect(posts("/document/patch")).toHaveLength(0)
+  })
+
+  it("draws a chart block with its data table, and explains a bad spec in that block only", async () => {
+    serve()
+    open()
+    const editor = await editable()
+    const before = structuredClone(editor.editor.getJSON())
+    const sales = blockDom(editor, "sales")
+    await waitFor(() => expect(sales.querySelector("[data-code-preview] svg[role=img]")).not.toBeNull())
+    const preview = sales.querySelector("[data-code-preview]")!
+    expect(preview.querySelector("svg")!.getAttribute("aria-label")).toBe("Bar chart: Sales. 1 series (<b>North</b>) over 2 categories (Q1 to Q2); values from 10 to 20.")
+    expect(preview.querySelectorAll("rect[data-chart-value]")).toHaveLength(2)
+    expect(preview.querySelector("b")).toBeNull()
+    expect(within(preview as HTMLElement).getByText("Show data table")).toBeTruthy()
+    expect([...preview.querySelectorAll("tbody td")].map(td => td.textContent)).toEqual(["10", "20"])
+    const bad = blockDom(editor, "bad-chart")
+    await waitFor(() => expect(bad.querySelector("[data-code-preview][data-error]")?.textContent).toBe('Cannot show this chart: "type" must be "bar" or "line".'))
+    expect(bad.querySelector("pre")!.hidden).toBe(false)
+    fireEvent.click(within(within(sales).getByRole("group", { name: "Show chart" })).getByRole("button", { name: "Source" }))
+    expect(sales.querySelector("pre")!.textContent).toBe(SALES)
+    expect(editor.editor.getJSON()).toEqual(before)
+    expect(posts("/document/patch")).toHaveLength(0)
   })
 })
 
