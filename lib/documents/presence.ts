@@ -19,6 +19,8 @@ export interface PresencePeer {
   userId: string
   name: string
   color: string
+  /** How many of this person's tabs are on the document; the server sends one entry per person. */
+  tabs: number
   anchor?: Y.RelativePosition
   head?: Y.RelativePosition
 }
@@ -52,7 +54,7 @@ export function parsePresenceReply(value: unknown): PresenceReply {
     const peer = raw as Record<string, unknown>
     if (typeof peer.client !== "string" || typeof peer.user_id !== "string" || typeof peer.name !== "string" || !peer.name.trim()) continue
     const anchor = decodePosition(peer.anchor), head = decodePosition(peer.head)
-    peers.push({ client: peer.client, userId: peer.user_id, name: peer.name.trim().slice(0, 80), color: peerColor(Number(peer.color)), ...(anchor && head ? { anchor, head } : {}) })
+    peers.push({ client: peer.client, userId: peer.user_id, name: peer.name.trim().slice(0, 80), color: peerColor(Number(peer.color)), tabs: Number.isSafeInteger(peer.tabs) && Number(peer.tabs) > 0 ? Number(peer.tabs) : 1, ...(anchor && head ? { anchor, head } : {}) })
   }
   const interval = Number(reply.interval_ms)
   return { peers, color: typeof reply.color === "number" ? peerColor(reply.color) : undefined, intervalMs: Number.isFinite(interval) ? Math.min(Math.max(interval, 500), 5000) : 1000 }

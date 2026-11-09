@@ -2605,7 +2605,8 @@ CLI: `crewship doc proposal-accept|proposal-reject <page-slug> <proposal-id> --e
 Who else has the document open, and where their caret is. Presence is
 ephemeral: the server keeps it in memory only, never in the database or the
 document, and forgets a tab after 6 seconds without a heartbeat. Clients send
-one heartbeat a second and when the caret moves.
+one heartbeat a second, and an extra one (at most every 150 ms) only when the
+caret actually moved.
 
 Authentication: a current human credential with read access to the document;
 every heartbeat is authorized like a document read, at that moment. Scoped CLI
@@ -2616,11 +2617,13 @@ Request body (at most 2 KiB, unknown fields refused): `client`, this tab's id
 the caret and range as base64 Yjs relative positions (at most 192 bytes each);
 `leave: true` removes this tab at once. A client cannot name itself or choose
 a colour.
-Response 200: `peers`, the other people's tabs on this document (never the
-caller's own), each with `client`, `user_id`, `name` (the member's display
+Response 200: `peers`, the other people on this document, one entry per
+person however many tabs they have open (never the caller, nor the caller's
+other tabs), each with `tabs` (how many of that person's tabs are present),
+`client` and `anchor`/`head` of the tab whose caret moved last, `user_id`, `name` (the member's display
 name, or `Workspace member` when they have none; never an email), `color` (an index the server assigns per document,
 different for each person while free colours remain, kept while they stay) and
-`anchor`/`head` when shared; plus the caller's own `color`, `ttl_ms` and
+`anchor`/`head` when that tab shares them; plus the caller's own `color`, `ttl_ms` and
 `interval_ms`. Statuses: 200 heartbeat recorded; 400 invalid request; 401
 invalid credential; 403 agent credential or missing scope; 404 document
 unavailable or read access gone (every tab of the caller on this document is
