@@ -121,6 +121,8 @@ describe("kinds from the selected version's profile", () => {
   it("reads older storage words in a saved link as the kind they show as", () => {
     expect(filtersFromParams(new URLSearchParams("kind=project,page,dashboard")).kinds).toEqual(["app", "dashboard"])
     expect(filtersFromParams(new URLSearchParams("kind=apps,design")).kinds).toEqual(["app", "design"])
+    // A Page with panels and a Dashboard both show as Dashboards: one kind, not two.
+    expect(filtersFromParams(new URLSearchParams("kind=page,dashboard")).kinds).toEqual(["dashboard"])
   })
 })
 

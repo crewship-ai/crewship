@@ -47,6 +47,9 @@ func TestArtifactProfileFromSelectedManifest(t *testing.T) {
 		{name: "interactive app with slides switched on", files: map[string]string{"dashboard.json": dashboard, "interactive.json": interactive}, slides: true, wantKind: "project", wantProfile: "interactive"},
 		{name: "design system", files: map[string]string{"design-system.json": designSys}, wantKind: "project", wantProfile: "design_system"},
 		{name: "design system with slides switched on", files: map[string]string{"design-system.json": designSys}, slides: true, wantKind: "project", wantProfile: "design_system"},
+		{name: "design system with a data collection is a library", files: map[string]string{"design-system.json": designSys, "dashboard.json": dashboard}, wantKind: "project", wantProfile: "design_system"},
+		{name: "design system wins over a runtime marker", files: map[string]string{"design-system.json": designSys, "interactive.json": interactive}, wantKind: "project", wantProfile: "design_system"},
+		{name: "a deck file decides nothing while Slides is off", files: map[string]string{"deck.json": `{"schema_version":1,"order":["intro"]}`, "dashboard.json": dashboard, "interactive.json": interactive}, wantKind: "project", wantProfile: "interactive"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -90,54 +93,46 @@ func TestArtifactProfileReaderSeesSharedVersion(t *testing.T) {
 	assertArtifactProfile(t, h, ws, reader, "project", "interactive")
 }
 
-// The catalog's kind facet uses the same derivation: an interactive app is not a dashboard.
+// The catalog's kind facet and kind sort use the same derivation: an
+// interactive app is not a dashboard, and a design system is a design (#5152).
 func TestArtifactProfileCatalogKindFacet(t *testing.T) {
 	h, ws, owner, call := artifactProjectFixture(t)
 	t.Setenv("CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED", "true")
 	for slug, files := range map[string]map[string]string{
 		"sales":    {"dashboard.json": `{"schema_version":1,"collections":["sales"]}`},
 		"showcase": {"dashboard.json": `{"schema_version":1,"collections":["showcase"]}`, "interactive.json": `{"schema_version":1}`},
+		"tokens":   {"design-system.json": `{"schema_version":1,"name":"Tokens","tokens":{}}`, "dashboard.json": `{"schema_version":1,"collections":["swatches"]}`},
 	} {
 		if w := call(owner, "POST", "artifacts", `{"slug":"`+slug+`","name":"`+slug+`",`+strings.TrimPrefix(projectWithFiles(t, 0, files), "{")); w.Code != 201 {
 			t.Fatal(slug, w.Code, w.Body)
 		}
 	}
-	slugs := func(kind string) []string {
-		req := pagesRequest(t, "GET", "/api/v1/pages?kind="+kind+"&limit=50", ws, owner, "OWNER", "")
+	slugs := func(query string) []string {
+		req := pagesRequest(t, "GET", "/api/v1/pages?"+query, ws, owner, "OWNER", "")
 		w := httptest.NewRecorder()
 		h.List(w, req)
-		if w.Code != 200 {
-			t.Fatalf("list %s: %d %s", kind, w.Code, w.Body)
-		}
-		var body struct {
-			Items []struct {
-				Slug    string `json:"slug"`
-				Profile string `json:"artifact_profile"`
-			} `json:"items"`
-		}
 		var rows []struct {
 			Slug string `json:"slug"`
 		}
+		if w.Code != 200 || json.Unmarshal(w.Body.Bytes(), &rows) != nil {
+			t.Fatalf("list %s: %d %s", query, w.Code, w.Body)
+		}
 		out := []string{}
-		if json.Unmarshal(w.Body.Bytes(), &body) == nil && body.Items != nil {
-			for _, item := range body.Items {
-				out = append(out, item.Slug)
-			}
-			return out
-		}
-		if err := json.Unmarshal(w.Body.Bytes(), &rows); err != nil {
-			t.Fatalf("list body %s", w.Body)
-		}
 		for _, row := range rows {
 			out = append(out, row.Slug)
 		}
 		return out
 	}
-	if got := slugs("dashboard"); len(got) != 1 || got[0] != "sales" {
-		t.Errorf("kind=dashboard = %v, want [sales]", got)
-	}
-	if got := slugs("project"); len(got) != 1 || got[0] != "showcase" {
-		t.Errorf("kind=project = %v, want [showcase]", got)
+	for query, want := range map[string]string{
+		"kind=dashboard": "sales",
+		"kind=project":   "showcase",
+		"kind=design":    "tokens",
+		// LIBRARY_KINDS order: project, dashboard, …, design.
+		"kind=project,dashboard,design&sort=kind": "showcase,sales,tokens",
+	} {
+		if got := strings.Join(slugs(query), ","); got != want {
+			t.Errorf("%s = %s, want %s", query, got, want)
+		}
 	}
 }
 

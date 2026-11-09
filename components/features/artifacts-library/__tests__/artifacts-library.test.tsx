@@ -192,6 +192,21 @@ it("sorts by kind in the browser, in the UI kinds' order, even with the server c
   expect(listedNames()).toEqual(["Sales", "Showcase", "Newer word"])
 })
 
+// #5152 review: the Design switch hides Design canvases, which cannot open
+// without it. A design system is a project that opens anyway; it stays listed,
+// named Design as everywhere else.
+it("keeps a design-system project listed as a Design while the Design switch is off", () => {
+  state.pages = [
+    wire({ slug: "tokens", id: "page-tokens", name: "Tokens", artifact_kind: "project", artifact_profile: "design_system" } as Partial<WirePage>),
+    wire({ slug: "canvas", id: "page-canvas", name: "Checkout canvas", artifact_kind: "design" }),
+  ]
+  renderLibrary()
+  openAll()
+  fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
+  expect(listedNames()).toEqual(["Tokens"])
+  expect(within(screen.getByRole("list", { name: "Artifacts" })).getByRole("listitem")).toHaveTextContent(/Design/)
+})
+
 it("moves to the last page when the total shrinks under the current offset, so nothing becomes unreachable", () => {
   serverOn()
   windowState.pages = [wire({ slug: "last", id: "page-last", name: "Last one", artifact_kind: "project" })]
