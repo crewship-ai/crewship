@@ -58,6 +58,44 @@ Upstream format: [3.0.10 release sources](https://registry.npmjs.org/@tiptap/y-t
 The npm registry `latest` tag was verified as 3.0.10 on 2026-10-21; the manifests
 and lockfiles pin the release rather than following that moving tag.
 
+## Canvas surface (not admitted yet)
+
+`surface-core.mjs` defines the Docs Canvas data model of R71 rev 2 §0.4. A Page
+block lives in `default`; the canvas only places it. Three extra Y.Map roots of
+the same Y.Doc hold plain JSON values:
+
+- `surface:placements`: key = a top-level Page block ID, value `{x,y,w,h,z}`. The
+  key is the block ID, so a block has at most one placement (v1). Moving replaces
+  geometry only; block content, IDs and hashes do not change.
+- `surface:items`: canvas-only notes, shapes and connectors. They are never Page
+  blocks. A connector has no geometry: it follows its endpoints.
+- `surface:text`: the text of a note or shape, a separate value from its geometry
+  so a concurrent move and text edit both survive.
+
+The validator is closed, read-only and bounded (2000 live entries per root, 4 KiB
+per value, and every value ever written, deleted ones included, within the 1 MiB
+document limit). Under gc:false that is a lifetime budget: the UI writes once per
+completed gesture, never per frame or keystroke, and compaction of surface
+history is open work. A placement whose block was deleted concurrently is reported
+as an orphan, an item whose ID a concurrent block also took as a conflict; neither
+is rendered and neither fails the room. Deleting a block removes its placement in
+the same transaction. Text left by an edit concurrent with a removal is reported
+as a stray and never carries over to a new item with the same ID. Mutators refuse
+to write into an invalid surface and refuse a write that would cross the history
+cap; after one full walk they add each own write's cost to a cached total, so a
+gesture does not re-walk the whole history. Known debt: the surface can use the
+whole 1 MiB document budget on its own; a separate surface share is open. Two
+replicas can each stay within the cap and exceed it once merged; then every
+surface write is refused until compaction or a server-side quota exists, which
+schema 6 admission must settle. Undo/redo writes bypass the pre-check (the next
+full validation still catches them). After a remote change the next gesture
+re-walks the surface once.
+
+No content schema admits these roots yet: `validate()` still refuses them for
+schemas 1-4. Schema 5 is reserved for formatting marks; the surface becomes
+schema 6 through the existing explicit human upgrade. `surface-node-test.mjs`
+covers the model, concurrency, comment anchoring and undo.
+
 ## Private service boundary
 
 `service.mjs` talks to a separate Go authority over a Unix socket. The service
