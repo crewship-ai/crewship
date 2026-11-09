@@ -72,6 +72,9 @@ try {
   const provisioned = await owner.request.post(`${base}/api/v1/workspaces/${encodeURIComponent(workspace)}/members/provision?${q}`, { data: { email: 'canvas-viewer@example.invalid', role: 'VIEWER', full_name: 'Canvas Viewer', create_only: true } })
   assert.ok(provisioned.status() < 300, await provisioned.text())
   const setup = new URL((await provisioned.json()).setup_url).searchParams.get('token')
+  // The Page is shared read-only with the workspace (a page is a per-object ACL).
+  const grant = await owner.request.put(`${base}/api/v1/pages/canvas-plan/grants?${q}`, { data: { subject_type: 'workspace', level: 'read' } })
+  assert.ok(grant.status() < 300, await grant.text())
   const viewerPassword = 'disposable-canvas-viewer-password'
   assert.ok((await owner.request.post(`${base}/api/v1/auth/reset`, { data: { token: setup, new_password: viewerPassword } })).status() < 300)
 
@@ -145,8 +148,10 @@ try {
   viewer.on('pageerror', error => errors.push(error.message))
   const writes = []
   viewer.on('request', r => { if (r.method() === 'POST' && r.url().includes('/document/patch')) writes.push(r.url()) })
+  const viewerRead = await viewerContext.request.get(`${base}/api/v1/pages/canvas-plan/document?${q}`)
+  console.log('viewer document read', viewerRead.status(), viewerRead.ok() ? JSON.stringify({ can_write: (await viewerRead.json()).can_write }) : (await viewerRead.text()).slice(0, 200))
   await viewer.goto(`${base}/artifacts/${encodeURIComponent(pageId)}`)
-  await viewer.getByLabel('Document editor', { exact: true }).waitFor()
+  try { await viewer.getByLabel('Document editor', { exact: true }).waitFor() } catch (error) { await viewer.screenshot({ path: join(output, 'viewer-failure.png') }); throw error }
   await viewer.getByRole('button', { name: 'Status: Read-only' }).waitFor({ timeout: 15000 })
   await viewer.getByRole('tab', { name: 'Canvas', exact: true }).click()
   await viewer.getByRole('application', { name: 'Canvas' }).waitFor()
