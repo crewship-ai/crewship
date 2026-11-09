@@ -4,6 +4,7 @@ import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
 import { documentSchema } from "@/lib/documents/schema"
 import { CodeHighlight, codeBlockView } from "./document-code-blocks"
+import { formatDocumentDate, NO_DOCUMENT_PEOPLE, type DocumentPeople } from "@/lib/documents/people"
 
 /**
  * The browser side of the closed document schemas. Every node and mark comes
@@ -36,13 +37,116 @@ export const isRichSchema = (schema: number | undefined) => schema === 3 || sche
 export const isStyledSchema = (schema: number | undefined) => schema === 5 || schema === 6
 
 /** The schema's own marks and nodes beyond the StarterKit base, with editing behaviour. */
-export function documentEditorExtensions(schema: number | undefined): AnyExtension[] {
+export function documentEditorExtensions(schema: number | undefined, people: DocumentPeople = NO_DOCUMENT_PEOPLE): AnyExtension[] {
   if (!isRichSchema(schema)) return []
   const names = RICH_NAMES[schema as number]
   const own = (documentSchema.extensionsFor(schema) as AnyExtension[]).filter(extension => names.includes(extension.name))
     .map(extension => extension.name === "taskItem" ? interactiveTaskItem(extension)
-      : extension.name === "codeBlock" ? codeBlockView(extension, { languages: isFormattedSchema(schema) }) : extension)
-  return isStyledSchema(schema) ? [...own, FormatShortcuts, CodeHighlight, StyleShortcuts] : isFormattedSchema(schema) ? [...own, FormatShortcuts, CodeHighlight] : own
+      : extension.name === "codeBlock" ? codeBlockView(extension, { languages: isFormattedSchema(schema) })
+      : extension.name === "date" ? dateChip(extension) : extension.name === "mention" ? mentionChip(extension, people) : extension)
+  return isStyledSchema(schema) ? [...own, FormatShortcuts, CodeHighlight, StyleShortcuts, DocumentMentions.configure({ people })] : isFormattedSchema(schema) ? [...own, FormatShortcuts, CodeHighlight] : own
+}
+
+type Extendable = AnyExtension & { extend: (config: object) => AnyExtension }
+type ChipView = { node: ProseMirrorNode }
+
+/** A date shows as one calendar day in the reader's locale; the stored value stays YYYY-MM-DD. */
+function dateChip(base: AnyExtension): AnyExtension {
+  return (base as Extendable).extend({
+    addNodeView() {
+      return ({ node }: ChipView) => {
+        const dom = document.createElement("time")
+        dom.className = "document-chip"
+        dom.contentEditable = "false"
+        const render = (next: ProseMirrorNode) => {
+          const value = String(next.attrs.value ?? "")
+          dom.dataset.date = value; dom.dateTime = value; dom.textContent = formatDocumentDate(value)
+        }
+        render(node)
+        return { dom, update: (next: ProseMirrorNode) => { if (next.type !== node.type) return false; render(next); return true } }
+      }
+    },
+  })
+}
+
+/**
+ * A mention shows the name this reader may see, or "Unknown member". The id
+ * stays in the content; the name only ever lives in this view.
+ */
+function mentionChip(base: AnyExtension, people: DocumentPeople): AnyExtension {
+  return (base as Extendable).extend({
+    addNodeView() {
+      return ({ node }: ChipView) => {
+        const dom = document.createElement("span")
+        dom.className = "document-chip"
+        dom.contentEditable = "false"
+        let current = node
+        const render = () => {
+          const id = String(current.attrs.userId ?? "")
+          dom.dataset.mention = id; dom.textContent = "@" + people.label(id)
+        }
+        render()
+        const unsubscribe = people.subscribe(render)
+        return {
+          dom,
+          update: (next: ProseMirrorNode) => { if (next.type !== current.type) return false; current = next; render(); return true },
+          destroy: unsubscribe,
+        }
+      }
+    },
+  })
+}
+
+const mentionKey = new PluginKey("documentMentionTrigger")
+
+/**
+ * Typing "@" at the start of a word opens the mention picker (the bottom
+ * bar's Mention menu). The "@" stays as typed until a person is picked; it is
+ * replaced by the mention, and closing the picker leaves it as plain text.
+ */
+export const DocumentMentions = Extension.create<{ people: DocumentPeople }, { people: DocumentPeople; trigger: number | null; open: (() => void) | null }>({
+  name: "documentMentions",
+  addOptions: () => ({ people: NO_DOCUMENT_PEOPLE }),
+  addStorage() { return { people: this.options.people, trigger: null, open: null } },
+  addProseMirrorPlugins() {
+    const storage = this.storage
+    return [new Plugin({
+      key: mentionKey,
+      props: {
+        handleTextInput(view, from, _to, text) {
+          if (text !== "@" || !view.editable) return false
+          const before = view.state.doc.textBetween(Math.max(view.state.selection.$from.start(), from - 1), from, "\0", "\0")
+          if (before && !/\s/.test(before)) return false
+          storage.trigger = from
+          setTimeout(() => storage.open?.(), 0)
+          return false
+        },
+      },
+    })]
+  },
+})
+
+/** Inserts a mention, replacing the "@" that opened the picker when it is still there. */
+export function insertMention(editor: Editor, userId: string): boolean {
+  const storage = (editor.storage as unknown as Record<string, { trigger: number | null } | undefined>).documentMentions
+  const at = storage?.trigger ?? null
+  if (storage) storage.trigger = null
+  const mention = { type: "mention", attrs: { userId } }
+  const chain = editor.chain().focus()
+  if (at !== null && at + 1 <= editor.state.doc.content.size && editor.state.doc.textBetween(at, at + 1) === "@" && editor.state.selection.from === at + 1)
+    return chain.insertContentAt({ from: at, to: at + 1 }, [mention, { type: "text", text: " " }]).run()
+  return chain.insertContent([mention, { type: "text", text: " " }]).run()
+}
+
+/** The mention lookup an editor was created with, for the toolbar's picker. */
+export function documentPeopleOf(editor: Editor): DocumentPeople | null {
+  return (editor.storage as unknown as Record<string, { people?: DocumentPeople } | undefined>).documentMentions?.people ?? null
+}
+
+/** Lets the toolbar open its mention picker when "@" is typed. */
+export function onMentionTrigger(editor: Editor, open: (() => void) | null) {
+  const storage = (editor.storage as unknown as Record<string, { open: (() => void) | null } | undefined>).documentMentions
+  if (storage) storage.open = open
 }
 
 const FormatShortcuts = Extension.create({
@@ -235,3 +339,63 @@ export function commentTarget(editor: Editor): CommentTarget | string {
   return { block: block.attrs.id, from: textFrom, to: textTo, quote: block.textBetween(start, end) }
 }
 
+/** A toolbar toggle's state over the selection: on everywhere, on for part of it, or off. */
+export type ToggleState = boolean | "mixed"
+
+/** Text in the selection that may carry `name` (code blocks take no marks). */
+function markableText(editor: Editor, name: string, visit: (node: ProseMirrorNode) => void) {
+  const { state } = editor, type = state.schema.marks[name]
+  if (!type) return false
+  const { from, to } = state.selection
+  state.doc.nodesBetween(from, to, (node, _pos, parent) => { if (node.isText && parent?.type.allowsMarkType(type)) visit(node) })
+  return true
+}
+
+/** Whether all, part or none of the selected text has the mark. An empty selection reports the marks typing would use. */
+export function markState(editor: Editor, name: string): ToggleState {
+  const { state } = editor, type = state.schema.marks[name]
+  if (!type) return false
+  if (state.selection.empty) return Boolean(type.isInSet(state.storedMarks ?? state.selection.$from.marks()))
+  let some = false, all = true, any = false
+  markableText(editor, name, node => { any = true; const has = Boolean(type.isInSet(node.marks)); some ||= has; all &&= has })
+  return !any ? false : all ? true : some ? "mixed" : false
+}
+
+/** The selection's palette colour for `textColor` or `highlight`: one name, null for the default, or "mixed". */
+export function colorState(editor: Editor, name: "textColor" | "highlight"): string | null | "mixed" {
+  const { state } = editor, type = state.schema.marks[name]
+  if (!type) return null
+  if (state.selection.empty) return (type.isInSet(state.storedMarks ?? state.selection.$from.marks())?.attrs.color as string | undefined) ?? null
+  const seen = new Set<string | null>()
+  markableText(editor, name, node => { seen.add((type.isInSet(node.marks)?.attrs.color as string | undefined) ?? null) })
+  return seen.size > 1 ? "mixed" : seen.values().next().value ?? null
+}
+
+const keptKey = new PluginKey<boolean>("documentKeptSelection")
+
+/**
+ * Keeps a non-empty selection visible while the editor is not focused, for
+ * example while a toolbar menu is open, so the person still sees what the
+ * command will change. It only decorates; the selection itself never moves.
+ */
+export const KeptSelection = Extension.create({
+  name: "documentKeptSelection",
+  addProseMirrorPlugins() {
+    const focus = (focused: boolean) => (view: import("@tiptap/pm/view").EditorView) => {
+      if (keptKey.getState(view.state) !== focused) view.dispatch(view.state.tr.setMeta(keptKey, focused).setMeta("addToHistory", false))
+      return false
+    }
+    return [new Plugin<boolean>({
+      key: keptKey,
+      state: { init: () => false, apply: (tr, focused) => (tr.getMeta(keptKey) as boolean | undefined) ?? focused },
+      props: {
+        handleDOMEvents: { focus: focus(true), blur: focus(false) },
+        decorations: state => {
+          const { from, to, empty } = state.selection
+          if (keptKey.getState(state) || empty) return null
+          return DecorationSet.create(state.doc, [Decoration.inline(from, to, { class: "document-selection-kept" })])
+        },
+      },
+    })]
+  },
+})
