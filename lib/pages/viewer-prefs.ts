@@ -2,7 +2,8 @@
  * A viewer's own view preferences for one artifact, such as a dashboard
  * filter. They live only in this browser's storage, keyed by viewer,
  * workspace and artifact: never sent to the server, never shared with other
- * people, and lost with the browser's site data. Every access is guarded, so
+ * people, and lost with the browser's site data. They stay in this browser
+ * after sign-out (like composer drafts); the key keeps other accounts out. Every access is guarded, so
  * a private window or blocked storage simply means nothing is remembered.
  */
 export const VIEWER_PREFS_MAX_BYTES = 4096
@@ -11,7 +12,7 @@ const MAX_KEY = 64
 const MAX_TEXT = 256
 
 export function viewerPrefsKey(userId: string, workspaceId: string, pageId: string): string {
-  return `crewship:artifact-viewer-prefs:v1:${userId}:${workspaceId}:${pageId}`
+  return `crewship:artifact-viewer-prefs:v1:${[userId, workspaceId, pageId].map(encodeURIComponent).join(":")}`
 }
 
 const plain = (value: unknown): value is Record<string, unknown> =>
@@ -52,7 +53,8 @@ export function createViewerPrefs(storage: () => Pick<Storage, "getItem" | "setI
       const valid = validViewerPrefs(value)
       const target = store()
       if (!valid || !target) return false
-      try { target.setItem(key, JSON.stringify(valid)); return true } catch { return false }
+      // An empty object is a reset: forget the entry rather than store "{}".
+      try { if (Object.keys(valid).length) target.setItem(key, JSON.stringify(valid)); else target.removeItem(key); return true } catch { return false }
     },
     clear() {
       const target = store()

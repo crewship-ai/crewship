@@ -99,6 +99,14 @@ describe("rwrx dashboard mirror runtime (B01)", () => {
     expect(ada.current()).toEqual({})
   })
 
+  it("opens with the default when an older host refuses prefs", async () => {
+    const refusing = { get: async () => { throw Object.assign(new Error("Unsupported request."), { code: "invalid" }) }, set: vi.fn(async () => { throw new Error("Unsupported request.") }) }
+    const page = await open(async () => ({ documents: rows }), refusing)
+    expect(page.kpis()[0]).toBe(String(sum(null, "done")))
+    await page.pick("Frontend")
+    expect(page.kpis()[0]).toBe(String(sum("Frontend", "done")))
+  })
+
   it("ignores stored keys the page does not use and works without a host store", async () => {
     const odd = await open(async () => ({ documents: rows }), prefsStore({ crew: 7, other: "x" }).prefs)
     expect(odd.kpis()[0]).toBe(String(sum(null, "done")))

@@ -12,6 +12,8 @@ const throwing = { getItem() { throw new Error("blocked") }, setItem() { throw n
 describe("viewer prefs (browser storage only)", () => {
   it("keys by viewer, workspace and artifact, so nothing is shared between people or dashboards", () => {
     expect(viewerPrefsKey("u1", "w1", "p1")).toBe("crewship:artifact-viewer-prefs:v1:u1:w1:p1")
+    // A separator inside an id cannot make two keys collide.
+    expect(viewerPrefsKey("u:1", "w", "p")).not.toBe(viewerPrefsKey("u", "1:w", "p"))
     const storage = new MemoryStorage()
     const ada = createViewerPrefs(() => storage, viewerPrefsKey("ada", "w1", "p1"))
     const bob = createViewerPrefs(() => storage, viewerPrefsKey("bob", "w1", "p1"))
@@ -20,6 +22,9 @@ describe("viewer prefs (browser storage only)", () => {
     expect(ada.get()).toEqual({ crew: "Frontend" })
     expect(bob.get()).toBeNull()
     expect(other.get()).toBeNull()
+    expect(ada.set({})).toBe(true)
+    expect(storage.data.has(viewerPrefsKey("ada", "w1", "p1"))).toBe(false)
+    expect(ada.set({ crew: "Frontend" })).toBe(true)
     expect(ada.clear()).toBe(true)
     expect(ada.get()).toBeNull()
   })
@@ -45,7 +50,7 @@ describe("viewer prefs (browser storage only)", () => {
   it.each<[string, unknown]>([
     ["an array", ["x"]],
     ["a nested object", { a: { b: 1 } }],
-    ["a function-like prototype key", JSON.parse('{"__proto__":"x"}')],
+    ["a __proto__ key", JSON.parse('{"__proto__":"x"}')],
     ["a non-finite number", { a: Infinity }],
     ["a long string", { a: "x".repeat(257) }],
     ["a long key", { ["k".repeat(65)]: 1 }],

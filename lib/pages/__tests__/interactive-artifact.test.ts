@@ -83,6 +83,14 @@ describe("InteractiveArtifactBroker", () => {
     expect(access.calls).toEqual([])
   })
 
+  it("reports a preference the browser did not keep", async () => {
+    const access = fakeAccess()
+    access.prefs = { get: () => null, set: () => false }
+    const { send, reply } = connect(false, access)
+    send(1, "prefs.set", { value: { crew: "x" } })
+    expect((await reply(1)).result).toEqual({ saved: false })
+  })
+
   it("says preferences are unavailable when the host keeps none", async () => {
     const { prefs: _, ...access } = fakeAccess()
     const { send, reply } = connect(true, access as InteractiveDataAccess & { calls: string[] })
