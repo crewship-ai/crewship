@@ -41,6 +41,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { parseSessionTimestamp } from "@/components/features/chat/session-sort"
 import { randomUUIDv4 } from "@/lib/random-id"
 import { useMessageAnchor } from "@/hooks/use-message-anchor"
+import { parseProposalRequest, type ProposalRequestTarget } from "@/lib/documents/proposal-request"
 
 /**
  * The roster row this page needs, which is wider than the one the column does.
@@ -326,14 +327,18 @@ function ChatClientBody() {
    */
   const [handoff, setHandoff] = useState<{ prompt: string; draft: boolean } | null>(null)
   const [pageHandoff, setPageHandoff] = useState<string | null>(null)
+  // A Docs "Ask for a proposal" handoff: one schema-4 target, never with Page context.
+  const [proposalHandoff, setProposalHandoff] = useState<ProposalRequestTarget | null>(null)
   const handoffConsumedRef = useRef(false)
   useEffect(() => {
     if (handoffConsumedRef.current) return
     const page = searchParams.get("page")
     const p = searchParams.get("prompt")
-    if (!p && !page) return
+    const propose = parseProposalRequest(searchParams.get("propose"))
+    if (!p && !page && !propose) return
     handoffConsumedRef.current = true
-    if (page && page.length <= 128) setPageHandoff(page)
+    if (propose) setProposalHandoff(propose)
+    else if (page && page.length <= 128) setPageHandoff(page)
     if (p) setHandoff({ prompt: p, draft: searchParams.get("draft") === "1" })
   }, [searchParams])
 
@@ -363,6 +368,11 @@ function ChatClientBody() {
     pageHandoffSessionRef.current = sessionId
   }
   const pageHandoffForThisSession = pageHandoff !== null && pageHandoffSessionRef.current === sessionId
+  const proposalHandoffSessionRef = useRef<string | null>(null)
+  if (proposalHandoff !== null && proposalHandoffSessionRef.current === null && sessionId) {
+    proposalHandoffSessionRef.current = sessionId
+  }
+  const proposalHandoffForThisSession = proposalHandoff !== null && proposalHandoffSessionRef.current === sessionId
 
   const agent = useMemo(
     () => tree.roster?.find((a) => a.slug === agentSlug) ?? null,
@@ -839,6 +849,7 @@ function ChatClientBody() {
           initialInput={handoffForThisSession ? handoff?.prompt : undefined}
           autoSendInitial={handoffForThisSession && !handoff?.draft}
           pageContextSlug={pageHandoffForThisSession ? pageHandoff : undefined}
+          proposalRequest={proposalHandoffForThisSession ? proposalHandoff : undefined}
           mobilePanel={isMobile ? mobilePanel : undefined}
           onMobilePanelChange={setMobilePanel}
           onNewConversation={() => startConversation(agent)}

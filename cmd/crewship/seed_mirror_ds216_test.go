@@ -163,16 +163,19 @@ type originalTokens struct {
 	Name  string `json:"name"`
 	Color struct {
 		Themes []struct {
-			ID string `json:"id"`
+			ID   string `json:"id"`
+			Name string `json:"name"`
 		} `json:"themes"`
 		Tokens []struct {
 			Name  string            `json:"name"`
 			Value map[string]string `json:"value"`
+			Usage string            `json:"usage"`
 		} `json:"tokens"`
 	} `json:"color"`
 	Type struct {
 		Families map[string]string `json:"families"`
 		Groups   []struct {
+			Name   string `json:"name"`
 			Family string `json:"family"`
 			Styles []struct {
 				Name       string `json:"name"`
@@ -191,14 +194,22 @@ type originalTokens struct {
 }
 
 type nativeDesignSystem struct {
-	SchemaVersion int               `json:"schema_version"`
-	Name          string            `json:"name"`
-	Colors        map[string]string `json:"colors"`
-	Typography    map[string]struct {
+	SchemaVersion int    `json:"schema_version"`
+	Name          string `json:"name"`
+	Themes        []struct {
+		ID   string `json:"id"`
+		Name string `json:"name"`
+	} `json:"themes"`
+	Colors map[string]struct {
+		Value map[string]string `json:"value"`
+		Usage string            `json:"usage"`
+	} `json:"colors"`
+	Typography map[string]struct {
 		Size       int     `json:"size"`
 		FontFamily string  `json:"font_family"`
 		Weight     int     `json:"weight"`
 		LineHeight float64 `json:"line_height"`
+		Group      string  `json:"group"`
 	} `json:"typography"`
 	Spacing    map[string]int `json:"spacing"`
 	Radii      map[string]int `json:"radii"`
@@ -235,7 +246,7 @@ func TestMirrorDS216_EveryTokenIsInTheLibrary(t *testing.T) {
 	if err := decoder.Decode(&native); err != nil {
 		t.Fatalf("design-system.json: %v", err)
 	}
-	if native.SchemaVersion != 1 || native.Name != original.Name || len(source) > 32<<10 {
+	if native.SchemaVersion != 2 || native.Name != original.Name || len(source) > 32<<10 {
 		t.Errorf("schema %d, name %q, %d bytes", native.SchemaVersion, native.Name, len(source))
 	}
 	name := regexp.MustCompile(`^[a-z][a-z0-9-]{0,47}$`)
@@ -246,20 +257,29 @@ func TestMirrorDS216_EveryTokenIsInTheLibrary(t *testing.T) {
 			t.Errorf("%s holds %d tokens", group, n)
 		}
 	}
-	themes := map[string]string{"light": "", "dark": "-dark"}
-	if len(original.Color.Themes) != len(themes) {
-		t.Fatalf("original themes %v; the mirror maps light and dark only", original.Color.Themes)
+	// Schema 2: each original token once, under its own name, with every theme's value and its usage note.
+	if len(native.Themes) != len(original.Color.Themes) {
+		t.Fatalf("themes %+v, original %+v", native.Themes, original.Color.Themes)
+	}
+	for i, theme := range original.Color.Themes {
+		if native.Themes[i].ID != theme.ID || native.Themes[i].Name != theme.Name {
+			t.Errorf("theme %d = %+v, want %+v", i, native.Themes[i], theme)
+		}
 	}
 	for _, token := range original.Color.Tokens {
-		for theme, suffix := range themes {
-			got := native.Colors[token.Name+suffix]
-			if !name.MatchString(token.Name+suffix) || !hex.MatchString(got) || got != token.Value[theme] {
-				t.Errorf("color %s (%s) = %q, want %q", token.Name, theme, got, token.Value[theme])
+		got, ok := native.Colors[token.Name]
+		if !ok || !name.MatchString(token.Name) || got.Usage != token.Usage || len(got.Value) != len(original.Color.Themes) {
+			t.Errorf("color %s = %+v", token.Name, got)
+			continue
+		}
+		for _, theme := range original.Color.Themes {
+			if value := got.Value[theme.ID]; !hex.MatchString(value) || value != token.Value[theme.ID] {
+				t.Errorf("color %s (%s) = %q, want %q", token.Name, theme.ID, value, token.Value[theme.ID])
 			}
 		}
 	}
-	if len(native.Colors) != 2*len(original.Color.Tokens) {
-		t.Errorf("%d native colors for %d original tokens in 2 themes", len(native.Colors), len(original.Color.Tokens))
+	if len(native.Colors) != len(original.Color.Tokens) {
+		t.Errorf("%d native colors for %d original tokens", len(native.Colors), len(original.Color.Tokens))
 	}
 	styles := 0
 	for _, group := range original.Type.Groups {
@@ -267,7 +287,7 @@ func TestMirrorDS216_EveryTokenIsInTheLibrary(t *testing.T) {
 			styles++
 			got, ok := native.Typography[style.Name]
 			size, line := px(t, style.FontSize), px(t, style.LineHeight)
-			if !ok || got.Size != size || got.Weight != style.FontWeight || got.FontFamily != original.Type.Families[group.Family] || !family.MatchString(got.FontFamily) {
+			if !ok || got.Size != size || got.Weight != style.FontWeight || got.FontFamily != original.Type.Families[group.Family] || !family.MatchString(got.FontFamily) || got.Group != group.Name {
 				t.Errorf("type %s = %+v", style.Name, got)
 			}
 			// The Library holds a line height as a ratio; it must round back to the original pixels.

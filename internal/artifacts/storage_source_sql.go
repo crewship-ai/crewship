@@ -12,7 +12,7 @@ const storageSeedSQL = `SELECT workspace_id,SUM(bytes) AS bytes FROM (SELECT r.w
 // storageLaterSourcesSQL charges the tables created after that seed, each
 // with exactly the expression of its own storage triggers (checked by
 // TestStorageLaterSourcesMatchTheirTriggers).
-const storageLaterSourcesSQL = ` UNION ALL SELECT r.workspace_id AS workspace_id,coalesce(length(CAST(r.id AS BLOB)),0)+coalesce(length(CAST(r.parent_id AS BLOB)),0)+coalesce(length(CAST(r.body AS BLOB)),0)+coalesce(length(CAST(r.anchor_json AS BLOB)),0)+coalesce(length(CAST(r.actor AS BLOB)),0)+coalesce(length(CAST(r.created_at AS BLOB)),0)+256 AS bytes FROM document_comments r`
+const storageLaterSourcesSQL = ` UNION ALL SELECT r.workspace_id AS workspace_id,coalesce(length(CAST(r.id AS BLOB)),0)+coalesce(length(CAST(r.parent_id AS BLOB)),0)+coalesce(length(CAST(r.body AS BLOB)),0)+coalesce(length(CAST(r.anchor_json AS BLOB)),0)+coalesce(length(CAST(r.actor AS BLOB)),0)+coalesce(length(CAST(r.created_at AS BLOB)),0)+256 AS bytes FROM document_comments r UNION ALL SELECT r.workspace_id AS workspace_id,coalesce(length(CAST(r.id AS BLOB)),0)+coalesce(length(CAST(r.run_id AS BLOB)),0)+coalesce(length(CAST(r.actor AS BLOB)),0)+coalesce(length(CAST(r.text AS BLOB)),0)+coalesce(length(CAST(r.base_json AS BLOB)),0)+coalesce(length(CAST(r.proposed_json AS BLOB)),0)+coalesce(length(CAST(r.decided_by AS BLOB)),0)+coalesce(length(CAST(r.decision_id AS BLOB)),0)+512 AS bytes FROM document_proposals r`
 
 // storageSourceBytesSQL is the charge of every durable artifact row grouped by
 // workspace. The per-row triggers and this query must agree.

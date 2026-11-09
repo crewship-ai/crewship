@@ -358,6 +358,7 @@ var BackupTables = []string{
 	"document_receipts",
 	"document_checkpoints",
 	"document_comments",         // FK documents; replies follow their root thread
+	"document_proposals",        // FK documents; reviewable agent proposals
 	"page_panels",               // FK page_id → pages; FK owner_crew_id → crews
 	"page_panel_data",           // FK panel_id → page_panels; FK producer_run_id → pipeline_runs
 	"page_versions",             // FK page_id → pages
