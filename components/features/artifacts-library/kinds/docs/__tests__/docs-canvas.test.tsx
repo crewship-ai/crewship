@@ -65,6 +65,31 @@ describe("DocsCanvas", () => {
     expect(card("intro").getAttribute("aria-label")).toBe("Agree launch date with sales now")
   })
 
+  it("shows schema-5 date and mention atoms on the card as read-only chips, in place, like the Page", () => {
+    const doc = fixture()
+    const intro = doc.getXmlFragment("default").get(1) as Y.XmlElement
+    act(() => {
+      const text = intro.get(0) as Y.XmlText
+      text.delete(0, text.length); text.insert(0, "Due ")
+      const date = new Y.XmlElement("date"); date.setAttribute("value", "2026-12-01")
+      const mid = new Y.XmlText(); mid.insert(0, " for ", { bold: {} })
+      const known = new Y.XmlElement("mention"); known.setAttribute("userId", "user-ada")
+      const sep = new Y.XmlText(); sep.insert(0, " and ")
+      const unknown = new Y.XmlElement("mention"); unknown.setAttribute("userId", "user-gone")
+      const tail = new Y.XmlText(); tail.insert(0, ".")
+      intro.insert(1, [date, mid, known, sep, unknown, tail])
+    })
+    documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })
+    render(<DocsCanvas doc={doc} editable origin="me" memberName={id => id === "user-ada" ? "Ada Lovelace" : undefined} />)
+    const shown = card("intro")
+    expect(shown.querySelector("p")?.textContent).toBe("Due 2026-12-01 for @Ada Lovelace and @Unknown member.")
+    const date = shown.querySelector("time[data-date]")
+    expect(date?.getAttribute("datetime")).toBe("2026-12-01")
+    expect(date?.textContent).toBe("2026-12-01")
+    expect([...shown.querySelectorAll("[data-mention]")].map(n => [n.getAttribute("data-mention"), n.textContent])).toEqual([["user-ada", "@Ada Lovelace"], ["user-gone", "@Unknown member"]])
+    expect(shown.querySelector("strong")?.textContent).toBe(" for ")
+  })
+
   it("moves a placement with one write per gesture: geometry only, as the person's origin", () => {
     const doc = fixture()
     documentSurface.place(doc, "intro", { x: 0, y: 0, w: 320, h: 120, z: 1 })
