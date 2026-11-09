@@ -29,11 +29,11 @@ const sync = (a, b) => { Y.applyUpdate(b, Y.encodeStateAsUpdate(a, Y.encodeState
 
 test('surface roots stay refused by every admitted content schema until schema 6', () => {
   assert.equal(CANVAS_SCHEMA, 6);
-  assert.ok(CANVAS_SCHEMA > LATEST_VERSION + 1, 'schema 5 is reserved for formatting marks');
+  assert.equal(CANVAS_SCHEMA, LATEST_VERSION + 1, 'schema 5 holds the formatting marks; Canvas is the next schema');
   for (const root of [PLACEMENTS, ITEMS, TEXT]) {
     const doc = fixture();
     doc.getMap(root).set('intro', root === TEXT ? 'text' : at(0, 0));
-    for (const version of [1, 2, 3, 4]) assert.throws(() => validate(load(snapshot(doc)), version), /unsupported Yjs root/);
+    for (const version of [1, 2, 3, 4, 5]) assert.throws(() => validate(load(snapshot(doc)), version), /unsupported Yjs root/);
     doc.destroy();
   }
 });
