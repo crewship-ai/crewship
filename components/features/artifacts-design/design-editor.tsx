@@ -7,7 +7,7 @@ import * as Y from "yjs"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { artifactDraftKey, loadArtifactDraft, writeArtifactDraft, clearArtifactDraft, artifactDraftRevision } from "@/lib/artifact-drafts"
-import { artifactsDesign, artifactsDesignHideLock, artifactsDesignPrototype, artifactsDesignTextStyle } from "@/lib/feature-flags"
+import { artifactsDesign, artifactsDesignHideLock, artifactsDesignPrototype, artifactsDesignShapeStyle, artifactsDesignTextStyle } from "@/lib/feature-flags"
 import { Button } from "@/components/ui/button"
 import { CreateSurface, CreateSurfaceBody, CreateSurfaceField, CreateSurfaceFooter, CreateSurfaceHeader } from "@/components/layout/create-surface"
 import { apiFetch } from "@/lib/api-fetch"
@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils"
 import type { DesignConnection, DesignPeer } from "./design-provider"
 import { useDesign } from "./use-design"
 import { readablePeerFill } from "./peer-colors"
-import { designHiddenIds, designLockedIds, DESIGN_FONT_SIZE, DESIGN_FONT_WEIGHTS, DESIGN_LINE_HEIGHT, designTextStyle, designLinkTarget, designScreenOf, removeDesignNode, reorderDesignNode, restoreDesignConflict, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignConflict, type DesignNode, type DesignNodeType, type DesignOrderMove } from "./design-document"
+import { designHiddenIds, designLockedIds, designShapeStyle, DESIGN_RADIUS, DESIGN_STROKE_WIDTH, DESIGN_FONT_SIZE, DESIGN_FONT_WEIGHTS, DESIGN_LINE_HEIGHT, designTextStyle, designLinkTarget, designScreenOf, removeDesignNode, reorderDesignNode, restoreDesignConflict, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignConflict, type DesignNode, type DesignNodeType, type DesignOrderMove } from "./design-document"
 import { DesignNodeShape } from "./design-node-shape"
 import { DesignPrototypePlayer } from "./design-prototype-player"
 import { DesignExportButton } from "./design-export-button"
@@ -697,6 +697,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
    <Field label={selected.type === "text" ? "Text color" : "Fill"}><div className="flex gap-2"><input aria-label="Fill color" type="color" className="h-9 w-10 rounded border bg-background p-1 coarse:h-[44px]" value={/^#[0-9a-f]{6}$/i.test(selected.fill) ? selected.fill : "#ffffff"} disabled={!canChange} onChange={event => patch({ fill: event.target.value })} /><Input aria-label="Fill value" value={selected.fill ?? ""} disabled={!canChange} onChange={event => patch({ fill: event.target.value })} /></div></Field>
    {selected.type === "text" && <Field label="Text"><textarea aria-label="Text content" maxLength={100000} className="min-h-24 w-full rounded border bg-background p-2 text-sm" value={selected.text ?? ""} disabled={!canChange} onChange={event => patch({ text: event.target.value })} /></Field>}
    {selected.type === "text" && artifactsDesignTextStyle() && <DesignTextStyleFields node={selected} disabled={!canChange} onChange={patch} />}
+   {(selected.type === "rect" || selected.type === "image") && artifactsDesignShapeStyle() && <DesignShapeStyleFields node={selected} disabled={!canChange} onChange={patch} />}
    {selected.type === "image" && <Field label="Image URL"><Input aria-label="Image URL" placeholder="https://…" value={selected.src ?? ""} disabled={!canChange} onChange={event => { setImageURL(event.target.value); patch({ src: event.target.value }) }} /><p className="mt-1 text-xs text-muted-foreground">HTTPS image or embedded PNG, JPEG, WebP, GIF.</p></Field>}
    {selected.type !== "frame" && <Field label="Screen"><select aria-label="Parent screen" className="h-9 w-full rounded border bg-background px-2 text-sm coarse:h-[44px]" value={selected.parentId ?? ""} disabled={!canChange} onChange={event => patch({ parentId: event.target.value })}><option value="">On canvas</option>{frames.map(frame => <option key={frame.id} value={frame.id}>{frame.name || "Screen"}</option>)}</select></Field>}
    {prototype && selected.type !== "frame" && (() => {
@@ -892,6 +893,20 @@ function DesignTextStyleFields({ node, disabled, onChange }: { node: DesignNode;
   <Field label="Align"><select aria-label="Text alignment" className={selectClass} value={style.align} disabled={disabled} onChange={event => onChange({ textAlign: event.target.value as DesignNode["textAlign"] })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></Field>
   <label className="flex items-center gap-2 text-xs text-muted-foreground coarse:min-h-[44px]"><input type="checkbox" aria-label="Wrap text to the box width" checked={style.wrap} disabled={disabled} onChange={event => onChange({ textWrap: event.target.checked ? "wrap" : "none" })} />Wrap to the box width</label>
   <label className="flex items-center gap-2 text-xs text-muted-foreground coarse:min-h-[44px]"><input type="checkbox" aria-label="Clip text to the box" checked={style.clip} disabled={disabled} onChange={event => onChange({ overflow: event.target.checked ? "clip" : "visible" })} />Clip to the box</label>
+ </fieldset>
+}
+
+/** Corner radius and stroke of a rectangle or image (#5219). */
+function DesignShapeStyleFields({ node, disabled, onChange }: { node: DesignNode; disabled: boolean; onChange: (values: Partial<DesignNode>) => void }) {
+ const shape = designShapeStyle(node)
+ const number = (value: string, range: { min: number; max: number }) => { const parsed = Number(value); return value.trim() !== "" && Number.isFinite(parsed) && parsed >= range.min && parsed <= range.max ? parsed : undefined }
+ const color = shape.stroke ?? (typeof node.stroke === "string" && /^#[0-9a-f]{6}$/i.test(node.stroke) ? node.stroke : "#0f172a")
+ return <fieldset className="space-y-3" aria-label="Shape style">
+  <div className="grid grid-cols-2 gap-2">
+   <Field label="Corner radius"><Input type="number" aria-label="Corner radius" min={DESIGN_RADIUS.min} max={DESIGN_RADIUS.max} value={shape.radius} disabled={disabled} onChange={event => { const value = number(event.target.value, DESIGN_RADIUS); if (value !== undefined) onChange({ radius: value }) }} /></Field>
+   <Field label="Stroke width"><Input type="number" aria-label="Stroke width" min={DESIGN_STROKE_WIDTH.min} max={DESIGN_STROKE_WIDTH.max} value={shape.strokeWidth} disabled={disabled} onChange={event => { const value = number(event.target.value, DESIGN_STROKE_WIDTH); if (value !== undefined) onChange(value > 0 && !shape.stroke ? { strokeWidth: value, stroke: color } : { strokeWidth: value }) }} /></Field>
+  </div>
+  <Field label="Stroke color"><input aria-label="Stroke color" type="color" className="h-9 w-10 rounded border bg-background p-1 coarse:h-[44px]" value={/^#[0-9a-f]{6}$/i.test(color) ? color : "#0f172a"} disabled={disabled} onChange={event => onChange({ stroke: event.target.value })} /></Field>
  </fieldset>
 }
 

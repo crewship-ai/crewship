@@ -313,3 +313,35 @@ func TestRenderHTMLLeavesOutHiddenLayers(t *testing.T) {
 		t.Fatalf("a hidden layer must not be exported:\n%s", page)
 	}
 }
+
+// Shape style (#5219) reaches the exported page as border radius and an inset
+// stroke; a rectangle without it keeps the 6 px corners of the class.
+func TestRenderHTMLShapeStyle(t *testing.T) {
+	screen := map[string]any{"id": "s", "type": "frame", "x": 0, "y": 0, "width": 360, "height": 640}
+	plain := map[string]any{"id": "plain", "type": "rect", "parentId": "s", "x": 10, "y": 10, "width": 100, "height": 40, "fill": "#2563eb"}
+	card := map[string]any{"id": "card", "type": "rect", "parentId": "s", "x": 10, "y": 60, "width": 200, "height": 100, "fill": "#ffffff", "radius": 16, "stroke": "#0f172a", "strokeWidth": 2}
+	photo := map[string]any{"id": "photo", "type": "image", "parentId": "s", "x": 10, "y": 200, "width": 200, "height": 100, "src": "https://example.test/a.png", "radius": 50}
+	out, err := RenderHTML(exportFixture(screen, plain, card, photo), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := func(id string) string {
+		for _, l := range strings.Split(string(out), "\n") {
+			if strings.Contains(l, `data-node-id="`+id+`"`) {
+				return l
+			}
+		}
+		return ""
+	}
+	if strings.Contains(line("plain"), "border-radius") || strings.Contains(line("plain"), "box-shadow") {
+		t.Fatalf("an unstyled rectangle gained style: %s", line("plain"))
+	}
+	for _, want := range []string{"border-radius:16px", "box-shadow:inset 0 0 0 2px #0f172a"} {
+		if !strings.Contains(line("card"), want) {
+			t.Errorf("card lacks %q: %s", want, line("card"))
+		}
+	}
+	if !strings.Contains(line("photo"), "border-radius:50px") || !strings.Contains(line("photo"), "overflow:hidden") {
+		t.Errorf("rounded image not clipped: %s", line("photo"))
+	}
+}

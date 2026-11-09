@@ -50,6 +50,32 @@ type exportNode struct {
 	Overflow   string  `json:"overflow"`
 	// Hidden (#5218) leaves the layer, and everything inside a hidden screen, out of the page.
 	Hidden bool `json:"hidden"`
+	// Shape style (#5219); nil means "not set": the class default applies.
+	Radius      *float64 `json:"radius"`
+	Stroke      string   `json:"stroke"`
+	StrokeWidth *float64 `json:"strokeWidth"`
+}
+
+var exportStrokeColor = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
+
+// shapeStyle adds only values the engine accepts: a corner radius, and a
+// stroke drawn inside the box (as the canvas draws it).
+func shapeStyle(node *exportNode) string {
+	style := ""
+	if node.Radius != nil && *node.Radius >= 0 && *node.Radius <= 10000 {
+		style += ";border-radius:" + strconv.FormatFloat(*node.Radius, 'f', -1, 64) + "px"
+		if node.Type == "image" {
+			style += ";overflow:hidden"
+		}
+	}
+	width := 1.0
+	if node.StrokeWidth != nil {
+		width = *node.StrokeWidth
+	}
+	if exportStrokeColor.MatchString(node.Stroke) && width > 0 && width <= 1000 {
+		style += ";box-shadow:inset 0 0 0 " + strconv.FormatFloat(width, 'f', -1, 64) + "px " + node.Stroke
+	}
+	return style
 }
 
 // The same closed font stacks as the canvas (DESIGN_FONT_STACKS).
@@ -273,6 +299,7 @@ func writeLayer(b *bytes.Buffer, node *exportNode, geometry string, anchors map[
 		style += ";color:" + color(node.Fill, "#172554") + textStyle(node)
 		body = html.EscapeString(node.Text)
 	case "image":
+		style += shapeStyle(node)
 		if exportImage.MatchString(node.Src) {
 			body = "<img src=\"" + html.EscapeString(node.Src) + "\" alt=\"" + html.EscapeString(node.Name) + "\">"
 		} else {
@@ -284,6 +311,9 @@ func writeLayer(b *bytes.Buffer, node *exportNode, geometry string, anchors map[
 		}
 	default:
 		style += ";background:" + color(node.Fill, "#ffffff")
+		if node.Type == "rect" {
+			style += shapeStyle(node)
+		}
 	}
 	tag, attrs := "div", ""
 	if node.LinkTo != "" {

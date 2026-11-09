@@ -173,3 +173,35 @@ func TestEngineAcceptsHiddenAndLockedFlags(t *testing.T) {
 		}
 	}
 }
+
+// Shape style (#5219): optional corner radius, stroke colour and stroke width.
+// Absent means the look every older document has (rectangles 6 px round, no
+// stroke). The colour is a closed hex form so nothing else reaches a style.
+func TestEngineAcceptsBoundedShapeStyleFields(t *testing.T) {
+	styled := `{"id":"card","type":"rect","x":0,"y":0,"width":200,"height":100,"fill":"#ffffff","radius":16,"stroke":"#0f172a","strokeWidth":2}`
+	result, err := Run(t.Context(), Request{Operations: json.RawMessage(`[{"op":"upsert","node":` + styled + `}]`)})
+	if err != nil {
+		t.Fatalf("shape style refused: %v", err)
+	}
+	var got map[string]any
+	if err = json.Unmarshal(result.Nodes[0], &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["radius"] != float64(16) || got["stroke"] != "#0f172a" || got["strokeWidth"] != float64(2) {
+		t.Fatalf("shape style not stored: %v", got)
+	}
+	for _, field := range []map[string]any{
+		{"radius": -1}, {"radius": 10001}, {"radius": "8px"},
+		{"strokeWidth": -1}, {"strokeWidth": 1001}, {"strokeWidth": "2"},
+		{"stroke": "red"}, {"stroke": "#12345"}, {"stroke": "#000;background:url(x)"}, {"stroke": 0},
+	} {
+		node := map[string]any{"id": "card"}
+		for key, value := range field {
+			node[key] = value
+		}
+		raw, _ := json.Marshal([]any{map[string]any{"op": "upsert", "node": node}})
+		if _, err := Run(t.Context(), Request{State: result.State, Operations: raw}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("accepted invalid shape style %s: %v", raw, err)
+		}
+	}
+}

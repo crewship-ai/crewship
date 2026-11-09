@@ -66,7 +66,9 @@ on this layer opens in prototype playback; "" removes the link. A text node may 
 carry fontFamily (sans, serif, mono), fontWeight (100-900, step 100), fontSize
 (1-1000), lineHeight (0.5-5), textAlign (left, center, right), textWrap (none, wrap)
 and overflow (visible, clip); servers before #5161 refuse them. Any node may carry
-hidden and locked (true or false); servers before #5218 refuse them. Delete uses {"op":"delete","id":"node-id"}; reorder uses
+hidden and locked (true or false); servers before #5218 refuse them. A rect or image
+may carry radius (0-10000), stroke (#rgb or #rrggbb) and strokeWidth (0-1000);
+servers before #5219 refuse them. Delete uses {"op":"delete","id":"node-id"}; reorder uses
 {"op":"reorder","order":["frame-id","node-id"]}. Preserve IDs of existing nodes.
 The API applies these edits even when no browser has the canvas open.`, RunE: func(cmd *cobra.Command, args []string) error {
 		body, err := readDesignCLIChanges(cmd)
