@@ -16,7 +16,7 @@ export type UpgradeResult =
   | { status: "unknown" }
   | { status: "error" }
 
-export interface UpgradeTarget { pageId: string; schema: number; rev: number; epoch: string }
+export interface UpgradeTarget { workspaceId: string; pageId: string; schema: number; rev: number; epoch: string }
 
 /** Whether a person may be offered "Enable Canvas" for a document at this schema. */
 export function canEnableCanvas(schema: number | undefined, canWrite: boolean): boolean {
@@ -33,7 +33,7 @@ export async function enableCanvas(target: UpgradeTarget, requestId: string): Pr
   const body = { id: requestId, schema: target.schema, target_schema: CANVAS_SCHEMA, page_id: target.pageId, epoch: target.epoch, ifRev: target.rev }
   let response: Response
   try {
-    response = await apiFetch(`/api/v1/pages/${encodeURIComponent(`@${target.pageId}`)}/document/upgrade`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store" })
+    response = await apiFetch(`/api/v1/pages/${encodeURIComponent(`@${target.pageId}`)}/document/upgrade?workspace_id=${encodeURIComponent(target.workspaceId)}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), cache: "no-store" })
   } catch { return { status: "unknown" } }
   const value = await response.json().catch(() => null) as Record<string, unknown> | null
   if (response.ok) return typeof value?.rev === "number" && Number.isSafeInteger(value.rev) && value.schema === CANVAS_SCHEMA ? { status: "done", rev: value.rev } : { status: "unknown" }

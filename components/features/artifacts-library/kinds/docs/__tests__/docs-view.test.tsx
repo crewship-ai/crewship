@@ -18,13 +18,13 @@ import { DocsBody, type DocsFrameReport } from "../docs-view"
 
 const env = vi.hoisted(() => ({ proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, schema: 2, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang", denied: false }))
 const request = vi.hoisted(() => vi.fn())
-const upgrades = vi.hoisted(() => ({ outcome: "ok" as "ok" | "stale" | "missing", bodies: [] as Record<string, unknown>[] }))
+const upgrades = vi.hoisted(() => ({ outcome: "ok" as "ok" | "stale" | "missing", bodies: [] as Record<string, unknown>[], urls: [] as string[] }))
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: env.available, isPending: env.available === undefined }) }))
 vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/document-queue")>(), openDocumentDrafts: async () => ({ load: async () => env.drafts, put: async () => {}, remove: async () => {}, close: () => {}, exclusive: true }) }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "docs-human" } } }) }))
 
-afterEach(() => { cleanup(); request.mockReset(); upgrades.outcome = "ok"; upgrades.bodies = []; env.proposals = undefined; env.available = true; env.canWrite = true; env.schema = 2; env.drafts = []; env.patch = "ok"; env.denied = false })
+afterEach(() => { cleanup(); request.mockReset(); upgrades.outcome = "ok"; upgrades.bodies = []; upgrades.urls = []; env.proposals = undefined; env.available = true; env.canWrite = true; env.schema = 2; env.drafts = []; env.patch = "ok"; env.denied = false })
 
 const item: LibraryItem = {
   slug: "launch-notes", pageId: "page-docs", name: "Launch notes", kind: "word", family: "document", sharedVersion: null, native: false,
@@ -57,6 +57,7 @@ function serve() {
     if (url.includes("/document/upgrade")) {
       const body = JSON.parse(String(init?.body)) as Record<string, unknown>
       upgrades.bodies.push(body)
+      upgrades.urls.push(url)
       if (upgrades.outcome === "stale") return { ok: false, status: 409, json: async () => ({ error: "original Page identity, revision and supported upgrade required" }) }
       if (upgrades.outcome === "missing") return { ok: false, status: 404, json: async () => ({ error: "not found" }) }
       rev += 1; env.schema = 6
@@ -248,6 +249,8 @@ describe("Docs in the ArtifactFrame", () => {
     expect(upgrades.bodies).toHaveLength(1)
     expect(upgrades.bodies[0]).toMatchObject({ schema: 5, target_schema: 6, page_id: "page-docs", epoch: "go:node:1", ifRev: 1 })
     expect(String(upgrades.bodies[0].id)).toMatch(/^[a-zA-Z0-9_-]{1,128}$/)
+    // The route is workspace-scoped like every Docs call.
+    expect(new URL(upgrades.urls[0], "https://x.test").searchParams.get("workspace_id")).toBe("ws1")
     // The reopened session is the upgraded document, with the same Page text.
     fireEvent.click(within(within(slot("view")!).getByRole("tablist", { name: "Mode" })).getByRole("tab", { name: "Page" }))
     expect((await screen.findByLabelText("Document editor")).textContent).toContain("Ship the agency offer on 2 December.")

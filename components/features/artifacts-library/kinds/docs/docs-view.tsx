@@ -160,7 +160,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     if (!state || !enabling) return
     // Unsaved edits would be refused at the new schema: they are saved first, never dropped.
     if (sync.pending > 0 || sync.recovery) { setEnabling({ ...enabling, error: "Wait until your changes are saved, then enable Canvas." }); throw new Error("pending") }
-    const result = await enableCanvas({ pageId, schema: state.schema, rev: state.rev, epoch: state.epoch }, enabling.id)
+    const result = await enableCanvas({ workspaceId, pageId, schema: state.schema, rev: state.rev, epoch: state.epoch }, enabling.id)
     if (result.status !== "done") {
       // A changed document needs a fresh read and a fresh decision; an unknown outcome is retried with the same ID.
       setEnabling({ id: result.status === "unknown" ? enabling.id : crypto.randomUUID(), error: upgradeFailure(result) })
