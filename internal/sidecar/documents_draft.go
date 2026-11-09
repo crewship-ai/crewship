@@ -202,7 +202,7 @@ func PrepareDocumentDraftOrProposal(raw []byte) (any, error) {
 }
 
 // DocumentProposalPacket is one immutable proposal, at the document's own
-// schema (one that supports proposals: 4 or 5).
+// schema (one that supports proposals: 4, 5 or 6).
 // It changes nothing until a human accepts it.
 type DocumentProposalPacket struct {
 	Generation int64              `json:"generation"`

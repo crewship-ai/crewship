@@ -72,9 +72,9 @@ With Docs enabled, read your saved personal Document with
 `crewship doc read @<page-id> --format json`. Copy its schema, revision and
 generation into a target file, using the immutable Page ID. With `"schema": 3`
 (a Document created before schema 4 became the default) the run edits directly;
-with `"schema": 4` or `"schema": 5` (the document's own schema) it can only
+with `"schema": 4`, `"schema": 5` or `"schema": 6` (the document's own schema) it can only
 propose changes, which you accept or reject (see
-[Proposing on a schema 4 or 5 document](/cli/doc#proposing-on-a-schema-4-or-5-document)):
+[Proposing on a schema 4, 5 or 6 document](/cli/doc#proposing-on-a-schema-4-5-or-6-document)):
 
 ```json
 {"submission_id":"introduction-pass-1","page_id":"<page-id>","schema":3,"rev":7,"generation":2}

@@ -189,7 +189,8 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   // Behind the single-home switch a native Word or Sheet is edited here, in the
   // one Craft editor and its lease; /pages/<slug> sends it back here.
   const nativeEditor = artifactsLibrary() && item.native && (item.kind === "word" || item.kind === "sheet") && Boolean(item.pageId)
-  // Behind the same switch a Docs page (a native Tiptap/Yjs document) opens in its Docs view here; Canvas has no backend yet.
+  // Behind the same switch a Docs page (a native Tiptap/Yjs document) opens in its Docs view here, whose Canvas view
+  // appears at content schema 6; a legacy board (Canvas-only storage) has no Docs document behind it yet.
   const docsPage = artifactsLibrary() && resolved.kind === "docs" && resolved.mode !== "canvas" && Boolean(item.pageId)
   const [docs, setDocs] = useState<DocsFrameReport | null>(null)
   // Older storage Pages drew itself: a deck and a workbook without a version head.

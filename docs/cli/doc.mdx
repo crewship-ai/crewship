@@ -119,12 +119,12 @@ The routines MCP tools `doc_draft_view`, `doc_draft_prepare`, `doc_draft_apply`
 and `doc_draft_checkpoint` use the same permission and immutable requests. They
 do not accept raw Yjs updates or whole-document replacement.
 
-### Proposing on a schema 4 or 5 document
+### Proposing on a schema 4, 5 or 6 document
 
-On a schema 4 or 5 document an agent never edits directly: it proposes, and a
+On a schema 4, 5 or 6 document an agent never edits directly: it proposes, and a
 person with edit access accepts or rejects each proposal. The run needs a
 targeted message from the person who asked that names the document's own
-schema (`document_iteration_intent` with `"schema": 4` or `"schema": 5`; a
+schema (`document_iteration_intent` with `"schema": 4`, `"schema": 5` or `"schema": 6`; a
 mandate naming another schema than the document has is refused), optionally `"blocks": ["<block-id>", …]` to limit it to up to 16
 blocks). The person needs edit access to the document. On anything but their
 own personal private document the agent also needs a live `write` grant naming
@@ -188,12 +188,13 @@ does require one, so the same artifact is not a valid
 [`slides initialize`](/cli/slides) target.)
 
 Then supply a JSON request
-containing an operation `id`, explicit `schema` (2, 3, 4 or 5), and a `body` document
-tree. Schemas 3, 4 and 5 also require the original `page_id`. Headings, paragraphs,
+containing an operation `id`, explicit `schema` (2, 3, 4, 5 or 6), and a `body` document
+tree. Schemas 3 to 6 also require the original `page_id`. Headings, paragraphs,
 lists and simple tables use schema 2; schema 3 adds links, inline code and code
 blocks; schema 4 adds bold, italic and strikethrough, a code block `language`,
 block quotes and checklists; schema 5 adds underline, text colour and
-highlight. Initialization does not silently upgrade an
+highlight; schema 6 adds the Canvas surface and accepts the same `body` as
+schema 5, starting with an empty canvas. Initialization does not silently upgrade an
 existing document.
 
 Schema 4 nodes and marks:
@@ -257,16 +258,28 @@ what the document's schema supports in `capabilities`:
 | 1, 2 | read, edit, restore, export, upgrade |
 | 3 | read, edit, draft, restore, export, upgrade |
 | 4 | read, edit, draft, propose, accept, restore, export, upgrade |
-| 5 | read, edit, draft, propose, accept, restore, export |
+| 5 | read, edit, draft, propose, accept, restore, export, upgrade |
+| 6 | read, edit, draft, propose, accept, restore, export |
 
 `draft` is the run that created the document with your drafting permission
-editing it directly. On a schema 4 or 5 document any other agent request is a
+editing it directly. On a schema 4, 5 or 6 document any other agent request is a
 proposal at the document's own schema, and a person accepts it; see
-[Proposing on a schema 4 or 5 document](#proposing-on-a-schema-4-or-5-document).
+[Proposing on a schema 4, 5 or 6 document](#proposing-on-a-schema-4-5-or-6-document).
 A proposal keeps every mark, date and mention outside the text it changes; one
 that would insert text beside a date or mention, or delete across one, is
 refused with `ambiguous_inline_atom`. A proposal made at one schema is never
 accepted after the document's schema changed; it can still be rejected.
+
+Schema 6 is schema 5 plus the Docs Canvas. Placements of Page blocks, notes and
+shapes are stored beside the page in their own roots. Moving a block on the
+canvas never changes its text, block ID or hash, so the page, its Markdown, its
+comment anchors and agent proposals work as at schema 5; an agent proposes on
+Page blocks and never writes the canvas. The canvas has its own share of the
+document budget (512 KiB of history, counted as an upper bound of its stored
+bytes); a save that would exceed it, or the 2000-entry limit, is refused
+with status 413 and code `surface_quota`, and the page keeps room for text.
+A document becomes schema 6 only when a person enables Canvas for it
+(`crewship doc upgrade`, or the first switch to Canvas in the Docs view).
 
 `--file` is required. Use `--file -` to read stdin. The file must contain one JSON
 object of at most 2 MiB. Keep the same operation ID and contents when retrying
@@ -331,6 +344,9 @@ receipt has `page_id`, `id`, `rev`, `epoch`, `kind` and `schema`, the
 document's schema after the restore; a replay also has `duplicate`. A schema 5
 document stays at schema 5 when you restore a checkpoint from before its
 upgrade, so new agent proposals are made at schema 5, never silently at 4.
+A Canvas (schema 6) document likewise stays at schema 6; restoring a
+checkpoint from before Canvas was enabled leaves its layout, cards and notes
+empty.
 
 ```bash
 crewship doc restore @<artifact-id> --file restore.json
@@ -407,7 +423,7 @@ crewship doc outline @<artifact-id>
 Save an explicitly guarded update. `--file` is required; `--file -` reads stdin.
 Supply one JSON object of at most 2 MiB. A semantic text replacement contains
 `id`, `schema`, the confirmed `epoch`, `target` block ID, replacement `text`,
-`ifRev` and `ifHash`. Schemas 3, 4 and 5 also require the original `page_id`. The editor's
+`ifRev` and `ifHash`. Schemas 3 to 6 also require the original `page_id`. The editor's
 binary update form uses `kind: "human"` and a base64 `update` instead.
 
 A changed revision, target hash or epoch refuses the edit. Read the confirmed
@@ -430,6 +446,31 @@ crewship doc patch @<artifact-id> --file patch.json
 
 An exact retry returns the original receipt with `found: true` and
 `duplicate: true`, plus the request's `schema` and the current `epoch`.
+
+## `crewship doc upgrade <page-slug>`
+
+Upgrade a document to the newest schema. Today that enables the Canvas
+(schema 6) on an older document; in the Docs view the first switch to Canvas
+asks the same question. Read the document first and send its current values:
+
+```json
+{"id":"enable-canvas-1","schema":5,"target_schema":6,"page_id":"<artifact-id>","epoch":"<epoch>","ifRev":12}
+```
+
+```bash
+crewship doc upgrade @<artifact-id> --file upgrade.json
+```
+
+The upgrade only widens what the document may hold. Its text, block IDs and
+hashes, versions and comments stay as they are, and restoring a version from
+before the upgrade keeps the new schema (with an empty Canvas layout). Open
+proposals can afterwards only be rejected; an agent proposes again at the new
+schema. You need Edit access;
+agents cannot upgrade. A changed revision or epoch returns 409 and nothing
+changes: read again and send a new request. Resend the exact request after a
+lost confirmation; the original receipt comes back with `duplicate: true`.
+Editors still open at the old schema are refused when they save and must
+reload.
 
 ## `crewship doc comments <page-slug>`
 
@@ -458,7 +499,7 @@ A thread names the text it is about: `block` is a paragraph, heading or code
 block ID from `crewship doc outline`, and `from`/`to` are the UTF-16 offsets of
 the quoted text inside it. A reply names `parent` instead. Both need `id`,
 `schema`, the confirmed `epoch` and `ifRev` and `text` (1–10,000 characters);
-schemas 3 and 4 also need `page_id`.
+schemas 3 to 6 also need `page_id`.
 
 ```bash
 crewship doc comment @<artifact-id> --file comment.json
@@ -480,7 +521,7 @@ does a changed revision or epoch. Read again and send a new request.
 
 Resolve a thread, or reopen it with `"resolved": false`. `--file` is required;
 `--file -` reads stdin. The request has `id`, `schema`, `epoch`, `ifRev`,
-`page_id` (schemas 3 and 4), `comment` (the thread ID), `version` (from
+`page_id` (schemas 3 to 6), `comment` (the thread ID), `version` (from
 `crewship doc comments`) and `resolved`. A changed `version` returns 409, so two
 people cannot silently undo each other. You need Comment or Edit access.
 
@@ -494,7 +535,7 @@ crewship doc comment-resolve @<artifact-id> --file resolve.json
 
 ## `crewship doc proposals <page-slug>`
 
-List an agent's proposals on a schema 4 or 5 document, oldest first. Each has `id`,
+List an agent's proposals on a schema 4, 5 or 6 document, oldest first. Each has `id`,
 `author`, `run_id`, `target.block_ids`, `base_rev`, `status`, `text` and
 `created_at`. `status` is `open`, `stale` (its block changed after it was made,
 so it can no longer be accepted), `accepted` or `rejected`. Reading needs read

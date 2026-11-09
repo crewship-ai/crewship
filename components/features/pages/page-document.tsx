@@ -242,13 +242,13 @@ export function DocumentHistoryHost({ workspaceId, pageId, humanId, available, d
   useEffect(() => { if (!eligible && !restoring && !controlled) setOwnOpen(false) }, [eligible, restoring, controlled])
   const close = () => { setOpen(false); opener.current?.focus() }
   if (control) return !eligible ? <p role="status" className="text-sm text-muted-foreground">History is unavailable.</p>
-    : visible ? <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} /> : null
+    : visible ? <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headSchema={head?.schema} /> : null
   return <div className="space-y-3 px-3">
     <Button ref={opener} type="button" variant="outline" disabled={!eligible || restoring} aria-expanded={visible} onClick={() => {
       if (!eligible || restoring) return
       if (open) close()
       else { setOpenEpoch(value => value + 1); setOpen(true) }
     }}>History</Button>
-    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} />}
+    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headSchema={head?.schema} />}
   </div>
 }

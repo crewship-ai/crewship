@@ -9,6 +9,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { startService, PROTOCOL } from './service.mjs';
+import { createSurface } from './surface-core.mjs';
 import { RICH_VERSION, LATEST_VERSION, CREATE_VERSION, create, snapshot, initialJSON, outline, load, validate, anchor, find, encode } from './schema.mjs';
 const secret = 'a'.repeat(48);
 function call(socket, path, data, headers = {}) {
@@ -62,7 +63,7 @@ function authorityModel() {
       model.state = { ...model.state, schema: data.schema, rev: model.state.rev + 1, snapshot: data.snapshot };
     } else if (op === 'checkpoint') { model.checkpoints++; model.checkpointStates.set(data.id,{schema:model.state.schema,snapshot:model.state.snapshot}); }
     else if (op === 'upgrade') { assert.equal(data.schema,model.state.schema); assert.equal(data.targetSchema,LATEST_VERSION); assert.equal(data.ifRev,model.state.rev); assert.equal(data.generation,model.state.generation); model.state = {...model.state,schema:LATEST_VERSION,rev:model.state.rev+1,epoch:model.state.epoch+1,generation:model.state.generation+1}; }
-    else if (op === 'restore') { model.restores++; const source=model.checkpointStates.get(data.checkpoint)??model.state; model.state = { ...model.state,schema:model.state.schema===5&&source.schema<5?5:source.schema,snapshot:source.snapshot, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1 }; }
+    else if (op === 'restore') { model.restores++; const source=model.checkpointStates.get(data.checkpoint)??model.state; model.state = { ...model.state,schema:model.state.schema>=5&&source.schema<model.state.schema?model.state.schema:source.schema,snapshot:source.snapshot, rev: model.state.rev + 1, epoch: model.state.epoch + 1, generation: model.state.generation + 1 }; }
     const receipt = { id: data.id, rev: model.state.rev, epoch: model.state.epoch, fingerprint: data.fingerprint };
     model.receipts.set(data.id, receipt); return receipt;
   };
@@ -520,7 +521,7 @@ test('public comment responses resolve spans without exposing the private anchor
 });
 
 test('startup rejects missing, old or future Go content capability before admitting documents', async () => {
- for (const schema of [undefined, 2, 3, 4, 6]) {
+ for (const schema of [undefined, 2, 3, 4, 5, 7]) {
   const f = await fixture((op,data) => { assert.equal(op,'recover'); assert.equal(data.schema,LATEST_VERSION); return {recovered:true,protocol:PROTOCOL,...(schema === undefined ? {} : {schema})}; });
   try { await assert.rejects(f.start(),/compatible engine recovery/); await assert.rejects(call(f.socket,'/v1/documents/p/read',{})); } finally { await f.close(); }
  }
@@ -717,7 +718,7 @@ test('authoring adapter bytes change the copied service build identity', async (
   const dir=await mkdtemp(join(tmpdir(),'docs-build-'));
   let f, service;
   try {
-    for(const file of ['pnpm-lock.yaml','schema.mjs','schema-core.mjs','position-migrations.mjs','service.mjs','create-document.mjs','secret.mjs'])await copyFile(new URL(file,import.meta.url),join(dir,file));
+    for(const file of ['pnpm-lock.yaml','schema.mjs','schema-core.mjs','surface-core.mjs','position-migrations.mjs','service.mjs','create-document.mjs','secret.mjs'])await copyFile(new URL(file,import.meta.url),join(dir,file));
     await symlink(fileURLToPath(new URL('node_modules',import.meta.url)),join(dir,'node_modules'),'dir');
     const {startService:copiedStart}=await import(pathToFileURL(join(dir,'service.mjs')).href);
     f=await fixture(authorityModel().handle);
@@ -832,7 +833,7 @@ test('schema4 initialize is human-only, Page-bound and exports formatting to Mar
     await f.start();
     assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, body })).status, 409);
     assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, page_id: 'p', body }, { Authorization: 'Bearer agtv2.synthetic' })).status, 403);
-    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-six', schema: 6, page_id: 'p', body })).status, 400);
+    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-seven', schema: 7, page_id: 'p', body })).status, 400);
     const bad = structuredClone(body); bad.content[1].attrs.language = 'Go<script>';
     assert.notEqual((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-bad', schema: 4, page_id: 'p', body: bad })).status, 200);
     assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-four', schema: 4, page_id: 'p', body })).status, 200);
@@ -846,6 +847,7 @@ test('schema4 initialize is human-only, Page-bound and exports formatting to Mar
 for (const [from, body] of [
   [3, { type: 'doc', content: [{ type: 'codeBlock', attrs: { id: 'c' }, content: [{ type: 'text', text: 'x' }] }] }],
   [4, { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'b' }, content: [{ type: 'text', text: 'bold', marks: [{ type: 'bold', attrs: {} }] }] }] }],
+  [5, { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'u' }, content: [{ type: 'text', text: 'under', marks: [{ type: 'underline', attrs: {} }] }] }] }],
 ]) test(`schema${from} documents upgrade to ${LATEST_VERSION} explicitly with unchanged content; the latest cannot upgrade again or to 4`, async () => {
   const model = authorityModel();
   const doc = create(body, from);
@@ -1046,7 +1048,7 @@ test('prepare-create builds at the schema Go names and refuses one without draft
   const prepare=body=>call(f.socket,'/v1/documents/new/prepare-create',body,{Authorization:'Bearer agtv2.synthetic-creation'});
   try {
     for (const schema of [3,4,5]) { const result=await prepare({schema,blocks:[{type:'paragraph',text:'Hello'}]}); assert.equal(result.status,200); assert.equal(result.body.schema,schema); const doc=load(result.body.snapshot); try { validate(doc,schema); } finally { doc.destroy(); } }
-    for (const schema of [1,2,6,'5']) assert.equal((await prepare({schema,blocks:[{type:'paragraph',text:'x'}]})).status,409,`schema ${schema}`);
+    for (const schema of [1,2,7,'5']) assert.equal((await prepare({schema,blocks:[{type:'paragraph',text:'x'}]})).status,409,`schema ${schema}`);
     assert.equal((await prepare({schema:5,blocks:[],extra:1})).status,400);
   } finally { await f.close(); }
 });
@@ -1096,5 +1098,155 @@ test('schema3 documents refuse proposals; agent patch and checkpoint paths are u
     assert.equal((await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'acc3', proposal: 'p3', ifRev: state.rev })).status, 409);
     assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'd3', schema: 3, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target: 'a', ifHash: hash, text: 'Alpha two' }, agent)).status, 200);
     assert.equal(model.commits, 1);
+  } finally { await f.close(); }
+});
+
+// Schema 6: the Canvas surface through the real engine write path.
+const surface = createSurface({ Y });
+const canvasModel = schema => {
+  const model = authorityModel(), doc = create({ type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'intro' }, content: [{ type: 'text', text: 'Shared' }] }, { type: 'paragraph', attrs: { id: 'outro' }, content: [{ type: 'text', text: 'Last' }] }] }, schema);
+  model.state = { ...model.state, schema, snapshot: snapshot(doc) }; doc.destroy(); return model;
+};
+const placeUpdate = (state, mutate) => { const doc = load(state.snapshot), vector = Y.encodeStateVector(doc); mutate(doc); const update = encode(Y.encodeStateAsUpdate(doc, vector)); doc.destroy(); return update; };
+
+test('schema6: a placement commit is refused on schema 5, saved after the explicit human upgrade, and reads back after reload', async () => {
+  const model = canvasModel(5), f = await fixture(model.handle); await f.start();
+  try {
+    const old = (await read(f)).body;
+    const update = placeUpdate(old, doc => surface.place(doc, 'intro', { x: 40, y: 60, w: 320, h: 120, z: 1 }));
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'place-on-five', schema: 5, page_id: 'p', epoch: old.epoch, kind: 'human', update })).status, 400);
+    assert.equal(model.commits, 0, 'schema 5 never stores a surface');
+    const upgrade = { id: 'enable-canvas', schema: 5, target_schema: 6, page_id: 'p', epoch: old.epoch, ifRev: old.rev };
+    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', upgrade, { Authorization: 'Bearer agtv2.synthetic' })).status, 403, 'agents cannot enable Canvas');
+    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', upgrade)).status, 200);
+    const six = (await read(f)).body; assert.equal(six.schema, 6); assert.deepEqual(six.content, old.content); assert.deepEqual(six.outline, old.outline);
+    const placed = placeUpdate(six, doc => surface.place(doc, 'intro', { x: 40, y: 60, w: 320, h: 120, z: 1 }));
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'place-on-six', schema: 6, page_id: 'p', epoch: six.epoch, kind: 'human', update: placed })).status, 200);
+    const reloaded = (await read(f)).body, doc = load(reloaded.snapshot);
+    assert.deepEqual(surface.project(doc).placements, [{ id: 'intro', x: 40, y: 60, w: 320, h: 120, z: 1 }]);
+    assert.deepEqual(reloaded.outline, six.outline, 'placing a block changes no block hash');
+    doc.destroy();
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'old-editor', schema: 5, page_id: 'p', epoch: reloaded.epoch, kind: 'human', update: placed })).status, 409, 'an older editor cannot write over a Canvas document');
+  } finally { await f.close(); }
+});
+
+test('schema6: an invalid surface value is refused and nothing is stored', async () => {
+  const model = canvasModel(6), f = await fixture(model.handle); await f.start();
+  try {
+    const state = (await read(f)).body;
+    const update = placeUpdate(state, doc => doc.getMap(surface.PLACEMENTS).set('intro', { x: 0, y: 0, w: 320, h: 120, z: 1, html: '<img>' }));
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'bad-surface', schema: 6, page_id: 'p', epoch: state.epoch, kind: 'human', update })).status, 400);
+    assert.equal(model.commits, 0);
+  } finally { await f.close(); }
+});
+
+test('schema6: copies that each stayed inside the Canvas budget are refused together once merged (server-side quota)', async () => {
+  const model = canvasModel(6), f = await fixture(model.handle); await f.start();
+  try {
+    const base = (await read(f)).body;
+    const a = load(base.snapshot), b = load(base.snapshot), vector = Y.encodeStateVector(a);
+    surface.putItem(a, 'n', { kind: 'note', x: 0, y: 0, w: 200, h: 160, z: 0, tone: 'yellow', text: 'start' });
+    Y.applyUpdate(b, Y.encodeStateAsUpdate(a, vector));
+    const shared = Y.encodeStateVector(b);
+    const big = i => 'q'.repeat(3990) + (i % 10);
+    for (let i = 0; i < 70; i++) { surface.setText(a, 'n', big(i)); surface.setText(b, 'n', big(i + 3)); }
+    const first = await call(f.socket, '/v1/documents/p/patch', { id: 'copy-a', schema: 6, page_id: 'p', epoch: base.epoch, kind: 'human', update: encode(Y.encodeStateAsUpdate(a, vector)) });
+    assert.equal(first.status, 200);
+    const stored = model.state.snapshot, commits = model.commits;
+    const second = await call(f.socket, '/v1/documents/p/patch', { id: 'copy-b', schema: 6, page_id: 'p', epoch: base.epoch, kind: 'human', update: encode(Y.encodeStateAsUpdate(b, shared)) });
+    assert.equal(second.status, 413); assert.equal(second.body.code, 'surface_quota'); assert.match(second.body.error, /Canvas history is full/);
+    assert.equal(model.commits, commits); assert.equal(model.state.snapshot, stored, 'the stored document stays valid and unchanged');
+    validate(load(model.state.snapshot), 6);
+    a.destroy(); b.destroy();
+  } finally { await f.close(); }
+});
+
+test('schema6: after Canvas is enabled an agent proposes on a placed block; accept keeps formatting and geometry, reject writes nothing (#5149)', async () => {
+  const model = authorityModel(), proposals = new Map(), sent = [];
+  const under = { type: 'underline', attrs: {} }, red = { type: 'textColor', attrs: { color: 'red' } }, bold = { type: 'bold', attrs: {} };
+  const body = { type: 'doc', content: [
+    { type: 'paragraph', attrs: { id: 'lead' }, content: [{ type: 'text', text: 'Ship ' }, { type: 'text', text: 'under', marks: [under] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'red', marks: [red, bold] }, { type: 'text', text: ' by ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: '.' }] },
+    { type: 'paragraph', attrs: { id: 'other' }, content: [{ type: 'text', text: 'Other' }] },
+  ] };
+  const doc = create(body, 5); model.state = { ...model.state, schema: 5, snapshot: snapshot(doc) }; doc.destroy();
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'propose') {
+      sent.push(data);
+      const find = (node, id) => node.attrs?.id === id ? node : (node.content ?? []).map(child => find(child, id)).find(Boolean);
+      proposals.set(data.id, { id: data.id, actor: 'agent:a:r', run_id: 'r', target: data.target, schema: data.schema, base_hash: data.ifHashes[data.target], text: data.semantic.text, generation: data.generation, base_rev: data.ifRev, status: 'open', created_at: 'now', proposed_content: find(data.semantic.rich.after, data.target) });
+      return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, actor: 'agent:a:r', kind: 'proposal' };
+    }
+    if (op === 'proposal') return proposals.get(data.id);
+    if (op === 'proposal-reject') { proposals.get(data.proposal).status = 'rejected'; return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, kind: 'proposal-reject' }; }
+    if (op === 'commit' && data.proposal) proposals.get(data.proposal).status = 'accepted';
+    return model.handle(op, data, req, res);
+  });
+  await f.start();
+  try {
+    const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
+    const five = (await read(f)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', { id: 'enable-canvas', schema: 5, target_schema: 6, page_id: 'p', epoch: five.epoch, ifRev: five.rev })).status, 200);
+    const six = (await read(f)).body; assert.equal(six.schema, 6); assert.deepEqual(six.content, five.content, 'enabling Canvas keeps the Page exactly');
+    const geometry = { lead: { x: 40, y: 60, w: 320, h: 120, z: 1 }, other: { x: 480, y: 60, w: 240, h: 96, z: 2 } };
+    const placed = placeUpdate(six, d => { surface.place(d, 'lead', geometry.lead); surface.place(d, 'other', geometry.other); });
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'place-both', schema: 6, page_id: 'p', epoch: six.epoch, kind: 'human', update: placed })).status, 200);
+    const state = (await read(f)).body, lead = state.outline.find(b => b.id === 'lead');
+    const request = { id: 'p6', schema: 6, page_id: 'p', epoch: state.epoch, ifRev: state.rev, target: 'lead', ifHash: lead.hash, text: 'Deliver under and red by .' };
+    assert.equal((await call(f.socket, '/v1/documents/p/propose', { ...request, id: 'p5', schema: 5 }, agent)).status, 409, 'a proposal made at the old schema is refused');
+    const proposed = await call(f.socket, '/v1/documents/p/propose', request, agent);
+    assert.equal(proposed.status, 200, JSON.stringify(proposed.body)); assert.deepEqual(sent.map(d => d.schema), [6]);
+    const commits = model.commits;
+    const accepted = await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-6', proposal: 'p6', ifRev: state.rev });
+    assert.equal(accepted.status, 200, JSON.stringify(accepted.body)); assert.equal(model.commits, commits + 1);
+    const after = (await read(f)).body, d = load(after.snapshot);
+    try {
+      assert.equal(after.schema, 6);
+      assert.deepEqual(after.content.content[0].content, [{ type: 'text', text: 'Deliver ' }, { type: 'text', text: 'under', marks: [under] }, { type: 'text', text: ' and ' }, { type: 'text', text: 'red', marks: [bold, red] }, { type: 'text', text: ' by ' }, { type: 'date', attrs: { value: '2026-12-01' } }, { type: 'text', text: '.' }], 'marks come back in schema order');
+      assert.deepEqual(after.content.content[1], body.content[1]);
+      assert.deepEqual(surface.project(d).placements, [{ id: 'lead', ...geometry.lead }, { id: 'other', ...geometry.other }], 'accepting a proposal keeps every placement');
+      validate(d, 6);
+    } finally { d.destroy(); }
+    const otherHash = after.outline.find(b => b.id === 'other').hash;
+    assert.equal((await call(f.socket, '/v1/documents/p/propose', { ...request, id: 'p6b', epoch: after.epoch, ifRev: after.rev, target: 'other', ifHash: otherHash, text: 'Rejected' }, agent)).status, 200);
+    const before = model.commits, snap = model.state.snapshot;
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-reject', { id: 'reject-6', proposal: 'p6b', ifRev: after.rev })).status, 200);
+    assert.equal(model.commits, before); assert.equal(model.state.snapshot, snap, 'reject changes neither text nor geometry');
+  } finally { await f.close(); }
+});
+
+test('schema6: a proposal made before Canvas was enabled can only be rejected afterwards; restoring a pre-Canvas version keeps schema 6 with an empty layout (#5149)', async () => {
+  const model = authorityModel(), proposals = new Map();
+  const body = { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'lead' }, content: [{ type: 'text', text: 'Ship it.' }] }] };
+  const doc = create(body, 5); model.state = { ...model.state, schema: 5, snapshot: snapshot(doc) }; doc.destroy();
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'propose') { proposals.set(data.id, { id: data.id, actor: 'agent:a:r', run_id: 'r', target: data.target, schema: data.schema, base_hash: data.ifHashes[data.target], text: data.semantic.text, generation: data.generation, base_rev: data.ifRev, status: 'open', created_at: 'now' }); return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, actor: 'agent:a:r', kind: 'proposal' }; }
+    if (op === 'proposal') return proposals.get(data.id);
+    if (op === 'proposal-reject') { proposals.get(data.proposal).status = 'rejected'; return { id: data.id, rev: data.ifRev, epoch: model.state.epoch, kind: 'proposal-reject' }; }
+    return model.handle(op, data, req, res);
+  });
+  await f.start();
+  try {
+    const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
+    const five = (await read(f)).body, lead = five.outline.find(b => b.id === 'lead');
+    assert.equal((await call(f.socket, '/v1/documents/p/checkpoint', { id: 'before-canvas', schema: 5, page_id: 'p', epoch: five.epoch, ifRev: five.rev })).status, 200);
+    assert.equal((await call(f.socket, '/v1/documents/p/propose', { id: 'old', schema: 5, page_id: 'p', epoch: five.epoch, ifRev: five.rev, target: 'lead', ifHash: lead.hash, text: 'Ship it now.' }, agent)).status, 200);
+    assert.equal((await call(f.socket, '/v1/documents/p/upgrade', { id: 'enable-canvas', schema: 5, target_schema: 6, page_id: 'p', epoch: five.epoch, ifRev: five.rev })).status, 200);
+    const six = (await read(f)).body; assert.equal(six.schema, 6);
+    const commits = model.commits;
+    const stale = await call(f.socket, '/v1/documents/p/proposal-accept', { id: 'accept-old', proposal: 'old', ifRev: six.rev });
+    assert.equal(stale.status, 409, 'a pre-Canvas proposal is never accepted at 6'); assert.match(stale.body.error, /proposal is no longer open/);
+    assert.equal(model.commits, commits);
+    assert.equal((await call(f.socket, '/v1/documents/p/proposal-reject', { id: 'reject-old', proposal: 'old', ifRev: six.rev })).status, 200, 'but it can always be closed');
+    const placed = placeUpdate(six, d => surface.place(d, 'lead', { x: 40, y: 60, w: 320, h: 120, z: 1 }));
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', { id: 'place', schema: 6, page_id: 'p', epoch: six.epoch, kind: 'human', update: placed })).status, 200);
+    const head = (await read(f)).body;
+    const restored = await call(f.socket, '/v1/documents/p/restore', { id: 'restore-before-canvas', schema: 6, page_id: 'p', epoch: head.epoch, ifRev: head.rev, checkpoint: 'before-canvas' });
+    assert.equal(restored.status, 200, JSON.stringify(restored.body)); assert.equal(restored.body.schema, 6);
+    const back = (await read(f)).body, d = load(back.snapshot);
+    try {
+      assert.equal(back.schema, 6, 'Canvas stays enabled'); assert.deepEqual(back.content, five.content);
+      assert.deepEqual(surface.project(d).placements, [], 'the pre-Canvas version has no layout');
+      validate(d, 6);
+    } finally { d.destroy(); }
   } finally { await f.close(); }
 });

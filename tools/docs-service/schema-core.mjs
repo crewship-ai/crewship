@@ -1,4 +1,5 @@
 import { validatePositionMigrations } from './position-migrations.mjs';
+import { createSurface } from './surface-core.mjs';
 
 // What each content schema supports (#5233). Mirrors Go
 // internal/documents/schemas.go (a Go test compares the two); every engine and
@@ -11,7 +12,10 @@ export const SCHEMA_CAPABILITIES = Object.freeze({
   2: Object.freeze(['read', 'edit', 'restore', 'export', 'upgrade']),
   3: Object.freeze(['read', 'edit', 'draft', 'restore', 'export', 'upgrade']),
   4: Object.freeze(['read', 'edit', 'draft', 'propose', 'accept', 'restore', 'export', 'upgrade']),
-  5: Object.freeze(['read', 'edit', 'draft', 'propose', 'accept', 'restore', 'export']),
+  5: Object.freeze(['read', 'edit', 'draft', 'propose', 'accept', 'restore', 'export', 'upgrade']),
+  // Schema 6 (Canvas) keeps every capability schema 5 released: agents propose
+  // on Page blocks; the surface is human-edited only in v1.
+  6: Object.freeze(['read', 'edit', 'draft', 'propose', 'accept', 'restore', 'export']),
 });
 /** Whether documents of this schema support a capability; unknown schemas support nothing. */
 export const schemaAllows = (version, capability) => Object.hasOwn(SCHEMA_CAPABILITIES, version) && SCHEMA_CAPABILITIES[version].includes(capability);
@@ -29,7 +33,13 @@ const FORMATTED_VERSION = 4;
 // Schema 5 is additive over 4: underline, and a text colour and a highlight
 // whose value is a palette NAME. The reader's theme resolves the name; stored
 // content never carries CSS, so a colour cannot become markup or a payload.
-const LATEST_VERSION = 5;
+const MARKS_VERSION = 5;
+// Schema 6 is schema 5 plus the Canvas surface (surface-core.mjs): extra Y.Map
+// roots holding placements of Page blocks and canvas-only items. The Page
+// content contract, projection, hashes and Markdown are exactly schema 5's.
+const CANVAS_VERSION = 6;
+const LATEST_VERSION = CANVAS_VERSION;
+const surface = createSurface({ Y });
 const PALETTE = Object.freeze(['gray', 'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink']);
 const validColor = value => typeof value === 'string' && PALETTE.includes(value);
 // Schema 5 inline atoms. A date is a calendar day, never a time or free text.
@@ -50,7 +60,7 @@ const validAtomValue = (type, value) => type === 'date' ? validDate(value) : typ
 const UNKNOWN_MEMBER = 'Unknown member';
 const richTypes = [...legacyTypes, 'codeBlock'];
 const formattedTypes = [...richTypes, 'blockquote', 'taskList', 'taskItem'];
-const typesFor = version => { if (![1,2,3,4,5].includes(version)) throw new Error('unsupported content schema'); return version >= FORMATTED_VERSION ? formattedTypes : version === 3 ? richTypes : legacyTypes; };
+const typesFor = version => { if (![1,2,3,4,5,6].includes(version)) throw new Error('unsupported content schema'); return version >= FORMATTED_VERSION ? formattedTypes : version === 3 ? richTypes : legacyTypes; };
 const isRich = version => version >= RICH_VERSION;
 const isFormatted = version => version >= FORMATTED_VERSION;
 const atomsFor = version => version >= 5 ? ATOMS : [];
@@ -147,8 +157,9 @@ const extensions = extensionsFor(VERSION);
 const schema = getSchema(extensions);
 const richSchema = getSchema(extensionsFor(RICH_VERSION));
 const formattedSchema = getSchema(extensionsFor(FORMATTED_VERSION));
-const latestSchema = getSchema(extensionsFor(LATEST_VERSION));
-const schemaFor = (version = VERSION) => { typesFor(version); return version === LATEST_VERSION ? latestSchema : version === FORMATTED_VERSION ? formattedSchema : version === RICH_VERSION ? richSchema : schema; };
+// Schema 6 adds no content types or marks: it shares schema 5's ProseMirror schema.
+const latestSchema = getSchema(extensionsFor(MARKS_VERSION));
+const schemaFor = (version = VERSION) => { typesFor(version); return version >= MARKS_VERSION ? latestSchema : version === FORMATTED_VERSION ? formattedSchema : version === RICH_VERSION ? richSchema : schema; };
 function validLinkHref(value) {
   if (typeof value !== 'string' || new TextEncoder().encode(value).length > 2048 || /[\u0000-\u0020\u007f\p{Cs}]/u.test(value)) return false;
   try { const url = new URL(value); return ['http:', 'https:'].includes(url.protocol) && !!url.hostname && !url.username && !url.password && url.href === value; } catch { return false; }
@@ -246,7 +257,7 @@ function validateJSON(json, version = VERSION) {
 }
 // Yjs 13.6.33's retained Item/content classes are part of this experiment's
 // binary contract. Upgrades must rerun the retained-content regressions.
-function validateRetained(doc, version, migrations) {
+function validateRetained(doc, version, migrations, surfaceTypes = new Set()) {
   const types = typesFor(version);
   const root = doc.getXmlFragment('default');
   const atom = type => type instanceof Y.XmlElement && isAtom(type.nodeName, version);
@@ -256,6 +267,7 @@ function validateRetained(doc, version, migrations) {
     // GC carries no recoverable payload. Deleted Items still do.
     if (item instanceof Y.GC) continue;
     if (migrations && item.parent === migrations) continue; // Fully checked, including retained payloads, before this walk.
+    if (surfaceTypes.has(item.parent)) continue; // Fully checked by surface.validateSurface, live and retained.
     if (!(item instanceof Y.Item) || !supportedType(item.parent)) throw new Error('unsupported retained Yjs parent');
     // Atoms are leaves: nothing was ever allowed inside one, even if deleted.
     if (item.parentSub === null && atom(item.parent)) throw new Error('unsupported retained atom content');
@@ -312,8 +324,11 @@ function validate(doc, version = VERSION) {
   const json = validateJSON(project(doc), version);
   if (Y.encodeStateAsUpdate(doc).length > 1 << 20) throw new Error('document limit');
   // Prevent opaque client-controlled Yjs roots from becoming a covert payload.
-  const migrations = validatePositionMigrations(doc, Y);
-  validateRetained(doc, version, migrations);
+  // Only schema 6 admits the surface roots; every earlier schema still refuses them.
+  const surfaceRoots = version >= CANVAS_VERSION ? surface.ROOTS : [];
+  if (surfaceRoots.length) surface.validateSurface(doc);
+  const migrations = validatePositionMigrations(doc, Y, surfaceRoots);
+  validateRetained(doc, version, migrations, new Set(surfaceRoots.map(name => doc.share.get(name)).filter(Boolean)));
   return json;
 }
 async function outline(doc, version = VERSION) {
@@ -562,5 +577,5 @@ function markdown(json, version = RICH_VERSION, { people } = {}) {
   return visit(json).trimEnd()+'\n';
 }
 
-return { VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION, PALETTE, validColor, ATOMS, validDate, validUserId, UNKNOWN_MEMBER, validLanguage, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
+return { VERSION, RICH_VERSION, FORMATTED_VERSION, MARKS_VERSION, CANVAS_VERSION, LATEST_VERSION, PALETTE, validColor, ATOMS, validDate, validUserId, UNKNOWN_MEMBER, validLanguage, extensionsFor, extensions, schema, schemaFor, validLinkHref, encode, decode, canonical, hash, load, snapshot, project, validateJSON, validate, outline, textOf, find, textNode, patch, anchor, resolve, initialJSON, create, markdown };
 }

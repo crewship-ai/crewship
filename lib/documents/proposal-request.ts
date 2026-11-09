@@ -21,7 +21,7 @@ export interface ProposalIterationIntent {
 
 /** The schema a proposal request names, or undefined when the Doc's schema has no proposals. */
 export function proposalSchema(schema: number | undefined): ProposalSchema | undefined {
-  return schema !== undefined && schemaAllows(schema, "propose") && (schema === 4 || schema === 5) ? schema : undefined
+  return schema !== undefined && schemaAllows(schema, "propose") && (schema === 4 || schema === 5 || schema === 6) ? schema : undefined
 }
 
 // page.rev.generation.schema; links from before #5233 have no schema and meant schema 4.

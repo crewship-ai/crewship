@@ -83,18 +83,25 @@ the same transaction. Text left by an edit concurrent with a removal is reported
 as a stray and never carries over to a new item with the same ID. Mutators refuse
 to write into an invalid surface and refuse a write that would cross the history
 cap; after one full walk they add each own write's cost to a cached total, so a
-gesture does not re-walk the whole history. Known debt: the surface can use the
-whole 1 MiB document budget on its own; a separate surface share is open. Two
-replicas can each stay within the cap and exceed it once merged; then every
-surface write is refused until compaction or a server-side quota exists, which
-schema 6 admission must settle. Undo/redo writes bypass the pre-check (the next
-full validation still catches them). After a remote change the next gesture
-re-walks the surface once.
+gesture does not re-walk the whole history.
 
-No content schema admits these roots yet: `validate()` still refuses them for
-schemas 1-4. Schema 5 is reserved for formatting marks; the surface becomes
-schema 6 through the existing explicit human upgrade. `surface-node-test.mjs`
-covers the model, concurrency, comment anchoring and undo.
+Content schema 6 admits these roots; `validate()` keeps refusing them for
+schemas 1-5, and a document becomes schema 6 only by an explicit initialize or
+the human-only upgrade. The surface has its own share of the document: its
+history count is an upper bound of its encoded bytes (whatever the values,
+keys or number of writers) and may not exceed 512 KiB, half of the 1 MiB
+document limit, so the Page always keeps the other half. Every commit validates
+the merged state, so replicas that each stayed inside the share are refused
+together once merged past it: the service answers 413 with code
+`surface_quota` (also for the 2000-entry limit) and stores nothing.
+
+Known debt: history is a lifetime budget (gc:false, no compaction yet), so once
+the share is full every further Canvas write is refused; the editor treats that
+413 like any refused save and keeps the draft for recovery. Undo/redo writes
+bypass the client pre-check (the server validation still catches them). After a
+remote change the next gesture re-walks the surface once.
+`surface-node-test.mjs` covers the model, concurrency, comment anchoring and
+undo; `schema-v6-node-test.mjs` the admission and the share.
 
 ## Private service boundary
 
@@ -159,46 +166,3 @@ TEST_DOCUMENT_DURABILITY=1 go test -tags docs_foundation ./cmd/crewship \
 
 `TEST_DOCUMENT_DURABILITY_EVIDENCE` names the measurements JSON file. The test
 needs Node.js 24 and records numbers only; it enforces no thresholds.
-
-## Tabs (not admitted yet)
-
-`tabs-core.mjs` is the model for Docs tabs, planned as content schema 7 after
-the Canvas surface (schema 6). No content schema admits its roots yet, so every
-validator still refuses them as unsupported Yjs roots.
-
-- The first tab is the existing `default` fragment: every older document is a
-  one-tab document without migration, and reading tabs writes nothing.
-- Further tabs are XmlFragments named `tab:<id>`. Where a tab sits lives in
-  the `tabs` map (`{ parent, order }`) and its name in `tab-names`, so a
-  concurrent rename and move both survive, and renaming, reordering and
-  nesting never move content or detach comment anchors.
-- Order keys are fractional strings over `[0-9A-Za-z]` that never end in `0`.
-  Two replicas that append at once get equal keys, and a key can grow long
-  after many moves to the same place; in both cases the next insert there
-  rebalances the siblings' keys in the same write, so an insert never fails.
-- Nesting is at most 8 levels. A tab cannot move into itself or its
-  descendants; a cycle formed by concurrent moves is broken at its smallest
-  ID, and a tab that concurrent moves put below level 8 is shown under its
-  ancestor at level 7. Both depend only on the stored state, so every replica
-  shows the same tree.
-- Deleting a tab removes its content and metadata and moves its children up;
-  the first tab cannot be deleted. The empty root a deleted tab leaves behind
-  is neither shown nor counted. Content written concurrently into a deleted
-  tab stays visible as "Untitled tab" instead of being lost.
-- Metadata is closed and bounded, retained values included: 400 tabs at most
-  in any stored state, of which mutators create at most 200 (room for
-  concurrent creates), 120-character names, and 256 KiB of metadata history
-  counted as an upper bound of its encoded bytes. Mutators check every limit
-  before writing and stop at three quarters of the history budget, leaving room
-  for concurrent replicas; the full validation walk runs once per foreign change.
-  A raw update can carry bytes its decoded values do not (an own `__proto__`
-  key is dropped by the decoder); the service never stores raw request bytes,
-  only the re-encoded document state and diff, so they never reach history.
-
-Admission (schema 7) still needs: the document validator to accept `tab:`
-fragments and the tab maps; block IDs unique across all tabs, including
-duplicates created concurrently (a new tab refuses a block ID already used in
-this replica only); comment anchors that carry the tab and a defined outcome
-for anchors in deleted tabs; a Page projection in tree order for outlines,
-Markdown and agents; the human-only upgrade; and compaction, because the
-metadata history budget is for the document's lifetime.
