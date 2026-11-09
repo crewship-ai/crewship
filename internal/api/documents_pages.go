@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"strings"
@@ -78,6 +79,12 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 			return
 		}
 	}
+	if !mutate && strings.HasSuffix(r.URL.Path, "/document/export") {
+		if format := r.URL.Query().Get("format"); format != "markdown" && format != "md" {
+			replyError(w, 400, "format must be markdown")
+			return
+		}
+	}
 	if r.URL.Query().Has("block_id") {
 		replyError(w, 400, "selected block reads are not enabled")
 		return
@@ -92,6 +99,13 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 	operation := "read"
 	if strings.HasSuffix(r.URL.Path, "/document/comments") {
 		operation = "comments"
+	}
+	exporting := !mutate && strings.HasSuffix(r.URL.Path, "/document/export")
+	if exporting {
+		// Export is the same confirmed read as GET /document (the engine reads
+		// state through the private authority with this caller's credential,
+		// including private-custody checks and audit), serialized by the engine.
+		operation = "export"
 	}
 	var body any = map[string]any{}
 	if mutate {
@@ -135,6 +149,19 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 		replyError(w, 502, "invalid document engine response")
 		return
 	}
+	if exporting {
+		markdown, ok := value["markdown"].(string)
+		if !ok || len(value) != 1 {
+			replyError(w, 502, "invalid document engine response")
+			return
+		}
+		w.Header().Set("Content-Type", "text/markdown; charset=utf-8")
+		w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": documentExportFilename(rec.Slug, "md")}))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.WriteHeader(200)
+		_, _ = io.WriteString(w, markdown)
+		return
+	}
 	if operation == "read" || operation == "comments" {
 		value["page_id"] = rec.ID
 		user := UserFromContext(r.Context())
@@ -163,4 +190,22 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 		value["can_resolve"] = canComment
 	}
 	writeJSON(w, 200, value)
+}
+
+// documentExportFilename names a download after the artifact slug, reduced to
+// a safe ASCII file name.
+func documentExportFilename(slug, extension string) string {
+	var b strings.Builder
+	for _, c := range slug {
+		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' {
+			b.WriteRune(c)
+		}
+		if b.Len() >= 100 {
+			break
+		}
+	}
+	if b.Len() == 0 {
+		b.WriteString("document")
+	}
+	return b.String() + "." + extension
 }
