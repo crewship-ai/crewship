@@ -80,6 +80,41 @@ test('the surface has its own share of the document budget: merged copies past i
   for (const d of [a, b, c]) d.destroy();
 });
 
+test('the surface budget bounds its real encoded bytes for any writer pattern, so the Page always keeps half the document', () => {
+  const patterns = {
+    'one writer, set then delete under fresh keys, float geometry': (doc, i) => { const m = doc.getMap(surface.PLACEMENTS), k = i.toString(36); m.set(k, { x: 1e-7, y: 1e-7, w: 40.1, h: 24.1, z: 1 }); m.delete(k); },
+    'a new writer for every write': (doc, i) => { doc.clientID = 2 ** 52 + i * 7919; const m = doc.getMap(surface.PLACEMENTS), k = i.toString(36); m.set(k, { x: 1e-7, y: 1e-7, w: 40.1, h: 24.1, z: 1 }); m.delete(k); },
+    'long keys and long text, overwritten': (doc, i) => { doc.getMap(surface.TEXT).set('k'.repeat(70) + (i % 7), '\u00e9'.repeat(2000)); },
+  };
+  for (const [name, write] of Object.entries(patterns)) {
+    const doc = create(body, 6), base = Y.encodeStateAsUpdate(doc).length;
+    let accepted = 0, full = false;
+    for (let i = 0; i < 20000 && !full; i++) {
+      write(doc, i);
+      if (i % 20) continue;
+      let counted;
+      try { counted = surface.validateSurface(doc).retained; } catch (error) { assert.match(error.message, /surface history limit/); full = true; break; }
+      const real = Y.encodeStateAsUpdate(doc).length - base;
+      assert.ok(real <= counted, `${name}: ${real} encoded bytes counted as ${counted}`);
+      accepted = i + 1;
+    }
+    assert.ok(full && accepted > 20, `${name}: the share fills after ${accepted} accepted writes`);
+    doc.destroy();
+  }
+  // A surface filled up to its share still leaves the Page room for 400 KB of text.
+  const full = create(body, 6);
+  for (let i = 0; i < 20000; i++) {
+    full.clientID = 2 ** 52 + i * 7919;
+    const m = full.getMap(surface.PLACEMENTS), k = i.toString(36);
+    m.set(k, { x: 1e-7, y: 1e-7, w: 40.1, h: 24.1, z: 1 }); m.delete(k);
+    if (i % 20 === 0 && surface.validateSurface(full).retained > surface.LIMITS.retainedBytes - 8000) break;
+  }
+  full.clientID = 7;
+  full.getXmlFragment('default').get(1).get(0).insert(0, 'z'.repeat(400000));
+  validate(load(snapshot(full)), 6);
+  full.destroy();
+});
+
 test('comments stay block-anchored at schema 6 across moves and deletion', () => {
   const doc = create(body, 6), thread = anchor(doc, 'intro', 0, 6, 't', 1, 6);
   surface.place(doc, 'intro', at(0, 0)); surface.move(doc, 'intro', { x: 400 });
