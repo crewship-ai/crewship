@@ -45,6 +45,7 @@ const decode = value => Uint8Array.from(Buffer.from(value, 'base64'))
 const world = page => page.locator('[data-canvas-world]').evaluate(element => element.style.transform)
 
 let browser
+const opened = []
 try {
   browser = await chromium.launch({ headless: true })
   const viewport = { width: 1440, height: 1000 }
@@ -101,6 +102,7 @@ try {
 
   const errors = []
   const page = await owner.newPage()
+  opened.push(['owner', page])
   page.on('pageerror', error => errors.push(error.message))
   await page.goto(`${base}/artifacts/${encodeURIComponent(pageId)}`)
   const editor = page.getByLabel('Document editor', { exact: true })
@@ -111,6 +113,7 @@ try {
   const coContext = await browser.newContext({ viewport, reducedMotion: 'reduce', recordVideo: video })
   await signIn(coContext, 'canvas-coeditor@example.invalid', coPassword)
   const co = await coContext.newPage()
+  opened.push(['coeditor', co])
   co.on('pageerror', error => errors.push(error.message))
   await co.goto(`${base}/artifacts/${encodeURIComponent(pageId)}`)
   await co.getByLabel('Document editor', { exact: true }).waitFor()
@@ -233,6 +236,7 @@ try {
   const session = await (await viewerContext.request.get(`${base}/api/auth/session`)).json()
   assert.equal(session.user?.email, 'canvas-viewer@example.invalid', 'a second, distinct identity')
   const viewer = await viewerContext.newPage()
+  opened.push(['viewer', viewer])
   viewer.on('pageerror', error => errors.push(error.message))
   const writes = []
   viewer.on('request', r => { if (r.method() === 'POST' && r.url().includes('/document/patch')) writes.push(r.url()) })
@@ -419,6 +423,10 @@ try {
   await owner.close(); await viewerContext.close(); await coContext.close()
   report.videos = videos
   console.log(JSON.stringify({ ...report, schema: 6, identities: 3, engine: 'production Node', persistence: 'Go authority/SQLite', providerInvoked: false }))
+} catch (error) {
+  // Evidence for a failed run: every open tab as it was.
+  for (const [name, tab] of opened) await tab.screenshot({ path: join(output, `failure-${name}.png`) }).catch(() => {})
+  throw error
 } finally {
   try { await browser?.close() } finally {
     try {
