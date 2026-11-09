@@ -300,7 +300,7 @@ func TestDocumentCanvasSchemaSixRealEngineCLI(t *testing.T) {
 				t.Fatalf("%s cannot read the document it was granted: %d %s %v", person.id, status, raw, err)
 			}
 		}
-		if status, raw, err := request(http.MethodPost, "/api/v1/pages/"+slug+"/document/upgrade", token, packet); err != nil || (status != http.StatusForbidden && (person.role == "RESTRICTED" || status != http.StatusNotFound)) {
+		if status, raw, err := request(http.MethodPost, "/api/v1/pages/"+slug+"/document/upgrade", token, packet); err != nil || status != http.StatusForbidden {
 			t.Fatalf("%s (%s, %s grant) upgrade: %d %s %v", person.id, person.role, person.level, status, raw, err)
 		}
 		if readDoc().Schema != 5 {

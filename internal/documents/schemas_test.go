@@ -106,7 +106,9 @@ func TestIterationIntentBindsTheDocumentSchema(t *testing.T) {
 		{5, "", true, true},
 		{5, "a,b", true, true},
 		{2, "", false, false},
-		{6, "", false, false},
+		{6, "", true, true},
+		{6, "a,b", true, true},
+		{7, "", false, false},
 	} {
 		intent := IterationIntent{SubmissionID: "submission-1", PageID: "page-1", Schema: tt.schema, Rev: 1, Generation: 0, Blocks: tt.blocks}
 		if got := intent.Validate() == nil; got != tt.valid {

@@ -4,13 +4,13 @@ import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { formatDateTime } from "@/lib/time"
 import { documentSurface } from "@/lib/documents/surface"
-
-const CANVAS_SCHEMA: number = documentSurface.CANVAS_SCHEMA
 import { DocumentCompare } from "./document-compare"
 import { HistoryActions } from "./history-actions"
 import { DocumentReadonly } from "../document-readonly/document-readonly"
 import type { DocumentHistoryProps, DocumentCheckpointSnapshot } from "./types"
 export type { DocumentHistoryProps } from "./types"
+
+const CANVAS_SCHEMA: number = documentSurface.CANVAS_SCHEMA
 
 function supported(schema: number): schema is 2 | 3 | 4 | 5 | 6 { return schema === 2 || schema === 3 || schema === 4 || schema === 5 || schema === 6 }
 function when(value: string) {
