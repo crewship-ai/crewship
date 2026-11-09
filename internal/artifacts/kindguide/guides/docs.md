@@ -1,7 +1,11 @@
 ---
 kind: docs
 title: Docs
-version: 1.0.0
+version: 1.1.0
+modes: [ask, comment, propose, edit]
+capabilities:
+  supported: [blocks.paragraph, blocks.heading, blocks.bulletList, blocks.orderedList, blocks.codeBlock, draft.replaceText, propose.schema4]
+  unsupported: [marks.underline, marks.textColor, tables, math, embeds, tabs, propose.schema1, propose.schema2, propose.schema3]
 ---
 # Docs agent guide
 
@@ -9,7 +13,7 @@ A Docs artifact is a document people write together live. Its content is a
 tree of blocks with stable IDs that the server assigns. You never send HTML,
 images or raw Yjs updates; you send typed text blocks and guarded patches.
 The tools are `doc_create`, `doc_draft_view`, `doc_draft_prepare`,
-`doc_draft_apply` and `doc_draft_checkpoint` (CLI `crewship doc create` and
+`doc_draft_propose`, `doc_draft_apply` and `doc_draft_checkpoint` (CLI `crewship doc create` and
 `crewship doc draft`); their descriptions carry the exact arguments.
 
 ## Data shape
@@ -61,10 +65,16 @@ is `committed_checkpoint_pending`, the text is already saved: retry
 
 ## Agent modes
 
-Docs has no proposal layer for agents yet, so Propose is not available for
-Docs. Ask and Comment read only. Creating or drafting needs the human's
-explicit pre-send permission for this live run; that permission covers only
-the one document it names and ends with the run.
+Propose exists on schema 4 Documents only. There `doc_draft_view` returns
+mode `propose`, `doc_draft_prepare` returns a proposal packet and
+`doc_draft_propose` sends it. The document does not change: a person accepts
+or rejects each proposal. A Document holds at most 100 open proposals and 500
+stored, open and decided. On schema 3 or older there is no proposal path.
+
+On a shared Document you need a live propose or write grant; only the Owner
+delegates Edit. Edit (`doc_draft_apply`) needs the human's explicit pre-send
+permission for this live run, which covers only the one document it names and
+ends with the run. Ask and Comment read only.
 
 ## Verification
 

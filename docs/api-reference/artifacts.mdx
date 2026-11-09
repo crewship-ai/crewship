@@ -284,8 +284,8 @@ CLI: [`crewship artifacts kind-guide`](/cli/artifacts#agent-guides-per-kind).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/v1/artifact-kind-guides` | List `{guides:[{kind, title, version, rules_version, sha256, bytes}]}` |
-| GET | `/api/v1/artifact-kind-guides/{kind}` | One guide with its `content`; aliases `design-system` and `project` resolve to `library` and `app`. Unknown and Craft kinds are `404` |
+| GET | `/api/v1/artifact-kind-guides` | List `{guides:[{kind, title, version, rules_version, sha256, bytes, modes}]}` |
+| GET | `/api/v1/artifact-kind-guides/{kind}` | One guide with its `modes`, `capabilities` (`supported`, `unsupported`) and `content`; aliases `design-system` and `project` resolve to `library` and `app`. Unknown and Craft kinds are `404` |
 
 ### Related families
 

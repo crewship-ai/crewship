@@ -1581,6 +1581,29 @@
             "minimum": 1,
             "type": "integer"
           },
+          "capabilities": {
+            "additionalProperties": false,
+            "description": "What the agent profile supports and, by name, what it does not. Grants nothing.",
+            "properties": {
+              "supported": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "unsupported": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "supported",
+              "unsupported"
+            ],
+            "type": "object"
+          },
           "content": {
             "description": "Markdown guide: data shapes and limits, write order, version check, conflicts, agent modes, verification and untrusted content.",
             "type": "string"
@@ -1595,6 +1618,18 @@
               "app"
             ],
             "type": "string"
+          },
+          "modes": {
+            "items": {
+              "enum": [
+                "ask",
+                "comment",
+                "propose",
+                "edit"
+              ],
+              "type": "string"
+            },
+            "type": "array"
           },
           "rules_version": {
             "description": "Semantic version of the shared rules appended to every guide.",
@@ -1620,6 +1655,8 @@
           "rules_version",
           "sha256",
           "bytes",
+          "modes",
+          "capabilities",
           "content"
         ],
         "type": "object"
@@ -1658,6 +1695,18 @@
             ],
             "type": "string"
           },
+          "modes": {
+            "items": {
+              "enum": [
+                "ask",
+                "comment",
+                "propose",
+                "edit"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
           "rules_version": {
             "description": "Semantic version of the shared rules appended to every guide.",
             "type": "string"
@@ -1681,7 +1730,8 @@
           "version",
           "rules_version",
           "sha256",
-          "bytes"
+          "bytes",
+          "modes"
         ],
         "type": "object"
       },

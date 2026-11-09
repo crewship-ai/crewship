@@ -112,3 +112,12 @@ func TestListReturnsDetachedCopies(t *testing.T) {
 		t.Fatal("List exposes the registry for mutation")
 	}
 }
+
+func TestLookupReturnsDetachedDeclarations(t *testing.T) {
+	a, _ := Lookup("app")
+	a.Modes[0] = "edit"
+	a.Capabilities.Supported[0] = "model"
+	if b, _ := Lookup("app"); b.Modes[0] != "ask" || b.Capabilities.Supported[0] == "model" {
+		t.Fatal("Lookup exposes registry slices")
+	}
+}

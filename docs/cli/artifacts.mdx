@@ -804,6 +804,22 @@ guide with the `artifact_kind_guide` tool of its sidecar. The kind comes from
 the version the sender may read; Word, Sheet, panel and board Pages carry no
 Kind line.
 
+Each guide also declares `modes` (the agent modes the kind has a path for:
+`ask`, `comment`, `propose`, `edit`) and `capabilities` with `supported` and
+`unsupported` names. A client hides an unsupported feature instead of
+imitating it; neither list grants access. Docs declare Propose for schema 4
+Documents only (`propose.schema4` supported, `propose.schema1` to
+`propose.schema3` unsupported), Design has no proposal path (`propose` is
+unsupported), and an App's scripts reach only
+`data.get`, `data.list`, `data.batch` and `viewer`: user profiles, presence,
+model calls, connectors, uploads, downloads, in-page comments and publishing
+are declared unsupported.
+
+On a Dashboard, a data write counts as Edit, not Propose: it changes what
+readers see at once, so it needs the Owner's authorization for that run. A
+code change is a Propose: a new retained version that does not move the
+shared version.
+
 ## Agent publishing policy
 
 The workspace artifact policy is the administrative ceiling for agent work on

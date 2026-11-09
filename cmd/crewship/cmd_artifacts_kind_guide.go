@@ -21,17 +21,24 @@ func newArtifactsCommand() *cobra.Command {
 }
 
 type KindGuideSummary struct {
-	Kind         string `json:"kind" yaml:"kind"`
-	Title        string `json:"title" yaml:"title"`
-	Version      string `json:"version" yaml:"version"`
-	RulesVersion string `json:"rules_version" yaml:"rules_version"`
-	SHA256       string `json:"sha256" yaml:"sha256"`
-	Bytes        int    `json:"bytes" yaml:"bytes"`
+	Kind         string   `json:"kind" yaml:"kind"`
+	Title        string   `json:"title" yaml:"title"`
+	Version      string   `json:"version" yaml:"version"`
+	RulesVersion string   `json:"rules_version" yaml:"rules_version"`
+	SHA256       string   `json:"sha256" yaml:"sha256"`
+	Bytes        int      `json:"bytes" yaml:"bytes"`
+	Modes        []string `json:"modes" yaml:"modes"`
+}
+
+type kindGuideCapabilities struct {
+	Supported   []string `json:"supported" yaml:"supported"`
+	Unsupported []string `json:"unsupported" yaml:"unsupported"`
 }
 
 type kindGuide struct {
 	KindGuideSummary `json:",inline" yaml:",inline"`
-	Content          string `json:"content" yaml:"content"`
+	Capabilities     kindGuideCapabilities `json:"capabilities" yaml:"capabilities"`
+	Content          string                `json:"content" yaml:"content"`
 }
 
 func newArtifactsKindGuideCommand() *cobra.Command {
@@ -70,9 +77,9 @@ verification rule agents follow for that kind. Agents receive the same text.`,
 				}
 				rows := make([][]string, 0, len(body.Guides))
 				for _, g := range body.Guides {
-					rows = append(rows, []string{g.Kind, g.Title, g.Version, g.RulesVersion, g.SHA256[:min(12, len(g.SHA256))]})
+					rows = append(rows, []string{g.Kind, g.Title, g.Version, g.RulesVersion, strings.Join(g.Modes, ","), g.SHA256[:min(12, len(g.SHA256))]})
 				}
-				return formatter.Auto(body, []string{"KIND", "TITLE", "VERSION", "RULES", "SHA256"}, rows)
+				return formatter.Auto(body, []string{"KIND", "TITLE", "VERSION", "RULES", "MODES", "SHA256"}, rows)
 			}
 			kind := strings.TrimSpace(args[0])
 			if kind == "" {
@@ -90,7 +97,8 @@ verification rule agents follow for that kind. Agents receive the same text.`,
 				return err
 			}
 			return formatter.AutoHuman(g, func() {
-				fmt.Fprintf(formatter.Writer, "%s guide %s (rules %s, sha256 %s)\n\n", g.Title, g.Version, g.RulesVersion, g.SHA256)
+				fmt.Fprintf(formatter.Writer, "%s guide %s (rules %s, sha256 %s)\n", g.Title, g.Version, g.RulesVersion, g.SHA256)
+				fmt.Fprintf(formatter.Writer, "Modes: %s\nSupported: %s\nUnsupported: %s\n\n", strings.Join(g.Modes, ", "), strings.Join(g.Capabilities.Supported, ", "), strings.Join(g.Capabilities.Unsupported, ", "))
 				fmt.Fprint(formatter.Writer, g.Content)
 			})
 		},
