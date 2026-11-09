@@ -32,4 +32,24 @@ describe("ArtifactDesignSystemPreview", () => {
     expect(screen.getByRole("alert").textContent).toContain("invalid")
     expect(document.querySelector("[data-token]")).toBeNull()
   })
+
+  it("shows every theme's value, usage notes and type groups of a schema 2 file", () => {
+    const { container } = render(<ArtifactDesignSystemPreview title="Preview" files={[{ path: "design-system.json", content: JSON.stringify({
+      schema_version: 2, name: "Harbor", themes: [{ id: "light", name: "Light" }, { id: "dark", name: "Dark" }],
+      colors: { surface: { value: { light: "#F4F1EA", dark: "#0B1726" }, usage: "Page background." }, text: { value: { light: "#000000", dark: "{surface}" } } },
+      typography: { body: { size: 15, group: "Text" } }, spacing: {}, radii: {},
+    }) }]} />)
+    expect(screen.getByText("Themes: Light (default), Dark")).toBeTruthy()
+    const surface = container.querySelector('[data-token="color.surface"]') as HTMLElement
+    expect(surface.textContent).toContain("Light #f4f1ea")
+    expect(surface.textContent).toContain("Dark #0b1726")
+    expect(surface.textContent).toContain("Page background.")
+    expect((container.querySelector('[data-token="color.text"]') as HTMLElement).textContent).toContain("Dark #0b1726 {surface}")
+    expect((container.querySelector('[data-token="typography.body"]') as HTMLElement).textContent).toContain("Text")
+  })
+
+  it("names a newer format instead of calling the file invalid", () => {
+    render(<ArtifactDesignSystemPreview files={[{ path: "design-system.json", content: '{"schema_version":3}' }]} title="Preview" />)
+    expect(screen.getByRole("alert").textContent).toBe("This Design System uses format version 3, which this version of Crewship cannot show. The file is unchanged.")
+  })
 })

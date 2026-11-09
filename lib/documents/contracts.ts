@@ -14,6 +14,8 @@ export interface DocumentState {
   content: DocumentNode
   outline: {id: string; type: string; parent: string | null; hash: string; text: string}[]
   can_write: boolean; can_comment: boolean; can_resolve: boolean
+  /** The server serves agent proposals and their review on this Doc (schema 4; not for restricted members). */
+  proposals?: boolean
 }
 export interface MutationAttempt { id: string; epoch: string; schema: number; baselineRev: number }
 export interface MutationReceipt { id: string; epoch: string; rev: number; schema?: number }

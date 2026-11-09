@@ -3,13 +3,14 @@ import { Plugin, PluginKey } from "@tiptap/pm/state"
 import { Decoration, DecorationSet } from "@tiptap/pm/view"
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model"
 import { documentSchema } from "@/lib/documents/schema"
+import { CodeHighlight, codeBlockView } from "./document-code-blocks"
 
 /**
  * The browser side of the closed document schemas. Every node and mark comes
  * from the shared engine definitions (`extensionsFor`), so the editor can
  * never produce content the engine refuses; this only adds editing behaviour
- * the engine has no use for: a clickable checklist box, keyboard shortcuts and
- * comment highlights.
+ * the engine has no use for: a clickable checklist box, keyboard shortcuts,
+ * code block chrome and syntax colours, and comment highlights.
  */
 
 const BASE_BLOCKS = ["paragraph", "heading", "bulletList", "orderedList", "listItem", "table", "tableRow", "tableCell", "tableHeader"]
@@ -33,8 +34,9 @@ export function documentEditorExtensions(schema: number | undefined): AnyExtensi
   if (!isRichSchema(schema)) return []
   const names = RICH_NAMES[schema as number]
   const own = (documentSchema.extensionsFor(schema) as AnyExtension[]).filter(extension => names.includes(extension.name))
-    .map(extension => extension.name === "taskItem" ? interactiveTaskItem(extension) : extension)
-  return isFormattedSchema(schema) ? [...own, FormatShortcuts] : own
+    .map(extension => extension.name === "taskItem" ? interactiveTaskItem(extension)
+      : extension.name === "codeBlock" ? codeBlockView(extension, { languages: isFormattedSchema(schema) }) : extension)
+  return isFormattedSchema(schema) ? [...own, FormatShortcuts, CodeHighlight] : own
 }
 
 const FormatShortcuts = Extension.create({
