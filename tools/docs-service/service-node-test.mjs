@@ -1304,5 +1304,8 @@ test('schema6: schema 4 and schema 5 history restored on a Canvas document is co
       for (const [from, to] of [[6, 5], [5, 4], [7, 7], [5, 7]]) assert.throws(() => upgradeContent(probe, from, to), /unsupported schema conversion/);
       assert.ok(upgradeContent(probe, 5, 6));
     } finally { probe.destroy(); }
+    // Schema 1 and 2 history (one content format) converts the same way.
+    const legacy = create(initialJSON());
+    try { assert.ok(upgradeContent(legacy, 1, 6)); assert.ok(upgradeContent(legacy, 2, 5)); } finally { legacy.destroy(); }
   } finally { await f.close(); }
 });

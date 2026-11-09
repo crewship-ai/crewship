@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { createMentionNames, mentionLabel } from "../mention-names"
+import { REFRESH_MS, createMentionNames, mentionLabel } from "../mention-names"
 
 afterEach(() => { vi.useRealTimers() })
 
@@ -62,5 +62,57 @@ describe("mention names", () => {
     refused.want(["ada"])
     await vi.advanceTimersByTimeAsync(0)
     expect(mentionLabel(refused, "ada")).toBe("@Unknown member")
+  })
+
+  it("retries a network or server failure with backoff, and gives up after a few attempts", async () => {
+    vi.useFakeTimers()
+    const calls: string[] = []
+    const codes = [503, 599]
+    const names = createMentionNames("ws", "p", vi.fn(async (url: string) => {
+      const code = codes.shift() ?? 200
+      if (code === 599) { calls.push(url); throw new TypeError("offline") }
+      return people({ ada: "Ada" }, calls, () => code)(url)
+    }))
+    names.want(["ada"])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(calls).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(2000)
+    expect(calls).toHaveLength(2)
+    expect(mentionLabel(names, "ada")).toBe("@Unknown member")
+    await vi.advanceTimersByTimeAsync(4000)
+    expect(calls).toHaveLength(3)
+    expect(mentionLabel(names, "ada")).toBe("@Ada")
+    const broken: string[] = []
+    const down = createMentionNames("ws", "p", people({ ada: "Ada" }, broken, () => 500))
+    down.want(["ada"])
+    await vi.advanceTimersByTimeAsync(10 * 60_000)
+    expect(broken).toHaveLength(5)
+    expect(mentionLabel(down, "ada")).toBe("@Unknown member")
+  })
+
+  it("asks again while names are shown, so a reader who lost access stops being named; dispose stops asking", async () => {
+    vi.useFakeTimers()
+    const calls: string[] = []
+    const readers: Record<string, string> = { ada: "Ada" }
+    const names = createMentionNames("ws", "p", people(readers, calls))
+    const stop = names.subscribe(() => {})
+    names.want(["ada"])
+    await vi.advanceTimersByTimeAsync(0)
+    expect(mentionLabel(names, "ada")).toBe("@Ada")
+    delete readers.ada
+    await vi.advanceTimersByTimeAsync(REFRESH_MS - 1)
+    expect(calls).toHaveLength(1)
+    await vi.advanceTimersByTimeAsync(10)
+    expect(calls).toHaveLength(2)
+    expect(mentionLabel(names, "ada")).toBe("@Unknown member")
+    stop()
+    await vi.advanceTimersByTimeAsync(3 * REFRESH_MS)
+    expect(calls).toHaveLength(2)
+    // A session that ended sends nothing it had queued.
+    const ended: string[] = []
+    const closed = createMentionNames("ws", "p", people({}, ended))
+    closed.want(["ada"]); closed.dispose()
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(ended).toHaveLength(0)
   })
 })

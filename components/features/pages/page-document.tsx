@@ -111,6 +111,7 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
   const proposalClient = useMemo(() => createHttpProposalClient(workspaceId, pageId), [workspaceId, pageId])
   // One reader-scoped mention lookup for every surface of this session (the Page editor and the Canvas).
   const mentions = useMemo(() => createMentionNames(workspaceId, pageId), [workspaceId, pageId])
+  useEffect(() => () => mentions.dispose(), [mentions])
   const hasLocalDraft = sync.pending > 0 || sync.recovery
   const downloadDraft = () => downloadText(`${slug}-draft.json`, JSON.stringify(editor?.getJSON(), null, 2))
   const localVersion = useRef(0), restoreVersion = useRef(0)

@@ -319,9 +319,9 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
           if (checkpoint.schema !== undefined && !supportedSchema(checkpoint.schema)) throw fault(409, 'unsupported checkpoint schema');
           restored = restoredSchema(state.schema, checkpoint.schema??VERSION); doc.destroy(); doc = load(checkpoint.snapshot);
           // Older history restored onto a schema 5 or 6 Document goes through the
-          // same explicit conversion as Enable Canvas, and is then checked as content
-          // of the schema it now has (#5149).
-          resultVersion = contentSchema(restored); upgradeContent(doc, checkpoint.schema??VERSION, resultVersion); break;
+          // same explicit conversion as Enable Canvas (#5149). Same-schema history needs
+          // none; the checks below (with the Canvas quota mapping) cover both.
+          resultVersion = contentSchema(restored); if (resultVersion !== contentSchema(checkpoint.schema??VERSION)) upgradeContent(doc, checkpoint.schema??VERSION, resultVersion); break;
         }
         case 'checkpoint':
           if (request.ifRev !== state.rev) throw fault(409, 'checkpoint precondition conflict');

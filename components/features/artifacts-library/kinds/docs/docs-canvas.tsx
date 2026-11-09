@@ -94,11 +94,20 @@ function runsOf(node: Y.XmlElement | Y.XmlText): TextRun[] {
 }
 
 /** A card shows the Page block's formatting with the same palette as the Page editor; links are not followable on the canvas. */
+const noSubscription = () => () => {}
+/** Re-renders when the shared mention lookup answers. */
+function useMentionVersion(mentions?: MentionNames) {
+  return React.useSyncExternalStore(mentions ? mentions.subscribe : noSubscription, () => mentions?.version() ?? 0, () => 0)
+}
+/** The card's accessible name: its text with dates and mentions as they are shown. */
+export function runsLabel(runs: TextRun[], mentions?: MentionNames) {
+  return runs.map(run => run.atom?.kind === "date" ? run.atom.value : run.atom?.kind === "mention" ? mentionLabel(mentions, run.atom.userId) : run.text).join("")
+}
+
 function FormattedRuns({ runs, mentions }: { runs: TextRun[]; mentions?: MentionNames }) {
-  const ids = runs.flatMap(run => run.atom?.kind === "mention" ? [run.atom.userId] : []).join(",")
-  React.useEffect(() => { if (ids) mentions?.want(ids.split(",")) }, [mentions, ids])
-  const none = React.useCallback(() => () => {}, [])
-  React.useSyncExternalStore(mentions ? mentions.subscribe : none, () => mentions?.version() ?? 0, () => 0)
+  const key = JSON.stringify(runs.flatMap(run => run.atom?.kind === "mention" ? [run.atom.userId] : []))
+  React.useEffect(() => { const ids = JSON.parse(key) as string[]; if (ids.length) mentions?.want(ids) }, [mentions, key])
+  useMentionVersion(mentions)
   return <>{runs.map((run, index) => {
     // Atoms are read-only chips, like on the Page: the date as its ISO day, a mention by the Page's reader-scoped rule.
     if (run.atom?.kind === "date") return <time key={index} data-date={run.atom.value} dateTime={run.atom.value} className="rounded-sm bg-muted px-1">{run.atom.value}</time>
@@ -193,6 +202,8 @@ const handleClass: Record<string, string> = {
 
 export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOpenComments, mentions }: DocsCanvasProps) {
   const { view: surface, blocks, error } = useSurface(doc)
+  // Card names include mentions, so the cards follow the shared lookup too.
+  useMentionVersion(mentions)
   const ref = React.useRef<HTMLDivElement>(null)
   const [viewport, setViewport] = React.useState<Viewport>({ x: -48, y: -48, scale: 1 })
   const [selected, setSelected] = React.useState<string | null>(null)
@@ -390,7 +401,7 @@ export function DocsCanvas({ doc, editable, origin, onOpenInPage, comments, onOp
         {placements.map(p => {
           const block = byId.get(p.id), r = shown(p)
           if (!block) return null
-          return <div key={p.id} role="group" aria-label={block.text || "Empty block"} data-placement={p.id} data-selected={selected === p.id ? "true" : undefined}
+          return <div key={p.id} role="group" aria-label={runsLabel(block.runs, mentions).trim() ? runsLabel(block.runs, mentions) : "Empty block"} data-placement={p.id} data-selected={selected === p.id ? "true" : undefined}
             tabIndex={0} onFocus={() => setSelected(p.id)}
             onPointerDown={e => onPointerDown(e, { id: p.id })} onDoubleClick={() => onOpenInPage?.(p.id)}
             className={cn("absolute overflow-hidden rounded-md border bg-card p-3 text-sm shadow-sm outline-none", editable ? "cursor-grab" : "cursor-default",

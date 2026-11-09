@@ -46,6 +46,8 @@ describe("mentions on the Page and the Canvas", () => {
     await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); await new Promise(resolve => setTimeout(resolve, 0)) })
     expect(labels(page)).toEqual([["ada", "@Ada Lovelace"], ["cid", "@Unknown member"]])
     expect(labels(canvasCard)).toEqual(labels(page))
+    // The card's accessible name reads the mentions the same way.
+    expect(canvasCard.getAttribute("aria-label")).toBe("Ask @Ada Lovelace and @Unknown member")
     // One request for both surfaces, never the workspace member list.
     expect(fetcher.mock.calls.map(call => call[0])).toEqual(["/api/v1/pages/%40page-1/document/people?ids=ada%2Ccid&workspace_id=ws"])
     // The name is display only: the stored content and its HTML keep just the id.
