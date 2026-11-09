@@ -252,6 +252,55 @@ describe.skipIf(!ready)("Design canvas viewport in Chromium", () => {
   await page.context().close()
  }, 60_000)
 
+ it("resizes the selected layer from a handle, nudges it with arrows and deletes it with Delete (V04)", async () => {
+  const page = await open()
+  type Box = { id: string; x: number; y: number; width: number; height: number }
+  const node = async () => (JSON.parse(await nodes(page)) as Box[]).find(item => item.id === "cta")
+  const { scale } = await viewOf(page)
+  let box = await cta(page)
+  await page.mouse.click(box.x + 20, box.y + 20)
+  const handle = page.locator('[data-design-handle="se"]')
+  await expect.poll(() => handle.count()).toBe(1)
+  // Drag the bottom-right handle: the top-left corner stays, the size grows.
+  const start = (await node())!
+  let grip = (await handle.boundingBox())!
+  await drag(page, { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 }, { x: 50, y: 30 })
+  const grown = (await node())!
+  expect([grown.x, grown.y, grown.width, grown.height]).toEqual([start.x, start.y, Math.round(start.width + 50 / scale), Math.round(start.height + 30 / scale)])
+  // The top-left handle keeps the bottom-right corner.
+  grip = (await page.locator('[data-design-handle="nw"]').boundingBox())!
+  await drag(page, { x: grip.x + grip.width / 2, y: grip.y + grip.height / 2 }, { x: 20, y: 10 })
+  const shrunk = (await node())!
+  expect(shrunk.x + shrunk.width).toBe(grown.x + grown.width)
+  expect(shrunk.y + shrunk.height).toBe(grown.y + grown.height)
+  // Escape and pointercancel during a resize put the box back.
+  for (const interrupt of ["Escape", "pointercancel"] as const) {
+   grip = (await handle.boundingBox())!
+   await page.mouse.move(grip.x + grip.width / 2, grip.y + grip.height / 2)
+   await page.mouse.down()
+   await page.mouse.move(grip.x + 120, grip.y + 90, { steps: 4 })
+   expect((await node())!.width).not.toBe(shrunk.width)
+   if (interrupt === "Escape") await page.keyboard.press("Escape")
+   else await page.getByLabel("Design canvas viewport").dispatchEvent("pointercancel", { pointerId: 1, pointerType: "mouse", bubbles: true })
+   await page.mouse.up()
+   expect(await node()).toEqual(shrunk)
+  }
+  // Escape cleared nothing else: select again, then nudge by 1 and, with Shift, by 10.
+  box = await cta(page)
+  await page.mouse.click(box.x + 20, box.y + 20)
+  const view = await viewOf(page)
+  await page.keyboard.press("ArrowRight")
+  await page.keyboard.press("Shift+ArrowDown")
+  expect(await node()).toMatchObject({ x: shrunk.x + 1, y: shrunk.y + 10 })
+  expect(await viewOf(page), "arrows move the layer, not the view, while one is selected").toEqual(view)
+  await page.keyboard.press("Delete")
+  expect(await node()).toBeUndefined()
+  // Nothing selected: arrows pan again.
+  await page.keyboard.press("ArrowLeft")
+  expect((await viewOf(page)).x).toBe(view.x + 40)
+  await page.context().close()
+ }, 60_000)
+
  it("pans with one finger on the background and pinch-zooms around the fingers on touch", async () => {
   const page = await open(true)
   const before = await nodes(page)

@@ -13,22 +13,43 @@ vi.mock("@/lib/api-fetch",async()=>{
  const actual=await vi.importActual<typeof import("@/lib/api-fetch")>("@/lib/api-fetch")
  return {...actual,apiFetch:(...args:Parameters<typeof actual.apiFetch>)=>copying.real?actual.apiFetch(...args):copying.send(...args)}
 })
-const state = vi.hoisted(() => ({ canShare: true, editable: true, doc: null as Y.Doc | null, pageId: "old-private-page", user: false, peerColor: "#2563eb", saveError: null as (Error & { status?: number }) | null, restoreError: null as (Error & { status?: number }) | null, conflicts: [] as unknown[], dismiss: vi.fn(), dirty: false, unsynced: false }))
+const state = vi.hoisted(() => ({ comments: [] as unknown[], canShare: true, editable: true, doc: null as Y.Doc | null, pageId: "old-private-page", user: false, peerColor: "#2563eb", saveError: null as (Error & { status?: number }) | null, restoreError: null as (Error & { status?: number }) | null, conflicts: [] as unknown[], dismiss: vi.fn(), dirty: false, unsynced: false }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => state.user ? { data: { user: { id: "same-user" } } } : null }))
 vi.mock("@/hooks/use-artifact-agent-dispatch", () => ({ useArtifactAgentDispatch: () => ({ ready: false, dispatch: vi.fn() }) }))
 vi.mock("../use-design", () => ({ useDesign: (_workspaceId: string, _slug: string, selectedVersion?: number) => {
  const mutation = { mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false, error: null }
  return {
   query: { data: { page_id: state.pageId, can_edit: state.editable, can_share: state.canShare, can_comment: state.editable, latest_version: 1, comments: [] }, isError: false },
-  comments: { data: { comments: [] }, isError: false },
+  comments: { data: { comments: state.comments }, isError: false },
   versions: { data: { versions: [{ version: 1 }], shared_version: 1 }, isError: false },
   doc: state.doc, nodes: designNodes(state.doc!), peers: [{ clientId: 2, name: "Marie", color: state.peerColor, cursor: { x: 12, y: 24 } }], connection: "connected", editable: state.editable && !selectedVersion, dirty: state.dirty, unsynced: state.unsynced, draftError: false,
   save: { ...mutation, error: state.saveError }, restore: { ...mutation, error: state.restoreError }, share: mutation, comment: mutation, connectAgent: mutation, setCursor: vi.fn(), conflicts: state.conflicts, dismissConflict: state.dismiss,
  }
 } }))
-beforeEach(() => { copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.canShare = true; state.pageId = "old-private-page"; state.user = false; state.peerColor = "#2563eb"; state.conflicts = []; state.dismiss.mockReset(); state.dirty = false; state.unsynced = false; state.saveError = null; state.restoreError = null; state.doc = new Y.Doc() })
+beforeEach(() => { state.comments = []; copying.real=false;copying.send.mockReset(); vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true"); state.editable = true; state.canShare = true; state.pageId = "old-private-page"; state.user = false; state.peerColor = "#2563eb"; state.conflicts = []; state.dismiss.mockReset(); state.dirty = false; state.unsynced = false; state.saveError = null; state.restoreError = null; state.doc = new Y.Doc() })
 afterEach(() => { cleanup(); state.doc?.destroy(); vi.unstubAllEnvs();vi.unstubAllGlobals() })
 describe("Design editor controls", () => {
+ it("changes layer order from Properties and says when a comment's layer is gone (V05)", () => {
+  upsertDesignNode(state.doc!, { id: "s", type: "frame", name: "Screen", x: 0, y: 0, width: 360, height: 640, fill: "#ffffff" })
+  upsertDesignNode(state.doc!, { id: "back", type: "rect", name: "Back", parentId: "s", x: 0, y: 0, width: 10, height: 10, fill: "#000000" })
+  upsertDesignNode(state.doc!, { id: "front", type: "rect", name: "Front", parentId: "s", x: 0, y: 0, width: 10, height: 10, fill: "#000000" })
+  state.comments = [
+   { id: "c1", version: 1, path: "design.json", selector: "front", quote: "Front", text: "Fine" },
+   { id: "c2", version: 1, path: "design.json", selector: "gone", quote: "Old button", text: "Make it larger" },
+  ]
+  const { container } = render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  const drawn = () => [...container.querySelectorAll("g[data-design-node]")].map(node => node.getAttribute("data-design-node"))
+  expect(drawn()).toEqual(["s", "back", "front"])
+  fireEvent.click(within(screen.getByLabelText("Layers")).getByRole("button", { name: "Back" }))
+  const orderGroup = screen.getByRole("group", { name: "Layer order" })
+  const stored = () => designNodes(state.doc!).map(node => node.id)
+  fireEvent.click(within(orderGroup).getByRole("button", { name: "Bring to front" }))
+  expect(stored()).toEqual(["s", "front", "back"])
+  fireEvent.click(within(orderGroup).getByRole("button", { name: "Send backward" }))
+  expect(stored()).toEqual(["s", "back", "front"])
+  expect(screen.getAllByText(/This layer is no longer on the canvas/)).toHaveLength(1)
+  expect(screen.getByText(/This layer is no longer on the canvas/).closest("article")).toHaveTextContent("Make it larger")
+ })
  it("offers Export HTML only with its flag, for the saved version, to editors and readers", () => {
   const view = render(<DesignEditor workspaceId="workspace" slug="shop" />)
   expect(screen.queryByRole("button", { name: /Export HTML/ })).not.toBeInTheDocument()

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react"
 import dynamic from "next/dynamic"
-import { ChevronDown, ChevronLeft, ChevronRight, Download, Frame, ImagePlus, Info, Layers, MessageSquare, MousePointer2, Play, Plus, Save, Scan, SlidersHorizontal, Square, Trash2, Type, ZoomIn, ZoomOut } from "lucide-react"
+import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronLeft, ChevronRight, Download, Frame, ImagePlus, Info, Layers, MessageSquare, MousePointer2, Play, Plus, Save, Scan, SlidersHorizontal, Square, Trash2, Type, ZoomIn, ZoomOut } from "lucide-react"
 import * as Y from "yjs"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
@@ -19,11 +19,11 @@ import { cn } from "@/lib/utils"
 import type { DesignConnection, DesignPeer } from "./design-provider"
 import { useDesign } from "./use-design"
 import { readablePeerFill } from "./peer-colors"
-import { designLinkTarget, designScreenOf, removeDesignNode, restoreDesignConflict, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignConflict, type DesignNode, type DesignNodeType } from "./design-document"
+import { designLinkTarget, designScreenOf, removeDesignNode, reorderDesignNode, restoreDesignConflict, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignConflict, type DesignNode, type DesignNodeType, type DesignOrderMove } from "./design-document"
 import { DesignNodeShape } from "./design-node-shape"
 import { DesignPrototypePlayer } from "./design-prototype-player"
 import { DesignExportButton } from "./design-export-button"
-import { DRAG_THRESHOLD, fitView, focusView, panBy, pinchOf, pinchView, pressIntent, toCanvas, toScreen, typingTarget, wheelGesture, zoomAround, type DesignView, type Point } from "./design-viewport"
+import { DRAG_THRESHOLD, fitView, focusView, panBy, pinchOf, pinchView, pressIntent, resizeBox, RESIZE_HANDLES, toCanvas, toScreen, typingTarget, wheelGesture, zoomAround, type DesignBox, type DesignView, type Point, type ResizeHandle } from "./design-viewport"
 
 function encodedDesignState(doc: Y.Doc,maxBytes=Infinity) {
  const state=Y.encodeStateAsUpdate(doc)
@@ -124,6 +124,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const patch = (values: Partial<DesignNode>) => {
   if (selected && design.doc && canChange) upsertDesignNode(design.doc, { id: selected.id, ...values })
  }
+ const order = (move: DesignOrderMove) => { if (selected && design.doc && canChange) reorderDesignNode(design.doc, selected.id, move) }
  const add = (type: DesignNodeType) => {
   if (!design.doc || !canChange) return
   const id = crypto.randomUUID()
@@ -197,6 +198,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  type Gesture =
   | { kind: "pan"; pointerId: number; start: Point; view: DesignView; moved: boolean; tapNode?: string; touch: boolean; button: number }
   | { kind: "move"; pointerId: number; start: Point; id: string; x: number; y: number; moved: boolean; touch: boolean }
+  | { kind: "resize"; pointerId: number; start: Point; id: string; handle: ResizeHandle; box: DesignBox; moved: boolean; touch: boolean }
   | { kind: "pinch"; ids: [number, number]; view: DesignView; from: ReturnType<typeof pinchOf> }
   // Fingers still down after a pinch ended or was cancelled start nothing until all are up.
   | { kind: "spent" }
@@ -215,6 +217,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   setPanning(false)
   if (!current || current.kind === "spent") return false
   if (current.kind === "move" && current.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, x: current.x, y: current.y })
+  if (current.kind === "resize" && current.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, ...current.box })
   if (current.kind === "pan" || current.kind === "pinch") setView(current.view)
   return true
  }
@@ -243,6 +246,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     // A second finger turns whatever the first one started into a pinch from the current view.
     const started = gesture.current
     if (started?.kind === "move" && started.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: started.id, x: started.x, y: started.y })
+    if (started?.kind === "resize" && started.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: started.id, ...started.box })
     const ids = [...touches.current.keys()].slice(-2) as [number, number]
     gesture.current = { kind: "pinch", ids, view, from: pinchOf(touches.current.get(ids[0])!, touches.current.get(ids[1])!) }
     setPanning(true)
@@ -250,6 +254,13 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
    }
   }
   if (gesture.current) return
+  const handle = (event.target as Element | null)?.closest?.("[data-design-handle]")?.getAttribute("data-design-handle") as ResizeHandle | null | undefined
+  if (handle && event.button === 0 && !spaceHeld.current && canChange && selected && (event.pointerType !== "touch" || event.isPrimary)) {
+   gesture.current = { kind: "resize", pointerId: event.pointerId, start: at, id: selected.id, handle, box: { x: Number(selected.x) || 0, y: Number(selected.y) || 0, width: Math.max(1, Number(selected.width) || 1), height: Math.max(1, Number(selected.height) || 1) }, moved: false, touch: event.pointerType === "touch" }
+   viewport.current?.focus({ preventScroll: true })
+   capture(event)
+   return
+  }
   const nodeId = (event.target as Element | null)?.closest?.("[data-design-node]")?.getAttribute("data-design-node")
   const node = nodeId ? design.nodes.find(item => item.id === nodeId) : undefined
   const intent = pressIntent({ button: event.button, pointerType: event.pointerType, space: spaceHeld.current, onNode: Boolean(node), canMove: canChange })
@@ -282,6 +293,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   if (!current.moved && placed.fit) setView(view) // a drag holds the view still, even if the fitted area changes
   current.moved = true
   if (current.kind === "pan") setView(panBy(current.view, dx, dy))
+  else if (current.kind === "resize") { if (design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, ...resizeBox(current.box, current.handle, dx / scale, dy / scale) }) }
   else if (design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, x: Math.round(current.x + dx / scale), y: Math.round(current.y + dy / scale) })
  }
  const pressUp = (event: PointerEvent<HTMLDivElement>) => {
@@ -312,6 +324,15 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const viewKey = (event: ReactKeyboardEvent<HTMLDivElement>) => {
   if (typingTarget(event.target)) return
   if (event.key === "Escape") { if (!cancelGesture()) setSelectedId(null); event.preventDefault(); return }
+  // With a layer selected, arrows nudge it (Shift: by 10), Delete removes it and
+  // [ ] change its order (with Ctrl/⌘: to the back or front).
+  if (selected && canChange && design.doc && !gesture.current) {
+   const nudge: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
+   const by = event.shiftKey ? 10 : 1
+   if (nudge[event.key] && !event.altKey && !event.ctrlKey && !event.metaKey) { upsertDesignNode(design.doc, { id: selected.id, x: (Number(selected.x) || 0) + nudge[event.key][0] * by, y: (Number(selected.y) || 0) + nudge[event.key][1] * by }); event.preventDefault(); return }
+   if (event.key === "Delete" || event.key === "Backspace") { removeDesignNode(design.doc, selected.id); setSelectedId(null); event.preventDefault(); return }
+   if (event.key === "]" || event.key === "[") { order(event.key === "]" ? (event.ctrlKey || event.metaKey ? "front" : "forward") : (event.ctrlKey || event.metaKey ? "back" : "backward")); event.preventDefault(); return }
+  }
   const pan: Record<string, [number, number]> = { ArrowLeft: [40, 0], ArrowRight: [-40, 0], ArrowUp: [0, 40], ArrowDown: [0, -40] }
   if (pan[event.key]) { setView(panBy(view, ...pan[event.key])); event.preventDefault() }
   else if (event.key === "+" || event.key === "=") { step(1); event.preventDefault() }
@@ -490,6 +511,11 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     {node.type === "frame" && <text x="0" y="-10" fontSize={12 / Math.min(1, scale)} fill="currentColor" className="text-muted-foreground">{node.name || "Screen"}</text>}
     <DesignNodeShape node={node} width={w} height={h} />
     {selectedId === node.id && <rect width={w} height={h} fill="none" stroke="#2563eb" strokeWidth={2 / scale} pointerEvents="none" />}
+    {selectedId === node.id && canChange && RESIZE_HANDLES.map(handle => {
+     const size = (phone ? 14 : 9) / scale
+     const hx = handle.includes("w") ? 0 : handle.includes("e") ? w : w / 2, hy = handle.includes("n") ? 0 : handle.includes("s") ? h : h / 2
+     return <rect key={handle} data-design-handle={handle} aria-hidden x={hx - size / 2} y={hy - size / 2} width={size} height={size} fill="white" stroke="#3b82f6" strokeWidth={1.5 / scale} style={{ cursor: `${handle}-resize` }} />
+    })}
    </g>
   })}
   {design.peers.filter(peer => peer.cursor).map(peer => <g key={peer.clientId} transform={`translate(${peer.cursor!.x},${peer.cursor!.y})${scale === 1 ? "" : ` scale(${1 / scale})`}`} pointerEvents="none" aria-label={`${peer.name} cursor`}><path d="M0 0 L0 20 L5 15 L9 24 L13 22 L9 13 L17 13 Z" fill={peer.color} stroke="white" /><rect x="16" y="18" width={Math.min(160, peer.name.length * 7 + 16)} height="22" rx="4" fill={readablePeerFill(peer.color)} /><text x="24" y="33" fontSize="12" fill="white">{peer.name.slice(0, 22)}</text></g>)}
@@ -497,7 +523,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  // Right, middle or Space + left drag pans; Ctrl/Cmd + wheel or a pinch zooms around the pointer.
  // The browser menu is held back only here, so a right-drag ends without one.
  const viewportView = (className: string) => <div ref={attachViewport} role="group" tabIndex={0} aria-label="Design canvas viewport"
-  aria-keyshortcuts="Escape + - Shift+1 Shift+0 ArrowLeft ArrowRight ArrowUp ArrowDown"
+  aria-keyshortcuts="Escape + - Shift+1 Shift+0 ArrowLeft ArrowRight ArrowUp ArrowDown Delete Backspace [ ]"
   data-design-view={`${Math.round(scale * 10000) / 10000} ${Math.round(view.x * 100) / 100} ${Math.round(view.y * 100) / 100}`}
   className={cn("relative min-h-0 flex-1 touch-none select-none overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset", panning ? "cursor-grabbing" : space && "cursor-grab", className)}
   onPointerDown={pressDown} onPointerMove={pressMove} onPointerUp={pressUp} onPointerCancel={pressCancel} onLostPointerCapture={event => { if (event.pointerType === "touch" && touches.current.has(event.pointerId)) pressUp(event) }}
@@ -526,6 +552,12 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     const link = designLinkTarget(design.nodes, selected)
     return <Field label="Link to screen"><select aria-label="Link to screen" className="h-9 w-full rounded border bg-background px-2 text-sm coarse:h-[44px]" value={link.kind === "none" ? "" : link.kind === "screen" ? link.screen.id : link.target} disabled={!canChange} onChange={event => setLink(event.target.value)}><option value="">No link</option>{frames.map(frame => <option key={frame.id} value={frame.id}>{frame.name || "Screen"}</option>)}{link.kind === "missing" && <option value={link.target} disabled>Deleted screen</option>}</select>{link.kind === "missing" && <p className="mt-1 text-xs text-warn">The linked screen was deleted. In Play this layer does nothing{canChange ? "; choose another screen or No link." : "."}</p>}{link.kind !== "missing" && <p className="mt-1 text-xs text-muted-foreground">In Play, clicking this layer opens the screen.</p>}</Field>
    })()}
+   <Field label="Order"><div className="grid grid-cols-4 gap-1" role="group" aria-label="Layer order">
+    <Button variant="outline" size="sm" aria-label="Send to back" title="Send to back (Ctrl+[)" disabled={!canChange} onClick={() => order("back")}><ArrowDownToLine className="size-4" /></Button>
+    <Button variant="outline" size="sm" aria-label="Send backward" title="Send backward ([)" disabled={!canChange} onClick={() => order("backward")}><ChevronDown className="size-4" /></Button>
+    <Button variant="outline" size="sm" aria-label="Bring forward" title="Bring forward (])" disabled={!canChange} onClick={() => order("forward")}><ChevronDown className="size-4 rotate-180" /></Button>
+    <Button variant="outline" size="sm" aria-label="Bring to front" title="Bring to front (Ctrl+])" disabled={!canChange} onClick={() => order("front")}><ArrowUpToLine className="size-4" /></Button>
+   </div></Field>
    {canChange && <Button variant="ghost" className="w-full text-destructive" onClick={() => { if (design.doc) removeDesignNode(design.doc, selected.id); setSelectedId(null) }}><Trash2 className="size-4" />Delete {selected.type === "frame" ? "screen and layers" : "layer"}</Button>}
   </div> : <p className="text-sm text-muted-foreground">Select a screen or layer to see its properties.{canChange && " Add your first screen using the toolbar."}</p>}
  </>
@@ -547,7 +579,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   {data.origin && <a className="mb-3 inline-block text-xs underline" href={`/chat/${encodeURIComponent(data.origin.chat_id)}?workspace_id=${encodeURIComponent(workspaceId)}`}>Open agent chat</a>}
   {mayComment && composer("Comment for agent")}
   {(design.comments.data?.comments ?? []).map(comment => <article key={comment.id} className="mb-3 rounded border p-3 text-xs">
-   <button className="text-left text-muted-foreground" onClick={() => setSelectedId(comment.selector)}>v{comment.version} · {comment.quote || comment.selector}</button><p className="mt-2 whitespace-pre-wrap">{comment.text}</p>
+   <button className="text-left text-muted-foreground" onClick={() => setSelectedId(comment.selector)}>v{comment.version} · {comment.quote || comment.selector}</button>{comment.selector && !version && !design.nodes.some(node => node.id === comment.selector) && <p className="mt-1 text-warn">This layer is no longer on the canvas. The comment is kept; open v{comment.version} in History to see it.</p>}<p className="mt-2 whitespace-pre-wrap">{comment.text}</p>
    {comment.task_id && <p className="mt-2 text-muted-foreground">{comment.replies?.length ? `Done · v${comment.replies.at(-1)?.version}` : delivery[comment.id] ?? "Waiting for agent"}</p>}
    {comment.task_id && !comment.replies?.length && data.origin && data.can_edit && <Button size="sm" variant="ghost" disabled={!agent.ready} onClick={async () => { const accepted = await agent.dispatch(comment); setDelivery(previous => ({ ...previous, [comment.id]: accepted ? "Sent to agent" : agent.refusal?.(comment.id) === "busy" ? "Comment saved. The agent is busy; retry when it finishes." : "Comment saved. Agent delivery could not be confirmed." })) }}>Retry delivery</Button>}
    {comment.replies?.map((reply, index) => <p key={index} className="mt-2 border-t pt-2">v{reply.version}: {reply.text}</p>)}
