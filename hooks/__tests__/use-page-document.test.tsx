@@ -91,7 +91,7 @@ it("accepts the original exact-retry receipt after the authorized head advances"
 it("does not recommit an acknowledged update when its authorized refresh fails",async()=>{
  const server=model();let committed=false,readFails=true,posts=0
  fetchMock.mockImplementation((_url:string,init?:RequestInit)=>{
-  if(init?.method==="POST"){posts++;const body=JSON.parse(init.body as string);Y.applyUpdate(server,decodeUpdate(body.update));committed=true;Y.applyUpdate(server,decodeUpdate(body.update));return response({id:body.id,epoch:body.epoch,rev:5})}
+  if(init?.method==="POST"){posts++;const body=JSON.parse(init.body as string);committed=true;Y.applyUpdate(server,decodeUpdate(body.update));return response({id:body.id,epoch:body.epoch,rev:5})}
   return committed && readFails?response({error:"read unavailable"},503):response(state(server,committed?5:4))
  })
  const {result,unmount}=renderHook(()=>usePageDocument("w","slug","page"))
@@ -101,7 +101,7 @@ it("does not recommit an acknowledged update when its authorized refresh fails",
 it("retains immutable attempted bytes and Page identity while its slug changes",async()=>{
  const server=model();let fail=true;const calls:{url:string;body:string}[]=[]
  fetchMock.mockImplementation((url:string,init?:RequestInit)=>{
-  if(init?.method==="POST"){const body=JSON.parse(init.body as string);calls.push({url,body:init.body as string});if(fail)return response({error:"uncertain"},503);Y.applyUpdate(server,decodeUpdate(body.update));Y.applyUpdate(server,decodeUpdate(body.update));return response({id:body.id,epoch:body.epoch,rev:5})}
+  if(init?.method==="POST"){const body=JSON.parse(init.body as string);calls.push({url,body:init.body as string});if(fail)return response({error:"uncertain"},503);Y.applyUpdate(server,decodeUpdate(body.update));return response({id:body.id,epoch:body.epoch,rev:5})}
   return response(state(server,fail?4:5))
  })
  const {result,rerender,unmount}=renderHook(({slug})=>usePageDocument("w",slug,"page"),{initialProps:{slug:"original"}})
@@ -270,7 +270,6 @@ it("keeps confirmed edits out of replay when journal cleanup fails",async()=>{
  fetchMock.mockImplementation((_url:string,init?:RequestInit)=>{
   if(init?.method==="POST"){
    posts++;const body=JSON.parse(init.body as string)
-   Y.applyUpdate(server,decodeUpdate(body.update))
    Y.applyUpdate(server,decodeUpdate(body.update));return response({id:body.id,epoch:body.epoch,rev:5})
   }
   return response(state(server,posts?5:4))

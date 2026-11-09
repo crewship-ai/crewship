@@ -48,10 +48,12 @@ export const DocumentCaretKeeper = Extension.create({
   addProseMirrorPlugins() {
     let captured: Captured | null = null
     let binding: ProsemirrorBinding | undefined
+    let composing = () => false
     return [new Plugin({
       key,
       view: view => {
         binding = ySyncPluginKey.getState(view.state)?.binding as ProsemirrorBinding | undefined
+        composing = () => view.composing
         const doc = binding?.doc
         const before = () => {
           if (!binding || captured || binding.projectionError) return
@@ -69,7 +71,8 @@ export const DocumentCaretKeeper = Extension.create({
         return { destroy: () => { doc?.off("beforeAllTransactions", before); doc?.off("afterAllTransactions", after); captured = null } }
       },
       appendTransaction: (transactions, _old, state) => {
-        if (!binding || !captured || !(state.selection instanceof TextSelection)) return null
+        // During IME composition the binding's own selection stands: an extra transaction could abort the composition.
+        if (!binding || !captured || composing() || !(state.selection instanceof TextSelection)) return null
         const remote = transactions.some(tr => {
           const meta = tr.getMeta(ySyncPluginKey) as { isChangeOrigin?: boolean; isUndoRedoOperation?: boolean } | undefined
           return tr.docChanged && meta?.isChangeOrigin === true && !meta.isUndoRedoOperation
@@ -80,7 +83,8 @@ export const DocumentCaretKeeper = Extension.create({
         if (anchor === state.selection.anchor && head === state.selection.head) return null
         const $anchor = state.doc.resolve(anchor), $head = state.doc.resolve(head)
         if (!$anchor.parent.isTextblock || !$head.parent.isTextblock) return null
-        return state.tr.setSelection(TextSelection.between($anchor, $head)).setMeta("addToHistory", false)
+        // Marked as part of the remote change so the Yjs plugin neither treats it as a local edit nor splits the typist's undo group.
+        return state.tr.setSelection(TextSelection.between($anchor, $head)).setMeta("addToHistory", false).setMeta(ySyncPluginKey, { isChangeOrigin: true })
       },
     })]
   },

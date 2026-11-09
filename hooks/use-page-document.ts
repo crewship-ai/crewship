@@ -121,6 +121,7 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
     const stored = new Set<string>()
     // The content of the last confirmed read: "Saved" is said only while this editor shows exactly that.
     let serverText: string | undefined
+    let unconfirmedReads = 0
     let restored: DocumentDraft[] = []
     // Bounded journal: one writer loop, one pending row per draft. Edits made
     // while a write is in flight coalesce into the next write of the same draft.
@@ -337,10 +338,14 @@ export function usePageDocument(workspace: string, slug: string, pageId: string,
           recount()
         }
         if (!queue.size && next.can_write && serverText !== doc.getXmlFragment(CONTENT_FIELD).toString()) {
-          // Nothing is queued, yet the server's confirmed copy lacks what this editor holds: stop like any other
-          // unconfirmable state (no further sends built on it, read-only, the local copy offered for download).
+          // Nothing is queued, yet the server's confirmed copy lacks what this editor holds. One such read may be a
+          // shared in-flight response from before the write, so the next poll reads again; on a second one in a row
+          // stop like any other unconfirmable state (no further sends built on it, read-only, the local copy offered
+          // for download). Never Saved meanwhile.
+          if (++unconfirmedReads < 2) { setError(undefined); setStatus("Saving…"); return }
           blocked = blockedOther = true; setRecovery(true); setError(undefined); setStatus(NOT_CONFIRMED); return
         }
+        unconfirmedReads = 0
         setError(undefined); setStatus(queue.size ? "Saving…" : next.can_write ? "Saved" : "Read only")
       } catch (cause) {
         if (!active) return
