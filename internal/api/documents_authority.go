@@ -34,6 +34,10 @@ const documentEngineProtocol = 3
 
 // DocumentAuthority constructs the private authority. It is never registered
 // on r.mux. Boot fencing runs only after the caller owns its Unix listener.
+// documentExclusiveOutputTables are the other output types a Document page
+// must not carry. The document authority and the people endpoint share it.
+var documentExclusiveOutputTables = []string{"artifact_version_heads", "slides_heads", "page_boards", "page_artifacts", "gridcraft_heads", "mooring_documents", "mooring_collab_documents"}
+
 func (r *Router) DocumentAuthority(ctx context.Context, secret string) (http.Handler, error) {
 	if len(secret) < 32 {
 		return nil, errors.New("Docs service secret requires at least 32 characters")
@@ -158,7 +162,7 @@ func (h *documentAuthority) authorizeWithReadRecord(r *http.Request, k documents
 		if _, _, e := privatePageOwnershipSQL(ctx, tx, "p"); e != nil {
 			return "", errDocumentAccess
 		}
-		for _, table := range []string{"artifact_version_heads", "slides_heads", "page_boards", "page_artifacts", "gridcraft_heads", "mooring_documents", "mooring_collab_documents"} {
+		for _, table := range documentExclusiveOutputTables {
 			var installed, attached bool
 			if tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=? COLLATE NOCASE)", table).Scan(&installed) != nil {
 				return "", errDocumentAccess

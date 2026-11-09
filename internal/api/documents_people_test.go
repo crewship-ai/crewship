@@ -3,11 +3,15 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"sort"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/auth/sessions"
 )
 
 // documentPeopleFixture: an owner's Document, a member who can read it only
@@ -43,9 +47,7 @@ func documentPeopleFixture(t *testing.T, private bool) (*PageHandler, string, st
 
 func documentPeopleCall(t *testing.T, h *PageHandler, ws, caller, role, query string) (int, []documentPerson) {
 	t.Helper()
-	r := pagesRequest(t, "GET", "/api/v1/pages/people-doc/document/people?"+query, ws, caller, role, "")
-	r = r.WithContext(context.WithValue(r.Context(), ctxAuthKind, AuthKindSession))
-	r.SetPathValue("slug", "people-doc")
+	r := documentPeopleRequest(t, h, ws, caller, role, query)
 	h.documentCall = func(context.Context, string, string, string, string, any) ([]byte, int, error) {
 		t.Fatal("people must never call the document engine")
 		return nil, 0, nil
@@ -65,6 +67,21 @@ func documentPeopleCall(t *testing.T, h *PageHandler, ws, caller, role, query st
 		t.Fatalf("people body %s: %v", w.Body, err)
 	}
 	return w.Code, body.People
+}
+
+// documentPeopleRequest: a current browser session for caller.
+func documentPeopleRequest(t *testing.T, h *PageHandler, ws, caller, role, query string) *http.Request {
+	t.Helper()
+	session, err := sessions.NewDBStore(h.db).Create(t.Context(), caller, "document-people", "127.0.0.1", auth.RefreshTokenTTL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := pagesRequest(t, "GET", "/api/v1/pages/people-doc/document/people?"+query, ws, caller, role, "")
+	ctx := context.WithValue(r.Context(), ctxAuthKind, AuthKindSession)
+	ctx = context.WithValue(ctx, ctxUser, &AuthUser{ID: caller, SessionID: session.ID})
+	r = r.WithContext(ctx)
+	r.SetPathValue("slug", "people-doc")
+	return r
 }
 
 func names(people []documentPerson) []string {
@@ -115,7 +132,7 @@ func TestDocumentPeopleNamesOnlyReadersAndOnlyToReaders(t *testing.T) {
 	for i := range many {
 		many[i] = "u" + strings.Repeat("x", i%5) + string(rune('a'+i%26)) + strings.Repeat("y", i/26)
 	}
-	for _, query := range []string{"ids=bea&q=b", "ids=" + url.QueryEscape("bad id"), "ids=", "ids=" + url.QueryEscape("a,,b"), "ids=" + strings.Join(many, ","), "q=" + strings.Repeat("x", 101)} {
+	for _, query := range []string{"ids=bea&q=b", "ids=" + url.QueryEscape("bad id"), "ids=", "ids=" + url.QueryEscape("a,,b"), "ids=" + strings.Join(many, ","), "q=" + strings.Repeat("x", 101), "ids=bea&ids=cid", "q=a&q=b"} {
 		if status, _ := documentPeopleCall(t, h, ws, owner, "OWNER", query); status != 400 {
 			t.Fatalf("%s: status %d", query[:min(len(query), 30)], status)
 		}
@@ -143,7 +160,7 @@ func TestDocumentPeopleRequiresADocumentPage(t *testing.T) {
 }
 
 func TestDocumentPersonNameIsOneBoundedLine(t *testing.T) {
-	for in, want := range map[string]string{"  Ada \n Owner\t": "Ada   Owner", "\x00\x1f": "", strings.Repeat("é", 250): strings.Repeat("é", 200)} {
+	for in, want := range map[string]string{"Eve\u202egnirts": "Evegnirts", "  Ada \n Owner\t": "Ada   Owner", "\x00\x1f": "", strings.Repeat("é", 250): strings.Repeat("é", 200)} {
 		if got := documentPersonName(in); got != want {
 			t.Fatalf("%q -> %q, want %q", in, got, want)
 		}
@@ -161,5 +178,68 @@ func TestDocumentPeopleRefusesAgentCallers(t *testing.T) {
 	h.DocumentPeople(w, r)
 	if w.Code != 403 || strings.Contains(w.Body.String(), "Test User") {
 		t.Fatalf("agent caller: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestDocumentPeopleRequiresTheCurrentCredentialAndReadScope(t *testing.T) {
+	for _, change := range []string{"session-revoked", "cli-read", "cli-narrowed", "cli-revoked"} {
+		t.Run(change, func(t *testing.T) {
+			h, ws, owner := documentPeopleFixture(t, false)
+			r := documentPeopleRequest(t, h, ws, owner, "OWNER", "q=")
+			want := 401
+			switch change {
+			case "session-revoked":
+				execOrFatal(t, h.db, `UPDATE user_sessions SET revoked_at='2026-01-01T00:00:00Z'`)
+			default:
+				const token = "crewship_cli_document_people_test"
+				execOrFatal(t, h.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier,scopes) VALUES('people-cli',?,'people',?,'STANDARD','["pages:read"]')`, owner, hashStandard(token))
+				r.Header.Set("Authorization", "Bearer "+token)
+				r = r.WithContext(context.WithValue(r.Context(), ctxAuthKind, AuthKindCLIToken))
+				switch change {
+				case "cli-read":
+					want = 200
+				case "cli-narrowed":
+					execOrFatal(t, h.db, `UPDATE cli_tokens SET scopes='["crews:write"]' WHERE id='people-cli'`)
+					want = 403
+				case "cli-revoked":
+					execOrFatal(t, h.db, `UPDATE cli_tokens SET revoked_at='2026-01-01T00:00:00Z' WHERE id='people-cli'`)
+				}
+			}
+			w := httptest.NewRecorder()
+			h.DocumentPeople(w, r)
+			if w.Code != want || (want != 200 && strings.Contains(w.Body.String(), "Bea Member")) {
+				t.Fatalf("%s: %d %s", change, w.Code, w.Body)
+			}
+		})
+	}
+}
+
+func TestDocumentPeopleRefusesAPageTheDocumentReadRefuses(t *testing.T) {
+	h, ws, owner := documentPeopleFixture(t, false)
+	execOrFatal(t, h.db, `INSERT INTO page_panels(id,page_id,panel_id,schema,producer_kind,producer_ref,sla_seconds) VALUES('people-panel','people-page','sensor','status.v1','script','script/watch.sh',60)`)
+	if status, _ := documentPeopleCall(t, h, ws, owner, "OWNER", "ids="+owner); status != 404 {
+		t.Fatalf("page with a panel named people: %d", status)
+	}
+}
+
+func TestDocumentPeopleSearchMatchesInSQLAndTreatsWildcardsAsText(t *testing.T) {
+	h, ws, owner := documentPeopleFixture(t, false)
+	// More members than one scan used to read, all ahead of the reader alphabetically.
+	for i := 0; i < 1100; i++ {
+		id := fmt.Sprintf("aaa%04d", i)
+		execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, id, id+"@example.invalid", "Aaron "+id)
+		execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, id+"-m", ws, id)
+	}
+	execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES('zoe','zoe@example.invalid','Zoe 100% _Reader')`)
+	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('zoe-m',?,'zoe','MEMBER')`, ws)
+	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','user','zoe','read',?)`, owner)
+	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q=zoe"); strings.Join(names(found), "|") != "zoe=Zoe 100% _Reader" {
+		t.Fatalf("late member not found: %v", names(found))
+	}
+	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="+url.QueryEscape("100% _")); len(found) != 1 {
+		t.Fatalf("literal wildcard text: %v", names(found))
+	}
+	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="+url.QueryEscape("%")); len(found) != 1 {
+		t.Fatalf("%% must match only a literal percent sign: %v", names(found))
 	}
 }
