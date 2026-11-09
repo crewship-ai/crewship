@@ -161,6 +161,11 @@ describe("Docs in the ArtifactFrame", () => {
     expect(screen.queryByText(/Add blocks/)).toBeNull()
     expect(screen.queryByRole("button", { name: "Add note" })).toBeNull()
     expect(screen.getByRole("button", { name: "Fit to screen" })).toBeTruthy()
+    // Trying to change the canvas from the keyboard writes nothing, even after a poll cycle.
+    const canvas = screen.getByRole("application", { name: "Canvas" })
+    fireEvent.keyDown(canvas, { key: "ArrowRight" })
+    fireEvent.keyDown(canvas, { key: "Delete" })
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 1200)) })
     expect(request.mock.calls.some(([url]) => String(url).includes("/document/patch"))).toBe(false)
   })
 

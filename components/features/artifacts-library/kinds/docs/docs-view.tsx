@@ -93,6 +93,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     const member = kind === "user" ? (members.members ?? []).find(entry => entry.user.id === id) : undefined
     return member?.user.full_name || member?.user.email || (kind === "agent" ? "Agent" : "Workspace member")
   }, [humanId, members.members])
+  const [mode, setMode] = React.useState<"page" | "canvas">("page")
   const [draft, setDraft] = React.useState<CommentTarget | null>(null)
   const [commentNotice, setCommentNotice] = React.useState<string | null>(null)
   const [activeThread, setActiveThread] = React.useState<string | null>(null)
@@ -111,6 +112,8 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   const jumpToComment = (comment: DocumentComment) => {
     if (!editor || !comment.block) return
     setActiveThread(comment.id)
+    // The thread's text lives on the Page: show it there.
+    setMode("page")
     const target = [...editor.view.dom.querySelectorAll<HTMLElement>("[data-block-id]")].find(node => node.dataset.blockId === comment.block)
     target?.scrollIntoView?.({ block: "center", behavior: "smooth" })
   }
@@ -119,8 +122,9 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
   // Canvas is a second view of the same Y.Doc (R71 §0.4), offered only at a schema that admits the surface.
   // Older documents keep Page only; nothing upgrades them implicitly.
   const canvasReady = Boolean(sync.state && !sync.denied && sync.state.schema >= documentSurface.CANVAS_SCHEMA)
-  const [mode, setMode] = React.useState<"page" | "canvas">("page")
   const view = canvasReady ? mode : "page"
+  // Losing Canvas (schema or access changed) returns to the Page for good, never back on its own.
+  React.useEffect(() => { if (!canvasReady) setMode("page") }, [canvasReady])
   // The person's own transaction origin for Canvas writes: saved like every local change, never mixed with remote ones.
   const canvasOrigin = React.useMemo(() => "canvas:" + crypto.randomUUID(), [])
   const openInPage = (blockId: string) => {
@@ -173,6 +177,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
 
   const outlineShown = outlineOpen && view === "page"
   const modeTab = (value: "page" | "canvas", Icon: typeof FileText, label: string) => <button type="button" role="tab" aria-selected={view === value}
+    id={`docs-mode-${value}`} aria-controls={`docs-view-${value}`}
     onClick={() => setMode(value)} data-docs-mode={value}
     className={cn("inline-flex h-[30px] items-center gap-1.5 rounded-[var(--radius-row)] px-2.5 text-sm font-medium coarse:min-h-[44px]",
       view === value ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-accent/60 hover:text-foreground")}>
@@ -181,7 +186,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
 
   return <section aria-label="Doc page" data-docs-page data-layout={layout} data-docs-view={view} className={cn("touch-form min-h-full", outlineShown && !phone && "pl-[256px]")}>
     {/* The Page editor stays mounted under Canvas, so unsent edits and its undo history are never unmounted. */}
-    <article className={COLUMN} hidden={view !== "page"}>
+    <article id="docs-view-page" role="tabpanel" aria-labelledby="docs-mode-page" className={COLUMN} hidden={view !== "page"}>
       {view === "page" && banner}
       {/* The frame names the artifact and its Info drawer the owner and folder (Harbor 2 v87 Docs): the column starts with the document. */}
       {/* The chip is a button; this stays the one live region that announces save state. */}
@@ -196,7 +201,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
       </>}
     </article>
 
-    {view === "canvas" && <div className="h-[calc(100dvh-8rem)] min-h-[480px] w-full px-2 pb-16 pt-14 md:px-4 md:pb-4">
+    {view === "canvas" && <div id="docs-view-canvas" role="tabpanel" aria-labelledby="docs-mode-canvas" className="h-[calc(100dvh-8rem)] min-h-[480px] w-full px-2 pb-16 pt-14 md:px-4 md:pb-4">
       {banner}
       <DocsCanvas doc={sync.doc} editable={editable} origin={canvasOrigin} onOpenInPage={openInPage}
         comments={discussion?.comments} onOpenComments={discussion ? openCanvasComments : undefined} />
@@ -241,7 +246,7 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { onFrame: (report: DocsF
     </ArtifactSlot>
 
     {discussion && <ArtifactDrawerSection tab="comments" label="Comments" icon={MessageSquare}>
-      {discussion.canComment && !editable && <div className="px-3.5 pt-3.5">
+      {discussion.canComment && !editable && view === "page" && <div className="px-3.5 pt-3.5">
         <Button type="button" size="sm" variant="outline" className="coarse:min-h-[44px]" onClick={startComment}>Comment on selection</Button>
       </div>}
       <DocsComments data={discussion} nameOf={nameOf} draft={draft} notice={commentNotice} active={activeThread}
