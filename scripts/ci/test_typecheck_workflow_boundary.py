@@ -9,7 +9,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURE_COMMAND = "node --test scripts/typecheck-tests-node-test.mjs"
-ANALYSIS_COMMAND = "timeout --kill-after=30s 8m pnpm test:types"
+ANALYSIS_COMMAND = "timeout --kill-after=30s 12m pnpm test:types"
 
 
 def job(text, name):
@@ -37,14 +37,14 @@ class TypecheckWorkflowBoundary(unittest.TestCase):
         self.ci = (ROOT / ".github/workflows/ci.yml").read_text()
         self.lane = job(self.ci, "frontend-test-types")
 
-    def test_fixtures_have_their_own_bound_without_expanding_analysis_or_job(self):
+    def test_fixtures_and_complete_analysis_have_separate_nested_bounds(self):
         fixture = step(self.lane, "Typecheck helper regressions")
         analysis = step(self.lane, "Type-check tests once")
         self.assertEqual(self.lane.count(FIXTURE_COMMAND), 1)
         self.assertEqual(self.lane.count(ANALYSIS_COMMAND), 1)
         self.assertLess(self.lane.index(FIXTURE_COMMAND), self.lane.index(ANALYSIS_COMMAND))
         self.assertRegex(fixture, r"(?m)^        timeout-minutes: 3$")
-        self.assertRegex(analysis, r"(?m)^        timeout-minutes: 9$")
+        self.assertRegex(analysis, r"(?m)^        timeout-minutes: 13$")
         self.assertRegex(self.lane, r"(?m)^    timeout-minutes: 20$")
         self.assertEqual(script(fixture), FIXTURE_COMMAND)
         self.assertEqual(script(analysis).strip(), ANALYSIS_COMMAND)
