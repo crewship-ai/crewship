@@ -146,3 +146,30 @@ func TestEngineAcceptsBoundedTextStyleFields(t *testing.T) {
 		}
 	}
 }
+
+// Hide and lock (#5218) are optional boolean node fields: absent means shown
+// and unlocked, the state of every older document. Only true and false pass.
+func TestEngineAcceptsHiddenAndLockedFlags(t *testing.T) {
+	flagged := `{"id":"logo","type":"rect","x":0,"y":0,"width":10,"height":10,"hidden":true,"locked":false}`
+	result, err := Run(t.Context(), Request{Operations: json.RawMessage(`[{"op":"upsert","node":` + flagged + `}]`)})
+	if err != nil {
+		t.Fatalf("hide/lock refused: %v", err)
+	}
+	var got map[string]any
+	if err = json.Unmarshal(result.Nodes[0], &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["hidden"] != true || got["locked"] != false {
+		t.Fatalf("flags not stored: %v", got)
+	}
+	for _, field := range []map[string]any{{"hidden": "true"}, {"hidden": 1}, {"locked": "yes"}, {"locked": nil}, {"locked": map[string]any{}}} {
+		node := map[string]any{"id": "logo"}
+		for key, value := range field {
+			node[key] = value
+		}
+		raw, _ := json.Marshal([]any{map[string]any{"op": "upsert", "node": node}})
+		if _, err := Run(t.Context(), Request{State: result.State, Operations: raw}); !errors.Is(err, ErrInvalid) {
+			t.Errorf("accepted invalid flag %s: %v", raw, err)
+		}
+	}
+}

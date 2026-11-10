@@ -31,6 +31,9 @@ export function designTextStyle(node: Partial<DesignNode>) {
 
 export interface DesignNode {
  id: string
+ /** Hide and lock (#5218): absent means shown and unlocked, like every older document. */
+ hidden?: boolean
+ locked?: boolean
  type: DesignNodeType
  name?: string
  parentId?: string
@@ -415,3 +418,22 @@ export function reorderDesignNode(doc: Y.Doc, id: string, move: DesignOrderMove)
  }, "editor")
  return true
 }
+
+/**
+ * Layers not drawn (#5218): hidden ones and everything inside a hidden screen.
+ * Locked ones work the same way for `designLockedIds`.
+ */
+function inherited(nodes: readonly DesignNode[], flag: "hidden" | "locked"): Set<string> {
+ const byId = new Map(nodes.map(node => [node.id, node]))
+ const out = new Set<string>()
+ for (const node of nodes) {
+  const seen = new Set<string>()
+  for (let at: DesignNode | undefined = node; at && !seen.has(at.id); at = at.parentId ? byId.get(at.parentId) : undefined) {
+   seen.add(at.id)
+   if (at[flag] === true) { out.add(node.id); break }
+  }
+ }
+ return out
+}
+export const designHiddenIds = (nodes: readonly DesignNode[]) => inherited(nodes, "hidden")
+export const designLockedIds = (nodes: readonly DesignNode[]) => inherited(nodes, "locked")
