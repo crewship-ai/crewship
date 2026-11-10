@@ -7,6 +7,9 @@ import { trackPage } from "../created"
 export interface DesignNode {
   hidden?: boolean
   locked?: boolean
+  radius?: number
+  stroke?: string
+  strokeWidth?: number
   id: string
   type: "frame" | "rect" | "text" | "image"
   name?: string

@@ -313,3 +313,64 @@ func TestRenderHTMLLeavesOutHiddenLayers(t *testing.T) {
 		t.Fatalf("a hidden layer must not be exported:\n%s", page)
 	}
 }
+
+// Shape style (#5219) reaches the exported page as border radius and an inset
+// stroke; a rectangle without it keeps the 6 px corners of the class.
+func TestRenderHTMLShapeStyle(t *testing.T) {
+	screen := map[string]any{"id": "s", "type": "frame", "x": 0, "y": 0, "width": 360, "height": 640}
+	plain := map[string]any{"id": "plain", "type": "rect", "parentId": "s", "x": 10, "y": 10, "width": 100, "height": 40, "fill": "#2563eb"}
+	card := map[string]any{"id": "card", "type": "rect", "parentId": "s", "x": 10, "y": 60, "width": 200, "height": 100, "fill": "#ffffff", "radius": 16, "stroke": "#0f172a", "strokeWidth": 2}
+	photo := map[string]any{"id": "photo", "type": "image", "parentId": "s", "x": 10, "y": 200, "width": 200, "height": 100, "src": "https://example.test/a.png", "radius": 50}
+	// An <img> fills its layer and would cover an inset box-shadow, so the
+	// stroke must be drawn above the content, as on the canvas.
+	framed := map[string]any{"id": "framed", "type": "image", "parentId": "s", "x": 10, "y": 320, "width": 200, "height": 100, "src": "https://example.test/b.png", "stroke": "#dc2626", "strokeWidth": 3}
+	out, err := RenderHTML(exportFixture(screen, plain, card, photo, framed), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := func(id string) string {
+		for _, l := range strings.Split(string(out), "\n") {
+			if strings.Contains(l, `data-node-id="`+id+`"`) {
+				return l
+			}
+		}
+		return ""
+	}
+	if strings.Contains(line("plain"), "border-radius") || strings.Contains(line("plain"), "outline") {
+		t.Fatalf("an unstyled rectangle gained style: %s", line("plain"))
+	}
+	for _, want := range []string{"border-radius:16px", "outline:2px solid #0f172a", "outline-offset:-2px"} {
+		if !strings.Contains(line("card"), want) {
+			t.Errorf("card lacks %q: %s", want, line("card"))
+		}
+	}
+	if !strings.Contains(line("photo"), "border-radius:50px") || !strings.Contains(line("photo"), "overflow:hidden") {
+		t.Errorf("rounded image not clipped: %s", line("photo"))
+	}
+	if l := line("framed"); !strings.Contains(l, "outline:3px solid #dc2626") || !strings.Contains(l, "outline-offset:-3px") || strings.Contains(l, "box-shadow") {
+		t.Errorf("image stroke is not drawn above the picture: %s", l)
+	}
+}
+
+// A stroke is an inline outline, which beats a stylesheet rule on the same
+// element: the focus ring of a linked layer and the broken-link warning must
+// still win, or a stroked hotspot has no visible keyboard focus (#5219).
+func TestRenderHTMLStrokeKeepsFocusAndBrokenLinkOutline(t *testing.T) {
+	a := map[string]any{"id": "a", "type": "frame", "x": 0, "y": 0, "width": 360, "height": 640}
+	b := map[string]any{"id": "b", "type": "frame", "x": 400, "y": 0, "width": 360, "height": 640}
+	cta := map[string]any{"id": "cta", "type": "rect", "parentId": "a", "x": 10, "y": 10, "width": 100, "height": 40, "fill": "#2563eb", "stroke": "#0f172a", "strokeWidth": 2, "linkTo": "b"}
+	gone := map[string]any{"id": "gone", "type": "rect", "parentId": "a", "x": 10, "y": 80, "width": 100, "height": 40, "fill": "#2563eb", "stroke": "#0f172a", "linkTo": "missing"}
+	out, err := RenderHTML(exportFixture(a, b, cta, gone), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	html := string(out)
+	for _, want := range []string{"a.hotspot:focus-visible{outline:2px solid #2563eb!important", ".broken-link{outline:2px dashed #d97706!important"} {
+		if !strings.Contains(html, want) {
+			t.Errorf("stylesheet lacks %q, so an inline stroke outline hides it", want)
+		}
+	}
+	if !strings.Contains(html, `data-node-id="cta"`) || !strings.Contains(html, "outline:2px solid #0f172a") {
+		t.Errorf("the linked layer lost its stroke")
+	}
+}
