@@ -1,0 +1,2 @@
+- **Design: select several layers (#5217).** Shift- or Ctrl/⌘-click toggles a layer in the selection, and a left drag from the empty canvas selects every layer inside the box. The selection moves, resizes, nudges and deletes together, Escape clears it, and collaborators see every selected layer outlined in your colour.
+- **Multi-selection preserves arbitrary layer IDs and independent peer sizes.** Awareness keeps newline-containing IDs intact, and cancelling a group move restores only its positions, retaining a peer’s width and height changes.

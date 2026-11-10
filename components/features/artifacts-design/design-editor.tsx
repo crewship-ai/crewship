@@ -23,6 +23,7 @@ import { DESIGN_FONT_SIZE, DESIGN_FONT_WEIGHTS, DESIGN_LINE_HEIGHT, designTextSt
 import { DesignNodeShape } from "./design-node-shape"
 import { DesignPrototypePlayer } from "./design-prototype-player"
 import { DesignExportButton } from "./design-export-button"
+import { groupBox, marqueeHits, moveGroup, resizeGroup, selectionRoots, toggleSelection } from "./design-selection"
 import { DRAG_THRESHOLD, fitView, focusView, panBy, pinchOf, pinchView, pressIntent, resizeBox, RESIZE_HANDLES, toCanvas, toScreen, typingTarget, wheelGesture, zoomAround, type DesignBox, type DesignView, type Point, type ResizeHandle } from "./design-viewport"
 
 function encodedDesignState(doc: Y.Doc,maxBytes=Infinity) {
@@ -108,7 +109,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   setDraftState({ key: commentKey, text: value })
   void writeArtifactDraft(commentKey, value).catch(() => setCommentError("Draft storage failed. Keep this tab open."))
  }
- const [selectedId, setSelectedId] = useState<string | null>(null)
+ // One or more selected layers (#5217): Shift or Ctrl/⌘ click and a marquee add to it.
+ const [selectedIds, setSelectedIds] = useState<string[]>([])
+ const setSelectedId = (id: string | null) => setSelectedIds(id ? [id] : [])
  const [agentChat, setAgentChat] = useState("")
  const [imageURL, setImageURL] = useState("")
  const [panel, setPanel] = useState<"properties" | "history">("properties")
@@ -118,7 +121,10 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const playButton = useRef<HTMLButtonElement>(null)
  const wasPlaying = useRef(false)
  useEffect(() => { if (wasPlaying.current && !playing) playButton.current?.focus(); wasPlaying.current = Boolean(playing) }, [playing])
- const selected = design.nodes.find(node => node.id === selectedId)
+ const chosen = selectedIds.filter(id => design.nodes.some(node => node.id === id))
+ const selectedId = chosen.length === 1 ? chosen[0] : null
+ const selected = selectedId ? design.nodes.find(node => node.id === selectedId) : undefined
+ const many = chosen.length > 1
  // Undo and redo take back only this person's own edits (Ctrl/⌘+Z,
  // Shift+Ctrl/⌘+Z or Ctrl+Y); a text field keeps its own undo.
  const historyKeys = useRef({ undo: design.undo, redo: design.redo }); historyKeys.current = { undo: design.undo, redo: design.redo }
@@ -141,7 +147,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  // only, never the document). A reader or a History view shares nothing.
  const liveSelection = design.editable && !version
  const shareSelection = useRef(design.setSelection); shareSelection.current = design.setSelection
- useEffect(() => { shareSelection.current?.(liveSelection && selected ? selected.id : null) }, [selected?.id, liveSelection]) // eslint-disable-line react-hooks/exhaustive-deps -- the ID and the live state are the whole input
+ const chosenKey = JSON.stringify(chosen)
  const frames = design.nodes.filter(node => node.type === "frame")
  const selectedFrame = selected?.type === "frame" ? selected.id : selected?.parentId
  const position = (node: DesignNode, seen = new Set<string>()): { x: number; y: number } => {
@@ -232,10 +238,32 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   | { kind: "pan"; pointerId: number; start: Point; view: DesignView; moved: boolean; tapNode?: string; touch: boolean; button: number }
   | { kind: "move"; pointerId: number; start: Point; id: string; x: number; y: number; moved: boolean; touch: boolean }
   | { kind: "resize"; pointerId: number; start: Point; id: string; handle: ResizeHandle; box: DesignBox; moved: boolean; touch: boolean }
+  // Several selected layers move or resize together; `nodes` is the canvas when the drag began.
+  | { kind: "group"; pointerId: number; start: Point; ids: string[]; nodes: DesignNode[]; moved: boolean; touch: boolean; tapNode: string }
+  | { kind: "group-resize"; pointerId: number; start: Point; ids: string[]; nodes: DesignNode[]; handle: ResizeHandle; box: DesignBox; moved: boolean; touch: boolean }
+  // A left drag on the empty canvas selects the layers wholly inside it (Shift: adds to the selection).
+  | { kind: "marquee"; pointerId: number; start: Point; base: string[]; additive: boolean; moved: boolean; touch: boolean }
   | { kind: "pinch"; ids: [number, number]; view: DesignView; from: ReturnType<typeof pinchOf> }
   // Fingers still down after a pinch ended or was cancelled start nothing until all are up.
   | { kind: "spent" }
  const gesture = useRef<Gesture | null>(null)
+ const [marquee, setMarquee] = useState<{ a: Point; b: Point } | null>(null)
+ // While a marquee is drawn the selection changes on every move; peers get the result when it ends.
+ const marqueeOpen = marquee !== null
+ useEffect(() => { if (!marqueeOpen) shareSelection.current?.(liveSelection ? JSON.parse(chosenKey) as string[] : []) }, [chosenKey, liveSelection, marqueeOpen])
+ /** Writes several layers in one change, so peers and undo see one step. */
+ const writeAll = (patches: (Partial<DesignNode> & { id: string })[]) => {
+  const doc = design.doc
+  if (!doc || !canChange || !patches.length) return
+  doc.transact(() => { for (const patch of patches) upsertDesignNode(doc, patch) }, "editor")
+ }
+ /** Puts every layer of a group gesture back where the drag began. */
+ const restoreGroup = (current: Extract<Gesture, { kind: "group" | "group-resize" }>) => writeAll(selectionRoots(current.nodes, current.ids).map(id => {
+  const node = current.nodes.find(item => item.id === id)!
+  const position = { id, x: Number(node.x) || 0, y: Number(node.y) || 0 }
+  // A move never changed dimensions: cancellation must keep a peer's resize.
+  return current.kind === "group" ? position : { ...position, width: Number(node.width) || 0, height: Number(node.height) || 0 }
+ }))
  const touches = useRef(new Map<number, Point>())
  const [panning, setPanning] = useState(false)
  const [space, setSpace] = useState(false)
@@ -251,6 +279,8 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   if (!current || current.kind === "spent") return false
   if (current.kind === "move" && current.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, x: current.x, y: current.y })
   if (current.kind === "resize" && current.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, ...current.box })
+  if ((current.kind === "group" || current.kind === "group-resize") && current.moved) restoreGroup(current)
+  if (current.kind === "marquee") { setMarquee(null); setSelectedIds(current.base) }
   if (current.kind === "pan" || current.kind === "pinch") setView(current.view)
   return true
  }
@@ -280,6 +310,8 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     const started = gesture.current
     if (started?.kind === "move" && started.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: started.id, x: started.x, y: started.y })
     if (started?.kind === "resize" && started.moved && design.doc && canChange) upsertDesignNode(design.doc, { id: started.id, ...started.box })
+    if ((started?.kind === "group" || started?.kind === "group-resize") && started.moved) restoreGroup(started)
+    if (started?.kind === "marquee") { setMarquee(null); setSelectedIds(started.base) }
     const ids = [...touches.current.keys()].slice(-2) as [number, number]
     gesture.current = { kind: "pinch", ids, view, from: pinchOf(touches.current.get(ids[0])!, touches.current.get(ids[1])!) }
     setPanning(true)
@@ -288,6 +320,15 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   }
   if (gesture.current) return
   const handle = (event.target as Element | null)?.closest?.("[data-design-handle]")?.getAttribute("data-design-handle") as ResizeHandle | null | undefined
+  if (handle && event.button === 0 && !spaceHeld.current && canChange && many && (event.pointerType !== "touch" || event.isPrimary)) {
+   const box = groupBox(design.nodes, chosen)
+   if (box) {
+    gesture.current = { kind: "group-resize", pointerId: event.pointerId, start: at, ids: chosen, nodes: design.nodes, handle, box, moved: false, touch: event.pointerType === "touch" }
+    viewport.current?.focus({ preventScroll: true })
+    capture(event)
+    return
+   }
+  }
   if (handle && event.button === 0 && !spaceHeld.current && canChange && selected && (event.pointerType !== "touch" || event.isPrimary)) {
    gesture.current = { kind: "resize", pointerId: event.pointerId, start: at, id: selected.id, handle, box: { x: Number(selected.x) || 0, y: Number(selected.y) || 0, width: Math.max(1, Number(selected.width) || 1), height: Math.max(1, Number(selected.height) || 1) }, moved: false, touch: event.pointerType === "touch" }
    viewport.current?.focus({ preventScroll: true })
@@ -298,7 +339,26 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   const node = nodeId ? design.nodes.find(item => item.id === nodeId) : undefined
   const intent = pressIntent({ button: event.button, pointerType: event.pointerType, space: spaceHeld.current, onNode: Boolean(node), canMove: canChange })
   if (intent === "none") return
-  if (intent === "deselect") { setSelectedId(null); viewport.current?.focus({ preventScroll: true }); return }
+  // Shift or Ctrl/⌘ click adds a layer to the selection or takes it out.
+  if (node && (intent === "select" || intent === "move") && (event.shiftKey || event.ctrlKey || event.metaKey) && event.pointerType !== "touch") {
+   setSelectedIds(toggleSelection(chosen, node.id))
+   viewport.current?.focus({ preventScroll: true })
+   return
+  }
+  if (intent === "deselect") {
+   viewport.current?.focus({ preventScroll: true })
+   if (event.pointerType === "touch") { setSelectedId(null); return }
+   gesture.current = { kind: "marquee", pointerId: event.pointerId, start: at, base: event.shiftKey ? chosen : [], additive: event.shiftKey, moved: false, touch: false }
+   capture(event)
+   return
+  }
+  // Dragging one of several selected layers moves them all.
+  if (node && intent === "move" && many && chosen.includes(node.id)) {
+   viewport.current?.focus({ preventScroll: true })
+   gesture.current = { kind: "group", pointerId: event.pointerId, start: at, ids: chosen, nodes: design.nodes, moved: false, touch: event.pointerType === "touch", tapNode: node.id }
+   capture(event)
+   return
+  }
   if (node && (intent === "select" || intent === "move")) selectNode(node)
   viewport.current?.focus({ preventScroll: true })
   if (intent === "select") return
@@ -326,6 +386,14 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   if (!current.moved && placed.fit) setView(view) // a drag holds the view still, even if the fitted area changes
   current.moved = true
   if (current.kind === "pan") setView(panBy(current.view, dx, dy))
+  else if (current.kind === "marquee") {
+   const a = toCanvas(view, current.start), b = toCanvas(view, at)
+   setMarquee({ a, b })
+   const hits = marqueeHits(design.nodes, a, b)
+   setSelectedIds(current.additive ? [...current.base, ...hits.filter(id => !current.base.includes(id))] : hits)
+  }
+  else if (current.kind === "group") writeAll(moveGroup(current.nodes, current.ids, dx / scale, dy / scale))
+  else if (current.kind === "group-resize") writeAll(resizeGroup(current.nodes, current.ids, current.box, resizeBox(current.box, current.handle, dx / scale, dy / scale)))
   else if (current.kind === "resize") { if (design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, ...resizeBox(current.box, current.handle, dx / scale, dy / scale) }) }
   else if (design.doc && canChange) upsertDesignNode(design.doc, { id: current.id, x: Math.round(current.x + dx / scale), y: Math.round(current.y + dy / scale) })
  }
@@ -342,6 +410,10 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   gesture.current = null
   setPanning(false)
   if (current.kind === "pan" && current.button === 2 && current.moved) menuAfterPan.current = Date.now()
+  // A click on the empty canvas clears the selection; a drawn marquee keeps what it holds.
+  if (current.kind === "marquee") { setMarquee(null); if (!current.moved && !current.additive) setSelectedId(null) }
+  // A plain click on one of several selected layers selects just that layer.
+  if (current.kind === "group" && !current.moved) { const node = design.nodes.find(item => item.id === current.tapNode); if (node) selectNode(node) }
   // A tap with a finger selects or clears like a click; a right or middle click changes nothing.
   if (current.kind === "pan" && current.touch && !current.moved) {
    const node = current.tapNode ? design.nodes.find(item => item.id === current.tapNode) : undefined
@@ -359,6 +431,19 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   if (event.key === "Escape") { if (!cancelGesture()) setSelectedId(null); event.preventDefault(); return }
   // With a layer selected, arrows nudge it (Shift: by 10), Delete removes it and
   // [ ] change its order (with Ctrl/⌘: to the back or front).
+  if (many && canChange && design.doc && !gesture.current) {
+   const nudge: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
+   const by = event.shiftKey ? 10 : 1
+   if (nudge[event.key] && !event.altKey && !event.ctrlKey && !event.metaKey) { writeAll(moveGroup(design.nodes, chosen, nudge[event.key][0] * by, nudge[event.key][1] * by)); event.preventDefault(); return }
+   if (event.key === "Delete" || event.key === "Backspace") {
+    // Screens stay: Delete on the keyboard removes layers only, as for one layer.
+    const doc = design.doc
+    const layers = chosen.filter(id => design.nodes.find(node => node.id === id)?.type !== "frame")
+    doc.transact(() => { for (const id of layers) removeDesignNode(doc, id) }, "editor")
+    setSelectedIds(chosen.filter(id => design.nodes.find(node => node.id === id)?.type === "frame"))
+    event.preventDefault(); return
+   }
+  }
   if (selected && canChange && design.doc && !gesture.current) {
    const nudge: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
    const by = event.shiftKey ? 10 : 1
@@ -534,7 +619,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   {design.draftError && <p role="alert" className="border-b px-4 py-2 text-sm">Browser draft storage is unavailable or full. Keep this window open until connected and save a version.</p>}
  </>
  const hasBanners = addressPending || historyFull || continued?.scope === continueScope || Boolean(failure) || design.connection === "quota" || design.conflicts.length > 0 || design.draftError
- const layerList = design.nodes.map(node => <button key={node.id} onClick={() => { setSelectedId(node.id); if (node.type === "frame") setFocus(frames.indexOf(node)) }} className={`flex min-h-9 items-center gap-2 px-3 text-left text-xs coarse:min-h-[44px] ${selectedId === node.id ? "bg-accent text-accent-foreground" : "hover:bg-muted"} ${node.parentId ? "pl-7" : "font-medium"}`}>
+ const layerList = design.nodes.map(node => <button key={node.id} aria-pressed={chosen.includes(node.id)} onClick={event => { if (event.shiftKey || event.ctrlKey || event.metaKey) { setSelectedIds(toggleSelection(chosen, node.id)); return } setSelectedId(node.id); if (node.type === "frame") setFocus(frames.indexOf(node)) }} className={`flex min-h-9 items-center gap-2 px-3 text-left text-xs coarse:min-h-[44px] ${chosen.includes(node.id) ? "bg-accent text-accent-foreground" : "hover:bg-muted"} ${node.parentId ? "pl-7" : "font-medium"}`}>
   {node.type === "frame" ? <Frame className="size-3.5 shrink-0" /> : node.type === "text" ? <Type className="size-3.5 shrink-0" /> : <Square className="size-3.5 shrink-0" />}<span className="truncate">{node.name || node.text || node.type}</span>
  </button>)
  const canvasView = <svg ref={canvas} role="img" aria-label="Design canvas" width={width * scale} height={height * scale} viewBox={`${left} ${top} ${width} ${height}`} className="absolute left-0 top-0 max-w-none" style={{ transform: `translate(${origin.x}px, ${origin.y}px)` }}>
@@ -546,7 +631,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
    return <g key={node.id} data-design-node={node.id} data-node-type={node.type} data-node-name={node.name} transform={`translate(${x},${y})`} style={{ cursor: space || panning ? undefined : canChange ? "move" : "pointer" }}>
     {node.type === "frame" && <text x="0" y="-10" fontSize={12 / Math.min(1, scale)} fill="currentColor" className="text-muted-foreground">{node.name || "Screen"}</text>}
     <DesignNodeShape node={node} width={w} height={h} />
-    {selectedId === node.id && <rect width={w} height={h} fill="none" stroke="#2563eb" strokeWidth={2 / scale} pointerEvents="none" />}
+    {chosen.includes(node.id) && <rect width={w} height={h} fill="none" stroke="#2563eb" strokeWidth={2 / scale} pointerEvents="none" />}
     {selectedId === node.id && canChange && RESIZE_HANDLES.map(handle => {
      const size = 9 / scale
      const hx = handle.includes("w") ? 0 : handle.includes("e") ? w : w / 2, hy = handle.includes("n") ? 0 : handle.includes("s") ? h : h / 2
@@ -554,15 +639,28 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     })}
    </g>
   })}
-  {!version && design.peers.filter(peer => peer.selection).map(peer => {
-   const node = design.nodes.find(item => item.id === peer.selection)
+  {many && canChange && !version && (() => {
+   const group = groupBox(design.nodes, chosen)
+   if (!group) return null
+   return <g data-design-group={chosen.length} transform={`translate(${group.x},${group.y})`}>
+    <rect width={group.width} height={group.height} fill="none" stroke="#2563eb" strokeWidth={1 / scale} strokeDasharray={`${4 / scale} ${3 / scale}`} pointerEvents="none" />
+    {RESIZE_HANDLES.map(handle => {
+     const size = 9 / scale
+     const hx = handle.includes("w") ? 0 : handle.includes("e") ? group.width : group.width / 2, hy = handle.includes("n") ? 0 : handle.includes("s") ? group.height : group.height / 2
+     return <rect key={handle} data-design-handle={handle} aria-hidden x={hx - size / 2} y={hy - size / 2} width={size} height={size} fill="white" stroke="#3b82f6" strokeWidth={1.5 / scale} style={{ cursor: `${handle}-resize` }} />
+    })}
+   </g>
+  })()}
+  {marquee && <rect data-design-marquee="" x={Math.min(marquee.a.x, marquee.b.x)} y={Math.min(marquee.a.y, marquee.b.y)} width={Math.abs(marquee.b.x - marquee.a.x)} height={Math.abs(marquee.b.y - marquee.a.y)} fill="#3b82f6" fillOpacity={0.08} stroke="#3b82f6" strokeWidth={1 / scale} pointerEvents="none" />}
+  {!version && design.peers.flatMap(peer => (peer.selection ?? []).map((id, index) => ({ peer, id, index }))).map(({ peer, id, index }) => {
+   const node = design.nodes.find(item => item.id === id)
    if (!node) return null
    const { x, y } = position(node)
    const w = Math.max(1, Number(node.width) || 1), h = Math.max(1, Number(node.height) || 1)
    const label = peer.name.slice(0, 22)
-   return <g key={`selection-${peer.clientId}`} data-remote-selection={node.id} transform={`translate(${x},${y})`} pointerEvents="none" aria-label={`${peer.name} selected ${node.name || node.type}`}>
+   return <g key={`selection-${peer.clientId}-${node.id}`} data-remote-selection={node.id} data-remote-peer={peer.clientId} transform={`translate(${x},${y})`} pointerEvents="none" aria-label={`${peer.name} selected ${node.name || node.type}`}>
     <rect width={w} height={h} fill="none" stroke={peer.color} strokeWidth={2 / scale} strokeDasharray={`${6 / scale} ${4 / scale}`} />
-    <g transform={`translate(0,${-22 / scale - 2 / scale})${scale === 1 ? "" : ` scale(${1 / scale})`}`}><rect width={Math.min(160, label.length * 7 + 12)} height="18" rx="3" fill={readablePeerFill(peer.color)} /><text x="6" y="13" fontSize="11" fill="white">{label}</text></g>
+    {index === 0 && <g transform={`translate(0,${-22 / scale - 2 / scale})${scale === 1 ? "" : ` scale(${1 / scale})`}`}><rect width={Math.min(160, label.length * 7 + 12)} height="18" rx="3" fill={readablePeerFill(peer.color)} /><text x="6" y="13" fontSize="11" fill="white">{label}</text></g>}
    </g>
   })}
   {design.peers.filter(peer => peer.cursor).map(peer => <g key={peer.clientId} transform={`translate(${peer.cursor!.x},${peer.cursor!.y})${scale === 1 ? "" : ` scale(${1 / scale})`}`} pointerEvents="none" aria-label={`${peer.name} cursor`}><path d="M0 0 L0 20 L5 15 L9 24 L13 22 L9 13 L17 13 Z" fill={peer.color} stroke="white" /><rect x="16" y="18" width={Math.min(160, peer.name.length * 7 + 16)} height="22" rx="4" fill={readablePeerFill(peer.color)} /><text x="24" y="33" fontSize="12" fill="white">{peer.name.slice(0, 22)}</text></g>)}
@@ -607,6 +705,14 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     <Button variant="outline" size="sm" aria-label="Bring to front" title="Bring to front (Ctrl+])" disabled={!canChange} onClick={() => order("front")}><ArrowUpToLine className="size-4" /></Button>
    </div></Field>
    {canChange && <Button variant="ghost" className="w-full text-destructive" onClick={() => { if (design.doc) removeDesignNode(design.doc, selected.id); setSelectedId(null) }}><Trash2 className="size-4" />Delete {selected.type === "frame" ? "screen and layers" : "layer"}</Button>}
+  </div> : many ? <div className="space-y-3">
+   <p className="text-sm">{chosen.length} layers selected</p>
+   <p className="text-xs text-muted-foreground">Drag one of them, its handles or the arrow keys to move or resize them together. Escape clears the selection.</p>
+   {canChange && (() => {
+    // The same as Delete on the keyboard: the selected layers go, screens stay.
+    const layers = chosen.filter(id => design.nodes.find(node => node.id === id)?.type !== "frame")
+    return layers.length > 0 && <Button variant="ghost" className="w-full text-destructive" onClick={() => { const doc = design.doc; if (doc) doc.transact(() => { for (const id of layers) removeDesignNode(doc, id) }, "editor"); setSelectedIds(chosen.filter(id => !layers.includes(id))) }}><Trash2 className="size-4" />Delete {layers.length} {layers.length === 1 ? "layer" : "layers"}</Button>
+   })()}
   </div> : <p className="text-sm text-muted-foreground">Select a screen or layer to see its properties.{canChange && " Add your first screen using the toolbar."}</p>}
  </>
  const composer = (label: string) => <div className="mb-4 space-y-2">

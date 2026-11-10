@@ -470,6 +470,8 @@
     "V06.reconnect",
     "V06.revoke-write",
     "CO04.undo-own",
+    "CO02.multi-selection",
+    "V04.multi-select",
     "role.design.read-browser",
     "role.project.revoke-open",
     "role.design.revoke-open",

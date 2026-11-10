@@ -337,4 +337,41 @@ test.describe("design collaboration", () => {
    await prd.evidence("revoked-b.png", await b.page.screenshot())
   },
  )
+ test(
+  "a multi-selection is drawn for the other person, moves together and Escape clears it",
+  {
+   annotation: [
+    prdRequirement("V04.multi-select", "Design: Shift-click selects several layers; arrows and Delete act on all of them; Escape clears the selection"),
+    prdRequirement("CO02.multi-selection", "Design: the other person sees every layer of a multi-selection outlined, and none once it is cleared"),
+   ],
+  },
+  async ({ prd }) => {
+   const { ws, slug, a, b } = await twoPeople(prd, "multi")
+   const remote = (id: string) => b.page.locator(`[data-remote-selection="${id}"]`)
+   const layers = a.page.getByLabel("Layers")
+   await layers.getByRole("button", { name: "Call to action", exact: true }).click()
+   await layers.getByRole("button", { name: "Copy", exact: true }).click({ modifiers: ["Shift"] })
+   await expect(a.page.getByText("2 layers selected")).toBeVisible()
+   await expect(remote("cta")).toHaveCount(1, { timeout: 20_000 })
+   await expect(remote("copy")).toHaveCount(1)
+   const seen = await b.page.locator("[data-remote-selection]").evaluateAll(nodes => nodes.map(node => node.getAttribute("aria-label")))
+   // Shift + arrow moves both by 10, at the server.
+   await viewport(a.page).focus()
+   await a.page.keyboard.press("Shift+ArrowRight")
+   await expect.poll(async () => [(await serverNode(a, ws.id, slug, "cta"))?.x, (await serverNode(a, ws.id, slug, "copy"))?.x], { timeout: 20_000 }).toEqual([50, 50])
+   // Escape clears the selection, for the other person too.
+   await a.page.keyboard.press("Escape")
+   await expect(b.page.locator("[data-remote-selection]")).toHaveCount(0, { timeout: 20_000 })
+   // Delete removes both layers and never the screen.
+   await layers.getByRole("button", { name: "Call to action", exact: true }).click()
+   await layers.getByRole("button", { name: "Copy", exact: true }).click({ modifiers: ["Shift"] })
+   await expect(remote("copy")).toHaveCount(1, { timeout: 20_000 })
+   await viewport(a.page).focus()
+   await a.page.keyboard.press("Delete")
+   await expect.poll(async () => (await getDesign(a.context.request, ws.id, slug)).nodes.map(node => node.id), { timeout: 20_000 }).toEqual(["screen"])
+   await expect(b.page.locator("[data-remote-selection]")).toHaveCount(0, { timeout: 20_000 })
+   await prd.evidence("multi-select.json", { remoteOutlines: seen, nudgedBy: 10, afterDelete: ["screen"] })
+   await prd.evidence("multi-select-b.png", await b.page.screenshot())
+  },
+ )
 })
