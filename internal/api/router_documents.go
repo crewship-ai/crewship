@@ -30,6 +30,10 @@ func (r *Router) registerDocumentRoutes() {
 	// Mention names for this reader (#5155): ids to names, or @-mention search.
 	// openapi: responses 200,400,401,403,404,500,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/document/people", authed(wsCtx(http.HandlerFunc(p.DocumentPeople))))
+
+	// Markdown or DOCX download of the confirmed document; same read authority as GET /document.
+	// openapi: responses 200,400,401,403,404,409,422,429,500,502,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/document/export", authed(wsCtx(http.HandlerFunc(p.GetDocument))))
 	// openapi: responses 200,400,401,403,404,409,429,500,502,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/document/checkpoints", authed(wsCtx(http.HandlerFunc(p.ListDocumentCheckpoints))))
 	// openapi: responses 200,400,401,403,404,409,429,500,502,503

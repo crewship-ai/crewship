@@ -1,0 +1,1 @@
+- **Export in the Docs view.** The Docs output tools now offer Export with exactly the formats the server produces, Markdown and Word; the file is the saved document, and restricted members, who cannot export, do not see it.

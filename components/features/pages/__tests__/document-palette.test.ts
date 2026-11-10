@@ -75,7 +75,7 @@ describe("Docs text colour and highlight palette", () => {
   })
 
   it("Word export uses the light theme's shades", () => {
-    const source = readFileSync(join(process.cwd(), "lib", "documents", "docx-export.mjs"), "utf8")
+    const source = readFileSync(join(process.cwd(), "tools", "docs-service", "docx-export.mjs"), "utf8")
     const light = block(":root")
     for (const name of documentSchema.PALETTE) {
       expect(source).toMatch(new RegExp(`TEXT_HEX = \\{[^}]*${name}: '${token(light, `doc-text-${name}`).slice(1)}'`, "i"))

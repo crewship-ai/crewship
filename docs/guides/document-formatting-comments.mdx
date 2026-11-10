@@ -28,8 +28,8 @@ mark it done.
 
 The documents engine can write a schema 4 document as Markdown (`**bold**`,
 `*italic*`, `~~strike~~`, fenced code with its language, `>` quotes and
-`- [x]` checklists), but no API, CLI command or Docs menu offers a Docs
-download yet, so the Docs page shows no export.
+`- [x]` checklists). The Docs **Export** menu and `crewship doc export`
+download the current confirmed Page content as Markdown or Word.
 
 ### Code blocks
 
@@ -80,8 +80,8 @@ including someone without access, appears as **Unknown member**, so a document
 never reveals whether a person exists. Markdown and Word export write the date
 as `2026-11-20` and a mention as `@` and a name only when the export is given
 the names the exporting reader may see; otherwise as `@Unknown member`. The
-export serializers accept those names, but no export endpoint supplies them in
-this release, so exported mentions read `@Unknown member` for now. A semantic
+export endpoint resolves names using the same live reader checks as the editor.
+A semantic
 `replaceText` edit that would insert text exactly beside a date or mention, or
 delete across one, is refused with `ambiguous_inline_atom`; make that edit in
 the editor.
@@ -282,6 +282,26 @@ The status chip says **Saved** only when the server has confirmed your changes
 and its confirmed copy holds everything in your editor. If it lacks something,
 editing stops, the chip shows an unsaved draft and offers **Download my
 changes**; that state is never reported as saved.
+
+## Export
+
+Exports include the current confirmed Page content only. Canvas-only items and
+layout, unsent changes and selected historical revisions are not included. Mention
+names use the exporting reader’s current document access; unavailable people remain
+unknown. If the Page changes while export is prepared, retry the export.
+
+
+**Export** in the Docs view's output tools downloads the saved document as
+**Markdown** (`.md`) or **Word** (`.docx`); these are the only formats the server
+produces. The file holds what the server has confirmed: changes this browser
+has not sent yet are not included. Word keeps headings as heading styles, lists
+as Word numbering, checklists as ☐/☑ paragraphs, quotes, tables with header
+rows, links, emphasis and code blocks in a code style; math, CSV and Markdown
+code blocks keep their source text. When a format cannot hold part of the
+document (a code block inside a table in Markdown, or lists nested deeper than
+nine levels in Word) the export stops with that reason instead of leaving the
+part out. Export needs read access to the document and is not offered to
+restricted members. From the CLI: [`crewship doc export`](/cli/doc).
 
 ## Comments
 

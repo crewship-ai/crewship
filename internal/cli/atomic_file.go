@@ -101,6 +101,30 @@ func (a *AtomicFile) Commit() error {
 	return nil
 }
 
+// CommitIfAbsent publishes the complete file only if the target does not exist.
+// A same-directory hard link makes the existence check and publication atomic,
+// including when another process creates a file or symlink during the download.
+func (a *AtomicFile) CommitIfAbsent() error {
+	if a.committed {
+		return nil
+	}
+	if err := a.f.Sync(); err != nil {
+		return fmt.Errorf("sync tempfile: %w", err)
+	}
+	if err := a.f.Close(); err != nil {
+		return fmt.Errorf("close tempfile: %w", err)
+	}
+	if err := os.Link(a.tmpPath, a.target); err != nil {
+		return fmt.Errorf("publish %s without replacement: %w", a.target, err)
+	}
+	// Publication succeeded. Close still retries removal if the temporary
+	// alias cannot be removed here; the target already contains the full file.
+	if err := os.Remove(a.tmpPath); err == nil {
+		a.committed = true
+	}
+	return nil
+}
+
 // Close removes the tempfile if Commit hasn't run. Safe to call multiple
 // times and after Commit (no-op in either of those cases). Defer this in
 // callers as a "cleanup if anything goes wrong" handler.

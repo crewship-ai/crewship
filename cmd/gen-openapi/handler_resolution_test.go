@@ -335,6 +335,8 @@ var requiredQueryParametersInSpec = []string{
 	"GET /api/v1/pages/{slug}/workbook/commits ?since",
 	// Mooring's authenticated upgrade refuses a missing original connection_ref.
 	"GET /api/v1/pages/{slug}/mooring/ws ?connection_ref",
+	// Document export refuses a missing, empty or repeated format before engine dispatch.
+	"GET /api/v1/pages/{slug}/document/export ?format",
 	"GET /api/v1/skills/proposed ?crew_id",
 	// pipeline-schedules/preview used to list ?cron_expr here (B9, #2362). It takes
 	// cron_expr OR phrase since ODCH-RT-15, so neither is required on its own.

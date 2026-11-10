@@ -23,6 +23,8 @@ import { DocsCanvas, type MentionLabels } from "./docs-canvas"
 import { documentSurface } from "@/lib/documents/surface"
 import { presentPeople, type CanvasPresence } from "@/lib/documents/presence"
 import type { CanvasPresenceChannel } from "@/hooks/use-document-presence"
+import { DocsExportMenu } from "./docs-export"
+import { useAccessMode } from "@/hooks/use-access-mode"
 import { commentFailure, useDocumentComments, type CommentWrite, type DocumentComment } from "@/hooks/use-document-comments"
 import { useMembers } from "@/components/features/settings/members/use-members"
 import { documentActorName } from "@/lib/documents/actor-name"
@@ -133,6 +135,8 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { pin: VersionPin; onFram
   }, [version, openDrawer, pin])
   const layout: FrameLayout = frame?.layout ?? "desktop"
   const phone = layout === "phone"
+  // Export requires a trusted session with a confirmed document.
+  const accessMode = useAccessMode()
   // Canvas presence rides on the document's presence heartbeat; a stable channel, so the heartbeat never restarts.
   const presenceCanvas = React.useRef<CanvasPresenceChannel>({ current: null }).current
   // A selection change, or the pointer entering or leaving, is shared at once; pointer moves at most every 500 ms.
@@ -306,6 +310,9 @@ function DocsWorkspace(props: DocumentWorkspaceProps & { pin: VersionPin; onFram
       <DocsCanvas doc={sync.doc} editable={editable} origin={canvasOrigin} onOpenInPage={openInPage} peers={peers} onPresence={shareCanvas}
         comments={discussion?.comments} onOpenComments={discussion ? openCanvasComments : undefined} people={sessionPeople(editor)} />
     </div>}
+    {sync.state && !sync.denied && available && accessMode === "trusted" && <ArtifactSlot name="output" label="Output">
+      <DocsExportMenu workspaceId={workspaceId} pageId={pageId} />
+    </ArtifactSlot>}
 
     <ArtifactSlot name="view" label="View">
       {view === "page" && <>

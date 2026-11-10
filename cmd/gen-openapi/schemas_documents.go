@@ -86,6 +86,15 @@ func documentSchemaCatalog() map[string]DomainSchema {
 	get(base, "DocumentState")
 	get(base+"/checkpoints", "DocumentCheckpointList")
 	get(base+"/checkpoints/{checkpoint}", "DocumentCheckpoint")
+	out["GET "+base+"/export"] = DomainSchema{NoRequest: true,
+		Response:        map[string]any{"type": "string", "format": "binary", "description": "The confirmed document as one attachment named after the page slug: UTF-8 Markdown (format=markdown) or a Word package (format=docx, at most 3 MiB), produced by the docs engine from the same state GET /document reads."},
+		ResponseMedia:   []string{"text/markdown", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+		SuccessStatuses: []string{"200"},
+		ErrorStatuses:   []string{"400", "401", "403", "404", "409", "422", "429", "500", "502", "503"},
+		Parameters: []map[string]any{
+			{"name": "format", "in": "query", "required": true, "schema": map[string]any{"type": "string", "enum": []string{"markdown", "md", "docx"}}, "description": "One explicit export format: markdown (or md) or docx."},
+		},
+	}
 	out["POST "+base+"/restore"] = DomainSchema{
 		Request: map[string]any{"type": "object", "additionalProperties": false,
 			"required": []string{"page_id", "id", "schema", "epoch", "ifRev", "checkpoint"},

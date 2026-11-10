@@ -23,6 +23,9 @@ importers:
       '@tiptap/y-tiptap':
         specifier: 3.2.0
         version: 3.2.0(prosemirror-model@1.25.13)(prosemirror-state@1.4.4)(prosemirror-view@1.42.9)(y-protocols@1.0.7(yjs@13.6.33))(yjs@13.6.33)
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
       yjs:
         specifier: 13.6.33
         version: 13.6.33
@@ -59,6 +62,9 @@ packages:
       prosemirror-view: ^1.9.10
       y-protocols: ^1.0.1
       yjs: ^13.6.13
+
+  fflate@0.8.3:
+    resolution: {integrity: sha512-tbZNuJrLwGUp3zshBtdy4W+ORxZuIh8a5ilyIEQDC5rY1f3U20JMry0Ll3WBzU58EZKsEuJFXhb5gwv8CsPvgA==}
 
   isomorphic.js@0.2.5:
     resolution: {integrity: sha512-PIeMbHqMt4DnUP3MA/Flc0HElYjMXArsw1qwJZcm9sqR8mq3l8NYizFMty0pWwE/tzIGH3EKK5+jes5mAr85yw==}
@@ -174,6 +180,8 @@ snapshots:
       prosemirror-view: 1.42.9
       y-protocols: 1.0.7(yjs@13.6.33)
       yjs: 13.6.33
+
+  fflate@0.8.3: {}
 
   isomorphic.js@0.2.5: {}
 

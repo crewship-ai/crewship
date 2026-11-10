@@ -239,7 +239,7 @@
      --background, --card and --muted, and on every highlight of this theme;
      --foreground on every highlight is far above that. Checked by
      components/features/pages/__tests__/document-palette.test.ts. Word export
-     (lib/documents/docx-export.mjs) uses the light values. */
+     (tools/docs-service/docx-export.mjs) uses the light values. */
   --doc-text-gray: #545B67;
   --doc-text-red: #B3242B;
   --doc-text-orange: #A04307;
