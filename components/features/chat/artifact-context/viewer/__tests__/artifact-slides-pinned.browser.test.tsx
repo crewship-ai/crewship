@@ -62,7 +62,10 @@ it.skipIf(!existsSync(chromium.executablePath()))("renders pinned tokens and a r
     expect(appearance).toMatchObject({ family: expect.stringContaining("crewship-pin-"), color: "rgb(17, 17, 17)", size: "24px", background: "rgb(29, 78, 216)" })
     await page.getByRole("button", { name: "Present" }).click()
     expect(await page.getByRole("dialog", { name: "Present slides" }).locator('[data-slide-content="title"]').evaluate(node => getComputedStyle(node).fontFamily)).toBe(appearance.family)
-    const inlined = await page.evaluate(() => (window as Window & { inlinedPin: string }).inlinedPin)
+    const inlined = await page.evaluate(() => {
+      const html: unknown = Reflect.get(window, "inlinedPin")
+      return typeof html === "string" ? html : ""
+    })
     expect(inlined).toMatch(/^<!DOCTYPE html>/i)
     expect(inlined).not.toContain('href="local.css"')
     await page.setContent(inlined)
