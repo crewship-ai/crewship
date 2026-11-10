@@ -1,3 +1,4 @@
+import { unzipSync } from 'fflate';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -940,7 +941,7 @@ test('authoring adapter bytes change the copied service build identity', async (
   const dir=await mkdtemp(join(tmpdir(),'docs-build-'));
   let f, service;
   try {
-    for(const file of ['pnpm-lock.yaml','schema.mjs','schema-core.mjs','surface-core.mjs','position-migrations.mjs','service.mjs','create-document.mjs','secret.mjs'])await copyFile(new URL(file,import.meta.url),join(dir,file));
+    for(const file of ['pnpm-lock.yaml','schema.mjs','schema-core.mjs','surface-core.mjs','position-migrations.mjs','service.mjs','create-document.mjs','docx-export.mjs','secret.mjs'])await copyFile(new URL(file,import.meta.url),join(dir,file));
     await symlink(fileURLToPath(new URL('node_modules',import.meta.url)),join(dir,'node_modules'),'dir');
     const {startService:copiedStart}=await import(pathToFileURL(join(dir,'service.mjs')).href);
     f=await fixture(authorityModel().handle);
@@ -958,6 +959,11 @@ test('authoring adapter bytes change the copied service build identity', async (
     await appendFile(join(dir,'position-migrations.mjs'),'\n// copied migration validator identity change\n');
     service=await start();
     assert.notEqual(service.identity.build,authored,'migration validator changes must invalidate service identity');
+    const migrated=service.identity.build;
+    await service.close(); service=undefined;
+    await appendFile(join(dir,'docx-export.mjs'),'\n// copied export formatter identity change\n');
+    service=await start();
+    assert.notEqual(service.identity.build,migrated,'export formatter changes must invalidate service identity');
   } finally {
     try {if(service)await service.close()} finally {try {if(f)await f.close()} finally {await rm(dir,{recursive:true})}}
   }
@@ -1066,6 +1072,53 @@ test('schema4 initialize is human-only, Page-bound and exports formatting to Mar
   } finally { await f.close(); }
 });
 
+test('export format docx returns the formatter package of the confirmed state, refuses what Word cannot hold', async () => {
+  const model = authorityModel();
+  const t = (text, marks) => ({ type: 'text', text, ...(marks ? { marks } : {}) });
+  const cell = (type, id, text) => ({ type, attrs: { id, colspan: 1, rowspan: 1, colwidth: null }, content: [{ type: 'paragraph', attrs: { id: `${id}p` }, content: [t(text)] }] });
+  const body = { type: 'doc', content: [
+    { type: 'heading', attrs: { id: 'h', level: 1 }, content: [t('Launch notes')] },
+    { type: 'paragraph', attrs: { id: 'p' }, content: [t('Ship '), t('only', [{ type: 'bold', attrs: {} }]), t(' <b>first</b>')] },
+    { type: 'table', attrs: { id: 't' }, content: [{ type: 'tableRow', attrs: { id: 'r1' }, content: [cell('tableHeader', 'a', 'Owner'), cell('tableHeader', 'b', 'Share')] }, { type: 'tableRow', attrs: { id: 'r2' }, content: [cell('tableCell', 'c', 'Jana'), cell('tableCell', 'd', '40 %')] }] },
+    { type: 'codeBlock', attrs: { id: 'py', language: 'python' }, content: [t('def f():\n\treturn 1')] },
+    { type: 'codeBlock', attrs: { id: 'tex', language: 'latex' }, content: [t('e^{i\\pi} + 1 = 0')] },
+    { type: 'blockquote', attrs: { id: 'q' }, content: [{ type: 'paragraph', attrs: { id: 'qp' }, content: [t('Quoted')] }] },
+    { type: 'taskList', attrs: { id: 'tl' }, content: [{ type: 'taskItem', attrs: { id: 'ti', checked: true }, content: [{ type: 'paragraph', attrs: { id: 'tip' }, content: [t('Legal review')] }] }] },
+  ] };
+  const f = await fixture(async (op, data, req, res) => {
+    if (op === 'initialize') { model.state = { ...model.state, schema: data.schema, snapshot: data.snapshot, rev: 0 }; return model.state; }
+    return model.handle(op, data, req, res);
+  });
+  try {
+    await f.start();
+    assert.equal((await call(f.socket, '/v1/documents/p/initialize', { id: 'init-docx', schema: 4, page_id: 'p', body })).status, 200);
+    const exported = await call(f.socket, '/v1/documents/p/export', { format: 'docx' });
+    assert.equal(exported.status, 200);
+    assert.deepEqual(Object.keys(exported.body).sort(), ['docx']);
+    const bytes = Buffer.from(exported.body.docx, 'base64');
+    assert.equal(bytes.subarray(0, 4).toString('latin1'), 'PK\x03\x04');
+    const { unzipSync, strFromU8 } = await import('fflate');
+    const xml = strFromU8(unzipSync(new Uint8Array(bytes))['word/document.xml']);
+    assert.match(xml, /<w:pStyle w:val="Heading1"\/><\/w:pPr><w:r><w:t xml:space="preserve">Launch notes<\/w:t>/);
+    assert.match(xml, /<w:b\/><\/w:rPr><w:t xml:space="preserve">only</);
+    assert.match(xml, /&lt;b&gt;first&lt;\/b&gt;/);
+    assert.equal((xml.match(/<w:tr>/g) || []).length, 2);
+    assert.match(xml, /<w:pStyle w:val="CodeBlock"\/><\/w:pPr><w:r><w:t xml:space="preserve">def f\(\):<\/w:t><w:br\/><w:tab\/><w:t xml:space="preserve">return 1</);
+    assert.match(xml, /e\^\{i\\pi\} \+ 1 = 0/);
+    assert.match(xml, /<w:pStyle w:val="Quote"\/><\/w:pPr><w:r><w:t xml:space="preserve">Quoted</);
+    assert.match(xml, /<w:t xml:space="preserve">\u2611 <\/w:t><\/w:r><w:r><w:t xml:space="preserve">Legal review</);
+    // The same read authority: Markdown stays the default.
+    assert.equal(typeof (await call(f.socket, '/v1/documents/p/export', {})).body.markdown, 'string');
+    for (const request of [{ format: 'pdf' }, { format: 'DOCX' }, { format: 1 }, []]) assert.equal((await call(f.socket, '/v1/documents/p/export', request)).status, 400);
+    // Ten nested lists have no Word mapping: an explicit 422, never a partial file.
+    let nested = { type: 'bulletList', attrs: { id: 'l9' }, content: [{ type: 'listItem', attrs: { id: 'i9' }, content: [{ type: 'paragraph', attrs: { id: 'q9' }, content: [t('deep')] }] }] };
+    for (let level = 8; level >= 0; level--) nested = { type: 'bulletList', attrs: { id: `l${level}` }, content: [{ type: 'listItem', attrs: { id: `i${level}` }, content: [{ type: 'paragraph', attrs: { id: `q${level}` }, content: [t(String(level))] }, nested] }] };
+    model.state = { ...model.state, snapshot: snapshot(create({ type: 'doc', content: [nested] }, 4)), updates: [], rev: model.state.rev + 1 };
+    const refused = await call(f.socket, '/v1/documents/p/export', { format: 'docx' });
+    assert.equal(refused.status, 422); assert.equal(refused.body.code, 'unmappable-content'); assert.equal(refused.body.docx, undefined);
+  } finally { await f.close(); }
+});
+
 for (const [from, body] of [
   [3, { type: 'doc', content: [{ type: 'codeBlock', attrs: { id: 'c' }, content: [{ type: 'text', text: 'x' }] }] }],
   [4, { type: 'doc', content: [{ type: 'paragraph', attrs: { id: 'b' }, content: [{ type: 'text', text: 'bold', marks: [{ type: 'bold', attrs: {} }] }] }] }],
@@ -1107,6 +1160,21 @@ test('schema5 initialize keeps underline, colour and highlight and exports them 
     const state = (await read(f)).body;
     assert.equal(state.schema, 5); assert.deepEqual(state.content, body);
     assert.equal((await call(f.socket, '/v1/documents/p/export', {})).body.markdown, '<u>under</u> <span data-text-color="red"><mark data-highlight="yellow">red</mark></span> 2026-11-20 @Unknown member\n');
+    for (const schema of [5, 6]) {
+      if (schema === 6) {
+        const page = create(body, 6);
+        model.state = { ...model.state, schema: 6, snapshot: snapshot(page), updates: [], snapshotRev: model.state.rev };
+        page.destroy();
+      }
+      const confirmed = (await read(f)).body;
+      const exported = await call(f.socket, '/v1/documents/p/export', { format: 'docx', people: { u1: 'Ada' }, expected_rev: confirmed.rev, expected_epoch: confirmed.epoch });
+      assert.equal(exported.status, 200);
+      const parts = unzipSync(Buffer.from(exported.body.docx, 'base64'));
+      const xml = new TextDecoder().decode(parts['word/document.xml']);
+      assert.match(xml, /Ada/); assert.match(xml, /2026-11-20/); assert.match(xml, /w:u/);
+      assert.equal((await call(f.socket, '/v1/documents/p/export', { format: 'docx', expected_rev: confirmed.rev + 1, expected_epoch: confirmed.epoch })).status, 409);
+      assert.equal((await call(f.socket, '/v1/documents/p/export', { expected_rev: confirmed.rev, expected_epoch: 'retired' })).status, 409);
+    }
     // Go supplies the names this reader may see; the engine never looks them up.
     assert.equal((await call(f.socket, '/v1/documents/p/export', { people: { u1: 'Ada' } })).body.markdown, '<u>under</u> <span data-text-color="red"><mark data-highlight="yellow">red</mark></span> 2026-11-20 @Ada\n');
     // Names are bounded in code points, as Go bounds them: 200 emoji are one valid name.

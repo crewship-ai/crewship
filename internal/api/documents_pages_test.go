@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -378,5 +379,117 @@ func TestHumanDocumentReadHidesCommentControlsFromRestrictedMembers(t *testing.T
 				t.Fatalf("%s %s: %d %s", mode, path, w.Code, w.Body.String())
 			}
 		}
+	}
+}
+
+// Export trusts nothing but a well-formed engine reply of the requested format:
+// the request names the format, and anything else is 502, never a file.
+func TestDocumentExportEngineReplyBoundary(t *testing.T) {
+	zipFile := base64.StdEncoding.EncodeToString([]byte("PK\x03\x04rest"))
+	for _, tc := range []struct {
+		name, format, reply, media, body string
+		status                           int
+	}{
+		{"markdown", "markdown", `{"markdown":"# T\n"}`, "text/markdown; charset=utf-8", "# T\n", 200},
+		{"docx", "docx", `{"docx":"` + zipFile + `"}`, documentDOCXMediaType, "PK\x03\x04rest", 200},
+		{"docx answered with markdown", "docx", `{"markdown":"# T\n"}`, "", "", 502},
+		{"markdown answered with docx", "markdown", `{"docx":"` + zipFile + `"}`, "", "", 502},
+		{"docx not base64", "docx", `{"docx":"%%%"}`, "", "", 502},
+		{"docx not a zip", "docx", `{"docx":"` + base64.StdEncoding.EncodeToString([]byte("<html>")) + `"}`, "", "", 502},
+		{"docx over limit", "docx", `{"docx":"` + base64.StdEncoding.EncodeToString(append([]byte("PK\x03\x04"), make([]byte, documentDOCXExportBytes)...)) + `"}`, "", "", 502},
+		{"docx extra field", "docx", `{"docx":"` + zipFile + `","markdown":"x"}`, "", "", 502},
+		{"unknown format", "pdf", `{}`, "", "", 400},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, ws, user := humanDocumentTransportFixture(t)
+			var sent any
+			h.documentCall = func(_ context.Context, _, _, _, op string, body any) ([]byte, int, error) {
+				if op == "read" {
+					return []byte(`{"rev":7,"epoch":"fixture:1","content":{"type":"doc","content":[]}}`), 200, nil
+				}
+				if op != "export" {
+					t.Fatalf("operation %q", op)
+				}
+				sent = body
+				return []byte(tc.reply), 200, nil
+			}
+			w := httptest.NewRecorder()
+			h.GetDocument(w, humanDocumentRequest(t, "GET", "/api/v1/pages/private-doc/document/export?format="+tc.format, ws, user, ""))
+			if w.Code != tc.status {
+				t.Fatalf("status=%d body=%q", w.Code, w.Body.String())
+			}
+			if tc.status == 400 && sent != nil {
+				t.Fatal("unknown format reached the engine")
+			}
+			if tc.status != 200 {
+				return
+			}
+			wantBody := map[string]any{"expected_rev": int64(7), "expected_epoch": "fixture:1"}
+			if tc.format == "docx" {
+				wantBody["format"] = "docx"
+			}
+			if !reflect.DeepEqual(sent, wantBody) || w.Header().Get("Content-Type") != tc.media || w.Body.String() != tc.body ||
+				w.Header().Get("X-Content-Type-Options") != "nosniff" || w.Header().Get("Cache-Control") != "no-store" ||
+				!strings.HasPrefix(w.Header().Get("Content-Disposition"), "attachment; filename=private-doc.") {
+				t.Fatalf("sent=%v headers=%v body=%q", sent, w.Header(), w.Body.String())
+			}
+		})
+	}
+}
+
+// The largest package the engine may deliver must still fit the engine read
+// once base64-encoded inside its {"docx":"..."} reply.
+func TestDocumentDOCXExportLimitFitsEngineRead(t *testing.T) {
+	reply := len(`{"docx":""}`) + base64.StdEncoding.EncodedLen(documentDOCXExportBytes)
+	if reply > 4<<20 || documentDOCXExportBytes != 3145680 {
+		t.Fatalf("limit %d gives a %d-byte reply; the engine read is %d", documentDOCXExportBytes, reply, 4<<20)
+	}
+}
+
+func TestDocumentExportUsesReaderScopedPeople(t *testing.T) {
+	for _, revoke := range []bool{false, true} {
+		t.Run(fmt.Sprintf("revoke=%v", revoke), func(t *testing.T) {
+			h, ws, owner := documentPeopleFixture(t, false)
+			r := documentPeopleRequest(t, h, ws, owner, "OWNER", "")
+			r.URL.Path = "/api/v1/pages/people-doc/document/export"
+			r.URL.RawQuery = "format=markdown"
+			exports := 0
+			h.documentCall = func(_ context.Context, workspace, _, page, op string, body any) ([]byte, int, error) {
+				if workspace != ws || page != "people-page" {
+					t.Fatal("export scope changed")
+				}
+				if op == "read" {
+					if revoke {
+						execOrFatal(t, h.db, `DELETE FROM page_grants WHERE page_id='people-page' AND subject_id='bea'`)
+					}
+					return []byte(`{"rev":8,"epoch":"people:1","content":{"type":"doc","content":[{"type":"paragraph","attrs":{"id":"p"},"content":[{"type":"mention","attrs":{"userId":"bea"}},{"type":"mention","attrs":{"userId":"cid"}},{"type":"mention","attrs":{"userId":"sus"}},{"type":"mention","attrs":{"userId":"res"}},{"type":"mention","attrs":{"userId":"zed"}},{"type":"mention","attrs":{"userId":"missing"}}]}]}}`), 200, nil
+				}
+				if op != "export" {
+					t.Fatalf("operation=%s", op)
+				}
+				exports++
+				request := body.(map[string]any)
+				if request["expected_rev"] != int64(8) || request["expected_epoch"] != "people:1" {
+					t.Fatalf("head fence=%v", request)
+				}
+				want := map[string]string{"bea": "Bea Member"}
+				if revoke {
+					want = nil
+				}
+				if revoke {
+					if _, exists := request["people"]; exists {
+						t.Fatalf("revoked person named: %v", request)
+					}
+				} else if !reflect.DeepEqual(request["people"], want) {
+					t.Fatalf("names=%v", request["people"])
+				}
+				return []byte(`{"markdown":"safe output\n"}`), 200, nil
+			}
+			w := httptest.NewRecorder()
+			h.GetDocument(w, r)
+			if w.Code != 200 || exports != 1 {
+				t.Fatalf("status=%d exports=%d body=%s", w.Code, exports, w.Body.String())
+			}
+		})
 	}
 }

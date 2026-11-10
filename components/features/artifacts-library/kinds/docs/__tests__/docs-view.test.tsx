@@ -17,16 +17,20 @@ import { decodeUpdate, encodeUpdate } from "@/hooks/use-page-document"
 import { ArtifactFrame, NO_FRAME_CAPABILITIES, type FrameLayout } from "../../../frame"
 import type { LibraryItem } from "../../../library-items"
 import { DocsBody, type DocsFrameReport } from "../docs-view"
+import { DocsExportMenu } from "../docs-export"
 
-const env = vi.hoisted(() => ({ proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, schema: 2, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang", denied: false, checkpoints: [] as { id: string; rev: number; schema: number; actor: string; created_at: string }[] }))
+const env = vi.hoisted(() => ({ human: "docs-human", credential: null as string | null, accessMode: "trusted" as "trusted" | "restricted" | "loading", proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, schema: 2, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang", denied: false, checkpoints: [] as { id: string; rev: number; schema: number; actor: string; created_at: string }[] }))
 const request = vi.hoisted(() => vi.fn())
 const upgrades = vi.hoisted(() => ({ outcome: "ok" as "ok" | "stale" | "missing" | "lost", bodies: [] as Record<string, unknown>[], urls: [] as string[] }))
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: env.available, isPending: env.available === undefined }) }))
 vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOriginal<typeof import("@/lib/document-queue")>(), openDocumentDrafts: async () => ({ load: async () => env.drafts, put: async () => {}, remove: async () => {}, close: () => {}, exclusive: true }) }))
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
-vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "docs-human" } } }) }))
+vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => env.accessMode }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: env.human } } }) }))
 
-afterEach(() => { cleanup(); request.mockReset(); upgrades.outcome = "ok"; upgrades.bodies = []; upgrades.urls = []; env.proposals = undefined; env.available = true; env.canWrite = true; env.schema = 2; env.drafts = []; env.patch = "ok"; env.denied = false; env.checkpoints = [] })
+vi.mock("@/lib/server-base", async original => ({ ...await original<typeof import("@/lib/server-base")>(), getBearerToken: () => env.credential }))
+
+afterEach(() => { cleanup(); env.human = "docs-human"; env.credential = null; env.accessMode = "trusted"; request.mockReset(); upgrades.outcome = "ok"; upgrades.bodies = []; upgrades.urls = []; env.proposals = undefined; env.available = true; env.canWrite = true; env.schema = 2; env.drafts = []; env.patch = "ok"; env.denied = false; env.checkpoints = [] })
 
 const item: LibraryItem = {
   slug: "launch-notes", pageId: "page-docs", name: "Launch notes", kind: "word", family: "document", sharedVersion: null, native: false,
@@ -106,6 +110,107 @@ function open(layout: FrameLayout = "desktop", onReport?: (report: DocsFrameRepo
 
 const slot = (name: string) => document.querySelector(`[data-artifact-slot="${name}"]`) as HTMLElement | null
 
+describe("Docs export", () => {
+  const exportCalls = () => request.mock.calls.map(([url]) => String(url)).filter(url => url.includes("/document/export"))
+  const openMenu = async () => {
+    const trigger = await waitFor(() => within(slot("output")!).getByRole("button", { name: "Export" }))
+    fireEvent.pointerDown(trigger, { button: 0, pointerType: "mouse" })
+    return screen.findByRole("menu")
+  }
+
+  it("offers exactly the formats the server produces and downloads the server's file", async () => {
+    serve()
+    const created: Blob[] = [], clicked: string[] = []
+    const createObjectURL = vi.fn((blob: Blob) => { created.push(blob); return "blob:export" })
+    const revokeObjectURL = vi.fn()
+    Object.assign(URL, { createObjectURL, revokeObjectURL })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) { clicked.push(this.download) })
+    const base = request.getMockImplementation()!
+    request.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (!String(url).includes("/document/export")) return base(url, init)
+      const docx = String(url).includes("format=docx")
+      return new Response(docx ? new Uint8Array([0x50, 0x4b, 3, 4]) : "# Goal\n", { status: 200, headers: {
+        "Content-Type": docx ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : "text/markdown; charset=utf-8",
+        "Content-Disposition": `attachment; filename=launch-notes.${docx ? "docx" : "md"}`,
+      } })
+    })
+    open()
+    expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
+    const menu = await openMenu()
+    expect(within(menu).getByText("Current saved Page content only. Canvas layout, unsent changes and selected History revisions are not included.")).toBeTruthy()
+    expect(within(menu).getAllByRole("menuitem").map(item => item.textContent)).toEqual(["Markdown.md", "Word.docx"])
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /Markdown/ }))
+    await waitFor(() => expect(clicked).toEqual(["launch-notes.md"]))
+    fireEvent.click(within(await openMenu()).getByRole("menuitem", { name: /Word/ }))
+    await waitFor(() => expect(clicked).toEqual(["launch-notes.md", "launch-notes.docx"]))
+    expect(exportCalls()).toEqual([
+      "/api/v1/pages/%40page-docs/document/export?format=markdown&workspace_id=ws1",
+      "/api/v1/pages/%40page-docs/document/export?format=docx&workspace_id=ws1",
+    ])
+    expect(await created[0].text()).toBe("# Goal\n")
+    expect(new Uint8Array(await created[1].arrayBuffer())).toEqual(new Uint8Array([0x50, 0x4b, 3, 4]))
+    await waitFor(() => expect(revokeObjectURL).toHaveBeenCalledTimes(2))
+    click.mockRestore()
+  })
+
+  for (const phase of ["response", "body"] as const) {
+    for (const transition of ["workspace", "identity", "credential", "unmount"] as const) {
+      it(`retires a delayed ${phase} download on ${transition} change`, async () => {
+        let answer!: (value: Response) => void
+        let body!: (value: Blob) => void
+        const responseWait = new Promise<Response>(resolve => { answer = resolve })
+        const bodyWait = new Promise<Blob>(resolve => { body = resolve })
+        const blob = vi.fn(() => bodyWait)
+        const response = new Response("# Private", { headers: { "Content-Disposition": "attachment; filename=private.md" } })
+        Object.defineProperty(response, "blob", { value: blob })
+        request.mockImplementation(() => phase === "response" ? responseWait : Promise.resolve(response))
+        const create = vi.fn(() => "blob:private")
+        Object.assign(URL, { createObjectURL: create, revokeObjectURL: vi.fn() })
+        const clicked = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {})
+        try {
+          const view = render(<DocsExportMenu workspaceId="ws1" pageId="page-docs" />)
+          fireEvent.pointerDown(screen.getByRole("button", { name: "Export" }), { button: 0, pointerType: "mouse" })
+          fireEvent.click(within(await screen.findByRole("menu")).getByRole("menuitem", { name: /Markdown/ }))
+          await waitFor(() => expect(request).toHaveBeenCalledTimes(1))
+          if (phase === "body") await waitFor(() => expect(blob).toHaveBeenCalledTimes(1))
+          const signal = (request.mock.calls[0][1] as RequestInit).signal
+          if (transition === "identity") env.human = "different-human"
+          if (transition === "credential") env.credential = "different-credential"
+          if (transition === "unmount") view.unmount()
+          else view.rerender(<DocsExportMenu workspaceId={transition === "workspace" ? "ws2" : "ws1"} pageId="page-docs" />)
+          expect(signal?.aborted).toBe(true)
+          await act(async () => { answer(response); body(new Blob(["# Private"])); await Promise.resolve() })
+          expect(create).not.toHaveBeenCalled()
+          expect(clicked).not.toHaveBeenCalled()
+          expect(screen.queryByRole("alert")).toBeNull()
+        } finally { clicked.mockRestore() }
+      })
+    }
+  }
+
+  it("shows the server's reason when a format cannot hold the document", async () => {
+    serve()
+    const base = request.getMockImplementation()!
+    request.mockImplementation(async (url: string, init?: RequestInit) => String(url).includes("/document/export")
+      ? new Response(JSON.stringify({ error: "code block inside a simple table; move this code outside the table", code: "unsupported_markdown" }), { status: 422, headers: { "Content-Type": "application/json" } })
+      : base(url, init))
+    open()
+    expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
+    fireEvent.click(within(await openMenu()).getByRole("menuitem", { name: /Markdown/ }))
+    expect((await screen.findByRole("alert")).textContent).toBe("code block inside a simple table; move this code outside the table")
+  })
+
+  it("is not offered to a restricted session, whose export route answers 404", async () => {
+    serve()
+    env.accessMode = "restricted"
+    open()
+    expect(await screen.findByText("Ship the agency offer on 2 December.")).toBeTruthy()
+    expect(slot("output")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Export" })).toBeNull()
+    expect(exportCalls()).toEqual([])
+  })
+})
+
 describe("Docs in the ArtifactFrame", () => {
   it("shows the saved version, never an editor, when the documents service does not admit the session", () => {
     env.available = false
@@ -133,12 +238,13 @@ describe("Docs in the ArtifactFrame", () => {
     const outline = within(slot("panel")!).getByRole("navigation", { name: "Headings" })
     expect(within(outline).getAllByRole("button").map(button => button.textContent)).toEqual(["Goal", "Timeline"])
     expect(slot("viewport")!.textContent).toBe("9 words · 1 min read")
-    // Formatting only while editable; no Insert menu, no embeds, no Comments, no Export.
+    // Formatting only while editable; no Insert menu, no embeds, no Comments.
     await waitFor(() => expect(slot("tools")).not.toBeNull())
     expect(within(slot("tools")!).getByRole("button", { name: "Heading 1" })).toBeTruthy()
     expect(screen.queryByRole("button", { name: /Insert|Embed/ })).toBeNull()
     expect(screen.queryByRole("button", { name: "Comments" })).toBeNull()
-    expect(slot("output")).toBeNull()
+    // Output holds only Export, the one action with a server route.
+    expect(within(slot("output")!).getAllByRole("button").map(button => button.getAttribute("aria-label"))).toEqual(["Export"])
     expect(await screen.findByRole("button", { name: "Status: Live" })).toBeTruthy()
     // History is a drawer tab with the restore rule spelled out.
     fireEvent.click(screen.getByRole("button", { name: "History" }))

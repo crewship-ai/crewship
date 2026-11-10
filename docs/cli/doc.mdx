@@ -444,6 +444,42 @@ crewship doc outline @<artifact-id>
 [{"hash":"11afc865…","id":"intro","parent":null,"text":"Original selected text","type":"paragraph"}]
 ```
 
+## `crewship doc export <page-slug>`
+
+Exports include the current confirmed Page content only. Canvas-only items and
+layout, unsent changes and selected historical revisions are not included. Mention
+names use the exporting reader’s current document access; unavailable people remain
+unknown. If the Page changes while export is prepared, retry the export.
+
+
+Download the confirmed document as Markdown (`--as md`, the default) or as a
+Word document (`--as docx`). It reads what `doc read` reads,
+with the same access: you need read access to the document (scoped tokens:
+`pages:read`), and without it fails exactly as `doc read` does. Restricted
+members cannot export, not even their own private output. Content the chosen
+format cannot represent fails with the reason instead of a file with parts
+missing: a code block inside a table has no Markdown form (Word keeps it), and
+lists nested deeper than nine levels have no Word form. Math blocks export as
+their LaTeX source in both formats.
+
+The file is written atomically to `--out` (default: the server's file name,
+such as `launch-notes.md`, in the current directory) and standard output
+carries a JSON receipt with `path`, `media_type`, `byte_length` and `sha256`.
+An existing file is not replaced unless you pass `--force`. `--out -` writes
+the file itself to standard output. `--as` selects the file type: `md`
+(`text/markdown`, at most 4 MiB) or `docx` (Word package, just under 3 MiB).
+
+```bash
+crewship doc export @<artifact-id>
+crewship doc export launch-notes -o notes.md --force
+crewship doc export launch-notes -o - | less
+crewship doc export launch-notes --as docx
+```
+
+```json
+{"byte_length":1834,"media_type":"text/markdown","path":"launch-notes.md","sha256":"5d41402a…"}
+```
+
 ## `crewship doc patch <page-slug>`
 
 Save an explicitly guarded update. `--file` is required; `--file -` reads stdin.

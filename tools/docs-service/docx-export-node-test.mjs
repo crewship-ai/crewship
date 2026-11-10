@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { unzipSync, strFromU8 } from 'fflate';
-import { validateJSON } from '../../tools/docs-service/schema.mjs';
+import { validateJSON } from './schema.mjs';
 import { createDocumentDOCXExporter, DocxExportError } from './docx-export.mjs';
 
 const exportDOCX = createDocumentDOCXExporter(validateJSON);

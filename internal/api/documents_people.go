@@ -75,6 +75,15 @@ func (h *PageHandler) documentReader(ctx context.Context, workspace string, rec 
 //	?q=text   people who can read this Document whose name contains text,
 //	          for the @-mention picker (at most 20; empty q lists the first 20)
 func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
+	h.serveDocumentPeople(w, r, func(people []documentPerson) {
+		writeJSON(w, 200, documentPeopleResponse{People: people})
+	})
+}
+
+// The export path uses the same bounded lookup, live credential, audience and
+// audit boundary as on-screen mentions. Only successful authorized names reach
+// the callback; failures are written to w without calling it.
+func (h *PageHandler) serveDocumentPeople(w http.ResponseWriter, r *http.Request, deliver func([]documentPerson)) {
 	w.Header().Set("Cache-Control", "no-store")
 	if agent, _ := pageGrantCallerIsAgent(r); agent {
 		replyError(w, 403, "human document credentials required")
@@ -180,7 +189,7 @@ func (h *PageHandler) DocumentPeople(w http.ResponseWriter, r *http.Request) {
 				people = append(people, person)
 			}
 		}
-		h.replyDocumentPeople(w, outer, tx, rec, people)
+		h.replyDocumentPeople(w, outer, tx, rec, people, deliver)
 		return
 	}
 	// The name match and the access filter both run in SQL before the limit,
@@ -227,7 +236,7 @@ ORDER BY crewship_casefold(u.full_name), u.id LIMIT ?`, args...)
 			people = append(people, documentPerson{ID: candidate.ID, Name: documentPersonName(candidate.Name)})
 		}
 	}
-	h.replyDocumentPeople(w, outer, tx, rec, people)
+	h.replyDocumentPeople(w, outer, tx, rec, people, deliver)
 }
 
 // documentPeopleAudience narrows the search to the people who can possibly
@@ -255,7 +264,7 @@ AND (m.role IN ('OWNER','ADMIN') OR u.id=?
 // administrator read (a write) and only then answers. An administrator's
 // role-only lookups are audited once per Document, custodian and credential
 // within documentPeopleAuditWindow, not once per keystroke of the picker.
-func (h *PageHandler) replyDocumentPeople(w http.ResponseWriter, r *http.Request, tx *sql.Tx, rec *pageRecord, people []documentPerson) {
+func (h *PageHandler) replyDocumentPeople(w http.ResponseWriter, r *http.Request, tx *sql.Tx, rec *pageRecord, people []documentPerson, deliver func([]documentPerson)) {
 	_ = tx.Rollback()
 	ctx, workspace, user := r.Context(), WorkspaceIDFromContext(r.Context()), UserFromContext(r.Context())
 	// Decide first whether this read is audited at all, so the writer is taken
@@ -284,13 +293,13 @@ func (h *PageHandler) replyDocumentPeople(w http.ResponseWriter, r *http.Request
 		if !h.auditPrivateOwnerAccess(w, r, rec) {
 			return
 		}
-		writeJSON(w, 200, documentPeopleResponse{People: people})
+		deliver(people)
 		return
 	}
 	// Already audited for this Document, custodian, role and credential: the
 	// role and reach were re-derived above from live state, nothing is written.
 	if h.documentPeople().auditedRecently(key) {
-		writeJSON(w, 200, documentPeopleResponse{People: people})
+		deliver(people)
 		return
 	}
 	r, b, err := h.startMetadataRead(r, true)
@@ -308,7 +317,7 @@ func (h *PageHandler) replyDocumentPeople(w http.ResponseWriter, r *http.Request
 	if len(b.audits) > 0 {
 		h.documentPeople().rememberAudit(key)
 	}
-	writeJSON(w, 200, documentPeopleResponse{People: people})
+	deliver(people)
 }
 
 // documentPeopleAuditKey names one administrator read: workspace, Document,

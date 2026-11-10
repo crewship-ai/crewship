@@ -20,6 +20,13 @@ func TestDocumentPrivateOwnerAuditCustodyFence(t *testing.T) {
 	assertDocumentPrivateOwnerAuditCustodyFence(t, "state", (*PageHandler).GetDocument)
 }
 
+// Export reads through the same fenced private authority as GET /document:
+// the custodian audit lands before any Markdown byte, and a failed audit
+// releases none.
+func TestDocumentExportPrivateOwnerAuditCustodyFence(t *testing.T) {
+	assertDocumentPrivateOwnerAuditCustodyFence(t, "export", (*PageHandler).GetDocument)
+}
+
 func assertDocumentPrivateOwnerAuditCustodyFence(t *testing.T, operation string, publicBoundary func(*PageHandler, http.ResponseWriter, *http.Request)) {
 	t.Helper()
 	for _, rejectAudit := range []bool{false, true} {
@@ -54,7 +61,11 @@ func assertDocumentPrivateOwnerAuditCustodyFence(t *testing.T, operation string,
 			if rejectAudit {
 				execOrFatal(t, rig.db, `CREATE TRIGGER fixture_private_audit_unavailable BEFORE INSERT ON audit_logs WHEN NEW.action='artifact.private_owner_accessed' BEGIN SELECT RAISE(ABORT,'fixture audit unavailable'); END`)
 			}
-			request := ownershipRequest(t, rig, "GET", "/api/v1/pages/"+page+"/document", "")
+			path, authorityOperation := "/api/v1/pages/"+page+"/document", operation
+			if operation == "export" {
+				path, authorityOperation = path+"/export?format=markdown", "state"
+			}
+			request := ownershipRequest(t, rig, "GET", path, "")
 			request.SetPathValue("slug", page)
 			request.SetPathValue("checkpoint", pin)
 			ctx, cancel := context.WithTimeout(request.Context(), 3*time.Second)
@@ -64,8 +75,8 @@ func assertDocumentPrivateOwnerAuditCustodyFence(t *testing.T, operation string,
 			authority := &documentAuthority{pages: pages, store: store}
 			privateSuccess, auditBeforeBytes := false, false
 			pages.documentCall = func(ctx context.Context, workspace, _ string, pageID, publicOperation string, _ any) ([]byte, int, error) {
-				expected := map[string]string{"state": "read", "checkpoints": "checkpoints", "checkpoint-read": "checkpoint-read"}[operation]
-				if workspace != rig.wsID || pageID != page || publicOperation != expected {
+				expected := map[string]string{"state": "read", "export": "export", "checkpoints": "checkpoints", "checkpoint-read": "checkpoint-read"}[operation]
+				if workspace != rig.wsID || pageID != page || publicOperation != expected && !(operation == "export" && publicOperation == "read") {
 					t.Fatalf("transport scope changed: %s %s %s", workspace, pageID, publicOperation)
 				}
 				body := `{}`
@@ -76,7 +87,7 @@ func assertDocumentPrivateOwnerAuditCustodyFence(t *testing.T, operation string,
 				inner.Method = "POST"
 				inner.Body = io.NopCloser(strings.NewReader(body))
 				inner.SetPathValue("page", pageID)
-				inner.SetPathValue("operation", operation)
+				inner.SetPathValue("operation", authorityOperation)
 				recorder := httptest.NewRecorder()
 				gate := &documentAuditGateWriter{ResponseRecorder: recorder, beforeHeader: func(code int) {
 					if code != http.StatusOK {
@@ -93,6 +104,13 @@ func assertDocumentPrivateOwnerAuditCustodyFence(t *testing.T, operation string,
 				raw, code := recorder.Body.Bytes(), recorder.Code
 				if code != http.StatusOK || operation == "state" {
 					return raw, code, nil
+				}
+				if operation == "export" && publicOperation == "read" {
+					return []byte(`{"rev":0,"epoch":"fixture:1","content":{"type":"doc","content":[]}}`), code, nil
+				}
+				if operation == "export" {
+					// Stand in only for Node serialization, after the real fenced state read.
+					return []byte(`{"markdown":"Private checkpoint marker\n"}`), code, nil
 				}
 				if operation == "checkpoints" {
 					wrapped, err := json.Marshal(map[string]any{"checkpoints": json.RawMessage(raw)})
@@ -118,7 +136,7 @@ func assertDocumentPrivateOwnerAuditCustodyFence(t *testing.T, operation string,
 			}
 			if rejectAudit {
 				wantStatus := http.StatusInternalServerError
-				if operation != "state" {
+				if operation != "state" && operation != "export" {
 					wantStatus = http.StatusServiceUnavailable
 				}
 				if response.Code != wantStatus || privateSuccess || strings.Contains(response.Body.String(), "Private checkpoint marker") || strings.Contains(response.Body.String(), "snapshot") || strings.Contains(response.Body.String(), pin) {
