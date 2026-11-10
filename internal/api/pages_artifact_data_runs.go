@@ -1,8 +1,6 @@
 package api
 
 import (
-	"bytes"
-	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
@@ -42,6 +40,7 @@ type artifactDataRunResponse struct {
 	StartedBy       string `json:"started_by"`
 	StartedKind     string `json:"started_by_kind"`
 	StartedAt       string `json:"started_at"`
+	CodeVersion     int64  `json:"code_version"`
 	StartGeneration int64  `json:"start_generation"`
 	FinishedAt      string `json:"finished_at,omitempty"`
 	FinishedBy      string `json:"finished_by,omitempty"`
@@ -90,7 +89,7 @@ func projectRunActor(r *http.Request, actor string) (label, kind string) {
 
 func projectArtifactDataRun(r *http.Request, run *artifacts.DataRun, showReason bool) artifactDataRunResponse {
 	label, kind := projectRunActor(r, run.StartedBy)
-	out := artifactDataRunResponse{ID: run.ID, Collection: run.Collection, State: run.State, StartedBy: label, StartedKind: kind, StartedAt: run.StartedAt, StartGeneration: run.StartGeneration, FinishedAt: run.FinishedAt, DataGeneration: run.EndGeneration, Partial: run.Partial()}
+	out := artifactDataRunResponse{ID: run.ID, Collection: run.Collection, State: run.State, StartedBy: label, StartedKind: kind, StartedAt: run.StartedAt, CodeVersion: run.CodeVersion, StartGeneration: run.StartGeneration, FinishedAt: run.FinishedAt, DataGeneration: run.EndGeneration, Partial: run.Partial()}
 	if run.State != "running" {
 		out.FinishedBy, out.FinishedKind = projectRunActor(r, run.FinishedBy)
 	}
@@ -100,15 +99,13 @@ func projectArtifactDataRun(r *http.Request, run *artifacts.DataRun, showReason 
 	return out
 }
 
-func decodeDataRunBody(w http.ResponseWriter, r *http.Request, target any) bool {
+func decodeDataRunBody(w http.ResponseWriter, r *http.Request, target any, fields ...string) bool {
 	raw, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxDataRunRequestBytes))
 	if err != nil {
 		artifactDataError(w, artifacts.ErrDataInvalid)
 		return false
 	}
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(target); err != nil || decoder.More() {
+	if err := artifacts.DecodeDataJSON(raw, target, fields...); err != nil {
 		artifactDataError(w, artifacts.ErrDataInvalid)
 		return false
 	}
@@ -138,6 +135,10 @@ func artifactDataRunError(w http.ResponseWriter, r *http.Request, err error) {
 		writeJSON(w, 409, artifactDataRunOverlapResponse{Error: "Another refresh of this dataset is still running, or failed after changing data while this one ran. Finish the runs in blocking_runs (any writer can finish one as failed), then start a new run. Nothing was changed.", Code: "artifact_data_run_overlap", Blocking: blocking})
 		return
 	}
+	if errors.Is(err, artifacts.ErrDataRunCodeVersion) {
+		writeJSON(w, 409, map[string]string{"error": "The run started on a different code version. Finish it as failed and start a new run. Nothing was changed.", "code": "artifact_data_run_code_version"})
+		return
+	}
 	if errors.Is(err, artifacts.ErrDataRunGeneration) {
 		writeJSON(w, 409, map[string]string{"error": "The collection changed outside this run, or the claimed generation does not match a linked batch or a verified unchanged run. Nothing was changed.", "code": "artifact_data_run_generation"})
 		return
@@ -160,7 +161,7 @@ func (h *PageHandler) StartArtifactDataRun(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	var body artifactDataRunStart
-	if !decodeDataRunBody(w, r, &body) {
+	if !decodeDataRunBody(w, r, &body, "base_version", "idempotency_key") {
 		return
 	}
 	if body.BaseVersion < 1 || body.BaseVersion > artifacts.MaxDataVersion {
@@ -169,7 +170,7 @@ func (h *PageHandler) StartArtifactDataRun(w http.ResponseWriter, r *http.Reques
 	}
 	collection := r.PathValue("collection")
 	auth, _ := h.artifactDataAuthority(r, k, collection, body.BaseVersion, true)
-	run, created, err := artifacts.NewDataStore(h.db, artifacts.DataOptionsFromEnv()).StartRun(r.Context(), k, collection, body.IdempotencyKey, auth)
+	run, created, err := artifacts.NewDataStore(h.db, artifacts.DataOptionsFromEnv()).StartRun(r.Context(), k, collection, body.IdempotencyKey, body.BaseVersion, auth)
 	if err != nil {
 		artifactDataRunError(w, r, err)
 		return
@@ -192,7 +193,7 @@ func (h *PageHandler) FinishArtifactDataRun(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	var body artifactDataRunFinish
-	if !decodeDataRunBody(w, r, &body) {
+	if !decodeDataRunBody(w, r, &body, "base_version", "state", "reason", "data_generation", "unchanged") {
 		return
 	}
 	if body.BaseVersion < 1 || body.BaseVersion > artifacts.MaxDataVersion {
@@ -201,7 +202,7 @@ func (h *PageHandler) FinishArtifactDataRun(w http.ResponseWriter, r *http.Reque
 	}
 	collection := r.PathValue("collection")
 	auth, _ := h.artifactDataAuthority(r, k, collection, body.BaseVersion, true)
-	run, err := artifacts.NewDataStore(h.db, artifacts.DataOptionsFromEnv()).FinishRun(r.Context(), k, collection, r.PathValue("run"), artifacts.DataRunFinish{State: body.State, Reason: body.Reason, DataGeneration: body.DataGeneration, Unchanged: body.Unchanged}, auth)
+	run, err := artifacts.NewDataStore(h.db, artifacts.DataOptionsFromEnv()).FinishRun(r.Context(), k, collection, r.PathValue("run"), body.BaseVersion, artifacts.DataRunFinish{State: body.State, Reason: body.Reason, DataGeneration: body.DataGeneration, Unchanged: body.Unchanged}, auth)
 	if err != nil {
 		artifactDataRunError(w, r, err)
 		return
@@ -233,7 +234,7 @@ func (h *PageHandler) ListArtifactDataRuns(w http.ResponseWriter, r *http.Reques
 	}
 	notifyDesignAdminAudit(r)
 	out := artifactDataRunsResponse{CodeVersion: version, StalledAfterSeconds: int64(store.StalledAfter() / time.Second), Runs: []artifactDataRunSummaryResponse{}}
-	showReason := selection.owner || selection.editor
+	showReason := selection.owner || selection.editorLatest
 	for _, summary := range summaries {
 		entry := artifactDataRunSummaryResponse{Collection: summary.Collection, Latest: projectArtifactDataRun(r, summary.Latest, showReason), LastAttemptAt: summary.LastAttemptAt, LastSuccessAt: summary.LastSuccessAt}
 		if showReason {

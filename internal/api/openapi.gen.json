@@ -1566,6 +1566,13 @@
       "ArtifactDataRun": {
         "additionalProperties": false,
         "properties": {
+          "code_version": {
+            "description": "The code version on which the run started.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
           "collection": {
             "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
             "type": "string"
@@ -1642,6 +1649,7 @@
           "started_by",
           "started_by_kind",
           "started_at",
+          "code_version",
           "start_generation"
         ],
         "type": "object"
@@ -1738,7 +1746,7 @@
             "items": {
               "$ref": "#/components/schemas/ArtifactDataRun"
             },
-            "maxItems": 16,
+            "maxItems": 64,
             "type": "array"
           },
           "collection": {
@@ -141306,7 +141314,7 @@
     },
     "/api/v1/pages/{slug}/artifact/data/{collection}/runs": {
       "post": {
-        "description": "Record that a producer started refreshing a declared collection. Needs exactly the authority of a data batch for a human caller (owner or a current Edit share; agent runs on the artifact tool path cannot record runs yet) and `base_version` equal to the latest code version. Repeating `idempotency_key` returns the same run with 200; a key used by another producer returns 409. The producer is the authenticated principal. The run records the collection's current data generation as `start_generation`. Configurable server defaults (`CREWSHIP_ARTIFACT_DATA_RUNS_*`), not contract: at most 4 running runs per collection (more return 409 `artifact_data_run_busy`), the newest 20 finished runs plus the newest success are retained, a running run is never pruned, and the key of a finished run stays reserved until 24 hours pass or the run is pruned, whichever comes first. Runs never write data or code versions; batches apply as written.",
+        "description": "Record that a producer started refreshing a declared collection. Needs exactly the authority of a data batch for a human caller (owner or a current Edit share; agent runs on the artifact tool path cannot record runs yet) and `base_version` equal to the latest code version. Repeating `idempotency_key` for the same collection and code version returns the same run with 200; a key used by another producer returns 409. The producer is the authenticated principal. The run records the collection's current data generation as `start_generation`. Configurable server defaults (`CREWSHIP_ARTIFACT_DATA_RUNS_*`), not contract: at most 4 running runs per collection (more return 409 `artifact_data_run_busy`), the newest 20 finished runs, the newest success and at most one additional overlapping partial failure are retained, a running run is never pruned, and the key of a finished run stays reserved until 24 hours pass or the run is pruned, whichever comes first. Runs never write data or code versions; batches apply as written.",
         "operationId": "post_api_v1_pages_slug_artifact_data_collection_runs",
         "parameters": [
           {
@@ -141458,7 +141466,7 @@
     },
     "/api/v1/pages/{slug}/artifact/data/{collection}/runs/{run}": {
       "post": {
-        "description": "End a running run as `succeeded` or `failed` with the authority of a data batch. Only the producer that started the run can finish it as succeeded (another writer gets 403 `artifact_data_run_forbidden`), naming as `data_generation` the generation returned by its last batch linked with `run_id`; it must still be current, and a success without a data change needs `unchanged` with the start generation, otherwise 409 `artifact_data_run_generation`; a success while another run of the collection is running, or after one failed with changed data during this run, returns 409 `artifact_data_run_overlap` with the blocking runs in `blocking_runs`. Any writer can finish a run as failed; the finisher is recorded and a failed run whose data changed is `partial`. A run that is never finished stays `running`. Repeating the same outcome returns the stored run; a different outcome returns 409 `artifact_data_run_conflict`. An unknown run, including one of another Page or workspace, returns 404.",
+        "description": "End a running run as `succeeded` or `failed` with the authority of a data batch. Only the producer that started the run can finish it as succeeded (another writer gets 403 `artifact_data_run_forbidden`), using the same code version and naming as `data_generation` the generation returned by its last batch linked with `run_id`; it must still be current, and a success without a data change needs `unchanged` with the start generation, otherwise 409 `artifact_data_run_generation`; a success while another run of the collection is running, or after one failed with changed data during this run, returns 409 `artifact_data_run_overlap` with the blocking runs in `blocking_runs`. Any writer can finish a run as failed on the current code version declaring the collection, including runs started on an earlier version; the finisher is recorded and a failed run whose data changed is `partial`. A run that is never finished stays `running`. Repeating the same outcome returns the stored run; a different outcome returns 409 `artifact_data_run_conflict`. An unknown run, including one of another Page or workspace, returns 404.",
         "operationId": "post_api_v1_pages_slug_artifact_data_collection_runs_run",
         "parameters": [
           {

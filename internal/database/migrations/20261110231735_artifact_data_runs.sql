@@ -24,6 +24,7 @@ CREATE TABLE artifact_data_runs (
  state TEXT NOT NULL CHECK(state IN ('running','succeeded','failed')),
  started_by TEXT NOT NULL,
  started_at TEXT NOT NULL,
+ code_version INTEGER NOT NULL CHECK(code_version >= 1),
  start_generation INTEGER NOT NULL DEFAULT 0 CHECK(start_generation >= 0),
  written_generation INTEGER CHECK(written_generation IS NULL OR written_generation > start_generation),
  finished_at TEXT,
@@ -37,7 +38,7 @@ CREATE TABLE artifact_data_runs (
  CHECK(state!='running' OR idempotency_key IS NOT NULL),
  CHECK(failure_reason IS NULL OR state='failed'),
  PRIMARY KEY(workspace_id,page_id,id),
- UNIQUE(workspace_id,page_id,collection,idempotency_key),
+ UNIQUE(workspace_id,page_id,collection,code_version,idempotency_key),
  FOREIGN KEY(workspace_id,page_id) REFERENCES artifact_version_heads(workspace_id,page_id) ON DELETE CASCADE
 );
 CREATE INDEX artifact_data_runs_latest ON artifact_data_runs(workspace_id,page_id,collection,started_at);

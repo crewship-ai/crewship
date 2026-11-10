@@ -52,7 +52,7 @@ function runLine(row: DashboardFreshness["collections"][number]): string {
   const success = row.lastSuccessAt ? `Last success ${freshnessTime(row.lastSuccessAt)}` : "No successful refresh yet"
   if (row.stalled) return `Refresh stalled since ${freshnessTime(run.startedAt)} · ${success}`
   if (run.state === "running") return `Refreshing since ${freshnessTime(run.startedAt)} · ${success}`
-  if (run.state === "failed") return `Refresh failed ${freshnessTime(run.lastAttemptAt)}${run.reason ? `: ${run.reason}` : ""}${run.partial ? " · partly applied" : ""} · ${success}`
+  if (run.state === "failed") return `Refresh failed ${freshnessTime(run.lastAttemptAt)}${run.reason ? `: ${run.reason}` : ""}${run.partial ? " · Data changed during run" : ""} · ${success}`
   return `${success} · ${run.startedBy}`
 }
 

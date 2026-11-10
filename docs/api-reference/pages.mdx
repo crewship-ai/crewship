@@ -3290,7 +3290,7 @@ CLI commands are `crewship page artifact data collections`, `data get` and
 
 | Method | Route | Request / result |
 | --- | --- | --- |
-| POST | `/api/v1/pages/{slug}/artifact/data/{collection}/runs` | Request body `{base_version,idempotency_key}`; response is the run `{id,collection,state,started_by,started_by_kind,started_at,start_generation}`: 201 when created, 200 when the key repeats. |
+| POST | `/api/v1/pages/{slug}/artifact/data/{collection}/runs` | Request body `{base_version,idempotency_key}`; response is the run `{id,collection,state,started_by,started_by_kind,started_at,code_version,start_generation}`: 201 when created, 200 when the key repeats. |
 | POST | `/api/v1/pages/{slug}/artifact/data/{collection}/runs/{run}` | Request body `{base_version,state,reason?,data_generation?,unchanged?}` with `state` `succeeded` or `failed`; response is the finished run with `finished_at`, `finished_by`, `finished_by_kind`, `data_generation`, `partial` (failed runs whose data changed) and, for a failure, `failure_reason`. |
 | GET | `/api/v1/pages/{slug}/artifact/data-runs` | Required `version` query; response `{code_version,stalled_after_seconds,runs:[{collection,latest,last_attempt_at,last_success_at?,active_runs?}]}` for declared collections that have a run. |
 
@@ -3298,7 +3298,8 @@ A producer records each refresh of a collection as a run. A run never writes
 data or changes a code version; the producer writes with the batch route
 between start and finish. Batches are not staged: each applies immediately,
 so readers may see values of a run that is still going or that failed.
-`idempotency_key` is 1–128 letters, digits, `.`, `_`, `:` or `-`. The
+`idempotency_key` is 1–128 letters, digits, `.`, `_`, `:` or `-`, scoped to
+the collection and starting code version. The
 producer and the finisher are authenticated principals stored on the server;
 the request cannot supply them, and responses project them as `started_by`
 and `finished_by` (`You`, `Contributor`, `Agent` or `Former contributor`).
@@ -3306,8 +3307,10 @@ and `finished_by` (`You`, `Contributor`, `Agent` or `Former contributor`).
 **Data generation:** a collection's generation is the sum of its document
 versions. Documents are never deleted, so it only grows. The batch route
 returns it as `generation`, and a run records it as `start_generation`. A
-success must name as `data_generation` the generation the producer's last
-batch returned, and it must still be current. A success over unchanged data
+success must name as `data_generation` the current generation returned by
+the producer's last batch linked by `run_id`. Both linked writes and success
+require the starting code version; if it changes, a writer can still mark
+the old run failed using the latest version declaring the collection. A success over unchanged data
 must set `unchanged: true` with the start generation; `unchanged` over
 changed data is refused; `unchanged` is the producer's claim, which the
 server checks only against writes made during the run. A success is also
@@ -3315,8 +3318,8 @@ refused while another run of the collection is running, or after one failed
 with changed data while this run was going (`artifact_data_run_overlap`;
 the response lists them in `blocking_runs`, and the list route returns every
 running run as `active_runs` to the owner and editors, so any writer can find
-and abandon a run whose producer died). Such failed runs are kept by
-retention while a run they block is still going. A
+and abandon a run whose producer died). Retention can keep the newest such partial failure
+as evidence while a run it blocks is still going. A
 failure carries neither field. A failed run whose generation moved (by it or
 another writer) is reported as `partial`.
 

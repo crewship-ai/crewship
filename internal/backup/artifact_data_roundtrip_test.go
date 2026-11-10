@@ -28,15 +28,15 @@ func TestArtifactDataBackupFreshAndForkPreserveDocumentKeys(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	run, created, err := d.StartRun(t.Context(), k, "sales", "backup-refresh", auth)
+	run, created, err := d.StartRun(t.Context(), k, "sales", "backup-refresh", 1, auth)
 	if err != nil || !created {
 		t.Fatalf("start run: %v %v", created, err)
 	}
-	_, generation, err := d.BatchGeneration(t.Context(), k, "sales", []artifacts.DataWrite{{ID: "stable-row", IfVersion: 2, Value: json.RawMessage(`{"n":9007199254740993}`)}}, run.ID, auth)
+	_, generation, err := d.BatchGeneration(t.Context(), k, "sales", []artifacts.DataWrite{{ID: "stable-row", IfVersion: 2, Value: json.RawMessage(`{"n":9007199254740993}`)}}, run.ID, 1, auth)
 	if err != nil || generation != 3 {
 		t.Fatalf("linked batch: %d %v", generation, err)
 	}
-	done, err := d.FinishRun(t.Context(), k, "sales", run.ID, artifacts.DataRunFinish{State: "succeeded", DataGeneration: &generation}, auth)
+	done, err := d.FinishRun(t.Context(), k, "sales", run.ID, 1, artifacts.DataRunFinish{State: "succeeded", DataGeneration: &generation}, auth)
 	if err != nil {
 		t.Fatalf("finish run: %v", err)
 	}

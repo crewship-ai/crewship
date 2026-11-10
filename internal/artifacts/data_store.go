@@ -94,18 +94,18 @@ func (s *DataStore) transaction(ctx context.Context, key VersionKey, auth Versio
 // ifVersion means absent; positive values must match the exact stored counter.
 // Input has no attribution fields: the current host authority supplies them.
 func (s *DataStore) Batch(ctx context.Context, key VersionKey, collection string, writes []DataWrite, auth VersionAuthorize) ([]DataDocument, error) {
-	out, _, err := s.BatchGeneration(ctx, key, collection, writes, "", auth)
+	out, _, err := s.BatchGeneration(ctx, key, collection, writes, "", 0, auth)
 	return out, err
 }
 
 // BatchGeneration is Batch that also returns the collection's data generation
 // after the batch. When runID is set, the authenticated starter must own the
 // active run and its previous generation must still be current.
-func (s *DataStore) BatchGeneration(ctx context.Context, key VersionKey, collection string, writes []DataWrite, runID string, auth VersionAuthorize) ([]DataDocument, int64, error) {
+func (s *DataStore) BatchGeneration(ctx context.Context, key VersionKey, collection string, writes []DataWrite, runID string, codeVersion int64, auth VersionAuthorize) ([]DataDocument, int64, error) {
 	if s == nil || s.db == nil || !s.opts.Enabled {
 		return nil, 0, ErrDisabled
 	}
-	if (runID != "" && !validDataRunID(runID)) || !dataIdentifier.MatchString(collection) || len(writes) == 0 || len(writes) > MaxDataBatchWrites {
+	if (runID != "" && (!validDataRunID(runID) || codeVersion < 1 || codeVersion > MaxDataVersion)) || !dataIdentifier.MatchString(collection) || len(writes) == 0 || len(writes) > MaxDataBatchWrites {
 		return nil, 0, ErrDataInvalid
 	}
 	seen := map[string]bool{}
@@ -150,6 +150,9 @@ func (s *DataStore) BatchGeneration(ctx context.Context, key VersionKey, collect
 			}
 			if err != nil {
 				return err
+			}
+			if run.CodeVersion != codeVersion {
+				return ErrDataRunCodeVersion
 			}
 			if run.State != "running" {
 				return ErrDataRunGeneration

@@ -28,9 +28,10 @@ func (h *PageHandler) artifactDataEnabled(ctx context.Context) bool {
 }
 
 type artifactDataSelection struct {
-	owner       bool
-	editor      bool
-	collections []string
+	owner        bool
+	editor       bool
+	editorLatest bool
+	collections  []string
 }
 
 func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.VersionKey, collection string, version int64, write bool) (artifacts.VersionAuthorize, *artifactDataSelection) {
@@ -109,11 +110,12 @@ func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.Version
 		if collection != "" && !slices.Contains(collections, collection) {
 			return "", artifacts.ErrVersionNotFound
 		}
-		if checked && (selected.owner != isOwner || selected.editor != isEditor || !slices.Equal(selected.collections, collections)) {
+		if checked && (selected.owner != isOwner || selected.editor != isEditor || selected.editorLatest != (isEditor && latest == version) || !slices.Equal(selected.collections, collections)) {
 			return "", artifacts.ErrVersionAuthority
 		}
 		selected.owner = isOwner
 		selected.editor = isEditor
+		selected.editorLatest = isEditor && latest == version
 		selected.collections = collections
 		checked = true
 		return actor, nil
@@ -292,9 +294,9 @@ func (h *PageHandler) BatchArtifactData(w http.ResponseWriter, r *http.Request) 
 	}
 	collection := r.PathValue("collection")
 	auth, _ := h.artifactDataAuthority(r, k, collection, body.BaseVersion, true)
-	documents, generation, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).BatchGeneration(r.Context(), k, collection, body.Documents, body.RunID, auth)
+	documents, generation, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).BatchGeneration(r.Context(), k, collection, body.Documents, body.RunID, body.BaseVersion, auth)
 	if err != nil {
-		if errors.Is(err, artifacts.ErrDataRunNotFound) || errors.Is(err, artifacts.ErrDataRunGeneration) {
+		if errors.Is(err, artifacts.ErrDataRunNotFound) || errors.Is(err, artifacts.ErrDataRunGeneration) || errors.Is(err, artifacts.ErrDataRunCodeVersion) {
 			artifactDataRunError(w, r, err)
 		} else {
 			artifactDataError(w, err)

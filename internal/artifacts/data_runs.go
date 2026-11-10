@@ -49,6 +49,7 @@ const (
 	DefaultDataRunsKept = 20
 	// DefaultDataRunsActive running runs per collection; more are refused.
 	DefaultDataRunsActive = 4
+	MaxDataRunsActive     = 64
 	// DefaultDataRunKeyTTL after which a terminal run's idempotency key may be reused.
 	DefaultDataRunKeyTTL = 24 * time.Hour
 	// DefaultDataRunStalledAfter is when clients show a running run as stalled.
@@ -79,7 +80,7 @@ func DataOptionsFromEnv() DataOptions {
 	return DataOptions{
 		Enabled:         true,
 		RunsKept:        count("CREWSHIP_ARTIFACT_DATA_RUNS_KEPT", DefaultDataRunsKept, 1000),
-		RunsActive:      count("CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE", DefaultDataRunsActive, 64),
+		RunsActive:      count("CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE", DefaultDataRunsActive, MaxDataRunsActive),
 		RunKeyTTL:       duration("CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL", DefaultDataRunKeyTTL),
 		RunStalledAfter: duration("CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER", DefaultDataRunStalledAfter),
 	}
@@ -105,7 +106,8 @@ var (
 	// success would hide that refresh.
 	ErrDataRunOverlap = errors.New("another run of this collection overlaps this one")
 	// ErrDataRunGeneration is a success that does not match the current data generation.
-	ErrDataRunGeneration = errors.New("data generation is not current or does not match the claim")
+	ErrDataRunGeneration  = errors.New("data generation is not current or does not match the claim")
+	ErrDataRunCodeVersion = errors.New("run started on a different code version")
 )
 
 type DataRun struct {
@@ -114,6 +116,7 @@ type DataRun struct {
 	State             string `json:"state"`
 	StartedBy         string `json:"started_by"`
 	StartedAt         string `json:"started_at"`
+	CodeVersion       int64  `json:"code_version"`
 	StartGeneration   int64  `json:"start_generation"`
 	writtenGeneration sql.NullInt64
 	FinishedAt        string `json:"finished_at,omitempty"`
@@ -232,12 +235,12 @@ func validDataRunID(id string) bool {
 	return true
 }
 
-const dataRunColumns = `id,collection,state,started_by,started_at,start_generation,written_generation,coalesce(finished_at,''),coalesce(finished_by,''),end_generation,coalesce(failure_reason,''),coalesce(idempotency_key,'')`
+const dataRunColumns = `id,collection,state,started_by,started_at,code_version,start_generation,written_generation,coalesce(finished_at,''),coalesce(finished_by,''),end_generation,coalesce(failure_reason,''),coalesce(idempotency_key,'')`
 
 func scanDataRun(row interface{ Scan(...any) error }) (*DataRun, error) {
 	var run DataRun
 	var end sql.NullInt64
-	if err := row.Scan(&run.ID, &run.Collection, &run.State, &run.StartedBy, &run.StartedAt, &run.StartGeneration, &run.writtenGeneration, &run.FinishedAt, &run.FinishedBy, &end, &run.Reason, &run.Idempotency); err != nil {
+	if err := row.Scan(&run.ID, &run.Collection, &run.State, &run.StartedBy, &run.StartedAt, &run.CodeVersion, &run.StartGeneration, &run.writtenGeneration, &run.FinishedAt, &run.FinishedBy, &end, &run.Reason, &run.Idempotency); err != nil {
 		return nil, err
 	}
 	if end.Valid {
@@ -292,13 +295,14 @@ func (s *DataStore) runKeyTTL() time.Duration {
 
 // pruneDataRuns keeps the newest terminal runs and the newest success. A
 // running run is never removed; admission bounds how many exist. A failed
-// partial run that ended while a run is still going is kept too: it is the
-// evidence that refuses that run's success (ErrDataRunOverlap).
+// partial failure ending during an active run may block success. The single
+// newest partial failure is sufficient evidence for every active run; keeping
+// all such failures would allow a stalled run to defeat retention.
 func (s *DataStore) pruneDataRuns(ctx context.Context, tx *sql.Tx, key VersionKey, collection string) error {
 	_, err := tx.ExecContext(ctx, `DELETE FROM artifact_data_runs WHERE workspace_id=?1 AND page_id=?2 AND collection=?3 AND state!='running'
  AND id NOT IN (SELECT id FROM artifact_data_runs WHERE workspace_id=?1 AND page_id=?2 AND collection=?3 AND state!='running' ORDER BY finished_at DESC, rowid DESC LIMIT ?4)
  AND id NOT IN (SELECT id FROM artifact_data_runs WHERE workspace_id=?1 AND page_id=?2 AND collection=?3 AND state='succeeded' ORDER BY finished_at DESC, rowid DESC LIMIT 1)
- AND NOT (state='failed' AND end_generation>start_generation AND finished_at>=coalesce((SELECT min(started_at) FROM artifact_data_runs WHERE workspace_id=?1 AND page_id=?2 AND collection=?3 AND state='running'),'9999'))`, key.WorkspaceID, key.PageID, collection, s.runsKept())
+ AND id NOT IN (SELECT id FROM artifact_data_runs WHERE workspace_id=?1 AND page_id=?2 AND collection=?3 AND state='failed' AND end_generation>start_generation AND finished_at>=coalesce((SELECT min(started_at) FROM artifact_data_runs WHERE workspace_id=?1 AND page_id=?2 AND collection=?3 AND state='running'),'9999') ORDER BY finished_at DESC, rowid DESC LIMIT 1)`, key.WorkspaceID, key.PageID, collection, s.runsKept())
 	return err
 }
 
@@ -316,16 +320,16 @@ func keyExpired(run *DataRun, ttl time.Duration, now time.Time) bool {
 // run expires after the key TTL and then starts a new run. A collection with
 // the maximum active runs refuses new ones with ErrDataRunBusy. The authority
 // must reject a collection the current code version does not declare.
-func (s *DataStore) StartRun(ctx context.Context, key VersionKey, collection, idempotency string, auth VersionAuthorize) (run *DataRun, created bool, err error) {
+func (s *DataStore) StartRun(ctx context.Context, key VersionKey, collection, idempotency string, codeVersion int64, auth VersionAuthorize) (run *DataRun, created bool, err error) {
 	if s == nil || s.db == nil || !s.opts.Enabled {
 		return nil, false, ErrDisabled
 	}
-	if !dataIdentifier.MatchString(collection) || !idempotencyKey.MatchString(idempotency) {
+	if codeVersion < 1 || codeVersion > MaxDataVersion || !dataIdentifier.MatchString(collection) || !idempotencyKey.MatchString(idempotency) {
 		return nil, false, ErrDataInvalid
 	}
 	err = s.transaction(ctx, key, auth, func(tx *sql.Tx, actor string) error {
 		now := time.Now().UTC()
-		existing, err := scanDataRun(tx.QueryRowContext(ctx, `SELECT `+dataRunColumns+` FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND idempotency_key=?`, key.WorkspaceID, key.PageID, collection, idempotency))
+		existing, err := scanDataRun(tx.QueryRowContext(ctx, `SELECT `+dataRunColumns+` FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND code_version=? AND idempotency_key=?`, key.WorkspaceID, key.PageID, collection, codeVersion, idempotency))
 		switch {
 		case err == nil && keyExpired(existing, s.runKeyTTL(), now):
 			if _, err := tx.ExecContext(ctx, `UPDATE artifact_data_runs SET idempotency_key=NULL WHERE workspace_id=? AND page_id=? AND id=? AND state!='running'`, key.WorkspaceID, key.PageID, existing.ID); err != nil {
@@ -339,6 +343,14 @@ func (s *DataStore) StartRun(ctx context.Context, key VersionKey, collection, id
 			return nil
 		case !errors.Is(err, sql.ErrNoRows):
 			return err
+		}
+		var known bool
+		var collections int
+		if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(collection=?),0),count(DISTINCT collection) FROM artifact_data_runs WHERE workspace_id=? AND page_id=?`, collection, key.WorkspaceID, key.PageID).Scan(&known, &collections); err != nil {
+			return err
+		}
+		if !known && collections >= MaxDataCollections {
+			return ErrDataQuota
 		}
 		var active int
 		if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND state='running'`, key.WorkspaceID, key.PageID, collection).Scan(&active); err != nil {
@@ -359,13 +371,13 @@ func (s *DataStore) StartRun(ctx context.Context, key VersionKey, collection, id
 			return err
 		}
 		stamp := tsformat.Format(now)
-		if _, err := tx.ExecContext(ctx, `INSERT INTO artifact_data_runs(workspace_id,page_id,collection,id,idempotency_key,state,started_by,started_at,start_generation) VALUES(?,?,?,?,?,'running',?,?,?)`, key.WorkspaceID, key.PageID, collection, id, idempotency, actor, stamp, generation); err != nil {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO artifact_data_runs(workspace_id,page_id,collection,id,idempotency_key,state,started_by,started_at,code_version,start_generation) VALUES(?,?,?,?,?,'running',?,?,?,?)`, key.WorkspaceID, key.PageID, collection, id, idempotency, actor, stamp, codeVersion, generation); err != nil {
 			return err
 		}
 		if err := s.pruneDataRuns(ctx, tx, key, collection); err != nil {
 			return err
 		}
-		run = &DataRun{ID: id, Collection: collection, State: "running", StartedBy: actor, StartedAt: stamp, StartGeneration: generation, Idempotency: idempotency}
+		run = &DataRun{ID: id, Collection: collection, State: "running", StartedBy: actor, StartedAt: stamp, CodeVersion: codeVersion, StartGeneration: generation, Idempotency: idempotency}
 		created = true
 		return nil
 	})
@@ -385,12 +397,12 @@ func (s *DataStore) StartRun(ctx context.Context, key VersionKey, collection, id
 // Finishing again with the same outcome returns the stored run; a different
 // outcome is a conflict. A reason is only kept for a failure and is cleaned by
 // CleanDataRunReason. The finisher and the end generation are recorded.
-func (s *DataStore) FinishRun(ctx context.Context, key VersionKey, collection, id string, finish DataRunFinish, auth VersionAuthorize) (*DataRun, error) {
+func (s *DataStore) FinishRun(ctx context.Context, key VersionKey, collection, id string, codeVersion int64, finish DataRunFinish, auth VersionAuthorize) (*DataRun, error) {
 	if s == nil || s.db == nil || !s.opts.Enabled {
 		return nil, ErrDisabled
 	}
 	state, reason := finish.State, finish.Reason
-	if !dataIdentifier.MatchString(collection) || len(id) == 0 || len(id) > 64 || len(reason) > 4*MaxDataRunReason {
+	if codeVersion < 1 || codeVersion > MaxDataVersion || !dataIdentifier.MatchString(collection) || len(id) == 0 || len(id) > 64 || len(reason) > 4*MaxDataRunReason {
 		return nil, ErrDataInvalid
 	}
 	switch state {
@@ -415,8 +427,13 @@ func (s *DataStore) FinishRun(ctx context.Context, key VersionKey, collection, i
 		if err != nil {
 			return err
 		}
-		if state == "succeeded" && run.StartedBy != actor {
-			return ErrDataRunForbidden
+		if state == "succeeded" {
+			if run.StartedBy != actor {
+				return ErrDataRunForbidden
+			}
+			if run.CodeVersion != codeVersion {
+				return ErrDataRunCodeVersion
+			}
 		}
 		if run.State != "running" {
 			if run.State != state || run.Reason != reason || state == "succeeded" && (run.EndGeneration == nil || *run.EndGeneration != *finish.DataGeneration || (*run.EndGeneration == run.StartGeneration) != finish.Unchanged) {
@@ -487,7 +504,7 @@ func (s *DataStore) RunSummaries(ctx context.Context, key VersionKey, collection
 				return err
 			}
 			summary := DataRunSummary{Collection: collection, Latest: latest, LastAttemptAt: latest.StartedAt}
-			if summary.Active, err = scanDataRuns(tx.QueryContext(ctx, `SELECT `+dataRunColumns+` FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND state='running' ORDER BY started_at DESC, rowid DESC LIMIT 16`, key.WorkspaceID, key.PageID, collection)); err != nil {
+			if summary.Active, err = scanDataRuns(tx.QueryContext(ctx, `SELECT `+dataRunColumns+` FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND state='running' ORDER BY started_at DESC, rowid DESC LIMIT ?`, key.WorkspaceID, key.PageID, collection, MaxDataRunsActive)); err != nil {
 				return err
 			}
 			if err := tx.QueryRowContext(ctx, `SELECT coalesce(max(finished_at),'') FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND state='succeeded'`, key.WorkspaceID, key.PageID, collection).Scan(&summary.LastSuccessAt); err != nil {

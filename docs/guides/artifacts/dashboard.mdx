@@ -332,14 +332,14 @@ and common credential patterns (such as passwords, tokens, API keys, private
 key blocks and URL user info) and keeps at most 500 bytes. This is not a
 guarantee, so do not put secrets in a reason.
 
-- Repeating `start` with the same `--key` returns the same run, so a retried
+- Repeating `start` with the same `--key` and code version returns the same run, so a retried
   job does not open a second one. To retry after a failure, start a new run
   with a new key.
 - Finishing the same run again with the same outcome is accepted; a different
   outcome fails with `409`.
 - Only the producer that started a run can finish it as succeeded. Any writer
   of the Dashboard can finish a run as failed, for example to abandon a run
-  whose producer died; the person who finished it is recorded.
+  whose producer died or started on an old code version. The finisher is recorded. Linked batches and a successful finish require the same code version as the start.
 - `crewship page artifact data runs list <slug> --version 3` shows the newest
   run, last attempt and last success per collection.
 - Agent runs that work through the artifact tools cannot record runs yet; use
@@ -349,7 +349,9 @@ Limits are configurable server defaults, not part of the API contract (see
 [environment variables](/configuration/environment)): at most 4 runs per
 collection can be running at once (`CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE`; more
 fail with `409 artifact_data_run_busy`); the newest 20 finished runs and the
-newest success are kept (`CREWSHIP_ARTIFACT_DATA_RUNS_KEPT`); a running run
+newest success are kept (`CREWSHIP_ARTIFACT_DATA_RUNS_KEPT`), plus at most
+one additional overlapping partial failure. Producer histories can exist
+for up to 32 collection names per Dashboard. A running run
 is never removed, whatever the limit. The key of a finished run stays reserved
 until 24 hours pass (`CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL`) or the run is
 pruned, whichever comes first; do not rely on replaying a key of a run that
