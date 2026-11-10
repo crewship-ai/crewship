@@ -8,7 +8,7 @@ import { designConflicts, designNodes, type DesignConflict } from "./design-docu
 export type DesignConnection = "connecting" | "connected" | "offline" | "denied" | "rejected" | "quota"
 export type DesignAdmission = "ready" | "denied" | "retry"
 /** Another person on the canvas: name and colour from the server, pointer and selected layer from their browser. */
-export interface DesignPeer { clientId: number; name: string; color: string; cursor?: { x: number; y: number }; selection?: string }
+export interface DesignPeer { clientId: number; name: string; color: string; cursor?: { x: number; y: number }; selection?: string[] }
 const REMOTE = "design-server"
 // A paced turn refreshes the stored mark and sends a barrier. Every sync request
 // spends from the server's bucket: a burst of 5, then 1 a second, and it closes
@@ -249,9 +249,11 @@ export class DesignProvider {
   this.updateTimer ??= setTimeout(() => this.flushUpdates(), 75)
  }
  /** The layer this person has selected, for the others to see. Never a document change. */
- setSelection(id: string | null) {
-  const next = typeof id === "string" && id && id.length <= 128 ? id : null
-  if ((this.awareness.getLocalState()?.selection ?? null) !== next) this.awareness.setLocalStateField("selection", next)
+ /** One layer goes out as its ID, several (#5217) as a list of IDs, none as null. */
+ setSelection(ids: string | readonly string[] | null) {
+  const valid = [...new Set(typeof ids === "string" ? [ids] : ids ?? [])].filter(id => typeof id === "string" && id && id.length <= 128).slice(0, 200)
+  const next = valid.length === 0 ? null : valid.length === 1 ? valid[0] : valid
+  if (JSON.stringify(this.awareness.getLocalState()?.selection ?? null) !== JSON.stringify(next)) this.awareness.setLocalStateField("selection", next)
  }
  setCursor(cursor: { x: number; y: number } | null) {
   this.cursor = cursor

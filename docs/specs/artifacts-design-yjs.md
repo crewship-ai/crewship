@@ -242,7 +242,9 @@ standard `y-protocols` sync and awareness messages in binary frames.
   disconnected.
 - Awareness (cursors, selection and presence) is limited to one client ID per
   connection. `cursor` is a canvas point; `selection` is the selected layer ID
-  (1 to 128 characters) or `null`. Both are view state and are never written
+  (1 to 128 characters), a list of 1 to 200 such IDs for a multi-selection
+  (#5217; clients send one layer as a plain ID, so older peers keep drawing it),
+  or `null`. Both are view state and are never written
   to the document; a selection naming a missing layer draws nothing.
 - `selection` is live-canvas state. The server drops it from awareness sent by
   a person who cannot read the live canvas, and removes it from the awareness
@@ -372,3 +374,5 @@ Page slug, or `@<page-id>`.
 | `GET /api/v1/pages/{slug}/design/comments` | Read node-anchored comments. |
 | `POST /api/v1/pages/{slug}/design/comments` | Add a node-anchored comment. |
 | `POST /api/v1/pages/{slug}/design/agent` | Connect the owner's private chat. |
+
+A multi-selection publishes at most the first 200 selected layer IDs in live awareness. IDs remain bounded strings, including embedded newlines; the editor does not split an ID into other selections. This bound limits presence metadata, not document content.
