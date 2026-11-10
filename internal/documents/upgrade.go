@@ -11,10 +11,12 @@ import (
 
 // LatestSchema is the newest content schema: 4 adds bold, italic, strike,
 // code block languages, block quotes and task lists to schema 3; 5 adds
-// underline and a text colour and highlight named from a closed palette.
-const LatestSchema = 5
+// underline and a text colour and highlight named from a closed palette; 6
+// adds the Docs Canvas surface (placements of Page blocks and canvas-only
+// notes, shapes and connectors) without changing the Page content contract.
+const LatestSchema = 6
 
-// RichSchema is schema 3, 4 or 5: bound to its original Page and edited
+// RichSchema is schema 3 to 6: bound to its original Page and edited
 // through rich semantic proofs. What agents may do on each is SchemaAllows.
 func RichSchema(schema int) bool { return schema >= 3 && schema <= LatestSchema }
 

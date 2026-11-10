@@ -2462,7 +2462,7 @@ refused. Reading somebody else's private document as workspace OWNER requires
 an audit entry before disclosure; earlier checkpoint permissions are not reused.
 
 Request: one JSON object of at most 4096 bytes, with exactly `page_id`, `id`,
-`schema` (2 to 5), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
+`schema` (2 to 6), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
 the current editing epoch and revision, a retained checkpoint ID and a new
 mutation ID. Page, mutation and checkpoint IDs contain 1–128 ASCII letters,
 digits, underscores or hyphens. A changed Page identity, revision or epoch
@@ -2473,8 +2473,10 @@ Response 200: `page_id`, `id`, `rev`, a new `epoch`, `kind: "restore"` and
 Restoration creates a new revision, preserving the retained checkpoint. A
 schema 5 Document stays at schema 5 when you restore a checkpoint from before
 its upgrade: older content is valid schema 5 content, and new agent proposals
-are made at schema 5. Below schema 5 the Document takes the
-checkpoint's schema. After an uncertain confirmation, retry the original
+are made at schema 5. A Canvas (schema 6) Document stays at schema 6 in the
+same way; a checkpoint from before Canvas was enabled restores the Page and
+leaves the Canvas layout, cards and notes empty. Below schema 5 the Document
+takes the checkpoint's schema. After an uncertain confirmation, retry the original
 packet with the same mutation ID and preconditions; an exact authorized retry
 returns the original receipt without another restoration. A lost confirmation
 is not evidence that the write failed.
@@ -2494,7 +2496,7 @@ CLI: `crewship doc restore <page-slug> --file <request.json>`.
 Authentication: a current human credential owning an empty Page, with current
 write permission; scoped CLI credentials need both `pages:read` and `pages:write`.
 Request body: one JSON object of at most 2 MiB containing `id`, `schema` (2, 3 or 4)
-and `body`. Schemas 3 and 4 also require the original `page_id`. Schema 4 adds
+and `body`. Schemas 3 to 6 also require the original `page_id`. Schema 4 adds
 `bold`, `italic` and `strike` marks, a code block `language`, `blockquote` and
 `taskList`/`taskItem` (`checked`); see [`crewship doc initialize`](/cli/doc). Stage a Page through
 `POST /api/v1/pages` with `panels: []` and `allow_empty: true`; this is an explicit
@@ -2516,7 +2518,7 @@ Authentication: a current human credential with current document write access;
 scoped CLI credentials need both `pages:read` and `pages:write`. Request body:
 one JSON object of at most 2 MiB. Semantic replacement requires `id`, `schema`,
 `epoch`, `target`, `text`, `ifRev` and `ifHash`. The editor's incremental form
-uses `kind: "human"` and base64 `update`; schemas 3 and 4 require the original
+uses `kind: "human"` and base64 `update`; schemas 3 to 6 require the original
 `page_id`. The service rechecks the exact credential and permission within the
 storage transaction. Response: a receipt for the confirmed revision. Repeating
 the original operation after a lost confirmation returns its receipt without
@@ -2527,6 +2529,29 @@ automatically rebased. Statuses: 200 confirmed receipt; 400 invalid request;
 request; 422 invalid content; 429 temporary operation limit; 500 storage failure;
 502 invalid engine response; 503 disabled or unavailable service. Responses use
 `Cache-Control: no-store`. CLI: `crewship doc patch <page-slug> --file <request.json>`.
+
+## Upgrade a native document (enable Canvas)
+
+`POST /api/v1/pages/{slug}/document/upgrade`
+
+The explicit human schema upgrade; today it enables the Docs Canvas (schema 6)
+on an older document. Authentication: a current human credential with current
+document write (Edit) access; scoped CLI credentials need both `pages:read` and
+`pages:write`. Agent run credentials are refused. Request body: one JSON object
+with `id` (operation ID), `schema` (the document's current schema, which must
+support upgrade), `target_schema` (6), `page_id`, `epoch` and `ifRev` from the
+current read. Nothing in the content changes: text, block IDs and hashes,
+versions and comments stay as they are. Open proposals can afterwards only be
+rejected, never accepted. The schema and the document generation advance, so editors still open at the old schema are
+refused with 409 and must reload. Response: a receipt with `rev` and `schema`.
+Repeating the original request after a lost confirmation returns its receipt
+with `duplicate: true` and never upgrades twice. Statuses: 200 confirmed
+receipt; 400 invalid request; 401 invalid credential; 403 missing access/scope
+or an agent credential; 404 unavailable document; 409 stale revision/epoch, a
+schema that cannot upgrade, a wrong target or a conflicting operation ID; 413
+oversized request; 429 temporary operation limit; 500 storage failure; 502
+invalid engine response; 503 disabled or unavailable service. Responses use
+`Cache-Control: no-store`. CLI: `crewship doc upgrade <page-slug> --file <request.json>`.
 
 ## List document comments
 
@@ -2556,7 +2581,7 @@ Authentication: a current human credential with Comment or Edit access to the
 document (Edit, or a Comment or Edit grant); on private output only its owner.
 Scoped CLI credentials need `pages:write`; agent credentials are refused.
 Request body: `id`, `schema`, `epoch`, `ifRev`, `text` (1–10,000 characters) and,
-for schemas 3 and 4, `page_id`. A new thread adds `block`, `from` and `to` (the
+for schemas 3 to 6, `page_id`. A new thread adds `block`, `from` and `to` (the
 quoted UTF-16 range in one paragraph, heading or code block); a reply adds
 `parent` instead. Response: a receipt with `id`, `rev`, `epoch`, `actor` and
 `kind: "comment"`; an exact retry returns it again. Comments never change
@@ -2572,7 +2597,7 @@ CLI: `crewship doc comment <page-slug> --file <request.json>`.
 `POST /api/v1/pages/{slug}/document/comments/resolve`
 
 Authentication: as for commenting. Request body: `id`, `schema`, `epoch`,
-`ifRev`, `page_id` (schemas 3 and 4), `comment` (thread ID), `version` (current)
+`ifRev`, `page_id` (schemas 3 to 6), `comment` (thread ID), `version` (current)
 and `resolved` (`true` resolves, `false` reopens). Response: a receipt with
 `kind: "resolve"`. Statuses: 200 confirmed; 400 invalid request; 401 invalid
 credential; 403 missing access/scope; 409 stale version, revision or epoch;
@@ -2590,7 +2615,7 @@ never review proposals, and restricted members have no access to this route.
 Request: path parameter `slug` only. Response: `page_id` and `proposals`, oldest
 first; each has `id`, `author`, `run_id`, `target.block_ids`, `base_rev`,
 `status` (`open`, `stale`, `accepted` or `rejected`), `text` and `created_at`.
-Proposals exist on documents whose schema supports them (4 and 5), each bound to
+Proposals exist on documents whose schema supports them (4, 5 and 6), each bound to
 the schema it was made at; `GET /api/v1/pages/{slug}/document` reports
 `proposals: true` where they are served and the schema's `capabilities`. Statuses: 200 listed; 401
 invalid credential; 403 missing access or an agent credential; 404 no such

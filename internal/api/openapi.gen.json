@@ -8173,7 +8173,8 @@
               2,
               3,
               4,
-              5
+              5,
+              6
             ],
             "type": "integer"
           }
@@ -8472,7 +8473,7 @@
         "type": "object"
       },
       "DocumentNode": {
-        "description": "Versioned bounded tree: depth\u003c=40, nodes\u003c=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks (one per text) and plain codeBlock; explicit4 adds bold/italic/strike marks combinable with each other and link (inline code stays alone), codeBlock language, blockquote and taskList/taskItem(checked); explicit5 adds underline and textColor/highlight marks whose only attribute is a palette name (at most 7 marks per text), and inline atoms date{value: YYYY-MM-DD} and mention{userId} inside paragraphs and headings, with exactly that one attribute, no content and no marks. Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine.",
+        "description": "Versioned bounded tree: depth\u003c=40, nodes\u003c=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks (one per text) and plain codeBlock; explicit4 adds bold/italic/strike marks combinable with each other and link (inline code stays alone), codeBlock language, blockquote and taskList/taskItem(checked); explicit5 adds underline and textColor/highlight marks whose only attribute is a palette name (at most 7 marks per text), and inline atoms date{value: YYYY-MM-DD} and mention{userId} inside paragraphs and headings, with exactly that one attribute, no content and no marks; explicit6 keeps the schema5 tree and adds the Canvas surface (block placements and canvas-only items) stored beside it, never inside this tree. Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine.",
         "properties": {
           "attrs": {
             "properties": {
@@ -9003,7 +9004,8 @@
               2,
               3,
               4,
-              5
+              5,
+              6
             ],
             "type": "integer"
           }
@@ -9111,7 +9113,7 @@
             "type": "string"
           },
           "proposals": {
-            "description": "Agent proposals and their review are served on this Doc (its schema supports them: 4 or 5; never for restricted members).",
+            "description": "Agent proposals and their review are served on this Doc (its schema supports them: 4, 5 or 6; never for restricted members).",
             "type": "boolean"
           },
           "rev": {
@@ -148249,7 +148251,8 @@
                                 "enum": [
                                   3,
                                   4,
-                                  5
+                                  5,
+                                  6
                                 ]
                               }
                             },
@@ -148289,7 +148292,8 @@
                           2,
                           3,
                           4,
-                          5
+                          5,
+                          6
                         ],
                         "type": "integer"
                       },
@@ -148336,7 +148340,8 @@
                                 "enum": [
                                   3,
                                   4,
-                                  5
+                                  5,
+                                  6
                                 ]
                               }
                             },
@@ -148372,7 +148377,8 @@
                           2,
                           3,
                           4,
-                          5
+                          5,
+                          6
                         ],
                         "type": "integer"
                       },
@@ -148916,7 +148922,8 @@
                             "enum": [
                               3,
                               4,
-                              5
+                              5,
+                              6
                             ]
                           }
                         },
@@ -148955,7 +148962,8 @@
                       2,
                       3,
                       4,
-                      5
+                      5,
+                      6
                     ],
                     "type": "integer"
                   },
@@ -149497,7 +149505,8 @@
                             "enum": [
                               3,
                               4,
-                              5
+                              5,
+                              6
                             ]
                           }
                         },
@@ -149524,7 +149533,8 @@
                       2,
                       3,
                       4,
-                      5
+                      5,
+                      6
                     ],
                     "type": "integer"
                   }
@@ -150112,7 +150122,8 @@
                                 "enum": [
                                   3,
                                   4,
-                                  5
+                                  5,
+                                  6
                                 ]
                               }
                             },
@@ -150146,7 +150157,8 @@
                           2,
                           3,
                           4,
-                          5
+                          5,
+                          6
                         ],
                         "type": "integer"
                       },
@@ -150186,7 +150198,8 @@
                                 "enum": [
                                   3,
                                   4,
-                                  5
+                                  5,
+                                  6
                                 ]
                               }
                             },
@@ -150228,7 +150241,8 @@
                           2,
                           3,
                           4,
-                          5
+                          5,
+                          6
                         ],
                         "type": "integer"
                       },
@@ -152989,7 +153003,8 @@
                       2,
                       3,
                       4,
-                      5
+                      5,
+                      6
                     ],
                     "type": "integer"
                   }
@@ -153537,6 +153552,598 @@
           }
         ],
         "summary": "Restore page document",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/document/upgrade": {
+      "post": {
+        "description": "Submit page document upgrade (POST /api/v1/pages/{slug}/document/upgrade).",
+        "operationId": "post_api_v1_pages_slug_document_upgrade",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Explicit human schema upgrade (for example enabling Canvas at schema 6). Content, block IDs and hashes, versions and comments are unchanged; agents are refused.",
+                "properties": {
+                  "epoch": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "ifRev": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "page_id": {
+                    "type": "string"
+                  },
+                  "schema": {
+                    "description": "The document's current schema; it must support upgrade.",
+                    "enum": [
+                      1,
+                      2,
+                      3,
+                      4,
+                      5
+                    ],
+                    "type": "integer"
+                  },
+                  "target_schema": {
+                    "enum": [
+                      6
+                    ],
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id",
+                  "schema",
+                  "target_schema",
+                  "page_id",
+                  "epoch",
+                  "ifRev"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page document upgrade",
         "tags": [
           "pages"
         ],

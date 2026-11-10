@@ -218,13 +218,15 @@ func documentRichDate(value any) bool {
 	return day <= days
 }
 
-// documentRichTreeFor validates a closed rich projection for schema 3, 4 or 5.
+// documentRichTreeFor validates a closed rich projection for schema 3 to 6.
 // Schema 4 adds bold, italic and strike (combinable with each other and a
 // link; inline code stays alone), code block languages, quotes and task lists.
 // Schema 5 adds underline, a palette text colour and highlight, and the inline
 // atoms date {value} and mention {userId} inside paragraphs and headings.
+// Schema 6 (Canvas) has exactly schema 5's Page tree; its surface is never
+// part of a projection.
 func documentRichTreeFor(raw json.RawMessage, schema int) (map[string]any, error) {
-	if schema != 3 && schema != 4 && schema != 5 {
+	if !documents.RichSchema(schema) {
 		return nil, fmt.Errorf("unsupported rich schema")
 	}
 	formatted := schema >= 4

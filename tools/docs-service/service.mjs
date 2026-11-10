@@ -6,7 +6,7 @@ import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 import { basename, dirname, isAbsolute, normalize } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import * as Y from 'yjs';
-import { VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION, CREATE_VERSION, schemaAllows, create, load, snapshot, outline, validate, patch, hash, decode, anchor, resolve, markdown, validUserId } from './schema.mjs';
+import { VERSION, RICH_VERSION, FORMATTED_VERSION, MARKS_VERSION, CANVAS_VERSION, LATEST_VERSION, CREATE_VERSION, schemaAllows, create, load, snapshot, outline, validate, upgradeContent, patch, hash, decode, anchor, resolve, markdown, validUserId } from './schema.mjs';
 import { readServiceSecret } from './secret.mjs';
 
 export const PROTOCOL = 3;
@@ -17,12 +17,13 @@ const id = value => typeof value === 'string' && /^[a-zA-Z0-9_-]{1,128}$/.test(v
 const textBoundary = (text, index) => index === 0 || index === text.length ||
   !(text.charCodeAt(index - 1) >= 0xd800 && text.charCodeAt(index - 1) <= 0xdbff && text.charCodeAt(index) >= 0xdc00 && text.charCodeAt(index) <= 0xdfff);
 const contentSchema = version => version === 1 ? VERSION : version;
-const supportedSchema = version => [1, VERSION, RICH_VERSION, FORMATTED_VERSION, LATEST_VERSION].includes(version);
+const supportedSchema = version => [1, VERSION, RICH_VERSION, FORMATTED_VERSION, MARKS_VERSION, CANVAS_VERSION].includes(version);
 // Mirrors Go documents.RestoredSchema (#5155): a restore never takes a schema 5
-// Document below schema 5, so schema 4 proposals are never silently re-enabled.
-const restoredSchema = (current, checkpoint) => current === LATEST_VERSION && checkpoint < LATEST_VERSION ? LATEST_VERSION : checkpoint;
-// Schemas 3, 4 and 5 are bound to their original Page and carry rich semantic proofs.
-const richSchema = version => version === RICH_VERSION || version === FORMATTED_VERSION || version === LATEST_VERSION;
+// or later Document below its schema, so schema 4 proposals are never silently
+// re-enabled and enabling Canvas is never undone by a restore.
+const restoredSchema = (current, checkpoint) => current >= MARKS_VERSION && checkpoint < current ? current : checkpoint;
+// Schemas 3 to 6 are bound to their original Page and carry rich semantic proofs.
+const richSchema = version => Number.isInteger(version) && version >= RICH_VERSION && version <= LATEST_VERSION;
 async function verifyTargets(doc, targets, version = VERSION) {
   if (!Array.isArray(targets) || targets.length < 1 || targets.length > 16) throw fault(400, 'one to sixteen selected text targets required');
   const blocks = new Map((await outline(doc,version)).map(block => [block.id, block]));
@@ -89,7 +90,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   for (const path of [socket, authoritySocket, tokenFile]) if (!isAbsolute(path) || normalize(path) !== path || Buffer.byteLength(path) > 100) throw new Error('clean absolute Unix socket path required (maximum 100 bytes)');
   const secret = await readServiceSecret(tokenFile);
   const build = createHash('sha256');
-  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'position-migrations.mjs', 'service.mjs', 'create-document.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
+  for (const file of ['pnpm-lock.yaml', 'schema.mjs', 'schema-core.mjs', 'surface-core.mjs', 'position-migrations.mjs', 'service.mjs', 'create-document.mjs', 'secret.mjs']) build.update(await readFile(new URL(file, import.meta.url)));
   const identity = { protocol: PROTOCOL, schema: LATEST_VERSION, build: build.digest('hex') };
   const leases = new Map();
   const owner = randomUUID();
@@ -219,7 +220,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     if ((richSchema(request.schema) || request.page_id !== undefined) && request.page_id !== page) throw fault(409,'original Page identity changed');
     if (operation === 'initialize' && richSchema(request.schema) && context.authorization.startsWith('Bearer agtv2.')) throw fault(403,'human rich document initialization required');
     if (operation === 'initialize') {
-      if (![VERSION,RICH_VERSION,FORMATTED_VERSION,LATEST_VERSION].includes(request.schema) || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
+      if (![VERSION,RICH_VERSION,FORMATTED_VERSION,MARKS_VERSION,CANVAS_VERSION].includes(request.schema) || !id(request.id) || !request.body) throw fault(400, 'schema and operation ID required');
       const fingerprint = await hash({ operation, request });
       try { const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint }); if (receipt.found) return { ...receipt, duplicate: true }; } catch (error) { if (error.status !== 404) throw error; }
       const doc = create(request.body,request.schema);
@@ -290,7 +291,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       const key=`${context.workspace}/${page}`;
       lease=await writerLease(page,context,state);
       if (operation === 'upgrade') {
-        validate(doc,LATEST_VERSION);
+        upgradeContent(doc,state.schema,LATEST_VERSION);
         const result = await go(page,'upgrade',context,{id:request.id,fingerprint,schema:state.schema,targetSchema:LATEST_VERSION,ifRev:state.rev,generation:state.generation??0,epoch:lease.epoch,leaseToken:lease.token,leaseOwner:owner});
         leases.delete(key);
         return {...result,schema:LATEST_VERSION,epoch:syncEpoch(advanced(state))};
@@ -322,7 +323,11 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
           if (request.ifRev !== state.rev) throw fault(409, 'restore precondition conflict');
           const checkpoint = await go(page, 'checkpoint-read', context, { id: request.checkpoint });
           if (checkpoint.schema !== undefined && !supportedSchema(checkpoint.schema)) throw fault(409, 'unsupported checkpoint schema');
-          resultVersion = contentSchema(checkpoint.schema??VERSION); restored = restoredSchema(state.schema, checkpoint.schema??VERSION); doc.destroy(); doc = load(checkpoint.snapshot); if (restored !== contentSchema(checkpoint.schema??VERSION)) validate(doc, restored); break;
+          restored = restoredSchema(state.schema, checkpoint.schema??VERSION); doc.destroy(); doc = load(checkpoint.snapshot);
+          // Older history restored onto a schema 5 or 6 Document goes through the
+          // same explicit conversion as Enable Canvas (#5149). Same-schema history needs
+          // none; the checks below (with the Canvas quota mapping) cover both.
+          resultVersion = contentSchema(restored); if (resultVersion !== contentSchema(checkpoint.schema??VERSION)) upgradeContent(doc, checkpoint.schema??VERSION, resultVersion); break;
         }
         case 'checkpoint':
           if (request.ifRev !== state.rev) throw fault(409, 'checkpoint precondition conflict');
@@ -330,7 +335,12 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
         default: throw fault(404, 'unknown operation');
       }
       if (doc.store.pendingStructs || doc.store.pendingDs) throw fault(400, 'unresolved Yjs dependencies');
-      validate(doc,resultVersion);
+      // The Canvas budget is checked on the merged state, so copies that each
+      // stayed inside it cannot be stored together past it (schema 6).
+      try { validate(doc,resultVersion); } catch (error) {
+        if (error.message === 'surface history limit' || error.message === 'surface entry limit') throw fault(413, error.message === 'surface entry limit' ? 'The canvas holds as many items as it can; this change was not saved and stays in your draft.' : 'Canvas history is full; this change was not saved and stays in your draft.', 'surface_quota');
+        throw error;
+      }
       const blocks = (await outline(doc,resultVersion)).map(({ id, hash }) => ({ id, hash }));
       const renewal=await go(page, 'renew', context, { owner, epoch: lease.epoch, token: lease.token });
       if(renewal.expiresAt)lease.expiresAt=renewal.expiresAt;

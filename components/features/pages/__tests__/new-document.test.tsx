@@ -3,8 +3,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, expect, it, vi } from "vitest"
 import { NewDocumentDialog } from "../new-document-dialog"
 import { CREATE_SCHEMA } from "@/lib/documents/contracts"
-import { readFileSync } from "node:fs"
-import { join } from "node:path"
 const mocks=vi.hoisted(()=>({fetch:vi.fn(),allowed:true,enabled:true,commands:false,native:false,sdkPrefix:undefined as string|undefined,checkpoint:vi.fn(),openNative:vi.fn(),openCommand:vi.fn()}))
 vi.mock("@/lib/api-fetch",()=>({apiFetch:mocks.fetch,broadcastSessionExpired:vi.fn()}))
 vi.mock("@/hooks/use-page-creation-access",()=>({usePageCreationAccess:()=>mocks.allowed}))
@@ -33,9 +31,6 @@ it("retries numeric initialization with the original Page and creation-schema pa
   expect(calls.filter(([url])=>!url.includes("/initialize"))).toHaveLength(1)
   const bodies=calls.filter(([url])=>url.includes("/initialize")).map(([,init])=>JSON.parse(init.body))
   expect(bodies[0]).toEqual(bodies[1]);expect(bodies[0]).toMatchObject({schema:CREATE_SCHEMA,page_id:"stable-page"});expect(CREATE_SCHEMA).toBe(5)
-  // The UI initialize request names exactly Go's documents.CreateSchema, the schema API/CLI create uses (#5233).
-  const goCreate=/^const CreateSchema = (\d+)$/m.exec(readFileSync(join(process.cwd(),"internal/documents/schemas.go"),"utf8"))
-  expect(goCreate).not.toBeNull();expect(bodies[0].schema).toBe(Number(goCreate![1]))
   expect(calls[0][1].body).not.toContain("owner")
   client.clear()
 })

@@ -1,6 +1,6 @@
 ---
 title: "Document formatting and comments"
-description: "What a Docs page can hold in schemas 4 and 5, how a document gets them, and how comment threads work."
+description: "What a Docs page can hold in schemas 4 to 6, how a document gets them, and how comment threads work."
 icon: "message-square"
 stability: experimental
 tag: Experimental
@@ -20,6 +20,7 @@ so a document never changes meaning on its own:
 | 3 | Schema 2 plus web links, inline code and code blocks |
 | 4 | Schema 3 plus **bold**, *italic* and ~~strikethrough~~ (combinable, and with links), a language on each code block, block quotes and checklists |
 | 5 | Schema 4 plus underline, a text colour and a highlight, each combinable with the other marks, and inline dates and mentions |
+| 6 | Schema 5 plus the Canvas: block placements, notes and shapes beside the page |
 
 In a schema 4 document the toolbar offers Bold, Italic, Strikethrough, Quote,
 Checklist and a language for the current code block. Tick a checklist item to
@@ -85,12 +86,17 @@ this release, so exported mentions read `@Unknown member` for now. A semantic
 delete across one, is refused with `ambiguous_inline_atom`; make that edit in
 the editor.
 
-A document becomes schema 4 or 5 only explicitly: initialize it with `"schema": 4`
-(see [`crewship doc initialize`](/cli/doc)) or `"schema": 5`, or upgrade an older
-document through the documents service's human-only upgrade, which always goes
-to the newest schema (5), keeps its content, history and comments and only
-widens what it may hold. Restoring a version from before that upgrade keeps
-the document at schema 5, so it never silently returns to schema 4. An editor
+A document becomes schema 4, 5 or 6 only explicitly: initialize it with that
+`"schema"` (see [`crewship doc initialize`](/cli/doc)), or upgrade an older
+document with the human-only upgrade ([`crewship doc upgrade`](/cli/doc), or
+**Enable Canvas** in the Docs view), which always goes to the newest schema
+(6), keeps its content, history and comments and only widens what it may hold.
+From schema 5 on, restoring a version from before an upgrade keeps the
+document's schema, so it never silently returns to schema 4 and Canvas stays
+enabled. The restored version goes through the same conversion as the upgrade
+and must be valid content of the document's schema; its text, formatting,
+dates and mentions are kept, it has no Canvas layout, and the document stays
+editable and open to agent proposals. An editor
 that does not know a document's schema opens it read-only with "This document
 needs a newer editor" and never saves over it.
 
@@ -98,7 +104,7 @@ New documents start at schema 5: the New Doc dialog, the Artifacts library and
 documents an agent creates from chat. Existing documents keep their schema
 until someone with edit access upgrades them. The agent run that created a
 document with your drafting permission edits it directly; any later agent
-request on a schema 4 or 5 document is a proposal at that document's schema,
+request on a schema 4, 5 or 6 document is a proposal at that document's schema,
 which a person accepts or rejects. Accepting keeps underline, colours,
 highlights, dates and mentions outside the changed text.
 
@@ -246,6 +252,32 @@ The status chip says **Saved** only when the server has confirmed your changes
 and its confirmed copy holds everything in your editor. If it lacks something,
 editing stops, the chip shows an unsaved draft and offers **Download my
 changes**; that state is never reported as saved.
+
+## Canvas
+
+In the Artifacts library every document shows **Page** and **Canvas** in its
+view bar. On an older document the first switch to Canvas asks **Enable Canvas
+for this document?**: confirming upgrades it to schema 6 and keeps its text,
+formatting, versions and comments; open proposals can then only be rejected,
+and an agent proposes again. Only people with edit access are asked. Canvas lays the same document out as cards: add blocks from the
+document, then drag a card to move it or drag its edges to resize it. A card is
+the block itself, not a copy: editing it on the Page changes the card, and
+moving a card never changes its text. A card shows the block's formatting,
+dates and mentions; a mention names a person exactly as the Page does, through
+the same people lookup, and otherwise reads **@Unknown member**. Drag the background or use the wheel to
+pan, Ctrl/⌘ + wheel or a pinch to zoom, and **Fit** to see everything.
+Double-click a card (or press Enter) to open that block in the Page.
+
+Select a card for **Remove from canvas**, which takes only the card off the
+canvas and leaves the block on the Page, or **Delete block…**, which deletes the
+block from the Page and the Canvas after a confirmation that names the comment
+threads it detaches. **Add note** puts a note on the canvas only; it is never
+part of the Page or its export. **Undo** and **Redo** (Ctrl/⌘ + Z, Shift +
+Ctrl/⌘ + Z) take back your own canvas changes, never someone else's. With read
+access only, you can pan, zoom, fit and select but not change the canvas. A card
+with open comments shows a badge that opens the same threads as the Page.
+Agents propose changes to blocks as on the Page; they never move or add
+anything on the canvas.
 
 ## Comments
 

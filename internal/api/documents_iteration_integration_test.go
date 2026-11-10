@@ -164,9 +164,15 @@ func TestDocumentIterationManagedBridgeDraftSamePage(t *testing.T) {
 	if err := json.Unmarshal(raw, &created); err != nil {
 		t.Fatal(err)
 	}
+	// The target names the created Document's own schema (CreateSchema), not
+	// LatestSchema: an upgrade is the person's explicit step (#5149).
 	var rev, generation int64
-	if err := f.rig.db.QueryRow(`SELECT head_rev,generation FROM documents WHERE page_id=?`, created.PageID).Scan(&rev, &generation); err != nil {
+	var schema int
+	if err := f.rig.db.QueryRow(`SELECT head_rev,generation,schema_version FROM documents WHERE page_id=?`, created.PageID).Scan(&rev, &generation, &schema); err != nil {
 		t.Fatal(err)
+	}
+	if schema != documents.CreateSchema {
+		t.Fatalf("created schema %d, want %d", schema, documents.CreateSchema)
 	}
 	resolver := &iterationLiveResolver{IPCResolver: chatbridge.NewIPCResolver(host.URL, master, newTestLogger()), f: f, stop: errors.New("stop after actual HTTP admission")}
 	runtime := &iterationRuntime{}
@@ -214,7 +220,7 @@ func TestDocumentIterationManagedBridgeDraftSamePage(t *testing.T) {
 		}
 		// #5137: a follow-up run on a schema-4 Doc proposes; the creator agent
 		// has no Edit grant from the owner, so it never writes directly.
-		if view.PageID != created.PageID || view.Rev != rev || view.Schema != documents.LatestSchema || view.Mode != "propose" || len(view.Targets) != 2 {
+		if view.PageID != created.PageID || view.Rev != rev || view.Schema != schema || view.Mode != "propose" || len(view.Targets) != 2 {
 			err = fmt.Errorf("target changed or not a propose view: %+v", view)
 			completed <- result{err: err}
 			return err
@@ -231,7 +237,7 @@ func TestDocumentIterationManagedBridgeDraftSamePage(t *testing.T) {
 			err = fmt.Errorf("propose view prepared %T", prepared)
 		}
 		if err == nil {
-			direct, _ := json.Marshal(map[string]any{"operation": "patch", "generation": packet.Generation, "request": map[string]any{"id": "followup-direct", "schema": documents.LatestSchema, "page_id": created.PageID, "epoch": view.Epoch, "ifRev": view.Rev, "target": packet.Proposal.Target, "ifHash": packet.Proposal.IfHash, "text": "Revised introduction."}})
+			direct, _ := json.Marshal(map[string]any{"operation": "patch", "generation": packet.Generation, "request": map[string]any{"id": "followup-direct", "schema": schema, "page_id": created.PageID, "epoch": view.Epoch, "ifRev": view.Rev, "target": packet.Proposal.Target, "ifHash": packet.Proposal.IfHash, "text": "Revised introduction."}})
 			if status, raw, _ := exchange(http.MethodPost, direct); status != 403 {
 				err = fmt.Errorf("direct write without an Edit grant: %d %s", status, raw)
 			}
@@ -255,7 +261,7 @@ func TestDocumentIterationManagedBridgeDraftSamePage(t *testing.T) {
 	digest := sha256.Sum256([]byte(humanToken))
 	mustExec(t, f.rig.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier,scopes) VALUES('iteration-cli-token',?,'Iteration test',?,'STANDARD','["*"]')`, f.a.HumanUserID, fmt.Sprintf("%x", digest))
 	target := filepath.Join(dir, "target.json")
-	targetBytes, _ := json.Marshal(map[string]any{"submission_id": "followup", "page_id": created.PageID, "schema": documents.LatestSchema, "rev": rev, "generation": generation})
+	targetBytes, _ := json.Marshal(map[string]any{"submission_id": "followup", "page_id": created.PageID, "schema": schema, "rev": rev, "generation": generation})
 	if err := os.WriteFile(target, targetBytes, 0600); err != nil {
 		t.Fatal(err)
 	}

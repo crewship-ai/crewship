@@ -223,15 +223,16 @@ func (s *Store) Stats(ctx context.Context, k Key, a Authorize) (v Stats, e error
 }
 
 // RestoredSchema is the schema a Document has after restoring a checkpoint
-// recorded at checkpoint while it is at current (#5155). A Document at the
-// latest schema stays there: every older schema reaches the latest one by a
-// pure schema bump (UpgradeRequest), so older content is valid latest content,
-// and a silent downgrade would re-enable schema 4 agent proposals on a
-// Document that may hold dates and mentions. Below the latest schema a
+// recorded at checkpoint while it is at current (#5155). A Document at schema
+// 5 or later never goes below its schema: every older schema reaches it by a
+// pure schema bump (UpgradeRequest), so older content is valid content of the
+// current schema, a downgrade would re-enable schema 4 agent proposals on a
+// Document that may hold dates and mentions, and restoring a version from
+// before Canvas was enabled keeps Canvas (schema 6) enabled. Below schema 5 a
 // restore keeps the checkpoint's own schema, as before.
 func RestoredSchema(current, checkpoint int) int {
-	if current == LatestSchema && checkpoint < LatestSchema {
-		return LatestSchema
+	if current >= MarksSchema && checkpoint < current {
+		return current
 	}
 	return checkpoint
 }

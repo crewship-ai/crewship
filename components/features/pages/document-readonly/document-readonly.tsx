@@ -7,7 +7,7 @@ import { isEmptyDocument } from "@/lib/documents/empty"
 import { documentSchema } from "@/lib/documents/schema"
 
 export interface DocumentReadonlyProps {
-  schema: 2 | 3 | 4 | 5
+  schema: 2 | 3 | 4 | 5 | 6
   content: unknown
   /** A label from the authorized caller; never infer a private title here. */
   accessibleLabel: string
@@ -26,7 +26,7 @@ function decorate(element: HTMLElement, people: DocumentPeople) {
 const unavailable = "Document unavailable. This content cannot be displayed by this reader."
 
 function confirmedContent(content: unknown, version: number) {
-  if (version !== 2 && version !== 3 && version !== 4 && version !== 5) return null
+  if (version !== 2 && version !== 3 && version !== 4 && version !== 5 && version !== 6) return null
   try {
     documentSchema.validateJSON(content, version)
     const schema = documentSchema.schemaFor(version)

@@ -34,6 +34,15 @@ describe("Docs schema 5 in the browser", () => {
     expect(names(4)).not.toEqual(expect.arrayContaining(["underline"]))
   })
 
+  it("edits a schema 6 Page with exactly schema 5's marks and nodes", () => {
+    const names = (schema: number) => documentEditorExtensions(schema).map(extension => extension.name)
+    expect(names(6)).toEqual(names(5))
+    expect(stableBlockTypes(6)).toEqual(stableBlockTypes(5))
+    const page = editor(6, styled)
+    expect(page.getJSON()).toEqual(editor(5, styled).getJSON())
+    page.destroy()
+  })
+
   it("renders saved underline, colour and highlight as palette names, never inline CSS", () => {
     render(<DocumentReadonly schema={5} content={styled} accessibleLabel="Saved document" />)
     const region = screen.getByRole("region", { name: "Saved document" })

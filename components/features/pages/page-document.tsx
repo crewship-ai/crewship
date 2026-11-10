@@ -262,13 +262,13 @@ export function DocumentHistoryHost({ workspaceId, pageId, humanId, available, d
   const actorName = useCallback((actor: string) => documentActorName(actor, { humanId, members: roster }), [humanId, roster])
   const headRev = head?.page_id === pageId ? head.rev : undefined
   if (control) return !eligible ? <p role="status" className="text-sm text-muted-foreground">History is unavailable.</p>
-    : visible ? <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headRev={headRev} actorName={actorName} /> : null
+    : visible ? <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headSchema={head?.schema} headRev={headRev} actorName={actorName} /> : null
   return <div className="space-y-3 px-3">
     <Button ref={opener} type="button" variant="outline" disabled={!eligible || restoring} aria-expanded={visible} onClick={() => {
       if (!eligible || restoring) return
       if (open) close()
       else { setOpenEpoch(value => value + 1); setOpen(true) }
     }}>History</Button>
-    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headRev={headRev} actorName={actorName} />}
+    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headSchema={head?.schema} headRev={headRev} actorName={actorName} />}
   </div>
 }
