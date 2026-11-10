@@ -141,6 +141,9 @@ func (c *designClient) awarenessFor(recipient *designClient) []byte {
 // at most 128 characters.
 const designMaxSelection = 128
 
+// designMaxSelected bounds how many layer IDs one multi-selection names (#5217).
+const designMaxSelected = 200
+
 // The standard JavaScript peers represent protocol integers exactly through 2^53-1.
 const designMaxSafeUint uint64 = 1<<53 - 1
 
@@ -263,10 +266,11 @@ func designAwareness(raw []byte, client *designClient, room *designRoom) ([]byte
 		user["name"] = client.displayName
 		user["id"] = client.actor
 		value["user"] = user
-		// The selected layer is live-canvas state: only someone who reads the
-		// live canvas may send it, as a bounded layer ID or null.
+		// The selected layers are live-canvas state: only someone who reads the
+		// live canvas may send them, as a bounded layer ID, a bounded list of
+		// layer IDs (a multi-selection, #5217) or null.
 		if selection, ok := value["selection"]; ok {
-			if text, isText := selection.(string); !client.canReadLive || !(selection == nil || (isText && text != "" && len(text) <= designMaxSelection)) {
+			if !client.canReadLive || !designValidSelection(selection) {
 				delete(value, "selection")
 			}
 		}
@@ -285,6 +289,29 @@ func designAwareness(raw []byte, client *designClient, room *designRoom) ([]byte
 		}
 	}
 	return client.awareness, nil
+}
+
+func designValidSelection(selection any) bool {
+	validID := func(value any) bool {
+		text, ok := value.(string)
+		return ok && text != "" && len(text) <= designMaxSelection
+	}
+	switch value := selection.(type) {
+	case nil:
+		return true
+	case []any:
+		if len(value) == 0 || len(value) > designMaxSelected {
+			return false
+		}
+		for _, id := range value {
+			if !validID(id) {
+				return false
+			}
+		}
+		return true
+	default:
+		return validID(value)
+	}
 }
 
 func designAwarenessFrame(id, clock uint64, state []byte) []byte {
