@@ -190,6 +190,8 @@ var TableCategory = map[string]string{
 	"artifact_version_heads":           CategoryPages,
 	"artifact_version_blobs":           CategoryPages,
 	"artifact_versions":                CategoryPages,
+	"artifact_library_publications":    CategoryPages,
+	"artifact_library_pins":            CategoryPages,
 	"artifact_project_comments":        CategoryPages,
 	"artifact_project_comment_tasks":   CategoryPages,
 	"artifact_project_comment_replies": CategoryPages,

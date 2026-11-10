@@ -30,6 +30,7 @@ import { ArtifactInteractivePreview } from "./artifact-interactive-preview"
 import { ArtifactSlidesPreview } from "./artifact-slides-preview"
 import { ArtifactDesignSystemPreview } from "@/components/features/artifacts/design-system/design-system-preview"
 import { hasDesignSystemFile } from "@/components/features/artifacts/design-system/manifest"
+import { LibraryPinNotice } from "@/components/features/artifacts-library/kinds/design/library-publication"
 import { isValidAnchorSelector, screenLabel, screenLabels } from "./element-select"
 
 export type ArtifactViewerVariant = "pane" | "fullscreen" | "library"
@@ -596,6 +597,7 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const quota = data.quota
   const pct = quota && quota.limit_bytes > 0 ? Math.min(100, Math.round(quota.used_bytes / quota.limit_bytes * 100)) : 100
   const banners = <>
+    {artifactDesignSystem() && !hasDesignSystemFile(data.manifest.files) && <LibraryPinNotice pageId={data.page_id} canWrite={canWrite} />}
     {banner === "conflict" && <ViewerBanner tone="warn" title="Changed meanwhile" action={<Button type="button" size="sm" variant="secondary" className="h-7 shrink-0" onClick={() => void reapply()}>Reload and reapply</Button>}>
       <span>Someone saved a newer version while you were working. Nothing was overwritten. Your comment and selection are kept; Reload and reapply puts them on the newest version.</span>
     </ViewerBanner>}

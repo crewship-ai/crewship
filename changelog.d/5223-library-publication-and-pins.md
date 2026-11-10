@@ -1,0 +1,1 @@
+Library owners can publish a version, and projects can pin a copy of its tokens. A pin stays readable with the consumer after access to the source is lost. Updating requires current read access to the exact publication and write access to the consumer.
