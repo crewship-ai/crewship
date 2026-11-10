@@ -32,11 +32,6 @@ export default defineConfig({
     // testIgnore would not gain coverage — it would break the spec.
     // scripts/onboarding-gate-test.sh pins that arrangement.
     "**/onboarding-wizard.spec.ts",
-    // The two-identity collaboration acceptance (#5144) creates, shares,
-    // revokes and restarts its own throwaway server; it has its own harness
-    // and config (scripts/collab-throwaway.sh, playwright.collab.config.ts)
-    // and must never run against the shared login state of this suite.
-    "**/collab-*.spec.ts",
   ],
   globalSetup: "./e2e/global-setup.ts",
   fullyParallel: true,

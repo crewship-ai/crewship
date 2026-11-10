@@ -10,7 +10,7 @@
 #    sockets, as a child of this run.
 # 3. seed --offline-demo --with-users: the bootstrap owner plus MEMBER and
 #    VIEWER accounts — genuinely different identities for every scenario.
-# 4. playwright.collab.config.ts (e2e/collab-*.spec.ts). The specs create their
+# 4. playwright.collab.config.ts (e2e/collab-*.manual.ts). The specs create their
 #    own artifacts and grants through the CLI binary and restart this server
 #    (CO10) with `throwaway-server.sh restart NAME`.
 #

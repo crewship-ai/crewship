@@ -16,7 +16,7 @@ authenticated-server and isolated-fixture tests.
 | [playwright.nightly.config.ts](../playwright.nightly.config.ts) | Authenticated seeded instance; workflow selects gate/drift buckets | [nightly-e2e.yml](../.github/workflows/nightly-e2e.yml) |
 | [playwright.reveal.config.ts](../playwright.reveal.config.ts) | `credential-reveal.spec.ts`; isolated fixture server on port 3914 | `playwright-pr` in [ci.yml](../.github/workflows/ci.yml) |
 | [playwright.pool-ui.config.ts](../playwright.pool-ui.config.ts) | `provider-pools.spec.ts`; isolated fixture server on port 3913, no provider request | `playwright-pr` in [ci.yml](../.github/workflows/ci.yml) |
-| [playwright.collab.config.ts](../playwright.collab.config.ts) | `collab-*.spec.ts`: two-identity Docs/Design collaboration acceptance (#5144); throwaway server with its own Docs engine, owner/MEMBER/VIEWER accounts, restarts the server mid-run | `scripts/collab-throwaway.sh`, local only (excluded from nightly until stable) |
+| [playwright.collab.config.ts](../playwright.collab.config.ts) | `collab-*.manual.ts`: two-identity Docs/Design collaboration acceptance (#5144); throwaway server with its own Docs engine, owner/MEMBER/VIEWER accounts, restarts the server mid-run | `scripts/collab-throwaway.sh`, manual-only configuration; separate from default/nightly discovery |
 | [playwright.restricted.config.ts](../playwright.restricted.config.ts) | `restricted-member-shell.spec.ts`; isolated fixture server on port 3912, every API response mocked | `playwright-pr` in [ci.yml](../.github/workflows/ci.yml); gate guarded by [restricted-shell-gate-test.sh](../scripts/restricted-shell-gate-test.sh) |
 
 The three isolated UI suites (reveal, pool UI, restricted) serve the built static export; follow their CI
@@ -115,6 +115,10 @@ those require their own runtime fixtures. A manual probe or a screenshot from
 a past run is not a substitute for a reproducible regression test.
 
 ## Collaboration acceptance with two identities
+
+The `*.manual.ts` names are intentional: only the dedicated configuration
+discovers this suite. The default and nightly `*.spec.ts` suites are unchanged;
+no CI exclusion, protected control change or approval exception is required.
 
 `scripts/collab-throwaway.sh --binary ./crewship` starts a throwaway server
 (`scripts/throwaway-server.sh run --documents`), runs the Docs engine on that

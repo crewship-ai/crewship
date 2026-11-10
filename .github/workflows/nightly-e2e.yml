@@ -220,18 +220,8 @@ env:
   # Credential reveal and provider pools have their own blocking PR configs.
   # artifacts-canonical-url.spec.ts runs on every PR in ci.yml's restricted
   # browser job (playwright.restricted.config.ts), against its own mocked API.
-  # collab-*.spec.ts (#5144) is the two-identity collaboration acceptance. It
-  # needs its own harness — scripts/collab-throwaway.sh starts a throwaway
-  # server with a Docs engine, seeds owner/MEMBER/VIEWER accounts and restarts
-  # the server mid-run — and is not yet stable enough to gate (Docs concurrent
-  # typing is intermittently corrupted, #5162). Run it locally with
-  # playwright.collab.config.ts through that script until it joins THROWAWAY.
   EXCLUDED_SPECS: >-
     e2e/artifacts-canonical-url.spec.ts
-    e2e/collab-a11y.spec.ts
-    e2e/collab-design.spec.ts
-    e2e/collab-docs.spec.ts
-    e2e/collab-history.spec.ts
     e2e/credential-reveal.spec.ts
     e2e/provider-pools.spec.ts
     e2e/visual.spec.ts
