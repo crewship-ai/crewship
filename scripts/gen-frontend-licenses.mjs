@@ -32,6 +32,19 @@ const pnpmDir = "node_modules/.pnpm";
 // Adding an entry requires citing where the declaration is observable and a
 // review note; versions not listed here fail hard.
 const EXCEPTIONS = {
+  // Dependabot integration (2026-11-10): exact registry tarballs inspected,
+  // SHA-512 verified against pnpm-lock.yaml; no package-level license text.
+  "@ai-sdk/provider-utils@5.0.76": "package.json declares Apache-2.0; exact locked tarball inspected: https://registry.npmjs.org/@ai-sdk/provider-utils/-/provider-utils-5.0.76.tgz",
+  "@napi-rs/canvas-linux-x64-gnu@1.1.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@napi-rs/canvas-linux-x64-gnu/-/canvas-linux-x64-gnu-1.1.0.tgz",
+  "@napi-rs/canvas-linux-x64-musl@1.1.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@napi-rs/canvas-linux-x64-musl/-/canvas-linux-x64-musl-1.1.0.tgz",
+  "@next/env@16.4.6": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/env/-/env-16.4.6.tgz",
+  "@next/swc-linux-x64-gnu@16.4.6": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/swc-linux-x64-gnu/-/swc-linux-x64-gnu-16.4.6.tgz",
+  "@next/swc-linux-x64-musl@16.4.6": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@next/swc-linux-x64-musl/-/swc-linux-x64-musl-16.4.6.tgz",
+  "@rolldown/binding-linux-x64-gnu@1.2.18": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@rolldown/binding-linux-x64-gnu/-/binding-linux-x64-gnu-1.2.18.tgz",
+  "@rolldown/binding-linux-x64-musl@1.2.18": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@rolldown/binding-linux-x64-musl/-/binding-linux-x64-musl-1.2.18.tgz",
+  "@sentry/server-runtime-injection@11.11.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@sentry/server-runtime-injection/-/server-runtime-injection-11.11.0.tgz",
+  "@sentry/server-utils@11.11.0": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@sentry/server-utils/-/server-utils-11.11.0.tgz",
+  "@tailwindcss/oxide-wasm32-wasi@4.3.5": "package.json declares MIT; exact locked tarball inspected: https://registry.npmjs.org/@tailwindcss/oxide-wasm32-wasi/-/oxide-wasm32-wasi-4.3.5.tgz",
   // Dependency refresh (2026-10-29): inspected each exact registry tarball,
   // matched its SHA-512 against pnpm-lock.yaml, and checked package.json.
   // Still no package-level license text; same declarations as before.

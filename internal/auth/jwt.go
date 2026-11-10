@@ -226,7 +226,7 @@ func (v *JWTValidator) ValidateWS(tokenStr string) (*Claims, error) {
 }
 
 func (v *JWTValidator) validate(key []byte, expectedKind, tokenStr string) (*Claims, error) {
-	jwe, err := jose.ParseEncrypted(tokenStr, []jose.KeyAlgorithm{jose.DIRECT}, []jose.ContentEncryption{jose.A256CBC_HS512})
+	jwe, err := jose.ParseEncryptedCompact(tokenStr, []jose.KeyAlgorithm{jose.DIRECT}, []jose.ContentEncryption{jose.A256CBC_HS512})
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse: %v", ErrInvalidToken, err)
 	}

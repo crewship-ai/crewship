@@ -30,7 +30,7 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           persist-credentials: false
-      - uses: actions/setup-go@90ad2b35f69faf97585ad74d28fa006d2739b7af
+      - uses: actions/setup-go@802e89cd7394b98352d79117a8b463bbfc2fdacf
         with:
           go-version-file: go.mod
       - name: Test runner and prepare the licensed release context

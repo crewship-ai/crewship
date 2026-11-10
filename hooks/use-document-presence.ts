@@ -20,7 +20,7 @@ function tabId(): string {
 function caretOf(editor: Editor): { anchor: string; head: string } | Record<string, never> {
   const binding = ySyncPluginKey.getState(editor.state)?.binding as ProsemirrorBinding | undefined
   const selection = editor.state.selection
-  if (!binding || binding.projectionError || !(selection instanceof TextSelection)) return {}
+  if (!binding || binding.invalidContentError || !(selection instanceof TextSelection)) return {}
   try {
     return { anchor: encodePosition(absolutePositionToRelativePosition(selection.anchor, binding.type, binding.mapping)), head: encodePosition(absolutePositionToRelativePosition(selection.head, binding.type, binding.mapping)) }
   } catch { return {} }
