@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifacts/kindguide"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 )
 
@@ -83,8 +84,45 @@ func (h *PageHandler) ResolvePageChatContext(ctx context.Context, workspaceID, u
 	if err := h.recordPrivateOwnerAccess(ctx, workspaceID, userID, rec); err != nil {
 		return deniedContext, err
 	}
-	return chatbridge.PageChatContext{
+	out := chatbridge.PageChatContext{
 		WorkspaceID: workspaceID, PageID: rec.ID, Slug: rec.Slug,
 		Name: rec.Name, SnapshotAt: time.Now().UTC().Format(time.RFC3339),
-	}, nil
+	}
+	// The kind is derived from the same server metadata the library shows,
+	// for the version this human may read; it only names a static guide.
+	storage, profile, _ := h.artifactPageMetadata(ctx, workspaceID, rec.ID)
+	if kind := pageChatKind(rec.HasDocument, rec.HasSlides, storage, profile); kind != "" {
+		if guide, err := kindguide.Lookup(kind); err == nil {
+			out.Kind, out.GuideVersion = guide.Kind, guide.Version
+		}
+	}
+	return out, nil
+}
+
+// pageChatKind names a guide from the catalog's already selected, bounded
+// metadata. Versioned storage wins over legacy flags, and the profile never
+// reads an owner's private latest on behalf of another reader. Native Craft,
+// panel Pages and boards deliberately have no guide in this registry.
+func pageChatKind(hasDocument, hasSlides bool, storage, profile string) string {
+	switch storage {
+	case "word", "sheet":
+		return ""
+	case "slides", "design":
+		return storage
+	case "project", "dashboard":
+		if profile == artifactProfileDesignSystem {
+			return "library"
+		}
+		if storage == "project" || profile == artifactProfileInteractive {
+			return "app"
+		}
+		return "dashboard"
+	}
+	if hasDocument {
+		return "docs"
+	}
+	if hasSlides {
+		return "slides"
+	}
+	return ""
 }

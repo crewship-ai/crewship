@@ -374,6 +374,10 @@ func buildDocument(routes []route) map[string]any {
 	for _, name := range []string{"ArtifactProjectCreateRequest", "ArtifactProjectFileInput", "ArtifactProjectCreateResponse", "ArtifactProjectAvailability", "ArtifactStorageUsage", "ArtifactProjectError", "ArtifactProjectFile", "ArtifactProjectManifest", "ArtifactProjectVersion", "ArtifactProjectQuota", "ArtifactProjectPublishRequest", "ArtifactProjectMutationResponse", "ArtifactProjectVersionRequest", "ArtifactProjectShareResponse"} {
 		schemas[name] = artifactCore[name]
 	}
+	_, kindGuideComponents := artifactKindGuideSchemaCatalog()
+	for name, schema := range kindGuideComponents {
+		schemas[name] = schema
+	}
 	_, artifactSlidesComponents := artifactSlidesSchemaCatalog()
 	for name, schema := range artifactSlidesComponents {
 		schemas[name] = schema
@@ -580,6 +584,10 @@ func buildDocument(routes []route) map[string]any {
 
 func routeSchemaCatalog() map[string]DomainSchema {
 	result := map[string]DomainSchema{}
+	kindGuideRoutes, _ := artifactKindGuideSchemaCatalog()
+	for key, schema := range kindGuideRoutes {
+		result[key] = schema
+	}
 	artifactSlidesRoutes, _ := artifactSlidesSchemaCatalog()
 	for key, schema := range artifactSlidesRoutes {
 		result[key] = schema

@@ -1573,6 +1573,168 @@
         ],
         "type": "object"
       },
+      "ArtifactKindGuide": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "maximum": 16384,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "capabilities": {
+            "additionalProperties": false,
+            "description": "What the agent profile supports and, by name, what it does not. Grants nothing.",
+            "properties": {
+              "supported": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "unsupported": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              }
+            },
+            "required": [
+              "supported",
+              "unsupported"
+            ],
+            "type": "object"
+          },
+          "content": {
+            "description": "Markdown guide: data shapes and limits, write order, version check, conflicts, agent modes, verification and untrusted content.",
+            "type": "string"
+          },
+          "kind": {
+            "enum": [
+              "docs",
+              "slides",
+              "design",
+              "library",
+              "dashboard",
+              "app"
+            ],
+            "type": "string"
+          },
+          "modes": {
+            "items": {
+              "enum": [
+                "ask",
+                "comment",
+                "propose",
+                "edit"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rules_version": {
+            "description": "Semantic version of the shared rules appended to every guide.",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Lowercase hex SHA-256 of content.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Display name of the kind.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Semantic version of this kind's guide.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "version",
+          "rules_version",
+          "sha256",
+          "bytes",
+          "modes",
+          "capabilities",
+          "content"
+        ],
+        "type": "object"
+      },
+      "ArtifactKindGuideList": {
+        "additionalProperties": false,
+        "properties": {
+          "guides": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactKindGuideSummary"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "guides"
+        ],
+        "type": "object"
+      },
+      "ArtifactKindGuideSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "bytes": {
+            "maximum": 16384,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "docs",
+              "slides",
+              "design",
+              "library",
+              "dashboard",
+              "app"
+            ],
+            "type": "string"
+          },
+          "modes": {
+            "items": {
+              "enum": [
+                "ask",
+                "comment",
+                "propose",
+                "edit"
+              ],
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "rules_version": {
+            "description": "Semantic version of the shared rules appended to every guide.",
+            "type": "string"
+          },
+          "sha256": {
+            "description": "Lowercase hex SHA-256 of content.",
+            "type": "string"
+          },
+          "title": {
+            "description": "Display name of the kind.",
+            "type": "string"
+          },
+          "version": {
+            "description": "Semantic version of this kind's guide.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "title",
+          "version",
+          "rules_version",
+          "sha256",
+          "bytes",
+          "modes"
+        ],
+        "type": "object"
+      },
       "ArtifactProjectAvailability": {
         "additionalProperties": false,
         "properties": {
@@ -64241,6 +64403,138 @@
           "approvals"
         ],
         "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/artifact-kind-guides": {
+      "get": {
+        "description": "List artifact kind guides (GET /api/v1/artifact-kind-guides).",
+        "operationId": "get_api_v1_artifact-kind-guides",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactKindGuideList"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List artifact kind guides",
+        "tags": [
+          "artifact-kind-guides"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/artifact-kind-guides/{kind}": {
+      "get": {
+        "description": "Get artifact kind guide (GET /api/v1/artifact-kind-guides/{kind}).",
+        "operationId": "get_api_v1_artifact-kind-guides_kind",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "kind",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactKindGuide"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get artifact kind guide",
+        "tags": [
+          "artifact-kind-guides"
+        ],
+        "x-crewship-read-only": true
       }
     },
     "/api/v1/audit": {

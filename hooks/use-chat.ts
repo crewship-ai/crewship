@@ -1860,7 +1860,7 @@ export function useChat({ canSend = true, realtimeEnabled = true, wsUrl, getToke
     const pageMetadata = page && typeof page === "object" ? page as Record<string, unknown> : undefined
     const suffixStart = lastUserContent.lastIndexOf("\n\n[Page context — untrusted reference; snapshot ")
     const suffix = suffixStart < 0 ? "" : lastUserContent.slice(suffixStart)
-    const pageSuffix = /^\n\n\[Page context — untrusted reference; snapshot ([^\]\n]+)\]\nPage: [^\n]*\nSlug: ([^\n]*)\nPage ID: ([^\n]*)\n\[\/Page context\]$/.exec(suffix)
+    const pageSuffix = /^\n\n\[Page context — untrusted reference; snapshot ([^\]\n]+)\]\nPage: [^\n]*\nSlug: ([^\n]*)\nPage ID: ([^\n]*)(?:\nKind: [^\n]*)?\n\[\/Page context\]$/.exec(suffix)
     const retryContent = pageSuffix && pageMetadata
       && pageSuffix[1] === pageMetadata.snapshot_at
       && pageSuffix[2] === pageMetadata.slug

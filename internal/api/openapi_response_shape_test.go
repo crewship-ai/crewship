@@ -13,6 +13,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/artifacts/kindguide"
 	"github.com/crewship-ai/crewship/internal/costvis"
 	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/groupchat"
@@ -65,6 +66,9 @@ var responseShapeContracts = []struct {
 	{name: "DesignShareResponse", pointer: "/components/schemas/DesignShareResponse", value: designShareResponse{}},
 	{name: "DesignAgentResponse", pointer: "/components/schemas/DesignAgentResponse", value: designAgentResponse{}},
 
+	{name: "ArtifactKindGuide", pointer: "/components/schemas/ArtifactKindGuide", value: kindguide.Guide{}},
+	{name: "ArtifactKindGuideList", pointer: "/components/schemas/ArtifactKindGuideList", value: artifactKindGuideList{}},
+	{name: "ArtifactKindGuideSummary", pointer: "/components/schemas/ArtifactKindGuideSummary", value: artifactKindGuideSummary{}},
 	{name: "ArtifactSlidesProjection", pointer: "/components/schemas/ArtifactSlidesProjection", value: artifacts.ArtifactSlidesProjection{}},
 	{name: "ArtifactSlideAnchor", pointer: "/components/schemas/ArtifactSlideAnchor", value: artifacts.ArtifactSlideAnchor{}},
 	{name: "ArtifactDataCollections", pointer: "/components/schemas/ArtifactDataCollections", value: artifactDataCollectionsResponse{}},

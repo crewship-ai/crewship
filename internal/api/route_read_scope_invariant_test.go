@@ -180,6 +180,8 @@ var readRoutesWithoutWorkspace = map[string]string{
 	"GET /api/v1/feedback":                          "caller's own submitted feedback",
 	"GET /api/v1/connectors/{connectorId}":          "static connector manifest read off disk, not tenant rows",
 	"GET /api/v1/mcp-registry/search":               "static registry catalog",
+	"GET /api/v1/artifact-kind-guides":              "static embedded per-kind agent guide catalog; no tenant rows",
+	"GET /api/v1/artifact-kind-guides/{kind}":       "one static embedded agent guide; no tenant rows",
 
 	// Instance-global catalogs and status. No tenant rows involved.
 	//

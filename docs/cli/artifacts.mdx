@@ -765,6 +765,60 @@ for `archive`.
 crewship page artifact unarchive quarterly-review --dry-run --pages-version 1
 ```
 
+## Agent guides per kind
+
+Each artifact kind ships a versioned guide that agents follow when they work
+on an artifact of that kind: the exact data shapes and size limits, the write
+order (on create the index first; on revise the data first and the index
+last), the read-before-write version check, the conflict rule (stop after the
+third refusal and report), the agent modes (Ask, Comment, Propose, Edit; only
+the Owner delegates Edit, and a comment is never a proposal) and when not to
+verify. The guides are built into the server; they describe supported product paths and required policy and grant nothing.
+
+### `crewship artifacts kind-guide [kind]`
+
+Without a kind, list the guides with their version, shared-rules version and
+SHA-256 digest. With a kind (`docs`, `slides`, `design`, `library`,
+`dashboard`, `app`; `design-system` and `project` are accepted as aliases),
+print that guide. Word and Sheet are Craft documents and have no artifact
+guide (`404`).
+
+```bash
+crewship artifacts kind-guide -f json
+crewship artifacts kind-guide docs
+crewship artifacts kind-guide design-system -f json
+```
+
+```json
+{"kind": "library", "title": "Library (design system)", "version": "1.0.0", "rules_version": "1.1.0", "sha256": "…", "bytes": 4210, "content": "# Library agent guide\n…"}
+```
+
+The digest is over `content`, so a changed guide is visible even when only the
+shared rules moved.
+
+Agents get the same text. When a chat message carries an artifact as
+context, the server-built Page context block ends with a line such as
+`Kind: docs; agent guide 1.2.0 (artifact_kind_guide)`, and the agent reads the
+guide with the `artifact_kind_guide` tool of its sidecar. The kind comes from
+the version the sender may read; Word, Sheet, panel and board Pages carry no
+Kind line.
+
+Each guide also declares `modes` (the agent modes the kind has a path for:
+`ask`, `comment`, `propose`, `edit`) and `capabilities` with `supported` and
+`unsupported` names. A client hides an unsupported feature instead of
+imitating it; neither list grants access. Docs declare Propose for schema 4–6
+Documents (`propose.schema4`, `propose.schema5`, `propose.schema6` supported, `propose.schema1` to
+`propose.schema3` unsupported), Design has no proposal path (`propose` is
+unsupported), and an App's scripts reach only
+`data.get`, `data.list`, `data.batch` and `viewer`: user profiles, presence,
+model calls, connectors, uploads, downloads, in-page comments and publishing
+are declared unsupported.
+
+On a Dashboard, a data write counts as Edit, not Propose: it changes what
+readers see at once, so it needs the Owner's authorization for that run. A
+code change is a Propose: a new retained version that does not move the
+shared version.
+
 ## Agent publishing policy
 
 The workspace artifact policy is the administrative ceiling for agent work on
