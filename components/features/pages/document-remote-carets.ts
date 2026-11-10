@@ -24,7 +24,7 @@ export const remoteCaretsKey = new PluginKey<CaretsState>("documentRemoteCarets"
 
 function place(state: EditorState, peers: PresencePeer[]): Placed[] {
   const binding = ySyncPluginKey.getState(state)?.binding as ProsemirrorBinding | undefined
-  if (!binding || binding.projectionError) return []
+  if (!binding || binding.invalidContentError) return []
   const size = state.doc.content.size
   const placed: Placed[] = []
   for (const peer of peers) {

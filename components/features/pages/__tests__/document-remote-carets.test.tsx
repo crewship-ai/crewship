@@ -4,6 +4,7 @@
 import { afterEach, describe, expect, it } from "vitest"
 import * as Y from "yjs"
 import { Editor } from "@tiptap/core"
+import { ySyncPluginKey, type ProsemirrorBinding } from "@tiptap/y-tiptap"
 import { documentSessionExtensions } from "../page-document"
 import { setRemoteCarets } from "../document-remote-carets"
 import { decodePosition, encodePosition, parsePresenceReply, peerColor, presentPeople, type PresencePeer } from "@/lib/documents/presence"
@@ -11,7 +12,7 @@ import { decodePosition, encodePosition, parsePresenceReply, peerColor, presentP
 const editors: Editor[] = []
 afterEach(() => { for (const editor of editors.splice(0)) editor.destroy(); document.body.innerHTML = "" })
 
-function documents() {
+function documents(enableContentCheck = false) {
   const saved = new Y.Doc({ gc: false })
   const paragraph = new Y.XmlElement("paragraph"); paragraph.setAttribute("id", "alpha")
   const text = new Y.XmlText(); text.insert(0, "Caret paragraph with words."); paragraph.insert(0, [text])
@@ -19,7 +20,7 @@ function documents() {
   const local = new Y.Doc({ gc: false }), remote = new Y.Doc({ gc: false })
   Y.applyUpdate(local, Y.encodeStateAsUpdate(saved), "remote"); Y.applyUpdate(remote, Y.encodeStateAsUpdate(saved))
   const element = document.createElement("div"); document.body.append(element)
-  const editor = new Editor({ element, extensions: documentSessionExtensions(local, 2) })
+  const editor = new Editor({ element, enableContentCheck, onContentError: () => {}, extensions: documentSessionExtensions(local, 2) })
   editors.push(editor)
   const remoteText = () => (remote.getXmlFragment("default").get(0) as Y.XmlElement).get(0) as Y.XmlText
   return { editor, local, remote, remoteText }
@@ -38,6 +39,25 @@ const caretOffset = (editor: Editor) => {
 }
 
 describe("remote carets", () => {
+  it("does not draw positions while shared content cannot be projected, and resumes after repair", () => {
+    const { editor, local, remoteText } = documents(true)
+    const peer = peerAt(remoteText(), 6, 15)
+    const binding = ySyncPluginKey.getState(editor.state)!.binding as ProsemirrorBinding
+    setRemoteCarets(editor, [peer])
+    expect(caretOffset(editor)).toBe(15)
+    const fragment = local.getXmlFragment("default")
+    fragment.push([new Y.XmlElement("unsupported-block")])
+    expect(binding.invalidContentError).toBeInstanceOf(Error)
+    setRemoteCarets(editor, [peer])
+    expect(editor.view.dom.querySelector("[data-remote-caret]")).toBeNull()
+    expect(editor.view.dom.querySelector(".document-peer-range")).toBeNull()
+    // Repair arrives as shared data; presence is again safe to resolve.
+    fragment.delete(fragment.length - 1, 1)
+    expect(binding.invalidContentError).toBeNull()
+    setRemoteCarets(editor, [peer])
+    expect(caretOffset(editor)).toBe(15)
+  })
+
   it("draws one named caret where the other person is, and their range", () => {
     const { editor, remoteText } = documents()
     setRemoteCarets(editor, [peerAt(remoteText(), 6, 15)])
