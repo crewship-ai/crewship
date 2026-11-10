@@ -191,7 +191,7 @@ func TestSetClock_OverridingFnReplacesPriorOne(t *testing.T) {
 // check). Mirrors the validate() decrypt-and-unmarshal pair.
 func decryptClaimsForTest(t *testing.T, _ *JWTValidator, tok string, key []byte) Claims {
 	t.Helper()
-	jwe, err := jose.ParseEncrypted(tok,
+	jwe, err := jose.ParseEncryptedCompact(tok,
 		[]jose.KeyAlgorithm{jose.DIRECT},
 		[]jose.ContentEncryption{jose.A256CBC_HS512})
 	if err != nil {

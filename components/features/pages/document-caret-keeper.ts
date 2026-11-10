@@ -56,7 +56,7 @@ export const DocumentCaretKeeper = Extension.create({
         composing = () => view.composing
         const doc = binding?.doc
         const before = () => {
-          if (!binding || captured || binding.projectionError) return
+          if (!binding || captured || binding.invalidContentError) return
           const selection = view.state.selection
           if (!(selection instanceof TextSelection)) return
           // During a local edit's own Yjs write the editor state is ahead of the mapping, so this capture may be off or throw;

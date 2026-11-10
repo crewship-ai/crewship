@@ -5,6 +5,7 @@ import { act, renderHook, waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import { Editor } from "@tiptap/core"
+import { ySyncPluginKey, type ProsemirrorBinding } from "@tiptap/y-tiptap"
 import { documentSessionExtensions } from "@/components/features/pages/page-document"
 import { useDocumentPresence, type CanvasPresenceChannel } from "../use-document-presence"
 
@@ -14,10 +15,10 @@ vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: 
 const editors: Editor[] = []
 afterEach(() => { for (const editor of editors.splice(0)) editor.destroy(); request.mockReset(); document.body.innerHTML = "" })
 
-function editor() {
+function editor(enableContentCheck = false) {
   const doc = new Y.Doc({ gc: false })
   const element = document.createElement("div"); document.body.append(element)
-  const created = new Editor({ element, extensions: documentSessionExtensions(doc, 2) })
+  const created = new Editor({ element, enableContentCheck, onContentError: () => {}, extensions: documentSessionExtensions(doc, 2) })
   editors.push(created)
   return created
 }
@@ -25,6 +26,20 @@ function editor() {
 const reply = (status: number, body: unknown = {}) => ({ ok: status < 400, status, json: async () => body })
 const peer = { client: "tab-erin-0001", user_id: "erin", name: "Erin Editor", color: 1 }
 const bodies = () => request.mock.calls.map(([, init]) => JSON.parse(String((init as RequestInit).body)) as { client: string; leave?: boolean })
+
+it("omits caret coordinates while the shared document has invalid content", async () => {
+  request.mockImplementation(async () => reply(200, { peers: [], interval_ms: 5000 }))
+  const activeEditor = editor(true)
+  const binding = ySyncPluginKey.getState(activeEditor.state)!.binding as ProsemirrorBinding
+  const fragment = binding.doc.getXmlFragment("default")
+  fragment.push([new Y.XmlElement("unsupported-block")])
+  expect(binding.invalidContentError).toBeInstanceOf(Error)
+  const hook = renderHook(() => useDocumentPresence({ workspaceId: "w", slug: "notes", editor: activeEditor, enabled: true }))
+  await waitFor(() => expect(request).toHaveBeenCalled())
+  expect(bodies()[0]).not.toHaveProperty("anchor")
+  expect(bodies()[0]).not.toHaveProperty("head")
+  hook.unmount()
+})
 
 it("clears everybody and stops on a refusal", async () => {
   let refuse = false

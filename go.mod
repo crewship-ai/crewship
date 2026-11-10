@@ -5,7 +5,7 @@ go 1.27
 toolchain go1.27.3
 
 require (
-	cel.dev/cel-go v0.33.1
+	cel.dev/cel-go v0.33.2
 	filippo.io/age v1.3.2
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/glamour v1.0.0
@@ -15,7 +15,7 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/getkin/kin-openapi v0.152.0
 	github.com/getsentry/sentry-go v0.50.0
-	github.com/go-jose/go-jose/v4 v4.1.6
+	github.com/go-jose/go-jose/v4 v4.1.9
 	github.com/google/go-containerregistry v0.22.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/nftables v0.3.0
@@ -23,22 +23,22 @@ require (
 	github.com/gorilla/websocket v1.5.3
 	github.com/gowebpki/jcs v1.0.2
 	github.com/grafana/pyroscope-go v1.4.3
-	github.com/jackc/pgx/v5 v5.11.0
+	github.com/jackc/pgx/v5 v5.12.0
 	github.com/klauspost/compress v1.20.3
 	github.com/mattn/go-isatty v0.0.24
 	github.com/mdlayher/netlink v1.11.2
 	github.com/moby/moby/api v1.56.1
 	github.com/moby/moby/client v0.6.2
 	github.com/modelcontextprotocol/go-sdk v1.8.0
-	github.com/nicholas-fedor/shoutrrr v0.22.1
+	github.com/nicholas-fedor/shoutrrr v0.23.0
 	github.com/phpdave11/gofpdi v1.0.16
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.1
-	github.com/signintech/gopdf v0.38.3
+	github.com/signintech/gopdf v0.38.4
 	github.com/spf13/afero v1.15.0
 	github.com/spf13/cobra v1.10.2
-	github.com/spf13/pflag v1.0.10
+	github.com/spf13/pflag v1.1.0
 	github.com/stretchr/testify v1.12.1
 	github.com/yuin/goldmark v1.8.7
 	go.etcd.io/bbolt v1.5.0
@@ -57,7 +57,7 @@ require (
 	golang.org/x/text v0.43.0
 	golang.org/x/time v0.16.0
 	gopkg.in/yaml.v3 v3.0.1
-	modernc.org/sqlite v1.61.0
+	modernc.org/sqlite v1.61.1
 )
 
 require (
@@ -133,7 +133,7 @@ require (
 	go.opentelemetry.io/otel/log v1.47.0 // indirect
 	go.opentelemetry.io/otel/metric v1.47.0 // indirect
 	go.opentelemetry.io/proto/otlp v1.11.0 // indirect
-	go.yaml.in/yaml/v3 v3.0.5 // indirect
+	go.yaml.in/yaml/v3 v3.0.6 // indirect
 	golang.org/x/exp v0.0.0-20240823005443-9b4947da3948 // indirect
 	golang.org/x/sync v0.24.0 // indirect
 	golang.org/x/tools v0.52.0 // indirect
