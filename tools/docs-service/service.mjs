@@ -393,22 +393,52 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     } finally { doc.destroy(); }
   }
   async function writerLease(page, context, state) {
-    const key=`${context.workspace}/${page}`;const cached=leases.get(key);let lease;
-    if(cached && cached.lease.epoch===state.epoch && (!cached.lease.expiresAt || Date.parse(cached.lease.expiresAt)>Date.now()+1000)) lease=cached.lease;
-    if(!lease) { lease=await go(page,'lease',context,{owner,epoch:state.epoch});leases.set(key,{lease,context,page,touched:Date.now()}); } else {cached.touched=Date.now();cached.context=context;}
+    const key=`${context.workspace}/${page}`;let cached=leases.get(key),lease;
+    // The old token remains live until Go confirms its release. Never race an
+    // acquisition against that release, or borrow its previous human authority.
+    if(cached?.releasing) { await cached.releasing;cached=leases.get(key); }
+    if(cached && cached.lease.epoch===state.epoch) {
+      lease=cached.lease;cached.touched=Date.now();cached.context=context;
+      const expires=lease.expiresAt?Date.parse(lease.expiresAt):Infinity;
+      if(cached.needsRenewal || !(expires>Date.now()+1000)) {
+        try {
+          const renewal=await go(page,'renew',context,{owner,epoch:lease.epoch,token:lease.token});
+          if(renewal.expiresAt)lease.expiresAt=renewal.expiresAt;
+          cached.needsRenewal=false;
+        } catch(error) {
+          // Other conflicts can mean changed task/authority. Preserve them
+          // exactly; only Go's explicit token fence admits reacquisition.
+          if(error.status!==409 || error.message!=='document writer fenced')throw error;
+          if(leases.get(key)===cached)leases.delete(key);
+          lease=undefined; // Expired/released token: acquire with this request's unchanged authority.
+        }
+      }
+    }
+    if(!lease) { lease=await go(page,'lease',context,{owner,epoch:state.epoch});leases.set(key,{lease,context,page,touched:Date.now()}); }
     if(lease.generation!==undefined && lease.generation!==state.generation) throw fault(409,'document generation changed; reload');
     if (!Number.isSafeInteger(lease.epoch) || lease.epoch < state.epoch || typeof lease.token !== 'string') throw fault(409, 'writer lease changed; reload document');
     return lease;
   }
+  async function releaseIdleLease(key, held) {
+    try {
+      await go(held.page,'release',held.context,{owner,epoch:held.lease.epoch,token:held.lease.token});
+      if(leases.get(key)===held)leases.delete(key);
+    } catch {
+      // Revocation can refuse cleanup; a lost ACK can leave its outcome unknown.
+      // Keep the private token, revalidate it with the next caller, and back off.
+      held.needsRenewal=true;held.touched=Date.now();
+      if(held.lease.expiresAt && Date.parse(held.lease.expiresAt)<=Date.now() && leases.get(key)===held)leases.delete(key);
+    } finally { held.releasing=undefined; }
+  }
   const timer = setInterval(() => {
-    for(const [key,held] of leases) if(!documents.get(key)?.queued && Date.now()-held.touched>=Math.min(idleMs,15000)) {
-      leases.delete(key);void go(held.page,'release',held.context,{owner,epoch:held.lease.epoch,token:held.lease.token}).catch(()=>{});
+    for(const [key,held] of leases) if(!held.releasing && !documents.get(key)?.queued && Date.now()-held.touched>=Math.min(idleMs,15000)) {
+      held.releasing=releaseIdleLease(key,held);
     }
     for(const [key,entry] of documents) if(!entry.queued && Date.now()-entry.touched>=idleMs)documents.delete(key);
   },Math.min(idleMs,1000));timer.unref();
   async function drain() {
     draining=true;for(const request of decoding)request.destroy();let timeout;
-    const finish=async()=>{await Promise.all([...documents.values()].map(entry=>entry.tail));await Promise.all([...leases.values()].map(held=>go(held.page,'release',held.context,{owner,epoch:held.lease.epoch,token:held.lease.token}).catch(()=>{})));leases.clear();documents.clear()};
+    const finish=async()=>{await Promise.all([...documents.values()].map(entry=>entry.tail));await Promise.all([...leases.values()].map(held=>held.releasing));await Promise.all([...leases.values()].map(held=>go(held.page,'release',held.context,{owner,epoch:held.lease.epoch,token:held.lease.token}).catch(()=>{})));leases.clear();documents.clear()};
     try{await Promise.race([finish(),new Promise((_,reject)=>{timeout=setTimeout(()=>reject(fault(503,'drain timeout')),drainTimeoutMs)})])}finally{clearTimeout(timeout)}
   }
   const server = http.createServer(async (req, res) => {

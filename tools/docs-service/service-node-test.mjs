@@ -70,6 +70,31 @@ function authorityModel() {
   };
   return model;
 }
+// Unlike the broad projection fixture, a real Go authority refuses acquisition
+// while another live token exists, and fences renew/commit after its release.
+function strictLeaseAuthority(model, onRelease = async () => {}) {
+  let active;
+  return async (op, data, req, res) => {
+    if (model.revoked.has(req.headers.authorization)) return model.handle(op, data, req, res);
+    if (op === 'lease' && active && Date.parse(active.expiresAt) > Date.now()) {
+      res.writeHead(409); return { error: 'document writer fenced' };
+    }
+    if (['renew', 'commit', 'release'].includes(op)) {
+      const token = op === 'commit' ? data.leaseToken : data.token;
+      if (!active || Date.parse(active.expiresAt) <= Date.now() || token !== active.token || data.epoch !== active.epoch) {
+        res.writeHead(409); return { error: 'document writer fenced' };
+      }
+    }
+    if (op === 'release') await onRelease();
+    const value = await model.handle(op, data, req, res);
+    if (res.statusCode < 400) {
+      if (op === 'lease') active = value;
+      if (op === 'renew') active.expiresAt = value.expiresAt;
+      if (op === 'release') active = undefined;
+    }
+    return value;
+  };
+}
 const read = (f, headers) => call(f.socket, '/v1/documents/p/read', {}, headers);
 test('fixture error responses declare JSON instead of an HTML interpretation', async () => {
   const f = await fixture(() => { throw new Error('<script>literal diagnostic</script>'); });
@@ -391,6 +416,153 @@ test('cached writer lease rechecks each principal and releases on idle and drain
     assert.equal(model.acquisitions, 2);
     await call(f.socket, '/drain', {}); assert.equal(model.releases, 2);
   } finally { await f.close(); }
+});
+test('an idle release refused for the last principal does not strand an authorized writer', async () => {
+  const model = authorityModel(), deniedRelease = deferred();
+  const strict = strictLeaseAuthority(model);
+  const f = await fixture(async (op, data, req, res) => {
+    const result = await strict(op, data, req, res);
+    if (op === 'release' && res.statusCode === 403) deniedRelease.resolve();
+    return result;
+  }, { idleMs: 100 });
+  await f.start();
+  try {
+    const alice = { Authorization: 'Bearer alice' }, bob = { Authorization: 'Bearer bob' };
+    let state = (await read(f, alice)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'first-alice'), alice)).status, 200);
+    state = (await read(f, bob)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'last-bob'), bob)).status, 200);
+    model.revoked.add('Bearer bob');
+    await deniedRelease.promise;
+    const before = (await read(f, alice)).body;
+    assert.equal((await read(f, bob)).status, 403, 'revocation remains enforced');
+    const packet = patchRequest(before, 'alice-after-idle', 'authorized edit after idle');
+    const saved = await call(f.socket, '/v1/documents/p/patch', packet, alice);
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.rev, before.rev + 1);
+    assert.equal(model.acquisitions, 1, 'use the known component token with the current authorized principal');
+    assert.equal(model.seen.filter(x => x.op === 'renew').at(-1).bearer, 'Bearer alice');
+    const commits = model.commits;
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', packet, alice)).body.duplicate, true);
+    assert.equal(model.commits, commits, 'unchanged idempotency packet cannot write twice');
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', packet, bob)).status, 403);
+  } finally { await f.close(); }
+});
+test('a new write waits for a successful idle release before acquiring its next lease', async () => {
+  const model = authorityModel(), releasing = deferred(), finishRelease = deferred();
+  const f = await fixture(strictLeaseAuthority(model, async () => { releasing.resolve(); await finishRelease.promise; }), { idleMs: 100 });
+  await f.start();
+  try {
+    const state = (await read(f)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'before-release'))).status, 200);
+    const confirmed = (await read(f)).body;
+    await releasing.promise;
+    const pending = call(f.socket, '/v1/documents/p/patch', patchRequest(confirmed, 'during-release'));
+    // Keep the authority's release in flight while a real socket request enters
+    // the engine. Acquiring now would be fenced by the still-live Go token.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    finishRelease.resolve();
+    const saved = await pending;
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.rev, confirmed.rev + 1);
+    assert.equal(model.acquisitions, 2);
+  } finally { finishRelease.resolve(); await f.close(); }
+});
+test('a near-expiry cached token is renewed before an acquisition can fence itself', async () => {
+  const model = authorityModel(), base = model.handle;
+  let short = true;
+  model.handle = async (...args) => {
+    const value = await base(...args);
+    if (short && ['lease', 'renew'].includes(args[0]) && args[3].statusCode < 400) value.expiresAt = new Date(Date.now() + 500).toISOString();
+    return value;
+  };
+  const f = await fixture(strictLeaseAuthority(model)); await f.start();
+  try {
+    let state = (await read(f)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'short-lease'))).status, 200);
+    short = false;
+    state = (await read(f)).body;
+    const saved = await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'renew-near-expiry'));
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(model.acquisitions, 1, 'the live token is renewed, not replaced');
+  } finally { await f.close(); }
+});
+test('an uncertain idle release is revalidated before a fresh authorized token is acquired', async () => {
+  const model = authorityModel(), strict = strictLeaseAuthority(model), lost = deferred();
+  let lose = true;
+  const f = await fixture(async (op, data, req, res) => {
+    const result = await strict(op, data, req, res);
+    if (op === 'release' && res.statusCode < 400 && lose) {
+      lose = false;res.writeHead(503);lost.resolve();return { error: 'release response lost after its effect' };
+    }
+    return result;
+  }, { idleMs: 100 });
+  await f.start();
+  try {
+    let state = (await read(f)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'before-lost-release'))).status, 200);
+    await lost.promise;
+    state = (await read(f)).body;
+    const packet = patchRequest(state, 'after-lost-release');
+    const saved = await call(f.socket, '/v1/documents/p/patch', packet);
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.rev, state.rev + 1);assert.equal(model.acquisitions, 2);
+    const commits = model.commits;
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', packet)).body.duplicate, true);
+    assert.equal(model.commits, commits);
+  } finally { await f.close(); }
+});
+test('an expired cached token can be replaced without changing the public document epoch', async () => {
+  const model = authorityModel(), base = model.handle;
+  let short = true;
+  model.handle = async (...args) => {
+    const value = await base(...args);
+    if (short && ['lease', 'renew'].includes(args[0]) && args[3].statusCode < 400) value.expiresAt = new Date(Date.now() + 500).toISOString();
+    return value;
+  };
+  const f = await fixture(strictLeaseAuthority(model)); await f.start();
+  try {
+    let state = (await read(f)).body;
+    assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'before-expiry'))).status, 200);
+    short = false;
+    await new Promise(resolve => setTimeout(resolve, 600));
+    state = (await read(f)).body;
+    const saved = await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'after-expiry'));
+    assert.equal(saved.status, 200, JSON.stringify(saved.body));
+    assert.equal(saved.body.rev, state.rev + 1);assert.equal(saved.body.epoch, state.epoch);
+    assert.equal(model.acquisitions, 2);
+  } finally { await f.close(); }
+});
+test('authorization refusals and non-lease conflicts never attempt lease reacquisition', async () => {
+  for (const status of [403, 409]) {
+    const model = authorityModel(), strict = strictLeaseAuthority(model), deniedRelease = deferred();
+    let refuseRenew = false, attempts = 0;
+    const message = status === 403 ? 'current writer authority revoked' : 'original task authority changed';
+    const f = await fixture(async (op, data, req, res) => {
+      if (op === 'lease') attempts++;
+      if (op === 'renew' && refuseRenew && req.headers.authorization === 'Bearer alice') {
+        res.writeHead(status);return { error: message };
+      }
+      const value = await strict(op, data, req, res);
+      if (op === 'release' && res.statusCode === 403) deniedRelease.resolve();
+      return value;
+    }, { idleMs: 100 });
+    await f.start();
+    try {
+      const alice = { Authorization: 'Bearer alice' }, bob = { Authorization: 'Bearer bob' };
+      let state = (await read(f, alice)).body;
+      assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'initial-alice'), alice)).status, 200);
+      state = (await read(f, bob)).body;
+      assert.equal((await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'initial-bob'), bob)).status, 200);
+      model.revoked.add('Bearer bob');await deniedRelease.promise;
+      refuseRenew = true;state = (await read(f, alice)).body;
+      const commits = model.commits, before = attempts;
+      const refused = await call(f.socket, '/v1/documents/p/patch', patchRequest(state, 'refused-current-authority'), alice);
+      assert.equal(refused.status, status);assert.equal(refused.body.error, message);
+      assert.equal(attempts, before, 'do not retry an authority conflict as a lease acquisition');
+      assert.equal(model.commits, commits);assert.equal(model.state.rev, state.rev);
+    } finally { await f.close(); }
+  }
 });
 test('public epoch keeps a plain restart and changes when a backup restore rotates the database identity', async () => {
   const model = authorityModel(), f = await fixture(model.handle);
