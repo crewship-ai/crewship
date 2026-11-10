@@ -50,6 +50,38 @@ type exportNode struct {
 	Overflow   string  `json:"overflow"`
 	// Hidden (#5218) leaves the layer, and everything inside a hidden screen, out of the page.
 	Hidden bool `json:"hidden"`
+	// Shape style (#5219); nil means "not set": the class default applies.
+	Radius      *float64 `json:"radius"`
+	Stroke      string   `json:"stroke"`
+	StrokeWidth *float64 `json:"strokeWidth"`
+}
+
+var exportStrokeColor = regexp.MustCompile(`^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$`)
+
+// shapeStyle adds only values the engine accepts: a corner radius, and a
+// stroke drawn inside the box (as the canvas draws it).
+func shapeStyle(node *exportNode) string {
+	style := ""
+	if node.Radius != nil && *node.Radius >= 0 && *node.Radius <= 10000 {
+		style += ";border-radius:" + strconv.FormatFloat(*node.Radius, 'f', -1, 64) + "px"
+		if node.Type == "image" {
+			style += ";overflow:hidden"
+		}
+	}
+	width := 1.0
+	if node.StrokeWidth != nil {
+		width = *node.StrokeWidth
+	}
+	if exportStrokeColor.MatchString(node.Stroke) && width > 0 && width <= 1000 {
+		// An outline drawn inwards sits above the layer's content (an <img>
+		// fills its box and would cover an inset box-shadow) and follows
+		// border-radius, as the canvas draws the stroke over the shape. The
+		// focus ring and the broken-link warning are !important in the
+		// stylesheet, so they still replace it on a linked layer.
+		w := strconv.FormatFloat(width, 'f', -1, 64)
+		style += ";outline:" + w + "px solid " + node.Stroke + ";outline-offset:-" + w + "px"
+	}
+	return style
 }
 
 // The same closed font stacks as the canvas (DESIGN_FONT_STACKS).
@@ -103,8 +135,8 @@ const exportStyle = `*{box-sizing:border-box}body{margin:0;background:#f1f5f9;co
 	`.layer{position:absolute;display:block;color:inherit;text-decoration:none}.rect{border-radius:6px}` +
 	`.text{white-space:pre;overflow:visible;font:20px/1.3 system-ui,sans-serif}.image img{display:block;width:100%;height:100%;object-fit:cover}` +
 	`.placeholder{border-radius:4px;background:#e2e8f0;color:#64748b;padding:8px 12px;font-size:14px;overflow:hidden}` +
-	`a.hotspot{cursor:pointer}a.hotspot:hover,a.hotspot:focus-visible{outline:2px solid #2563eb;outline-offset:1px}` +
-	`.broken-link{outline:2px dashed #d97706;outline-offset:1px}.empty{color:#475569}`
+	`a.hotspot{cursor:pointer}a.hotspot:hover,a.hotspot:focus-visible{outline:2px solid #2563eb!important;outline-offset:1px!important}` +
+	`.broken-link{outline:2px dashed #d97706!important;outline-offset:1px!important}.empty{color:#475569}`
 
 // RenderHTML writes one self-contained HTML document with every screen
 // (frame) of the version. Layers use the same geometry as the prototype
@@ -273,6 +305,7 @@ func writeLayer(b *bytes.Buffer, node *exportNode, geometry string, anchors map[
 		style += ";color:" + color(node.Fill, "#172554") + textStyle(node)
 		body = html.EscapeString(node.Text)
 	case "image":
+		style += shapeStyle(node)
 		if exportImage.MatchString(node.Src) {
 			body = "<img src=\"" + html.EscapeString(node.Src) + "\" alt=\"" + html.EscapeString(node.Name) + "\">"
 		} else {
@@ -284,6 +317,9 @@ func writeLayer(b *bytes.Buffer, node *exportNode, geometry string, anchors map[
 		}
 	default:
 		style += ";background:" + color(node.Fill, "#ffffff")
+		if node.Type == "rect" {
+			style += shapeStyle(node)
+		}
 	}
 	tag, attrs := "div", ""
 	if node.LinkTo != "" {

@@ -23,6 +23,7 @@ apart and meet only when the live state is saved as a version.
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | off | `true` at build time adds link editing and prototype playback ([Prototype links](#prototype-links)) |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_TEXT_STYLE` | off | `true` at build time adds the text style controls in Properties ([Text style](#text-style)) |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_HIDE_LOCK` | off | `true` at build time adds the hide and lock buttons in Layers ([Hide and lock](#hide-and-lock)) |
+| Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_SHAPE_STYLE` | off | `true` at build time adds the shape style controls in Properties ([Shape style](#shape-style)) |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_EXPORT` | off | `true` at build time adds the **Export HTML** button ([HTML export](#html-export)) |
 
 The Design flag is independent of `artifact_projects`. When it is off, every
@@ -201,6 +202,25 @@ unlocked, so older documents are unchanged.
   `NEXT_PUBLIC_ARTIFACTS_DESIGN_HIDE_LOCK` (default off) until no rollback past
   this server is expected. A server without #5218 refuses a document that
   contains the fields.
+
+### Shape style
+
+Rectangles and images may carry these optional fields (#5219); the server
+refuses other values with `400`.
+
+| Field | Values | Absent means |
+|---|---|---|
+| `radius` | 0 to 10000 (corner radius in pixels) | 6 for a rectangle, 0 for an image |
+| `stroke` | `#rgb` or `#rrggbb` | no stroke |
+| `strokeWidth` | 0 to 1000 (pixels) | 1 when `stroke` is set |
+
+- The stroke is drawn inside the box on the canvas, in playback and in the HTML
+  export (an outline drawn inwards, above an image), so a stroke never changes a layer's size or
+  position. A rounded image is clipped to its corners.
+- `fill` keeps its meaning: the paint of a rectangle. An image is drawn from its
+  URL; its `fill` is not drawn.
+- Rollout is the same two steps as text style, behind the build-time
+  `NEXT_PUBLIC_ARTIFACTS_DESIGN_SHAPE_STYLE` (default off).
 
 ## HTML export
 

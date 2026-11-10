@@ -34,6 +34,10 @@ export interface DesignNode {
  /** Hide and lock (#5218): absent means shown and unlocked, like every older document. */
  hidden?: boolean
  locked?: boolean
+ /** Shape style (#5219), rectangles and images: corner radius in px, stroke colour (#rgb or #rrggbb) and width in px. */
+ radius?: number
+ stroke?: string
+ strokeWidth?: number
  type: DesignNodeType
  name?: string
  parentId?: string
@@ -437,3 +441,20 @@ function inherited(nodes: readonly DesignNode[], flag: "hidden" | "locked"): Set
 }
 export const designHiddenIds = (nodes: readonly DesignNode[]) => inherited(nodes, "hidden")
 export const designLockedIds = (nodes: readonly DesignNode[]) => inherited(nodes, "locked")
+
+/** Shape style limits (#5219), the same as the engine's. */
+export const DESIGN_RADIUS = { min: 0, max: 10000 }
+export const DESIGN_STROKE_WIDTH = { min: 0, max: 1000 }
+const STROKE_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
+
+/**
+ * The corner radius, stroke colour and stroke width a rectangle or image is
+ * drawn with. Absent fields keep the old look: rectangles 6 px round, images
+ * square, no stroke. A stroke colour without a width draws 1 px.
+ */
+export function designShapeStyle(node: DesignNode): { radius: number; stroke?: string; strokeWidth: number } {
+ const radius = typeof node.radius === "number" && Number.isFinite(node.radius) && node.radius >= DESIGN_RADIUS.min && node.radius <= DESIGN_RADIUS.max ? node.radius : node.type === "rect" ? 6 : 0
+ const stroke = typeof node.stroke === "string" && STROKE_COLOR.test(node.stroke) ? node.stroke : undefined
+ const width = typeof node.strokeWidth === "number" && Number.isFinite(node.strokeWidth) && node.strokeWidth >= DESIGN_STROKE_WIDTH.min && node.strokeWidth <= DESIGN_STROKE_WIDTH.max ? node.strokeWidth : 1
+ return { radius, ...(stroke && width > 0 ? { stroke } : {}), strokeWidth: stroke ? width : 0 }
+}

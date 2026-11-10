@@ -1,13 +1,22 @@
 import { useId } from "react"
-import { designTextStyle, safeImageSource, type DesignNode } from "./design-document"
+import { designShapeStyle, designTextStyle, safeImageSource, type DesignNode } from "./design-document"
 
 /** Paint of one node at its local origin; shared by the editor canvas and prototype playback. */
 export function DesignNodeShape({ node, width, height }: { node: DesignNode; width: number; height: number }) {
  const clipId = `design-clip-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`
  const image = node.type === "image" ? safeImageSource(node.src) : undefined
  if (node.type === "text") return <DesignText node={node} width={width} height={height} clipId={clipId} />
- if (node.type === "image") return image ? <image href={image} width={width} height={height} preserveAspectRatio="xMidYMid slice" /> : <><rect width={width} height={height} fill="#e2e8f0" rx="4" /><text x="12" y="28" fill="#64748b" fontSize="14">Set an image URL in Properties</text></>
- return <rect width={width} height={height} fill={node.fill || "#ffffff"} rx={node.type === "frame" ? 0 : 6} stroke={node.type === "frame" ? "#cbd5e1" : "none"} />
+ if (node.type === "frame") return <rect width={width} height={height} fill={node.fill || "#ffffff"} rx={0} stroke="#cbd5e1" />
+ // Rectangles and images (#5219): the stroke is drawn inside the box, as the HTML export does.
+ const shape = designShapeStyle(node)
+ const inset = shape.stroke ? Math.min(shape.strokeWidth, width / 2, height / 2) : 0
+ const outline = shape.stroke ? <rect data-shape-stroke="" x={inset / 2} y={inset / 2} width={Math.max(0, width - inset)} height={Math.max(0, height - inset)} rx={Math.max(0, shape.radius - inset / 2)} fill="none" stroke={shape.stroke} strokeWidth={inset} /> : null
+ if (node.type === "image") {
+  if (!image) return <><rect width={width} height={height} fill="#e2e8f0" rx={node.radius === undefined ? 4 : shape.radius} /><text x="12" y="28" fill="#64748b" fontSize="14">Set an image URL in Properties</text>{outline}</>
+  if (!shape.radius) return <><image href={image} width={width} height={height} preserveAspectRatio="xMidYMid slice" />{outline}</>
+  return <><clipPath id={clipId}><rect width={width} height={height} rx={shape.radius} /></clipPath><image href={image} width={width} height={height} preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clipId})`} />{outline}</>
+ }
+ return <><rect width={width} height={height} fill={node.fill || "#ffffff"} rx={shape.radius} stroke="none" />{outline}</>
 }
 
 /**
