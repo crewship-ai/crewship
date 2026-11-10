@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, expect, it, vi } from "vitest"
 import { NewDocumentDialog } from "../new-document-dialog"
+import { CREATE_SCHEMA } from "@/lib/documents/contracts"
 const mocks=vi.hoisted(()=>({fetch:vi.fn(),allowed:true,enabled:true,commands:false,native:false,sdkPrefix:undefined as string|undefined,checkpoint:vi.fn(),openNative:vi.fn(),openCommand:vi.fn()}))
 vi.mock("@/lib/api-fetch",()=>({apiFetch:mocks.fetch,broadcastSessionExpired:vi.fn()}))
 vi.mock("@/hooks/use-page-creation-access",()=>({usePageCreationAccess:()=>mocks.allowed}))
@@ -12,7 +13,9 @@ vi.mock("@/lib/mooring/wordcraft-command-session",()=>({commandRequest:mocks.ope
 afterEach(()=>{cleanup();mocks.fetch.mockReset();mocks.allowed=true;mocks.enabled=true;mocks.commands=false;mocks.native=false;mocks.sdkPrefix=undefined;mocks.checkpoint.mockReset();mocks.openNative.mockReset();mocks.openCommand.mockReset()})
 function mount(){const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{retry:false}}});const created=vi.fn();render(<QueryClientProvider client={client}><NewDocumentDialog workspaceId="workspace" onClose={vi.fn()} onCreated={created} /></QueryClientProvider>);fireEvent.change(screen.getByLabelText("Name"),{target:{value:"Notes"}});return {created,client}}
 const response=(value:unknown,status=200)=>Promise.resolve({ok:status<400,status,json:async()=>value})
-it("retries numeric initialization with the original Page and schema3 payload",async()=>{
+// The UI initializes at CREATE_SCHEMA, the engine CREATE_VERSION that Go
+// documents.CreateSchema is tested equal to, so UI and API/CLI creation agree (#5233).
+it("retries numeric initialization with the original Page and creation-schema payload",async()=>{
   let attempts=0
   mocks.fetch.mockImplementation((url:string,init?:RequestInit)=>{
     if(url.includes("/initialize")){attempts++;const body=JSON.parse(init!.body as string);return attempts===1?response({error:"lost acknowledgment"},503):response({id:body.id,rev:0,epoch:1,actor:"human",kind:"init",found:true,duplicate:true})}
@@ -27,7 +30,7 @@ it("retries numeric initialization with the original Page and schema3 payload",a
   const calls=mocks.fetch.mock.calls
   expect(calls.filter(([url])=>!url.includes("/initialize"))).toHaveLength(1)
   const bodies=calls.filter(([url])=>url.includes("/initialize")).map(([,init])=>JSON.parse(init.body))
-  expect(bodies[0]).toEqual(bodies[1]);expect(bodies[0]).toMatchObject({schema:3,page_id:"stable-page"})
+  expect(bodies[0]).toEqual(bodies[1]);expect(bodies[0]).toMatchObject({schema:CREATE_SCHEMA,page_id:"stable-page"});expect(CREATE_SCHEMA).toBe(5)
   expect(calls[0][1].body).not.toContain("owner")
   client.clear()
 })

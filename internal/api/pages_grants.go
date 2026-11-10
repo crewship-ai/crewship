@@ -27,7 +27,9 @@ package api
 //     ADMIN/OWNER of the workspace (§7.1 rule 3) and it deliberately does NOT
 //     consult page_grants: a `write` grantee may rearrange the page, not widen
 //     who reaches it. Otherwise the first grant issued is the last one anybody
-//     controls.
+//     controls. One level is narrower still: Edit (`write`) to an AGENT is
+//     delegated by the page's owner only (R71 §0.14/1, mayDelegateAgentEdit);
+//     a workspace role does not imply it.
 //
 //  3. REVOKE IS SYMMETRIC WITH GRANT (§11b decision 13). Every subject kind
 //     that can be granted can be revoked by the same reference, and a revoke
@@ -94,6 +96,10 @@ type pageGrantsWire struct {
 	Page    string          `json:"page"`
 	Grants  []pageGrantWire `json:"grants"`
 	Changed int             `json:"changed,omitempty"`
+	// CanDelegateAgentEdit is whether the CALLER may grant an agent write
+	// (R71 §0.14/1: the page owner only), so a client hides the choice from
+	// everyone the server would refuse rather than offering it.
+	CanDelegateAgentEdit bool `json:"can_delegate_agent_edit"`
 }
 
 // pageGrantWriteRequest is the PUT body.
@@ -255,6 +261,18 @@ func (h *PageHandler) PutGrant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tx.Rollback()
+
+	// R71 §0.14/1: Edit is delegated to an agent by the page's OWNER only,
+	// Edit of the spec (write) and of the data (produce) alike. Asked inside
+	// the mutation transaction, against the page as it stands there. A
+	// workspace ADMIN/OWNER role still issues agent read and every human
+	// grant (mayAdministerGrants above), and may still revoke.
+	// A crew produce grant delegates data Edit to every agent and routine of
+	// that crew (crewMayProduce), so it is owner-only too (#5260).
+	if pageGrantDelegatesToAgents(req.SubjectType, req.Level) && !h.mayDelegateAgentEdit(r.Context(), wsID, user.ID, rec) {
+		replyError(w, http.StatusForbidden, pageAgentEditOwnerOnlyRefusal)
+		return
+	}
 
 	// A scope naming a panel this page does not have is a grant that silently
 	// covers nothing. Refuse it here rather than let somebody believe an agent
@@ -553,7 +571,8 @@ func (h *PageHandler) grantPage(w http.ResponseWriter, r *http.Request, wsID str
 }
 
 // mayAdministerGrants answers §7.1 rule 3's "Grants are issued by the page
-// owner or by a workspace ADMIN/OWNER".
+// owner or by a workspace ADMIN/OWNER" — for every level except agent Edit,
+// which mayDelegateAgentEdit narrows to the owner (R71 §0.14/1).
 //
 // It does not consult page_grants, and that omission is the rule: authority to
 // widen access is not itself grantable, or the first grant issued would be the
@@ -569,6 +588,101 @@ func (h *PageHandler) mayAdministerGrants(ctx context.Context, wsID, userID, rol
 		return true
 	}
 	return h.isPageOwner(ctx, wsID, userID, rec)
+}
+
+// pageGrantDelegatesToAgents names the grants that delegate Edit to agents:
+// agent write and produce, and crew produce, which its agents and routines
+// push with. Keep it equal to agentEditIssuerNotOwnerSQL's predicate.
+func pageGrantDelegatesToAgents(subjectType, level string) bool {
+	switch subjectType {
+	case pageSubjectAgent:
+		return level == pageGrantWrite || level == pageGrantProduce
+	case "crew":
+		return level == pageGrantProduce
+	}
+	return false
+}
+
+// pageAgentEditOwnerOnlyRefusal and pageAgentEditInertReason state R71
+// §0.14/1 where a person reads them: on the refused PUT, and on a stored row
+// the rule has made inert.
+const (
+	pageAgentEditOwnerOnlyRefusal = "only the artifact's owner can delegate Edit (write) or data Edit (produce) to an agent or an agent's crew; " +
+		"a workspace admin can grant an agent read and a crew read or write, or ask the owner to grant write or produce"
+	pageAgentEditInertReason = "only the artifact's owner can delegate Edit (write) or data Edit (produce) to an agent or an agent's crew, and this grant " +
+		"was not issued by the page's current owner (or its issuer stopped owning the page), so it has ended for good; " +
+		"the owner must issue a new grant"
+)
+
+// mayDelegateAgentEdit answers R71 §0.14/1 (which overrides §0.3/4): "Edit
+// agentovi uděluje jen vlastník". It is page ownership and nothing else — the
+// owning user, or a member of the owning crew. A workspace ADMIN/OWNER role
+// reads everything with audit and administers ordinary grants, but "read,
+// edit and grant access are different capabilities" and delegating Edit to
+// an agent is not implied by a workspace role. It gates agent write and
+// produce: produce pushes the artifact's data, which is Edit of its data.
+// Widening this to admins needs the owner's explicit approval. The use-time
+// twin is agentEditIssuerNotOwnerSQL (pages_grants_authz.go), and migration
+// 20261109132621 retires non-owner-issued rows for good.
+func (h *PageHandler) mayDelegateAgentEdit(ctx context.Context, wsID, userID string, rec *pageRecord) bool {
+	if rec == nil || rec.PrivateAudience {
+		return false
+	}
+	return h.pageOwnerForDelegation(ctx, wsID, userID, rec)
+}
+
+// pageOwnerForDelegation is ownership as delegation to an agent reads it: the
+// owning user, or a member of the owning crew while that crew is not deleted.
+// A deleted crew owns nothing it can hand an agent. The SQL twins are
+// agentEditIssuerNotOwnerSQL and the triggers of migration 20261109132621.
+// isPageOwner, pageGrantIssuerCurrent and the issuer_standing arm of the view
+// page_grant_verdicts, which other owner checks use, still count a deleted
+// crew's members (#5259).
+func (h *PageHandler) pageOwnerForDelegation(ctx context.Context, wsID, userID string, rec *pageRecord) bool {
+	if userID == "" {
+		return false
+	}
+	if rec.OwnerUserID != "" {
+		return rec.OwnerUserID == userID
+	}
+	if rec.OwnerCrewID == "" {
+		return false
+	}
+	var owner bool
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM crew_members cm JOIN crews c ON c.id=cm.crew_id
+		WHERE cm.crew_id=? AND cm.user_id=? AND c.workspace_id=? AND c.deleted_at IS NULL)`, rec.OwnerCrewID, userID, wsID).Scan(&owner)
+	return err == nil && owner
+}
+
+// agentRunMayWrite is R71 §0.14/1 and §0.3/4 at use time for an agent RUN —
+// an agent acting on a human's original request — that writes an artifact.
+// See humanAgentMayWrite.
+func (h *PageHandler) agentRunMayWrite(ctx context.Context, wsID, pageID string, run *artifactRunAuthority) bool {
+	if run == nil {
+		return false
+	}
+	return h.humanAgentMayWrite(ctx, wsID, pageID, run.HumanUserID, run.AgentID)
+}
+
+// humanAgentMayWrite: an agent working for a human may borrow that human's
+// write only while the human OWNS the page (the owning user, or a member of
+// the owning crew). Editing the page through a workspace ADMIN/OWNER role or a
+// human Edit grant is not a right to delegate Edit, so otherwise the agent
+// writes only with its own live write grant, which only the owner can issue
+// (agentEditIssuerNotOwnerSQL). A private page admits only its owner: no
+// grant reaches it. Reads are not decided here.
+func (h *PageHandler) humanAgentMayWrite(ctx context.Context, wsID, pageID, humanID, agentID string) bool {
+	if humanID == "" || agentID == "" {
+		return false
+	}
+	rec := &pageRecord{ID: pageID}
+	if err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT coalesce(owner_user_id,''),coalesce(owner_crew_id,''),private_audience FROM pages WHERE workspace_id=? AND id=?`, wsID, pageID).Scan(&rec.OwnerUserID, &rec.OwnerCrewID, &rec.PrivateAudience); err != nil {
+		return false
+	}
+	if h.pageOwnerForDelegation(ctx, wsID, humanID, rec) {
+		return true
+	}
+	return !rec.PrivateAudience && h.agentMayEditSpec(ctx, wsID, rec, agentID)
 }
 
 // pagePanelIDs is the set of panel ids on this page, for validating a produce
@@ -687,6 +801,9 @@ func (h *PageHandler) grantsDocument(w http.ResponseWriter, r *http.Request, wsI
 		return nil, false
 	}
 	out := &pageGrantsWire{Page: rec.Slug, Grants: make([]pageGrantWire, 0, len(records)), Changed: changed}
+	if user := UserFromContext(r.Context()); user != nil {
+		out.CanDelegateAgentEdit = h.mayDelegateAgentEdit(r.Context(), wsID, user.ID, rec)
+	}
 	issuers := map[string]string{}
 	for _, g := range records {
 		issuer, seen := issuers[g.GrantedBy]

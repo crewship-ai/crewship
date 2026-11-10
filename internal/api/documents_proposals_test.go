@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
@@ -18,7 +19,7 @@ func proposeIterationFixture(t *testing.T, blocks string) (*artifactPrincipalFix
 	t.Helper()
 	f, _, token, intent := iterationFixtureFor(t, func(f *artifactPrincipalFixture, intent *documents.IterationIntent) {
 		mustExec(t, f.rig.db, `UPDATE documents SET schema_version=4 WHERE page_id=?`, intent.PageID)
-		intent.Schema = documents.ProposalSchema
+		intent.Schema = documents.FormattedSchema
 		intent.Blocks = blocks
 	})
 	return f, token, intent
@@ -41,10 +42,15 @@ func TestDocumentIterationProposeMandateGates(t *testing.T) {
 			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'read',?)`, page, f.a.AgentID, f.rig.adminID)
 		}, errDocumentAccess},
-		{"shared with agent write grant", func(t *testing.T, f *artifactPrincipalFixture, page string) {
+		{"shared with agent write grant from the owner", func(t *testing.T, f *artifactPrincipalFixture, page string) {
+			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
+			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) SELECT id,'agent',?,'write',owner_user_id FROM pages WHERE id=?`, f.a.AgentID, page)
+		}, nil},
+		// R71 §0.14/1: only the owner delegates Edit to an agent.
+		{"shared with agent write grant from a workspace admin", func(t *testing.T, f *artifactPrincipalFixture, page string) {
 			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'write',?)`, page, f.a.AgentID, f.rig.adminID)
-		}, nil},
+		}, errDocumentAccess},
 		{"crew write grant never reaches the agent", func(t *testing.T, f *artifactPrincipalFixture, page string) {
 			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'crew',?,'write',?)`, page, f.a.CrewID, f.rig.adminID)
@@ -59,6 +65,16 @@ func TestDocumentIterationProposeMandateGates(t *testing.T) {
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,'write',?)`, page, f.a.HumanUserID, f.rig.adminID)
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'write',?)`, page, f.a.AgentID, f.rig.adminID)
 		}, nil},
+		// R71 §0.14/1: the requester's own Edit is not a right to delegate it.
+		{"requester with write grant, agent holds no grant", func(t *testing.T, f *artifactPrincipalFixture, page string) {
+			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0,owner_user_id=? WHERE id=?`, f.rig.adminID, page)
+			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,'write',?)`, page, f.a.HumanUserID, f.rig.adminID)
+		}, errDocumentAccess},
+		{"workspace admin requester's own agent grant on another owner's document", func(t *testing.T, f *artifactPrincipalFixture, page string) {
+			mustExec(t, f.rig.db, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id=?`, f.a.WorkspaceID, f.a.HumanUserID)
+			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0,owner_user_id=? WHERE id=?`, f.rig.adminID, page)
+			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'write',?)`, page, f.a.AgentID, f.a.HumanUserID)
+		}, errDocumentAccess},
 		{"another person's private document", func(t *testing.T, f *artifactPrincipalFixture, page string) {
 			mustExec(t, f.rig.db, `UPDATE pages SET owner_user_id=? WHERE id=?`, f.rig.adminID, page)
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'write',?)`, page, f.a.AgentID, f.rig.adminID)
@@ -159,6 +175,7 @@ func TestDocumentDraftProposeModeFiltersViewAndRefusesOutsideMandate(t *testing.
 		{"patch on a propose mandate", request("patch", "intro", 3), 403},
 		{"target outside the mandate", request("propose", "body", 4), 403},
 		{"propose with schema 3", request("propose", "intro", 3), 400},
+		{"propose at another schema than the Doc's", request("propose", "intro", 5), 409},
 		{"propose inside the mandate", request("propose", "intro", 4), 200},
 	}
 	for _, tt := range tests {
@@ -254,7 +271,15 @@ func TestIterationIntentBlocksRoundTrip(t *testing.T) {
 		{"duplicate blocks", `{"submission_id":"s","page_id":"p","schema":4,"generation":0,"rev":0,"blocks":["a","a"]}`, false},
 		{"empty blocks", `{"submission_id":"s","page_id":"p","schema":4,"generation":0,"rev":0,"blocks":[]}`, false},
 		{"bad block id", `{"submission_id":"s","page_id":"p","schema":4,"generation":0,"rev":0,"blocks":["a b"]}`, false},
-		{"schema 5", `{"submission_id":"s","page_id":"p","schema":5,"generation":0,"rev":0}`, false},
+		{"schema 5 with blocks", `{"submission_id":"s","page_id":"p","schema":5,"generation":0,"rev":0,"blocks":["a"]}`, true},
+		// Canvas (schema 6) documents take propose mandates (#5149): the blocks
+		// named on the Page round-trip exactly. A mandate never carries Canvas
+		// geometry; placements are document state, kept by accept (see
+		// TestDocumentCanvasSchemaSixRealEngineCLI).
+		{"schema 6 with blocks", `{"submission_id":"s","page_id":"p","schema":6,"generation":3,"rev":7,"blocks":["lead","other"]}`, true},
+		{"schema 6 whole document", `{"submission_id":"s","page_id":"p","schema":6,"generation":0,"rev":0}`, true},
+		{"schema 6 with placements", `{"submission_id":"s","page_id":"p","schema":6,"generation":0,"rev":0,"blocks":["lead"],"placements":{"lead":{"x":0,"y":0}}}`, false},
+		{"schema 7", `{"submission_id":"s","page_id":"p","schema":7,"generation":0,"rev":0}`, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -276,6 +301,18 @@ func TestIterationIntentBlocksRoundTrip(t *testing.T) {
 			var back documents.IterationIntent
 			if json.Unmarshal(again, &back) != nil || back != intent {
 				t.Fatalf("round trip: %s -> %+v", again, back)
+			}
+			var source struct {
+				Schema     int      `json:"schema"`
+				Rev        int64    `json:"rev"`
+				Generation int64    `json:"generation"`
+				Blocks     []string `json:"blocks"`
+			}
+			if err := json.Unmarshal([]byte(tt.raw), &source); err != nil {
+				t.Fatal(err)
+			}
+			if back.Schema != source.Schema || back.Rev != source.Rev || back.Generation != source.Generation || !slices.Equal(back.BlockList(), source.Blocks) || !back.Propose() {
+				t.Fatalf("round trip lost the mandate: %s -> %+v (blocks %v)", tt.raw, back, back.BlockList())
 			}
 		})
 	}

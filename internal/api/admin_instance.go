@@ -37,6 +37,8 @@ type InstanceAdminHandler struct {
 	logger   *slog.Logger
 	sessions sessions.Store
 	streams  *auth.StreamCredentials
+	// presence (#5166): see WorkspaceHandler.presence.
+	presence *documentPresenceHub
 	journal  journal.Emitter
 	hub      *wshub.Hub
 }
@@ -651,6 +653,7 @@ func (h *InstanceAdminHandler) SetMembership(w http.ResponseWriter, r *http.Requ
 		replyInternalError(w, h.logger, "set membership: commit", err)
 		return
 	}
+	h.presence.memberAccessChanged(wsID, userID)
 	status := http.StatusOK
 	if created {
 		status = http.StatusCreated
@@ -739,6 +742,7 @@ func (h *InstanceAdminHandler) RemoveMembership(w http.ResponseWriter, r *http.R
 		replyInternalError(w, h.logger, "remove membership", err)
 		return
 	}
+	h.presence.memberAccessChanged(wsID, userID)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -1079,6 +1083,7 @@ func (h *InstanceAdminHandler) DeleteWorkspace(w http.ResponseWriter, r *http.Re
 		broadcastWorkspaceEvent(h.hub, wsID, "crew.deleted", map[string]string{"id": cid})
 	}
 	broadcastWorkspaceEvent(h.hub, wsID, "workspace.deleted", map[string]string{"id": wsID, "slug": slug})
+	h.presence.workspaceGone(wsID)
 	w.WriteHeader(http.StatusNoContent)
 }
 

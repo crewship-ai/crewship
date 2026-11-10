@@ -10,7 +10,8 @@ describe("Document acknowledgments", () => {
     expect(()=>verifyMutationReceipt(receipt,attempt)).toThrow(/confirmed/i)
   })
   it("accepts numeric first initialization state and numeric exact-retry receipt", () => {
-    expect(()=>verifyInitialization({schema:3,rev:0,epoch:1,generation:1,incarnation:"generation",snapshot:"AAA=",snapshotRev:0,updates:[],blocks:[]},"attempt")).not.toThrow()
+    for (const schema of [3, 4, 5, 6]) expect(()=>verifyInitialization({schema,rev:0,epoch:1,generation:1,incarnation:"generation",snapshot:"AAA=",snapshotRev:0,updates:[],blocks:[]},"attempt")).not.toThrow()
+    expect(()=>verifyInitialization({schema:7,rev:0,epoch:1,generation:1,incarnation:"generation",snapshot:"AAA=",snapshotRev:0,updates:[],blocks:[]},"attempt")).toThrow()
     expect(()=>verifyInitialization({id:"attempt",rev:0,epoch:1,actor:"human",kind:"init",found:true,duplicate:true},"attempt")).not.toThrow()
   })
   it.each([{id:"other",rev:0,epoch:1,actor:"human",kind:"init",found:true,duplicate:true},{schema:3,rev:0,epoch:"opaque"},null])("rejects invalid initialization acknowledgment %j", value => {

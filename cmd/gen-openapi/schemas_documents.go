@@ -16,11 +16,11 @@ func documentSchemaComponents() map[string]any {
 	boolean := func() map[string]any { return map[string]any{"type": "boolean"} }
 	block := obj(map[string]any{"id": str(), "hash": str()}, "id", "hash")
 	outline := obj(map[string]any{"id": str(), "hash": str(), "type": str(), "text": str(), "parent": map[string]any{"type": "string", "nullable": true}}, "id", "hash", "type", "text", "parent")
-	attrs := obj(map[string]any{"id": map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,80}$"}, "level": map[string]any{"type": "integer", "enum": []int{1, 2, 3}}, "start": integer(), "type": map[string]any{"type": "string", "nullable": true}, "colspan": integer(), "rowspan": integer(), "colwidth": map[string]any{"type": "array", "nullable": true, "items": integer()}, "align": map[string]any{"type": "string", "nullable": true}, "language": map[string]any{"type": "string", "nullable": true, "pattern": "^[a-z0-9][a-z0-9+#-]{0,31}$", "description": "Schema 4 code block language."}, "checked": map[string]any{"type": "boolean", "description": "Schema 4 task item state."}})
-	node := obj(map[string]any{"type": map[string]any{"type": "string", "enum": []string{"doc", "text", "paragraph", "heading", "bulletList", "orderedList", "listItem", "table", "tableRow", "tableCell", "tableHeader", "codeBlock", "blockquote", "taskList", "taskItem"}}, "attrs": attrs, "content": arr(ref("DocumentNode")), "text": str(), "marks": map[string]any{"type": "array", "maxItems": 4, "items": map[string]any{"oneOf": []any{map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type"}, "properties": map[string]any{"type": map[string]any{"type": "string", "enum": []string{"bold", "italic", "strike"}}, "attrs": map[string]any{"type": "object", "additionalProperties": false, "maxProperties": 0}}}, map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type", "attrs"}, "properties": map[string]any{"type": map[string]any{"type": "string", "enum": []string{"link"}}, "attrs": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"href"}, "properties": map[string]any{"href": map[string]any{"type": "string", "maxLength": 2048, "description": "Canonical HTTP(S) URL without credentials or control/space characters; engine enforces UTF8 byte bound2048."}}}}}, map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type"}, "properties": map[string]any{"type": map[string]any{"type": "string", "enum": []string{"code"}}, "attrs": map[string]any{"type": "object", "additionalProperties": false, "maxProperties": 0}}}}}}}, "type")
-	node["description"] = "Versioned bounded tree: depth<=40, nodes<=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks (one per text) and plain codeBlock; explicit4 adds bold/italic/strike marks combinable with each other and link (inline code stays alone), codeBlock language, blockquote and taskList/taskItem(checked). Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine."
+	attrs := obj(map[string]any{"id": map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,80}$"}, "level": map[string]any{"type": "integer", "enum": []int{1, 2, 3}}, "start": integer(), "type": map[string]any{"type": "string", "nullable": true}, "colspan": integer(), "rowspan": integer(), "colwidth": map[string]any{"type": "array", "nullable": true, "items": integer()}, "align": map[string]any{"type": "string", "nullable": true}, "language": map[string]any{"type": "string", "nullable": true, "pattern": "^[a-z0-9][a-z0-9+#-]{0,31}$", "description": "Schema 4 code block language."}, "checked": map[string]any{"type": "boolean", "description": "Schema 4 task item state."}, "value": map[string]any{"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$", "description": "Schema 5 date: one real calendar day, never a time."}, "userId": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$", "description": "Schema 5 mention: opaque user id only. The name is resolved per reader (GET .../document/people); content never stores names."}})
+	node := obj(map[string]any{"type": map[string]any{"type": "string", "enum": []string{"doc", "text", "paragraph", "heading", "bulletList", "orderedList", "listItem", "table", "tableRow", "tableCell", "tableHeader", "codeBlock", "blockquote", "taskList", "taskItem", "date", "mention"}}, "attrs": attrs, "content": arr(ref("DocumentNode")), "text": str(), "marks": map[string]any{"type": "array", "maxItems": 7, "items": map[string]any{"oneOf": []any{map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type"}, "properties": map[string]any{"type": map[string]any{"type": "string", "enum": []string{"bold", "italic", "strike", "underline"}}, "attrs": map[string]any{"type": "object", "additionalProperties": false, "maxProperties": 0}}}, map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type", "attrs"}, "properties": map[string]any{"type": map[string]any{"type": "string", "enum": []string{"link"}}, "attrs": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"href"}, "properties": map[string]any{"href": map[string]any{"type": "string", "maxLength": 2048, "description": "Canonical HTTP(S) URL without credentials or control/space characters; engine enforces UTF8 byte bound2048."}}}}}, map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type"}, "properties": map[string]any{"type": map[string]any{"type": "string", "enum": []string{"code"}}, "attrs": map[string]any{"type": "object", "additionalProperties": false, "maxProperties": 0}}}, map[string]any{"type": "object", "additionalProperties": false, "required": []string{"type", "attrs"}, "properties": map[string]any{"type": map[string]any{"type": "string", "enum": []string{"textColor", "highlight"}}, "attrs": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"color"}, "properties": map[string]any{"color": map[string]any{"type": "string", "enum": []string{"gray", "red", "orange", "yellow", "green", "blue", "purple", "pink"}, "description": "Schema 5 palette name; never a CSS value. Each theme resolves it."}}}}}}}}}, "type")
+	node["description"] = "Versioned bounded tree: depth<=40, nodes<=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks (one per text) and plain codeBlock; explicit4 adds bold/italic/strike marks combinable with each other and link (inline code stays alone), codeBlock language, blockquote and taskList/taskItem(checked); explicit5 adds underline and textColor/highlight marks whose only attribute is a palette name (at most 7 marks per text), and inline atoms date{value: YYYY-MM-DD} and mention{userId} inside paragraphs and headings, with exactly that one attribute, no content and no marks; explicit6 keeps the schema5 tree and adds the Canvas surface (block placements and canvas-only items) stored beside it, never inside this tree. Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine."
 	receipt := obj(map[string]any{"id": str(), "rev": integer(), "epoch": str(), "actor": str(), "kind": str(), "schema": integer(), "checkpoint": str(), "duplicate": boolean(), "found": boolean()}, "id", "rev", "epoch")
-	state := obj(map[string]any{"page_id": str(), "schema": integer(), "rev": integer(), "epoch": str(), "generation": integer(), "incarnation": str(), "snapshot": str(), "snapshotRev": integer(), "updates": arr(str()), "blocks": arr(block), "content": ref("DocumentNode"), "outline": arr(outline), "can_write": boolean(), "can_comment": boolean(), "can_resolve": boolean(), "proposals": map[string]any{"type": "boolean", "description": "Agent proposals and their review are served on this Doc (schema 4; never for restricted members)."}}, "page_id", "schema", "rev", "epoch", "generation", "incarnation", "snapshot", "snapshotRev", "updates", "blocks", "content", "outline", "can_write", "can_comment", "can_resolve", "proposals")
+	state := obj(map[string]any{"page_id": str(), "schema": integer(), "rev": integer(), "epoch": str(), "generation": integer(), "incarnation": str(), "snapshot": str(), "snapshotRev": integer(), "updates": arr(str()), "blocks": arr(block), "content": ref("DocumentNode"), "outline": arr(outline), "can_write": boolean(), "can_comment": boolean(), "can_resolve": boolean(), "proposals": map[string]any{"type": "boolean", "description": "Agent proposals and their review are served on this Doc (its schema supports them: 4, 5 or 6; never for restricted members)."}, "capabilities": map[string]any{"type": "array", "description": "What this Doc's content schema supports (read, edit, draft, propose, accept, restore, export, upgrade), on a read.", "items": map[string]any{"type": "string", "enum": []any{"read", "edit", "draft", "propose", "accept", "restore", "export", "upgrade"}}}}, "page_id", "schema", "rev", "epoch", "generation", "incarnation", "snapshot", "snapshotRev", "updates", "blocks", "content", "outline", "can_write", "can_comment", "can_resolve", "proposals")
 	result := obj(map[string]any{"page_id": str(), "type": map[string]any{"type": "string", "enum": []string{"document"}}, "page_slug": str(), "title": str(), "revision": map[string]any{"type": "integer", "enum": []int{0}}, "created_at": map[string]any{"type": "string", "format": "date-time"}, "agent_id": str(), "agent_name": str(), "run_id": str(), "on_behalf_of_user_id": str()}, "page_id", "type", "page_slug", "title", "revision", "created_at", "agent_id", "agent_name", "run_id", "on_behalf_of_user_id")
 	comment := obj(map[string]any{"id": str(), "parent": map[string]any{"type": "string", "description": "Root thread a reply answers; absent on a thread."}, "body": str(), "actor": str(), "rev": integer(), "version": map[string]any{"type": "integer", "minimum": 1}, "resolved": boolean(), "created_at": str(),
 		"block": str(), "quote": str(), "checkpoint": integer(), "start": str(), "end": str(), "from": integer(), "to": integer(),
@@ -33,7 +33,7 @@ func documentSchemaComponents() map[string]any {
 	checkpoint["additionalProperties"] = false
 	history := obj(map[string]any{"checkpoints": map[string]any{"type": "array", "maxItems": 1000, "items": checkpoint}}, "checkpoints")
 	history["additionalProperties"] = false
-	selected := obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3, 4}}, "content": ref("DocumentNode")}, "page_id", "id", "rev", "schema", "content")
+	selected := obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3, 4, 5, 6}}, "content": ref("DocumentNode")}, "page_id", "id", "rev", "schema", "content")
 	selected["additionalProperties"] = false
 	proposalID := map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,128}$"}
 	proposalProps := map[string]any{"id": proposalID, "author": str(), "run_id": str(), "target": obj(map[string]any{"block_ids": map[string]any{"type": "array", "minItems": 1, "maxItems": 1, "items": str()}}, "block_ids"),
@@ -52,7 +52,7 @@ func documentSchemaComponents() map[string]any {
 		"DocumentProposalDetail":      proposalDetail,
 		"DocumentProposalList":        obj(map[string]any{"page_id": str(), "proposals": map[string]any{"type": "array", "maxItems": 500, "items": ref("DocumentProposal")}}, "page_id", "proposals"),
 		"DocumentProposalReceipt":     obj(map[string]any{"page_id": str(), "proposal": proposalID, "id": proposalID, "rev": revision, "kind": map[string]any{"type": "string", "enum": []string{"human", "proposal-reject"}}, "duplicate": boolean()}, "page_id", "proposal", "id", "rev", "kind"),
-		"DocumentRestoreReceipt":      obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "epoch": str(), "kind": map[string]any{"type": "string", "enum": []string{"restore"}}, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3, 4}}, "duplicate": boolean()}, "page_id", "id", "rev", "epoch", "kind"),
+		"DocumentRestoreReceipt":      obj(map[string]any{"page_id": str(), "id": checkpointID, "rev": revision, "epoch": str(), "kind": map[string]any{"type": "string", "enum": []string{"restore"}}, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3, 4, 5, 6}}, "duplicate": boolean()}, "page_id", "id", "rev", "epoch", "kind"),
 		"DocumentCheckpointList":      history,
 		"DocumentCheckpoint":          selected,
 		"DocumentChatResults":         obj(map[string]any{"results": map[string]any{"type": "array", "maxItems": 20, "items": result}}, "results"),
@@ -60,7 +60,9 @@ func documentSchemaComponents() map[string]any {
 		"DocumentInitializationState": obj(map[string]any{"schema": integer(), "rev": integer(), "epoch": integer(), "generation": integer(), "incarnation": str(), "database": str(), "contentGeneration": integer(), "snapshot": str(), "snapshotRev": integer(), "updates": arr(str()), "blocks": arr(block)}, "schema", "rev", "epoch", "generation", "incarnation", "database", "contentGeneration", "snapshot", "snapshotRev", "updates", "blocks"),
 		"DocumentInitializeReceipt":   obj(map[string]any{"id": str(), "rev": integer(), "epoch": integer(), "actor": str(), "kind": str(), "found": boolean(), "duplicate": boolean()}, "id", "rev", "epoch", "actor", "kind", "found", "duplicate"),
 		"DocumentNode":                node, "DocumentState": state, "DocumentReceipt": receipt,
-		"DocumentComment":     comment,
+		"DocumentComment": comment,
+		"DocumentPeople": obj(map[string]any{"people": map[string]any{"type": "array", "maxItems": 100, "items": obj(map[string]any{"id": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,64}$"}, "name": map[string]any{"type": "string", "minLength": 1, "maxLength": 200}}, "id", "name"),
+			"description": "Only people who can read this Document, released only to a caller who can read it. Any other id is simply absent (shown as Unknown member), so the answer never confirms that an id exists."}}, "people"),
 		"DocumentCommentList": obj(map[string]any{"page_id": str(), "comments": map[string]any{"type": "array", "maxItems": 1000, "items": ref("DocumentComment")}, "can_comment": boolean(), "can_resolve": boolean()}, "page_id", "comments", "can_comment", "can_resolve"),
 	}
 }
@@ -68,11 +70,11 @@ func documentSchemaCatalog() map[string]DomainSchema {
 	str := func() map[string]any { return map[string]any{"type": "string"} }
 	integer := func() map[string]any { return map[string]any{"type": "integer", "minimum": 0} }
 	body := func(extra map[string]any, required ...string) map[string]any {
-		props := map[string]any{"id": map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,128}$"}, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3, 4}}, "epoch": str(), "page_id": str()}
+		props := map[string]any{"id": map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,128}$"}, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3, 4, 5, 6}}, "epoch": str(), "page_id": str()}
 		for k, v := range extra {
 			props[k] = v
 		}
-		return map[string]any{"type": "object", "properties": props, "required": append([]string{"id", "schema", "epoch"}, required...), "additionalProperties": false, "allOf": []any{map[string]any{"oneOf": []any{map[string]any{"properties": map[string]any{"schema": map[string]any{"enum": []int{1, 2}}}}, map[string]any{"properties": map[string]any{"schema": map[string]any{"enum": []int{3, 4}}}, "required": []string{"page_id"}}}}}}
+		return map[string]any{"type": "object", "properties": props, "required": append([]string{"id", "schema", "epoch"}, required...), "additionalProperties": false, "allOf": []any{map[string]any{"oneOf": []any{map[string]any{"properties": map[string]any{"schema": map[string]any{"enum": []int{1, 2}}}}, map[string]any{"properties": map[string]any{"schema": map[string]any{"enum": []int{3, 4, 5, 6}}}, "required": []string{"page_id"}}}}}}
 	}
 	base := "/api/v1/pages/{slug}/document"
 	out := map[string]DomainSchema{}
@@ -87,7 +89,7 @@ func documentSchemaCatalog() map[string]DomainSchema {
 			"required": []string{"page_id", "id", "schema", "epoch", "ifRev", "checkpoint"},
 			"properties": map[string]any{
 				"page_id": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"}, "id": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"}, "epoch": map[string]any{"type": "string", "minLength": 1, "maxLength": 256}, "checkpoint": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{1,128}$"},
-				"schema": map[string]any{"type": "integer", "enum": []int{2, 3, 4}},
+				"schema": map[string]any{"type": "integer", "enum": []int{2, 3, 4, 5, 6}},
 				"ifRev":  map[string]any{"type": "integer", "minimum": 0, "maximum": 9007199254740990},
 			}},
 		RequestRequired: true, Response: ref("DocumentRestoreReceipt"),
@@ -100,6 +102,12 @@ func documentSchemaCatalog() map[string]DomainSchema {
 		contract.SuccessHeaders = map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}}
 		out["GET "+path] = contract
 	}
+	out["GET "+base+"/people"] = DomainSchema{NoRequest: true, Response: ref("DocumentPeople"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"400", "401", "403", "404", "429", "500", "503"},
+		SuccessHeaders: map[string]any{"Cache-Control": map[string]any{"schema": map[string]any{"type": "string", "enum": []string{"no-store"}}}},
+		Parameters: []map[string]any{
+			{"name": "ids", "in": "query", "required": false, "schema": map[string]any{"type": "string"}, "description": "Comma-separated mention user ids (at most 100) to name for this reader."},
+			{"name": "q", "in": "query", "required": false, "schema": map[string]any{"type": "string", "maxLength": 100}, "description": "Name search for the @-mention picker; at most 20 people who can read this Document. Not combinable with ids."},
+		}}
 	out["GET /api/v1/chats/{chatId}/document-results"] = DomainSchema{Response: ref("DocumentChatResults"), SuccessStatuses: []string{"200"}, ErrorStatuses: []string{"401", "403", "404", "500", "503"}}
 	out["GET /api/v1/documents/status"] = DomainSchema{Response: ref("DocumentAvailability"), SuccessStatuses: []string{"200"}}
 	post := func(path string, request map[string]any) {
@@ -108,7 +116,7 @@ func documentSchemaCatalog() map[string]DomainSchema {
 	initialize := body(map[string]any{"body": ref("DocumentNode")}, "body")
 	initialize["required"] = []string{"id", "schema", "body"}
 	delete(initialize["properties"].(map[string]any), "epoch")
-	initialize["properties"].(map[string]any)["schema"] = map[string]any{"type": "integer", "enum": []int{2, 3, 4}}
+	initialize["properties"].(map[string]any)["schema"] = map[string]any{"type": "integer", "enum": []int{2, 3, 4, 5, 6}}
 	post("/initialize", initialize)
 	initSchema := out["POST "+base+"/initialize"]
 	initSchema.Response = map[string]any{"oneOf": []any{ref("DocumentInitializationState"), ref("DocumentInitializeReceipt")}}
@@ -116,6 +124,11 @@ func documentSchemaCatalog() map[string]DomainSchema {
 	human := body(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"human"}}, "update": map[string]any{"type": "string", "maxLength": 1400000, "description": "Base64 incremental Yjs update; agent raw updates forbidden."}}, "kind", "update")
 	semantic := body(map[string]any{"kind": map[string]any{"type": "string", "enum": []string{"agent"}}, "target": str(), "text": str(), "ifRev": integer(), "ifHash": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}}, "target", "text", "ifRev", "ifHash")
 	post("/patch", map[string]any{"oneOf": []any{human, semantic}})
+	upgrade := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "schema", "target_schema", "page_id", "epoch", "ifRev"},
+		"description": "Explicit human schema upgrade (for example enabling Canvas at schema 6). Content, block IDs and hashes, versions and comments are unchanged; agents are refused.",
+		"properties": map[string]any{"id": map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,128}$"}, "schema": map[string]any{"type": "integer", "enum": []int{1, 2, 3, 4, 5}, "description": "The document's current schema; it must support upgrade."},
+			"target_schema": map[string]any{"type": "integer", "enum": []int{6}}, "page_id": str(), "epoch": str(), "ifRev": integer()}}
+	post("/upgrade", upgrade)
 	get(base+"/comments", "DocumentCommentList")
 	commentText := map[string]any{"type": "string", "minLength": 1, "maxLength": 10000}
 	thread := body(map[string]any{"ifRev": integer(), "block": map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,80}$"}, "from": integer(), "to": integer(), "text": commentText}, "ifRev", "block", "from", "to", "text")
@@ -131,13 +144,17 @@ func documentSchemaCatalog() map[string]DomainSchema {
 	}
 	// Ephemeral presence (#5166): the server names people and assigns colours; a client sends only its tab and caret.
 	position := map[string]any{"type": "string", "maxLength": 256, "description": "Base64 encoded Yjs relative position (at most 192 bytes)."}
+	coordinate := map[string]any{"type": "number", "minimum": -1000000, "maximum": 1000000}
+	canvasPresence := map[string]any{"type": "object", "additionalProperties": false, "description": "Where this tab is on the Canvas view (schema 6): its pointer in canvas coordinates, absent once it leaves the canvas, and the cards it selected. Replaced by every heartbeat; gone with the tab after the TTL.", "properties": map[string]any{
+		"pointer":   map[string]any{"type": "object", "additionalProperties": false, "required": []string{"x", "y"}, "properties": map[string]any{"x": coordinate, "y": coordinate}},
+		"selection": map[string]any{"type": "array", "maxItems": 8, "uniqueItems": true, "items": map[string]any{"type": "string", "pattern": "^[a-zA-Z0-9_-]{1,80}$"}, "description": "Selected cards: Page block IDs (placements) or canvas item IDs."}}}
 	peer := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"client", "user_id", "name", "color"}, "properties": map[string]any{
 		"client": str(), "user_id": str(), "name": map[string]any{"type": "string", "description": "The member's display name, or Workspace member; never an email."},
-		"color": map[string]any{"type": "integer", "minimum": 0, "maximum": 7, "description": "Per-document colour index assigned by the server."}, "anchor": position, "head": position}}
+		"color": map[string]any{"type": "integer", "minimum": 0, "maximum": 7, "description": "Per-document colour index assigned by the server."}, "anchor": position, "head": position, "canvas": canvasPresence}}
 	out["POST "+base+"/presence"] = DomainSchema{
 		Request: map[string]any{"type": "object", "additionalProperties": false, "required": []string{"client"}, "properties": map[string]any{
 			"client": map[string]any{"type": "string", "pattern": "^[A-Za-z0-9_-]{8,64}$", "description": "This tab's id."},
-			"anchor": position, "head": position,
+			"anchor": position, "head": position, "canvas": canvasPresence,
 			"leave": map[string]any{"type": "boolean", "description": "Remove this tab at once."}}},
 		RequestRequired: true,
 		Response: map[string]any{"type": "object", "required": []string{"peers"}, "properties": map[string]any{

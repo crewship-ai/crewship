@@ -106,7 +106,8 @@ func pagesAccessKeys(doc pagesAccessDoc) []string {
 //	ops-board  owned by crew/engine; one panel by crew/lookout
 //
 // bob is in engine, carol in lookout, frank in both, erin is an ADMIN, and
-// the fixture's OWNER user issues every grant.
+// the fixture's OWNER user issues every grant but the agent's produce, which
+// only alice, the page's owner, may delegate.
 func pagesAccessFixture(t *testing.T) (*PageHandler, string, string) {
 	t.Helper()
 	h, _, _, wsID, ownerID := newPagesFixture(t)
@@ -134,7 +135,8 @@ func pagesAccessFixture(t *testing.T) (*PageHandler, string, string) {
 	pagesGrant(t, h, wsID, ownerID, "fleet-201", `{"subject_type":"user","subject":"frank","level":"write"}`)
 	pagesGrant(t, h, wsID, ownerID, "fleet-201", `{"subject_type":"user","subject":"frank","level":"read"}`)
 	pagesGrant(t, h, wsID, ownerID, "fleet-201", `{"subject_type":"crew","subject":"engine","level":"read"}`)
-	pagesGrant(t, h, wsID, ownerID, "fleet-201", `{"subject_type":"agent","subject":"watcher","level":"produce","panels":["p1"]}`)
+	// R71 §0.14/1: only the page's owner delegates produce to an agent.
+	pagesGrant(t, h, wsID, "alice", "fleet-201", `{"subject_type":"agent","subject":"watcher","level":"produce","panels":["p1"]}`)
 	return h, wsID, ownerID
 }
 

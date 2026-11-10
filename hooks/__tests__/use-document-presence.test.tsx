@@ -6,7 +6,7 @@ import { afterEach, expect, it, vi } from "vitest"
 import * as Y from "yjs"
 import { Editor } from "@tiptap/core"
 import { documentSessionExtensions } from "@/components/features/pages/page-document"
-import { useDocumentPresence } from "../use-document-presence"
+import { useDocumentPresence, type CanvasPresenceChannel } from "../use-document-presence"
 
 const request = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
@@ -66,5 +66,47 @@ it("leaves when the page is hidden (reload, closed tab), where no cleanup runs",
   act(() => { window.dispatchEvent(new Event("pagehide")) })
   const leave = request.mock.calls.find(([, init]) => JSON.parse(String((init as RequestInit).body)).leave === true)
   expect(leave?.[1]).toMatchObject({ method: "POST", keepalive: true })
+  hook.unmount()
+})
+
+it("sends this tab's Canvas pointer and selection with the heartbeat, at once when they change, and stops when the Canvas closes", async () => {
+  request.mockImplementation(async () => reply(200, { peers: [{ ...peer, canvas: { pointer: { x: 12, y: 34 }, selection: ["intro"] } }], color: 0, ttl_ms: 6000, interval_ms: 5000 }))
+  const channel: CanvasPresenceChannel = { current: null }
+  const hook = renderHook(() => useDocumentPresence({ workspaceId: "w", slug: "notes", editor: editors[0] ?? editor(), enabled: true, canvas: channel }))
+  await waitFor(() => expect(hook.result.current[0]?.canvas).toEqual({ pointer: { x: 12, y: 34 }, selection: ["intro"] }))
+  expect((bodies()[0] as { canvas?: unknown }).canvas).toBeUndefined()
+  expect(channel.share).toBeTypeOf("function")
+  const before = request.mock.calls.length
+  channel.current = { pointer: { x: 100.6, y: -20.2 }, selection: ["intro"] }
+  act(() => { channel.share!() })
+  // Throttled like a caret move, well before the 5 s heartbeat.
+  await waitFor(() => expect(request.mock.calls.length).toBeGreaterThan(before), { timeout: 1000 })
+  expect((bodies().at(-1) as { canvas?: unknown }).canvas).toEqual({ pointer: { x: 101, y: -20 }, selection: ["intro"] })
+  channel.current = null
+  act(() => { channel.share!() })
+  await waitFor(() => expect(request.mock.calls.length).toBeGreaterThan(before + 1), { timeout: 1000 })
+  expect((bodies().at(-1) as { canvas?: unknown }).canvas).toBeUndefined()
+  hook.unmount()
+  expect(channel.share).toBeUndefined()
+})
+
+it("shares only the active surface, restoring the Page caret after Canvas closes", async () => {
+  request.mockImplementation(async () => reply(200, { peers: [], ttl_ms: 6000, interval_ms: 5000 }))
+  const activeEditor = editor()
+  activeEditor.commands.setTextSelection(1)
+  const channel: CanvasPresenceChannel = { current: null }
+  const hook = renderHook(() => useDocumentPresence({ workspaceId: "w", slug: "notes", editor: activeEditor, enabled: true, canvas: channel }))
+  await waitFor(() => expect(bodies()[0]).toHaveProperty("anchor", expect.any(String)))
+  expect(bodies()[0]).toHaveProperty("head", expect.any(String))
+  channel.current = { pointer: { x: 1, y: 2 }, selection: [] }
+  act(() => { channel.share!() })
+  await waitFor(() => expect(bodies().at(-1)).toHaveProperty("canvas"))
+  expect(bodies().at(-1)).not.toHaveProperty("anchor")
+  expect(bodies().at(-1)).not.toHaveProperty("head")
+  channel.current = null
+  act(() => { channel.share!() })
+  await waitFor(() => expect(bodies().at(-1)).not.toHaveProperty("canvas"))
+  expect(bodies().at(-1)).toHaveProperty("anchor", expect.any(String))
+  expect(bodies().at(-1)).toHaveProperty("head", expect.any(String))
   hook.unmount()
 })

@@ -49,6 +49,8 @@ export interface DocumentHistoryProps {
   headRev?: number
   /** Display name for a checkpoint actor (`user:<id>`, `agent:<id>`). Must never return the raw identifier. */
   actorName?: (actor: string) => string
+  /** The live document's schema, to warn when a restore drops a layer the checkpoint predates (the Canvas at 6). */
+  headSchema?: number
   restore?: {
     allowed: boolean
     baseKey?: string

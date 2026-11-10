@@ -27,6 +27,9 @@ func (r *Router) registerDocumentRoutes() {
 	r.mux.Handle("GET /api/v1/chats/{chatId}/document-results", authed(wsCtx(http.HandlerFunc(p.ListChatDocumentResults))))
 	// openapi: responses 200,400,401,403,404,409,413,422,500,502,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/document", authed(wsCtx(http.HandlerFunc(p.GetDocument))))
+	// Mention names for this reader (#5155): ids to names, or @-mention search.
+	// openapi: responses 200,400,401,403,404,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/document/people", authed(wsCtx(http.HandlerFunc(p.DocumentPeople))))
 	// openapi: responses 200,400,401,403,404,409,429,500,502,503
 	r.mux.Handle("GET /api/v1/pages/{slug}/document/checkpoints", authed(wsCtx(http.HandlerFunc(p.ListDocumentCheckpoints))))
 	// openapi: responses 200,400,401,403,404,409,429,500,502,503
@@ -40,9 +43,12 @@ func (r *Router) registerDocumentRoutes() {
 	// openapi: responses 200,400,401,403,404,409,413,422,429,500,502,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/patch", roleInline, p.MutateDocument)
 	// Ephemeral presence (#5166): live read authority on every heartbeat, memory only.
-	r.documentPresenceHub = newDocumentPresenceHub()
 	// openapi: responses 200,400,401,403,404,429,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/document/presence", roleInline, r.documentPresence)
+	// Explicit human schema upgrade (enable Canvas, #5149): Edit in the
+	// authority; agents are refused here and in the engine.
+	// openapi: responses 200,400,401,403,404,409,413,422,429,500,502,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/document/upgrade", roleInline, p.MutateDocument)
 	// Anchored discussion. Reading follows document read authority; writing
 	// needs Comment authority (Edit, or a Comment/Edit grant) in the authority.
 	// openapi: responses 200,400,401,403,404,409,429,500,502,503

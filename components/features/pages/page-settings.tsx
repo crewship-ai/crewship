@@ -401,7 +401,7 @@ export function AccessCard({
   /** Native document content uses read/write grants; panel production is inapplicable. */
   documentContent?: boolean
 }) {
-  const { grants, inertCount, loading, refusal, error } = usePageGrants(workspaceId, slug)
+  const { grants, inertCount, loading, refusal, error, canDelegateAgentEdit } = usePageGrants(workspaceId, slug)
 
   const [subjectType, setSubjectType] = React.useState<PageSubjectType>("user")
   const [subject, setSubject] = React.useState("")
@@ -451,7 +451,7 @@ export function AccessCard({
           }`
 
   const forWorkspace = subjectType === "workspace"
-  const levels = pageGrantLevelsFor(subjectType).filter(level => !documentContent || level !== "produce")
+  const levels = pageGrantLevelsFor(subjectType, canDelegateAgentEdit).filter(level => !documentContent || level !== "produce")
 
   const onIssue = (e: React.FormEvent) => {
     e.preventDefault()
@@ -563,7 +563,7 @@ export function AccessCard({
                   setSubjectType(next)
                   // The workspace never produces; a level the new kind may
                   // not hold is not left standing in the select.
-                  if (!pageGrantLevelsFor(next).includes(level)) setLevel("read")
+                  if (!pageGrantLevelsFor(next, canDelegateAgentEdit).includes(level)) setLevel("read")
                   touch()
                 }}
               >

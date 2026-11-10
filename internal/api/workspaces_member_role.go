@@ -249,6 +249,7 @@ VALUES(?,?,?,'member.role_change','WorkspaceMember',?,?,?)`, auditID, workspaceI
 	// A role change can end read access to shared pages: tell only this
 	// member's own channel to re-check every open shared preview.
 	publishUserAccessRecheck(h.hub, h.logger, []string{memberUserID}, map[string]any{})
+	h.presence.memberAccessChanged(workspaceID, memberUserID)
 
 	writeJSON(w, http.StatusOK, map[string]string{
 		"status":    "updated",

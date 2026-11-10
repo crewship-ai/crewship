@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"net/http/httptest"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -175,13 +176,13 @@ func TestDocumentPresenceLeaveAndTTL(t *testing.T) {
 	rig := presenceFixture(t)
 	rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
 	rig.beat("editor", "doc-a", caret("editor-tab-2", "e2"))
-	if _, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o")); len(reply.Peers) != 2 || reply.Peers[0].Color != reply.Peers[1].Color {
-		t.Fatalf("one person's two tabs: %+v", reply.Peers)
+	if _, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o")); len(reply.Peers) != 1 || reply.Peers[0].Tabs != 2 {
+		t.Fatalf("one person's two tabs are one peer with a tab count: %+v", reply.Peers)
 	}
 	if code, _ := rig.beat("editor", "doc-a", `{"client":"editor-tab-1","leave":true}`); code != 200 {
 		t.Fatalf("leave %d", code)
 	}
-	if _, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o")); len(reply.Peers) != 1 || reply.Peers[0].Client != "editor-tab-2" {
+	if _, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o")); len(reply.Peers) != 1 || reply.Peers[0].Client != "editor-tab-2" || reply.Peers[0].Tabs != 1 {
 		t.Fatalf("after leave: %+v", reply.Peers)
 	}
 	base := time.Now()
@@ -199,7 +200,7 @@ func TestDocumentPresenceColoursAvoidCollisionsPerDocument(t *testing.T) {
 	seen := map[int]string{}
 	for i := 0; i < documentPresenceColors; i++ {
 		user := "user-" + string(rune('a'+i))
-		color, _, ok := hub.beat(room, user, "tab-"+user+"-0001", user, "", "")
+		color, _, ok := hub.beat(room, user, "tab-"+user+"-0001", user, "", "", nil)
 		if !ok {
 			t.Fatal("room full too early")
 		}
@@ -208,7 +209,7 @@ func TestDocumentPresenceColoursAvoidCollisionsPerDocument(t *testing.T) {
 		}
 		seen[color] = user
 		// Deterministic: the same person on the same document keeps their colour.
-		if again, _, _ := hub.beat(room, user, "tab-"+user+"-0001", user, "", ""); again != color {
+		if again, _, _ := hub.beat(room, user, "tab-"+user+"-0001", user, "", "", nil); again != color {
 			t.Fatalf("%s colour changed %d -> %d", user, color, again)
 		}
 	}
@@ -248,15 +249,15 @@ func TestDocumentPresenceStaleRoomsNeverExhaustTheServer(t *testing.T) {
 	hub.now = func() time.Time { return base }
 	for i := 0; hub.total < documentPresenceTotalLimit; i++ {
 		room := documentPresenceRoom("ws", "page-"+strconv.Itoa(i))
-		if _, _, ok := hub.beat(room, "user-"+strconv.Itoa(i), "tab-00000001", "Name", "", ""); !ok {
+		if _, _, ok := hub.beat(room, "user-"+strconv.Itoa(i), "tab-00000001", "Name", "", "", nil); !ok {
 			t.Fatalf("filling the hub refused at %d", hub.total)
 		}
 	}
-	if _, _, ok := hub.beat(documentPresenceRoom("ws", "fresh"), "late-user", "tab-00000001", "Late", "", ""); ok {
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "fresh"), "late-user", "tab-00000001", "Late", "", "", nil); ok {
 		t.Fatal("the server-wide limit must hold while entries are live")
 	}
 	hub.now = func() time.Time { return base.Add(documentPresenceTTL + time.Second) }
-	if _, _, ok := hub.beat(documentPresenceRoom("ws", "fresh"), "late-user", "tab-00000001", "Late", "", ""); !ok {
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "fresh"), "late-user", "tab-00000001", "Late", "", "", nil); !ok {
 		t.Fatal("expired entries in untouched rooms still block new people")
 	}
 	if hub.total != 1 || len(hub.rooms) != 1 {
@@ -275,8 +276,8 @@ func TestDocumentPresenceCapsTabsPerPerson(t *testing.T) {
 	if code, _ := rig.beat("reader", "doc-a", caret("reader-tab-extra", "r")); code != 429 {
 		t.Fatalf("a ninth tab of one person accepted with %d", code)
 	}
-	if code, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "e")); code != 200 || len(reply.Peers) != documentPresenceUserTabLimit {
-		t.Fatalf("another person locked out: %d %d", code, len(reply.Peers))
+	if code, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "e")); code != 200 || len(reply.Peers) != 1 || reply.Peers[0].Tabs != documentPresenceUserTabLimit {
+		t.Fatalf("another person locked out: %d %+v", code, reply.Peers)
 	}
 }
 
@@ -284,21 +285,339 @@ func TestDocumentPresenceCapsTabsPerPerson(t *testing.T) {
 func TestDocumentPresenceCapsTabsPerPersonServerWide(t *testing.T) {
 	hub := newDocumentPresenceHub()
 	for i := 0; i < documentPresenceUserTotalLimit; i++ {
-		if _, _, ok := hub.beat(documentPresenceRoom("ws", "page-"+strconv.Itoa(i)), "busy-user", "tab-00000001", "Busy", "", ""); !ok {
+		if _, _, ok := hub.beat(documentPresenceRoom("ws", "page-"+strconv.Itoa(i)), "busy-user", "tab-00000001", "Busy", "", "", nil); !ok {
 			t.Fatalf("tab %d refused", i)
 		}
 	}
-	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "busy-user", "tab-00000001", "Busy", "", ""); ok {
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "busy-user", "tab-00000001", "Busy", "", "", nil); ok {
 		t.Fatal("one person exceeded the server-wide tab limit")
 	}
-	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "other-user", "tab-00000001", "Other", "", ""); !ok {
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "other-user", "tab-00000001", "Other", "", "", nil); !ok {
 		t.Fatal("another person locked out")
 	}
 	hub.leave(documentPresenceRoom("ws", "page-0"), "busy-user", "tab-00000001")
-	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "busy-user", "tab-00000001", "Busy", "", ""); !ok {
+	if _, _, ok := hub.beat(documentPresenceRoom("ws", "one-more"), "busy-user", "tab-00000001", "Busy", "", "", nil); !ok {
 		t.Fatal("a leave must free the person's slot")
 	}
 	if hub.users["busy-user"] != documentPresenceUserTotalLimit || hub.total != documentPresenceUserTotalLimit+1 {
 		t.Fatalf("counts drifted: user %d total %d", hub.users["busy-user"], hub.total)
 	}
+}
+
+// #5166 debt: a revoked credential, an ended membership or a role change
+// removes the person's presence at once, not after the TTL.
+func TestDocumentPresenceEndsAtOnceOnRevokeAndMembershipChange(t *testing.T) {
+	present := func(rig *presenceRig, name string) bool {
+		_, reply := rig.beat("owner", "doc-a", caret("owner-tab-1", "o"))
+		for _, peer := range reply.Peers {
+			if peer.Name == name {
+				return true
+			}
+		}
+		return false
+	}
+	call := func(rig *presenceRig, who, method, path, body string) int {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set("Authorization", "Bearer "+rig.tokens[who])
+		req.Header.Set("X-Workspace-ID", rig.ws)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		rig.router.mux.ServeHTTP(w, req)
+		return w.Code
+	}
+	t.Run("CLI token revoked", func(t *testing.T) {
+		rig := presenceFixture(t)
+		rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+		if !present(rig, "Erin Editor") {
+			t.Fatal("setup: editor not present")
+		}
+		if code := call(rig, "editor", "DELETE", "/api/v1/auth/cli-tokens/clt-presence-editor", ""); code != 200 {
+			t.Fatalf("revoke token: %d", code)
+		}
+		if present(rig, "Erin Editor") {
+			t.Fatal("a revoked token keeps its tab present until the TTL")
+		}
+	})
+	t.Run("revoked while the heartbeat is in flight", func(t *testing.T) {
+		rig := presenceFixture(t)
+		rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+		documentPresenceBeforeBeat = func() {
+			documentPresenceBeforeBeat = nil
+			rig.router.authMw.streams.NotifyTokenRevoked("clt-presence-editor")
+		}
+		t.Cleanup(func() { documentPresenceBeforeBeat = nil })
+		if code, _ := rig.beat("editor", "doc-a", caret("editor-tab-1", "e")); code == 200 {
+			t.Fatal("a heartbeat revoked mid-flight was accepted")
+		}
+		if present(rig, "Erin Editor") {
+			t.Fatal("a heartbeat that raced the revocation put the tab back until the TTL")
+		}
+	})
+	t.Run("membership removed", func(t *testing.T) {
+		rig := presenceFixture(t)
+		rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+		var member string
+		if err := rig.router.db.QueryRow(`SELECT id FROM workspace_members WHERE workspace_id=? AND user_id='presence-editor'`, rig.ws).Scan(&member); err != nil {
+			t.Fatal(err)
+		}
+		if code := call(rig, "owner", "DELETE", "/api/v1/workspaces/"+rig.ws+"/members/"+member, ""); code != 200 {
+			t.Fatalf("remove member: %d", code)
+		}
+		if present(rig, "Erin Editor") {
+			t.Fatal("a removed member stays present until the TTL")
+		}
+	})
+	t.Run("role changed", func(t *testing.T) {
+		rig := presenceFixture(t)
+		rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+		var member string
+		if err := rig.router.db.QueryRow(`SELECT id FROM workspace_members WHERE workspace_id=? AND user_id='presence-editor'`, rig.ws).Scan(&member); err != nil {
+			t.Fatal(err)
+		}
+		if code := call(rig, "owner", "PATCH", "/api/v1/workspaces/"+rig.ws+"/members/"+member, `{"role":"VIEWER"}`); code != 200 {
+			t.Fatalf("change role: %d", code)
+		}
+		if present(rig, "Erin Editor") {
+			t.Fatal("a role change keeps the old presence until the TTL")
+		}
+		// Still able to read: the next heartbeat brings the person back.
+		rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+		if !present(rig, "Erin Editor") {
+			t.Fatal("a member who can still read is not re-admitted")
+		}
+	})
+}
+
+func TestDocumentPresenceCredentialRevocationKinds(t *testing.T) {
+	hub := newDocumentPresenceHub()
+	room, other := documentPresenceRoom("ws", "a"), documentPresenceRoom("ws2", "b")
+	seed := func() {
+		hub.beatAs(room, "u1", "tab-session1", "s1", "", "U1", "", "")
+		hub.beatAs(room, "u1", "tab-token001", "", "t1", "U1", "", "")
+		hub.beatAs(other, "u1", "tab-session2", "s2", "", "U1", "", "")
+		hub.beatAs(room, "u2", "tab-session3", "s3", "", "U2", "", "")
+	}
+	tabs := func() []string {
+		out := []string{}
+		for _, entries := range hub.rooms {
+			for _, e := range entries {
+				out = append(out, e.client)
+			}
+		}
+		sort.Strings(out)
+		return out
+	}
+	for _, tc := range []struct{ kind, id, want string }{
+		{"session", "s1", "tab-session2 tab-session3 tab-token001"},
+		{"token", "t1", "tab-session1 tab-session2 tab-session3"},
+		{"user-session", "u1", "tab-session3 tab-token001"},
+		{"user-token", "u1", "tab-session1 tab-session2 tab-session3"},
+		{"account", "u1", "tab-session3"},
+	} {
+		hub.forget("", func(*documentPresenceEntry) bool { return true })
+		seed()
+		hub.credentialRevoked(tc.kind, tc.id)
+		if got := strings.Join(tabs(), " "); got != tc.want {
+			t.Errorf("%s %s: left %q, want %q", tc.kind, tc.id, got, tc.want)
+		}
+		if hub.total != len(tabs()) {
+			t.Errorf("%s: total %d for %d tabs", tc.kind, hub.total, len(tabs()))
+		}
+	}
+	hub.forget("", func(*documentPresenceEntry) bool { return true })
+	seed()
+	hub.workspaceGone("ws")
+	if got := strings.Join(tabs(), " "); got != "tab-session2" {
+		t.Errorf("workspace gone: left %q", got)
+	}
+	hub.forget("", func(*documentPresenceEntry) bool { return true })
+	seed()
+	hub.memberAccessChanged("ws", "u1")
+	if got := strings.Join(tabs(), " "); got != "tab-session2 tab-session3" {
+		t.Errorf("member access changed: left %q", got)
+	}
+	var none *documentPresenceHub
+	none.memberAccessChanged("ws", "u1")
+	none.workspaceGone("ws")
+}
+
+// Presence is per person (CO01: the right name and colour; two windows of one
+// Owner are not two participants): a peer with several tabs is one entry with
+// a tab count and the caret of the tab that moved last, never one caret per
+// tab. A person's own other tabs are never listed as peers.
+func TestDocumentPresenceIsOneEntryPerPerson(t *testing.T) {
+	rig := presenceFixture(t)
+	base := time.Now()
+	at := func(d time.Duration) { rig.router.documentPresenceHub.now = func() time.Time { return base.Add(d) } }
+	at(0)
+	rig.beat("owner", "doc-a", caret("owner-tab-1", "first"))
+	at(100 * time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-tab-2", "second"))
+	at(200 * time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-tab-3", "third"))
+	// Tab 1 moves last; tabs 2 and 3 keep heartbeating without moving.
+	at(300 * time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-tab-1", "moved"))
+	at(400 * time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-tab-2", "second"))
+	rig.beat("owner", "doc-a", caret("owner-tab-3", "third"))
+	code, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+	if code != 200 || len(reply.Peers) != 1 {
+		t.Fatalf("three Owner tabs must be one peer: %d %+v", code, reply.Peers)
+	}
+	peer := reply.Peers[0]
+	moved := base64.StdEncoding.EncodeToString([]byte("moved"))
+	if peer.Tabs != 3 || peer.Client != "owner-tab-1" || peer.Anchor != moved || peer.Head != moved {
+		t.Fatalf("want the last-moved tab's caret and tabs=3, got %+v", peer)
+	}
+	// A later heartbeat without a caret (the CLI, a node selection) never hides that caret.
+	at(500 * time.Millisecond)
+	rig.beat("owner", "doc-a", `{"client":"owner-cli-0001"}`)
+	if _, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "e")); len(reply.Peers) != 1 || reply.Peers[0].Client != "owner-tab-1" || reply.Peers[0].Tabs != 4 {
+		t.Fatalf("a caretless tab hid the moved caret: %+v", reply.Peers)
+	}
+	if _, own := rig.beat("owner", "doc-a", caret("owner-tab-2", "second")); len(own.Peers) != 1 || own.Peers[0].UserID == peer.UserID {
+		t.Fatalf("own tabs listed as peers: %+v", own.Peers)
+	}
+}
+
+func canvasBeat(client, canvas string) string {
+	return `{"client":"` + client + `","canvas":` + canvas + `}`
+}
+
+// Canvas presence (#5149 C06): the pointer in canvas coordinates and the selected cards ride on the same
+// heartbeat, under the same live read check and TTL, and are relayed to the other people on the document.
+func TestDocumentPresenceRelaysCanvasPointerAndSelection(t *testing.T) {
+	rig := presenceFixture(t)
+	if code, _ := rig.beat("owner", "doc-a", canvasBeat("owner-tab-1", `{"pointer":{"x":120.5,"y":-40},"selection":["intro","note-1"]}`)); code != 200 {
+		t.Fatalf("canvas heartbeat refused with %d", code)
+	}
+	_, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "editor-caret"))
+	if len(reply.Peers) != 1 || reply.Peers[0].Canvas == nil {
+		t.Fatalf("editor does not see the owner's canvas presence: %+v", reply.Peers)
+	}
+	got := reply.Peers[0].Canvas
+	if got.Pointer == nil || got.Pointer.X == nil || *got.Pointer.X != 120.5 || *got.Pointer.Y != -40 || strings.Join(got.Selection, ",") != "intro,note-1" {
+		t.Fatalf("canvas presence relayed as %+v", got)
+	}
+	// Back on the Page (or the pointer left the canvas with nothing selected): the next heartbeat clears it.
+	rig.beat("owner", "doc-a", caret("owner-tab-1", "owner-caret"))
+	if _, reply = rig.beat("editor", "doc-a", caret("editor-tab-1", "editor-caret")); reply.Peers[0].Canvas != nil {
+		t.Fatalf("canvas presence outlived the view: %+v", reply.Peers[0].Canvas)
+	}
+	rig.beat("owner", "doc-a", canvasBeat("owner-tab-1", `{}`))
+	if _, reply = rig.beat("editor", "doc-a", caret("editor-tab-1", "editor-caret")); reply.Peers[0].Canvas != nil {
+		t.Fatalf("an empty canvas is relayed: %+v", reply.Peers[0].Canvas)
+	}
+	// A selection alone (pointer outside the canvas) is relayed without a pointer.
+	rig.beat("owner", "doc-a", canvasBeat("owner-tab-1", `{"selection":["intro"]}`))
+	if _, reply = rig.beat("editor", "doc-a", caret("editor-tab-1", "editor-caret")); reply.Peers[0].Canvas == nil || reply.Peers[0].Canvas.Pointer != nil {
+		t.Fatalf("selection-only presence relayed as %+v", reply.Peers[0].Canvas)
+	}
+	nine := `["a","b","c","d","e","f","g","h","i"]`
+	for _, forged := range []string{
+		`{"pointer":{"x":1000001,"y":0}}`,
+		`{"pointer":{"x":0,"y":-1000001}}`,
+		`{"pointer":{"x":0,"y":0,"z":1}}`,
+		`{"pointer":{"x":"1","y":0}}`,
+		`{"pointer":{}}`,
+		`{"pointer":{"x":5}}`,
+		`{"pointer":{"x":null,"y":null}}`,
+		`{"pointer":{"x":1e400,"y":0}}`,
+		`{"selection":[null]}`,
+		`{"selection":` + nine + `}`,
+		`{"selection":["intro","intro"]}`,
+		`{"selection":["has space"]}`,
+		`{"selection":["` + strings.Repeat("a", 81) + `"]}`,
+		`{"color":1}`,
+		`{"name":"Someone else"}`,
+		`"canvas"`,
+	} {
+		if code, _ := rig.beat("owner", "doc-a", canvasBeat("owner-tab-1", forged)); code != 400 {
+			t.Errorf("canvas presence %s accepted with %d", forged, code)
+		}
+	}
+	// The most a heartbeat may carry still fits the 2 KiB body bound.
+	ids := []string{}
+	for i := 0; i < documentPresenceCanvasSelection; i++ {
+		ids = append(ids, `"`+strings.Repeat(strconv.Itoa(i), 80)+`"`)
+	}
+	position := base64.StdEncoding.EncodeToString(make([]byte, documentPresencePositionLimit))
+	full := `{"client":"` + strings.Repeat("t", 64) + `","anchor":"` + position + `","head":"` + position + `","canvas":{"pointer":{"x":-999999.125,"y":999999.125},"selection":[` + strings.Join(ids, ",") + `]}}`
+	if code, _ := rig.beat("owner", "doc-a", full); code != 200 {
+		t.Fatalf("largest valid heartbeat (%d bytes) refused with %d", len(full), code)
+	}
+}
+
+func TestDocumentPresenceCanvasExpiresWithTheTab(t *testing.T) {
+	rig := presenceFixture(t)
+	now := time.Now()
+	rig.router.documentPresenceHub.now = func() time.Time { return now }
+	rig.beat("owner", "doc-a", canvasBeat("owner-tab-1", `{"pointer":{"x":1,"y":2},"selection":["intro"]}`))
+	now = now.Add(documentPresenceTTL + time.Millisecond)
+	if _, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "editor-caret")); len(reply.Peers) != 0 {
+		t.Fatalf("canvas presence outlived the TTL: %+v", reply.Peers)
+	}
+}
+
+// A moving Canvas tab must not disappear behind another tab's unchanged Page caret.
+func TestDocumentPresenceCanvasTracksTheActiveTab(t *testing.T) {
+	rig := presenceFixture(t)
+	now := time.Now()
+	rig.router.documentPresenceHub.now = func() time.Time { return now }
+	rig.beat("owner", "doc-a", caret("owner-page-1", "page-caret"))
+	now = now.Add(time.Millisecond)
+	rig.beat("owner", "doc-a", canvasBeat("owner-canvas-1", `{"pointer":{"x":10,"y":20},"selection":["intro"]}`))
+	now = now.Add(time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-page-1", "page-caret"))
+	_, reply := rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+	if len(reply.Peers) != 1 || reply.Peers[0].Tabs != 2 || reply.Peers[0].Canvas == nil || reply.Peers[0].Client != "owner-canvas-1" {
+		t.Fatalf("active Canvas hidden by unchanged Page caret: %+v", reply.Peers)
+	}
+	now = now.Add(time.Millisecond)
+	rig.beat("owner", "doc-a", caret("owner-page-1", "moved-page-caret"))
+	_, reply = rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+	if len(reply.Peers) != 1 || reply.Peers[0].Canvas != nil || reply.Peers[0].Client != "owner-page-1" {
+		t.Fatalf("Canvas hid the newly active Page tab: %+v", reply.Peers)
+	}
+	now = now.Add(time.Millisecond)
+	rig.beat("owner", "doc-a", canvasBeat("owner-canvas-1", `{"pointer":{"x":30,"y":40},"selection":["intro"]}`))
+	_, reply = rig.beat("editor", "doc-a", caret("editor-tab-1", "e"))
+	if len(reply.Peers) != 1 || reply.Peers[0].Canvas == nil || reply.Peers[0].Canvas.Pointer == nil || reply.Peers[0].Canvas.Pointer.X == nil || *reply.Peers[0].Canvas.Pointer.X != 30 || reply.Peers[0].Client != "owner-canvas-1" {
+		t.Fatalf("a moving Canvas tab did not regain activity: %+v", reply.Peers)
+	}
+}
+
+func TestDocumentPresenceCanvasRevocation(t *testing.T) {
+	t.Run("grant revoked", func(t *testing.T) {
+		rig := presenceFixture(t)
+		body := canvasBeat("reader-canvas-1", `{"pointer":{"x":1,"y":2},"selection":["intro"]}`)
+		rig.beat("owner", "doc-a", canvasBeat("owner-canvas-1", `{"pointer":{"x":3,"y":4}}`))
+		if code, reply := rig.beat("reader", "doc-a", body); code != 200 || len(reply.Peers) != 1 || reply.Peers[0].Canvas == nil {
+			t.Fatalf("setup: reader cannot see Canvas presence: %d %+v", code, reply)
+		}
+		mustExec(t, rig.router.db, `DELETE FROM page_grants WHERE page_id='doc-a' AND subject_id='presence-reader'`)
+		if code, reply := rig.beat("reader", "doc-a", body); code != 404 || len(reply.Peers) != 0 {
+			t.Fatalf("revoked Canvas reader got %d %+v", code, reply)
+		}
+		if _, reply := rig.beat("owner", "doc-a", caret("owner-canvas-1", "o")); len(reply.Peers) != 0 {
+			t.Fatalf("revoked reader Canvas remains visible: %+v", reply.Peers)
+		}
+	})
+	t.Run("credential revoked in flight", func(t *testing.T) {
+		rig := presenceFixture(t)
+		body := canvasBeat("editor-canvas-1", `{"pointer":{"x":1,"y":2},"selection":["intro"]}`)
+		rig.beat("editor", "doc-a", body)
+		documentPresenceBeforeBeat = func() {
+			documentPresenceBeforeBeat = nil
+			rig.router.authMw.streams.NotifyTokenRevoked("clt-presence-editor")
+		}
+		t.Cleanup(func() { documentPresenceBeforeBeat = nil })
+		if code, reply := rig.beat("editor", "doc-a", body); code == 200 || len(reply.Peers) != 0 {
+			t.Fatalf("Canvas heartbeat raced revocation: %d %+v", code, reply)
+		}
+		if _, reply := rig.beat("owner", "doc-a", caret("owner-page-1", "o")); len(reply.Peers) != 0 {
+			t.Fatalf("late heartbeat resurrected revoked Canvas: %+v", reply.Peers)
+		}
+	})
 }

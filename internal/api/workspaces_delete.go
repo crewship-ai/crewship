@@ -170,6 +170,7 @@ func (h *WorkspaceHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		"slug": slug,
 	})
 
+	h.presence.workspaceGone(workspaceID)
 	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
 }
 

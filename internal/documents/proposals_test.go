@@ -30,7 +30,7 @@ func proposalFixture(t *testing.T) (*Store, *sql.DB) {
 
 func proposalInput(id string, guard MutationGuard) ProposalInput {
 	generation := int64(0)
-	return ProposalInput{ID: id, Fingerprint: "f-" + id, RunID: "run-1", Target: "one", BaseHash: proposalBase, ProposedHash: proposalProposed, Text: "New **text**",
+	return ProposalInput{ID: id, Fingerprint: "f-" + id, RunID: "run-1", Target: "one", Schema: 4, BaseHash: proposalBase, ProposedHash: proposalProposed, Text: "New **text**",
 		Ancestors: []string{"parent"}, Base: json.RawMessage(`{"type":"paragraph"}`), Proposed: json.RawMessage(`{"type":"paragraph","content":[]}`), IfRev: 0, Generation: &generation, Guard: guard}
 }
 
@@ -231,4 +231,86 @@ func TestProposalsFromEarlierGenerationsNeverLockTheDocument(t *testing.T) {
 	if e := db.QueryRowContext(ctx, `SELECT count(*),(SELECT count(*) FROM document_proposals WHERE id='old-0') FROM document_proposals WHERE generation=1`).Scan(&live, &gone); e != nil || live != 2 || gone != 0 {
 		t.Fatalf("purge removed a live proposal or kept the oldest dead one: live=%d oldest=%d %v", live, gone, e)
 	}
+}
+
+// TestProposalBoundToDocumentSchema (#5233): a proposal is stored only on a
+// document of exactly the schema it was proved at, and only where that schema
+// supports proposals.
+func TestProposalBoundToDocumentSchema(t *testing.T) {
+	for _, tt := range []struct {
+		document, proposal int
+		want               error
+	}{
+		{4, 4, nil},
+		{5, 5, nil},
+		{5, 4, ErrSchema},
+		{4, 5, ErrSchema},
+		{6, 6, nil},
+		{6, 5, ErrSchema},
+		{5, 6, ErrSchema},
+		{3, 3, ErrInvalidProposal},
+		{7, 7, ErrInvalidProposal},
+	} {
+		t.Run(fmt.Sprintf("document %d proposal %d", tt.document, tt.proposal), func(t *testing.T) {
+			s, db := proposalFixture(t)
+			if _, e := db.ExecContext(ctx, `UPDATE documents SET schema_version=? WHERE workspace_id=? AND page_id=?`, tt.document, key.WorkspaceID, key.PageID); e != nil {
+				t.Fatal(e)
+			}
+			in := proposalInput("p1", pass)
+			in.Schema = tt.proposal
+			_, e := s.Propose(ctx, key, in, allow)
+			if !errors.Is(e, tt.want) && !(tt.want == nil && e == nil) {
+				t.Fatalf("got %v, want %v", e, tt.want)
+			}
+			if tt.want != nil {
+				return
+			}
+			p, e := s.ProposalRead(ctx, key, "p1", allow)
+			if e != nil || p.Schema != tt.document {
+				t.Fatalf("stored schema: %+v %v", p, e)
+			}
+		})
+	}
+}
+
+// TestAcceptProposalGuardRequiresTheProposalSchema (#5233): a proposal proved
+// at schema 4 is never accepted on the same document at schema 5, even within
+// one generation; a schema-5 proposal is accepted on a schema-5 document.
+func TestAcceptProposalGuardRequiresTheProposalSchema(t *testing.T) {
+	good := `[{"id":"parent","hash":"` + strings.Repeat("d", 64) + `"},{"id":"one","hash":"` + proposalProposed + `"},{"id":"two","hash":"h2"}]`
+	t.Run("schema changed under the proposal", func(t *testing.T) {
+		s, db := proposalFixture(t)
+		if _, e := s.Propose(ctx, key, proposalInput("p1", pass), allow); e != nil {
+			t.Fatal(e)
+		}
+		if _, e := db.ExecContext(ctx, `UPDATE documents SET schema_version=5 WHERE workspace_id=? AND page_id=?`, key.WorkspaceID, key.PageID); e != nil {
+			t.Fatal(e)
+		}
+		l := acquire(t, s)
+		c := acceptCommit(l, "accept", good, AcceptProposalGuard(key, "p1", "accept", json.RawMessage(good)))
+		c.Schema = 5
+		if _, e := s.Commit(ctx, key, c, allow); !errors.Is(e, ErrConflict) {
+			t.Fatalf("schema-4 proposal accepted at schema 5: %v", e)
+		}
+		if p, e := s.ProposalRead(ctx, key, "p1", allow); e != nil || p.Status != "open" {
+			t.Fatalf("refused accept decided the proposal: %+v %v", p, e)
+		}
+	})
+	t.Run("schema 5", func(t *testing.T) {
+		s, db := proposalFixture(t)
+		if _, e := db.ExecContext(ctx, `UPDATE documents SET schema_version=5 WHERE workspace_id=? AND page_id=?`, key.WorkspaceID, key.PageID); e != nil {
+			t.Fatal(e)
+		}
+		in := proposalInput("p1", pass)
+		in.Schema = 5
+		if _, e := s.Propose(ctx, key, in, allow); e != nil {
+			t.Fatal(e)
+		}
+		l := acquire(t, s)
+		c := acceptCommit(l, "accept", good, AcceptProposalGuard(key, "p1", "accept", json.RawMessage(good)))
+		c.Schema = 5
+		if r, e := s.Commit(ctx, key, c, allow); e != nil || r.Rev != 1 {
+			t.Fatalf("schema-5 accept: %+v %v", r, e)
+		}
+	})
 }

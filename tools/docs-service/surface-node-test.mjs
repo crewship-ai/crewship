@@ -27,15 +27,15 @@ const box = (z = 1) => ({ kind: 'note', x: 0, y: 400, w: 200, h: 160, z, tone: '
 const note = (text, z = 1) => ({ ...box(z), text });
 const sync = (a, b) => { Y.applyUpdate(b, Y.encodeStateAsUpdate(a, Y.encodeStateVector(b))); Y.applyUpdate(a, Y.encodeStateAsUpdate(b, Y.encodeStateVector(a))); };
 
-test('surface roots stay refused by every admitted content schema until schema 6', () => {
-  assert.equal(CANVAS_SCHEMA, 6);
-  assert.ok(CANVAS_SCHEMA > LATEST_VERSION + 1, 'schema 5 is reserved for formatting marks');
+test('surface roots are refused by schemas 1-5 and admitted only at schema 6', () => {
+  assert.equal(CANVAS_SCHEMA, 6); assert.equal(LATEST_VERSION, 6);
   for (const root of [PLACEMENTS, ITEMS, TEXT]) {
     const doc = fixture();
     doc.getMap(root).set('intro', root === TEXT ? 'text' : at(0, 0));
-    for (const version of [1, 2, 3, 4]) assert.throws(() => validate(load(snapshot(doc)), version), /unsupported Yjs root/);
+    for (const version of [1, 2, 3, 4, 5]) assert.throws(() => validate(load(snapshot(doc)), version), /unsupported Yjs root/);
     doc.destroy();
   }
+  const doc = fixture(); place(doc, 'intro', at(0, 0)); validate(load(snapshot(doc)), 6); doc.destroy();
 });
 
 test('a placement references the block: moving changes geometry only, never content, IDs or hashes', async () => {
@@ -248,9 +248,9 @@ test('validation is read-only, bounds deleted keys, and the history cap equals t
   const before = decoded.share.get(PLACEMENTS);
   validateSurface(decoded); project(decoded);
   assert.equal(decoded.share.get(PLACEMENTS), before, 'the decoded root was not specialized');
-  assert.equal(surface.LIMITS.retainedBytes, 1 << 20);
+  assert.equal(surface.LIMITS.retainedBytes, 512 * 1024);
   const keys = fixture();
-  keys.transact(() => { for (let i = 0; i < 14000; i++) { keys.getMap(TEXT).set('k'.repeat(70) + i, 'x'); keys.getMap(TEXT).delete('k'.repeat(70) + i); } });
+  keys.transact(() => { for (let i = 0; i < 7000; i++) { keys.getMap(TEXT).set('k'.repeat(70) + i, 'x'); keys.getMap(TEXT).delete('k'.repeat(70) + i); } });
   assert.throws(() => validateSurface(load(snapshot(keys))), /history limit/);
   for (const d of [doc, decoded, keys]) d.destroy();
 });
@@ -279,7 +279,7 @@ test('writes are refused before they cross the history cap, and stay cheap as hi
   const big = 'x'.repeat(3990);
   let accepted = 0;
   assert.throws(() => { for (let k = 0; k < 1000; k++) { setText(doc, 'n1', big + (accepted % 10)); accepted++; } }, /history limit/);
-  assert.ok(accepted > 200);
+  assert.ok(accepted > 100);
   validateSurface(load(snapshot(doc))); // the refused write left a valid document
   const timed = fixture(); place(timed, 'intro', at(0, 0));
   const run = () => { const start = performance.now(); for (let i = 0; i < 1000; i++) move(timed, 'intro', { x: i % 500 }); return performance.now() - start; };

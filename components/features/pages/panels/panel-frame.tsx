@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { SectionCard } from "@/components/ui/section-card"
 import { PanelMotionStyles, panelMotion } from "@/components/features/pages/panel-motion"
 import { PanelActions } from "./panel-actions"
+import { ProducerAuthorizationNotice } from "./producer-authorization"
 import { isPanelIconName, resolvePanelIcon } from "./panel-icon"
 import {
   EM_DASH,
@@ -140,6 +141,7 @@ export function PanelFrame({
          * panel id — which the public grid never does (§7.3.2 rule 1) — and
          * `publicView` refuses a second time regardless.
          */}
+        <ProducerAuthorizationNotice panel={panel} publicView={publicView} />
         <PanelActions panel={panel} publicView={publicView} />
         {showProvenance ? <PanelProvenance data={data} now={now} publicView={publicView} /> : null}
       </div>

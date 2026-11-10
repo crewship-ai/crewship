@@ -110,6 +110,19 @@ func TestAcceptance_DocumentPresenceBinary(t *testing.T) {
 	if got := peers("presence-owner", "presence-a", "--client", "owner-tab-0001"); len(got) != 1 || got[0] != "Rory Reader/presence-reader" {
 		t.Fatalf("owner sees %v", got)
 	}
+	// Canvas presence through the binary: the owner's pointer and selection reach the reader.
+	if output, err := run("presence-owner", "presence-a", "--client", "owner-tab-0001", "--pointer", "240.5,-60", "--select", "intro,note-1"); err != nil {
+		t.Fatalf("canvas presence: %v %s", err, output)
+	}
+	output, err := run("presence-reader", "presence-a", "--client", "reader-tab-0001")
+	if err != nil || !strings.Contains(output, `"canvas"`) || !strings.Contains(output, `240.5`) || !strings.Contains(output, `"note-1"`) {
+		t.Fatalf("reader does not see the owner's canvas presence: %v %s", err, output)
+	}
+	for _, bad := range [][]string{{"--select", "a b"}, {"--select", "a,a"}, {"--pointer", "1"}, {"--pointer", "2000000,0"}, {"--leave", "--pointer", "1,2"}} {
+		if output, err := run("presence-owner", append([]string{"presence-a", "--client", "owner-tab-0001"}, bad...)...); err == nil || !strings.Contains(output, "--") {
+			t.Fatalf("invalid canvas flags %v accepted: %v %s", bad, err, output)
+		}
+	}
 	// No grant on B: refused, nobody revealed.
 	if output, err := run("presence-reader", "presence-b", "--client", "reader-tab-0002"); err == nil || !strings.Contains(output, "404") || strings.Contains(output, "Olive") {
 		t.Fatalf("reader on B: err=%v %s", err, output)

@@ -15,7 +15,7 @@ import (
 
 type DocumentDraftView struct {
 	PageID string `json:"page_id"`
-	// Mode is "propose" on a schema-4 mandate: the run may only propose.
+	// Mode is "propose" on a propose mandate: the run may only propose.
 	Mode       string                 `json:"mode,omitempty"`
 	Schema     int                    `json:"schema"`
 	Rev        int64                  `json:"rev"`
@@ -107,11 +107,7 @@ func (h *PageHandler) GetDocumentDraftAgent(w http.ResponseWriter, r *http.Reque
 		Epoch      string                 `json:"epoch"`
 		Outline    []DocumentOutlineBlock `json:"outline"`
 	}
-	schema := 3
-	if scope.Propose {
-		schema = documents.ProposalSchema
-	}
-	if json.Unmarshal(raw, &remote) != nil || remote.Schema != schema || remote.Rev != scope.Rev || remote.Generation != scope.Generation || remote.Epoch == "" || len(remote.Epoch) > 256 {
+	if json.Unmarshal(raw, &remote) != nil || remote.Schema != scope.Schema || remote.Rev != scope.Rev || remote.Generation != scope.Generation || remote.Epoch == "" || len(remote.Epoch) > 256 {
 		replyError(w, 502, "invalid document draft view")
 		return
 	}
@@ -191,7 +187,10 @@ func (h *PageHandler) MutateDocumentDraftAgent(w http.ResponseWriter, r *http.Re
 		documentAuthorityError(w, errDocumentAccess)
 		return
 	}
-	if page != scope.PageID || generation != scope.Generation {
+	var schema int
+	_ = json.Unmarshal(request["schema"], &schema)
+	// Drafts and proposals are both bound to the Doc's own stored schema.
+	if page != scope.PageID || generation != scope.Generation || schema != scope.Schema {
 		documentAuthorityError(w, documents.ErrConflict)
 		return
 	}
@@ -306,11 +305,14 @@ func validateDocumentDraftRequest(operation string, request map[string]json.RawM
 	}
 	var schema int
 	var rev int64
-	want := 3
+	// A direct draft names a schema that supports drafting and a proposal one
+	// that supports proposals; the handler then binds it to the stored schema
+	// of the scoped Doc.
+	capability := documents.CapDraft
 	if operation == "propose" {
-		want = documents.ProposalSchema
+		capability = documents.CapPropose
 	}
-	if json.Unmarshal(request["schema"], &schema) != nil || schema != want || json.Unmarshal(request["ifRev"], &rev) != nil || rev < 0 {
+	if json.Unmarshal(request["schema"], &schema) != nil || !documents.SchemaAllows(schema, capability) || json.Unmarshal(request["ifRev"], &rev) != nil || rev < 0 {
 		return errors.New("original schema/revision required")
 	}
 	for _, name := range []string{"id", "page_id", "epoch"} {

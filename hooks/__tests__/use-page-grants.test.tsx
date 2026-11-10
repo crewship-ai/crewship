@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest"
 const api = vi.hoisted(() => vi.fn())
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: api }))
 vi.mock("@/hooks/use-realtime", () => ({ useRealtimeEventSafe: vi.fn() }))
-import { normalizePageGrants, normalizePageVersions, toPageOwner, pagePanelCount, usePageGrants, usePageVersions, usePageGrantWrite, usePageGrantRevoke, usePageRollback, pageWriteFailureMessage, type WirePageDetail } from "@/hooks/use-page-grants"
+import { normalizePageGrants, normalizePageGrantsDocument, pageGrantLevelsFor, normalizePageVersions, toPageOwner, pagePanelCount, usePageGrants, usePageVersions, usePageGrantWrite, usePageGrantRevoke, usePageRollback, pageWriteFailureMessage, type WirePageDetail } from "@/hooks/use-page-grants"
 
 const clients: QueryClient[] = []
 function setup() {
@@ -23,6 +23,22 @@ it("normalizes sparse grant rows without inventing active permissions", () => {
  expect(normalizePageGrants({ grants: [{ live: true, inert_reason: "obsolete" }] })[0].inertReason).toBeNull()
 })
 it.each([null, 42, {}, { grants: false }])("treats invalid grants envelope %j as empty", body => expect(normalizePageGrants(body)).toEqual([]))
+it.each([
+  [{ grants: [], can_delegate_agent_edit: true }, true],
+  [{ grants: [], can_delegate_agent_edit: false }, false],
+  [{ grants: [], can_delegate_agent_edit: "true" }, false],
+  [{ grants: [] }, false],
+  [[], false],
+])("reads agent Edit delegation from %j only when the server says true", (body, want) =>
+  expect(normalizePageGrantsDocument(body).canDelegateAgentEdit).toBe(want))
+it("never offers agent write or produce without delegation, and keeps them for people and the owner", () => {
+  expect(pageGrantLevelsFor("agent", false)).toEqual(["read"])
+  expect(pageGrantLevelsFor("crew", false)).toEqual(["read", "write"])
+  expect(pageGrantLevelsFor("crew", true)).toEqual(["read", "produce", "write"])
+  expect(pageGrantLevelsFor("agent", true)).toEqual(["read", "produce", "write"])
+  expect(pageGrantLevelsFor("user", false)).toEqual(["read", "produce", "write"])
+  expect(pageGrantLevelsFor("workspace", false)).toEqual(["read", "write"])
+})
 it("normalizes retained version metadata without fabricating measurements", () => {
  const versions = normalizePageVersions([{ seq: Infinity, panel_count: -1, current: "true" }, { seq: 3, panel_count: 2, current: true }, {}])
  expect(versions.map(v => [v.seq, v.panelCount, v.current])).toEqual([[0, 0, false], [3, 2, true], [0, 0, false]])

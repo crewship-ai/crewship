@@ -144,6 +144,11 @@ func (m *craftNativeAgentManager) checkOriginalGrant(ctx context.Context, tx *sq
 	if err != nil || proof.application != g.Application || proof.workspaceEpoch != g.Proof.workspaceEpoch || proof.memberID != g.Proof.memberID || proof.memberRevision != g.Proof.memberRevision {
 		return errCraftNativeAgentDenied
 	}
+	// R71 §0.14/1 (#5235), rechecked on every agent write: ownership moving
+	// away, or the owner's agent grant ending, stops a running task.
+	if !m.human.pages.humanAgentMayWrite(context.WithValue(ctx, pageAuthReaderKey{}, tx), g.Scope.WorkspaceID, g.Scope.ArtifactID, g.Source.UserID, g.AgentID) {
+		return errCraftNativeAgentDenied
+	}
 	var instruction string
 	err = tx.QueryRowContext(ctx, `SELECT m.content FROM conversation_messages m
  JOIN agents a ON a.id=m.agent_id AND a.workspace_id=? AND a.crew_id=? AND a.deleted_at IS NULL AND a.expired_at IS NULL
