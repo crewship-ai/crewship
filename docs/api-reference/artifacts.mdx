@@ -276,6 +276,17 @@ documented in [`crewship craft`](/cli/craft).
 
 There is no separate export route: `GET .../craft/document` returns the bytes.
 
+### Agent guides
+
+Static, versioned guides per artifact kind, embedded in the server. Any
+signed-in caller may read them; they read no workspace data and grant nothing.
+CLI: [`crewship artifacts kind-guide`](/cli/artifacts#agent-guides-per-kind).
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/v1/artifact-kind-guides` | List `{guides:[{kind, title, version, rules_version, sha256, bytes, modes}]}` |
+| GET | `/api/v1/artifact-kind-guides/{kind}` | One guide with its `modes`, `capabilities` (`supported`, `unsupported`) and `content`; aliases `design-system` and `project` resolve to `library` and `app`. Unknown and Craft kinds are `404` |
+
 ### Related families
 
 These routes are not specific to one artifact type. They are documented on

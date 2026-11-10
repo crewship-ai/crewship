@@ -73,6 +73,7 @@ func (r *Router) registerPageRoutes() {
 	r.registerDesignRoutes()
 	r.registerArtifactProjectVersionRoutes()
 	r.registerArtifactSlidesRoutes()
+	r.registerArtifactKindGuideRoutes()
 	r.registerArtifactDataRoutes()
 	if r.pageProjectsPath != "" {
 		p.SetProjectStore(&pages.ProjectStore{Directory: r.pageProjectsPath})
