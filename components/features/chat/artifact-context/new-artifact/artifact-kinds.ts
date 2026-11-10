@@ -31,6 +31,8 @@ export interface ArtifactCapabilities {
   slides: boolean
   /** Some document creation format is confirmed (Doc, WordCraft or commands). */
   documents: boolean
+  /** Collaborative Docs, independently of native Word/Sheet availability. */
+  docs?: boolean
   /** GridCraft workbook creation is switched on for the workspace. */
   sheets: boolean
   /** The caller may create Pages at all (role or page.create). Every kind needs it, agent-made ones too. */

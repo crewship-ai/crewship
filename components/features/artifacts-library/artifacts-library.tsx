@@ -13,7 +13,6 @@ import { usePageFolders } from "@/hooks/use-page-folders"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useIsMobile } from "@/hooks/use-mobile"
-import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
 import { NewDocumentDialog } from "@/components/features/pages/new-document-dialog"
 import { formatRelativeShort } from "@/lib/time"
 import { artifactsDesign, artifactsServerCatalog, artifactsSharingMock } from "@/lib/feature-flags"
@@ -331,8 +330,7 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   const { pages, loading, error, refresh } = usePages(workspaceId, undefined, CATALOG)
   const { folders } = usePageFolders(workspaceId)
   const caps = useArtifactCapabilities(workspaceId)
-  const docsAvailability = useDocumentsAvailability(workspaceId)
-  const canCreateDocs = caps.pages && docsAvailability.data === true
+  const canCreateDocs = caps.pages && caps.docs === true
   const sharing = useSharingApi(workspaceId)
   // Archive, test origin and mock moves; re-read whenever a sharing write settles.
   const stateTick = useQuery({ queryKey: sharingKeys.state(workspaceId), queryFn: () => Date.now(), staleTime: Infinity }).data

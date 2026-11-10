@@ -21,6 +21,7 @@ export function useArtifactCapabilities(workspaceId: string): ArtifactCapabiliti
     // (wordcraft_native) included, exactly as Sheet follows gridcraft_native;
     // unconfirmed or failed reads withdraw it.
     documents: documents.data === true || documents.wordcraftNative === true || Boolean(documents.wordcraftSDKPrefix) || documents.wordcraftCommands === true,
+    docs: documents.data === true,
     // Sheet is offered only when the server advertises the native GridCraft
     // profile (gridcraft_native); unconfirmed or failed reads withdraw it.
     sheets: documents.gridcraftNative === true,
