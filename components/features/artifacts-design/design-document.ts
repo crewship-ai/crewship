@@ -307,17 +307,30 @@ export function safeImageSource(value: string | undefined): string | undefined {
  * change. Edits within half a second form one step. When a peer changes a
  * property (or deletes a layer) that a step in this history also changed, that
  * step is dropped: undoing it after concurrent edits could otherwise delete or
- * overwrite the value both sides agreed on. Layer order is not tracked this way,
- * since order edits from both sides merge without losing entries.
+ * overwrite the value both sides agreed on. Order changes track the moved IDs
+ * too: undo must not reinsert an older position after a peer moved that layer.
  */
 export function createDesignUndo(doc: Y.Doc) {
  const nodes = doc.getMap<Y.Map<unknown>>("nodes")
- const undo = new Y.UndoManager([nodes, doc.getArray("order")], { trackedOrigins: new Set(["editor"]), captureTimeout: 500 })
+ const order = doc.getArray<string>("order")
+ const undo = new Y.UndoManager([nodes, order], { trackedOrigins: new Set(["editor"]), captureTimeout: 500 })
+ // Array deltas report delete counts, not the deleted IDs. Capture the actual
+ // inserted/deleted item contents while this transaction still retains them.
+ // A private transaction key keeps multiple undo managers independent.
+ const orderChanges = Symbol("design-order-changes")
+ const onOrder = (event: Y.YArrayEvent<string>) => {
+  const ids = new Set<string>()
+  for (const item of [...event.changes.added, ...event.changes.deleted]) {
+   for (const id of item.content.getContent()) if (typeof id === "string") ids.add(id)
+  }
+  event.transaction.meta.set(orderChanges, ids)
+ }
+ order.observe(onOrder)
  // Keys are "<node id>:<property>"; "<node id>:*" stands for the whole layer.
- const touched = (changed: Y.Transaction["changed"]) => {
+ const touched = (transaction: Y.Transaction) => {
   const keys = new Set<string>()
   const root: unknown = nodes
-  changed.forEach((subs, type) => {
+  transaction.changed.forEach((subs, type) => {
    if (type === root) subs.forEach(id => { if (id) keys.add(`${id}:*`) })
    else if (type._item && type._item.parent === root && typeof type._item.parentSub === "string") {
     const id = type._item.parentSub
@@ -325,6 +338,9 @@ export function createDesignUndo(doc: Y.Doc) {
     subs.forEach(key => { if (key && key !== "id") keys.add(`${id}:${key}`) })
    }
   })
+  // @order cannot collide with a supported node property. A peer changing
+  // geometry keeps an independent order undo, and vice versa.
+  for (const id of (transaction.meta.get(orderChanges) as Set<string> | undefined) ?? []) keys.add(`${id}:@order`)
   return keys
  }
  const overlaps = (mine: Set<string> | undefined, theirs: Set<string>) => {
@@ -337,7 +353,7 @@ export function createDesignUndo(doc: Y.Doc) {
   return false
  }
  const onTransaction = (tr: Y.Transaction) => {
-  const keys = touched(tr.changed)
+  const keys = touched(tr)
   if (keys.size === 0) return
   const local = tr.local && (tr.origin === "editor" || tr.origin === undo)
   if (local) {
@@ -359,6 +375,43 @@ export function createDesignUndo(doc: Y.Doc) {
  }
  doc.on("afterTransaction", onTransaction)
  const destroy = undo.destroy.bind(undo)
- undo.destroy = () => { doc.off("afterTransaction", onTransaction); destroy() }
+ undo.destroy = () => { order.unobserve(onOrder); doc.off("afterTransaction", onTransaction); destroy() }
  return undo
+}
+
+export type DesignOrderMove = "forward" | "backward" | "front" | "back"
+
+/**
+ * Changes a layer's stacking order among its siblings: layers with the same
+ * screen (or none), screens among screens. Drawing follows the document order,
+ * so this moves the one ID in `order` (its entry is deleted and inserted again
+ * next to its new neighbour); every other entry stays, so a concurrent edit,
+ * delete or reorder of another layer keeps its effect. Returns false when the
+ * layer is already at that end.
+ */
+export function reorderDesignNode(doc: Y.Doc, id: string, move: DesignOrderMove): boolean {
+ const nodes = doc.getMap<Y.Map<unknown>>("nodes")
+ if (!(nodes.get(id) instanceof Y.Map)) return false
+ const order = doc.getArray<string>("order")
+ const listed = order.toArray()
+ const group = (key: string) => {
+  const node = nodes.get(key)
+  return !(node instanceof Y.Map) ? null : node.get("type") === "frame" ? "frame" : `layer:${String(node.get("parentId") ?? "")}`
+ }
+ const mine = group(id)
+ // Siblings in drawing order: listed first (first entry wins), then unlisted ones.
+ const siblings = [...new Set([...listed, ...nodes.keys()])].filter(key => group(key) === mine)
+ const at = siblings.indexOf(id)
+ const to = move === "forward" ? at + 1 : move === "backward" ? at - 1 : move === "front" ? siblings.length - 1 : 0
+ if (to < 0 || to >= siblings.length || to === at) return false
+ const neighbour = siblings[to]
+ doc.transact(() => {
+  // Remove this ID's own entries only, from the end so indexes stay valid.
+  for (let index = listed.length - 1; index >= 0; index--) if (listed[index] === id) order.delete(index, 1)
+  const now = order.toArray()
+  let anchor = now.indexOf(neighbour)
+  if (anchor < 0) { order.push([neighbour]); anchor = now.length }
+  order.insert(to > at ? anchor + 1 : anchor, [id])
+ }, "editor")
+ return true
 }

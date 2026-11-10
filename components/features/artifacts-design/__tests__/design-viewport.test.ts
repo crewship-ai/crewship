@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { clampScale, fitView, focusView, MAX_SCALE, MIN_SCALE, panBy, pinchOf, pinchView, pressIntent, toCanvas, toScreen, typingTarget, wheelGesture, zoomAround, type DesignView } from "../design-viewport"
+import { clampScale, fitView, focusView, MAX_SCALE, MIN_SCALE, panBy, pinchOf, pinchView, pressIntent, resizeBox, RESIZE_HANDLES, toCanvas, toScreen, typingTarget, wheelGesture, zoomAround, type DesignView } from "../design-viewport"
 
 const view: DesignView = { scale: 0.5, x: 100, y: 40 }
 
@@ -114,4 +114,19 @@ describe("Design viewport model", () => {
   expect(typingTarget(document.createElement("div"))).toBe(false)
   expect(typingTarget(null)).toBe(false)
  })
+})
+
+describe("resizeBox", () => {
+ const box = { x: 10, y: 20, width: 100, height: 50 }
+ it("moves only the dragged edges and keeps the opposite ones", () => {
+  expect(resizeBox(box, "se", 30, 10)).toEqual({ x: 10, y: 20, width: 130, height: 60 })
+  expect(resizeBox(box, "nw", 30, 10)).toEqual({ x: 40, y: 30, width: 70, height: 40 })
+  expect(resizeBox(box, "e", 5, 99)).toEqual({ x: 10, y: 20, width: 105, height: 50 })
+  expect(resizeBox(box, "n", 99, -5)).toEqual({ x: 10, y: 15, width: 100, height: 55 })
+ })
+ it("never goes below 1 × 1, even when dragged past the opposite edge", () => {
+  expect(resizeBox(box, "se", -500, -500)).toEqual({ x: 10, y: 20, width: 1, height: 1 })
+  expect(resizeBox(box, "nw", 500, 500)).toEqual({ x: 109, y: 69, width: 1, height: 1 })
+ })
+ it("has eight handles", () => { expect(RESIZE_HANDLES).toHaveLength(8) })
 })

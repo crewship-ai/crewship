@@ -1788,7 +1788,11 @@ version through `snapshot` or through an automatic `Automatic Design checkpoint`
 snapshot, taken while an editor's websocket is open once the live head has been
 idle for about 10 seconds. Engine limits (500 operations per request, 2,000
 nodes, 4,000 order entries, unknown node fields) answer 400; history quota
-answers 413 and keeps existing versions.
+answers 413 and keeps existing versions. A websocket update whose merge leaves
+an order entry for a layer that no longer exists (a reorder concurrent with a
+delete of that layer or its screen) is accepted, and the engine drops the
+entry in the broadcast update; a REST `reorder` naming a missing layer still
+answers 400.
 
 When saved history is full, the editor shows the refused checkpoint and offers
 both a draft download (canvas and unsent feedback) and **Continue in a new
