@@ -259,15 +259,15 @@ it("returns focus to the New artifact button that opened it once the library unm
 })
 
 // G03 (#5153): Docs is offered in New artifact and creates the collaborative Doc format.
-it("creates Docs in the Doc format and opens it by its address", async () => {
+it("creates Docs in the Doc format and opens the confirmed Page identity", async () => {
   m.caps = { ...ALL, docs: true, words: false }
-  m.wordCreate.mockResolvedValue({ slug: "team-notes", pagesVersion: 0 })
+  m.wordCreate.mockResolvedValue({ slug: "team-notes", pageId: "confirmed-doc-id", pagesVersion: 0 })
   const { onCreated } = mount({ defaultKind: "docs" })
   expect(kinds().map(b => b.getAttribute("data-kind"))).toEqual(["project", "dashboard", "page", "docs", "sheet", "slides"])
   expect(screen.getByRole("button", { name: /^Docs/ })).toHaveAttribute("aria-pressed", "true")
   name("Team notes")
   fireEvent.click(create())
-  await waitFor(() => expect(onCreated).toHaveBeenCalledWith("team-notes"))
+  await waitFor(() => expect(onCreated).toHaveBeenCalledWith("team-notes", "confirmed-doc-id"))
   expect(m.wordCreate).toHaveBeenCalledWith({ name: "Team notes", slug: "team-notes", format: "doc" })
 })
 

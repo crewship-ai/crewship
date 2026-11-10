@@ -145,7 +145,8 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
       const doc = await word.create.mutateAsync(k.key === "word" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: wordFormat }
         : k.key === "docs" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: "doc" }
         : { name: trimmed, slug: freeSlug(trimmed, "sheet", pages), format: "sheet" })
-      return { slug: doc.slug, pagesVersion: doc.pagesVersion, ...(doc.nativePageId ? { id: doc.nativePageId } : {}) }
+      const pageId = doc.nativePageId ?? (k.key === "docs" ? doc.pageId : undefined)
+      return { slug: doc.slug, pagesVersion: doc.pagesVersion, ...(pageId ? { id: pageId } : {}) }
     }
     const intent = pageIntent.current ??= { slug: freeSlug(trimmed, k.key === "design" ? "design" : "page", pages) }
     if (intent.created) return intent.created
