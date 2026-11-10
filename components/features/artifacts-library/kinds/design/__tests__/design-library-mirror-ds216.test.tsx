@@ -91,6 +91,14 @@ describe("Design library: mirrored Template Crewship Design System", () => {
     expect([...screen.getByRole("region", { name: "Corner radius" }).querySelectorAll("[data-token]")].map(item => item.getAttribute("data-token"))).toEqual(["radius.radius-sm", "radius.radius-md", "radius.radius-lg"])
   })
 
+  it("lists every mirrored file in Files, including the original index and tokens.json", () => {
+    mount()
+    const section = screen.getByRole("region", { name: "Files" })
+    expect([...section.querySelectorAll("[data-file]")].map(row => row.getAttribute("data-file"))).toEqual(manifest.files.map(file => file.path))
+    fireEvent.click(within(section).getByRole("button", { name: "View source/design-system.json" }))
+    expect(within(section).getByRole("region", { name: "source/design-system.json" }).querySelector("pre")!.textContent).toBe(manifest.files.find(file => file.path === "source/design-system.json")!.content)
+  })
+
   it("draws the Cover preview in the chosen theme", () => {
     mount()
     const doc = () => (screen.getByTitle("Cover preview") as HTMLIFrameElement).getAttribute("srcdoc")!

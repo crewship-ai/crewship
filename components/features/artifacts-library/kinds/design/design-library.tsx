@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { BookOpen, Code2, CornerUpLeft, Component, Download, Palette, Ruler, Search, SunMoon, Type } from "lucide-react"
+import { BookOpen, Code2, CornerUpLeft, Component, Download, Eye, FolderTree, Palette, Ruler, Search, SunMoon, Type } from "lucide-react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { MarkdownContent } from "@/components/features/issues/markdown-content"
 import { artifactDesignSystem } from "@/lib/feature-flags"
@@ -23,15 +23,29 @@ export function isDesignLibrary(snapshot: Pick<ArtifactProjectSnapshot, "manifes
   return Boolean(snapshot && artifactDesignSystem() && !snapshot.artifact_kind && hasDesignSystemFile(snapshot.manifest.files))
 }
 
-type SectionId = "overview" | "colors" | "typography" | "spacing" | "radii" | "components"
-const SECTIONS: { id: SectionId; label: string; icon: typeof Palette; count: (system: DesignSystem) => number | null }[] = [
+type SectionId = "overview" | "colors" | "typography" | "spacing" | "radii" | "components" | "files"
+const SECTIONS: { id: SectionId; label: string; icon: typeof Palette; count: (system: DesignSystem, files: number) => number | null }[] = [
   { id: "overview", label: "Overview", icon: BookOpen, count: () => null },
   { id: "colors", label: "Colors", icon: Palette, count: system => system.colors.length },
   { id: "typography", label: "Typography", icon: Type, count: system => system.typography.length },
   { id: "spacing", label: "Spacing", icon: Ruler, count: system => system.spacing.length },
   { id: "radii", label: "Corner radius", icon: CornerUpLeft, count: system => system.radii.length },
   { id: "components", label: "Components", icon: Component, count: system => system.components.length },
+  { id: "files", label: "Files", icon: FolderTree, count: (_, files) => files },
 ]
+/** The file viewer shows at most this much text; Download has all of it. */
+const FILE_VIEW_LIMIT = 64 * 1024
+export function fileSize(bytes: number): string {
+  return bytes < 1024 ? `${bytes} B` : bytes < 1024 * 1024 ? `${(bytes / 1024).toFixed(1)} KB` : `${(bytes / 1024 / 1024).toFixed(1)} MB`
+}
+/** Saves bytes as an opaque download, so no file of the system is ever opened or run by the browser. */
+function save(content: string, name: string) {
+  const url = URL.createObjectURL(new Blob([content], { type: "application/octet-stream" }))
+  try {
+    const link = document.createElement("a")
+    link.href = url; link.download = name; link.click()
+  } finally { setTimeout(() => URL.revokeObjectURL(url), 0) }
+}
 const SAMPLE = "Agents propose, people decide."
 /** The library's brand book, next to design-system.json in the manifest. */
 export const LIBRARY_README_FILE = "README.md"
@@ -107,7 +121,7 @@ export function DesignLibraryProjectView({ parts, onFrame }: { parts: ArtifactVi
   if (!system) return <>{notices}<p role="alert" className="p-6 pt-16 text-sm">{unreadable(designSystemSchemaVersion(data.manifest.files))}</p><ProjectDrawer parts={parts} /></>
   const source = data.manifest.files.find(file => file.path === DESIGN_SYSTEM_FILE)?.content ?? ""
   return <>
-    <LibraryView system={system} version={version.shown} source={source} extras={libraryExtras(system, data.manifest.files)} notices={parts.banners}
+    <LibraryView system={system} version={version.shown} source={source} files={data.manifest.files} extras={libraryExtras(system, data.manifest.files)} notices={parts.banners}
       view={<><ArtifactToolSeparator /><VersionMenu parts={parts} />{parts.share}</>}
       output={parts.editSourceHref && <Link href={parts.editSourceHref} aria-label="Edit source" title="Edit source"
         className="inline-flex h-[30px] min-w-[30px] items-center justify-center rounded-[var(--radius-row)] px-[7px] text-muted-foreground hover:bg-accent hover:text-foreground coarse:min-h-[44px] coarse:min-w-[44px]"><Code2 aria-hidden className="size-4" /></Link>} />
@@ -163,8 +177,10 @@ export function DesignLibraryGate({ workspaceId, target, onBack, onFrame, childr
   </ArtifactViewerProvider>
 }
 
-export function LibraryView({ system, version, source, extras = { readme: null, previews: {}, fonts: [] }, notices, view, output }: {
+export function LibraryView({ system, version, source, files = [], extras = { readme: null, previews: {}, fonts: [] }, notices, view, output }: {
   system: DesignSystem; version: number; source: string; extras?: LibraryExtras
+  /** Every file of the shown version, for the read-only Files section. */
+  files?: readonly { path: string; media_type: string; content: string }[]
   /** The viewer's conflict, retry and version notices, above the library. */
   notices?: React.ReactNode
   /** Version and Share after the Library switch and search. */
@@ -188,6 +204,9 @@ export function LibraryView({ system, version, source, extras = { readme: null, 
   const spacing = system.spacing.filter(token => match(token.name))
   const radii = system.radii.filter(token => match(token.name))
   const components = system.components.filter(component => match(component.name))
+  const listed = files.filter(file => match(file.path))
+  const [opened, setOpened] = React.useState<string | null>(null)
+  const openFile = files.find(file => file.path === opened) ?? null
   const go = (id: SectionId) => {
     setActive(id)
     scroller.current?.querySelector(`[data-ds-section="${id}"]`)?.scrollIntoView?.({ block: "start", behavior: "smooth" })
@@ -199,13 +218,19 @@ export function LibraryView({ system, version, source, extras = { readme: null, 
       link.href = url; link.download = `design-system-v${version}.json`; link.click()
     } finally { setTimeout(() => URL.revokeObjectURL(url), 0) }
   }
+  const encoder = new TextEncoder()
+  const openFileBytes = openFile ? encoder.encode(openFile.content) : null
+  // Streaming decode omits a partial trailing UTF-8 code point at the byte cap.
+  const previewText = openFileBytes && openFileBytes.byteLength > FILE_VIEW_LIMIT
+    ? new TextDecoder().decode(openFileBytes.subarray(0, FILE_VIEW_LIMIT), { stream: true })
+    : openFile?.content
   const head = (id: SectionId, title: string, count: number) => <header data-ds-section={id} className="mb-3 flex scroll-mt-16 items-baseline gap-2 border-b pb-2">
     <h2 className="text-lg font-semibold">{title}</h2><span className="text-xs text-muted-foreground">{count}</span>
   </header>
   const none = <p className="text-sm text-muted-foreground">{needle ? "Nothing matches the search." : "None defined."}</p>
   const navigator = <nav aria-label="Sections" className="grid gap-0.5 p-2">
     {SECTIONS.map(section => {
-      const count = section.count(system)
+      const count = section.count(system, files.length)
       return <button key={section.id} type="button" aria-current={active === section.id ? "true" : undefined} onClick={() => go(section.id)}
         className="flex min-h-8 items-center gap-2 rounded-[var(--radius-row)] px-2.5 text-left text-sm text-muted-foreground hover:bg-accent hover:text-foreground aria-[current=true]:bg-primary/12 aria-[current=true]:text-primary-hover coarse:min-h-[44px]">
         <section.icon aria-hidden className="size-4 shrink-0" /><span className="flex-1 truncate">{section.label}</span>
@@ -300,6 +325,29 @@ export function LibraryView({ system, version, source, extras = { readme: null, 
               </li>
             })}
           </ul>}
+        </section>
+        <section aria-label="Files">
+          {head("files", "Files", listed.length)}
+          <p className="mb-2 text-xs text-muted-foreground">The Library shows colors, typography, spacing, corner radius and components from design-system.json, the README and each component&apos;s preview. Other sections, such as shadows or assets, have no place in this format yet; their files, if any, are listed here as stored. Files are read-only and are never opened or run here.</p>
+          {listed.length === 0 ? none : <table className="w-full table-fixed text-xs">
+            <thead className="text-left text-muted-foreground"><tr><th className="py-1 font-medium">Path</th><th className="w-36 py-1 font-medium">Type</th><th className="w-20 py-1 text-right font-medium">Size</th><th className="w-20 py-1"><span className="sr-only">Actions</span></th></tr></thead>
+            <tbody className="divide-y border-y">
+              {listed.map(file => <tr key={file.path} data-file={file.path}>
+                <td className="truncate py-1.5 font-mono" title={file.path}>{file.path}</td>
+                <td className="truncate py-1.5 text-muted-foreground">{file.media_type}</td>
+                <td className="py-1.5 text-right tabular-nums text-muted-foreground">{fileSize(encoder.encode(file.content).byteLength)}</td>
+                <td className="py-1.5"><span className="flex justify-end">
+                  <ArtifactTool icon={Eye} label={`View ${file.path}`} on={opened === file.path} onClick={() => setOpened(opened === file.path ? null : file.path)} />
+                  <ArtifactTool icon={Download} label={`Download ${file.path}`} onClick={() => save(file.content, file.path.split("/").pop() || "file")} />
+                </span></td>
+              </tr>)}
+            </tbody>
+          </table>}
+          {openFile && <div role="region" aria-label={openFile.path} className="mt-3 overflow-hidden rounded-card border">
+            <div className="flex items-center gap-2 border-b bg-muted/60 px-3 py-1.5 text-xs"><b className="truncate font-mono font-medium">{openFile.path}</b>
+              {openFileBytes && openFileBytes.byteLength > FILE_VIEW_LIMIT && <span className="ml-auto shrink-0 text-muted-foreground">Showing the first 64 KiB. Download the file for all of it.</span>}</div>
+            <pre className="max-h-96 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs">{previewText}</pre>
+          </div>}
         </section>
       </div>
     </div>
