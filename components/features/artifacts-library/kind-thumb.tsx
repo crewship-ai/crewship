@@ -1,13 +1,17 @@
 import type { CSSProperties } from "react"
 import { cn } from "@/lib/utils"
-import { kindAccent, type ArtifactKind } from "./kinds"
+import { kindAccent, KINDS, type ArtifactKind } from "./kinds"
 
 /*
  * A drawn thumbnail per kind, tinted with the kind's registry colour: a Docs
  * page, dashboard bars, a slide, design artboards, an app window, a Word page,
  * a Sheet grid. It says what the item is before its name is read, and needs no
- * render of the content: nothing private is fetched or drawn. Real previews
- * can replace it per kind once the API serves them.
+ * render of the content: nothing private is fetched or drawn, and no author
+ * code runs for it. Because the drawing could pass for a picture of the
+ * content (dashboard bars, a slide), it carries a visible "<Kind> · no preview"
+ * label (#5154). A safe thumbnail of one exact version, rendered outside the
+ * host origin and checked against the reader's access, can replace it per
+ * kind once the API serves one.
  */
 
 const line = (width = "100%", strong = false) =>
@@ -69,8 +73,11 @@ function Drawing({ kind, mode }: { kind: ArtifactKind; mode?: string }) {
 
 export function KindThumb({ kind, mode, empty, className }: { kind: ArtifactKind; mode?: string; empty?: boolean; className?: string }) {
   const style = { "--kind": kindAccent(kind).tint } as CSSProperties
-  return <div aria-hidden="true" data-thumb={kind} style={style}
+  return <div aria-hidden="true" data-thumb={kind} data-thumb-fallback="kind" style={style}
     className={cn("relative h-[104px] overflow-hidden rounded-md bg-[color-mix(in_srgb,var(--kind)_12%,var(--muted))]", className)}>
-    {empty ? <span className="absolute inset-0 grid place-items-center text-xs text-muted-foreground">Nothing here yet</span> : <Drawing kind={kind} mode={mode} />}
+    {empty ? <span className="absolute inset-0 grid place-items-center text-xs text-muted-foreground">Nothing here yet</span> : <>
+      <Drawing kind={kind} mode={mode} />
+      <span className="absolute bottom-1.5 left-1.5 rounded-[var(--radius-row)] bg-card/90 px-1.5 py-0.5 text-micro font-medium leading-none text-muted-foreground shadow-xs">{KINDS[kind].label} · no preview</span>
+    </>}
   </div>
 }
