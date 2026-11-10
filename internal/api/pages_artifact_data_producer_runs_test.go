@@ -643,3 +643,102 @@ func TestDashboardProducerRunLimitsAreConfigurable(t *testing.T) {
 		}
 	}
 }
+
+func TestDashboardProducerRunIsBoundToItsCodeVersion(t *testing.T) {
+	f := newProducerRunFixture(t)
+	begin := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"same-key"}`)
+	run := decodeRun(t, begin)
+	if begin.Code != 201 || run.CodeVersion != 1 {
+		t.Fatal(begin.Code, begin.Body)
+	}
+	if w := f.call(f.owner, "POST", "three-screens/artifact/versions", dashboardBody(1, "sales", "costs")); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	tagged := fmt.Sprintf(`{"base_version":2,"run_id":%q,"documents":[{"id":"row","ifVersion":0,"value":{"amount":1}}]}`, run.ID)
+	batch := dashboardRequest(t, f.h, f.ws, f.owner, "POST", "sales", "", tagged)
+	finish := f.do(t, f.owner, "finish", "sales", run.ID, "", `{"base_version":2,"state":"succeeded","data_generation":0,"unchanged":true}`)
+	for _, w := range []*httptest.ResponseRecorder{batch, finish} {
+		if w.Code != 409 || !strings.Contains(w.Body.String(), "artifact_data_run_code_version") {
+			t.Fatal(w.Code, w.Body)
+		}
+	}
+	if w := f.do(t, f.owner, "finish", "sales", run.ID, "", `{"base_version":2,"state":"failed"}`); w.Code != 200 || decodeRun(t, w).CodeVersion != 1 {
+		t.Fatalf("current writer cannot abandon an old run: %d %s", w.Code, w.Body)
+	}
+	if w := f.do(t, f.owner, "start", "sales", "", "", `{"base_version":2,"idempotency_key":"same-key"}`); w.Code != 201 || decodeRun(t, w).ID == run.ID || decodeRun(t, w).CodeVersion != 2 {
+		t.Fatalf("version-scoped key replayed an old run: %d %s", w.Code, w.Body)
+	}
+}
+
+func TestDashboardProducerRunReasonRespectsHistoricalAdminSelection(t *testing.T) {
+	f := newProducerRunFixture(t)
+	admin := "producer-admin-editor"
+	dashboardEditMember(t, f.h, f.ws, admin, "ADMIN")
+	mustExec(t, f.h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,granted_at) VALUES(?,'user',?,'write',?,datetime('now'))`, f.page, admin, f.owner)
+	start := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"first"}`))
+	if w := f.do(t, f.owner, "finish", "sales", start.ID, "", `{"base_version":1,"state":"failed","reason":"producer diagnostic"}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	if w := f.call(f.owner, "POST", "three-screens/artifact/versions", dashboardBody(1, "sales", "costs")); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+	for _, tc := range []struct {
+		query      string
+		wantReason bool
+	}{{"?version=1", false}, {"?version=2", true}} {
+		w := f.do(t, admin, "list", "", "", tc.query, "")
+		if w.Code != 200 || strings.Contains(w.Body.String(), "producer diagnostic") != tc.wantReason {
+			t.Fatalf("%s: %d %s", tc.query, w.Code, w.Body)
+		}
+	}
+}
+
+func TestDashboardProducerRunPartialRetentionRemainsBounded(t *testing.T) {
+	t.Setenv("CREWSHIP_ARTIFACT_DATA_RUNS_KEPT", "2")
+	f := newProducerRunFixture(t)
+	active := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", `{"base_version":1,"idempotency_key":"stalled"}`))
+	for i := 0; i < 8; i++ {
+		began := f.do(t, f.owner, "start", "sales", "", "", fmt.Sprintf(`{"base_version":1,"idempotency_key":"partial-%d"}`, i))
+		if began.Code != 201 {
+			t.Fatal(began.Code, began.Body)
+		}
+		id := decodeRun(t, began).ID
+		tagged := fmt.Sprintf(`{"base_version":1,"run_id":%q,"documents":[{"id":"row","ifVersion":%d,"value":{"amount":%d}}]}`, id, i, i)
+		if w := dashboardRequest(t, f.h, f.ws, f.owner, "POST", "sales", "", tagged); w.Code != 200 {
+			t.Fatal(w.Code, w.Body)
+		}
+		if w := f.do(t, f.owner, "finish", "sales", id, "", `{"base_version":1,"state":"failed"}`); w.Code != 200 || !decodeRun(t, w).Partial {
+			t.Fatal(w.Code, w.Body)
+		}
+	}
+	// Push every partial out of the ordinary retention window. Exactly one
+	// remains to witness an overlap with the stalled run.
+	for i := 0; i < 3; i++ {
+		id := decodeRun(t, f.do(t, f.owner, "start", "sales", "", "", fmt.Sprintf(`{"base_version":1,"idempotency_key":"clean-%d"}`, i))).ID
+		if w := f.do(t, f.owner, "finish", "sales", id, "", `{"base_version":1,"state":"failed"}`); w.Code != 200 {
+			t.Fatal(w.Code, w.Body)
+		}
+	}
+	var running, terminal, partial int
+	if err := f.h.db.QueryRow(`SELECT sum(state='running'),sum(state!='running'),sum(state='failed' AND end_generation>start_generation) FROM artifact_data_runs WHERE workspace_id=?`, f.ws).Scan(&running, &terminal, &partial); err != nil || running != 1 || terminal != 3 || partial != 1 {
+		t.Fatalf("retention: active=%d terminal=%d partial=%d: %v", running, terminal, partial, err)
+	}
+	if w := f.do(t, f.owner, "finish", "sales", active.ID, "", `{"base_version":1,"state":"failed"}`); w.Code != 200 {
+		t.Fatal(w.Code, w.Body)
+	}
+}
+
+func TestDashboardProducerRunListsAllConfiguredActiveRuns(t *testing.T) {
+	t.Setenv("CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE", "18")
+	f := newProducerRunFixture(t)
+	for i := 0; i < 18; i++ {
+		if w := f.do(t, f.owner, "start", "sales", "", "", fmt.Sprintf(`{"base_version":1,"idempotency_key":"running-%d"}`, i)); w.Code != 201 {
+			t.Fatal(w.Code, w.Body)
+		}
+	}
+	w := f.do(t, f.owner, "list", "", "", "?version=1", "")
+	var got artifactDataRunsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || w.Code != 200 || len(got.Runs) != 1 || len(got.Runs[0].Active) != 18 {
+		t.Fatalf("active list: %d %s %v", w.Code, w.Body, err)
+	}
+}

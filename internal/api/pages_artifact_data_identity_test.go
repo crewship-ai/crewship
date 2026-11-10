@@ -7,8 +7,8 @@ func TestArtifactDataIdentityErasurePreservesValuesAndOtherWorkspace(t *testing.
 	for _, scope := range []struct{ ws, page string }{{ws, "identity-page"}, {"identity-other-ws", "identity-other-page"}} {
 		mustExec(t, db, `INSERT INTO artifact_data_collections(workspace_id,page_id,name) VALUES(?,?,'sales')`, scope.ws, scope.page)
 		mustExec(t, db, `INSERT INTO artifact_data_documents(workspace_id,page_id,collection,id,version,value_json,updated_by,updated_at) VALUES(?,?,'sales','row',1,'{"n":42}',?,datetime('now'))`, scope.ws, scope.page, "user:"+user)
-		mustExec(t, db, `INSERT INTO artifact_data_runs(workspace_id,page_id,collection,id,idempotency_key,state,started_by,started_at) VALUES(?,?,'sales','run_1','k','running',?,datetime('now'))`, scope.ws, scope.page, user)
-		mustExec(t, db, `INSERT INTO artifact_data_runs(workspace_id,page_id,collection,id,idempotency_key,state,started_by,started_at,finished_at,finished_by,start_generation,end_generation) VALUES(?,?,'sales','run_2','k2','failed','someone-else',datetime('now'),datetime('now'),?,0,0)`, scope.ws, scope.page, "user:"+user)
+		mustExec(t, db, `INSERT INTO artifact_data_runs(workspace_id,page_id,collection,id,idempotency_key,state,started_by,started_at,code_version) VALUES(?,?,'sales','run_1','k','running',?,datetime('now'),1)`, scope.ws, scope.page, user)
+		mustExec(t, db, `INSERT INTO artifact_data_runs(workspace_id,page_id,collection,id,idempotency_key,state,started_by,started_at,finished_at,finished_by,code_version,start_generation,end_generation) VALUES(?,?,'sales','run_2','k2','failed','someone-else',datetime('now'),datetime('now'),?,1,0,0)`, scope.ws, scope.page, "user:"+user)
 	}
 	tx, err := db.BeginTx(t.Context(), nil)
 	if err != nil {

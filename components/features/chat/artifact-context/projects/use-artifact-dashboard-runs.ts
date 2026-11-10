@@ -5,7 +5,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { artifactDashboards } from "@/lib/feature-flags"
 import { parseDashboardRuns, type DashboardRunSummary } from "@/lib/pages/artifact-dashboard-runs"
 
-const MAX_RUNS_BYTES = 256 * 1024
+const MAX_RUNS_BYTES = 1024 * 1024
 
 /**
  * The producer run records next to the data read. A failed or invalid read
