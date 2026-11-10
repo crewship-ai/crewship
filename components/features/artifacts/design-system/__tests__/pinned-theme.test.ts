@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { pinnedThemeCss, withPinnedTheme, slideFontFaces, parsePinnedFiles, type PinnedFile } from "../pinned-theme"
+import { pinnedThemeCss, pinnedSlideTheme, withPinnedTheme, slideFontFaces, parsePinnedFiles, type PinnedFile } from "../pinned-theme"
 
 const tokens = JSON.stringify({
   schema_version: 2, name: "Harbor", themes: [{ id: "light", name: "Light" }, { id: "dark", name: "Dark" }],
@@ -47,7 +47,25 @@ describe("pinned theme", () => {
 
   it("names slide fonts apart from the app's own families", () => {
     const faces = slideFontFaces([inter, secret], "deck-1")
-    expect(faces).toEqual([{ family: "Inter", alias: "crewship-pin-deck-1-Inter", source: "url(data:font/woff2;base64,d09GMgABAAA=)", weight: "400", style: "normal" }])
+    expect(faces).toHaveLength(1)
+    expect(faces[0]).toMatchObject({ family: "Inter", source: "url(data:font/woff2;base64,d09GMgABAAA=)", weight: "400", style: "normal" })
+    const families = slideFontFaces([{ ...inter, family: "A B" }, { ...inter, family: "A-B" }], "deck-1")
+    expect(new Set(families.map(face => face.alias)).size).toBe(2)
+    expect(slideFontFaces([inter], "deck/1")[0].alias).not.toBe(faces[0].alias)
+  })
+
+  it("keeps a leading doctype and never writes into a commented-out head", () => {
+    const html = '<!-- <head> -->\n<!doctype html><html><head><title>Preview</title></head><body>Text</body></html>'
+    const out = withPinnedTheme(html, ":root{--ds-color-ink:#111111;}")
+    expect(out).toMatch(/^<!-- <head> -->\s*<!doctype html><style data-library-pin>/i)
+  })
+
+  it("resolves only requested Slides preview bindings from the pinned tokens", () => {
+    const binding = { path: "slides-library.json", content: JSON.stringify({ schema_version: 1, background: "primary", text_color: "ink", typography: "body" }) }
+    expect(pinnedSlideTheme(tokens, [binding])).toEqual({ background: "#1d4ed8", textColor: "#111111", typography: { size: 16, weight: 400, family: "Inter" } })
+    expect(pinnedSlideTheme(undefined, [binding])).toBeUndefined()
+    expect(pinnedSlideTheme(tokens, [binding, binding])).toBeUndefined()
+    expect(pinnedSlideTheme(tokens, [{ ...binding, content: '{"schema_version":1,"background":"url(x)"}' }])).toBeUndefined()
   })
 
   it("admits only well-formed file lists", () => {
