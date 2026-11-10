@@ -6,7 +6,6 @@ const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error
 // Storage is a no-op in this suite's setup: the drafts this browser kept are listed here instead.
 const drafts = vi.hoisted(() => new Set<string>())
 const docsState = vi.hoisted(() => ({ enabled: true }))
-vi.mock("@/hooks/use-documents-availability",()=>({useDocumentsAvailability:()=>({data:docsState.enabled})}))
 vi.mock("@/components/features/pages/new-document-dialog",()=>({NewDocumentDialog:({docsOnly,onCreated}:{docsOnly?:boolean;onCreated:(slug:string,id?:string)=>void})=><div role="dialog" aria-label="New Docs" data-docs-only={String(docsOnly)}><button onClick={()=>onCreated("fresh-docs","docs-page-id")}>Create Docs</button></div>}))
 vi.mock("@/components/features/chat/artifact-context/craft/local-draft", async importOriginal => ({
   ...(await importOriginal<typeof import("@/components/features/chat/artifact-context/craft/local-draft")>()),
@@ -46,7 +45,7 @@ vi.mock("@/hooks/use-user-preference", async () => {
 })
 vi.mock("@/hooks/use-page-folders", () => ({ usePageFolders: () => ({ folders: state.folders, loading: false, error: null, supported: true, refresh: vi.fn(), reread: vi.fn() }) }))
 vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities", () => ({
-  useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: true, sheets: false, pages: true, ...state.caps }),
+  useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: true, docs:docsState.enabled, sheets: false, pages: true, ...state.caps }),
 }))
 vi.mock("../new-artifact-dialog", () => ({
   NewArtifactDialog: ({ defaultKind, defaultFolderSlug, onCreated }: { defaultKind?: string; defaultFolderSlug?: string; onCreated: (slug: string, id?: string) => void }) =>
