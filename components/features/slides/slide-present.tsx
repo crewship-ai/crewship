@@ -9,13 +9,33 @@ const control = "min-h-9 coarse:min-h-[44px] rounded border px-3"
 
 /** Presentation is a modal native view, not an export or durable write. */
 /** `onSlideChange` hears every slide shown, so the viewer leaves Present on the last one. */
-export function SlidePresent({ deck, initialSlideId, onClose, onSlideChange }: { deck: unknown; initialSlideId: string; onClose: () => void; onSlideChange?: (slideId: string) => void }) {
-  if (!isRenderableSlideDeck(deck) || !deck.slide_order.includes(initialSlideId)) return <p role="alert">This presentation format or target is unavailable.</p>
-  return <NativePresentation deck={deck} initialSlideId={initialSlideId} onClose={onClose} onSlideChange={onSlideChange} />
+/** `follow` moves the presentation from outside (a Presenter view); each new `seq` is one move. */
+export interface PresentFollow { id: string; seq: number }
+
+interface PresentProps {
+  initialSlideId: string
+  onClose: () => void
+  onSlideChange?: (slideId: string) => void
+  follow?: PresentFollow
+  /** Offers a Full screen button, for a Present started without a user gesture to spare. */
+  onFullscreen?: () => void
 }
 
-function NativePresentation({ deck, initialSlideId, onClose, onSlideChange }: { deck: SlideDeck; initialSlideId: string; onClose: () => void; onSlideChange?: (slideId: string) => void }) {
+export function SlidePresent({ deck, ...props }: PresentProps & { deck: unknown }) {
+  if (!isRenderableSlideDeck(deck) || !deck.slide_order.includes(props.initialSlideId)) return <p role="alert">This presentation format or target is unavailable.</p>
+  return <NativePresentation deck={deck} {...props} />
+}
+
+function NativePresentation({ deck, initialSlideId, onClose, onSlideChange, follow, onFullscreen }: PresentProps & { deck: SlideDeck }) {
   const [index, setIndex] = React.useState(Math.max(0, deck.slide_order.indexOf(initialSlideId)))
+  // Only a move made after this presentation opened; an older one never moves it.
+  const seen = React.useRef(follow?.seq)
+  React.useEffect(() => {
+    if (!follow || follow.seq === seen.current) return
+    seen.current = follow.seq
+    const position = deck.slide_order.indexOf(follow.id)
+    if (position >= 0) setIndex(position)
+  }, [follow, deck])
   const root = React.useRef<HTMLDivElement>(null)
   const close = React.useRef(onClose)
   close.current = onClose
@@ -63,6 +83,7 @@ function NativePresentation({ deck, initialSlideId, onClose, onSlideChange }: { 
       <button className={control} disabled={current === 0} onClick={() => setIndex(current - 1)}>Previous slide</button>
       <span aria-live="polite">{current + 1} / {deck.slide_order.length}</span>
       <button className={control} disabled={current === deck.slide_order.length - 1} onClick={() => setIndex(current + 1)}>Next slide</button>
+      {onFullscreen && <button className={control} onClick={onFullscreen}>Full screen</button>}
       <button className={control} onClick={onClose}>Close presentation</button>
     </div>
   </div>
