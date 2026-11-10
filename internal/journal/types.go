@@ -382,6 +382,10 @@ const (
 	// run.id, payload carries step_id + duration_ms.
 	EntryPipelineStepContainerReady EntryType = "pipeline.step.container_ready"
 
+	// EntryPipelineStepAgentWait marks the start and outcome of contention
+	// on the agent run lock before routine step execution.
+	EntryPipelineStepAgentWait EntryType = "pipeline.step.agent_wait"
+
 	// EntryPipelineScheduleCircuitBreaker fires when a schedule auto-disables
 	// after K consecutive FAILED fires (#1405). Payload carries schedule_id,
 	// consecutive_failures, max_consecutive_failures. Distinct from

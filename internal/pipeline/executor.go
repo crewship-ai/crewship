@@ -2242,6 +2242,7 @@ func (e *Executor) runAgentStep(
 			InputGuardAction: resolveInputGuardAction(in.dsl),
 		}
 		res, err := e.runRunnerWithTransientRetry(ctx, req, step, emit)
+		totalCost += res.CostUSD
 		if err != nil {
 			emit.emitStepFailed(ctx, step, "agent_run_error", err.Error())
 			// Treat outright runner failure as a candidate for tier
@@ -2252,7 +2253,6 @@ func (e *Executor) runAgentStep(
 			}
 			return "", totalCost, time.Since(startTotal).Milliseconds(), err
 		}
-		totalCost += res.CostUSD
 
 		// Validation gate (cheap structural checks first — bail
 		// before we spend rubric-grader tokens on output that

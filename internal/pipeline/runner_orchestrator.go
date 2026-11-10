@@ -249,11 +249,24 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		if !r.agentRunLock.TryStart(agentID) {
 			wait := r.busyWaitFor(req)
 			waitCtx, cancel := context.WithTimeout(ctx, wait)
+			startedAt := time.Now()
+			waitID := generateRunID()
+			r.emitStepAgentWait(waitCtx, req, waitID, "waiting", startedAt, 0)
 			acquired := r.agentRunLock.Acquire(waitCtx, agentID)
+			finishedAt := time.Now()
 			cancel()
+			waitErr := ctx.Err()
+			phase := "acquired"
 			if !acquired {
-				if err := ctx.Err(); err != nil {
-					return AgentStepResult{}, err
+				phase = "timed_out"
+				if waitErr != nil {
+					phase = "cancelled"
+				}
+			}
+			r.emitStepAgentWait(context.WithoutCancel(ctx), req, waitID, phase, finishedAt, finishedAt.Sub(startedAt))
+			if !acquired {
+				if waitErr != nil {
+					return AgentStepResult{}, waitErr
 				}
 				return AgentStepResult{}, fmt.Errorf("agent %s stayed busy for %s: %w", agentID, wait, ErrAgentBusy)
 			}
@@ -435,6 +448,7 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 		UserMessage: req.Prompt,
 		LLMModel:    llmModel,
 		TimeoutSecs: timeoutSecs,
+		MaxTurns:    orchestrator.RoutineMaxTurns,
 		// Previously omitted — pipeline-launched agents silently lost
 		// their resource limits. Pass the agent's configured limits.
 		MemoryMB: info.MemoryMB,

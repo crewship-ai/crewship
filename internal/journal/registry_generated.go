@@ -149,6 +149,7 @@ var AllEntryTypes = []EntryType{
 	EntryPipelineRunsSwept,
 	EntryPipelineScheduleCircuitBreaker,
 	EntryPipelineScheduleMissedOccurrences,
+	EntryPipelineStepAgentWait,
 	EntryPipelineStepCompleted,
 	EntryPipelineStepContainerReady,
 	EntryPipelineStepFailed,

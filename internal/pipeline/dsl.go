@@ -71,7 +71,7 @@ var knownDSLKeys = func() map[string]bool {
 // IsKnownDSLKey reports whether key is a top-level field of the routine
 // DSL this build understands.
 //
-// Parse discards unknown keys silently (encoding/json has no strict
+// Parse discards most unknown keys silently (encoding/json has no strict
 // mode here, and making it strict would break forward compatibility —
 // an older server must still accept a manifest written against a newer
 // one). So callers that hold author-supplied keys use this to SAY
@@ -97,11 +97,27 @@ func Parse(data []byte) (*DSL, error) {
 	// Step.Raw; encoding/json drops fields we don't recognise.
 	var raw struct {
 		Steps []json.RawMessage `json:"steps"`
+		Hooks struct {
+			BeforeAll json.RawMessage `json:"before_all"`
+			AfterAll  json.RawMessage `json:"after_all"`
+			OnFailure json.RawMessage `json:"on_failure"`
+		} `json:"hooks"`
 	}
 	if err := json.Unmarshal(data, &raw); err == nil {
 		for i := range dsl.Steps {
 			if i < len(raw.Steps) {
 				dsl.Steps[i].Raw = raw.Steps[i]
+			}
+		}
+		if dsl.Hooks != nil {
+			if dsl.Hooks.BeforeAll != nil {
+				dsl.Hooks.BeforeAll.Raw = raw.Hooks.BeforeAll
+			}
+			if dsl.Hooks.AfterAll != nil {
+				dsl.Hooks.AfterAll.Raw = raw.Hooks.AfterAll
+			}
+			if dsl.Hooks.OnFailure != nil {
+				dsl.Hooks.OnFailure.Raw = raw.Hooks.OnFailure
 			}
 		}
 	}
@@ -184,6 +200,7 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 	seenStepIDs := make(map[string]struct{}, len(dsl.Steps))
 	for i, st := range dsl.Steps {
 		stepPath := fmt.Sprintf("/steps/%d", i)
+		validateStepControls(&st, stepPath, &errs)
 		// validateStepSlugs returns *ValidationError directly (not error) so
 		// this stays a plain nil check — passing it through errs.add would
 		// hit the classic typed-nil-in-interface trap (err != nil even when
@@ -199,6 +216,11 @@ func Validate(dsl *DSL, agentSlugs map[string]struct{}, pipelineSlugs map[string
 		errs.add(stepPath+"/foreach", validateForeachStep(st, dsl, agentSlugs))
 	}
 
+	if dsl.Hooks != nil {
+		validateStepControls(dsl.Hooks.BeforeAll, "/hooks/before_all", &errs)
+		validateStepControls(dsl.Hooks.AfterAll, "/hooks/after_all", &errs)
+		validateStepControls(dsl.Hooks.OnFailure, "/hooks/on_failure", &errs)
+	}
 	errs.add("/hooks", validateHooks(dsl))
 	errs.add("/egress_targets", validateEgressTargets(dsl))
 	errs.add("/concurrency_key", validateConcurrencyKey(dsl))

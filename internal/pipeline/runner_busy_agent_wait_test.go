@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/chatbridge"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // A routine step whose agent is busy (a chat, an assignment or another
@@ -18,6 +19,7 @@ func busyAgentRig(t *testing.T) (*OrchestratorRunner, *chatbridge.AgentRunLock) 
 	t.Helper()
 	resolver := &orchCovResolver{info: covChatInfo(), resolveErr: errors.New("reached agent resolution")}
 	r := newOrchRunnerRig(t, &orchCovContainer{}, resolver)
+	r.journalE = &captureEmitter{}
 	lock := chatbridge.NewAgentRunLock()
 	r.SetAgentRunLock(lock)
 	if !lock.TryStart("agent_cov") {
@@ -26,7 +28,10 @@ func busyAgentRig(t *testing.T) (*OrchestratorRunner, *chatbridge.AgentRunLock) 
 	return r, lock
 }
 
-var busyAgentStep = AgentStepRequest{WorkspaceID: "ws_cov", AuthorCrewID: "crew_cov", AgentSlug: "cov-agent"}
+var busyAgentStep = AgentStepRequest{
+	WorkspaceID: "ws_cov", AuthorCrewID: "crew_cov", AgentSlug: "cov-agent",
+	PipelineID: "pipeline-busy", PipelineRunID: "run-busy", StepID: "classify", Attempt: 1,
+}
 
 func TestRunStep_BusyAgentWaitsForRelease(t *testing.T) {
 	r, lock := busyAgentRig(t)
@@ -44,6 +49,7 @@ func TestRunStep_BusyAgentWaitsForRelease(t *testing.T) {
 	if lock.InFlight("agent_cov") {
 		t.Fatal("step kept the agent after it returned")
 	}
+	assertAgentWaitEvents(t, r, "acquired")
 }
 
 func TestRunStep_BusyAgentWaitIsBounded(t *testing.T) {
@@ -65,6 +71,7 @@ func TestRunStep_BusyAgentWaitIsBounded(t *testing.T) {
 	if lock.InFlight("agent_cov") {
 		t.Fatal("a step that gave up left a claim on the agent")
 	}
+	assertAgentWaitEvents(t, r, "timed_out")
 }
 
 func TestRunStep_BusyAgentWaitStopsOnCancel(t *testing.T) {
@@ -78,6 +85,34 @@ func TestRunStep_BusyAgentWaitStopsOnCancel(t *testing.T) {
 	_, err := r.RunStep(ctx, busyAgentStep)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("want context.Canceled when the run is stopped while waiting, got %v", err)
+	}
+	assertAgentWaitEvents(t, r, "cancelled")
+}
+
+func assertAgentWaitEvents(t *testing.T, r *OrchestratorRunner, outcome string) {
+	t.Helper()
+	entries := r.journalE.(*captureEmitter).entries
+	if len(entries) != 2 {
+		t.Fatalf("want two wait events, got %v", entries)
+	}
+	var waitID string
+	for i, phase := range []string{"waiting", outcome} {
+		entry := entries[i]
+		p := entry.Payload
+		if entry.Type != journal.EntryPipelineStepAgentWait ||
+			entry.TraceID != busyAgentStep.PipelineRunID || entry.WorkspaceID != busyAgentStep.WorkspaceID ||
+			p["phase"] != phase || p["run_id"] != busyAgentStep.PipelineRunID ||
+			p["step_id"] != busyAgentStep.StepID || p["agent_slug"] != busyAgentStep.AgentSlug ||
+			p["attempt"] != busyAgentStep.Attempt {
+			t.Fatalf("unexpected %s event: %+v", phase, entry)
+		}
+		if i == 0 {
+			waitID, _ = p["wait_id"].(string)
+			continue
+		}
+		if waitID == "" || p["wait_id"] != waitID || p["duration_ms"] != entry.TS.Sub(entries[0].TS).Milliseconds() {
+			t.Fatalf("wait events do not correlate: %+v", entries)
+		}
 	}
 }
 

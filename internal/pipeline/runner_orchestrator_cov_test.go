@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -266,6 +267,9 @@ func TestOrchestratorRunner_RunStep_HappyPath(t *testing.T) {
 		}
 	}
 	all := decoded.String()
+	if !strings.Contains(all, "\x00--max-turns\x00"+strconv.Itoa(orchestrator.RoutineMaxTurns)+"\x00") {
+		t.Errorf("routine turn limit did not reach the Claude argv")
+	}
 	if !strings.Contains(all, "claude-override-model") {
 		t.Errorf("model override did not reach the agent exec")
 	}
