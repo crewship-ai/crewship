@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"strings"
 )
 
 func (s *Store) Checkpoint(ctx context.Context, k Key, l Lease, id string, snapshot []byte, ifRev int64, a Authorize) (Checkpoint, error) {
@@ -21,6 +22,10 @@ func (s *Store) CheckpointRequest(ctx context.Context, k Key, l Lease, id, finge
 func (s *Store) CheckpointRequestAtGeneration(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, generation *int64, a Authorize) (Checkpoint, error) {
 	return s.CheckpointRequestGuarded(ctx, k, l, id, fingerprint, snapshot, ifRev, generation, a, nil)
 }
+
+// CheckpointRequestGuarded writes the checkpoint receipt in the same
+// transaction. Keep it that way: the session budget (store_session_checkpoint.go)
+// treats a "session-" checkpoint without a checkpoint receipt as automatic.
 func (s *Store) CheckpointRequestGuarded(ctx context.Context, k Key, l Lease, id, fingerprint string, snapshot []byte, ifRev int64, generation *int64, a Authorize, guard MutationGuard) (c Checkpoint, e error) {
 	e = s.tx(ctx, k, a, func(t *sql.Tx, actor string) error {
 		if id == "" || len(id) > 256 || len(fingerprint) > 256 {
@@ -41,6 +46,12 @@ func (s *Store) CheckpointRequestGuarded(ctx context.Context, k Key, l Lease, id
 		}
 		if lookupErr != nil && !errors.Is(lookupErr, sql.ErrNoRows) {
 			return lookupErr
+		}
+		// "session-" names automatic snapshots (store_session_checkpoint.go). A new
+		// explicit checkpoint may not take that name or an existing pin's row;
+		// an exact retry of an older explicit one still has its receipt above.
+		if lookupErr != nil && strings.HasPrefix(id, sessionCheckpointPrefix) {
+			return errors.New("checkpoint id prefix session- is reserved")
 		}
 		var existing Checkpoint
 		existing.ID = id
@@ -119,7 +130,20 @@ func (s *Store) RestoreRequest(ctx context.Context, k Key, l Lease, id, requestI
 func (s *Store) RestoreRequestWithFingerprint(ctx context.Context, k Key, l Lease, id, requestID, fingerprint string, ifRev int64, a Authorize) (Receipt, error) {
 	return s.RestoreRequestWithFingerprintAtGeneration(ctx, k, l, id, requestID, fingerprint, ifRev, nil, a)
 }
-func (s *Store) RestoreRequestWithFingerprintAtGeneration(ctx context.Context, k Key, l Lease, id, requestID, fingerprint string, ifRev int64, generation *int64, a Authorize) (r Receipt, e error) {
+func (s *Store) RestoreRequestWithFingerprintAtGeneration(ctx context.Context, k Key, l Lease, id, requestID, fingerprint string, ifRev int64, generation *int64, a Authorize) (Receipt, error) {
+	return s.RestoreRequestKeeping(ctx, k, l, id, requestID, fingerprint, ifRev, generation, nil, a)
+}
+
+// RestoreRequestKeeping restores checkpoint id and, when replaced is given,
+// first pins the head it replaces (replaced is that head's full state, built by
+// the documents service from the snapshot and its updates) as a checkpoint at
+// the replaced revision, in the same transaction (#5165). The replaced work
+// therefore stays reachable in History; when History cannot hold it, the
+// restore is refused with ErrQuota and nothing changes. A head that already has
+// a checkpoint at its revision, or whose stored snapshot (with no pending
+// updates) is byte-identical to a checkpoint, is not pinned again, and a
+// replayed restore returns its receipt without writing again.
+func (s *Store) RestoreRequestKeeping(ctx context.Context, k Key, l Lease, id, requestID, fingerprint string, ifRev int64, generation *int64, replaced []byte, a Authorize) (r Receipt, e error) {
 	e = s.tx(ctx, k, a, func(t *sql.Tx, actor string) error {
 		if requestID == "" || len(requestID) > 256 || len(id) > 256 || len(fingerprint) > 256 {
 			return errors.New("restore request id required")
@@ -170,6 +194,11 @@ func (s *Store) RestoreRequestWithFingerprintAtGeneration(ctx context.Context, k
 		}
 		if err = admitDisk(ctx, t, len(c.Snapshot), len(c.Projection)); err != nil {
 			return err
+		}
+		if replaced != nil {
+			if err = s.keepReplacedHead(ctx, t, k, requestID, actor, v, replaced); err != nil {
+				return err
+			}
 		}
 		r = Receipt{requestID, v.HeadRev + 1, v.Epoch + 1, actor, "restore"}
 		if _, err = t.ExecContext(ctx, "UPDATE documents SET head_rev=?,epoch=?,generation=generation+1,content_generation=content_generation+1,schema_version=?,snapshot=?,snapshot_rev=?,projection=?,writer='',owner='',lease_until=0 WHERE workspace_id=? AND page_id=?", r.Rev, r.Epoch, RestoredSchema(v.Schema, c.Schema), c.Snapshot, r.Rev, []byte(c.Projection), k.WorkspaceID, k.PageID); err != nil {
@@ -235,4 +264,52 @@ func RestoredSchema(current, checkpoint int) int {
 		return current
 	}
 	return checkpoint
+}
+
+// keepReplacedHead pins the head a restore is about to replace, unless a
+// checkpoint at that revision already holds it. Its ID is derived from the
+// restore request, so it is stable for the request and a valid checkpoint ID.
+func (s *Store) keepReplacedHead(ctx context.Context, t *sql.Tx, k Key, requestID, actor string, v State, replaced []byte) error {
+	var pinned int
+	if err := t.QueryRowContext(ctx, "SELECT count(*) FROM document_checkpoints WHERE workspace_id=? AND page_id=? AND rev=?", k.WorkspaceID, k.PageID, v.HeadRev).Scan(&pinned); err != nil {
+		return err
+	}
+	if pinned > 0 {
+		return nil
+	}
+	// A head with no pending updates whose stored snapshot is byte-identical to a
+	// checkpoint (typically right after a restore) is already in History.
+	if v.SnapshotRev == v.HeadRev {
+		var same int
+		if err := t.QueryRowContext(ctx, "SELECT count(*) FROM document_checkpoints WHERE workspace_id=? AND page_id=? AND snapshot=?", k.WorkspaceID, k.PageID, v.Snapshot).Scan(&same); err != nil {
+			return err
+		}
+		if same > 0 {
+			return nil
+		}
+	}
+	if err := s.valid(v.Schema, replaced, v.Projection); err != nil {
+		return err
+	}
+	var size int
+	if err := t.QueryRowContext(ctx, "SELECT coalesce(sum(length(snapshot)+length(projection)),0) FROM document_checkpoints WHERE workspace_id=? AND page_id=?", k.WorkspaceID, k.PageID).Scan(&size); err != nil {
+		return err
+	}
+	if size+len(replaced)+len(v.Projection) > s.opts.MaxHistoryBytes {
+		return ErrQuota
+	}
+	if err := admitDisk(ctx, t, len(replaced), len(v.Projection)); err != nil {
+		return err
+	}
+	sum := sha256.Sum256([]byte("replaced-by-restore\x00" + requestID))
+	id := "replaced-" + hex.EncodeToString(sum[:16])
+	var taken int
+	if err := t.QueryRowContext(ctx, "SELECT count(*) FROM document_checkpoints WHERE workspace_id=? AND page_id=? AND id=?", k.WorkspaceID, k.PageID, id).Scan(&taken); err != nil {
+		return err
+	}
+	if taken > 0 {
+		return ErrDuplicate
+	}
+	_, err := t.ExecContext(ctx, "INSERT INTO document_checkpoints(workspace_id,page_id,id,rev,schema_version,snapshot,projection,actor) VALUES(?,?,?,?,?,?,?,?)", k.WorkspaceID, k.PageID, id, v.HeadRev, v.Schema, replaced, []byte(v.Projection), actor)
+	return err
 }

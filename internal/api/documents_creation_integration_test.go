@@ -743,6 +743,33 @@ func testDocumentCreationManagedRouterSidecarCLI(t *testing.T, drafting bool) {
 		if err := h.db.QueryRow(`SELECT count(*) FROM document_receipts WHERE page_id=? AND id='human-restore-pin'`, created.PageID).Scan(&receipts); err != nil || receipts != 1 {
 			t.Fatal("restore retry created duplicate receipt")
 		}
+		// #5165: the head the restore replaced stays in History, once, with
+		// the human work it held, through the real Node engine and authority.
+		var list struct {
+			Checkpoints []struct {
+				ID  string `json:"id"`
+				Rev int64  `json:"rev"`
+			} `json:"checkpoints"`
+		}
+		if out := invokeHuman("checkpoints", "@"+created.PageID); json.Unmarshal(out, &list) != nil {
+			t.Fatalf("checkpoints after restore: %s", out)
+		}
+		kept := list.Checkpoints
+		replaced := ""
+		for _, c := range kept {
+			if strings.HasPrefix(c.ID, "replaced-") {
+				if replaced != "" || c.Rev != beforeRestore.Rev {
+					t.Fatalf("replaced head must be kept exactly once at rev %d: %+v", beforeRestore.Rev, kept)
+				}
+				replaced = c.ID
+			}
+		}
+		if replaced == "" {
+			t.Fatalf("restore did not keep the replaced head in History: %+v", kept)
+		}
+		if out := invokeHuman("checkpoint", "@"+created.PageID, replaced); !bytes.Contains(out, []byte("Human intervening content")) {
+			t.Fatalf("kept checkpoint lacks the replaced human work: %s", out)
+		}
 		if err := h.db.QueryRow(`SELECT length(writer) FROM documents WHERE page_id=?`, created.PageID).Scan(&writerLength); err != nil || writerLength != 0 {
 			t.Fatal("restore retained the old writer lease")
 		}
