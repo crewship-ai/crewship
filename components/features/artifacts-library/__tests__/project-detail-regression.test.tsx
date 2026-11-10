@@ -35,7 +35,7 @@ vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id
 vi.mock("@/components/features/chat/artifact-context/viewer/artifact-slides-preview", () => ({ ArtifactSlidesPreview: ({ selectMode }: { selectMode: boolean }) => <div data-testid="library-slides" data-select-mode={String(selectMode)}>Library typed Slides</div> }))
 // The Artifacts detail draws typed Slides in its own frame view (kinds/slides); the deck read is the existing hook.
 vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-slides", () => ({ useArtifactSlides: () => ({ scope: "s", enabled: true, projection: undefined, error: false, downloadPDF: async () => null }) }))
-vi.mock("@/components/features/artifacts-library/kinds/design/library-publication", () => ({ LibraryPublishControl: () => null, LibraryPinNotice: () => null }))
+vi.mock("@/components/features/artifacts-library/kinds/design/library-publication", () => ({ LibraryPublishControl: () => null, LibraryPinNotice: () => null, usePinnedLibrary: () => null }))
 vi.mock("@/hooks/use-pages", async importOriginal => ({
   ...(await importOriginal<typeof import("@/hooks/use-pages")>()),
   usePages: () => ({ pages: state.pages, loading: false, error: null, refresh: vi.fn() }),

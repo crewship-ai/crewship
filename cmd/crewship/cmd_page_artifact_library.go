@@ -17,6 +17,7 @@ import (
 //	page artifact pin show <slug>                   GET  …/artifact/library-pin
 //	page artifact pin set <slug> --library …        PUT  …/artifact/library-pin
 //	page artifact pin check <slug>                  GET  …/artifact/library-pin/update
+//	page artifact pin files <slug>                  GET  …/artifact/library-pin/files
 func newArtifactLibraryCommands() []*cobra.Command {
 	library := &cobra.Command{Use: "library", Short: "Read or publish a Library's published version (publishing is owner only)"}
 	show := &cobra.Command{Use: "show <slug>", Args: cobra.ExactArgs(1), Short: "Read the published version and whether you may publish", RunE: func(cmd *cobra.Command, args []string) error {
@@ -80,9 +81,12 @@ func newArtifactLibraryCommands() []*cobra.Command {
 	pinSet.Flags().Int64("version", 0, "Published Library version you reviewed; a different publication is a conflict")
 	pinSet.Flags().String("if-pinned-library", "", "Library currently pinned (slug or @id), empty when nothing is pinned; a mismatch is a conflict")
 	pinSet.Flags().Int64("if-pinned-version", 0, "Library version currently pinned (0 for none); a mismatch is a conflict")
-	check := &cobra.Command{Use: "check <slug>", Args: cobra.ExactArgs(1), Short: "Review whether the Library published a different version, with a token diff", RunE: func(cmd *cobra.Command, args []string) error {
+	check := &cobra.Command{Use: "check <slug>", Args: cobra.ExactArgs(1), Short: "Review whether the Library published a different version, with token and file diffs", RunE: func(cmd *cobra.Command, args []string) error {
 		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/library-pin/update", nil)
 	}}
-	pin.AddCommand(pinShow, pinSet, check)
+	files := &cobra.Command{Use: "files <slug>", Args: cobra.ExactArgs(1), Short: "Read the fonts and licence files the pin carries, bytes in base64 (never reads the Library)", RunE: func(cmd *cobra.Command, args []string) error {
+		return artifactCLIRequest(cmd, "GET", "/api/v1/pages/"+pagePathEscape(args[0])+"/artifact/library-pin/files", nil)
+	}}
+	pin.AddCommand(pinShow, pinSet, check, files)
 	return []*cobra.Command{library, pin}
 }

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
@@ -45,9 +46,16 @@ func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
 	}
 	library := artifacts.VersionKey{WorkspaceID: ws, PageID: libraryPage}
 	tokens := []byte(`{"colors":{"brand":"#123456"}}` + "\n")
+	// A small synthetic WOFF2 header exercises exact byte retention, not browser decoding.
+	font := []byte{'w', 'O', 'F', '2', 0, 255, 128, 0, 42, 27, 199}
+	license := []byte("SIL OPEN FONT LICENSE Version 1.1\n")
+
 	if _, err := store.Apply(t.Context(), library, artifacts.VersionRequest{EntryPoint: "index.html", Files: map[string]artifacts.VersionFile{
-		"index.html":          {Content: []byte("Brand library"), MediaType: "text/html"},
-		artifacts.LibraryFile: {Content: tokens, MediaType: "application/json"},
+		"index.html":               {Content: []byte("Brand library"), MediaType: "text/html"},
+		artifacts.LibraryFile:      {Content: tokens, MediaType: "application/json"},
+		"fonts/Brand.woff2":        {Content: []byte("data:font/woff2;base64," + base64.StdEncoding.EncodeToString(font)), MediaType: "font/woff2"},
+		"fonts/OFL.txt":            {Content: license, MediaType: "text/plain"},
+		artifacts.LibraryFontsFile: {Content: []byte(`{"schema_version":1,"fonts":[{"file":"fonts/Brand.woff2","family":"Brand"}]}`), MediaType: "application/json"},
 	}}, auth); err != nil {
 		t.Fatal(err)
 	}
@@ -111,9 +119,16 @@ func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
 			if err != nil || pub.Version != 1 {
 				t.Fatalf("publication lost: %+v %v", pub, err)
 			}
-			pin, err := recovered.ReadLibraryPin(t.Context(), restored, auth)
+			pin, files, err := recovered.ReadLibraryPinSnapshot(t.Context(), restored, auth)
 			if err != nil || pin.LibraryPageID != restoredLibrary || pin.LibraryVersion != 1 || !bytes.Equal(pin.Content, tokens) {
 				t.Fatalf("pin lost its source or exact bytes: %+v %v", pin, err)
+			}
+			byPath := map[string][]byte{}
+			for _, f := range files {
+				byPath[f.Path] = f.Content
+			}
+			if len(files) != 2 || !bytes.Equal(byPath["fonts/Brand.woff2"], font) || !bytes.Equal(byPath["fonts/OFL.txt"], license) {
+				t.Fatalf("pinned dependency bytes lost during restore: %+v", files)
 			}
 			var pinType string
 			if err := target.QueryRow(`SELECT typeof(content) FROM artifact_library_pins WHERE workspace_id=? AND page_id=?`, restored.WorkspaceID, restored.PageID).Scan(&pinType); err != nil || pinType != "blob" {

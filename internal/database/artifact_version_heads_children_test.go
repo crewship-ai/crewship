@@ -39,3 +39,30 @@ func TestArtifactVersionHeadsForeignKeyChildrenAreKnown(t *testing.T) {
 		t.Fatalf("artifact_version_heads foreign-key children changed:\n got  %v\n want %v\nA rebuild of artifact_version_heads must preserve every child; update the list deliberately.", got, artifactVersionHeadsChildren)
 	}
 }
+
+// artifactLibraryPinsChildren are the tables a rebuild of artifact_library_pins
+// must preserve (#5248).
+var artifactLibraryPinsChildren = []string{"artifact_library_pin_files"}
+
+func TestArtifactLibraryPinsForeignKeyChildrenAreKnown(t *testing.T) {
+	db := openMigratedTestDB(t)
+	rows, err := db.Query(`SELECT DISTINCT m.name FROM sqlite_schema m JOIN pragma_foreign_key_list(m.name) f ON f."table" COLLATE NOCASE='artifact_library_pins' WHERE m.type='table' ORDER BY m.name`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatal(err)
+		}
+		got = append(got, name)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, artifactLibraryPinsChildren) {
+		t.Fatalf("artifact_library_pins foreign-key children changed:\n got  %v\n want %v", got, artifactLibraryPinsChildren)
+	}
+}

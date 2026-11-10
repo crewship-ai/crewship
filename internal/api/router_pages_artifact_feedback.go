@@ -27,6 +27,7 @@ func (r *Router) registerArtifactProjectFeedbackRoutes() {
 	r.authedMut("PUT", "/api/v1/pages/{slug}/artifact/library-pin", roleInline, p.PutArtifactLibraryPin)
 	// openapi: responses 200,400,401,403,404,500
 	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/library-pin/update", authed(wsCtx(http.HandlerFunc(p.GetArtifactLibraryPinUpdate))))
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/library-pin/files", authed(wsCtx(http.HandlerFunc(p.GetArtifactLibraryPinFiles))))
 	// openapi: responses 201,400,401,403,404,409,413,500
 	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/comments", roleInline, p.CreateArtifactProjectComment)
 	// openapi: responses 200,400,401,403,404,409,500
