@@ -399,6 +399,8 @@ func TestDocumentExportEngineReplyBoundary(t *testing.T) {
 		{"docx over limit", "docx", `{"docx":"` + base64.StdEncoding.EncodeToString(append([]byte("PK\x03\x04"), make([]byte, documentDOCXExportBytes)...)) + `"}`, "", "", 502},
 		{"docx extra field", "docx", `{"docx":"` + zipFile + `","markdown":"x"}`, "", "", 502},
 		{"unknown format", "pdf", `{}`, "", "", 400},
+		{"empty format", "", `{}`, "", "", 400},
+		{"repeated format", "markdown&format=docx", `{}`, "", "", 400},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, ws, user := humanDocumentTransportFixture(t)
