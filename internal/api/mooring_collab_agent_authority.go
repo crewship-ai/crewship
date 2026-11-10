@@ -94,7 +94,7 @@ func collaborationAgentGrantAllows(ctx context.Context, h *PageHandler, workspac
 		return false
 	}
 	for _, g := range grants {
-		if g.Level == pageGrantWrite || !write && g.Level == pageGrantRead {
+		if g.Level == pageGrantWrite || !write && (g.Level == pageGrantRead || g.Level == pageGrantPropose) {
 			return true
 		}
 	}

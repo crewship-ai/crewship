@@ -17,16 +17,21 @@ import (
 // own personal private Document, optionally scoped to blocks.
 func proposeIterationFixture(t *testing.T, blocks string) (*artifactPrincipalFixture, string, documents.IterationIntent) {
 	t.Helper()
+	return proposeIterationFixtureSchema(t, blocks, documents.FormattedSchema)
+}
+
+func proposeIterationFixtureSchema(t *testing.T, blocks string, schema int) (*artifactPrincipalFixture, string, documents.IterationIntent) {
+	t.Helper()
 	f, _, token, intent := iterationFixtureFor(t, func(f *artifactPrincipalFixture, intent *documents.IterationIntent) {
-		mustExec(t, f.rig.db, `UPDATE documents SET schema_version=4 WHERE page_id=?`, intent.PageID)
-		intent.Schema = documents.FormattedSchema
+		mustExec(t, f.rig.db, `UPDATE documents SET schema_version=? WHERE page_id=?`, schema, intent.PageID)
+		intent.Schema = schema
 		intent.Blocks = blocks
 	})
 	return f, token, intent
 }
 
-// The schema-4 mandate's grant gates (PRD §0.2/§0.3): the requester needs Edit,
-// a shared Document needs a live agent write grant, and nothing reaches another
+// Every proposal-capable schema keeps the grant gates: the requester needs Edit,
+// a shared Document needs a live agent propose or write grant, and nothing reaches another
 // person's private Document.
 func TestDocumentIterationProposeMandateGates(t *testing.T) {
 	tests := []struct {
@@ -50,6 +55,14 @@ func TestDocumentIterationProposeMandateGates(t *testing.T) {
 		{"shared with agent write grant from a workspace admin", func(t *testing.T, f *artifactPrincipalFixture, page string) {
 			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'write',?)`, page, f.a.AgentID, f.rig.adminID)
+		}, errDocumentAccess},
+		{"shared with agent propose grant", func(t *testing.T, f *artifactPrincipalFixture, page string) {
+			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
+			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'propose',?)`, page, f.a.AgentID, f.rig.adminID)
+		}, nil},
+		{"retired agent propose grant", func(t *testing.T, f *artifactPrincipalFixture, page string) {
+			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
+			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id,retired_at) VALUES(?,'agent',?,'propose',?,datetime('now'))`, page, f.a.AgentID, f.rig.adminID)
 		}, errDocumentAccess},
 		{"crew write grant never reaches the agent", func(t *testing.T, f *artifactPrincipalFixture, page string) {
 			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
@@ -83,21 +96,26 @@ func TestDocumentIterationProposeMandateGates(t *testing.T) {
 			mustExec(t, f.rig.db, `UPDATE documents SET schema_version=3 WHERE page_id=?`, page)
 		}, documents.ErrConflict},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			f, _, intent := proposeIterationFixture(t, "")
-			tt.setup(t, f, intent.PageID)
-			scope, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, intent)
-			if tt.want == nil {
-				if err != nil || !scope.Propose || scope.PageID != intent.PageID {
-					t.Fatalf("propose mandate refused: %+v %v", scope, err)
+	for schema := 1; schema <= documents.LatestSchema; schema++ {
+		if !documents.SchemaAllows(schema, documents.CapPropose) {
+			continue
+		}
+		for _, tt := range tests {
+			t.Run(fmt.Sprintf("schema%d/%s", schema, tt.name), func(t *testing.T) {
+				f, _, intent := proposeIterationFixtureSchema(t, "", schema)
+				tt.setup(t, f, intent.PageID)
+				scope, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, intent)
+				if tt.want == nil {
+					if err != nil || !scope.Propose || scope.PageID != intent.PageID {
+						t.Fatalf("propose mandate refused: %+v %v", scope, err)
+					}
+					return
 				}
-				return
-			}
-			if !errors.Is(err, tt.want) {
-				t.Fatalf("err=%v want %v", err, tt.want)
-			}
-		})
+				if !errors.Is(err, tt.want) {
+					t.Fatalf("err=%v want %v", err, tt.want)
+				}
+			})
+		}
 	}
 }
 
@@ -108,6 +126,28 @@ func TestDocumentIterationSchemaThreeSharedUnchangedWithAgentWriteGrant(t *testi
 	mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'write',?)`, intent.PageID, f.a.AgentID, f.rig.adminID)
 	if _, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, intent); !errors.Is(err, errDocumentIterationProposalUnavailable) {
 		t.Fatalf("schema 3 shared mandate changed: %v", err)
+	}
+}
+
+// A propose-only agent never gets a direct (schema-3) edit mandate on a shared
+// Document: Propose is not Edit.
+func TestDocumentIterationProposeGrantNeverAdmitsDirectEdit(t *testing.T) {
+	f, _, _, intent := iterationFixture(t)
+	mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, intent.PageID)
+	mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'propose',?)`, intent.PageID, f.a.AgentID, f.rig.adminID)
+	if _, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, intent); !errors.Is(err, errDocumentIterationProposalUnavailable) {
+		t.Fatalf("propose grant and a direct edit mandate: %v", err)
+	}
+	var slug string
+	if err := f.rig.db.QueryRow(`SELECT slug FROM pages WHERE id=?`, intent.PageID).Scan(&slug); err != nil {
+		t.Fatal(err)
+	}
+	rec, err := f.pages.loadPage(t.Context(), f.a.WorkspaceID, slug)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.pages.agentMayEditSpec(t.Context(), f.a.WorkspaceID, rec, f.a.AgentID) || collaborationAgentGrantAllows(t.Context(), f.pages, f.a.WorkspaceID, rec, f.a.AgentID, true) {
+		t.Fatal("propose-only agent may write the Document")
 	}
 }
 

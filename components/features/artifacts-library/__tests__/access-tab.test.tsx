@@ -123,3 +123,19 @@ it("a new session in the same workspace never sees the previous one's list", asy
   expect(screen.queryByText("ann@example.test")).toBeNull()
   expect(await screen.findByText("Nobody else can open it yet.")).toBeTruthy()
 })
+
+it("groups an agent's Propose grant under Can propose, between Edit and Read", async () => {
+  flags.mock = false
+  const perms = (read: boolean, comment = false, edit = false) => ({ read, comment, edit, produce: false })
+  const owner = { subject_type: "user", subject_id: "u1", label: "You", paths: ["owner"], effective_permissions: perms(true, true, true), sources: [{ path: "owner", inherited: false, permissions: perms(true, true, true) }] }
+  const grants = [
+    { subject_type: "agent", subject: "scribe", subject_id: "a1", level: "propose", live: true },
+    { subject_type: "workspace", subject: "workspace", subject_id: "", level: "read", live: true },
+  ]
+  flags.fetch.mockImplementation(async (url: string) => new Response(JSON.stringify(url.includes("/grants") ? { page: "brief", grants } : { page: "brief", page_id: "p1", pages_version: 3, subjects: [owner] }), { status: 200 }))
+  renderTab()
+  const groups = await screen.findAllByRole("group")
+  expect(groups.map(g => g.getAttribute("aria-label"))).toEqual(["Edit access", "Can propose access", "Read access"])
+  expect(within(groups[1]).getByText("scribe")).toBeTruthy()
+  expect(within(groups[1]).getByText(/accepts or rejects/)).toBeTruthy()
+})

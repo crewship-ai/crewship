@@ -2,10 +2,10 @@ package main
 
 func pageManagementPermissionsSchema() map[string]any {
 	props := map[string]any{}
-	for _, name := range []string{"read", "comment", "edit", "produce"} {
+	for _, name := range []string{"read", "comment", "edit", "produce", "propose"} {
 		props[name] = map[string]any{"type": "boolean"}
 	}
-	return map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": []string{"read", "comment", "edit", "produce"}}
+	return map[string]any{"type": "object", "additionalProperties": false, "properties": props, "required": []string{"read", "comment", "edit", "produce", "propose"}}
 }
 
 func pageManagementSchemas(subject map[string]any) (map[string]any, map[string]any, map[string]any) {
