@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { ChevronDown, Download, Film, LayoutGrid, MousePointerClick, NotebookText, Play, Presentation, Square, ZoomIn, ZoomOut } from "lucide-react"
+import { ChevronDown, Download, Film, LayoutGrid, MonitorSpeaker, MousePointerClick, NotebookText, Play, Presentation, Square, ZoomIn, ZoomOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -14,7 +14,8 @@ import { artifactSlidesMode, artifactSlideThumbnail, type ArtifactSlidesProjecti
 import type { Slide } from "@/lib/slides/model"
 import { cn } from "@/lib/utils"
 import { SlideCanvas } from "@/components/features/slides/slide-canvas"
-import { SlidePresent } from "@/components/features/slides/slide-present"
+import { SlidePresent, type PresentFollow } from "@/components/features/slides/slide-present"
+import { newPresenterSession, presenterSessionOf, SlidePresenterView, usePresenterChannel } from "@/components/features/slides/slide-presenter"
 import { useArtifactProjectMutations, useArtifactProjectSnapshot } from "@/components/features/chat/artifact-context/projects/use-artifact-project-data"
 import { useArtifactSlides } from "@/components/features/chat/artifact-context/projects/use-artifact-slides"
 import type { ArtifactComment, ArtifactProjectSnapshot } from "@/components/features/chat/artifact-context/projects/types"
@@ -221,12 +222,65 @@ function SlidesStage({ projection, codeVersion, download, data, workspaceId, slu
   React.useEffect(() => {
     if (!present || typeof document === "undefined") return
     let entered = Boolean(document.fullscreenElement)
-    const onChange = () => { if (document.fullscreenElement) entered = true; else if (entered) setPresent(false) }
+    const onChange = () => { if (document.fullscreenElement) entered = true; else if (entered) stop.current() }
     document.addEventListener("fullscreenchange", onChange)
     return () => document.removeEventListener("fullscreenchange", onChange)
   }, [present])
-  const startPresent = () => { setPresent(true); enterFullscreen() }
-  const stopPresent = () => { setPresent(false); exitFullscreen() }
+  // Presenter view (#5151): this window is a presenter for `presenting`, or opened one as `audience`.
+  // Only the two windows of one session follow each other; notes stay in the presenter's window.
+  const [presenting] = React.useState(() => typeof window === "undefined" ? null : presenterSessionOf(window.location.search))
+  const [audience, setAudience] = React.useState<string | null>(null)
+  const [ended, setEnded] = React.useState(false)
+  const [follow, setFollow] = React.useState<PresentFollow>()
+  const [presenterError, setPresenterError] = React.useState("")
+  // The slide the other window just moved us to: adopting it is not a move to send back, so a
+  // late echo can never pull a fast presenter back a slide.
+  const received = React.useRef<string | null>(null)
+  const post = usePresenterChannel(presenting ?? audience, deck.slide_order, message => {
+    if (message.kind === "end") { if (presenting) setEnded(true); else { setAudience(null); setFollow(undefined); setPresent(false); exitFullscreen() } return }
+    const position = deck.slide_order.indexOf(message.id)
+    if (position < 0) return
+    received.current = message.id
+    setCurrent(position); setFollow(previous => ({ id: message.id, seq: (previous?.seq ?? 0) + 1 }))
+  })
+  React.useEffect(() => {
+    if (!slideId || !(presenting || audience)) return
+    const echo = received.current === slideId
+    received.current = null
+    if (!echo) post({ kind: "slide", id: slideId })
+  }, [slideId, presenting, audience, post])
+  // Closing or reloading either window ends the presentation in the other one too.
+  React.useEffect(() => {
+    if (!presenting && !audience) return
+    const leave = () => post({ kind: "end" })
+    window.addEventListener("pagehide", leave)
+    return () => window.removeEventListener("pagehide", leave)
+  }, [presenting, audience, post])
+  const startPresent = () => { setFollow(undefined); setPresent(true); enterFullscreen() }
+  const stopPresent = () => {
+    setPresent(false); setFollow(undefined); exitFullscreen()
+    if (audience) { post({ kind: "end" }); setAudience(null) }
+  }
+  const stop = React.useRef(stopPresent); stop.current = stopPresent
+  const startPresenter = () => {
+    const session = newPresenterSession()
+    const query = new URLSearchParams(window.location.search)
+    query.set("presenter", session)
+    const popup = window.open(`${window.location.pathname}?${query}#slide-${slideId}`, `crewship-presenter-${session}`, "popup,width=1280,height=800")
+    if (!popup) { setPresenterError("Your browser blocked the presenter window. Allow pop-ups for this site and try again."); return }
+    // Same origin and the same person, but the presenter window has no use for a handle on this one.
+    try { popup.opener = null } catch { /* already detached */ }
+    setPresenterError("")
+    // The audience screen never keeps the notes panel open behind the presentation.
+    setNotes(false)
+    setAudience(session); setFollow(undefined)
+    // Opening the window used the click; full screen is offered as a button in Present instead.
+    setPresent(true)
+  }
+  const endPresenter = () => {
+    post({ kind: "end" }); setEnded(true)
+    try { window.close() } catch { /* a window the browser keeps open says the presentation ended */ }
+  }
   const pdf = async () => {
     if (pdfPending) return
     setPdfPending(true); setPdfError("")
@@ -243,8 +297,9 @@ function SlidesStage({ projection, codeVersion, download, data, workspaceId, slu
   }
   const count = `${index + 1} / ${deck.slide_order.length}`
   return <section aria-label="Slides" data-slides-deck data-slides-layout={phone ? "phone" : "wide"} className="artifact-slides relative flex min-h-0 flex-1 flex-col bg-muted/40">
-    {(pdfError || selectionError || overflow.length > 0) && <div className={cn("relative z-[11] mx-3 grid gap-1 rounded-card border bg-card px-3 py-2 text-sm", phone ? "mt-16" : "mt-14")}>
+    {(pdfError || selectionError || presenterError || overflow.length > 0) && <div className={cn("relative z-[11] mx-3 grid gap-1 rounded-card border bg-card px-3 py-2 text-sm", phone ? "mt-16" : "mt-14")}>
       {pdfError && <p role="alert">{pdfError}</p>}
+      {presenterError && <p role="alert">{presenterError}</p>}
       {selectionError && <p role="status">{selectionError}</p>}
       {overflow.length > 0 && <p role="status" className="text-muted-foreground">Some slide content overflows its frame. PDF export may be unavailable.</p>}
     </div>}
@@ -307,6 +362,7 @@ function SlidesStage({ projection, codeVersion, download, data, workspaceId, slu
         </DropdownMenuContent>
       </DropdownMenu>
       <ArtifactTool icon={Play} label="Present" text="Present" onClick={startPresent} />
+      {!phone && <ArtifactTool icon={MonitorSpeaker} label="Presenter view" onClick={startPresenter} />}
     </ArtifactSlot>
     <ArtifactSlot name="viewport" label="Zoom">
       <ArtifactTool icon={ZoomOut} label="Zoom out" disabled={grid} onClick={() => step(-1)} />
@@ -326,8 +382,10 @@ function SlidesStage({ projection, codeVersion, download, data, workspaceId, slu
       selectMode={selectMode} setSelectMode={setSelectMode} anchor={anchor} setAnchor={setAnchor}
       onOpen={comment => { const position = deck.slide_order.findIndex(id => comment.path === `slides/${id}.html`); if (position >= 0) { go(position); setGrid(false) } }} />
     <ProjectVersionHistory data={data} workspaceId={workspaceId} slug={slug} canWrite={canWrite} setViewing={setViewing} />
-    {present && <SlidePresent deck={deck} initialSlideId={slideId} onClose={stopPresent}
+    {present && <SlidePresent deck={deck} initialSlideId={slideId} onClose={stopPresent} follow={follow} onFullscreen={audience ? enterFullscreen : undefined}
       onSlideChange={id => { const position = deck.slide_order.indexOf(id); if (position >= 0) setCurrent(position) }} />}
+    {presenting && slideId && <SlidePresenterView deck={deck} slideId={slideId} ended={ended} onEnd={endPresenter}
+      onSelect={id => { const position = deck.slide_order.indexOf(id); if (position >= 0) setCurrent(position) }} />}
   </section>
 }
 

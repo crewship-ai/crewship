@@ -69,8 +69,9 @@ try {
   const bundle = await readFile(join(directory, "bundle.js"), "utf8")
   const bundleCSS = await readFile(join(directory, "bundle.css"), "utf8").catch(() => "")
   browser = await chromium.launch({ headless: true, ...(process.env.CREWSHIP_BROWSER ? { executablePath: process.env.CREWSHIP_BROWSER } : {}) })
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } }), external = []
-  await page.route("**/*", async route => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  const page = await context.newPage(), external = []
+  await context.route("**/*", async route => {
     const url = new URL(route.request().url())
     if (url.origin !== ORIGIN) { external.push(url.href); return route.abort() }
     if (url.pathname === "/artifacts/page" || url.pathname === "/artifacts") return route.fulfill({ contentType: "text/html", body: '<!doctype html><html><head><link rel="stylesheet" href="/app.css"><link rel="stylesheet" href="/bundle.css"></head><body><div id="root"></div><script src="/bundle.js"></script></body></html>' })
@@ -166,8 +167,38 @@ try {
   await dialog.waitFor({ state: "detached" })
   await at("3 / 3", "#slide-closing")
 
+  // Presenter view (#5151): its own window with notes drives this window's Present; the audience never sees notes.
+  await page.locator("body").press("Home"); await at("1 / 3", "#slide-intro")
+  const opening = page.context().waitForEvent("page")
+  await page.getByRole("button", { name: "Presenter view", exact: true }).click()
+  const presenter = await opening
+  await presenter.waitForLoadState()
+  assert.match(presenter.url(), /\/artifacts\/page\?workspace_id=workspace&presenter=[0-9a-f]{24}#slide-intro$/)
+  const view = presenter.getByRole("dialog", { name: "Presenter view" })
+  await view.waitFor()
+  await view.getByRole("region", { name: "Speaker notes" }).getByText("Opening note").waitFor()
+  await dialog.waitFor()
+  assert.equal(await page.getByText("Opening note").count(), 0, "the audience window shows no notes")
+  await view.getByRole("button", { name: "Next slide" }).click()
+  await dialog.getByText("2 / 3", { exact: true }).waitFor()
+  await view.press("End")
+  await dialog.getByText("3 / 3", { exact: true }).waitFor()
+  await view.getByRole("region", { name: "Speaker notes" }).getByText("Thank the board").waitFor()
+  await view.getByRole("region", { name: "Next slide" }).getByText("End of the deck.").waitFor()
+  assert.equal(await page.getByText("Thank the board").count(), 0, "the audience window shows no notes")
+  if (artifacts) await presenter.screenshot({ path: join(artifacts, "06-presenter-view.png") })
+  await shot("07-audience-while-presenting")
+  // The audience's keys move the presenter too.
+  await dialog.press("ArrowLeft")
+  await view.getByText("2 / 3", { exact: true }).waitFor()
+  // Ending in the presenter window ends Present here, on the slide shown.
+  await view.getByRole("button", { name: "End presentation" }).click()
+  await dialog.waitFor({ state: "detached" })
+  await at("2 / 3", "#slide-details")
+  if (!presenter.isClosed()) await view.getByText("The presentation ended. You can close this window.").waitFor()
+
   assert.deepEqual(external, [])
-  process.stdout.write(`Chromium Slides frame: link/reload/back-forward/keys/filmstrip/grid/notes/Present return passed (fixture snapshot; full screen ${fullscreen ? "entered and exited" : "unavailable, Escape path"}).\n`)
+  process.stdout.write(`Chromium Slides frame: link/reload/back-forward/keys/filmstrip/grid/notes/Present return/Presenter view passed (fixture snapshot; full screen ${fullscreen ? "entered and exited" : "unavailable, Escape path"}; presenter window ${presenter.isClosed() ? "closed itself" : "stayed open with an ended notice"}).\n`)
 } finally {
   await browser?.close()
   await rm(directory, { recursive: true, force: true })
