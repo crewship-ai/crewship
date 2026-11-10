@@ -44,6 +44,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 
 	"artifact_data_collections":        IntentInclude,
 	"artifact_data_documents":          IntentInclude,
+	"artifact_data_runs":               IntentInclude, // bounded producer run history; started_by is erased with the identity
 	"artifact_design_documents":        IntentInclude, // durable live Yjs content, including unsnapshotted edits; never awareness or authority
 	"artifact_project_comments":        IntentInclude,
 	"artifact_project_comment_tasks":   IntentInclude,

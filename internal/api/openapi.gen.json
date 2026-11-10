@@ -1388,11 +1388,52 @@
             "maxItems": 50,
             "minItems": 1,
             "type": "array"
+          },
+          "run_id": {
+            "description": "Optional active run owned by the authenticated producer. The run must still match the collection generation.",
+            "pattern": "^run_[a-f0-9]{24}$",
+            "type": "string"
           }
         },
         "required": [
           "base_version",
           "documents"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataBatchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "code_version": {
+            "description": "Code version whose dashboard.json declared the visible collections.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "collection": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "documents": {
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDataDocument"
+            },
+            "maxItems": 50,
+            "type": "array"
+          },
+          "generation": {
+            "description": "The collection's data generation after this batch: the sum of its document versions, which only grows. If run_id was supplied, name it as data_generation when you finish that run as succeeded.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "collection",
+          "code_version",
+          "documents",
+          "generation"
         ],
         "type": "object"
       },
@@ -1519,6 +1560,239 @@
           "collection",
           "code_version",
           "documents"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataRun": {
+        "additionalProperties": false,
+        "properties": {
+          "collection": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "data_generation": {
+            "description": "The collection's data generation when the run finished.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "failure_reason": {
+            "description": "Returned to the owner and editors only.",
+            "type": "string"
+          },
+          "finished_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "finished_by": {
+            "description": "Who finished the run, as display attribution like started_by. Only the producer can finish a run as succeeded; any writer can finish it as failed.",
+            "type": "string"
+          },
+          "finished_by_kind": {
+            "enum": [
+              "human",
+              "agent",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "id": {
+            "pattern": "^run_[0-9a-f]{24}$",
+            "type": "string"
+          },
+          "partial": {
+            "description": "True for a failed run during which the collection's data changed: batches apply as written, so some values may be from this run.",
+            "type": "boolean"
+          },
+          "start_generation": {
+            "description": "The collection's data generation when the run started.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "started_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "started_by": {
+            "description": "Display attribution chosen by the server: You, Contributor, Agent or Former contributor. The producer is the authenticated principal and is never accepted from the client.",
+            "type": "string"
+          },
+          "started_by_kind": {
+            "enum": [
+              "human",
+              "agent",
+              "unknown"
+            ],
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "running",
+              "succeeded",
+              "failed"
+            ],
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "collection",
+          "state",
+          "started_by",
+          "started_by_kind",
+          "started_at",
+          "start_generation"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataRunError": {
+        "additionalProperties": false,
+        "properties": {
+          "blocking_runs": {
+            "description": "With 409 artifact_data_run_overlap: the runs that block this success. Any writer can finish one as failed.",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDataRun"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "code": {
+            "type": "string"
+          },
+          "error": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataRunFinish": {
+        "additionalProperties": false,
+        "properties": {
+          "base_version": {
+            "description": "Latest code version; it must declare the collection.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "data_generation": {
+            "description": "Required with state succeeded, refused with failed: the generation returned by the producer's last batch linked with run_id. It must equal the collection's current generation, or 409 artifact_data_run_generation.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "reason": {
+            "description": "Only with state failed. Stored cleaned: control characters and common credential patterns removed, at most 500 bytes.",
+            "maxLength": 2000,
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "succeeded",
+              "failed"
+            ],
+            "type": "string"
+          },
+          "unchanged": {
+            "description": "With state succeeded: the run verified that no data needed to change. Required when data_generation equals the run's start_generation, refused otherwise.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "base_version",
+          "state"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataRunStart": {
+        "additionalProperties": false,
+        "properties": {
+          "base_version": {
+            "description": "Latest code version; it must declare the collection.",
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "idempotency_key": {
+            "description": "Repeating a key returns the same run with 200; a key used by another producer returns 409.",
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "base_version",
+          "idempotency_key"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataRunSummary": {
+        "additionalProperties": false,
+        "properties": {
+          "active_runs": {
+            "description": "Every running run of the collection, newest first, so a run whose producer died stays findable. Returned to the owner and editors only.",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDataRun"
+            },
+            "maxItems": 16,
+            "type": "array"
+          },
+          "collection": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9_-]{0,127}$",
+            "type": "string"
+          },
+          "last_attempt_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "last_success_at": {
+            "description": "Finish time of the newest retained succeeded run; absent when none succeeded.",
+            "format": "date-time",
+            "type": "string"
+          },
+          "latest": {
+            "$ref": "#/components/schemas/ArtifactDataRun"
+          }
+        },
+        "required": [
+          "collection",
+          "latest",
+          "last_attempt_at"
+        ],
+        "type": "object"
+      },
+      "ArtifactDataRuns": {
+        "additionalProperties": false,
+        "properties": {
+          "code_version": {
+            "format": "int64",
+            "maximum": 9007199254740991,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "runs": {
+            "description": "One entry per collection declared in code_version that has at least one retained run.",
+            "items": {
+              "$ref": "#/components/schemas/ArtifactDataRunSummary"
+            },
+            "maxItems": 32,
+            "type": "array"
+          },
+          "stalled_after_seconds": {
+            "description": "Configured threshold after which clients show a running run as stalled (CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER, 1800 by default). A display default; the server never ends a run.",
+            "format": "int64",
+            "minimum": 60,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code_version",
+          "stalled_after_seconds",
+          "runs"
         ],
         "type": "object"
       },
@@ -140610,6 +140884,137 @@
         "x-crewship-read-only": true
       }
     },
+    "/api/v1/pages/{slug}/artifact/data-runs": {
+      "get": {
+        "description": "For each collection declared by code `version` that has a retained run: the newest run, the last attempt and the last success. Readers see the same Dashboards and versions as for a data read; the failure reason is returned to the owner and editors only. Requires the `artifact_projects` and `artifact_dashboard_data` feature flags.",
+        "operationId": "get_api_v1_pages_slug_artifact_data-runs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "version",
+            "required": true,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataRuns"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List Dashboard producer runs",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/pages/{slug}/artifact/data/{collection}": {
       "get": {
         "description": "Read every document of one collection declared by code `version`. Data is shared by all versions of the artifact; the version only selects which collections are visible. Requires the `artifact_projects` and `artifact_dashboard_data` feature flags.",
@@ -140759,7 +141164,7 @@
         "x-crewship-read-only": true
       },
       "post": {
-        "description": "Atomically upsert up to 50 documents. `base_version` must equal the latest code version and each document's `ifVersion` must equal its stored version (0 for a new document); any mismatch returns 409 and nothing is written. Allowed for the owner, the agent run acting for the owner, and a human with a current Edit share or inherited folder write; a workspace role without a grant does not write. Read and Comment shares get 403 and callers who cannot see the Dashboard get 404. Exceeding a dataset limit returns 413 `artifact_data_quota`.",
+        "description": "Atomically upsert up to 50 documents. `base_version` must equal the latest code version and each document's `ifVersion` must equal its stored version (0 for a new document); any mismatch returns 409 and nothing is written. Allowed for the owner, the agent run acting for the owner, and a human with a current Edit share or inherited folder write; a workspace role without a grant does not write. Read and Comment shares get 403 and callers who cannot see the Dashboard get 404. Exceeding a dataset limit returns 413 `artifact_data_quota`. The response carries the collection's data `generation` after the batch, which a producer names when it finishes a run. Set optional `run_id` to bind the batch to an active run of the same producer; an unknown or foreign run returns 404 and a broken generation chain returns 409.",
         "operationId": "post_api_v1_pages_slug_artifact_data_collection",
         "parameters": [
           {
@@ -140794,7 +141199,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ArtifactDataResponse"
+                  "$ref": "#/components/schemas/ArtifactDataBatchResponse"
                 }
               }
             },
@@ -140893,6 +141298,298 @@
           }
         ],
         "summary": "Write Dashboard documents",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/data/{collection}/runs": {
+      "post": {
+        "description": "Record that a producer started refreshing a declared collection. Needs exactly the authority of a data batch for a human caller (owner or a current Edit share; agent runs on the artifact tool path cannot record runs yet) and `base_version` equal to the latest code version. Repeating `idempotency_key` returns the same run with 200; a key used by another producer returns 409. The producer is the authenticated principal. The run records the collection's current data generation as `start_generation`. Configurable server defaults (`CREWSHIP_ARTIFACT_DATA_RUNS_*`), not contract: at most 4 running runs per collection (more return 409 `artifact_data_run_busy`), the newest 20 finished runs plus the newest success are retained, a running run is never pruned, and the key of a finished run stays reserved until 24 hours pass or the run is pruned, whichever comes first. Runs never write data or code versions; batches apply as written.",
+        "operationId": "post_api_v1_pages_slug_artifact_data_collection_runs",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactDataRunStart"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataRun"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataRun"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Start a Dashboard producer run",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/data/{collection}/runs/{run}": {
+      "post": {
+        "description": "End a running run as `succeeded` or `failed` with the authority of a data batch. Only the producer that started the run can finish it as succeeded (another writer gets 403 `artifact_data_run_forbidden`), naming as `data_generation` the generation returned by its last batch linked with `run_id`; it must still be current, and a success without a data change needs `unchanged` with the start generation, otherwise 409 `artifact_data_run_generation`; a success while another run of the collection is running, or after one failed with changed data during this run, returns 409 `artifact_data_run_overlap` with the blocking runs in `blocking_runs`. Any writer can finish a run as failed; the finisher is recorded and a failed run whose data changed is `partial`. A run that is never finished stays `running`. Repeating the same outcome returns the stored run; a different outcome returns 409 `artifact_data_run_conflict`. An unknown run, including one of another Page or workspace, returns 404.",
+        "operationId": "post_api_v1_pages_slug_artifact_data_collection_runs_run",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "collection",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "run",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactDataRunFinish"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataRun"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactDataRunError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Finish a Dashboard producer run",
         "tags": [
           "pages"
         ],

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest"
 import type { DashboardCollection, DashboardDataset } from "@/lib/pages/artifact-dashboard"
+import type { DashboardRunSummary } from "@/lib/pages/artifact-dashboard-runs"
 import { appCapabilities, appFrameStatus, runtimeMissing } from "../app/app-status"
 import { dashboardFrameStatus, dashboardFreshness, freshnessLabel } from "../dashboard/freshness"
 
@@ -95,5 +96,61 @@ describe("Dashboard freshness", () => {
     const chip = dashboardFrameStatus({ pending: false, error: false, limitExceeded: false, freshness: invalid, viewingOld: false, shown: 2, now })
     expect(chip).toMatchObject({ key: "error", label: "Invalid dataset details" })
     expect(chip!.detail).toContain("Dataset details in datasets.json are invalid")
+  })
+
+  describe("producer runs", () => {
+    const run = (over: Partial<DashboardRunSummary> = {}): DashboardRunSummary => ({ collection: "a", state: "succeeded", startedAt: new Date("2026-11-08T11:40:00"), finishedAt: new Date("2026-11-08T11:41:00"), lastAttemptAt: new Date("2026-11-08T11:40:00"), lastSuccessAt: new Date("2026-11-08T11:41:00"), reason: null, startedBy: "Agent", partial: false, stalledAfterMs: 30 * 60 * 1000, ...over })
+    const chip = (runs: DashboardRunSummary[] | null, datasets: Record<string, DashboardDataset> = { a: ds({ title: "Sales", maxAgeSeconds: 3600 }) }, written = "2026-11-08T11:41:00") => {
+      const freshness = dashboardFreshness([collection("a", [[written, "Scout"]])], { status: "ok", datasets }, now, runs)
+      return { freshness, status: dashboardFrameStatus({ pending: false, error: false, limitExceeded: false, freshness, viewingOld: false, shown: 2, now }) }
+    }
+    // Batches apply as they are written: nothing is staged, so the copy never
+    // promises that values stay at the last good refresh.
+    it("shows Refreshing while a run is in progress and says values update as they are written", () => {
+      const { freshness, status } = chip([run({ state: "running", startedAt: new Date("2026-11-08T11:55:00"), finishedAt: null, lastAttemptAt: new Date("2026-11-08T11:55:00") })])
+      expect(status).toMatchObject({ key: "refreshing", detail: expect.stringMatching(/Sales is refreshing since 11:55\. Values update as the refresh writes them; the last successful refresh was 11:41\./) })
+      expect(status!.detail).not.toMatch(/last good data|until the run finishes/)
+      expect(freshness.collections[0]).toMatchObject({ documents: 1, stale: false })
+    })
+    it("says the refresh failed with the reason the server returned, and that it changed nothing", () => {
+      const { freshness, status } = chip([run({ state: "failed", startedAt: new Date("2026-11-08T11:50:00"), finishedAt: new Date("2026-11-08T11:51:00"), lastAttemptAt: new Date("2026-11-08T11:50:00"), lastSuccessAt: new Date("2026-11-08T11:41:00"), reason: "warehouse 502" })])
+      expect(status).toMatchObject({ key: "stale", label: "Refresh failed", detail: expect.stringMatching(/Sales: the refresh at 11:50 failed: warehouse 502\. No values changed while it ran; the last successful refresh was 11:41\./) })
+      expect(freshness.collections[0].documents).toBe(1)
+    })
+    it("says data changed during a failed refresh, without claiming who wrote it", () => {
+      const { status } = chip([run({ state: "failed", partial: true, lastAttemptAt: new Date("2026-11-08T11:50:00"), reason: null })])
+      expect(status).toMatchObject({ key: "stale", label: "Refresh failed", detail: expect.stringMatching(/Sales: the refresh at 11:50 failed\. Data changed while this refresh ran, so some values may be from it; the last successful refresh was 11:41\./) })
+      expect(status!.detail).not.toMatch(/changed no values|Values keep/)
+    })
+    it("does not invent a reason for a reader and says when nothing ever succeeded", () => {
+      const { status } = chip([run({ state: "failed", lastSuccessAt: null, reason: null, lastAttemptAt: new Date("2026-11-08T11:50:00") })])
+      expect(status).toMatchObject({ key: "stale", label: "Refresh failed" })
+      expect(status!.detail).toMatch(/Sales: the refresh at 11:50 failed\. No values changed while it ran; no refresh has succeeded yet\./)
+      expect(status!.detail).not.toMatch(/: undefined|null/)
+    })
+    it("computes Stale from the last successful refresh, not from a later stray write", () => {
+      const { freshness, status } = chip([run({ lastSuccessAt: new Date("2026-11-08T10:00:00"), finishedAt: new Date("2026-11-08T10:00:00") })], undefined, "2026-11-08T11:59:00")
+      expect(freshness.collections[0]).toMatchObject({ stale: true, lastSuccessAt: new Date("2026-11-08T10:00:00") })
+      expect(status).toMatchObject({ key: "stale", detail: expect.stringMatching(/Sales last refreshed successfully 10:00, older than its stated maximum age of 1 h/) })
+    })
+    it("stays Live after a recent success and falls back to the last write without runs", () => {
+      expect(chip([run()]).status).toMatchObject({ key: "live", detail: expect.stringMatching(/Last successful refresh 11:41/) })
+      expect(chip(null).status).toMatchObject({ key: "live" })
+      expect(chip(null, undefined, "2026-11-08T09:00:00").status).toMatchObject({ key: "stale", detail: expect.stringMatching(/was last written 09:00/) })
+    })
+    it("calls a run that has been running for over 30 minutes stalled", () => {
+      const { status } = chip([run({ state: "running", startedAt: new Date("2026-11-08T11:10:00"), finishedAt: null, lastAttemptAt: new Date("2026-11-08T11:10:00") })])
+      expect(status).toMatchObject({ key: "stale", label: "Refresh stalled", detail: expect.stringMatching(/Sales has been refreshing since 11:10 without finishing\. Values may be partly updated; the last successful refresh was 11:41\./) })
+      expect(status!.detail).not.toMatch(/Values keep/)
+    })
+    it("uses the stalled threshold the server configured", () => {
+      const running = { state: "running" as const, startedAt: new Date("2026-11-08T11:45:00"), finishedAt: null, lastAttemptAt: new Date("2026-11-08T11:45:00") }
+      expect(chip([run(running)]).status).toMatchObject({ key: "refreshing" })
+      expect(chip([run({ ...running, stalledAfterMs: 10 * 60 * 1000 })]).status).toMatchObject({ key: "stale", label: "Refresh stalled" })
+    })
+    it("lets a read error win over every run state", () => {
+      const freshness = dashboardFreshness([collection("a", [["2026-11-08T11:00:00", "Scout"]])], { status: "absent" }, now, [run({ state: "failed" })])
+      expect(dashboardFrameStatus({ pending: false, error: true, limitExceeded: false, freshness, viewingOld: false, shown: 2, now })).toMatchObject({ key: "error" })
+    })
   })
 })

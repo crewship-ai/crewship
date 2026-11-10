@@ -31,7 +31,16 @@ var (
 	ErrDataQuota    = errors.New("artifact dataset quota exceeded")
 )
 
-type DataOptions struct{ Enabled bool }
+// DataOptions configures a DataStore. Run limits left zero use the
+// DefaultDataRuns* defaults; they are server settings, not API contract.
+type DataOptions struct {
+	Enabled    bool
+	RunsKept   int
+	RunsActive int
+	RunKeyTTL  time.Duration
+	// RunStalledAfter is only reported to clients; the server never ends a run.
+	RunStalledAfter time.Duration
+}
 type DataWrite struct {
 	ID        string          `json:"id"`
 	IfVersion int64           `json:"ifVersion"`
@@ -85,11 +94,19 @@ func (s *DataStore) transaction(ctx context.Context, key VersionKey, auth Versio
 // ifVersion means absent; positive values must match the exact stored counter.
 // Input has no attribution fields: the current host authority supplies them.
 func (s *DataStore) Batch(ctx context.Context, key VersionKey, collection string, writes []DataWrite, auth VersionAuthorize) ([]DataDocument, error) {
+	out, _, err := s.BatchGeneration(ctx, key, collection, writes, "", auth)
+	return out, err
+}
+
+// BatchGeneration is Batch that also returns the collection's data generation
+// after the batch. When runID is set, the authenticated starter must own the
+// active run and its previous generation must still be current.
+func (s *DataStore) BatchGeneration(ctx context.Context, key VersionKey, collection string, writes []DataWrite, runID string, auth VersionAuthorize) ([]DataDocument, int64, error) {
 	if s == nil || s.db == nil || !s.opts.Enabled {
-		return nil, ErrDisabled
+		return nil, 0, ErrDisabled
 	}
-	if !dataIdentifier.MatchString(collection) || len(writes) == 0 || len(writes) > MaxDataBatchWrites {
-		return nil, ErrDataInvalid
+	if (runID != "" && !validDataRunID(runID)) || !dataIdentifier.MatchString(collection) || len(writes) == 0 || len(writes) > MaxDataBatchWrites {
+		return nil, 0, ErrDataInvalid
 	}
 	seen := map[string]bool{}
 	// Batch receives writes, not the code base_version. Account the smallest
@@ -97,31 +114,58 @@ func (s *DataStore) Batch(ctx context.Context, key VersionKey, collection string
 	// whole request. Encode metadata only so value whitespace, Unicode and
 	// numeric lexemes retain their original byte cost.
 	batchBytes := len(`{"base_version":1,"documents":[]}`)
+	if runID != "" {
+		batchBytes += len(`,"run_id":""`) + len(runID)
+	}
 	for i, w := range writes {
 		if !dataIdentifier.MatchString(w.ID) || seen[w.ID] || w.IfVersion < 0 || w.IfVersion >= MaxDataVersion {
-			return nil, ErrDataInvalid
+			return nil, 0, ErrDataInvalid
 		}
 		seen[w.ID] = true
 		if len(w.Value) > MaxDataDocumentBytes {
-			return nil, ErrDataQuota
+			return nil, 0, ErrDataQuota
 		}
 		if !validDataObject(w.Value) {
-			return nil, ErrDataInvalid
+			return nil, 0, ErrDataInvalid
 		}
 		metadata, err := json.Marshal(DataWrite{ID: w.ID, IfVersion: w.IfVersion, Value: json.RawMessage(`{}`)})
 		if err != nil {
-			return nil, ErrDataInvalid
+			return nil, 0, ErrDataInvalid
 		}
 		batchBytes += len(metadata) - len(`{}`) + len(w.Value)
 		if i > 0 {
 			batchBytes++ // comma between document objects
 		}
 		if batchBytes > MaxDataBatchBytes {
-			return nil, ErrDataQuota
+			return nil, 0, ErrDataQuota
 		}
 	}
 	var out []DataDocument
+	var generation int64
 	err := s.transaction(ctx, key, auth, func(tx *sql.Tx, actor string) error {
+		if runID != "" {
+			run, err := scanDataRun(tx.QueryRowContext(ctx, `SELECT `+dataRunColumns+` FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection=? AND id=?`, key.WorkspaceID, key.PageID, collection, runID))
+			if errors.Is(err, sql.ErrNoRows) || (err == nil && run.StartedBy != actor) {
+				return ErrDataRunNotFound
+			}
+			if err != nil {
+				return err
+			}
+			if run.State != "running" {
+				return ErrDataRunGeneration
+			}
+			current, err := dataGeneration(ctx, tx, key, collection)
+			if err != nil {
+				return err
+			}
+			expected := run.StartGeneration
+			if run.writtenGeneration.Valid {
+				expected = run.writtenGeneration.Int64
+			}
+			if current != expected {
+				return ErrDataRunGeneration
+			}
+		}
 		if err := ConsumeStorageUpload(ctx, tx, key); err != nil {
 			return err
 		}
@@ -168,12 +212,18 @@ func (s *DataStore) Batch(ctx context.Context, key VersionKey, collection string
 		if count > MaxDataDocuments || size > MaxDataCollectionBytes {
 			return ErrDataQuota
 		}
-		return nil
+		var genErr error
+		generation, genErr = dataGeneration(ctx, tx, key, collection)
+		if genErr != nil || runID == "" {
+			return genErr
+		}
+		_, genErr = tx.ExecContext(ctx, `UPDATE artifact_data_runs SET written_generation=? WHERE workspace_id=? AND page_id=? AND collection=? AND id=?`, generation, key.WorkspaceID, key.PageID, collection, runID)
+		return genErr
 	})
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	return out, nil
+	return out, generation, nil
 }
 
 func (s *DataStore) Read(ctx context.Context, key VersionKey, collection string, auth VersionAuthorize) ([]DataDocument, error) {
