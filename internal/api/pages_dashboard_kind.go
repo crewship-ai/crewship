@@ -9,7 +9,7 @@ import (
 // Metadata is derived from the same immutable code selection as the viewer:
 // current owner's latest, everyone else's shared pin. It never examines a
 // reader's private latest version or guesses a kind from the title/address.
-func (h *PageHandler) artifactPageMetadata(ctx context.Context, workspace, page string) (string, int) {
+func (h *PageHandler) artifactPageMetadata(ctx context.Context, workspace, page string) (string, string, int) {
 	return h.artifactSelectedPageMetadata(ctx, workspace, page)
 }
 

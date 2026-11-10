@@ -19,7 +19,7 @@ import { KindThumb } from "./kind-thumb"
 /** Library Docs uses human collaborative creation, distinct from the Word Craft flow and agent artifact kinds. */
 export type LibraryCreationFlow = ArtifactKindKey
 export const CREATE_FLOW: Record<ArtifactKind, readonly LibraryCreationFlow[]> = {
-  docs: ["docs"], dashboard: ["dashboard"], slides: ["slides"], design: ["design"], app: ["project", "page"], word: ["word"], sheet: ["sheet"],
+  docs: ["docs"], dashboard: ["dashboard", "page"], slides: ["slides"], design: ["design"], app: ["project"], word: ["word"], sheet: ["sheet"],
 }
 
 export function creatableUiKinds(creatable: readonly ArtifactKindKey[], docsAvailable = false): { kind: ArtifactKind; flow: LibraryCreationFlow }[] {

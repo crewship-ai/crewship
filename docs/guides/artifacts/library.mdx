@@ -42,17 +42,24 @@ The library groups kinds as **Artifacts** (many people at once) and **Craft**
 | Kind | Family | What it is | Versions | Made by |
 |---|---|---|---|---|
 | Docs | Artifact | A shared document or canvas (board) | Yes | You, as a blank document, or an agent from chat |
-| Dashboard | Artifact | Numbers and tables agents keep current | Yes | An agent, from chat |
+| Dashboard | Artifact | Numbers and tables agents keep current, or a Page with panels (monitors and queues that crews fill, see [Pages](/guides/pages)) | Projects: yes. Pages with panels: no | An agent from chat, or you as an empty Page with panels |
 | Slides | Artifact | A deck you can present | Yes | An agent, from chat |
 | Design | Artifact | A shared canvas with screens; a design system shows as **Design · Library** | Yes | You, as a blank canvas |
-| App | Artifact | HTML you can run. **App · Static** is a multi-file HTML project or a Page with panels (monitors and queues that crews fill, see [Pages](/guides/pages)); an App with an application runs it | Projects: yes. Pages with panels: no | An agent from chat, or you as an empty Page |
+| App | Artifact | HTML you can run. **App · Static** is a multi-file HTML project; an App with an application, or a project that runs its own scripts (an interactive app, such as the Crewship Showcase), runs it. An interactive app is an App even when it keeps data in a collection | Yes | An agent from chat |
 | Word | Craft | A document that one person edits at a time | Yes (native documents) | You, or an agent from chat |
 | Sheet | Craft | A workbook with formulas | Yes (native workbooks) | Listed in the library. You can't create one here yet. |
 
-The **Kind** filter in the side panel still lists how an item is stored:
-**Static app** (a project), **App** (a Page with panels), Dashboard, Word,
-Sheet, Slides and Design. `kind:project` and `kind:page` keep working in
-search.
+A Page with panels (monitors and queues that crews fill, see
+[Pages](/guides/pages)) shows as a **Dashboard**, or as an **App** when it
+publishes an application.
+
+The card, the **Kind** chips on Home, the **Kind** filter in the side panel,
+its counts, the **Preview** panel and the artifact's own header all use the
+same kind. The library knows a design system and an interactive app from the
+list itself, before you open them, so a design system is counted under
+**Designs** and an interactive app under **Apps** everywhere. Older searches
+and links keep working: `kind:project` finds Apps, `kind:page` finds the
+kind a Page with panels shows as.
 
 Each item in the library shows its version state:
 
@@ -107,7 +114,7 @@ name or the address (slug). You can also use these operators:
 
 | Operator | Matches |
 |---|---|
-| `kind:project`, `kind:word`, `kind:slides`, … | That kind; the plural form also works |
+| `kind:app`, `kind:dashboard`, `kind:design`, `kind:word`, `kind:slides`, … | That kind; the plural form also works |
 | `is:shared` | Artifacts with a shared version |
 | `is:unshared` or `is:draft` | Artifacts with versions but no shared version |
 | `is:private` | Artifacts only their owner can open |

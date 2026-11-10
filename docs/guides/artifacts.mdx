@@ -35,9 +35,12 @@ library flag on, old Pages addresses lead to the library as well; see
 [One address per artifact](#one-address-per-artifact).
 
 The library lists each Page with its kind: Project, Dashboard, Page, Word,
-Sheet, Slides or Design. The kind comes from the server's `artifact_kind` or
-from the Page's stored content, never from its name. For a versioned item it
-shows the shared version, or marks the item as not shared yet.
+Sheet, Slides or Design. The kind comes from the server's `artifact_kind` and
+`artifact_profile` or from the Page's stored content, never from its name. For a versioned item it
+shows the shared version, or marks the item as not shared yet. The list,
+counts, filters, preview, header and New artifact all show the same library
+label for it: a design system is **Design · Library**, and an interactive
+project is an **App**, never a Dashboard.
 
 | View | What it holds |
 |---|---|

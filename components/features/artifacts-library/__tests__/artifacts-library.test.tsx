@@ -167,7 +167,6 @@ const listedNames = () => within(screen.getByRole("list", { name: "Artifacts" })
 
 it.each([
   ["name", [wire({ slug: "alpha", id: "page-alpha", name: "Alpha", artifact_kind: "word", updated_at: "2026-10-20T10:00:00Z" }), wire({ slug: "zulu", id: "page-zulu", name: "Zulu", artifact_kind: "word", updated_at: "2026-10-30T10:00:00Z" })], ["Alpha", "Zulu"]],
-  ["kind", [wire({ slug: "deck", id: "page-deck", name: "Older project", artifact_kind: "project", updated_at: "2026-10-20T10:00:00Z" }), wire({ slug: "memo", id: "page-memo", name: "Newer word", artifact_kind: "word", updated_at: "2026-10-30T10:00:00Z" })], ["Older project", "Newer word"]],
 ] as const)("a server window keeps the server's %s order, never re-sorted by update time", (sort, pages, want) => {
   serverOn()
   windowState.pages = [...pages]
@@ -178,6 +177,42 @@ it.each([
   fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
   expect(new URLSearchParams(windowState.calls[windowState.calls.length - 1].params!).get("sort")).toBe(sort)
   expect(listedNames()).toEqual(want)
+})
+
+// #5152: the server sorts by storage kind; the UI kind (an interactive app is an App) is derived in the browser.
+it("sorts by kind in the browser, in the UI kinds' order, even with the server catalog on", () => {
+  serverOn()
+  state.pages = [
+    wire({ slug: "memo", id: "page-memo", name: "Newer word", artifact_kind: "word", updated_at: "2026-10-30T10:00:00Z" }),
+    wire({ slug: "showcase", id: "page-showcase", name: "Showcase", artifact_kind: "project", artifact_profile: "interactive", updated_at: "2026-10-25T10:00:00Z" } as Partial<WirePage>),
+    wire({ slug: "sales", id: "page-sales", name: "Sales", artifact_kind: "dashboard", updated_at: "2026-10-20T10:00:00Z" }),
+  ]
+  renderLibrary()
+  openAll()
+  fireEvent.change(screen.getByRole("combobox", { name: "Sort" }), { target: { value: "kind" } })
+  fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
+  expect(windowState.calls[windowState.calls.length - 1].params).toBeNull()
+  expect(listedNames()).toEqual(["Sales", "Showcase", "Newer word"])
+})
+
+// #5152 review: a design system is a Design, so the Design switch leaves it
+// out like a Design canvas, in the browser and in the server catalog alike.
+it.each([["browser", false], ["server catalog", true]] as const)("leaves a design-system project out while the Design switch is off (%s)", (_mode, server) => {
+  if (server) serverOn()
+  const rows = [
+    wire({ slug: "tokens", id: "page-tokens", name: "Tokens", artifact_kind: "project", artifact_profile: "design_system" } as Partial<WirePage>),
+    wire({ slug: "canvas", id: "page-canvas", name: "Checkout canvas", artifact_kind: "design" }),
+    wire({ slug: "site", id: "page-site", name: "Pricing site", artifact_kind: "project" }),
+  ]
+  state.pages = rows
+  // The server window answers its kind facet the way the server does: a design system is design.
+  windowState.pages = rows.filter(row => row.slug === "site")
+  windowState.total = windowState.pages.length
+  renderLibrary()
+  openAll()
+  fireEvent.click(screen.getByRole("radio", { name: "Gallery" }))
+  expect(listedNames()).toEqual(["Pricing site"])
+  if (server) expect(new URLSearchParams(windowState.calls[windowState.calls.length - 1].params!).get("kind")?.split(",")).not.toContain("design")
 })
 
 it("moves to the last page when the total shrinks under the current offset, so nothing becomes unreachable", () => {

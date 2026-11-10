@@ -14,6 +14,8 @@ describe("kindOf", () => {
     ["slides", { kind: "slides" }, { kind: "slides" }],
     ["design is a Canvas design", { kind: "design" }, { kind: "design", mode: "canvas" }],
     ["design system manifest is a Design Library", { kind: "project", designSystem: true }, { kind: "design", mode: "library", badge: "Library" }],
+    ["interactive project is an App, not Static", { kind: "project", interactive: true }, { kind: "app" }],
+    ["interactive project with a helper collection is an App, never a Dashboard", { kind: "dashboard", interactive: true }, { kind: "app" }],
     ["native Word is Craft Word", { kind: "word", native: true }, { kind: "word" }],
     ["legacy doc (Word storage without a version head) is Docs", { kind: "word", native: false }, { kind: "docs", mode: "page" }],
     ["Sheet", { kind: "sheet", native: true }, { kind: "sheet" }],
@@ -75,11 +77,29 @@ describe("kindOf", () => {
       wire({ slug: "demo-live", name: "Demo live", has_application: true, panel_count: 2 } as Partial<WirePage>),
       wire({ slug: "brief", name: "Brief", artifact_kind: "word" }),
       wire({ slug: "old-doc", name: "Old doc", has_document: true }),
+      // #5152: the profile comes with the catalog, so these are named right before they are opened.
+      wire({ slug: "ref-crewship-showcase", name: "Showcase", artifact_kind: "project", artifact_profile: "interactive" } as Partial<WirePage>),
+      wire({ slug: "ref-design-system", name: "Design system", artifact_kind: "project", artifact_profile: "design_system" } as Partial<WirePage>),
+      wire({ slug: "unknown-profile", name: "Unknown", artifact_kind: "project", artifact_profile: "spreadsheet" } as Partial<WirePage>),
     ].map(toPageView))
     const bySlug = Object.fromEntries(items.map(item => [item.slug, kindText(kindOf(item))]))
     expect(bySlug).toEqual({
       "landing-page": "Design", deck: "Slides", roi: "App · Static", sales: "Dashboard", "demo-live": "App", brief: "Word", "old-doc": "Docs",
+      "ref-crewship-showcase": "App", "ref-design-system": "Design · Library", "unknown-profile": "App · Static",
     })
-    expect(uiKindCounts(items)).toEqual([["docs", 1], ["dashboard", 1], ["slides", 1], ["design", 1], ["app", 2], ["word", 1]])
+    expect(uiKindCounts(items)).toEqual([["docs", 1], ["dashboard", 1], ["slides", 1], ["design", 2], ["app", 4], ["word", 1]])
+  })
+})
+
+// #5152: what New <kind> makes is shown as that kind once it exists.
+describe("New artifact makes what it names", () => {
+  it("makes a Page with panels from New Dashboard, never New App", async () => {
+    const { creatableUiKinds } = await import("../library-home")
+    expect(creatableUiKinds(["page"])).toEqual([{ kind: "dashboard", flow: "page" }])
+    expect(creatableUiKinds(["project", "page"])).toEqual([{ kind: "dashboard", flow: "page" }, { kind: "app", flow: "project" }])
+    expect(creatableUiKinds(["dashboard", "page", "project"])).toEqual([{ kind: "dashboard", flow: "dashboard" }, { kind: "app", flow: "project" }])
+    // What each flow makes, read back through the one derivation.
+    expect(kindOf({ kind: "page" }).kind).toBe("dashboard")
+    expect(kindOf({ kind: "project" }).kind).toBe("app")
   })
 })
