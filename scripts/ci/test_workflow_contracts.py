@@ -531,6 +531,48 @@ class WorkflowContracts(unittest.TestCase):
         self.assertIn('github.event.before', job)
         self.assertIn('fetch-depth: 0', job)
 
+    def test_lint_export_preparation_keeps_the_complete_test_graph_and_fails_closed(self):
+        ci = self.text('ci.yml')
+        job = self.job(ci, 'go-lint')
+        warm = self.step(ci, 'Warm Go export data for lint')
+        script = textwrap.dedent(re.search(r'        run: \|\n((?:          .*\n|\n)*)', warm).group(1))
+        self.assertLess(job.index('Warm Go export data for lint'), job.index('Run golangci-lint'))
+        self.assertIn('timeout-minutes: 5', warm)
+        self.assertNotIn('continue-on-error', warm)
+        self.assertIn('timeout-minutes: 8', self.step(ci, 'Run golangci-lint'))
+        self.assertEqual(int(re.search(r'^    timeout-minutes: (\d+)', job, re.M).group(1)), 15)
+        # Execute the real preparation shell with a compiler substitute. A
+        # failed export must remain a failed step; narrowing to production
+        # packages, a selected package, or executing test bodies is forbidden.
+        for status in (0, 42):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as temp:
+                root = Path(temp)
+                fake = root / 'go'
+                fake.write_text('#!/bin/bash\nprintf "%s\\n" "$@" > "$COMMAND_LOG"\nexit "$EXPORT_STATUS"\n')
+                fake.chmod(0o755)
+                env = dict(os.environ, PATH=f'{root}:' + os.environ['PATH'],
+                           COMMAND_LOG=str(root / 'args'), EXPORT_STATUS=str(status))
+                result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
+                                        cwd=root, env=env, capture_output=True, text=True)
+                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertEqual((root / 'args').read_text().splitlines(),
+                                 ['list', '-export', '-deps', '-test', './...'])
+
+    def test_manual_codeql_qualification_keeps_both_actual_analysis_languages(self):
+        codeql = self.text('codeql.yml')
+        self.assertIn('  workflow_dispatch: {}', codeql)
+        planner = self.job(codeql, 'changes')
+        script = textwrap.dedent(planner.split('        run: |\n', 1)[1])
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / 'outputs'
+            result = subprocess.run(['bash', '-e', '-o', 'pipefail', '-c', script],
+                                    env=dict(os.environ, GITHUB_EVENT_NAME='workflow_dispatch',
+                                             GITHUB_OUTPUT=str(output)), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            matrix = json.loads(output.read_text().strip().removeprefix('include='))
+            self.assertCountEqual(matrix, [{'language': 'go', 'build-mode': 'manual'},
+                                          {'language': 'javascript-typescript', 'build-mode': 'none'}])
+
     def test_both_publishers_scan_final_binary_artifacts(self):
         for workflow, job in [('nightly.yml', 'binaries'), ('release.yml', 'release')]:
             block = self.job(self.text(workflow), job)
