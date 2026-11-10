@@ -16,19 +16,20 @@ import { useWordDocumentCreation, type DocumentFormat } from "./use-word-documen
 
 const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/
 
-export function NewDocumentDialog({workspaceId,onClose,onCreated}:{workspaceId:string;onClose:()=>void;onCreated:(slug:string,nativePageId?:string)=>void}) {
+export function NewDocumentDialog({workspaceId,onClose,onCreated,docsOnly=false}:{workspaceId:string;onClose:()=>void;onCreated:(slug:string,pageId?:string)=>void;docsOnly?:boolean}) {
   const [name,setName]=useState("")
   const [slug,setSlug]=useState("")
   const {allowed,availability,selectedFormat,setFormat,formatAvailable,frozen,create,retrying}=useWordDocumentCreation(workspaceId)
-  const canSubmit=allowed && formatAvailable && !create.isPending && Boolean(name.trim()) && SLUG.test(slug)
-  const submit=()=>{if(canSubmit)create.mutate({name,slug},{onSuccess:saved=>{if(saved.nativePageId)onCreated(saved.slug,saved.nativePageId);else onCreated(saved.slug);onClose()}})}
+  const available=docsOnly ? availability.data===true : formatAvailable
+  const canSubmit=allowed && available && !create.isPending && Boolean(name.trim()) && SLUG.test(slug)
+  const submit=()=>{if(canSubmit)create.mutate({name,slug,...(docsOnly?{format:"doc" as const}:{})},{onSuccess:saved=>{const id=docsOnly?saved.pageId:saved.nativePageId;if(id)onCreated(saved.slug,id);else onCreated(saved.slug);onClose()}})}
   // The kit's create surface (dialogs-through-kit guard): Esc, the overlay
   // and the header close all go through onOpenChange, which a pending create
   // refuses so the original intent is not lost mid-request.
   return <CreateSurface open size="sm" onOpenChange={open=>{if(!open && !create.isPending)onClose()}} onSubmit={submit} className="touch-form">
-    <CreateSurfaceHeader icon={FilePlus2} context="Artifacts" title="New Doc" description="Create a document owned by you." onClose={create.isPending ? undefined : onClose} />
+    <CreateSurfaceHeader icon={FilePlus2} context="Artifacts" title={docsOnly?"New Docs":"New Doc"} description="Create a document owned by you." onClose={create.isPending ? undefined : onClose} />
     <CreateSurfaceBody className="flex flex-col gap-3">
-      {(availability.wordcraftNative || availability.gridcraftNative === true || availability.wordcraftSDKPrefix || availability.wordcraftCommands) && <CreateSurfaceField label="Format" htmlFor="document-format"><select id="document-format" className={CREATE_SURFACE_INPUT} disabled={frozen || create.isPending} value={selectedFormat} onChange={event=>setFormat(event.target.value as DocumentFormat)}>
+      {!docsOnly && (availability.wordcraftNative || availability.gridcraftNative === true || availability.wordcraftSDKPrefix || availability.wordcraftCommands) && <CreateSurfaceField label="Format" htmlFor="document-format"><select id="document-format" className={CREATE_SURFACE_INPUT} disabled={frozen || create.isPending} value={selectedFormat} onChange={event=>setFormat(event.target.value as DocumentFormat)}>
         {availability.wordcraftNative && <option value="native">Word</option>}{availability.gridcraftNative === true && <option value="sheet">Sheet</option>}{availability.wordcraftSDKPrefix && <option value="wordcraft">WordCraft</option>}{availability.data === true && <option value="doc">Doc</option>}{availability.wordcraftCommands && <option value="commands">WordCraft (test příkazů)</option>}
       </select></CreateSurfaceField>}
       <CreateSurfaceField label="Name" htmlFor="document-name"><Input id="document-name" className={CREATE_SURFACE_INPUT} autoFocus required disabled={frozen || create.isPending} value={name} onChange={event=>{const next=event.target.value;setName(next);if(!slug || slug===name.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))setSlug(next.toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,""))}} /></CreateSurfaceField>
@@ -37,9 +38,9 @@ export function NewDocumentDialog({workspaceId,onClose,onCreated}:{workspaceId:s
           workspace OWNER/ADMIN, plus live grants and folders added later. It is
           not a private-audience Document; "My space" lists only those. */}
       <div className="text-sm"><p className="font-medium">Who can open it</p><p className="text-muted-foreground">You, and workspace owners and admins. Others only after you share it.</p></div>
-      {!formatAvailable && <p role="status" className="text-label text-muted-foreground">Document creation is unavailable.</p>}
+      {!available && <p role="status" className="text-label text-muted-foreground">Document creation is unavailable.</p>}
     </CreateSurfaceBody>
     <CreateSurfaceRefusal message={create.error ? create.error.message : null} />
-    <CreateSurfaceFooter onCancel={create.isPending ? undefined : onClose} primaryLabel={create.isPending?"Creating…":retrying?"Retry initialization":"Create Doc"} primaryDisabled={!canSubmit} busy={create.isPending} onPrimary={submit} />
+    <CreateSurfaceFooter onCancel={create.isPending ? undefined : onClose} primaryLabel={create.isPending?"Creating…":retrying?"Retry initialization":docsOnly?"Create Docs":"Create Doc"} primaryDisabled={!canSubmit} busy={create.isPending} onPrimary={submit} />
   </CreateSurface>
 }

@@ -914,6 +914,15 @@ the same control to behave differently, which is the exact debt #1776 is trackin
 
 ### 9b.7 Addresses — one canonical URL per artifact
 
+The Artifacts library's **New Docs** action opens collaborative document
+creation only when Page creation is allowed and the Docs service is confirmed
+enabled. It explicitly chooses the `doc` format even when native Word or Sheet
+is also available, initializes at `CREATE_SCHEMA`, and opens the returned
+immutable Page ID. It reuses the original Page and initialization request on
+retry. Its audience text includes workspace owners and admins; it does not
+promise a private audience. The menu and format/identity regressions are in
+`artifacts-library.test.tsx` and `new-document.test.tsx`.
+
 Every Page has one browser address, `/artifacts/<page-id>?workspace_id=<id>`
 (issue #5129), with `&version=N` for a pinned project version. `<page-id>` is
 the immutable ID, so a renamed or reused slug never changes what a link opens.

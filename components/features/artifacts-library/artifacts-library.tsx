@@ -13,11 +13,13 @@ import { usePageFolders } from "@/hooks/use-page-folders"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useUserPreference } from "@/hooks/use-user-preference"
 import { useIsMobile } from "@/hooks/use-mobile"
+import { useDocumentsAvailability } from "@/hooks/use-documents-availability"
+import { NewDocumentDialog } from "@/components/features/pages/new-document-dialog"
 import { formatRelativeShort } from "@/lib/time"
 import { artifactsDesign, artifactsServerCatalog, artifactsSharingMock } from "@/lib/feature-flags"
 import { cn } from "@/lib/utils"
 import { readLocalDraft } from "@/components/features/chat/artifact-context/craft/local-draft"
-import { ARTIFACT_KINDS, type ArtifactKindKey } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
+import { ARTIFACT_KINDS } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
 import { useArtifactCapabilities } from "@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities"
 import { NewArtifactDialog } from "./new-artifact-dialog"
 import { libraryItems, withLibraryState, type LibraryItem } from "./library-items"
@@ -34,7 +36,7 @@ import { ArtifactDetail } from "./artifact-detail"
 import { ArtifactFrame, NO_FRAME_CAPABILITIES } from "./frame"
 import { kindOf, kindText } from "./kinds"
 import { KindBadge, KindTile } from "./kind-tile"
-import { LibraryHome, NewArtifactMenu } from "./library-home"
+import { LibraryHome, NewArtifactMenu, type LibraryCreationFlow } from "./library-home"
 import { LibraryPanel } from "./library-panel"
 import { KindThumb } from "./kind-thumb"
 import { useArtifactAccess } from "./use-artifact-access"
@@ -324,6 +326,8 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   const { pages, loading, error, refresh } = usePages(workspaceId, undefined, CATALOG)
   const { folders } = usePageFolders(workspaceId)
   const caps = useArtifactCapabilities(workspaceId)
+  const docsAvailability = useDocumentsAvailability(workspaceId)
+  const canCreateDocs = caps.pages && docsAvailability.data === true
   const sharing = useSharingApi(workspaceId)
   // Archive, test origin and mock moves; re-read whenever a sharing write settles.
   const stateTick = useQuery({ queryKey: sharingKeys.state(workspaceId), queryFn: () => Date.now(), staleTime: Infinity }).data
@@ -341,7 +345,7 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   const [sort, setSort] = useState<SortKey>("updated")
   const [group, setGroup] = useState<GroupKey>("none")
   const [layout, setLayout] = useState<Layout>("list")
-  const [newKind, setNewKind] = useState<ArtifactKindKey | null | undefined>(undefined)
+  const [newKind, setNewKind] = useState<LibraryCreationFlow | null | undefined>(undefined)
   const creatable = ARTIFACT_KINDS.filter(kind => kind.live(caps)).map(kind => kind.key)
   // Per person, synced across devices: what they opened and what they starred. Never shared with others.
   const [recent, setRecent] = useUserPreference<{ slug: string; at: number }[]>(`artifacts.${workspaceId}.recentlyOpened`, [])
@@ -416,7 +420,7 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
 
   // The open artifact's frame owns the bar; the library's bar is only for lists.
   const subBar = item === null ? <SubBar icon={Library} title="Artifacts" ariaLabel="Artifacts" heading={false}
-    actions={<NewArtifactMenu creatable={creatable} onNew={kind => setNewKind(kind)} />} /> : null
+    actions={<NewArtifactMenu creatable={creatable} docsAvailable={canCreateDocs} onNew={kind => setNewKind(kind)} />} /> : null
   // Not in the catalog: ask the server why, so the frame can say signed out, no access or not there.
   const access = useArtifactAccess(workspaceId, item === null ? null : bySlug ? item : "@" + item, item !== null && !selected && !loading)
   // The folder panel steps aside while an artifact is open, unless pinned; its own toggle still works per open.
@@ -527,7 +531,15 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
     {/* A just-created artifact is not in the list yet. With its ID it opens at /artifacts/<id> at once: opening it by
         slug first mounted the editor (whose admission refreshes the session) right before the exported build reloaded
         the page as /artifacts/<id>, losing that refresh's cookies and signing the person out (#4902). */}
-    {newKind !== undefined && <NewArtifactDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setNewKind(undefined) }}
+    {newKind === "docs" && <NewDocumentDialog workspaceId={workspaceId} docsOnly onClose={() => setNewKind(undefined)}
+      onCreated={(slug, id) => {
+        setNewKind(undefined)
+        if (slug) setMadeHere([slug, ...(Array.isArray(madeHere) ? madeHere : []).filter(entry => entry !== slug)].slice(0, 50))
+        refresh()
+        if (id) onSelect(id)
+        else if (slug) onSelect(null, slug)
+      }} />}
+    {newKind !== undefined && newKind !== "docs" && <NewArtifactDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setNewKind(undefined) }}
       defaultKind={newKind ?? undefined} defaultFolderSlug={filters.folder || undefined}
       onCreated={(slug, id) => {
         setNewKind(undefined)
