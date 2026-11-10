@@ -37,6 +37,27 @@ func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
 	if err := store.Share(t.Context(), key, 3, 1, auth); err != nil {
 		t.Fatal(err)
 	}
+	// Round-trip a real publication and pin with this existing encrypted
+	// fixture, including a source Page ID that must change in a fork.
+	libraryPage := "artifact-library-backup"
+	if _, err := source.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES(?,?,?,?,?,'{}')`, libraryPage, ws, libraryPage, "Brand library", "u_admin"); err != nil {
+		t.Fatal(err)
+	}
+	library := artifacts.VersionKey{WorkspaceID: ws, PageID: libraryPage}
+	tokens := []byte(`{"colors":{"brand":"#123456"}}` + "\n")
+	if _, err := store.Apply(t.Context(), library, artifacts.VersionRequest{EntryPoint: "index.html", Files: map[string]artifacts.VersionFile{
+		"index.html":          {Content: []byte("Brand library"), MediaType: "text/html"},
+		artifacts.LibraryFile: {Content: tokens, MediaType: "application/json"},
+	}}, auth); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.PublishLibrary(t.Context(), library, 1, auth); err != nil {
+		t.Fatal(err)
+	}
+	if _, changed, err := store.PinLibrary(t.Context(), key, libraryPage, artifacts.LibraryPinExpect{Version: 1}, auth,
+		func(ctx context.Context, tx *sql.Tx, _ int64) (string, error) { return auth(ctx, tx) }); err != nil || !changed {
+		t.Fatalf("pin setup changed=%v: %v", changed, err)
+	}
 	actor := backup.Actor{UserID: "u_admin", Email: "admin@e2e.test", Role: "ADMIN"}
 	bundle, err := backup.CreateBackup(t.Context(), source, backup.CreateOptions{Scope: backup.ScopeWorkspace, WorkspaceID: ws, OutputDir: t.TempDir(), Passphrase: "artifact-version-roundtrip-passphrase", Actor: actor})
 	if err != nil {
@@ -54,7 +75,7 @@ func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
 			}
 			var restored artifacts.VersionKey
 			var family string
-			if err := target.QueryRow(`SELECT workspace_id,page_id,content_type FROM artifact_version_heads`).Scan(&restored.WorkspaceID, &restored.PageID, &family); err != nil {
+			if err := target.QueryRow(`SELECT h.workspace_id,h.page_id,h.content_type FROM artifact_version_heads h JOIN pages p ON p.id=h.page_id WHERE p.slug=?`, page).Scan(&restored.WorkspaceID, &restored.PageID, &family); err != nil {
 				t.Fatal(err)
 			}
 			if family != "artifact_project" {
@@ -78,6 +99,25 @@ func TestArtifactVersionBackupPreservesHistoryPinAndBinaryAssets(t *testing.T) {
 			versions, err := recovered.Versions(t.Context(), restored, auth)
 			if err != nil || len(versions) != 3 {
 				t.Fatalf("history lost %+v %v", versions, err)
+			}
+			var restoredLibrary string
+			if err := target.QueryRow(`SELECT id FROM pages WHERE workspace_id=? AND slug=?`, restored.WorkspaceID, libraryPage).Scan(&restoredLibrary); err != nil {
+				t.Fatal(err)
+			}
+			if (restoredLibrary != libraryPage) != fork {
+				t.Fatalf("unexpected library remap: fork=%v id=%q", fork, restoredLibrary)
+			}
+			pub, err := recovered.ReadLibraryPublication(t.Context(), artifacts.VersionKey{WorkspaceID: restored.WorkspaceID, PageID: restoredLibrary}, auth)
+			if err != nil || pub.Version != 1 {
+				t.Fatalf("publication lost: %+v %v", pub, err)
+			}
+			pin, err := recovered.ReadLibraryPin(t.Context(), restored, auth)
+			if err != nil || pin.LibraryPageID != restoredLibrary || pin.LibraryVersion != 1 || !bytes.Equal(pin.Content, tokens) {
+				t.Fatalf("pin lost its source or exact bytes: %+v %v", pin, err)
+			}
+			var pinType string
+			if err := target.QueryRow(`SELECT typeof(content) FROM artifact_library_pins WHERE workspace_id=? AND page_id=?`, restored.WorkspaceID, restored.PageID).Scan(&pinType); err != nil || pinType != "blob" {
+				t.Fatalf("pin content changed storage type: %q %v", pinType, err)
 			}
 			var blobType string
 			if err := target.QueryRow(`SELECT typeof(content) FROM artifact_version_blobs WHERE length(content)=?`, len(asset)).Scan(&blobType); err != nil || blobType != "blob" {

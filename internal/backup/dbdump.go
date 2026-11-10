@@ -326,6 +326,8 @@ var BackupTables = []string{
 	"artifact_design_documents",
 	"artifact_version_blobs",
 	"artifact_versions",
+	"artifact_library_publications", // FK artifact_version_heads
+	"artifact_library_pins",         // FK artifact_version_heads; library_page_id is a soft Page reference
 	"artifact_data_collections",
 	"artifact_data_documents",
 	"artifact_project_comments",

@@ -1735,6 +1735,251 @@
         ],
         "type": "object"
       },
+      "ArtifactLibraryPin": {
+        "additionalProperties": false,
+        "properties": {
+          "copied_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "copied_by": {
+            "description": "Human who made or updated the copy.",
+            "type": "string"
+          },
+          "library_name": {
+            "description": "Library name when the copy was made.",
+            "type": "string"
+          },
+          "library_page_id": {
+            "description": "Library Page id. The copy outlives the Library.",
+            "type": "string"
+          },
+          "library_version": {
+            "description": "Library version the copy was made from.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sha256": {
+            "description": "SHA-256 of the copied design-system.json bytes.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "tokens": {
+            "additionalProperties": true,
+            "description": "The pinned design-system.json, byte for byte.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "library_page_id",
+          "library_version",
+          "library_name",
+          "sha256",
+          "copied_by",
+          "copied_at",
+          "tokens"
+        ],
+        "type": "object"
+      },
+      "ArtifactLibraryPinRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "if_pinned_library": {
+            "description": "Library currently pinned as reviewed (slug or @\u003cpage id\u003e); required exactly when if_pinned_version is not 0. A slug that no longer resolves returns 409 artifact_version_conflict; @\u003cpage id\u003e always resolves.",
+            "type": "string"
+          },
+          "if_pinned_version": {
+            "description": "Library version currently pinned as reviewed, 0 when nothing is pinned; a mismatch returns 409 artifact_version_conflict.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "library": {
+            "description": "Library slug, or @\u003cpage id\u003e, in this workspace.",
+            "minLength": 1,
+            "type": "string"
+          },
+          "version": {
+            "description": "Published Library version the caller reviewed; a different publication returns 409 artifact_version_conflict.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "library",
+          "version",
+          "if_pinned_version"
+        ],
+        "type": "object"
+      },
+      "ArtifactLibraryPinResult": {
+        "additionalProperties": false,
+        "properties": {
+          "changed": {
+            "description": "False when this version was already pinned (a safe retry).",
+            "type": "boolean"
+          },
+          "copied_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "copied_by": {
+            "description": "Human who made or updated the copy.",
+            "type": "string"
+          },
+          "library_name": {
+            "description": "Library name when the copy was made.",
+            "type": "string"
+          },
+          "library_page_id": {
+            "description": "Library Page id. The copy outlives the Library.",
+            "type": "string"
+          },
+          "library_version": {
+            "description": "Library version the copy was made from.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "sha256": {
+            "description": "SHA-256 of the copied design-system.json bytes.",
+            "pattern": "^[0-9a-f]{64}$",
+            "type": "string"
+          },
+          "tokens": {
+            "additionalProperties": true,
+            "description": "The pinned design-system.json, byte for byte.",
+            "type": "object"
+          }
+        },
+        "required": [
+          "library_page_id",
+          "library_version",
+          "library_name",
+          "sha256",
+          "copied_by",
+          "copied_at",
+          "tokens",
+          "changed"
+        ],
+        "type": "object"
+      },
+      "ArtifactLibraryPublication": {
+        "additionalProperties": false,
+        "properties": {
+          "can_publish": {
+            "description": "True only for the Library's human owner.",
+            "type": "boolean"
+          },
+          "published_at": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "published_by": {
+            "description": "Owner who published it.",
+            "type": "string"
+          },
+          "published_version": {
+            "description": "Published version; 0 while nothing is published.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "published_version",
+          "can_publish"
+        ],
+        "type": "object"
+      },
+      "ArtifactLibraryPublishRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "version": {
+            "description": "Retained version carrying design-system.json (a JSON object of at most 32 KiB).",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "type": "object"
+      },
+      "ArtifactLibraryUpdate": {
+        "additionalProperties": false,
+        "properties": {
+          "changes": {
+            "additionalProperties": false,
+            "properties": {
+              "added": {
+                "description": "Dot-joined token paths, sorted; at most 200.",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              "changed": {
+                "description": "Dot-joined token paths, sorted; at most 200.",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              "removed": {
+                "description": "Dot-joined token paths, sorted; at most 200.",
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              "truncated": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "added",
+              "removed",
+              "changed"
+            ],
+            "type": "object"
+          },
+          "library_available": {
+            "description": "False when the caller can no longer read the published version; nothing else about the Library is reported.",
+            "type": "boolean"
+          },
+          "pinned_version": {
+            "description": "Pinned Library version.",
+            "format": "int64",
+            "minimum": 1,
+            "type": "integer"
+          },
+          "published_version": {
+            "description": "Library's published version; 0 when unpublished or not readable by the caller.",
+            "format": "int64",
+            "minimum": 0,
+            "type": "integer"
+          },
+          "update_available": {
+            "description": "True when the published version differs from the pinned one.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "pinned_version",
+          "published_version",
+          "library_available",
+          "update_available",
+          "changes"
+        ],
+        "type": "object"
+      },
       "ArtifactProjectAvailability": {
         "additionalProperties": false,
         "properties": {
@@ -140793,6 +141038,621 @@
           "pages"
         ],
         "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/library": {
+      "get": {
+        "description": "Report the Library's published version and whether the caller may publish. Any reader of the Library. `published_version` is 0 while nothing is published.",
+        "operationId": "get_api_v1_pages_slug_artifact_library",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactLibraryPublication"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get library publication",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/library-pin": {
+      "get": {
+        "description": "Return the project's self-contained copy of a Library's design-system.json. Requires read access to this project only; the Library is not read, so the copy keeps working after the Library changes or the caller's access to it ends. A copy whose SHA-256 no longer matches is never served: 409 `artifact_library_pin_corrupt`.",
+        "operationId": "get_api_v1_pages_slug_artifact_library-pin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactLibraryPin"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Get pinned library copy",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      },
+      "put": {
+        "description": "Copy the Library's published design-system.json into this project. Requires Edit on the project (not an agent run) and the caller's own read access to the published version; the workspace admin read path does not count. `version`, `if_pinned_library` and `if_pinned_version` must match the published version and the current pin, otherwise 409 `artifact_version_conflict`; an `if_pinned_library` slug that no longer resolves is the same 409 (pass `@\u003clibrary_page_id\u003e`). Every reader of the project can read the copy, which survives unsharing the Library. Pinning the version already pinned returns `changed: false`. An absent, unpublished or unreadable Library returns the same 404.",
+        "operationId": "put_api_v1_pages_slug_artifact_library-pin",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactLibraryPinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactLibraryPinResult"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Pin or update library copy",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/library-pin/update": {
+      "get": {
+        "description": "Compare the pin with the Library's published version and list the token paths an update adds, removes and changes. When the caller can no longer read the Library, `library_available` is false and nothing else about it is reported. A damaged stored copy returns 409 `artifact_library_pin_corrupt`.",
+        "operationId": "get_api_v1_pages_slug_artifact_library-pin_update",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactLibraryUpdate"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Review library update",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
+    "/api/v1/pages/{slug}/artifact/library/publish": {
+      "post": {
+        "description": "Point the Library's publication at a retained `version` that carries `design-system.json` (a JSON object of at most 32 KiB) and record an audit entry. Owner only: an Edit grant, a workspace owner or admin and an agent run get 403. Edits and restores never move the publication or change any pinned project.",
+        "operationId": "post_api_v1_pages_slug_artifact_library_publish",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ArtifactLibraryPublishRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactLibraryPublication"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ArtifactProjectError"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Publish library version",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
       }
     },
     "/api/v1/pages/{slug}/artifact/restore": {

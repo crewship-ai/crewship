@@ -36,6 +36,7 @@ func TestStorageLaterSourcesMatchTheirTriggers(t *testing.T) {
 	for _, source := range []struct{ table, migration string }{
 		{"document_comments", "20261108145251_document_comments.sql"},
 		{"document_proposals", "20261108204553_document_proposals.sql"},
+		{"artifact_library_pins", "20261110221226_artifact_library_pins.sql"},
 	} {
 		raw, err := os.ReadFile("../database/migrations/" + source.migration)
 		if err != nil {

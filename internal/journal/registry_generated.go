@@ -29,6 +29,8 @@ var AllEntryTypes = []EntryType{
 	EntryApprovalTimeout,
 	EntryTrustGranted,
 	EntryTrustRevoked,
+	EntryType("artifact.library_pinned"),           // journalArtifactLibraryPinned, internal/api/pages_artifact_library.go:31:2
+	EntryType("artifact.library_published"),        // journalArtifactLibraryPublished, internal/api/pages_artifact_library.go:30:2
 	EntryType("artifact.mooring_committed"),        // mooringCommitted, internal/api/mooring.go:23:2
 	EntryType("artifact.mooring_created"),          // mooringCreated, internal/api/mooring.go:22:2
 	EntryType("artifact.mooring_mandate_admitted"), // mooringMandateAdmitted, internal/api/mooring.go:24:2

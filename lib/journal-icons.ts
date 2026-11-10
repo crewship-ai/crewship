@@ -336,6 +336,8 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "artifact.mooring_mandate_admitted": KeyRound,
   "artifact.mooring_mandate_revoked": Ban,
   "artifact.project_shared": Globe,
+  "artifact.library_published": Globe,
+  "artifact.library_pinned": FilePen,
   "craft.native_preview_shared": Eye,
   "artifact.orphaned_workbook_deleted": Trash2,
   "artifact.private_output_published": Globe,

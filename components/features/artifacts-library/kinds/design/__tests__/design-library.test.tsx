@@ -24,7 +24,7 @@ const viewer = vi.hoisted(() => ({ parts: null as ArtifactViewerParts | null }))
 vi.mock("@/components/features/chat/artifact-context/viewer/artifact-viewer-panel", () => ({
   ArtifactViewerPanel: ({ render }: { render?: (parts: ArtifactViewerParts) => React.ReactNode }) => render?.(viewer.parts!) ?? <p>legacy viewer chrome</p>,
 }))
-vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-context", () => ({ ArtifactViewerProvider: ({ children }: { children: React.ReactNode }) => children }))
+vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-context", () => ({ ArtifactViewerProvider: ({ children }: { children: React.ReactNode }) => children, useArtifactViewer: () => null }))
 
 function parts(over: Partial<ArtifactViewerParts> = {}): ArtifactViewerParts {
   const data = state.snapshot!

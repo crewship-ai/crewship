@@ -56,6 +56,9 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"artifact_version_blobs": IntentInclude, // binary project assets, encoded losslessly
 	"artifact_versions":      IntentInclude, // all retained whole-project manifests
 
+	"artifact_library_publications": IntentInclude, // owner-selected published library version
+	"artifact_library_pins":         IntentInclude, // consumer's self-contained design-system copy
+
 	"mooring_authority_generations":  IntentExcludeRuntime, // target-local non-ABA tombstones never travel or reset in portable restore
 	"mooring_page_grant_generations": IntentExcludeRuntime, // target-local (Page, recipient) grant tombstones never travel or reset in portable restore
 	"workspace_member_retired_ids":   IntentExcludeRuntime, // target-local tombstones: a restored member row must meet them, not reset them
