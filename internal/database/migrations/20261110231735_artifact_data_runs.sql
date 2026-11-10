@@ -14,7 +14,7 @@
 -- Debt: rows cascade from artifact_version_heads. A future migration that
 -- rebuilds that table (as 20261028202000 did) must copy artifact_data_runs
 -- around the rebuild like artifact_data_documents, or the run history is lost.
--- There is no shared guard list for heads dependents yet.
+-- TestArtifactVersionHeadsForeignKeyChildrenAreKnown tracks that dependency.
 CREATE TABLE artifact_data_runs (
  workspace_id TEXT NOT NULL,
  page_id TEXT NOT NULL,
