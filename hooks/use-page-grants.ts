@@ -72,8 +72,19 @@ export const PAGE_SUBJECT_TYPE_LABEL: Record<PageSubjectType, string> = {
 
 /** The levels a subject kind may hold. The workspace never produces: a
  *  payload has an author, and "everyone" is not one (spec §3/14). */
-export function pageGrantLevelsFor(subjectType: PageSubjectType): readonly PageGrantLevel[] {
-  return subjectType === "workspace" ? ["read", "write"] : PAGE_GRANT_LEVELS
+export function pageGrantLevelsFor(
+  subjectType: PageSubjectType,
+  canDelegateAgentEdit = false,
+): readonly PageGrantLevel[] {
+  if (subjectType === "workspace") return ["read", "write"]
+  // Only the page's owner delegates Edit to an agent, of the spec (write) or
+  // of the data (produce); everyone else is not offered the choice the server
+  // would refuse.
+  if (subjectType === "agent" && !canDelegateAgentEdit) return ["read"]
+  // A crew's produce grant lets its agents and routines push the page's data,
+  // so it is the owner's to give as well (#5260).
+  if (subjectType === "crew" && !canDelegateAgentEdit) return ["read", "write"]
+  return PAGE_GRANT_LEVELS
 }
 
 /**
@@ -125,6 +136,8 @@ export interface WirePageGrants {
   page?: string | null
   grants?: WirePageGrant[] | null
   changed?: number | null
+  /** Whether the caller may grant an agent write: the page owner only. */
+  can_delegate_agent_edit?: boolean | null
 }
 
 export interface WirePageVersion {
@@ -197,6 +210,19 @@ export function toPageGrant(raw: WirePageGrant): PageGrant {
 
 /** `{page, grants}` is the envelope all three verbs answer with. A bare array
  *  is read too, for the same reason `normalizePageList` reads both. */
+export interface PageGrantsDocument {
+  grants: PageGrant[]
+  /** False unless the server said so: the safe default hides agent Edit. */
+  canDelegateAgentEdit: boolean
+}
+
+export function normalizePageGrantsDocument(body: unknown): PageGrantsDocument {
+  const canDelegateAgentEdit = Boolean(
+    body && typeof body === "object" && !Array.isArray(body) && (body as WirePageGrants).can_delegate_agent_edit === true,
+  )
+  return { grants: normalizePageGrants(body), canDelegateAgentEdit }
+}
+
 export function normalizePageGrants(body: unknown): PageGrant[] {
   if (Array.isArray(body)) return (body as WirePageGrant[]).map(toPageGrant)
   if (body && typeof body === "object") {
@@ -322,6 +348,8 @@ export function gateOf(status: unknown, isPending: boolean, enabled: boolean): G
 
 export interface UsePageGrantsResult extends GatedRead {
   grants: PageGrant[]
+  /** Whether the caller may grant an agent write (the page owner only). */
+  canDelegateAgentEdit: boolean
   /** Rows the server declared inert. Counted here so no surface has to. */
   inertCount: number
 }
@@ -335,7 +363,7 @@ export function usePageGrants(
   const query = useQuery({
     queryKey: pageAccessKeys.grants(workspaceId ?? "", slug ?? ""),
     queryFn: async ({ signal }) =>
-      normalizePageGrants(
+      normalizePageGrantsDocument(
         await readJSON(
           `/api/v1/pages/${encodeURIComponent(slug!)}/grants${pageQueryString(workspaceId!)}`,
           signal,
@@ -345,9 +373,10 @@ export function usePageGrants(
     enabled: on,
     retry: false,
   })
-  const grants = useMemo(() => query.data ?? [], [query.data])
+  const grants = useMemo(() => query.data?.grants ?? [], [query.data])
   return {
     grants,
+    canDelegateAgentEdit: query.data?.canDelegateAgentEdit ?? false,
     inertCount: grants.reduce((n, g) => (g.live ? n : n + 1), 0),
     ...gateOf(query.error, query.isPending, on),
   }

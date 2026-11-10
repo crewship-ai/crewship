@@ -664,8 +664,16 @@ func (h *PageHandler) PublishProject(w http.ResponseWriter, r *http.Request) {
 		replyPublishConflict(w, "Page definition changed; review again", "definition", nil)
 		return
 	}
-	if err := reconcilePanels(r.Context(), tx, rec.ID, candidate.document, candidate.resolved, now); err != nil {
+	retiredBefore, err := retiredAgentProducers(r.Context(), tx, rec.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "read agent producer designations", err)
+		return
+	}
+	if err := reconcilePanels(r.Context(), tx, rec.ID, candidate.document, candidate.resolved, now, producerDesignator(r, user.ID)); err != nil {
 		replyInternalError(w, h.logger, "publish Page panels", err)
+		return
+	}
+	if h.refuseUndelegatedAgentProducers(w, r, tx, rec.ID, retiredBefore) {
 		return
 	}
 	if err := clearPanelRings(r.Context(), tx, rec.ID, dim); err != nil {

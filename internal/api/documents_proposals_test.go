@@ -42,10 +42,15 @@ func TestDocumentIterationProposeMandateGates(t *testing.T) {
 			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'read',?)`, page, f.a.AgentID, f.rig.adminID)
 		}, errDocumentAccess},
-		{"shared with agent write grant", func(t *testing.T, f *artifactPrincipalFixture, page string) {
+		{"shared with agent write grant from the owner", func(t *testing.T, f *artifactPrincipalFixture, page string) {
+			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
+			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) SELECT id,'agent',?,'write',owner_user_id FROM pages WHERE id=?`, f.a.AgentID, page)
+		}, nil},
+		// R71 §0.14/1: only the owner delegates Edit to an agent.
+		{"shared with agent write grant from a workspace admin", func(t *testing.T, f *artifactPrincipalFixture, page string) {
 			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'write',?)`, page, f.a.AgentID, f.rig.adminID)
-		}, nil},
+		}, errDocumentAccess},
 		{"crew write grant never reaches the agent", func(t *testing.T, f *artifactPrincipalFixture, page string) {
 			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'crew',?,'write',?)`, page, f.a.CrewID, f.rig.adminID)
@@ -60,6 +65,16 @@ func TestDocumentIterationProposeMandateGates(t *testing.T) {
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,'write',?)`, page, f.a.HumanUserID, f.rig.adminID)
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'write',?)`, page, f.a.AgentID, f.rig.adminID)
 		}, nil},
+		// R71 §0.14/1: the requester's own Edit is not a right to delegate it.
+		{"requester with write grant, agent holds no grant", func(t *testing.T, f *artifactPrincipalFixture, page string) {
+			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0,owner_user_id=? WHERE id=?`, f.rig.adminID, page)
+			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'user',?,'write',?)`, page, f.a.HumanUserID, f.rig.adminID)
+		}, errDocumentAccess},
+		{"workspace admin requester's own agent grant on another owner's document", func(t *testing.T, f *artifactPrincipalFixture, page string) {
+			mustExec(t, f.rig.db, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id=?`, f.a.WorkspaceID, f.a.HumanUserID)
+			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0,owner_user_id=? WHERE id=?`, f.rig.adminID, page)
+			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'write',?)`, page, f.a.AgentID, f.a.HumanUserID)
+		}, errDocumentAccess},
 		{"another person's private document", func(t *testing.T, f *artifactPrincipalFixture, page string) {
 			mustExec(t, f.rig.db, `UPDATE pages SET owner_user_id=? WHERE id=?`, f.rig.adminID, page)
 			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'write',?)`, page, f.a.AgentID, f.rig.adminID)

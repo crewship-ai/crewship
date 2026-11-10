@@ -72,6 +72,10 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			"description": "Computed SERVER-side on every read (§4 rule 2, §11b.8). fresh and stale are functions of the clock and are never stored."},
 		"reason": map[string]any{"type": "string",
 			"description": "Why a failed panel failed. Internal vocabulary — never rendered on a public page (§7.3.2b)."},
+		"producer_authorization": obj(map[string]any{
+			"producer":      map[string]any{"type": "string", "description": "agent/<slug>, the declared producer awaiting the owner's authorization."},
+			"can_authorize": map[string]any{"type": "boolean", "description": "True only for the page's owner, a person: POST .../producer/authorize."},
+		}),
 		"data":       map[string]any{"description": "The last payload, exactly as the producer sent it. Absent when nothing has ever been pushed."},
 		"provenance": provenance,
 	}))
@@ -305,6 +309,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"grants": arr(grant),
 		"changed": map[string]any{"type": "integer",
 			"description": "Rows affected by an issue or a revoke. 0 on a revoke naming a subject that held no grant — a revoke that changed nothing still succeeded."},
+		"can_delegate_agent_edit": map[string]any{"type": "boolean",
+			"description": "Whether the caller may grant an agent `write` or `produce`, or a crew `produce`. Only the page's owner (the owning user, or a member of the owning crew) delegates Edit, of the spec or of the data, to an agent or to the crew its agents push with; a workspace ADMIN/OWNER role does not imply it. Anyone else gets 403 for `subject_type=agent, level=write|produce` and `subject_type=crew, level=produce`, and such a grant the owner did not issue is listed with `live: false` and stays retired."},
 	})
 
 	// ── Effective access (pages-collections-access-analysis §5/10, F2) ─────
@@ -512,8 +518,20 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			Response: grantsResponse,
 		},
 		"DELETE /api/v1/pages/{slug}/grants": {Response: grantsResponse},
-		"GET /api/v1/pages/{slug}/access":    {Response: accessResponse},
-		"GET /api/v1/pages/access":           {Response: subjectAccessResponse},
+		"POST /api/v1/pages/{slug}/panels/{panelId}/producer/authorize": {
+			// No fields: the page, the panel and the producer are all in the path
+			// and the stored spec. An empty object (or no body) is the request.
+			Request: map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{}},
+			Response: obj(map[string]any{
+				"page":       str(),
+				"panel":      str(),
+				"producer":   map[string]any{"type": "string", "description": "agent/<slug>, the producer the panel's spec declares."},
+				"authorized": map[string]any{"type": "boolean"},
+				"changed":    map[string]any{"type": "boolean", "description": "False when this owner had already authorized it."},
+			}),
+		},
+		"GET /api/v1/pages/{slug}/access": {Response: accessResponse},
+		"GET /api/v1/pages/access":        {Response: subjectAccessResponse},
 
 		// Folders (#2527). Reads are filtered to what the caller reaches
 		// (§5/12); the two membership writes carry version fences (§5/8).

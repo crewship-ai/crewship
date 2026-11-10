@@ -181,6 +181,12 @@ func TestPrivateReadSurfacesAuditBeforeForeignOwnerOutput(t *testing.T) {
 
 func TestPrivateChatContextCustodyKeepsAgentGrantChecks(t *testing.T) {
 	h, ws, issuer := pagesAccessFixture(t)
+	// The agent's grant under test is issued by the workspace OWNER. Since
+	// R71 §0.14/1 (#5258) the fixture's agent produce grant comes from alice,
+	// the page's owner, because only the owner delegates produce; a workspace
+	// OWNER may still grant an agent read, and read is all chat context needs.
+	// A produce grant that ends never stands in for read.
+	pagesGrant(t, h, ws, issuer, "fleet-201", `{"subject_type":"agent","subject":"watcher","level":"read"}`)
 	execOrFatal(t, h.db, `UPDATE pages SET private_audience=1 WHERE slug='fleet-201'`)
 	ctx := withWorkspace(withUser(t.Context(), &AuthUser{ID: "alice"}), ws, "MEMBER")
 	resolve := func() error {
@@ -194,6 +200,12 @@ func TestPrivateChatContextCustodyKeepsAgentGrantChecks(t *testing.T) {
 	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('chat-other-member','chat-other-ws','alice','MEMBER','restricted')`)
 	if err := resolve(); err != nil {
 		t.Errorf("restricted-elsewhere custodian context denied: %v", err)
+	}
+	// alice's own produce grant ended with her standing (#5069); the context
+	// above came from the OWNER-issued read grant, not from it.
+	var aliceLive int
+	if err := h.db.QueryRow(`SELECT COUNT(*) FROM page_grants WHERE granted_by_user_id='alice' AND subject_type='agent' AND retired_at IS NULL`).Scan(&aliceLive); err != nil || aliceLive != 0 {
+		t.Errorf("alice's agent produce grant outlived her standing: %d %v", aliceLive, err)
 	}
 	ownerCtx := withWorkspace(withUser(t.Context(), &AuthUser{ID: issuer}), ws, "OWNER")
 	if _, err := h.ResolvePageChatContext(ownerCtx, ws, issuer, "agent-watcher", "fleet-201"); err != nil {
@@ -214,5 +226,49 @@ func TestPrivateChatContextCustodyKeepsAgentGrantChecks(t *testing.T) {
 	execOrFatal(t, h.db, `UPDATE workspace_members SET role='MEMBER' WHERE workspace_id=? AND user_id=?`, ws, issuer)
 	if err := resolve(); !errors.Is(err, chatbridge.ErrPageChatAccess) {
 		t.Errorf("lost grant issuer authority must deny, got %v", err)
+	}
+}
+
+// What an agent's produce grant means for chat context (R71 §0.14/1, #5258).
+// produce opens the page (reachesPage: a producer pushes into panels by name,
+// so it must reach the page that names them), so a LIVE produce grant yields
+// page context like read does. Only the owner delegates produce; a produce
+// grant someone else issued is retired and yields nothing — it is never read
+// in disguise. A workspace OWNER/ADMIN may still grant an agent read, and that
+// yields context. An owner-issued grant still ends with its issuer's standing
+// (#5069), whatever its level.
+func TestChatContextFollowsAgentGrantDelegation(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		setup func(t *testing.T, h *PageHandler, ws, issuer string)
+		want  bool
+	}{
+		{"owner-issued produce yields context", func(*testing.T, *PageHandler, string, string) {}, true},
+		{"admin-issued produce is retired and yields none", func(t *testing.T, h *PageHandler, ws, issuer string) {
+			execOrFatal(t, h.db, `DELETE FROM page_grants WHERE subject_type='agent' AND subject_id='agent-watcher'`)
+			execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) SELECT id,'agent','agent-watcher','produce',? FROM pages WHERE slug='fleet-201'`, issuer)
+			var retired bool
+			if err := h.db.QueryRow(`SELECT retired_at IS NOT NULL FROM page_grants WHERE subject_type='agent' AND subject_id='agent-watcher' AND level='produce'`).Scan(&retired); err != nil || !retired {
+				t.Fatalf("admin-issued agent produce stored live: %v", err)
+			}
+		}, false},
+		{"admin-issued read yields context", func(t *testing.T, h *PageHandler, ws, issuer string) {
+			execOrFatal(t, h.db, `DELETE FROM page_grants WHERE subject_type='agent' AND subject_id='agent-watcher'`)
+			pagesGrant(t, h, ws, issuer, "fleet-201", `{"subject_type":"agent","subject":"watcher","level":"read"}`)
+		}, true},
+		{"owner-issued produce ends with the owner's standing", func(t *testing.T, h *PageHandler, ws, issuer string) {
+			execOrFatal(t, h.db, `INSERT INTO workspaces(id,name,slug) VALUES('cc-other','Other','cc-other')`)
+			execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('cc-m','cc-other','alice','MEMBER','restricted')`)
+		}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, ws, issuer := pagesAccessFixture(t)
+			tc.setup(t, h, ws, issuer)
+			ctx := withWorkspace(withUser(t.Context(), &AuthUser{ID: "alice"}), ws, "MEMBER")
+			_, err := h.ResolvePageChatContext(ctx, ws, "alice", "agent-watcher", "fleet-201")
+			if got := err == nil; got != tc.want {
+				t.Fatalf("context released = %v, want %v (err %v)", got, tc.want, err)
+			}
+		})
 	}
 }

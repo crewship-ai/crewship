@@ -92,6 +92,8 @@ export interface WirePanel {
   tab?: string | null
   panel_id?: string | null
   owner_crew_name?: string | null
+  /** #5260: the agent producer awaits the owner's authorization. */
+  producer_authorization?: { producer?: unknown; can_authorize?: unknown } | null
   /** §11b.8: four states, and the SERVER sends `never_produced`. */
   state?: string | null
   /** The payload. §11 does not fix the key; `data` is what the CLI's
@@ -337,6 +339,13 @@ export interface PanelView {
    */
 }
 
+function toProducerAuthorization(raw: WirePanel["producer_authorization"]): PanelSpec["producer_authorization"] {
+  if (!raw || typeof raw !== "object") return null
+  const producer = typeof raw.producer === "string" ? raw.producer.trim() : ""
+  if (!producer) return null
+  return { producer, can_authorize: raw.can_authorize === true }
+}
+
 export function toPanelView(raw: WirePanel, index = 0): PanelView {
   const sealed = raw.sealed === true
   const id = trimmed(raw.id) ?? trimmed(raw.panel_id) ?? `panel-${index + 1}`
@@ -362,6 +371,7 @@ export function toPanelView(raw: WirePanel, index = 0): PanelView {
       icon: trimmed(raw.icon),
       sealed,
       owner_crew_name: trimmed(raw.owner_crew_name),
+      producer_authorization: sealed ? null : toProducerAuthorization(raw.producer_authorization),
     },
     snapshot: {
       // A state this build cannot read is NOT reported as fresh. `never_produced`
