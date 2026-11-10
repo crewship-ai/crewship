@@ -1,0 +1,1 @@
+The Design Library lists every file of its shown version, views at most 64 KiB as plain text and downloads the full content as opaque bytes. Files remain read-only; unsupported Library sections are explained.

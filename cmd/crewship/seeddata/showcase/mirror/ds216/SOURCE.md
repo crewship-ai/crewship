@@ -45,6 +45,10 @@ The version message is the original's `lastChange.note`.
 
 ## Known gaps (the Library format cannot hold these; nothing is faked)
 
+- **Shadows and Assets:** the original has no shadow tokens and an empty asset store
+  (`assetGroups` is `{}`), so these sections were empty there and nothing is missing here. The
+  Library has no Shadows or Assets section; it says which sections it shows under **Files**,
+  which lists every file of the project read-only (view as plain text or download).
 - **Spacing and radius usage notes:** the Library schema has a usage note only for colours.
   The original has none for spacing or radius, so nothing is dropped.
 - **Line height** is a ratio, not pixels. Its rendered value can differ from the original by
