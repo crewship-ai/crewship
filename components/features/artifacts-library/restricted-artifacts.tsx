@@ -16,7 +16,7 @@ import { RESTRICTED_RUNTIME_MISSING_MESSAGE, restrictedCatalogFailure, type Rest
 interface ActionInput { name: string; label?: string; type: string; required: boolean; options?: string[] }
 interface ArtifactAction { intent_hash: string; panel_id: string; id: string; label: string; inputs: ActionInput[]; confirm?: { title: string; body: string } }
 /** One entry of `GET /workspaces/{id}/restricted-pages`: the server's only answer about what this member may run. */
-interface GrantedArtifact { slug: string; name: string; publication?: number; actions: ArtifactAction[] }
+interface GrantedArtifact { id: string; slug: string; name: string; publication?: number; actions: ArtifactAction[] }
 interface Invocation extends ArtifactAction { key: string; artifact: GrantedArtifact }
 interface Result { run_id: string; status: string; step_outputs: Record<string, string> }
 
@@ -29,13 +29,17 @@ const ACTIVE = ["SCHEDULED", "DEDUPED", "pending", "running"]
  * action with the same publication-bound POST and polls only its own run
  * (`/restricted-routine-runs/{runId}`): the calls the Page actions catalog
  * made at /pages before, and nothing from the library. `focus` is the slug
- * of an `/artifacts?item=<slug>` address; an artifact the catalog does not
- * list shows the access gate and never its name.
+ * of an `/artifacts?item=<slug>` address or, with `byId`, the ID of an
+ * `/artifacts/<id>` address (#5135). Either is matched only against the
+ * catalog already read, so the ID never leaves the browser; an artifact the
+ * catalog does not list (not granted, nonexistent or deleted alike) shows the
+ * same access gate and never its name.
  */
-export function RestrictedArtifacts({ workspaceId, access, focus, hrefFor, homeHref }: {
+export function RestrictedArtifacts({ workspaceId, access, focus, byId = false, hrefFor, homeHref }: {
   workspaceId: string
   access?: AccessContext
   focus: string | null
+  byId?: boolean
   hrefFor: (slug: string) => string
   homeHref: string
 }) {
@@ -50,7 +54,7 @@ export function RestrictedArtifacts({ workspaceId, access, focus, hrefFor, homeH
   const [reload, setReload] = useState(0)
   // The frozen request a retry resends, bound to the one action it was built for.
   const request = useRef<{ action: string; key: string; body: string; url: string } | null>(null)
-  const scope = JSON.stringify([workspaceId, focus])
+  const scope = JSON.stringify([workspaceId, focus, byId])
   // Bumped whenever the scope changes, the catalog is re-read or the view
   // unmounts: a confirmation or response that resumes later finds a different
   // generation and touches nothing (#5132).
@@ -58,7 +62,7 @@ export function RestrictedArtifacts({ workspaceId, access, focus, hrefFor, homeH
   useEffect(() => () => { generation.current++ }, [])
   const runId = run?.run_id
   const runState = run?.status
-  const artifact = focus === null ? null : catalog.find(entry => entry.slug === focus) ?? null
+  const artifact = focus === null ? null : catalog.find(entry => byId ? entry.id === focus : entry.slug === focus) ?? null
   const actions: Invocation[] = artifact ? artifact.actions.map(action => ({ ...action, artifact, key: JSON.stringify([artifact.slug, action.panel_id, action.id]) })) : []
   const action = actions.find(item => item.key === selected)
 

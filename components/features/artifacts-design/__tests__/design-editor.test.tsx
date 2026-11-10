@@ -120,6 +120,41 @@ describe("Design editor controls", () => {
   expect(within(history).getByRole("button", { name: "Restore" })).toBeEnabled()
   expect(within(history).queryAllByRole("button", { name: "Share" })).toHaveLength(buttons)
  })
+ it("changes a version address on the same mounted editor and returns to live on a plain address", () => {
+  const view = render(<DesignEditor workspaceId="workspace" slug="shop" initialVersion={1} />)
+  const editor = screen.getByRole("region", { name: "Design editor" })
+  expect(screen.getByRole("status")).toHaveTextContent("Version 1")
+  view.rerender(<DesignEditor workspaceId="workspace" slug="shop" initialVersion={2} />)
+  expect(screen.getByRole("status")).toHaveTextContent("Version 2")
+  expect(screen.queryByRole("button", { name: "Screen" })).toBeNull()
+  expect(screen.getByRole("region", { name: "Design editor" })).toBe(editor)
+  view.rerender(<DesignEditor workspaceId="workspace" slug="shop" />)
+  expect(screen.getByRole("button", { name: "Screen" })).toBeEnabled()
+  expect(screen.getByRole("status")).not.toHaveTextContent(/Version/)
+ })
+ it("consumes a changed address even when History already selected that same view", () => {
+  const view = render(<DesignEditor workspaceId="workspace" slug="shop" initialVersion={1} />)
+  fireEvent.click(screen.getByRole("button", { name: /History ·/ }))
+  fireEvent.click(within(screen.getByLabelText("Version history")).getByRole("button", { name: "Live canvas" }))
+  view.rerender(<DesignEditor workspaceId="workspace" slug="shop" />)
+  expect(screen.queryByText(/requested version will open/)).toBeNull()
+  expect(screen.getByRole("button", { name: "Screen" })).toBeEnabled()
+ })
+ it("keeps an unsent live canvas mounted until writes are confirmed before following a version address", () => {
+  const view = render(<DesignEditor workspaceId="workspace" slug="shop" />)
+  const doc = state.doc
+  state.unsynced = true
+  view.rerender(<DesignEditor workspaceId="workspace" slug="shop" initialVersion={2} />)
+  expect(screen.getByText(/requested version will open when your local changes are saved/)).toBeInTheDocument()
+  expect(screen.getByRole("button", { name: "Screen" })).toBeEnabled()
+  expect(state.doc).toBe(doc)
+  state.unsynced = false
+  view.rerender(<DesignEditor workspaceId="workspace" slug="shop" initialVersion={2} />)
+  expect(screen.queryByText(/requested version will open/)).toBeNull()
+  expect(screen.getByRole("status")).toHaveTextContent("Version 2")
+  expect(screen.queryByRole("button", { name: "Screen" })).toBeNull()
+  expect(state.doc).toBe(doc)
+ })
  it("offers the live canvas to an editor while inspecting a historical snapshot", () => {
   render(<DesignEditor workspaceId="workspace" slug="shop" initialVersion={1} />)
   fireEvent.click(screen.getByRole("button", { name: /History ·/ }))

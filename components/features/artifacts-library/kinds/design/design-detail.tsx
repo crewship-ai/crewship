@@ -38,7 +38,7 @@ export function DesignPresence({ peers }: { peers: DesignEditorFrameState["peers
  * canvas with its controls in the frame's slots and drawer. The chip, presence
  * and the "Design access" action go up to the frame through `onFrame`.
  */
-export function DesignBody({ workspaceId, slug, onFrame }: { workspaceId: string; slug: string; onFrame: (report: KindFrameReport) => void }) {
+export function DesignBody({ workspaceId, slug, version, onFrame }: { workspaceId: string; slug: string; version?: number; onFrame: (report: KindFrameReport) => void }) {
   const [state, setState] = React.useState<DesignEditorFrameState | null>(null)
   const [accessOpen, setAccessOpen] = React.useState(false)
   const status = state ? designFrameStatus(state) : null
@@ -55,7 +55,7 @@ export function DesignBody({ workspaceId, slug, onFrame }: { workspaceId: string
     // eslint-disable-next-line react-hooks/exhaustive-deps -- the key holds everything reported
   }, [key])
   return <div className="flex min-h-0 flex-1 flex-col">
-    <DesignEditor workspaceId={workspaceId} slug={slug} onFrameState={setState} />
+    <DesignEditor workspaceId={workspaceId} slug={slug} initialVersion={version} onFrameState={setState} />
     {accessOpen && <DesignAccessDialog workspaceId={workspaceId} slug={slug} onClose={() => setAccessOpen(false)} />}
   </div>
 }

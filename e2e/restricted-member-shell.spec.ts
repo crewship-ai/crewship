@@ -646,12 +646,12 @@ const RESTRICTED_BEFORE = {
   items: ["Brief — Archive", "Brief — Publish", "Launch plan — Notify"],
 }
 const RESTRICTED_CATALOG = [
-  { slug: "brief", name: "Brief", publication: 3, actions: [
+  { id: "page-brief", slug: "brief", name: "Brief", publication: 3, actions: [
     { intent_hash: "i1", panel_id: "p", id: "publish", label: "Publish", inputs: [] },
     { intent_hash: "i2", panel_id: "p", id: "archive", label: "Archive", inputs: [] },
   ] },
-  { slug: "launch", name: "Launch plan", actions: [{ intent_hash: "i3", panel_id: "q", id: "notify", label: "Notify", inputs: [] }] },
-  { slug: "silent", name: "Silent draft", actions: [] },
+  { id: "page-launch", slug: "launch", name: "Launch plan", actions: [{ intent_hash: "i3", panel_id: "q", id: "notify", label: "Notify", inputs: [] }] },
+  { id: "page-silent", slug: "silent", name: "Silent draft", actions: [] },
 ]
 test("restricted member's Artifacts shows exactly their old Pages catalog, and old links land on it", async ({ page }) => {
   const forbidden: string[] = []
@@ -707,6 +707,15 @@ test("restricted member's Artifacts shows exactly their old Pages catalog, and o
   await expect(page.getByRole("combobox", { name: "Action" }).locator("option:not([value=''])")).toHaveText(["Publish", "Archive"])
   await expect(page.getByText("Launch plan")).toHaveCount(0)
 
+  // #5135: a granted artifact's own ID address opens the same actions as its slug link.
+  for (const link of ["/artifacts/page-brief?workspace_id=ws-a", "/pages/%40page-brief?workspace_id=ws-a", "/pages/craft/editor?page_id=page-brief&workspace_id=ws-a"]) {
+    await page.goto(link)
+    await expect(page.getByRole("heading", { name: "Brief" }), link).toBeVisible()
+    await expect(page.getByRole("combobox", { name: "Action" }).locator("option:not([value=''])")).toHaveText(["Publish", "Archive"])
+    await expect(page.getByText("This artifact isn’t part of your access")).toHaveCount(0)
+    await expect(page.getByText("Launch plan")).toHaveCount(0)
+  }
+
   // Anything not granted: the gate, never the address's or another artifact's name.
   for (const link of ["/pages/secret-plan?workspace_id=ws-a", "/artifacts?item=secret-plan&workspace_id=ws-a", "/artifacts/page-secret?workspace_id=ws-a", "/pages/%40page-secret?workspace_id=ws-a", "/pages/craft/editor?page_id=page-secret&workspace_id=ws-a"]) {
     await page.goto(link)
@@ -714,6 +723,28 @@ test("restricted member's Artifacts shows exactly their old Pages catalog, and o
     await expect(page.getByRole("link", { name: "Go to Artifacts" })).toHaveAttribute("href", "/artifacts?workspace_id=ws-a")
     for (const secret of ["secret-plan", "page-secret", "Brief", "Launch plan", "Silent draft"]) await expect(main, link).not.toContainText(secret)
   }
+
+  // No existence oracle: a never-granted, a nonexistent, a deleted and an
+  // action-less ID render the same gate after the same ID-free catalog read.
+  const gates: string[] = []
+  for (const id of ["page-secret", "page-never-existed", "page-deleted", "page-silent"]) {
+    const sent: string[] = []
+    const api: string[] = []
+    const record = (request: { url: () => string }) => {
+      const url = new URL(request.url())
+      if (url.pathname.startsWith("/api/")) api.push(url.pathname + url.search)
+      if (url.pathname.startsWith("/api/v1/workspaces/")) sent.push(url.pathname + url.search)
+    }
+    page.on("request", record)
+    await page.goto(`/artifacts/${id}?workspace_id=ws-a`)
+    await expect(page.getByRole("heading", { name: "This artifact isn’t part of your access" })).toBeVisible()
+    await page.waitForTimeout(300)
+    page.off("request", record)
+    expect(api.some(url => url.includes(id)), id).toBe(false)
+    expect([...new Set(sent)].map(url => `GET ${url}`), id).toEqual(RESTRICTED_BEFORE.requests)
+    gates.push(await main.innerHTML())
+  }
+  for (const gate of gates) expect(gate).toBe(gates[0])
 
   await page.waitForTimeout(500)
   expect([...seen].sort()).toEqual(RESTRICTED_BEFORE.requests)

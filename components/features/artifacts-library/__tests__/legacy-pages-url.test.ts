@@ -24,7 +24,8 @@ describe("legacyPagesTarget: every old URL shape and its canonical target", () =
     ["unencoded immutable ID", "/pages/@page-brief", "workspace_id=ws1", resolve("@page-brief")],
     ["project link (#4995)", "/pages/brief", "artifact=1&workspace_id=ws1", resolve("brief", { project: true })],
     ["pinned project link", "/pages/%40page-brief", "artifact=1&version=3&workspace_id=ws1", resolve("@page-brief", { project: true, version: 3 })],
-    ["pinned version without artifact=1", "/pages/brief", "version=2&workspace_id=ws1", resolve("brief", { project: true, version: 2 })],
+    // A pin without artifact=1 is a version of whatever the page is: a project's, a Doc's revision, a Design's version (#5168).
+    ["pinned version without artifact=1", "/pages/brief", "version=2&workspace_id=ws1", resolve("brief", { version: 2 })],
     ["unusable pin", "/pages/brief", "artifact=1&version=bogus", resolve("brief", { project: true })],
     ["native editor", "/pages/craft/editor", "workspace_id=ws1&page_id=page-brief", resolve("@page-brief")],
     ["native editor, other parameter order", "/pages/craft/editor", "page_id=page-brief&workspace_id=ws1", resolve("@page-brief")],
@@ -56,6 +57,8 @@ describe("legacyPagesTarget: every old URL shape and its canonical target", () =
     ["native editor from another workspace", "/pages/craft/editor", "page_id=page-brief&workspace_id=ws2"],
     ["native editor for two pages", "/pages/craft/editor", "page_id=a&page_id=b&workspace_id=ws1"],
     ["native editor with an unsafe ID", "/pages/craft/editor", "page_id=a%00b&workspace_id=ws1"],
+    ["unusable pin without artifact=1", "/pages/brief", "version=bogus&workspace_id=ws1"],
+    ["zero pin without artifact=1", "/pages/brief", "version=0&workspace_id=ws1"],
     ["malformed escape", "/pages/%", ""],
     ["deeper path", "/pages/brief/extra", ""],
   ])("stays on Pages for the %s", (_name, pathname, search) => {
@@ -127,6 +130,18 @@ describe("resolvedArtifactId", () => {
 
   it("never moves a project link to something that is not a project", () => {
     expect(resolvedArtifactId(resolve("brief", { project: true }), page({ artifact_kind: "word", has_document: true }))).toBeNull()
+  })
+
+  it("moves a version link of a project, a Doc or a Design with its pin, and keeps any other kind on Pages (#5168)", () => {
+    const pinned = resolve("brief", { version: 2 })
+    expect(resolvedArtifactId(pinned, page({ artifact_kind: "project" }))).toBe("page-brief")
+    expect(resolvedArtifactId(pinned, page({ has_document: true }))).toBe("page-brief")
+    expect(resolvedArtifactId(pinned, page({ artifact_kind: "design" }))).toBeNull()
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true")
+    expect(resolvedArtifactId(pinned, page({ artifact_kind: "design" }))).toBe("page-brief")
+    // A panel Page and a native Word have no versions to open: their pin is not guessed at.
+    expect(resolvedArtifactId(pinned, page({}))).toBeNull()
+    expect(resolvedArtifactId(pinned, page({ artifact_kind: "word", has_document: true }))).toBeNull()
   })
 
   it("moves a Design only behind its switch, which is the only way the library shows it", () => {

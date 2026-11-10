@@ -10,7 +10,7 @@ import { usePage } from "@/hooks/use-pages"
 import { artifactsDesign, artifactsLibrary } from "@/lib/feature-flags"
 import { useAccessContext } from "@/components/features/restricted/access-notice"
 import { ArtifactsLibrary } from "./artifacts-library"
-import { RestrictedArtifactGate, RestrictedArtifacts } from "./restricted-artifacts"
+import { RestrictedArtifacts } from "./restricted-artifacts"
 import { filtersFromParams, filtersToParams } from "./library-filter"
 import { libraryItems, versionPin } from "./library-items"
 
@@ -96,22 +96,22 @@ export function ArtifactsRoute({ item, bySlug }: { item: string | null; bySlug?:
 }
 
 /**
- * /artifacts for a restricted member (#5132). `?item=<slug>` opens one granted
- * artifact's actions; `/artifacts/<id>` is always the access gate, decided
- * without any request: the restricted catalog names artifacts by slug only, so
- * an immutable ID can never be matched to a grant (the server stays
- * authoritative for every action either way).
+ * /artifacts for a restricted member (#5132). `?item=<slug>` and
+ * `/artifacts/<id>` (#5135) open one granted artifact's actions. Both are
+ * matched against the restricted catalog, the one read the home makes too,
+ * which names each granted artifact by slug and ID; the address itself is
+ * never sent, so any ID outside the catalog gets the same response and the
+ * same gate (the server stays authoritative for every action either way).
  */
 function RestrictedEntry({ workspaceId, item, bySlug, workspaceQuery }: { workspaceId: string; item: string | null; bySlug?: boolean; workspaceQuery: URLSearchParams }) {
   const access = useAccessContext()
   const homeHref = `/artifacts${workspaceQuery.size ? `?${workspaceQuery}` : ""}`
-  if (item !== null && !bySlug) return <RestrictedArtifactGate homeHref={homeHref} />
   const hrefFor = (slug: string) => {
     const next = new URLSearchParams(workspaceQuery)
     next.set("item", slug)
     return `/artifacts?${next}`
   }
-  return <RestrictedArtifacts workspaceId={workspaceId} access={access} focus={item} hrefFor={hrefFor} homeHref={homeHref} />
+  return <RestrictedArtifacts workspaceId={workspaceId} access={access} focus={item} byId={item !== null && !bySlug} hrefFor={hrefFor} homeHref={homeHref} />
 }
 
 /**

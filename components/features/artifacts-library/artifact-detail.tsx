@@ -233,7 +233,7 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   const hostedProject = (readOnly: boolean) => <ArtifactProject key={`${workspaceId}:${projectRef}:${readOnly ? "read" : "edit"}`} workspaceId={workspaceId} slug={projectRef} initialVersion={version}
     hosted={{ readOnly, versionHref, onCanWrite: setProjectWrite }} />
   let body: React.ReactNode
-  if (design) body = <DesignBody workspaceId={workspaceId} slug={item.pageId ? "@" + item.pageId : item.slug} onFrame={setKindFrame} />
+  if (design) body = <DesignBody workspaceId={workspaceId} slug={item.pageId ? "@" + item.pageId : item.slug} version={version} onFrame={setKindFrame} />
   else if (sourceEditor) body = hostedProject(false)
   else if (projectPreview && item.kind === "slides" && artifactSlides()) body = <SlidesBody workspaceId={workspaceId} slug={item.slug} version={version} onFrame={setKindFrame} />
   // A project whose manifest is a design system opens as a Design library. The catalog calls it an App until
@@ -247,7 +247,7 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   else if (projectReadOnly) body = hostedProject(true)
   else if (pageEditor) body = <FramePageEditor workspaceId={workspaceId} pageId={item.pageId!} onLeave={reason => reason === "deleted" ? onBack() : setEditing(false)} />
   else if (pageContent) body = <ArtifactPageContent workspaceId={workspaceId} pageId={item.pageId!} onBack={onBack} onReport={setKindReport} />
-  else if (docsPage) body = <DocsBody workspaceId={workspaceId} item={item} onFrame={setDocs}
+  else if (docsPage) body = <DocsBody workspaceId={workspaceId} item={item} version={version} onFrame={setDocs}
     fallback={documentColumn(<WordPreview workspaceId={workspaceId} item={item} />)} />
   else if (nativeEditor) body = <div className="flex min-h-0 flex-1 flex-col">
     {item.kind === "word" && <LockLostDraft workspaceId={workspaceId} slug={"@" + item.pageId} />}

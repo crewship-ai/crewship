@@ -232,11 +232,28 @@ export function DocumentEarlierDraftNotice({ sync, slug, onError, className }: D
  * `control` and the button is left out. Every fetch, guard and restore rule
  * is the same either way.
  */
-export function DocumentHistoryHost({ workspaceId, pageId, humanId, available, denied, head, blocked, review, onStart, onRestored, onRefused, control }: {
+/** Selects a version link's revision once, the first time the checkpoint list is read; later choices are the person's. */
+function usePinnedCheckpoint(history: ReturnType<typeof useDocumentHistory>, rev: number | undefined): { missing: boolean } {
+  const [done, setDone] = useState<{ rev?: number; status: "selected" | "missing" }>()
+  const status = done?.rev === rev ? done?.status : undefined
+  const { list, onSelect } = history
+  useEffect(() => {
+    if (rev === undefined) { setDone(undefined); return }
+    if (status !== undefined || list.status !== "ready") return
+    const match = list.data.checkpoints.find(checkpoint => checkpoint.rev === rev)
+    if (match) onSelect(match.id)
+    setDone({ rev, status: match ? "selected" : "missing" })
+  }, [rev, status, list, onSelect])
+  return { missing: rev !== undefined && status === "missing" }
+}
+
+export function DocumentHistoryHost({ workspaceId, pageId, humanId, available, denied, head, blocked, review, onStart, onRestored, onRefused, control, pinnedRev }: {
   workspaceId: string; pageId: string; humanId: string; available: boolean; denied: boolean
   head?: ReturnType<typeof usePageDocument>["state"]; blocked: boolean; review?: DocumentHistoryReview
   onStart:()=>void; onRestored:()=>void; onRefused:(denied:boolean)=>void
   control?: { open: boolean; onClose: () => void }
+  /** A version link's revision (#5168): selected once the list is read, or reported missing. */
+  pinnedRev?: number
 }) {
   const [ownOpen, setOwnOpen] = useState(false)
   const open = control ? control.open : ownOpen
@@ -250,6 +267,7 @@ export function DocumentHistoryHost({ workspaceId, pageId, humanId, available, d
   const [settling, setSettling] = useState(false)
   const visible = (open || settling) && eligible
   const history = useDocumentHistory({ enabled: visible, workspaceId, humanId, pageId, activationKey: `history-open:${openEpoch}` })
+  const pinned = usePinnedCheckpoint(history, pinnedRev)
   const restore = useDocumentHistoryRestore({ enabled: visible, workspaceId, humanId, pageId, activationKey: `history-open:${openEpoch}:denied:${denied}`,
     head, snapshot: history.snapshot, historyScopeKey: history.scopeKey, blocked, onStart, onRestored, onRefused })
   const restoring = restore.status === "pending" || restore.status === "uncertain"
@@ -262,7 +280,7 @@ export function DocumentHistoryHost({ workspaceId, pageId, humanId, available, d
   const actorName = useCallback((actor: string) => documentActorName(actor, { humanId, members: roster }), [humanId, roster])
   const headRev = head?.page_id === pageId ? head.rev : undefined
   if (control) return !eligible ? <p role="status" className="text-sm text-muted-foreground">History is unavailable.</p>
-    : visible ? <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headSchema={head?.schema} headRev={headRev} actorName={actorName} /> : null
+    : visible ? <>{pinned.missing && <p role="status" className="text-sm text-muted-foreground">Revision {pinnedRev} is not in History.</p>}<DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headSchema={head?.schema} headRev={headRev} actorName={actorName} /></> : null
   return <div className="space-y-3 px-3">
     <Button ref={opener} type="button" variant="outline" disabled={!eligible || restoring} aria-expanded={visible} onClick={() => {
       if (!eligible || restoring) return
