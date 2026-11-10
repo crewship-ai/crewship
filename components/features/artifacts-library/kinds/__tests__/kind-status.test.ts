@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { DashboardCollection } from "@/lib/pages/artifact-dashboard"
+import type { DashboardCollection, DashboardDataset } from "@/lib/pages/artifact-dashboard"
 import { appCapabilities, appFrameStatus, runtimeMissing } from "../app/app-status"
 import { dashboardFrameStatus, dashboardFreshness, freshnessLabel } from "../dashboard/freshness"
 
@@ -64,5 +64,36 @@ describe("Dashboard freshness", () => {
     expect(dashboardFrameStatus({ ...base, error: true })).toMatchObject({ key: "error", label: "Data unavailable" })
     expect(dashboardFrameStatus({ ...base, error: true, limitExceeded: true })).toMatchObject({ key: "error", label: "Too much data" })
     for (const input of [base, { ...base, viewingOld: true }]) expect(["stale", "refreshing"]).not.toContain(dashboardFrameStatus(input)?.key)
+  })
+
+  const ds = (over: Partial<DashboardDataset>): DashboardDataset => ({ title: null, description: null, mode: "planned", sample: false, maxAgeSeconds: null, ...over })
+  const status = (datasets: Record<string, DashboardDataset>, written = "2026-11-08T10:00:00", extra: Partial<Parameters<typeof dashboardFrameStatus>[0]> = {}) => {
+    const freshness = dashboardFreshness([collection("a", [[written, "Scout"]])], { status: "ok", datasets }, now)
+    return dashboardFrameStatus({ pending: false, error: false, limitExceeded: false, freshness, viewingOld: false, shown: 2, now, ...extra })
+  }
+  it.each([
+    ["planned data older than its max age is Stale", { a: ds({ title: "Tasks", maxAgeSeconds: 3600 }) }, "stale", /Tasks was last written 10:00, older than its stated maximum age of 1 h/],
+    ["live data within its max age stays Live", { a: ds({ mode: "live", maxAgeSeconds: 3 * 3600 }) }, "live", /every few seconds/],
+    ["planned data without a stated age is never Stale", { a: ds({}) }, "live", /every few seconds/],
+    ["a fixed dataset is Fixed, never Stale", { a: ds({ mode: "fixed" }) }, "fixed", /no automatic refresh\. Last written 10:00/],
+    ["sample data says so", { a: ds({ mode: "fixed", sample: true }) }, "sample", /marked this data as sample data/],
+    ["stale wins over sample", { a: ds({ sample: true, maxAgeSeconds: 60 }) }, "stale", /older than its stated maximum age of 1 min/],
+  ])("%s", (_, datasets, key, detail) => {
+    expect(status(datasets)).toMatchObject({ key, detail: expect.stringMatching(detail) })
+  })
+  it("does not present an unchanged successful read as a live source refresh", () => {
+    expect(status({ a: ds({ mode: "planned" }) })).toMatchObject({ key: "live", label: "Data connected" })
+  })
+  it("does not read a dataset from Object.prototype for a collection named constructor", () => {
+    const fresh = dashboardFreshness([collection("constructor", [["2026-11-08T10:00:00", "Scout"]])], { status: "ok", datasets: {} }, now)
+    expect(fresh.collections[0]).toMatchObject({ dataset: null, stale: false })
+  })
+  it("keeps the read error above every dataset state and names invalid details in the chip", () => {
+    expect(status({ a: ds({ maxAgeSeconds: 60 }) }, undefined, { error: true })).toMatchObject({ key: "error" })
+    const invalid = dashboardFreshness([collection("a", [["2026-11-08T10:00:00", "Scout"]])], { status: "invalid" }, now)
+    expect(invalid).toMatchObject({ details: "invalid", collections: [{ dataset: null, stale: false }] })
+    const chip = dashboardFrameStatus({ pending: false, error: false, limitExceeded: false, freshness: invalid, viewingOld: false, shown: 2, now })
+    expect(chip).toMatchObject({ key: "error", label: "Invalid dataset details" })
+    expect(chip!.detail).toContain("Dataset details in datasets.json are invalid")
   })
 })

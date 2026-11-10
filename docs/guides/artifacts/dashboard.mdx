@@ -9,8 +9,8 @@ A Dashboard is an artifact whose layout and numbers are stored separately. The
 layout is ordinary versioned HTML, like any other project artifact. The
 numbers live in **data collections** next to it. An agent (or you, from the
 CLI) updates the numbers in place, so the dashboard stays current without a new
-version for every change. Every value on screen carries its source: who last
-wrote it and when.
+version for every change. Every bound value on screen carries its source: who
+last wrote it and when.
 
 <Note>
 Dashboards are off by default. All of the following must be on
@@ -73,6 +73,46 @@ An agent writes the layout and the data for you, so you rarely edit these files
 yourself. Knowing the structure helps you ask for changes ("add a `costs`
 collection", "show revenue as a meter").
 
+## Describe the datasets
+
+An optional second file, `datasets.json`, states what each collection is. The
+**Sources** drawer and the status chip read it; the data itself is unchanged
+without it.
+
+```json
+{"schema_version":1,"datasets":{
+  "sales":{"title":"Open deals","description":"Pipeline from the CRM, one row per region.","mode":"planned","max_age_seconds":7200},
+  "targets":{"title":"Quarter targets","mode":"fixed","sample":true}
+}}
+```
+
+| Key | Meaning |
+|---|---|
+| `title` | A readable name, up to 120 characters. Sources shows it instead of the collection ID. |
+| `description` | What the rows are, up to 500 characters (line breaks allowed). |
+| `mode` | Required. The author declares `fixed` for a snapshot, `planned` when a producer is expected to refresh it on a schedule, or `live` when it is expected to change while the dashboard is open. This file does not configure a source or schedule. |
+| `sample` | `true` when the values are sample data, not measurements. |
+| `max_age_seconds` | `planned` and `live` only, 60 seconds to 366 days. Data whose last write is older than this shows as **Stale**. |
+
+Every key under `datasets` must be a collection declared in `dashboard.json`;
+a collection may be left out. The file is checked as a whole: an unknown key,
+an undeclared collection or a value out of range rejects all of it, and Sources
+then says *The dataset details in datasets.json are invalid*. Nothing in this
+file is a server record. The last write and who made it always come from the
+server, never from the file.
+
+The status chip follows these details: **Stale** when a `planned` or `live`
+dataset is older than its maximum age, **Sample data** when any dataset is
+marked as sample, **Fixed data** when every dataset is declared fixed, and
+**Data connected** when the stored values can be read. A stale dashboard with
+sample data also names that in the chip. Invalid metadata gets its own label. Without a `max_age_seconds` nothing is ever shown as stale. The
+chip does not show producer runs: a refresh that failed and wrote nothing
+leaves no trace here, only an ageing last write. `live` describes how the
+data is expected to change; it does not run a query as the reader.
+
+`dashboard.json` keeps `schema_version` 1. Version 2 is reserved for the
+planned widget profile, which is not available yet.
+
 ## Ask an agent for a Dashboard
 
 <Steps>
@@ -128,6 +168,10 @@ collection", "show revenue as a meter").
 </Steps>
 
 ## See where a number came from
+
+This applies to screens that bind values with `data-field`. An interactive
+dashboard (one that draws its own numbers with a script) has no per-value
+citation; its **Sources** drawer says so and lists the datasets it reads.
 
 Hover over a value, or move keyboard focus to it, to see where it came from:
 
