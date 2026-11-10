@@ -1,6 +1,7 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -45,26 +46,40 @@ func TestUpdateWebhook_OverlapWindowBounds(t *testing.T) {
 }
 
 func TestUpdateWebhook_RevokePreviousSecret(t *testing.T) {
+	const oldSecret = "synthetic-previous-signing-secret-must-not-be-returned"
 	h, db, userID, wsID := webhookHandlerRig(t)
 	seedWebhookPipeline(t, db, wsID, "pw-rv", "rv-pipe")
-	wh := seedWebhookRow(t, db, wsID, "pw-rv", "s1", true)
+	wh := seedWebhookRow(t, db, wsID, "pw-rv", oldSecret, true)
+	// Benign metadata can contain the former two-character secret sentinel.
+	// Exercise that collision deterministically instead of relying on CUID time.
+	const benignID = "pwh_s1_benign_metadata"
+	if _, err := db.Exec(`UPDATE pipeline_webhooks SET id=? WHERE id=?`, benignID, wh.ID); err != nil {
+		t.Fatal(err)
+	}
+	wh.ID = benignID
 	if rr := patchWebhook(t, h, userID, wsID, wh.ID, `{"rotate_secret":true,"rotate_grace_seconds":3600}`); rr.Code != http.StatusOK {
 		t.Fatalf("rotate: %d %s", rr.Code, rr.Body.String())
 	}
 	store := pipeline.NewWebhookStore(db)
 	cur, _ := store.GetByID(t.Context(), wh.ID)
-	if ok, prev := cur.MatchSignature([]byte("x"), covPSWSign("s1", "x"), time.Now()); !ok || !prev {
+	if ok, prev := cur.MatchSignature([]byte("x"), covPSWSign(oldSecret, "x"), time.Now()); !ok || !prev {
 		t.Fatal("setup: the old secret should verify inside the overlap")
 	}
 	rr := patchWebhook(t, h, userID, wsID, wh.ID, `{"revoke_previous_secret":true}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("revoke: %d %s", rr.Code, rr.Body.String())
 	}
-	if strings.Contains(rr.Body.String(), "s1") || strings.Contains(rr.Body.String(), "previous_secret_expires_at") {
+	var response map[string]json.RawMessage
+	if err := json.Unmarshal(rr.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	_, hasSecret := response["signing_secret"]
+	_, hasOverlap := response["previous_secret_expires_at"]
+	if strings.Contains(rr.Body.String(), oldSecret) || hasSecret || hasOverlap {
 		t.Fatalf("revoke response leaks or still reports an overlap: %s", rr.Body.String())
 	}
 	cur, _ = store.GetByID(t.Context(), wh.ID)
-	if ok, _ := cur.MatchSignature([]byte("x"), covPSWSign("s1", "x"), time.Now()); ok {
+	if ok, _ := cur.MatchSignature([]byte("x"), covPSWSign(oldSecret, "x"), time.Now()); ok {
 		t.Fatal("revoked secret still verifies")
 	}
 	if !cur.ValidateSignature([]byte("x"), covPSWSign(cur.SigningSecret, "x")) {

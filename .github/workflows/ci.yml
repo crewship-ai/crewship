@@ -1600,8 +1600,11 @@ jobs:
         timeout-minutes: 3
         run: node --test scripts/typecheck-tests-node-test.mjs
       - name: Type-check tests once
-        timeout-minutes: 9
-        run: timeout --kill-after=30s 8m pnpm test:types
+        # The 3505-file graph reached its final batch at the old 8m limit
+        # on ubuntu-latest. Allow the complete check to finish: 12m + 30s
+        # cleanup < this 13m step < the unchanged 20m job bound.
+        timeout-minutes: 13
+        run: timeout --kill-after=30s 12m pnpm test:types
       - name: E2E private artifact security tests
         timeout-minutes: 2
         run: node --test e2e/helpers/private-artifacts.test.mjs
