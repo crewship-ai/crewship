@@ -5,7 +5,9 @@
 // Datasets: each dataset is one collection of this artifact; its rows are the
 // collection's documents in id order. Calcs are worked out from those rows.
 // Drawings (`data-draw`) and `onData` run after the page's scripts, whenever
-// data, a filter or the width changes. Filters live in this page view only.
+// data, a filter or the width changes. Filters are this viewer's own: the
+// host remembers them in its browser storage (crewship.prefs) and the page
+// restores them on the next visit; they never reach the shared data.
 (function () {
   "use strict"
   var DATASETS = ["tasks"]
@@ -17,6 +19,8 @@
   var draws = {}
   var listeners = []
   var params = Object.assign({}, DEFAULT_PARAMS)
+  // Keys restored from the viewer's storage, checked against the data once it arrives.
+  var restored = {}
   var started = false
   var scheduled = false
 
@@ -116,11 +120,53 @@
       loaded[id] = rows.length
         ? { status: "ok", data: rows, columns: columnsOf(rows), message: "", refreshing: false, meta: [] }
         : { status: "empty", data: [], columns: [], message: "No rows yet.", refreshing: false, meta: [] }
+      revalidate(rows)
       schedule()
     }, function (error) {
       loaded[id] = { status: "error", data: [], columns: [], message: String(error && error.message || error), refreshing: false, meta: [] }
       schedule()
     })
+  }
+
+  // Only the page's own filter keys, with values of the default's type, and only those that differ from it.
+  function prefsApi() { return window.crewship && window.crewship.prefs }
+  function remember() {
+    var api = prefsApi()
+    if (!api) return
+    var changed = {}
+    for (var key in DEFAULT_PARAMS) if (params[key] !== DEFAULT_PARAMS[key]) changed[key] = params[key]
+    api.set(changed).catch(function () {})
+  }
+  function restore(next) {
+    var api = prefsApi()
+    if (!api) { next(); return }
+    // An older host refuses prefs.get; a host that never answers must not hold the page back either.
+    var finished = false
+    function done() { if (!finished) { finished = true; next() } }
+    setTimeout(done, 1500)
+    api.get().then(function (result) {
+      if (finished) return
+      var saved = result && result.value
+      if (saved && typeof saved === "object") {
+        for (var key in DEFAULT_PARAMS) {
+          if (Object.prototype.hasOwnProperty.call(saved, key) && typeof saved[key] === typeof DEFAULT_PARAMS[key]) { params[key] = saved[key]; restored[key] = true }
+        }
+      }
+      done()
+    }, function () { done() })
+  }
+
+  // A remembered value the data no longer has (a crew renamed or removed, or
+  // rows the viewer can no longer read) falls back to the default and is forgotten.
+  function revalidate(rows) {
+    var dropped = false
+    for (var key in restored) {
+      var value = params[key]
+      var present = value === DEFAULT_PARAMS[key] || rows.some(function (r) { return r && r[key] === value })
+      if (!present) { params[key] = DEFAULT_PARAMS[key]; dropped = true }
+      delete restored[key]
+    }
+    if (dropped) remember()
   }
 
   var widths = new WeakMap()
@@ -145,8 +191,8 @@
     colors: COLORS,
     refresh: function (id) { if (DATASETS.indexOf(id) >= 0) load(id) },
     params: function () { return Object.assign({}, params) },
-    setParams: function (next) { params = Object.assign({}, params, next || {}); schedule() },
-    resetParams: function () { params = Object.assign({}, DEFAULT_PARAMS); schedule() },
+    setParams: function (next) { params = Object.assign({}, params, next || {}); restored = {}; remember(); schedule() },
+    resetParams: function () { params = Object.assign({}, DEFAULT_PARAMS); restored = {}; remember(); schedule() },
     setLink: function () {},
   })
 
@@ -160,7 +206,10 @@
       var els = root.querySelectorAll("[data-draw]")
       for (var i = 0; i < els.length; i++) observer.observe(els[i])
     }
-    for (var d = 0; d < DATASETS.length; d++) load(DATASETS[d])
-    render()
+    // The viewer's remembered filter applies before the first data arrives, so the page never flashes the default.
+    restore(function () {
+      for (var d = 0; d < DATASETS.length; d++) load(DATASETS[d])
+      render()
+    })
   }
 })()
