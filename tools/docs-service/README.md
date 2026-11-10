@@ -111,7 +111,7 @@ of at most 100 bytes. Run both processes with the same UID and use private,
 dedicated socket directories. The token must be a regular mode-0600 file of at
 most 512 bytes; its trimmed content must contain 32–256 bytes.
 
-Readiness requires protocol 3, schema 3 and confirmation that the authority has
+Readiness requires protocol 3, the current latest schema and confirmation that the authority has
 recovered its writer state. Draining rejects new work, finishes accepted queues
 and releases held leases. The container packaging uses no network and mounts no
 database; persistence and authorization remain with Go.
@@ -120,6 +120,13 @@ Admission is bounded to 32 active scheduler keys, 128 total operations and 32 pe
 An incoming key evicts the least recently used idle scheduler tail if necessary;
 busy keys are never evicted. Idle reads therefore do not impose a lifetime
 32-document capacity. Writer leases remain independently fenced.
+Idle cleanup retains its private lease token until Go confirms release, and a
+new write waits for an in-flight release. Refused or uncertain cleanup is
+revalidated with the next request's current principal; no previous principal's
+permissions are reused. An expired or released token can be acquired again
+before committing, while authorization refusals still fail closed. The service
+reacquires only after an explicit writer fence; other conflicts are not retried.
+Tests cover revocation, concurrent release, expiry and lost release responses.
 Idle keys unload after 30 seconds. Every operation reloads the Go snapshot and
 update log into an isolated Y.Doc, validates it and destroys it afterward.
 Bodies are capped at 2 MiB, authority replies at 4 MiB; each authority call has
