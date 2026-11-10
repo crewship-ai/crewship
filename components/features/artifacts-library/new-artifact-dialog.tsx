@@ -25,6 +25,7 @@ import { pagesKeys, usePages, type PageView } from "@/hooks/use-pages"
 import { usePageFolderMutations, usePageFolders, type PageFolderView } from "@/hooks/use-page-folders"
 import { useWordDocumentCreation } from "@/components/features/pages/use-word-document-creation"
 import {
+  ARTIFACT_KINDS,
   artifactKindOfPage,
   comingKinds,
   creatableKinds,
@@ -118,7 +119,10 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   // A Page create has no idempotency key; an unconfirmed one is never repeated.
   const pageIntent = useRef<{ slug: string; created?: Created; uncertain?: boolean }>(undefined)
 
-  const kind = creatable.find(k => k.key === picked) ?? creatable[0]
+  const kindFrozen = word.frozen || Boolean(pageIntent.current) || Boolean(created)
+  // An uncertain create must keep its kind even when that capability disappears.
+  // Falling back to a live kind here would bypass the original creation intent.
+  const kind = kindFrozen ? ARTIFACT_KINDS.find(k => k.key === picked) : creatable.find(k => k.key === picked) ?? creatable[0]
   const starts = kind ? startOptions(kind) : []
   const start = starts.find(o => o.value === startPick && !o.disabled)?.value ?? starts[0]?.value ?? "blank"
   const handoff = start === "describe" || (kind?.make === "agent" && start === "tmpl")
@@ -141,6 +145,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   const wordFormat = word.wordFormat === "doc" && caps.words === true && word.availability.wordcraftCommands === true ? "commands" as const : word.wordFormat
   const wordFormatAvailable = wordFormat === "commands" ? word.availability.wordcraftCommands === true : word.wordFormatAvailable
   const create = useMutation<Created, Error, ArtifactKindEntry>({ mutationFn: async k => {
+    setPicked(k.key)
     if (k.key === "word" || k.key === "sheet" || k.key === "docs") {
       const doc = await word.create.mutateAsync(k.key === "word" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: wordFormat }
         : k.key === "docs" ? { name: trimmed, slug: freeSlug(trimmed, "document", pages), format: "doc" }
@@ -167,7 +172,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   } })
 
   const busy = create.isPending
-  const frozen = busy || word.frozen || Boolean(pageIntent.current) || Boolean(created)
+  const frozen = busy || kindFrozen
   const close = () => { if (!busy) onOpenChange(false) }
   const open = (slug: string, id?: string) => { if (id) onCreated(slug, id); else onCreated(slug); onOpenChange(false) }
 
@@ -195,14 +200,17 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
   }
 
   const canSubmit = Boolean(kind) && !busy && (created ? true
-    : handoff ? start === "tmpl" || Boolean(prompt.trim() || trimmed)
-    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && wordFormatAvailable)) && (kind?.key !== "sheet" || (word.allowed && word.availability.gridcraftNative === true)) && (kind?.key !== "docs" || (word.allowed && word.availability.data === true)))
+    : kind?.live(caps) === true && (handoff ? start === "tmpl" || Boolean(prompt.trim() || trimmed)
+    : Boolean(trimmed) && (kind?.key !== "word" || (word.allowed && wordFormatAvailable)) && (kind?.key !== "sheet" || (word.allowed && word.availability.gridcraftNative === true)) && (kind?.key !== "docs" || (word.allowed && word.availability.data === true))))
   const primaryLabel = created ? "Open it" : handoff ? "Continue in chat" : busy ? "Creating…" : word.retrying && (kind?.key === "word" || kind?.key === "sheet" || kind?.key === "docs") ? "Retry initialization" : kind?.make === "panels" ? "Create page" : "Create and edit"
   const refusal = created ? `${created.name} was created but not put in ${created.folder}: ${created.error}` : create.error?.message ?? null
 
   return <CreateSurface open size="lg" restoreOpenerFocus restoreFocusTo={opener} onOpenChange={next => { if (!next) close() }} onSubmit={() => { if (canSubmit) void submit() }} ariaLabel="New artifact">
     <CreateSurfaceHeader icon={Plus} context={folder ? `in ${folder.name}` : "Artifacts"} title="New artifact" description="Pick what you are making. An artifact holds one kind of content." onClose={busy ? undefined : close} />
     <CreateSurfaceBody className="flex flex-col gap-3.5">
+      {kindFrozen && kind && !kind.live(caps) && !created && <CreateSurfaceNotice tone="info">
+        {kind.label} is unavailable. Your creation is kept. Retry when it is available again.
+      </CreateSurfaceNotice>}
       {creatable.length >= SEARCH_FROM && <label className="relative block">
         <Search aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
         <Input type="search" aria-label="Find a kind or template" placeholder="Find a kind or template" className={cn(CREATE_SURFACE_INPUT, "pl-8")} value={query} onChange={e => setQuery(e.target.value)} />
@@ -237,7 +245,7 @@ function NewArtifactForm({ workspaceId, onOpenChange, defaultFolderSlug, default
 
         <p className="flex items-center gap-2 text-xs text-muted-foreground">
           <Eye aria-hidden className="size-3.5 shrink-0" />
-          <span>Who can open: <b className="font-medium text-foreground">{folder ? `People with access to ${folder.name}` : "Only you until you share it"}</b></span>
+          <span>Who can open: <b className="font-medium text-foreground">{folder ? `People with access to ${folder.name}` : kind.key === "docs" ? "You, and workspace owners and admins. Others only after you share it." : "Only you until you share it"}</b></span>
           <span className="ml-auto text-micro text-muted-foreground-soft max-sm:hidden">Change in Share after</span>
         </p>
 
