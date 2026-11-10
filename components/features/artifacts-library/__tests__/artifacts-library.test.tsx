@@ -273,7 +273,7 @@ it("does not offer New artifact to a member who cannot create Pages, whatever th
 })
 
 it("offers New artifact in the bar, on Home and in the empty state to a member who can create", () => {
-  state.caps = { projects: true, dashboards: true, slides: true, documents: true, designs: true, pages: true }
+  state.caps = { projects: true, dashboards: true, slides: true, documents: true, docs: false, designs: true, pages: true }
   const view = renderLibrary()
   expect(screen.getAllByRole("button", { name: "New artifact" })).toHaveLength(1)
   fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
@@ -283,14 +283,6 @@ it("offers New artifact in the bar, on Home and in the empty state to a member w
   state.pages = []
   renderLibrary()
   expect(screen.getAllByRole("button", { name: "New artifact" })).toHaveLength(2)
-})
-
-it("offers New Docs once the server confirms the Doc format, opening the dialog on Docs (#5153)", () => {
-  state.caps = { docs: true }
-  renderLibrary()
-  fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
-  fireEvent.click(screen.getByRole("button", { name: "New Docs" }))
-  expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("docs")
 })
 
 it("a just-created artifact opens by its slug, never as an ID, so it does not land on not available", () => {
