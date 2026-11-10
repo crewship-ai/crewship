@@ -183,8 +183,9 @@ server version over it; *Znovu uchovat koncept* retries the journal and
 *Zahodit místní kopii* discards it. A read revocation is handled in one
 place, `terminate`, reached from a transport refusal or terminal host state.
 It clears the note, offers and copied text. A live controller can purge
-through its admitted journal; a late refusal never opens a fresh journal or
-purges drafts from a newer admission. A capture that finishes after read
+through its admitted journal. A refusal from an older request cannot
+retire a view after it has confirmed a newer read, and never opens a fresh
+journal or purges drafts from a newer admission. A capture that finishes after read
 loss can remove only its own exact row. A sign-out retirement (`stopped` with no read
 refusal seen) also removes the text but keeps the journal rows.
 

@@ -562,6 +562,37 @@ describe("NoteCraft reference application", () => {
     expect(lease).toHaveBeenCalledTimes(1)
   })
 
+  it("an old save refusal cannot retire a newer admitted editor in the same view", async () => {
+    const server = createFakeCraftServer("server text")
+    const rows = new Map<string, RecoveryDraft>()
+    const a = open(server, alice, rows)
+    await editing(a)
+    let refuseOld!: (error: unknown) => void
+    const old = new Promise<never>((_resolve, reject) => { refuseOld = reject })
+    let finishNew!: () => void
+    const proceed = new Promise<void>(resolve => { finishNew = resolve })
+    const realSave = a.client.save
+    const save = vi.spyOn(a.client, "save").mockImplementationOnce(() => old)
+      .mockImplementationOnce(async (...args) => { await proceed; return realSave(...args) })
+    a.type("old pending draft")
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(1))
+    server.takeOver(bob)
+    await a.app.refresh()
+    server.takeOver(alice)
+    await a.app.refresh()
+    expect(a.note.readOnly).toBe(false)
+    a.type("new admission draft")
+    await vi.waitFor(() => expect(save).toHaveBeenCalledTimes(2))
+    expect(stored(rows)).toContain("new admission draft")
+    refuseOld(new SaveError("read_revoked"))
+    await new Promise(resolve => setTimeout(resolve, 25))
+    expect(a.note).toMatchObject({ value: "new admission draft", readOnly: false })
+    expect(stored(rows)).toContain("new admission draft")
+    finishNew()
+    await vi.waitFor(() => expect(a.status()).toBe("Uloženo"))
+    await expect(a.app.close()).resolves.toBe("durable")
+  })
+
   it("the demo journal offers only drafts belonging to the admitted person", async () => {
     const openJournal = createMemoryJournalProfiles()
     const aliceDraft = openJournal(alice.actor_id)

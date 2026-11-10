@@ -55,21 +55,30 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
   const $ = <T extends HTMLElement>(name: string) => root.querySelector<T>(`[data-${name}]`)!
   const note = $<HTMLTextAreaElement>("note"), status = $<HTMLOutputElement>("save"), alert = $("error")
   const lifetime = new AbortController(), signal = lifetime.signal
+  let readEpoch = 0
   /** Every server call NoteCraft or its save lifecycle makes. A read
    * revocation reported by any of them goes to the one handler, `terminate`,
    * before the caller sees the error, even for a lifecycle already closed.
    * A terminal `revoked` report from the host enters the same handler. */
-  const guard = async <T>(work: () => Promise<T>): Promise<T> => {
-    if (signal.aborted) throw new Error("notecraft_retired")
+  const guard = async <T>(work: () => Promise<T>, isCurrent?: () => boolean): Promise<T> => {
+    const askedAt = readEpoch
+    const current = isCurrent ?? (() => readEpoch === askedAt)
+    if (signal.aborted || !current()) throw new Error("notecraft_retired")
     try { return await work() }
-    catch (error) { if (readRevokedError(error)) terminate("revoked"); throw error }
+    catch (error) {
+      if (readRevokedError(error)) {
+        // This refusal cannot erase the view or reach a controller's purge
+        // path after a newer read has been admitted.
+        if (!current()) throw new Error("notecraft_retired")
+        terminate("revoked")
+      }
+      throw error
+    }
   }
   const doc = {
     read: (s: AbortSignal) => guard(() => host.document.read(s)),
     lease: (...a: Parameters<LeaseTransport["lease"]>) => guard(() => host.document.lease(...a)),
     leaseAction: (...a: Parameters<LeaseTransport["leaseAction"]>) => guard(() => host.document.leaseAction(...a)),
-    save: (r: SaveRequest, s: AbortSignal) => guard(() => host.document.save(r, s)),
-    reconcile: (r: SaveRequest, s: AbortSignal) => guard(() => host.document.reconcile(r, s)),
   }
   const versions: VersionsTransport = {
     list: (...a: Parameters<VersionsTransport["list"]>) => guard(() => host.versions.list(...a)),
@@ -152,18 +161,22 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
     $("reconcile").hidden = editing?.state.phase !== "uncertain"
   }
   async function load() {
+    const askedAt = readEpoch
     const read = await doc.read(signal)
-    if (signal.aborted) return
+    if (signal.aborted || askedAt !== readEpoch) return
+    readEpoch++
     server = read
     note.value = decode(server.bytes)
   }
   /** A lifecycle that revoked its writing never writes again. */
   const retired = (e: typeof editing) => !!e && (e.state.phase === "read-only" || e.state.phase === "stopped")
   async function startEditing(generation: string) {
+    const admittedRead = readEpoch
     const journal = await host.openJournal()
-    if (signal.aborted || terminated) { await journal.close(); return }
+    if (signal.aborted || admittedRead !== readEpoch) { await journal.close(); return }
     edits = 0
     let self: SaveController | undefined
+    const current = () => admittedRead === readEpoch && (!editing || editing.controller === self)
     let initial: SaveState | undefined
     const terminal = (state: SaveState) => state.phase === "revoked" || state.phase === "stopped"
     const controller = self = host.createSave({
@@ -173,8 +186,11 @@ export function mountNoteCraft(root: HTMLElement, host: NoteCraftHost) {
         snapshot: async () => ({ bytes: encode(note.value), editorRevision: `note:${generation}:${edits}` }),
         validate: async draft => { if (draft.bytes.byteLength > MAX_NOTE_BYTES) throw new Error("note_too_large"); decode(draft.bytes) },
       },
-      // Guarded: a read-revoked reply reaches `terminate` before the lifecycle.
-      transport: { save: doc.save, reconcile: doc.reconcile },
+      // Only this controller's still-current admission can retire the view.
+      transport: {
+        save: (request, abort) => guard(() => host.document.save(request, abort), current),
+        reconcile: (request, abort) => guard(() => host.document.reconcile(request, abort), current),
+      },
       onState: state => {
         // The factory may synchronously stop if the journal has already
         // retired. Capture that before the returned controller is assigned.
