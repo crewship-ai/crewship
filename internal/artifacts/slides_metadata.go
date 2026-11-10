@@ -22,8 +22,13 @@ func ValidateSlidesArtifactManifest(raw []byte) bool {
 		return false
 	}
 	var files map[string]json.RawMessage
-	if json.Unmarshal(envelope["files"], &files) != nil || len(files) < 2 || len(files) > 101 {
+	if json.Unmarshal(envelope["files"], &files) != nil || len(files) < 2 || len(files) > SlidesArtifactMaxSourceFiles {
 		return false
+	}
+	if len(files) == SlidesArtifactMaxSourceFiles {
+		if _, exists := files[slidesLibraryBindingFile]; !exists {
+			return false
+		}
 	}
 	for _, rawFile := range files {
 		if !canonicalDataFields(rawFile, "hash", "media_type") {
@@ -55,7 +60,17 @@ func IsSlidesArtifactIndex(rawManifest, index []byte) bool {
 		return false
 	}
 	var manifest storedManifest
-	if json.Unmarshal(rawManifest, &manifest) != nil || len(manifest.Files) != len(order)+1 {
+	if json.Unmarshal(rawManifest, &manifest) != nil {
+		return false
+	}
+	expectedFiles := len(order) + 1
+	if binding, exists := manifest.Files[slidesLibraryBindingFile]; exists {
+		if binding.MediaType != "application/json" {
+			return false
+		}
+		expectedFiles++
+	}
+	if len(manifest.Files) != expectedFiles {
 		return false
 	}
 	file, ok := manifest.Files["deck.json"]

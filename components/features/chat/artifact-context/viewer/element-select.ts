@@ -214,7 +214,7 @@ export function inlineProjectAssets(html: string, path: string, files: Pick<Arti
     changed = true
   }
   if (!changed) return html
-  return (/^\s*<!doctype/i.test(html) ? "<!DOCTYPE html>\n" : "") + doc.documentElement.outerHTML
+  return (doc.doctype?.name.toLowerCase() === "html" ? "<!DOCTYPE html>\n" : "") + doc.documentElement.outerHTML
 }
 
 export interface PreviewDocumentOptions {

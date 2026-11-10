@@ -151,7 +151,7 @@ func artifactSlidesSourceDigest(ctx context.Context, tx *sql.Tx, k artifacts.Ver
 	if err != nil {
 		return out, err
 	}
-	if count < 2 || count > 101 || total > 2<<20 || largest > 256<<10 || missing != 0 {
+	if count < 2 || count > artifacts.SlidesArtifactMaxSourceFiles || total > 2<<20 || largest > 256<<10 || missing != 0 {
 		return out, artifacts.ErrSlidesArtifactUnsupported
 	}
 	digest := sha256.New()

@@ -14,7 +14,10 @@ it.skipIf(!existsSync(chromium.executablePath()))("renders pinned tokens and a r
       import { parseArtifactSlides } from "./lib/pages/artifact-slides"
       import fixture from "./testdata/artifact-slides-projection.json"
       import { ArtifactSlidesPreview } from "./components/features/chat/artifact-context/viewer/artifact-slides-preview"
-      import { pinnedSlideTheme } from "./components/features/artifacts/design-system/pinned-theme"
+      import { pinnedSlideTheme, withPinnedTheme } from "./components/features/artifacts/design-system/pinned-theme"
+      import { inlineProjectAssets } from "./components/features/chat/artifact-context/viewer/element-select"
+      window.inlinedPin = inlineProjectAssets(withPinnedTheme('<!-- <head> --><!doctype html><html><head><link rel="stylesheet" href="local.css"></head><body><h1>Text</h1></body></html>', ':root{--ds-color-ink:#111111}'), "index.html", [{path:"local.css",media_type:"text/css",content:"h1{color:var(--ds-color-ink)}"}])
+
       const projection = parseArtifactSlides(fixture, "page")
       if (!projection) throw new Error("Go projection is not admitted")
       window.pinnedProjection = projection
@@ -59,6 +62,12 @@ it.skipIf(!existsSync(chromium.executablePath()))("renders pinned tokens and a r
     expect(appearance).toMatchObject({ family: expect.stringContaining("crewship-pin-"), color: "rgb(17, 17, 17)", size: "24px", background: "rgb(29, 78, 216)" })
     await page.getByRole("button", { name: "Present" }).click()
     expect(await page.getByRole("dialog", { name: "Present slides" }).locator('[data-slide-content="title"]').evaluate(node => getComputedStyle(node).fontFamily)).toBe(appearance.family)
+    const inlined = await page.evaluate(() => (window as Window & { inlinedPin: string }).inlinedPin)
+    expect(inlined).toMatch(/^<!DOCTYPE html>/i)
+    expect(inlined).not.toContain('href="local.css"')
+    await page.setContent(inlined)
+    expect(await page.evaluate(() => ({ standards: document.compatMode, color: getComputedStyle(document.querySelector("h1")!).color }))).toEqual({ standards: "CSS1Compat", color: "rgb(17, 17, 17)" })
+
   } finally {
     await browser.close()
   }
