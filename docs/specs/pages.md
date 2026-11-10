@@ -970,10 +970,13 @@ library, the detail or Design, because `GET /api/v1/pages` and
 |---|---|
 | `/artifacts` | the granted artifacts, each with its action count |
 | `/artifacts?item=<slug>` | that artifact's actions, if the catalog lists it; otherwise the access gate |
-| `/artifacts/<id>` | the access gate, decided without a request: the catalog names artifacts by slug only, so an ID never proves a grant |
+| `/artifacts/<id>` | that artifact's actions, if a catalog entry carries this `id`; otherwise the access gate |
 
 The gate reads "This artifact isn’t part of your access". It never names the
-address or any artifact. An artifact listed without actions was never shown
+address or any artifact. Both addresses are matched only against the catalog
+the home reads too, so the address is never sent to decide access: an ID that
+was never granted, never existed or was deleted gets the same request, the same
+response and the same gate (#5135). An artifact listed without actions was never shown
 before and is not shown now.
 
 Old `/pages` addresses stay mountable for the surface only so that they can

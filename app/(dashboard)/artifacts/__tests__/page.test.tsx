@@ -11,11 +11,10 @@ vi.mock("@/hooks/use-page-workspace", () => ({ usePageWorkspace: () => ({ worksp
 vi.mock("@/hooks/use-access-mode", () => ({ useAccessMode: () => nav.access }))
 vi.mock("@/components/features/restricted/access-notice", () => ({ useAccessContext: () => ({ workspaceName: null, role: null, surfaces: ["pages"] }) }))
 vi.mock("@/components/features/artifacts-library/restricted-artifacts", () => ({
-  RestrictedArtifacts: ({ workspaceId, focus, hrefFor, homeHref }: { workspaceId: string; focus: string | null; hrefFor: (slug: string) => string; homeHref: string }) => {
-    nav.catalog(workspaceId, focus)
-    return <p data-testid="restricted-catalog" data-focus={focus ?? "none"} data-open={hrefFor("brief")} data-home={homeHref}>Restricted catalog</p>
+  RestrictedArtifacts: ({ workspaceId, focus, byId, hrefFor, homeHref }: { workspaceId: string; focus: string | null; byId?: boolean; hrefFor: (slug: string) => string; homeHref: string }) => {
+    nav.catalog(workspaceId, focus, Boolean(byId))
+    return <p data-testid="restricted-catalog" data-focus={focus ?? "none"} data-by={byId ? "id" : "slug"} data-open={hrefFor("brief")} data-home={homeHref}>Restricted catalog</p>
   },
-  RestrictedArtifactGate: ({ homeHref }: { homeHref: string }) => <p data-testid="restricted-gate" data-home={homeHref}>This artifact isn’t part of your access</p>,
 }))
 vi.mock("@/hooks/use-pages", async importOriginal => {
   const original = await importOriginal<typeof import("@/hooks/use-pages")>()
@@ -181,30 +180,25 @@ it("without the library waits for the page before choosing a Pages address", () 
 
 // Restricted member (#5132): /artifacts is their restricted catalog with or
 // without the library. It never mounts the library, the detail or Design,
-// reads no page and redirects nowhere; an ID address is the access gate
-// without even a catalog read, because the catalog names artifacts by slug.
+// reads no page and redirects nowhere. An ID address (#5135) is matched by ID
+// against the same catalog; the catalog alone decides between actions and gate.
 describe.each(["true", "false"])("a restricted member with the library %s", library => {
   it.each([
-    ["the library", "/artifacts", "workspace_id=ws1", "catalog", ""],
-    ["a slug link", "/artifacts", "workspace_id=ws1&item=site", "catalog", "site"],
-    ["a shared Design", "/artifacts", "workspace_id=ws1&design=1&item=wireframe", "catalog", ""],
-    ["an artifact by ID", "/artifacts/page-site", "workspace_id=ws1", "gate", ""],
-    ["a pinned artifact by ID", "/artifacts/page-site", "workspace_id=ws1&version=2", "gate", ""],
-    ["the exported placeholder", "/artifacts/_", "workspace_id=ws1", "catalog", ""],
-  ])("at %s sees only the restricted catalog or its gate", (_name, path, query, shown, focus) => {
+    ["the library", "/artifacts", "workspace_id=ws1", "slug", ""],
+    ["a slug link", "/artifacts", "workspace_id=ws1&item=site", "slug", "site"],
+    ["a shared Design", "/artifacts", "workspace_id=ws1&design=1&item=wireframe", "slug", ""],
+    ["an artifact by ID", "/artifacts/page-site", "workspace_id=ws1", "id", "page-site"],
+    ["a pinned artifact by ID", "/artifacts/page-site", "workspace_id=ws1&version=2", "id", "page-site"],
+    ["the exported placeholder", "/artifacts/_", "workspace_id=ws1", "slug", ""],
+  ])("at %s sees only the restricted catalog", (_name, path, query, by, focus) => {
     vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_LIBRARY", library)
     vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN", "true")
     nav.access = "restricted"
     nav.params = new URLSearchParams(query)
     at(path)
     render(path === "/artifacts" ? <ArtifactsPage /> : <ArtifactRoute />)
-    if (shown === "gate") {
-      expect(screen.getByTestId("restricted-gate").dataset.home).toBe("/artifacts?workspace_id=ws1")
-      expect(nav.catalog).not.toHaveBeenCalled()
-    } else {
-      expect(screen.getByTestId("restricted-catalog").dataset).toMatchObject({ focus: focus || "none", open: "/artifacts?workspace_id=ws1&item=brief", home: "/artifacts?workspace_id=ws1" })
-      expect(nav.catalog).toHaveBeenCalledWith("ws1", focus || null)
-    }
+    expect(screen.getByTestId("restricted-catalog").dataset).toMatchObject({ focus: focus || "none", by, open: "/artifacts?workspace_id=ws1&item=brief", home: "/artifacts?workspace_id=ws1" })
+    expect(nav.catalog).toHaveBeenCalledWith("ws1", focus || null, by === "id")
     expect(screen.queryByTestId("library")).toBeNull()
     expect(screen.queryByTestId("design")).toBeNull()
     expect(nav.read).not.toHaveBeenCalled()
@@ -219,7 +213,6 @@ it("decides nothing and reads nothing before the access mode is known", () => {
   render(<ArtifactRoute />)
   expect(screen.queryByTestId("library")).toBeNull()
   expect(screen.queryByTestId("restricted-catalog")).toBeNull()
-  expect(screen.queryByTestId("restricted-gate")).toBeNull()
   expect(nav.read).not.toHaveBeenCalled()
   expect(nav.replace).not.toHaveBeenCalled()
 })
