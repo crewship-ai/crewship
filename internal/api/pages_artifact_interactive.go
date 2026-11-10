@@ -20,6 +20,7 @@ type artifactInteractiveRuntime struct {
 	RuntimeURL            string   `json:"runtime_url"`
 	DevelopmentSameOrigin bool     `json:"development_same_origin"`
 	Collections           []string `json:"collections"`
+	ViewerFilters         bool     `json:"viewer_filters,omitempty"`
 }
 
 // artifactInteractiveEnabled requires the data collections it is built on,
@@ -46,7 +47,9 @@ func (h *PageHandler) artifactInteractiveFor(r *http.Request, files map[string]a
 	if err != nil {
 		return nil
 	}
-	out := &artifactInteractiveRuntime{DevelopmentSameOrigin: h.pageRuntimeDevelopmentSameOrigin, Collections: collections}
+	// This optional marker keeps older servers able to open the same interactive
+	// project. It enables only browser-local preferences, never a data grant.
+	out := &artifactInteractiveRuntime{DevelopmentSameOrigin: h.pageRuntimeDevelopmentSameOrigin, Collections: collections, ViewerFilters: artifacts.InteractiveViewerFilters(files)}
 	if origin := h.runtimeOriginFor(r); origin != "" {
 		scheme := "http://"
 		if strings.HasPrefix(origin, "https://") {

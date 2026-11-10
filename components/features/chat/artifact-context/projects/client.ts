@@ -138,7 +138,7 @@ function parseQuota(raw: unknown): ArtifactQuota | undefined {
 /** The runtime the server advertises for an interactive Project; anything not in that exact shape is dropped. */
 function parseInteractive(raw: unknown): ArtifactInteractiveRuntime | undefined {
   if (!object(raw) || !str(raw.runtime_url) || typeof raw.development_same_origin !== "boolean" || !Array.isArray(raw.collections) || !raw.collections.every(str)) return undefined
-  return { runtime_url: raw.runtime_url, development_same_origin: raw.development_same_origin, collections: [...raw.collections] }
+  return { runtime_url: raw.runtime_url, development_same_origin: raw.development_same_origin, collections: [...raw.collections], ...(raw.viewer_filters === true ? { viewer_filters: true as const } : {}) }
 }
 
 /** Validates the required fields and drops any optional one with the wrong type, so the UI never renders a guess. */
