@@ -198,6 +198,25 @@ func TestAcceptance_HumanDocumentsBinary(t *testing.T) {
 		t.Fatal("public read-only rejection reached engine")
 	}
 	read(readConfig)
+	// Mention names (#5155): a reader learns names only of people who can read
+	// this Document; an unknown id is simply absent, never an error.
+	if _, err := db.Exec(`UPDATE users SET full_name='Human Owner' WHERE id='human-doc-owner'`); err != nil {
+		t.Fatal(err)
+	}
+	var named struct {
+		People []struct{ ID, Name string } `json:"people"`
+	}
+	peopleOut := require(readConfig, "", "doc", "people", "human-document", "--ids", "human-doc-owner,nobody-at-all")
+	if json.Unmarshal(peopleOut, &named) != nil || len(named.People) != 1 || named.People[0].ID != "human-doc-owner" || named.People[0].Name != "Human Owner" {
+		t.Fatalf("doc people --ids: %s", peopleOut)
+	}
+	searchOut := require(readConfig, "", "doc", "people", "human-document", "--query", "human")
+	if json.Unmarshal(searchOut, &named) != nil || len(named.People) != 1 || strings.Contains(string(searchOut), "example.invalid") {
+		t.Fatalf("doc people --query: %s", searchOut)
+	}
+	if out, err := run(readConfig, "", "doc", "people", "human-document", "--ids", "a", "--query", "b"); err == nil {
+		t.Fatalf("ids and query together accepted: %s", out)
+	}
 	receipt := require(writerConfig, string(rawPatch), "doc", "patch", "human-document", "--file", "-")
 	retry := require(writerConfig, string(rawPatch), "doc", "patch", "human-document", "--file", "-")
 	var first, second map[string]any

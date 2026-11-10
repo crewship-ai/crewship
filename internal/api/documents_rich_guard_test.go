@@ -38,7 +38,7 @@ func richTestProjection(t *testing.T, root map[string]any) json.RawMessage {
 	var blocks []DocumentBlockHash
 	var visit func(map[string]any)
 	visit = func(node map[string]any) {
-		if attrs, ok := node["attrs"].(map[string]any); ok {
+		if attrs, ok := node["attrs"].(map[string]any); ok && attrs["id"] != nil {
 			blocks = append(blocks, DocumentBlockHash{ID: attrs["id"].(string), Hash: documentRichHash(node)})
 		}
 		children, _ := node["content"].([]any)

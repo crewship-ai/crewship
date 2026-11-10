@@ -213,7 +213,7 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		for i := range blocks {
 			content = append(content, map[string]any{"type": "paragraph", "attrs": map[string]any{"id": fmt.Sprintf("%s%02d", prefix, i)}, "content": []any{map[string]any{"type": "text", "text": fmt.Sprintf("Initial paragraph %02d with enough confirmed text to give the measured document a realistic body.", i)}}})
 		}
-		initialize, _ := json.Marshal(map[string]any{"id": slug + "-init", "schema": documents.LatestSchema, "page_id": page.ID, "body": map[string]any{"type": "doc", "content": content}})
+		initialize, _ := json.Marshal(map[string]any{"id": slug + "-init", "schema": documents.CreateSchema, "page_id": page.ID, "body": map[string]any{"type": "doc", "content": content}})
 		require("one", string(initialize), "doc", "initialize", slug, "--file", "-")
 		return docRef{slug, page.ID, blocks}
 	}
@@ -251,7 +251,7 @@ func TestAcceptance_DocumentDurabilityRealEngine(t *testing.T) {
 		return outlineBlock{}
 	}
 	patchDoc := func(d docRef, s state, id, target, text string) string {
-		raw, _ := json.Marshal(map[string]any{"id": id, "schema": documents.LatestSchema, "page_id": d.id, "epoch": s.Epoch, "ifRev": s.Rev, "target": target, "ifHash": blockOf(s, target).Hash, "text": text})
+		raw, _ := json.Marshal(map[string]any{"id": id, "schema": documents.CreateSchema, "page_id": d.id, "epoch": s.Epoch, "ifRev": s.Rev, "target": target, "ifHash": blockOf(s, target).Hash, "text": text})
 		return string(raw)
 	}
 	patchFor := func(s state, id, target, text string) string { return patchDoc(primary, s, id, target, text) }

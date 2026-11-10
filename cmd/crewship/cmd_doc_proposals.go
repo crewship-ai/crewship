@@ -17,7 +17,7 @@ import (
 var docProposalRequestID = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,128}$`)
 
 func newDocProposalCommands() []*cobra.Command {
-	list := &cobra.Command{Use: "proposals <page-slug>", Short: "List agent proposals on a schema 4 document", Long: `Print proposals (oldest first) with id, author, run_id, target.block_ids,
+	list := &cobra.Command{Use: "proposals <page-slug>", Short: "List agent proposals on a schema 4 or 5 document", Long: `Print proposals (oldest first) with id, author, run_id, target.block_ids,
 base_rev, status (open, stale, accepted or rejected), text and created_at.
 An open proposal turns stale when its block changed after it was made; it can
 then no longer be accepted. Reading needs read access to the document.`, Example: `  crewship doc proposals @<artifact-id>`, Args: cobra.ExactArgs(1), RunE: func(cmd *cobra.Command, args []string) error {

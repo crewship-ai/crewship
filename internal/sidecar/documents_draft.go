@@ -14,6 +14,8 @@ import (
 	"regexp"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/crewship-ai/crewship/internal/documents"
 )
 
 type DocumentDraftTarget struct {
@@ -160,7 +162,7 @@ func PrepareDocumentDraft(raw []byte) (DocumentDraftPacket, error) {
 	if v.Mode != "" {
 		return DocumentDraftPacket{}, errors.New("this run may only propose; use doc draft prepare, then doc draft propose")
 	}
-	if v.Schema != 3 || v.Rev < 0 || v.Rev == math.MaxInt64 || v.Generation < 0 || !draftID.MatchString(v.PageID) || v.Epoch == "" || len(v.Epoch) > 2048 || !draftID.MatchString(in.MutationID) || !draftID.MatchString(in.MutationID+"-checkpoint") || !draftID.MatchString(in.Target) {
+	if !documents.SchemaAllows(v.Schema, documents.CapDraft) || v.Rev < 0 || v.Rev == math.MaxInt64 || v.Generation < 0 || !draftID.MatchString(v.PageID) || v.Epoch == "" || len(v.Epoch) > 2048 || !draftID.MatchString(in.MutationID) || !draftID.MatchString(in.MutationID+"-checkpoint") || !draftID.MatchString(in.Target) {
 		return DocumentDraftPacket{}, errors.New("invalid original draft view or mutation identity")
 	}
 	seen := map[string]bool{}
@@ -199,7 +201,8 @@ func PrepareDocumentDraftOrProposal(raw []byte) (any, error) {
 	return PrepareDocumentDraft(raw)
 }
 
-// DocumentProposalPacket is one immutable proposal on a schema-4 document.
+// DocumentProposalPacket is one immutable proposal, at the document's own
+// schema (one that supports proposals: 4 or 5).
 // It changes nothing until a human accepts it.
 type DocumentProposalPacket struct {
 	Generation int64              `json:"generation"`
@@ -224,7 +227,7 @@ func PrepareDocumentProposal(raw []byte) (DocumentProposalPacket, error) {
 		return DocumentProposalPacket{}, err
 	}
 	v := in.View
-	if v.Mode != "propose" || v.Schema != 4 || v.Rev < 0 || v.Rev == math.MaxInt64 || v.Generation < 0 || !draftID.MatchString(v.PageID) || v.Epoch == "" || len(v.Epoch) > 2048 || !draftID.MatchString(in.MutationID) || !draftID.MatchString(in.Target) || len(in.Text) > 100000 {
+	if v.Mode != "propose" || !documents.SchemaAllows(v.Schema, documents.CapPropose) || v.Rev < 0 || v.Rev == math.MaxInt64 || v.Generation < 0 || !draftID.MatchString(v.PageID) || v.Epoch == "" || len(v.Epoch) > 2048 || !draftID.MatchString(in.MutationID) || !draftID.MatchString(in.Target) || len(in.Text) > 100000 {
 		return DocumentProposalPacket{}, errors.New("invalid original propose view or proposal identity")
 	}
 	hash := ""
@@ -241,7 +244,7 @@ func PrepareDocumentProposal(raw []byte) (DocumentProposalPacket, error) {
 	if hash == "" {
 		return DocumentProposalPacket{}, errors.New("target is outside this run's mandate")
 	}
-	p := DocumentProposalPacket{Generation: v.Generation, Proposal: DocumentDraftPatch{ID: in.MutationID, Schema: 4, PageID: v.PageID, Epoch: v.Epoch, IfRev: v.Rev, Target: in.Target, IfHash: hash, Text: in.Text}}
+	p := DocumentProposalPacket{Generation: v.Generation, Proposal: DocumentDraftPatch{ID: in.MutationID, Schema: v.Schema, PageID: v.PageID, Epoch: v.Epoch, IfRev: v.Rev, Target: in.Target, IfHash: hash, Text: in.Text}}
 	rawPacket, _ := json.Marshal(p)
 	if len(rawPacket)+64 > 64<<10 {
 		return DocumentProposalPacket{}, errors.New("prepared packet exceeds 64 KiB response limit")
@@ -278,7 +281,7 @@ func ParseDocumentProposalPacket(raw []byte) (DocumentProposalPacket, error) {
 		return p, err
 	}
 	a := p.Proposal
-	if p.Generation < 0 || a.Schema != 4 || !draftID.MatchString(a.ID) || !draftID.MatchString(a.PageID) || !draftID.MatchString(a.Target) || !draftHash.MatchString(a.IfHash) || a.Epoch == "" || len(a.Epoch) > 2048 || a.IfRev < 0 || a.IfRev == math.MaxInt64 {
+	if p.Generation < 0 || !documents.SchemaAllows(a.Schema, documents.CapPropose) || !draftID.MatchString(a.ID) || !draftID.MatchString(a.PageID) || !draftID.MatchString(a.Target) || !draftHash.MatchString(a.IfHash) || a.Epoch == "" || len(a.Epoch) > 2048 || a.IfRev < 0 || a.IfRev == math.MaxInt64 {
 		return p, errors.New("inconsistent immutable proposal packet")
 	}
 	return p, nil
@@ -352,7 +355,7 @@ func ParseDocumentDraftPacket(raw []byte) (DocumentDraftPacket, error) {
 		return p, err
 	}
 	a, b := p.Patch, p.Checkpoint
-	if p.Generation < 0 || a.Schema != 3 || b.Schema != a.Schema || !draftID.MatchString(a.ID) || !draftID.MatchString(a.PageID) || !draftID.MatchString(a.Target) || !draftHash.MatchString(a.IfHash) || a.Epoch == "" || len(a.Epoch) > 2048 || a.IfRev < 0 || a.IfRev == math.MaxInt64 || !draftID.MatchString(b.ID) || b.ID != a.ID+"-checkpoint" || b.PageID != a.PageID || b.Epoch != a.Epoch || b.IfRev != a.IfRev+1 {
+	if p.Generation < 0 || !documents.SchemaAllows(a.Schema, documents.CapDraft) || b.Schema != a.Schema || !draftID.MatchString(a.ID) || !draftID.MatchString(a.PageID) || !draftID.MatchString(a.Target) || !draftHash.MatchString(a.IfHash) || a.Epoch == "" || len(a.Epoch) > 2048 || a.IfRev < 0 || a.IfRev == math.MaxInt64 || !draftID.MatchString(b.ID) || b.ID != a.ID+"-checkpoint" || b.PageID != a.PageID || b.Epoch != a.Epoch || b.IfRev != a.IfRev+1 {
 		return p, errors.New("inconsistent immutable draft packet")
 	}
 	return p, nil
