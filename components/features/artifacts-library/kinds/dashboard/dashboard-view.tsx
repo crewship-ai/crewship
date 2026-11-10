@@ -113,7 +113,9 @@ export function DashboardProjectView({ workspaceId, parts, onReport }: { workspa
     {freshness && <ArtifactDrawerSection tab="sources" label="Sources" icon={Database} order={0}>
       <p className="px-3.5 pb-1 pt-3 text-xs text-muted-foreground">{citations
         ? "Each bound value carries its source; hover or focus a number in the dashboard to see it."
-        : "This dashboard draws its own numbers, so values carry no per-number citation. The datasets below are what it reads."}</p>
+        : parts.previewKind === "interactive"
+          ? "This interactive preview manages its own rendering, so values carry no per-number citation. The list shows declared datasets and their stored values."
+          : "This preview has no per-number citation. The list shows declared datasets and their stored values."}</p>
       <SourcesList freshness={freshness} codeVersion={version.shown} detailed />
     </ArtifactDrawerSection>}
     <ProjectDrawer parts={parts} />

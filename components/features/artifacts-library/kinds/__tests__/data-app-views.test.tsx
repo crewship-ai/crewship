@@ -153,6 +153,7 @@ describe("Dashboard view", () => {
     fireEvent.click(await screen.findByRole("button", { name: "Sources" }))
     expect(screen.queryByText(/hover/)).toBeNull()
     expect(screen.getByText(/values carry no per-number citation/)).toBeInTheDocument()
+    expect(screen.getByText(/shows declared datasets and their stored values/)).toBeInTheDocument()
     expect(screen.getAllByRole("alert").some(node => /datasets\.json are invalid/.test(node.textContent ?? ""))).toBe(true)
   })
 
