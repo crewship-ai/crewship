@@ -103,7 +103,7 @@ func documentPeopleSessionRequest(t *testing.T, h *PageHandler, ws, caller, role
 	return r
 }
 
-func names(people []documentPerson) []string {
+func documentPeopleNames(people []documentPerson) []string {
 	out := []string{}
 	for _, person := range people {
 		out = append(out, person.ID+"="+person.Name)
@@ -116,8 +116,8 @@ func TestDocumentPeopleNamesOnlyReadersAndOnlyToReaders(t *testing.T) {
 	h, ws, owner := documentPeopleFixture(t, false)
 	// The owner learns names only of people who can read this Document.
 	status, people := documentPeopleCall(t, h, ws, owner, "OWNER", "ids="+url.QueryEscape("bea,cid,sus,res,zed,nobody,"+owner))
-	if status != 200 || strings.Join(names(people), "|") != "bea=Bea Member|test-user-id=Test User" {
-		t.Fatalf("named people = %d %v", status, names(people))
+	if status != 200 || strings.Join(documentPeopleNames(people), "|") != "bea=Bea Member|test-user-id=Test User" {
+		t.Fatalf("named people = %d %v", status, documentPeopleNames(people))
 	}
 	// An id for nobody and an id for a member without access get the same answer: nothing.
 	_, nobody := documentPeopleCall(t, h, ws, owner, "OWNER", "ids=nobody")
@@ -128,13 +128,13 @@ func TestDocumentPeopleNamesOnlyReadersAndOnlyToReaders(t *testing.T) {
 	}
 	// Search lists only readers; email addresses never match or appear.
 	_, all := documentPeopleCall(t, h, ws, owner, "OWNER", "q=")
-	if strings.Join(names(all), "|") != "bea=Bea Member|test-user-id=Test User" {
-		t.Fatalf("search = %v", names(all))
+	if strings.Join(documentPeopleNames(all), "|") != "bea=Bea Member|test-user-id=Test User" {
+		t.Fatalf("search = %v", documentPeopleNames(all))
 	}
 	_, byName := documentPeopleCall(t, h, ws, owner, "OWNER", "q=bea")
 	_, byEmail := documentPeopleCall(t, h, ws, owner, "OWNER", "q=example.invalid")
 	_, hidden := documentPeopleCall(t, h, ws, owner, "OWNER", "q=Cid")
-	if strings.Join(names(byName), "|") != "bea=Bea Member" || len(byEmail) != 0 || len(hidden) != 0 {
+	if strings.Join(documentPeopleNames(byName), "|") != "bea=Bea Member" || len(byEmail) != 0 || len(hidden) != 0 {
 		t.Fatalf("search filters: %v %v %v", byName, byEmail, hidden)
 	}
 	// A reader through a grant may name co-readers; a member without access gets 404, like a missing page.
@@ -162,8 +162,8 @@ func TestDocumentPeopleOnPrivateOutputFollowsThePrivateAudience(t *testing.T) {
 	h, ws, owner := documentPeopleFixture(t, true)
 	// A grant does not open private output; only its custodian (and the
 	// audited workspace administrator read) can read, so only they are named.
-	if status, people := documentPeopleCall(t, h, ws, owner, "OWNER", "ids=bea,"+owner); status != 200 || strings.Join(names(people), "|") != "test-user-id=Test User" {
-		t.Fatalf("private names = %d %v", status, names(people))
+	if status, people := documentPeopleCall(t, h, ws, owner, "OWNER", "ids=bea,"+owner); status != 200 || strings.Join(documentPeopleNames(people), "|") != "test-user-id=Test User" {
+		t.Fatalf("private names = %d %v", status, documentPeopleNames(people))
 	}
 	if status, _ := documentPeopleCall(t, h, ws, "bea", "MEMBER", "ids="+owner); status != 404 {
 		t.Fatalf("granted member read private people: %d", status)
@@ -261,14 +261,14 @@ func TestDocumentPeopleSearchMatchesInSQLAndTreatsWildcardsAsText(t *testing.T) 
 	execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES('zoe','zoe@example.invalid','Zoe 100% _Reader')`)
 	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('zoe-m',?,'zoe','MEMBER')`, ws)
 	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','user','zoe','read',?)`, owner)
-	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q=zoe"); strings.Join(names(found), "|") != "zoe=Zoe 100% _Reader" {
-		t.Fatalf("late member not found: %v", names(found))
+	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q=zoe"); strings.Join(documentPeopleNames(found), "|") != "zoe=Zoe 100% _Reader" {
+		t.Fatalf("late member not found: %v", documentPeopleNames(found))
 	}
 	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="+url.QueryEscape("100% _")); len(found) != 1 {
-		t.Fatalf("literal wildcard text: %v", names(found))
+		t.Fatalf("literal wildcard text: %v", documentPeopleNames(found))
 	}
 	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="+url.QueryEscape("%")); len(found) != 1 {
-		t.Fatalf("%% must match only a literal percent sign: %v", names(found))
+		t.Fatalf("%% must match only a literal percent sign: %v", documentPeopleNames(found))
 	}
 }
 
@@ -278,8 +278,8 @@ func TestDocumentPeopleSearchFoldsUnicodeCase(t *testing.T) {
 	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('sarka-m',?,'sarka','MEMBER')`, ws)
 	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','user','sarka','read',?)`, owner)
 	for _, q := range []string{"šá", "ŠÁRKA", "nováková"} {
-		if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="+url.QueryEscape(q)); strings.Join(names(found), "|") != "sarka=Šárka Nováková" {
-			t.Fatalf("%q: %v", q, names(found))
+		if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="+url.QueryEscape(q)); strings.Join(documentPeopleNames(found), "|") != "sarka=Šárka Nováková" {
+			t.Fatalf("%q: %v", q, documentPeopleNames(found))
 		}
 	}
 }
@@ -294,8 +294,8 @@ func TestDocumentPeopleOnPrivateOutputSearchesOnlyItsPossibleReaders(t *testing.
 	}
 	execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES('adm','adm@example.invalid','Zed Admin')`)
 	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('adm-m',?,'adm','ADMIN')`, ws)
-	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="); strings.Join(names(found), "|") != "adm=Zed Admin|test-user-id=Test User" {
-		t.Fatalf("private search: %v", names(found))
+	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="); strings.Join(documentPeopleNames(found), "|") != "adm=Zed Admin|test-user-id=Test User" {
+		t.Fatalf("private search: %v", documentPeopleNames(found))
 	}
 }
 
@@ -348,15 +348,15 @@ func TestDocumentPeopleSearchFindsReadersBehindManyNonReaders(t *testing.T) {
 	execOrFatal(t, h.db, `INSERT INTO page_folder_acl(folder_id,subject_type,subject_id,can_read,can_write,set_at) VALUES('people-folder','user','zfolder',1,0,datetime('now'))`)
 	execOrFatal(t, h.db, `UPDATE pages SET folder_id='people-folder' WHERE id='people-page'`)
 	_, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q=alex")
-	if strings.Join(names(found), "|") != "zcrew=Alex Z zcrew|zfolder=Alex Z zfolder|zgrant=Alex Z zgrant" {
-		t.Fatalf("readers behind non-readers: %v", names(found))
+	if strings.Join(documentPeopleNames(found), "|") != "zcrew=Alex Z zcrew|zfolder=Alex Z zfolder|zgrant=Alex Z zgrant" {
+		t.Fatalf("readers behind non-readers: %v", documentPeopleNames(found))
 	}
 	// A retired grant to the whole workspace reaches nobody, so it must not
 	// widen the candidates back to every member.
 	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','workspace','','comment',?)`, owner)
 	execOrFatal(t, h.db, `UPDATE page_grants SET retired_at=datetime('now') WHERE page_id='people-page' AND subject_type='workspace'`)
 	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q=alex"); len(found) != 3 {
-		t.Fatalf("retired workspace grant widened the search: %v", names(found))
+		t.Fatalf("retired workspace grant widened the search: %v", documentPeopleNames(found))
 	}
 	// A grant to the whole workspace makes every unrestricted member a reader.
 	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','workspace','',?,?)`, "read", owner)
