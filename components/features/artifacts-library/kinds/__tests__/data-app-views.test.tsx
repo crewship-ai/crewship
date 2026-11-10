@@ -7,11 +7,11 @@ import { AppProjectView } from "../app/app-view"
 import { DashboardProjectView } from "../dashboard/dashboard-view"
 import type { KindReport } from "../project-parts"
 
-const read = vi.hoisted(() => ({ value: { pending: false, error: false as unknown, limitExceeded: false, collections: undefined as unknown } }))
+const read = vi.hoisted(() => ({ value: { pending: false, error: false as unknown, limitExceeded: false, collections: undefined as unknown, manifest: undefined as unknown } }))
 vi.mock("@/components/features/chat/artifact-context/projects/use-artifact-dashboard-data", () => ({ useArtifactDashboardData: () => read.value }))
 
 afterEach(cleanup)
-beforeEach(() => { read.value = { pending: false, error: false, limitExceeded: false, collections: undefined } })
+beforeEach(() => { read.value = { pending: false, error: false, limitExceeded: false, collections: undefined, manifest: undefined } })
 
 const snapshot = (over: Partial<ArtifactProjectSnapshot> = {}): ArtifactProjectSnapshot => ({
   page_id: "page-1", name: "Pricing site", can_write: true, latest_version: 4, shared_version: 3,
@@ -115,7 +115,7 @@ describe("Dashboard view", () => {
   const collections = [{ collection: "deals", code_version: 4, documents: [{ id: "d1", version: 1, value: {}, updated_at: new Date().toISOString(), source_label: "HubSpot", source_kind: "agent" }] }]
 
   it("reports Live with freshness from the data read and lists sources in the drawer", async () => {
-    read.value = { pending: false, error: false, limitExceeded: false, collections }
+    read.value = { pending: false, error: false, limitExceeded: false, collections, manifest: undefined }
     const reports: (KindReport | null)[] = []
     inFrame(<DashboardProjectView workspaceId="w" parts={parts({ screens: ["index.html"], screen: "index.html" })} onReport={report => reports.push(report)} />)
     expect(await screen.findByRole("button", { name: /^Data freshness: Updated \d\d:\d\d · HubSpot$/ })).toBeInTheDocument()
@@ -126,8 +126,61 @@ describe("Dashboard view", () => {
     expect(screen.queryByRole("button", { name: /Export/ })).toBeNull()
   })
 
+  const files = (datasets?: string) => [
+    { path: "dashboard.json", media_type: "application/json", content: '{"schema_version":1,"collections":["deals"]}' },
+    ...(datasets ? [{ path: "datasets.json", media_type: "application/json", content: datasets }] : []),
+  ]
+  const declared = { schema_version: 1, collections: ["deals"] }
+
+  it("shows the stated title, description, mode and max age with the lineage, and offers per-value citations for bound pages", async () => {
+    read.value = { pending: false, error: false, limitExceeded: false, collections, manifest: declared }
+    const data = snapshot({ manifest: { version: 4, entrypoint: "index.html", files: files('{"schema_version":1,"datasets":{"deals":{"title":"Open deals","description":"Pipeline from the CRM.","mode":"planned","max_age_seconds":7200}}}') } })
+    inFrame(<DashboardProjectView workspaceId="w" parts={parts({ data, previewKind: "dashboard" })} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Sources" }))
+    const row = document.querySelector('[data-dataset="deals"]') as HTMLElement
+    expect(row).toHaveTextContent("Open deals")
+    expect(row).toHaveTextContent("Pipeline from the CRM.")
+    expect(row).toHaveTextContent("Planned refresh · declared· Max age 2 h")
+    expect(row).toHaveTextContent(/Last write \d\d:\d\d · HubSpot/)
+    expect(row).toHaveTextContent("Collection deals · declared by v4")
+    expect(screen.getByText(/Each bound value carries its source; hover or focus a number/)).toBeInTheDocument()
+  })
+
+  it("does not promise hover citations on an interactive dashboard and says when dataset details are invalid", async () => {
+    read.value = { pending: false, error: false, limitExceeded: false, collections, manifest: declared }
+    const data = snapshot({ interactive: { runtime_url: "https://apps.example.test/run", development_same_origin: false, collections: ["deals"] }, manifest: { version: 4, entrypoint: "index.html", files: files('{"schema_version":1,"datasets":{"sales":{"mode":"fixed"}}}') } })
+    inFrame(<DashboardProjectView workspaceId="w" parts={parts({ data, previewKind: "interactive" })} />)
+    fireEvent.click(await screen.findByRole("button", { name: "Sources" }))
+    expect(screen.queryByText(/hover/)).toBeNull()
+    expect(screen.getByText(/values carry no per-number citation/)).toBeInTheDocument()
+    expect(screen.getByText(/shows declared datasets and their stored values/)).toBeInTheDocument()
+    expect(screen.getAllByRole("alert").some(node => /datasets\.json are invalid/.test(node.textContent ?? ""))).toBe(true)
+  })
+
+  it("turns Stale while the dashboard stays open and the data does not change", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date("2026-11-08T10:00:00Z") })
+    try {
+      read.value = { pending: false, error: false, limitExceeded: false, manifest: declared,
+        collections: [{ ...collections[0], documents: [{ ...collections[0].documents[0], updated_at: "2026-11-08T09:59:00Z" }] }] }
+      const data = snapshot({ manifest: { version: 4, entrypoint: "index.html", files: files('{"schema_version":1,"datasets":{"deals":{"mode":"live","max_age_seconds":120}}}') } })
+      const reports: (KindReport | null)[] = []
+      inFrame(<DashboardProjectView workspaceId="w" parts={parts({ data, previewKind: "dashboard" })} onReport={report => reports.push(report)} />)
+      await waitFor(() => expect(reports.at(-1)?.status).toMatchObject({ key: "live" }))
+      await vi.advanceTimersByTimeAsync(90_000)
+      await waitFor(() => expect(reports.at(-1)?.status).toMatchObject({ key: "stale" }))
+    } finally { vi.useRealTimers() }
+  })
+
+  it("reports Sample data from datasets.json", async () => {
+    read.value = { pending: false, error: false, limitExceeded: false, collections, manifest: declared }
+    const data = snapshot({ manifest: { version: 4, entrypoint: "index.html", files: files('{"schema_version":1,"datasets":{"deals":{"mode":"fixed","sample":true}}}') } })
+    const reports: (KindReport | null)[] = []
+    inFrame(<DashboardProjectView workspaceId="w" parts={parts({ data, previewKind: "dashboard" })} onReport={report => reports.push(report)} />)
+    await waitFor(() => expect(reports.at(-1)?.status).toMatchObject({ key: "sample" }))
+  })
+
   it("reports an error and no Sources tab when the data cannot be read", async () => {
-    read.value = { pending: false, error: true, limitExceeded: false, collections: undefined }
+    read.value = { pending: false, error: true, limitExceeded: false, collections: undefined, manifest: undefined }
     const reports: (KindReport | null)[] = []
     inFrame(<DashboardProjectView workspaceId="w" parts={parts()} onReport={report => reports.push(report)} />)
     expect(await screen.findByRole("button", { name: "Data freshness: Data unavailable" })).toBeInTheDocument()
@@ -136,7 +189,7 @@ describe("Dashboard view", () => {
   })
 
   it("uses the dashboard's own pages as view tabs and fills the width on a phone", async () => {
-    read.value = { pending: true, error: false, limitExceeded: false, collections: undefined }
+    read.value = { pending: true, error: false, limitExceeded: false, collections: undefined, manifest: undefined }
     const setScreen = vi.fn()
     const { container } = inFrame(<DashboardProjectView workspaceId="w" parts={parts({ setScreen })} />, "phone")
     fireEvent.click(await screen.findByRole("button", { name: "index.html" }))

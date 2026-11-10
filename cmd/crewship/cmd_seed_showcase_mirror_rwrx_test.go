@@ -99,7 +99,7 @@ func TestShowcaseMirrorRwrx_Manifest(t *testing.T) {
 	if m.EntryPoint != "index.html" || m.Message == "" {
 		t.Errorf("entrypoint %q, message %q", m.EntryPoint, m.Message)
 	}
-	wantTypes := map[string]string{"index.html": "text/html", "theme.css": "text/css", "interactive.json": "application/json", "dashboard.json": "application/json"}
+	wantTypes := map[string]string{"index.html": "text/html", "theme.css": "text/css", "interactive.json": "application/json", "dashboard.json": "application/json", "datasets.json": "application/json"}
 	if len(files) != len(wantTypes) {
 		t.Errorf("files = %d, want %d", len(files), len(wantTypes))
 	}
@@ -136,6 +136,22 @@ func TestShowcaseMirrorRwrx_Manifest(t *testing.T) {
 			t.Errorf("index.html: %s out of order", o.name)
 		}
 		last = at
+	}
+	if runtime := strings.TrimRight(string(seeddata.ShowcaseFile("mirror/rwrx/host/runtime.js")), "\n"); !strings.Contains(html, runtime) {
+		t.Error("index.html must inline host/runtime.js as it is; rerun build.py")
+	}
+	var datasets struct {
+		SchemaVersion int `json:"schema_version"`
+		Datasets      map[string]struct {
+			Title, Description, Mode string
+			Sample                   bool
+		} `json:"datasets"`
+	}
+	if err := json.Unmarshal(files["datasets.json"].Content, &datasets); err != nil || datasets.SchemaVersion != 1 || len(datasets.Datasets) != 1 {
+		t.Fatalf("datasets.json = %s, %v; want schema 1 with the tasks dataset", files["datasets.json"].Content, err)
+	}
+	if task := datasets.Datasets["tasks"]; task.Mode != "fixed" || !task.Sample || !strings.HasPrefix(task.Title, "Sample") || task.Description == "" {
+		t.Errorf("datasets.json tasks = %+v; want the original's title and description, fixed, sample", task)
 	}
 	if pageAt < 0 || len(original) < 10000 {
 		t.Errorf("index.html must hold the original page verbatim (%d bytes)", len(original))

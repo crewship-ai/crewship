@@ -111,6 +111,15 @@ IDs. Native `<meter>` supports simple charts with static `min` and `max`.
 Scripts, external requests, SVG/canvas and arbitrary SDKs are not supported by
 this inert profile.
 
+Optionally publish `datasets.json` in the same manifest to describe each
+declared collection:
+`{"schema_version":1,"datasets":{"sales":{"title":"Open deals","description":"…","mode":"planned","max_age_seconds":7200}}}`.
+`mode` is required and one of `fixed`, `planned`, `live`; `sample: true` marks
+sample values; `max_age_seconds` (60 to 31622400) only with `planned` or
+`live`. Keys must be declared collections; any unknown key or bad value
+rejects the whole file. Never state who wrote the data or when: the server
+supplies that. Keep `dashboard.json` at `schema_version` 1.
+
 For data changes, read the current documents and send `artifact_data_batch`
 with the exact code `base_version`, `collection`, and `documents` entries
 `{"id":"north","ifVersion":N,"value":{"revenue":42}}`. Use `ifVersion:0` only

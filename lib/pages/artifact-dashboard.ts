@@ -28,6 +28,60 @@ export function parseDashboardManifest(files: ArtifactFile[]): DashboardManifest
   } catch { return null }
 }
 
+/**
+ * Author-declared dataset details, in their own file beside dashboard.json so
+ * that dashboard.json v1 stays byte-for-byte valid and v2 stays free for the
+ * planned widget profile. `fixed` data has no automatic refresh; `planned`
+ * data is refreshed by a producer on a schedule; `live` data is expected to
+ * change while the dashboard is open. `max_age_seconds` (planned/live only)
+ * is the author's freshness promise: older data shows as Stale. Nothing here
+ * is a server audit: it is what the author states about the dataset.
+ */
+export const DASHBOARD_DATASETS_FILE = "datasets.json"
+export type DashboardDatasetMode = "fixed" | "planned" | "live"
+export interface DashboardDataset { title: string | null; description: string | null; mode: DashboardDatasetMode; sample: boolean; maxAgeSeconds: number | null }
+/** `absent`: no file (a v1 dashboard). `invalid`: a file exists but is rejected as a whole; the UI says so instead of dropping it. */
+export type DashboardDatasets = { status: "absent" } | { status: "invalid" } | { status: "ok"; datasets: Record<string, DashboardDataset> }
+export const DASHBOARD_MAX_AGE_SECONDS = { min: 60, max: 366 * 24 * 3600 }
+const DATASET_KEYS = ["title", "description", "mode", "sample", "max_age_seconds"]
+const datasetText = (value: unknown, max: number, lines: boolean): value is string =>
+  typeof value === "string" && value.trim().length > 0 && value.length <= max && !(lines ? /[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/ : /[\u0000-\u001f\u007f-\u009f]/).test(value) && !/\p{Cf}/u.test(value)
+/** Fails closed: any unknown key, undeclared collection, duplicate key or out-of-range value rejects the whole file. */
+export function parseDashboardDatasets(files: readonly { path: string; content: string; media_type?: string }[], collections: readonly string[]): DashboardDatasets {
+  const candidates = files.filter(file => file.path === DASHBOARD_DATASETS_FILE)
+  if (candidates.length === 0) return { status: "absent" }
+  const invalid = { status: "invalid" } as const
+  if (candidates.length !== 1 || candidates[0].content.length > 16384 || (candidates[0].media_type !== undefined && candidates[0].media_type !== "application/json")) return invalid
+  const source = candidates[0].content
+  if (new TextEncoder().encode(source).length > 16384) return invalid
+  let value: unknown
+  try { value = JSON.parse(source) } catch { return invalid }
+  if (!object(value) || value.schema_version !== 1 || Object.keys(value).length !== 2 || !object(value.datasets)) return invalid
+  const datasets: Record<string, DashboardDataset> = {}
+  const declared = new Set(collections)
+  let keys = 2
+  for (const [name, raw] of Object.entries(value.datasets)) {
+    if (!dashboardName(name) || !declared.has(name) || !object(raw)) return invalid
+    const fields = Object.keys(raw)
+    if (!fields.every(key => DATASET_KEYS.includes(key))) return invalid
+    keys += fields.length + 1
+    const { title, description, mode, sample, max_age_seconds: maxAge } = raw
+    if (mode !== "fixed" && mode !== "planned" && mode !== "live") return invalid
+    if (title !== undefined && !datasetText(title, 120, false)) return invalid
+    if (description !== undefined && !datasetText(description, 500, true)) return invalid
+    if (sample !== undefined && typeof sample !== "boolean") return invalid
+    if (maxAge !== undefined && (mode === "fixed" || !Number.isSafeInteger(maxAge) || (maxAge as number) < DASHBOARD_MAX_AGE_SECONDS.min || (maxAge as number) > DASHBOARD_MAX_AGE_SECONDS.max)) return invalid
+    datasets[name] = { title: (title as string | undefined) ?? null, description: (description as string | undefined) ?? null, mode, sample: sample === true, maxAgeSeconds: (maxAge as number | undefined) ?? null }
+  }
+  // The admitted schema has only scalar fields. Scan JSON string tokens for
+  // keys and compare their count without recursing into untrusted values.
+  let spelled = 0
+  for (const match of source.matchAll(/"(?:\\.|[^"\\])*"\s*/g)) {
+    if (source[match.index + match[0].length] === ":") spelled++
+  }
+  return spelled === keys ? { status: "ok", datasets } : invalid
+}
+
 /** Project only the reader-safe wire fields. No raw actor, chat or run identity crosses the frame. */
 export function parseDashboardCollection(raw: unknown, collection: string, codeVersion: number): DashboardCollection | null {
   if (!object(raw) || raw.collection !== collection || raw.code_version !== codeVersion || !version(codeVersion) || !Array.isArray(raw.documents) || raw.documents.length > 4096) return null
