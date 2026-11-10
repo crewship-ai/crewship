@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -65,7 +66,8 @@ type LibraryChanges struct {
 }
 
 type LibraryUpdate struct {
-	PinnedVersion int64 `json:"pinned_version"`
+	LibraryPageID string `json:"library_page_id"`
+	PinnedVersion int64  `json:"pinned_version"`
 	// PublishedVersion is 0 when the library is not readable or not published.
 	PublishedVersion int64          `json:"published_version"`
 	LibraryAvailable bool           `json:"library_available"`
@@ -327,7 +329,7 @@ func (s *VersionStore) CheckLibraryUpdate(ctx context.Context, consumer VersionK
 		if !found {
 			return ErrVersionNotFound
 		}
-		out = LibraryUpdate{PinnedVersion: pin.LibraryVersion, Changes: LibraryChanges{Added: []string{}, Removed: []string{}, Changed: []string{}}}
+		out = LibraryUpdate{LibraryPageID: pin.LibraryPageID, PinnedVersion: pin.LibraryVersion, Changes: LibraryChanges{Added: []string{}, Removed: []string{}, Changed: []string{}}}
 		lib := VersionKey{consumer.WorkspaceID, pin.LibraryPageID}
 		pub, e := readLibraryPublication(ctx, tx, lib)
 		if e != nil || pub.Version == 0 {
@@ -368,8 +370,8 @@ func (s *VersionStore) CheckLibraryUpdate(ctx context.Context, consumer VersionK
 	return
 }
 
-// diffLibraryTokens lists leaf paths (dot-joined object keys) that a library
-// update adds, removes or changes. Arrays and scalars are leaves.
+// diffLibraryTokens lists leaf paths that a library update adds, removes or
+// changes. Paths are dot-separated; unusual key segments are quoted.
 func diffLibraryTokens(from, to []byte) (LibraryChanges, error) {
 	a, b := map[string]json.RawMessage{}, map[string]json.RawMessage{}
 	if err := flattenLibraryTokens(from, "", a); err != nil {
@@ -408,9 +410,13 @@ func flattenLibraryTokens(raw []byte, prefix string, out map[string]json.RawMess
 			return fmt.Errorf("%w: %v", ErrVersionInvalid, err)
 		}
 		for k, v := range obj {
-			path := k
+			segment := k
+			if k == "" || strings.ContainsAny(k, ".\\\"") || strings.TrimSpace(k) != k {
+				segment = strconv.Quote(k)
+			}
+			path := segment
 			if prefix != "" {
-				path = prefix + "." + k
+				path = prefix + "." + segment
 			}
 			if err := flattenLibraryTokens(v, path, out); err != nil {
 				return err
@@ -423,6 +429,6 @@ func flattenLibraryTokens(raw []byte, prefix string, out map[string]json.RawMess
 	if err := json.Compact(&buf, raw); err != nil {
 		return fmt.Errorf("%w: %v", ErrVersionInvalid, err)
 	}
-	out[strings.TrimSpace(prefix)] = buf.Bytes()
+	out[prefix] = buf.Bytes()
 	return nil
 }

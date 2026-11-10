@@ -452,7 +452,7 @@ tokens every reader of the project may see. There is no unpin command yet.
 
 Read the pinned copy. Any reader of the project may call it; the Library is not
 read, so the copy stays available after the Library changes or your access to
-it ends. The stored SHA-256 is checked on every read; a copy that no longer
+it ends. The SHA-256 is of the stored source bytes and is checked on every read. The response carries tokens as JSON, whose whitespace and escaping may differ. A copy that no longer
 matches is never served and returns `409 artifact_library_pin_corrupt` ("The
 pinned copy is damaged; pin the library again."). `pin check` reports the same
 error. An editor who still has read access to the reviewed publication can run

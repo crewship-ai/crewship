@@ -40,7 +40,8 @@ type artifactLibraryResponse struct {
 
 type artifactLibraryPinResponse struct {
 	artifacts.LibraryPin
-	// Tokens is the pinned design-system.json, byte for byte.
+	// Tokens is the stored design-system.json as a JSON object. The digest
+	// covers the stored source bytes, not the wire encoding of this field.
 	Tokens json.RawMessage `json:"tokens"`
 }
 

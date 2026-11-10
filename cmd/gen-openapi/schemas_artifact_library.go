@@ -19,7 +19,7 @@ func artifactLibrarySchemaCatalog() (map[string]DomainSchema, map[string]any) {
 		"sha256":          map[string]any{"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the copied design-system.json bytes."},
 		"copied_by":       str("Human who made or updated the copy."),
 		"copied_at":       map[string]any{"type": "string", "format": "date-time"},
-		"tokens":          map[string]any{"type": "object", "additionalProperties": true, "description": "The pinned design-system.json, byte for byte."},
+		"tokens":          map[string]any{"type": "object", "additionalProperties": true, "description": "The pinned design-system.json as a JSON object. JSON serialization may change whitespace or escapes; sha256 covers the stored source bytes."},
 	}
 	withChanged := map[string]any{"changed": map[string]any{"type": "boolean", "description": "False when this version was already pinned (a safe retry)."}}
 	for k, v := range pin {
@@ -42,12 +42,13 @@ func artifactLibrarySchemaCatalog() (map[string]DomainSchema, map[string]any) {
 			"if_pinned_version": integer(0, "Library version currently pinned as reviewed, 0 when nothing is pinned; a mismatch returns 409 artifact_version_conflict."),
 		}, "library", "version", "if_pinned_version"),
 		"ArtifactLibraryUpdate": object(map[string]any{
+			"library_page_id":   str("Immutable Page ID of the Library pinned in the snapshot used for this review."),
 			"pinned_version":    integer(1, "Pinned Library version."),
 			"published_version": integer(0, "Library's published version; 0 when unpublished or not readable by the caller."),
 			"library_available": map[string]any{"type": "boolean", "description": "False when the caller can no longer read the published version; nothing else about the Library is reported."},
 			"update_available":  map[string]any{"type": "boolean", "description": "True when the published version differs from the pinned one."},
 			"changes":           object(map[string]any{"added": paths, "removed": paths, "changed": paths, "truncated": map[string]any{"type": "boolean"}}, "added", "removed", "changed"),
-		}, "pinned_version", "published_version", "library_available", "update_available", "changes"),
+		}, "library_page_id", "pinned_version", "published_version", "library_available", "update_available", "changes"),
 	}
 	routes := map[string]DomainSchema{}
 	add := func(method, suffix, response, request string, errors ...string) {

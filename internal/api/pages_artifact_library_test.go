@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -431,6 +432,29 @@ func TestArtifactLibraryCorruptPinIsAConflict(t *testing.T) {
 		if strings.Contains(w.Body.String(), "#bad") {
 			t.Fatalf("%s served corrupt bytes", path)
 		}
+	}
+}
+
+func TestArtifactLibraryPinWireDigestCoversStoredSource(t *testing.T) {
+	f := newLibraryFixture(t)
+	source := "{\n  \"colors\": {\"brand\": \"<brand>\"}\n}\n"
+	f.must(201, f.owner, "POST", "artifacts", `{"slug":"wire-library","name":"Wire library",`+strings.TrimPrefix(libraryProjectBody(0, source), "{"))
+	f.must(200, f.owner, "POST", "wire-library/artifact/library/publish", `{"version":1}`)
+	f.must(200, f.owner, "PUT", "deck/artifact/library-pin", `{"library":"wire-library","version":1,"if_pinned_version":0}`)
+	w := f.call(f.owner, "GET", "deck/artifact/library-pin", "")
+	var pin struct {
+		SHA256 string          `json:"sha256"`
+		Tokens json.RawMessage `json:"tokens"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &pin); w.Code != 200 || err != nil {
+		t.Fatalf("read: %d %s (%v)", w.Code, w.Body, err)
+	}
+	var tokens struct{ Colors map[string]string }
+	if err := json.Unmarshal(pin.Tokens, &tokens); err != nil || tokens.Colors["brand"] != "<brand>" {
+		t.Fatalf("lost token value: %s (%v)", pin.Tokens, err)
+	}
+	if pin.SHA256 != fmt.Sprintf("%x", sha256.Sum256([]byte(source))) || pin.SHA256 == fmt.Sprintf("%x", sha256.Sum256(pin.Tokens)) {
+		t.Fatalf("digest must cover source bytes, not compact wire JSON: %s %s", pin.SHA256, pin.Tokens)
 	}
 }
 

@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-const api = vi.hoisted(() => ({ calls: [] as { url: string; method?: string; body?: unknown }[], replies: new Map<string, unknown>(), slug: "deck", workspace: "ws" }))
+const api = vi.hoisted(() => ({ calls: [] as { url: string; method?: string; body?: unknown }[], replies: new Map<string, unknown>(), slug: "deck", workspace: "ws", principal: "owner" }))
 vi.mock("@/components/features/chat/artifact-context/projects/client", () => ({
   artifactRequest: vi.fn(async (url: string, parse: (raw: unknown) => unknown, init: { method?: string; body?: unknown } = {}) => {
     api.calls.push({ url, method: init.method, body: init.body })
@@ -14,6 +14,7 @@ vi.mock("@/components/features/chat/artifact-context/projects/client", () => ({
     return parse(reply)
   }),
 }))
+vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: api.principal } } }) }))
 vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-context", () => ({
   useArtifactViewer: () => ({ workspaceId: api.workspace, target: { slug: api.slug } }),
 }))
@@ -21,7 +22,7 @@ vi.mock("@/components/features/chat/artifact-context/projects/artifact-viewer-co
 import { LibraryPinNotice, LibraryPublishControl, parseUpdate } from "../library-publication"
 
 const base = "/api/v1/pages/deck/artifact"
-beforeEach(() => { api.calls.length = 0; api.replies.clear(); api.slug = "deck"; api.workspace = "ws" })
+beforeEach(() => { api.calls.length = 0; api.replies.clear(); api.slug = "deck"; api.workspace = "ws"; api.principal = "owner" })
 afterEach(() => cleanup())
 
 describe("LibraryPublishControl", () => {
@@ -72,7 +73,7 @@ describe("LibraryPinNotice", () => {
 
   it("reviews the token diff and applies the update with the reviewed version", async () => {
     api.replies.set(`GET ${base}/library-pin`, pin)
-    api.replies.set(`GET ${base}/library-pin/update`, { pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: ["colors.accent"], removed: [], changed: ["colors.primary"] } })
+    api.replies.set(`GET ${base}/library-pin/update`, { library_page_id: "lib-1", pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: ["colors.accent"], removed: [], changed: ["colors.primary"] } })
     api.replies.set(`PUT ${base}/library-pin`, { ...pin, library_version: 2 })
     render(<LibraryPinNotice />)
     await screen.findByText("Update available: v2")
@@ -88,7 +89,7 @@ describe("LibraryPinNotice", () => {
 
   it("drops the previous project's pin review before loading a new workspace", async () => {
     api.replies.set(`GET ${base}/library-pin`, pin)
-    api.replies.set(`GET ${base}/library-pin/update`, { pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: ["colors.private-review"], removed: [], changed: [] } })
+    api.replies.set(`GET ${base}/library-pin/update`, { library_page_id: "lib-1", pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: ["colors.private-review"], removed: [], changed: [] } })
     const view = render(<LibraryPinNotice />)
     fireEvent.click(await screen.findByRole("button", { name: "Review update" }))
     expect(screen.getByText("colors.private-review")).toBeTruthy()
@@ -100,9 +101,37 @@ describe("LibraryPinNotice", () => {
     expect(screen.queryByRole("button", { name: "Apply v2" })).toBeNull()
   })
 
+  it("never offers a review from another Library with the same pinned version", async () => {
+    api.replies.set(`GET ${base}/library-pin`, pin)
+    let release!: (value: unknown) => void
+    api.replies.set(`GET ${base}/library-pin/update`, new Promise(resolve => { release = resolve }))
+    render(<LibraryPinNotice />)
+    await waitFor(() => expect(api.calls.some(call => call.url.includes("/update"))).toBe(true))
+    // The pin changed to a different Library at v1 between the two GETs.
+    release({ library_page_id: "lib-2", pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: ["from-the-other-library"], removed: [], changed: [] } })
+    await screen.findByRole("status")
+    expect(screen.queryByRole("button", { name: "Review update" })).toBeNull()
+    expect(screen.queryByText("from-the-other-library")).toBeNull()
+    expect(api.calls.some(call => call.method === "PUT")).toBe(false)
+  })
+
+  it("drops an open review on a same-page principal change", async () => {
+    api.replies.set(`GET ${base}/library-pin`, pin)
+    api.replies.set(`GET ${base}/library-pin/update`, { library_page_id: "lib-1", pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: ["private-to-first-person"], removed: [], changed: [] } })
+    const view = render(<LibraryPinNotice />)
+    fireEvent.click(await screen.findByRole("button", { name: "Review update" }))
+    expect(screen.getByText("private-to-first-person")).toBeTruthy()
+    api.principal = "different-user"
+    api.replies.set(`GET ${base}/library-pin/update`, { library_page_id: "lib-1", pinned_version: 1, published_version: 0, library_available: false, update_available: false, changes: { added: [], removed: [], changed: [] } })
+    view.rerender(<LibraryPinNotice />)
+    expect(screen.queryByText("private-to-first-person")).toBeNull()
+    expect(screen.queryByRole("button", { name: "Apply v2" })).toBeNull()
+    await screen.findByText(/keeps its pinned copy/)
+  })
+
   it("keeps the pinned copy when the library is no longer readable", async () => {
     api.replies.set(`GET ${base}/library-pin`, pin)
-    api.replies.set(`GET ${base}/library-pin/update`, { pinned_version: 1, published_version: 0, library_available: false, update_available: false, changes: { added: [], removed: [], changed: [] } })
+    api.replies.set(`GET ${base}/library-pin/update`, { library_page_id: "lib-1", pinned_version: 1, published_version: 0, library_available: false, update_available: false, changes: { added: [], removed: [], changed: [] } })
     render(<LibraryPinNotice />)
     await screen.findByText(/keeps its pinned copy/)
     expect(screen.getByText("Brand")).toBeTruthy()
@@ -111,7 +140,7 @@ describe("LibraryPinNotice", () => {
 
   it("shows a failed apply without losing the review", async () => {
     api.replies.set(`GET ${base}/library-pin`, pin)
-    api.replies.set(`GET ${base}/library-pin/update`, { pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: [], removed: ["radii.sm"], changed: [] } })
+    api.replies.set(`GET ${base}/library-pin/update`, { library_page_id: "lib-1", pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: [], removed: ["radii.sm"], changed: [] } })
     api.replies.set(`PUT ${base}/library-pin`, new Error("This project changed."))
     render(<LibraryPinNotice />)
     fireEvent.click(await screen.findByRole("button", { name: "Review update" }))
@@ -123,7 +152,7 @@ describe("LibraryPinNotice", () => {
 
 describe("parseUpdate", () => {
   it("rejects answers without change lists", () => {
-    expect(parseUpdate({ pinned_version: 1, published_version: 2, library_available: true, update_available: true })).toBeNull()
-    expect(parseUpdate({ pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: [1], removed: [], changed: [] } })).toBeNull()
+    expect(parseUpdate({ library_page_id: "lib-1", pinned_version: 1, published_version: 2, library_available: true, update_available: true })).toBeNull()
+    expect(parseUpdate({ library_page_id: "lib-1", pinned_version: 1, published_version: 2, library_available: true, update_available: true, changes: { added: [1], removed: [], changed: [] } })).toBeNull()
   })
 })

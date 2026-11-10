@@ -123,7 +123,7 @@ export function DesignLibraryProjectView({ parts, onFrame }: { parts: ArtifactVi
   const source = data.manifest.files.find(file => file.path === DESIGN_SYSTEM_FILE)?.content ?? ""
   return <>
     <LibraryView system={system} version={version.shown} source={source} files={data.manifest.files} extras={libraryExtras(system, data.manifest.files)} notices={parts.banners}
-      view={<><ArtifactToolSeparator /><VersionMenu parts={parts} />{parts.share}<LibraryPublishControl shown={version.shown} /></>}
+      view={<><ArtifactToolSeparator /><VersionMenu parts={parts} />{parts.share}<LibraryPublishControl shown={version.shown} pageId={data.page_id} /></>}
       output={parts.editSourceHref && <Link href={parts.editSourceHref} aria-label="Edit source" title="Edit source"
         className="inline-flex h-[30px] min-w-[30px] items-center justify-center rounded-[var(--radius-row)] px-[7px] text-muted-foreground hover:bg-accent hover:text-foreground coarse:min-h-[44px] coarse:min-w-[44px]"><Code2 aria-hidden className="size-4" /></Link>} />
     <ProjectDrawer parts={parts} />

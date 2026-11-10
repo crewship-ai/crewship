@@ -169,6 +169,8 @@ func TestDiffLibraryTokens(t *testing.T) {
 		{"identical", `{"a":1}`, `{"a":1}`, "", "", ""},
 		{"nested", `{"t":{"light":{"bg":"#fff"}}}`, `{"t":{"light":{"bg":"#000"},"dark":{"bg":"#000"}}}`, "t.dark.bg", "", "t.light.bg"},
 		{"leaf to object", `{"a":1}`, `{"a":{"b":1}}`, "a.b", "a", ""},
+		{"literal dots and nested paths", `{"a.b":1,"a":{"b":2}}`, `{"a.b":3,"a":{"b":4}}`, "", "", `"a.b",a.b`},
+		{"empty and spaced keys", `{"a":1," a ":2,"":{"a":3}}`, `{"a":1," a ":4,"":{"a":5}}`, "", "", `" a ","".a`},
 		{"arrays are leaves", `{"a":[1]}`, `{"a":[1,2]}`, "", "", "a"},
 	}
 	for _, c := range cases {

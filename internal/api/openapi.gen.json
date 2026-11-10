@@ -1767,7 +1767,7 @@
           },
           "tokens": {
             "additionalProperties": true,
-            "description": "The pinned design-system.json, byte for byte.",
+            "description": "The pinned design-system.json as a JSON object. JSON serialization may change whitespace or escapes; sha256 covers the stored source bytes.",
             "type": "object"
           }
         },
@@ -1850,7 +1850,7 @@
           },
           "tokens": {
             "additionalProperties": true,
-            "description": "The pinned design-system.json, byte for byte.",
+            "description": "The pinned design-system.json as a JSON object. JSON serialization may change whitespace or escapes; sha256 covers the stored source bytes.",
             "type": "object"
           }
         },
@@ -1954,6 +1954,10 @@
             "description": "False when the caller can no longer read the published version; nothing else about the Library is reported.",
             "type": "boolean"
           },
+          "library_page_id": {
+            "description": "Immutable Page ID of the Library pinned in the snapshot used for this review.",
+            "type": "string"
+          },
           "pinned_version": {
             "description": "Pinned Library version.",
             "format": "int64",
@@ -1972,6 +1976,7 @@
           }
         },
         "required": [
+          "library_page_id",
           "pinned_version",
           "published_version",
           "library_available",
