@@ -11,6 +11,28 @@ import (
 
 const testSecret = "supersecretkeythatisatleast32chars!!"
 
+func TestValidateAccessRequiresCompactJWE(t *testing.T) {
+	v, err := NewJWTValidator(testSecret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	token, err := v.IssueAccessToken("user", "session", "User", "user@example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.ValidateAccess(token); err != nil {
+		t.Fatalf("issued compact JWT rejected: %v", err)
+	}
+	jwe, err := jose.ParseEncryptedCompact(token, []jose.KeyAlgorithm{jose.DIRECT}, []jose.ContentEncryption{jose.A256CBC_HS512})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The same authenticated ciphertext in JWE JSON serialization is not a JWT.
+	if _, err := v.ValidateAccess(jwe.FullSerialize()); !errors.Is(err, ErrInvalidToken) {
+		t.Fatalf("JSON JWE must be rejected at the JWT boundary: %v", err)
+	}
+}
+
 func TestValidateWSRejectsTicketsBeforeScopeFence(t *testing.T) {
 	v, err := NewJWTValidator(testSecret)
 	if err != nil {

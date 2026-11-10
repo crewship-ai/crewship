@@ -26,8 +26,8 @@ together when updating the engine.
 
 ## Position history compatibility
 
-The browser and service pin `@tiptap/y-tiptap` 3.0.10 and Yjs 13.6.33 together.
-Alongside `default`, validation admits only the upstream position-history map
+The browser and service pin `@tiptap/y-tiptap` 3.2.0 and Yjs 13.6.33 together.
+Alongside `default`, validation continues to admit the legacy position-history map
 `__tiptap_position_migrations:root:default`. Its version 1 records contain numeric
 client/clock identities, causal vectors and position transfers; references must
 resolve to retained document intervals (including payload-free GC intervals).
@@ -39,8 +39,12 @@ The same limits include deleted and overwritten retained records: 256 records,
 4096 transfers, 128 causal pairs per record, 500000 total transferred positions,
 and 64 KiB of JSON metadata per Document, within the existing 1 MiB binary limit.
 A limit refuses the update without discarding confirmed content. Metadata is not
-silently pruned: history and comment identities must survive an explicit future
-compaction contract. Existing snapshots without this map need no rewrite. Deploy the compatible
+compacted or discarded. The 3.2 binding clears the live legacy map on mount and
+when old peers update it; `gc:false` retains its deleted records in the binary
+snapshot, and validation still checks those retained payloads. Formatting tests
+cover this cleanup through a binary reload and the production service boundary,
+including an existing comment's character positions and stable block ID.
+Existing snapshots without this map need no rewrite. Deploy the compatible
 service before the new browser build. Once new snapshots contain this map, an
 older validator will refuse them: a rollback must retain this compatibility
 reader even if the editor dependency is downgraded. Do not strip metadata or
@@ -54,9 +58,9 @@ The separate Dependabot `document-editor` group covers both manifests; its
 packages are excluded from the broad dependency groups. Major and security
 updates retain the existing separate-review policy.
 
-Upstream format: [3.0.10 release sources](https://registry.npmjs.org/@tiptap/y-tiptap/-/y-tiptap-3.0.10.tgz).
-The npm registry `latest` tag was verified as 3.0.10 on 2026-10-21; the manifests
-and lockfiles pin the release rather than following that moving tag.
+Upstream sources: [legacy 3.0.10 format](https://registry.npmjs.org/@tiptap/y-tiptap/-/y-tiptap-3.0.10.tgz)
+and [3.2.0 binding](https://registry.npmjs.org/@tiptap/y-tiptap/-/y-tiptap-3.2.0.tgz).
+The manifests and lockfiles pin the release rather than following `latest`.
 
 ## Canvas surface (not admitted yet)
 
