@@ -15,6 +15,7 @@ export interface PresentFollow { id: string; seq: number }
 interface PresentProps {
   initialSlideId: string
   onClose: () => void
+  fontAliases?: Readonly<Record<string, string>>
   onSlideChange?: (slideId: string) => void
   follow?: PresentFollow
   /** Offers a Full screen button, for a Present started without a user gesture to spare. */
@@ -26,7 +27,7 @@ export function SlidePresent({ deck, ...props }: PresentProps & { deck: unknown 
   return <NativePresentation deck={deck} {...props} />
 }
 
-function NativePresentation({ deck, initialSlideId, onClose, onSlideChange, follow, onFullscreen }: PresentProps & { deck: SlideDeck }) {
+function NativePresentation({ deck, initialSlideId, onClose, onSlideChange, follow, onFullscreen, fontAliases }: PresentProps & { deck: SlideDeck }) {
   const [index, setIndex] = React.useState(Math.max(0, deck.slide_order.indexOf(initialSlideId)))
   // Only a move made after this presentation opened; an older one never moves it.
   const seen = React.useRef(follow?.seq)
@@ -78,7 +79,7 @@ function NativePresentation({ deck, initialSlideId, onClose, onSlideChange, foll
       else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus() }
     }
   }}>
-    <div className="m-auto w-full overflow-hidden" style={{ maxWidth: `min(100%, calc((100dvh - 160px) * ${deck.width} / ${deck.height}))` }}><div ref={stage} data-slide-transition={deck.slides.find(slide => slide.id === deck.slide_order[current])?.transition}><SlideCanvas deck={deck} slideId={deck.slide_order[current]} /></div></div>
+    <div className="m-auto w-full overflow-hidden" style={{ maxWidth: `min(100%, calc((100dvh - 160px) * ${deck.width} / ${deck.height}))` }}><div ref={stage} data-slide-transition={deck.slides.find(slide => slide.id === deck.slide_order[current])?.transition}><SlideCanvas deck={deck} slideId={deck.slide_order[current]} fontAliases={fontAliases} /></div></div>
     <div className="flex shrink-0 flex-wrap items-center justify-center gap-3 py-2">
       <button className={control} disabled={current === 0} onClick={() => setIndex(current - 1)}>Previous slide</button>
       <span aria-live="polite">{current + 1} / {deck.slide_order.length}</span>

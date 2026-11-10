@@ -468,7 +468,7 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	}
 	// Library publications and pins anchor on heads, and a pin names its
 	// library by Page id without a foreign key so the copy outlives it.
-	for _, table := range []string{"artifact_library_publications", "artifact_library_pins"} {
+	for _, table := range []string{"artifact_library_publications", "artifact_library_pins", "artifact_library_pin_files"} {
 		for _, row := range dump.Tables[table] {
 			for column, anchor := range map[string]string{"workspace_id": "workspaces", "page_id": "pages", "library_page_id": "pages"} {
 				if old, ok := row[column].(string); ok {

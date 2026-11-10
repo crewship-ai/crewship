@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -282,4 +283,42 @@ func (h *PageHandler) GetArtifactLibraryPinUpdate(w http.ResponseWriter, r *http
 	}
 	notifyDesignAdminAudit(r)
 	writeJSON(w, 200, up)
+}
+
+// artifactLibraryPinFileBody is one pinned dependency; Content is the copied
+// bytes in base64, empty for a font that was not copied.
+type artifactLibraryPinFileBody struct {
+	artifacts.LibraryPinFile
+	Content string `json:"content"`
+}
+
+// artifactLibraryPinFilesResponse is the body of GET …/library-pin/files.
+type artifactLibraryPinFilesResponse struct {
+	LibraryPageID  string                       `json:"library_page_id"`
+	LibraryVersion int64                        `json:"library_version"`
+	SHA256         string                       `json:"sha256"`
+	Tokens         json.RawMessage              `json:"tokens"`
+	Files          []artifactLibraryPinFileBody `json:"files"`
+}
+
+// GetArtifactLibraryPinFiles returns the pin's dependency files with their
+// bytes (#5248), under the consumer's read authority only: every reader of the
+// project may render from them, and the library is not read.
+func (h *PageHandler) GetArtifactLibraryPinFiles(w http.ResponseWriter, r *http.Request) {
+	k, ok := h.artifactProjectStart(w, r)
+	if !ok {
+		return
+	}
+	r = ensureDesignAdminAuditRequest(r, false)
+	pin, files, err := h.artifactProjectStore(r.Context()).ReadLibraryPinSnapshot(r.Context(), k, h.artifactProjectAuthority(r, k, false, false))
+	if err != nil {
+		artifactProjectError(w, err)
+		return
+	}
+	notifyDesignAdminAudit(r)
+	out := make([]artifactLibraryPinFileBody, len(files))
+	for i, f := range files {
+		out[i] = artifactLibraryPinFileBody{f, base64.StdEncoding.EncodeToString(f.Content)}
+	}
+	writeJSON(w, 200, artifactLibraryPinFilesResponse{LibraryPageID: pin.LibraryPageID, LibraryVersion: pin.LibraryVersion, SHA256: pin.SHA256, Tokens: json.RawMessage(pin.Content), Files: out})
 }
