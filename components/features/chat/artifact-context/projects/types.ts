@@ -60,6 +60,7 @@ export interface ArtifactInteractiveRuntime {
   /** Fixed Page runtime bootstrap on a separate site; empty when none isolates this host. */
   runtime_url: string
   development_same_origin: boolean
+  viewer_filters?: true
   collections: string[]
 }
 

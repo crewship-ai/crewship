@@ -169,7 +169,9 @@ planned widget profile, which is not available yet.
 
 ### Your filters are your own
 
-On an interactive Dashboard, a filter you pick (a crew, say) changes only your
+An interactive Dashboard can opt in by including `viewer-filters.json` with
+the content `{"schema_version":1}`. A filter
+you pick (a crew, say) changes only your
 view; it never changes the shared data or what anyone else sees. The page can
 ask the browser to remember it with `crewship.prefs` (see
 [Interactive artifacts](/guides/artifacts/interactive#the-runtime-window-crewship)),

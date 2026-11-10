@@ -36,7 +36,7 @@ vi.mock("../../projects/use-artifact-project-data", () => ({
 
 vi.mock("../artifact-dashboard-preview", () => ({ ArtifactDashboardPreview: () => <div>Bound dashboard</div> }))
 vi.mock("../artifact-slides-preview", () => ({ ArtifactSlidesPreview: () => <div>Typed slides preview</div> }))
-vi.mock("../artifact-interactive-preview", () => ({ ArtifactInteractivePreview: (props: { canWrite: boolean; codeVersion: number }) => <div>Interactive runtime canWrite={String(props.canWrite)} v{props.codeVersion}</div> }))
+vi.mock("../artifact-interactive-preview", () => ({ ArtifactInteractivePreview: (props: { canWrite: boolean; codeVersion: number; rememberViewerPrefs?: boolean }) => <div data-viewer-filters={String(Boolean(props.rememberViewerPrefs))}>Interactive runtime canWrite={String(props.canWrite)} v{props.codeVersion}</div> }))
 
 import { ArtifactViewerPanel, commentQueueChip } from "../artifact-viewer-panel"
 import { parseArtifactProject } from "../../projects/client"
@@ -829,5 +829,21 @@ it("keeps the server's interactive runtime through the real parser and runs the 
     render(<ArtifactViewerPanel />)
     expect(screen.getByText(/Interactive runtime canWrite=true v1/)).toBeInTheDocument()
     expect(screen.queryByText("Bound dashboard")).toBeNull()
+  } finally { vi.unstubAllEnvs() }
+})
+
+it.each([
+  ["true", true, true],
+  ["true", undefined, false],
+  ["true", "true", false],
+  ["false", true, false],
+] as const)("admits viewer filters with Dashboard flag %s and wire declaration %s", (flag, declaration, enabled) => {
+  vi.stubEnv("NEXT_PUBLIC_ARTIFACT_DASHBOARDS", flag)
+  try {
+    const wire = JSON.parse(SERVER_INTERACTIVE_SNAPSHOT)
+    wire.interactive.viewer_filters = declaration
+    state.snapshot.data = parseArtifactProject(wire)
+    render(<ArtifactViewerPanel />)
+    expect(screen.getByText(/Interactive runtime/)).toHaveAttribute("data-viewer-filters", String(enabled))
   } finally { vi.unstubAllEnvs() }
 })

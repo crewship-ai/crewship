@@ -45,6 +45,7 @@ func artifactProjectFeedbackComponents() map[string]any {
 	schemas["ArtifactInteractiveRuntime"] = object(map[string]any{
 		"runtime_url":             map[string]any{"type": "string", "description": "Fixed Pages runtime bootstrap on a separate site where the Project's scripts run, or empty when this server has no isolating runtime origin for the request host."},
 		"development_same_origin": boolean(),
+		"viewer_filters":          map[string]any{"type": "boolean", "description": "The selected interactive version opted into browser-local viewer filters."},
 		"collections":             array(str()),
 	}, "runtime_url", "development_same_origin", "collections")
 	schemas["ArtifactProjectRetentionPreview"] = map[string]any{
