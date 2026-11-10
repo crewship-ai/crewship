@@ -28,6 +28,7 @@ func MarshalDataJSON(value any) ([]byte, error) {
 
 type DataBatch struct {
 	BaseVersion int64       `json:"base_version"`
+	RunID       string      `json:"run_id,omitempty"`
 	Documents   []DataWrite `json:"documents"`
 }
 
@@ -99,7 +100,7 @@ func DecodeDataBatch(raw []byte) (DataBatch, error) {
 	if len(raw) > MaxDataBatchBytes {
 		return body, ErrDataQuota
 	}
-	if !validDataObject(raw) || !canonicalDataFields(raw, "base_version", "documents") {
+	if !validDataObject(raw) || !canonicalDataFields(raw, "base_version", "documents", "run_id") {
 		return body, ErrDataInvalid
 	}
 	d := json.NewDecoder(bytes.NewReader(raw))
@@ -110,7 +111,7 @@ func DecodeDataBatch(raw []byte) (DataBatch, error) {
 		}
 		return DataBatch{}, ErrDataInvalid
 	}
-	if body.BaseVersion < 1 || body.BaseVersion > MaxDataVersion || len(body.Documents) < 1 || len(body.Documents) > MaxDataBatchWrites {
+	if (body.RunID != "" && !validDataRunID(body.RunID)) || body.BaseVersion < 1 || body.BaseVersion > MaxDataVersion || len(body.Documents) < 1 || len(body.Documents) > MaxDataBatchWrites {
 		return DataBatch{}, ErrDataInvalid
 	}
 	if err := d.Decode(new(any)); !errors.Is(err, io.EOF) {

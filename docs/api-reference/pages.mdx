@@ -3240,7 +3240,7 @@ Select the workspace with `workspace_id`; `{slug}` also accepts `@page_id`.
 | --- | --- | --- |
 | GET | `/api/v1/pages/{slug}/artifact/data` | Required `version` query; returns `{code_version,collections}` for initialized collections declared by that code manifest. |
 | GET | `/api/v1/pages/{slug}/artifact/data/{collection}` | Required `version` query; returns `{collection,code_version,documents}`. |
-| POST | `/api/v1/pages/{slug}/artifact/data/{collection}` | `{base_version,documents:[{id,ifVersion,value}]}`; returns the changed documents with their new versions. |
+| POST | `/api/v1/pages/{slug}/artifact/data/{collection}` | `{base_version,run_id?,documents:[{id,ifVersion,value}]}`; returns the changed documents with their new versions. |
 
 A project code manifest declares up to 32 unique collections with
 `dashboard.json`: `{"schema_version":1,"collections":["sales"]}`. Collection and
@@ -3280,6 +3280,86 @@ batch; there is no delete operation.
 CLI commands are `crewship page artifact data collections`, `data get` and
 `data batch`. Original-run MCP tools are `artifact_data_collections`,
 `artifact_data_read` and `artifact_data_batch`.
+
+### Dashboard producer runs
+
+| Method | Route | Request / result |
+| --- | --- | --- |
+| POST | `/api/v1/pages/{slug}/artifact/data/{collection}/runs` | Request body `{base_version,idempotency_key}`; response is the run `{id,collection,state,started_by,started_by_kind,started_at,start_generation}`: 201 when created, 200 when the key repeats. |
+| POST | `/api/v1/pages/{slug}/artifact/data/{collection}/runs/{run}` | Request body `{base_version,state,reason?,data_generation?,unchanged?}` with `state` `succeeded` or `failed`; response is the finished run with `finished_at`, `finished_by`, `finished_by_kind`, `data_generation`, `partial` (failed runs whose data changed) and, for a failure, `failure_reason`. |
+| GET | `/api/v1/pages/{slug}/artifact/data-runs` | Required `version` query; response `{code_version,stalled_after_seconds,runs:[{collection,latest,last_attempt_at,last_success_at?,active_runs?}]}` for declared collections that have a run. |
+
+A producer records each refresh of a collection as a run. A run never writes
+data or changes a code version; the producer writes with the batch route
+between start and finish. Batches are not staged: each applies immediately,
+so readers may see values of a run that is still going or that failed.
+`idempotency_key` is 1–128 letters, digits, `.`, `_`, `:` or `-`. The
+producer and the finisher are authenticated principals stored on the server;
+the request cannot supply them, and responses project them as `started_by`
+and `finished_by` (`You`, `Contributor`, `Agent` or `Former contributor`).
+
+**Data generation:** a collection's generation is the sum of its document
+versions. Documents are never deleted, so it only grows. The batch route
+returns it as `generation`, and a run records it as `start_generation`. A
+success must name as `data_generation` the generation the producer's last
+batch returned, and it must still be current. A success over unchanged data
+must set `unchanged: true` with the start generation; `unchanged` over
+changed data is refused; `unchanged` is the producer's claim, which the
+server checks only against writes made during the run. A success is also
+refused while another run of the collection is running, or after one failed
+with changed data while this run was going (`artifact_data_run_overlap`;
+the response lists them in `blocking_runs`, and the list route returns every
+running run as `active_runs` to the owner and editors, so any writer can find
+and abandon a run whose producer died). Such failed runs are kept by
+retention while a run they block is still going. A
+failure carries neither field. A failed run whose generation moved (by it or
+another writer) is reported as `partial`.
+
+**Authentication and authority:** start and finish require exactly the
+authority of a data batch for a human caller (the owner or a current Edit
+share), `pages:write` scope, and a `base_version` equal to
+the latest code version that declares the collection. The list route requires
+the authority of a data read and returns only collections the selected version
+declares. Only the producer that started a run can finish it as succeeded;
+any writer can finish it as failed, and the finisher is recorded. A run that
+is never finished stays `running`; there is no server timeout and a running
+run is never pruned (clients show it as stalled after the list route's
+`stalled_after_seconds`, 30 minutes by default). Agent runs on the artifact tool path cannot record runs yet.
+`failure_reason` is returned to the owner and editors only, never to a reader or
+an auditing workspace administrator. A failure
+reason is cleaned on the server: control and invisible characters are removed,
+common credential patterns are redacted (bearer and basic credentials,
+`key=value`, `key: value`, `key => value` and `key is value` secrets, PEM
+private key blocks, JWTs, Crewship, GitHub, GitLab, Google, AWS and other
+provider tokens, URL user info), and it is cut to 500 bytes. Redaction is
+pattern based, not a guarantee.
+
+**Limits (configurable server defaults, not contract):** at most 4 running
+runs per collection (`CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE`); the newest 20
+finished runs plus the newest success are kept
+(`CREWSHIP_ARTIFACT_DATA_RUNS_KEPT`), and a running run is never pruned
+whatever the limit; the stalled threshold is
+`CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER` (TTL below:
+`CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL`); the
+key of a finished run stays reserved until 24 hours pass or the run is pruned,
+whichever comes first, while the key of a running run never expires.
+
+**Statuses:** 200 success or idempotent replay; 201 run created; 400 invalid
+body, key, state, version, or a success without `data_generation`; 401
+unauthenticated; 403 write authority denied, or a success by a writer that did
+not start the run (`artifact_data_run_forbidden`); 404 disabled,
+inaccessible, undeclared collection or unknown run (including a run of
+another Page or workspace); 409 stale code base, a key owned by another
+producer, a finish whose outcome differs from the stored one
+(`artifact_data_run_conflict`), a success whose generation is not current or
+whose `unchanged` claim does not match (`artifact_data_run_generation`), a
+success that overlaps another running or partly failed run
+(`artifact_data_run_overlap`), or
+too many running runs (`artifact_data_run_busy`); 413 storage quota; 500
+internal failure; 503 durable transaction unavailable.
+
+CLI commands are `crewship page artifact data runs start`, `runs finish` and
+`runs list`. There is no MCP tool; agents use the CLI.
 ## Artifact kind metadata
 
 Page lists and authenticated detail responses include `artifact_kind` for a

@@ -328,6 +328,7 @@ var BackupTables = []string{
 	"artifact_versions",
 	"artifact_data_collections",
 	"artifact_data_documents",
+	"artifact_data_runs",
 	"artifact_project_comments",
 	"artifact_project_comment_tasks",
 	"artifact_project_comment_replies",
