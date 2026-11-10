@@ -18,7 +18,7 @@ import { ArtifactFrame, NO_FRAME_CAPABILITIES, type FrameLayout } from "../../..
 import type { LibraryItem } from "../../../library-items"
 import { DocsBody, type DocsFrameReport } from "../docs-view"
 
-const env = vi.hoisted(() => ({ proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, schema: 2, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang", denied: false }))
+const env = vi.hoisted(() => ({ proposals: undefined as boolean | undefined, available: true as boolean | undefined, canWrite: true, schema: 2, drafts: [] as import("@/lib/document-queue").DocumentDraft[], patch: "ok" as "ok" | "hang", denied: false, checkpoints: [] as { id: string; rev: number; schema: number; actor: string; created_at: string }[] }))
 const request = vi.hoisted(() => vi.fn())
 const upgrades = vi.hoisted(() => ({ outcome: "ok" as "ok" | "stale" | "missing" | "lost", bodies: [] as Record<string, unknown>[], urls: [] as string[] }))
 vi.mock("@/hooks/use-documents-availability", () => ({ useDocumentsAvailability: () => ({ data: env.available, isPending: env.available === undefined }) }))
@@ -26,7 +26,7 @@ vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOrigin
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "docs-human" } } }) }))
 
-afterEach(() => { cleanup(); request.mockReset(); upgrades.outcome = "ok"; upgrades.bodies = []; upgrades.urls = []; env.proposals = undefined; env.available = true; env.canWrite = true; env.schema = 2; env.drafts = []; env.patch = "ok"; env.denied = false })
+afterEach(() => { cleanup(); request.mockReset(); upgrades.outcome = "ok"; upgrades.bodies = []; upgrades.urls = []; env.proposals = undefined; env.available = true; env.canWrite = true; env.schema = 2; env.drafts = []; env.patch = "ok"; env.denied = false; env.checkpoints = [] })
 
 const item: LibraryItem = {
   slug: "launch-notes", pageId: "page-docs", name: "Launch notes", kind: "word", family: "document", sharedVersion: null, native: false,
@@ -49,6 +49,7 @@ function serve() {
   // The fake server stores what it acknowledges, as the real one does: Saved means it holds the editor's content.
   const server = savedDocument()
   let rev = 1
+  let epoch = "go:node:1"
   request.mockImplementation(async (url: string, init?: RequestInit) => {
     if (url.includes("/document/patch")) {
       if (env.patch === "hang") return new Promise(() => {})
@@ -69,27 +70,38 @@ function serve() {
       rev += 1; env.schema = 6
       return { ok: true, json: async () => ({ id: body.id, rev, epoch: "go:node:2", schema: 6 }) }
     }
-    if (url.includes("/document/checkpoints")) return { ok: true, json: async () => ({ checkpoints: [] }) }
+    if (url.includes("/document/restore")) {
+      const body = JSON.parse(String(init?.body))
+      rev = body.ifRev + 1; epoch = "go:node:restored"
+      return { ok: true, json: async () => ({ page_id: "page-docs", id: body.id, rev, epoch, schema: env.schema, kind: "restore" }) }
+    }
+    const checkpoint = url.match(/\/document\/checkpoints\/([^?]+)/)?.[1]
+    if (checkpoint) {
+      const pin = env.checkpoints.find(item => item.id === checkpoint)!
+      return { ok: true, json: async () => ({ page_id: "page-docs", id: pin.id, rev: pin.rev, schema: pin.schema, content: { type: "doc", content: [{ type: "paragraph", attrs: { id: "historical-paragraph" }, content: [{ type: "text", text: `Historical revision ${pin.rev}` }] }] } }) }
+    }
+    if (url.includes("/document/checkpoints")) return { ok: true, json: async () => ({ checkpoints: env.checkpoints }) }
     if (url.includes("/proposals")) return { ok: true, json: async () => ({ proposals: [] }) }
     if (env.denied) return { ok: false, status: 403, json: async () => ({ error: "document access denied" }) }
-    return { ok: true, json: async () => ({ page_id: "page-docs", schema: env.schema, rev, generation: 0, epoch: upgrades.outcome === "lost" && upgrades.bodies.length > 0 ? "go:node:2" : "go:node:1", can_write: env.canWrite, snapshot: encodeUpdate(Y.encodeStateAsUpdate(server)), ...(env.proposals === undefined ? {} : { proposals: env.proposals }) }) }
+    return { ok: true, json: async () => ({ page_id: "page-docs", schema: env.schema, rev, generation: 0, epoch: upgrades.outcome === "lost" && upgrades.bodies.length > 0 ? "go:node:2" : epoch, can_write: env.canWrite, snapshot: encodeUpdate(Y.encodeStateAsUpdate(server)), ...(env.proposals === undefined ? {} : { proposals: env.proposals }) }) }
   })
 }
 
 /** The frame as artifact-detail builds it for Docs: the chip and canEdit come from the body's report. */
-function Harness({ layout, onReport }: { layout: FrameLayout; onReport?: (report: DocsFrameReport | null) => void }) {
+function Harness({ layout, onReport, version }: { layout: FrameLayout; onReport?: (report: DocsFrameReport | null) => void; version?: number }) {
   const [report, setReport] = React.useState<DocsFrameReport | null>(null)
   const onFrame = React.useCallback((next: DocsFrameReport | null) => { setReport(next); onReport?.(next) }, [onReport])
   return <ArtifactFrame name={item.name} kind={{ kind: "docs", mode: "page" }} folder="Demo Lab" layout={layout} onHome={() => {}}
     caps={{ ...NO_FRAME_CAPABILITIES, canEdit: report?.canEdit === true, status: report?.status ?? null, agent: { ask: { chatHref: () => "/chat" } } }}
     statusActions={report?.statusActions} statusFoot={report?.statusFoot}>
-    <DocsBody workspaceId="ws1" item={item} onFrame={onFrame} fallback={<p data-testid="saved-preview">saved version</p>} />
+    <DocsBody workspaceId="ws1" item={item} version={version} onFrame={onFrame} fallback={<p data-testid="saved-preview">saved version</p>} />
   </ArtifactFrame>
 }
 
-function open(layout: FrameLayout = "desktop", onReport?: (report: DocsFrameReport | null) => void) {
+function open(layout: FrameLayout = "desktop", onReport?: (report: DocsFrameReport | null) => void, version?: number) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, gcTime: 0 } } })
-  return render(<QueryClientProvider client={client}><Harness layout={layout} onReport={onReport} /></QueryClientProvider>)
+  const view = render(<QueryClientProvider client={client}><Harness layout={layout} onReport={onReport} version={version} /></QueryClientProvider>)
+  return { ...view, address: (next?: number) => view.rerender(<QueryClientProvider client={client}><Harness layout={layout} onReport={onReport} version={next} /></QueryClientProvider>) }
 }
 
 const slot = (name: string) => document.querySelector(`[data-artifact-slot="${name}"]`) as HTMLElement | null
@@ -407,6 +419,68 @@ describe("Docs in the ArtifactFrame", () => {
     env.denied = true
     expect(await screen.findByRole("button", { name: "Status: No access" }, { timeout: 5_000 })).toBeTruthy()
     expect(screen.queryByText("Ship the agency offer on 2 December.")).toBeNull()
+  })
+  it("opens a version link in History with that revision selected (#5168)", async () => {
+    serve()
+    env.checkpoints = [
+      { id: "cp-3", rev: 3, schema: 2, actor: "user:docs-human", created_at: "2026-11-08T10:00:00Z" },
+      { id: "cp-2", rev: 2, schema: 2, actor: "user:docs-human", created_at: "2026-11-07T10:00:00Z" },
+    ]
+    open("desktop", undefined, 2)
+    // Generous waits: the list read and the selection settle over several renders on a loaded host.
+    const drawer = await screen.findByRole("complementary", { name: "History" }, { timeout: 5_000 })
+    await waitFor(() => {
+      expect(within(drawer).getByRole("button", { name: /Revision 2/ }).getAttribute("aria-pressed")).toBe("true")
+      expect(within(drawer).getByRole("button", { name: /Revision 3/ }).getAttribute("aria-pressed")).toBe("false")
+    }, { timeout: 5_000 })
+  })
+  it("says so when a version link names a revision History does not hold (#5168)", async () => {
+    serve()
+    env.checkpoints = [{ id: "cp-3", rev: 3, schema: 2, actor: "user:docs-human", created_at: "2026-11-08T10:00:00Z" }]
+    open("desktop", undefined, 9)
+    const drawer = await screen.findByRole("complementary", { name: "History" }, { timeout: 5_000 })
+    expect(await within(drawer).findByText("Revision 9 is not in History.", undefined, { timeout: 5_000 })).toBeTruthy()
+    expect(within(drawer).getByRole("button", { name: /Revision 3/ }).getAttribute("aria-pressed")).toBe("false")
+  })
+  it("selects a changed version address in the same open Doc without replacing the editor", async () => {
+    serve()
+    env.checkpoints = [2, 3].map(rev => ({ id: `cp-${rev}`, rev, schema: 2, actor: "user:docs-human", created_at: "2026-11-08T10:00:00Z" }))
+    const view = open("desktop", undefined, 2)
+    const editor = await screen.findByLabelText("Document editor")
+    const selected = (rev: number) => within(screen.getByRole("complementary", { name: "History" })).getByRole("button", { name: new RegExp(`Revision ${rev}`) })
+    await waitFor(() => expect(selected(2)).toHaveAttribute("aria-pressed", "true"))
+    view.address(3)
+    await waitFor(() => expect(selected(3)).toHaveAttribute("aria-pressed", "true"))
+    expect(selected(2)).toHaveAttribute("aria-pressed", "false")
+    expect(screen.getByLabelText("Document editor")).toBe(editor)
+    view.address(2)
+    await waitFor(() => expect(selected(2)).toHaveAttribute("aria-pressed", "true"))
+    expect(request.mock.calls.some(([url]) => String(url).includes("/document/patch"))).toBe(false)
+  })
+  it("clears a missing pin on a plain address and admits a later valid pin", async () => {
+    serve()
+    env.checkpoints = [{ id: "cp-2", rev: 2, schema: 2, actor: "user:docs-human", created_at: "2026-11-08T10:00:00Z" }]
+    const view = open("desktop", undefined, 9)
+    await screen.findByText("Revision 9 is not in History.")
+    const editor = screen.getByLabelText("Document editor")
+    view.address()
+    await waitFor(() => expect(screen.queryByText(/is not in History/)).toBeNull())
+    view.address(2)
+    await waitFor(() => expect(screen.getByRole("button", { name: /Revision 2/ })).toHaveAttribute("aria-pressed", "true"))
+    expect(screen.getByLabelText("Document editor")).toBe(editor)
+    view.address(9)
+    await screen.findByText("Revision 9 is not in History.")
+  })
+  it("does not reapply an address pin after a confirmed restore remount", async () => {
+    serve()
+    env.checkpoints = [{ id: "cp-2", rev: 2, schema: 2, actor: "user:docs-human", created_at: "2026-11-08T10:00:00Z" }]
+    open("desktop", undefined, 2)
+    const before = await screen.findByLabelText("Document editor")
+    fireEvent.click(await screen.findByRole("button", { name: "Restore selected checkpoint" }))
+    fireEvent.click(screen.getByRole("button", { name: "Confirm restore" }))
+    await waitFor(() => expect(screen.getByLabelText("Document editor")).not.toBe(before))
+    await waitFor(() => expect(screen.getByRole("button", { name: /Revision 2/ })).toHaveAttribute("aria-pressed", "false"))
+    expect(request.mock.calls.filter(([url]) => String(url).includes("/document/restore"))).toHaveLength(1)
   })
   it("is Read-only without write access: no tools, a read-only editor", async () => {
     serve()

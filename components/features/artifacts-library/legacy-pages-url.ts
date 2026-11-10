@@ -1,5 +1,6 @@
 import type { PageView } from "@/hooks/use-pages"
-import { artifactsProjectHref, libraryItems, opensAsProject, opensInArtifacts, versionPin } from "./library-items"
+import { kindOf } from "./kinds"
+import { artifactsProjectHref, libraryItems, opensAsProject, opensInArtifacts, versionPin, type LibraryItem } from "./library-items"
 
 /**
  * Where an old Pages address goes once the Artifacts library is the single
@@ -64,16 +65,21 @@ export function legacyPagesTarget(pathname: string, search: string, context: Leg
   if (mode.length > 1 || mode.length === 1 && mode[0] !== "edit" && mode[0] !== "view") return STAY
   if (editFlag.length > 1 || editFlag.length === 1 && editFlag[0] !== "1") return STAY
   const edit = mode[0] === "edit" || editFlag[0] === "1"
-  // A pin is a project version: it moves only to a project viewer, with the pin.
-  const project = params.get("artifact") === "1" || params.has("version")
-  const version = project ? versionPin(params.get("version")) : undefined
+  // `artifact=1` names the project viewer; a pin alone is a version of whatever
+  // the page is (a project's version, a Doc's revision, a Design's version) and
+  // moves with the address (#5168). resolvedArtifactId decides which kinds keep it.
+  const project = params.get("artifact") === "1"
+  const version = versionPin(params.get("version"))
+  // A bare pin that is not a version is not guessed at.
+  if (!project && params.has("version") && version === undefined) return STAY
   return { to: "resolve", reference, workspaceId: context.workspaceId, project, ...(version === undefined ? {} : { version }), ...(edit ? { edit } : {}) }
 }
 
 /**
  * The ID a resolved page opens at in Artifacts, or null to stay on Pages.
  * Every kind opens in the Artifacts frame (owner, 8 Nov 2026); a project
- * address only for a versioned project, and a Design only behind its switch.
+ * address only for a versioned project, a pinned address only for a kind with
+ * versions, and a Design only behind its switch.
  * Fails closed on a missing page or unusable ID.
  */
 export function resolvedArtifactId(target: Extract<LegacyPagesTarget, { to: "resolve" }>, page: PageView | null): string | null {
@@ -81,5 +87,12 @@ export function resolvedArtifactId(target: Extract<LegacyPagesTarget, { to: "res
   const [item] = libraryItems([page])
   if (!opensInArtifacts(item)) return null
   if (target.project) return opensAsProject(item) ? page.immutablePageId : null
+  // A pin opens only where the frame has versions: a project, a Doc's History, a Design.
+  if (target.version !== undefined && !opensAsProject(item) && !hasVersionView(item)) return null
   return page.immutablePageId
+}
+
+function hasVersionView(item: LibraryItem): boolean {
+  const kind = kindOf(item)
+  return kind.kind === "design" || kind.kind === "docs" && kind.mode === "page"
 }

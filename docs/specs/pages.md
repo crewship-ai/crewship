@@ -943,7 +943,8 @@ reference with the same page read Pages makes and calls `router.replace`:
 | `/pages[?…]` | `/artifacts[?…]` |
 | `/pages?ref=<id>&workspace_id=<ws>` | resolve `@<id>` |
 | `/pages/<slug>`, `/pages/@<id>` | resolve the slug or `@<id>` |
-| `/pages/<slug>?artifact=1[&version=N]`, `/pages/<slug>?version=N` | resolve as a project; moves only to a project viewer the detail has |
+| `/pages/<slug>?artifact=1[&version=N]` | resolve as a project; moves only to a project viewer the detail has |
+| `/pages/<slug>?version=N` | resolve with the pin; moves only for a project, a Doc or a Design, to `/artifacts/<id>?version=N` (#5168). A Doc opens History with revision N selected, or says it is not there; a Design opens the requested historical snapshot read-only. A changed pin selects that snapshot after pending local writes are confirmed; it does not remount or discard a local draft |
 | `/pages/craft/editor?page_id=<id>&workspace_id=<ws>` | resolve `@<id>`; the detail mounts the same editor host |
 | `/pages/<slug>/editor`, `/pages/@<id>/editor` | `/pages/<slug>?mode=edit` by address alone (`lib/legacy-app-address.ts`, from the in-shell 404) |
 | `/artifacts/@<id>` | `/artifacts/<id>` by address alone, query kept (`app/(dashboard)/artifacts/[id]/page-client.tsx`) |

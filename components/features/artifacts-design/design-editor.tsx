@@ -68,6 +68,16 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const [accessOpen, setAccessOpen] = useState(false)
  const [version, setVersion] = useState(initialVersion)
  const design = useDesign(workspaceId, slug, version)
+ // Address changes select another snapshot without remounting the live editor.
+ // Wait for confirmation of local writes; a restore's internal return to live
+ // must not reapply an already consumed address pin.
+ const [addressVersion, setAddressVersion] = useState(initialVersion)
+ const addressPending = addressVersion !== initialVersion
+ useLayoutEffect(() => {
+  if (addressVersion === initialVersion || design.unsynced || design.draftError || design.save.isPending || design.restore.isPending) return
+  setAddressVersion(initialVersion)
+  setVersion(initialVersion)
+ }, [initialVersion, addressVersion, design.unsynced, design.draftError, design.save.isPending, design.restore.isPending])
  const session = useSessionSafe()
  const commentPageId = design.query.data?.page_id
  const commentKey = artifactDraftKey("design-comment", session?.data?.user?.id, workspaceId, !design.query.isError ? commentPageId : null)
@@ -499,9 +509,10 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   {failure && !historyFull && <p role="alert" className="border-b px-4 py-2 text-sm text-destructive">{failure.message}</p>}
   {design.connection==="quota"&&!historyFull&&<p role="alert" className="border-b px-4 py-2 text-sm">Storage capacity is full. Your changes are kept in this browser and nothing was deleted. Save a version to open the recovery choices.</p>}
   {design.conflicts.map((conflict, index) => <DesignConflictNotice key={`${conflict.id}-${index}`} conflict={conflict} canRestore={canChange && Boolean(design.doc)} onRestore={() => { if (design.doc) restoreDesignConflict(design.doc, conflict); design.dismissConflict(conflict) }} onDismiss={() => design.dismissConflict(conflict)} />)}
+  {addressPending && <p role="status" className="border-b px-4 py-2 text-sm">The requested version will open when your local changes are saved. Keep this canvas open while they are pending.</p>}
   {design.draftError && <p role="alert" className="border-b px-4 py-2 text-sm">Browser draft storage is unavailable or full. Keep this window open until connected and save a version.</p>}
  </>
- const hasBanners = historyFull || continued?.scope === continueScope || Boolean(failure) || design.connection === "quota" || design.conflicts.length > 0 || design.draftError
+ const hasBanners = addressPending || historyFull || continued?.scope === continueScope || Boolean(failure) || design.connection === "quota" || design.conflicts.length > 0 || design.draftError
  const layerList = design.nodes.map(node => <button key={node.id} onClick={() => { setSelectedId(node.id); if (node.type === "frame") setFocus(frames.indexOf(node)) }} className={`flex min-h-9 items-center gap-2 px-3 text-left text-xs coarse:min-h-[44px] ${selectedId === node.id ? "bg-accent text-accent-foreground" : "hover:bg-muted"} ${node.parentId ? "pl-7" : "font-medium"}`}>
   {node.type === "frame" ? <Frame className="size-3.5 shrink-0" /> : node.type === "text" ? <Type className="size-3.5 shrink-0" /> : <Square className="size-3.5 shrink-0" />}<span className="truncate">{node.name || node.text || node.type}</span>
  </button>)
