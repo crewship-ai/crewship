@@ -32,6 +32,10 @@ var errDocumentAccess = errors.New("document access denied")
 
 const documentEngineProtocol = 3
 
+// documentExclusiveOutputTables are the other output types a Document page
+// must not carry. The document authority and the people endpoint share it.
+var documentExclusiveOutputTables = []string{"artifact_version_heads", "slides_heads", "page_boards", "page_artifacts", "gridcraft_heads", "mooring_documents", "mooring_collab_documents"}
+
 // DocumentAuthority constructs the private authority. It is never registered
 // on r.mux. Boot fencing runs only after the caller owns its Unix listener.
 func (r *Router) DocumentAuthority(ctx context.Context, secret string) (http.Handler, error) {
@@ -158,7 +162,7 @@ func (h *documentAuthority) authorizeWithReadRecord(r *http.Request, k documents
 		if _, _, e := privatePageOwnershipSQL(ctx, tx, "p"); e != nil {
 			return "", errDocumentAccess
 		}
-		for _, table := range []string{"artifact_version_heads", "slides_heads", "page_boards", "page_artifacts", "gridcraft_heads", "mooring_documents", "mooring_collab_documents"} {
+		for _, table := range documentExclusiveOutputTables {
 			var installed, attached bool
 			if tx.QueryRowContext(ctx, "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name=? COLLATE NOCASE)", table).Scan(&installed) != nil {
 				return "", errDocumentAccess
@@ -367,12 +371,14 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			result = documentReceiptWire(receipt)
 		default:
 			var proposal documents.ProposalInput
-			proposal, err = documentProposalInput(in.ID, in.Fingerprint, a.RunID, in.Target, in.Semantic, in.IfHashes, in.IfRev, in.Generation)
+			// The engine names the schema it proved the proposal at; the
+			// guard refuses it unless that is the Doc's stored schema.
+			proposal, err = documentProposalInput(in.ID, in.Fingerprint, a.RunID, in.Target, in.Schema, in.Semantic, in.IfHashes, in.IfRev, in.Generation)
 			if err != nil {
 				replyError(w, 400, "bounded semantic proposal required")
 				return
 			}
-			proposal.Guard = documentRichSemanticGuardFor(documents.ProposalSchema, in.Semantic, in.IfHashes, in.Blocks, h.pages.documentProposalGuard(a, k, in.Target, in.IfRev))
+			proposal.Guard = documentRichSemanticGuardFor(in.Schema, in.Semantic, in.IfHashes, in.Blocks, h.pages.documentProposalGuard(a, k, in.Target, in.IfRev))
 			var receipt documents.Receipt
 			receipt, err = h.store.Propose(ctx, k, proposal, auth)
 			result = documentReceiptWire(receipt)
@@ -442,7 +448,14 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 				replyError(w, 403, "a proposal is accepted by a human")
 				return
 			}
-			guard = documentRichSemanticGuard(in.Semantic, in.IfHashes, in.Blocks, h.pages.documentDraftGuard(a, k, "commit", in.IfRev))
+			// The guard refuses any schema other than the stored one, so a
+			// client cannot pick a looser proof; drafts reach only schemas
+			// that support drafting.
+			schema := 3
+			if documents.SchemaAllows(in.Schema, documents.CapDraft) {
+				schema = in.Schema
+			}
+			guard = documentRichSemanticGuardFor(schema, in.Semantic, in.IfHashes, in.Blocks, h.pages.documentDraftGuard(a, k, "commit", in.IfRev))
 		} else if in.Proposal != "" {
 			// Accepting is an ordinary human commit bound to exactly one open
 			// proposal, marked accepted in the same transaction.
@@ -471,8 +484,15 @@ func (h *documentAuthority) operation(w http.ResponseWriter, r *http.Request) {
 			replyError(w, 400, "document generation required")
 			return
 		}
+		// The replaced head is kept in History (#5165); a restore without it
+		// would silently lose that work, so it is refused.
+		if len(in.Snapshot) == 0 {
+			replyError(w, 400, "replaced document state required")
+			return
+		}
 		var receipt documents.Receipt
-		receipt, err = operations.Restore(ctx, k, artifacts.RestoreDocument{Lease: lease, Checkpoint: in.Checkpoint, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, Generation: in.Generation}, auth)
+		// The Docs service sends the replaced head's full state; History keeps it (#5165).
+		receipt, err = operations.Restore(ctx, k, artifacts.RestoreDocument{Lease: lease, Checkpoint: in.Checkpoint, ID: in.ID, Fingerprint: in.Fingerprint, IfRev: in.IfRev, Generation: in.Generation, Replaced: in.Snapshot}, auth)
 		result = documentReceiptWire(receipt)
 	default:
 		replyError(w, 404, "unknown Docs authority operation")

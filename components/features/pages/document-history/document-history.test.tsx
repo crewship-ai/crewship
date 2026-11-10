@@ -164,3 +164,23 @@ it("does not list the current revision twice when it is already a checkpoint",()
   expect(screen.getAllByText(/Revision 7/)).toHaveLength(1)
   expect(screen.getByRole("button",{name:/Revision 7/})).toHaveTextContent("Current version")
 })
+it("warns that restoring a version from before Canvas empties the Canvas layout, and only then",()=>{
+  const restore={restore:{allowed:true,status:"idle" as const,onConfirm:vi.fn(),onRetry:vi.fn()}}
+  const {rerender}=render(<DocumentHistory {...props()} {...restore} headSchema={6}/>)
+  fireEvent.click(screen.getByRole("button",{name:"Restore selected checkpoint"}))
+  expect(screen.getByRole("alertdialog")).toHaveTextContent("This version is from before Canvas: Canvas stays enabled, but its layout and notes will be empty.")
+  rerender(<DocumentHistory {...props()} {...restore} headSchema={5}/>)
+  expect(screen.getByRole("alertdialog")).not.toHaveTextContent("before Canvas")
+})
+it("explains the History limit without hiding the list",()=>{
+  const p=props()
+  const list={status:"ready" as const,scopeKey:p.scopeKey,data:{checkpoints:[row],history_limit_reached:true as const}}
+  render(<DocumentHistory {...p} list={list}/>)
+  // A note, not a live region: it is not re-announced on every list refresh.
+  expect(screen.getByRole("note",{name:"History limit"})).toHaveTextContent("Your edits are still saved")
+  expect(screen.getByRole("button",{name:/Revision 7/})).toBeInTheDocument()
+})
+it("says nothing about a limit that was not reached",()=>{
+  render(<DocumentHistory {...props()}/>)
+  expect(screen.queryByRole("note",{name:"History limit"})).toBeNull()
+})

@@ -169,7 +169,7 @@ func TestDocumentProposalSchemaFourRealEngineCLI(t *testing.T) {
 		map[string]any{"type": "blockquote", "attrs": map[string]any{"id": "quote"}, "content": []any{paragraph("quote-p", text("Quoted", "italic"))}},
 		map[string]any{"type": "taskList", "attrs": map[string]any{"id": "tasks"}, "content": []any{map[string]any{"type": "taskItem", "attrs": map[string]any{"id": "done", "checked": true}, "content": []any{paragraph("done-p", text("Ship it"))}}}},
 	}}
-	initialize, _ := json.Marshal(map[string]any{"id": "proposal-init", "schema": documents.ProposalSchema, "page_id": page.ID, "body": body})
+	initialize, _ := json.Marshal(map[string]any{"id": "proposal-init", "schema": documents.FormattedSchema, "page_id": page.ID, "body": body})
 	must(string(initialize), "doc", "initialize", slug, "--file", "-")
 	type docState struct {
 		Schema     int             `json:"schema"`
@@ -203,7 +203,7 @@ func TestDocumentProposalSchemaFourRealEngineCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	mustExec(t, f.rig.db, `INSERT INTO journal_entries(id,workspace_id,crew_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('proposal-start',?,?,?,'run.started','system','test',?)`, f.a.WorkspaceID, f.a.CrewID, f.a.AgentID, f.a.RunID)
-	intent := documents.IterationIntent{SubmissionID: "propose-1", PageID: page.ID, Schema: documents.ProposalSchema, Rev: before.Rev, Generation: before.Generation}
+	intent := documents.IterationIntent{SubmissionID: "propose-1", PageID: page.ID, Schema: documents.FormattedSchema, Rev: before.Rev, Generation: before.Generation}
 	pages := router.Pages()
 	// Gate: the Doc is shared and the agent holds no grant yet.
 	if err := pages.persistDocumentIterationIntent(httptest.NewRequest("POST", "/", nil), f.receipt, f.a.MessageID, intent); err == nil {

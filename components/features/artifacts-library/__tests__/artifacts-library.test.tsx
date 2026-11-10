@@ -5,6 +5,8 @@ import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 const state = vi.hoisted(() => ({ pages: [] as PageView[], loading: false, error: null as string | null, refresh: vi.fn(), projectsOn: true, item: null as string | null, select: vi.fn(), folders: [] as { id: string; slug: string; name: string; pageCount: number }[], reads: [] as { target: { pageId: string } | null; enabled: boolean; chatId: string }[], readStatus: "ready" as string, pagesArgs: [] as unknown[], mobile: false, caps: {} as Record<string, boolean>, access: "unknown" as string, accessRefs: [] as (string | null)[] }))
 // Storage is a no-op in this suite's setup: the drafts this browser kept are listed here instead.
 const drafts = vi.hoisted(() => new Set<string>())
+const docsState = vi.hoisted(() => ({ enabled: true }))
+vi.mock("@/components/features/pages/new-document-dialog",()=>({NewDocumentDialog:({docsOnly,onCreated}:{docsOnly?:boolean;onCreated:(slug:string,id?:string)=>void})=><div role="dialog" aria-label="New Docs" data-docs-only={String(docsOnly)}><button onClick={()=>onCreated("fresh-docs","docs-page-id")}>Create Docs</button></div>}))
 vi.mock("@/components/features/chat/artifact-context/craft/local-draft", async importOriginal => ({
   ...(await importOriginal<typeof import("@/components/features/chat/artifact-context/craft/local-draft")>()),
   readLocalDraft: (userId: string, workspaceId: string, slug: string) => drafts.has([userId, workspaceId, slug].join(":")) ? { content: "x", baseVersion: 1, savedAt: "2026-10-27T10:00:00Z" } : null,
@@ -43,7 +45,7 @@ vi.mock("@/hooks/use-user-preference", async () => {
 })
 vi.mock("@/hooks/use-page-folders", () => ({ usePageFolders: () => ({ folders: state.folders, loading: false, error: null, supported: true, refresh: vi.fn(), reread: vi.fn() }) }))
 vi.mock("@/components/features/chat/artifact-context/new-artifact/use-artifact-capabilities", () => ({
-  useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: true, sheets: false, pages: true, ...state.caps }),
+  useArtifactCapabilities: () => ({ projects: true, dashboards: false, slides: false, documents: true, docs:docsState.enabled, sheets: false, pages: true, ...state.caps }),
 }))
 vi.mock("../new-artifact-dialog", () => ({
   NewArtifactDialog: ({ defaultKind, defaultFolderSlug, onCreated }: { defaultKind?: string; defaultFolderSlug?: string; onCreated: (slug: string, id?: string) => void }) =>
@@ -91,6 +93,7 @@ const withQuery = (ui: React.ReactElement) => <QueryClientProvider client={clien
 
 const wire = (over: Partial<WirePage>): PageView => toPageView({ id: over.slug, owner: "user/u1", updated_at: "2026-10-27T10:00:00Z", reach: ["owner"], ...over } as WirePage)
 beforeEach(() => {
+  docsState.enabled = true
   state.pages = [
     wire({ slug: "site", id: "page-site", name: "Pricing site", artifact_kind: "project", artifact_shared_version: 2, updated_at: "2026-10-27T12:00:00Z" }),
     wire({ slug: "brief", id: "page-brief", name: "Partner brief", artifact_kind: "word", has_document: true }),
@@ -216,6 +219,21 @@ it("Home lists each artifact once, filters by kind chips, and offers what can be
   expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("word")
 })
 
+it("New Docs opens collaborative creation and navigates directly to the confirmed immutable ID",()=>{
+  renderLibrary();fireEvent.click(screen.getByRole("button",{name:"New artifact"}))
+  fireEvent.click(within(screen.getByRole("region",{name:"Artifacts"})).getByRole("button",{name:"New Docs"}))
+  expect(screen.getByRole("dialog",{name:"New Docs"})).toHaveAttribute("data-docs-only","true")
+  fireEvent.click(screen.getByRole("button",{name:"Create Docs"}))
+  expect(state.select).toHaveBeenCalledWith("docs-page-id");expect(state.refresh).toHaveBeenCalled()
+})
+it("does not offer New Docs when its engine is unavailable even if Word is available",()=>{
+  docsState.enabled=false;renderLibrary();fireEvent.click(screen.getByRole("button",{name:"New artifact"}))
+  expect(screen.queryByRole("button",{name:"New Docs"})).toBeNull();expect(screen.getByRole("button",{name:"New Word"})).toBeTruthy()
+})
+it("does not offer New Docs to a caller without Page creation access",()=>{
+  state.caps={pages:false};renderLibrary();expect(screen.queryByRole("button",{name:"New artifact"})).toBeNull()
+})
+
 it("Needs attention lists a failed refresh and a recovered draft, never an unshared item", () => {
   state.pages = [
     ...state.pages,
@@ -255,11 +273,12 @@ it("does not offer New artifact to a member who cannot create Pages, whatever th
 })
 
 it("offers New artifact in the bar, on Home and in the empty state to a member who can create", () => {
-  state.caps = { projects: true, dashboards: true, slides: true, documents: true, designs: true, pages: true }
+  state.caps = { projects: true, dashboards: true, slides: true, documents: true, docs: false, designs: true, pages: true }
   const view = renderLibrary()
   expect(screen.getAllByRole("button", { name: "New artifact" })).toHaveLength(1)
   fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
   for (const name of ["New App", "New Dashboard", "New Slides"]) expect(screen.getByRole("button", { name })).toBeTruthy()
+  expect(screen.queryByRole("button", { name: "New Docs" })).toBeNull()
   view.unmount()
   state.pages = []
   renderLibrary()

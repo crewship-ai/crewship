@@ -1,6 +1,6 @@
 ---
 title: "Document formatting and comments"
-description: "What a Docs page can hold in schema 4, how a document gets it, and how comment threads work."
+description: "What a Docs page can hold in schemas 4 to 6, how a document gets them, and how comment threads work."
 icon: "message-square"
 stability: experimental
 tag: Experimental
@@ -19,6 +19,8 @@ so a document never changes meaning on its own:
 | 2 | Headings (levels 1–3), paragraphs, bulleted and numbered lists, simple tables |
 | 3 | Schema 2 plus web links, inline code and code blocks |
 | 4 | Schema 3 plus **bold**, *italic* and ~~strikethrough~~ (combinable, and with links), a language on each code block, block quotes and checklists |
+| 5 | Schema 4 plus underline, a text colour and a highlight, each combinable with the other marks, and inline dates and mentions |
+| 6 | Schema 5 plus the Canvas: block placements, notes and shapes beside the page |
 
 In a schema 4 document the toolbar offers Bold, Italic, Strikethrough, Quote,
 Checklist and a language for the current code block. Tick a checklist item to
@@ -49,6 +51,62 @@ lowercase name can be typed, and an unknown one stays uncoloured.
 - Code is never run. Markup such as `<script>` in a block stays text.
 - Blocks longer than 20 000 characters are shown without colours so typing
   stays responsive.
+
+Every Docs page offers Paragraph and Heading 1, 2 and 3. In a schema 5
+document the toolbar also offers Underline, Text colour and Highlight, and
+**Clear formatting**, which removes bold, italic, underline, strike, colour,
+highlight and inline code from the selection and keeps links. A toggle shows as
+pressed when the whole selection has that formatting, and as partly pressed
+(dashed outline) when only some of it does; pressing it then applies it to all
+of the selection. The colour menus keep your selection visible while they are
+open; **Default** removes the colour. Shortcuts: `Ctrl+B` / `⌘+B` bold,
+`Ctrl+I` italic, `Ctrl+U` underline, `Ctrl+Shift+S` strike, `Ctrl+E` inline
+code, `Ctrl+\` clear formatting, `Ctrl+Z` undo and `Ctrl+Shift+Z` redo. Undo
+takes back only your own changes, never another person's.
+
+Schema 5 colours come from a fixed palette of eight names (gray, red,
+orange, yellow, green, blue, purple, pink). The document stores the name, never
+a CSS value, and light and dark themes each show their own readable shade of
+it. Markdown has no syntax for these marks, so Markdown export writes
+`<u>…</u>`, `<span data-text-color="red">…</span>` and
+`<mark data-highlight="yellow">…</mark>`; most Markdown viewers show underline
+and highlight and show coloured text plainly. Word export uses the light
+theme's shades.
+
+A schema 5 date is one calendar day (`2026-11-20`), shown in each reader's own
+date format. A mention stores only the person's id, never their name: each
+reader sees the name of a person who can read the document, and anyone else,
+including someone without access, appears as **Unknown member**, so a document
+never reveals whether a person exists. Markdown and Word export write the date
+as `2026-11-20` and a mention as `@` and a name only when the export is given
+the names the exporting reader may see; otherwise as `@Unknown member`. The
+export serializers accept those names, but no export endpoint supplies them in
+this release, so exported mentions read `@Unknown member` for now. A semantic
+`replaceText` edit that would insert text exactly beside a date or mention, or
+delete across one, is refused with `ambiguous_inline_atom`; make that edit in
+the editor.
+
+A document becomes schema 4, 5 or 6 only explicitly: initialize it with that
+`"schema"` (see [`crewship doc initialize`](/cli/doc)), or upgrade an older
+document with the human-only upgrade ([`crewship doc upgrade`](/cli/doc), or
+**Enable Canvas** in the Docs view), which always goes to the newest schema
+(6), keeps its content, history and comments and only widens what it may hold.
+From schema 5 on, restoring a version from before an upgrade keeps the
+document's schema, so it never silently returns to schema 4 and Canvas stays
+enabled. The restored version goes through the same conversion as the upgrade
+and must be valid content of the document's schema; its text, formatting,
+dates and mentions are kept, it has no Canvas layout, and the document stays
+editable and open to agent proposals. An editor
+that does not know a document's schema opens it read-only with "This document
+needs a newer editor" and never saves over it.
+
+New documents start at schema 5: the New Doc dialog, the Artifacts library and
+documents an agent creates from chat. Existing documents keep their schema
+until someone with edit access upgrades them. The agent run that created a
+document with your drafting permission edits it directly; any later agent
+request on a schema 4, 5 or 6 document is a proposal at that document's schema,
+which a person accepts or rejects. Accepting keeps underline, colours,
+highlights, dates and mentions outside the changed text.
 
 ### Math
 
@@ -172,12 +230,33 @@ A `chart` block holds exactly this shape; `title` is optional:
   block. Commenting on a single diagram node or chart bar is not available:
   it needs a new kind of content and will come with a later document schema.
 
-A document becomes schema 4 only explicitly: initialize it with `"schema": 4`
-(see [`crewship doc initialize`](/cli/doc)), or upgrade an older document through
-the documents service's human-only upgrade, which keeps its content, history and
-comments and only widens what it may hold. New documents from the Artifacts
-library and from agents in chat are still schema 3, because agent drafting
-works on schema 3 only; an agent cannot edit a schema 4 document yet.
+New Docs use schema 5. Older documents upgrade only when a person explicitly chooses to upgrade; content, history and comments are kept. Agent drafting and proposals follow the capability table for the document’s own schema.
+
+## Canvas
+
+In the Artifacts library every document shows **Page** and **Canvas** in its
+view bar. On an older document the first switch to Canvas asks **Enable Canvas
+for this document?**: confirming upgrades it to schema 6 and keeps its text,
+formatting, versions and comments; open proposals can then only be rejected,
+and an agent proposes again. Only people with edit access are asked. Canvas lays the same document out as cards: add blocks from the
+document, then drag a card to move it or drag its edges to resize it. A card is
+the block itself, not a copy: editing it on the Page changes the card, and
+moving a card never changes its text. A card shows the block's formatting,
+dates and mentions; a mention names a person exactly as the Page does, through
+the same people lookup, and otherwise reads **@Unknown member**. Drag the background or use the wheel to
+pan, Ctrl/⌘ + wheel or a pinch to zoom, and **Fit** to see everything.
+Double-click a card (or press Enter) to open that block in the Page.
+
+Select a card for **Remove from canvas**, which takes only the card off the
+canvas and leaves the block on the Page, or **Delete block…**, which deletes the
+block from the Page and the Canvas after a confirmation that names the comment
+threads it detaches. **Add note** puts a note on the canvas only; it is never
+part of the Page or its export. **Undo** and **Redo** (Ctrl/⌘ + Z, Shift +
+Ctrl/⌘ + Z) take back your own canvas changes, never someone else's. With read
+access only, you can pan, zoom, fit and select but not change the canvas. A card
+with open comments shows a badge that opens the same threads as the Page.
+Agents propose changes to blocks as on the Page; they never move or add
+anything on the canvas.
 
 ## Editing together
 
@@ -190,7 +269,11 @@ Everyone who has the page open shows in the header as a round mark in their
 colour (hover it, or use a screen reader, for the name), and their caret shows
 in the text as a thin bar of that colour with their name above it; a selected
 range is tinted in the same colour. Names come from the workspace, not from
-the other person's browser. Presence is not stored anywhere: it disappears
+the other person's browser. On the Canvas, everyone else who has it open shows
+as a pointer in their colour with their name, at the same place on the canvas
+whatever your own pan and zoom, and a card they selected is outlined in their
+colour with their name above it. Readers' pointers and selections show too;
+they never change the canvas. Presence is not stored anywhere: it disappears
 within a few seconds of somebody leaving, and at once for a person whose
 access is removed. Readers and commenters are shown too; nobody sees who is
 on a document they cannot read.

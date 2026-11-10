@@ -8172,7 +8172,9 @@
               1,
               2,
               3,
-              4
+              4,
+              5,
+              6
             ],
             "type": "integer"
           }
@@ -8224,6 +8226,12 @@
             },
             "maxItems": 1000,
             "type": "array"
+          },
+          "history_limit_reached": {
+            "enum": [
+              true
+            ],
+            "type": "boolean"
           }
         },
         "required": [
@@ -8471,7 +8479,7 @@
         "type": "object"
       },
       "DocumentNode": {
-        "description": "Versioned bounded tree: depth\u003c=40, nodes\u003c=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks (one per text) and plain codeBlock; explicit4 adds bold/italic/strike marks combinable with each other and link (inline code stays alone), codeBlock language, blockquote and taskList/taskItem(checked). Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine.",
+        "description": "Versioned bounded tree: depth\u003c=40, nodes\u003c=10000, stable unique block IDs and headings levels1..3. Schema1/2 forbid marks/code blocks; explicit3 adds closed mutually exclusive link/code marks (one per text) and plain codeBlock; explicit4 adds bold/italic/strike marks combinable with each other and link (inline code stays alone), codeBlock language, blockquote and taskList/taskItem(checked); explicit5 adds underline and textColor/highlight marks whose only attribute is a palette name (at most 7 marks per text), and inline atoms date{value: YYYY-MM-DD} and mention{userId} inside paragraphs and headings, with exactly that one attribute, no content and no marks; explicit6 keeps the schema5 tree and adds the Canvas surface (block placements and canvas-only items) stored beside it, never inside this tree. Images remain unsupported. Structural grammar and retained Yjs validation are enforced by the document engine.",
         "properties": {
           "attrs": {
             "properties": {
@@ -8524,6 +8532,16 @@
               "type": {
                 "nullable": true,
                 "type": "string"
+              },
+              "userId": {
+                "description": "Schema 5 mention: opaque user id only. The name is resolved per reader (GET .../document/people); content never stores names.",
+                "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                "type": "string"
+              },
+              "value": {
+                "description": "Schema 5 date: one real calendar day, never a time.",
+                "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+                "type": "string"
               }
             },
             "type": "object"
@@ -8549,7 +8567,8 @@
                       "enum": [
                         "bold",
                         "italic",
-                        "strike"
+                        "strike",
+                        "underline"
                       ],
                       "type": "string"
                     }
@@ -8608,10 +8627,50 @@
                     "type"
                   ],
                   "type": "object"
+                },
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "attrs": {
+                      "additionalProperties": false,
+                      "properties": {
+                        "color": {
+                          "description": "Schema 5 palette name; never a CSS value. Each theme resolves it.",
+                          "enum": [
+                            "gray",
+                            "red",
+                            "orange",
+                            "yellow",
+                            "green",
+                            "blue",
+                            "purple",
+                            "pink"
+                          ],
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "color"
+                      ],
+                      "type": "object"
+                    },
+                    "type": {
+                      "enum": [
+                        "textColor",
+                        "highlight"
+                      ],
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "attrs"
+                  ],
+                  "type": "object"
                 }
               ]
             },
-            "maxItems": 4,
+            "maxItems": 7,
             "type": "array"
           },
           "text": {
@@ -8633,13 +8692,46 @@
               "codeBlock",
               "blockquote",
               "taskList",
-              "taskItem"
+              "taskItem",
+              "date",
+              "mention"
             ],
             "type": "string"
           }
         },
         "required": [
           "type"
+        ],
+        "type": "object"
+      },
+      "DocumentPeople": {
+        "properties": {
+          "people": {
+            "description": "Only people who can read this Document, released only to a caller who can read it. Any other id is simply absent (shown as Unknown member), so the answer never confirms that an id exists.",
+            "items": {
+              "properties": {
+                "id": {
+                  "pattern": "^[A-Za-z0-9_-]{1,64}$",
+                  "type": "string"
+                },
+                "name": {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "id",
+                "name"
+              ],
+              "type": "object"
+            },
+            "maxItems": 100,
+            "type": "array"
+          }
+        },
+        "required": [
+          "people"
         ],
         "type": "object"
       },
@@ -8917,7 +9009,9 @@
               1,
               2,
               3,
-              4
+              4,
+              5,
+              6
             ],
             "type": "integer"
           }
@@ -8959,6 +9053,23 @@
           },
           "can_write": {
             "type": "boolean"
+          },
+          "capabilities": {
+            "description": "What this Doc's content schema supports (read, edit, draft, propose, accept, restore, export, upgrade), on a read.",
+            "items": {
+              "enum": [
+                "read",
+                "edit",
+                "draft",
+                "propose",
+                "accept",
+                "restore",
+                "export",
+                "upgrade"
+              ],
+              "type": "string"
+            },
+            "type": "array"
           },
           "content": {
             "$ref": "#/components/schemas/DocumentNode"
@@ -9008,7 +9119,7 @@
             "type": "string"
           },
           "proposals": {
-            "description": "Agent proposals and their review are served on this Doc (schema 4; never for restricted members).",
+            "description": "Agent proposals and their review are served on this Doc (its schema supports them: 4, 5 or 6; never for restricted members).",
             "type": "boolean"
           },
           "rev": {
@@ -134062,6 +134173,19 @@
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
                               },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
                               "provenance": {
                                 "properties": {
                                   "produced_at": {
@@ -134326,6 +134450,19 @@
                               "producer": {
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
+                              },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
                               },
                               "provenance": {
                                 "properties": {
@@ -135663,6 +135800,19 @@
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
                               },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
                               "provenance": {
                                 "properties": {
                                   "produced_at": {
@@ -135927,6 +136077,19 @@
                               "producer": {
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
+                              },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
                               },
                               "provenance": {
                                 "properties": {
@@ -136676,6 +136839,19 @@
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
                               },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
+                              },
                               "provenance": {
                                 "properties": {
                                   "produced_at": {
@@ -137202,6 +137378,19 @@
                               "producer": {
                                 "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                 "type": "string"
+                              },
+                              "producer_authorization": {
+                                "properties": {
+                                  "can_authorize": {
+                                    "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                    "type": "boolean"
+                                  },
+                                  "producer": {
+                                    "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                    "type": "string"
+                                  }
+                                },
+                                "type": "object"
                               },
                               "provenance": {
                                 "properties": {
@@ -148145,7 +148334,9 @@
                               "schema": {
                                 "enum": [
                                   3,
-                                  4
+                                  4,
+                                  5,
+                                  6
                                 ]
                               }
                             },
@@ -148184,7 +148375,9 @@
                           1,
                           2,
                           3,
-                          4
+                          4,
+                          5,
+                          6
                         ],
                         "type": "integer"
                       },
@@ -148230,7 +148423,9 @@
                               "schema": {
                                 "enum": [
                                   3,
-                                  4
+                                  4,
+                                  5,
+                                  6
                                 ]
                               }
                             },
@@ -148265,7 +148460,9 @@
                           1,
                           2,
                           3,
-                          4
+                          4,
+                          5,
+                          6
                         ],
                         "type": "integer"
                       },
@@ -148808,7 +149005,9 @@
                           "schema": {
                             "enum": [
                               3,
-                              4
+                              4,
+                              5,
+                              6
                             ]
                           }
                         },
@@ -148846,7 +149045,9 @@
                       1,
                       2,
                       3,
-                      4
+                      4,
+                      5,
+                      6
                     ],
                     "type": "integer"
                   },
@@ -149387,7 +149588,9 @@
                           "schema": {
                             "enum": [
                               3,
-                              4
+                              4,
+                              5,
+                              6
                             ]
                           }
                         },
@@ -149413,7 +149616,9 @@
                     "enum": [
                       2,
                       3,
-                      4
+                      4,
+                      5,
+                      6
                     ],
                     "type": "integer"
                   }
@@ -150000,7 +150205,9 @@
                               "schema": {
                                 "enum": [
                                   3,
-                                  4
+                                  4,
+                                  5,
+                                  6
                                 ]
                               }
                             },
@@ -150033,7 +150240,9 @@
                           1,
                           2,
                           3,
-                          4
+                          4,
+                          5,
+                          6
                         ],
                         "type": "integer"
                       },
@@ -150072,7 +150281,9 @@
                               "schema": {
                                 "enum": [
                                   3,
-                                  4
+                                  4,
+                                  5,
+                                  6
                                 ]
                               }
                             },
@@ -150113,7 +150324,9 @@
                           1,
                           2,
                           3,
-                          4
+                          4,
+                          5,
+                          6
                         ],
                         "type": "integer"
                       },
@@ -150666,6 +150879,214 @@
         "x-crewship-read-only": false
       }
     },
+    "/api/v1/pages/{slug}/document/people": {
+      "get": {
+        "description": "List page document people (GET /api/v1/pages/{slug}/document/people).",
+        "operationId": "get_api_v1_pages_slug_document_people",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Workspace ID or slug.",
+            "in": "header",
+            "name": "X-Workspace-ID",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated mention user ids (at most 100) to name for this reader.",
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Name search for the @-mention picker; at most 20 people who can read this Document. Not combinable with ids.",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "maxLength": 100,
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentPeople"
+                }
+              }
+            },
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
+                "schema": {
+                  "enum": [
+                    "no-store"
+                  ],
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "List page document people",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": true
+      }
+    },
     "/api/v1/pages/{slug}/document/presence": {
       "post": {
         "description": "Submit page document presence (POST /api/v1/pages/{slug}/document/presence).",
@@ -150690,6 +151111,43 @@
                     "description": "Base64 encoded Yjs relative position (at most 192 bytes).",
                     "maxLength": 256,
                     "type": "string"
+                  },
+                  "canvas": {
+                    "additionalProperties": false,
+                    "description": "Where this tab is on the Canvas view (schema 6): its pointer in canvas coordinates, absent once it leaves the canvas, and the cards it selected. Replaced by every heartbeat; gone with the tab after the TTL.",
+                    "properties": {
+                      "pointer": {
+                        "additionalProperties": false,
+                        "properties": {
+                          "x": {
+                            "maximum": 1000000,
+                            "minimum": -1000000,
+                            "type": "number"
+                          },
+                          "y": {
+                            "maximum": 1000000,
+                            "minimum": -1000000,
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "x",
+                          "y"
+                        ],
+                        "type": "object"
+                      },
+                      "selection": {
+                        "description": "Selected cards: Page block IDs (placements) or canvas item IDs.",
+                        "items": {
+                          "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+                          "type": "string"
+                        },
+                        "maxItems": 8,
+                        "type": "array",
+                        "uniqueItems": true
+                      }
+                    },
+                    "type": "object"
                   },
                   "client": {
                     "description": "This tab's id.",
@@ -150738,6 +151196,43 @@
                             "description": "Base64 encoded Yjs relative position (at most 192 bytes).",
                             "maxLength": 256,
                             "type": "string"
+                          },
+                          "canvas": {
+                            "additionalProperties": false,
+                            "description": "Where this tab is on the Canvas view (schema 6): its pointer in canvas coordinates, absent once it leaves the canvas, and the cards it selected. Replaced by every heartbeat; gone with the tab after the TTL.",
+                            "properties": {
+                              "pointer": {
+                                "additionalProperties": false,
+                                "properties": {
+                                  "x": {
+                                    "maximum": 1000000,
+                                    "minimum": -1000000,
+                                    "type": "number"
+                                  },
+                                  "y": {
+                                    "maximum": 1000000,
+                                    "minimum": -1000000,
+                                    "type": "number"
+                                  }
+                                },
+                                "required": [
+                                  "x",
+                                  "y"
+                                ],
+                                "type": "object"
+                              },
+                              "selection": {
+                                "description": "Selected cards: Page block IDs (placements) or canvas item IDs.",
+                                "items": {
+                                  "pattern": "^[a-zA-Z0-9_-]{1,80}$",
+                                  "type": "string"
+                                },
+                                "maxItems": 8,
+                                "type": "array",
+                                "uniqueItems": true
+                              }
+                            },
+                            "type": "object"
                           },
                           "client": {
                             "type": "string"
@@ -152665,7 +153160,9 @@
                     "enum": [
                       2,
                       3,
-                      4
+                      4,
+                      5,
+                      6
                     ],
                     "type": "integer"
                   }
@@ -153213,6 +153710,598 @@
           }
         ],
         "summary": "Restore page document",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/document/upgrade": {
+      "post": {
+        "description": "Submit page document upgrade (POST /api/v1/pages/{slug}/document/upgrade).",
+        "operationId": "post_api_v1_pages_slug_document_upgrade",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "description": "Explicit human schema upgrade (for example enabling Canvas at schema 6). Content, block IDs and hashes, versions and comments are unchanged; agents are refused.",
+                "properties": {
+                  "epoch": {
+                    "type": "string"
+                  },
+                  "id": {
+                    "pattern": "^[a-zA-Z0-9_-]{1,128}$",
+                    "type": "string"
+                  },
+                  "ifRev": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "page_id": {
+                    "type": "string"
+                  },
+                  "schema": {
+                    "description": "The document's current schema; it must support upgrade.",
+                    "enum": [
+                      1,
+                      2,
+                      3,
+                      4,
+                      5
+                    ],
+                    "type": "integer"
+                  },
+                  "target_schema": {
+                    "enum": [
+                      6
+                    ],
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "id",
+                  "schema",
+                  "target_schema",
+                  "page_id",
+                  "epoch",
+                  "ifRev"
+                ],
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentReceipt"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Bad Gateway"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "oneOf": [
+                    {
+                      "properties": {
+                        "error": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "error"
+                      ],
+                      "type": "object"
+                    },
+                    {
+                      "properties": {
+                        "detail": {
+                          "type": "string"
+                        },
+                        "status": {
+                          "type": "integer"
+                        },
+                        "title": {
+                          "type": "string"
+                        },
+                        "type": {
+                          "type": "string"
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "title",
+                        "status",
+                        "detail"
+                      ],
+                      "type": "object"
+                    }
+                  ]
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page document upgrade",
         "tags": [
           "pages"
         ],
@@ -153847,6 +154936,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "can_delegate_agent_edit": {
+                      "description": "Whether the caller may grant an agent `write` or `produce`, or a crew `produce`. Only the page's owner (the owning user, or a member of the owning crew) delegates Edit, of the spec or of the data, to an agent or to the crew its agents push with; a workspace ADMIN/OWNER role does not imply it. Anyone else gets 403 for `subject_type=agent, level=write|produce` and `subject_type=crew, level=produce`, and such a grant the owner did not issue is listed with `live: false` and stays retired.",
+                      "type": "boolean"
+                    },
                     "changed": {
                       "description": "Rows affected by an issue or a revoke. 0 on a revoke naming a subject that held no grant — a revoke that changed nothing still succeeded.",
                       "type": "integer"
@@ -154053,6 +155146,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "can_delegate_agent_edit": {
+                      "description": "Whether the caller may grant an agent `write` or `produce`, or a crew `produce`. Only the page's owner (the owning user, or a member of the owning crew) delegates Edit, of the spec or of the data, to an agent or to the crew its agents push with; a workspace ADMIN/OWNER role does not imply it. Anyone else gets 403 for `subject_type=agent, level=write|produce` and `subject_type=crew, level=produce`, and such a grant the owner did not issue is listed with `live: false` and stays retired.",
+                      "type": "boolean"
+                    },
                     "changed": {
                       "description": "Rows affected by an issue or a revoke. 0 on a revoke naming a subject that held no grant — a revoke that changed nothing still succeeded.",
                       "type": "integer"
@@ -154256,6 +155353,10 @@
               "application/json": {
                 "schema": {
                   "properties": {
+                    "can_delegate_agent_edit": {
+                      "description": "Whether the caller may grant an agent `write` or `produce`, or a crew `produce`. Only the page's owner (the owning user, or a member of the owning crew) delegates Edit, of the spec or of the data, to an agent or to the crew its agents push with; a workspace ADMIN/OWNER role does not imply it. Anyone else gets 403 for `subject_type=agent, level=write|produce` and `subject_type=crew, level=produce`, and such a grant the owner did not issue is listed with `live: false` and stays retired.",
+                      "type": "boolean"
+                    },
                     "changed": {
                       "description": "Rows affected by an issue or a revoke. 0 on a revoke naming a subject that held no grant — a revoke that changed nothing still succeeded.",
                       "type": "integer"
@@ -156902,6 +158003,178 @@
           }
         ],
         "summary": "Update page panel data",
+        "tags": [
+          "pages"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/pages/{slug}/panels/{panelId}/producer/authorize": {
+      "post": {
+        "description": "Submit page panel producer authorize (POST /api/v1/pages/{slug}/panels/{panelId}/producer/authorize).",
+        "operationId": "post_api_v1_pages_slug_panels_panelId_producer_authorize",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "panelId",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": false,
+                "properties": {},
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "authorized": {
+                      "type": "boolean"
+                    },
+                    "changed": {
+                      "description": "False when this owner had already authorized it.",
+                      "type": "boolean"
+                    },
+                    "page": {
+                      "type": "string"
+                    },
+                    "panel": {
+                      "type": "string"
+                    },
+                    "producer": {
+                      "description": "agent/\u003cslug\u003e, the producer the panel's spec declares.",
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Submit page panel producer authorize",
         "tags": [
           "pages"
         ],
@@ -161704,6 +162977,19 @@
                                   "producer": {
                                     "description": "`\u003ckind\u003e/\u003cref\u003e`, kind ∈ {routine, script, agent, webhook}. Only the declared producer may write the panel's payload (§7.1 rule 4).",
                                     "type": "string"
+                                  },
+                                  "producer_authorization": {
+                                    "properties": {
+                                      "can_authorize": {
+                                        "description": "True only for the page's owner, a person: POST .../producer/authorize.",
+                                        "type": "boolean"
+                                      },
+                                      "producer": {
+                                        "description": "agent/\u003cslug\u003e, the declared producer awaiting the owner's authorization.",
+                                        "type": "string"
+                                      }
+                                    },
+                                    "type": "object"
                                   },
                                   "provenance": {
                                     "properties": {

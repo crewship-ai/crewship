@@ -44,6 +44,7 @@ validation.
 | GET | [`/api/v1/pages/{slug}/grants`](#list-grants) | List a page's grants |
 | PUT | [`/api/v1/pages/{slug}/grants`](#issue-a-grant) | Grant read, produce, or write |
 | DELETE | [`/api/v1/pages/{slug}/grants`](#revoke-a-grant) | Revoke a grant |
+| POST | [`/api/v1/pages/{slug}/panels/{panelId}/producer/authorize`](#authorize-a-panels-agent-producer) | The owner authorizes a panel's agent producer |
 | GET | [`/api/v1/pages/{slug}/access`](#who-reaches-a-page) | Who reaches a page, and by which paths |
 | GET | [`/api/v1/pages/access`](#what-a-subject-reaches) | Which pages one user, crew or agent reaches |
 | GET | [`/api/v1/page-folders`](#list-folders) | List the folders the caller may see |
@@ -286,7 +287,7 @@ those is a 400 naming the rule; see the
 | 201 | Created. |
 | 400 | The spec is malformed, or a panel names a schema, icon, or owner that does not exist. |
 | 401 | No session or token. |
-| 403 | Caller lacks `page.create`, or named an owner crew they do not belong to. |
+| 403 | Caller lacks `page.create`, named an owner crew they do not belong to, or names `agent/<slug>` as a panel producer without being the page's owner (#5260). |
 | 409 | A page with that slug already exists in the workspace. |
 
 ---
@@ -399,7 +400,7 @@ modification time; the optimistic lock (409) still applies.
 | 200 | Updated. A new structural version is recorded. |
 | 400 | Malformed spec, or an unresolvable owner/producer/routine reference. |
 | 401 | No session or token. |
-| 403 | No write authority, a panel replacement includes unreadable current/target panels, or a hidden reference no longer validates. Only for a caller who reaches the page. |
+| 403 | No write authority, a panel replacement includes unreadable current/target panels, a hidden reference no longer validates, or the update newly names `agent/<slug>` as a panel producer and the caller is not the page's owner (keeping a panel's producer unchanged is allowed). Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 | 409 | The live definition changed before the update; reload before saving. |
 
@@ -482,7 +483,7 @@ push's own server-side reference `push:<panel>:<seq>` in place of a run id.
 | 200 | Stored. Connected viewers are notified over the page's websocket channel. |
 | 400 | The payload does not satisfy the panel's schema. The message names the field and why. |
 | 401 | No session or token. |
-| 403 | The caller is not the panel's declared producer and holds no `produce` grant, and reaches the page some other way. The refusal writes a journal entry and notifies the page owner — treat it as a signal to investigate, not noise to retry past. |
+| 403 | The caller is not the panel's declared producer and holds no `produce` grant, and reaches the page some other way. A declared `agent/<slug>` producer counts only while the page's owner named it; otherwise the panel carries the reason in `fault`. The refusal writes a journal entry and notifies the page owner — treat it as a signal to investigate, not noise to retry past. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or the page has no such panel. A caller who cannot reach the page gets this answer for an unauthorised push too — still journalled, and the owner still notified. |
 | 422 | The payload exceeds 64 KiB. The rejection names the bytes attempted and the limit. |
 | 429 | Faster than one push per two seconds for this panel, or over the per-minute budget. |
@@ -516,9 +517,14 @@ ADMIN/OWNER.
       "granted_at": "2026-08-01T08:20:11Z",
       "live": true
     }
-  ]
+  ],
+  "can_delegate_agent_edit": false
 }
 ```
+
+`can_delegate_agent_edit` says whether the caller may grant an agent `write`:
+only the page's owner (the owning user, or a member of the owning crew) may. A
+client hides that choice when it is `false`.
 
 `live` is not stored. A grant is only as wide as the human who issued it: if
 that human loses access to the crew the grant names, the grant reports `live:
@@ -593,6 +599,29 @@ failing: they were given the board, not the numbers on it.
 Without any grant a page is reached by its owner, by a workspace ADMIN/OWNER,
 and by members of the crews that own its panels.
 
+### Only the owner delegates Edit to an agent
+
+`write` or `produce` to an `agent` subject, and `produce` to a `crew` subject,
+are issued by the page's **owner** only: the owning user, or a member of the
+owning crew while that crew is not deleted. `produce` pushes the page's data, so
+it is Edit of the data, and a crew's agents and routines push with a crew
+`produce` grant. A workspace ADMIN/OWNER role administers
+every other grant, can grant an agent `read`, and can revoke any grant, but it
+does not imply the right to delegate Edit to an agent. A request from anyone
+else gets 403.
+
+The rule also applies at use time. An agent `write` or `produce` grant, or a
+crew `produce` grant, that the page's owner did not issue is listed with `live: false` and an `inert_reason`,
+and it authorises nothing: no spec edits, no pushed payloads, no document
+proposals and no collaborative writes. Such a row is retired for good when it
+is stored, when the page changes owner, when its issuer leaves the owning
+crew, or when the owning crew is deleted, and each retirement writes a `page.agent_grant.retired_not_owner` audit
+entry. It stays retired if its issuer comes to own the page later. Only a new
+grant by the owner delegates again.
+
+An agent cannot hold `comment`, and neither `comment` nor `read` lets an agent
+propose a change to a document.
+
 **Statuses:**
 
 | Status | Condition |
@@ -600,7 +629,7 @@ and by members of the crews that own its panels.
 | 200 | Issued, or updated in place if the subject already held one. |
 | 400 | Unknown `subject_type` or `level`, missing subject, `produce` for the `workspace` subject, `comment` for an `agent` subject, or `panels` naming a panel the page does not have. |
 | 401 | No session. |
-| 403 | Not the owner and not an admin, or the caller is an agent rather than a human. Only for a caller who reaches the page. |
+| 403 | Not the owner and not an admin; `write` or `produce` to an `agent`, or `produce` to a `crew`, from anyone but the page's owner; or the caller is an agent rather than a human. Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
 
 ---
@@ -629,6 +658,39 @@ answers **400** rather than reporting a success it did not perform.
 | 401 | No session or token. |
 | 403 | Not the owner and not an admin. Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
+
+---
+
+## Authorize a panel's agent producer
+
+```
+POST /api/v1/pages/{slug}/panels/{panelId}/producer/authorize
+```
+
+**Authentication:** session cookie or CLI token. Only the page's **owner** (the
+owning user, or a member of the owning crew while that crew is not deleted),
+and only a person.
+
+A panel whose `agent/<slug>` producer the owner did not name carries
+`producer_authorization: {"producer": "agent/<slug>", "can_authorize": <bool>}`
+on [Get a page](#get-a-page). Its `reason` starts with "Producer not authorized
+by the owner". `can_authorize` is true only for the owner. This call makes the
+declared producer the owner's own designation. It writes the audit entry
+`page.agent_producer.authorized`, and the agent can push again. The designation
+ends if the page changes owner, like any other. No body.
+
+**Response 200:** `{"page": "fleet-201", "panel": "sluzby", "producer": "agent/writer", "authorized": true, "changed": true}`.
+`changed` is false when the designation was already live under the page's owner (on a crew-owned page, any member's live designation counts, and it is not re-attributed). `can_authorize` is false on a private artifact.
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Authorized, or already live under the page's owner. |
+| 401 | No session or token. |
+| 403 | The caller is not the page's owner, or is an agent. Only for a caller who reaches the page. |
+| 404 | No such page or panel, or a page the caller [cannot reach](#unreachable-pages-are-not-found). |
+| 409 | The panel's producer is not an agent, or the page is a private artifact, which delegates nothing to agents. |
 
 ---
 
@@ -1429,7 +1491,7 @@ five minutes later.
 | 200 | Rolled back. |
 | 400 | `to` missing, invalid request, or a stored definition that no longer validates. |
 | 401 | No session or token. |
-| 403 | No write authority, or the current/archived definition contains panels the caller cannot read. Only for a caller who reaches the page. |
+| 403 | No write authority, the current/archived definition contains panels the caller cannot read, or the rollback newly names an agent producer and the caller is not the page's owner. Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found), or no such retained version. |
 | 409 | The live definition changed before rollback; reload before restoring. |
 
@@ -2391,6 +2453,34 @@ the checkpoint endpoint below instead. Statuses: 200 document; 400 unsupported s
 502 invalid engine response; 503 disabled or unavailable service. Responses use
 `Cache-Control: no-store`. CLI: `crewship doc read` and `crewship doc outline`.
 
+## Name the people mentioned in a native document
+
+`GET /api/v1/pages/{slug}/document/people`
+
+Authentication: a current human session, or a current CLI token with `pages:read`, with current read
+access to the Page and its document; agent run credentials are refused with 403.
+Request: the Page slug or immutable `@PageID` and current workspace; query
+parameters `ids` (a comma-separated list of at most 100 mention user ids) or
+`q` (at most 100 characters of name text for the @-mention picker), never both;
+no request body. Response: `people`, an array of `{id, name}`. With `ids`, only
+the listed people who can currently read this document are named; anyone else,
+including an unknown id, is simply absent, so the answer never reveals whether
+an id exists. With `q`, at most 20 such readers whose name contains the text
+(an empty `q` lists the first 20). The name match and a first access filter
+both cover every member, so a reader is found however many other members share
+the text; at most 200 of those candidates get the exact access check per
+request. Email addresses are never matched or returned.
+A caller who cannot read the document gets 404, as for a missing Page.
+Each person may make 30 lookups at once and 2 per second after that, per
+workspace; beyond that the answer is 429 with `Retry-After` and code
+`document_people_rate_limit`. A workspace owner's or administrator's lookup
+that only their role makes possible is audited once per document and session
+(or CLI token) per hour, not once per keystroke.
+Statuses: 200 people; 400 invalid ids, both selectors, a repeated parameter or too-long text;
+401 invalid credential; 403 agent or missing scope; 404 unavailable Page or
+document; 429 lookup limit; 500 storage or audit failure; 503 disabled service. Responses use
+`Cache-Control: no-store`. CLI: `crewship doc people`.
+
 ## List saved document checkpoints
 
 `GET /api/v1/pages/{slug}/document/checkpoints`
@@ -2434,15 +2524,21 @@ refused. Reading somebody else's private document as workspace OWNER requires
 an audit entry before disclosure; earlier checkpoint permissions are not reused.
 
 Request: one JSON object of at most 4096 bytes, with exactly `page_id`, `id`,
-`schema` (2, 3 or 4), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
+`schema` (2 to 6), `epoch`, `ifRev` and `checkpoint`. Use the immutable Page ID,
 the current editing epoch and revision, a retained checkpoint ID and a new
 mutation ID. Page, mutation and checkpoint IDs contain 1–128 ASCII letters,
 digits, underscores or hyphens. A changed Page identity, revision or epoch
 refuses the operation; the server does not select a replacement checkpoint.
 
 Response 200: `page_id`, `id`, `rev`, a new `epoch`, `kind: "restore"` and
-optional `schema` and `duplicate`. Restoration creates a new revision, preserving
-the retained checkpoint. After an uncertain confirmation, retry the original
+`schema` (the Document's schema after the restore) and optional `duplicate`.
+Restoration creates a new revision, preserving the retained checkpoint. A
+schema 5 Document stays at schema 5 when you restore a checkpoint from before
+its upgrade: older content is valid schema 5 content, and new agent proposals
+are made at schema 5. A Canvas (schema 6) Document stays at schema 6 in the
+same way; a checkpoint from before Canvas was enabled restores the Page and
+leaves the Canvas layout, cards and notes empty. Below schema 5 the Document
+takes the checkpoint's schema. After an uncertain confirmation, retry the original
 packet with the same mutation ID and preconditions; an exact authorized retry
 returns the original receipt without another restoration. A lost confirmation
 is not evidence that the write failed.
@@ -2462,7 +2558,7 @@ CLI: `crewship doc restore <page-slug> --file <request.json>`.
 Authentication: a current human credential owning an empty Page, with current
 write permission; scoped CLI credentials need both `pages:read` and `pages:write`.
 Request body: one JSON object of at most 2 MiB containing `id`, `schema` (2, 3 or 4)
-and `body`. Schemas 3 and 4 also require the original `page_id`. Schema 4 adds
+and `body`. Schemas 3 to 6 also require the original `page_id`. Schema 4 adds
 `bold`, `italic` and `strike` marks, a code block `language`, `blockquote` and
 `taskList`/`taskItem` (`checked`); see [`crewship doc initialize`](/cli/doc). Stage a Page through
 `POST /api/v1/pages` with `panels: []` and `allow_empty: true`; this is an explicit
@@ -2484,7 +2580,7 @@ Authentication: a current human credential with current document write access;
 scoped CLI credentials need both `pages:read` and `pages:write`. Request body:
 one JSON object of at most 2 MiB. Semantic replacement requires `id`, `schema`,
 `epoch`, `target`, `text`, `ifRev` and `ifHash`. The editor's incremental form
-uses `kind: "human"` and base64 `update`; schemas 3 and 4 require the original
+uses `kind: "human"` and base64 `update`; schemas 3 to 6 require the original
 `page_id`. The service rechecks the exact credential and permission within the
 storage transaction. Response: a receipt for the confirmed revision. Repeating
 the original operation after a lost confirmation returns its receipt without
@@ -2495,6 +2591,29 @@ automatically rebased. Statuses: 200 confirmed receipt; 400 invalid request;
 request; 422 invalid content; 429 temporary operation limit; 500 storage failure;
 502 invalid engine response; 503 disabled or unavailable service. Responses use
 `Cache-Control: no-store`. CLI: `crewship doc patch <page-slug> --file <request.json>`.
+
+## Upgrade a native document (enable Canvas)
+
+`POST /api/v1/pages/{slug}/document/upgrade`
+
+The explicit human schema upgrade; today it enables the Docs Canvas (schema 6)
+on an older document. Authentication: a current human credential with current
+document write (Edit) access; scoped CLI credentials need both `pages:read` and
+`pages:write`. Agent run credentials are refused. Request body: one JSON object
+with `id` (operation ID), `schema` (the document's current schema, which must
+support upgrade), `target_schema` (6), `page_id`, `epoch` and `ifRev` from the
+current read. Nothing in the content changes: text, block IDs and hashes,
+versions and comments stay as they are. Open proposals can afterwards only be
+rejected, never accepted. The schema and the document generation advance, so editors still open at the old schema are
+refused with 409 and must reload. Response: a receipt with `rev` and `schema`.
+Repeating the original request after a lost confirmation returns its receipt
+with `duplicate: true` and never upgrades twice. Statuses: 200 confirmed
+receipt; 400 invalid request; 401 invalid credential; 403 missing access/scope
+or an agent credential; 404 unavailable document; 409 stale revision/epoch, a
+schema that cannot upgrade, a wrong target or a conflicting operation ID; 413
+oversized request; 429 temporary operation limit; 500 storage failure; 502
+invalid engine response; 503 disabled or unavailable service. Responses use
+`Cache-Control: no-store`. CLI: `crewship doc upgrade <page-slug> --file <request.json>`.
 
 ## List document comments
 
@@ -2524,7 +2643,7 @@ Authentication: a current human credential with Comment or Edit access to the
 document (Edit, or a Comment or Edit grant); on private output only its owner.
 Scoped CLI credentials need `pages:write`; agent credentials are refused.
 Request body: `id`, `schema`, `epoch`, `ifRev`, `text` (1–10,000 characters) and,
-for schemas 3 and 4, `page_id`. A new thread adds `block`, `from` and `to` (the
+for schemas 3 to 6, `page_id`. A new thread adds `block`, `from` and `to` (the
 quoted UTF-16 range in one paragraph, heading or code block); a reply adds
 `parent` instead. Response: a receipt with `id`, `rev`, `epoch`, `actor` and
 `kind: "comment"`; an exact retry returns it again. Comments never change
@@ -2540,7 +2659,7 @@ CLI: `crewship doc comment <page-slug> --file <request.json>`.
 `POST /api/v1/pages/{slug}/document/comments/resolve`
 
 Authentication: as for commenting. Request body: `id`, `schema`, `epoch`,
-`ifRev`, `page_id` (schemas 3 and 4), `comment` (thread ID), `version` (current)
+`ifRev`, `page_id` (schemas 3 to 6), `comment` (thread ID), `version` (current)
 and `resolved` (`true` resolves, `false` reopens). Response: a receipt with
 `kind: "resolve"`. Statuses: 200 confirmed; 400 invalid request; 401 invalid
 credential; 403 missing access/scope; 409 stale version, revision or epoch;
@@ -2558,8 +2677,9 @@ never review proposals, and restricted members have no access to this route.
 Request: path parameter `slug` only. Response: `page_id` and `proposals`, oldest
 first; each has `id`, `author`, `run_id`, `target.block_ids`, `base_rev`,
 `status` (`open`, `stale`, `accepted` or `rejected`), `text` and `created_at`.
-Proposals exist on schema 4 documents only; `GET /api/v1/pages/{slug}/document`
-reports `proposals: true` where they are served. Statuses: 200 listed; 401
+Proposals exist on documents whose schema supports them (4, 5 and 6), each bound to
+the schema it was made at; `GET /api/v1/pages/{slug}/document` reports
+`proposals: true` where they are served and the schema's `capabilities`. Statuses: 200 listed; 401
 invalid credential; 403 missing access or an agent credential; 404 no such
 document; 409 unsupported schema; 502 invalid engine response; 503
 disabled or unavailable service.
@@ -2605,7 +2725,8 @@ CLI: `crewship doc proposal-accept|proposal-reject <page-slug> <proposal-id> --e
 Who else has the document open, and where their caret is. Presence is
 ephemeral: the server keeps it in memory only, never in the database or the
 document, and forgets a tab after 6 seconds without a heartbeat. Clients send
-one heartbeat a second and when the caret moves.
+one heartbeat a second, and an extra one (at most every 150 ms) only when the
+caret actually moved.
 
 Authentication: a current human credential with read access to the document;
 every heartbeat is authorized like a document read, at that moment. Scoped CLI
@@ -2614,20 +2735,28 @@ only its owner takes part (nobody else is ever listed there).
 Request body (at most 2 KiB, unknown fields refused): `client`, this tab's id
 (8–64 of `A-Z a-z 0-9 - _`); optionally `anchor` and `head`, both or neither,
 the caret and range as base64 Yjs relative positions (at most 192 bytes each);
-`leave: true` removes this tab at once. A client cannot name itself or choose
-a colour.
-Response 200: `peers`, the other people's tabs on this document (never the
-caller's own), each with `client`, `user_id`, `name` (the member's display
+`leave: true` removes this tab at once. Optional `canvas` carries a `pointer`
+with both `x` and `y` in canvas coordinates (absolute value at most 1000000),
+and `selection`, at most 8 unique Page block or canvas item IDs matching
+`^[a-zA-Z0-9_-]{1,80}$`. An empty `canvas` counts as none; omit it after
+leaving Canvas. These fields share the same read authorization and TTL. A
+client cannot name itself or choose a colour.
+Response 200: `peers`, the other people on this document, one entry per
+person however many tabs they have open (never the caller, nor the caller's
+other tabs), each with `tabs` (how many of that person's tabs are present),
+`client` and `anchor`/`head` of the tab whose caret or Canvas presence moved last (a tab sharing either is preferred to one without), `user_id`, `name` (the member's display
 name, or `Workspace member` when they have none; never an email), `color` (an index the server assigns per document,
 different for each person while free colours remain, kept while they stay) and
-`anchor`/`head` when shared; plus the caller's own `color`, `ttl_ms` and
+`anchor`/`head` and `canvas` when that tab shares them; plus the caller's own `color`, `ttl_ms` and
 `interval_ms`. Statuses: 200 heartbeat recorded; 400 invalid request; 401
 invalid credential; 403 agent credential or missing scope; 404 document
 unavailable or read access gone (every tab of the caller on this document is
 removed at the same time); 429 too many tabs on the document (at most 64, and
-8 per person); 503 Docs disabled. A revoked Page grant removes the person on
-their next heartbeat; when the credential or membership itself is gone, the
-request is refused before presence and the tab disappears after the 6 seconds. Responses use `Cache-Control: no-store`.
+8 per person); 503 Docs disabled. A revoked session or CLI token, a suspended
+account, an ended membership, a role or access change and a deleted workspace
+remove the person's tabs at once; a revoked Page grant removes them on their
+next heartbeat, which is refused. A person who can still read reappears with
+their next heartbeat. Responses use `Cache-Control: no-store`.
 CLI: `crewship doc presence <page-slug>`.
 
 Page read and list responses include `has_document`, which identifies saved native

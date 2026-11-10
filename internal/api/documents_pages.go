@@ -100,7 +100,7 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 		if operation == "comments" {
 			operation = "comment"
 		}
-		if operation != "initialize" && operation != "patch" && operation != "comment" && operation != "resolve" {
+		if operation != "initialize" && operation != "patch" && operation != "upgrade" && operation != "comment" && operation != "resolve" {
 			replyError(w, 404, "unknown document operation")
 			return
 		}
@@ -163,10 +163,12 @@ func (h *PageHandler) serveDocument(w http.ResponseWriter, r *http.Request, muta
 		}
 		if operation == "read" {
 			value["can_write"] = canWrite
-			// Agent proposals and their review exist on schema 4 only (#5137).
-			// This states the capability; accept and reject still need Edit.
+			// What this Doc's schema supports (#5233), and whether this
+			// reader is offered agent proposals and their review. This states
+			// capabilities; accept and reject still need Edit.
 			schema, _ := value["schema"].(float64)
-			value["proposals"] = int(schema) == documents.ProposalSchema && !restricted
+			value["capabilities"] = documents.SchemaCapabilities(int(schema))
+			value["proposals"] = documents.SchemaAllows(int(schema), documents.CapPropose) && !restricted
 		}
 		value["can_comment"] = canComment
 		value["can_resolve"] = canComment

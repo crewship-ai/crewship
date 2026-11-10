@@ -64,6 +64,9 @@ type PageHandler struct {
 	designOnce sync.Once
 	design     *designHTTP
 
+	peopleOnce  sync.Once
+	peopleGuard *documentPeopleGuard
+
 	artifactMasterToken              string
 	documentStoreOptions             documents.Options
 	documentCall                     func(context.Context, string, string, string, string, any) ([]byte, int, error)
@@ -158,6 +161,11 @@ type pagePanelWire struct {
 	SLASeconds int    `json:"sla_seconds"`
 	Span       int    `json:"span"`
 	Public     bool   `json:"public,omitempty"`
+
+	// ProducerAuthorization is set only on a panel whose agent producer the
+	// page's owner has not authorized (#5260): the reason says so, and this
+	// tells the client which producer and whether this viewer may fix it.
+	ProducerAuthorization *pageProducerAuthorizationWire `json:"producer_authorization,omitempty"`
 
 	// Embed is the server-resolved URL for an embed.v1 panel, and nothing
 	// else ever carries one. See embedWire.
@@ -498,6 +506,13 @@ type panelRecord struct {
 	// the icon it has no column and is attached from the parsed spec: it is
 	// layout, and page_panels carries the contract.
 	Tab string
+	// ProducerDelegated is false for an agent producer whose designation the
+	// page's owner did not make, or that has been retired (#5260): that agent
+	// may not push by being the declared producer.
+	ProducerDelegated bool
+	// ProducerUnauthorized marks the panel whose Fault is that its live agent
+	// producer awaits the owner's authorization (AuthorizePanelProducer).
+	ProducerUnauthorized bool
 	// Fault is §10b.4's stated reason: the producer was deleted, the owning
 	// crew removed. It outranks the clock — no amount of recent data makes a
 	// panel whose producer is gone current.
@@ -981,7 +996,7 @@ func (h *PageHandler) Get(w http.ResponseWriter, r *http.Request) {
 	// document the editor renders is the whole page rather than a copy that
 	// loses its gates on save.
 	authored := h.mayEditSpec(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec)
-	out := h.pageDocumentFor(r.Context(), rec, panels, viewer, authored)
+	out := h.pageDocumentFor(producerAuthorizationContext(r), rec, panels, viewer, authored)
 	if !h.finishMetadataRead(w, r, read) {
 		return
 	}
@@ -1132,10 +1147,13 @@ func (h *PageHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range doc.Spec.Panels {
-		if err := insertPanel(r.Context(), tx, pageID, &doc.Spec.Panels[i], resolved[doc.Spec.Panels[i].ID], now); err != nil {
+		if err := insertPanel(r.Context(), tx, pageID, &doc.Spec.Panels[i], resolved[doc.Spec.Panels[i].ID], now, producerDesignator(r, user.ID)); err != nil {
 			replyInternalError(w, h.logger, "insert page panel", err)
 			return
 		}
+	}
+	if h.refuseUndelegatedAgentProducers(w, r, tx, pageID, nil) {
+		return
 	}
 	// §5: each wake gate compiles to an `automations` row, in the SAME
 	// transaction as the page. A page whose spec says it wakes devops, saved
@@ -1385,7 +1403,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		broadcastWorkspaceEvent(h.hub, wsID, "page.updated", pageWorkspaceInvalidation(updated, len(panels) != 0))
-		writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)))
+		writeJSON(w, http.StatusOK, h.pageDocument(producerAuthorizationContext(r), updated, panels, h.reviewViewer(r.Context(), wsID)))
 		return
 	}
 
@@ -1403,8 +1421,16 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusConflict, "Page definition changed before the update; reload before saving")
 		return
 	}
-	if err := reconcilePanels(r.Context(), tx, rec.ID, base, resolved, now); err != nil {
+	retiredBefore, err := retiredAgentProducers(r.Context(), tx, rec.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "read agent producer designations", err)
+		return
+	}
+	if err := reconcilePanels(r.Context(), tx, rec.ID, base, resolved, now, producerDesignator(r, user.ID)); err != nil {
 		replyInternalError(w, h.logger, "reconcile page panels", err)
+		return
+	}
+	if h.refuseUndelegatedAgentProducers(w, r, tx, rec.ID, retiredBefore) {
 		return
 	}
 	// A panel whose schema, producer or OWNING CREW changed keeps its row and
@@ -1477,7 +1503,7 @@ func (h *PageHandler) Update(w http.ResponseWriter, r *http.Request) {
 		h.emitPageSpecChanged(r.Context(), wsID, updated, base, false, after)
 	}
 	broadcastWorkspaceEvent(h.hub, wsID, "page.updated", pageWorkspaceInvalidation(updated, len(panels) != 0))
-	writeJSON(w, http.StatusOK, h.pageDocument(r.Context(), updated, panels, h.reviewViewer(r.Context(), wsID)))
+	writeJSON(w, http.StatusOK, h.pageDocument(producerAuthorizationContext(r), updated, panels, h.reviewViewer(r.Context(), wsID)))
 }
 
 // ── 5. Delete — DELETE /api/v1/pages/{slug} ────────────────────────────────
@@ -1742,7 +1768,8 @@ func (h *PageHandler) loadPanelsIn(ctx context.Context, wsID string, scope pageS
 		            WHEN 'routine' THEN pl.id IS NOT NULL
 		            WHEN 'agent'   THEN ag.id IS NOT NULL
 		            ELSE 1
-		       END AS producer_alive
+		       END AS producer_alive,
+		       `+agentProducerDelegatedSQL+` AS producer_delegated
 		FROM page_panels pp
 		JOIN pages p ON p.id = pp.page_id
 		JOIN crews c ON c.id = pp.owner_crew_id
@@ -1769,7 +1796,7 @@ func (h *PageHandler) loadPanelsIn(ctx context.Context, wsID string, scope pageS
 		var pageID string
 		var crewGone, producerAlive bool
 		if err := rows.Scan(&pageID, &p.RowID, &p.PanelID, &p.Schema, &p.Title, &p.OwnerCrewID, &p.OwnerCrew, &p.OwnerCrewName,
-			&crewGone, &p.ProducerKind, &p.ProducerRef, &p.SLASeconds, &p.Span, &producerAlive); err != nil {
+			&crewGone, &p.ProducerKind, &p.ProducerRef, &p.SLASeconds, &p.Span, &producerAlive, &p.ProducerDelegated); err != nil {
 			return nil, err
 		}
 		switch {
@@ -1777,6 +1804,9 @@ func (h *PageHandler) loadPanelsIn(ctx context.Context, wsID string, scope pageS
 			p.Fault = fmt.Sprintf("the owning crew %q no longer exists", p.OwnerCrew)
 		case !producerAlive:
 			p.Fault = fmt.Sprintf("producer %s %q no longer exists", p.ProducerKind, p.ProducerRef)
+		case !p.ProducerDelegated:
+			p.Fault = fmt.Sprintf(pageAgentProducerRetiredFault, p.ProducerRef)
+			p.ProducerUnauthorized = true
 		}
 		rec := p
 		if byPageAndPanel[pageID] == nil {
@@ -2080,6 +2110,7 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 		Icon:         rec.Icon,
 		Color:        rec.Color,
 	}
+	var canAuthorize *bool
 	for _, p := range panels {
 		if viewer != nil && !h.canSeePanel(viewer, p) {
 			out.Panels = append(out.Panels, pageSealedPanelWire{
@@ -2092,6 +2123,13 @@ func (h *PageHandler) pageDocumentFor(ctx context.Context, rec *pageRecord, pane
 			continue
 		}
 		wire := h.panelWire(p)
+		if p.ProducerUnauthorized {
+			if canAuthorize == nil {
+				v := h.mayAuthorizeProducersFor(ctx, viewer, rec)
+				canAuthorize = &v
+			}
+			wire.ProducerAuthorization = &pageProducerAuthorizationWire{Producer: p.producerRef(), CanAuthorize: *canAuthorize}
+		}
 		if authored {
 			h.attachAuthoredHalf(ctx, rec.ID, p.PanelID, &wire)
 		}
@@ -2460,7 +2498,11 @@ func (h *PageHandler) resolvePanelReferences(ctx context.Context, wsID string, d
 
 // ── Writing panels ─────────────────────────────────────────────────────────
 
-func insertPanel(ctx context.Context, tx *sql.Tx, pageID string, spec *pages.PanelSpec, res resolvedPanel, now string) error {
+// designator is the human naming this panel's producer, "" when no human does
+// (an agent-authored write). An agent producer designation the page's owner
+// did not make is retired as it lands (migration 20261109152536); the
+// handlers that can say so refuse it first (refuseUndelegatedAgentProducers).
+func insertPanel(ctx context.Context, tx *sql.Tx, pageID string, spec *pages.PanelSpec, res resolvedPanel, now, designator string) error {
 	sla, err := spec.SLADuration()
 	if err != nil {
 		return err
@@ -2468,10 +2510,10 @@ func insertPanel(ctx context.Context, tx *sql.Tx, pageID string, spec *pages.Pan
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO page_panels (id, page_id, panel_id, schema, title, owner_crew_id,
 		                         producer_kind, producer_ref, sla_seconds, span, config_json,
-		                         created_at, updated_at)
-		VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, '{}', ?, ?)`,
+		                         created_at, updated_at, producer_designated_by_user_id)
+		VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?, ?, '{}', ?, ?, NULLIF(?, ''))`,
 		generateCUID(), pageID, spec.ID, string(spec.Schema), spec.Title, res.OwnerCrewID,
-		res.Kind, res.Ref, int(sla.Seconds()), spec.Span, now, now)
+		res.Kind, res.Ref, int(sla.Seconds()), spec.Span, now, now, designator)
 	return err
 }
 
@@ -2480,7 +2522,11 @@ func insertPanel(ctx context.Context, tx *sql.Tx, pageID string, spec *pages.Pan
 //
 // A surviving panel is UPDATED rather than replaced so its payload ring
 // survives the edit (page_panel_data cascades from page_panels).
-func reconcilePanels(ctx context.Context, tx *sql.Tx, pageID string, doc *pages.Document, resolved map[string]resolvedPanel, now string) error {
+//
+// A producer that changes is designated anew by designator, with a clean
+// retirement marker; a producer that stays keeps its designator and marker, so
+// an edit that leaves it alone is neither a re-designation nor a revival.
+func reconcilePanels(ctx context.Context, tx *sql.Tx, pageID string, doc *pages.Document, resolved map[string]resolvedPanel, now, designator string) error {
 	rows, err := tx.QueryContext(ctx, `SELECT panel_id FROM page_panels WHERE page_id = ?`, pageID)
 	if err != nil {
 		return err
@@ -2512,15 +2558,21 @@ func reconcilePanels(ctx context.Context, tx *sql.Tx, pageID string, doc *pages.
 			if _, err := tx.ExecContext(ctx, `
 				UPDATE page_panels
 				   SET schema = ?, title = NULLIF(?, ''), owner_crew_id = ?,
+				       producer_designated_by_user_id = CASE WHEN producer_kind IS NOT ? OR producer_ref IS NOT ?
+				                                             THEN NULLIF(?, '') ELSE producer_designated_by_user_id END,
+				       producer_retired_at = CASE WHEN producer_kind IS NOT ? OR producer_ref IS NOT ?
+				                                  THEN NULL ELSE producer_retired_at END,
 				       producer_kind = ?, producer_ref = ?, sla_seconds = ?, span = ?, updated_at = ?
 				 WHERE page_id = ? AND panel_id = ?`,
-				string(spec.Schema), spec.Title, res.OwnerCrewID, res.Kind, res.Ref,
+				string(spec.Schema), spec.Title, res.OwnerCrewID,
+				res.Kind, res.Ref, designator, res.Kind, res.Ref,
+				res.Kind, res.Ref,
 				int(sla.Seconds()), spec.Span, now, pageID, spec.ID); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := insertPanel(ctx, tx, pageID, spec, res, now); err != nil {
+		if err := insertPanel(ctx, tx, pageID, spec, res, now, designator); err != nil {
 			return err
 		}
 	}

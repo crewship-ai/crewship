@@ -475,6 +475,15 @@ export function PanelActionsProvider({
 }
 
 /**
+ * The page this panel renders on, inside the internal grid's provider; `null`
+ * on every surface without one (public page, dashboard strip, a bare test).
+ */
+export function usePanelPage(): { slug: string; workspaceId?: string | null } | null {
+  const ctx = React.useContext(PanelActionsContext)
+  return ctx ? { slug: ctx.slug, workspaceId: ctx.workspaceId } : null
+}
+
+/**
  * The panel ids a `toggle` action currently hides, for the grid to skip.
  *
  * Outside the provider it is empty, which is the honest answer everywhere a

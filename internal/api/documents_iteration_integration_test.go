@@ -25,6 +25,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/orchestrator"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -69,6 +70,8 @@ func (f iterationChatHandlerFunc) HandleChatMessage(ctx context.Context, user, c
 	return f(ctx, user, chat, text, emit, opts...)
 }
 
+// A follow-up on a Doc the agent created (schema 4, #5137) proposes on the
+// same Page; without an owner Edit grant it never writes directly.
 func TestDocumentIterationManagedBridgeDraftSamePage(t *testing.T) {
 	if os.Getenv("CREWSHIP_DOCUMENT_CREATE") != "1" {
 		t.Fatal("requires explicit owned Node24/frozen Docs installation opt-in")
@@ -161,9 +164,15 @@ func TestDocumentIterationManagedBridgeDraftSamePage(t *testing.T) {
 	if err := json.Unmarshal(raw, &created); err != nil {
 		t.Fatal(err)
 	}
+	// The target names the created Document's own schema (CreateSchema), not
+	// LatestSchema: an upgrade is the person's explicit step (#5149).
 	var rev, generation int64
-	if err := f.rig.db.QueryRow(`SELECT head_rev,generation FROM documents WHERE page_id=?`, created.PageID).Scan(&rev, &generation); err != nil {
+	var schema int
+	if err := f.rig.db.QueryRow(`SELECT head_rev,generation,schema_version FROM documents WHERE page_id=?`, created.PageID).Scan(&rev, &generation, &schema); err != nil {
 		t.Fatal(err)
+	}
+	if schema != documents.CreateSchema {
+		t.Fatalf("created schema %d, want %d", schema, documents.CreateSchema)
 	}
 	resolver := &iterationLiveResolver{IPCResolver: chatbridge.NewIPCResolver(host.URL, master, newTestLogger()), f: f, stop: errors.New("stop after actual HTTP admission")}
 	runtime := &iterationRuntime{}
@@ -175,7 +184,7 @@ func TestDocumentIterationManagedBridgeDraftSamePage(t *testing.T) {
 
 	type result struct {
 		run    string
-		packet sidecar.DocumentDraftPacket
+		packet sidecar.DocumentProposalPacket
 		err    error
 	}
 	completed := make(chan result, 1)
@@ -209,25 +218,42 @@ func TestDocumentIterationManagedBridgeDraftSamePage(t *testing.T) {
 			completed <- result{err: err}
 			return err
 		}
-		if view.PageID != created.PageID || view.Rev != rev || len(view.Targets) != 2 {
-			err = fmt.Errorf("target changed: %+v", view)
+		// #5137: a follow-up run on a schema-4 Doc proposes; the creator agent
+		// has no Edit grant from the owner, so it never writes directly.
+		if view.PageID != created.PageID || view.Rev != rev || view.Schema != schema || view.Mode != "propose" || len(view.Targets) != 2 {
+			err = fmt.Errorf("target changed or not a propose view: %+v", view)
 			completed <- result{err: err}
 			return err
 		}
 		input, _ := json.Marshal(sidecar.DocumentDraftPrepare{View: view, Target: view.Targets[0].ID, Text: "Revised introduction.", MutationID: "followup-change"})
-		packet, err := sidecar.PrepareDocumentDraft(input)
+		if _, err := sidecar.PrepareDocumentDraft(input); err == nil {
+			err = errors.New("direct draft prepared on a propose mandate")
+			completed <- result{err: err}
+			return err
+		}
+		prepared, err := sidecar.PrepareDocumentDraftOrProposal(input)
+		packet, ok := prepared.(sidecar.DocumentProposalPacket)
+		if err == nil && !ok {
+			err = fmt.Errorf("propose view prepared %T", prepared)
+		}
+		if err == nil {
+			direct, _ := json.Marshal(map[string]any{"operation": "patch", "generation": packet.Generation, "request": map[string]any{"id": "followup-direct", "schema": schema, "page_id": created.PageID, "epoch": view.Epoch, "ifRev": view.Rev, "target": packet.Proposal.Target, "ifHash": packet.Proposal.IfHash, "text": "Revised introduction."}})
+			if status, raw, _ := exchange(http.MethodPost, direct); status != 403 {
+				err = fmt.Errorf("direct write without an Edit grant: %d %s", status, raw)
+			}
+		}
 		if err == nil {
 			var outcome sidecar.DocumentDraftOutcome
-			outcome, err = sidecar.ApplyDocumentDraft(packet, false, exchange)
-			if err == nil && outcome.Status != "checkpointed" {
-				err = fmt.Errorf("unconfirmed draft: %+v", outcome)
+			outcome, err = sidecar.ApplyDocumentProposal(packet, exchange)
+			if err == nil && outcome.Status != "proposed" {
+				err = fmt.Errorf("unconfirmed proposal: %+v", outcome)
 			}
 		}
 		completed <- result{run: run, packet: packet, err: err}
 		if err != nil {
 			return err
 		}
-		emit(ws.ChatEvent{Type: "text", Content: "Saved revision of the existing document."})
+		emit(ws.ChatEvent{Type: "text", Content: "Proposed a revision of the existing document."})
 		emit(ws.ChatEvent{Type: "done"})
 		return nil
 	}))
@@ -235,7 +261,7 @@ func TestDocumentIterationManagedBridgeDraftSamePage(t *testing.T) {
 	digest := sha256.Sum256([]byte(humanToken))
 	mustExec(t, f.rig.db, `INSERT INTO cli_tokens(id,user_id,name,token_hash,tier,scopes) VALUES('iteration-cli-token',?,'Iteration test',?,'STANDARD','["*"]')`, f.a.HumanUserID, fmt.Sprintf("%x", digest))
 	target := filepath.Join(dir, "target.json")
-	targetBytes, _ := json.Marshal(map[string]any{"submission_id": "followup", "page_id": created.PageID, "schema": 3, "rev": rev, "generation": generation})
+	targetBytes, _ := json.Marshal(map[string]any{"submission_id": "followup", "page_id": created.PageID, "schema": schema, "rev": rev, "generation": generation})
 	if err := os.WriteFile(target, targetBytes, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -268,30 +294,30 @@ func TestDocumentIterationManagedBridgeDraftSamePage(t *testing.T) {
 		t.Fatal("no durable admission/tool result")
 	}
 	if saved.err != nil || saved.run == "" {
-		t.Fatalf("draft failed: %+v", saved)
+		t.Fatalf("proposal failed: %+v", saved)
 	}
-	var head, cursor int64
-	var snapshot []byte
+	var head int64
+	var proposals int
 	var count int
-	if err := f.rig.db.QueryRow(`SELECT d.head_rev,d.snapshot,i.draft_rev FROM documents d JOIN document_iteration_intents i ON i.page_id=d.page_id WHERE i.run_id=?`, saved.run).Scan(&head, &snapshot, &cursor); err != nil {
+	if err := f.rig.db.QueryRow(`SELECT d.head_rev,(SELECT count(*) FROM document_proposals p WHERE p.page_id=d.page_id AND p.run_id=? AND p.status='open' AND p.text='Revised introduction.') FROM documents d WHERE d.page_id=?`, saved.run, created.PageID).Scan(&head, &proposals); err != nil {
 		t.Fatal(err)
 	}
-	if head != rev+1 || cursor != head || len(snapshot) == 0 {
-		t.Fatal("same Page durable update missing")
+	if head != rev || proposals != 1 {
+		t.Fatalf("follow-up must propose without writing: head=%d (was %d) open proposals=%d", head, rev, proposals)
 	}
 	if err := f.rig.db.QueryRow(`SELECT count(*) FROM document_creations WHERE source_chat_id=?`, f.a.ChatID).Scan(&count); err != nil || count != 1 {
 		t.Fatal("iteration created replacement document")
 	}
 	status, raw, err = request(http.MethodGet, "/api/v1/pages/@"+created.PageID+"/document", humanToken, nil)
-	if err != nil || status != 200 || !bytes.Contains(raw, []byte("Revised introduction.")) || !bytes.Contains(raw, []byte("Keep this paragraph.")) {
+	if err != nil || status != 200 || bytes.Contains(raw, []byte("Revised introduction.")) || !bytes.Contains(raw, []byte("Original introduction.")) || !bytes.Contains(raw, []byte("Keep this paragraph.")) {
 		t.Fatalf("Latest panel human reader: %d %s %v", status, raw, err)
 	}
 	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(master, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, saved.run)
 	exchange := func(method string, body []byte) (int, []byte, error) {
 		return request(method, "/api/v1/internal/documents/draft", token, body)
 	}
-	replay, err := sidecar.ApplyDocumentDraft(saved.packet, false, exchange)
-	if err != nil || replay.Status != "checkpointed" {
+	replay, err := sidecar.ApplyDocumentProposal(saved.packet, exchange)
+	if err != nil || replay.Status != "proposed" {
 		t.Fatalf("exact receipt retry failed: %+v %v", replay, err)
 	}
 }

@@ -10,7 +10,7 @@ import { usePageCreationAccess } from "@/hooks/use-page-creation-access"
 import { createEmptyWordCraftCheckpoint } from "@/lib/mooring/wordcraft-create"
 import { openWordCraftSession } from "@/lib/mooring/wordcraft-host-session"
 import { commandRequest } from "@/lib/mooring/wordcraft-command-session"
-import { verifyInitialization } from "@/lib/documents/contracts"
+import { CREATE_SCHEMA, verifyInitialization } from "@/lib/documents/contracts"
 
 export type DocumentFormat = "native" | "sheet" | "wordcraft" | "doc" | "commands"
 
@@ -18,7 +18,7 @@ export type DocumentFormat = "native" | "sheet" | "wordcraft" | "doc" | "command
  * What a confirmed creation hands back: the address, the fence a folder move
  * sends, and for a native Word or Sheet the Page identity its editor opens by.
  */
-export interface CreatedDocument { slug: string; pagesVersion: number; nativePageId?: string }
+export interface CreatedDocument { slug: string; pagesVersion: number; pageId?: string; nativePageId?: string }
 
 interface Intent {
   name: string
@@ -32,7 +32,7 @@ interface Intent {
   format: DocumentFormat
   sdkPrefix?: string
   checkpoint?: string
-  initialize?: { id: string; schema: 3; page_id: string; body: object }
+  initialize?: { id: string; schema: number; page_id: string; body: object }
 }
 
 /**
@@ -78,7 +78,7 @@ export function useWordDocumentCreation(workspaceId: string) {
     }
     const pageId = original.pageId
     if (!pageId) throw new Error("The original Page identity is unavailable.")
-    const done = { slug: original.slug, pagesVersion: original.pagesVersion ?? 0 }
+    const done = { slug: original.slug, pagesVersion: original.pagesVersion ?? 0, pageId }
     if (original.format === "native" || original.format === "sheet") {
       const application = original.format === "sheet" ? "gridcraft" : "wordcraft"
       const base = `/api/v1/pages/${encodeURIComponent("@" + pageId)}/craft/`
@@ -126,7 +126,7 @@ export function useWordDocumentCreation(workspaceId: string) {
       await openWordCraftSession(workspaceId, pageId, true, new AbortController().signal, original.checkpoint)
       return done
     }
-    const input2 = original.initialize ??= { id: crypto.randomUUID(), schema: 3, page_id: pageId, body: { type: "doc", content: [{ type: "paragraph", attrs: { id: crypto.randomUUID() } }] } }
+    const input2 = original.initialize ??= { id: crypto.randomUUID(), schema: CREATE_SCHEMA, page_id: pageId, body: { type: "doc", content: [{ type: "paragraph", attrs: { id: crypto.randomUUID() } }] } }
     const acknowledged = await documentRequest(workspaceId, original.slug, "/initialize", input2)
     verifyInitialization(acknowledged, input2.id)
     // A numeric initialization fence is not an editor state. Opening the Page

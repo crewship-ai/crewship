@@ -20,12 +20,15 @@ const closed = (value: unknown, keys: string[]): value is Record<string, unknown
 const nonempty = (value: string) => typeof value === "string" && value.trim().length > 0
 const revision = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0
 const schemaNumber = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 1
-const supported = (value: number): value is 2 | 3 | 4 => value === 2 || value === 3 || value === 4
+const supported = (value: number): value is 2 | 3 | 4 | 5 | 6 => value === 2 || value === 3 || value === 4 || value === 5 || value === 6
 class HistoryFailure extends Error {
   constructor(readonly status: "denied" | "unavailable" | "error") { super("Document history unavailable") }
 }
 function listResponse(value: unknown): DocumentCheckpointList {
-  if (!closed(value, ["checkpoints"]) || !Array.isArray(value.checkpoints) || value.checkpoints.length > 1000) throw new HistoryFailure("error")
+  // `history_limit_reached` is present only as `true` (automatic snapshots used their share of the budget).
+  const limited = object(value) && Object.hasOwn(value, "history_limit_reached")
+  if (limited && (value as Record<string, unknown>).history_limit_reached !== true) throw new HistoryFailure("error")
+  if (!closed(value, limited ? ["checkpoints", "history_limit_reached"] : ["checkpoints"]) || !Array.isArray(value.checkpoints) || value.checkpoints.length > 1000) throw new HistoryFailure("error")
   const seen = new Set<string>()
   for (const pin of value.checkpoints) {
     if (!closed(pin, ["id", "rev", "schema", "actor", "created_at"]) || !identifier(pin.id) || seen.has(pin.id) || !revision(pin.rev) || !schemaNumber(pin.schema) || typeof pin.actor !== "string" || pin.actor.length > 1024 || typeof pin.created_at !== "string" || pin.created_at.length > 128) throw new HistoryFailure("error")
@@ -183,7 +186,7 @@ export function useDocumentHistoryRestore(input: RestoreScope) {
       if (current.current !== captured.key) return
       if (!object(receipt) || receipt.page_id !== captured.packet.page_id || receipt.id !== captured.packet.id || receipt.rev !== captured.packet.ifRev + 1
         || receipt.kind !== "restore" || typeof receipt.epoch !== "string" || !receipt.epoch || receipt.epoch === captured.packet.epoch || receipt.epoch.length > 256
-        || (receipt.schema !== undefined && (typeof receipt.schema !== "number" || ![1, 2, 3, 4].includes(receipt.schema)))) throw new Error("unconfirmed restore")
+        || (receipt.schema !== undefined && (typeof receipt.schema !== "number" || ![1, 2, 3, 4, 5, 6].includes(receipt.schema)))) throw new Error("unconfirmed restore")
       request.current = undefined
       setResult({ key: captured.key, status: "idle" })
       latest.current.onRestored()

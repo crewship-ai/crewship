@@ -128,6 +128,13 @@ export interface PanelSpec {
    * type that mixes both conventions is a type nobody can guess.
    */
   owner_crew_name?: string | null
+  /**
+   * #5260: set only when the panel's agent producer is not authorized by the
+   * page's owner. `producer` is `agent/<slug>`; `can_authorize` is the
+   * server's answer for this viewer (the owner, and only a person). A hint for
+   * the button: the endpoint decides again.
+   */
+  producer_authorization?: { producer: string; can_authorize: boolean } | null
 }
 
 /** The panel payload as produced by a machine (§6 layer 2), plus its state. */

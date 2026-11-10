@@ -3,6 +3,7 @@
 import { Button } from "@/components/ui/button"
 import { useState } from "react"
 import { formatDateTime } from "@/lib/time"
+import { documentSurface } from "@/lib/documents/surface"
 import { DocumentCompare } from "./document-compare"
 import { HistoryActions } from "./history-actions"
 import { DocumentReadonly } from "../document-readonly/document-readonly"
@@ -10,7 +11,9 @@ import { documentActorName } from "@/lib/documents/actor-name"
 import type { DocumentHistoryProps, DocumentCheckpointSnapshot } from "./types"
 export type { DocumentHistoryProps } from "./types"
 
-function supported(schema: number): schema is 2 | 3 | 4 { return schema === 2 || schema === 3 || schema === 4 }
+const CANVAS_SCHEMA: number = documentSurface.CANVAS_SCHEMA
+
+function supported(schema: number): schema is 2 | 3 | 4 | 5 | 6 { return schema === 2 || schema === 3 || schema === 4 || schema === 5 || schema === 6 }
 function when(value: string) {
   return Number.isFinite(Date.parse(value)) ? formatDateTime(value) : "Date unavailable"
 }
@@ -23,7 +26,7 @@ function ConfirmedContent({ snapshot }: { snapshot: DocumentCheckpointSnapshot }
 
 const describeActor = (actor: string) => documentActorName(actor, {})
 
-export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, onSelect, onClose, restore, review, headRev, actorName = describeActor }: DocumentHistoryProps) {
+export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, onSelect, onClose, restore, review, headSchema, headRev, actorName = describeActor }: DocumentHistoryProps) {
   const [confirmation, setConfirmation] = useState<string>()
   const [comparing, setComparing] = useState<string>()
   // The caller must invalidate scope on current-human/workspace/Page/auth changes.
@@ -60,10 +63,14 @@ export function DocumentHistory({ pageId, scopeKey, list, selectedId, snapshot, 
     {canRestore && <Button onClick={() => setConfirmation(confirmationKey)}>Restore selected checkpoint</Button>}
     {canRestore && confirmation === confirmationKey && <div role="alertdialog" aria-label="Confirm checkpoint restore" aria-modal="true">
       <p>Restore revision {read?.rev} as a new confirmed revision? Earlier write permissions will not be renewed.</p>
+      {headSchema !== undefined && headSchema >= CANVAS_SCHEMA && read !== undefined && read.schema < CANVAS_SCHEMA && <p>This version is from before Canvas: Canvas stays enabled, but its layout and notes will be empty.</p>}
       <Button onClick={() => { setConfirmation(undefined); restore?.onConfirm() }}>Confirm restore</Button>
       <Button onClick={() => setConfirmation(undefined)}>Cancel restore</Button>
     </div>}
     {listMessage ? <p role={denied || list.status === "error" ? "alert" : "status"}>{listMessage}</p> : <>
+      {admitted && list.status === "ready" && list.data.history_limit_reached && <p role="note" aria-label="History limit" className="rounded-md border p-3 text-sm">
+        History is not adding new automatic snapshots of this document because its storage limit is reached. Your edits are still saved, and the revisions listed here can still be compared and restored.
+      </p>}
       {checkpoints.length === 0 && current === undefined ? <p>No checkpoints yet.</p> : <ul aria-label="Confirmed checkpoints" className="max-h-72 space-y-2 overflow-y-auto">
         {current !== undefined && !headListed && <li className="rounded-md border border-dashed p-3 text-sm">
           <span className="font-medium">Current version</span> · <span>Revision {current}</span>

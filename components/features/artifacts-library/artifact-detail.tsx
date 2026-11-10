@@ -7,6 +7,7 @@ import { StatusPill } from "@/components/ui/status-pill"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { useDocumentViewerRead } from "@/hooks/use-document-viewer-read"
 import { DocumentReadonly } from "@/components/features/pages/document-readonly/document-readonly"
+import { createDocumentPeople } from "@/lib/documents/people"
 import type { NativeCraftHostStatus } from "@/components/features/pages/native-craft-editor-host"
 import { formatRelativeShort } from "@/lib/time"
 import { artifactDashboards, artifactSlides, artifactsDesign, artifactsLibrary } from "@/lib/feature-flags"
@@ -47,6 +48,7 @@ import { SlidesBody } from "./kinds/slides/slides-detail"
 function WordPreview({ workspaceId, item, onStatus }: { workspaceId: string; item: LibraryItem; onStatus?: (status: string) => void }) {
   const userId = useSessionSafe()?.data?.user?.id ?? null
   const target = useMemo(() => item.pageId ? { workspaceId, pageId: item.pageId, type: "document" as const, mode: "latest" as const } : null, [workspaceId, item.pageId])
+  const people = useMemo(() => createDocumentPeople(workspaceId, item.pageId ? "@" + item.pageId : item.slug), [workspaceId, item.pageId, item.slug])
   // chatId and activationKey only scope the read; the library is its own scope, one per opened item.
   const { read } = useDocumentViewerRead({ workspaceId, chatId: "artifacts-library", currentUserId: userId, activationKey: `library:${item.slug}`, target, enabled: target !== null })
   useEffect(() => { onStatus?.(read.status) }, [onStatus, read.status])
@@ -59,7 +61,7 @@ function WordPreview({ workspaceId, item, onStatus }: { workspaceId: string; ite
           : "The document preview could not be loaded. Nothing was changed."}
   </p>
   return <div className="rounded-card border bg-card">
-    <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} />
+    <DocumentReadonly schema={read.content.schema} content={read.content.content} accessibleLabel={`${item.name}, saved version`} people={people} />
   </div>
 }
 
@@ -189,7 +191,8 @@ export function ArtifactDetail({ workspaceId, item, version, folders, onBack, fa
   // Behind the single-home switch a native Word or Sheet is edited here, in the
   // one Craft editor and its lease; /pages/<slug> sends it back here.
   const nativeEditor = artifactsLibrary() && item.native && (item.kind === "word" || item.kind === "sheet") && Boolean(item.pageId)
-  // Behind the same switch a Docs page (a native Tiptap/Yjs document) opens in its Docs view here; Canvas has no backend yet.
+  // Behind the same switch a Docs page (a native Tiptap/Yjs document) opens in its Docs view here, whose Canvas view
+  // appears at content schema 6; a legacy board (Canvas-only storage) has no Docs document behind it yet.
   const docsPage = artifactsLibrary() && resolved.kind === "docs" && resolved.mode !== "canvas" && Boolean(item.pageId)
   const [docs, setDocs] = useState<DocsFrameReport | null>(null)
   // Older storage Pages drew itself: a deck and a workbook without a version head.

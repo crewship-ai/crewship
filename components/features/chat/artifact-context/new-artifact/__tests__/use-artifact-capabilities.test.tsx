@@ -10,6 +10,12 @@ import { useArtifactCapabilities } from "../use-artifact-capabilities"
 
 beforeEach(() => { m.docs = { data: false, wordcraftNative: false, gridcraftNative: false, wordcraftCommands: false } })
 
+it.each([false,undefined,true])("offers collaborative Docs only for confirmed Docs availability (%s), independently of native crafts",data=>{
+  m.docs={data,wordcraftNative:true,gridcraftNative:true}
+  const caps=renderHook(()=>useArtifactCapabilities("ws1")).result.current
+  expect(caps.docs).toBe(data===true);expect(caps.documents).toBe(true);expect(caps.sheets).toBe(true)
+})
+
 it("offers Sheet only when the server advertises gridcraft_native", () => {
   expect(renderHook(() => useArtifactCapabilities("ws1")).result.current.sheets).toBe(false)
   m.docs = { ...m.docs, gridcraftNative: true }

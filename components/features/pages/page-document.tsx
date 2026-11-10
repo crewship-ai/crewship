@@ -30,9 +30,10 @@ import { createHttpProposalClient } from "@/lib/documents/proposals"
 import { documentReviewActions } from "@/lib/feature-flags"
 import { DocumentCaretKeeper } from "./document-caret-keeper"
 import { DocumentRemoteCarets } from "./document-remote-carets"
-import { useDocumentPresence } from "@/hooks/use-document-presence"
+import { useDocumentPresence, type CanvasPresenceChannel } from "@/hooks/use-document-presence"
 import { DocsPresence } from "@/components/features/artifacts-library/kinds/docs/docs-presence"
-import { CommentHighlights, documentEditorExtensions, isRichSchema, stableBlockTypes } from "./document-rich-extensions"
+import { createDocumentPeople, type DocumentPeople } from "@/lib/documents/people"
+import { CommentHighlights, documentEditorExtensions, isRichSchema, KeptSelection, stableBlockTypes } from "./document-rich-extensions"
 
 const StableIDs = Extension.create({
   name: "documentBlockIDs",
@@ -51,8 +52,8 @@ const StableIDs = Extension.create({
   } })] },
 })
 /** The editor of one document session: the schema's nodes and marks, stable block ids, comment highlights and the shared CRDT. */
-export function documentSessionExtensions(doc: Y.Doc, schema: number | undefined) {
-  return [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(schema) }), ...documentEditorExtensions(schema), CommentHighlights, Collaboration.configure({ document: doc, field: "default" }), DocumentCaretKeeper, DocumentRemoteCarets]
+export function documentSessionExtensions(doc: Y.Doc, schema: number | undefined, people?: DocumentPeople) {
+  return [StarterKit.configure({ trailingNode: false, undoRedo: false, bold: false, italic: false, strike: false, code: false, codeBlock: false, blockquote: false, horizontalRule: false, hardBreak: false, link: false, underline: false, heading: { levels: [1, 2, 3] } }), Table.configure({ resizable: false }), TableRow, TableCell, TableHeader, StableIDs.configure({ types: stableBlockTypes(schema) }), ...documentEditorExtensions(schema, people), CommentHighlights, KeptSelection, Collaboration.configure({ document: doc, field: "default" }), DocumentCaretKeeper, DocumentRemoteCarets]
 }
 /** Saves text as a local file: the draft downloads. Nothing is sent. */
 export function downloadText(name: string, content: string) {
@@ -113,12 +114,14 @@ const PAGES_EDITOR_CLASS = "min-h-64 max-w-none p-6 outline-none [&_p]:my-3 [&_h
  * sync says so and no restore is pending; a restore confirmed while this tab
  * still holds local edits never reopens over them.
  */
-export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyChange, onRestored }: Pick<DocumentWorkspaceProps, "workspaceId" | "pageId" | "slug" | "sync" | "onDirtyChange" | "onRestored">, editorClass = PAGES_EDITOR_CLASS) {
+export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyChange, onRestored }: Pick<DocumentWorkspaceProps, "workspaceId" | "pageId" | "slug" | "sync" | "onDirtyChange" | "onRestored">, editorClass = PAGES_EDITOR_CLASS, presenceCanvas?: CanvasPresenceChannel) {
   const [actionError, setActionError] = useState<string>()
   const [restoring, setRestoring] = useState(false)
   const reviewEnabled = documentReviewActions()
   const revertActions = useMemo(() => createHttpHistoryActions(workspaceId, pageId), [workspaceId, pageId])
   const proposalClient = useMemo(() => createHttpProposalClient(workspaceId, pageId), [workspaceId, pageId])
+  // Mention names for this reader; the content only ever holds user ids.
+  const people = useMemo(() => createDocumentPeople(workspaceId, slug), [workspaceId, slug])
   const hasLocalDraft = sync.pending > 0 || sync.recovery
   const downloadDraft = () => downloadText(`${slug}-draft.json`, JSON.stringify(editor?.getJSON(), null, 2))
   const localVersion = useRef(0), restoreVersion = useRef(0)
@@ -129,16 +132,16 @@ export function useDocumentWorkspace({ workspaceId, pageId, slug, sync, onDirtyC
   }, [sync.doc])
   const editor = useEditor({
     immediatelyRender: false, editable: false,
-    extensions: documentSessionExtensions(sync.doc, sync.state?.schema),
+    extensions: documentSessionExtensions(sync.doc, sync.state?.schema, people),
     // The browser moves the caret (Ctrl+End, arrows, a tap) before its selectionchange reaches ProseMirror. A key the
     // editor handles itself, such as Enter, must act where the caret is shown, so the DOM selection is read first.
     // Only for real key presses: ProseMirror replays a browser-made Enter or Backspace (iOS, Android) as a plain Event
     // in the middle of its own flush, where reading the DOM again would split twice or recurse.
     editorProps: { handleKeyDown: (view, event) => { if (event instanceof KeyboardEvent && !view.composing) (view as unknown as { domObserver: { flush(): void } }).domObserver.flush(); return false }, attributes: { class: editorClass, "aria-label": "Document editor" } },
-  }, [sync.doc,sync.state?.schema])
+  }, [sync.doc,sync.state?.schema,people])
   useEffect(() => { editor?.setEditable(sync.editable && !restoring) }, [editor, sync.editable, restoring])
   // Who else is here and where their caret is (#5166): only while this session holds an authorized read.
-  const peers = useDocumentPresence({ workspaceId, slug, editor, enabled: Boolean(sync.state) && !sync.denied })
+  const peers = useDocumentPresence({ workspaceId, slug, editor, enabled: Boolean(sync.state) && !sync.denied, canvas: presenceCanvas })
   const empty = useEditorState({ editor, selector: ({ editor }) => editor ? isEmptyDocument(editor.state.doc) : false })
   useEffect(() => { onDirtyChange?.(sync.pending > 0 || sync.recovery); return () => onDirtyChange?.(false) }, [sync.pending, sync.recovery, onDirtyChange])
   // Collaboration's Yjs undo tracks only this editor's own transactions, so it never takes back confirmed work from others.
@@ -259,13 +262,13 @@ export function DocumentHistoryHost({ workspaceId, pageId, humanId, available, d
   const actorName = useCallback((actor: string) => documentActorName(actor, { humanId, members: roster }), [humanId, roster])
   const headRev = head?.page_id === pageId ? head.rev : undefined
   if (control) return !eligible ? <p role="status" className="text-sm text-muted-foreground">History is unavailable.</p>
-    : visible ? <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headRev={headRev} actorName={actorName} /> : null
+    : visible ? <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headSchema={head?.schema} headRev={headRev} actorName={actorName} /> : null
   return <div className="space-y-3 px-3">
     <Button ref={opener} type="button" variant="outline" disabled={!eligible || restoring} aria-expanded={visible} onClick={() => {
       if (!eligible || restoring) return
       if (open) close()
       else { setOpenEpoch(value => value + 1); setOpen(true) }
     }}>History</Button>
-    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headRev={headRev} actorName={actorName} />}
+    {visible && <DocumentHistory pageId={pageId} scopeKey={history.scopeKey} list={history.list} snapshot={history.snapshot} selectedId={history.selectedId} onSelect={history.onSelect} onClose={close} restore={restore} review={review} headSchema={head?.schema} headRev={headRev} actorName={actorName} />}
   </div>
 }

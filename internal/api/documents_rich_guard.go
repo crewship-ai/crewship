@@ -40,7 +40,13 @@ func documentRichSemanticGuard(semantic *documentSemanticPatch, hashes map[strin
 
 // documentRichSemanticGuardFor proves, for exactly one content schema, that
 // the engine's candidate differs from the confirmed head only by the declared
-// replacement of one paragraph or heading's text. Proposals use schema 4.
+// replacement of one paragraph or heading's text. Proposals and drafts use
+// the Doc's own stored schema. Schema 5 dates and mentions have no width in
+// text offsets; an edit that inserts beside one or deletes across one is
+// refused. The engine's rule (ambiguous_inline_atom) is stricter: it also
+// refuses every position a change could slide to within the agent's range,
+// which Go does not see. This guard is the necessary condition: the result is
+// exactly Go's own reconstruction of the declared edit, so no atom moves.
 func documentRichSemanticGuardFor(schema int, semantic *documentSemanticPatch, hashes map[string]string, projection json.RawMessage, next documents.MutationGuard) documents.MutationGuard {
 	return func(ctx context.Context, tx *sql.Tx, actor string, state documents.State) error {
 		if state.Schema != schema {
@@ -67,7 +73,9 @@ func documentRichSemanticGuardFor(schema int, semantic *documentSemanticPatch, h
 		children, _ := target["content"].([]any)
 		var original strings.Builder
 		for _, child := range children {
-			original.WriteString(child.(map[string]any)["text"].(string))
+			if text, ok := child.(map[string]any)["text"].(string); ok {
+				original.WriteString(text)
+			}
 		}
 		units := utf16.Encode([]rune(original.String()))
 		edit := semantic.Edit
@@ -81,29 +89,77 @@ func documentRichSemanticGuardFor(schema int, semantic *documentSemanticPatch, h
 		if expected != semantic.Text {
 			return documents.ErrConflict
 		}
-		var replacement []any
-		slice := func(from, to int) {
-			offset := 0
-			for _, value := range children {
-				child := value.(map[string]any)
-				text := utf16.Encode([]rune(child["text"].(string)))
-				start, end := max(from-offset, 0), min(to-offset, len(text))
-				if start < end {
-					part := map[string]any{}
-					for k, v := range child {
-						part[k] = v
-					}
-					part["text"] = string(utf16.Decode(text[start:end]))
-					replacement = append(replacement, part)
-				}
-				offset += len(text)
+		// A replacement never starts or ends with the code point it replaces,
+		// as the engine's minimal edit never does. Otherwise a proof could
+		// "replace" marked text by the same unmarked text and drop its marks.
+		// A pure deletion or insertion may sit at any equivalent position:
+		// the agent picks among them with its range, deleting is within its
+		// authority, and inserted text never carries marks.
+		if edit.From < edit.To && edit.Insert != "" {
+			deleted := []rune(string(utf16.Decode(units[edit.From:edit.To])))
+			inserted := []rune(edit.Insert)
+			if deleted[0] == inserted[0] || deleted[len(deleted)-1] == inserted[len(inserted)-1] {
+				return documents.ErrConflict
 			}
 		}
-		slice(0, edit.From)
-		if edit.Insert != "" {
-			replacement = append(replacement, map[string]any{"type": "text", "text": edit.Insert})
+		// An atom sits at a text offset. It stays before the edit when at or
+		// before From, after it when at or after To; inside a deleted range,
+		// or exactly beside inserted text, its side would be a guess.
+		offset := 0
+		for _, value := range children {
+			child := value.(map[string]any)
+			text, isText := child["text"].(string)
+			if isText {
+				offset += len(utf16.Encode([]rune(text)))
+				continue
+			}
+			if (edit.From < offset && offset < edit.To) || (edit.Insert != "" && (offset == edit.From || offset == edit.To)) {
+				return documents.ErrConflict
+			}
 		}
-		slice(edit.To, len(units))
+		// One pass in document order: the prefix before From, then the
+		// inserted text, then the suffix from To. An atom at or before From
+		// stays in the prefix, any later atom in the suffix; the checks above
+		// leave no atom whose side depends on that choice.
+		var replacement []any
+		inserted := false
+		insert := func() {
+			if !inserted && edit.Insert != "" {
+				replacement = append(replacement, map[string]any{"type": "text", "text": edit.Insert})
+			}
+			inserted = true
+		}
+		offset = 0
+		for _, value := range children {
+			child := value.(map[string]any)
+			textValue, isText := child["text"].(string)
+			if !isText {
+				if offset > edit.From {
+					insert()
+				}
+				replacement = append(replacement, child)
+				continue
+			}
+			text := utf16.Encode([]rune(textValue))
+			end := offset + len(text)
+			part := func(from, to int) {
+				if from < to {
+					copied := map[string]any{}
+					for k, v := range child {
+						copied[k] = v
+					}
+					copied["text"] = string(utf16.Decode(text[from-offset : to-offset]))
+					replacement = append(replacement, copied)
+				}
+			}
+			part(offset, min(end, edit.From))
+			if end > edit.From {
+				insert()
+				part(max(offset, edit.To), end)
+			}
+			offset = end
+		}
+		insert()
 		if len(replacement) == 0 {
 			delete(target, "content")
 		} else {
@@ -125,14 +181,56 @@ func documentRichTree(raw json.RawMessage) (map[string]any, error) {
 	return documentRichTreeFor(raw, 3)
 }
 
-// documentRichTreeFor validates a closed rich projection for schema 3 or 4.
+// documentRichPalette is the closed schema-5 colour palette
+// (tools/docs-service/schema-core.mjs PALETTE): names, never CSS values.
+var documentRichPalette = map[string]bool{"gray": true, "red": true, "orange": true, "yellow": true, "green": true, "blue": true, "purple": true, "pink": true}
+
+// A schema-5 mention stores only an opaque user id.
+var documentRichUserID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
+
+// documentRichDate is one real calendar day, YYYY-MM-DD, year 1 or later
+// (schema-core.mjs validDate).
+func documentRichDate(value any) bool {
+	text, ok := value.(string)
+	if !ok || len(text) != 10 || text[4] != '-' || text[7] != '-' {
+		return false
+	}
+	digits := func(part string) (int, bool) {
+		n := 0
+		for _, r := range part {
+			if r < '0' || r > '9' {
+				return 0, false
+			}
+			n = n*10 + int(r-'0')
+		}
+		return n, true
+	}
+	year, okYear := digits(text[:4])
+	month, okMonth := digits(text[5:7])
+	day, okDay := digits(text[8:])
+	if !okYear || !okMonth || !okDay || year < 1 || month < 1 || month > 12 || day < 1 {
+		return false
+	}
+	days := [...]int{31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}[month-1]
+	if month == 2 && year%4 == 0 && (year%100 != 0 || year%400 == 0) {
+		days = 29
+	}
+	return day <= days
+}
+
+// documentRichTreeFor validates a closed rich projection for schema 3 to 6.
 // Schema 4 adds bold, italic and strike (combinable with each other and a
 // link; inline code stays alone), code block languages, quotes and task lists.
+// Schema 5 adds underline, a palette text colour and highlight, and the inline
+// atoms date {value} and mention {userId} inside paragraphs and headings.
+// Schema 6 (Canvas) has exactly schema 5's Page tree; its surface is never
+// part of a projection.
 func documentRichTreeFor(raw json.RawMessage, schema int) (map[string]any, error) {
-	if schema != 3 && schema != 4 {
+	if !documents.RichSchema(schema) {
 		return nil, fmt.Errorf("unsupported rich schema")
 	}
-	formatted := schema == 4
+	formatted := schema >= 4
+	latest := schema >= 5
 	if len(raw) == 0 || len(raw) > documentRichProofLimit {
 		return nil, fmt.Errorf("bounded rich proof required")
 	}
@@ -159,6 +257,25 @@ func documentRichTreeFor(raw json.RawMessage, schema int) (map[string]any, error
 				return fmt.Errorf("unknown node field")
 			}
 		}
+		if latest && (typ == "date" || typ == "mention") {
+			// An atom is a leaf with exactly one attribute: no text, content or marks.
+			if parent != "paragraph" && parent != "heading" || len(node) != 2 {
+				return fmt.Errorf("inline atom shape")
+			}
+			attrs, ok := node["attrs"].(map[string]any)
+			if !ok || len(attrs) != 1 {
+				return fmt.Errorf("inline atom attrs")
+			}
+			if typ == "date" && !documentRichDate(attrs["value"]) {
+				return fmt.Errorf("inline date")
+			}
+			if typ == "mention" {
+				if id, ok := attrs["userId"].(string); !ok || !documentRichUserID.MatchString(id) {
+					return fmt.Errorf("inline mention")
+				}
+			}
+			return nil
+		}
 		if typ == "text" {
 			if parent != "paragraph" && parent != "heading" && parent != "codeBlock" {
 				return fmt.Errorf("text parent required")
@@ -170,7 +287,9 @@ func documentRichTreeFor(raw json.RawMessage, schema int) (map[string]any, error
 			if marks, exists := node["marks"]; exists {
 				list, ok := marks.([]any)
 				limit := 1
-				if formatted {
+				if latest {
+					limit = 7
+				} else if formatted {
 					limit = 4
 				}
 				if !ok || len(list) > limit {
@@ -183,8 +302,9 @@ func documentRichTreeFor(raw json.RawMessage, schema int) (map[string]any, error
 						return fmt.Errorf("mark shape")
 					}
 					kind := mark["type"]
-					emphasis := formatted && (kind == "bold" || kind == "italic" || kind == "strike")
-					if kind != "link" && kind != "code" && !emphasis {
+					emphasis := formatted && (kind == "bold" || kind == "italic" || kind == "strike") || latest && kind == "underline"
+					colour := latest && (kind == "textColor" || kind == "highlight")
+					if kind != "link" && kind != "code" && !emphasis && !colour {
 						return fmt.Errorf("mark type")
 					}
 					if kinds[kind] || (kind == "code" && len(list) > 1) {
@@ -202,6 +322,14 @@ func documentRichTreeFor(raw json.RawMessage, schema int) (map[string]any, error
 							if !ok || len(m) != 0 {
 								return fmt.Errorf("code attrs")
 							}
+						}
+					} else if colour {
+						attrs, ok := mark["attrs"].(map[string]any)
+						if !ok || len(attrs) != 1 {
+							return fmt.Errorf("colour attrs")
+						}
+						if name, ok := attrs["color"].(string); !ok || !documentRichPalette[name] {
+							return fmt.Errorf("palette colour")
 						}
 					} else {
 						attrs, ok := mark["attrs"].(map[string]any)
@@ -354,7 +482,9 @@ func documentRichProjectionMatches(root map[string]any, raw json.RawMessage) boo
 	index := 0
 	var visit func(map[string]any) bool
 	visit = func(node map[string]any) bool {
-		if attrs, ok := node["attrs"].(map[string]any); ok {
+		// Blocks carry an ID; schema-5 inline atoms have attrs but no ID and
+		// are hashed only as part of their block.
+		if attrs, ok := node["attrs"].(map[string]any); ok && attrs["id"] != nil {
 			if index >= len(blocks) || blocks[index].ID != attrs["id"] || blocks[index].Hash != documentRichHash(node) {
 				return false
 			}
