@@ -16,9 +16,10 @@ authenticated-server and isolated-fixture tests.
 | [playwright.nightly.config.ts](../playwright.nightly.config.ts) | Authenticated seeded instance; workflow selects gate/drift buckets | [nightly-e2e.yml](../.github/workflows/nightly-e2e.yml) |
 | [playwright.reveal.config.ts](../playwright.reveal.config.ts) | `credential-reveal.spec.ts`; isolated fixture server on port 3914 | `playwright-pr` in [ci.yml](../.github/workflows/ci.yml) |
 | [playwright.pool-ui.config.ts](../playwright.pool-ui.config.ts) | `provider-pools.spec.ts`; isolated fixture server on port 3913, no provider request | `playwright-pr` in [ci.yml](../.github/workflows/ci.yml) |
+| [playwright.collab.config.ts](../playwright.collab.config.ts) | `collab-*.spec.ts`: two-identity Docs/Design collaboration acceptance (#5144); throwaway server with its own Docs engine, owner/MEMBER/VIEWER accounts, restarts the server mid-run | `scripts/collab-throwaway.sh`, local only (excluded from nightly until stable) |
 | [playwright.restricted.config.ts](../playwright.restricted.config.ts) | `restricted-member-shell.spec.ts`; isolated fixture server on port 3912, every API response mocked | `playwright-pr` in [ci.yml](../.github/workflows/ci.yml); gate guarded by [restricted-shell-gate-test.sh](../scripts/restricted-shell-gate-test.sh) |
 
-The three isolated UI suites serve the built static export; follow their CI
+The three isolated UI suites (reveal, pool UI, restricted) serve the built static export; follow their CI
 build prerequisites when reproducing them. Their fixed ports are separate
 from the live development slots. The shared server/URL settings for the main,
 fresh, PR and nightly suites live in [playwright.shared.ts](../playwright.shared.ts).
@@ -112,6 +113,43 @@ Prefer a shallow route smoke check or a focused feature interaction. The PR
 contract subset does not stand in for provider-backed chat or agent execution;
 those require their own runtime fixtures. A manual probe or a screenshot from
 a past run is not a substitute for a reproducible regression test.
+
+## Collaboration acceptance with two identities
+
+`scripts/collab-throwaway.sh --binary ./crewship` starts a throwaway server
+(`scripts/throwaway-server.sh run --documents`), runs the Docs engine on that
+instance's own sockets, seeds `--offline-demo --with-users` and runs
+`playwright.collab.config.ts`. Each scenario creates its own Doc or Design
+through the CLI and signs in the owner, a MEMBER with a write grant and a VIEWER
+with a comment grant in separate browser contexts; two windows of one account
+prove nothing about rights. Set `COLLAB_EVIDENCE_DIR` to keep every video and
+screenshot. The binary must embed the web export with Design enabled. The owner
+password can be overridden with `COLLAB_OWNER_PASSWORD`; keep it a throwaway
+fixture value, because a failed scenario's trace records the sign-in request. On the
+shared dev host run the whole script through `crewship-heavy`, and pass the
+variables it needs with `CREWSHIP_BATCH_ENV`. Docker is not reachable inside a
+`crewship-heavy` job, so the instance's own teardown there cannot list its
+containers and exits non-zero after the tests; read the Playwright summary, then
+remove the instance from outside the job with
+`scripts/throwaway-server.sh stop <name>` (same `CREWSHIP_THROWAWAY_STATE`).
+
+Docs CO03 marks itself an expected failure only when the known caret defect
+(#5162) actually interleaves the typed text: every typed character is still
+there and the server holds the same text. A dropped edit fails hard; a clean
+run passes normally. Design G06 (an unshared commenter is not told access was
+removed) needs #5179 and fails on a build without it.
+
+Presence/carets, Design selection/local undo, stable restart epochs, retained
+restore work and historical routes are positive assertions against current main.
+The conditional CO03 interleave debt above and Design drag/layout regression
+#5283 remain explicitly reported when reproduced. G08 separately edits a real UI
+property offline and proves the exact server value and reload after reconnect;
+it does not prove offline draft durability or fix the drag defect. The guarded
+#5283 case first proves the server received the exact local value, then marks
+only the reversed-direction assertion as expected failure when the warning and
+wrong local direction actually occurred. Missing delivery fails normally.
+An expected failure is not a PASS of that criterion. Historical-link cases use
+real known snapshots with different live content, rather than checking URL alone.
 
 ## Deterministic routine executions on a live server
 
