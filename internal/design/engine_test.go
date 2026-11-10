@@ -170,3 +170,57 @@ func TestEngineRestorePreservesPrototypeNamedNodeIDs(t *testing.T) {
 		})
 	}
 }
+
+// A live reorder that re-adds a layer's order entry while another client
+// deletes that layer (or its screen) merges into an order naming a missing
+// layer. The engine drops such entries from a sync frame instead of refusing
+// the frame, which would leave the reordering client rejected for good (#5201).
+func TestEngineDropsOrderEntriesOfLayersDeletedConcurrently(t *testing.T) {
+	base, err := Run(context.Background(), Request{Operations: json.RawMessage(`[
+		{"op":"upsert","node":{"id":"s","type":"frame","x":0,"y":0,"width":320,"height":640}},
+		{"op":"upsert","node":{"id":"a","type":"rect","parentId":"s","x":0,"y":0,"width":10,"height":10}},
+		{"op":"upsert","node":{"id":"b","type":"rect","parentId":"s","x":0,"y":0,"width":10,"height":10}}]`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, deletion := range map[string]string{
+		"same layer":   `[{"op":"delete","id":"a"}]`,
+		"layer screen": `[{"op":"delete","id":"a"},{"op":"delete","id":"b"},{"op":"delete","id":"s"}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			reordered, err := Run(context.Background(), Request{State: base.State, Operations: json.RawMessage(`[{"op":"reorder","order":["s","b","a"]}]`)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			deleted, err := Run(context.Background(), Request{State: base.State, Operations: json.RawMessage(deletion)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for direction, request := range map[string]Request{
+				"reorder reaches delete": {State: deleted.State, Frame: reordered.Frame},
+				"delete reaches reorder": {State: reordered.State, Frame: deleted.Frame},
+			} {
+				merged, err := Run(context.Background(), request)
+				if err != nil {
+					t.Fatalf("%s: merged frame refused: %v", direction, err)
+				}
+				live := map[string]bool{}
+				for _, raw := range merged.Nodes {
+					var node struct{ ID string }
+					if err := json.Unmarshal(raw, &node); err != nil {
+						t.Fatal(err)
+					}
+					live[node.ID] = true
+				}
+				for _, id := range merged.Order {
+					if !live[id] {
+						t.Fatalf("%s: order %v names missing layer %q", direction, merged.Order, id)
+					}
+				}
+				if len(merged.Update) == 0 {
+					t.Fatalf("%s: the dropped entry must reach the other clients as an update", direction)
+				}
+			}
+		})
+	}
+}

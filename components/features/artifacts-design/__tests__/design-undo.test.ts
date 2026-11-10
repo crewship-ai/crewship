@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import * as Y from "yjs"
-import { createDesignUndo, designNodes, removeDesignNode, upsertDesignNode } from "../design-document"
+import { createDesignUndo, designNodes, removeDesignNode, reorderDesignNode, upsertDesignNode } from "../design-document"
 
 /** Two people's documents, kept in sync like the server does. */
 function pair() {
@@ -78,4 +78,60 @@ describe("createDesignUndo", () => {
   undoA.undo()
   expect(node(b, "r1")).toMatchObject({ x: 100, height: 130 })
  })
+ it("keeps a peer's later order for the same layer instead of undoing or duplicating it", () => {
+  const { a, b } = pair()
+  upsertDesignNode(a, { id: "r3", type: "rect", x: 500, y: 100, width: 50, height: 50 })
+  const undoA = createDesignUndo(a)
+  reorderDesignNode(a, "r1", "front")
+  undoA.stopCapturing()
+  expect(a.getArray("order").toArray()).toEqual(["r2", "r3", "r1"])
+  reorderDesignNode(b, "r1", "backward")
+  const peerOrder = ["r2", "r1", "r3"]
+  expect(a.getArray("order").toArray()).toEqual(peerOrder)
+  const canUndo = undoA.canUndo()
+  undoA.undo()
+  expect(a.getArray("order").toArray()).toEqual(peerOrder)
+  expect(b.getArray("order").toArray()).toEqual(peerOrder)
+  expect(canUndo).toBe(false)
+ })
+ it("keeps an independent geometry undo when a peer reorders that layer", () => {
+  const { a, b } = pair()
+  const undoA = createDesignUndo(a)
+  upsertDesignNode(a, { id: "r1", x: 180 })
+  undoA.stopCapturing()
+  reorderDesignNode(b, "r1", "front")
+  expect(undoA.canUndo()).toBe(true)
+  undoA.undo()
+  expect(node(b, "r1")?.x).toBe(100)
+  expect(b.getArray("order").toArray()).toEqual(["r2", "r1"])
+ })
+ it("retires a local order redo when a peer subsequently moves the same layer", () => {
+  const { a, b } = pair()
+  upsertDesignNode(a, { id: "r3", type: "rect", x: 500, y: 100, width: 50, height: 50 })
+  const undoA = createDesignUndo(a)
+  reorderDesignNode(a, "r1", "front")
+  undoA.stopCapturing()
+  undoA.undo()
+  expect(undoA.canRedo()).toBe(true)
+  reorderDesignNode(b, "r1", "forward")
+  expect(undoA.canRedo()).toBe(false)
+  undoA.redo()
+  expect(a.getArray("order").toArray()).toEqual(["r2", "r1", "r3"])
+  expect(b.getArray("order").toArray()).toEqual(["r2", "r1", "r3"])
+ })
+
+ it("keeps a local order undo when a peer moves a different layer", () => {
+  const { a, b } = pair()
+  upsertDesignNode(a, { id: "r3", type: "rect", x: 500, y: 100, width: 50, height: 50 })
+  upsertDesignNode(a, { id: "r4", type: "rect", x: 600, y: 100, width: 50, height: 50 })
+  const undoA = createDesignUndo(a)
+  reorderDesignNode(a, "r1", "front")
+  undoA.stopCapturing()
+  reorderDesignNode(b, "r3", "front")
+  expect(undoA.canUndo()).toBe(true)
+  undoA.undo()
+  expect(a.getArray("order").toArray()).toEqual(["r1", "r2", "r4", "r3"])
+  expect(b.getArray("order").toArray()).toEqual(["r1", "r2", "r4", "r3"])
+ })
+
 })
