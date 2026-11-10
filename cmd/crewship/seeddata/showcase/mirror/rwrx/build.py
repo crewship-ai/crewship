@@ -56,6 +56,7 @@ def main() -> None:
             {"path": "theme.css", "media_type": "text/css", "content": theme},
             {"path": "interactive.json", "media_type": "application/json", "content": '{"schema_version": 1}'},
             {"path": "dashboard.json", "media_type": "application/json", "content": '{"schema_version": 1, "collections": ["tasks"]}'},
+            {"path": "viewer-filters.json", "media_type": "application/json", "content": '{"schema_version":1}'},
             {"path": "datasets.json", "media_type": "application/json", "content": json.dumps(datasets, ensure_ascii=False)},
         ],
         "message": "Mirror of the reference dashboard",

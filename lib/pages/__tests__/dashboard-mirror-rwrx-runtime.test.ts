@@ -28,12 +28,13 @@ function prefsStore(initial: Record<string, unknown> | null = null) {
   return { prefs: { get: async () => ({ value }), set } as Prefs, set, current: () => value }
 }
 
-async function open(get: Get, prefs?: Prefs) {
+async function open(get: Get, prefs?: Prefs, onBoot?: (window: Window) => Promise<void>) {
   const window = new Window({ url: "https://runtime.example.test/", settings: { enableJavaScriptEvaluation: true, suppressCodeGenerationFromStringsWarning: true, disableCSSFileLoading: true, disableJavaScriptFileLoading: true, navigation: { disableChildFrameNavigation: true } } })
   windows.push(window)
   const writes = { batch: vi.fn(), set: vi.fn(), delete: vi.fn() }
   ;(window as unknown as { crewship: unknown }).crewship = { data: { get: vi.fn(get), ...writes }, ...(prefs ? { prefs } : {}) }
   window.document.write(page)
+  await onBoot?.(window)
   await window.happyDOM.waitUntilComplete()
   for (let i = 0; i < 5; i++) { await new Promise(resolve => setTimeout(resolve, 20)); await window.happyDOM.waitUntilComplete() }
   const text = (selector: string) => window.document.querySelector(selector)?.textContent?.trim() ?? null
@@ -97,6 +98,24 @@ describe("rwrx dashboard mirror runtime (B01)", () => {
     // Picking the default again stores nothing to restore.
     await reload.pick("")
     expect(ada.current()).toEqual({})
+  })
+
+  it.each(["Frontend", ""])("keeps a selection made while saved preferences are still loading (%s)", async selected => {
+    const store = prefsStore({ crew: "Ops" })
+    const started = Promise.withResolvers<void>()
+    const saved = Promise.withResolvers<{ value: Record<string, unknown> | null }>()
+    const runtime = await open(async () => ({ documents: rows }), {
+      ...store.prefs,
+      get: () => { started.resolve(); return saved.promise },
+    }, async window => {
+      await started.promise
+      const select = window.document.querySelector("#cx-crew") as unknown as { value: string; dispatchEvent(event: unknown): boolean }
+      select.value = selected
+      select.dispatchEvent(new window.Event("change"))
+      saved.resolve({ value: { crew: "Ops" } })
+    })
+    expect(runtime.kpis()[0]).toBe(String(sum(selected || null, "done")))
+    expect(store.current()).toEqual(selected ? { crew: selected } : {})
   })
 
   it("drops a remembered crew the data no longer has and forgets it", async () => {

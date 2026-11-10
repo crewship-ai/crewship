@@ -19,6 +19,7 @@
   var draws = {}
   var listeners = []
   var params = Object.assign({}, DEFAULT_PARAMS)
+  var choiceVersion = 0
   // Keys restored from the viewer's storage, checked against the data once it arrives.
   var restored = {}
   var started = false
@@ -142,12 +143,13 @@
     if (!api) { next(); return }
     // An older host refuses prefs.get; a host that never answers must not hold the page back either.
     var finished = false
-    function done() { if (!finished) { finished = true; next() } }
-    setTimeout(done, 1500)
+    var initialChoice = choiceVersion
+    function done() { if (!finished) { finished = true; clearTimeout(timeout); next() } }
+    var timeout = setTimeout(done, 1500)
     api.get().then(function (result) {
       if (finished) return
       var saved = result && result.value
-      if (saved && typeof saved === "object") {
+      if (choiceVersion === initialChoice && saved && typeof saved === "object") {
         for (var key in DEFAULT_PARAMS) {
           if (Object.prototype.hasOwnProperty.call(saved, key) && typeof saved[key] === typeof DEFAULT_PARAMS[key]) { params[key] = saved[key]; restored[key] = true }
         }
@@ -191,8 +193,8 @@
     colors: COLORS,
     refresh: function (id) { if (DATASETS.indexOf(id) >= 0) load(id) },
     params: function () { return Object.assign({}, params) },
-    setParams: function (next) { params = Object.assign({}, params, next || {}); restored = {}; remember(); schedule() },
-    resetParams: function () { params = Object.assign({}, DEFAULT_PARAMS); restored = {}; remember(); schedule() },
+    setParams: function (next) { choiceVersion++; params = Object.assign({}, params, next || {}); restored = {}; remember(); schedule() },
+    resetParams: function () { choiceVersion++; params = Object.assign({}, DEFAULT_PARAMS); restored = {}; remember(); schedule() },
     setLink: function () {},
   })
 
