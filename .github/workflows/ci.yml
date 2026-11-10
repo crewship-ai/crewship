@@ -2616,6 +2616,14 @@ jobs:
         timeout-minutes: 8
         run: go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@${{ env.GOLANGCI_VERSION }}
 
+      # Cold package/test export compilation used almost four minutes of the
+      # five-minute analysis deadline (#3250). Prepare the complete graph
+      # separately, within the existing job ceiling; no test bodies execute.
+      - name: Warm Go export data for lint
+        timeout-minutes: 5
+        run: |
+          go list -export -deps -test ./... > /dev/null
+
       # --timeout=5m (golangci's own) < 8m (this step) < 15m (the job). The
       # inner deadline is the one that names the linter that hung.
       - name: Run golangci-lint

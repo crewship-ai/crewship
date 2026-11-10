@@ -14,6 +14,7 @@ name: CodeQL
 # CodeQL Result remains execution evidence (see the CI/CD policy runbook).
 
 on:
+  workflow_dispatch: {}
   merge_group:
     types: [checks_requested]
   pull_request:
