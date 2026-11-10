@@ -347,3 +347,22 @@ func TestLibraryLegacyPinOfAnUnvalidatedPublicationStillReviews(t *testing.T) {
 		t.Fatalf("review %+v", up)
 	}
 }
+
+func TestLibraryFileReviewIncludesFontAndLicenceMetadata(t *testing.T) {
+	old := LibraryPinFile{Path: "fonts/Brand.woff2", MediaType: "font/woff2", Status: LibraryFileCopied, Size: 100, SHA256: strings.Repeat("a", 64), Family: "Brand", Weight: 400, Style: "normal", Licence: "OFL-1.1"}
+	for name, mutate := range map[string]func(*LibraryPinFile){
+		"family":  func(f *LibraryPinFile) { f.Family = "Brand Text" },
+		"weight":  func(f *LibraryPinFile) { f.Weight = 700 },
+		"style":   func(f *LibraryPinFile) { f.Style = "italic" },
+		"licence": func(f *LibraryPinFile) { f.Licence = "UFL-1.0" },
+	} {
+		t.Run(name, func(t *testing.T) {
+			next := old
+			mutate(&next)
+			diff := diffLibraryFiles([]LibraryPinFile{old}, []LibraryPinFile{next})
+			if strings.Join(diff.Changed, ",") != old.Path || libraryFilesEqual([]LibraryPinFile{old}, []LibraryPinFile{next}) {
+				t.Fatalf("identical bytes hid metadata change: %+v", diff)
+			}
+		})
+	}
+}

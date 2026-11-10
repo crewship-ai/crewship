@@ -1,3 +1,4 @@
+import type { SlidePreviewTheme } from "@/lib/slides/model"
 import { DESIGN_SYSTEM_FILE, parseDesignSystem } from "./manifest"
 
 /*
@@ -62,12 +63,40 @@ export function pinnedThemeCss(tokens: string, files: readonly PinnedFile[]): st
   return /[<>]/.test(css) ? null : css
 }
 
-/** The screen with the pinned theme as the first style in its head, so the project's own CSS still wins. */
+/** Put the style before authored styles, after an actual leading doctype. */
 export function withPinnedTheme(html: string, css: string | null): string {
-  if (!css) return html
+  if (!css || /[<>]/.test(css)) return html
   const style = `<style data-library-pin>${css}</style>`
-  const head = /<head(\s[^>]*)?>/i.exec(html)
-  return head ? html.slice(0, head.index + head[0].length) + style + html.slice(head.index + head[0].length) : style + html
+  // A style before <html> opens the implicit head. Keep a real doctype
+  // ahead of it so it doesn't put the preview into quirks mode. Commented
+  // tags are never treated as an insertion point.
+  const doctype = /^(?:\s|<!--[\s\S]*?-->)*<!doctype\s[^>]*>/i.exec(html)
+  const index = doctype?.[0].length ?? 0
+  return html.slice(0, index) + style + html.slice(index)
+}
+
+export const SLIDES_LIBRARY_FILE = "slides-library.json"
+
+/** Resolve the author's optional preview bindings against the current pin. */
+export function pinnedSlideTheme(tokens: string | undefined, files: readonly { path: string; content: string }[]): SlidePreviewTheme | undefined {
+  const bindings = files.filter(file => file.path === SLIDES_LIBRARY_FILE)
+  if (!tokens || bindings.length !== 1 || bindings[0].content.length > 1024) return undefined
+  const system = parseDesignSystem([{ path: DESIGN_SYSTEM_FILE, content: tokens }])
+  if (!system) return undefined
+  let raw: unknown
+  try { raw = JSON.parse(bindings[0].content) } catch { return undefined }
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined
+  const config = raw as Record<string, unknown>
+  if (config.schema_version !== 1 || Object.keys(config).some(key => !["schema_version", "background", "text_color", "typography"].includes(key))) return undefined
+  for (const key of ["background", "text_color", "typography"]) {
+    if (Object.hasOwn(config, key) && (typeof config[key] !== "string" || !/^[a-z][a-z0-9-]{0,47}$/.test(config[key]))) return undefined
+  }
+  const background = system.colors.find(token => token.name === config.background)?.value
+  const textColor = system.colors.find(token => token.name === config.text_color)?.value
+  const style = system.typography.find(token => token.name === config.typography)
+  if (!background && !textColor && !style) return undefined
+  const family = style?.fontFamily?.split(",")[0].trim()
+  return { background, textColor, typography: style ? { size: style.size, family: family && FAMILY.test(family) ? family : undefined, weight: style.weight ?? undefined } : undefined }
 }
 
 export interface SlideFontFace { family: string; alias: string; source: string; weight: string; style: string }
@@ -78,6 +107,8 @@ export interface SlideFontFace { family: string; alias: string; source: string; 
  * another deck's.
  */
 export function slideFontFaces(files: readonly PinnedFile[], deck: string): SlideFontFace[] {
-  const scope = deck.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 64)
-  return faces(files).map(face => ({ family: face.family, alias: `crewship-pin-${scope}-${face.family.replace(/ /g, "-")}`, source: face.source, weight: face.weight, style: face.style }))
+  // Hex encodes segment boundaries and distinctions such as "A B"/"A-B".
+  const encode = (value: string) => Array.from(value, char => char.codePointAt(0)!.toString(16).padStart(6, "0")).join("")
+  const scope = encode(deck)
+  return faces(files).map(face => ({ family: face.family, alias: `crewship-pin-${scope}-${encode(face.family)}`, source: face.source, weight: face.weight, style: face.style }))
 }

@@ -370,11 +370,18 @@ func (s *VersionStore) ReadLibraryPinSnapshot(ctx context.Context, consumer Vers
 	return
 }
 
-// diffLibraryFiles compares a pin's files with the next version's by path and
-// content hash. A file the next version would not copy counts by its status.
+// diffLibraryFiles compares bytes and the metadata that affects rendering
+// or licence review. The content hash represents the bytes.
 func diffLibraryFiles(from, to []LibraryPinFile) LibraryChanges {
-	key := func(f LibraryPinFile) string { return f.Status + ":" + f.SHA256 }
-	a, b := map[string]string{}, map[string]string{}
+	type descriptor struct {
+		media, status, sha, family, style, licence string
+		size                                       int64
+		weight                                     int
+	}
+	key := func(f LibraryPinFile) descriptor {
+		return descriptor{f.MediaType, f.Status, f.SHA256, f.Family, f.Style, f.Licence, f.Size, f.Weight}
+	}
+	a, b := map[string]descriptor{}, map[string]descriptor{}
 	for _, f := range from {
 		a[f.Path] = key(f)
 	}

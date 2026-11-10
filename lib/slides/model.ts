@@ -31,6 +31,12 @@ export interface SlideImage { asset_id: string; expected_sha256: string; alt: st
 interface Geometry { id: string; x: number; y: number; width: number; height: number }
 export type SlideElement = Geometry & ({ type: "text"; text: SlideText } | { type: "shape"; shape: SlideShape } | { type: "table"; table: SlideTable } | { type: "image"; image: SlideImage } | { type: "icon"; icon: SlideIcon })
 export interface Slide { id: string; notes: string; elements: SlideElement[]; transition?: "fade" | "push" }
+/** Resolved pin tokens for artifact previews only; never serialized in a deck. */
+export interface SlidePreviewTheme {
+ background?: string
+ textColor?: string
+ typography?: { family?: string; size: number; weight?: number }
+}
 export interface SlideTheme { background: string; color: string; font_family: string; font_size: number }
 export interface SlideDeck { theme: SlideTheme; schema_version: 1 | 2 | 3; deck_id: string; width: number; height: number; slide_order: string[]; slides: Slide[] }
 

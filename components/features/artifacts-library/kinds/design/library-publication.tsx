@@ -69,7 +69,7 @@ export const libraryClient = {
 
 const PIN_CHANGED = "crewship:library-pin-changed"
 
-export interface PinnedLibrary { css: string | null; files: PinnedFile[] }
+export interface PinnedLibrary { css: string | null; tokens: string; files: PinnedFile[] }
 
 /**
  * The consumer's pinned theme, derived from its own copy (#5248). Null while
@@ -94,7 +94,7 @@ export function usePinnedLibrary(workspaceId: string, slug: string, enabled: boo
       .then(({ tokens, files }) => {
         if (abort.signal.aborted) return
         const css = pinnedThemeCss(tokens, files)
-        setState(css === null ? null : { scope, value: { css, files } })
+        setState(css === null ? null : { scope, value: { css, tokens, files } })
       }, () => { if (!abort.signal.aborted) setState(null) })
     return () => abort.abort()
   }, [workspaceId, slug, enabled, scope])

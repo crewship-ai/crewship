@@ -516,9 +516,14 @@ applies an update:
   `--ds-font-<name>` and `--ds-font-size-<name>`, plus an `@font-face` for each
   copied font that `fonts.json` names. Use them as
   `color: var(--ds-color-primary)`;
-- a Slides deck draws a text box whose family the pin carries in that pinned
-  face, registered under a per-deck name so it never replaces the app's
-  fonts; the bundled faces of the rich Slides schema keep priority.
+- Slides can name pin tokens in an optional `slides-library.json` file in the
+  consumer's saved project. For example:
+  `{"schema_version":1,"background":"canvas","text_color":"ink","typography":"body"}`.
+  The first two names select color tokens; the third selects the text size,
+  weight and font family. The preview, thumbnails and Present use the resolved
+  values. A missing token or uncopied font keeps the saved styling for that
+  property. The PDF still uses the saved deck.
+
 
 Interactive and Dashboard previews do not apply the pinned theme yet.
 
