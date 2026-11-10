@@ -12,6 +12,8 @@ type pageAccessPermissions struct {
 	Comment bool `json:"comment"`
 	Edit    bool `json:"edit"`
 	Produce bool `json:"produce"`
+	// Propose is an agent's: a live propose or write grant names it.
+	Propose bool `json:"propose"`
 }
 
 type pageAccessSource struct {
@@ -25,6 +27,7 @@ func (p *pageAccessPermissions) include(other pageAccessPermissions) {
 	p.Comment = p.Comment || other.Comment
 	p.Edit = p.Edit || other.Edit
 	p.Produce = p.Produce || other.Produce
+	p.Propose = p.Propose || other.Propose
 }
 
 // decoratePageAccess is pure over the same bulk-loaded, already redacted paths
@@ -50,8 +53,11 @@ func decoratePageAccess(subjects []pageAccessSubjectWire, rec *pageRecord, ws *p
 				p.Edit = true
 			case path == pageReachGrantPage+pageGrantComment:
 				p.Comment = true
+			case path == pageReachGrantPage+pageGrantPropose:
+				p.Propose = s.SubjectType == pageSubjectAgent
 			case path == pageReachGrantPage+pageGrantWrite:
 				p.Comment = s.SubjectType != pageSubjectAgent
+				p.Propose = s.SubjectType == pageSubjectAgent
 				p.Edit = true
 			case path == pageReachGrantPage+pageGrantProduce:
 				p.Produce = true

@@ -177,6 +177,45 @@ describe("share and revoke: PUT/DELETE /pages/{slug}/grants", () => {
   })
 })
 
+describe("agent Propose grants", () => {
+  const ACCESS = { page: "brief", page_id: "p1", pages_version: 7, subjects: [
+    subject("user", "u1", "owner@example.test", [["owner", perms(true, true, true)]]),
+    subject("agent", "a1", "scribe", [["grant:page:propose", perms(true)], ["grant:page:produce", perms(true, false, false, true)]]),
+  ] }
+
+  it("lists an agent's propose grant as Propose, and ignores propose on a person", async () => {
+    serve(
+      { method: "GET", path: "/api/v1/pages/brief/access", body: ACCESS },
+      { method: "GET", path: "/api/v1/pages/brief/grants", body: { page: "brief", grants: [
+        grant("agent", "scribe", "a1", "propose"), grant("agent", "scribe", "a1", "produce", { panels: ["kpi"] }), grant("user", "x", "u2", "propose"),
+      ] } },
+    )
+    const entries = await api().access(item())
+    expect(entries.filter(e => e.via === "grant").map(e => [e.subjectType, e.subjectId, e.label, e.level])).toEqual([["agent", "a1", "scribe", "propose"]])
+  })
+
+  it("an agent's strongest live grant wins: Edit over Propose over Read", async () => {
+    serve(
+      { method: "GET", path: "/api/v1/pages/brief/access", body: ACCESS },
+      { method: "GET", path: "/api/v1/pages/brief/grants", body: { page: "brief", grants: [grant("agent", "scribe", "a1", "propose"), grant("agent", "scribe", "a1", "read")] } },
+    )
+    expect((await api().access(item())).find(e => e.subjectType === "agent")?.level).toBe("propose")
+  })
+
+  it("changing an agent from Propose to Edit adds write, then removes propose, and leaves produce alone", async () => {
+    serve(
+      { method: "GET", path: "/api/v1/pages/brief/grants", body: { page: "brief", grants: [grant("agent", "scribe", "a1", "propose"), grant("agent", "scribe", "a1", "produce", { panels: ["kpi"] })] } },
+      { method: "PUT", path: "/api/v1/pages/brief/grants", body: { page: "brief", grants: [] } },
+      { method: "DELETE", path: "/api/v1/pages/brief/grants", body: { page: "brief", grants: [] } },
+    )
+    await api().share(item(), { subjectType: "agent", subjectId: "a1", label: "scribe", level: "write" })
+    expect(calls.slice(1).map(c => [c.method, c.body ?? c.query.get("level")])).toEqual([
+      ["PUT", { subject_type: "agent", subject: "a1", level: "write" }],
+      ["DELETE", "propose"],
+    ])
+  })
+})
+
 describe("folder settings: /page-folders/{slug}/acl", () => {
   const ACL = {
     folder: "fin", acl_version: 4,

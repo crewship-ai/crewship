@@ -55,7 +55,7 @@ import { PagesRequestError, pagesKeys, type WirePage } from "@/hooks/use-pages"
 // of them. Closed on purpose: a level the UI offers that the schema refuses is
 // a button that always 400s.
 
-export const PAGE_GRANT_LEVELS = ["read", "produce", "write"] as const
+export const PAGE_GRANT_LEVELS = ["read", "propose", "produce", "write"] as const
 export type PageGrantLevel = (typeof PAGE_GRANT_LEVELS)[number]
 
 /** `workspace` — everyone in this workspace, read or write only (#2533). */
@@ -72,19 +72,18 @@ export const PAGE_SUBJECT_TYPE_LABEL: Record<PageSubjectType, string> = {
 
 /** The levels a subject kind may hold. The workspace never produces: a
  *  payload has an author, and "everyone" is not one (spec §3/14). */
-export function pageGrantLevelsFor(
-  subjectType: PageSubjectType,
-  canDelegateAgentEdit = false,
-): readonly PageGrantLevel[] {
+export function pageGrantLevelsFor(subjectType: PageSubjectType, canDelegateAgentEdit = false): readonly PageGrantLevel[] {
   if (subjectType === "workspace") return ["read", "write"]
-  // Only the page's owner delegates Edit to an agent, of the spec (write) or
-  // of the data (produce); everyone else is not offered the choice the server
-  // would refuse.
-  if (subjectType === "agent" && !canDelegateAgentEdit) return ["read"]
-  // A crew's produce grant lets its agents and routines push the page's data,
-  // so it is the owner's to give as well (#5260).
+  if (subjectType === "agent") return canDelegateAgentEdit ? PAGE_GRANT_LEVELS : ["read", "propose"]
+  // A crew's produce grant delegates data writes to agents: only the owner.
   if (subjectType === "crew" && !canDelegateAgentEdit) return ["read", "write"]
-  return PAGE_GRANT_LEVELS
+  return ["read", "produce", "write"]
+}
+
+/** An agent on a Document starts at Propose; Edit is never inferred. */
+export function pageGrantDefaultLevel(subjectType: PageSubjectType, documentContent: boolean): PageGrantLevel {
+  if (subjectType === "agent" && documentContent) return "propose"
+  return documentContent || subjectType === "workspace" ? "read" : "produce"
 }
 
 /**
@@ -103,6 +102,7 @@ export function pageGrantLevelsFor(
  */
 export const PAGE_GRANT_LEVEL_MEANING: Record<PageGrantLevel, string> = {
   read: "opens the page — panels stay sealed unless the grantee's own crew membership already opened them",
+  propose: "agents only: opens the page, and may propose changes a person accepts or rejects — never edits",
   produce: "opens the page, and may push payloads into named panels",
   write: "opens the page, and may edit its spec — add, remove and re-arrange panels",
 }

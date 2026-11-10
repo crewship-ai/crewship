@@ -47,7 +47,7 @@ exception in the other direction: it prints YAML unless you ask for
 | `set <slug>/<panel> --data -` | Push a panel's data — the single write path |
 | `actions <slug>/<panel>` | List the actions a panel declares, and the routine each one runs |
 | `action <slug>/<panel> <action-id>` | Dispatch a declared action |
-| `grant <slug> --user\|--crew\|--agent <subject>\|--everyone --level <level>` | Grant read, comment, produce, or write on a page |
+| `grant <slug> --user\|--crew\|--agent <subject>\|--everyone --level <level>` | Grant read, comment, propose, produce, or write on a page; `--agent` without `--level` grants `propose` |
 | `share <slug> --user\|--crew <subject>\|--everyone --level read\|comment\|write` | Share inside the workspace; Comment never grants edit or execution authority |
 | `archive <page> --dry-run --pages-version <n>` | Preview removal from default lists without deleting content |
 | `unarchive <page> --dry-run --pages-version <n>` | Preview restoration to default lists |
@@ -905,7 +905,7 @@ crewship page grant fleet-201 --user  ops@example.com --level write
 | `--crew <slug>` | Grant to a crew |
 | `--agent <slug>` | Grant to an agent |
 | `--everyone` | Grant to everyone in the workspace — every current human member, including anyone who joins later, never an agent. `read`, `comment` or `write`; `produce` names a producer, and everyone is not one. On an artifact, `read` and `comment` reach only the shared version, `write` reaches the latest version, and none of them lets a member share a version. A guest and a non-member gain nothing on a Word, Sheet, project or Design. A private artifact refuses the grant with exit `5`. |
-| `--level <read\|comment\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs) |
+| `--level <read\|comment\|propose\|produce\|write>` | The verb being granted — see [the permission model](/guides/pages#the-three-verbs). Required for people, crews and everyone. For `--agent` it defaults to `propose`: the agent may propose changes that a person accepts or rejects, and never edits. Edit (`write`) is always asked for by name. `propose` is refused for anyone but an agent. |
 | `--panels <id,id,...>` | Restricts a `produce` grant to these panel ids. Omitted = every panel the subject is otherwise eligible to write. Only meaningful for `--level produce`. |
 
 <Note>
@@ -1271,7 +1271,7 @@ A path is one of the server's own words, printed verbatim:
 | `crew:<slug>` | A member of the crew that owns the page. |
 | `panel_crew:<slug>` | A member of a crew that owns a panel on it — one entry per crew, in panel order. On a crew's row, that the crew owns a panel. |
 | `folder:<slug>` | The folder the page is in is shared with the subject — a user directly or through a crew, a crew by name, or everyone in the workspace. The path says the subject is named, not at which level. |
-| `grant:page:<level>` | A live `read`, `produce` or `write` grant names the subject (or, for a user, one of their crews). |
+| `grant:page:<level>` | A live `read`, `comment`, `propose`, `produce` or `write` grant names the subject (or, for a user, one of their crews). |
 | `panel_crew:withheld` | A crew you cannot see owns a panel. The server does not name it, and its members are not listed by name; the row's subject prints as `(withheld)`. |
 
 ```

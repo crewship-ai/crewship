@@ -266,7 +266,11 @@ func TestDocumentProposalSchemaFiveRealEngineCLI(t *testing.T) {
 	pages := router.Pages()
 	// A mandate naming a schema the Doc does not have is refused.
 	stale := documents.IterationIntent{SubmissionID: "propose5-0", PageID: page.ID, Schema: 4, Rev: before.Rev, Generation: before.Generation, Blocks: "lead,other"}
-	must("", "page", "grant", slug, "--agent", "principal-agent", "--level", "write")
+	must("", "page", "grant", slug, "--agent", "principal-agent", "--level", "propose")
+	var directGrants int
+	if err := f.rig.db.QueryRow(`SELECT count(*) FROM page_grants WHERE page_id=? AND subject_type='agent' AND subject_id=? AND level IN ('write','produce') AND retired_at IS NULL`, page.ID, f.a.AgentID).Scan(&directGrants); err != nil || directGrants != 0 {
+		t.Fatalf("proposal fixture acquired direct Edit: %d %v", directGrants, err)
+	}
 	if err := pages.persistDocumentIterationIntent(httptest.NewRequest("POST", "/", nil), f.receipt, f.a.MessageID, stale); err == nil {
 		t.Fatal("a schema-4 mandate was admitted on a schema-5 Doc")
 	}

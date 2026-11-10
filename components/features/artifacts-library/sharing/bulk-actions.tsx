@@ -11,7 +11,7 @@ import {
 import type { LibraryItem } from "../library-items"
 import { LevelSelect, SELECT, SubjectSelect, useSubjects, type Subject } from "./share-controls"
 import {
-  BULK_LIMIT, guardedSharingApi, SESSION_CHANGED, SHARE_LEVEL_LABEL, SharingError, useSharingApi, useSharingHuman, useSharingMutation,
+  ACCESS_LEVEL_LABEL, BULK_LIMIT, guardedSharingApi, SESSION_CHANGED, SharingError, useSharingApi, useSharingHuman, useSharingMutation,
   type AccessEntry, type BulkAction, type BulkRequest, type BulkResult, type ShareLevel,
 } from "./sharing-api"
 
@@ -74,7 +74,7 @@ const DID: Record<BulkAction, string> = { move: "moved", share: "shared", archiv
 const ICON: Record<BulkAction, SurfaceIcon> = { move: FolderInput, share: Share2, archive: Archive, unarchive: ArchiveRestore }
 const UNFILED = "__unfiled"
 
-const listEntries = (entries: AccessEntry[]) => entries.map(e => `${e.label} (${SHARE_LEVEL_LABEL[e.level]})`).join(", ")
+const listEntries = (entries: AccessEntry[]) => entries.map(e => `${e.label} (${ACCESS_LEVEL_LABEL[e.level]})`).join(", ")
 
 /** Changes 26–27: pick the action, read its dry run per item, confirm only what can happen. */
 export function BulkPreviewDialog({ workspaceId, action, items, folders, open, onOpenChange, onDone }: BulkPreviewDialogProps) {

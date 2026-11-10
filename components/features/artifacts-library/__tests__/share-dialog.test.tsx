@@ -151,3 +151,33 @@ it("returns focus to the Share button that opened it once the dialog unmounts", 
   await waitFor(() => expect(document.activeElement).toBe(opener))
   opener.remove()
 })
+
+const AGENT_GRANT = { subject_type: "agent", subject: "scribe", subject_id: "a1", level: "propose", live: true }
+
+it("shows an agent's Propose grant as Can propose, and the owner changes it to Edit", async () => {
+  flags.mock = false
+  serve([AGENT_GRANT])
+  renderDialog(item({ ownedByMe: true }))
+  await within(list()).findByText("scribe")
+  const select = within(row("scribe")).getByRole("combobox", { name: "Level for scribe" }) as HTMLSelectElement
+  expect(select.value).toBe("propose")
+  expect([...select.options].map(o => o.textContent)).toEqual(["Edit", "Can propose", "Read"])
+  fireEvent.change(select, { target: { value: "write" } })
+  await waitFor(() => expect(flags.fetch.mock.calls.some(([, init]) => init?.method === "DELETE")).toBe(true))
+  const writes = flags.fetch.mock.calls.filter(([, init]) => init?.method && init.method !== "GET")
+  expect(writes.map(([url, init]) => [init.method, init.body ? JSON.parse(init.body) : new URL(url, "http://h").searchParams.toString()])).toEqual([
+    ["PUT", { subject_type: "agent", subject: "a1", level: "write" }],
+    ["DELETE", "workspace_id=ws1&subject_type=agent&subject=a1&level=propose"],
+  ])
+})
+
+it("a non-owner sees an agent's Can propose read-only", async () => {
+  flags.mock = false
+  serve([AGENT_GRANT])
+  renderDialog()
+  await within(list()).findByText("scribe")
+  const agent = row("scribe")
+  expect(within(agent).getByText("Can propose")).toBeTruthy()
+  expect(within(agent).queryByRole("combobox")).toBeNull()
+  expect(within(agent).queryByRole("button", { name: /Remove/ })).toBeNull()
+})

@@ -569,7 +569,7 @@ still cannot widen who reaches it, not even to another agent in its own crew.
 |---|---|---|
 | `subject_type` | string | `user`, `crew`, `agent`, or `workspace` (every current human member of the workspace, never an agent). |
 | `subject` | string | The subject's slug or id. Omitted for `workspace`. |
-| `level` | string | `read`, `comment`, `produce`, or `write`. The `workspace` subject carries `read`, `comment` or `write`, never `produce`: `produce` names a producer, and everyone is not one. `comment` names people, never an agent. |
+| `level` | string | `read`, `comment`, `propose`, `produce`, or `write`. The `workspace` subject carries `read`, `comment` or `write`, never `produce`: `produce` names a producer, and everyone is not one. `comment` names people, never an agent. `propose` names an agent, never a person, crew or the workspace, and carries no `panels`. |
 | `panels` | string[] | Optional. Restricts a `produce` grant to named panels; omitted means every panel on the page. |
 
 ### What each level decides
@@ -578,6 +578,7 @@ still cannot widen who reaches it, not even to another agent in its own crew.
 |---|---|---|
 | `read` | yes | nothing else |
 | `comment` | yes | may submit [artifact project feedback](#version-bound-artifact-project-feedback-pilot) on the current shared version; no content writes, restore, sharing or agent execution |
+| `propose` | yes | agents only: may propose changes on a shared schema-4–6 Document, which a person accepts or rejects; never edits, produces or opens a writable session. A `write` grant also admits proposals. |
 | `produce` | yes | may push payloads into the panels it names |
 | `write` | yes | may add, remove and re-arrange panels, and read the page's version history |
 
@@ -627,7 +628,7 @@ propose a change to a document.
 | Status | Condition |
 |---|---|
 | 200 | Issued, or updated in place if the subject already held one. |
-| 400 | Unknown `subject_type` or `level`, missing subject, `produce` for the `workspace` subject, `comment` for an `agent` subject, or `panels` naming a panel the page does not have. |
+| 400 | Unknown `subject_type` or `level`, missing subject, `produce` for the `workspace` subject, `comment` for an `agent` subject, `propose` for anything but an `agent` subject, or `panels` naming a panel the page does not have. |
 | 401 | No session. |
 | 403 | Not the owner and not an admin; `write` or `produce` to an `agent`, or `produce` to a `crew`, from anyone but the page's owner; or the caller is an agent rather than a human. Only for a caller who reaches the page. |
 | 404 | No such page, or one the caller [cannot reach](#unreachable-pages-are-not-found). |
@@ -740,7 +741,7 @@ spelled out per level:
 | `crew:<slug>` | A member of the crew that owns the page. |
 | `panel_crew:<slug>` | A member of a crew that owns a panel — one entry per crew, in panel order. On a crew's row, that the crew owns a panel. |
 | `folder:<slug>` | The folder the page is in is shared with the subject (a user directly or through a crew, a crew by name, or everyone in the workspace). |
-| `grant:page:<level>` | A live `read`, `produce` or `write` grant names the subject, or (for a user) one of their crews. |
+| `grant:page:<level>` | A live `read`, `comment`, `propose`, `produce` or `write` grant names the subject, or (for a user) one of their crews. An agent's `effective_permissions.propose` is true for a live `propose` or `write` grant. |
 | `panel_crew:withheld` | A crew the caller cannot see owns a panel. See below. |
 
 Rows are ordered users by email, then crews by slug, then agents by slug,

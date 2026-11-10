@@ -26,7 +26,7 @@ import (
 
 // TestDocumentProposalSchemaFourRealEngineCLI (#5137): a human makes a
 // schema-4 Doc with marks, a code block language, a quote and a task list
-// through the CLI binary and gives the agent write on it; the agent, admitted
+// through the CLI binary and gives the agent only Propose on it; the agent, admitted
 // by a schema-4 targeted message, proposes through the real draft route and
 // the real Node engine; the human lists, reads and accepts the proposal with
 // the CLI. Content and formatting round-trip; the mandate gates hold.
@@ -207,7 +207,7 @@ func TestDocumentProposalSchemaFourRealEngineCLI(t *testing.T) {
 	pages := router.Pages()
 	// Gate: the Doc is shared and the agent holds no grant yet.
 	if err := pages.persistDocumentIterationIntent(httptest.NewRequest("POST", "/", nil), f.receipt, f.a.MessageID, intent); err == nil {
-		t.Fatal("agent without a write grant was mandated to propose")
+		t.Fatal("agent without a propose/write grant was mandated to propose")
 	}
 	if out, err := cli("", "page", "grant", slug, "--agent", "principal-agent", "--level", "read"); err != nil {
 		t.Fatalf("read grant: %v %s", err, out)
@@ -215,7 +215,11 @@ func TestDocumentProposalSchemaFourRealEngineCLI(t *testing.T) {
 	if err := pages.persistDocumentIterationIntent(httptest.NewRequest("POST", "/", nil), f.receipt, f.a.MessageID, intent); err == nil {
 		t.Fatal("agent read grant was mandated to propose")
 	}
-	must("", "page", "grant", slug, "--agent", "principal-agent", "--level", "write")
+	must("", "page", "grant", slug, "--agent", "principal-agent", "--level", "propose")
+	var directGrants int
+	if err := f.rig.db.QueryRow(`SELECT count(*) FROM page_grants WHERE page_id=? AND subject_type='agent' AND subject_id=? AND level IN ('write','produce') AND retired_at IS NULL`, page.ID, f.a.AgentID).Scan(&directGrants); err != nil || directGrants != 0 {
+		t.Fatalf("proposal fixture acquired direct Edit: %d %v", directGrants, err)
+	}
 	if err := pages.persistDocumentIterationIntent(httptest.NewRequest("POST", "/", nil), f.receipt, f.a.MessageID, intent); err != nil {
 		t.Fatalf("persist propose mandate: %v", err)
 	}

@@ -2107,6 +2107,7 @@ END;
 		restoreBackfill: restoreBackfillPinLegacyAvatarStyle},
 	{version: 20261025233100, name: "crew_resource_grants", fn: migrationCrewResourceGrants},
 	{version: 20261026111927, name: "crew_manage_grants", fn: migrationCrewManageGrants},
+	{version: 20261110185446, name: "page_propose_grants", fn: migrationPageProposeGrants},
 }
 
 // restoreBackfillOverrides lets tests wire a hook without touching the

@@ -4,8 +4,8 @@ import { Share2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { StatusPill } from "@/components/ui/status-pill"
 import type { LibraryItem } from "../library-items"
-import { accessVia, byAccess, LEVEL_TONE, LEVELS_DESC, lockedReason } from "./access-reason"
-import { entryKey, SHARE_LEVEL_LABEL, SHARE_LEVEL_MEANING, SharingError, useAccess, useSharingHuman } from "./sharing-api"
+import { ACCESS_LEVELS_DESC, accessVia, byAccess, LEVEL_TONE, lockedReason } from "./access-reason"
+import { ACCESS_LEVEL_LABEL, ACCESS_LEVEL_MEANING, entryKey, SharingError, useAccess, useSharingHuman } from "./sharing-api"
 import { shownLabel } from "./share-controls"
 
 export interface AccessTabProps {
@@ -18,7 +18,7 @@ export function AccessTab({ workspaceId, item, onShare }: AccessTabProps) {
   const access = useAccess(workspaceId, item)
   const { humanId } = useSharingHuman()
   const entries = [...(access.data ?? [])].sort(byAccess)
-  const groups = LEVELS_DESC.map(level => ({ level, entries: entries.filter(e => e.level === level) })).filter(g => g.entries.length > 0)
+  const groups = ACCESS_LEVELS_DESC.map(level => ({ level, entries: entries.filter(e => e.level === level) })).filter(g => g.entries.length > 0)
 
   return <section aria-label="Access" className="flex min-w-0 flex-col gap-3 p-3">
     <div className="flex items-center gap-2">
@@ -26,7 +26,7 @@ export function AccessTab({ workspaceId, item, onShare }: AccessTabProps) {
         <h3 className="text-xs font-semibold">Who can open it</h3>
         {access.data && <p className="text-micro text-muted-foreground">
           {entries.length === 1 ? "1 person or group" : `${entries.length} people and groups`}
-          {groups.length > 0 && ` · ${groups.map(g => `${g.entries.length} ${SHARE_LEVEL_LABEL[g.level]}`).join(", ")}`}
+          {groups.length > 0 && ` · ${groups.map(g => `${g.entries.length} ${ACCESS_LEVEL_LABEL[g.level]}`).join(", ")}`}
         </p>}
       </div>
       <Button type="button" size="sm" variant="secondary" className="h-7 text-xs" onClick={onShare}><Share2 aria-hidden className="size-3.5" />Share…</Button>
@@ -37,15 +37,15 @@ export function AccessTab({ workspaceId, item, onShare }: AccessTabProps) {
         {access.error instanceof SharingError && access.error.status === 403 ? "Only people who can share this artifact see its access list." : access.error.message}
       </p>
       : groups.length === 0 ? <p className="text-xs text-muted-foreground">Nobody else can open it yet.</p>
-      : groups.map(({ level, entries }) => <div key={level} role="group" aria-label={`${SHARE_LEVEL_LABEL[level]} access`} data-level={level} className="flex flex-col gap-1">
+      : groups.map(({ level, entries }) => <div key={level} role="group" aria-label={`${ACCESS_LEVEL_LABEL[level]} access`} data-level={level} className="flex flex-col gap-1">
         <div className="flex items-center gap-2">
-          <StatusPill tone={LEVEL_TONE[level]} label={SHARE_LEVEL_LABEL[level]} />
+          <StatusPill tone={LEVEL_TONE[level]} label={ACCESS_LEVEL_LABEL[level]} />
           <span className="text-micro tabular-nums text-muted-foreground">{entries.length}</span>
         </div>
-        <p className="text-micro text-muted-foreground-soft">{SHARE_LEVEL_MEANING[level]}</p>
+        <p className="text-micro text-muted-foreground-soft">{ACCESS_LEVEL_MEANING[level]}</p>
         <ul className="flex flex-col divide-y">
           {entries.map(entry => {
-            const locked = lockedReason(entry)
+            const locked = lockedReason(entry, item.ownedByMe === true)
             return <li key={`${entryKey(entry)}:${entry.via}:${entry.folderSlug ?? ""}`} className="flex items-baseline gap-2 py-1.5">
               <span className="min-w-0 flex-1 truncate text-xs">{shownLabel(entry, humanId)}</span>
               <span className="shrink-0 text-micro text-muted-foreground">{accessVia(entry)}{entry.via === "folder" && locked ? ` · ${locked}` : ""}</span>
