@@ -1,8 +1,6 @@
 package backup_test
 
 import (
-	"io"
-	"log/slog"
 	"path/filepath"
 	"testing"
 
@@ -10,20 +8,16 @@ import (
 	"github.com/crewship-ai/crewship/internal/backup"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/hooks"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 func TestRestoreHostHookRequiresLocalReview(t *testing.T) {
 	for _, fault := range []string{"", "ABORT", "IGNORE"} {
 		auditFailure := fault != ""
 		t.Run("import/"+fault, func(t *testing.T) {
-			db, err := database.Open(filepath.Join(t.TempDir(), "restore.db"))
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer db.Close()
-			if err := database.Migrate(t.Context(), db.DB, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
-				t.Fatal(err)
-			}
+			// This tests current-schema restore quarantine and audit atomicity,
+			// not migrations. Each case still owns its production-opened DB file.
+			db := testutil.MigratedDBAt(t, filepath.Join(t.TempDir(), "restore.db"))
 			if _, err := db.Exec(`INSERT INTO workspaces(id,name,slug) VALUES('ws-hook','Hooks','ws-hook')`); err != nil {
 				t.Fatal(err)
 			}
@@ -40,7 +34,7 @@ func TestRestoreHostHookRequiresLocalReview(t *testing.T) {
 				{"id": "imported-shell", "workspace_id": "ws-hook", "event": "pre_agent_start", "handler_kind": "shell", "handler_config": `{"command":"never run"}`, "enabled": int64(1), "host_authorization": "forged-or-imported-approval"},
 				{"id": "imported-http", "workspace_id": "ws-hook", "event": "pre_agent_start", "handler_kind": "http", "handler_config": `{"url":"https://example.test"}`, "enabled": int64(1)},
 			}}}
-			_, err = backup.RestoreDumpTxHooks(t.Context(), db.DB, dump, nil)
+			_, err := backup.RestoreDumpTxHooks(t.Context(), db.DB, dump, nil)
 			source := dump.Tables["hooks_config"][0]
 			if source["enabled"] != int64(1) || source["host_authorization"] != "forged-or-imported-approval" {
 				t.Fatalf("restore mutated source: %+v", source)
