@@ -18,7 +18,7 @@ export type DocumentFormat = "native" | "sheet" | "wordcraft" | "doc" | "command
  * What a confirmed creation hands back: the address, the fence a folder move
  * sends, and for a native Word or Sheet the Page identity its editor opens by.
  */
-export interface CreatedDocument { slug: string; pagesVersion: number; nativePageId?: string }
+export interface CreatedDocument { slug: string; pagesVersion: number; pageId?: string; nativePageId?: string }
 
 interface Intent {
   name: string
@@ -78,7 +78,7 @@ export function useWordDocumentCreation(workspaceId: string) {
     }
     const pageId = original.pageId
     if (!pageId) throw new Error("The original Page identity is unavailable.")
-    const done = { slug: original.slug, pagesVersion: original.pagesVersion ?? 0 }
+    const done = { slug: original.slug, pagesVersion: original.pagesVersion ?? 0, pageId }
     if (original.format === "native" || original.format === "sheet") {
       const application = original.format === "sheet" ? "gridcraft" : "wordcraft"
       const base = `/api/v1/pages/${encodeURIComponent("@" + pageId)}/craft/`
