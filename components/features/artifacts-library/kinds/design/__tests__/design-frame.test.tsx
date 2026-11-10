@@ -100,6 +100,23 @@ describe("Design in the artifact frame", () => {
     expect(within(slot("view")!).getByRole("button", { name: "Artboard: Landing · Mobile" })).toBeInTheDocument()
     expect(within(slot("nav")!).getByRole("button", { name: "Next artboard" })).toBeDisabled()
   })
+  it("focuses the selected visible Layers screen even when a hidden screen precedes it", () => {
+    vi.stubEnv("NEXT_PUBLIC_ARTIFACTS_DESIGN_HIDE_LOCK", "true")
+    upsertDesignNode(state.doc!, { id: "draft", type: "frame", name: "Old draft", x: 800, y: 64, width: 390, height: 844, hidden: true })
+    const order = state.doc!.getArray<string>("order")
+    order.delete(order.length - 1, 1)
+    order.insert(0, ["draft"])
+    mount()
+    fireEvent.click(within(slot("nav")!).getByRole("button", { name: "Next artboard" }))
+    fireEvent.click(within(slot("view")!).getByRole("button", { name: "Layers" }))
+    const layers = within(screen.getByRole("group", { name: "Layers" }))
+    fireEvent.click(layers.getByRole("button", { name: "Landing · Desktop" }))
+    expect(within(slot("view")!).getByRole("button", { name: "Artboard: Landing · Desktop" })).toBeInTheDocument()
+    fireEvent.click(layers.getByRole("button", { name: "Landing · Mobile" }))
+    fireEvent.click(layers.getByRole("button", { name: "Old draft" }))
+    expect(within(slot("view")!).getByRole("button", { name: "Artboard: Landing · Mobile" })).toBeInTheDocument()
+  })
+
   it("zooms in steps and returns to Fit", () => {
     mount()
     fireEvent.click(within(slot("viewport")!).getByRole("button", { name: "Zoom in" }))

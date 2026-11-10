@@ -661,7 +661,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   if (flag === "hidden" && !node.hidden) setSelectedIds(chosen.filter(id => id !== node.id))
  }
  const layerList = design.nodes.map(node => <div key={node.id} role="group" aria-label={`Layer ${node.name || node.text || node.type}`} className="flex items-center">
-  <button aria-pressed={chosen.includes(node.id)} onClick={event => { if (event.shiftKey || event.ctrlKey || event.metaKey) { setSelectedIds(toggleSelection(chosen, node.id)); return } setSelectedId(node.id); if (node.type === "frame") setFocus(frames.indexOf(node)) }} className={`flex min-h-9 min-w-0 flex-1 items-center gap-2 px-3 text-left text-xs coarse:min-h-[44px] ${chosen.includes(node.id) ? "bg-accent text-accent-foreground" : "hover:bg-muted"} ${node.parentId ? "pl-7" : "font-medium"}`}>
+  <button aria-pressed={chosen.includes(node.id)} onClick={event => { if (event.shiftKey || event.ctrlKey || event.metaKey) { setSelectedIds(toggleSelection(chosen, node.id)); return } setSelectedId(node.id); if (node.type === "frame") { const index = artboards.findIndex(frame => frame.id === node.id); if (index >= 0) setFocus(index) } }} className={`flex min-h-9 min-w-0 flex-1 items-center gap-2 px-3 text-left text-xs coarse:min-h-[44px] ${chosen.includes(node.id) ? "bg-accent text-accent-foreground" : "hover:bg-muted"} ${node.parentId ? "pl-7" : "font-medium"}`}>
   {node.type === "frame" ? <Frame className="size-3.5 shrink-0" /> : node.type === "text" ? <Type className="size-3.5 shrink-0" /> : <Square className="size-3.5 shrink-0" />}<span className={cn("truncate", hiddenIds.has(node.id) && "opacity-50")}>{node.name || node.text || node.type}</span>
  </button>
   {hideLock && canChange ? <>
