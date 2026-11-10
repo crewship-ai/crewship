@@ -472,6 +472,8 @@
     "CO04.undo-own",
     "CO02.multi-selection",
     "V04.multi-select",
+    "V05.hide",
+    "V05.lock",
     "role.design.read-browser",
     "role.project.revoke-open",
     "role.design.revoke-open",

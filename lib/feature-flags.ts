@@ -194,6 +194,16 @@ export function artifactsDesignTextStyle(): boolean {
 }
 
 /**
+ * Hide and lock buttons in the Design Layers list (#5218). Default off: an
+ * older server refuses the new `hidden`/`locked` fields, so the controls stay
+ * off until every server that may serve a rollback accepts them. A document
+ * that already carries them is drawn and edited correctly either way.
+ */
+export function artifactsDesignHideLock(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_HIDE_LOCK === "true"
+}
+
+/**
  * "Export HTML" in the Design editor (#4449). Default off. Only has an effect
  * together with `artifactsDesign()`. The server export route itself follows the
  * Design workspace flag; this only hides the button.

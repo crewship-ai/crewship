@@ -259,6 +259,38 @@ describe.skipIf(!ready)("Design canvas viewport in Chromium", () => {
   await page.context().close()
  }, 60_000)
 
+ it.each([
+  ["move", "cta", "locked"], ["resize", "cta", "hidden"],
+  ["groupmove", "cta", "locked"], ["groupresize", "screen", "locked"],
+  ["groupmove", "screen", "hidden"], ["move", "screen", "locked"],
+ ] as const)("retires an inflight %s after a peer makes %s %s", async (mode, id, flag) => {
+  const page = await open(false, { second: true })
+  try {
+   await page.getByRole("button", { name: "Layers", exact: true }).dispatchEvent("click")
+   const layer = (name: string) => page.getByLabel("Layers").getByRole("button", { name, exact: true })
+   await layer("Call to action").dispatchEvent("click")
+   if (mode.startsWith("group")) await layer("Copy block").dispatchEvent("click", { shiftKey: true })
+   const target = mode.includes("resize")
+    ? page.locator(mode.startsWith("group") ? '[data-design-group] [data-design-handle="se"]' : '[data-design-node="cta"] [data-design-handle="se"]')
+    : page.locator('[data-design-node="cta"] rect').first()
+   const box = (await target.boundingBox())!
+   const from = { x: box.x + box.width / 2, y: box.y + box.height / 2 }
+   await page.mouse.move(from.x, from.y); await page.mouse.down()
+   await page.mouse.move(from.x + 40, from.y + 30, { steps: 4 })
+   await page.evaluate(({ id, flag }) => (window as unknown as { peerPatch: (patch: Record<string, unknown>) => void }).peerPatch({ id, [flag]: true }), { id, flag })
+   const frozen = await nodes(page)
+   await page.mouse.move(from.x + 80, from.y + 60, { steps: 3 })
+   expect(await nodes(page)).toBe(frozen)
+   // An unlock during the same press must not revive its stale starting box.
+   await page.evaluate(({ id, flag }) => (window as unknown as { peerPatch: (patch: Record<string, unknown>) => void }).peerPatch({ id, [flag]: false }), { id, flag })
+   const unlocked = await nodes(page)
+   await page.mouse.move(from.x + 100, from.y + 70, { steps: 3 })
+   expect(await nodes(page)).toBe(unlocked)
+   await page.keyboard.press("Escape"); await page.mouse.up()
+   expect(await nodes(page)).toBe(unlocked)
+  } finally { await page.context().close() }
+ }, 30_000)
+
  it.each(["Escape", "pointercancel", "second touch"] as const)("keeps a peer's resized width when a group move is cancelled by %s", async interrupt => {
   const page = await open(interrupt === "second touch", { second: true })
   try {
