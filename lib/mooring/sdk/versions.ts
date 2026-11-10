@@ -101,10 +101,13 @@ export function artifactProjectVersions(source: {
   return {
     async list(signal) {
       const snapshot = await source.read(signal)
+      if (!Number.isSafeInteger(snapshot.latest_version) || snapshot.versions.some(v => !Number.isSafeInteger(v.version))) throw new VersionsError("invalid_versions")
       return { head: String(snapshot.latest_version), versions: snapshot.versions.map(v => ({ version: String(v.version), ...(v.created_at ? { createdAt: v.created_at } : {}), ...(v.message ? { message: v.message } : {}) })) }
     },
     async restore({ target, base }) {
-      const receipt = await source.restore({ version: Number(target), base_version: Number(base) }) as { version?: unknown } | null
+      const targetVersion = Number(target), baseVersion = Number(base)
+      if (!version(target) || !version(base) || !Number.isSafeInteger(targetVersion) || !Number.isSafeInteger(baseVersion) || baseVersion >= Number.MAX_SAFE_INTEGER) throw new VersionsError("unknown_version")
+      const receipt = await source.restore({ version: targetVersion, base_version: baseVersion }) as { version?: unknown } | null
       return { version: typeof receipt?.version === "number" && Number.isSafeInteger(receipt.version) ? String(receipt.version) : "" }
     },
   }

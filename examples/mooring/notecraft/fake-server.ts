@@ -93,3 +93,14 @@ export function memoryJournal(rows: Map<string, RecoveryDraft>, id = Math.random
     async revokeRead() { rows.clear() },
   }
 }
+
+// The demo gives each signed-in person a private journal namespace. Reusing
+// a principal reuses only that person's recovery rows.
+export function createMemoryJournalProfiles() {
+  const profiles = new Map<string, Map<string, RecoveryDraft>>()
+  return (principal: string) => {
+    let rows = profiles.get(principal)
+    if (!rows) { rows = new Map(); profiles.set(principal, rows) }
+    return memoryJournal(rows)
+  }
+}

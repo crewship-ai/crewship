@@ -6,7 +6,7 @@ import { fireEvent, within } from "@testing-library/dom"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { SaveError, type RecoveryDraft, type RecoveryJournal } from "../../../lib/mooring/sdk"
 import { createSingleEditorSave } from "../../../lib/mooring/single-editor-save"
-import { createFakeCraftServer, memoryJournal } from "./fake-server"
+import { createFakeCraftServer, createMemoryJournalProfiles, memoryJournal } from "./fake-server"
 import { mountNoteCraft } from "./notecraft"
 
 beforeEach(() => { vi.stubGlobal("crypto", webcrypto); document.body.innerHTML = "" })
@@ -485,11 +485,12 @@ describe("NoteCraft reference application", () => {
       return { ...real, recovery: async () => { const listed = await real.recovery(); await gate; return listed } }
     }
     const a = open(server, alice, rows, true, journal)
-    vi.spyOn(a.client, "lease").mockRejectedValue(new SaveError("read_revoked"))
+    const lease = vi.spyOn(a.client, "lease").mockRejectedValue(new SaveError("read_revoked"))
     await a.app.refresh()
     await vi.waitFor(() => expect(a.status()).toBe("Přístup ke čtení byl odebrán"))
     release()
     await a.app.ready.catch(() => {})
+    expect(lease).toHaveBeenCalledTimes(1)
     await new Promise(resolve => setTimeout(resolve, 50))
     expect(a.q.queryByRole("button", { name: "Kopírovat" })).toBeNull()
     expect(shown()).not.toContain("old secret")
@@ -520,6 +521,57 @@ describe("NoteCraft reference application", () => {
     await refreshing
     await expect(closing).resolves.toBe("local-copy")
     expect(a.note.value).toBe("Alice late")
+  })
+
+  it("never enables editing when the host journal has synchronously retired", async () => {
+    const server = createFakeCraftServer("previously readable")
+    let opens = 0
+    const rows = new Map<string, RecoveryDraft>()
+    const a = open(server, alice, rows, true, async () => {
+      const journal = memoryJournal(rows)
+      if (++opens === 1) return journal
+      return { ...journal, onRetire(listener) { listener(); return () => {} } }
+    })
+    await a.app.ready
+    a.click("Převzít úpravy")
+    await vi.waitFor(() => expect(a.note).toMatchObject({ value: "", readOnly: true }))
+    await expect(a.app.close()).resolves.toBe("revoked")
+  })
+
+  it("does not reopen or purge a newer journal when an old view receives a late refusal", async () => {
+    const server = createFakeCraftServer("old view")
+    const newer = new Map<string, RecoveryDraft>()
+    const draft: RecoveryDraft = { applicationId: "notecraft", enginePin: "pin", sessionId: "new-admission", generation: "2", baseVersion: "1", editorRevision: "newer", bytes: new TextEncoder().encode("new draft") }
+    let admittedAgain = false
+    const originalOpen = vi.fn(async () => memoryJournal(admittedAgain ? newer : new Map()))
+    const old = open(server, alice, new Map(), false, originalOpen)
+    await old.app.ready
+    let refuse!: (error: unknown) => void
+    const delayed = new Promise<never>((_resolve, reject) => { refuse = reject })
+    const lease = vi.spyOn(old.client, "lease").mockImplementation(() => delayed)
+    const refresh = old.app.refresh().catch(() => {})
+    expect(lease).toHaveBeenCalledTimes(1)
+    admittedAgain = true
+    newer.set("newer", draft)
+    refuse(new SaveError("read_revoked"))
+    await refresh
+    expect(old.note).toMatchObject({ value: "", readOnly: true })
+    expect(originalOpen).toHaveBeenCalledTimes(1)
+    expect(newer.get("newer")).toEqual(draft)
+    await old.app.refresh()
+    expect(lease).toHaveBeenCalledTimes(1)
+  })
+
+  it("the demo journal offers only drafts belonging to the admitted person", async () => {
+    const openJournal = createMemoryJournalProfiles()
+    const aliceDraft = openJournal(alice.actor_id)
+    const draft: RecoveryDraft = { applicationId: "notecraft", enginePin: "pin", sessionId: "alice-admission", generation: "1", baseVersion: "1", editorRevision: "alice", bytes: new TextEncoder().encode("Alice private") }
+    await aliceDraft.persist(draft)
+    await aliceDraft.close()
+    const b = openJournal(bob.actor_id)
+    expect(await b.recovery()).toEqual([])
+    await b.revokeRead()
+    expect((await openJournal(alice.actor_id).recovery()).map(row => row.draft)).toEqual([draft])
   })
 
   it("erases the live view when the host reports read revocation without a transport reply", async () => {

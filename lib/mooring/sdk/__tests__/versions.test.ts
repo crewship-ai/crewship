@@ -43,6 +43,15 @@ describe("Mooring SDK versions", () => {
     }
   })
 
+  it("refuses an imprecise artifact version before sending the restore", async () => {
+    const restore = vi.fn()
+    const h = createVersionHistory(artifactProjectVersions({ read: async () => ({ latest_version: 2 ** 53, versions: [{ version: 2 ** 53 }] }), restore }))
+    await expect(h.list()).rejects.toMatchObject({ reason: "invalid_versions" })
+    await expect(h.restore("9007199254740993", { base: "9007199254740994" })).rejects.toMatchObject({ reason: "unknown_version" })
+    await expect(h.restore("1", { base: "9007199254740991" })).rejects.toMatchObject({ reason: "unknown_version" })
+    expect(restore).not.toHaveBeenCalled()
+  })
+
   it("adapts the artifact project's existing query and restore mutation", async () => {
     const restore = vi.fn(async () => ({ version: 8, page_id: "p" }))
     const t = artifactProjectVersions({ read: async () => ({ latest_version: 7, versions: [{ version: 7, created_at: "2026-10-31T10:00:00Z" }, { version: 6, message: "draft" }] }), restore })

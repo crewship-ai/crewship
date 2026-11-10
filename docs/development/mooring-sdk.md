@@ -181,10 +181,11 @@ lost (or a restore finishes) and no journal can persist the unsaved text,
 NoteCraft keeps the note editable as a local copy instead of loading the
 server version over it; *Znovu uchovat koncept* retries the journal and
 *Zahodit místní kopii* discards it. A read revocation is handled in one
-place, `terminate`, reached from any server call NoteCraft or its save
-lifecycle makes: it purges through the lifecycle and once more through a
-fresh journal handle, removes the text from the note, the offers and memory,
-and never makes a local copy. A sign-out retirement (`stopped` with no read
+place, `terminate`, reached from a transport refusal or terminal host state.
+It clears the note, offers and copied text. A live controller can purge
+through its admitted journal; a late refusal never opens a fresh journal or
+purges drafts from a newer admission. A capture that finishes after read
+loss can remove only its own exact row. A sign-out retirement (`stopped` with no read
 refusal seen) also removes the text but keeps the journal rows.
 
 ```sh
@@ -205,7 +206,6 @@ cp examples/mooring/notecraft/index.html /mnt/dev-workspace/tmp/builds/notecraft
 - **Lease ordering is by generation only.** The lease view has no sequence
   number, so a delayed vacant view, or views reordered within one generation,
   apply in arrival order. Writes are still fenced by the server.
-- **Read revocation is not a distinct phase** (see Lifecycle step 5).
 - **No real server or browser storage in the tests.** The contract tests use
   in-memory doubles; they do not exercise the Go routes, IndexedDB, a real
   editor iframe or the native host.
