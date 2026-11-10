@@ -89,6 +89,17 @@ describe("Design in the artifact frame", () => {
     expect(screen.getByLabelText("Layer name")).toBeEnabled()
   })
 
+  it("skips a hidden screen in next, previous, the artboard picker and Fit (#5228)", () => {
+    upsertDesignNode(state.doc!, { id: "draft", type: "frame", name: "Old draft", x: 800, y: 64, width: 390, height: 844, fill: "#ffffff", hidden: true })
+    upsertDesignNode(state.doc!, { id: "far", type: "frame", name: "Far away", x: 90000, y: 90000, width: 390, height: 844, fill: "#ffffff", hidden: true })
+    mount()
+    expect(within(slot("view")!).getByRole("button", { name: "Artboard: Landing · Desktop" })).toHaveTextContent("2 artboards")
+    expect(within(slot("nav")!).getByText("1 / 2")).toBeInTheDocument()
+    fireEvent.click(within(slot("nav")!).getByRole("button", { name: "Next artboard" }))
+    expect(within(slot("nav")!).getByText("2 / 2")).toBeInTheDocument()
+    expect(within(slot("view")!).getByRole("button", { name: "Artboard: Landing · Mobile" })).toBeInTheDocument()
+    expect(within(slot("nav")!).getByRole("button", { name: "Next artboard" })).toBeDisabled()
+  })
   it("zooms in steps and returns to Fit", () => {
     mount()
     fireEvent.click(within(slot("viewport")!).getByRole("button", { name: "Zoom in" }))

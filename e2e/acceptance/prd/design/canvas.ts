@@ -1,7 +1,7 @@
 // Helpers of the "design" PRD scenario: a live Design canvas opened by several
 // people, driven through the same REST routes the CLI (`crewship page design …`)
 // and the agent's design_* tools use. Scenario-local; not a shared harness API.
-import { expect, type APIRequestContext, type BrowserContext, type Page } from "@playwright/test"
+import { expect, type APIRequestContext, type BrowserContext, type Locator, type Page } from "@playwright/test"
 import { trackPage } from "../created"
 
 export interface DesignNode {
@@ -195,4 +195,10 @@ export async function waitAgentIdle(api: APIRequestContext, workspaceId: string,
     }, { timeout: timeoutMs, intervals: [5_000, 15_000] })
     .toBe("IDLE")
   return status
+}
+
+/** Commit a Design Properties number explicitly, including in concurrency tests. */
+export async function commitNumber(input: Locator, value: string) {
+ await input.fill(value)
+ await input.press("Enter")
 }

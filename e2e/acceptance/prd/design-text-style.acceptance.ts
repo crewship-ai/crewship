@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto"
 import { loginStorageState } from "./auth"
 import { expect, prdRequirement, test } from "./fixtures"
-import { applyOperations, createDesign, enableDesign, getDesign, listVersions, openCanvas, selectWorkspace, sessionUserId, type DesignNode } from "./design/canvas"
+import { applyOperations, commitNumber, createDesign, enableDesign, getDesign, listVersions, openCanvas, selectWorkspace, sessionUserId, type DesignNode } from "./design/canvas"
 
 const tag = () => randomUUID().replaceAll("-", "").slice(0, 8)
 
@@ -40,8 +40,8 @@ test.describe("design text style", () => {
    }
    await style.getByLabel("Font family").selectOption("serif")
    await style.getByLabel("Font weight").selectOption("700")
-   await style.getByLabel("Font size").fill("28")
-   await style.getByLabel("Line height").fill("1.2")
+   await commitNumber(style.getByLabel("Font size"), "28")
+   await commitNumber(style.getByLabel("Line height"), "1.2")
    await style.getByLabel("Text alignment").selectOption("center")
    await style.getByLabel("Wrap text to the box width").check()
    await style.getByLabel("Clip text to the box").check()
