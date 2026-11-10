@@ -144,6 +144,8 @@ export interface WirePage {
   has_workbook?: boolean
   /** The Page carries a version head: project, dashboard, word or sheet. */
   artifact_kind?: string
+  /** What the selected project version is beyond its kind: an interactive App or a design system (#5152). */
+  artifact_profile?: string
   /** The version shared with readers; absent when nothing is shared. */
   artifact_shared_version?: number
   has_mooring?: boolean
@@ -518,6 +520,8 @@ export interface PageView {
   hasApplication?: boolean
   /** Versioned artifact kind from the version head; undefined for any other Page. */
   artifactKind?: "project" | "word" | "sheet" | "dashboard" | "slides" | "design"
+  /** From the same selected manifest as `artifactKind`: an App that runs its own scripts, or a design system. */
+  artifactProfile?: "interactive" | "design_system"
   /** The version readers see; undefined when nothing is shared. */
   artifactSharedVersion?: number
   hasMooring?: boolean
@@ -679,6 +683,7 @@ export function toPageView(raw: WirePage): PageView {
     hasApplication: raw.has_application === true,
     ...(raw.native_craft_application === "wordcraft" || raw.native_craft_application === "gridcraft" ? { nativeCraftApplication: raw.native_craft_application } : {}),
     ...(raw.artifact_kind === "project" || raw.artifact_kind === "word" || raw.artifact_kind === "sheet" || raw.artifact_kind === "dashboard" || raw.artifact_kind === "slides" || raw.artifact_kind === "design" ? { artifactKind: raw.artifact_kind } : {}),
+    ...(raw.artifact_profile === "interactive" || raw.artifact_profile === "design_system" ? { artifactProfile: raw.artifact_profile } : {}),
     ...(Number.isSafeInteger(raw.artifact_shared_version) && raw.artifact_shared_version! > 0 ? { artifactSharedVersion: raw.artifact_shared_version } : {}),
     hasMooring: raw.has_mooring === true,
     hasCollaboration: raw.has_collaboration === true,

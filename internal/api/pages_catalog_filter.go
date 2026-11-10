@@ -129,8 +129,12 @@ func pageCatalogQueryRows(r *http.Request, index *pageIndex, rows []pageIndexRow
 		if text != "" && !strings.Contains(strings.ToLower(rec.Name), text) && !strings.Contains(strings.ToLower(rec.Slug), text) {
 			continue
 		}
-		typedKind := artifactSelectedMetadataKind(rec.ArtifactContentType, rec.ArtifactDashboardDeclaration, true, rec.ArtifactSelectedManifest, rec.ArtifactSlidesDeclaration, rec.ArtifactSlidesEnabled)
+		typedKind := artifactSelectedMetadataKind(rec.ArtifactContentType, rec.ArtifactDashboardDeclaration, true, rec.ArtifactSelectedManifest, rec.ArtifactSlidesDeclaration, rec.ArtifactSlidesEnabled, rec.ArtifactProfile)
 		kind := typedKind
+		// The facet and the kind sort name a design system as the library does (#5152).
+		if rec.ArtifactProfile == artifactProfileDesignSystem {
+			kind = "design"
+		}
 		if kind == "" {
 			switch {
 			case rec.HasWorkbook:

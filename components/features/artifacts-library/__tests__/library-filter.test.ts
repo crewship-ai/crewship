@@ -66,7 +66,7 @@ describe("library filters", () => {
   })
 
   it("filters by facets and folder, Unfiled as an empty slug", () => {
-    expect(filter({ kinds: ["page"] })).toEqual(["weekly"])
+    expect(filter({ kinds: ["dashboard"] })).toEqual(["weekly"])
     expect(filter({ access: ["private"] })).toEqual(["draft"])
     expect(filter({ version: ["shared"], folder: "sales" })).toEqual(["site"])
     expect(filter({ folder: "", kinds: ["word"] })).toEqual(["brief"])
@@ -88,8 +88,8 @@ describe("library filters", () => {
   })
 
   it("counts a facet's values with the other facets applied", () => {
-    const counts = facetCounts(items, { ...EMPTY_FILTERS, view: "all", kinds: ["project"] })
-    expect(counts.kinds).toEqual([["project", 5], ["page", 1], ["word", 1]])
+    const counts = facetCounts(items, { ...EMPTY_FILTERS, view: "all", kinds: ["app"] })
+    expect(counts.kinds).toEqual([["dashboard", 1], ["app", 5], ["word", 1]])
     expect(counts.access).toEqual([["open", 4], ["private", 1]])
   })
 
@@ -99,9 +99,36 @@ describe("library filters", () => {
   })
 })
 
+// #5152: one derivation of the real profile for list, counts and filters.
+describe("kinds from the selected version's profile", () => {
+  const profiled = libraryItems([
+    page({ slug: "showcase", name: "Showcase", artifact_kind: "project", artifact_profile: "interactive" } as Partial<WirePage>),
+    page({ slug: "tokens", name: "Design system", artifact_kind: "project", artifact_profile: "design_system" } as Partial<WirePage>),
+    page({ slug: "sales", name: "Sales", artifact_kind: "dashboard" }),
+    page({ slug: "site", name: "Site", artifact_kind: "project" }),
+  ].map(toPageView))
+  const only = (kinds: LibraryFilters["kinds"]) => applyFilters(profiled, { ...EMPTY_FILTERS, view: "all", kinds }).map(item => item.slug).sort()
+
+  it("files an interactive app under Apps and a design system under Designs, never Dashboards", () => {
+    expect(only(["app"])).toEqual(["showcase", "site"])
+    expect(only(["design"])).toEqual(["tokens"])
+    expect(only(["dashboard"])).toEqual(["sales"])
+    expect(facetCounts(profiled, { ...EMPTY_FILTERS, view: "all" }).kinds).toEqual([["dashboard", 1], ["design", 1], ["app", 2]])
+    expect(applyFilters(profiled, { ...EMPTY_FILTERS, view: "all", q: "kind:designs" }).map(item => item.slug)).toEqual(["tokens"])
+    expect(groupItems(profiled, "kind").map(group => [group.label, group.items.map(item => item.slug).sort()])).toEqual([["Apps", ["showcase", "site"]], ["Designs", ["tokens"]], ["Dashboards", ["sales"]]])
+  })
+
+  it("reads older storage words in a saved link as the kind they show as", () => {
+    expect(filtersFromParams(new URLSearchParams("kind=project,page,dashboard")).kinds).toEqual(["app", "dashboard"])
+    expect(filtersFromParams(new URLSearchParams("kind=apps,design")).kinds).toEqual(["app", "design"])
+    // A Page with panels and a Dashboard both show as Dashboards: one kind, not two.
+    expect(filtersFromParams(new URLSearchParams("kind=page,dashboard")).kinds).toEqual(["dashboard"])
+  })
+})
+
 describe("filters in the URL", () => {
   it("round-trips every filter and leaves defaults and other parameters alone", () => {
-    const filters: LibraryFilters = { view: "all", q: "kind:word plan", kinds: ["word", "page"], access: ["private"], version: ["unshared"], owners: ["You"], folder: "" }
+    const filters: LibraryFilters = { view: "all", q: "kind:word plan", kinds: ["word", "dashboard"], access: ["private"], version: ["unshared"], owners: ["You"], folder: "" }
     const params = filtersToParams(filters, new URLSearchParams("workspace_id=ws1&item=brief"))
     expect(params.get("workspace_id")).toBe("ws1")
     expect(params.get("item")).toBe("brief")
@@ -143,15 +170,20 @@ describe("serverCatalogParams", () => {
   const asObject = (params: URLSearchParams | null) => params && Object.fromEntries(params)
 
   it("maps the All view's plain filters to the server catalog, leaving empty items out as the view does", () => {
-    expect(asObject(serverCatalogParams({ ...all, q: "  Pricing   Site ", kinds: ["project", "word"], access: ["private"], version: ["unshared"], folder: "" }, "name", { design: true })))
-      .toEqual({ empty: "exclude", sort: "name", q: "pricing site", kind: "project,word", access: "private", version: "unshared", folder: "~unfiled" })
+    expect(asObject(serverCatalogParams({ ...all, q: "  Pricing   Site ", access: ["private"], version: ["unshared"], folder: "" }, "name", { design: true })))
+      .toEqual({ empty: "exclude", sort: "name", q: "pricing site", access: "private", version: "unshared", folder: "~unfiled" })
     expect(asObject(serverCatalogParams(all, "updated", { design: true }))).toEqual({ empty: "exclude", sort: "updated" })
   })
 
   it("keeps Design out of the server request while Design is off, as the browser list does", () => {
-    expect(serverCatalogParams(all, "kind", { design: false })?.get("kind")).toBe("project,dashboard,page,word,sheet,slides")
-    expect(serverCatalogParams({ ...all, kinds: ["design", "word"] }, "kind", { design: false })?.get("kind")).toBe("word")
-    expect(serverCatalogParams({ ...all, kinds: ["design"] }, "kind", { design: false })).toBeNull()
+    expect(serverCatalogParams(all, "updated", { design: false })?.get("kind")).toBe("project,dashboard,page,word,sheet,slides")
+  })
+
+  // #5152: the server's kind is storage; UI kinds are derived once, in the browser.
+  it("leaves a kind filter and the kind sort to the browser", () => {
+    expect(serverCatalogParams({ ...all, kinds: ["app"] }, "updated", { design: true })).toBeNull()
+    expect(serverCatalogParams({ ...all, kinds: ["word"] }, "updated", { design: false })).toBeNull()
+    expect(serverCatalogParams(all, "kind", { design: true })).toBeNull()
   })
 
   it("leaves what only the browser can express to the browser", () => {
