@@ -126,6 +126,29 @@ func TestSlidesArtifactRefusesUnsupportedWithoutPartialProjection(t *testing.T) 
 		})
 	}
 }
+func TestSlidesArtifactRejectsInvalidBindingAndStillRefusesOtherFiles(t *testing.T) {
+	for name, file := range map[string]VersionFile{
+		"wrong media":     {MediaType: "text/plain", Content: []byte(`{"schema_version":1}`)},
+		"unsupported key": {MediaType: "application/json", Content: []byte(`{"schema_version":1,"url":"https://example.test"}`)},
+		"duplicate token": {MediaType: "application/json", Content: []byte(`{"schema_version":1,"background":"canvas","background":"ink"}`)},
+		"oversize":        {MediaType: "application/json", Content: []byte(`{"schema_version":1}` + strings.Repeat(" ", 1024))},
+	} {
+		t.Run(name, func(t *testing.T) {
+			files := slideFiles([]string{"intro"}, slideText("title", "Hello"))
+			files[slidesLibraryBindingFile] = file
+			if _, err := ParseSlidesArtifact("page-id", files); !errors.Is(err, ErrSlidesArtifactUnsupported) {
+				t.Fatalf("invalid binding: %v", err)
+			}
+		})
+	}
+	files := slideFiles([]string{"intro"}, slideText("title", "Hello"))
+	files[slidesLibraryBindingFile] = VersionFile{MediaType: "application/json", Content: []byte(`{"schema_version":1,"background":"canvas"}`)}
+	files["extra.json"] = VersionFile{MediaType: "application/json", Content: []byte(`{}`)}
+	if _, err := ParseSlidesArtifact("page-id", files); !errors.Is(err, ErrSlidesArtifactUnsupported) {
+		t.Fatalf("unlisted file: %v", err)
+	}
+}
+
 func TestSlidesArtifactBoundariesAndGlobalIDs(t *testing.T) {
 	build := func(counts ...int) map[string]VersionFile {
 		order := make([]string, len(counts))
