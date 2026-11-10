@@ -16,22 +16,23 @@ import { KIND_ORDER, KINDS, kindOf, uiKindCounts, type ArtifactKind } from "./ki
 import { KindBadge, KindTile } from "./kind-tile"
 import { KindThumb } from "./kind-thumb"
 
-/** The existing creation flow behind each kind, first live one wins. Docs has none yet, so it is not offered. */
-export const CREATE_FLOW: Record<ArtifactKind, readonly ArtifactKindKey[]> = {
-  docs: [], dashboard: ["dashboard"], slides: ["slides"], design: ["design"], app: ["project", "page"], word: ["word"], sheet: ["sheet"],
+/** Library Docs uses human collaborative creation, distinct from the Word Craft flow and agent artifact kinds. */
+export type LibraryCreationFlow = ArtifactKindKey
+export const CREATE_FLOW: Record<ArtifactKind, readonly LibraryCreationFlow[]> = {
+  docs: ["docs"], dashboard: ["dashboard"], slides: ["slides"], design: ["design"], app: ["project", "page"], word: ["word"], sheet: ["sheet"],
 }
 
-export function creatableUiKinds(creatable: readonly ArtifactKindKey[]): { kind: ArtifactKind; flow: ArtifactKindKey }[] {
+export function creatableUiKinds(creatable: readonly ArtifactKindKey[], docsAvailable = false): { kind: ArtifactKind; flow: LibraryCreationFlow }[] {
   return KIND_ORDER.flatMap(kind => {
-    const flow = CREATE_FLOW[kind].find(key => creatable.includes(key))
+    const flow = CREATE_FLOW[kind].find(key => key === "docs" ? docsAvailable : creatable.includes(key))
     return flow ? [{ kind, flow }] : []
   })
 }
 
 /** New artifact: one popover grouped Artifact and Craft, each entry opening the existing New artifact dialog on its flow. */
-export function NewArtifactMenu({ creatable, onNew }: { creatable: readonly ArtifactKindKey[]; onNew: (flow: ArtifactKindKey) => void }) {
+export function NewArtifactMenu({ creatable, docsAvailable = false, onNew }: { creatable: readonly ArtifactKindKey[]; docsAvailable?: boolean; onNew: (flow: LibraryCreationFlow) => void }) {
   const [open, setOpen] = useState(false)
-  const entries = creatableUiKinds(creatable)
+  const entries = creatableUiKinds(creatable, docsAvailable)
   if (!entries.length) return null
   const group = (family: "Artifact" | "Craft", caption: string) => {
     const list = entries.filter(entry => KINDS[entry.kind].family === family)

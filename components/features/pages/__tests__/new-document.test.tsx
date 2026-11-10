@@ -11,8 +11,23 @@ vi.mock("@/lib/mooring/wordcraft-create",()=>({createEmptyWordCraftCheckpoint:mo
 vi.mock("@/lib/mooring/wordcraft-host-session",()=>({openWordCraftSession:mocks.openNative}))
 vi.mock("@/lib/mooring/wordcraft-command-session",()=>({commandRequest:mocks.openCommand}))
 afterEach(()=>{cleanup();mocks.fetch.mockReset();mocks.allowed=true;mocks.enabled=true;mocks.commands=false;mocks.native=false;mocks.sdkPrefix=undefined;mocks.checkpoint.mockReset();mocks.openNative.mockReset();mocks.openCommand.mockReset()})
-function mount(){const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{retry:false}}});const created=vi.fn();render(<QueryClientProvider client={client}><NewDocumentDialog workspaceId="workspace" onClose={vi.fn()} onCreated={created} /></QueryClientProvider>);fireEvent.change(screen.getByLabelText("Name"),{target:{value:"Notes"}});return {created,client}}
+function mount(docsOnly=false){const client=new QueryClient({defaultOptions:{queries:{retry:false,gcTime:0},mutations:{retry:false}}});const created=vi.fn();render(<QueryClientProvider client={client}><NewDocumentDialog workspaceId="workspace" onClose={vi.fn()} onCreated={created} docsOnly={docsOnly} /></QueryClientProvider>);fireEvent.change(screen.getByLabelText("Name"),{target:{value:"Notes"}});return {created,client}}
 const response=(value:unknown,status=200)=>Promise.resolve({ok:status<400,status,json:async()=>value})
+it("New Docs creates collaborative schema5 and returns its canonical ID even when native Word is available",async()=>{
+  mocks.native=true
+  mocks.fetch.mockImplementation((url:string,init?:RequestInit)=>url.includes("/initialize")?response({id:JSON.parse(init!.body as string).id,rev:0,epoch:1,actor:"human",kind:"init",found:true,duplicate:true}):response({id:"docs-id",slug:"notes"}))
+  const {created,client}=mount(true)
+  expect(screen.queryByLabelText("Format")).toBeNull()
+  fireEvent.click(screen.getByRole("button",{name:"Create Docs"}))
+  await waitFor(()=>expect(created).toHaveBeenCalledWith("notes","docs-id"))
+  expect(mocks.fetch.mock.calls.filter(([url])=>url.includes("/initialize"))).toHaveLength(1)
+  expect(JSON.parse(mocks.fetch.mock.calls[1][1].body)).toMatchObject({schema:CREATE_SCHEMA,page_id:"docs-id"})
+  expect(mocks.openNative).not.toHaveBeenCalled();expect(mocks.checkpoint).not.toHaveBeenCalled();client.clear()
+})
+it.each(["access","availability"])("New Docs cannot fall through to native Word without confirmed %s",mode=>{
+  mocks.native=true;if(mode==="access")mocks.allowed=false;else mocks.enabled=false
+  const {client}=mount(true);expect(screen.getByRole("button",{name:"Create Docs"})).toBeDisabled();expect(mocks.fetch).not.toHaveBeenCalled();client.clear()
+})
 // The UI initializes at CREATE_SCHEMA, the engine CREATE_VERSION that Go
 // documents.CreateSchema is tested equal to, so UI and API/CLI creation agree (#5233).
 it("retries numeric initialization with the original Page and creation-schema payload",async()=>{
