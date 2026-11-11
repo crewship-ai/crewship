@@ -270,7 +270,8 @@ def run(index, count, timeout, bootstrap_directory=None, *, profile_directory=No
     # compile is reused by the run instead of rebuilding SQLite.
     inventory = subprocess.check_output(['go', 'test', PACKAGE_DIR, '-race', RACE_GCFLAGS, '-list', '.'],
                                         cwd=ROOT, env=env, text=True)
-    names, shards = partition(inventory, count, adjacent=PACKAGE == MODULE + '/internal/api')
+    # Restore the pre-adjacent placement; retain strict gates and checked selectors.
+    names, shards = partition(inventory, count)
     selected = shards[index]
     pattern = selection_pattern(selected, names if PACKAGE == MODULE + '/internal/api' else None)
     manifest = {'index': index, 'count': count, 'inventory_count': len(names),

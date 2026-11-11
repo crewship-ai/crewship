@@ -1,0 +1,1 @@
+Restore the API race runner’s previous round-robin placement while preserving inventory-checked selectors, exact executed-root coverage, bootstrap accounting, strict all-event duration alarms, process counts and deadlines.
