@@ -54,6 +54,16 @@ describe("pinned theme", () => {
     expect(slideFontFaces([inter], "deck/1")[0].alias).not.toBe(faces[0].alias)
   })
 
+  it("scans repeated comments without backtracking or mistaking a commented doctype for a real one", () => {
+    const css = ":root{--ds-color-ink:#101010;}"
+    const style = `<style data-library-pin>${css}</style>`
+    const comments = "<!-- <!doctype fake> -->".repeat(4096)
+    const document = "<html><body>Text</body></html>"
+    expect(withPinnedTheme(comments + document, css)).toBe(style + comments + document)
+    expect(withPinnedTheme(comments + "<!DOCTYPE html>" + document, css)).toBe(comments + "<!DOCTYPE html>" + style + document)
+    expect(withPinnedTheme(comments + "<!-- <!doctype html>", css)).toBe(style + comments + "<!-- <!doctype html>")
+  })
+
   it("keeps a leading doctype and never writes into a commented-out head", () => {
     const html = '<!-- <head> -->\n<!doctype html><html><head><title>Preview</title></head><body>Text</body></html>'
     const out = withPinnedTheme(html, ":root{--ds-color-ink:#111111;}")

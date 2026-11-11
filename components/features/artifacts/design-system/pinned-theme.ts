@@ -70,8 +70,18 @@ export function withPinnedTheme(html: string, css: string | null): string {
   // A style before <html> opens the implicit head. Keep a real doctype
   // ahead of it so it doesn't put the preview into quirks mode. Commented
   // tags are never treated as an insertion point.
-  const doctype = /^(?:\s|<!--[\s\S]*?-->)*<!doctype\s[^>]*>/i.exec(html)
-  const index = doctype?.[0].length ?? 0
+  let start = 0
+  for (;;) {
+    while (start < html.length && /\s/.test(html.charAt(start))) start++
+    if (!html.startsWith("<!--", start)) break
+    const end = html.indexOf("-->", start + 4)
+    if (end === -1) break
+    start = end + 3
+  }
+  const afterKeyword = start + "<!doctype".length
+  const end = html.slice(start, afterKeyword).toLowerCase() === "<!doctype" && /\s/.test(html.charAt(afterKeyword))
+    ? html.indexOf(">", afterKeyword + 1) : -1
+  const index = end + 1
   return html.slice(0, index) + style + html.slice(index)
 }
 
