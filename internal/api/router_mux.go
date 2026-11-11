@@ -4,7 +4,9 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 )
 
 // routeMux is a thin recording wrapper around http.ServeMux.
@@ -57,6 +59,9 @@ type routeMux struct {
 	// is deterministic run to run.
 	shapeOrder []string
 	sealed     bool
+
+	// Bind guard discovery to every original pattern and its registration order.
+	registrations []string
 }
 
 func newRouteMux() *routeMux {
@@ -106,6 +111,7 @@ func normalizeShape(path string) string {
 }
 
 func (m *routeMux) record(pattern string) {
+	m.registrations = append(m.registrations, pattern)
 	method, path := splitPattern(pattern)
 	if m.methods[path] == nil {
 		m.methods[path] = map[string]bool{}
@@ -223,12 +229,57 @@ func (m *routeMux) sealMethodGuards() {
 	}
 	m.sealed = true
 
-	type guard struct {
-		pattern string
-		allow   string
+	for _, g := range methodGuardsFor(m) {
+		m.mux.Handle(g.pattern, methodNotAllowedHandler(g.allow))
 	}
-	var guards []guard
+}
 
+type routeMethodGuard struct {
+	pattern string
+	allow   string
+}
+
+// Only the most recent immutable plan is retained. Its inputs are the exact
+// ordered registrations and probe methods, never handlers or request state.
+// Routers with another route surface must discover their own plan.
+var methodGuardPlanCache struct {
+	sync.Mutex
+	key    string
+	guards []routeMethodGuard
+}
+
+func methodGuardsFor(m *routeMux) []routeMethodGuard {
+	// Length framing keeps this an exact key even when patterns contain
+	// separators. Include the method list separately from the registrations.
+	var key strings.Builder
+	write := func(value string) {
+		key.WriteString(strconv.Itoa(len(value)))
+		key.WriteByte(':')
+		key.WriteString(value)
+	}
+	write(strconv.Itoa(len(guardedMethods)))
+	for _, method := range guardedMethods {
+		write(method)
+	}
+	write(strconv.Itoa(len(m.registrations)))
+	for _, pattern := range m.registrations {
+		write(pattern)
+	}
+	signature := key.String()
+
+	methodGuardPlanCache.Lock()
+	defer methodGuardPlanCache.Unlock()
+	if methodGuardPlanCache.key == signature {
+		return methodGuardPlanCache.guards
+	}
+	guards := m.discoverMethodGuards()
+	methodGuardPlanCache.key = signature
+	methodGuardPlanCache.guards = guards
+	return guards
+}
+
+func (m *routeMux) discoverMethodGuards() []routeMethodGuard {
+	var guards []routeMethodGuard
 	for _, shape := range m.shapeOrder {
 		set := m.shapeMethods[shape]
 		if set[""] {
@@ -262,13 +313,11 @@ func (m *routeMux) sealMethodGuards() {
 				// inside it would 405 traffic the mount is there to accept.
 				continue
 			}
-			guards = append(guards, guard{pattern: method + " " + spelling, allow: allow})
+			guards = append(guards, routeMethodGuard{pattern: method + " " + spelling, allow: allow})
 		}
 	}
 
-	for _, g := range guards {
-		m.mux.Handle(g.pattern, methodNotAllowedHandler(g.allow))
-	}
+	return guards
 }
 
 // pathParamSub matches a ServeMux wildcard segment ({id}, {token...}) so a
