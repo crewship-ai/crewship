@@ -63,6 +63,12 @@ func (m *craftNativeHTTP) retirementFinding(ctx context.Context, entry *craftNat
 // events is an authenticated server heartbeat. It never depends on browser
 // visibility, never acquires custody, and renews only this exact live holder.
 func (m *craftNativeHTTP) events(w http.ResponseWriter, r *http.Request) {
+	m.eventsOnTick(w, r, nil)
+}
+
+// eventsOnTick shares the complete stream boundary with deterministic tests.
+// Only events is routed; a nil clock uses the production heartbeat cadence.
+func (m *craftNativeHTTP) eventsOnTick(w http.ResponseWriter, r *http.Request, ticks <-chan time.Time) {
 	entry, err := m.bound(r)
 	if err != nil {
 		craftNativeHTTPError(w, err)
@@ -104,8 +110,11 @@ func (m *craftNativeHTTP) events(w http.ResponseWriter, r *http.Request) {
 		draft, reason := m.retirementFinding(r.Context(), entry)
 		send("session_retired", map[string]any{"delivery": "stopped", "reason": reason, "draft": draft})
 	}
-	ticker := time.NewTicker(craftNativeEventInterval)
-	defer ticker.Stop()
+	if ticks == nil {
+		ticker := time.NewTicker(craftNativeEventInterval)
+		defer ticker.Stop()
+		ticks = ticker.C
+	}
 	for {
 		// Repeat original-source, scope and current Page read authority immediately
 		// before each metadata delivery. No document bytes flow through this stream.
@@ -146,7 +155,7 @@ func (m *craftNativeHTTP) events(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ticker.C:
+		case <-ticks:
 		}
 	}
 }

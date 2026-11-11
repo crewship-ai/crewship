@@ -189,6 +189,15 @@ func TestSessionRuntimeWrongScopeAndOverflowCloseActualChild(t *testing.T) {
 			if s.Err() == nil {
 				t.Fatal("missing poison cause")
 			}
+			stage := s.FailureStage()
+			expected := map[string]string{"wrong-scope": "reader.validate", "unsolicited": "reader.reply-correlation", "flood": "reader.control-budget"}[mode]
+			if stage != expected {
+				t.Fatalf("first transport failure stage=%q want=%q", stage, expected)
+			}
+			_ = s.Close()
+			if s.FailureStage() != stage {
+				t.Fatal("host teardown replaced original transport failure stage")
+			}
 			if s.process.cmd.ProcessState == nil {
 				t.Fatal("Done before actual process exit")
 			}
