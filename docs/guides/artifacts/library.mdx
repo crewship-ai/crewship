@@ -446,15 +446,91 @@ record the project owns:
 - restoring or editing the Library never changes it;
 - deleting the Library, or losing your access to it, keeps the copy;
 - losing access does block the next update;
-- everyone who can read the project can read the copy (tokens and Library
-  name), even without access to the Library, and the copy survives unsharing
-  the Library. Pin only tokens all of the project's readers may see.
+- everyone who can read the project can read the copy (tokens, Library name,
+  and the font and licence files the pin carries), even without access to the
+  Library, and the copy survives unsharing the Library. Pin only what all of
+  the project's readers may see.
 
-Project previews do not yet render with the pinned tokens; today the pin is a
-record with an update review. That rendering is planned.
+### What a pin carries
+
+Tokens are closed literals (hex colours, pixels, plain font-family names), so
+they cannot reference other files. Besides `design-system.json`, a pin carries
+the Library's **font files** and the **licence files** that let them travel:
+
+- Store a font in the Library as a text file with a font extension
+  (`.woff2`, `.woff`, `.ttf`, `.otf`) whose content is a base64 data URL,
+  for example `data:font/woff2;base64,d09GMg…`. The bytes must start like the
+  format the extension names.
+- An optional `fonts.json` names each font's family, weight and style, and may
+  give its licence as an SPDX id:
+
+  ```json
+  {"schema_version": 1, "fonts": [
+    {"file": "fonts/Inter-Regular.woff2", "family": "Inter", "weight": 400, "style": "normal"},
+    {"file": "fonts/Brand.woff2", "family": "Brand", "license": "LicenseRef-Proprietary"}
+  ]}
+  ```
+
+- A font is copied only with a redistributable licence:
+  - an explicit `license` in `fonts.json` of `OFL-1.1`, `OFL-1.0`,
+    `Apache-2.0`, `MIT`, `UFL-1.0`, `CC0-1.0`, `Bitstream-Vera` or
+    `BSD-3-Clause` (any other id keeps the font out, whatever licence files
+    say);
+  - without one, a `LICENSE`, `OFL` or `COPYING` file **next to the font**
+    titled with the SIL Open Font License 1.1, Apache License 2.0, the Ubuntu
+    Font Licence 1.0, the MIT License or CC0 1.0 Universal;
+  - without either, a licence file at the **Library root** only when it is a
+    font licence (OFL or UFL). A root MIT or Apache `LICENSE` usually covers
+    the repository's code, so it never lets an undeclared font travel; declare
+    the font's `license` in `fonts.json` instead.
+
+  Only the licence's title line counts (for example
+  `SIL OPEN FONT LICENSE Version 1.1`), at the start of a line; a sentence that
+  merely mentions a licence, such as "not under the SIL Open Font License",
+  does not. The licence file is copied with the font.
+- A font without such a licence, over 1 MiB, or one that would take the pin
+  past 4 MiB is listed with the reason and never copied. The 4 MiB covers
+  every copied byte, the licence files included. Nothing is ever downloaded.
+
+Publishing refuses a version whose `fonts.json` or font files are invalid.
+`crewship page artifact pin files <slug>` returns the carried files, bytes in
+base64; each copy is checked against its SHA-256 whenever its bytes are read.
+The pin itself, `pin show` and `pin check` list the files without loading the
+bytes. The project's Library notice lists the fonts its pin left behind, with
+the reason.
+
+A pin made before fonts travelled with a Library holds the published version
+but no files. `pin check` then reports `dependencies_missing` together with
+`update_available`, and applying the same version copies the fonts without
+changing the tokens.
+
+### Previews render from the pin
+
+A project that pins a Library previews with its own copy, never the live
+Library, so edits, restores and publications change nothing until someone
+applies an update:
+
+- a static project preview gets the pinned default theme as CSS custom
+  properties, first in its `<head>` so the project's own styles still win:
+  `--ds-color-<name>`, `--ds-space-<name>`, `--ds-radius-<name>`,
+  `--ds-font-<name>` and `--ds-font-size-<name>`, plus an `@font-face` for each
+  copied font that `fonts.json` names. Use them as
+  `color: var(--ds-color-primary)`;
+- Slides can name pin tokens in an optional `slides-library.json` file in the
+  consumer's saved project. For example:
+  `{"schema_version":1,"background":"canvas","text_color":"ink","typography":"body"}`.
+  The first two names select color tokens; the third selects the text size,
+  weight and font family. The preview, thumbnails and Present use the resolved
+  values. A missing token or uncopied font keeps the saved styling for that
+  property. The PDF still uses the saved deck.
+
+
+Interactive and Dashboard previews do not apply the pinned theme yet.
 
 When the owner publishes a different version, `crewship page artifact pin check`
-reports **update available** with the token paths it adds, removes and changes.
+reports **update available** with the token paths it adds, removes and changes,
+the font and licence files it adds, removes and changes, and the fonts it would
+leave behind with the reason.
 Nothing changes until someone with Edit on the project applies exactly the
 reviewed state with `pin set --version <published> --if-pinned-library <library>
 --if-pinned-version <pinned>`. Workspace administrators cannot pin a Library

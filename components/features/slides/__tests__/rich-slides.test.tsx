@@ -55,6 +55,17 @@ describe("schema-3 boundary", () => {
   })
 })
 
+describe("Library-pinned faces (#5248)", () => {
+  it("draws a family the pin carries from its per-deck alias, with the named family as fallback", () => {
+    const { container } = render(<SlideCanvas deck={structuredClone(v1.deck)} slideId="slide_b" fontAliases={{ "DejaVu Sans": "crewship-pin-deck-DejaVu-Sans" }} />)
+    expect(container.querySelector<HTMLElement>('[data-slide-content="title_b"]')!.style.fontFamily).toBe('crewship-pin-deck-DejaVu-Sans, "DejaVu Sans"')
+  })
+  it("keeps the bundled schema-3 faces ahead of any pin", () => {
+    const { container } = render(<SlideCanvas deck={rich()} slideId="cover" fontAliases={{ "IBM Plex Sans": "crewship-pin-deck-IBM-Plex-Sans" }} />)
+    expect(container.querySelector<HTMLElement>('[data-slide-content="cover-title"]')!.style.fontFamily).toBe('"IBM Plex Sans", sans-serif')
+  })
+})
+
 describe("schema-3 canvas", () => {
   it("draws typography from the bundled faces with weight, spacing and line height", () => {
     const { container } = render(<SlideCanvas deck={rich()} slideId="cover" />)

@@ -37,6 +37,7 @@ func TestStorageLaterSourcesMatchTheirTriggers(t *testing.T) {
 		{"document_comments", "20261108145251_document_comments.sql"},
 		{"document_proposals", "20261108204553_document_proposals.sql"},
 		{"artifact_library_pins", "20261110221226_artifact_library_pins.sql"},
+		{"artifact_library_pin_files", "20261110223333_artifact_library_pin_files.sql"},
 	} {
 		raw, err := os.ReadFile("../database/migrations/" + source.migration)
 		if err != nil {

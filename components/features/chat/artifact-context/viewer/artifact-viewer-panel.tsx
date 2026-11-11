@@ -30,7 +30,8 @@ import { ArtifactInteractivePreview } from "./artifact-interactive-preview"
 import { ArtifactSlidesPreview } from "./artifact-slides-preview"
 import { ArtifactDesignSystemPreview } from "@/components/features/artifacts/design-system/design-system-preview"
 import { hasDesignSystemFile } from "@/components/features/artifacts/design-system/manifest"
-import { LibraryPinNotice } from "@/components/features/artifacts-library/kinds/design/library-publication"
+import { LibraryPinNotice, usePinnedLibrary } from "@/components/features/artifacts-library/kinds/design/library-publication"
+import { pinnedSlideTheme, withPinnedTheme } from "@/components/features/artifacts/design-system/pinned-theme"
 import { isValidAnchorSelector, screenLabel, screenLabels } from "./element-select"
 
 export type ArtifactViewerVariant = "pane" | "fullscreen" | "library"
@@ -348,6 +349,11 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
   const labelOf = (path: string) => labels.get(path) ?? screenLabel(path)
   const screen = screenPath && screens.includes(screenPath) ? screenPath : screens[0] ?? ""
   const html = data.manifest.files.find(file => file.path === screen)?.content ?? ""
+  // A project that pins a Library renders from its own copy of the tokens and fonts (#5248).
+  const pinned = usePinnedLibrary(workspaceId, "@" + data.page_id, artifactDesignSystem() && !designSystem)
+  const pinnedCss = pinned?.css ?? null
+  const slideTheme = useMemo(() => pinnedSlideTheme(pinned?.tokens, data.manifest.files), [pinned?.tokens, data.manifest.files])
+  const themedHtml = useMemo(() => withPinnedTheme(html, pinnedCss), [html, pinnedCss])
   // The server anchors comments by a unique #id only; a screen without ids has nothing to select.
   const anchorable = useMemo(() => slidesMode ? slidesMode === "slides" : typeof DOMParser === "undefined" || new DOMParser().parseFromString(html, "text/html").querySelector("body [id]") !== null, [html, slidesMode])
   const versions = useMemo(() => [...data.versions].sort((a, b) => b.version - a.version), [data.versions])
@@ -663,14 +669,14 @@ function LoadedViewer({ data, target, setViewing, readForRetry, workspaceId, she
     : data.interactive && !(canComment && selectMode && !viewingOld) ? "interactive" : designSystem ? "design-system"
       : artifactDashboards() && data.manifest.files.some(file => file.path === "dashboard.json") ? "dashboard" : "static"
   const preview = slidesMode === "unsupported" ? <p role="alert" className="p-4">This Slides format is unsupported.</p>
-        : slidesMode === "slides" ? <ArtifactSlidesPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} artifactKind={data.artifact_kind} path={screenPath ?? ""} title={`Preview of ${labelOf(screen)}`} selectMode={canComment && selectMode && !viewingOld} onSelect={select} onNavigate={setScreenPath} />
+        : slidesMode === "slides" ? <ArtifactSlidesPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} artifactKind={data.artifact_kind} path={screenPath ?? ""} title={`Preview of ${labelOf(screen)}`} selectMode={canComment && selectMode && !viewingOld} onSelect={select} onNavigate={setScreenPath} pinnedFiles={pinned?.files} pinnedTheme={slideTheme} />
         // Select mode keeps the static preview so comments anchor to inert markup.
         : data.interactive && !(canComment && selectMode && !viewingOld)
         ? <ArtifactInteractivePreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} files={data.manifest.files} path={screen} runtime={data.interactive} canWrite={canWrite && !viewingOld} title={`Preview of ${labelOf(screen)}`} />
         : designSystem ? <ArtifactDesignSystemPreview files={data.manifest.files} title={`Preview of ${data.name ?? data.slug ?? target.slug}`} />
         : artifactDashboards() && data.manifest.files.some(file => file.path === "dashboard.json")
         ? <ArtifactDashboardPreview workspaceId={workspaceId} pageId={data.page_id} codeVersion={shown} files={data.manifest.files} path={screen} selectMode={canComment && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`} onSelect={select} onNavigate={setScreenPath} />
-        : <ArtifactPreviewFrame html={html} files={data.manifest.files} screens={screens} path={screen} selectMode={canComment && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
+        : <ArtifactPreviewFrame html={themedHtml} files={data.manifest.files} screens={screens} path={screen} selectMode={canComment && selectMode && !viewingOld} title={`Preview of ${labelOf(screen)}`}
           highlight={highlight} onSelect={select} onNavigate={setScreenPath} />
   const canvas = <div ref={canvasRef} className="relative rounded-card bg-muted p-3.5">
     <div className={cn("overflow-hidden rounded-md border bg-white", fullscreen ? "h-[max(320px,calc(100dvh-14rem))]" : "h-[min(70vh,560px)] min-h-[320px]")}>

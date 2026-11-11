@@ -55,6 +55,9 @@ type LibraryPin struct {
 	SHA256         string `json:"sha256"`
 	CopiedBy       string `json:"copied_by"`
 	CopiedAt       string `json:"copied_at"`
+	// Files lists the copied dependencies (fonts and their licences) and the
+	// fonts left behind, without their bytes (#5248).
+	Files []LibraryPinFile `json:"files"`
 }
 
 type LibraryChanges struct {
@@ -73,6 +76,16 @@ type LibraryUpdate struct {
 	LibraryAvailable bool           `json:"library_available"`
 	UpdateAvailable  bool           `json:"update_available"`
 	Changes          LibraryChanges `json:"changes"`
+	// FileChanges compares dependency files by path and content; NotCopied
+	// names the published version's fonts an update would leave behind, as
+	// "path:status".
+	FileChanges LibraryChanges `json:"file_changes"`
+	NotCopied   []string       `json:"not_copied"`
+	// DependenciesMissing is true when the pin holds the published version
+	// but not the dependency files that version carries: a pin made before
+	// dependencies travelled. UpdateAvailable is then true too, and applying
+	// the same version copies them.
+	DependenciesMissing bool `json:"dependencies_missing"`
 }
 
 func libraryTokens(m VersionManifest) ([]byte, error) {
@@ -113,6 +126,9 @@ func (s *VersionStore) PublishLibrary(ctx context.Context, k VersionKey, version
 		if _, e = libraryTokens(m); e != nil {
 			return e
 		}
+		if _, e = libraryDependencies(m); e != nil {
+			return e
+		}
 		if out, e = readLibraryPublication(ctx, tx, k); e != nil || out.Version == version {
 			return e
 		}
@@ -147,6 +163,9 @@ func readLibraryPin(ctx context.Context, tx *sql.Tx, k VersionKey) (p LibraryPin
 	if sum := sha256.Sum256(p.Content); hex.EncodeToString(sum[:]) != p.SHA256 {
 		p.Content = nil // A repair may compare metadata; never hand out damaged bytes.
 		return p, true, ErrLibraryPinCorrupt
+	}
+	if p.Files, err = readLibraryPinFileMeta(ctx, tx, k); err != nil {
+		return LibraryPin{}, false, err
 	}
 	return p, true, nil
 }
@@ -263,6 +282,10 @@ func (s *VersionStore) pinLibrary(ctx context.Context, consumer VersionKey, libr
 		if e != nil {
 			return e
 		}
+		deps, e := libraryDependencies(m)
+		if e != nil {
+			return e
+		}
 		sum := sha256.Sum256(content)
 		hash := hex.EncodeToString(sum[:])
 		current, found, e := readLibraryPin(ctx, tx, consumer)
@@ -286,9 +309,15 @@ func (s *VersionStore) pinLibrary(ctx context.Context, consumer VersionKey, libr
 				}
 			}
 		}
-		if !corrupt && found && current.LibraryPageID == libraryPageID && current.LibraryVersion == pub.Version && current.SHA256 == hash {
-			out = current
-			return libraryRead(ctx, tx, la, pub.Version, actor)
+		if !corrupt && found && current.LibraryPageID == libraryPageID && current.LibraryVersion == pub.Version && current.SHA256 == hash && libraryFilesEqual(current.Files, deps) {
+			// A matching metadata row may still have damaged bytes. Verify them on
+			// an explicit retry before deciding that this pin needs no repair.
+			if _, e = readLibraryPinFiles(ctx, tx, consumer); e == nil {
+				out = current
+				return libraryRead(ctx, tx, la, pub.Version, actor)
+			} else if !errors.Is(e, ErrLibraryPinCorrupt) {
+				return e
+			}
 		}
 		if current.LibraryPageID != expectedID || current.LibraryVersion != expect.PinnedVersion {
 			return ErrVersionConflict
@@ -297,8 +326,11 @@ func (s *VersionStore) pinLibrary(ctx context.Context, consumer VersionKey, libr
 		if e = tx.QueryRowContext(ctx, `SELECT coalesce(name,'') FROM pages WHERE id=? AND workspace_id=?`, libraryPageID, consumer.WorkspaceID).Scan(&name); e != nil {
 			return e
 		}
-		out = LibraryPin{libraryPageID, pub.Version, name, content, hash, actor, time.Now().UTC().Format("2006-01-02T15:04:05.000Z")}
+		out = LibraryPin{libraryPageID, pub.Version, name, content, hash, actor, time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), withoutContent(deps)}
 		if _, e = tx.ExecContext(ctx, `INSERT INTO artifact_library_pins(workspace_id,page_id,library_page_id,library_version,library_name,content,sha256,copied_by,copied_at) VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(workspace_id,page_id) DO UPDATE SET library_page_id=excluded.library_page_id,library_version=excluded.library_version,library_name=excluded.library_name,content=excluded.content,sha256=excluded.sha256,copied_by=excluded.copied_by,copied_at=excluded.copied_at`, consumer.WorkspaceID, consumer.PageID, out.LibraryPageID, out.LibraryVersion, out.LibraryName, out.Content, out.SHA256, out.CopiedBy, out.CopiedAt); e != nil {
+			return e
+		}
+		if e = writeLibraryPinFiles(ctx, tx, consumer, deps); e != nil {
 			return e
 		}
 		if record != nil {
@@ -329,7 +361,8 @@ func (s *VersionStore) CheckLibraryUpdate(ctx context.Context, consumer VersionK
 		if !found {
 			return ErrVersionNotFound
 		}
-		out = LibraryUpdate{LibraryPageID: pin.LibraryPageID, PinnedVersion: pin.LibraryVersion, Changes: LibraryChanges{Added: []string{}, Removed: []string{}, Changed: []string{}}}
+		empty := LibraryChanges{Added: []string{}, Removed: []string{}, Changed: []string{}}
+		out = LibraryUpdate{LibraryPageID: pin.LibraryPageID, PinnedVersion: pin.LibraryVersion, Changes: empty, FileChanges: empty, NotCopied: []string{}}
 		lib := VersionKey{consumer.WorkspaceID, pin.LibraryPageID}
 		pub, e := readLibraryPublication(ctx, tx, lib)
 		if e != nil || pub.Version == 0 {
@@ -347,12 +380,27 @@ func (s *VersionStore) CheckLibraryUpdate(ctx context.Context, consumer VersionK
 		}
 		out.LibraryAvailable = true
 		out.PublishedVersion = pub.Version
-		if pub.Version == pin.LibraryVersion {
+		// A pin made by this release carries its version's dependencies, so an
+		// up-to-date pin with files needs no further look. One with none may
+		// predate them (#5223); only then is the version read again.
+		if pub.Version == pin.LibraryVersion && len(pin.Files) > 0 {
 			return nil
 		}
 		m, e := readVersion(ctx, tx, lib, pub.Version)
 		if e != nil {
 			return e
+		}
+		if pub.Version == pin.LibraryVersion {
+			// A publication from before dependency validation may hold a font
+			// that is not a data URL; it has nothing a pin could copy, so the
+			// review stays as it was rather than failing.
+			deps, e := libraryDependencies(m)
+			if e != nil || len(deps) == 0 {
+				return nil
+			}
+			out.FileChanges, out.NotCopied = diffLibraryFiles(pin.Files, deps), notCopied(deps)
+			out.UpdateAvailable, out.DependenciesMissing = true, true
+			return libraryRead(ctx, tx, la, pub.Version, actor)
 		}
 		next, e := libraryTokens(m)
 		if e != nil {
@@ -361,6 +409,11 @@ func (s *VersionStore) CheckLibraryUpdate(ctx context.Context, consumer VersionK
 		if out.Changes, e = diffLibraryTokens(pin.Content, next); e != nil {
 			return e
 		}
+		deps, e := libraryDependencies(m)
+		if e != nil {
+			return e
+		}
+		out.FileChanges, out.NotCopied = diffLibraryFiles(pin.Files, deps), notCopied(deps)
 		out.UpdateAvailable = true
 		return libraryRead(ctx, tx, la, pub.Version, actor)
 	})

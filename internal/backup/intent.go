@@ -58,6 +58,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 
 	"artifact_library_publications": IntentInclude, // owner-selected published library version
 	"artifact_library_pins":         IntentInclude, // consumer's self-contained design-system copy
+	"artifact_library_pin_files":    IntentInclude, // fonts and licences the pin carries
 
 	"mooring_authority_generations":  IntentExcludeRuntime, // target-local non-ABA tombstones never travel or reset in portable restore
 	"mooring_page_grant_generations": IntentExcludeRuntime, // target-local (Page, recipient) grant tombstones never travel or reset in portable restore

@@ -94,6 +94,50 @@ func TestArtifactSlidesSelectedProjectionAndPDF(t *testing.T) {
 	}
 }
 
+func TestArtifactSlidesWithLibraryBindingProjectsAndExports(t *testing.T) {
+	h, ws, owner, call := artifactProjectFixture(t)
+	t.Setenv("CREWSHIP_ARTIFACT_SLIDES_ENABLED", "true")
+	var body map[string]any
+	if err := json.Unmarshal([]byte(slidesArtifactBody(0, "Slide using its saved style")), &body); err != nil {
+		t.Fatal(err)
+	}
+	body["files"] = append(body["files"].([]any), map[string]any{
+		"path": "slides-library.json", "media_type": "application/json", "content": `{"schema_version":1,"background":"canvas","text_color":"ink","typography":"body"}`,
+	})
+	encoded, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := call(owner, "POST", "artifacts", `{"slug":"bound-slides","name":"Bound Slides",`+strings.TrimPrefix(string(encoded), "{"))
+	if w.Code != 201 {
+		t.Fatalf("create %d %s", w.Code, w.Body)
+	}
+	var page string
+	if err = h.db.QueryRow(`SELECT id FROM pages WHERE slug='bound-slides'`).Scan(&page); err != nil {
+		t.Fatal(err)
+	}
+	if kind := pagesListRows(t, h, ws, owner, "OWNER")["bound-slides"]["artifact_kind"]; kind != "slides" {
+		t.Errorf("list classified binding deck as %v", kind)
+	}
+	snapshot := httptest.NewRecorder()
+	h.GetArtifactProject(snapshot, slidesAPIRequest(t, h, ws, owner, page, "?version=1"))
+	var saved map[string]any
+	if snapshot.Code != 200 || json.Unmarshal(snapshot.Body.Bytes(), &saved) != nil || saved["artifact_kind"] != "slides" {
+		t.Errorf("snapshot did not retain Slides kind: %d %s", snapshot.Code, snapshot.Body)
+	}
+	projection := httptest.NewRecorder()
+	h.GetArtifactSlides(projection, slidesAPIRequest(t, h, ws, owner, page, "slides?version=1"))
+	var view artifacts.ArtifactSlidesProjection
+	if projection.Code != 200 || json.Unmarshal(projection.Body.Bytes(), &view) != nil || view.Deck.Theme.Background != "#FFFFFF" {
+		t.Errorf("typed projection should retain the saved deck: %d %s", projection.Code, projection.Body)
+	}
+	pdf := httptest.NewRecorder()
+	h.ExportArtifactSlidesPDF(pdf, slidesAPIRequest(t, h, ws, owner, page, "export.pdf?version=1"))
+	if pdf.Code != 200 || !strings.HasPrefix(pdf.Body.String(), "%PDF-") {
+		t.Errorf("PDF %d %s", pdf.Code, pdf.Body)
+	}
+}
+
 func TestArtifactSlidesRechecksAuthorityAfterActualRender(t *testing.T) {
 	cases := []string{"edit aba", "grant", "token", "member", "shared pin", "owner mode", "flag", "project flag", "retention", "source replacement", "blob corruption"}
 	for _, name := range cases {

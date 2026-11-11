@@ -26,6 +26,39 @@ const artifactSlideSourceBytes = 2 << 20
 const artifactSlideFileBytes = 256 << 10
 const artifactSlideFont = "Go Regular"
 
+// One index, up to 100 authored slides and one optional pin binding file.
+const SlidesArtifactMaxSourceFiles = 102
+const slidesLibraryBindingFile = "slides-library.json"
+
+var slidesLibraryTokenName = regexp.MustCompile(`^[a-z][a-z0-9-]{0,47}$`)
+
+func validSlidesLibraryBinding(file VersionFile) bool {
+	if file.MediaType != "application/json" || len(file.Content) > 1024 || !utf8.Valid(file.Content) || !validDataObject(file.Content) {
+		return false
+	}
+	var bindings map[string]json.RawMessage
+	if json.Unmarshal(file.Content, &bindings) != nil {
+		return false
+	}
+	var version int
+	if json.Unmarshal(bindings["schema_version"], &version) != nil || version != 1 {
+		return false
+	}
+	for key, raw := range bindings {
+		if key == "schema_version" {
+			continue
+		}
+		if key != "background" && key != "text_color" && key != "typography" {
+			return false
+		}
+		var token string
+		if json.Unmarshal(raw, &token) != nil || !slidesLibraryTokenName.MatchString(token) {
+			return false
+		}
+	}
+	return true
+}
+
 // ArtifactSlideAnchor names actual authored content for the existing CommentQueue.
 type ArtifactSlideAnchor struct {
 	SlideID  string `json:"slide_id"`
@@ -49,14 +82,21 @@ func unsupportedSlide(reason string) error {
 func ParseSlidesArtifact(pageID string, files map[string]VersionFile) (ArtifactSlidesProjection, error) {
 	empty := ArtifactSlidesProjection{}
 	index, ok := files["deck.json"]
-	if !ok || index.MediaType != "application/json" || len(files) > 101 {
+	if !ok || index.MediaType != "application/json" || len(files) > SlidesArtifactMaxSourceFiles {
 		return empty, unsupportedSlide("missing or unsupported deck index")
 	}
 	order, err := artifactSlideOrder(index.Content)
 	if err != nil {
 		return empty, err
 	}
-	if len(files) != len(order)+1 {
+	expectedFiles := len(order) + 1
+	if binding, exists := files[slidesLibraryBindingFile]; exists {
+		if !validSlidesLibraryBinding(binding) {
+			return empty, unsupportedSlide("invalid Library binding")
+		}
+		expectedFiles++
+	}
+	if len(files) != expectedFiles {
 		return empty, unsupportedSlide("manifest has missing or unlisted files")
 	}
 	total := 0
