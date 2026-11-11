@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Routine doctor and checkup warn when parallel foreach items share an agent (#5300).** Diagnostics identify fixed agent targets and their recipe paths, including nested loops and graders. The warning does not block validation or execution; templated targets remain unknown.
+
 - **Routine run logs show when a step waits for an occupied agent (#5290).** The journal records when waiting begins and whether the agent becomes available, the wait times out, or the run is cancelled. The outcome includes elapsed wait time.
 
 - ⚠️ **Behaviour change: routine budgets include costs reported by every agent attempt.** Reported costs from empty responses, failed attempts, and attempts preceding cancellation during backoff now count toward the run total. A routine close to its configured cost cap can stop earlier.

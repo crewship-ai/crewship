@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/url"
 
+	pipelineanalysis "github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/spf13/cobra"
 )
 
@@ -132,6 +133,7 @@ func runRoutineDoctor(cmd *cobra.Command, args []string) error {
 		{"credentials_required", func() []doctorCheck { return checkCredentialsRequired(client, ws, pipeline.Definition) }},
 		{"egress_allowlist", func() []doctorCheck { return checkEgressTargets(pipeline.Definition) }},
 		{"cost_cap", func() []doctorCheck { return []doctorCheck{checkCostCap(pipeline.Definition)} }},
+		{"foreach_agent_contention", func() []doctorCheck { return checkForeachAgentContention(pipeline.Definition) }},
 		{"validation_gates", func() []doctorCheck { return checkValidationGates(pipeline.Definition) }},
 		{"schedule_circuit_breaker", func() []doctorCheck { return checkScheduleCircuitBreaker(client, ws, slug) }},
 	}
@@ -286,4 +288,12 @@ func truncCrewID(id string) string {
 
 func init() {
 	pipelineCmd.AddCommand(routineDoctorCmd)
+}
+
+func checkForeachAgentContention(def map[string]any) []doctorCheck {
+	var checks []doctorCheck
+	for _, warning := range pipelineanalysis.ForeachAgentContentionWarnings(def) {
+		checks = append(checks, doctorCheck{Name: "foreach_agent_contention", Level: doctorWarn, Message: warning.Message, Hint: "Use sequential execution when intended, or explicitly distribute work across distinct agents. Raising parallelism alone does not remove the agent lock."})
+	}
+	return checks
 }

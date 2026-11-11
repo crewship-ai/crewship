@@ -109,6 +109,10 @@ func (h *PipelineHandler) routineCheckup(ctx context.Context, p *pipeline.Pipeli
 		add("runnable", "ok", "Can run", "It is approved and turned on.", "")
 	}
 
+	for _, warning := range pipeline.ForeachAgentContentionWarnings(def) {
+		add("foreach-agent-contention:"+warning.Path, "warn", "Agent steps may serialize", warning.Message, "steps")
+	}
+
 	// Agents the steps run as must exist in the author crew.
 	slugs := map[string]bool{}
 	walkDefinitionKey(def["steps"], "agent_slug", func(s string) {
