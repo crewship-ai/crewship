@@ -28,10 +28,11 @@ selectable element an explicit, prefixed ID such as `artifact-hero-heading`.
   `window.crewship`: `data.get`, `data.list`, `data.batch` and `viewer`
   (the viewer's display name), each as the viewer's own request.
 - The runtime also defines `prefs.get` and `prefs.set` for the viewer's own
-  browser preferences. The host enables them only for the current Dashboard
-  version whose `viewer-filters.json` declares `{"schema_version":1}`. Ordinary
-  Apps and historical versions receive `unavailable`; do not require these
-  methods for an App. Preferences are scoped to the user, workspace and Page,
+  browser preferences. The host enables storage only when the Dashboard
+  feature is available, the server admits the interactive runtime, and the
+  selected current manifest has `viewer-filters.json` = `{"schema_version":1}`.
+  Other previews and historical versions receive `unavailable`; do not require
+  these optional methods for an App. Preferences are scoped to the user, workspace and Page,
   stay in this browser, and neither grant data access nor change shared data.
 - User profiles, presence, model calls, connectors, uploads, downloads and
   in-page comments are not offered to Apps. Do not imitate them.
