@@ -122,7 +122,7 @@ func TestOpenNativeStreamAcrossMembershipChange(t *testing.T) {
 			}
 			ctx := craftNativeFreshRequestContext(t, f, user, "native-scope-session")
 			token, id := craftNativeIssued(t, m, ctx)
-			next := craftNativeOpenStream(t, f, m, ctx, token)
+			next := craftNativeOpenStreamOnTick(t, f, m, ctx, token)
 			if event, _ := next(); event != "lease" {
 				t.Fatalf("calibration event %q", event)
 			}

@@ -22,11 +22,41 @@ import (
 // returns a reader for its next event name and payload.
 func craftNativeOpenStream(t *testing.T, f *pagesTransferRig, m *craftNativeHTTP, ctx context.Context, token string) func() (string, map[string]any) {
 	t.Helper()
+	return craftNativeOpenStreamHandler(t, f, ctx, token, m.events)
+}
+
+// The authority matrices advance one real stream iteration after committing
+// their mutation. No periodic ticks can queue a pre-mutation lease frame.
+// Cadence and credential-expiry acceptance continue to use the real timer.
+func craftNativeOpenStreamOnTick(t *testing.T, f *pagesTransferRig, m *craftNativeHTTP, ctx context.Context, token string) func() (string, map[string]any) {
+	t.Helper()
+	ticks := make(chan time.Time)
+	next := craftNativeOpenStreamHandler(t, f, ctx, token, func(w http.ResponseWriter, r *http.Request) {
+		m.eventsOnTick(w, r, ticks)
+	})
+	initial := true
+	return func() (string, map[string]any) {
+		t.Helper()
+		if initial {
+			initial = false
+		} else {
+			select {
+			case ticks <- time.Now():
+			case <-time.After(5 * time.Second):
+				t.Fatal("native stream did not await its next authority recheck")
+			}
+		}
+		return next()
+	}
+}
+
+func craftNativeOpenStreamHandler(t *testing.T, f *pagesTransferRig, ctx context.Context, token string, events http.HandlerFunc) func() (string, map[string]any) {
+	t.Helper()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		bound := context.WithValue(context.WithValue(context.WithValue(r.Context(), ctxUser, UserFromContext(ctx)), ctxAuthKind, AuthKindSession), ctxWorkspaceID, f.wsID)
 		r = r.WithContext(auth.WithOriginalCredential(bound, *auth.OriginalCredentialFromContext(ctx)))
 		r.SetPathValue("slug", "native-page")
-		m.events(w, r)
+		events(w, r)
 	}))
 	t.Cleanup(server.Close)
 	request, err := http.NewRequest(http.MethodGet, server.URL, nil)
@@ -113,7 +143,7 @@ func TestCraftNativeWriteRevokeKeepsOnlyAFreshReadAdmission(t *testing.T) {
 				t.Fatalf("calibration save: %d %s", w.Code, w.Body)
 			}
 			published := versions()
-			next := craftNativeOpenStream(t, f, m, ctx, oldToken)
+			next := craftNativeOpenStreamOnTick(t, f, m, ctx, oldToken)
 			if event, first := next(); event != "lease" || first["can_write"] != true {
 				t.Fatalf("calibration stream: %s %v", event, first)
 			}

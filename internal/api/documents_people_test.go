@@ -276,14 +276,43 @@ func TestDocumentPeopleRefusesAPageTheDocumentReadRefuses(t *testing.T) {
 	}
 }
 
+// Seed only the initial population in one transaction. Search and all grant
+// mutations still run through their original independent requests/commits.
+func seedDocumentPeopleMembers(t *testing.T, h *PageHandler, ws, prefix, name string, count int) {
+	t.Helper()
+	tx, err := h.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	users, err := tx.PrepareContext(t.Context(), `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer users.Close()
+	members, err := tx.PrepareContext(t.Context(), `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer members.Close()
+	for i := 0; i < count; i++ {
+		id := fmt.Sprintf("%s%04d", prefix, i)
+		if _, err := users.ExecContext(t.Context(), id, id+"@example.invalid", name+id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := members.ExecContext(t.Context(), id+"-m", ws, id); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDocumentPeopleSearchMatchesInSQLAndTreatsWildcardsAsText(t *testing.T) {
 	h, ws, owner := documentPeopleFixture(t, false)
 	// More members than one scan used to read, all ahead of the reader alphabetically.
-	for i := 0; i < 1100; i++ {
-		id := fmt.Sprintf("aaa%04d", i)
-		execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, id, id+"@example.invalid", "Aaron "+id)
-		execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, id+"-m", ws, id)
-	}
+	seedDocumentPeopleMembers(t, h, ws, "aaa", "Aaron ", 1100)
 	execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES('zoe','zoe@example.invalid','Zoe 100% _Reader')`)
 	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('zoe-m',?,'zoe','MEMBER')`, ws)
 	execOrFatal(t, h.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('people-page','user','zoe','read',?)`, owner)
@@ -313,11 +342,7 @@ func TestDocumentPeopleSearchFoldsUnicodeCase(t *testing.T) {
 func TestDocumentPeopleOnPrivateOutputSearchesOnlyItsPossibleReaders(t *testing.T) {
 	h, ws, owner := documentPeopleFixture(t, true)
 	// Many members sort ahead of the custodian; none of them can read private output.
-	for i := 0; i < 250; i++ {
-		id := fmt.Sprintf("aa%04d", i)
-		execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, id, id+"@example.invalid", "Aa "+id)
-		execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, id+"-m", ws, id)
-	}
+	seedDocumentPeopleMembers(t, h, ws, "aa", "Aa ", 250)
 	execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES('adm','adm@example.invalid','Zed Admin')`)
 	execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('adm-m',?,'adm','ADMIN')`, ws)
 	if _, found := documentPeopleCall(t, h, ws, owner, "OWNER", "q="); strings.Join(documentPeopleNames(found), "|") != "adm=Zed Admin|test-user-id=Test User" {
@@ -357,11 +382,7 @@ func TestDocumentPeopleAdministratorReadIsAudited(t *testing.T) {
 // the folder ACL (a Document page is always owned by a person).
 func TestDocumentPeopleSearchFindsReadersBehindManyNonReaders(t *testing.T) {
 	h, ws, owner := documentPeopleFixture(t, false)
-	for i := 0; i < 300; i++ {
-		id := fmt.Sprintf("al%04d", i)
-		execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, id, id+"@example.invalid", "Alex "+id)
-		execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, id+"-m", ws, id)
-	}
+	seedDocumentPeopleMembers(t, h, ws, "al", "Alex ", 300)
 	for _, person := range []string{"zgrant", "zcrew", "zfolder"} {
 		execOrFatal(t, h.db, `INSERT INTO users(id,email,full_name) VALUES(?,?,?)`, person, person+"@example.invalid", "Alex Z "+person)
 		execOrFatal(t, h.db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES(?,?,?,'MEMBER')`, person+"-m", ws, person)

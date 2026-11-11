@@ -8,10 +8,10 @@ The release image, module and workflows name the Go version and must agree:
 
 | Where | Line |
 |---|---|
-| `go.mod` | `toolchain go1.27.3` — the anchor everything else is checked against |
-| `Dockerfile` | `FROM golang:1.27.3-alpine` — the compiler for the **shipped** binary |
-| workflows | `GO_VERSION: "1.27.3"` |
-| `.github/workflows/codeql.yml` | a literal `go-version: "1.27.3"` |
+| `go.mod` | `toolchain go1.27.4` — the anchor everything else is checked against |
+| `Dockerfile` | `FROM golang:1.27.4-alpine` — the compiler for the **shipped** binary |
+| workflows | `GO_VERSION: "1.27.4"` |
+| `.github/workflows/codeql.yml` | a literal `go-version: "1.27.4"` |
 
 `scripts/go-toolchain-pin.sh` parses all of them and fails on disagreement;
 it runs in CI's `Shell` job on every PR. Run it before you push:
@@ -55,3 +55,7 @@ comments saying so; the guard cannot check this one for you.
 Go 1.27.3 fixes the reachable `crypto/x509` advisory GO-2026-6809.
 The patch upgrade keeps the Go 1.27 language floor and the vulnerability gate;
 it does not accept or suppress that advisory.
+
+Go 1.27.4 also fixes the reachable `net/http` advisory GO-2026-6859.
+The compiler, release image and CI pins move together; the Go 1.27 language
+floor and the blocking vulnerability gate remain unchanged.
