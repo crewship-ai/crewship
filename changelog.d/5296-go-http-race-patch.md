@@ -1,0 +1,1 @@
+- **HTTP server security patch:** build with Go 1.27.4 to fix the reachable MaxBytesReader header race (GO-2026-6859); keep the existing language floor and blocking vulnerability checks.

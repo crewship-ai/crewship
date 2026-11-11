@@ -99,8 +99,14 @@ func (c *collaborationHTTPConnection) closeObsoleteGate(ctx context.Context, gat
 
 // startGateTransition owns deliveryMu only through exact Leave/Open writes.
 // It NEVER waits for Ticket or Joined while holding connection/delivery locks.
-func (c *collaborationHTTPConnection) startGateTransition(ctx context.Context) (*collaborationGateTransition, error) {
+func (c *collaborationHTTPConnection) startGateTransition(ctx context.Context) (result *collaborationGateTransition, err error) {
 	d := c.document
+	stage := collaborationPumpFailureStage("transition.binding")
+	defer func() {
+		if err != nil {
+			d.pump.recordFailure(stage)
+		}
+	}()
 	c.mu.Lock()
 	c.pruneRetirementsLocked()
 	if c.transition != nil {
@@ -114,10 +120,12 @@ func (c *collaborationHTTPConnection) startGateTransition(ctx context.Context) (
 	}
 	binding, gate := c.participantBinding, c.joined.gate
 	c.mu.Unlock()
+	stage = "transition.close-obsolete"
 	obsolete, err := c.closeObsoleteGate(ctx, gate)
 	if err != nil || !obsolete {
 		return nil, err
 	}
+	stage = "transition.retire"
 	proof, err := d.cell.runtime.RetireParticipant(ctx, d.activation, binding)
 	if err != nil {
 		return nil, err
@@ -132,6 +140,7 @@ func (c *collaborationHTTPConnection) startGateTransition(ctx context.Context) (
 	c.transition = t
 	c.participantBinding = nil
 	c.mu.Unlock()
+	stage = "transition.reconnect"
 	ticket, err := d.humans.reconnect(ctx, d.committer.binding, d.owner, c.admission.participant)
 	if err != nil {
 		if errors.Is(err, errCollaborationAuthorChanged) || errors.Is(err, errCollaborationAdmissionHorizon) {
@@ -144,18 +153,22 @@ func (c *collaborationHTTPConnection) startGateTransition(ctx context.Context) (
 		}
 		return nil, err
 	}
+	stage = "transition.open-id"
 	id, err := collaborationOpaqueID()
 	if err != nil {
 		return nil, err
 	}
+	stage = "transition.join-id"
 	joinID, err := collaborationOpaqueID()
 	if err != nil {
 		return nil, err
 	}
+	stage = "transition.join-encode"
 	join, err := json.Marshal(protocol.SessionJoin{Type: "session_join", RequestID: protocol.Identifier(joinID), Ticket: ticket, Versions: d.wireVersions()})
 	if err != nil {
 		return nil, err
 	}
+	stage = "transition.prepare-open"
 	pending, err := d.cell.runtime.PrepareParticipantReopen(d.activation, proof, protocol.SessionParticipantOpen{Type: "session_participant_open", RequestID: protocol.Identifier(id), ControlProfile: mooring.PrivateSessionProfile, Scope: d.wireScope(), SessionID: protocol.Identifier(d.activation.SessionID()), RuntimeRef: protocol.Identifier(d.cell.runtime.RuntimeRef()), Fence: d.wireFence(), ConnectionRef: protocol.Identifier(c.ref), Join: join})
 	if err != nil {
 		return nil, err
@@ -167,6 +180,7 @@ func (c *collaborationHTTPConnection) startGateTransition(ctx context.Context) (
 	c.participantPending = pending
 	c.joined = collaborationHumanJoined{}
 	c.mu.Unlock()
+	stage = "transition.send-open"
 	if err = d.cell.runtime.SendPreparedParticipantOpen(ctx, d.activation, pending); err != nil {
 		return nil, err
 	}

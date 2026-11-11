@@ -571,6 +571,10 @@ func TestCollaborationSessionPumpUncertaintyNeverRunsNextMutation(t *testing.T) 
 			if err != errCollaborationSessionPump {
 				t.Fatal("nonopaque pump error", err)
 			}
+			failure := r.pump.firstFailure.Load()
+			if failure == nil || (*failure != "mutation.submit" && *failure != "mutation.panic") {
+				t.Fatalf("lost first mutation failure behind shutdown: %v", failure)
+			}
 		})
 	}
 }
@@ -619,6 +623,18 @@ func TestCollaborationSessionPumpManagementTransplantsStopProcess(t *testing.T) 
 			pumpWait(t, r.ctx, r.runtime.Done())
 			if r.other.Load() != 0 {
 				t.Fatal("transplanted management reply ran B/status", r.other.Load())
+			}
+			want := collaborationPumpFailureStage("control.owner-acquire")
+			switch {
+			case strings.HasPrefix(outcome, "renew-"):
+				want = "control.owner-renew"
+			case strings.HasPrefix(outcome, "delivery-"):
+				want = "control.delivery"
+			case strings.HasPrefix(outcome, "ticket-"):
+				want = "control.ticket"
+			}
+			if failure := r.pump.firstFailure.Load(); failure == nil || *failure != want {
+				t.Fatalf("management failure lost to cancelled mutation: got %v, want %s", failure, want)
 			}
 		})
 	}
