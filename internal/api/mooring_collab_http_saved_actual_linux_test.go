@@ -698,7 +698,10 @@ process.stdout.write(JSON.stringify(changes));`
 			var raw []byte
 			if err := websocket.Message.Receive(recipient.ws, &raw); err != nil {
 				phase("receive-failed")
-				t.Logf("runtime error=%v", document.cell.runtime.Err())
+				if failure := document.pump.firstFailure.Load(); failure != nil {
+					t.Logf("first host failure stage=%s", *failure)
+				}
+				t.Logf("runtime error=%v stage=%s", document.cell.runtime.Err(), document.cell.runtime.FailureStage())
 				_, now, clockErr := document.manager.clock.Now()
 				rows, queryErr := rig.db.QueryContext(t.Context(), `SELECT expires_ns,closed FROM mooring_delivery_gates WHERE page_id='http-native-page'`)
 				if queryErr == nil {

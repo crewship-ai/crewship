@@ -12,7 +12,7 @@ import (
 
 // craftNativeGrantedStream opens a real metadata stream for a grantee on a real
 // clock and returns the first lease as calibration.
-func craftNativeGrantedStream(t *testing.T, horizon time.Duration) (*pagesTransferRig, func() (string, map[string]any)) {
+func craftNativeGrantedStream(t *testing.T, horizon time.Duration, controlledTicks bool) (*pagesTransferRig, func() (string, map[string]any), time.Time) {
 	t.Helper()
 	f, m, _ := craftNativeHTTPFixture(t)
 	clock, err := mooring.NewBootOwnerClock()
@@ -28,11 +28,16 @@ func craftNativeGrantedStream(t *testing.T, horizon time.Duration) (*pagesTransf
 	if w := craftNativeLeaseCall(m, ctx, token, "native-page", "acquire", `{}`); w.Code != 200 {
 		t.Fatalf("calibration acquire: %d %s", w.Code, w.Body)
 	}
-	next := craftNativeOpenStream(t, f, m, ctx, token)
+	open := craftNativeOpenStream
+	if controlledTicks {
+		open = craftNativeOpenStreamOnTick
+	}
+	opened := time.Now()
+	next := open(t, f, m, ctx, token)
 	if event, first := next(); event != "lease" || first["can_write"] != true {
 		t.Fatalf("calibration stream: %s %v", event, first)
 	}
-	return f, next
+	return f, next, opened
 }
 
 // The retirement event is the only server statement that lets a browser erase a
@@ -58,7 +63,7 @@ func TestCraftNativeRetirementPurgesOnlyOnProvenReadLoss(t *testing.T) {
 		{name: "sign-in expired", horizon: 2 * time.Second, wantReason: "authority_changed", wantDraft: "retain"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			f, next := craftNativeGrantedStream(t, test.horizon)
+			f, next, _ := craftNativeGrantedStream(t, test.horizon, test.horizon == 0)
 			if test.revoke != "" {
 				mustExec(t, f.db, test.revoke)
 			}
@@ -81,7 +86,15 @@ func TestCraftNativeRetirementPurgesOnlyOnProvenReadLoss(t *testing.T) {
 // event interval plus delivery. CI load is why the margin is not tighter; the
 // measured value is logged for the record.
 func TestCraftNativeReadLossDeliveryWithinOneEventInterval(t *testing.T) {
-	f, next := craftNativeGrantedStream(t, 0)
+	f, next, calibrated := craftNativeGrantedStream(t, 0, false)
+	// Calibrate the routed production timer before revoking authority. The
+	// matrices above use controlled ticks; they cannot establish this cadence.
+	if event, _ := next(); event != "lease" {
+		t.Fatalf("healthy production heartbeat: %s", event)
+	}
+	if elapsed := time.Since(calibrated); elapsed < 4*time.Second {
+		t.Fatalf("production heartbeat arrived too early: %s", elapsed)
+	}
 	committed := time.Now()
 	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_id='native-scope-writer'`)
 	for {
@@ -117,7 +130,7 @@ func TestCraftNativeCommentToNoneAfterAdmissionStopped(t *testing.T) {
 	if w := craftNativeLeaseCall(m, ctx, token, "native-page", "acquire", `{}`); w.Code != 200 {
 		t.Fatalf("acquire: %d %s", w.Code, w.Body)
 	}
-	next := craftNativeOpenStream(t, f, m, ctx, token)
+	next := craftNativeOpenStreamOnTick(t, f, m, ctx, token)
 	if event, _ := next(); event != "lease" {
 		t.Fatalf("calibration stream: %s", event)
 	}
@@ -161,7 +174,7 @@ func TestCraftNativeRetirementKeepsTheDraftOnAnACLLookupFault(t *testing.T) {
 	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_id='native-scope-writer'`)
 	ctx = craftNativeFreshContext(t, f, ctx, time.Hour)
 	token, _ := craftNativeIssued(t, m, ctx)
-	next := craftNativeOpenStream(t, f, m, ctx, token)
+	next := craftNativeOpenStreamOnTick(t, f, m, ctx, token)
 	if event, first := next(); event != "lease" {
 		t.Fatalf("calibration stream: %s %v", event, first)
 	}
