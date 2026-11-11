@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto"
 import { loginStorageState } from "./auth"
 import { expect, prdRequirement, test } from "./fixtures"
-import { applyOperations, createDesign, enableDesign, getDesign, listVersions, openCanvas, selectWorkspace, sessionUserId, type DesignNode } from "./design/canvas"
+import { applyOperations, commitNumber, createDesign, enableDesign, getDesign, listVersions, openCanvas, selectWorkspace, sessionUserId, type DesignNode } from "./design/canvas"
 
 const tag = () => randomUUID().replaceAll("-", "").slice(0, 8)
 
@@ -41,15 +41,15 @@ test.describe("design shape style", () => {
     throw new Error("the build has no Shape style controls")
    }
    await page.getByLabel("Fill value").fill("#16a34a")
-   await style.getByLabel("Corner radius").fill("24")
-   await style.getByLabel("Stroke width").fill("3")
+   await commitNumber(style.getByLabel("Corner radius"), "24")
+   await commitNumber(style.getByLabel("Stroke width"), "3")
    await style.getByLabel("Stroke color").fill("#dc2626")
    const card = { fill: "#16a34a", radius: 24, strokeWidth: 3, stroke: "#dc2626" }
    const server = async (id: string) => (await getDesign(context.request, ws.id, slug)).nodes.find(node => node.id === id)
    await expect.poll(() => server("card"), { timeout: 20_000 }).toMatchObject(card)
    await layers.getByRole("button", { name: "Photo", exact: true }).click()
-   await page.getByRole("group", { name: "Shape style" }).getByLabel("Corner radius").fill("60")
-   await page.getByRole("group", { name: "Shape style" }).getByLabel("Stroke width").fill("2")
+   await commitNumber(page.getByRole("group", { name: "Shape style" }).getByLabel("Corner radius"), "60")
+   await commitNumber(page.getByRole("group", { name: "Shape style" }).getByLabel("Stroke width"), "2")
    await expect.poll(() => server("photo"), { timeout: 20_000 }).toMatchObject({ radius: 60, strokeWidth: 2 })
 
    const drawnCard = page.locator('[data-design-node="card"]')

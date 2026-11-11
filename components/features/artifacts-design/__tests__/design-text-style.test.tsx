@@ -81,17 +81,22 @@ describe("Design text style", () => {
   fireEvent.change(within(style).getByLabelText("Font family"), { target: { value: "serif" } })
   fireEvent.change(within(style).getByLabelText("Font weight"), { target: { value: "700" } })
   fireEvent.change(within(style).getByLabelText("Font size"), { target: { value: "36" } })
+  fireEvent.blur(within(style).getByLabelText("Font size"))
   fireEvent.change(within(style).getByLabelText("Line height"), { target: { value: "1.1" } })
+  fireEvent.blur(within(style).getByLabelText("Line height"))
   fireEvent.change(within(style).getByLabelText("Text alignment"), { target: { value: "center" } })
   fireEvent.click(within(style).getByLabelText("Wrap text to the box width"))
   fireEvent.click(within(style).getByLabelText("Clip text to the box"))
   // Out of range: nothing is written.
   fireEvent.change(within(style).getByLabelText("Font size"), { target: { value: "5000" } })
+  fireEvent.blur(within(style).getByLabelText("Font size"))
   fireEvent.change(within(style).getByLabelText("Line height"), { target: { value: "" } })
+  fireEvent.blur(within(style).getByLabelText("Line height"))
   const expected = { fontFamily: "serif", fontWeight: 700, fontSize: 36, lineHeight: 1.1, textAlign: "center", textWrap: "wrap", overflow: "clip" }
   expect(designNodes(state.doc!).find(node => node.id === "t")).toMatchObject(expected)
   // A later change of something else, as an older client makes it, keeps the style.
   fireEvent.change(screen.getByLabelText("x"), { target: { value: "12" } })
+  fireEvent.blur(screen.getByLabelText("x"))
   fireEvent.change(screen.getByLabelText("Text content"), { target: { value: "New headline" } })
   expect(designNodes(state.doc!).find(node => node.id === "t")).toMatchObject({ ...expected, x: 12, text: "New headline" })
  })

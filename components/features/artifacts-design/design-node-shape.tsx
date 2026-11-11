@@ -1,5 +1,5 @@
 import { useId } from "react"
-import { designShapeStyle, designTextStyle, safeImageSource, type DesignNode } from "./design-document"
+import { DESIGN_FILL, designShapeStyle, designTextStyle, safeImageSource, type DesignNode } from "./design-document"
 
 /** Paint of one node at its local origin; shared by the editor canvas and prototype playback. */
 export function DesignNodeShape({ node, width, height }: { node: DesignNode; width: number; height: number }) {
@@ -12,9 +12,11 @@ export function DesignNodeShape({ node, width, height }: { node: DesignNode; wid
  const inset = shape.stroke ? Math.min(shape.strokeWidth, width / 2, height / 2) : 0
  const outline = shape.stroke ? <rect data-shape-stroke="" x={inset / 2} y={inset / 2} width={Math.max(0, width - inset)} height={Math.max(0, height - inset)} rx={Math.max(0, shape.radius - inset / 2)} fill="none" stroke={shape.stroke} strokeWidth={inset} /> : null
  if (node.type === "image") {
+  // An image's fill is painted behind the picture, as in the export (#5228).
+  const backing = typeof node.fill === "string" && DESIGN_FILL.test(node.fill) ? <rect data-image-fill="" width={width} height={height} fill={node.fill} rx={shape.radius} /> : null
   if (!image) return <><rect width={width} height={height} fill="#e2e8f0" rx={node.radius === undefined ? 4 : shape.radius} /><text x="12" y="28" fill="#64748b" fontSize="14">Set an image URL in Properties</text>{outline}</>
-  if (!shape.radius) return <><image href={image} width={width} height={height} preserveAspectRatio="xMidYMid slice" />{outline}</>
-  return <><clipPath id={clipId}><rect width={width} height={height} rx={shape.radius} /></clipPath><image href={image} width={width} height={height} preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clipId})`} />{outline}</>
+  if (!shape.radius) return <>{backing}<image href={image} width={width} height={height} preserveAspectRatio="xMidYMid slice" />{outline}</>
+  return <><clipPath id={clipId}><rect width={width} height={height} rx={shape.radius} /></clipPath>{backing}<image href={image} width={width} height={height} preserveAspectRatio="xMidYMid slice" clipPath={`url(#${clipId})`} />{outline}</>
  }
  return <><rect width={width} height={height} fill={node.fill || "#ffffff"} rx={shape.radius} stroke="none" />{outline}</>
 }

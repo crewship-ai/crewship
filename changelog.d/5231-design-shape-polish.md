@@ -1,0 +1,1 @@
+- **Design: image fill and steadier Properties (#5228).** An image's fill is painted behind the picture on the canvas and in the export. **Remove stroke** takes a stroke off again. Next, previous, the artboard picker and Fit skip hidden screens. A number you clear in Properties no longer snaps back while you type; leaving the field or pressing Enter keeps the last valid value.
