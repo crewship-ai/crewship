@@ -1,0 +1,1 @@
+- **Routine doctor and checkup warn when parallel foreach items share an agent (#5300).** Diagnostics identify fixed agent targets and their recipe paths, including nested loops and graders. The warning does not block validation or execution; templated targets remain unknown.

@@ -6,8 +6,9 @@ import (
 	"net/http"
 	"net/url"
 
-	pipelineanalysis "github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/spf13/cobra"
+
+	pipelineanalysis "github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 // routineDoctorCmd is the preflight-check command. The "blind alley"
@@ -34,6 +35,7 @@ Checks performed:
   - Routine exists in the workspace
   - Author crew exists and is provisioned (image cached / agent containers ready)
   - Every step's agent_slug resolves to an agent in the author crew
+  - Parallel foreach items sharing a fixed agent target (warning only)
   - Every outcomes.grader_agent_slug resolves
   - Every credentials_required type has an active workspace credential
   - egress_targets sanity (no wildcards, no localhost)
