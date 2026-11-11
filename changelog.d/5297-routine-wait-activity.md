@@ -1,0 +1,1 @@
+- **Routine Activity keeps agent-wait events when focused on one routine.** Wait events now carry the routine slug. Failed journal writes produce a backend warning with the run, step and wait phase while execution continues.

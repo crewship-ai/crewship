@@ -836,6 +836,26 @@ describe("narrowToFocus — the rail and the cards must count the same set", () 
     expect(out.map((e) => e.id)).toEqual(["a", "b"])
   })
 
+  it("keeps wait phases for the focused routine and excludes another routine", () => {
+    const phases = ["waiting", "acquired", "timed_out", "cancelled"]
+    const waits = phases.map((phase) => entry({
+      id: phase,
+      entry_type: "pipeline.step.agent_wait",
+      payload: { pipeline_slug: "cost-spike-probe", phase },
+    }))
+    const otherWait = entry({
+      id: "other-wait",
+      entry_type: "pipeline.step.agent_wait",
+      payload: { pipeline_slug: "normalize-dates", phase: "waiting" },
+    })
+
+    const out = narrowToFocus([...waits, otherWait], {
+      kind: "routine",
+      id: "cost-spike-probe",
+    })
+    expect(out.map((e) => e.id)).toEqual(phases)
+  })
+
   it("returns everything when nothing is focused", () => {
     const all = [probe, probeFailed, otherFailed]
     expect(narrowToFocus(all, null)).toHaveLength(3)

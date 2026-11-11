@@ -21,6 +21,9 @@ func (r *OrchestratorRunner) emitStepAgentWait(ctx context.Context, req AgentSte
 		"wait_id":     waitID,
 		"phase":       phase,
 	}
+	if req.PipelineSlug != "" {
+		payload["pipeline_slug"] = req.PipelineSlug
+	}
 	if req.Attempt > 0 {
 		payload["attempt"] = req.Attempt
 	}
@@ -41,7 +44,7 @@ func (r *OrchestratorRunner) emitStepAgentWait(ctx context.Context, req AgentSte
 	// A slow journal must not hold a routine step indefinitely.
 	emitCtx, cancel := context.WithTimeout(ctx, 250*time.Millisecond)
 	defer cancel()
-	_, _ = r.journalE.Emit(emitCtx, journal.Entry{
+	_, err := r.journalE.Emit(emitCtx, journal.Entry{
 		WorkspaceID: req.WorkspaceID,
 		CrewID:      req.AuthorCrewID,
 		TS:          at,
@@ -53,4 +56,9 @@ func (r *OrchestratorRunner) emitStepAgentWait(ctx context.Context, req AgentSte
 		Summary:     summary,
 		Payload:     payload,
 	})
+	if err != nil {
+		r.logger.Warn("routine agent wait journal write failed",
+			"run_id", req.PipelineRunID, "step_id", req.StepID,
+			"wait_id", waitID, "phase", phase, "error", err)
+	}
 }

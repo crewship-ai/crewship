@@ -31,6 +31,7 @@ func busyAgentRig(t *testing.T) (*OrchestratorRunner, *chatbridge.AgentRunLock) 
 var busyAgentStep = AgentStepRequest{
 	WorkspaceID: "ws_cov", AuthorCrewID: "crew_cov", AgentSlug: "cov-agent",
 	PipelineID: "pipeline-busy", PipelineRunID: "run-busy", StepID: "classify", Attempt: 1,
+	PipelineSlug: "accounting",
 }
 
 func TestRunStep_BusyAgentWaitsForRelease(t *testing.T) {
@@ -102,6 +103,7 @@ func assertAgentWaitEvents(t *testing.T, r *OrchestratorRunner, outcome string) 
 		if entry.Type != journal.EntryPipelineStepAgentWait ||
 			entry.TraceID != busyAgentStep.PipelineRunID || entry.WorkspaceID != busyAgentStep.WorkspaceID ||
 			p["phase"] != phase || p["run_id"] != busyAgentStep.PipelineRunID ||
+			p["pipeline_slug"] != busyAgentStep.PipelineSlug ||
 			p["step_id"] != busyAgentStep.StepID || p["agent_slug"] != busyAgentStep.AgentSlug ||
 			p["attempt"] != busyAgentStep.Attempt {
 			t.Fatalf("unexpected %s event: %+v", phase, entry)

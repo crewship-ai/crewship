@@ -2234,6 +2234,7 @@ func (e *Executor) runAgentStep(
 			Prompt:           attemptPrompt,
 			TimeoutSec:       step.TimeoutSec,
 			PipelineID:       pipelineID,
+			PipelineSlug:     emit.pipelineSlug,
 			PipelineName:     routineDisplayName(in.dsl),
 			PipelineRunID:    runID,
 			StepID:           step.ID,
@@ -2276,7 +2277,7 @@ func (e *Executor) runAgentStep(
 		// in the author crew, not a raw LLM call, so the no-API-key
 		// invariant survives.
 		if step.Outcomes != nil {
-			gradeRes, gradeCost, gradeErr := e.runOutcomesGrader(ctx, step, res.Output, in)
+			gradeRes, gradeCost, gradeErr := e.runOutcomesGrader(ctx, step, res.Output, in, emit.pipelineSlug)
 			totalCost += gradeCost
 			if gradeErr != nil {
 				// Grader infrastructure failure: surface but treat
