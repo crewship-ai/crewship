@@ -22,6 +22,7 @@ apart and meet only when the live state is saved as a version.
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN` | off | `true` at build time shows the canvas in the Artifacts library |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_PROTOTYPE` | off | `true` at build time adds link editing and prototype playback ([Prototype links](#prototype-links)) |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_TEXT_STYLE` | off | `true` at build time adds the text style controls in Properties ([Text style](#text-style)) |
+| Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_HIDE_LOCK` | off | `true` at build time adds the hide and lock buttons in Layers ([Hide and lock](#hide-and-lock)) |
 | Build-time `NEXT_PUBLIC_ARTIFACTS_DESIGN_EXPORT` | off | `true` at build time adds the **Export HTML** button ([HTML export](#html-export)) |
 
 The Design flag is independent of `artifact_projects`. When it is off, every
@@ -177,6 +178,29 @@ reaches the canvas or an exported style attribute.
   variable, deploy a server with #5161 everywhere the client runs.
 - Only editors change the fields, in **Properties** (when enabled) or through
   `upsert`.
+
+### Hide and lock
+
+Any layer or screen may carry `hidden` and `locked` (#5218), each `true` or
+`false`; the server refuses any other value with `400`. Absent means shown and
+unlocked, so older documents are unchanged.
+
+- `hidden`: the layer, and everything inside a hidden screen, is not drawn on
+  the canvas, in prototype playback or in the HTML export. It stays in
+  **Layers** (dimmed) and keeps its comments.
+- `locked`: the layer, and everything inside a locked screen, is drawn but a
+  click or drag on the canvas passes through it, a marquee leaves it out, and
+  the arrow keys and **Delete** do not act on it. It can still be selected
+  in **Layers** for inspection; unlock it before changing **Properties**.
+  An in-flight move or resize retires when a target or parent becomes locked
+  or hidden; the same press does not resume it after an unlock.
+- Both are document state: every viewer sees them, and undo takes them back
+  like any other edit.
+- Rollout is the same two steps as text style: this server accepts and
+  honours the fields, and the **Layers** buttons stay behind the build-time
+  `NEXT_PUBLIC_ARTIFACTS_DESIGN_HIDE_LOCK` (default off) until no rollback past
+  this server is expected. A server without #5218 refuses a document that
+  contains the fields.
 
 ## HTML export
 

@@ -65,7 +65,8 @@ parentId, text, src or linkTo. linkTo is the ID of the screen (frame) that a cli
 on this layer opens in prototype playback; "" removes the link. A text node may also
 carry fontFamily (sans, serif, mono), fontWeight (100-900, step 100), fontSize
 (1-1000), lineHeight (0.5-5), textAlign (left, center, right), textWrap (none, wrap)
-and overflow (visible, clip); servers before #5161 refuse them. Delete uses {"op":"delete","id":"node-id"}; reorder uses
+and overflow (visible, clip); servers before #5161 refuse them. Any node may carry
+hidden and locked (true or false); servers before #5218 refuse them. Delete uses {"op":"delete","id":"node-id"}; reorder uses
 {"op":"reorder","order":["frame-id","node-id"]}. Preserve IDs of existing nodes.
 The API applies these edits even when no browser has the canvas open.`, RunE: func(cmd *cobra.Command, args []string) error {
 		body, err := readDesignCLIChanges(cmd)

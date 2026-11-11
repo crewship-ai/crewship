@@ -23,6 +23,7 @@ export const RELEASE_FLAGS = [
 // Later milestones stay off in every profile until they pass their own
 // acceptance: Dashboard is milestone C, Slides and Design System milestone D of the PRD.
 export const UNACCEPTED_FLAGS = [
+  "NEXT_PUBLIC_ARTIFACTS_DESIGN_HIDE_LOCK",
   "NEXT_PUBLIC_ARTIFACT_DASHBOARDS",
   "NEXT_PUBLIC_ARTIFACT_SLIDES",
   "NEXT_PUBLIC_ARTIFACT_DESIGN_SYSTEM",
