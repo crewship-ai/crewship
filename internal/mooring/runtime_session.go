@@ -67,6 +67,7 @@ type SessionRuntime struct {
 	openSent                   bool
 	closed                     bool
 	err                        error
+	failureStage               sessionRuntimeFailureStage
 	done, closedCh, readerDone chan struct{}
 	notify                     chan struct{}
 	writer                     chan struct{}
@@ -134,12 +135,25 @@ func (s *SessionRuntime) Restore(ctx context.Context, request protocol.SessionRe
 func (s *SessionRuntime) Done() <-chan struct{} { return s.done }
 func (s *SessionRuntime) RuntimeRef() string    { return s.runtimeRef }
 func (s *SessionRuntime) Err() error            { s.mu.Lock(); defer s.mu.Unlock(); return s.err }
+
+// FailureStage identifies the first transport shutdown site using a closed host
+// label. It contains no frame, request ID, participant, token or error text and
+// has no role in transport validation or authority.
+func (s *SessionRuntime) FailureStage() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return string(s.failureStage)
+}
+
+type sessionRuntimeFailureStage string
+
 func (s *SessionRuntime) Close() error {
-	s.fail(ErrSessionRuntime)
+	s.failAt(ErrSessionRuntime, "host.close")
 	<-s.done
 	return s.Err()
 }
-func (s *SessionRuntime) fail(err error) {
+func (s *SessionRuntime) fail(err error) { s.failAt(err, "runtime.failure") }
+func (s *SessionRuntime) failAt(err error, stage sessionRuntimeFailureStage) {
 	s.mu.Lock()
 	if s.closed {
 		s.mu.Unlock()
@@ -151,6 +165,7 @@ func (s *SessionRuntime) fail(err error) {
 		err = io.EOF
 	}
 	s.err = err
+	s.failureStage = stage
 	close(s.closedCh)
 	s.signalLocked()
 	s.mu.Unlock()
@@ -293,12 +308,12 @@ func (s *SessionRuntime) readLoop() {
 	for {
 		raw, err := s.process.RPC.Read()
 		if err != nil {
-			s.fail(err)
+			s.failAt(err, "reader.read")
 			return
 		}
 		normalized, header, err := s.validate(raw, true)
 		if err != nil {
-			s.fail(err)
+			s.failAt(err, "reader.validate")
 			return
 		}
 		s.mu.Lock()
@@ -310,7 +325,7 @@ func (s *SessionRuntime) readLoop() {
 			p := s.pending[header.id]
 			if p == nil || !p.sent || p.expected != header.kind || p.responseBytes != 0 || len(normalized) > sessionControlBytes-s.bytes {
 				s.mu.Unlock()
-				s.fail(ErrSessionRuntime)
+				s.failAt(ErrSessionRuntime, "reader.reply-correlation")
 				return
 			}
 			s.observeResponseLocked(header.kind, normalized)
@@ -338,13 +353,13 @@ func (s *SessionRuntime) readLoop() {
 				s.outputPhasesCorrelatedLocked(entry.bytes, normalized)
 			if !paired {
 				s.mu.Unlock()
-				s.fail(ErrSessionRuntime)
+				s.failAt(ErrSessionRuntime, "reader.child-id-reuse")
 				return
 			}
 		}
 		if s.next == ^uint64(0) || !s.reserveLocked(len(normalized)) {
 			s.mu.Unlock()
-			s.fail(ErrSessionRuntime)
+			s.failAt(ErrSessionRuntime, "reader.control-budget")
 			return
 		}
 		s.next++
