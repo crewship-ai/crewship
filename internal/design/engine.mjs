@@ -26,13 +26,19 @@ const nodeNumberFields = new Map([
   ['fontWeight', value => Number.isInteger(value) && value >= 100 && value <= 900 && value % 100 === 0],
   ['fontSize', value => value >= 1 && value <= 1000],
   ['lineHeight', value => value >= 0.5 && value <= 5],
+  ['radius', value => value >= 0 && value <= 10000],
+  ['strokeWidth', value => value >= 0 && value <= 1000],
 ])
 // Hide and lock (#5218): optional booleans; absent means shown and unlocked.
 const nodeBooleanFields = new Set(['hidden', 'locked'])
+// Shape style (#5219): stroke colour is a closed hex form; radius and stroke width bounded px.
+const nodeHexColorFields = new Set(['stroke'])
 function validateNodeFields(entries) {
   for (const [key, value] of entries) {
     if (nodeBooleanFields.has(key)) {
       if (typeof value !== 'boolean') throw new Error(`invalid node ${key}`)
+    } else if (nodeHexColorFields.has(key)) {
+      if (typeof value !== 'string' || !/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(value)) throw new Error(`invalid node ${key}`)
     } else if (nodeChoiceFields.has(key)) {
       if (typeof value !== 'string' || !nodeChoiceFields.get(key).has(value)) throw new Error(`invalid node ${key}`)
     } else if (nodeNumberFields.has(key)) {

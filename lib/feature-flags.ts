@@ -204,6 +204,16 @@ export function artifactsDesignHideLock(): boolean {
 }
 
 /**
+ * Corner radius and stroke controls for Design rectangles and images
+ * (#5219). Default off, for the same rollback reason as hide and lock: an
+ * older server refuses `radius`, `stroke` and `strokeWidth`. Stored values
+ * are drawn and exported either way.
+ */
+export function artifactsDesignShapeStyle(): boolean {
+  return process.env.NEXT_PUBLIC_ARTIFACTS_DESIGN_SHAPE_STYLE === "true"
+}
+
+/**
  * "Export HTML" in the Design editor (#4449). Default off. Only has an effect
  * together with `artifactsDesign()`. The server export route itself follows the
  * Design workspace flag; this only hides the button.
