@@ -1,6 +1,7 @@
 import type { ArtifactFile } from "@/hooks/use-artifact-project"
 import { dashboardName, parseDashboardCollection } from "./artifact-dashboard"
 import { validatePreview } from "./preview-runtime"
+import { validViewerPrefs, type ViewerPrefs } from "./viewer-prefs"
 
 /**
  * Interactive artifacts: a Project's own HTML and scripts run inside the fixed
@@ -13,7 +14,7 @@ import { validatePreview } from "./preview-runtime"
 export const INTERACTIVE_REQUEST = "crewship.artifact.request/v1"
 export const INTERACTIVE_RESPONSE = "crewship.artifact.response/v1"
 export const INTERACTIVE_READY = "crewship.artifact.ready/v1"
-export const INTERACTIVE_METHODS = ["data.get", "data.list", "data.batch", "viewer"] as const
+export const INTERACTIVE_METHODS = ["data.get", "data.list", "data.batch", "viewer", "prefs.get", "prefs.set"] as const
 export type InteractiveMethod = typeof INTERACTIVE_METHODS[number]
 
 /** One batch is 1 MiB of documents on the server; the envelope gets a fixed 8 KiB. */
@@ -36,6 +37,11 @@ export interface InteractiveDataAccess {
   list(signal: AbortSignal): Promise<{ collections: { name: string; documents: number }[] }>
   batch(collection: string, documents: InteractiveWrite[], signal: AbortSignal): Promise<InteractiveCollection>
   viewer(): InteractiveViewer
+  /**
+   * The viewer's own preferences for this artifact (a filter, say), kept in
+   * the host's browser storage only. Absent where the host keeps none.
+   */
+  prefs?: Pick<ViewerPrefs, "get" | "set">
 }
 
 export class InteractiveRequestError extends Error {
@@ -88,16 +94,22 @@ export class InteractiveArtifactBroker {
     this.port.postMessage(error ? { type: INTERACTIVE_RESPONSE, id, error: error.message, code: error.code } : { type: INTERACTIVE_RESPONSE, id, result })
   }
 
-  private validate(message: Record<string, unknown>): { method: InteractiveMethod; collection?: string; documents?: InteractiveWrite[] } {
+  private validate(message: Record<string, unknown>): { method: InteractiveMethod; collection?: string; documents?: InteractiveWrite[]; prefs?: Record<string, unknown> } {
     if (byteLength(message) > INTERACTIVE_MAX_REQUEST_BYTES) throw new InteractiveRequestError("The request exceeds the 1 MiB batch limit.", "limit")
     const { params } = message
     const method = message.method as InteractiveMethod
     if (Object.keys(message).some(key => !["type", "id", "method", "params"].includes(key))) throw new InteractiveRequestError("Unsupported request.")
     if (typeof method !== "string" || !(INTERACTIVE_METHODS as readonly string[]).includes(method)) throw new InteractiveRequestError("Unsupported request.")
     if (!plainObject(params)) throw new InteractiveRequestError("Request parameters must be an object.")
-    const allowed = method === "data.get" ? ["collection"] : method === "data.batch" ? ["collection", "documents"] : []
+    const allowed = method === "data.get" ? ["collection"] : method === "data.batch" ? ["collection", "documents"] : method === "prefs.set" ? ["value"] : []
     if (Object.keys(params).some(key => !allowed.includes(key))) throw new InteractiveRequestError("Unsupported request parameter.")
-    if (method === "data.list" || method === "viewer") return { method }
+    if (method === "data.list" || method === "viewer" || method === "prefs.get") return { method }
+    // Preferences are the viewer's own and stay in this browser, so they need no write right.
+    if (method === "prefs.set") {
+      const prefs = validViewerPrefs(params.value)
+      if (!prefs) throw new InteractiveRequestError("Preferences are a flat object of at most 32 short keys with text, number, true/false or null values, up to 4 KiB.")
+      return { method, prefs }
+    }
     const collection = params.collection
     if (!dashboardName(collection) || !this.options.collections.includes(collection)) throw new InteractiveRequestError("This collection is not declared in dashboard.json.")
     if (method === "data.get") return { method, collection }
@@ -123,7 +135,11 @@ export class InteractiveArtifactBroker {
     this.inFlight++
     try {
       const signal = this.abort.signal
-      const result = request.method === "data.get" ? await this.access.get(request.collection!, signal)
+      const prefs = this.access.prefs
+      if ((request.method === "prefs.get" || request.method === "prefs.set") && !prefs) throw new InteractiveRequestError("This viewer keeps no preferences here.", "unavailable")
+      const result = request.method === "prefs.get" ? { value: prefs!.get() }
+        : request.method === "prefs.set" ? { saved: prefs!.set(request.prefs!) }
+        : request.method === "data.get" ? await this.access.get(request.collection!, signal)
         : request.method === "data.batch" ? await this.access.batch(request.collection!, request.documents!, signal)
         : request.method === "data.list" ? await this.access.list(signal)
         : { name: this.access.viewer().name }
@@ -163,7 +179,7 @@ const projectDocuments = (raw: unknown, collection: string, codeVersion: number)
  * The broker's server side: the same endpoints the Dashboard preview and the
  * CLI use, with the viewer's session supplied by `fetcher` (apiFetch).
  */
-export function createInteractiveDataAccess({ fetcher, workspaceId, pageId, codeVersion, viewerName }: { fetcher: Fetcher; workspaceId: string; pageId: string; codeVersion: number; viewerName: () => string }): InteractiveDataAccess {
+export function createInteractiveDataAccess({ fetcher, workspaceId, pageId, codeVersion, viewerName, prefs }: { fetcher: Fetcher; workspaceId: string; pageId: string; codeVersion: number; viewerName: () => string; prefs?: ViewerPrefs }): InteractiveDataAccess {
   const base = `/api/v1/pages/${encodeURIComponent("@" + pageId)}/artifact/data`
   const query = () => new URLSearchParams({ workspace_id: workspaceId, version: String(codeVersion) }).toString()
   const read = async (response: Response) => {
@@ -183,6 +199,7 @@ export function createInteractiveDataAccess({ fetcher, workspaceId, pageId, code
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ base_version: codeVersion, documents }), signal,
     })), collection, codeVersion),
     viewer: () => ({ name: viewerName().slice(0, 120) }),
+    ...(prefs ? { prefs } : {}),
   }
 }
 
@@ -218,7 +235,9 @@ export function installInteractiveRuntime(config: { html: string; requestType: s
     list: () => call("data.list", {}),
     batch: (collection: string, documents: unknown) => call("data.batch", { collection, documents }),
   })
-  Object.defineProperty(window, "crewship", { value: Object.freeze({ version: 1, data, viewer: () => call("viewer", {}) }), enumerable: false, configurable: false, writable: false })
+  // The viewer's own preferences for this artifact, kept by the host in its browser storage, never on the server.
+  const prefs = Object.freeze({ get: () => call("prefs.get", {}), set: (value: unknown) => call("prefs.set", { value }) })
+  Object.defineProperty(window, "crewship", { value: Object.freeze({ version: 1, data, prefs, viewer: () => call("viewer", {}) }), enumerable: false, configurable: false, writable: false })
   // The frame has one verified document. A followed link would replace it and
   // end the session, so only same-document fragment links navigate.
   document.addEventListener("click", event => {

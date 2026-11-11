@@ -1564,6 +1564,10 @@
           "runtime_url": {
             "description": "Fixed Pages runtime bootstrap on a separate site where the Project's scripts run, or empty when this server has no isolating runtime origin for the request host.",
             "type": "string"
+          },
+          "viewer_filters": {
+            "description": "The selected interactive version opted into browser-local viewer filters.",
+            "type": "boolean"
           }
         },
         "required": [
