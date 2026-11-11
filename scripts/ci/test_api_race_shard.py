@@ -180,18 +180,23 @@ sys.exit(int(os.environ['TEST_EXIT']))
         result, _ = self.invoke(test_exit=9)
         self.assertEqual(result.returncode, 9)
 
-    def test_budget_is_summed_and_main_only_failure_preserved(self):
+    def test_budget_is_summed_and_excess_fails_every_event(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)
             for manifest in self.manifests():
                 directory = root / str(manifest['index'])
                 directory.mkdir()
                 (directory / 'api-race-shard.json').write_text(json.dumps(manifest))
-            for event, expected in [('pull_request', 0), ('merge_group', 0), ('push', 1)]:
+            for event in (None, '', 'pull_request', 'merge_group', 'push', 'workflow_dispatch', 'schedule'):
                 output = io.StringIO()
-                with patch.dict(os.environ, GITHUB_EVENT_NAME=event, GITHUB_STEP_SUMMARY=os.devnull, GITHUB_SHA='a' * 40), redirect_stdout(output):
-                    self.assertEqual(shard.report(root, 4, 20), expected)
-                self.assertIn('::error::' if event == 'push' else '::warning::', output.getvalue())
+                with patch.dict(os.environ, GITHUB_STEP_SUMMARY=os.devnull, GITHUB_SHA='a' * 40), redirect_stdout(output):
+                    if event is None:
+                        os.environ.pop('GITHUB_EVENT_NAME', None)
+                    else:
+                        os.environ['GITHUB_EVENT_NAME'] = event
+                    self.assertEqual(shard.report(root, 4, 20), 1)
+                self.assertIn('::error::', output.getvalue())
+                self.assertNotIn('::warning::', output.getvalue())
             output = io.StringIO()
             with patch.dict(os.environ, GITHUB_EVENT_NAME='push', GITHUB_STEP_SUMMARY=os.devnull, GITHUB_SHA='a' * 40), redirect_stdout(output):
                 self.assertEqual(shard.report(root, 4, 100), 0)
@@ -222,11 +227,12 @@ sys.exit(int(os.environ['TEST_EXIT']))
         code, out = run('push', '39')
         self.assertEqual(code, 1)
         self.assertIn('erosion alarm: 39s', out)
-        for event in ('pull_request', 'merge_group'):
+        for event in ('pull_request', 'merge_group', 'workflow_dispatch', ''):
             code, out = run(event, '39')
-            self.assertEqual(code, 0)
-            self.assertIn('::warning::', out)
-        self.assertEqual(run('push', '40')[0], 0)
+            self.assertEqual(code, 1)
+            self.assertIn('::error::', out)
+        for event in ('pull_request', 'merge_group', 'push', 'workflow_dispatch', ''):
+            self.assertEqual(run(event, '40')[0], 0)
         for bad in ('', '29', '-5', '4.5e3', 'x'):
             with self.assertRaises(ValueError):
                 run('push', bad)

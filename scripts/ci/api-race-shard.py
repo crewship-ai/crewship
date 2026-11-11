@@ -317,10 +317,9 @@ def report(directory, count, baseline, bootstrap_directory=None):
     with open(os.environ.get('GITHUB_STEP_SUMMARY', os.devnull), 'a') as output:
         output.write(summary)
     if seconds > alarm:
-        main_push = os.environ.get('GITHUB_EVENT_NAME') == 'push'
-        print(f'::{"error" if main_push else "warning"}::{PACKAGE_DIR[2:]} race combined duration exceeds '
+        print(f'::error::{PACKAGE_DIR[2:]} race combined duration exceeds '
               'the erosion alarm; re-measure from green main runs before changing the budget.')
-        return int(main_push)
+        return 1
     return 0
 
 
