@@ -620,6 +620,12 @@ Checks performed:
 - `cost_cap` — `max_cost_usd` is set and is at least 1.5× `estimated_cost_usd`
 - `validation:<step_id>` — gates are structurally satisfiable (`min_length ≤ max_length`, no string in both `must_contain` and `must_not_contain`)
 
+`foreach_agent_contention` warns when concurrent foreach items repeat a fixed
+agent target, including graders and nested loops. It names the recipe field
+path. `parallelism: 1` is sequential unless an enclosing foreach is concurrent;
+the default parallelism allows concurrency. Other work in the items may still
+overlap. The diagnostic does not predict item counts or conditional execution.
+
 Exit code is non-zero if any check FAILed. WARN does not propagate to the exit code — it's an operator hint, not a blocker.
 
 ---
