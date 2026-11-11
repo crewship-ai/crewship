@@ -6,6 +6,7 @@ parent with all subtests, and writes evidence to CI_RESULTS_DIR (.ci-results).
 report DIRECTORY COUNT BASELINE_SECONDS validates downloaded shard artifacts.
 Uses only local Go/git tooling; never contacts a running Crewship instance.
 """
+from bisect import bisect_left
 import hashlib
 import json
 import math
@@ -143,7 +144,7 @@ def fingerprint(names):
     return hashlib.sha256('\n'.join(sorted(names)).encode()).hexdigest()
 
 
-def partition(inventory, count):
+def partition(inventory, count, *, adjacent=False):
     if not 1 <= count <= 32:
         raise ValueError('require 1 <= shard count <= 32')
     names = []
@@ -153,15 +154,23 @@ def partition(inventory, count):
     if len(names) != len(set(names)):
         raise ValueError('duplicate top-level test in Go inventory')
     names.sort()
-    shards = [names[i::count] for i in range(count)]
+    if adjacent:
+        if PACKAGE != MODULE + '/internal/api':
+            raise ValueError('adjacent partitions require the API package')
+        # Adjacent names permit small inventory-checked prefix expressions.
+        # Keep exactly the same number of processes and every parent/subtest.
+        shards = [names[i * len(names) // count:(i + 1) * len(names) // count]
+                  for i in range(count)]
+    else:
+        shards = [names[i::count] for i in range(count)]
     # These API parents build the same real CLI. Keep their build/cache reuse
     # within one measured shard even when unrelated tests change sorted ranks.
-    # Every other test keeps its original round-robin assignment.
+    # Every other parent keeps its original assignment in the selected mode.
     anchor = 'TestDocumentCreationSubmissionReplayThroughWebSocketAndBinary'
     peer = 'TestPrivateArtifactConversationAudienceThroughBinary'
     if PACKAGE == MODULE + '/internal/api' and anchor in names and peer in names:
-        anchor_index = names.index(anchor) % count
-        peer_index = names.index(peer) % count
+        anchor_index = next(i for i, part in enumerate(shards) if anchor in part)
+        peer_index = next(i for i, part in enumerate(shards) if peer in part)
         if anchor_index != peer_index:
             shards[peer_index].remove(peer)
             shards[anchor_index].append(peer)
@@ -171,11 +180,43 @@ def partition(inventory, count):
     return names, shards
 
 
-def selection_pattern(names):
-    # Names originate from Go identifiers, which contain no regexp operators.
-    pattern = '^(' + '|'.join(names) + ')$'
+def selection_pattern(names, inventory=None):
+    # Other package runners retain exact literal selection. The API runner can
+    # compact only against its complete immutable Go-enumerated inventory.
+    terms = list(names)
+    if inventory is not None:
+        chosen = set(names)
+        complete = set(inventory)
+        if not chosen or len(chosen) != len(names) or len(complete) != len(inventory) or not chosen <= complete:
+            raise ValueError('invalid selection or complete inventory')
+        excluded = sorted(complete - chosen)
+        prefixes, exact = set(), set()
+        for name in sorted(chosen):
+            position = bisect_left(excluded, name)
+            shared = 0
+            # In sorted order, the nearest excluded neighbors determine the
+            # longest prefix this name shares with ANY excluded parent.
+            for neighbor in excluded[max(0, position - 1):position + 1]:
+                common = 0
+                for left, right in zip(name, neighbor):
+                    if left != right:
+                        break
+                    common += 1
+                shared = max(shared, common)
+            if shared == len(name):
+                exact.add(name)
+            else:
+                prefixes.add(name[:shared + 1])
+        terms = [re.escape(name) for name in sorted(exact)]
+        terms += [re.escape(prefix) + '.*' for prefix in sorted(prefixes)]
+    pattern = '^(' + '|'.join(terms) + ')$'
     if len(pattern.encode()) >= MAX_PATTERN_BYTES:
         raise ValueError('API shard regexp exceeds safe argv size; increase shard count')
+    if inventory is not None:
+        # Never broaden the expected set to fit an expression. Actual Go
+        # execution is independently checked against these same selected roots.
+        if {name for name in inventory if re.fullmatch(pattern, name)} != set(names):
+            raise ValueError('compact expression differs from selected inventory')
     return pattern
 
 
@@ -229,12 +270,15 @@ def run(index, count, timeout, bootstrap_directory=None, *, profile_directory=No
     # compile is reused by the run instead of rebuilding SQLite.
     inventory = subprocess.check_output(['go', 'test', PACKAGE_DIR, '-race', RACE_GCFLAGS, '-list', '.'],
                                         cwd=ROOT, env=env, text=True)
-    names, shards = partition(inventory, count)
+    names, shards = partition(inventory, count, adjacent=PACKAGE == MODULE + '/internal/api')
     selected = shards[index]
-    pattern = selection_pattern(selected)
+    pattern = selection_pattern(selected, names if PACKAGE == MODULE + '/internal/api' else None)
     manifest = {'index': index, 'count': count, 'inventory_count': len(names),
                 'inventory_sha256': fingerprint(names), 'selected': selected,
-                'package': PACKAGE, 'source_sha': os.environ.get('GITHUB_SHA', '')}
+                'package': PACKAGE, 'source_sha': os.environ.get('GITHUB_SHA', ''),
+                'selection_pattern_sha256': hashlib.sha256(pattern.encode()).hexdigest(),
+                'selection_pattern_bytes': len(pattern.encode()),
+                'selection_mode': 'inventory-prefix-v1' if PACKAGE == MODULE + '/internal/api' else 'exact-names-v1'}
     if bootstrap_digest is not None:
         manifest['bootstrap_sha256'] = bootstrap_digest
     if profile_directory is not None:
@@ -317,10 +361,9 @@ def report(directory, count, baseline, bootstrap_directory=None):
     with open(os.environ.get('GITHUB_STEP_SUMMARY', os.devnull), 'a') as output:
         output.write(summary)
     if seconds > alarm:
-        main_push = os.environ.get('GITHUB_EVENT_NAME') == 'push'
-        print(f'::{"error" if main_push else "warning"}::{PACKAGE_DIR[2:]} race combined duration exceeds '
+        print(f'::error::{PACKAGE_DIR[2:]} race combined duration exceeds '
               'the erosion alarm; re-measure from green main runs before changing the budget.')
-        return int(main_push)
+        return 1
     return 0
 
 
