@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent } from "react"
 import dynamic from "next/dynamic"
-import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, EyeOff, Frame, ImagePlus, Info, Layers, Lock, LockOpen, MessageSquare, MousePointer2, Play, Plus, Redo2, Save, Scan, SlidersHorizontal, Square, Trash2, Type, Undo2, ZoomIn, ZoomOut } from "lucide-react"
+import { ArrowDownToLine, ArrowUpToLine, ChevronDown, ChevronLeft, ChevronRight, Download, Eye, EyeOff, Frame, ImagePlus, Info, Layers, Lock, LockOpen, MessageSquare, MousePointer2, Play, Plus, Redo2, Save, Scan, SlidersHorizontal, Square, Trash2, Type, Undo2, ZoomIn, ZoomOut, X } from "lucide-react"
 import * as Y from "yjs"
 import { useArtifactAgentDispatch } from "@/hooks/use-artifact-agent-dispatch"
 import { useSessionSafe } from "@/hooks/use-auth"
@@ -19,7 +19,7 @@ import { cn } from "@/lib/utils"
 import type { DesignConnection, DesignPeer } from "./design-provider"
 import { useDesign } from "./use-design"
 import { readablePeerFill } from "./peer-colors"
-import { designHiddenIds, designLockedIds, designNodes, designShapeStyle, DESIGN_RADIUS, DESIGN_STROKE_WIDTH, DESIGN_FONT_SIZE, DESIGN_FONT_WEIGHTS, DESIGN_LINE_HEIGHT, designTextStyle, designLinkTarget, designScreenOf, removeDesignNode, reorderDesignNode, restoreDesignConflict, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignConflict, type DesignNode, type DesignNodeType, type DesignOrderMove } from "./design-document"
+import { clearDesignNodeFields, designHiddenIds, designLockedIds, designNodes, designShapeStyle, DESIGN_RADIUS, DESIGN_STROKE_WIDTH, DESIGN_FONT_SIZE, DESIGN_FONT_WEIGHTS, DESIGN_LINE_HEIGHT, designTextStyle, designLinkTarget, designScreenOf, removeDesignNode, reorderDesignNode, restoreDesignConflict, safeImageSource, setDesignNodeLink, upsertDesignNode, type DesignConflict, type DesignNode, type DesignNodeType, type DesignOrderMove } from "./design-document"
 import { DesignNodeShape } from "./design-node-shape"
 import { DesignPrototypePlayer } from "./design-prototype-player"
 import { DesignExportButton } from "./design-export-button"
@@ -153,6 +153,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const shareSelection = useRef(design.setSelection); shareSelection.current = design.setSelection
  const chosenKey = JSON.stringify(chosen)
  const frames = design.nodes.filter(node => node.type === "frame")
+ // Next, previous, the artboard picker, Fit and Play skip hidden screens (#5228);
+ // adding a screen still counts every screen.
+ const artboards = frames.filter(frame => !hiddenIds.has(frame.id))
  const selectedFrame = selected?.type === "frame" ? selected.id : selected?.parentId
  const position = (node: DesignNode, seen = new Set<string>()): { x: number; y: number } => {
   if (seen.has(node.id)) return { x: node.x || 0, y: node.y || 0 }
@@ -195,7 +198,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   upsertDesignNode(design.doc, node)
   setSelectedId(id)
   setPanel("properties")
-  if (type === "frame") setFocus(frames.length)
+  if (type === "frame") setFocus(artboards.length)
  }
  // The viewport (design-viewport.ts): pan and zoom are this browser's view only,
  // never written into the document, history or awareness.
@@ -206,8 +209,8 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const [viewportSize, setViewportSize] = useState({ width: 0, height: 0 })
  const [focus, setFocus] = useState(0)
  const [layersOpen, setLayersOpen] = useState(false)
- const focusIndex = Math.min(focus, Math.max(0, frames.length - 1))
- const focused = frames[focusIndex]
+ const focusIndex = Math.min(focus, Math.max(0, artboards.length - 1))
+ const focused = artboards[focusIndex]
  useLayoutEffect(() => {
   const element = viewportElement
   if (!element) return
@@ -227,7 +230,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  // The frame's toolbars float over the canvas: keep the fitted area clear of them.
  const fitOptions = !framed ? { top: 24, bottom: 24, side: 24 } : phone ? { top: 88, bottom: 0, side: 12, widthOnly: true } : { top: 80, bottom: 64, side: FIT_PAD }
  // Fit: every artboard and loose layer on a wide screen; the focused artboard's width on a phone.
- const fitTarget = phone && focused ? box([focused]) : box(design.nodes.filter(node => !node.parentId || !design.nodes.some(parent => parent.id === node.parentId)))
+ const fitTarget = phone && focused ? box([focused]) : box(design.nodes.filter(node => !hiddenIds.has(node.id) && (!node.parentId || !design.nodes.some(parent => parent.id === node.parentId))))
  const fitted: DesignView = fitTarget && viewportSize.width ? fitView(fitTarget, viewportSize, fitOptions) : { scale: 1, x: fitOptions.side, y: fitOptions.top }
  const view: DesignView = placed.fit ? fitted : placed.view
  const scale = view.scale
@@ -550,7 +553,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const setLink = (target: string) => { if (selected && design.doc && canEditSelected && currentEditableIds().has(selected.id)) setDesignNodeLink(design.doc, selected.id, target || null) }
  const play = () => {
   const start = selected ? designScreenOf(design.nodes, selected) : undefined
-  const first = start ?? (framed ? focused?.id : undefined) ?? frames[0]?.id
+  const first = (start && !hiddenIds.has(start) ? start : undefined) ?? (framed ? focused?.id : undefined) ?? artboards[0]?.id
   if (prototype && first) { setPlaying(first); if (framed) enterFullscreen() }
  }
  const stopPlaying = () => { setPlaying(null); if (framed) exitFullscreen() }
@@ -658,7 +661,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   if (flag === "hidden" && !node.hidden) setSelectedIds(chosen.filter(id => id !== node.id))
  }
  const layerList = design.nodes.map(node => <div key={node.id} role="group" aria-label={`Layer ${node.name || node.text || node.type}`} className="flex items-center">
-  <button aria-pressed={chosen.includes(node.id)} onClick={event => { if (event.shiftKey || event.ctrlKey || event.metaKey) { setSelectedIds(toggleSelection(chosen, node.id)); return } setSelectedId(node.id); if (node.type === "frame") setFocus(frames.indexOf(node)) }} className={`flex min-h-9 min-w-0 flex-1 items-center gap-2 px-3 text-left text-xs coarse:min-h-[44px] ${chosen.includes(node.id) ? "bg-accent text-accent-foreground" : "hover:bg-muted"} ${node.parentId ? "pl-7" : "font-medium"}`}>
+  <button aria-pressed={chosen.includes(node.id)} onClick={event => { if (event.shiftKey || event.ctrlKey || event.metaKey) { setSelectedIds(toggleSelection(chosen, node.id)); return } setSelectedId(node.id); if (node.type === "frame") { const index = artboards.findIndex(frame => frame.id === node.id); if (index >= 0) setFocus(index) } }} className={`flex min-h-9 min-w-0 flex-1 items-center gap-2 px-3 text-left text-xs coarse:min-h-[44px] ${chosen.includes(node.id) ? "bg-accent text-accent-foreground" : "hover:bg-muted"} ${node.parentId ? "pl-7" : "font-medium"}`}>
   {node.type === "frame" ? <Frame className="size-3.5 shrink-0" /> : node.type === "text" ? <Type className="size-3.5 shrink-0" /> : <Square className="size-3.5 shrink-0" />}<span className={cn("truncate", hiddenIds.has(node.id) && "opacity-50")}>{node.name || node.text || node.type}</span>
  </button>
   {hideLock && canChange ? <>
@@ -734,13 +737,13 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
  const propertiesPanel = <>
   {!framed && <h2 className="mb-4 text-sm font-semibold">Properties</h2>}
   {reviewOnly && <p className="mb-3 flex items-start gap-1.5 text-xs text-muted-foreground"><Info aria-hidden className="mt-px size-3.5 shrink-0" />Review only on a phone. Edit on a larger screen.</p>}
-  {selected ? <fieldset disabled={!canEditSelected} className="min-w-0 space-y-3 border-0 p-0">
+  {selected ? <fieldset key={selected.id} disabled={!canEditSelected} className="min-w-0 space-y-3 border-0 p-0">
    <Field label="Name"><Input aria-label="Layer name" value={selected.name ?? ""} disabled={!canEditSelected} onChange={event => patch({ name: event.target.value })} /></Field>
-   <div className="grid grid-cols-2 gap-2">{(["x", "y", "width", "height"] as const).map(field => <Field key={field} label={field === "width" ? "W" : field === "height" ? "H" : field.toUpperCase()}><Input type="number" aria-label={field} value={selected[field] ?? 0} disabled={!canEditSelected} min={field === "width" || field === "height" ? 1 : undefined} onChange={event => { const value = Number(event.target.value); if (Number.isFinite(value) && Math.abs(value) <= 1000000 && (!(field === "width" || field === "height") || value >= 1)) patch({ [field]: value }) }} /></Field>)}</div>
+   <div className="grid grid-cols-2 gap-2">{(["x", "y", "width", "height"] as const).map(field => <Field key={field} label={field === "width" ? "W" : field === "height" ? "H" : field.toUpperCase()}><DraftNumberInput aria-label={field} value={selected[field] ?? 0} disabled={!canEditSelected} min={field === "width" || field === "height" ? 1 : undefined} parse={text => { const value = Number(text); return text.trim() !== "" && Number.isFinite(value) && Math.abs(value) <= 1000000 && (!(field === "width" || field === "height") || value >= 1) ? value : undefined }} onCommit={value => patch({ [field]: value })} /></Field>)}</div>
    <Field label={selected.type === "text" ? "Text color" : "Fill"}><div className="flex gap-2"><input aria-label="Fill color" type="color" className="h-9 w-10 rounded border bg-background p-1 coarse:h-[44px]" value={/^#[0-9a-f]{6}$/i.test(selected.fill) ? selected.fill : "#ffffff"} disabled={!canEditSelected} onChange={event => patch({ fill: event.target.value })} /><Input aria-label="Fill value" value={selected.fill ?? ""} disabled={!canEditSelected} onChange={event => patch({ fill: event.target.value })} /></div></Field>
    {selected.type === "text" && <Field label="Text"><textarea aria-label="Text content" maxLength={100000} className="min-h-24 w-full rounded border bg-background p-2 text-sm" value={selected.text ?? ""} disabled={!canEditSelected} onChange={event => patch({ text: event.target.value })} /></Field>}
    {selected.type === "text" && artifactsDesignTextStyle() && <DesignTextStyleFields node={selected} disabled={!canEditSelected} onChange={patch} />}
-   {(selected.type === "rect" || selected.type === "image") && artifactsDesignShapeStyle() && <DesignShapeStyleFields node={selected} disabled={!canEditSelected} onChange={patch} />}
+   {(selected.type === "rect" || selected.type === "image") && artifactsDesignShapeStyle() && <DesignShapeStyleFields node={selected} disabled={!canEditSelected} onChange={patch} onClearStroke={() => { if (design.doc && canEditSelected && currentEditableIds().has(selected.id)) clearDesignNodeFields(design.doc, selected.id, ["stroke", "strokeWidth"]) }} />}
    {selected.type === "image" && <Field label="Image URL"><Input aria-label="Image URL" placeholder="https://…" value={selected.src ?? ""} disabled={!canEditSelected} onChange={event => { setImageURL(event.target.value); patch({ src: event.target.value }) }} /><p className="mt-1 text-xs text-muted-foreground">HTTPS image or embedded PNG, JPEG, WebP, GIF.</p></Field>}
    {selected.type !== "frame" && <Field label="Screen"><select aria-label="Parent screen" className="h-9 w-full rounded border bg-background px-2 text-sm coarse:h-[44px]" value={selected.parentId ?? ""} disabled={!canEditSelected} onChange={event => patch({ parentId: event.target.value })}><option value="">On canvas</option>{frames.map(frame => <option key={frame.id} value={frame.id}>{frame.name || "Screen"}</option>)}</select></Field>}
    {prototype && selected.type !== "frame" && (() => {
@@ -798,9 +801,9 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
   const zoomLabel = placed.fit ? `Fit · ${Math.round(scale * 100)} %` : `${Math.round(scale * 100)} %`
   // Next and previous bring the artboard into view; a phone keeps fitting its width.
   const goTo = (index: number) => {
-   const next = Math.max(0, Math.min(frames.length - 1, index))
+   const next = Math.max(0, Math.min(artboards.length - 1, index))
    setFocus(next)
-   const target = frames[next] && box([frames[next]])
+   const target = artboards[next] && box([artboards[next]])
    if (target && !(phone && placed.fit)) setView(focusView(view, target, fitOptions))
   }
   return <section aria-label="Design editor" className="relative flex min-h-0 flex-1 flex-col bg-muted/40 text-foreground" data-design-connection={design.connection} data-design-review={reviewOnly ? "phone" : undefined}>
@@ -808,17 +811,17 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
    {viewportView("")}
    {/* view: what am I looking at. Canvas | Library appears only for a file that publishes a library; none does yet. */}
    <ArtifactSlot name="view" label="View">
-    {frames.length > 0 ? <DropdownMenu>
+    {artboards.length > 0 ? <DropdownMenu>
      <DropdownMenuTrigger asChild>
       <button type="button" aria-label={`Artboard: ${focused?.name || "Screen"}`} className="inline-flex h-[30px] items-center gap-1.5 rounded-[var(--radius-row)] px-2 text-sm hover:bg-accent coarse:min-h-[44px]">
        <Layers aria-hidden className="size-3.5 text-muted-foreground" /><b className="max-w-40 truncate font-semibold">{focused?.name || "Screen"}</b>
-       <span className="font-mono text-xs text-muted-foreground">{phone ? `${focusIndex + 1}/${frames.length}` : `${frames.length} ${frames.length === 1 ? "artboard" : "artboards"}`}</span>
+       <span className="font-mono text-xs text-muted-foreground">{phone ? `${focusIndex + 1}/${artboards.length}` : `${artboards.length} ${artboards.length === 1 ? "artboard" : "artboards"}`}</span>
        <ChevronDown aria-hidden className="size-3 text-muted-foreground" />
       </button>
      </DropdownMenuTrigger>
      <DropdownMenuContent align="start" className="w-60">
-      <DropdownMenuLabel className="text-xs text-muted-foreground">{frames.length} {frames.length === 1 ? "artboard" : "artboards"}</DropdownMenuLabel>
-      {frames.map((frame, index) => <DropdownMenuItem key={frame.id} onSelect={() => goTo(index)} aria-current={index === focusIndex ? "true" : undefined}>
+      <DropdownMenuLabel className="text-xs text-muted-foreground">{artboards.length} {artboards.length === 1 ? "artboard" : "artboards"}</DropdownMenuLabel>
+      {artboards.map((frame, index) => <DropdownMenuItem key={frame.id} onSelect={() => goTo(index)} aria-current={index === focusIndex ? "true" : undefined}>
        <Frame aria-hidden /><span className="min-w-0 flex-1 truncate">{frame.name || "Screen"}</span><span className="font-mono text-xs text-muted-foreground">{Math.round(Number(frame.width) || 0)} × {Math.round(Number(frame.height) || 0)}</span>
       </DropdownMenuItem>)}
      </DropdownMenuContent>
@@ -826,7 +829,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     {!phone && <ArtifactTool icon={Layers} label="Layers" on={layersOpen} onClick={() => setLayersOpen(open => !open)} />}
    </ArtifactSlot>
    <ArtifactSlot name="output" label="Output">
-    {prototype && frames.length > 0 && <ArtifactTool ref={playButton} icon={Play} label="Play prototype" text={phone ? undefined : "Play"} onClick={play} />}
+    {prototype && artboards.length > 0 && <ArtifactTool ref={playButton} icon={Play} label="Play prototype" text={phone ? undefined : "Play"} onClick={play} />}
     {!phone && <DesignExportButton workspaceId={workspaceId} pageId={data.page_id} version={viewedVersion} variant="tool" />}
    </ArtifactSlot>
    {canChange && <ArtifactSlot name="tools" label="Design tools">
@@ -851,11 +854,11 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
     <ArtifactToolSeparator />
     <ArtifactTool icon={Scan} label="Fit" on={placed.fit} onClick={() => setPlaced({ fit: true })} />
    </ArtifactSlot>
-   {frames.length > 0 && <ArtifactSlot name="nav" label="Artboards">
+   {artboards.length > 0 && <ArtifactSlot name="nav" label="Artboards">
     <ArtifactTool icon={ChevronLeft} label="Previous artboard" disabled={focusIndex === 0} onClick={() => goTo(focusIndex - 1)} />
     <span className="max-w-44 truncate px-1 text-sm font-semibold">{focused?.name || "Screen"}</span>
-    <span className="px-1 font-mono text-xs text-muted-foreground">{focusIndex + 1} / {frames.length}</span>
-    <ArtifactTool icon={ChevronRight} label="Next artboard" disabled={focusIndex >= frames.length - 1} onClick={() => goTo(focusIndex + 1)} />
+    <span className="px-1 font-mono text-xs text-muted-foreground">{focusIndex + 1} / {artboards.length}</span>
+    <ArtifactTool icon={ChevronRight} label="Next artboard" disabled={focusIndex >= artboards.length - 1} onClick={() => goTo(focusIndex + 1)} />
    </ArtifactSlot>}
    {layersOpen && !phone && <ArtifactSlot name="panel" label="Layers">
     <div className="flex items-center gap-2 border-b px-3 py-2 text-xs font-semibold text-muted-foreground">Layers <span className="ml-auto font-normal">{design.nodes.length}</span></div>
@@ -883,7 +886,7 @@ export function DesignEditor({ workspaceId, slug, initialVersion, onFrameState }
    <span role="status" className="text-xs text-muted-foreground">{statusText}</span>
    {!design.editable && <span className="rounded bg-muted px-2 py-1 text-xs">{version ? "History" : "Read only"}</span>}
    <div className="flex -space-x-1" aria-label="People on this canvas">{design.peers.map(peer => <span key={peer.clientId} title={peer.name} className="flex size-7 items-center justify-center rounded-full border-2 border-background text-xs font-medium text-white" style={{ backgroundColor: readablePeerFill(peer.color) }}>{peer.name.slice(0, 2).toUpperCase()}</span>)}</div>
-   {prototype && frames.length > 0 && <Button ref={playButton} variant="outline" onClick={play}><Play className="size-4" />Play</Button>}
+   {prototype && artboards.length > 0 && <Button ref={playButton} variant="outline" onClick={play}><Play className="size-4" />Play</Button>}
    <Button variant="outline" onClick={() => setAccessOpen(true)}>Access</Button>
    <Button variant="outline" onClick={() => setPanel(panel === "history" ? "properties" : "history")}>History{viewedVersion ? ` · v${viewedVersion}` : ""}</Button>
    <DesignExportButton workspaceId={workspaceId} pageId={data.page_id} version={viewedVersion} />
@@ -930,8 +933,8 @@ function DesignTextStyleFields({ node, disabled, onChange }: { node: DesignNode;
   <div className="grid grid-cols-2 gap-2">
    <Field label="Font"><select aria-label="Font family" className={selectClass} value={style.family} disabled={disabled} onChange={event => onChange({ fontFamily: event.target.value as DesignNode["fontFamily"] })}><option value="sans">Sans</option><option value="serif">Serif</option><option value="mono">Mono</option></select></Field>
    <Field label="Weight"><select aria-label="Font weight" className={selectClass} value={style.weight} disabled={disabled} onChange={event => onChange({ fontWeight: Number(event.target.value) })}>{DESIGN_FONT_WEIGHTS.map(weight => <option key={weight} value={weight}>{weight} · {WEIGHT_NAMES[weight]}</option>)}</select></Field>
-   <Field label="Size"><Input type="number" aria-label="Font size" min={DESIGN_FONT_SIZE.min} max={DESIGN_FONT_SIZE.max} value={style.size} disabled={disabled} onChange={event => { const value = number(event.target.value, DESIGN_FONT_SIZE); if (value !== undefined) onChange({ fontSize: value }) }} /></Field>
-   <Field label="Line height"><Input type="number" aria-label="Line height" step={0.1} min={DESIGN_LINE_HEIGHT.min} max={DESIGN_LINE_HEIGHT.max} value={style.lineHeight} disabled={disabled} onChange={event => { const value = number(event.target.value, DESIGN_LINE_HEIGHT); if (value !== undefined) onChange({ lineHeight: value }) }} /></Field>
+   <Field label="Size"><DraftNumberInput aria-label="Font size" min={DESIGN_FONT_SIZE.min} max={DESIGN_FONT_SIZE.max} value={style.size} disabled={disabled} parse={text => number(text, DESIGN_FONT_SIZE)} onCommit={value => onChange({ fontSize: value })} /></Field>
+   <Field label="Line height"><DraftNumberInput aria-label="Line height" step={0.1} min={DESIGN_LINE_HEIGHT.min} max={DESIGN_LINE_HEIGHT.max} value={style.lineHeight} disabled={disabled} parse={text => number(text, DESIGN_LINE_HEIGHT)} onCommit={value => onChange({ lineHeight: value })} /></Field>
   </div>
   <Field label="Align"><select aria-label="Text alignment" className={selectClass} value={style.align} disabled={disabled} onChange={event => onChange({ textAlign: event.target.value as DesignNode["textAlign"] })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></Field>
   <label className="flex items-center gap-2 text-xs text-muted-foreground coarse:min-h-[44px]"><input type="checkbox" aria-label="Wrap text to the box width" checked={style.wrap} disabled={disabled} onChange={event => onChange({ textWrap: event.target.checked ? "wrap" : "none" })} />Wrap to the box width</label>
@@ -940,17 +943,39 @@ function DesignTextStyleFields({ node, disabled, onChange }: { node: DesignNode;
 }
 
 /** Corner radius and stroke of a rectangle or image (#5219). */
-function DesignShapeStyleFields({ node, disabled, onChange }: { node: DesignNode; disabled: boolean; onChange: (values: Partial<DesignNode>) => void }) {
+function DesignShapeStyleFields({ node, disabled, onChange, onClearStroke }: { node: DesignNode; disabled: boolean; onChange: (values: Partial<DesignNode>) => void; onClearStroke: () => void }) {
  const shape = designShapeStyle(node)
  const number = (value: string, range: { min: number; max: number }) => { const parsed = Number(value); return value.trim() !== "" && Number.isFinite(parsed) && parsed >= range.min && parsed <= range.max ? parsed : undefined }
- const color = shape.stroke ?? (typeof node.stroke === "string" && /^#[0-9a-f]{6}$/i.test(node.stroke) ? node.stroke : "#0f172a")
+ const storedColor = typeof node.stroke === "string" && /^#(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(node.stroke) ? node.stroke : undefined
+ const color = storedColor ?? "#0f172a"
+ const pickerColor = color.length === 4 ? "#" + [...color.slice(1)].map(digit => digit.repeat(2)).join("") : color
  return <fieldset className="space-y-3" aria-label="Shape style">
   <div className="grid grid-cols-2 gap-2">
-   <Field label="Corner radius"><Input type="number" aria-label="Corner radius" min={DESIGN_RADIUS.min} max={DESIGN_RADIUS.max} value={shape.radius} disabled={disabled} onChange={event => { const value = number(event.target.value, DESIGN_RADIUS); if (value !== undefined) onChange({ radius: value }) }} /></Field>
-   <Field label="Stroke width"><Input type="number" aria-label="Stroke width" min={DESIGN_STROKE_WIDTH.min} max={DESIGN_STROKE_WIDTH.max} value={shape.strokeWidth} disabled={disabled} onChange={event => { const value = number(event.target.value, DESIGN_STROKE_WIDTH); if (value !== undefined) onChange(value > 0 && !shape.stroke ? { strokeWidth: value, stroke: color } : { strokeWidth: value }) }} /></Field>
+   <Field label="Corner radius"><DraftNumberInput aria-label="Corner radius" min={DESIGN_RADIUS.min} max={DESIGN_RADIUS.max} value={shape.radius} disabled={disabled} parse={text => number(text, DESIGN_RADIUS)} onCommit={value => onChange({ radius: value })} /></Field>
+   <Field label="Stroke width"><DraftNumberInput aria-label="Stroke width" min={DESIGN_STROKE_WIDTH.min} max={DESIGN_STROKE_WIDTH.max} value={shape.strokeWidth} disabled={disabled} parse={text => number(text, DESIGN_STROKE_WIDTH)} onCommit={value => onChange(value > 0 && !shape.stroke ? { strokeWidth: value, stroke: color } : { strokeWidth: value })} /></Field>
   </div>
-  <Field label="Stroke color"><input aria-label="Stroke color" type="color" className="h-9 w-10 rounded border bg-background p-1 coarse:h-[44px]" value={/^#[0-9a-f]{6}$/i.test(color) ? color : "#0f172a"} disabled={disabled} onChange={event => onChange({ stroke: event.target.value })} /></Field>
+  <Field label="Stroke color"><input aria-label="Stroke color" type="color" className="h-9 w-10 rounded border bg-background p-1 coarse:h-[44px]" value={pickerColor} disabled={disabled} onChange={event => onChange({ stroke: event.target.value })} /></Field>
+  {(storedColor || node.strokeWidth !== undefined) && <Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={onClearStroke}><X className="size-4" />Remove stroke</Button>}
  </fieldset>
+}
+
+/** A Properties number stays local until blur or Enter. An empty or invalid draft leaves the layer unchanged. */
+function DraftNumberInput({ value, parse, onCommit, disabled, ...props }: Omit<React.ComponentProps<typeof Input>, "value" | "onChange" | "type"> & { value: number; parse: (text: string) => number | undefined; onCommit: (value: number) => void }) {
+ const [draft, setDraft] = useState<{ text: string; base: number } | null>(null)
+ if (disabled && draft) setDraft(null)
+ const finish = () => {
+  if (!disabled && draft) {
+   const parsed = parse(draft.text)
+   if (parsed !== undefined && parsed !== draft.base && parsed !== value) onCommit(parsed)
+  }
+  setDraft(null)
+ }
+ return <Input {...props} disabled={disabled} type="number" value={draft?.text ?? value}
+  onChange={event => {
+   const text = event.target.value
+   setDraft(previous => ({ text, base: previous?.base ?? value }))
+  }}
+  onBlur={finish} onKeyDown={event => { if (event.key === "Enter") { event.preventDefault(); finish() } else if (event.key === "Escape" && draft) { event.stopPropagation(); setDraft(null) } }} />
 }
 
 function Field({ label, children }: { label: string; children: React.ReactNode }) {

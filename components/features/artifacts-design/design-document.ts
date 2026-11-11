@@ -148,6 +148,14 @@ export function upsertDesignNode(doc: Y.Doc, patch: Partial<DesignNode> & { id: 
  }, "editor")
 }
 
+/** Takes optional fields off a layer (an absent field is the default), as one editor step. */
+export function clearDesignNodeFields(doc: Y.Doc, id: string, keys: readonly (keyof DesignNode)[]) {
+ doc.transact(() => {
+  const node = doc.getMap<Y.Map<unknown>>("nodes").get(id)
+  if (node) for (const key of keys) if (key !== "id" && node.has(key)) node.delete(key)
+ }, "editor")
+}
+
 /**
  * Brings a lost text back without taking anything else from the stale side.
  * The layer's current geometry, style, name and links stay. Text changed after
@@ -443,6 +451,9 @@ export const designHiddenIds = (nodes: readonly DesignNode[]) => inherited(nodes
 export const designLockedIds = (nodes: readonly DesignNode[]) => inherited(nodes, "locked")
 
 /** Shape style limits (#5219), the same as the engine's. */
+/** A fill the HTML export paints too: plain colour syntax only, the same set as export.go's exportColor. */
+export const DESIGN_FILL = /^(#[0-9a-fA-F]{3,8}|[a-zA-Z]{1,32}|(rgb|rgba|hsl|hsla)\([0-9.,%/ +-]{1,64}\))$/
+
 export const DESIGN_RADIUS = { min: 0, max: 10000 }
 export const DESIGN_STROKE_WIDTH = { min: 0, max: 1000 }
 const STROKE_COLOR = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/
