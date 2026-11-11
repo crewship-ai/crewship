@@ -40,7 +40,7 @@ func TestRunStep_BusyAgentWaitsForRelease(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		lock.End("agent_cov")
 	}()
-	_, err := r.RunStep(context.Background(), busyAgentStep)
+	res, err := r.RunStep(context.Background(), busyAgentStep)
 	if errors.Is(err, ErrAgentBusy) {
 		t.Fatalf("step failed as busy instead of waiting for the agent: %v", err)
 	}
@@ -50,6 +50,9 @@ func TestRunStep_BusyAgentWaitsForRelease(t *testing.T) {
 	if lock.InFlight("agent_cov") {
 		t.Fatal("step kept the agent after it returned")
 	}
+	if res.AgentWaitMs <= 0 {
+		t.Fatalf("lost wait duration: %+v", res)
+	}
 	assertAgentWaitEvents(t, r, "acquired")
 }
 
@@ -57,7 +60,7 @@ func TestRunStep_BusyAgentWaitIsBounded(t *testing.T) {
 	r, lock := busyAgentRig(t)
 	r.agentBusyWait = 40 * time.Millisecond
 	start := time.Now()
-	_, err := r.RunStep(context.Background(), busyAgentStep)
+	res, err := r.RunStep(context.Background(), busyAgentStep)
 	if !errors.Is(err, ErrAgentBusy) {
 		t.Fatalf("want ErrAgentBusy after the wait bound, got %v", err)
 	}
@@ -72,6 +75,9 @@ func TestRunStep_BusyAgentWaitIsBounded(t *testing.T) {
 	if lock.InFlight("agent_cov") {
 		t.Fatal("a step that gave up left a claim on the agent")
 	}
+	if res.AgentWaitMs <= 0 {
+		t.Fatalf("lost wait duration: %+v", res)
+	}
 	assertAgentWaitEvents(t, r, "timed_out")
 }
 
@@ -83,9 +89,12 @@ func TestRunStep_BusyAgentWaitStopsOnCancel(t *testing.T) {
 		time.Sleep(30 * time.Millisecond)
 		cancel()
 	}()
-	_, err := r.RunStep(ctx, busyAgentStep)
+	res, err := r.RunStep(ctx, busyAgentStep)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("want context.Canceled when the run is stopped while waiting, got %v", err)
+	}
+	if res.AgentWaitMs <= 0 {
+		t.Fatalf("lost wait duration: %+v", res)
 	}
 	assertAgentWaitEvents(t, r, "cancelled")
 }
@@ -131,5 +140,14 @@ func TestAgentBusyWaitBound(t *testing.T) {
 	r.agentBusyWait = time.Second
 	if got := r.busyWaitFor(AgentStepRequest{TimeoutSec: 90}); got != time.Second {
 		t.Fatalf("override: wait %v", got)
+	}
+}
+
+func TestRunStep_FreeAgentReportsZeroWait(t *testing.T) {
+	r, lock := busyAgentRig(t)
+	lock.End("agent_cov")
+	res, _ := r.RunStep(context.Background(), busyAgentStep)
+	if res.AgentWaitMs != 0 {
+		t.Fatalf("free agent wait = %d", res.AgentWaitMs)
 	}
 }

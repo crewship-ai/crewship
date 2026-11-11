@@ -3,11 +3,13 @@
 import { useCallback, useEffect, useState } from "react"
 import { apiFetch } from "@/lib/api-fetch"
 import { formatRoutineTime } from "@/lib/routine-time"
+import { formatDurationMs } from "@/lib/activity-stream"
 import { Button } from "@/components/ui/button"
 
 interface Execution {
   id: string; parent_execution_id: string; step_id: string; execution_path: string
   attempt: number; kind: string; status: string; agent_slug: string; model: string
+  agent_wait_ms?: number | null; work_duration_ms?: number | null
   started_at: string; ended_at: string; error: string; output_bytes: number
 }
 export function RoutineExecutionHistory({ workspaceId, runId, active }: { workspaceId: string; runId: string; active: boolean }) {
@@ -56,6 +58,10 @@ export function RoutineExecutionHistory({ workspaceId, runId, active }: { worksp
         <span>{row.kind === "agent_attempt" ? "Agent invocation" : row.step_id} · Attempt {row.attempt}</span><span className="text-xs text-muted-foreground">{row.status}</span>
       </button>
       <p className="mt-1 break-all text-xs text-muted-foreground">{row.execution_path} · {formatRoutineTime(row.started_at)}{row.agent_slug && ` · ${row.agent_slug}`}{row.model && ` · requested ${row.model}`}</p>
+      {row.agent_wait_ms != null && <p className="mt-1 text-xs tabular-nums text-muted-foreground">
+        <span>Agent wait: {formatDurationMs(row.agent_wait_ms)}</span>
+        {row.work_duration_ms != null && <span> · Work: {formatDurationMs(row.work_duration_ms)}</span>}
+      </p>}
       {row.error && <p className="mt-2 whitespace-pre-wrap text-xs text-destructive">{row.error}</p>}
       {selected === row.id && <pre className="mt-3 max-h-96 overflow-auto whitespace-pre-wrap break-words text-xs">{outputError ? "This output is unavailable." : output === null ? "Loading output…" : output || "No output recorded."}</pre>}
     </div>)}

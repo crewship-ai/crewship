@@ -1168,11 +1168,12 @@ type AgentStepRequest struct {
 // orchestrator collects token counts + cost via its existing
 // paymaster middleware; the pipeline package does not double-count.
 type AgentStepResult struct {
-	Output     string // final assistant message text
-	DurationMs int64
-	CostUSD    float64
-	TokensIn   int
-	TokensOut  int
+	AgentWaitMs int64  // time waiting for the shared agent lock, including aborted waits
+	Output      string // final assistant message text
+	DurationMs  int64
+	CostUSD     float64
+	TokensIn    int
+	TokensOut   int
 }
 
 // PipelineResolver is how the executor looks up a pipeline by slug

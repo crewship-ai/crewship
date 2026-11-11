@@ -202,6 +202,8 @@ func formatCalendarInputs(inputs *map[string]any) string {
 // routineExecutionRow is one row of `routine executions`. output_bytes is a
 // size, never the transcript — that is a second call with --execution-id.
 type routineExecutionRow struct {
+	AgentWaitMs       *int64 `json:"agent_wait_ms" yaml:"agent_wait_ms"`
+	WorkDurationMs    *int64 `json:"work_duration_ms" yaml:"work_duration_ms"`
 	ID                string `json:"id" yaml:"id"`
 	ParentExecutionID string `json:"parent_execution_id" yaml:"parent_execution_id"`
 	StepID            string `json:"step_id" yaml:"step_id"`
@@ -292,11 +294,11 @@ Examples:
 				return
 			}
 			w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-			fmt.Fprintln(w, "EXECUTION_ID\tPATH\tATTEMPT\tKIND\tSTATUS\tAGENT\tMODEL\tSTARTED\tENDED\tOUTPUT\tERROR")
+			fmt.Fprintln(w, "EXECUTION_ID\tPATH\tATTEMPT\tKIND\tSTATUS\tAGENT\tMODEL\tSTARTED\tENDED\tWAIT\tWORK\tOUTPUT\tERROR")
 			for _, r := range page.Rows {
-				fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+				fmt.Fprintf(w, "%s\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 					r.ID, r.ExecutionPath, r.Attempt, r.Kind, r.Status, orDash(r.AgentSlug), orDash(r.Model),
-					r.StartedAt, orDash(r.EndedAt), formatByteCount(r.OutputBytes), truncIDForCLI(r.Error, 60))
+					r.StartedAt, orDash(r.EndedAt), executionDuration(r.AgentWaitMs), executionDuration(r.WorkDurationMs), formatByteCount(r.OutputBytes), truncIDForCLI(r.Error, 60))
 			}
 			flush.of(w)
 			if page.NextCursor != nil {
@@ -493,4 +495,11 @@ func init() {
 	pipelineCmd.AddCommand(routineCalendarCmd)
 	pipelineCmd.AddCommand(routineExecutionsCmd)
 	pipelineCmd.AddCommand(routineArtifactsCmd)
+}
+
+func executionDuration(ms *int64) string {
+	if ms == nil {
+		return "—"
+	}
+	return (time.Duration(*ms) * time.Millisecond).String()
 }
