@@ -28,6 +28,18 @@ func TestArtifactDataBackupFreshAndForkPreserveDocumentKeys(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	run, created, err := d.StartRun(t.Context(), k, "sales", "backup-refresh", 1, auth)
+	if err != nil || !created {
+		t.Fatalf("start run: %v %v", created, err)
+	}
+	_, generation, err := d.BatchGeneration(t.Context(), k, "sales", []artifacts.DataWrite{{ID: "stable-row", IfVersion: 2, Value: json.RawMessage(`{"n":9007199254740993}`)}}, run.ID, 1, auth)
+	if err != nil || generation != 3 {
+		t.Fatalf("linked batch: %d %v", generation, err)
+	}
+	done, err := d.FinishRun(t.Context(), k, "sales", run.ID, 1, artifacts.DataRunFinish{State: "succeeded", DataGeneration: &generation}, auth)
+	if err != nil {
+		t.Fatalf("finish run: %v", err)
+	}
 	dump, err := backup.DumpWorkspace(t.Context(), source, ws)
 	if err != nil {
 		t.Fatal(err)
@@ -59,8 +71,14 @@ func TestArtifactDataBackupFreshAndForkPreserveDocumentKeys(t *testing.T) {
 				t.Fatal("fork retained source scope")
 			}
 			docs, err := artifacts.NewDataStore(target, artifacts.DataOptions{Enabled: true}).Read(t.Context(), restored, "sales", auth)
-			if err != nil || len(docs) != 1 || docs[0].ID != "stable-row" || docs[0].Version != 2 || docs[0].UpdatedBy != "u_admin" || string(docs[0].Value) != `{"n":9007199254740993}` {
+			if err != nil || len(docs) != 1 || docs[0].ID != "stable-row" || docs[0].Version != 3 || docs[0].UpdatedBy != "u_admin" || string(docs[0].Value) != `{"n":9007199254740993}` {
 				t.Fatalf("dataset changed: %+v %v", docs, err)
+			}
+			var runID, state, owner, finished string
+			var linked, end int64
+			err = target.QueryRow(`SELECT id,state,started_by,finished_at,written_generation,end_generation FROM artifact_data_runs WHERE workspace_id=? AND page_id=? AND collection='sales'`, restored.WorkspaceID, restored.PageID).Scan(&runID, &state, &owner, &finished, &linked, &end)
+			if err != nil || runID != run.ID || state != "succeeded" || owner != "u_admin" || linked != generation || end != generation || finished != done.FinishedAt {
+				t.Fatalf("producer evidence changed: %q %q %q %q %d %d %v", runID, state, owner, finished, linked, end, err)
 			}
 		})
 	}

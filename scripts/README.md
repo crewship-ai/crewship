@@ -38,6 +38,13 @@ timeout is an incomplete run, not a pass. Record the command and result when
 running the full suite with a deliberately adjusted timeout. Mutation tests
 (`make mutation`) are a separate, expensive check scoped by `.gremlins.yaml`.
 
+The Security Gitleaks job also runs
+`GITLEAKS_REQUIRED=1 python3 scripts/ci/test_gitleaks_fingerprints.py GitleaksFingerprintTests.test_exact_exception_preserves_other_values_at_the_same_path_and_line -v`
+after installing its checksum-verified scanner. It scans generated canaries in an
+owned temporary Git repository and proves an exact historical fingerprint
+exception cannot hide another value at the same file, rule and line. Other test
+discovery can skip this tool-dependent test; Security requires actual execution.
+
 ## Build, generated assets and release support
 
 | Script | Responsibility / outputs |

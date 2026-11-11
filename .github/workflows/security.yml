@@ -129,6 +129,13 @@ jobs:
           sudo mv /tmp/gitleaks /usr/local/bin/gitleaks
           gitleaks version
 
+      - name: Verify fixture exceptions cannot hide another credential
+        env:
+          GITLEAKS_REQUIRED: "1"
+        run: >-
+          python3 scripts/ci/test_gitleaks_fingerprints.py
+          GitleaksFingerprintTests.test_exact_exception_preserves_other_values_at_the_same_path_and_line -v
+
       - name: Run gitleaks detect
         # Scan this checkout's full ancestry, not every remote ref fetched above.
         # An unrelated unmerged PR can carry fixtures whose allowlist is not
