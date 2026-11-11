@@ -61,6 +61,7 @@ func (c *collaborationHTTPConnection) reopenLapsedGate(ctx context.Context) {
 	closed := c.closed
 	c.mu.Unlock()
 	if !closed {
+		c.document.pump.recordFailure("gate-watch.reopen")
 		c.document.cancel()
 	}
 }

@@ -16,6 +16,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/crewship-ai/crewship/internal/testutil"
 )
 
 func resetFixture(t *testing.T) (string, string) {
@@ -29,11 +30,15 @@ func resetFixture(t *testing.T) (string, string) {
 		t.Setenv(name, "")
 	}
 	t.Setenv("CREWSHIP_SKIP_SIDECAR", "1")
-	db, err := database.Open("file:" + filepath.Join(root, "crewship.db"))
-	if err != nil {
+	// These tests start from a current installation, then exercise the real
+	// reset (including its schema verification and fresh migration). Reuse
+	// only the initial migrated schema; reopen with production durability.
+	fixture := testutil.MigratedDBAt(t, filepath.Join(root, "crewship.db"))
+	if err := fixture.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.Migrate(context.Background(), db.DB, covLogger()); err != nil {
+	db, err := database.Open("file:" + filepath.Join(root, "crewship.db"))
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err := database.RunPostDeployMigrations(context.Background(), db.DB, covLogger()); err != nil {

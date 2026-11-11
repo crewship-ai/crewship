@@ -51,6 +51,17 @@ type collaborationSessionPump struct {
 	// Observation only: validated mutation tokens accepted by this one reader.
 	// This counter grants no admission, result, delivery or completion authority.
 	queuedMutations atomic.Uint64
+	// First failure is diagnostic only. Store a closed host stage, never a
+	// callback error, control frame, token or document payload.
+	firstFailure atomic.Pointer[collaborationPumpFailureStage]
+}
+
+type collaborationPumpFailureStage string
+
+func (p *collaborationSessionPump) recordFailure(stage collaborationPumpFailureStage) {
+	if p != nil {
+		p.firstFailure.CompareAndSwap(nil, &stage)
+	}
 }
 
 func newCollaborationSessionPump(runtime *mooring.SessionRuntime, handlers collaborationSessionPumpHandlers) (*collaborationSessionPump, error) {
@@ -75,6 +86,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 	if p == nil || !p.started.CompareAndSwap(false, true) {
 		return errCollaborationSessionPump
 	}
+	stage := collaborationPumpFailureStage("management.next-control")
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 	stop := context.AfterFunc(ctx, func() { _ = p.runtime.Close() })
@@ -84,6 +96,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 		defer finishRuntimeWatch()
 		select {
 		case <-p.runtime.Done():
+			p.recordFailure("runtime.done")
 			cancel()
 		case <-ctx.Done():
 		}
@@ -100,7 +113,11 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 		defer finishWorker()
 		defer close(workerDone)
 		defer cancel()
-		defer func() { _ = recover() }() // opaque failure; never publish panic data
+		defer func() {
+			if recover() != nil {
+				p.recordFailure("mutation.panic")
+			}
+		}() // opaque failure; never publish panic data
 		for {
 			select {
 			case <-ctx.Done():
@@ -126,7 +143,11 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 			defer finishOutput()
 			defer close(outputDone)
 			defer cancel()
-			defer func() { _ = recover() }()
+			defer func() {
+				if recover() != nil {
+					p.recordFailure("output.panic")
+				}
+			}()
 			for {
 				select {
 				case <-ctx.Done():
@@ -137,10 +158,16 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 					}
 					raw, e := next.token.Frame()
 					if e != nil {
+						p.recordFailure("output.frame")
 						return
 					}
 					if next.afterJoined != nil {
-						if next.afterJoined(ctx) != nil || ctx.Err() != nil || p.runtime.CompleteControl(next.token) != nil {
+						if next.afterJoined(ctx) != nil || ctx.Err() != nil {
+							p.recordFailure("output.joined-continuation")
+							return
+						}
+						if p.runtime.CompleteControl(next.token) != nil {
+							p.recordFailure("output.joined-complete")
 							return
 						}
 					} else if p.control(ctx, next.token, next.kind, raw) != nil {
@@ -156,16 +183,26 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 		<-workerDone
 		<-outputDone
 	}()
+	// Record the initiating management error before teardown can make a
+	// blocked worker fail merely because cancellation reached it.
+	defer func() {
+		if err != nil {
+			p.recordFailure(stage)
+		}
+	}()
 	defer func() {
 		if recover() != nil {
+			p.recordFailure("management.panic")
 			err = errCollaborationSessionPump
 		}
 	}()
 	for {
+		stage = "management.next-control"
 		token, e := p.runtime.NextControl(ctx)
 		if e != nil {
 			return errCollaborationSessionPump
 		}
+		stage = "management.frame"
 		raw, e := token.Frame()
 		if e != nil {
 			return errCollaborationSessionPump
@@ -173,10 +210,12 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 		var header struct {
 			Type string `json:"type"`
 		}
+		stage = "management.decode"
 		if json.Unmarshal(raw, &header) != nil {
 			return errCollaborationSessionPump
 		}
 		if header.Type == "session_submit_batch" || header.Type == "session_status_request" {
+			stage = "management.mutation-queue"
 			select {
 			case <-ctx.Done():
 				return errCollaborationSessionPump
@@ -188,6 +227,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 			continue
 		}
 		if outputQueue != nil && header.Type == "session_participant_output" {
+			stage = "management.output-envelope"
 			var envelope struct {
 				Message struct {
 					Type string `json:"type"`
@@ -197,6 +237,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 				return errCollaborationSessionPump
 			}
 			if envelope.Message.Type == "session_joined" && p.handlers.JoinedControl != nil {
+				stage = "management.joined-capture"
 				output, e := pumpRequest[protocol.SessionParticipantOutput](ctx, raw)
 				if e != nil {
 					return errCollaborationSessionPump
@@ -206,10 +247,12 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 					return errCollaborationSessionPump
 				}
 				if after == nil {
+					stage = "management.joined-complete"
 					if p.runtime.CompleteControl(token) != nil {
 						return errCollaborationSessionPump
 					}
 				} else {
+					stage = "management.joined-queue"
 					select {
 					case outputQueue <- pending{token: token, kind: header.Type, afterJoined: after}:
 					default:
@@ -219,6 +262,7 @@ func (p *collaborationSessionPump) run(parent context.Context) (err error) {
 				continue
 			}
 			if envelope.Message.Type != "session_joined" {
+				stage = "management.output-queue"
 				select {
 				case outputQueue <- pending{token: token, kind: header.Type}:
 				default:
@@ -265,7 +309,19 @@ func (p *collaborationSessionPump) reply(ctx context.Context, token mooring.Sess
 	return p.runtime.ReplyControl(ctx, token, raw)
 }
 
-func (p *collaborationSessionPump) mutation(ctx context.Context, token mooring.SessionControl, kind string) error {
+func (p *collaborationSessionPump) mutation(ctx context.Context, token mooring.SessionControl, kind string) (err error) {
+	defer func() {
+		if err != nil {
+			stage := collaborationPumpFailureStage("mutation.unknown")
+			switch kind {
+			case "session_submit_batch":
+				stage = "mutation.submit"
+			case "session_status_request":
+				stage = "mutation.status"
+			}
+			p.recordFailure(stage)
+		}
+	}()
 	raw, err := token.Frame()
 	if err != nil {
 		return errCollaborationSessionPump
@@ -337,7 +393,25 @@ func (p *collaborationSessionPump) mutation(ctx context.Context, token mooring.S
 	}
 }
 
-func (p *collaborationSessionPump) control(ctx context.Context, token mooring.SessionControl, kind string, raw []byte) error {
+func (p *collaborationSessionPump) control(ctx context.Context, token mooring.SessionControl, kind string, raw []byte) (err error) {
+	defer func() {
+		if err != nil {
+			stage := collaborationPumpFailureStage("control.unknown")
+			switch kind {
+			case "owner_acquire":
+				stage = "control.owner-acquire"
+			case "owner_renew":
+				stage = "control.owner-renew"
+			case "ticket_validate":
+				stage = "control.ticket"
+			case "delivery_renew":
+				stage = "control.delivery"
+			case "session_participant_output":
+				stage = "control.output"
+			}
+			p.recordFailure(stage)
+		}
+	}()
 	switch kind {
 	case "owner_acquire":
 		request, err := pumpRequest[protocol.OwnerAcquire](ctx, raw)
