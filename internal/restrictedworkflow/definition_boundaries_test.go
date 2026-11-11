@@ -91,6 +91,8 @@ func TestWorkflowTypedDeclarationRejectsUnboundedOrOpaqueInputs(t *testing.T) {
 		{"unknown input", strings.Replace(simple, `inputs.task`, `inputs.unknown`, 1)},
 		{"future output", strings.Replace(simple, `inputs.task`, `steps.later.output`, 1)},
 		{"timeout limit", strings.Replace(simple, `"id":"run"`, `"id":"run","timeout_seconds":301`, 1)},
+		{"step permissions", strings.Replace(simple, `"id":"run"`, `"id":"run","permissions":{"memory":"deny"}`, 1)},
+		{"step turn limit", strings.Replace(simple, `"id":"run"`, `"id":"run","max_turns":2`, 1)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			if _, err := compileTyped(tc.raw, true); !errors.Is(err, ErrUnsupported) {

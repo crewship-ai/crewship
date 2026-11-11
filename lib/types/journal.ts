@@ -120,6 +120,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "pipeline.step.skipped",
   "pipeline.step.retrying",
   "pipeline.step.container_ready",
+  "pipeline.step.agent_wait",
   "pipeline.schedule.circuit_breaker_tripped",
   "pipeline.schedule.missed_occurrences",
   "pipeline.webhook.fire_failed",

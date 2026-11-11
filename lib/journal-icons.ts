@@ -209,6 +209,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "pipeline.step.skipped": SkipForward,
   "pipeline.step.retrying": RotateCcw,
   "pipeline.step.container_ready": Boxes,
+  "pipeline.step.agent_wait": Clock,
   "pipeline.dry_run": Microscope,
   "pipeline.schedule.circuit_breaker_tripped": ShieldAlert,
   "pipeline.schedule.missed_occurrences": Clock,

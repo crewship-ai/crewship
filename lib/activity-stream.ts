@@ -90,6 +90,7 @@ export const ACTIVITY_SOURCES: ActivitySourceMeta[] = [
       "pipeline.step.skipped",
       "pipeline.step.retrying",
       "pipeline.step.container_ready",
+      "pipeline.step.agent_wait",
       "pipeline.step.validation_failed",
       "pipeline.schedule.circuit_breaker_tripped",
       "pipeline.schedule.missed_occurrences",

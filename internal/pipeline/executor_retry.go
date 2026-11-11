@@ -310,9 +310,10 @@ func (e *Executor) runRunnerWithTransientRetry(
 	emit *pipelineEmitContext,
 ) (AgentStepResult, error) {
 	var (
-		res     AgentStepResult
-		err     error
-		lastErr error
+		res       AgentStepResult
+		err       error
+		lastErr   error
+		totalCost float64
 	)
 	// Composition guard: when the step carries an explicit retry policy, that
 	// policy owns transient retries (with the author's backoff + retry_on), so
@@ -326,18 +327,20 @@ func (e *Executor) runRunnerWithTransientRetry(
 	}
 	for attempt := 1; attempt <= perTier; attempt++ {
 		if cerr := ctx.Err(); cerr != nil {
-			return AgentStepResult{}, cerr
+			return AgentStepResult{CostUSD: totalCost}, cerr
 		}
 		// Stamp the transient-retry attempt so a re-entry's container-ready
 		// record is distinguishable from the first attempt's (same step_id).
 		req.Attempt = attempt
 		res, err = e.runRecordedAgent(ctx, req)
+		totalCost += res.CostUSD
+		res.CostUSD = totalCost
 		if err != nil {
 			lastErr = err
 			if attempt < perTier && isTransientRunnerError(err) {
 				emit.emitStepRetry(ctx, step, attempt, perTier, err.Error(), transientRetryBackoff)
 				if !e.retrySleep(ctx, e.applyJitter(transientRetryBackoff, jitterHalf)) {
-					return AgentStepResult{}, ctx.Err()
+					return AgentStepResult{CostUSD: totalCost}, ctx.Err()
 				}
 				continue
 			}
@@ -348,7 +351,7 @@ func (e *Executor) runRunnerWithTransientRetry(
 			lastErr = fmt.Errorf("agent runner returned empty output")
 			emit.emitStepRetry(ctx, step, attempt, perTier, "empty output", transientRetryBackoff)
 			if !e.retrySleep(ctx, e.applyJitter(transientRetryBackoff, jitterHalf)) {
-				return AgentStepResult{}, ctx.Err()
+				return AgentStepResult{CostUSD: totalCost}, ctx.Err()
 			}
 			continue
 		}

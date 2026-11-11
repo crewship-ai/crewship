@@ -308,6 +308,7 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "pipeline.step.skipped": "routine",
   "pipeline.step.retrying": "routine",
   "pipeline.step.container_ready": "routine",
+  "pipeline.step.agent_wait": "routine",
   "pipeline.dry_run": "routine",
   "pipeline.schedule.circuit_breaker_tripped": "routine",
   "pipeline.schedule.missed_occurrences": "routine",

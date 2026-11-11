@@ -85,7 +85,7 @@ func (e *Executor) runOutcomesGrader(ctx context.Context, step Step, workerOutpu
 	graderReq.PipelineRunID = executionIn(ctx).runID
 	res, err := e.runRecordedAgent(ctx, graderReq)
 	if err != nil {
-		return graderResult{}, 0, fmt.Errorf("grader run: %w", err)
+		return graderResult{}, res.CostUSD, fmt.Errorf("grader run: %w", err)
 	}
 
 	verdict, parseErr := parseGraderVerdict(res.Output, step.Outcomes.Criteria)

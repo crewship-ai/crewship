@@ -55,6 +55,7 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "pipeline.step.skipped",
     "pipeline.step.retrying",
     "pipeline.step.container_ready",
+    "pipeline.step.agent_wait",
     "pipeline.dry_run",
     "pipeline.schedule.circuit_breaker_tripped",
     "pipeline.schedule.missed_occurrences",

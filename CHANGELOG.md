@@ -9,6 +9,12 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Routine run logs show when a step waits for an occupied agent (#5290).** The journal records when waiting begins and whether the agent becomes available, the wait times out, or the run is cancelled. The outcome includes elapsed wait time.
+
+- ⚠️ **Behaviour change: routine budgets include costs reported by every agent attempt.** Reported costs from empty responses, failed attempts, and attempts preceding cancellation during backoff now count toward the run total. A routine close to its configured cost cap can stop earlier.
+- ⚠️ **Behaviour change: Claude Code routine attempts use a 20-turn limit.** The routine runner now passes the existing unattended-run limit to Claude Code. Other CLI adapters use the execution timeout.
+- **Routine validation rejects unsupported step controls.** Definitions with `permissions` or `max_turns` on a step now identify the offending field during validation.
+
 - **Dependency updates keep the frontend, document editor and Go runtime libraries current (#5280).** Integrates the pending Dependabot updates and refreshes version-scoped license notices for packages that ship no license text. ⚠️ **Behaviour change:** authentication now explicitly requires compact JWE tokens, matching the tokens Crewship issues; JSON-serialized JWE messages are rejected.
 
 - **The CLI says when a profile overrides an exported `CREWSHIP_SERVER` (#5245).** Run outside a directory bound to a profile, a command went to the `server use` default instead of the exported server, and that server's answers looked like faults of the intended one (on crewship-dev, an intermittent `503 Docs are not enabled on this server` from a slot without Docs). The precedence is unchanged; the CLI now prints one warning line on stderr naming the profile and the server it dials. An explicit `--profile` or `CREWSHIP_PROFILE` prints nothing.
