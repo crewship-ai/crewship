@@ -37,7 +37,7 @@ type graderResult struct {
 // Agents) and the prompt-construction + verdict-parsing logic is
 // big enough to deserve its own scope. Keeps executor.go focused on
 // step dispatch + tier escalation.
-func (e *Executor) runOutcomesGrader(ctx context.Context, step Step, workerOutput string, in RunInput) (graderResult, float64, error) {
+func (e *Executor) runOutcomesGrader(ctx context.Context, step Step, workerOutput string, in RunInput, pipelineSlug string) (graderResult, float64, error) {
 	if step.Outcomes == nil || len(step.Outcomes.Criteria) == 0 {
 		// Nothing to grade. The caller's outcomes != nil check
 		// should prevent this, but defensive return saves a panic
@@ -66,6 +66,7 @@ func (e *Executor) runOutcomesGrader(ctx context.Context, step Step, workerOutpu
 		Prompt:          prompt,
 		TimeoutSec:      120, // grading is short by design — long timeouts hide a stuck grader
 		PipelineID:      step.ID + ":grader",
+		PipelineSlug:    pipelineSlug,
 		StepID:          step.ID + ":grader",
 		InvokingCrewID:  in.InvokingCrewID,
 		InvokingAgentID: in.InvokingAgentID,
