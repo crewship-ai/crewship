@@ -130,7 +130,7 @@ func TestCraftNativeCommentToNoneAfterAdmissionStopped(t *testing.T) {
 	if w := craftNativeLeaseCall(m, ctx, token, "native-page", "acquire", `{}`); w.Code != 200 {
 		t.Fatalf("acquire: %d %s", w.Code, w.Body)
 	}
-	next := craftNativeOpenStream(t, f, m, ctx, token)
+	next := craftNativeOpenStreamOnTick(t, f, m, ctx, token)
 	if event, _ := next(); event != "lease" {
 		t.Fatalf("calibration stream: %s", event)
 	}
@@ -174,7 +174,7 @@ func TestCraftNativeRetirementKeepsTheDraftOnAnACLLookupFault(t *testing.T) {
 	mustExec(t, f.db, `DELETE FROM page_grants WHERE page_id='native-page' AND subject_id='native-scope-writer'`)
 	ctx = craftNativeFreshContext(t, f, ctx, time.Hour)
 	token, _ := craftNativeIssued(t, m, ctx)
-	next := craftNativeOpenStream(t, f, m, ctx, token)
+	next := craftNativeOpenStreamOnTick(t, f, m, ctx, token)
 	if event, first := next(); event != "lease" {
 		t.Fatalf("calibration stream: %s %v", event, first)
 	}
