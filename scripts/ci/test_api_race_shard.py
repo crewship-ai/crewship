@@ -65,7 +65,7 @@ class APIRaceShards(unittest.TestCase):
                 self.assertEqual(inventory, names)
                 self.assertEqual(sorted(n for part in parts for n in part), names)
                 self.assertEqual(sum(part.count(peer) for part in parts), 1)
-                anchor_index = names.index(anchor) % count
+                anchor_index = next(i for i, part in enumerate(expected) if anchor in part)
                 self.assertIn(peer, parts[anchor_index])
                 for index, original in enumerate(expected):
                     self.assertEqual([n for n in parts[index] if n != peer],
@@ -109,6 +109,71 @@ class APIRaceShards(unittest.TestCase):
             shard.selection_pattern(two[0])
         _, four = shard.partition('\n'.join(names), 4)
         self.assertTrue(all(len(shard.selection_pattern(part).encode()) < shard.MAX_PATTERN_BYTES for part in four))
+
+    def test_adjacent_api_chunks_keep_all_roots_and_binary_affinity(self):
+        anchor = 'TestDocumentCreationSubmissionReplayThroughWebSocketAndBinary'
+        peer = 'TestPrivateArtifactConversationAudienceThroughBinary'
+        names = sorted([anchor, peer] + [f'TestGroup{letter}{i}' for letter in 'ABCDEFGH' for i in range(9)])
+        for count in [1, 2, 3, 4, 6]:
+            expected = [names[i * len(names) // count:(i + 1) * len(names) // count] for i in range(count)]
+            inventory, parts = shard.partition('\n'.join(reversed(names)), count, adjacent=True)
+            self.assertEqual(inventory, names)
+            self.assertEqual(sorted(n for part in parts for n in part), names)
+            self.assertTrue(all(parts))
+            anchor_index = next(i for i, part in enumerate(expected) if anchor in part)
+            self.assertIn(peer, parts[anchor_index])
+            for index, original in enumerate(expected):
+                self.assertEqual([n for n in parts[index] if n != peer], [n for n in original if n != peer])
+                pattern = shard.selection_pattern(parts[index], inventory)
+                self.assertEqual({n for n in inventory if re.fullmatch(pattern, n)}, set(parts[index]))
+        cli = load_for('github.com/crewship-ai/crewship/cmd/crewship')
+        with self.assertRaises(ValueError):
+            cli.partition('\n'.join(names), 3, adjacent=True)
+
+    def test_compact_patterns_preserve_inventory_membership_and_prefix_terminals(self):
+        names = ['ExampleČeský', 'FuzzRoute', 'TestA', 'TestAB', 'TestAC',
+                 'TestB', 'TestBA', 'TestČeský', 'TestČeskýExtra']
+        selections = [names, names[:1], names[2:4], names[3:5], names[5:7], names[7:8]]
+        for selected in selections:
+            pattern = shard.selection_pattern(selected, names)
+            self.assertEqual({n for n in names if re.fullmatch(pattern, n)}, set(selected))
+            self.assertEqual(shard.selection_pattern(list(reversed(selected)), list(reversed(names))), pattern)
+        for selected, inventory in [([], names), (['TestAbsent'], names), (['TestA', 'TestA'], names), (['TestA'], names + ['TestA'])]:
+            with self.assertRaises(ValueError):
+                shard.selection_pattern(selected, inventory)
+        # A newly observed matching parent is not silently added to expected.
+        with tempfile.TemporaryDirectory() as temp:
+            directory = Path(temp)
+            events = [dict(Package=shard.PACKAGE, Action='pass', Test=name) for name in ['TestA', 'TestAdded']]
+            events.append(dict(Package=shard.PACKAGE, Action='pass', Elapsed=1))
+            (directory / 'go-test.jsonl').write_text('\n'.join(map(json.dumps, events)))
+            with self.assertRaisesRegex(ValueError, 'do not match'):
+                shard.completed_seconds(directory, ['TestA'])
+
+    def test_real_go_testing_matcher_preserves_unicode_prefixes_and_all_subtests(self):
+        names = ['TestA', 'TestAB', 'TestAC', 'TestČeský', 'TestČeskýExtra']
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            source = root / 'selection_test.go'
+            source.write_text('package selection\nimport "testing"\n' + ''.join(
+                f'func {name}(t *testing.T) {{ t.Run("nested/unicode-č", func(t *testing.T) {{}}) }}\n'
+                for name in names))
+            binary = root / 'selection.test'
+            build = subprocess.run(['go', 'test', '-c', '-o', str(binary), str(source)],
+                                   capture_output=True, text=True, timeout=120)
+            self.assertEqual(build.returncode, 0, build.stderr)
+            for selected in [names, ['TestA'], ['TestAB', 'TestAC'], ['TestČeský']]:
+                pattern = shard.selection_pattern(selected, names)
+                result = subprocess.run(['go', 'tool', 'test2json', '-p', 'selection', str(binary),
+                                         '-test.v=test2json', '-test.count=1', '-test.run=' + pattern],
+                                        capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                events = [json.loads(line) for line in result.stdout.splitlines()]
+                passed = {e['Test'] for e in events if e.get('Test') and e.get('Action') == 'pass'}
+                self.assertEqual({name for name in passed if '/' not in name}, set(selected))
+                for name in selected:
+                    self.assertTrue(any(test.startswith(name + '/nested/') for test in passed))
+                self.assertFalse(any(e.get('Action') in ('fail', 'skip') for e in events))
 
     def test_aggregate_rejects_missing_duplicate_overlap_and_partial_evidence(self):
         good = self.manifests()
