@@ -17,6 +17,13 @@ func installExecutionSchema(t *testing.T, db *sql.DB) {
 	if _, err = db.Exec(string(body)); err != nil {
 		t.Fatal(err)
 	}
+	body, err = os.ReadFile("../database/migrations/20261111104000_pipeline_execution_agent_wait.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(string(body)); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestN9ArtifactFailureDoesNotFailSuccessfulWork(t *testing.T) {

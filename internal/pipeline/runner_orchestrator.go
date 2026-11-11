@@ -227,7 +227,9 @@ func (r *OrchestratorRunner) busyWaitFor(req AgentStepRequest) time.Duration {
 // shadow the executor's deadline by setting our own (via the
 // AgentRunRequest TimeoutSecs) so an unresponsive agent doesn't
 // hang the executor goroutine — the orchestrator enforces it.
-func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) (AgentStepResult, error) {
+func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) (result AgentStepResult, resultErr error) {
+	var agentWaitMs int64
+	defer func() { result.AgentWaitMs = agentWaitMs }()
 	// 1. Resolve agent_id from (workspace_id, crew_id, agent_slug).
 	// Workspace constraint is critical: the lookup must verify the
 	// crew belongs to the calling workspace, otherwise an
@@ -254,6 +256,7 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 			r.emitStepAgentWait(waitCtx, req, waitID, "waiting", startedAt, 0)
 			acquired := r.agentRunLock.Acquire(waitCtx, agentID)
 			finishedAt := time.Now()
+			agentWaitMs = finishedAt.Sub(startedAt).Milliseconds()
 			cancel()
 			waitErr := ctx.Err()
 			phase := "acquired"

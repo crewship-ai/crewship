@@ -55,6 +55,17 @@ function artifact(overrides: Record<string, unknown> = {}) {
 beforeEach(() => vi.clearAllMocks())
 
 describe("recorded executions", () => {
+  it("separates measured agent wait from work and keeps legacy timing unknown", async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(ok({ rows: [
+      execution({ id: "wait", kind: "agent_attempt", agent_wait_ms: 3000, work_duration_ms: 2000 }),
+      execution({ id: "legacy", agent_wait_ms: null, work_duration_ms: null }),
+    ], next_cursor: null }))
+    render(<RoutineExecutionHistory workspaceId="ws" runId="run_1" active={false} />)
+    expect(await screen.findByText(/Agent wait: 3.0s/)).toBeTruthy()
+    expect(screen.getByText(/Work: 2.0s/)).toBeTruthy()
+    expect(screen.getAllByText(/Agent wait:/)).toHaveLength(1)
+  })
+
   it("lists attempts without downloading their outputs, then fetches one on demand", async () => {
     vi.mocked(apiFetch).mockResolvedValueOnce(
       ok({

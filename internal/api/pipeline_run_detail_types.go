@@ -38,6 +38,8 @@ type routineCalendarResponse struct {
 }
 
 type pipelineRunStepExecution struct {
+	AgentWaitMs       *int64 `json:"agent_wait_ms"`
+	WorkDurationMs    *int64 `json:"work_duration_ms"`
 	ID                string `json:"id"`
 	ParentExecutionID string `json:"parent_execution_id"`
 	StepID            string `json:"step_id"`

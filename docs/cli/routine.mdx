@@ -1608,7 +1608,15 @@ crewship routine executions run_cmox10oci00016b48aacd -f json
 | `--after` | Cursor from the previous page's `next_cursor` (sent as `?after=`) |
 | `--execution-id` | Print this one execution's output instead of the list (sent as `?execution_id=`) |
 
-**Output columns:** EXECUTION_ID, PATH (`execution_path`, e.g. `/review/items/2/summarise`), ATTEMPT, KIND, STATUS (`running`, `completed`, `failed`, `skipped`, `waiting`, `cancelled`; a `running` row of a finished run reads `interrupted`), AGENT, MODEL, STARTED, ENDED, OUTPUT (size), ERROR.
+**Output columns:** EXECUTION_ID, PATH (`execution_path`, e.g. `/review/items/2/summarise`), ATTEMPT, KIND, STATUS (`running`, `completed`, `failed`, `skipped`, `waiting`, `cancelled`; a `running` row of a finished run reads `interrupted`), AGENT, MODEL, STARTED, ENDED, WAIT, WORK, OUTPUT (size), ERROR.
+
+`WAIT` is the measured time an agent attempt spent waiting for the shared
+agent lock. `WORK` is its elapsed time excluding that wait; it includes runtime
+preparation and finalization, not just model processing. JSON exposes these as
+nullable `agent_wait_ms` and `work_duration_ms`. Finished agent attempts that
+did not wait record zero. Legacy records, unfinished attempts and aggregate
+parent steps retain unknown timing (`null` / `—`); child waiting is not summed
+into parent rows again. STARTED and ENDED continue to describe the whole attempt.
 
 The list carries sizes, never transcripts — an execution's output can be
 megabytes, so it is a second call with `--execution-id`, which prints the

@@ -49,9 +49,10 @@ func routinesWorkspaceSchemaCatalog() (map[string]DomainSchema, map[string]any) 
 			"execution_path": str(), "attempt": integer(), "kind": str(),
 			"status": str(), "agent_slug": str(), "model": str(),
 			"started_at": str(), "ended_at": str(), "error": str(),
-			"output_bytes": integer(),
+			"output_bytes":  integer(),
+			"agent_wait_ms": map[string]any{"type": "integer", "nullable": true, "minimum": 0}, "work_duration_ms": map[string]any{"type": "integer", "nullable": true, "minimum": 0},
 		}, "id", "parent_execution_id", "step_id", "execution_path", "attempt", "kind",
-			"status", "agent_slug", "model", "started_at", "ended_at", "error", "output_bytes"),
+			"status", "agent_slug", "model", "started_at", "ended_at", "error", "output_bytes", "agent_wait_ms", "work_duration_ms"),
 		"PipelineRunStepExecutionList": object(map[string]any{
 			"rows": array(ref("PipelineRunStepExecution")), "next_cursor": nullableString(),
 		}, "rows", "next_cursor"),

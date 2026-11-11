@@ -17762,6 +17762,11 @@
           "agent_slug": {
             "type": "string"
           },
+          "agent_wait_ms": {
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
           "attempt": {
             "type": "integer"
           },
@@ -17797,6 +17802,11 @@
           },
           "step_id": {
             "type": "string"
+          },
+          "work_duration_ms": {
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
           }
         },
         "required": [
@@ -17812,7 +17822,9 @@
           "started_at",
           "ended_at",
           "error",
-          "output_bytes"
+          "output_bytes",
+          "agent_wait_ms",
+          "work_duration_ms"
         ],
         "type": "object"
       },
