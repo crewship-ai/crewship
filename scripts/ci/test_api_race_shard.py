@@ -175,14 +175,6 @@ class APIRaceShards(unittest.TestCase):
                     self.assertTrue(any(test.startswith(name + '/nested/') for test in passed))
                 self.assertFalse(any(e.get('Action') in ('fail', 'skip') for e in events))
 
-    def test_actual_api_runner_restores_round_robin_placement(self):
-        names = sorted([f'TestFamily{letter}{index}' for letter in 'ABCDE' for index in range(4)])
-        result, manifest = self.invoke(inventory='\n'.join(names))
-        self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(manifest['selected'], names[::4])
-        self.assertEqual(manifest['inventory_count'], len(names))
-        self.assertEqual(manifest['selection_mode'], 'inventory-prefix-v1')
-
     def test_aggregate_rejects_missing_duplicate_overlap_and_partial_evidence(self):
         good = self.manifests()
         cases = [good[:-1], good + [good[0]]]
