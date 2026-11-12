@@ -280,6 +280,23 @@ def verify_pr(pr, repo, number, head):
 def ancestor(api, repo, base, head):
     if base == head:
         return
+    # Queue groups normally have one direct parent. Compare metadata repeats
+    # the signed base commit twice and can exceed the unchanged response cap
+    # even when its later page omits all patches and commits (#5310). The Git
+    # Database identity/parent record proves that edge within the same cap.
+    commit_endpoint = 'repos/' + repo + '/git/commits/' + head
+    commit = api(commit_endpoint)
+    parents = commit.get('parents') if isinstance(commit, dict) else None
+    if (not isinstance(commit, dict) or commit.get('sha') != head
+            or commit.get('url') != 'https://api.github.com/' + commit_endpoint
+            or not isinstance(parents, list) or len(parents) > 32
+            or any(not isinstance(parent, dict)
+                   or not isinstance(parent.get('sha'), str)
+                   or not SHA.fullmatch(parent['sha']) for parent in parents)):
+        raise Rejected('queue commit ancestry metadata is missing or malformed')
+    if any(parent['sha'] == base for parent in parents):
+        return
+    # Non-direct ancestry still requires the complete comparison proof below.
     # A later page omits the first page's changed-file patches; retain the
     # existing response/request budgets and use only exact comparison metadata.
     endpoint = 'repos/' + repo + '/compare/' + base + '...' + head
