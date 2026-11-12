@@ -620,6 +620,12 @@ Checks performed:
 - `cost_cap` — `max_cost_usd` is set and is at least 1.5× `estimated_cost_usd`
 - `validation:<step_id>` — gates are structurally satisfiable (`min_length ≤ max_length`, no string in both `must_contain` and `must_not_contain`)
 
+`foreach_agent_contention` warns when concurrent foreach items repeat a fixed
+agent target, including graders and nested loops. It names the recipe field
+path. `parallelism: 1` is sequential unless an enclosing foreach is concurrent;
+the default parallelism allows concurrency. Other work in the items may still
+overlap. The diagnostic does not predict item counts or conditional execution.
+
 Exit code is non-zero if any check FAILed. WARN does not propagate to the exit code — it's an operator hint, not a blocker.
 
 ---
@@ -1608,7 +1614,15 @@ crewship routine executions run_cmox10oci00016b48aacd -f json
 | `--after` | Cursor from the previous page's `next_cursor` (sent as `?after=`) |
 | `--execution-id` | Print this one execution's output instead of the list (sent as `?execution_id=`) |
 
-**Output columns:** EXECUTION_ID, PATH (`execution_path`, e.g. `/review/items/2/summarise`), ATTEMPT, KIND, STATUS (`running`, `completed`, `failed`, `skipped`, `waiting`, `cancelled`; a `running` row of a finished run reads `interrupted`), AGENT, MODEL, STARTED, ENDED, OUTPUT (size), ERROR.
+**Output columns:** EXECUTION_ID, PATH (`execution_path`, e.g. `/review/items/2/summarise`), ATTEMPT, KIND, STATUS (`running`, `completed`, `failed`, `skipped`, `waiting`, `cancelled`; a `running` row of a finished run reads `interrupted`), AGENT, MODEL, STARTED, ENDED, WAIT, WORK, OUTPUT (size), ERROR.
+
+`WAIT` is the measured time an agent attempt spent waiting for the shared
+agent lock. `WORK` is its elapsed time excluding that wait; it includes runtime
+preparation and finalization, not just model processing. JSON exposes these as
+nullable `agent_wait_ms` and `work_duration_ms`. Finished agent attempts that
+did not wait record zero. Legacy records, unfinished attempts and aggregate
+parent steps retain unknown timing (`null` / `—`); child waiting is not summed
+into parent rows again. STARTED and ENDED continue to describe the whole attempt.
 
 The list carries sizes, never transcripts — an execution's output can be
 megabytes, so it is a second call with `--execution-id`, which prints the

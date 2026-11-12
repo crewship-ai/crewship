@@ -166,7 +166,7 @@ test.describe("Design, two identities", () => {
       await openDesign(b,d.id);await node(b.page,'r2').click()
       const y=b.page.getByLabel('y',{exact:true});await expect(y).toHaveValue('300')
       await b.context.setOffline(true)
-      await y.fill('350');await expect(y).toHaveValue('350')
+      await y.fill('350');await y.press('Enter');await expect(y).toHaveValue('350')
       await b.page.waitForTimeout(3000)
       expect(await b.page.locator('button[data-status]').getAttribute('data-status')).not.toMatch(/^(saved|live)$/)
       expect(position(d.slug,'r2').y).toBe(300)

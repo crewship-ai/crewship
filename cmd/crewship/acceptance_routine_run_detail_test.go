@@ -333,7 +333,7 @@ func TestAcceptance_RoutineRunDetail_CalendarExecutionsArtifacts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("routine executions failed: %v\n%s", err, execOut)
 	}
-	for _, want := range []string{"greet", "transform", "completed", "/greet"} {
+	for _, want := range []string{"greet", "transform", "completed", "/greet", "WAIT", "WORK"} {
 		if !strings.Contains(execOut, want) {
 			t.Fatalf("executions table is missing %q:\n%s", want, execOut)
 		}

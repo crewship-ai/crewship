@@ -2196,7 +2196,11 @@ definition. The draft bar and the Versions tab then say **Test run passed** or
 content that was not; editing a draft clears the result until it is tested again.
 `crewship routine checkup <slug>` lists what the server checks for a routine
 (agents, credentials, cost cap, failures in a row, the schedule breaker,
-untested changes).
+untested changes). It also warns when concurrent `foreach` items share a fixed
+agent target: those agent invocations serialize on the agent lock even when
+other item work overlaps. The diagnostic includes the recipe path and does
+not reject the definition. A sequential loop (`parallelism: 1`) does not
+produce this warning unless an enclosing loop is concurrent.
 
 ## Dry-run preview
 

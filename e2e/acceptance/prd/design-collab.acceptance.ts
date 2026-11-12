@@ -10,7 +10,7 @@ import { randomUUID } from "node:crypto"
 import type { BrowserContext, Locator, Page, WebSocketRoute } from "@playwright/test"
 import { loginStorageState } from "./auth"
 import { expect, prdRequirement, test, type PrdScenario } from "./fixtures"
-import { applyOperations, createDesign, enableDesign, getDesign, grantWrite, openCanvas, revokeWrite, selectWorkspace, sessionUserId, snapshot, type DesignNode } from "./design/canvas"
+import { applyOperations, commitNumber, createDesign, enableDesign, getDesign, grantWrite, openCanvas, revokeWrite, selectWorkspace, sessionUserId, snapshot, type DesignNode } from "./design/canvas"
 
 const tag = () => randomUUID().replaceAll("-", "").slice(0, 8)
 const viewport = (page: Page) => page.getByLabel("Design canvas viewport")
@@ -212,7 +212,7 @@ test.describe("design collaboration", () => {
    await properties(a.page, "Call to action")
    await properties(b.page, "Copy")
    await Promise.all([
-    a.page.getByLabel("x", { exact: true }).fill("120"),
+    commitNumber(a.page.getByLabel("x", { exact: true }), "120"),
     b.page.getByLabel("Text content").fill("Copy from B"),
    ])
    for (const person of [a, b]) {
@@ -223,12 +223,12 @@ test.describe("design collaboration", () => {
    await properties(b.page, "Call to action")
    await Promise.all([
     a.page.getByLabel("Layer name").fill("Buy now"),
-    b.page.getByLabel("width", { exact: true }).fill("260"),
+    commitNumber(b.page.getByLabel("width", { exact: true }), "260"),
    ])
    await expect.poll(async () => { const node = await serverNode(a, ws.id, slug, "cta"); return [node?.name, node?.width] }, { timeout: 20_000 }).toEqual(["Buy now", 260])
    // One layer, one property: whatever wins, both sides and the server agree.
-   await a.page.getByLabel("y", { exact: true }).fill("70")
-   await b.page.getByLabel("y", { exact: true }).fill("90")
+   await commitNumber(a.page.getByLabel("y", { exact: true }), "70")
+   await commitNumber(b.page.getByLabel("y", { exact: true }), "90")
    let settled = 0
    await expect.poll(async () => {
     const values = await Promise.all([a.page.getByLabel("y", { exact: true }).inputValue(), b.page.getByLabel("y", { exact: true }).inputValue(), serverNode(a, ws.id, slug, "cta").then(node => String(node?.y))])
@@ -237,9 +237,9 @@ test.describe("design collaboration", () => {
    }, { timeout: 20_000 }).toBe(true)
    // Undo is per person: A's undo takes back A's last edit only, never B's.
    const beforeUndo = await serverNode(a, ws.id, slug, "cta")
-   await a.page.getByLabel("x", { exact: true }).fill("150")
+   await commitNumber(a.page.getByLabel("x", { exact: true }), "150")
    await expect.poll(async () => (await serverNode(a, ws.id, slug, "cta"))?.x, { timeout: 20_000 }).toBe(150)
-   await b.page.getByLabel("height", { exact: true }).fill("130")
+   await commitNumber(b.page.getByLabel("height", { exact: true }), "130")
    await expect.poll(async () => (await serverNode(a, ws.id, slug, "cta"))?.height, { timeout: 20_000 }).toBe(130)
    await viewport(a.page).focus()
    await a.page.waitForTimeout(600) // past the undo step window
@@ -251,7 +251,7 @@ test.describe("design collaboration", () => {
    await b.page.waitForTimeout(600)
    await b.page.getByRole("button", { name: "Undo", exact: true }).click()
    await expect.poll(async () => { const node = await serverNode(a, ws.id, slug, "cta"); return [node?.x, node?.height] }, { timeout: 20_000 }).toEqual([150, beforeUndo?.height])
-   await a.page.getByLabel("x", { exact: true }).fill("120")
+   await commitNumber(a.page.getByLabel("x", { exact: true }), "120")
    await expect.poll(async () => (await serverNode(a, ws.id, slug, "cta"))?.x, { timeout: 20_000 }).toBe(120)
    await prd.evidence("undo.json", { before: beforeUndo, undoneByA: "x", keptOfB: "height" })
    // Reload both: the persisted canvas.
@@ -298,7 +298,7 @@ test.describe("design collaboration", () => {
    await properties(b.page, "Call to action")
    await bSocket.cut()
    await expect(b.page.getByText("Offline · changes kept in this browser")).toBeVisible({ timeout: 30_000 })
-   await b.page.getByLabel("x", { exact: true }).fill("333")
+   await commitNumber(b.page.getByLabel("x", { exact: true }), "333")
    await properties(a.page, "Copy")
    await a.page.getByLabel("Text content").fill("A while B was offline")
    bSocket.restore()

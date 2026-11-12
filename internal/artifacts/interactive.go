@@ -47,3 +47,17 @@ func ParseInteractiveArtifact(files map[string]VersionFile) ([]string, error) {
 	}
 	return ParseDashboardCollections(dashboard.Content)
 }
+
+// InteractiveViewerFilters reports whether the selected manifest explicitly
+// allows browser-local viewer filters. Callers must admit the runtime first.
+func InteractiveViewerFilters(files map[string]VersionFile) bool {
+	marker := files["viewer-filters.json"]
+	raw := marker.Content
+	if marker.MediaType != "application/json" || len(raw) > MaxInteractiveMarkerBytes || !validDataObject(raw) || !canonicalDataFields(raw, "schema_version") {
+		return false
+	}
+	var declaration struct {
+		SchemaVersion int `json:"schema_version"`
+	}
+	return json.Unmarshal(raw, &declaration) == nil && declaration.SchemaVersion == 1
+}

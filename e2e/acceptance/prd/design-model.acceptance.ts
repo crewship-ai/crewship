@@ -8,7 +8,7 @@ import { randomUUID } from "node:crypto"
 import type { Page } from "@playwright/test"
 import { loginStorageState } from "./auth"
 import { expect, prdRequirement, test } from "./fixtures"
-import { applyOperations, createDesign, enableDesign, getDesign, listVersions, openCanvas, scoped, selectWorkspace, sessionUserId, type DesignNode } from "./design/canvas"
+import { applyOperations, commitNumber, createDesign, enableDesign, getDesign, listVersions, openCanvas, scoped, selectWorkspace, sessionUserId, type DesignNode } from "./design/canvas"
 
 const tag = () => randomUUID().replaceAll("-", "").slice(0, 8)
 const layersPanel = (page: Page) => page.getByLabel("Layers")
@@ -84,10 +84,10 @@ test.describe("design model", () => {
    // Properties: edit through the inspector, save a version, reload.
    await layersPanel(page).getByRole("button", { name: "Title", exact: true }).click()
    await page.getByLabel("Layer name").fill("Headline")
-   await page.getByLabel("x", { exact: true }).fill("44")
-   await page.getByLabel("y", { exact: true }).fill("48")
-   await page.getByLabel("width", { exact: true }).fill("320")
-   await page.getByLabel("height", { exact: true }).fill("56")
+   await commitNumber(page.getByLabel("x", { exact: true }), "44")
+   await commitNumber(page.getByLabel("y", { exact: true }), "48")
+   await commitNumber(page.getByLabel("width", { exact: true }), "320")
+   await commitNumber(page.getByLabel("height", { exact: true }), "56")
    await page.getByLabel("Fill value").fill("#0f766e")
    await page.getByLabel("Text content").fill("Welcome back")
    await page.getByLabel("Parent screen").selectOption("screen-b")

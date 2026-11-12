@@ -2291,8 +2291,8 @@ jobs:
         # repeats the package's one-time setup (CLI binary build and DB
         # migration behind sync.Once), so the sum is not the unsplit runtime:
         # 3 partitions summed 2064.6s on PR run 37475371053 (unsplit main:
-        # 878.8s). Baseline 2100 in that metric; the 1.6x alarm warns on PRs
-        # and fails on main pushes, as for internal/api.
+        # 878.8s). Baseline 2100 in that metric; the unchanged 1.6x alarm
+        # fails on every event, including PRs and merge groups, as for internal/api.
         env:
           RACE_SHARD_PACKAGE: github.com/crewship-ai/crewship/cmd/crewship
         run: python3 scripts/ci/api-race-shard.py report .ci-cli-shards 3 2100
@@ -2482,7 +2482,7 @@ jobs:
         # mean 4183 s, sd 280 s, p95 4581 s, max 4876 s.
         # Alarm 5200 s: 6.6% over that max, 3.6 sd over the mean. It is not a
         # timeout: partition timeouts, the bootstrap deadline and job caps are
-        # unchanged. PR/merge-group warning, main-push failure as in #2031.
+        # unchanged. The same alarm fails PRs, merge groups and main pushes.
         env:
           RACE_COMBINED_ALARM_SECONDS: "5200"
         run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 6 4166 .ci-api-template

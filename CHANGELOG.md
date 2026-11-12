@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Routine execution attempts distinguish waiting for an agent from work (#5299).** The executions API, CLI and attempt history show measured lock waiting and elapsed time excluding that wait. Historical attempts retain unknown timing; aggregate parent steps do not double-count child waits. This adds a forward-only database migration: the previous binary refuses to start against the migrated database. Fix forward with a compatible binary, or restore the pre-migration snapshot together with the matching previous binary. Restoring the snapshot discards writes made since that snapshot. See the [downgrade procedure](docs/guides/upgrades.mdx#rollback--downgrade).
+
 - **Routine run logs show when a step waits for an occupied agent (#5290).** The journal records when waiting begins and whether the agent becomes available, the wait times out, or the run is cancelled. The outcome includes elapsed wait time.
 
 - ⚠️ **Behaviour change: routine budgets include costs reported by every agent attempt.** Reported costs from empty responses, failed attempts, and attempts preceding cancellation during backoff now count toward the run total. A routine close to its configured cost cap can stop earlier.

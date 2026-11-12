@@ -33,10 +33,14 @@ func TestArtifactInteractiveSnapshotProjection(t *testing.T) {
 		reader      bool
 		want        bool
 		wantURL     string
+		prefs       string
+		wantPrefs   bool
 	}{
 		{name: "flag off keeps snapshot unchanged", marker: marker, data: true, runtime: "https://pages.example.net"},
 		{name: "flag on exposes runtime and collections", marker: marker, interactive: true, data: true, runtime: "https://pages.example.net", want: true, wantURL: "https://pages.example.net/api/v1/pages/runtime/bootstrap"},
 		{name: "shared reader gets the same runtime", marker: marker, interactive: true, data: true, runtime: "https://pages.example.net", reader: true, want: true, wantURL: "https://pages.example.net/api/v1/pages/runtime/bootstrap"},
+		{name: "declared filters", marker: marker, prefs: `{ "schema_version": 1 }`, wantPrefs: true, interactive: true, data: true, want: true},
+		{name: "invalid filter declaration keeps runtime", marker: marker, prefs: `{"schema_version":1,"unknown":true}`, interactive: true, data: true, want: true},
 		{name: "plain dashboard is not interactive", interactive: true, data: true, runtime: "https://pages.example.net"},
 		{name: "data flag is required", marker: marker, interactive: true, runtime: "https://pages.example.net"},
 		{name: "invalid marker is ignored", marker: `{"schema_version":1,"cookies":true}`, interactive: true, data: true, runtime: "https://pages.example.net"},
@@ -49,7 +53,23 @@ func TestArtifactInteractiveSnapshotProjection(t *testing.T) {
 			t.Setenv("CREWSHIP_ARTIFACT_DASHBOARD_DATA_ENABLED", map[bool]string{true: "true"}[tc.data])
 			h.pageRuntimeOrigin = tc.runtime
 			h.pageStudioOrigin = "https://example.com"
-			if w := call(owner, "POST", "artifacts", `{"slug":"three-screens","name":"Poll",`+strings.TrimPrefix(interactiveArtifactBody(0, tc.marker), "{")); w.Code != 201 {
+			body := interactiveArtifactBody(0, tc.marker)
+			if tc.prefs != "" {
+				var draft struct {
+					Files      []map[string]any `json:"files"`
+					Entrypoint string           `json:"entrypoint"`
+				}
+				if err := json.Unmarshal([]byte(body), &draft); err != nil {
+					t.Fatal(err)
+				}
+				draft.Files = append(draft.Files, map[string]any{"path": "viewer-filters.json", "media_type": "application/json", "content": tc.prefs})
+				raw, err := json.Marshal(draft)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body = string(raw)
+			}
+			if w := call(owner, "POST", "artifacts", `{"slug":"three-screens","name":"Poll",`+strings.TrimPrefix(body, "{")); w.Code != 201 {
 				t.Fatalf("create %d %s", w.Code, w.Body)
 			}
 			var enabled bool
@@ -89,7 +109,7 @@ func TestArtifactInteractiveSnapshotProjection(t *testing.T) {
 			if err := json.Unmarshal(raw, &runtime); err != nil {
 				t.Fatal(err)
 			}
-			if runtime.RuntimeURL != tc.wantURL || !slices.Equal(runtime.Collections, []string{"votes"}) || runtime.DevelopmentSameOrigin {
+			if runtime.RuntimeURL != tc.wantURL || !slices.Equal(runtime.Collections, []string{"votes"}) || runtime.DevelopmentSameOrigin || runtime.ViewerFilters != tc.wantPrefs {
 				t.Fatalf("runtime %+v", runtime)
 			}
 			if kind := string(snapshot["artifact_kind"]); kind != "" {

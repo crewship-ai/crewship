@@ -1846,6 +1846,10 @@
           "runtime_url": {
             "description": "Fixed Pages runtime bootstrap on a separate site where the Project's scripts run, or empty when this server has no isolating runtime origin for the request host.",
             "type": "string"
+          },
+          "viewer_filters": {
+            "description": "The selected interactive version opted into browser-local viewer filters.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -18044,6 +18048,11 @@
           "agent_slug": {
             "type": "string"
           },
+          "agent_wait_ms": {
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
+          },
           "attempt": {
             "type": "integer"
           },
@@ -18079,6 +18088,11 @@
           },
           "step_id": {
             "type": "string"
+          },
+          "work_duration_ms": {
+            "minimum": 0,
+            "nullable": true,
+            "type": "integer"
           }
         },
         "required": [
@@ -18094,7 +18108,9 @@
           "started_at",
           "ended_at",
           "error",
-          "output_bytes"
+          "output_bytes",
+          "agent_wait_ms",
+          "work_duration_ms"
         ],
         "type": "object"
       },

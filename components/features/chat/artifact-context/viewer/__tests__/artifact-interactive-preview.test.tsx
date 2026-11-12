@@ -1,5 +1,7 @@
 import { act, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
+import { INTERACTIVE_REQUEST, INTERACTIVE_RESPONSE } from "@/lib/pages/interactive-artifact"
+import { viewerPrefsKey } from "@/lib/pages/viewer-prefs"
 import { ArtifactInteractivePreview } from "../artifact-interactive-preview"
 
 const state = vi.hoisted(() => ({ user: { id: "alice", name: "Alice" } as { id: string; name: string } | null, send: vi.fn() }))
@@ -48,6 +50,51 @@ it.each([
   render(<ArtifactInteractivePreview {...props} runtime={value} />)
   expect(screen.queryByTitle("Preview of Poll")).toBeNull()
   expect(screen.getByRole("alert").textContent).toContain(message)
+})
+
+it("keeps Dashboard filter preferences local to the current reader and closes them for other previews", async () => {
+  const aliceKey = viewerPrefsKey("alice", "ws", "pg")
+  const bobKey = viewerPrefsKey("bob", "ws", "pg")
+  const storage = new Map([[aliceKey, '{"crew":"Alpha"}']])
+  const get = vi.spyOn(window.localStorage, "getItem").mockImplementation(key => storage.get(key) ?? null)
+  const set = vi.spyOn(window.localStorage, "setItem").mockImplementation((key, value) => { storage.set(key, value) })
+  const remove = vi.spyOn(window.localStorage, "removeItem").mockImplementation(key => { storage.delete(key) })
+  state.send.mockClear()
+  const ports: MessagePort[] = []
+  const bind = () => {
+    const frame = screen.getByTitle("Preview of Poll") as HTMLIFrameElement
+    const post = vi.fn()
+    Object.defineProperty(frame, "contentWindow", { configurable: true, value: { postMessage: post } })
+    fireEvent.load(frame)
+    const port = (post.mock.calls[0][2] as MessagePort[])[0]
+    ports.push(port)
+    const replies = new Map<number, unknown>()
+    port.onmessage = event => { if (event.data?.type === INTERACTIVE_RESPONSE) replies.set(event.data.id, event.data) }
+    return async (id: number, method: string, params: object = {}) => {
+      port.postMessage({ type: INTERACTIVE_REQUEST, id, method, params })
+      await vi.waitFor(() => expect(replies.has(id)).toBe(true))
+      return replies.get(id)
+    }
+  }
+  const view = render(<ArtifactInteractivePreview {...props} canWrite={false} rememberViewerPrefs />)
+  try {
+    const alice = bind()
+    expect(await alice(1, "prefs.get")).toMatchObject({ result: { value: { crew: "Alpha" } } })
+    state.user = { id: "bob", name: "Bob" }
+    view.rerender(<ArtifactInteractivePreview {...props} canWrite={false} rememberViewerPrefs />)
+    const bob = bind()
+    expect(await bob(1, "prefs.get")).toMatchObject({ result: { value: null } })
+    expect(await bob(2, "prefs.set", { value: { crew: "Beta" } })).toMatchObject({ result: { saved: true } })
+    expect(window.localStorage.getItem(aliceKey)).toBe('{"crew":"Alpha"}')
+    expect(window.localStorage.getItem(bobKey)).toBe('{"crew":"Beta"}')
+    view.rerender(<ArtifactInteractivePreview {...props} canWrite={false} />)
+    expect(await bind()(1, "prefs.get")).toMatchObject({ code: "unavailable" })
+    expect(state.send).not.toHaveBeenCalled()
+  } finally {
+    view.unmount()
+    ports.forEach(port => port.close())
+    get.mockRestore(); set.mockRestore(); remove.mockRestore()
+  }
 })
 
 it("removes the frame when the session ends", () => {

@@ -99,7 +99,7 @@ func TestShowcaseMirrorRwrx_Manifest(t *testing.T) {
 	if m.EntryPoint != "index.html" || m.Message == "" {
 		t.Errorf("entrypoint %q, message %q", m.EntryPoint, m.Message)
 	}
-	wantTypes := map[string]string{"index.html": "text/html", "theme.css": "text/css", "interactive.json": "application/json", "dashboard.json": "application/json", "datasets.json": "application/json"}
+	wantTypes := map[string]string{"index.html": "text/html", "theme.css": "text/css", "interactive.json": "application/json", "dashboard.json": "application/json", "datasets.json": "application/json", "viewer-filters.json": "application/json"}
 	if len(files) != len(wantTypes) {
 		t.Errorf("files = %d, want %d", len(files), len(wantTypes))
 	}
@@ -111,6 +111,10 @@ func TestShowcaseMirrorRwrx_Manifest(t *testing.T) {
 	collections, err := artifacts.ParseInteractiveArtifact(files)
 	if err != nil || !reflect.DeepEqual(collections, []string{"tasks"}) {
 		t.Fatalf("interactive collections = %v, %v; want [tasks]", collections, err)
+	}
+
+	if !artifacts.InteractiveViewerFilters(files) {
+		t.Fatal("seed Dashboard must opt into browser-local filters")
 	}
 
 	html := string(files["index.html"].Content)

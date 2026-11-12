@@ -374,3 +374,29 @@ func TestRenderHTMLStrokeKeepsFocusAndBrokenLinkOutline(t *testing.T) {
 		t.Errorf("the linked layer lost its stroke")
 	}
 }
+
+// An image layer's fill is painted behind the picture, as on the canvas, so a
+// transparent image shows it (#5228). Without a valid fill nothing changes.
+func TestRenderHTMLImageFill(t *testing.T) {
+	screen := map[string]any{"id": "s", "type": "frame", "x": 0, "y": 0, "width": 360, "height": 640}
+	filled := map[string]any{"id": "filled", "type": "image", "parentId": "s", "x": 10, "y": 10, "width": 100, "height": 100, "src": "data:image/png;base64,iVBORw0KGgo=", "fill": "#fde68a"}
+	plain := map[string]any{"id": "plain", "type": "image", "parentId": "s", "x": 10, "y": 120, "width": 100, "height": 100, "src": "data:image/png;base64,iVBORw0KGgo="}
+	out, err := RenderHTML(exportFixture(screen, filled, plain), 1<<20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := func(id string) string {
+		for _, l := range strings.Split(string(out), "\n") {
+			if strings.Contains(l, `data-node-id="`+id+`"`) {
+				return l
+			}
+		}
+		return ""
+	}
+	if !strings.Contains(line("filled"), "background:#fde68a") {
+		t.Errorf("image fill is not painted: %s", line("filled"))
+	}
+	if strings.Contains(line("plain"), "background:") {
+		t.Errorf("an image without a fill gained a background: %s", line("plain"))
+	}
+}

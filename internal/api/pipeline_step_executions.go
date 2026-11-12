@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 )
 
 // RunExecutions is workspace-scoped and paginated. Large immutable outputs are
@@ -49,7 +50,7 @@ func (h *PipelineHandler) RunExecutions(w http.ResponseWriter, r *http.Request) 
 	}
 	rows, err := h.db.QueryContext(r.Context(), `SELECT e.rowid,e.id,e.parent_execution_id,e.step_id,e.execution_path,e.attempt,e.kind,
         CASE WHEN e.status='running' AND r.status IN ('cancelled','interrupted','failed','completed') THEN 'interrupted' ELSE e.status END,
-        e.agent_slug,e.model,e.started_at,e.ended_at,e.error,length(e.output)
+        e.agent_slug,e.model,e.started_at,e.ended_at,e.error,length(e.output),e.agent_wait_ms
         FROM pipeline_step_executions e JOIN pipeline_runs r ON r.id=e.run_id WHERE e.run_id=? AND e.rowid>? ORDER BY e.rowid LIMIT 101`, runID, after)
 	if err != nil {
 		replyError(w, 500, "load step executions")
@@ -64,7 +65,8 @@ func (h *PipelineHandler) RunExecutions(w http.ResponseWriter, r *http.Request) 
 		var id, step, path, kind, status, agent, model, started, reason string
 		var parent, ended sql.NullString
 		var attempt, size int
-		if err := rows.Scan(&seq, &id, &parent, &step, &path, &attempt, &kind, &status, &agent, &model, &started, &ended, &reason, &size); err != nil {
+		var wait sql.NullInt64
+		if err := rows.Scan(&seq, &id, &parent, &step, &path, &attempt, &kind, &status, &agent, &model, &started, &ended, &reason, &size, &wait); err != nil {
 			replyError(w, 500, "read step executions")
 			return
 		}
@@ -73,7 +75,20 @@ func (h *PipelineHandler) RunExecutions(w http.ResponseWriter, r *http.Request) 
 			break
 		}
 		next = seq
+
+		var waitMs, workMs *int64
+		// No inference for old records, aggregate steps, or live attempts.
+		if wait.Valid {
+			waitMs = &wait.Int64
+			startTime, startErr := time.Parse(time.RFC3339Nano, started)
+			endTime, endErr := time.Parse(time.RFC3339Nano, ended.String)
+			if startErr == nil && endErr == nil && !endTime.Before(startTime) {
+				work := max(int64(0), endTime.Sub(startTime).Milliseconds()-wait.Int64)
+				workMs = &work
+			}
+		}
 		records = append(records, pipelineRunStepExecution{
+			AgentWaitMs: waitMs, WorkDurationMs: workMs,
 			ID: id, ParentExecutionID: parent.String, StepID: step, ExecutionPath: path,
 			Attempt: attempt, Kind: kind, Status: status, AgentSlug: agent, Model: model,
 			StartedAt: started, EndedAt: ended.String, Error: reason, OutputBytes: size,
