@@ -147,3 +147,21 @@ mooring/vendor/sha2-0.10.9/.cargo-checksum.json:generic-api-key:1
 # Exact introducing-commit fingerprints for the same source hashes.
 e40906f36fd59049a89c0bf5190c3f50b896c6ff:mooring/vendor/digest-0.10.7/.cargo-checksum.json:generic-api-key:1
 e40906f36fd59049a89c0bf5190c3f50b896c6ff:mooring/vendor/sha2-0.10.9/.cargo-checksum.json:generic-api-key:1
+
+# #5215 / #5188: exact historical redaction-fixture and replay-ID findings.
+# PAT/GCP examples have deterministic alphabet/digit construction and are used
+# only to assert scrubbing; JWT/PEM examples have malformed advertised formats.
+# The producer idempotency field is a replay ID, never authentication authority.
+# Provenance review does not assert provider issuance/revocation. Keep the
+# exceptions bound to these introducing commits, paths, rules and lines only.
+# No current-line or file-wide suppression: a future value must still fail.
+979b5096ff84fe92f28bc95775b936830902689d:internal/artifacts/data_runs_test.go:gitlab-pat:36
+979b5096ff84fe92f28bc95775b936830902689d:internal/artifacts/data_runs_test.go:gcp-api-key:37
+979b5096ff84fe92f28bc95775b936830902689d:internal/artifacts/data_runs_test.go:jwt:34
+979b5096ff84fe92f28bc95775b936830902689d:internal/artifacts/data_runs_test.go:private-key:35
+979b5096ff84fe92f28bc95775b936830902689d:internal/api/pages_artifact_data_producer_runs_test.go:generic-api-key:92
+a8fdf3bb8e16c2cad606149edeff2da498cf826a:internal/artifacts/data_runs_test.go:gitlab-pat:35
+a8fdf3bb8e16c2cad606149edeff2da498cf826a:internal/artifacts/data_runs_test.go:gcp-api-key:36
+a8fdf3bb8e16c2cad606149edeff2da498cf826a:internal/artifacts/data_runs_test.go:private-key:34
+b58556de65fe4ee6dd933b3f61563c85c11cb00d:internal/artifacts/data_runs_test.go:jwt:33
+61425160c15318d87d3fe7b91b7c603d7596c311:internal/api/pages_artifact_data_producer_runs_test.go:generic-api-key:92

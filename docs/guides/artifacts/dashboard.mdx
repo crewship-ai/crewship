@@ -101,14 +101,24 @@ then says *The dataset details in datasets.json are invalid*. Nothing in this
 file is a server record. The last write and who made it always come from the
 server, never from the file.
 
-The status chip follows these details: **Stale** when a `planned` or `live`
-dataset is older than its maximum age, **Sample data** when any dataset is
-marked as sample, **Fixed data** when every dataset is declared fixed, and
-**Data connected** when the stored values can be read. A stale dashboard with
-sample data also names that in the chip. Invalid metadata gets its own label. Without a `max_age_seconds` nothing is ever shown as stale. The
-chip does not show producer runs: a refresh that failed and wrote nothing
-leaves no trace here, only an ageing last write. `live` describes how the
-data is expected to change; it does not run a query as the reader.
+The status chip follows these details and the producer runs the server
+recorded (see [Record producer runs](#record-producer-runs)), in this order:
+
+| Chip | When |
+|---|---|
+| **Refresh failed** | The newest run of a collection failed. The owner and editors see the reason; readers see only that it failed. The chip says whether the failed run already changed some values. |
+| **Refresh stalled** | A run has been running longer than the server's stalled threshold (30 minutes by default) without finishing. Shown by the browser only; the run stays `running` on the server. Values may be partly updated. |
+| **Refreshing…** | A run is in progress. Values update as the run writes them. |
+| **Stale** | A `planned` or `live` dataset is older than its maximum age. With run records the age counts from the last successful run, otherwise from the last write. |
+| **Sample data** | Any dataset is marked as sample. |
+| **Fixed data** | Every dataset is `fixed`. |
+| **Data connected** | The saved values can be read. |
+
+Invalid dataset details get their own label. Without a `max_age_seconds` nothing is shown as stale. Every state keeps
+the values as last written; a failed or running refresh never blanks a number
+or shows zero. Sources lists each collection's last run and its last success.
+`live` describes how the data is expected to change; it does not run a query as
+the reader.
 
 `dashboard.json` keeps `schema_version` 1. Version 2 is reserved for the
 planned widget profile, which is not available yet.
@@ -295,6 +305,78 @@ Read the collection again, decide what the value should be, and send a new
 batch. Do not retry the same file. The CLI never retries on its own. Agents get
 the same rule through the `artifact_data_batch` tool. The full command
 reference is in [`crewship page`](/cli/page#dashboard-data-disabled-by-default).
+
+## Record producer runs
+
+A producer that refreshes a dataset on a schedule (a script, routine step or
+job that calls the CLI or REST API with a token) can record each refresh so
+readers see **Refreshing…**, **Refresh failed** and the last success instead
+of an ageing write. Starting and finishing a run needs the same right as
+writing data. The producer recorded is the authenticated caller; it cannot be
+supplied.
+
+**Data updates as it is written.** A run does not stage data or publish it at
+the end: each `data batch` applies immediately, so readers may see new values
+while a refresh is still running, and a failed refresh may leave some of its
+values behind. The chip says so: a failed run during which data changed (by
+it or another writer) is reported as partly applied.
+
+**A success is bound to the data it wrote.** Every batch returns the
+collection's `generation` (the sum of its document versions; it only grows).
+Include the returned `run_id` (the start response's `id`) in every batch file
+for the refresh. Finish with the generation of the last linked batch. The
+server refuses a linked batch or success with `409 artifact_data_run_generation`
+if a write outside the run broke the sequence, and refuses success with `409 artifact_data_run_overlap` while
+another refresh of the collection is still running or after one failed with
+changed data while yours ran. The refusal lists those runs in
+`blocking_runs`, and `runs list` shows every running run to the owner and
+editors (`active_runs`), so a run whose producer died can always be found:
+any writer can finish it as failed. Then start a new run. Two healthy runs
+that overlap cannot both succeed; run one refresh per collection at a time. If the refresh had nothing to change, finish with the run's
+`start_generation` and `--unchanged`. `--unchanged` is your own claim: the
+server only checks that nobody wrote during the run, not the source.
+
+```bash
+crewship page artifact data runs start <slug> sales --base-version 3 --key nightly-2026-11-09
+# Include "run_id": "<run-id>" alongside base_version and documents in batch.json.
+crewship page artifact data batch <slug> sales --file batch.json      # returns "generation": 42
+crewship page artifact data runs finish <slug> sales <run-id> --base-version 3 --state succeeded --data-generation 42
+```
+
+If the refresh fails, finish with `--state failed --reason "<what went wrong>"`
+(`--reason -` reads standard input). The server removes control characters
+and common credential patterns (such as passwords, tokens, API keys, private
+key blocks and URL user info) and keeps at most 500 bytes. This is not a
+guarantee, so do not put secrets in a reason.
+
+- Repeating `start` with the same `--key` and code version returns the same run, so a retried
+  job does not open a second one. To retry after a failure, start a new run
+  with a new key.
+- Finishing the same run again with the same outcome is accepted; a different
+  outcome fails with `409`.
+- Only the producer that started a run can finish it as succeeded. Any writer
+  of the Dashboard can finish a run as failed, for example to abandon a run
+  whose producer died or started on an old code version. The finisher is recorded. Linked batches and a successful finish require the same code version as the start.
+- `crewship page artifact data runs list <slug> --version 3` shows the newest
+  run, last attempt and last success per collection.
+- Agent runs that work through the artifact tools cannot record runs yet; use
+  the CLI with a token.
+
+Limits are configurable server defaults, not part of the API contract (see
+[environment variables](/configuration/environment)): at most 4 runs per
+collection can be running at once (`CREWSHIP_ARTIFACT_DATA_RUNS_ACTIVE`; more
+fail with `409 artifact_data_run_busy`); the newest 20 finished runs and the
+newest success are kept (`CREWSHIP_ARTIFACT_DATA_RUNS_KEPT`), plus at most
+one additional overlapping partial failure. Producer histories can exist
+for up to 32 collection names per Dashboard. A running run
+is never removed, whatever the limit. The key of a finished run stays reserved
+until 24 hours pass (`CREWSHIP_ARTIFACT_DATA_RUN_KEY_TTL`) or the run is
+pruned, whichever comes first; do not rely on replaying a key of a run that
+may have been pruned. **Refresh stalled** is shown by the viewer's browser
+once a run has been running longer than the server's
+`stalled_after_seconds` (`CREWSHIP_ARTIFACT_DATA_RUN_STALLED_AFTER`, 30
+minutes by default); the server keeps such a run `running` until a writer
+finishes it.
 
 ## Who sees which data
 

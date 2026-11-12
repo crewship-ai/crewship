@@ -72,11 +72,13 @@ func newArtifactDataCommand() *cobra.Command {
 	batch.Long = `Apply up to 50 document writes atomically. base_version is the current code
 version; ifVersion 0 creates a document and an update gives the document's
 current version. One stale ifVersion fails the whole batch with 409
-artifact_data_conflict and nothing is written; the CLI never retries.`
+artifact_data_conflict and nothing is written; the CLI never retries.
+For a producer refresh, include its run_id in the JSON batch file.`
 	batch.Example = `  echo '{"base_version":1,"documents":[{"id":"north","ifVersion":0,"value":{"revenue":1250}}]}' \
     | crewship page artifact data batch sales-dashboard sales --file -`
 	batch.Flags().String("file", "", "Bounded JSON batch file; - reads stdin (required)")
 	root.AddCommand(batch)
+	root.AddCommand(newArtifactDataRunsCommand())
 	root.Long = `Read and write the JSON documents of a dashboard artifact.
 
 A code version declares its collections in dashboard.json, for example

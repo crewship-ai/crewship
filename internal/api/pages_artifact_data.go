@@ -28,9 +28,10 @@ func (h *PageHandler) artifactDataEnabled(ctx context.Context) bool {
 }
 
 type artifactDataSelection struct {
-	owner       bool
-	editor      bool
-	collections []string
+	owner        bool
+	editor       bool
+	editorLatest bool
+	collections  []string
 }
 
 func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.VersionKey, collection string, version int64, write bool) (artifacts.VersionAuthorize, *artifactDataSelection) {
@@ -109,11 +110,12 @@ func (h *PageHandler) artifactDataAuthority(r *http.Request, k artifacts.Version
 		if collection != "" && !slices.Contains(collections, collection) {
 			return "", artifacts.ErrVersionNotFound
 		}
-		if checked && (selected.owner != isOwner || selected.editor != isEditor || !slices.Equal(selected.collections, collections)) {
+		if checked && (selected.owner != isOwner || selected.editor != isEditor || selected.editorLatest != (isEditor && latest == version) || !slices.Equal(selected.collections, collections)) {
 			return "", artifacts.ErrVersionAuthority
 		}
 		selected.owner = isOwner
 		selected.editor = isEditor
+		selected.editorLatest = isEditor && latest == version
 		selected.collections = collections
 		checked = true
 		return actor, nil
@@ -161,6 +163,13 @@ type artifactDataResponse struct {
 	Collection  string                         `json:"collection"`
 	CodeVersion int64                          `json:"code_version"`
 	Documents   []artifactDataDocumentResponse `json:"documents"`
+}
+
+// artifactDataBatchResponse adds the collection's data generation after the
+// batch; a producer names it when it finishes a run as succeeded.
+type artifactDataBatchResponse struct {
+	artifactDataResponse
+	Generation int64 `json:"generation"`
 }
 
 // This projection is identical for owners and shared readers. Raw provenance
@@ -285,10 +294,14 @@ func (h *PageHandler) BatchArtifactData(w http.ResponseWriter, r *http.Request) 
 	}
 	collection := r.PathValue("collection")
 	auth, _ := h.artifactDataAuthority(r, k, collection, body.BaseVersion, true)
-	documents, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).Batch(r.Context(), k, collection, body.Documents, auth)
+	documents, generation, err := artifacts.NewDataStore(h.db, artifacts.DataOptions{Enabled: true}).BatchGeneration(r.Context(), k, collection, body.Documents, body.RunID, body.BaseVersion, auth)
 	if err != nil {
-		artifactDataError(w, err)
+		if errors.Is(err, artifacts.ErrDataRunNotFound) || errors.Is(err, artifacts.ErrDataRunGeneration) || errors.Is(err, artifacts.ErrDataRunCodeVersion) {
+			artifactDataRunError(w, r, err)
+		} else {
+			artifactDataError(w, err)
+		}
 		return
 	}
-	writeArtifactData(w, projectArtifactData(r, collection, body.BaseVersion, documents))
+	writeArtifactData(w, artifactDataBatchResponse{projectArtifactData(r, collection, body.BaseVersion, documents), generation})
 }
