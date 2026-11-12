@@ -49,6 +49,32 @@ out=$(run_in "$d"); rc=$?
 [ $rc -ne 0 ] && ok "Mach-O 64 is caught" || no "Mach-O 64 is caught" "rc=$rc"
 rm -rf "$d"
 
+# --- every executable signature stays enforced -----------------------------
+for magic in '\xfe\xed\xfa\xce' '\xce\xfa\xed\xfe' '\xfe\xed\xfa\xcf' '\xca\xfe\xba\xbe' '\xbe\xba\xfe\xca' '\x4d\x5a' ; do
+  d=$(scratch "executable" "$magic")
+  out=$(run_in "$d"); rc=$?
+  if [ $rc -ne 0 ]; then
+    ok "signature $magic is caught"
+  else
+    no "signature $magic is caught" "rc=$rc out=$out"
+  fi
+  rm -rf "$d"
+done
+
+# --- NUL-delimited Git names are data, never shell input --------------------
+# The command-substitution filename is intentionally literal adversarial input.
+# shellcheck disable=SC2016
+for name in '-leading-option' 'space name' $'tab\tname' $'line\nname' '$(touch should-not-exist)'; do
+  d=$(scratch "$name" '\x7f\x45\x4c\x46')
+  out=$(run_in "$d"); rc=$?
+  if [ $rc -ne 0 ] && [ ! -e "$d/should-not-exist" ] && [[ "$out" == *"$name"* ]]; then
+    ok "tracked unusual name is caught literally"
+  else
+    no "tracked unusual name is caught literally" "rc=$rc out=$out"
+  fi
+  rm -rf "$d"
+done
+
 # --- a binary in a subdirectory is no more acceptable than one at the root --
 d=$(mktemp -d)
 git -C "$d" init -q; git -C "$d" config user.email t@t.t; git -C "$d" config user.name t
