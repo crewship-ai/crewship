@@ -126,7 +126,7 @@ func TestHandleIssueCreate_ForwardsToCrewshipd(t *testing.T) {
 		WorkspaceID: "ws-1",
 	}, nil)
 
-	body := `{"title":"Login broken","description":"500 on POST /login","priority":"high","project_id":"proj-1","assignee_id":"agent-2","crew_id":"crew-override"}`
+	body := `{"title":"Login broken","description":"500 on POST /login","priority":"high","project_id":"proj-1","assignee_id":"agent-2","parent_identifier":"HOM-1","crew_id":"crew-override"}`
 	req := httptest.NewRequest(http.MethodPost, "/issue/create",
 		strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
@@ -154,6 +154,9 @@ func TestHandleIssueCreate_ForwardsToCrewshipd(t *testing.T) {
 	}
 	if receivedBody["priority"] != "high" {
 		t.Errorf("expected priority=high forwarded, got %v", receivedBody["priority"])
+	}
+	if receivedBody["parent_identifier"] != "HOM-1" {
+		t.Errorf("expected parent_identifier=HOM-1 forwarded for an atomic sub-issue, got %v", receivedBody["parent_identifier"])
 	}
 	if receivedBody["project_id"] != "proj-1" {
 		t.Errorf("expected project_id=proj-1 forwarded, got %v", receivedBody["project_id"])
@@ -280,7 +283,7 @@ func TestHandleIssueCreate_OmitsEmptyOptionalFields(t *testing.T) {
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d", w.Code)
 	}
-	for _, key := range []string{"description", "priority", "project_id", "assignee_id"} {
+	for _, key := range []string{"description", "priority", "project_id", "assignee_id", "parent_identifier"} {
 		if _, ok := receivedBody[key]; ok {
 			t.Errorf("expected %q to be omitted when empty, but it was forwarded as %v",
 				key, receivedBody[key])

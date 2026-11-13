@@ -381,6 +381,14 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		OperationKey  string   `json:"operation_key"`
 		ProjectID     *string  `json:"project_id"`
 		Labels        []string `json:"labels"`
+		// ParentIdentifier creates the issue as a sub-issue of an existing
+		// one, in the SAME transaction (see authorizeIssueParent). It is the
+		// supported decomposition path for runs carrying human authority,
+		// where the separate sub_issue_of link is refused: create-then-link
+		// left an unattached child behind every time the link was refused.
+		// Part of the request hash, so a replay with another parent under
+		// the same operation key is a conflict, not a silent re-parent.
+		ParentIdentifier string `json:"parent_identifier,omitempty"`
 	}
 	if err := readJSON(r, &req); err != nil {
 		writeProblem(w, r, http.StatusBadRequest, "Invalid JSON body")
@@ -475,6 +483,20 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 	if op != nil {
 		authorChatID = op.authority.ChatID
 	}
+	var parentID string
+	if req.ParentIdentifier != "" {
+		var perr error
+		parentID, perr = authorizeIssueParent(r.Context(), tx, op, req.WorkspaceID, req.CrewID, req.ParentIdentifier)
+		if perr != nil {
+			var pe *issueParentError
+			if errors.As(perr, &pe) {
+				writeProblem(w, r, pe.status, pe.msg)
+				return
+			}
+			internalError(w, r, h.logger, "authorize parent issue", perr)
+			return
+		}
+	}
 
 	// Creator attribution (v129): this endpoint is only reachable through
 	// the sidecar's trusted IPC identity, so a supplied author_agent_id
@@ -520,6 +542,14 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, h.logger, "insert issue", err)
 		return
 	}
+	if parentID != "" {
+		if _, err := tx.ExecContext(r.Context(),
+			`UPDATE missions SET parent_issue_id = ?, updated_at = ? WHERE id = ?`,
+			parentID, time.Now().UTC().Format(time.RFC3339), id); err != nil {
+			internalError(w, r, h.logger, "set parent issue", err)
+			return
+		}
+	}
 	// A later autonomous assignment of this issue must retain its requesting
 	// human even when no public Start request supplies a fresh admission.
 	if originID := chatIssueOriginID(op); originID != "" {
@@ -537,7 +567,16 @@ func (h *InternalIssueHandler) Create(w http.ResponseWriter, r *http.Request) {
 		internalError(w, r, h.logger, "persist agent issue creation", err)
 		return
 	}
+	if parentID != "" {
+		if _, err := persistIssueActivityTx(r.Context(), tx, issueEvent{MissionID: id, ActorType: actorType, ActorID: actorID, RunID: req.AuthorRunID, Action: actionParentChanged, Details: req.ParentIdentifier}); err != nil {
+			internalError(w, r, h.logger, "persist sub-issue parent", err)
+			return
+		}
+	}
 	result := map[string]string{"id": id, "identifier": identifier, "status": "BACKLOG"}
+	if parentID != "" {
+		result["parent_identifier"] = req.ParentIdentifier
+	}
 	if op != nil {
 		result["operation_id"] = op.operation.ID
 	}
