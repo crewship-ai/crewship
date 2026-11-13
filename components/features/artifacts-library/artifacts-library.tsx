@@ -35,7 +35,9 @@ import { ArtifactDetail } from "./artifact-detail"
 import { ArtifactFrame, NO_FRAME_CAPABILITIES } from "./frame"
 import { kindOf, kindText } from "./kinds"
 import { KindBadge, KindTile } from "./kind-tile"
-import { LibraryHome, NewArtifactMenu, type LibraryCreationFlow } from "./library-home"
+import { creatableUiKinds, LibraryHome, type LibraryCreationFlow } from "./library-home"
+import { NewArtifactButton, NewArtifactGuide, useNewArtifactPrefs } from "./new-artifact-button"
+import type { KindFamily } from "./kinds"
 import { LibraryPanel } from "./library-panel"
 import { KindThumb } from "./kind-thumb"
 import { useArtifactAccess } from "./use-artifact-access"
@@ -351,6 +353,15 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   const [layout, setLayout] = useState<Layout>("list")
   const [newKind, setNewKind] = useState<LibraryCreationFlow | null | undefined>(undefined)
   const creatable = ARTIFACT_KINDS.filter(kind => kind.live(caps)).map(kind => kind.key)
+  // The New artifact button: what this person can make, as UI kinds, and what they pinned and made last.
+  const newEntries = creatableUiKinds(creatable, canCreateDocs)
+  const newPrefs = useNewArtifactPrefs(workspaceId, newEntries.map(entry => entry.kind))
+  const [newMenu, setNewMenu] = useState<{ open: boolean; family: KindFamily | null }>({ open: false, family: null })
+  // The main button opens the general dialog (Docs included) on the kind made last; the dialog can still switch kind.
+  const [newDefault, setNewDefault] = useState<LibraryCreationFlow | undefined>(undefined)
+  const startNew = (flow: LibraryCreationFlow, fromMain = false) => {
+    if (fromMain) { setNewDefault(flow); setNewKind(null) } else setNewKind(flow)
+  }
   // Per person, synced across devices: what they opened and what they starred. Never shared with others.
   const [recent, setRecent] = useUserPreference<{ slug: string; at: number }[]>(`artifacts.${workspaceId}.recentlyOpened`, [])
   const [favorites, setFavorites] = useUserPreference<string[]>(`artifacts.${workspaceId}.favorites`, [])
@@ -430,7 +441,8 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
 
   // The open artifact's frame owns the bar; the library's bar is only for lists.
   const subBar = item === null ? <SubBar icon={Library} title="Artifacts" ariaLabel="Artifacts" heading={false}
-    actions={<NewArtifactMenu creatable={creatable} docsAvailable={canCreateDocs} onNew={kind => setNewKind(kind)} />} /> : null
+    actions={<NewArtifactButton entries={newEntries} prefs={newPrefs} onNew={startNew} open={newMenu.open} family={newMenu.family}
+      onOpenChange={open => setNewMenu({ open, family: open ? newMenu.family : null })} />} /> : null
   // Not in the catalog: ask the server why, so the frame can say signed out, no access or not there.
   const access = useArtifactAccess(workspaceId, item === null ? null : bySlug ? item : "@" + item, item !== null && !selected && !loading)
   // The folder panel steps aside while an artifact is open, unless pinned; its own toggle still works per open.
@@ -459,12 +471,15 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
       description={blank
         ? `${blank === 1 ? "1 blank item is" : `${blank} blank items are`} in Empty. Ask an agent in Chat to make a project or a dashboard, or start a document here.`
         : "Ask an agent in Chat to make a project or a dashboard, or start a document here."}
-      primary={creatable.length ? { label: "New artifact", icon: Plus, onClick: () => setNewKind(null) } : undefined}
+      primary={newEntries.length ? { label: "New artifact", icon: Plus, onClick: () => setNewKind(null) } : undefined}
       secondary={blank ? { label: `Show empty (${blank})`, onClick: () => setFilters({ ...EMPTY_FILTERS, view: "empty" }) } : undefined} />
   } else if (filters.view === "home") {
     const inHome = inView(items, "all", personal).filter(entry => filters.folder === null || (entry.folder?.slug ?? "") === filters.folder)
     content = <LibraryHome items={inHome} attention={attentionItems(inHome, { drafts })} title={folderInView?.name ?? (filters.folder === "" ? "Unfiled" : "All artifacts")}
-      onOpen={pick} peeked={peeked?.slug} />
+      onOpen={pick} peeked={peeked?.slug}
+      guide={newEntries.length > 0 && newPrefs.guide ? <NewArtifactGuide available={newEntries.map(entry => entry.kind)}
+        onNew={kind => { const flow = newEntries.find(entry => entry.kind === kind)?.flow; if (flow) { newPrefs.record(kind); startNew(flow) } }}
+        onBrowse={family => setNewMenu({ open: true, family })} onDismiss={() => newPrefs.setGuide(false)} /> : undefined} />
   } else if (serverParams && catalogWindow.loading) {
     content = <div aria-label="Loading artifacts"><PageLoading variant="cards" /></div>
   } else if (serverParams && catalogWindow.error) {
@@ -549,10 +564,10 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
         if (id) onSelect(id)
         else if (slug) onSelect(null, slug)
       }} />}
-    {newKind !== undefined && newKind !== "docs" && <NewArtifactDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) setNewKind(undefined) }}
-      defaultKind={newKind ?? undefined} defaultFolderSlug={filters.folder || undefined}
+    {newKind !== undefined && newKind !== "docs" && <NewArtifactDialog workspaceId={workspaceId} open onOpenChange={open => { if (!open) { setNewKind(undefined); setNewDefault(undefined) } }}
+      defaultKind={newKind ?? newDefault} defaultFolderSlug={filters.folder || undefined}
       onCreated={(slug, id) => {
-        setNewKind(undefined)
+        setNewKind(undefined); setNewDefault(undefined)
         if (slug) setMadeHere([slug, ...(Array.isArray(madeHere) ? madeHere : []).filter(entry => entry !== slug)].slice(0, 50))
         refresh()
         if (id) onSelect(id)

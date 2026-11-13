@@ -1,11 +1,9 @@
 "use client"
 
 import { useState } from "react"
-import { AlertTriangle, ChevronRight, Clock, LayoutGrid, Lock, Plus, RotateCcw, Table2 } from "lucide-react"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { AlertTriangle, ChevronRight, Clock, LayoutGrid, Lock, RotateCcw, Table2 } from "lucide-react"
 import { Segmented } from "@/components/ui/segmented"
 import { StatusPill } from "@/components/ui/status-pill"
-import { SubBarPrimary } from "@/components/layout/sub-bar"
 import { formatRelativeShort } from "@/lib/time"
 import { cn } from "@/lib/utils"
 import type { ArtifactKindKey } from "@/components/features/chat/artifact-context/new-artifact/artifact-kinds"
@@ -27,39 +25,6 @@ export function creatableUiKinds(creatable: readonly ArtifactKindKey[], docsAvai
     const flow = CREATE_FLOW[kind].find(key => key === "docs" ? docsAvailable : creatable.includes(key))
     return flow ? [{ kind, flow }] : []
   })
-}
-
-/** New artifact: one popover grouped Artifact and Craft, each entry opening the existing New artifact dialog on its flow. */
-export function NewArtifactMenu({ creatable, docsAvailable = false, onNew }: { creatable: readonly ArtifactKindKey[]; docsAvailable?: boolean; onNew: (flow: LibraryCreationFlow) => void }) {
-  const [open, setOpen] = useState(false)
-  const entries = creatableUiKinds(creatable, docsAvailable)
-  if (!entries.length) return null
-  const group = (family: "Artifact" | "Craft", caption: string) => {
-    const list = entries.filter(entry => KINDS[entry.kind].family === family)
-    return list.length > 0 && <section aria-label={caption} className="grid gap-1">
-      <h3 className="px-2 pb-0.5 pt-1.5 text-xs font-semibold text-muted-foreground">{caption}</h3>
-      <div className="grid gap-1 sm:grid-cols-2">
-        {list.map(({ kind, flow }) => <button key={kind} type="button" aria-label={`New ${KINDS[kind].label}`}
-          onClick={() => { setOpen(false); onNew(flow) }}
-          className="flex items-center gap-2.5 rounded-lg p-2 text-left transition-colors hover:bg-accent coarse:min-h-[44px]">
-          <KindTile kind={kind} />
-          <span className="grid min-w-0 gap-0.5">
-            <b className="text-sm font-semibold">{KINDS[kind].label}</b>
-            <small className="text-xs text-muted-foreground">{KINDS[kind].description}</small>
-          </span>
-        </button>)}
-      </div>
-    </section>
-  }
-  return <Popover open={open} onOpenChange={setOpen}>
-    <PopoverTrigger asChild>
-      <SubBarPrimary icon={Plus} aria-label="New artifact">New artifact</SubBarPrimary>
-    </PopoverTrigger>
-    <PopoverContent align="end" className="w-[min(560px,calc(100vw-2rem))] p-2" aria-label="New artifact">
-      {group("Artifact", "Artifacts")}
-      {group("Craft", "Craft · one editor at a time")}
-    </PopoverContent>
-  </Popover>
 }
 
 const ATTENTION_ICON: Record<AttentionReason, { icon: typeof Clock; tone: string }> = {
@@ -131,15 +96,17 @@ type HomeLayout = "grid" | "table"
 /**
  * Home (Harbor 2 v87): Needs attention (the fixed rule in attention.ts), then
  * every artifact in view with kind chips and a grid or table. What can be made
- * lives in the New artifact popover in the bar.
+ * lives in the New artifact button in the bar; `guide` is its first-run guide.
  */
-export function LibraryHome({ items, attention, title, onOpen, peeked }: {
+export function LibraryHome({ items, attention, title, onOpen, peeked, guide }: {
   items: LibraryItem[]
   attention: AttentionEntry[]
   /** The folder in view, or All artifacts. */
   title: string
   onOpen: (slug: string) => void
   peeked?: string | null
+  /** The New artifact guide, shown first until the person dismisses it. */
+  guide?: React.ReactNode
 }) {
   const [kind, setKind] = useState<ArtifactKind | "all">("all")
   const [layout, setLayout] = useState<HomeLayout>("grid")
@@ -153,6 +120,7 @@ export function LibraryHome({ items, attention, title, onOpen, peeked }: {
     </button>
   return <div className="grid content-start gap-6">
     <h1 className="sr-only">Artifacts</h1>
+    {guide}
     {attention.length > 0 && <section aria-labelledby="attention-heading" className="grid gap-2.5">
       <div>
         <h2 id="attention-heading" className="flex items-baseline gap-2 text-base font-semibold">Needs attention <span className="font-mono text-sm font-normal text-muted-foreground">{attention.length}</span></h2>
