@@ -33,8 +33,8 @@ spec:
     features:
       "ghcr.io/devcontainers/features/common-utils:2":
         username: agent
-        uid: "1001"
-        gid: "1001"
+        userUid: "1001"
+        userGid: "1001"
         installZsh: false
         upgradePackages: false
       "ghcr.io/devcontainers-extra/features/claude-code:2": {}

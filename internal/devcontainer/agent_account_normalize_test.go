@@ -1,6 +1,7 @@
 package devcontainer
 
 import (
+	"context"
 	"errors"
 	"reflect"
 	"testing"
@@ -150,5 +151,37 @@ func TestNormalizeDeclaredAgentUser_DoesNotInject(t *testing.T) {
 	changed, err := c.NormalizeDeclaredAgentUser()
 	if err != nil || changed || len(c.Features) != 0 {
 		t.Fatalf("changed=%v err=%v features=%v, want untouched", changed, err, c.Features)
+	}
+}
+
+func TestNormalizeAgentUser_ReviewCases(t *testing.T) {
+	cu := commonUtilsFeatureRef
+	for _, tc := range []struct {
+		name string
+		opts map[string]any
+		want map[string]any
+	}{
+		{"none creates no account: left alone", map[string]any{"username": "none", "installZsh": "false"}, map[string]any{"username": "none", "installZsh": "false"}},
+		{"root creates no account: left alone", map[string]any{"username": "root"}, map[string]any{"username": "root"}},
+		{"legacy value beats automatic", map[string]any{"uid": "1001", "userUid": "automatic"}, map[string]any{"username": "agent", "userUid": "1001", "userGid": "1001"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := &Config{Image: "x", Features: map[string]map[string]any{cu: tc.opts}}
+			if _, err := c.NormalizeAgentUser(); err != nil {
+				t.Fatal(err)
+			}
+			if got := c.Features[cu]; !reflect.DeepEqual(got, tc.want) {
+				t.Fatalf("options = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// Provisioning refuses a conflicting declaration before any image work.
+func TestProvision_RefusesConflictingAgentAccount(t *testing.T) {
+	p := NewProvisioner(nil, nil, nil, nil)
+	cfg := &Config{Image: "debian:bookworm-slim", Features: map[string]map[string]any{commonUtilsFeatureRef: {"username": "vscode"}}}
+	if _, err := p.Provision(context.Background(), cfg.Image, cfg, ""); !errors.Is(err, ErrAgentAccountConflict) {
+		t.Fatalf("err = %v, want ErrAgentAccountConflict", err)
 	}
 }

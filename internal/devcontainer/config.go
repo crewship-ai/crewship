@@ -260,6 +260,8 @@ var ErrAgentAccountConflict = errors.New("devcontainer: common-utils must create
 //     every other option the operator set.
 //   - A different explicit username, UID or GID is an error naming the fix,
 //     not a build that succeeds and then fails at run time.
+//   - username "none" or "root" creates no account; the base image is then
+//     trusted to provide agent at 1001, and the options are left alone.
 //
 // changed reports whether the options were rewritten. Because the options
 // are part of the cache key, a config that changes here builds a new image
@@ -293,15 +295,20 @@ func (c *Config) NormalizeDeclaredAgentUser() (changed bool, err error) {
 			c.Features[ref] = opts
 			changed = true
 		}
+		// username none/root: this feature creates no account, so the base
+		// image must provide agent at 1001 itself. Nothing to settle here.
+		if u := strings.ToLower(strings.TrimSpace(fmt.Sprint(opts["username"]))); u == "none" || u == "root" {
+			continue
+		}
 		for legacy, current := range legacyCommonUtilsKeys {
 			v, ok := opts[legacy]
 			if !ok {
 				continue
 			}
-			if cur, has := opts[current]; has && fmt.Sprint(cur) != fmt.Sprint(v) {
+			if cur, has := opts[current]; has && !isAutomatic(cur) && fmt.Sprint(cur) != fmt.Sprint(v) {
 				return false, fmt.Errorf("%w: %s sets both %s=%v and %s=%v; keep only %s=%s", ErrAgentAccountConflict, ref, legacy, v, current, cur, current, agentUID)
 			}
-			if _, has := opts[current]; !has {
+			if cur, has := opts[current]; !has || isAutomatic(cur) {
 				opts[current] = v
 			}
 			delete(opts, legacy)
@@ -310,7 +317,7 @@ func (c *Config) NormalizeDeclaredAgentUser() (changed bool, err error) {
 		for key, want := range map[string]string{"username": agentUsername, "userUid": agentUID, "userGid": agentUID} {
 			v, ok := opts[key]
 			got := strings.TrimSpace(fmt.Sprint(v))
-			if !ok || got == "" || strings.EqualFold(got, "automatic") {
+			if !ok || isAutomatic(v) {
 				opts[key] = want
 				changed = true
 				continue
@@ -325,6 +332,12 @@ func (c *Config) NormalizeDeclaredAgentUser() (changed bool, err error) {
 		}
 	}
 	return changed, nil
+}
+
+// isAutomatic reports an absent-equivalent common-utils account option.
+func isAutomatic(v any) bool {
+	got := strings.TrimSpace(fmt.Sprint(v))
+	return v == nil || got == "" || strings.EqualFold(got, "automatic")
 }
 
 // Validate checks that the Config is well-formed.

@@ -79,22 +79,31 @@ user ID 1001`, and `git` or `ssh` refusing to run.
 - **A different `username`, `userUid` or `userGid`:** create, update and
   provisioning refuse the config with `common-utils must create user 'agent'
   with UID/GID 1001` and name the option to change.
+- **`username: none` or `root`:** common-utils creates no account, and the
+  options are left alone. The base image must then provide `agent` at UID/GID
+  1001 itself.
+
+If the base image already has a different user or group at UID or GID 1001,
+the explicit 1001 can make the account step fail at build time. Use a base
+image without one; such an image never had a working runtime account anyway.
 
 The option names are `userUid` and `userGid`. Crewship versions before this
 change injected `uid` and `gid`, which common-utils does not read. The account
 then got an automatic UID: 1001 only when the base image already had a user at
 1000 (the `node` or `vscode` images), and 1000 on `debian:bookworm-slim`. Such a
-stored config is rewritten to the correct names when it is next provisioned
-(after a config change, or with `crewship crew rebuild <crew>`). That changes
+stored config is built with the correct names the next time it is provisioned
+(after a config change, or with `crewship crew rebuild <crew>`); the stored
+config itself is not rewritten, so reading it back still shows `uid` / `gid`. That changes
 its cache key, so it builds a new image **once**; crews with the same config
 share that build. Upgrading alone rebuilds nothing: a running crew keeps its
 current image until it is provisioned again. To fix a crew built on a slim
 image, run `crewship crew rebuild <crew>`.
 
 `sudo` works while the image is built (in `postCreateCommand`), once the account
-exists. It does not work inside a running crew container: containers run with
-`no-new-privileges` (unless the crew is privileged), so install system packages
-at build time, preferably as features, not from an agent.
+exists. On the Docker runtime it does not work inside a running crew container:
+containers run with `no-new-privileges` and a read-only root filesystem (unless
+the crew is privileged), so install system packages at build time, preferably
+as features, not from an agent.
 
 ## `mise_config` schema
 
