@@ -660,9 +660,18 @@ Decomposition is the reason the link verb exists: a large issue is broken into
 pieces, each piece becomes a child issue, and each child can then be assigned its
 own agent.
 
-1. `POST /issue/create` once per piece.
-2. `POST /issue/{child}/link` with `{"target_identifier":"<parent>","relation_type":"sub_issue_of"}`.
-3. `PATCH /issue/{child}` with the assignee for that piece.
+1. `POST /issue/create` once per piece, with `"parent_identifier":"<parent>"` and the
+   piece's `assignee_id`. The child is created already attached, in one transaction.
+2. Only if the child already exists: `POST /issue/{child}/link` with
+   `{"target_identifier":"<parent>","relation_type":"sub_issue_of"}`.
+
+Prefer step 1. On a run that carries a person's authority (a chat request, or an issue
+a person started) the separate link is refused with `chat_issue_action_not_supported`,
+and create-then-link would leave an unattached child. `parent_identifier` must name an
+issue of your crew or of a crew yours is connected to; under a person's authority that
+person must be allowed to update issues. An unknown or foreign-workspace parent is a
+`404`, an unconnected crew's parent a `403`, and either way no issue is created. A retry
+with the same `operation_key` and a different parent is a `409`, never a re-parent.
 
 `relation_type` is one of `blocks`, `blocked_by`, `relates_to`, `duplicate_of` or
 `sub_issue_of`. `blocked_by` is stored as the inverse `blocks` link, so the board
