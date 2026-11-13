@@ -35,6 +35,41 @@ jobs:
           [ "${#GITHUB_REF_NAME}" -le 128 ]
           git merge-base --is-ancestor HEAD origin/main
           python3 scripts/ci/verified_commit.py "$REPO" "$(git rev-parse HEAD)"
+  craft-components:
+    name: Build the Word and Sheet packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    needs:
+      - verified
+    permissions:
+      contents: read
+    outputs:
+      catalog: ${{ steps.catalog.outputs.pins }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - name: Install pinned Rust and both WASM targets
+        timeout-minutes: 5
+        run: timeout --kill-after=15s 4m rustup toolchain install 1.99.1 --profile minimal --target wasm32-wasip1 --target wasm32-unknown-unknown
+      # Pinned public sources, fonts and tools. Each package's manifest pins
+      # every file; the binaries carry the manifest digests (#5315).
+      - name: Build packages
+        run: python3 scripts/build-craft-components.py --rust-bin "$(dirname "$(rustup which --toolchain 1.99.1 rustc)")"
+      - name: Read the catalog
+        id: catalog
+        run: |
+          set -euo pipefail
+          pins="$(tr -d '\n' < build/craft-components/dist/catalog.txt)"
+          [[ "$pins" =~ ^[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64}(,[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64})*$ ]]
+          echo "pins=$pins" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: craft-packages
+          path: build/craft-components/dist/*.craftpkg
+          if-no-files-found: error
+          retention-days: 2
+          compression-level: 0
   release:
     name: Build and verify signed release assets
     runs-on: ubuntu-latest
@@ -44,6 +79,11 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Fetch the Word and Sheet packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: craft-packages
+          path: dist-craft
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -102,6 +142,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
+          CRAFT_COMPONENT_PINS: ${{ needs.craft-components.outputs.catalog }}
           NFPM_PACKAGES_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
           MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
@@ -109,6 +150,24 @@ jobs:
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
         name: Build and sign final release assets without publishing
+      # The signed binaries carry each package's manifest digest; a package is
+      # published next to the archives only if it is exactly the pinned one.
+      - name: Publish the Word and Sheet packages with the archives
+        env:
+          PINS: ${{ needs.craft-components.outputs.catalog }}
+        run: |
+          set -euo pipefail
+          # Every pin has exactly its package and every package its pin, so a
+          # binary never trusts a package that is not published.
+          IFS=, read -ra pins <<<"$PINS"
+          packages=(dist-craft/crewship-craft-*.craftpkg)
+          [ "${#pins[@]}" -ge 1 ] && [ "${#pins[@]}" -eq "${#packages[@]}" ] || { echo "::error::${#pins[@]} pins but ${#packages[@]} packages"; exit 1; }
+          for pin in "${pins[@]}"; do
+            app="${pin%%=*}"; sha="${pin##*=}"; pkg="dist-craft/crewship-craft-${app}.craftpkg"
+            [ -f "$pkg" ] || { echo "::error::no package for pin $app"; exit 1; }
+            [ "$(tar -xOf "$pkg" manifest.json | sha256sum | cut -d' ' -f1)" = "$sha" ] || { echo "::error::$pkg is not the pinned package"; exit 1; }
+            cp "$pkg" dist/
+          done
       - name: Verify legal contents of built artifacts
         run: |
           sudo apt-get update -qq
@@ -154,12 +213,14 @@ jobs:
             dist/*.cdx.json
             dist/*.sig
             dist/*.pem
+            dist/*.craftpkg
             dist/checksums.txt
           if-no-files-found: error
           retention-days: 2
           compression-level: 0
     needs:
       - verified
+      - craft-components
     permissions:
       contents: read
       id-token: write
@@ -248,6 +309,8 @@ jobs:
             COMMIT=${{ github.sha }}
             DATE=${{ steps.meta.outputs.build_date }}
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
+            CRAFT_COMPONENT_PINS=${{ needs.craft-components.outputs.catalog }}
+            CRAFT_COMPONENT_URL=https://github.com/crewship-ai/crewship/releases/download/${{ steps.meta.outputs.version }}
             NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }}
           cache-from: type=gha,scope=server-image
           cache-to: type=gha,mode=max,scope=server-image
@@ -277,6 +340,7 @@ jobs:
         run: cosign sign --yes "$IMAGE"
     needs:
       - verified
+      - craft-components
     outputs:
       digest: ${{ steps.build.outputs.digest }}
       tags: ${{ steps.tags.outputs.list }}
@@ -353,7 +417,7 @@ jobs:
           set -euo pipefail
           TAG="$GITHUB_REF_NAME"
           jq -n --arg sha "$GITHUB_SHA" --arg digest "$DIGEST" --arg image "ghcr.io/${REPO%/*}/crewship" --arg release "$TAG" '{sha:$sha,digest:$digest,image:$image,release:$release}' > dist/image-manifest.json
-          mapfile -d '' assets < <(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.rpm' -o -name '*.spdx.json' -o -name '*.cdx.json' -o -name '*.sig' -o -name '*.pem' -o -name 'checksums.txt' -o -name 'image-manifest.json' \) -print0)
+          mapfile -d '' assets < <(find dist -maxdepth 1 -type f \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.deb' -o -name '*.rpm' -o -name '*.spdx.json' -o -name '*.cdx.json' -o -name '*.sig' -o -name '*.pem' -o -name '*.craftpkg' -o -name 'checksums.txt' -o -name 'image-manifest.json' \) -print0)
           [ "${#assets[@]}" -gt 0 ]
           flags=()
           if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then flags+=(--prerelease); fi

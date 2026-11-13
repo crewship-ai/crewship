@@ -18,8 +18,10 @@ func TestCraftNativeAvailabilityPageAndDefaultOff(t *testing.T) {
 		req.SetPathValue("slug", tc.slug)
 		w := httptest.NewRecorder()
 		m.availability(w, req)
-		var v map[string]bool
-		if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil || w.Code != 200 || v["enabled"] != tc.enabled {
+		var v struct {
+			Enabled bool `json:"enabled"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil || w.Code != 200 || v.Enabled != tc.enabled {
 			t.Fatalf("availability %s %d %s", tc.slug, w.Code, w.Body)
 		}
 	}

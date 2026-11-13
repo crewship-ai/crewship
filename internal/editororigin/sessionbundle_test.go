@@ -163,3 +163,63 @@ func TestApplicationPackagesVerifyAndSnapshotExactReleaseBytes(t *testing.T) {
 		t.Fatal("unmanifested release package accepted")
 	}
 }
+
+// A Word or Sheet editor installed after startup is served without a
+// restart, with the same verification; a corrupt one is refused and nothing
+// else changes. Requests in flight see either no bundle or the whole one.
+func TestAddPackagesServesAnInstalledEditorWithoutRestart(t *testing.T) {
+	dir := t.TempDir()
+	index := `<!doctype html><script type="module">` + bootstrap + `</script>`
+	pin := writeBundle(t, dir, map[string]string{"index.html": index, "app.js": "console.log('installed')"})
+	source := fstest.MapFS{}
+	for _, name := range []string{"manifest.json", "index.html", "app.js"} {
+		body, err := os.ReadFile(filepath.Join(dir, pin, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		source[pin+"/"+name] = &fstest.MapFile{Data: body}
+	}
+	h, err := New(Options{SameHost: true, StudioOrigin: studio})
+	if err != nil || h.HasBundle(pin) {
+		t.Fatalf("before install: %v", err)
+	}
+	get := func() *httptest.ResponseRecorder {
+		r := httptest.NewRequest("GET", "https://studio.example.test/_editor/b/"+pin+"/app.js", nil)
+		r.Header.Set("Sec-Fetch-Site", "cross-site")
+		r.Header.Set("Sec-Fetch-Dest", "script")
+		w := httptest.NewRecorder()
+		h.ServeHTTP(w, r)
+		return w
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			if w := get(); w.Code != 404 && w.Body.String() != "console.log('installed')" {
+				t.Errorf("partial bundle served: %d %q", w.Code, w.Body.String())
+				return
+			}
+		}
+	}()
+	tampered := fstest.MapFS{}
+	for k, v := range source {
+		tampered[k] = &fstest.MapFile{Data: append([]byte(nil), v.Data...)}
+	}
+	tampered[pin+"/app.js"].Data[0] = 'X'
+	if err := h.AddPackages(tampered); err == nil || h.HasBundle(pin) {
+		t.Fatal("corrupt installed editor accepted")
+	}
+	if err := h.AddPackages(source); err != nil || !h.HasBundle(pin) {
+		t.Fatalf("install: %v", err)
+	}
+	<-done
+	if w := get(); w.Code != 200 || w.Body.String() != "console.log('installed')" {
+		t.Fatalf("installed editor: %d %q", w.Code, w.Body.String())
+	}
+	if d, u := h.PinnedBundle(sessionReq("studio.example.test"), pin); d != pin || u == "" {
+		t.Fatalf("installed pin unavailable: %q %q", d, u)
+	}
+	if err := Deny().AddPackages(source); err == nil {
+		t.Fatal("a disabled editor origin accepted a package")
+	}
+}

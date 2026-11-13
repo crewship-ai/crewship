@@ -63,10 +63,17 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
-	craftNativeHTTPConfig  CraftNativeHTTPConfig
-	craftNativeStartupErr  error
-	craftNativeHTTP        *craftNativeHTTP
-	craftNativeDocuments   *craftNativeDocumentsHTTP
+	craftNativeHTTPConfig CraftNativeHTTPConfig
+	craftNativeStartupErr error
+	craftNativeHTTP       *craftNativeHTTP
+	craftNativeDocuments  *craftNativeDocumentsHTTP
+	// craftComponentsMu guards craftNativeHTTPConfig.Components and
+	// craftInstalling while Admin installs an application (#5315).
+	craftComponentsMu sync.Mutex
+	craftInstalling   map[string]bool
+	// craftInstallCtx ends background installations at Shutdown.
+	craftInstallCtx        context.Context
+	craftInstallCancel     context.CancelFunc
 	mooringStartupErr      error
 	mooringHTTPConfig      MooringHTTPConfig
 	mooringHTTP            *collaborationHTTPManager
@@ -1103,6 +1110,11 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // reference to the DB handle or the Docker client.
 
 func (r *Router) Shutdown() {
+	r.craftComponentsMu.Lock()
+	if r.craftInstallCancel != nil {
+		r.craftInstallCancel()
+	}
+	r.craftComponentsMu.Unlock()
 	if r.craftNativeHTTP != nil && r.craftNativeHTTP.agents != nil {
 		r.craftNativeHTTP.agents.Close()
 	}

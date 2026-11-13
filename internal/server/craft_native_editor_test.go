@@ -34,7 +34,7 @@ func TestNativeEditorIncompatibleC1DirectoryFailsClosed(t *testing.T) {
 	cfg.GridCraft.EditorEnabled = true
 	cfg.GridCraft.EditorBundleDir = other
 	cfg.GridCraft.EditorBundles = []string{old}
-	editor := newEditorOrigin(cfg, slog.Default())
+	editor := newEditorOrigin(cfg, nil, slog.Default())
 	if editor != nil && editor.HasBundle(old) {
 		t.Fatal("incompatible native directory silently retained or replaced C1 mount")
 	}
@@ -42,8 +42,8 @@ func TestNativeEditorIncompatibleC1DirectoryFailsClosed(t *testing.T) {
 
 func TestNativeDocumentServerOnlyPublishesVerifiedServedBundleMetadata(t *testing.T) {
 	cfg, pin := nativeEditorConfigFixture(t)
-	editor := newEditorOrigin(cfg, slog.Default())
-	out, err := nativeCraftHTTPConfig(cfg, editor)
+	editor := newEditorOrigin(cfg, nil, slog.Default())
+	out, err := nativeCraftHTTPConfig(cfg, nil, editor)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,12 +54,12 @@ func TestNativeDocumentServerOnlyPublishesVerifiedServedBundleMetadata(t *testin
 	if out.Profiles["wordcraft"] != expected {
 		t.Fatal("server mapped profile adopted caller mutation")
 	}
-	if _, err = nativeCraftHTTPConfig(cfg, editor); err == nil {
+	if _, err = nativeCraftHTTPConfig(cfg, nil, editor); err == nil {
 		t.Fatal("server published mismatched served editor URL")
 	}
 	profile.EditorURL = "/_editor/b/" + pin + "/index.html"
 	cfg.CraftNative.Profiles["wordcraft"] = profile
-	if _, err = nativeCraftHTTPConfig(cfg, nil); err == nil {
+	if _, err = nativeCraftHTTPConfig(cfg, nil, nil); err == nil {
 		t.Fatal("server published unavailable editor bundle")
 	}
 }

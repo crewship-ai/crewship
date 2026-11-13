@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/craftapps"
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
@@ -139,9 +140,13 @@ func (d *craftNativeDocumentsHTTP) initialize(w http.ResponseWriter, r *http.Req
 		replyError(w, 400, "invalid native initialization request")
 		return
 	}
-	profile, qualified := d.applications[body.ApplicationID]
+	profile, qualified := d.application(body.ApplicationID)
 	if !qualified {
 		craftNativeDocumentError(w, mooring.ErrNativeDisabled)
+		return
+	}
+	if !m.apps.allows(r.Context(), body.ApplicationID, craftapps.OpCreate) {
+		m.apps.refuse(w, r.Context(), body.ApplicationID)
 		return
 	}
 	tx, err := m.pages.db.BeginTx(r.Context(), nil)

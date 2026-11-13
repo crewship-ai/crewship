@@ -106,7 +106,7 @@ off by default. Check before you plan the work:
 | Dashboard | `artifact_projects` and `artifact_dashboard_data` | `page artifact data` | `artifact_data_collections`, `artifact_data_read`, `artifact_data_batch` |
 | Slides | `artifact_projects` and `artifact_slides` | `page artifact slides`, `export-pdf` | `artifact_slides_read`, `artifact_export_pdf` |
 | Design | workspace flag `artifacts_design` | `page design` | `design_get`, `design_apply`, `design_snapshot`, `design_versions`, `design_restore` |
-| Craft Word, Sheet | instance config `CREWSHIP_CRAFT_NATIVE_ENABLED`; agent tasks also `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED` | `craft` | `craft_read`, `craft_acquire`, `craft_renew`, `craft_apply`, `craft_release` |
+| Craft Word, Sheet | Admin › Artifacts › Applications (`crewship admin instance applications enable word`, `sheet` or `agents`); agent tasks need agents on too | `craft` | `craft_read`, `craft_acquire`, `craft_renew`, `craft_apply`, `craft_release` |
 
 A workspace admin enables a flag with `crewship feature-flag enable <key>`. An
 operator can enable a kind for all workspaces with `CREWSHIP_ARTIFACT_PROJECTS_ENABLED`,

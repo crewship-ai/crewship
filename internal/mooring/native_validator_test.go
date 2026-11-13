@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/craftengine"
 )
 
 func nativeCLIProbe(t *testing.T, app, body string) NativeCLIValidator {
@@ -18,7 +20,11 @@ func nativeCLIProbe(t *testing.T, app, body string) NativeCLIValidator {
 	if err := os.WriteFile(path, raw, 0700); err != nil {
 		t.Fatal(err)
 	}
-	return NativeCLIValidator{Application: app, BinaryPath: path, SHA256: fmt.Sprintf("%x", sha256.Sum256(raw)), Timeout: time.Second}
+	engine, err := craftengine.NewNative(app, path, fmt.Sprintf("%x", sha256.Sum256(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return NativeCLIValidator{Application: app, Engine: engine, Timeout: time.Second}
 }
 func TestNativeCLIValidatorRejectsWrongPinAndNonNativeInputBeforeExecution(t *testing.T) {
 	marker := filepath.Join(t.TempDir(), "called")
@@ -28,7 +34,10 @@ func TestNativeCLIValidatorRejectsWrongPinAndNonNativeInputBeforeExecution(t *te
 			t.Fatal("invalid input admitted")
 		}
 	}
-	v.SHA256 = strings.Repeat("0", 64)
+	// The engine hashes the opened file on every run: a replaced engine is refused.
+	if err := os.WriteFile(enginePath(t, v), []byte("#!/bin/sh\ntouch '"+marker+"'\n"), 0700); err != nil {
+		t.Fatal(err)
+	}
 	if err := v.Validate(t.Context(), []byte(`{}`)); err == nil {
 		t.Fatal("changed engine admitted")
 	}
@@ -71,4 +80,14 @@ func TestNativeCLIValidatorWordSaveMetadataDoesNotHideContentLoss(t *testing.T) 
 	if preservesNativeModel(unknown, after, "wordcraft") {
 		t.Fatal("metadata exception hid unknown core field loss")
 	}
+}
+
+// enginePath returns the file behind a probe's native engine.
+func enginePath(t *testing.T, v NativeCLIValidator) string {
+	t.Helper()
+	n, ok := v.Engine.(*craftengine.Native)
+	if !ok {
+		t.Fatal("probe is not a native engine")
+	}
+	return n.Path()
 }

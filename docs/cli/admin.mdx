@@ -839,6 +839,103 @@ crewship admin instance workbook-editor
 crewship admin instance workbook-editor -f json
 ```
 
+### applications
+
+`GET /api/v1/admin/instance/artifacts/applications`. Word, Sheet and agents in
+them for the whole instance. Both applications run inside Crewship: the
+document engine runs in the server (WebAssembly, no extra process) and the
+editor is served by Crewship itself. They are not part of the binary: each
+release trusts one package of each application, and Crewship downloads,
+verifies and starts it without a restart when an administrator turns the
+application on (or installs it from a file, offline). Each application, and
+agents in them, starts **off**. For each one the command shows the setting
+(`desired`, `source`: `default`, `admin` or `server_config`), the resulting
+`state` (`ready`, `draining`, `disabled`, `unavailable`) with a `reason`, the
+installed component's version and how many documents exist. `crewship admin instance applications` without a subcommand
+does the same.
+
+```
+crewship admin instance applications
+crewship admin instance applications list -f json
+```
+
+Reasons: `app_disabled`, `app_draining`, `component_not_installed` (turning it
+on downloads it), `component_installing`, `component_install_failed` (the
+component's `detail` says why), `component_missing` (this build trusts no
+package: install an official release), `component_integrity` (the installed
+files do not match the trusted package: install it again),
+`clock_unsupported`, `engine_start_failed`, `engine_selftest_failed`,
+`editor_isolation_failed` (a proxy rewrites `/_editor/`),
+`agents_need_application`.
+
+When `CREWSHIP_CRAFT_NATIVE_ENABLED` or `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED`
+is set in the server environment, or an operator's native development profile
+is configured, that setting is fixed (`locked`, `source: server_config`) and
+cannot be changed here.
+
+### applications enable / disable
+
+`PATCH /api/v1/admin/instance/artifacts/applications/{app}` with
+`{"desired":"enabled"|"disabled","drain_seconds":900}`; `{app}` is `wordcraft`,
+`gridcraft` or `agents` (the CLI also takes `word` and `sheet`).
+
+Turning an application off **never deletes or changes a document**. People can
+still open, read, export and restore every document. Nobody can create one or
+start editing. Editors that are already open may keep saving for the drain
+(`--drain`, default 15 minutes, at most 24 hours); `--now` closes at once, after
+which an open editor keeps its unsaved draft locally. Agents stop at once. Each
+change is audited (`instance.craft_application_set`); repeating the current
+setting changes nothing. A locked setting answers `409`. Turning on an
+application that is not installed starts its download in the background; the
+state shows `component_installing` until it runs.
+
+```
+crewship admin instance applications enable word
+crewship admin instance applications enable agents
+crewship admin instance applications disable sheet --drain 30m
+crewship admin instance applications disable word --now
+```
+
+### applications doctor
+
+`POST /api/v1/admin/instance/artifacts/applications/{app}/diagnostics`. Starts
+the application's document engine and checks that it answers; the first run
+after a server start compiles the engine and takes a few seconds. It reads and
+writes no document. Exits non-zero when the check fails.
+
+```
+crewship admin instance applications doctor word
+```
+
+### applications install
+
+`POST /api/v1/admin/instance/artifacts/applications/{app}/install`. Without
+`--file` the server downloads the package this Crewship release trusts
+(published with the release as `crewship-craft-wordcraft.craftpkg` and
+`crewship-craft-gridcraft.craftpkg`) and the command waits until it is verified
+and running (`--no-wait` returns at once, `--timeout` bounds the wait). With
+`--file` it uploads that package from this machine, for a server without
+internet access; it must be exactly the trusted package, otherwise it is
+refused and nothing changes. A package is accepted only if the SHA-256 of its
+`manifest.json` is the pin in the signed Crewship binary; every file is checked
+against the manifest when it is installed and again when it is read. Installing
+does not turn the application on for anyone. Audited as
+`instance.craft_application_install`. An application that already runs answers
+`409`; a new version comes with a new Crewship release and is installed next to
+the old one, which existing documents keep using.
+
+```
+crewship admin instance applications install word
+crewship admin instance applications install sheet --file crewship-craft-gridcraft.craftpkg
+```
+
+Packages live in `<data directory>/craft-components/<application>/<pin>/`
+(`craft_native.components_dir`, `CREWSHIP_CRAFT_COMPONENTS_DIR`). An operator
+can name other trusted packages (`CREWSHIP_CRAFT_COMPONENT_PINS`, for example
+for a development build) or a mirror (`CREWSHIP_CRAFT_COMPONENT_URL`, https;
+http only to this machine). What an interrupted download leaves in that
+directory is removed at the next start.
+
 ### page-limit get
 
 `GET /api/v1/admin/instance/page-limit`. The maximum number of pages a workspace

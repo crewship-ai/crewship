@@ -23,7 +23,8 @@ import (
 // each request reached (Host, and the scheme by Crewship's trusted-proxy
 // rule), unless CREWSHIP_PAGE_STUDIO_ORIGIN names it, in which case the
 // editor answers only there.
-func newEditorOrigin(cfg *config.Config, logger *slog.Logger) *editororigin.Handler {
+func newEditorOrigin(cfg *config.Config, craft *craftApps, logger *slog.Logger) *editororigin.Handler {
+	craft = craftAppsOr(cfg, craft)
 	g := cfg.GridCraft
 	legacyEnabled := (g.Enabled && g.EditorEnabled) || cfg.Mooring.Enabled
 	dir, bundles, resolveErr := cfg.CraftNative.ResolveEditorBundles(g, legacyEnabled)
@@ -32,7 +33,7 @@ func newEditorOrigin(cfg *config.Config, logger *slog.Logger) *editororigin.Hand
 		return editororigin.Deny()
 	}
 	g.EditorBundleDir, g.EditorBundles = dir, bundles
-	enabled := legacyEnabled || nativeCraftEditorEnabled(cfg)
+	enabled := legacyEnabled || craft.enabled()
 	var applicationPackages fs.FS
 	if cfg.Mooring.Enabled {
 		var err error
@@ -87,9 +88,10 @@ func loopbackBind(host string) bool {
 // editorHeaderOptions adds the editor to Studio's frame-src only while the
 // editor is enabled: the dedicated origin, or the bundle path on the
 // request's Studio origin, never the bare Studio origin.
-func editorHeaderOptions(cfg *config.Config, editor *editororigin.Handler) securityHeaderOptions {
+func editorHeaderOptions(cfg *config.Config, craft *craftApps, editor *editororigin.Handler) securityHeaderOptions {
+	craft = craftAppsOr(cfg, craft)
 	o := securityHeaderOptions{pageRuntimeOrigin: cfg.PageRuntimeOrigin(), pageRuntimeLoopbackOnly: cfg.Storage.PageRuntimeOrigin == ""}
-	if ((cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled) || cfg.Mooring.Enabled || nativeCraftEditorEnabled(cfg)) && editor != nil {
+	if ((cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled) || cfg.Mooring.Enabled || craft.enabled()) && editor != nil {
 		o.editorFrameSrc = editor.FrameSourceFor
 		o.editorPerRequest = cfg.GridCraft.EditorOrigin == ""
 	}

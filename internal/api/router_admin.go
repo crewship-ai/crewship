@@ -163,6 +163,19 @@ func (r *Router) registerAdminRoutes() {
 	// openapi: responses 200,400,401,403,500
 	r.authedInstance("POST", "/api/v1/admin/instance/artifact-storage/recompute", as.Recompute)
 
+	// Admin › Artifacts › Applications (#5315): Word, Sheet and agents in
+	// them, on or off for the whole instance, and an engine self-test.
+	// Turning off never deletes or changes a document.
+	ca := &CraftAppsAdminHandler{r: r}
+	// openapi: responses 200,401,403,500
+	r.authedInstance("GET", "/api/v1/admin/instance/artifacts/applications", ca.List)
+	// openapi: responses 200,400,401,403,404,409,500
+	r.authedInstance("PATCH", "/api/v1/admin/instance/artifacts/applications/{app}", ca.Patch)
+	// openapi: responses 200,401,403,404,500
+	r.authedInstance("POST", "/api/v1/admin/instance/artifacts/applications/{app}/diagnostics", ca.Diagnose)
+	// openapi: responses 200,202,401,403,404,409,422,500
+	r.authedInstance("POST", "/api/v1/admin/instance/artifacts/applications/{app}/install", ca.Install)
+
 	// Admin › Page limit: the maximum number of pages per workspace. Lowering
 	// it only blocks new pages; nothing is deleted.
 	pl := &PageLimitAdminHandler{r: r}

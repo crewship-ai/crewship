@@ -1,9 +1,46 @@
 # Native Craft sessions, leases, agent tasks and whole-document API
 
-The separate whole-native WordCraft/GridCraft profile is experimental and off by
-default. `craft_native.enabled: true` or `CREWSHIP_CRAFT_NATIVE_ENABLED=true`
-enables its human session and EditLease HTTP API. It requires a Linux boot-aware
-clock. A qualified Word profile is advertised as `wordcraft_native` by the authenticated
+Word (WordCraft) and Sheet (GridCraft) run inside Crewship (#5315): each
+document engine is a WebAssembly module run inside the server by wazero, each
+editor a pinned bundle served by the editor origin. They are not part of the
+binary. A release binary carries a catalog: for each application the version and
+the SHA-256 of its package's `manifest.json` (`craftassets.releaseCatalog`, set
+at build time), and the address the packages are published at. When an
+administrator turns an application on, Crewship downloads
+`crewship-craft-<application>.craftpkg`, unpacks only regular files with valid
+names, accepts it only if its manifest matches the pin and every file matches
+the manifest, and moves it into `<data directory>/craft-components/<application>/<pin>/`
+(`craft_native.components_dir`). It then serves the editor, fences it with the
+native credential gate and registers the profile, without a restart. Offline,
+the same package is installed from a file (`crewship admin instance applications
+install --file`). Installed packages are verified again at every start and
+every read; versions live side by side, because documents stay pinned to the
+engine they were written with. A build without a catalog (an ordinary `go
+build`) trusts no package; an operator can name one with
+`CREWSHIP_CRAFT_COMPONENT_PINS` and a mirror with `CREWSHIP_CRAFT_COMPONENT_URL`.
+On a system without a suspend-aware clock (today: not Linux) the server starts
+and both applications report `clock_unsupported`. Whether people may use an application is the instance
+administrator's setting (`craft_application_settings`, Admin › Artifacts ›
+Applications, `crewship admin instance applications`); Word, Sheet and agents
+start **off**. The setting is applied per request:
+
+| Mode | Allowed |
+|---|---|
+| `open` | everything |
+| `draining` (off, within `drain_until`) | renew, save, import, restore, share, accept a proposal, agent apply; reads, release, reconcile |
+| `closed` | reads, release, reconcile only |
+
+New documents (`initialize`, the `wordcraft_native`/`gridcraft_native` document
+status) need `open`; acquire, handoff and new agent tasks need `open`. A
+refusal is `503` with `reason` `app_disabled` or `app_draining`. The metadata
+stream stops renewing a lease when the mode no longer allows it, so the editor
+keeps its draft. Turning off never changes stored documents.
+
+An operator can still configure a native development profile
+(`craft_native.enabled: true` or `CREWSHIP_CRAFT_NATIVE_ENABLED=true` with the
+profile variables below). It replaces the downloaded component of that
+application, runs only on Linux, and fixes the setting (`server_config`). It
+requires a Linux boot-aware clock. A qualified Word profile is advertised as `wordcraft_native` by the authenticated
 workspace document status endpoint. New Doc then creates a fresh empty personal
 Page, initializes its native Word model and releases the initial lease before
 opening the full editor. An ambiguous initialization is never blindly replayed. Native format metadata on

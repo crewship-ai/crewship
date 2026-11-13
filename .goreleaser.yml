@@ -56,6 +56,11 @@ builds:
       # consent state is still recorded but no events are sent. Production
       # release builds must set this secret to enable crash visibility.
       - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
+      # The Word and Sheet packages this release trusts (manifest digests from
+      # scripts/build-craft-components.py) and where they are published next
+      # to the archives (#5315). Unset in snapshots: no package is trusted.
+      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseCatalog={{ envOrDefault "CRAFT_COMPONENT_PINS" "" }}
+      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseBase={{ if index .Env "CRAFT_COMPONENT_PINS" }}https://github.com/crewship-ai/crewship/releases/download/{{ .Tag }}{{ end }}
 
   # Full daemon for macOS (#953). Separate build id so the darwin archive
   # (default-darwin below) can bundle the LINUX sidecar + entrypoint.sh —
@@ -81,6 +86,11 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
       - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
+      # The Word and Sheet packages this release trusts (manifest digests from
+      # scripts/build-craft-components.py) and where they are published next
+      # to the archives (#5315). Unset in snapshots: no package is trusted.
+      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseCatalog={{ envOrDefault "CRAFT_COMPONENT_PINS" "" }}
+      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseBase={{ if index .Env "CRAFT_COMPONENT_PINS" }}https://github.com/crewship-ai/crewship/releases/download/{{ .Tag }}{{ end }}
 
   # Full daemon for Windows (#946). Separate build id so the windows
   # archive (default-windows below) can bundle the LINUX sidecar +
@@ -105,6 +115,11 @@ builds:
       - -X main.commit={{.Commit}}
       - -X main.date={{.Date}}
       - -X github.com/crewship-ai/crewship/internal/crashreport.DSN={{ envOrDefault "SENTRY_DSN" "" }}
+      # The Word and Sheet packages this release trusts (manifest digests from
+      # scripts/build-craft-components.py) and where they are published next
+      # to the archives (#5315). Unset in snapshots: no package is trusted.
+      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseCatalog={{ envOrDefault "CRAFT_COMPONENT_PINS" "" }}
+      - -X github.com/crewship-ai/crewship/internal/craftassets.releaseBase={{ if index .Env "CRAFT_COMPONENT_PINS" }}https://github.com/crewship-ai/crewship/releases/download/{{ .Tag }}{{ end }}
 
   # CLI-only build — same cmd/crewship entry point, built with the
   # `clionly` tag. Strips the embedded Next.js bundle (web/embed.go),

@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "rust_version": "1.99.1",
+  "targets": ["wasm32-wasip1", "wasm32-unknown-unknown"],
+  "fonts": {
+    "repository": "https://github.com/storytold/craft-fonts.git",
+    "commit": "b076417b5880bd4154bd22f00695b1d28c6bea83"
+  },
+  "components": [
+    {
+      "application": "wordcraft",
+      "repository": "https://github.com/storytold/wordcraft.git",
+      "commit": "b0fb5cb571b6a4a3abb60e2c48ca7f5b22cd8d72",
+      "patch": "patches/wordcraft-wasi.patch",
+      "patch_sha256": "aea97a2a0742e0fddd0c4a2bf0054f90917063d7d3b115552eae30ac8cab44d2",
+      "cli_package": "wordcraft-cli",
+      "web_package": "wordcraft-web",
+      "license": {"name": "WordCraft", "spdx": "MIT OR Apache-2.0"},
+      "notices": ["LICENSE-MIT", "LICENSE-APACHE", "NOTICE", "ATTRIBUTION.md"]
+    },
+    {
+      "application": "gridcraft",
+      "repository": "https://github.com/storytold/gridcraft.git",
+      "commit": "e68d192282499bed81a9800d742cb9b239d367e5",
+      "patch": "patches/gridcraft-wasi.patch",
+      "patch_sha256": "5e14954302a65cf89d4d24412a34f22467468644b01b7646e7c5a3609cf06165",
+      "cli_package": "gridcraft-cli",
+      "web_package": "gridcraft-web",
+      "license": {"name": "GridCraft", "spdx": "MIT OR Apache-2.0"},
+      "notices": ["LICENSE-MIT", "LICENSE-APACHE", "NOTICE", "ATTRIBUTION.md"]
+    }
+  ]
+}

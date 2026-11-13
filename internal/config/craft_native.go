@@ -17,6 +17,22 @@ type CraftNativeConfig struct {
 	AgentsEnabled   bool                                  `yaml:"agents_enabled"`
 	Profiles        map[string]CraftNativeDocumentProfile `yaml:"profiles"`
 	EditorBundleDir string                                `yaml:"editor_bundle_dir"`
+	// ComponentsDir holds the installed Word and Sheet packages (#5315).
+	// Empty means <data dir>/craft-components.
+	ComponentsDir string `yaml:"components_dir"`
+	// ComponentPins replaces the packages this release trusts
+	// ("<application>=<version>=<manifest sha256>", comma separated): a
+	// development build, or an operator-qualified package. Only operator
+	// startup configuration can name one.
+	ComponentPins string `yaml:"component_pins"`
+	// ComponentURL replaces where the packages are downloaded from (a
+	// mirror). A package is installed only if it matches a pin.
+	ComponentURL string `yaml:"component_url"`
+	// EnabledFromEnv and AgentsEnabledFromEnv record that
+	// CREWSHIP_CRAFT_NATIVE_ENABLED / _AGENTS_ENABLED fixed the value; Admin
+	// then shows the setting as fixed by the server configuration.
+	EnabledFromEnv       bool `yaml:"-"`
+	AgentsEnabledFromEnv bool `yaml:"-"`
 }
 
 // CraftNativeDocumentProfile names an operator-qualified native release.
@@ -83,6 +99,13 @@ func (c CraftNativeConfig) ResolveEditorBundles(g GridCraftConfig, legacyEnabled
 func applyCraftNativeEnv(c *CraftNativeConfig) {
 	if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED"); ok {
 		c.AgentsEnabled = value == "true" || value == "1"
+		c.AgentsEnabledFromEnv = true
+	}
+	for name, field := range map[string]*string{"CREWSHIP_CRAFT_COMPONENTS_DIR": &c.ComponentsDir,
+		"CREWSHIP_CRAFT_COMPONENT_PINS": &c.ComponentPins, "CREWSHIP_CRAFT_COMPONENT_URL": &c.ComponentURL} {
+		if value, ok := os.LookupEnv(name); ok {
+			*field = value
+		}
 	}
 	if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_EDITOR_BUNDLE_DIR"); ok {
 		c.EditorBundleDir = value

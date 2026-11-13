@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/craftapps"
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
@@ -118,6 +119,10 @@ func (d *craftNativeDocumentsHTTP) decideProposal(w http.ResponseWriter, r *http
 	r, entry, s, _, err := d.bind(r)
 	if err != nil {
 		craftNativeDocumentError(w, err)
+		return
+	}
+	if accept && !d.human.apps.allows(r.Context(), entry.application, craftapps.OpContinue) {
+		d.human.apps.refuse(w, r.Context(), entry.application)
 		return
 	}
 	var body craftNativeProposalDecisionBody

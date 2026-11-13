@@ -184,3 +184,22 @@ func (zeroReader) Read(p []byte) (int, error) {
 	clear(p)
 	return len(p), nil
 }
+
+// A Word or Sheet package (#5315) is larger than the API body cap; its install
+// route alone is exempt, and only for the two applications.
+func TestCraftPackageInstallIsExemptFromTheAPIBodyCap(t *testing.T) {
+	for path, exempt := range map[string]bool{
+		"/api/v1/admin/instance/artifacts/applications/wordcraft/install":   true,
+		"/api/v1/admin/instance/artifacts/applications/gridcraft/install":   true,
+		"/api/v1/admin/instance/artifacts/applications/agents/install":      false,
+		"/api/v1/admin/instance/artifacts/applications/wordcraft":           false,
+		"/api/v1/admin/instance/artifacts/applications/wordcraft/install/x": false,
+	} {
+		if got := bodyCapExempt(httptest.NewRequest(http.MethodPost, path, nil)); got != exempt {
+			t.Errorf("%s exempt = %v", path, got)
+		}
+	}
+	if bodyCapExempt(httptest.NewRequest(http.MethodPut, "/api/v1/admin/instance/artifacts/applications/wordcraft/install", nil)) {
+		t.Error("PUT is exempt")
+	}
+}

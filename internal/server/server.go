@@ -56,6 +56,8 @@ import (
 // listener, WebSocket hub, orchestrator, scheduler, and all supporting services.
 
 type Server struct {
+	// craft is the startup view of the Word and Sheet applications (#5315).
+	craft               *craftApps
 	documentsStartupErr error
 	mooringStartupErr   error
 	mooringAssets       *mooringassets.Prepared
@@ -414,8 +416,11 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 	// The embedded workbook editor (nil while off). Built before the API so
 	// the API can report it to administrators and, in same-host mode, show
 	// it the public origin of signed-in browser requests.
-	editor := newEditorOrigin(cfg, logger)
-	if (cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled) || cfg.Mooring.Enabled || nativeCraftEditorEnabled(cfg) {
+	// Word and Sheet: operator profiles or the components built into this
+	// binary. Resolved once; the administrator's setting applies per request.
+	s.craft = resolveCraftApps(cfg, logger)
+	editor := newEditorOrigin(cfg, s.craft, logger)
+	if (cfg.GridCraft.Enabled && cfg.GridCraft.EditorEnabled) || cfg.Mooring.Enabled || s.craft.enabled() {
 		s.editor = editor
 	}
 
@@ -442,11 +447,11 @@ func New(cfg *config.Config, logger *slog.Logger, deps *Deps) *Server {
 		}
 		startEditorProxyCheck(s.bgCtx, &s.bgWg, s.editor, logger, newEditorProxyCheckClient(s.editor.AllowsLoopbackProbes()), editorProxyCheckSchedule)
 	}
-	mainHandler = securityHeadersMiddlewareWith(mainHandler, editorHeaderOptions(cfg, editor))
+	mainHandler = securityHeadersMiddlewareWith(mainHandler, editorHeaderOptions(cfg, s.craft, editor))
 	// The editor (its host, or its path prefix on the Studio origin) serves
 	// only allowlisted bundles under its own headers; it never reaches the
 	// API, the SPA, path cleaning or the Studio security headers.
-	mainHandler = nativeCraftCredentialGate(cfg, editor, editororigin.Gate(editor, mainHandler))
+	mainHandler = nativeCraftCredentialGate(cfg, s.craft, editor, editororigin.Gate(editor, mainHandler))
 	// Panic recovery is the OUTERMOST wrapper so it also catches panics
 	// inside securityHeadersMiddleware itself (rare but possible if a
 	// future header derivation path-traverses a nil request). Forwards
@@ -1086,7 +1091,7 @@ func (s *Server) mountAPIRouter(
 	if cfg.Documents.Enabled {
 		opts = append(opts, goapi.WithDocumentAuthority(cfg.Documents.AuthoritySocket, cfg.Documents.ServiceTokenFile), goapi.WithDocumentService(cfg.Documents.ServiceSocket), goapi.WithDocumentLimits(cfg.Documents))
 	}
-	nativeConfig, nativeErr := nativeCraftHTTPConfig(cfg, s.editor)
+	nativeConfig, nativeErr := nativeCraftHTTPConfig(cfg, s.craft, s.editor)
 	if nativeErr != nil {
 		logger.Error("native document release unavailable", "error", nativeErr)
 		return

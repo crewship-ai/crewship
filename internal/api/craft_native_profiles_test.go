@@ -28,7 +28,7 @@ func TestCraftNativeDocumentProfileOptionCapturesImmutableMap(t *testing.T) {
 	if router.craftNativeHTTPConfig.Profiles["wordcraft"] != original {
 		t.Fatal("startup profile adopted external map mutation")
 	}
-	profiles, err := qualifyCraftNativeProfiles(router.craftNativeHTTPConfig.Profiles)
+	profiles, _, err := qualifyCraftNativeProfiles(router.craftNativeHTTPConfig.Profiles)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestCraftNativeDocumentProfileRefusesUnqualifiedExecutablePinsAndURLs(t *te
 		t.Run(tc.name, func(t *testing.T) {
 			candidate := original
 			tc.mutate(&candidate)
-			if _, err := qualifyCraftNativeProfiles(map[string]CraftNativeDocumentProfile{"wordcraft": candidate}); err == nil {
+			if _, _, err := qualifyCraftNativeProfiles(map[string]CraftNativeDocumentProfile{"wordcraft": candidate}); err == nil {
 				t.Fatal("accepted unqualified native profile")
 			}
 		})

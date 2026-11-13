@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/craftengine"
 )
 
 // Explicit release qualification uses the original pinned executable.
@@ -38,7 +40,11 @@ func TestNativeCLIValidatorCanonicalSheetCreation(t *testing.T) {
 	if err := json.Unmarshal([]byte(strings.TrimSpace(literal)), &document); err != nil {
 		t.Fatal(err)
 	}
-	validator := NativeCLIValidator{Application: "gridcraft", BinaryPath: binary, SHA256: hash}
+	engine, err := craftengine.NewNative("gridcraft", binary, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validator := NativeCLIValidator{Application: "gridcraft", Engine: engine}
 	if err := validator.Validate(context.Background(), []byte(document)); err != nil {
 		t.Fatalf("canonical Sheet creation rejected by pinned engine: %v", err)
 	}

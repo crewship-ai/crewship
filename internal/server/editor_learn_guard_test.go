@@ -35,7 +35,7 @@ func TestZeroConfigSelfCheckIgnoresInternalOriginsFromUsers(t *testing.T) {
 	cfg := config.Default() // listens on 0.0.0.0
 	dir := t.TempDir()
 	cfg.GridCraft = config.GridCraftConfig{Enabled: true, EditorEnabled: true, EditorBundleDir: dir, EditorBundles: []string{writeEditorBundle(t, dir)}}
-	editor := newEditorOrigin(cfg, slog.Default())
+	editor := newEditorOrigin(cfg, nil, slog.Default())
 	if editor.AllowsLoopbackProbes() {
 		t.Fatal("a server on every interface allows loopback probes")
 	}
@@ -89,7 +89,7 @@ func TestZeroConfigDocumentsPrivateThroughStaticHandler(t *testing.T) {
 	cfg := config.Default()
 	dir := t.TempDir()
 	cfg.GridCraft = config.GridCraftConfig{Enabled: true, EditorEnabled: true, EditorBundleDir: dir, EditorBundles: []string{writeEditorBundle(t, dir)}}
-	editor := newEditorOrigin(cfg, slog.Default())
+	editor := newEditorOrigin(cfg, nil, slog.Default())
 	web := fstest.MapFS{
 		"index.html":               {Data: []byte("<!doctype html>root")},
 		"chat.html":                {Data: []byte("<!doctype html>chat")},
@@ -97,7 +97,7 @@ func TestZeroConfigDocumentsPrivateThroughStaticHandler(t *testing.T) {
 		"_next/static/chunks/a.js": {Data: []byte("1")},
 		"favicon.ico":              {Data: []byte("i")},
 	}
-	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(goapi.StaticFileHandler(web), editorHeaderOptions(cfg, editor)))
+	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(goapi.StaticFileHandler(web), editorHeaderOptions(cfg, nil, editor)))
 	get := func(p string) *httptest.ResponseRecorder {
 		r := httptest.NewRequest("GET", "https://crewship.example.test"+p, nil)
 		r.TLS = &tls.ConnectionState{}

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/craftapps"
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
@@ -17,6 +18,10 @@ type craftNativeAvailabilityResponse struct {
 	CanEdit        bool `json:"can_edit"`
 	PreviewEnabled bool `json:"preview_enabled"`
 	AgentsEnabled  bool `json:"agents_enabled"`
+	// Applications is each application's mode set by the instance
+	// administrator: "open", "draining" (finish and save only) or "closed"
+	// (read only). Absent when Craft documents are unavailable.
+	Applications map[string]craftapps.Mode `json:"applications,omitempty"`
 }
 type craftNativeRenewalResponse struct {
 	Renewed bool `json:"renewed"`
@@ -87,8 +92,13 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	var modes map[string]craftapps.Mode
+	if m.enabled {
+		modes = map[string]craftapps.Mode{craftapps.Word: m.apps.mode(r.Context(), craftapps.Word), craftapps.Sheet: m.apps.mode(r.Context(), craftapps.Sheet)}
+		agentsEnabled = agentsEnabled && m.apps.mode(r.Context(), craftapps.Agents) == craftapps.ModeOpen
+	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled, CanEdit: canEdit, PreviewEnabled: previewEnabled, AgentsEnabled: agentsEnabled})
+	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled, CanEdit: canEdit, PreviewEnabled: previewEnabled, AgentsEnabled: agentsEnabled, Applications: modes})
 }
 func craftNativeHTTPError(w http.ResponseWriter, err error) {
 	if artifactStorageRefusal(w, err) {
@@ -192,6 +202,10 @@ func (m *craftNativeHTTP) mutateLease(w http.ResponseWriter, r *http.Request, op
 	entry, err := m.bound(r)
 	if err != nil {
 		craftNativeHTTPError(w, err)
+		return
+	}
+	if !m.apps.allows(r.Context(), entry.application, craftLeaseOperation(operation)) {
+		m.apps.refuse(w, r.Context(), entry.application)
 		return
 	}
 	var body craftNativeLeaseBody
