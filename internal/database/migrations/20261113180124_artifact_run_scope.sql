@@ -3,7 +3,7 @@
 -- trusted pre-send recorder resolves each against the sending human, as an
 -- ordinary member, and keeps what it admitted here. Generic transcript
 -- metadata, an internal token or an agent cannot insert this table: only
--- RecordArtifactRefs writes it.
+-- RecordArtifactRefs writes it, and the trigger below holds the same shape.
 CREATE TABLE IF NOT EXISTS artifact_message_refs (
  message_id TEXT NOT NULL REFERENCES conversation_messages(id) ON DELETE CASCADE,
  workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -17,6 +17,15 @@ CREATE INDEX IF NOT EXISTS artifact_message_refs_page ON artifact_message_refs(p
 CREATE INDEX IF NOT EXISTS artifact_message_refs_human ON artifact_message_refs(human_user_id);
 CREATE INDEX IF NOT EXISTS artifact_message_refs_chat ON artifact_message_refs(chat_id);
 CREATE INDEX IF NOT EXISTS artifact_message_refs_workspace ON artifact_message_refs(workspace_id);
+-- The same rule in the schema: a reference row names the human's own message
+-- in that human's chat, and a page of the same workspace.
+CREATE TRIGGER IF NOT EXISTS artifact_message_refs_own_message BEFORE INSERT ON artifact_message_refs
+WHEN NOT EXISTS(
+ SELECT 1 FROM conversation_messages m
+ JOIN chats c ON c.id=m.session_id AND c.workspace_id=NEW.workspace_id AND c.created_by=NEW.human_user_id
+ JOIN pages p ON p.id=NEW.page_id AND p.workspace_id=NEW.workspace_id
+ WHERE m.id=NEW.message_id AND m.session_id=NEW.chat_id AND m.author_user_id=NEW.human_user_id AND m.role='user')
+BEGIN SELECT RAISE(ABORT,'artifact message reference must name the human''s own message and a page of the workspace'); END;
 CREATE TRIGGER IF NOT EXISTS artifact_message_refs_immutable BEFORE UPDATE ON artifact_message_refs
 BEGIN SELECT RAISE(ABORT,'artifact message reference is immutable'); END;
 

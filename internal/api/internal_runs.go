@@ -256,20 +256,16 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
-		} else if hasRefs, err := messageHasArtifactRefs(r.Context(), h.db, body.WorkspaceID, body.TriggerMessageID); err != nil {
-			replyInternalError(w, h.logger, "create run: read artifact references", err)
-			return
-		} else if hasRefs {
-			// A human message with structured artifact references admits its
-			// run scope only through the host's human receipt (#5317).
-			if body.TriggerType != "USER" || body.ChatOriginID != "" || body.HumanAuthority == nil {
-				replyError(w, http.StatusForbidden, "host human admission required")
-				return
-			}
-			if status, err := h.admitArtifactRefsStart(r, entry, body.HumanAuthority, body.TriggerMessageID); err != nil {
+		} else if admitted, status, err := h.admitArtifactRefsRun(r, entry, body.TriggerType, body.ChatOriginID, body.HumanAuthority, body.WorkspaceID, body.TriggerMessageID); err != nil {
+			if status == http.StatusInternalServerError {
+				replyInternalError(w, h.logger, "create run: artifact reference admission", err)
+			} else {
 				replyError(w, status, "artifact reference admission refused")
-				return
 			}
+			return
+		} else if admitted {
+			// A human message with structured artifact references admitted its
+			// run scope through the host's human receipt (#5317).
 		} else {
 			matched, err := h.matchRunStart(r.Context(), entry)
 			if err != nil {

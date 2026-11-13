@@ -213,7 +213,9 @@ The system prompt for each role reflects this equality:
 ## Agent access to artifacts from chat
 
 Behind the workspace feature flag `artifact_agent_access_modes`, off by
-default (`crewship feature-flag` turns it on per workspace).
+default (`crewship feature-flag` turns it on per workspace). With it off the
+`artifact_refs` message key is ignored, and turning it off later starts
+already-referenced runs the ordinary way, binding nothing.
 
 - An agent reaches an artifact from a chat run only through a **structured
   reference** the human attached to the message (a composer chip, resolved by
@@ -224,8 +226,9 @@ default (`crewship feature-flag` turns it on per workspace).
 - A refused reference gets one error whether the artifact is missing,
   unreadable or in another workspace.
 - Only the human message admission records references and binds them to the
-  run; a database trigger refuses any other run scope row. Agents and internal
-  tokens cannot widen it.
+  run, checking each one again at run start. Database triggers refuse any
+  reference that is not the human's own message and workspace page, and any
+  other run scope row. Agents and internal tokens cannot widen it.
 - References are accepted only in the human's own private chat with the agent.
 
 Specification: `docs/specs/pages.md` §7.1c.

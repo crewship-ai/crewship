@@ -31,8 +31,9 @@ var errArtifactRefUnavailable = errors.New("an attached artifact is not availabl
 var artifactRefID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // CheckArtifactRefs is the read-only pre-check the chat bridge runs before it
-// persists the human message: the same rules as RecordArtifactRefs, so a
-// refused reference never leaves a stored message behind it.
+// persists the human message: the same rules as RecordArtifactRefs. Access
+// lost between this check and the record still refuses the record; the
+// stored message then has no references and starts no run.
 func (h *PageHandler) CheckArtifactRefs(ctx context.Context, receipt *chataudience.Receipt, pageIDs []string) error {
 	return h.admitArtifactRefs(ctx, receipt, "", pageIDs)
 }
@@ -153,7 +154,7 @@ func (h *PageHandler) delegableViewer(ctx context.Context, workspace, userID str
 	}
 	var role string
 	err = h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT m.role FROM workspace_members m JOIN users u ON u.id=m.user_id AND u.suspended_at IS NULL
-WHERE m.workspace_id=? AND m.user_id=? AND NOT EXISTS(SELECT 1 FROM workspace_members restricted WHERE restricted.user_id=m.user_id AND restricted.access_mode='restricted')`, workspace, userID).Scan(&role)
+WHERE m.workspace_id=? AND m.user_id=? AND m.access_mode IS NOT 'restricted'`, workspace, userID).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return &pageViewer{UserID: userID, Crews: map[string]bool{}}, nil
 	}
@@ -212,15 +213,53 @@ ON CONFLICT(run_id,page_id) DO NOTHING`, run, message, workspace, human)
 	return res.RowsAffected()
 }
 
+// ArtifactRefsEnabled reports whether the workspace has agent access modes
+// on. With it off the chat bridge ignores `artifact_refs` metadata entirely,
+// exactly as before the flag existed.
+func (h *PageHandler) ArtifactRefsEnabled(ctx context.Context, workspace string) (bool, error) {
+	return featureflags.IsEnabledWith(ctx, h.db, workspace, ArtifactAgentAccessModesFlag)
+}
+
+// errArtifactRefsDisabled means the workspace flag is off: the run is started
+// the ordinary way and nothing is bound.
+var errArtifactRefsDisabled = errors.New("artifact agent access modes are off")
+
 // messageHasArtifactRefs reports whether the trusted recorder kept references
-// for this message.
+// for this message and the workspace still has the flag on. A kill switch
+// returns runs to the ordinary path instead of failing them.
 func messageHasArtifactRefs(ctx context.Context, q pageAuthQueryer, workspace, message string) (bool, error) {
 	if message == "" {
 		return false, nil
 	}
 	var n int
-	err := q.QueryRowContext(ctx, `SELECT count(*) FROM artifact_message_refs WHERE message_id=? AND workspace_id=?`, message, workspace).Scan(&n)
-	return n > 0, err
+	if err := q.QueryRowContext(ctx, `SELECT count(*) FROM artifact_message_refs WHERE message_id=? AND workspace_id=?`, message, workspace).Scan(&n); err != nil || n == 0 {
+		return false, err
+	}
+	return featureflags.IsEnabledWith(ctx, q, workspace, ArtifactAgentAccessModesFlag)
+}
+
+// admitArtifactRefsRun is CreateRun's branch for a referenced human message.
+// It reports admitted=false, with no error, when the message has no
+// references or the flag is off, and the caller starts the run normally.
+func (h *InternalHandler) admitArtifactRefsRun(r *http.Request, entry journal.Entry, triggerType, originID string, receipt *chataudience.Receipt, workspace, message string) (bool, int, error) {
+	hasRefs, err := messageHasArtifactRefs(r.Context(), h.db, workspace, message)
+	if err != nil {
+		return false, http.StatusInternalServerError, err
+	}
+	if !hasRefs {
+		return false, 0, nil
+	}
+	if triggerType != "USER" || originID != "" || receipt == nil {
+		return false, http.StatusForbidden, errArtifactRefUnavailable
+	}
+	status, err := h.admitArtifactRefsStart(r, entry, receipt, message)
+	if errors.Is(err, errArtifactRefsDisabled) {
+		return false, 0, nil
+	}
+	if err != nil {
+		return false, status, err
+	}
+	return true, 0, nil
 }
 
 // admitArtifactRefsStart admits a plain chat run whose human message carries
@@ -248,7 +287,45 @@ func (h *InternalHandler) admitArtifactRefsStart(r *http.Request, entry journal.
 		return http.StatusInternalServerError, err
 	}
 	if !enabled {
+		return 0, errArtifactRefsDisabled
+	}
+	// m1: the references are checked again at admission. A human who lost
+	// read access since sending does not hand it to the run.
+	ctx = context.WithValue(ctx, ctxWorkspaceID, receipt.WorkspaceID)
+	rows, err := tx.QueryContext(ctx, `SELECT page_id FROM artifact_message_refs WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=?`,
+		message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+	var refs []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return http.StatusInternalServerError, err
+		}
+		refs = append(refs, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return http.StatusInternalServerError, err
+	}
+	if len(refs) == 0 {
 		return http.StatusForbidden, errArtifactRefUnavailable
+	}
+	pages := &PageHandler{db: h.db}
+	viewer, err := pages.delegableViewer(ctx, receipt.WorkspaceID, receipt.UserID)
+	if err != nil {
+		return http.StatusInternalServerError, err
+	}
+	for _, id := range refs {
+		ok, err := pages.delegableRead(ctx, receipt.WorkspaceID, id, viewer)
+		if err != nil {
+			return http.StatusInternalServerError, err
+		}
+		if !ok {
+			return http.StatusForbidden, errArtifactRefUnavailable
+		}
 	}
 	matched, err := matchRunStartQuery(ctx, tx, entry)
 	if err != nil {
@@ -270,7 +347,7 @@ func (h *InternalHandler) admitArtifactRefsStart(r *http.Request, entry journal.
 	if err != nil {
 		return http.StatusForbidden, err
 	}
-	if n == 0 && !matched {
+	if int(n) != len(refs) && !matched {
 		return http.StatusForbidden, errArtifactRefUnavailable
 	}
 	if err := tx.Commit(); err != nil {

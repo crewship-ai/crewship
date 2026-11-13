@@ -3,7 +3,7 @@ package chatbridge
 import (
 	"context"
 	"errors"
-	"strings"
+	"regexp"
 
 	"github.com/crewship-ai/crewship/internal/chataudience"
 )
@@ -17,12 +17,17 @@ var ErrArtifactRefUnavailable = errors.New("an attached artifact is not availabl
 // message, names and links never are.
 const ArtifactRefsMetadataKey = "artifact_refs"
 
-// maxArtifactRefs mirrors the server's bound.
+// maxArtifactRefs and artifactRefID mirror the server's bound and id shape.
 const maxArtifactRefs = 10
+
+var artifactRefID = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 // ArtifactRefRecorder checks references before the human message is stored and
 // records them after, both against the sending human (#5317).
 type ArtifactRefRecorder interface {
+	// ArtifactRefsEnabled is the workspace flag. Off, the metadata key is
+	// ignored as it was before the flag existed.
+	ArtifactRefsEnabled(context.Context, string) (bool, error)
 	CheckArtifactRefs(context.Context, *chataudience.Receipt, []string) error
 	RecordArtifactRefs(context.Context, *chataudience.Receipt, string, []string) error
 }
@@ -50,7 +55,7 @@ func requestedArtifactRefs(metadata map[string]any) ([]string, bool, error) {
 			return nil, false, ErrArtifactRefUnavailable
 		}
 		id, ok := obj["page_id"].(string)
-		if !ok || id == "" || len(id) > 64 || strings.ContainsAny(id, "\r\n\x00 ") || seen[id] {
+		if !ok || !artifactRefID.MatchString(id) || seen[id] {
 			return nil, false, ErrArtifactRefUnavailable
 		}
 		seen[id] = true

@@ -350,37 +350,6 @@ The requirement: creator owns the page; a page created by an agent is owned by t
 authorised the agent; crew members inherit visibility of their crew's panels; the owner can grant
 read and write to others.
 
-### 7.1c Agent access modes — what a chat run may reach (#5317)
-
-Behind the workspace flag `artifact_agent_access_modes` (off by default; off
-changes nothing). Decided by the owner on 2026-11-13.
-
-1. **A reference is a structured chip, never text.** A chat message carries
-   `metadata.artifact_refs: [{"page_id": "<id>"}]`, 1–10 entries, filled from
-   the composer's attachment chips. Names, links or ids written in the message
-   body are never references.
-2. **The server resolves references when the message is sent, as the human
-   would be as an ordinary member.** Before the message is stored it checks
-   each reference against the sending human with their workspace role read as
-   MEMBER (never above their own role): reach that comes only from the ADMIN or
-   OWNER role does not pass to an agent, for reads or for writes. A reference
-   that is missing, unreadable, in another workspace or malformed is refused
-   with one identical error, so a refusal never reveals that something exists.
-   References are admitted only in the human's own private chat with the agent.
-3. **Only the trusted human admission writes the run scope.** After the message
-   is stored, the references are recorded (`artifact_message_refs`), and the
-   run's admission copies them into `artifact_run_scope` in the transaction
-   that captures the run principal. A database trigger refuses any scope row
-   that does not mirror its own principal message's references; an internal
-   token or an agent can neither record a reference nor widen a scope.
-4. **A follow-up message carries its own references.** An attached artifact is
-   not in reach of the next run unless that message attaches it again (the
-   composer keeps chips sticky and the server re-checks them every time).
-
-Read and write enforcement inside the run, artifacts created in the chat, the
-folder subject for a crew's agents and the audit with the human follow in later
-steps of #5317; until then a run scope grants nothing on its own.
-
 ### 7.1 The rules
 
 1. **A page has exactly one owner, and it is either a user or a crew.** `owner_user_id` xor
@@ -592,6 +561,47 @@ crewship page grant  <slug> --user  <email>      --level write
 crewship page revoke <slug> --agent <agent-slug>
 crewship page grants <slug>
 ```
+
+### 7.1c Agent access modes — what a chat run may reach (#5317)
+
+Behind the workspace flag `artifact_agent_access_modes` (off by default). Off
+changes nothing: the chat bridge ignores the `artifact_refs` key as it did
+before the flag existed, and turning the flag off after references were
+recorded starts their runs the ordinary way, binding nothing. Decided by the
+owner on 2026-11-13.
+
+1. **A reference is a structured chip, never text.** A chat message carries
+   `metadata.artifact_refs: [{"page_id": "<id>"}]`, 1–10 entries, filled from
+   the composer's attachment chips. Names, links or ids written in the message
+   body are never references.
+2. **The server resolves references when the message is sent, as the human
+   would be as an ordinary member.** Before the message is stored it checks
+   each reference against the sending human with their workspace role read as
+   MEMBER (never above their own role): reach that comes only from the ADMIN or
+   OWNER role does not pass to an agent, for reads or for writes. A reference
+   that is missing, unreadable, in another workspace or malformed is refused
+   with one identical error, so a refusal never reveals that something exists.
+   References are admitted only in the human's own private chat with the agent,
+   and are refused, never silently dropped, on a turn that would not bind
+   them: with `page_context`, a Document create or update, a Native Craft
+   instruction or an origin run.
+3. **Only the trusted human admission writes the run scope.** After the message
+   is stored, the references are recorded (`artifact_message_refs`), and the
+   run's admission copies them into `artifact_run_scope` in the transaction
+   that captures the run principal, checking each one against the human again;
+   access lost since sending refuses the run. Database triggers hold the same
+   shape: a reference row names the human's own message in their chat and a
+   page of the workspace, and a scope row mirrors its own principal message's
+   references. An internal token or an agent can neither record a reference
+   nor widen a scope. If access is lost between the pre-check and the record,
+   the stored message keeps no references and starts no run.
+4. **A follow-up message carries its own references.** An attached artifact is
+   not in reach of the next run unless that message attaches it again (the
+   composer keeps chips sticky and the server re-checks them every time).
+
+Read and write enforcement inside the run, artifacts created in the chat, the
+folder subject for a crew's agents and the audit with the human follow in later
+steps of #5317; until then a run scope grants nothing on its own.
 
 ### 7.2 What this costs
 

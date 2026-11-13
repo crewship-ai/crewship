@@ -48,8 +48,13 @@ func artifactRefRows(t *testing.T, f *artifactPrincipalFixture, query string, ar
 	return out
 }
 
-func TestArtifactRefs_FlagOffChangesNothing(t *testing.T) {
+// With the flag off the bridge ignores the key (TestArtifactRefsSendPath);
+// the server, asked directly, still records nothing.
+func TestArtifactRefs_FlagOffRecordsNothing(t *testing.T) {
 	f := artifactRefsFixture(t, false)
+	if on, err := f.pages.ArtifactRefsEnabled(t.Context(), f.a.WorkspaceID); err != nil || on {
+		t.Fatalf("flag reported on: %v %v", on, err)
+	}
 	if err := f.pages.CheckArtifactRefs(t.Context(), f.receipt, []string{"ref-own"}); !errors.Is(err, errArtifactRefUnavailable) {
 		t.Fatalf("flag off must refuse references: %v", err)
 	}
