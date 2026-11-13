@@ -3,10 +3,13 @@ package pipeline
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 // A strict crew's routine used to fail at its crewship step with "a routine
@@ -119,8 +122,8 @@ func TestCrewshipStep_ApprovalExecutesExactlyOnce(t *testing.T) {
 	if len(actions.done) != 1 {
 		t.Fatalf("action executed %d times, want exactly once", len(actions.done))
 	}
-	// Every attempt carried the same operation key, so a lost response
-	// replays rather than duplicates on the server.
+	// Every attempt carried the same identity (operation key and step), so
+	// the approval's binding matches the call that executes.
 	for _, c := range actions.calls {
 		if c.OperationKey != actions.calls[0].OperationKey || c.StepID != "create" {
 			t.Fatalf("attempts disagree on identity: %+v", actions.calls)
@@ -235,8 +238,17 @@ func TestCrewshipApprovalBinding(t *testing.T) {
 // Long arguments are never cut silently: the card says they were truncated
 // and names the binding the approval is tied to.
 func TestArgsForPrompt(t *testing.T) {
-	if got := argsForPrompt([]byte(`{"a":1}`), "b1"); got != `{"a":1}` {
+	if got := argsForPrompt([]byte(`{"a":1}`), "b1"); got != "```json\n{\"a\":1}\n```" {
 		t.Fatalf("short args = %q", got)
+	}
+	// Author-controlled backticks cannot close the fence early.
+	if got := argsForPrompt([]byte("{\"t\":\"```[x](y)\"}"), "b1"); !strings.HasPrefix(got, "````json\n") || !strings.HasSuffix(got, "\n````") {
+		t.Fatalf("fence not widened: %q", got)
+	}
+	// The cut never splits a multi-byte character.
+	multi := []byte("{\"t\":\"" + strings.Repeat("ž", approvalArgsShown) + "\"}")
+	if got := argsForPrompt(multi, "b1"); !utf8.ValidString(got) {
+		t.Fatal("truncation split a UTF-8 character")
 	}
 	long := []byte("{\"body\":\"" + strings.Repeat("x", approvalArgsShown) + "\"}")
 	got := argsForPrompt(long, "b1")
@@ -277,5 +289,101 @@ func TestCreateApproval_NoStandingTrust(t *testing.T) {
 	}
 	if strings.Contains(payload, `"eligible":true`) {
 		t.Fatalf("the card offers a standing grant: %s", payload)
+	}
+}
+
+// With no grant yet, a guided crew's approval card offers one. A held
+// crewship action's card must not: the control case proves the offer is
+// otherwise there, so the assertion fails if the guard is removed.
+func TestCreateApproval_NoStandingTrustOffer(t *testing.T) {
+	for _, held := range []bool{false, true} {
+		t.Run(map[bool]string{false: "wait step offers", true: "held action does not"}[held], func(t *testing.T) {
+			ctx := context.Background()
+			db := openTrustGateTestDB(t)
+			seedTrustRun(t, db, "run_offer", "hashA", "guided")
+			// Enough earlier human approvals of this step to earn an offer.
+			for i := 0; i < TrustOfferThreshold; i++ {
+				if _, err := db.Exec(`INSERT INTO pipeline_waitpoints (token, workspace_id, pipeline_run_id, step_id, kind, status, timeout_at)
+VALUES (?, 'ws_test', 'run_offer', 'publish', 'approval', 'approved', datetime('now'))`, fmt.Sprintf("prior-%d", i)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			store := NewSQLWaitpointStore(db)
+			defer store.Close()
+			token, err := store.CreateApproval(ctx, WaitpointApprovalRequest{
+				WorkspaceID: "ws_test", PipelineRunID: "run_offer", StepID: "publish",
+				Prompt: "Approve", NoStandingTrust: held,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload string
+			if err := db.QueryRow(`SELECT COALESCE(payload_json, '') FROM inbox_items WHERE source_id = ?`, token).Scan(&payload); err != nil {
+				t.Fatal(err)
+			}
+			if offered := strings.Contains(payload, `"eligible":true`); offered == held {
+				t.Fatalf("held=%v offered=%v: %s", held, offered, payload)
+			}
+		})
+	}
+}
+
+// A held crewship action's approval is decided only by a current workspace
+// OWNER or ADMIN: the public callback (external holder), a MANAGER and a
+// member of another workspace are refused and leave it pending. An ordinary
+// wait step's approval keeps its audience (MANAGER, the external holder).
+func TestDecide_HeldActionNeedsOwnerOrAdmin(t *testing.T) {
+	ctx := context.Background()
+	held := CrewshipApprovalStepKey("create", CrewshipApprovalBinding("op", "issue.create", map[string]any{"title": "x"}))
+	cases := []struct {
+		name    string
+		stepID  string
+		decider WaitpointDecider
+		allowed bool
+	}{
+		{"admin approves a held action", held, WaitpointDecider{Kind: DeciderUser, ID: "u_admin"}, true},
+		{"owner approves a held action", held, WaitpointDecider{Kind: DeciderUser, ID: "u_owner"}, true},
+		{"manager cannot", held, WaitpointDecider{Kind: DeciderUser, ID: "u_manager"}, false},
+		{"admin of another workspace cannot", held, WaitpointDecider{Kind: DeciderUser, ID: "u_elsewhere"}, false},
+		{"public callback cannot", held, WaitpointDecider{Kind: DeciderExternal, ID: "external-callback"}, false},
+		{"wait step: manager still can", "gate", WaitpointDecider{Kind: DeciderUser, ID: "u_manager"}, true},
+		{"wait step: public callback still can", "gate", WaitpointDecider{Kind: DeciderExternal, ID: "external-callback"}, true},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openTrustGateTestDB(t)
+			seedTrustRun(t, db, "run_d", "hashA", "strict")
+			if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workspace_members (workspace_id TEXT, user_id TEXT, role TEXT)`); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.Exec(`INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
+ ('ws_test','u_admin','ADMIN'), ('ws_test','u_owner','owner'), ('ws_test','u_manager','MANAGER'), ('ws_other','u_elsewhere','ADMIN')`); err != nil {
+				t.Fatal(err)
+			}
+			store := NewSQLWaitpointStore(db)
+			defer store.Close()
+			token, err := store.CreateApproval(ctx, WaitpointApprovalRequest{
+				WorkspaceID: "ws_test", PipelineRunID: "run_d", StepID: tc.stepID, Prompt: "Approve", NoStandingTrust: true,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantRole := map[bool]string{true: "ADMIN", false: "MANAGER"}[IsCrewshipApprovalStepKey(tc.stepID)]
+			var role string
+			if err := db.QueryRow(`SELECT target_role FROM inbox_items WHERE source_id = ?`, token).Scan(&role); err != nil || role != wantRole {
+				t.Fatalf("card addressed to %q (%v), want %q: the audience must be who can decide", role, err, wantRole)
+			}
+			err = store.Decide(ctx, "ws_test", token, true, tc.decider, "")
+			status, _, _ := waitpointRow(t, db, token)
+			if tc.allowed {
+				if err != nil || status != "approved" {
+					t.Fatalf("err=%v status=%q, want approved", err, status)
+				}
+				return
+			}
+			if !errors.Is(err, ErrDeciderNotAllowed) || status != "pending" {
+				t.Fatalf("err=%v status=%q, want ErrDeciderNotAllowed and still pending", err, status)
+			}
+		})
 	}
 }

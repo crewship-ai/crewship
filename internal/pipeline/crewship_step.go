@@ -437,5 +437,21 @@ func CrewshipApprovalBinding(operationKey, verb string, args map[string]any) str
 // crewship call is stored under: the step plus its binding, so a lookup by
 // step can only find the approval for this exact call.
 func CrewshipApprovalStepKey(stepID, binding string) string {
-	return stepID + "#approval:" + binding
+	return stepID + crewshipApprovalMarker + binding
 }
+
+const crewshipApprovalMarker = "#approval:"
+
+// IsCrewshipApprovalStepKey reports whether a waitpoint step_id is a held
+// crewship action's approval (CrewshipApprovalStepKey). Such a waitpoint
+// stands in for the autonomy hold the agent path queues for an OWNER or
+// ADMIN, so only a person of that role may decide it — never the token's
+// external holder.
+func IsCrewshipApprovalStepKey(stepID string) bool {
+	return strings.Contains(stepID, crewshipApprovalMarker)
+}
+
+// HeldActionDeciderRoles are the workspace roles that may decide a held
+// crewship action's approval: the same tier as POST /approvals/{id}/decide,
+// which decides the agent path's autonomy holds.
+var HeldActionDeciderRoles = map[string]bool{"OWNER": true, "ADMIN": true}

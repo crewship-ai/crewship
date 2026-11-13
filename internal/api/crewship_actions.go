@@ -186,17 +186,30 @@ func (c *crewshipActions) verifyApproval(ctx context.Context, req pipeline.Crews
 	// step), verb and arguments — so an approval for another item or other
 	// arguments cannot unlock this one.
 	stepKey := pipeline.CrewshipApprovalStepKey(req.StepID, pipeline.CrewshipApprovalBinding(req.OperationKey, req.Verb, req.Args))
-	var status string
-	err := c.db.QueryRowContext(ctx, `SELECT status FROM pipeline_waitpoints
+	var status, decidedBy string
+	err := c.db.QueryRowContext(ctx, `SELECT status, COALESCE(decided_by_user_id, '') FROM pipeline_waitpoints
 WHERE token = ? AND kind = 'approval' AND workspace_id = ? AND pipeline_run_id = ? AND step_id = ?`,
-		req.ApprovalToken, req.WorkspaceID, req.RunID, stepKey).Scan(&status)
+		req.ApprovalToken, req.WorkspaceID, req.RunID, stepKey).Scan(&status, &decidedBy)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, fmt.Errorf("approval does not belong to this run step")
 	}
 	if err != nil {
 		return false, fmt.Errorf("approval lookup: %w", err)
 	}
-	return status == "approved", nil
+	if status != "approved" {
+		return false, nil
+	}
+	// The decision door already requires an OWNER or ADMIN; ask again here,
+	// against the current role, so a decision recorded any other way (or by
+	// someone demoted since) does not execute.
+	allowed, err := pipeline.HeldActionDeciderAllowed(ctx, c.db, req.WorkspaceID, decidedBy)
+	if err != nil {
+		return false, err
+	}
+	if !allowed {
+		return false, fmt.Errorf("approval was not decided by a workspace OWNER or ADMIN")
+	}
+	return true, nil
 }
 
 // Do gates the verb on the author crew's autonomy level, then performs the
