@@ -1300,6 +1300,8 @@ Six rules govern it:
    or a workspace admin; a crew VIEWER or MEMBER can read a crew page but not
    publish it. A link stops opening while the person who created it is
    suspended or no longer in the workspace, and opens again if they return.
+   Only the same people see a page's links and who created them, or revoke
+   them; whoever created a link can always revoke it.
 4. **Every public link expires.** A required expiry, default 30 days,
    maximum 1 year. Tokens are high-entropy and individually revocable, and a
    page may have several — revoking the accountant's link never breaks the

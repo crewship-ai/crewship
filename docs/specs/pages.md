@@ -608,7 +608,8 @@ makes it auditable.
    MANAGER or above or who holds the crew's Manage grant, or a workspace ADMIN/OWNER. Plain crew
    membership reads a crew page but never publishes it. A link speaks for the human who created
    it, so it opens only while that human is a member of the workspace and is not suspended; it is
-   withheld, not revoked, and opens again when their standing returns.
+   withheld, not revoked, and opens again when their standing returns. Listing a page's links (which names their creators) takes the same authority
+   as publishing; revoking takes it too, except that anyone may revoke a link they created.
 4. **Every public link expires.** A required expiry, default 30 days, maximum 1 year. Tokens are
    high-entropy, revocable individually, and one page may have several so revoking the
    accountant's link does not break the client's.
