@@ -120,6 +120,9 @@ type pagePublicTokenWire struct {
 	// expired. Two columns and a clock is a calculation every reader would
 	// otherwise have to repeat, and one of them would get it wrong.
 	Live bool `json:"live"`
+	// Withheld: not revoked, but its creator is suspended or no longer a
+	// member, so it does not open until their standing returns.
+	Withheld bool `json:"withheld,omitempty"`
 	// Panels are the panel ids this link exposes — the human-attested set
 	// (§7.3.2 rules 2 and 3), so "what does this link show" is answerable
 	// without reading the spec.
@@ -424,7 +427,10 @@ func (h *PageHandler) ListPublicLinks(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT t.id, t.expires_at, t.show_provenance, t.password_hash IS NOT NULL,
 		       COALESCE(u.email, ''), t.created_at,
-		       COALESCE(t.revoked_at, ''), COALESCE(t.last_seen_at, '')
+		       COALESCE(t.revoked_at, ''), COALESCE(t.last_seen_at, ''),
+		       EXISTS(SELECT 1 FROM users cu JOIN workspace_members cm ON cm.user_id = cu.id
+		              JOIN pages p ON p.id = t.page_id AND cm.workspace_id = p.workspace_id
+		              WHERE cu.id = t.created_by_user_id AND cu.suspended_at IS NULL)
 		FROM page_public_tokens t
 		LEFT JOIN users u ON u.id = t.created_by_user_id
 		WHERE t.page_id = ?
@@ -439,15 +445,18 @@ func (h *PageHandler) ListPublicLinks(w http.ResponseWriter, r *http.Request) {
 	out := pagePublicTokensWire{Page: rec.Slug, Tokens: []pagePublicTokenWire{}}
 	for rows.Next() {
 		var t pagePublicTokenWire
-		var showProvenance, hasPassword int
+		var showProvenance, hasPassword, standing int
 		if err := rows.Scan(&t.ID, &t.ExpiresAt, &showProvenance, &hasPassword,
-			&t.CreatedBy, &t.CreatedAt, &t.RevokedAt, &t.LastSeenAt); err != nil {
+			&t.CreatedBy, &t.CreatedAt, &t.RevokedAt, &t.LastSeenAt, &standing); err != nil {
 			replyInternalError(w, h.logger, "scan public page token", err)
 			return
 		}
 		t.ShowProvenance = showProvenance == 1
 		t.HasPassword = hasPassword == 1
-		t.Live = t.RevokedAt == "" && parsePageTime(t.ExpiresAt).After(now)
+		// A link whose creator is suspended or gone is withheld (it opens
+		// again when their standing returns), so it is not live either.
+		t.Withheld = t.RevokedAt == "" && standing == 0
+		t.Live = t.RevokedAt == "" && !t.Withheld && parsePageTime(t.ExpiresAt).After(now)
 		// A live link shows what it currently exposes; a dead one shows
 		// nothing, because it exposes nothing.
 		if t.Live {
@@ -834,8 +843,8 @@ func (h *PageHandler) journalPublicLink(ctx context.Context, entryType journal.E
 // mayPublishPage is the publish gate. A workspace admin may publish anything
 // publishable. A user-owned page: its owner. A crew-owned page: a member of
 // the owning crew whose effective role there (workspace role or crew
-// override, whichever is higher) is MANAGER or above, or who holds the crew's
-// explicit Manage grant. A crew VIEWER or MEMBER may read the page but never
+// override, whichever is higher) is MANAGER or above, or the holder of the
+// crew's explicit Manage grant. A crew VIEWER or MEMBER may read the page but never
 // put it on the internet.
 func (h *PageHandler) mayPublishPage(ctx context.Context, wsID, userID, role string, rec *pageRecord) (bool, error) {
 	if canRole(role, "manage") {
@@ -844,16 +853,23 @@ func (h *PageHandler) mayPublishPage(ctx context.Context, wsID, userID, role str
 	if rec.OwnerUserID != "" {
 		return rec.OwnerUserID == userID, nil
 	}
-	if rec.OwnerCrewID == "" || !h.isPageOwner(ctx, wsID, userID, rec) {
+	if rec.OwnerCrewID == "" {
 		return false, nil
 	}
-	crewRole, err := crewRoleIn(ctx, h.pageAuthReader(ctx), userID, rec.OwnerCrewID)
-	if err != nil {
-		return false, err
+	// crewRoleIn falls back to the workspace role for a non-member, so crew
+	// membership is checked first: a workspace MANAGER outside the crew is
+	// not its manager.
+	if h.isPageOwner(ctx, wsID, userID, rec) {
+		crewRole, err := crewRoleIn(ctx, h.pageAuthReader(ctx), userID, rec.OwnerCrewID)
+		if err != nil {
+			return false, err
+		}
+		if canRole(crewRole, "create") {
+			return true, nil
+		}
 	}
-	if canRole(crewRole, "create") {
-		return true, nil
-	}
+	// The crew's explicit Manage grant stands on its own (trusted, live
+	// holder, live crew), as it does for every other crew-manage action.
 	switch err := (access.Store{DB: h.db}).CrewManage(ctx, userID, wsID, rec.OwnerCrewID); {
 	case err == nil:
 		return true, nil

@@ -3,6 +3,8 @@ package api
 import (
 	"database/sql"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -17,13 +19,20 @@ func TestPublish_CrewOwnedPageNeedsTheCrewsManager(t *testing.T) {
 		crewRole      any // nil = inherit the workspace role
 		inCrew        bool
 		wantPublish   bool
+		manageGrant   bool
+		crewDeleted   bool
 	}{
-		{"crew viewer", "VIEWER", nil, true, false},
-		{"crew member", "MEMBER", nil, true, false},
-		{"member with crew VIEWER override", "MEMBER", "VIEWER", true, false},
-		{"workspace manager in the crew", "MANAGER", nil, true, true},
-		{"member promoted to crew MANAGER", "MEMBER", "MANAGER", true, true},
-		{"workspace admin outside the crew", "ADMIN", nil, false, true},
+		{name: "crew viewer", workspaceRole: "VIEWER", inCrew: true},
+		{name: "crew member", workspaceRole: "MEMBER", inCrew: true},
+		{name: "member with crew VIEWER override", workspaceRole: "MEMBER", crewRole: "VIEWER", inCrew: true},
+		{name: "workspace manager outside the crew", workspaceRole: "MANAGER"},
+		{name: "workspace manager in the crew", workspaceRole: "MANAGER", inCrew: true, wantPublish: true},
+		{name: "manager with a crew VIEWER override keeps the higher role", workspaceRole: "MANAGER", crewRole: "VIEWER", inCrew: true, wantPublish: true},
+		{name: "member promoted to crew MANAGER", workspaceRole: "MEMBER", crewRole: "MANAGER", inCrew: true, wantPublish: true},
+		{name: "crew Manage grant without membership", workspaceRole: "MEMBER", manageGrant: true, wantPublish: true},
+		{name: "crew Manage grant in the crew", workspaceRole: "MEMBER", inCrew: true, manageGrant: true, wantPublish: true},
+		{name: "workspace admin outside the crew", workspaceRole: "ADMIN", wantPublish: true},
+		{name: "crew manager of a deleted crew", workspaceRole: "MANAGER", inCrew: true, crewDeleted: true},
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -35,6 +44,16 @@ func TestPublish_CrewOwnedPageNeedsTheCrewsManager(t *testing.T) {
 			mustExec(t, h.db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm-actor', ?, ?, ?)`, wsID, actor, tc.workspaceRole)
 			if tc.inCrew {
 				mustExec(t, h.db, `INSERT INTO crew_members (id, crew_id, user_id, role) VALUES ('cm-actor', 'crew-lookout', ?, ?)`, actor, tc.crewRole)
+			}
+			if tc.manageGrant {
+				var owner string
+				if err := h.db.QueryRow(`SELECT user_id FROM workspace_members WHERE workspace_id=? AND role='OWNER'`, wsID).Scan(&owner); err != nil {
+					t.Fatal(err)
+				}
+				mustExec(t, h.db, `INSERT INTO access_grants(id,member_id,resource_kind,crew_id,operation,created_by,created_at) VALUES('grant-actor','wm-actor','crew','crew-lookout','manage',?,'fixture')`, owner)
+			}
+			if tc.crewDeleted {
+				mustExec(t, h.db, `UPDATE crews SET deleted_at='2026-11-13T10:00:00Z' WHERE id='crew-lookout'`)
 			}
 			rr := pagesPublishAs(t, h, wsID, actor, tc.workspaceRole, slug, `{}`)
 			var links int
@@ -68,6 +87,16 @@ func TestPublicView_WithheldWhileTheCreatorLacksStanding(t *testing.T) {
 
 	mustExec(t, h.db, `UPDATE users SET suspended_at='2026-11-13T10:00:00Z' WHERE id=?`, userID)
 	open(http.StatusNotFound, "creator suspended")
+	if withheld, unknown := pagesPublicGet(t, h, token), pagesPublicGet(t, h, "unknown-token-for-comparison"); withheld.Body.String() != unknown.Body.String() {
+		t.Fatalf("a withheld link answers differently from an unknown one: %q vs %q", withheld.Body.String(), unknown.Body.String())
+	}
+	list := httptest.NewRecorder()
+	listReq := pagesHumanRequest(t, "GET", "/api/v1/pages/standing/public", wsID, userID, "OWNER", "")
+	listReq.SetPathValue("slug", "standing")
+	h.ListPublicLinks(list, listReq)
+	if !strings.Contains(list.Body.String(), `"withheld":true`) || strings.Contains(list.Body.String(), `"live":true`) {
+		t.Fatalf("the owner's list must show the link withheld, not live: %s", list.Body.String())
+	}
 	mustExec(t, h.db, `UPDATE users SET suspended_at=NULL WHERE id=?`, userID)
 	open(http.StatusOK, "suspension lifted")
 
