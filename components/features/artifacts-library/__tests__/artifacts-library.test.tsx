@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react"
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 import { toPageView, type PageView, type WirePage } from "@/hooks/use-pages"
 
@@ -891,6 +891,33 @@ it("N opens the dialog on the last kind and Shift+N opens every kind, never whil
   expect(screen.queryByRole("dialog", { name: "New artifact" })).toBeNull()
   fireEvent.keyDown(window, { key: "n" })
   expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("docs")
+})
+
+it("the arrow toggles the menu, gives focus back on Escape, and Shift+N inside it shows every kind", async () => {
+  renderLibrary()
+  const arrow = screen.getByRole("button", { name: "All ways to make an artifact" })
+  expect(arrow).toHaveAttribute("aria-haspopup", "dialog")
+  arrow.focus()
+  fireEvent.click(arrow)
+  expect(arrow).toHaveAttribute("aria-expanded", "true")
+  const menu = screen.getByRole("dialog", { name: "New artifact menu" })
+  // Shift+N on a row (not the search box) switches the open menu to every kind.
+  fireEvent.keyDown(within(menu).getByRole("button", { name: "New Docs" }), { key: "N", shiftKey: true })
+  expect(within(menu).getByRole("group", { name: "Family" })).toBeTruthy()
+  // Ctrl+1 is the browser's, not a pinned kind.
+  fireEvent.click(within(menu).getByRole("button", { name: "Back" }))
+  fireEvent.keyDown(within(menu).getByRole("button", { name: "New Docs" }), { key: "1", ctrlKey: true })
+  expect(screen.queryByRole("dialog", { name: "New artifact" })).toBeNull()
+  // A real pointer press on the arrow closes the menu instead of reopening it.
+  fireEvent.pointerDown(arrow); fireEvent.mouseDown(arrow); fireEvent.pointerUp(arrow); fireEvent.mouseUp(arrow); fireEvent.click(arrow)
+  expect(screen.queryByRole("dialog", { name: "New artifact menu" })).toBeNull()
+  fireEvent.click(arrow)
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "New artifact menu" }), { key: "Escape" })
+  await waitFor(() => expect(document.activeElement).toBe(arrow))
+  // N is ignored while another dialog is open.
+  fireEvent.keyDown(window, { key: "n" })
+  fireEvent.keyDown(window, { key: "n" })
+  expect(screen.getAllByRole("dialog", { name: "New artifact" })).toHaveLength(1)
 })
 
 it("the Home guide starts a kind, browses a family, hides on Got it and comes back from the menu", () => {

@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowDown, ArrowUp, ChevronDown, ChevronLeft, LayoutGrid, Plus, Search, Sparkles, Star, X } from "lucide-react"
-import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
+import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Button } from "@/components/ui/button"
 import { SubBarPrimary } from "@/components/layout/sub-bar"
 import { useUserPreference } from "@/hooks/use-user-preference"
@@ -110,7 +110,8 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key.toLowerCase() !== "n" || event.metaKey || event.ctrlKey || event.altKey || typing(event.target)) return
-      if (document.querySelector("[role=dialog][data-state=open], [role=alertdialog]")) return
+      // Our own menu is a dialog too: Shift+N inside it still switches to every kind.
+      if (document.querySelector("[role=dialog][data-state=open]:not([data-new-artifact-menu]), [role=alertdialog]")) return
       if (!available.length) return
       event.preventDefault()
       if (event.shiftKey) { if (open) { setFamFilter(null); setMode("all") } else { wantAll.current = true; onOpenChange(true) } }
@@ -216,7 +217,7 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
 
   const onMenuKey = (event: React.KeyboardEvent) => {
     const inSearch = event.target === search.current
-    if (/^[1-5]$/.test(event.key) && mode === "short" && (!inSearch || !query)) {
+    if (/^[1-5]$/.test(event.key) && !event.metaKey && !event.ctrlKey && !event.altKey && mode === "short" && (!inSearch || !query)) {
       const kind = pinnedLive[Number(event.key) - 1]
       if (kind) { event.preventDefault(); start(kind) }
       return
@@ -234,12 +235,14 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
         <SubBarPrimary icon={Plus} aria-label="New artifact" onClick={() => last && start(last, true)}
           title={last ? `New artifact · starts as ${KIND_EDITOR[last]?.app ?? KINDS[last].label} · N` : "New artifact"}
           className="rounded-r-none max-md:rounded-r-none">New artifact</SubBarPrimary>
-        <SubBarPrimary icon={ChevronDown} aria-label="All ways to make an artifact" aria-haspopup="menu" aria-expanded={open}
-          title="All ways to make an artifact · Shift+N" onClick={() => onOpenChange(!open)}
-          className="rounded-l-none border-l border-white/30 px-1.5 max-md:rounded-l-none" />
+        {/* The arrow is the Radix trigger: it toggles the menu, gets focus back on close and carries aria-expanded. */}
+        <PopoverTrigger asChild>
+          <SubBarPrimary icon={ChevronDown} aria-label="All ways to make an artifact" title="All ways to make an artifact · Shift+N"
+            className="rounded-l-none border-l border-white/30 px-1.5 max-md:rounded-l-none" />
+        </PopoverTrigger>
       </span>
     </PopoverAnchor>
-    <PopoverContent align="end" aria-label="New artifact menu" onKeyDown={onMenuKey}
+    <PopoverContent align="end" aria-label="New artifact menu" data-new-artifact-menu="" onKeyDown={onMenuKey}
       onOpenAutoFocus={event => { event.preventDefault(); if (window.matchMedia?.("(pointer: fine)").matches) search.current?.focus() }}
       className="grid max-h-[min(560px,80vh)] w-[min(360px,calc(100vw-1rem))] content-start gap-0.5 overflow-y-auto p-1.5">
       <label className="relative mx-0.5 mb-1 block">
@@ -247,7 +250,8 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
         <input ref={search} value={query} onChange={event => setQuery(event.target.value)} aria-label="Find a kind" placeholder="Find a kind or file type…" autoComplete="off"
           className="h-8 w-full rounded-md border border-control-border bg-card pl-7 pr-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring/50" />
       </label>
-      {note && <p role="status" className="mx-1 rounded-md bg-warn/12 px-2 py-1.5 text-xs text-warn">{note}</p>}
+      {/* Always mounted, so a screen reader announces the note when its text appears. */}
+      <p role="status" className={cn("mx-1 text-xs text-warn", note && "rounded-md bg-warn/12 px-2 py-1.5")}>{note}</p>
       {body}
     </PopoverContent>
   </Popover>
