@@ -133,12 +133,22 @@ func (s *SQLWaitpointStore) checkHeldActionDecider(ctx context.Context, workspac
 	return fmt.Errorf("%w: a held routine action needs a workspace OWNER or ADMIN", ErrDeciderNotAllowed)
 }
 
-// HeldActionDeciderAllowed reports whether userID currently holds a role in
-// HeldActionDeciderRoles in the workspace. The dispatcher asks it again at
-// execution, so a decision by someone since demoted does not run.
-func HeldActionDeciderAllowed(ctx context.Context, db *sql.DB, workspaceID, userID string) (bool, error) {
+// HeldActionDeciderAllowed reports whether userID is currently a trusted,
+// unsuspended member of the workspace with a role in HeldActionDeciderRoles
+// (the same filter the chat decision path applies to its members). It is
+// asked inside the decision transaction (decideTxClock) and again by the
+// dispatcher at execution, so a decision by someone since demoted or
+// suspended does not run.
+func HeldActionDeciderAllowed(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, workspaceID, userID string) (bool, error) {
+	if userID == "" {
+		return false, nil
+	}
 	var role string
-	err := db.QueryRowContext(ctx, `SELECT role FROM workspace_members WHERE workspace_id = ? AND user_id = ?`, workspaceID, userID).Scan(&role)
+	err := q.QueryRowContext(ctx, `SELECT wm.role FROM workspace_members wm
+JOIN users u ON u.id = wm.user_id AND u.suspended_at IS NULL
+WHERE wm.workspace_id = ? AND wm.user_id = ? AND wm.access_mode = 'trusted'`, workspaceID, userID).Scan(&role)
 	if errors.Is(err, sql.ErrNoRows) {
 		return false, nil
 	}

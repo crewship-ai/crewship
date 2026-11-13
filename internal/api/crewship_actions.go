@@ -199,6 +199,7 @@ WHERE token = ? AND kind = 'approval' AND workspace_id = ? AND pipeline_run_id =
 	if status != "approved" {
 		return false, nil
 	}
+	// An erased decider (decided_by cleared) fails closed here.
 	// The decision door already requires an OWNER or ADMIN; ask again here,
 	// against the current role, so a decision recorded any other way (or by
 	// someone demoted since) does not execute.

@@ -53,6 +53,29 @@ func (s *SQLWaitpointStore) decideTxClock(ctx context.Context, tx DecisionDBTX, 
 	default:
 		return nil, ErrDeciderNotAllowed
 	}
+	// The held-action rule lives here, inside the decision transaction, so
+	// every door — Decide, CompleteApproval and a source adapter calling
+	// DecideTx (chat decision cards) — enforces it.
+	var stepID string
+	if err := tx.QueryRowContext(ctx, `SELECT step_id FROM pipeline_waitpoints WHERE workspace_id=? AND token=?`, workspaceID, token).Scan(&stepID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrAlreadyDecided
+		}
+		return nil, err
+	}
+	if IsCrewshipApprovalStepKey(stepID) {
+		allowed := false
+		if decider.Kind == DeciderUser {
+			ok, err := HeldActionDeciderAllowed(ctx, tx, workspaceID, decider.ID)
+			if err != nil {
+				return nil, err
+			}
+			allowed = ok
+		}
+		if !allowed {
+			return nil, fmt.Errorf("%w: a held routine action needs a workspace OWNER or ADMIN", ErrDeciderNotAllowed)
+		}
+	}
 	now := tsformat.Format(clock())
 	var formJSON, runID string
 	var expired bool

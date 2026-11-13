@@ -202,12 +202,16 @@ func TestCrewshipActions_ApprovalTokenIsBoundToRunAndStep(t *testing.T) {
 	if _, err := db.Exec(`CREATE TABLE pipeline_waitpoints (token TEXT PRIMARY KEY, workspace_id TEXT, pipeline_run_id TEXT, step_id TEXT, kind TEXT, status TEXT, decided_by_user_id TEXT)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workspace_members (workspace_id TEXT, user_id TEXT, role TEXT)`); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := db.Exec(`INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
- ('ws_real','u_admin','ADMIN'), ('ws_real','u_owner','OWNER'), ('ws_real','u_manager','MANAGER'), ('ws_real','u_member','MEMBER'), ('ws_other','u_elsewhere','ADMIN')`); err != nil {
-		t.Fatal(err)
+	for _, q := range []string{
+		`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, suspended_at TEXT)`,
+		`CREATE TABLE IF NOT EXISTS workspace_members (workspace_id TEXT, user_id TEXT, role TEXT, access_mode TEXT NOT NULL DEFAULT 'trusted')`,
+		`INSERT INTO users (id, suspended_at) VALUES ('u_admin',NULL),('u_owner',NULL),('u_manager',NULL),('u_member',NULL),('u_elsewhere',NULL),('u_suspended','2026-11-01T00:00:00Z')`,
+		`INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
+ ('ws_real','u_admin','ADMIN'), ('ws_real','u_owner','OWNER'), ('ws_real','u_manager','MANAGER'), ('ws_real','u_member','MEMBER'), ('ws_other','u_elsewhere','ADMIN'), ('ws_real','u_suspended','ADMIN')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// The approval is stored under the step plus the binding of the exact
 	// call it answers: operation key (run, foreach item, step), verb, args.
@@ -220,10 +224,11 @@ func TestCrewshipActions_ApprovalTokenIsBoundToRunAndStep(t *testing.T) {
  ('tok-member','ws_real','run-1',?,'approval','approved','u_member'),
  ('tok-external','ws_real','run-1',?,'approval','approved','external-callback'),
  ('tok-elsewhere','ws_real','run-1',?,'approval','approved','u_elsewhere'),
+ ('tok-suspended','ws_real','run-1',?,'approval','approved','u_suspended'),
  ('tok-pending','ws_real','run-1',?,'approval','pending',NULL),
  ('tok-denied','ws_real','run-1',?,'approval','denied','u_admin'),
  ('tok-timer','ws_real','run-1',?,'timer','approved','u_admin'),
- ('tok-bare-step','ws_real','run-1','create','approval','approved','u_admin')`, key, key, key, key, key, key, key, key, key); err != nil {
+ ('tok-bare-step','ws_real','run-1','create','approval','approved','u_admin')`, key, key, key, key, key, key, key, key, key, key); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
@@ -247,6 +252,7 @@ func TestCrewshipActions_ApprovalTokenIsBoundToRunAndStep(t *testing.T) {
 		{"approved by a MEMBER is not enough", "tok-member", "run-1", "create", "ws_real", "op-item-1", args, false, false},
 		{"approved through the public callback", "tok-external", "run-1", "create", "ws_real", "op-item-1", args, false, false},
 		{"approved by an admin of another workspace", "tok-elsewhere", "run-1", "create", "ws_real", "op-item-1", args, false, false},
+		{"approved by an admin suspended since", "tok-suspended", "run-1", "create", "ws_real", "op-item-1", args, false, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

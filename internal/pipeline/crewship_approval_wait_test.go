@@ -59,6 +59,7 @@ const crewshipApprovalDSL = `{"dsl_version":"1.0","name":"split","steps":[
 func runHeldCrewship(t *testing.T) (*Executor, *RunStore, *SQLWaitpointStore, *heldCrewshipActions, *RunResult, *sql.DB) {
 	t.Helper()
 	db := openResumeTestDB(t)
+	seedHeldActionMembers(t, db)
 	t.Cleanup(func() { db.Close() })
 	store := NewStore(db)
 	runStore := NewRunStore(db)
@@ -152,6 +153,7 @@ func TestCrewshipStep_DeniedApprovalFailsWithoutExecuting(t *testing.T) {
 // each gets its own card, and each executes once after its own approval.
 func TestCrewshipStep_ApprovalIsPerForeachItem(t *testing.T) {
 	db := openResumeTestDB(t)
+	seedHeldActionMembers(t, db)
 	t.Cleanup(func() { db.Close() })
 	store := NewStore(db)
 	runStore := NewRunStore(db)
@@ -345,6 +347,8 @@ func TestDecide_HeldActionNeedsOwnerOrAdmin(t *testing.T) {
 		{"owner approves a held action", held, WaitpointDecider{Kind: DeciderUser, ID: "u_owner"}, true},
 		{"manager cannot", held, WaitpointDecider{Kind: DeciderUser, ID: "u_manager"}, false},
 		{"admin of another workspace cannot", held, WaitpointDecider{Kind: DeciderUser, ID: "u_elsewhere"}, false},
+		{"suspended admin cannot", held, WaitpointDecider{Kind: DeciderUser, ID: "u_suspended"}, false},
+		{"restricted-access admin cannot", held, WaitpointDecider{Kind: DeciderUser, ID: "u_restricted"}, false},
 		{"public callback cannot", held, WaitpointDecider{Kind: DeciderExternal, ID: "external-callback"}, false},
 		{"wait step: manager still can", "gate", WaitpointDecider{Kind: DeciderUser, ID: "u_manager"}, true},
 		{"wait step: public callback still can", "gate", WaitpointDecider{Kind: DeciderExternal, ID: "external-callback"}, true},
@@ -353,13 +357,7 @@ func TestDecide_HeldActionNeedsOwnerOrAdmin(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			db := openTrustGateTestDB(t)
 			seedTrustRun(t, db, "run_d", "hashA", "strict")
-			if _, err := db.Exec(`CREATE TABLE IF NOT EXISTS workspace_members (workspace_id TEXT, user_id TEXT, role TEXT)`); err != nil {
-				t.Fatal(err)
-			}
-			if _, err := db.Exec(`INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
- ('ws_test','u_admin','ADMIN'), ('ws_test','u_owner','owner'), ('ws_test','u_manager','MANAGER'), ('ws_other','u_elsewhere','ADMIN')`); err != nil {
-				t.Fatal(err)
-			}
+			seedHeldActionMembers(t, db)
 			store := NewSQLWaitpointStore(db)
 			defer store.Close()
 			token, err := store.CreateApproval(ctx, WaitpointApprovalRequest{
@@ -375,6 +373,14 @@ func TestDecide_HeldActionNeedsOwnerOrAdmin(t *testing.T) {
 			}
 			err = store.Decide(ctx, "ws_test", token, true, tc.decider, "")
 			status, _, _ := waitpointRow(t, db, token)
+			if !tc.allowed && tc.decider.Kind == DeciderUser {
+				// The transactional door a source adapter (chat decision
+				// card) uses enforces the same rule.
+				if _, txErr := store.decideTxClock(ctx, db, "ws_test", token, true, tc.decider, "", time.Now); !errors.Is(txErr, ErrDeciderNotAllowed) {
+					t.Fatalf("DecideTx err=%v, want ErrDeciderNotAllowed", txErr)
+				}
+				status, _, _ = waitpointRow(t, db, token)
+			}
 			if tc.allowed {
 				if err != nil || status != "approved" {
 					t.Fatalf("err=%v status=%q, want approved", err, status)
@@ -385,5 +391,23 @@ func TestDecide_HeldActionNeedsOwnerOrAdmin(t *testing.T) {
 				t.Fatalf("err=%v status=%q, want ErrDeciderNotAllowed and still pending", err, status)
 			}
 		})
+	}
+}
+
+// seedHeldActionMembers creates the member rows the held-action rule reads,
+// with the real filter columns (users.suspended_at, access_mode).
+func seedHeldActionMembers(t *testing.T, db *sql.DB) {
+	t.Helper()
+	for _, q := range []string{
+		`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, suspended_at TEXT)`,
+		`CREATE TABLE IF NOT EXISTS workspace_members (workspace_id TEXT, user_id TEXT, role TEXT, access_mode TEXT NOT NULL DEFAULT 'trusted')`,
+		`INSERT INTO users (id, suspended_at) VALUES ('u_admin',NULL),('u_owner',NULL),('u_manager',NULL),('u_elsewhere',NULL),('u_suspended','2026-11-01T00:00:00Z'),('u_restricted',NULL)`,
+		`INSERT INTO workspace_members (workspace_id, user_id, role, access_mode) VALUES
+ ('ws_test','u_admin','ADMIN','trusted'), ('ws_test','u_owner','owner','trusted'), ('ws_test','u_manager','MANAGER','trusted'),
+ ('ws_other','u_elsewhere','ADMIN','trusted'), ('ws_test','u_suspended','ADMIN','trusted'), ('ws_test','u_restricted','ADMIN','restricted')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
