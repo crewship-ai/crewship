@@ -323,6 +323,7 @@ type Bridge struct {
 	pageContextResolver           PageChatContextResolver
 	documentIterationRecorder     DocumentIterationRecorder
 	artifactProjectIntentRecorder ArtifactProjectIntentRecorder
+	artifactRefRecorder           ArtifactRefRecorder
 }
 
 // SetPageChatContextResolver enables server-verified Page references in chat.
@@ -563,6 +564,33 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		streamFn(ws.ChatEvent{Type: "error", Content: "Page context is invalid"})
 		return pageErr
 	}
+	// Structured artifact references (#5317). With no recorder or the
+	// workspace flag off the key is ignored, exactly as before the flag.
+	var artifactRefs []string
+	var hasArtifactRefs bool
+	var refsErr error
+	if _, present := msgOpt.Metadata[ArtifactRefsMetadataKey]; present && b.artifactRefRecorder != nil {
+		enabled, err := b.artifactRefRecorder.ArtifactRefsEnabled(ctx, info.WorkspaceID)
+		if err != nil {
+			streamFn(ws.ChatEvent{Type: "error", Content: "failed to resolve chat"})
+			return fmt.Errorf("artifact references flag: %w", err)
+		}
+		if enabled {
+			artifactRefs, hasArtifactRefs, refsErr = requestedArtifactRefs(msgOpt.Metadata)
+		}
+	}
+	// A page_context turn, or an origin run (its admission carries no
+	// trigger message), would never bind them: refuse instead of dropping.
+	if refsErr == nil && hasArtifactRefs && (hasPage || runauthority.OriginIDFromContext(ctx) != "") {
+		refsErr = ErrArtifactRefUnavailable
+	}
+	if refsErr == nil && hasArtifactRefs {
+		refsErr = b.artifactRefRecorder.CheckArtifactRefs(ctx, info.HumanAuthority, artifactRefs)
+	}
+	if refsErr != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: "An attached artifact is not available"})
+		return ErrArtifactRefUnavailable
+	}
 	triggerMessageID := generateMsgID()
 	if msgOpt.HumanResume && msgOpt.OriginalTriggerMessageID != "" {
 		triggerMessageID = msgOpt.OriginalTriggerMessageID
@@ -582,6 +610,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return errors.New("Document iteration is unavailable")
 	}
 	msgOpt.DocumentIterationIntent = documentIteration
+	if hasArtifactRefs && (documentCreation != nil || documentIteration != nil) {
+		// Document runs have their own admission and would not bind the
+		// references; refuse rather than drop them silently.
+		streamFn(ws.ChatEvent{Type: "error", Content: "An attached artifact is not available"})
+		return ErrArtifactRefUnavailable
+	}
 	artifactProject, err := artifactProjectForSend(b.cfg.ArtifactProjectsEnabled, msgOpt, info, userID, chatID, hasPage, documentCreation != nil || documentIteration != nil)
 	if err != nil {
 		return err
@@ -594,6 +628,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 	instructionOnly, err := nativeCraftInstruction(msgOpt.Metadata)
 	if err == nil && instructionOnly && (hasPage || askEnvelope != nil || documentCreation != nil || documentIteration != nil || artifactProject != nil) {
 		err = errNativeCraftInstruction
+	}
+	if err == nil && instructionOnly && hasArtifactRefs {
+		// An instruction starts no run, so references would bind to nothing.
+		streamFn(ws.ChatEvent{Type: "error", Content: "An attached artifact is not available"})
+		return ErrArtifactRefUnavailable
 	}
 	if err != nil {
 		streamFn(ws.ChatEvent{Type: "error", Content: "Native Craft instruction is invalid"})
@@ -713,6 +752,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		if err := b.convStore.SyncSession(ctx, chatID); err != nil {
 			return err
+		}
+		if hasArtifactRefs {
+			if err := b.artifactRefRecorder.RecordArtifactRefs(ctx, info.HumanAuthority, triggerMessageID, artifactRefs); err != nil {
+				return ErrArtifactRefUnavailable
+			}
 		}
 		if artifactProject != nil {
 			return b.artifactProjectIntentRecorder.RecordArtifactProjectIntent(ctx, info.HumanAuthority, triggerMessageID, *artifactProject)

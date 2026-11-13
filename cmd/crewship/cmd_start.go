@@ -522,6 +522,7 @@ var startCmd = &cobra.Command{
 			bridge.SetPageChatContextResolver(apiRouter.Pages())
 			bridge.SetDocumentIterationRecorder(apiRouter.Pages())
 			bridge.SetArtifactProjectIntentRecorder(apiRouter.Pages())
+			bridge.SetArtifactRefRecorder(apiRouter.Pages())
 		}
 
 		// Wire mid-turn steering: the API's POST /chats/{id}/steer route

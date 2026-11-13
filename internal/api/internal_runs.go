@@ -256,6 +256,16 @@ func (h *InternalHandler) CreateRun(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
+		} else if admitted, status, err := h.admitArtifactRefsRun(r, entry, body.TriggerType, body.ChatOriginID, body.HumanAuthority, body.WorkspaceID, body.TriggerMessageID); err != nil {
+			if status == http.StatusInternalServerError {
+				replyInternalError(w, h.logger, "create run: artifact reference admission", err)
+			} else {
+				replyError(w, status, "artifact reference admission refused")
+			}
+			return
+		} else if admitted {
+			// A human message with structured artifact references admitted its
+			// run scope through the host's human receipt (#5317).
 		} else {
 			matched, err := h.matchRunStart(r.Context(), entry)
 			if err != nil {

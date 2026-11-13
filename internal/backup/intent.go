@@ -51,6 +51,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"artifact_project_origins":         IntentInclude,
 	"artifact_project_run_consents":    IntentExcludeRuntime,
 	"artifact_project_message_intents": IntentExcludeRuntime,
+	"artifact_message_refs":            IntentExcludeRuntime, // checked chat references must be re-admitted after restore, never replayed
 
 	"artifact_version_heads": IntentInclude, // immutable storage family and separate latest/shared pins
 	"artifact_version_blobs": IntentInclude, // binary project assets, encoded losslessly
@@ -119,6 +120,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"workspace_artifact_creation_policy":    IntentInclude,
 	"workspace_artifact_creation_crews":     IntentInclude,
 	"artifact_run_principals":               IntentExcludeRuntime, // active chat/run admission must be freshly captured after restore
+	"artifact_run_scope":                    IntentExcludeRuntime, // a run's bound references belong to its live admission
 	"restricted_workflow_recipe_bindings":   IntentExcludeRuntime, // frozen private recipe authority requires fresh admission after restore
 	"restricted_workflow_provider_policies": IntentExcludeRuntime, // immutable provider policies belong to private queued authority
 	"restricted_workflow_delegate_slots":    IntentExcludeRuntime, // active host delegation slots cannot survive restore
