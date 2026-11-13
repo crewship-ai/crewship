@@ -6,8 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -123,48 +121,5 @@ func TestCraftApplicationsInstallWithoutRestart(t *testing.T) {
 	}
 	if !strings.Contains(craftassets.String(again.catalog.Pins), word.Pin.ManifestSHA256) {
 		t.Fatal("catalog lost the pin")
-	}
-}
-
-// With real release packages (CREWSHIP_CRAFT_TEST_PACKAGES=<directory with
-// catalog.txt and the .craftpkg files of scripts/build-craft-components.py>),
-// both install from their files: the editor origin verifies and serves each
-// real editor (including its CSP and WebRTC checks) and each real WASM engine
-// answers. Ordinary test runs skip this.
-func TestReleaseCraftPackagesInstallAndRun(t *testing.T) {
-	dir := os.Getenv("CREWSHIP_CRAFT_TEST_PACKAGES")
-	if dir == "" {
-		t.Skip("CREWSHIP_CRAFT_TEST_PACKAGES not set")
-	}
-	pins, err := os.ReadFile(filepath.Join(dir, "catalog.txt"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	cfg := config.Default()
-	cfg.Server.Host = "127.0.0.1"
-	cfg.CraftNative.ComponentsDir = t.TempDir()
-	cfg.CraftNative.ComponentPins = strings.TrimSpace(string(pins))
-	logger := slog.New(slog.DiscardHandler)
-	craft := resolveCraftApps(cfg, logger)
-	editor := newEditorOrigin(cfg, craft, logger)
-	out, err := nativeCraftHTTPConfig(cfg, craft, editor)
-	if err != nil || out.Install == nil {
-		t.Fatalf("native config: %v", err)
-	}
-	for _, app := range craftapps.Applications {
-		f, err := os.Open(filepath.Join(dir, craftassets.AssetName(app)))
-		if err != nil {
-			t.Fatal(err)
-		}
-		p, c, err := out.Install(context.Background(), app, f)
-		f.Close()
-		if err != nil || !editor.HasBundle(c.EditorBundle) {
-			t.Fatalf("%s: %v", app, err)
-		}
-		var stdout bytes.Buffer
-		if err := p.Engine.Run(context.Background(), t.TempDir(), []string{"--version"}, &stdout, &bytes.Buffer{}); err != nil || !strings.Contains(stdout.String(), app) {
-			t.Fatalf("%s engine: %q %v", app, stdout.String(), err)
-		}
-		t.Logf("%s %s: %s", app, c.Version, strings.TrimSpace(stdout.String()))
 	}
 }

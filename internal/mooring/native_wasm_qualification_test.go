@@ -1,3 +1,5 @@
+//go:build craftqualification
+
 package mooring
 
 import (
@@ -12,11 +14,11 @@ import (
 // the same validator the store uses. It is opt-in, because ordinary builds do
 // not carry the module:
 //
-//	CRAFT_WASM_QUALIFICATION_APP=wordcraft CRAFT_WASM_QUALIFICATION_MODULE=/abs/wordcraft-cli.wasm go test ./internal/mooring -run WASMEngineQualification
+//	CRAFT_WASM_QUALIFICATION_APP=wordcraft CRAFT_WASM_QUALIFICATION_MODULE=/abs/wordcraft-cli.wasm go test -tags craftqualification ./internal/mooring -run WASMEngineQualification
 func TestNativeWASMEngineQualification(t *testing.T) {
 	app, path := os.Getenv("CRAFT_WASM_QUALIFICATION_APP"), os.Getenv("CRAFT_WASM_QUALIFICATION_MODULE")
 	if path == "" {
-		t.Skip("set CRAFT_WASM_QUALIFICATION_MODULE to qualify a bundled engine")
+		t.Fatal("set CRAFT_WASM_QUALIFICATION_MODULE to qualify a bundled engine")
 	}
 	module, err := os.ReadFile(path)
 	if err != nil {

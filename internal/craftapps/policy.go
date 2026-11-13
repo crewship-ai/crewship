@@ -23,6 +23,8 @@ import (
 	"errors"
 	"fmt"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // Subjects of the policy.
@@ -173,7 +175,8 @@ func (p *Policy) now() time.Time {
 	return time.Now().UTC()
 }
 
-const timeLayout = time.RFC3339Nano
+// Fixed-width, so stored timestamps also order correctly as text.
+const timeLayout = tsformat.Layout
 
 // Get returns one subject's setting.
 func (p *Policy) Get(ctx context.Context, q Querier, subject string) (Setting, error) {

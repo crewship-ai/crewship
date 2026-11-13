@@ -19,7 +19,8 @@ func craftNativeProfileFixture(t *testing.T) CraftNativeDocumentProfile {
 	return CraftNativeDocumentProfile{Application: "wordcraft", EngineRevision: strings.Repeat("a", 40), CLIPath: binary, CLISHA256: fmt.Sprintf("%x", sha256.Sum256(raw)), EditorBundle: strings.Repeat("c", 64), EditorURL: "/_editor/b/" + strings.Repeat("c", 64) + "/index.html"}
 }
 func TestCraftNativeDocumentProfileOptionCapturesImmutableMap(t *testing.T) {
-	original := craftNativeProfileFixture(t)
+	// A WASM engine, so this runs on every platform.
+	original := testCraftProfile(t, "wordcraft", false)
 	input := map[string]CraftNativeDocumentProfile{"wordcraft": original}
 	option := WithCraftNativeHTTP(CraftNativeHTTPConfig{Enabled: true, Profiles: input})
 	input["wordcraft"] = CraftNativeDocumentProfile{Application: "gridcraft"}
@@ -32,7 +33,7 @@ func TestCraftNativeDocumentProfileOptionCapturesImmutableMap(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if profiles["wordcraft"].Store.Validate == nil || profiles["wordcraft"].Store.EngineSHA256 != original.CLISHA256 {
+	if profiles["wordcraft"].Store.Validate == nil || profiles["wordcraft"].Store.EngineSHA256 != original.Engine.SHA256() {
 		t.Fatal("profile has no pinned production validator")
 	}
 }
