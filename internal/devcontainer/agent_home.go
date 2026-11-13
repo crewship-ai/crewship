@@ -60,8 +60,33 @@ const AgentBinDir = "/opt/crewship/bin"
 // Runs as root, right after feature installation and before mise / lifecycle
 // hooks. Recursive, but both paths hold only dotfiles at this point in the
 // build, so the cost is negligible. Idempotent.
+// ensureAgentAccountScript gives the runtime UID 1001 a passwd and group
+// entry when the image has none. Every lifecycle hook and every agent run
+// executes as the raw numeric user "1001:1001"; the entry used to exist only
+// when the common-utils feature ran with uid=1001. A crew that declared
+// common-utils with its default `username: automatic` (which reuses the base
+// image's UID 1000 user), or whose image never ran it, got a process with no
+// account: `sudo` reports "you do not exist in the passwd database" and the
+// OpenSSH client refuses to start ("No user exists for uid 1001").
+//
+// It only appends, never rewrites: an existing 1001 entry (whatever its
+// name) is left alone, and the name falls back to crewship-agent if
+// "agent" already belongs to a different UID. No sudoers entry is written —
+// the runtime container runs with no-new-privileges and all capabilities
+// dropped, so root-requiring setup belongs in a feature (which installs as
+// root), not in a postCreateCommand that calls sudo.
+const ensureAgentAccountScript = `uid_taken() { awk -F: -v id="$2" '$3 == id { f = 1 } END { exit !f }' "$1"; } && ` +
+	`name_taken() { awk -F: -v n="$2" '$1 == n { f = 1 } END { exit !f }' "$1"; } && ` +
+	`if ! uid_taken /etc/passwd 1001; then ` +
+	`n=agent; if name_taken /etc/passwd agent; then n=crewship-agent; fi; ` +
+	`if ! uid_taken /etc/group 1001; then g=$n; if name_taken /etc/group "$g"; then g=crewship-agent; fi; echo "$g:x:1001:" >> /etc/group; fi; ` +
+	`sh=/bin/sh; [ -x /bin/bash ] && sh=/bin/bash; ` +
+	`echo "$n:x:1001:1001:Crewship agent:/home/agent:$sh" >> /etc/passwd; fi`
+
 func EnsureAgentHomeOwnership(ctx context.Context, containerID string, exec ExecFunc) error {
 	var b strings.Builder
+	b.WriteString(ensureAgentAccountScript)
+	b.WriteString(" && ")
 	for i, dir := range []string{agentHome, crewToolsDir, AgentBinDir} {
 		if i > 0 {
 			b.WriteString(" && ")

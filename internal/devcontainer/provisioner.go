@@ -499,24 +499,30 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		if !dockerutil.IsLocalImageID(inspected.ID) {
 			return fail(ProvStepStart, fmt.Errorf("cached artifact has no valid immutable image identity"))
 		}
-		p.logger.Info("using cached image", "tag", tag)
-		if o.onProgress != nil {
-			o.onProgress(1, 1, "Using cached image")
+		if p.cachedImageLacksAgentAccount(ctx, inspected.ID) {
+			// Built before the agent account was ensured: rebuild once (the
+			// feature layers stay cached), after which every hit is fast.
+			p.logger.Warn("cached image has no passwd entry for the agent UID; rebuilding it once", "tag", tag)
+		} else {
+			p.logger.Info("using cached image", "tag", tag)
+			if o.onProgress != nil {
+				o.onProgress(1, 1, "Using cached image")
+			}
+			// Even a no-build provision is audited: cache_hit → ready.
+			emitEvt(ProvisionEvent{Step: ProvStepCacheHit, Status: ProvStatusCompleted, Tag: tag})
+			// The requirements are part of the result even when the image is
+			// reused: the caller stores them as the crew's runtime contract, and
+			// an empty set here used to be written back as NULL — a cache hit
+			// silently dropped the privileged flag, the mounts, the env and the
+			// verified adapter CLIs of the build before it.
+			req, feats, err := p.cacheHitRequirements(ctx, cfg, o)
+			if err != nil {
+				return fail(ProvStepResolveFeatures, err)
+			}
+			req.Toolchain = p.inspectToolchain(ctx, inspected.ID, o.requiredBinaries)
+			emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
+			return &ProvisionResult{CachedImage: inspected.ID, ConfigHash: hash, Requirements: req, Features: feats}, nil
 		}
-		// Even a no-build provision is audited: cache_hit → ready.
-		emitEvt(ProvisionEvent{Step: ProvStepCacheHit, Status: ProvStatusCompleted, Tag: tag})
-		// The requirements are part of the result even when the image is
-		// reused: the caller stores them as the crew's runtime contract, and
-		// an empty set here used to be written back as NULL — a cache hit
-		// silently dropped the privileged flag, the mounts, the env and the
-		// verified adapter CLIs of the build before it.
-		req, feats, err := p.cacheHitRequirements(ctx, cfg, o)
-		if err != nil {
-			return fail(ProvStepResolveFeatures, err)
-		}
-		req.Toolchain = p.inspectToolchain(ctx, inspected.ID, o.requiredBinaries)
-		emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Tag: tag, DurationMs: elapsedMs(runStart)})
-		return &ProvisionResult{CachedImage: inspected.ID, ConfigHash: hash, Requirements: req, Features: feats}, nil
 	}
 
 	// Skip provisioning if no features, no postCreateCommand, no containerEnv, and no mise config.
