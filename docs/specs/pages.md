@@ -293,11 +293,14 @@ architecture and reuses two systems that already exist here.
 ## 7. Permission model
 
 Private chat artifacts are an explicit exception to the ordinary Page role and
-grant paths described below. Their persisted private audience permits only the
-human custodian and workspace OWNER; ADMIN has no automatic access. Unauthorized
-reads return 404 and catalogs omit the name and entry. OWNER opening another
-human's private output writes a content-free audit before metadata or content is
-released; unavailable audit storage refuses that access. Ordinary grants,
+grant paths described below. Their custody (write, administration) belongs only
+to the human custodian and the workspace OWNER. Their read audience is the
+custodian plus workspace OWNERs and ADMINs (owner decision 2026-10-30): an
+ADMIN's read is read-only and never becomes write, share, publish or custody
+power. Unauthorized reads return 404 and catalogs omit the name and entry. An
+OWNER or ADMIN opening another human's private output writes a content-free
+audit before metadata or content is released; unavailable audit storage refuses
+that access. Neither role's reach passes to an agent (§7.1c). Ordinary grants,
 folders and legacy public links cannot silently publish a private artifact. Private grant administration and production are also limited to the custodian and workspace OWNER; an ADMIN role or a legacy producer grant does not widen those controls.
 The only explicit publication path is the experimental workbook share
 (`docs/cli/workbook.mdx`). The owner confirms it, it is audited and one-way, and
@@ -346,6 +349,37 @@ these metadata consumers.
 The requirement: creator owns the page; a page created by an agent is owned by the human who
 authorised the agent; crew members inherit visibility of their crew's panels; the owner can grant
 read and write to others.
+
+### 7.1c Agent access modes — what a chat run may reach (#5317)
+
+Behind the workspace flag `artifact_agent_access_modes` (off by default; off
+changes nothing). Decided by the owner on 2026-11-13.
+
+1. **A reference is a structured chip, never text.** A chat message carries
+   `metadata.artifact_refs: [{"page_id": "<id>"}]`, 1–10 entries, filled from
+   the composer's attachment chips. Names, links or ids written in the message
+   body are never references.
+2. **The server resolves references when the message is sent, as the human
+   would be as an ordinary member.** Before the message is stored it checks
+   each reference against the sending human with their workspace role read as
+   MEMBER (never above their own role): reach that comes only from the ADMIN or
+   OWNER role does not pass to an agent, for reads or for writes. A reference
+   that is missing, unreadable, in another workspace or malformed is refused
+   with one identical error, so a refusal never reveals that something exists.
+   References are admitted only in the human's own private chat with the agent.
+3. **Only the trusted human admission writes the run scope.** After the message
+   is stored, the references are recorded (`artifact_message_refs`), and the
+   run's admission copies them into `artifact_run_scope` in the transaction
+   that captures the run principal. A database trigger refuses any scope row
+   that does not mirror its own principal message's references; an internal
+   token or an agent can neither record a reference nor widen a scope.
+4. **A follow-up message carries its own references.** An attached artifact is
+   not in reach of the next run unless that message attaches it again (the
+   composer keeps chips sticky and the server re-checks them every time).
+
+Read and write enforcement inside the run, artifacts created in the chat, the
+folder subject for a crew's agents and the audit with the human follow in later
+steps of #5317; until then a run scope grants nothing on its own.
 
 ### 7.1 The rules
 

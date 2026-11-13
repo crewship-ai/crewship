@@ -323,6 +323,7 @@ type Bridge struct {
 	pageContextResolver           PageChatContextResolver
 	documentIterationRecorder     DocumentIterationRecorder
 	artifactProjectIntentRecorder ArtifactProjectIntentRecorder
+	artifactRefRecorder           ArtifactRefRecorder
 }
 
 // SetPageChatContextResolver enables server-verified Page references in chat.
@@ -563,6 +564,17 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		streamFn(ws.ChatEvent{Type: "error", Content: "Page context is invalid"})
 		return pageErr
 	}
+	artifactRefs, hasArtifactRefs, refsErr := requestedArtifactRefs(msgOpt.Metadata)
+	if refsErr == nil && hasArtifactRefs && (hasPage || b.artifactRefRecorder == nil) {
+		refsErr = ErrArtifactRefUnavailable
+	}
+	if refsErr == nil && hasArtifactRefs {
+		refsErr = b.artifactRefRecorder.CheckArtifactRefs(ctx, info.HumanAuthority, artifactRefs)
+	}
+	if refsErr != nil {
+		streamFn(ws.ChatEvent{Type: "error", Content: "An attached artifact is not available"})
+		return ErrArtifactRefUnavailable
+	}
 	triggerMessageID := generateMsgID()
 	if msgOpt.HumanResume && msgOpt.OriginalTriggerMessageID != "" {
 		triggerMessageID = msgOpt.OriginalTriggerMessageID
@@ -582,6 +594,12 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		return errors.New("Document iteration is unavailable")
 	}
 	msgOpt.DocumentIterationIntent = documentIteration
+	if hasArtifactRefs && (documentCreation != nil || documentIteration != nil) {
+		// Document runs have their own admission and would not bind the
+		// references; refuse rather than drop them silently.
+		streamFn(ws.ChatEvent{Type: "error", Content: "An attached artifact is not available"})
+		return ErrArtifactRefUnavailable
+	}
 	artifactProject, err := artifactProjectForSend(b.cfg.ArtifactProjectsEnabled, msgOpt, info, userID, chatID, hasPage, documentCreation != nil || documentIteration != nil)
 	if err != nil {
 		return err
@@ -713,6 +731,11 @@ func (b *Bridge) HandleChatMessage(ctx context.Context, userID, chatID, content 
 		}
 		if err := b.convStore.SyncSession(ctx, chatID); err != nil {
 			return err
+		}
+		if hasArtifactRefs {
+			if err := b.artifactRefRecorder.RecordArtifactRefs(ctx, info.HumanAuthority, triggerMessageID, artifactRefs); err != nil {
+				return ErrArtifactRefUnavailable
+			}
 		}
 		if artifactProject != nil {
 			return b.artifactProjectIntentRecorder.RecordArtifactProjectIntent(ctx, info.HumanAuthority, triggerMessageID, *artifactProject)

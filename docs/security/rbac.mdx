@@ -210,6 +210,26 @@ The system prompt for each role reflects this equality:
 **LEAD:**
 > You are a crew member with orchestration responsibility. You are not a boss -- you are an equal colleague who carries the soul and mission of the expedition to the whole team.
 
+## Agent access to artifacts from chat
+
+Behind the workspace feature flag `artifact_agent_access_modes`, off by
+default (`crewship feature-flag` turns it on per workspace).
+
+- An agent reaches an artifact from a chat run only through a **structured
+  reference** the human attached to the message (a composer chip, resolved by
+  the server when the message is sent), never through text the model reads.
+- The server checks each reference against the human **as an ordinary
+  member**. Access the human holds only through the ADMIN or OWNER role is
+  never delegated.
+- A refused reference gets one error whether the artifact is missing,
+  unreadable or in another workspace.
+- Only the human message admission records references and binds them to the
+  run; a database trigger refuses any other run scope row. Agents and internal
+  tokens cannot widen it.
+- References are accepted only in the human's own private chat with the agent.
+
+Specification: `docs/specs/pages.md` §7.1c.
+
 ## Internal API Authentication
 
 The internal API (sidecar-to-crewshipd communication) uses token-based authentication:

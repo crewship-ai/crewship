@@ -10,6 +10,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/chataudience"
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
@@ -184,6 +185,15 @@ func (h *InternalHandler) admitArtifactProjectStart(r *http.Request, entry journ
 	a := &artifactRunAuthority{RunID: entry.TraceID, WorkspaceID: entry.WorkspaceID, AgentID: entry.AgentID, CrewID: entry.CrewID, HumanUserID: receipt.UserID, ChatID: receipt.ChatID, MessageID: message}
 	if err = pages.checkOriginalUserArtifactRunPrincipal(ctx, a); err != nil {
 		return 403, err
+	}
+	// With agent access modes on, the message's structured references
+	// become this run's scope in the same transaction (#5317).
+	if enabled, e := featureflags.IsEnabledWith(ctx, tx, receipt.WorkspaceID, ArtifactAgentAccessModesFlag); e != nil {
+		return 500, e
+	} else if enabled {
+		if _, e := bindArtifactRunScopeTx(ctx, tx, entry.TraceID, entry.WorkspaceID, message, receipt.UserID); e != nil {
+			return 403, e
+		}
 	}
 	var expiry string
 	if err = tx.QueryRowContext(ctx, `SELECT expires_at FROM artifact_run_principals WHERE run_id=?`, entry.TraceID).Scan(&expiry); err != nil {
