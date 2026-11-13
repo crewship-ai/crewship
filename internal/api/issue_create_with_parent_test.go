@@ -79,6 +79,27 @@ func TestInternalIssueCreate_WithParent_Refusals(t *testing.T) {
 			seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, "PAR-4", "DONE")
 			return "PAR-4"
 		}, http.StatusConflict, "reopen it"},
+		{"parent in review", func(t *testing.T, f chatIssueFixture) string {
+			seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, "PAR-5", "REVIEW")
+			return "PAR-5"
+		}, http.StatusConflict, "reopen it"},
+		{"non-issue mission is indistinguishable from unknown", func(t *testing.T, f chatIssueFixture) string {
+			seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, "PAR-6", "BACKLOG")
+			execOrFatal(t, f.h.db, `UPDATE missions SET mission_type = 'orchestration' WHERE identifier = 'PAR-6'`)
+			return "PAR-6"
+		}, http.StatusNotFound, "not found"},
+		{"one-way connection from the parent's crew only", func(t *testing.T, f chatIssueFixture) string {
+			execOrFatal(t, f.h.db, `INSERT INTO crews (id, workspace_id, name, slug, issue_prefix) VALUES ('crew-up', ?, 'Up', 'up', 'UPC')`, f.workspace)
+			execOrFatal(t, f.h.db, `INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status) VALUES ('cc-rev', ?, 'crew-up', ?, 'unidirectional', 'active')`, f.workspace, f.crew)
+			seedIssue(t, f.h.db, f.workspace, "crew-up", f.agent, "UPC-1", "BACKLOG")
+			return "UPC-1"
+		}, http.StatusForbidden, "not connected"},
+		{"inactive connection", func(t *testing.T, f chatIssueFixture) string {
+			execOrFatal(t, f.h.db, `INSERT INTO crews (id, workspace_id, name, slug, issue_prefix) VALUES ('crew-off', ?, 'Off', 'off', 'OFF')`, f.workspace)
+			execOrFatal(t, f.h.db, `INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status) VALUES ('cc-off', ?, ?, 'crew-off', 'bidirectional', 'inactive')`, f.workspace, f.crew)
+			seedIssue(t, f.h.db, f.workspace, "crew-off", f.agent, "OFF-1", "BACKLOG")
+			return "OFF-1"
+		}, http.StatusForbidden, "not connected"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -113,6 +134,22 @@ func TestInternalIssueCreate_WithParent_ConnectedCrew(t *testing.T) {
 
 	execOrFatal(t, f.h.db, `INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status) VALUES ('cc1', ?, ?, 'crew-devops', 'unidirectional', 'active')`, f.workspace, f.crew)
 	body["operation_key"] = "connected-2"
+	created := chatIssueJSON(t, chatIssueCall(t, f.h.Create, "POST", "", body), http.StatusCreated)
+	if got := parentLookup(t, f, created["identifier"].(string)); got != parentID {
+		t.Fatalf("parent = %q, want %q", got, parentID)
+	}
+}
+
+// A bidirectional connection counts in either direction: the parent's crew
+// opened it, the child's crew may attach work under the parent.
+func TestInternalIssueCreate_WithParent_ReverseBidirectionalConnection(t *testing.T) {
+	f := newChatIssueFixture(t)
+	execOrFatal(t, f.h.db, `INSERT INTO crews (id, workspace_id, name, slug, issue_prefix) VALUES ('crew-ops', ?, 'Ops', 'ops', 'OPS')`, f.workspace)
+	parentID := seedIssue(t, f.h.db, f.workspace, "crew-ops", f.agent, "OPS-3", "BACKLOG")
+	execOrFatal(t, f.h.db, `INSERT INTO crew_connections (id, workspace_id, from_crew_id, to_crew_id, direction, status) VALUES ('cc-bi', ?, 'crew-ops', ?, 'bidirectional', 'active')`, f.workspace, f.crew)
+
+	body := f.createBody("reverse-bi", "Child under a two-way connected crew's issue")
+	body["parent_identifier"] = "OPS-3"
 	created := chatIssueJSON(t, chatIssueCall(t, f.h.Create, "POST", "", body), http.StatusCreated)
 	if got := parentLookup(t, f, created["identifier"].(string)); got != parentID {
 		t.Fatalf("parent = %q, want %q", got, parentID)

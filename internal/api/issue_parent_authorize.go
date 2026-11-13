@@ -38,7 +38,8 @@ func (e *issueParentError) Error() string { return e.msg }
 //     under an issue is a structural edit of it, the same verb the public
 //     route requires.
 //
-// A closed (terminal) parent is a 409.
+// A closed (terminal) or in-REVIEW parent is a 409, checked after the
+// requester's right to update so the status is not revealed first.
 //
 // A foreign-workspace, unknown or non-issue identifier is a plain 404, not a
 // distinguishable refusal (no existence oracle).
@@ -69,13 +70,6 @@ func authorizeIssueParent(ctx context.Context, tx *sql.Tx, op *chatIssueOperatio
 				"parent issue " + parentIdentifier + " belongs to a crew this crew is not connected to"}
 		}
 	}
-	// A closed parent with a new open child is the state the terminal-
-	// children rule refuses elsewhere; splitting work under it is a mistake
-	// the caller should see, not a silent reopening hazard.
-	if terminalIssueStatuses[parentStatus] {
-		return "", &issueParentError{http.StatusConflict,
-			"parent issue " + parentIdentifier + " is " + parentStatus + "; reopen it before attaching new work"}
-	}
 	if op != nil && op.authority.HumanAuthority != nil {
 		allowed, err := issueRequesterAllowed(ctx, tx, op.authority.HumanAuthority.UserID, workspaceID, "updated")
 		if err != nil {
@@ -85,6 +79,14 @@ func authorizeIssueParent(ctx context.Context, tx *sql.Tx, op *chatIssueOperatio
 			return "", &issueParentError{http.StatusForbidden,
 				"the requesting person may not update issues, so work cannot be attached under " + parentIdentifier}
 		}
+	}
+	// A parent in DONE/REVIEW (or otherwise closed) with a new open child is
+	// exactly the state the terminal-children rule refuses on a status
+	// change (isTerminalIssueTarget); splitting work under it is a mistake the
+	// caller should see, not a silent reopening hazard.
+	if terminalIssueStatuses[parentStatus] || isTerminalIssueTarget(parentStatus) {
+		return "", &issueParentError{http.StatusConflict,
+			"parent issue " + parentIdentifier + " is " + parentStatus + "; reopen it before attaching new work"}
 	}
 	return parentID, nil
 }
