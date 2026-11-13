@@ -233,4 +233,14 @@ func TestInternalIssueCreate_WithParent_RequesterWithoutUpdate(t *testing.T) {
 		t.Fatalf("status = %d body %s, want 403 from the parent gate", rr.Code, rr.Body.String())
 	}
 	chatIssueCount(t, f, "missions", 2) // PAR-3 + the plain issue
+
+	// The requester check runs before the status check: a closed parent
+	// answers the same 403, never a 409 that would reveal its status.
+	seedIssue(t, h.db, workspace, crew, agent, "PAR-8", "DONE")
+	body = f.createBody("with-closed-parent", "Refused")
+	body["parent_identifier"] = "PAR-8"
+	rr = chatIssueCall(t, h.Create, "POST", "", body)
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "may not update issues") {
+		t.Fatalf("closed parent: status = %d body %s, want 403 before the status is revealed", rr.Code, rr.Body.String())
+	}
 }
