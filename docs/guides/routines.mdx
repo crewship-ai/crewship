@@ -1355,7 +1355,7 @@ out of it — `transform` with `.identifier` gives you the new issue's key.
 
 | verb | does | required `args` | policy action |
 | --- | --- | --- | --- |
-| `issue.create` | Creates an issue in the routine's author crew | `title` | `mission_create` |
+| `issue.create` | Creates an issue in the routine's author crew; with `parent_identifier` it is created as a sub-issue in the same call | `title` | `mission_create` |
 | `issue.update` | Changes an issue's status, priority, assignee, labels or due date | `identifier` | `issue_write` |
 | `issue.comment` | Comments on an issue | `identifier`, `body` | `issue_write` |
 | `issue.link` | Relates two issues | `identifier`, `target_identifier`, `relation_type` | `issue_write` |
@@ -1376,7 +1376,13 @@ unattended run a hold is a refusal. That is deliberate. An unwritten panel goes
 Raise it with `crewship policy set` if a crew should push unattended.
 
 `relation_type` is one of `blocks`, `blocked_by`, `relates_to`, `duplicate_of`,
-`sub_issue_of`. A missing required arg is a **save-time** error, not a 400 at
+`sub_issue_of`. To split work into sub-issues, prefer `issue.create` with
+`parent_identifier`: the child is created already attached, in one transaction,
+and it works on runs that carry a person's authority, where a separate
+`issue.link` is refused with `chat_issue_action_not_supported`. The parent must
+be an issue of the author crew or of a crew it is connected to; under a
+person's authority that person must be allowed to update issues. A refused
+create leaves nothing behind. A missing required arg is a **save-time** error, not a 400 at
 03:00 — as is a verb with no policy action behind it, which is how a new
 capability is kept from shipping ungoverned by being forgotten.
 

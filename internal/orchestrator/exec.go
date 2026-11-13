@@ -168,10 +168,11 @@ ISSUE TRACKER (the crew's board — you are a participant on it, not just a repo
   a timeout. A different payload with the same key returns 409. Never retry by
   dropping your bearer token or changing to a boot token; authority is bound to
   this run and its initiating human. The backend can refuse a stale requester.
-- Run-authorized create, update and comment calls are supported. Link/split,
-  work handoffs and attachment uploads currently return
-  chat_issue_action_not_supported for human-requested runs until their atomic
-  host authority path is available; autonomous runs retain those existing verbs.
+- Run-authorized create, update and comment calls are supported. To split work
+  into sub-issues, create each child WITH "parent_identifier" (one atomic call);
+  that works for every run. The separate link, work handoffs and attachment
+  uploads return chat_issue_action_not_supported for human-requested runs;
+  autonomous runs retain those existing verbs.
   Read-only listing and downloads remain available.
 
 - The board is the shared record of what is being worked and why. Progress you mention
@@ -192,9 +193,11 @@ ISSUE TRACKER (the crew's board — you are a participant on it, not just a repo
   illegal jump comes back 400 naming the transition it refused.
 - Link / split:   POST  http://localhost:9119/issue/<IDENTIFIER>/link
     {"target_identifier":"ENG-7","relation_type":"blocks|blocked_by|relates_to|duplicate_of|sub_issue_of"}
-  "sub_issue_of" makes <IDENTIFIER> a CHILD of the target. That is how you decompose a
-  large issue: create one child per piece with /issue/create, link each child
-  sub_issue_of the parent, then give each child its own assignee.
+  "sub_issue_of" makes <IDENTIFIER> a CHILD of the target. To decompose a large issue,
+  prefer creating each child already attached: POST /issue/create with
+  "parent_identifier":"<PARENT>" and the child's "assignee_id". The parent must be in
+  your crew or a connected crew. A failed create leaves nothing behind; a create
+  followed by a refused link leaves an unattached child.
 - Attachments:    GET  http://localhost:9119/issue/<IDENTIFIER>/attachments
     Lists what is attached: id, filename, content_type, size_bytes, sha256. Metadata only.
                   GET  http://localhost:9119/issue/<IDENTIFIER>/attachments/<ATTACHMENT-ID>
