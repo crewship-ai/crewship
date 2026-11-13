@@ -132,8 +132,16 @@ func TestGetCheckup_CredentialByName(t *testing.T) {
 	if _, err := db.Exec(`INSERT INTO credentials (id, workspace_id, scope, name, encrypted_value, type, status, created_by) VALUES ('cr_dev','ws_smoke','WORKSPACE','DEVICE_SSH_KEY','x','SECRET','ACTIVE','user_1')`); err != nil {
 		t.Fatal(err)
 	}
-	for slug, want := range map[string]string{"present": "ok", "absent": "bad"} {
-		name := map[string]string{"present": "DEVICE_SSH_KEY", "absent": "OTHER_KEY"}[slug]
+	// Held only by another crew: the routine's crew cannot use it, so the
+	// checkup must report it missing (and not reveal it exists elsewhere).
+	if _, err := db.Exec(`INSERT INTO crews (id, workspace_id, name, slug) VALUES ('crew_other','ws_smoke','Other','other')`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO credentials (id, workspace_id, scope, crew_id, name, encrypted_value, type, status, created_by) VALUES ('cr_foreign','ws_smoke','CREW','crew_other','FOREIGN_KEY','x','SECRET','ACTIVE','user_1')`); err != nil {
+		t.Fatal(err)
+	}
+	for slug, want := range map[string]string{"present": "ok", "absent": "bad", "foreign": "bad"} {
+		name := map[string]string{"present": "DEVICE_SSH_KEY", "absent": "OTHER_KEY", "foreign": "FOREIGN_KEY"}[slug]
 		seedSmokePipelineDef(t, db, slug, `{"name":"`+slug+`","credentials_required":[{"type":"name.`+name+`"}],"steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`)
 		code, resp := checkupOf(t, h, slug)
 		if code != http.StatusOK || resp.level("credentials") != want {

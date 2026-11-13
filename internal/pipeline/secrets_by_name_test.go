@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 )
@@ -129,5 +130,27 @@ func TestCheckCredentialRefShape(t *testing.T) {
 		if err := checkCredentialRefShape(ref); (err == nil) != ok {
 			t.Errorf("checkCredentialRefShape(%q) = %v, want ok=%v", ref, err, ok)
 		}
+	}
+}
+
+// End to end through a code step: `secrets.name.<NAME>` (any case of the
+// `name` segment) resolves through the step's own references, reaches the
+// code as a nested object, and is scrubbed from the output.
+func TestCodeStep_SecretByName(t *testing.T) {
+	resolver := func(_ context.Context, _ RunScope, ref string) (string, error) {
+		if name, ok := CredentialRefName(ref); ok && name == "DEVICE_KEY" {
+			return stripeSecretValue, nil
+		}
+		return "", errors.New("no active credential " + ref)
+	}
+	for _, spelling := range []string{"name", "NAME", "Name"} {
+		t.Run(spelling, func(t *testing.T) {
+			executor := (&Executor{}).WithCodeRunner(NewMultiCodeRunner()).WithCredentialResolver(resolver)
+			step := Step{ID: "s", Type: StepCode, Code: &CodeStep{Runtime: "cel", Code: `{{ secrets.` + spelling + `.DEVICE_KEY }}`}}
+			out, _, _, err := executor.runCodeStep(context.Background(), step, RenderContext{}, RunInput{WorkspaceID: "ws_1", AuthorCrewID: "crew_1"})
+			if err != nil || out != secretRedactionMarker {
+				t.Fatalf("out=%q err=%v, want the scrubbed secret", out, err)
+			}
+		})
 	}
 }

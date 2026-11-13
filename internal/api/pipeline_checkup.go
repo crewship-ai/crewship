@@ -145,13 +145,13 @@ func (h *PipelineHandler) routineCheckup(ctx context.Context, p *pipeline.Pipeli
 			m, _ := e.(map[string]any)
 			t, _ := m["type"].(string)
 			if name, byName := pipeline.CredentialRefName(t); byName {
-				// name.<NAME> selects one credential by its exact name.
-				var n int
-				err := h.db.QueryRowContext(ctx, `
-				SELECT COUNT(*) FROM credentials
-				WHERE workspace_id = ? AND deleted_at IS NULL AND status = 'ACTIVE' AND name = ?`,
-					p.WorkspaceID, name).Scan(&n)
-				if err == nil && n == 0 {
+				// name.<NAME> selects one credential by its exact name. Ask the
+				// run-time probe, scoped to the routine's crew: checkup must
+				// agree with the gate and must not reveal whether another
+				// crew holds a credential of that name.
+				found, err := pipeline.NewVaultCredentialProbe(h.db)(ctx,
+					pipeline.RunScope{WorkspaceID: p.WorkspaceID, AuthorCrewID: p.AuthorCrewID}, t)
+				if err == nil && !found {
 					missing = append(missing, "named "+name)
 				}
 				continue

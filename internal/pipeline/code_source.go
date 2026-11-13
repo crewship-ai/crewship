@@ -52,6 +52,11 @@ func codeReference(ref string) (string, error) {
 	if parts[0] == "steps" && len(parts) < 3 {
 		return "", codeTemplateError()
 	}
+	// secrets.NAME.x is accepted ignoring case like the template form;
+	// codeSecrets keys the by-name object as lower-case "name".
+	if parts[0] == "secrets" && len(parts) >= 3 && strings.EqualFold(parts[1], "name") {
+		parts[1] = "name"
+	}
 	var out strings.Builder
 	out.WriteString(parts[0])
 	for _, part := range parts[1:] {

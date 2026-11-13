@@ -375,7 +375,6 @@ A `code` / `script` / `notify` / `http` step that needs an API key, token, or pa
 
 The value **never** lands in the versioned DSL (the definition carries only the `{{ secrets.stripe }}` template), and it is **scrubbed** from the step's downstream output, the run journal, script-audit command lines, notification bodies, and error messages — so an echoed or reflected secret shows up as `[REDACTED:secret]`, not the real value. A type with no ACTIVE credential renders **empty** (like a missing input), so a public/optional call keeps working; to make an unresolvable credential a hard failure, declare it in [`credentials_required`](#required-credentials).
 
-<Warning>
 **By name.** Selection by type takes the newest matching credential, so it is
 ambiguous as soon as the crew can see two credentials of one type (two `SECRET`
 keys, say): the newest silently wins. Name the one you mean instead:
@@ -387,12 +386,14 @@ workspace scope, crew isolation, ACTIVE only, host binding at resolution — is
 the same as by type, so naming reaches nothing the crew could not already see;
 it lets you pick an older credential that selection by type would hide behind
 a newer one. In a `code` step the value is `secrets.name.DEVICE_SSH_KEY` as
-well, which works for names made of letters, digits and underscores; a name
-with dots, spaces or other punctuation is reachable from templates only.
+well (any case of `name`), which works for names made of letters, digits,
+underscores and hyphens; a name with dots, spaces or other punctuation is
+reachable from templates only.
 Leading or trailing spaces in a name cannot be referenced. A `credential_ref.type` with a dot that is not `name.<NAME>`, and a bare
 `{{ secrets.name }}`, are save-time errors (both used to resolve nothing,
 silently).
 
+<Warning>
 Because secrets are scrubbed from step outputs, you **cannot** thread a secret between steps as `{{ steps.X.output }}` — each step re-resolves `{{ secrets.<type> }}` fresh. This is deliberate: a plaintext secret must never flow through the step-outputs record.
 </Warning>
 
