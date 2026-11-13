@@ -108,11 +108,9 @@ afterEach(() => { cleanup(); vi.unstubAllEnvs() })
 
 const renderLibrary = () => render(withQuery(<ArtifactsLibrary workspaceId="ws1" item={state.item} onSelect={state.select} />))
 
-/** The bar's New artifact opens a popover grouped Artifacts / Craft; each entry opens the existing dialog on its flow. */
-const newFrom = (name: string) => {
-  fireEvent.click(screen.getAllByRole("button", { name: "New artifact" })[0])
-  fireEvent.click(screen.getByRole("button", { name }))
-}
+/** The bar's chevron opens the New artifact menu (pinned kinds first); each entry opens the existing dialog on its flow. */
+const openNewMenu = () => { fireEvent.click(screen.getByRole("button", { name: "All ways to make an artifact" })); return screen.getByRole("dialog", { name: "New artifact menu" }) }
+const newFrom = (name: string) => fireEvent.click(within(openNewMenu()).getByRole("button", { name }))
 const openAll = () => fireEvent.click(screen.getByRole("tab", { name: /All artifacts/ }))
 
 it("lists every kind with something in it, a panel Page as a Dashboard, and keeps empty items in their own view", () => {
@@ -246,24 +244,27 @@ it("Home lists each artifact once, filters by kind chips, and offers what can be
   expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(item => item.textContent)).toEqual([expect.stringContaining("Price model")])
   fireEvent.click(screen.getByRole("radio", { name: "Table" }))
   expect(screen.getByRole("table")).toBeTruthy()
-  fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
-  expect(within(screen.getByRole("region", { name: "Artifacts" })).getByRole("button", { name: "New App" })).toBeTruthy()
-  expect(within(screen.getByRole("region", { name: "Craft · one editor at a time" })).getByRole("button", { name: "New Word" })).toBeTruthy()
-  expect(screen.queryByRole("button", { name: "New Slides" })).toBeNull()
-  fireEvent.click(screen.getByRole("button", { name: "New Word" }))
+  const menu = openNewMenu()
+  fireEvent.click(within(menu).getByRole("button", { name: /All kinds/ }))
+  expect(within(screen.getByRole("region", { name: "Artifacts · live, versioned, agents help" })).getByRole("button", { name: "New App" })).toBeTruthy()
+  expect(within(screen.getByRole("region", { name: "Craft · files, one editor at a time" })).getByRole("button", { name: "New Word" })).toBeTruthy()
+  // What this workspace cannot make stays visible with the reason, never as a working entry.
+  expect(within(menu).getByRole("button", { name: "New Slides" })).toHaveAttribute("aria-disabled", "true")
+  fireEvent.click(within(menu).getByRole("button", { name: "New Slides" }))
+  expect(screen.queryByRole("dialog", { name: "New artifact" })).toBeNull()
+  fireEvent.click(within(menu).getByRole("button", { name: "New Word" }))
   expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("word")
 })
 
 it("New Docs opens collaborative creation and navigates directly to the confirmed immutable ID",()=>{
-  renderLibrary();fireEvent.click(screen.getByRole("button",{name:"New artifact"}))
-  fireEvent.click(within(screen.getByRole("region",{name:"Artifacts"})).getByRole("button",{name:"New Docs"}))
+  renderLibrary();newFrom("New Docs")
   expect(screen.getByRole("dialog",{name:"New Docs"})).toHaveAttribute("data-docs-only","true")
   fireEvent.click(screen.getByRole("button",{name:"Create Docs"}))
   expect(state.select).toHaveBeenCalledWith("docs-page-id");expect(state.refresh).toHaveBeenCalled()
 })
 it("does not offer New Docs when its engine is unavailable even if Word is available",()=>{
-  docsState.enabled=false;renderLibrary();fireEvent.click(screen.getByRole("button",{name:"New artifact"}))
-  expect(screen.queryByRole("button",{name:"New Docs"})).toBeNull();expect(screen.getByRole("button",{name:"New Word"})).toBeTruthy()
+  docsState.enabled=false;renderLibrary();const menu=openNewMenu()
+  expect(within(menu).queryByRole("button",{name:"New Docs"})).toBeNull();expect(within(menu).getByRole("button",{name:"New Word"})).toBeTruthy()
 })
 it("does not offer New Docs to a caller without Page creation access",()=>{
   state.caps={pages:false};renderLibrary();expect(screen.queryByRole("button",{name:"New artifact"})).toBeNull()
@@ -311,9 +312,9 @@ it("offers New artifact in the bar, on Home and in the empty state to a member w
   state.caps = { projects: true, dashboards: true, slides: true, documents: true, docs: false, designs: true, pages: true }
   const view = renderLibrary()
   expect(screen.getAllByRole("button", { name: "New artifact" })).toHaveLength(1)
-  fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
-  for (const name of ["New App", "New Dashboard", "New Slides"]) expect(screen.getByRole("button", { name })).toBeTruthy()
-  expect(screen.queryByRole("button", { name: "New Docs" })).toBeNull()
+  const menu = openNewMenu()
+  for (const name of ["New App", "New Dashboard", "New Slides"]) expect(within(menu).getByRole("button", { name })).toBeTruthy()
+  expect(within(menu).queryByRole("button", { name: "New Docs" })).toBeNull()
   view.unmount()
   state.pages = []
   renderLibrary()
@@ -822,4 +823,91 @@ it("with the server catalog flag, All keeps a blank Page the person just created
   openAll()
   expect(windowState.calls[windowState.calls.length - 1].params).toBeNull()
   expect(within(screen.getByRole("list", { name: "Artifacts" })).getAllByRole("listitem").map(row => row.textContent)).toEqual([expect.stringContaining("UX walkthrough page")])
+})
+
+// New artifact button (Harbor 2 round 72): split button, pinned kinds, recent, keys and the Home guide. Every toggle works.
+it("the main button opens the dialog on the kind made last; the chevron menu starts any kind", () => {
+  renderLibrary()
+  fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
+  // Nothing made yet: the first kind this person can make, and the dialog may still switch it.
+  expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("docs")
+  fireEvent.click(screen.getByRole("button", { name: "Create" }))
+  newFrom("New Word")
+  fireEvent.click(screen.getByRole("button", { name: "Create" }))
+  fireEvent.click(screen.getByRole("button", { name: "New artifact" }))
+  expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("word")
+})
+
+it("stars pin and unpin, five at most, in an order the person sets, and keys 1–5 start a pinned kind", () => {
+  state.caps = { projects: true, dashboards: true, slides: true, documents: true, docs: true, designs: true, sheets: true, pages: true }
+  renderLibrary()
+  let menu = openNewMenu()
+  const pinned = () => within(within(menu).getByRole("region", { name: "Pinned" })).getAllByRole("button", { name: /^New / }).map(b => b.getAttribute("aria-label"))
+  expect(pinned()).toEqual(["New Docs", "New Dashboard", "New Slides", "New Design", "New App"])
+  fireEvent.click(within(menu).getByRole("button", { name: "Unpin Slides" }))
+  expect(pinned()).toEqual(["New Docs", "New Dashboard", "New Design", "New App"])
+  fireEvent.click(within(menu).getByRole("button", { name: /All kinds/ }))
+  fireEvent.click(within(menu).getByRole("button", { name: "Pin GridCraft" }))
+  fireEvent.click(within(menu).getByRole("button", { name: "Pin WordCraft" }))
+  // The sixth is refused with the reason, and the editor opens to make room.
+  expect(within(menu).getByRole("status").textContent).toMatch(/Pinned is full \(5\)/)
+  expect(within(menu).getByRole("region", { name: "Edit pinned" })).toBeTruthy()
+  fireEvent.click(within(menu).getByRole("button", { name: "Move Sheet up" }))
+  fireEvent.click(within(menu).getByRole("button", { name: "Unpin Docs" }))
+  fireEvent.click(within(menu).getByRole("button", { name: "Back" }))
+  expect(pinned()).toEqual(["New Dashboard", "New Design", "New Sheet", "New App"])
+  // Key 3 starts the third pinned kind.
+  fireEvent.keyDown(within(menu).getByRole("textbox", { name: "Find a kind" }), { key: "3" })
+  expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("sheet")
+  fireEvent.click(screen.getByRole("button", { name: "Create" }))
+  menu = openNewMenu()
+  fireEvent.click(within(menu).getByRole("button", { name: "Edit" }))
+  fireEvent.click(within(menu).getByRole("button", { name: "Reset to default" }))
+  fireEvent.click(within(menu).getByRole("button", { name: "Back" }))
+  expect(pinned()).toEqual(["New Docs", "New Dashboard", "New Slides", "New Design", "New App"])
+})
+
+it("search finds a kind by its editor or file type, and Enter starts the first live one", () => {
+  state.caps = { sheets: true }
+  renderLibrary()
+  const menu = openNewMenu()
+  const box = within(menu).getByRole("textbox", { name: "Find a kind" })
+  fireEvent.change(box, { target: { value: ".xlsx" } })
+  expect(within(within(menu).getByRole("region", { name: "Results" })).getAllByRole("button", { name: /^New / }).map(b => b.getAttribute("aria-label"))).toEqual(["New Sheet"])
+  fireEvent.change(box, { target: { value: "zzz" } })
+  expect(within(menu).getByText(/Nothing called/)).toBeTruthy()
+  fireEvent.change(box, { target: { value: "grid" } })
+  fireEvent.keyDown(box, { key: "Enter" })
+  expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("sheet")
+})
+
+it("N opens the dialog on the last kind and Shift+N opens every kind, never while typing", () => {
+  renderLibrary()
+  fireEvent.keyDown(window, { key: "N", shiftKey: true })
+  expect(within(screen.getByRole("dialog", { name: "New artifact menu" })).getByRole("group", { name: "Family" })).toBeTruthy()
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "New artifact menu" }), { key: "Escape" })
+  const search = screen.getAllByRole("textbox")[0]
+  fireEvent.keyDown(search, { key: "n" })
+  expect(screen.queryByRole("dialog", { name: "New artifact" })).toBeNull()
+  fireEvent.keyDown(window, { key: "n" })
+  expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("docs")
+})
+
+it("the Home guide starts a kind, browses a family, hides on Got it and comes back from the menu", () => {
+  renderLibrary()
+  const guide = screen.getByRole("region", { name: "Two kinds of things live here" })
+  expect(within(guide).getByRole("button", { name: "Start Slides" })).toBeDisabled()
+  fireEvent.click(within(guide).getByRole("button", { name: "Start Word" }))
+  expect(screen.getByRole("dialog", { name: "New artifact" }).dataset.kind).toBe("word")
+  fireEvent.click(screen.getByRole("button", { name: "Create" }))
+  state.select.mockReset()
+  fireEvent.click(within(screen.getByRole("region", { name: "Two kinds of things live here" })).getAllByRole("button", { name: "Browse" })[1])
+  const menu = screen.getByRole("dialog", { name: "New artifact menu" })
+  expect(within(menu).getByRole("button", { name: "Craft" })).toHaveAttribute("aria-pressed", "true")
+  expect(within(menu).queryByRole("region", { name: /^Artifacts/ })).toBeNull()
+  fireEvent.keyDown(menu, { key: "Escape" })
+  fireEvent.click(within(screen.getByRole("region", { name: "Two kinds of things live here" })).getByRole("button", { name: "Got it" }))
+  expect(screen.queryByRole("region", { name: "Two kinds of things live here" })).toBeNull()
+  fireEvent.click(within(openNewMenu()).getByRole("button", { name: "Show the guide on Home" }))
+  expect(screen.getByRole("region", { name: "Two kinds of things live here" })).toBeTruthy()
 })
