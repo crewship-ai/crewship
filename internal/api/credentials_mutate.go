@@ -56,6 +56,21 @@ func encryptOrError(w http.ResponseWriter, logger *slog.Logger, logMsg, value st
 // (which keys on the literal value).
 var provisionedForServiceRe = regexp.MustCompile(`^[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?/[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$`)
 
+const crewDeliveryHint = `crew_delivery must be "all" (every crew member receives the credential) or "granted" (only agents with an explicit grant or AGENT binding)`
+
+// normalizeCrewDelivery maps the request value onto the stored vocabulary.
+// Empty means the default, "all", which is what every credential had before
+// the column existed.
+func normalizeCrewDelivery(v string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "", "all":
+		return "all", true
+	case "granted":
+		return "granted", true
+	}
+	return "", false
+}
+
 type createCredentialRequest struct {
 	Name        string  `json:"name"`
 	Description *string `json:"description"`
@@ -74,6 +89,8 @@ type createCredentialRequest struct {
 	RefreshToken  *string  `json:"refresh_token"`
 	TokenExpires  *string  `json:"token_expires_at"`
 	SecurityLevel *int     `json:"security_level"`
+	// CrewDelivery: "all" (default) or "granted". See credentialResponse.
+	CrewDelivery string `json:"crew_delivery,omitempty"`
 	// FolderID files the credential in a Vault folder (credential_folders).
 	FolderID *string `json:"folder_id"`
 	// Attribution (v98). Together these answer "who created this
@@ -438,6 +455,12 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 	// CRITICAL gave it the LOWEST tier — and the API said 201. L4 also has real
 	// consequences now (internal/keeper/tier.go), which makes the silent
 	// downgrade a security bug rather than a cosmetic one.
+	crewDelivery, ok := normalizeCrewDelivery(req.CrewDelivery)
+	if !ok {
+		replyError(w, http.StatusBadRequest, crewDeliveryHint)
+		return
+	}
+
 	secLevel := int(keeper.SecurityLevelL1)
 	if req.SecurityLevel != nil {
 		if !keeper.SecurityLevel(*req.SecurityLevel).Valid() {
@@ -506,12 +529,12 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		INSERT INTO credentials (id, workspace_id, name, description, encrypted_value,
 			type, provider, scope, crew_id, account_label, account_email, username,
 			token_expires_at, security_level, status, tags, created_by, created_at, updated_at,
-			created_by_actor_type, created_by_actor_id, provisioned_for_service, folder_id)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			created_by_actor_type, created_by_actor_id, provisioned_for_service, folder_id, crew_delivery)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		credID, workspaceID, req.Name, req.Description, encryptedValue,
 		req.Type, req.Provider, req.Scope, legacyCrewID, req.AccountLabel, req.AccountEmail, req.Username,
 		req.TokenExpires, secLevel, credStatus, tagsArg, user.ID, now, now,
-		actorType, actorID, provisionedForService, folderArg)
+		actorType, actorID, provisionedForService, folderArg, crewDelivery)
 	if err != nil {
 		tx.Rollback()
 		if strings.Contains(err.Error(), "UNIQUE") {
@@ -640,6 +663,7 @@ func (h *CredentialHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ProvisionedForService: provisionedForService,
 		SecurityLevel:         secLevel,
 		SecurityLevelLabel:    keeper.SecurityLevel(secLevel).Label(),
+		CrewDelivery:          crewDelivery,
 		FolderID:              respFolder(folderArg),
 	})
 }
@@ -894,6 +918,16 @@ func (h *CredentialHandler) Update(w http.ResponseWriter, r *http.Request) {
 		"crew_id": "crew_id", "account_label": "account_label",
 		"account_email": "account_email", "token_expires_at": "token_expires_at",
 		"security_level": "security_level", "username": "username",
+		"crew_delivery": "crew_delivery",
+	}
+	if raw, ok := body["crew_delivery"]; ok {
+		s, isStr := raw.(string)
+		v, valid := normalizeCrewDelivery(s)
+		if !isStr || !valid || s == "" {
+			replyError(w, http.StatusBadRequest, crewDeliveryHint)
+			return
+		}
+		body["crew_delivery"] = v
 	}
 
 	// Parse crew_ids if provided — will be written to junction table

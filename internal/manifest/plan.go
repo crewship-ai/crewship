@@ -998,8 +998,14 @@ func (pb *planBuilder) planAgentLinks(ctx context.Context, agentID string, a *Ag
 	if err != nil {
 		return fmt.Errorf("list agent credentials for %q/%q: %w", crewSlug, a.Slug, err)
 	}
+	// Inherited rows (crew link, binding) satisfy a declared env_ref — the
+	// agent already receives it — but are never planned for deletion: the
+	// manifest did not create them and cannot remove them per agent.
 	existingCredsByEnv := map[string]AgentCredentialBinding{}
 	for _, b := range existingCreds {
+		if prev, seen := existingCredsByEnv[b.EnvVarName]; seen && prev.Explicit() {
+			continue
+		}
 		existingCredsByEnv[b.EnvVarName] = b
 	}
 	declaredCredEnvs := map[string]bool{}
@@ -1022,7 +1028,7 @@ func (pb *planBuilder) planAgentLinks(ctx context.Context, agentID string, a *Ag
 	}
 	if pb.opts.Mode == ApplyUpsert {
 		for env, binding := range existingCredsByEnv {
-			if declaredCredEnvs[env] {
+			if declaredCredEnvs[env] || !binding.Explicit() {
 				continue
 			}
 			assignmentID := binding.ID

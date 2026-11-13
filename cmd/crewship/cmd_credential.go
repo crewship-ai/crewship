@@ -899,6 +899,7 @@ func init() {
 	credCreateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+" (0 = leave at the server default). L4 requires a human to approve every read unless the instance sets a lower escalate-from floor (keeper config).")
 	credCreateCmd.Flags().StringSlice("crews", nil, "Crew slugs or IDs to scope this credential to (repeatable/comma-separated); sets scope=CREW. Omit for a workspace-wide credential")
 	credCreateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE (default) or CREW. Usually inferred from --crews; set explicitly to override")
+	credCreateCmd.Flags().String("crew-delivery", "", crewDeliveryFlagHelp)
 	// OAuth app fields (--type OAUTH2). The row is created empty and PENDING;
 	// `crewship oauth connect` is what puts tokens in it. See cmd_oauth.go.
 	credCreateCmd.Flags().String("oauth-provider", "", "Fill the OAuth endpoints from the built-in catalogue (see `crewship oauth providers`); --type OAUTH2 only")
@@ -918,6 +919,7 @@ func init() {
 	credUpdateCmd.Flags().Int("security-level", 0, "Keeper credential tier — "+securityLevelHelp()+". L4 requires a human to approve every read unless the instance sets a lower escalate-from floor (keeper config).")
 	credUpdateCmd.Flags().StringSlice("crews", nil, "Replace the crew scoping with these crew slugs or IDs (repeatable/comma-separated); pass an empty value to clear crews and make it workspace-wide")
 	credUpdateCmd.Flags().String("scope", "", "Visibility scope: WORKSPACE or CREW. Usually inferred from --crews; set explicitly to override")
+	credUpdateCmd.Flags().String("crew-delivery", "", crewDeliveryFlagHelp)
 
 	credAssignCmd.Flags().String("env-var-name", "", "Environment variable name override")
 	credAssignCmd.Flags().Int("priority", 0, "Priority (1-10)")

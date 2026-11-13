@@ -150,6 +150,9 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	WHERE s.crew_id IS NOT NULL
 	  AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
 	  AND c.workspace_id = s.workspace_id
+	  -- crew_delivery='granted': the link is ownership and visibility only;
+	  -- the credential reaches an agent solely through the explicit arms above.
+	  AND c.crew_delivery = 'all'
 	  AND NOT EXISTS (
 	      SELECT 1 FROM agent_credentials ac2
 	      WHERE ac2.agent_id = s.agent_id AND ac2.credential_id = c.id

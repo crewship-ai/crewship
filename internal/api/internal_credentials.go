@@ -230,7 +230,8 @@ func (h *InternalHandler) ListCredentials(w http.ResponseWriter, r *http.Request
 			          AND (ac.expires_at IS NULL OR ac.expires_at > ?))
 			OR (credentials.type != 'PROVIDER_LOGIN' AND EXISTS (
                 SELECT 1 FROM credential_crews cc
-                WHERE cc.credential_id = credentials.id AND cc.crew_id = ?))
+                WHERE cc.credential_id = credentials.id AND cc.crew_id = ?
+                  AND credentials.crew_delivery = 'all'))
             OR (EXISTS (
                 SELECT 1 FROM credential_bindings cb
                 WHERE cb.credential_id = credentials.id

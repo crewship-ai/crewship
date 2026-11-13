@@ -114,6 +114,11 @@ type credentialResponse struct {
 	// an operator change it. The console had no tier control at all until it did,
 	// which is why every credential created through the UI was L1.
 	SecurityLevel int `json:"security_level"`
+	// CrewDelivery is who a crew link delivers this credential to: "all"
+	// (every crew member, the historical behaviour) or "granted" (the link is
+	// ownership and visibility only; delivery needs an explicit agent grant
+	// or AGENT binding). See credentials.crew_delivery.
+	CrewDelivery string `json:"crew_delivery"`
 	// SecurityLevelLabel is the same tier as the operator-facing name ("L4 ·
 	// critical"), served rather than mapped client-side so the console, the CLI
 	// and the judge prompt cannot drift into three different vocabularies.
@@ -336,7 +341,7 @@ const credentialSelectPrefix = `
 		c.last_used_at, c.last_used_ips, c.tags,
 		c.created_at, c.updated_at,
 		c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
-		c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'), COALESCE(c.security_level, 1),
+		c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'), COALESCE(c.security_level, 1), COALESCE(c.crew_delivery, 'all'),
 		(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count,
 		COALESCE(c.created_by, '')
 	FROM credentials c
@@ -364,7 +369,7 @@ func (h *CredentialHandler) scanCredentialRows(ctx context.Context, query string
 			&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 			&c.CreatedAt, &c.UpdatedAt,
 			&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
-			&encValue, &c.Sensitivity, &c.SecurityLevel,
+			&encValue, &c.Sensitivity, &c.SecurityLevel, &c.CrewDelivery,
 			&c.AgentCount, &createdBy); err != nil {
 			return nil, err
 		}
@@ -491,7 +496,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 			c.last_used_at, c.last_used_ips, c.tags,
 			c.created_at, c.updated_at,
 			c.created_by_actor_type, c.created_by_actor_id, c.provisioned_for_service,
-			c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'), COALESCE(c.security_level, 1),
+			c.encrypted_value, COALESCE(c.sensitivity, 'STANDARD'), COALESCE(c.security_level, 1), COALESCE(c.crew_delivery, 'all'),
 			(SELECT COUNT(*) FROM agent_credentials WHERE credential_id = c.id) AS agent_count,
 			COALESCE(c.created_by, '')
 		FROM credentials c
@@ -502,7 +507,7 @@ func (h *CredentialHandler) Get(w http.ResponseWriter, r *http.Request) {
 		&c.LastUsedAt, &lastUsedIPsRaw, &tagsRaw,
 		&c.CreatedAt, &c.UpdatedAt,
 		&c.CreatedByActorType, &c.CreatedByActorID, &c.ProvisionedForService,
-		&encValue, &c.Sensitivity, &c.SecurityLevel,
+		&encValue, &c.Sensitivity, &c.SecurityLevel, &c.CrewDelivery,
 		&c.AgentCount, &createdBy)
 	c.LastUsedIPs = parseLastUsedIPs(lastUsedIPsRaw)
 	c.Tags = parseTags(tagsRaw)

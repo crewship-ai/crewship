@@ -408,6 +408,12 @@ func (e *Executor) maybeGenerateRunVerdict(ctx context.Context, in RunInput, emi
 type RunScope struct {
 	WorkspaceID  string
 	AuthorCrewID string
+	// AuthorAgentID is the agent that authored the routine, empty for a
+	// human-authored one. A crew_delivery='granted' credential is released
+	// to a `{{ secrets.name.X }}` reference only when this agent holds an
+	// explicit grant for it (or the routine is human-authored), so a crew
+	// member cannot read a specialist's key by writing a routine.
+	AuthorAgentID string
 	// WebhookTriggered marks a run started by an inbound pipeline webhook
 	// delivery (#1416 item 1) — untrusted external input. The http-step
 	// egress gate (NewCrewNetworkPolicyGate) holds this run's crew-network

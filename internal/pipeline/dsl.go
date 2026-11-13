@@ -926,7 +926,11 @@ func resolveRef(ref string, ctx RenderContext) (string, bool) {
 		// and the runner scrubs it back out of any output/error it lands
 		// in. parts[1] is the credential type; deeper paths aren't
 		// supported (a secret is an opaque scalar).
-		if v, ok := ctx.Secrets[parts[1]]; ok {
+		key, ok := secretRefKey(parts)
+		if !ok {
+			return "", false
+		}
+		if v, ok := ctx.Secrets[key]; ok {
 			return v, true
 		}
 		return "", false

@@ -141,7 +141,7 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"id": str(), "name": str(), "description": nullable("string"), "type": str(), "provider": str(), "status": str(), "scope": str(),
 		"crew_id": nullable("string"), "crew_ids": stringArray(), "account_label": nullable("string"), "account_email": nullable("string"),
 		"username": nullable("string"), "endpoint_url": nullable("string"), "testable": boolean(), "sensitivity": str(),
-		"security_level": integer(), "security_level_label": str(), "token_expires_at": nullable("string"), "last_checked_at": nullable("string"),
+		"security_level": integer(), "security_level_label": str(), "crew_delivery": map[string]any{"type": "string", "enum": []string{"all", "granted"}}, "token_expires_at": nullable("string"), "last_checked_at": nullable("string"),
 		"last_error": nullable("string"), "last_used_at": nullable("string"), "last_used_ips": stringArray(), "tags": stringArray(),
 		"created_at": str(), "updated_at": str(), "_count_agent_credentials": integer(), "agent_names": stringArray(), "agent_ids": stringArray(), "mcp_used": boolean(),
 		"created_by_actor_type": nullable("string"), "created_by_actor_id": nullable("string"), "provisioned_for_service": nullable("string"),

@@ -109,6 +109,7 @@ func (h *AgentHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
 		WHERE a.id = ? AND a.deleted_at IS NULL AND a.crew_id IS NOT NULL
 		  AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
 		  AND c.workspace_id = a.workspace_id
+		  AND c.crew_delivery = 'all'
 		  AND NOT EXISTS (
 		      SELECT 1 FROM agent_credentials ac2
 		      WHERE ac2.agent_id = a.id AND ac2.credential_id = c.id

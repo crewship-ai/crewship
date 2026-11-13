@@ -220,6 +220,7 @@ var crewCredentialGranteesSQL = fmt.Sprintf(`
 	SELECT cc.credential_id, '', 1
 	FROM credential_crews cc
 	JOIN agent_scope s ON cc.crew_id = s.crew_id
+	JOIN credentials cd ON cd.id = cc.credential_id AND cd.crew_delivery = 'all'
 
 	UNION ALL
 

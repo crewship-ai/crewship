@@ -103,8 +103,8 @@ func secretTypesInStep(step Step) map[string]struct{} {
 		for _, m := range templateRE.FindAllStringSubmatch(s, -1) {
 			parts := strings.SplitN(strings.TrimSpace(m[1]), ".", 3)
 			if len(parts) >= 2 && parts[0] == "secrets" {
-				if t := strings.TrimSpace(parts[1]); t != "" {
-					out[t] = struct{}{}
+				if key, ok := secretRefKey(parts); ok {
+					out[key] = struct{}{}
 				}
 			}
 		}
@@ -178,7 +178,7 @@ func (e *Executor) resolveStepSecrets(ctx context.Context, step Step, parentRend
 	if len(types) == 0 || e.credentialByType == nil {
 		return parentRender, &secretScrub{}
 	}
-	scope := RunScope{WorkspaceID: in.WorkspaceID, AuthorCrewID: in.AuthorCrewID}
+	scope := RunScope{WorkspaceID: in.WorkspaceID, AuthorCrewID: in.AuthorCrewID, AuthorAgentID: in.AuthorAgentID}
 	resolved := make(map[string]string, len(types))
 	scrub := &secretScrub{}
 	for t := range types {

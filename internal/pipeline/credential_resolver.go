@@ -8,6 +8,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/credhostgate"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/encryption"
 	"github.com/crewship-ai/crewship/internal/llmroute"
@@ -92,6 +93,34 @@ func excludeEndpointProviders() (string, []any) {
 // (public endpoints must keep working), never as a step failure.
 // The decrypted value is returned to the caller ONLY — this function
 // must never log it.
+// secretNamePrefix marks a by-NAME secret reference. `{{ secrets.API_KEY }}`
+// selects by credential type, which is ambiguous as soon as a crew holds two
+// credentials of one type (a device-monitoring crew holds several SECRETs):
+// the newest one silently won. `{{ secrets.name.DEVICE_SSH_KEY }}` names
+// exactly one credential. Credential types never contain a dot, so the key
+// "name.<NAME>" cannot collide with a type.
+const secretNamePrefix = "name."
+
+// secretRefKey maps the parts of a `secrets.…` template ref (SplitN 3) to
+// the key resolveStepSecrets resolves and Render reads: the type for
+// `secrets.<TYPE>`, "name.<NAME>" for `secrets.name.<NAME>`.
+func secretRefKey(parts []string) (string, bool) {
+	if len(parts) < 2 {
+		return "", false
+	}
+	first := strings.TrimSpace(parts[1])
+	if first == "name" {
+		if len(parts) < 3 || strings.TrimSpace(parts[2]) == "" {
+			return "", false
+		}
+		return secretNamePrefix + strings.TrimSpace(parts[2]), true
+	}
+	if first == "" {
+		return "", false
+	}
+	return first, true
+}
+
 func NewVaultCredentialResolver(db *sql.DB) func(ctx context.Context, scope RunScope, credType string) (string, error) {
 	return func(ctx context.Context, scope RunScope, credType string) (string, error) {
 		credType = strings.TrimSpace(credType)
@@ -209,9 +238,36 @@ LIMIT 1`, args...,
 // same selection contract. A crew link must point to a live crew in the run's
 // workspace; stale or foreign links cannot grant a routine access. A row with
 // any crew links cannot silently fall back to workspace scope.
+//
+// Two selection modes, keyed by the reference:
+//
+//   - by TYPE (`secrets.SECRET`): unchanged for every existing credential,
+//     except that a crew_delivery='granted' credential is never a candidate.
+//     Such a credential was given to specific agents; matching it by type
+//     would hand it to any step that merely asks for "a SECRET".
+//   - by NAME (`secrets.name.X`): exactly the credential named X. A granted
+//     credential is a candidate only for a human-authored routine or when
+//     the authoring agent itself holds an explicit, unexpired grant or an
+//     AGENT binding for it.
 func vaultCredentialCandidates(scope RunScope, credType string) (string, []any) {
 	notEndpoint, endpointArgs := excludeEndpointProviders()
-	args := append([]any{scope.AuthorCrewID, scope.WorkspaceID, credType}, endpointArgs...)
+	match := "UPPER(c.type) = UPPER(?)\n  AND COALESCE(c.crew_delivery, 'all') = 'all'"
+	key := credType
+	var grantArgs []any
+	if name, byName := strings.CutPrefix(credType, secretNamePrefix); byName {
+		key = name
+		match = `c.name = ?
+  AND (COALESCE(c.crew_delivery, 'all') = 'all'
+       OR ? = ''
+       OR EXISTS (SELECT 1 FROM agent_credentials ag
+                  WHERE ag.credential_id = c.id AND ag.agent_id = ?
+                    AND (ag.expires_at IS NULL OR ag.expires_at > ?))
+       OR EXISTS (SELECT 1 FROM credential_bindings ab
+                  WHERE ab.credential_id = c.id AND ab.scope = 'AGENT' AND ab.agent_id = ?))`
+		grantArgs = []any{scope.AuthorAgentID, scope.AuthorAgentID, time.Now().UTC().Format(time.RFC3339), scope.AuthorAgentID}
+	}
+	args := append([]any{scope.AuthorCrewID, scope.WorkspaceID, key}, grantArgs...)
+	args = append(args, endpointArgs...)
 	return `WITH candidates AS (
 SELECT c.created_at, c.id, c.scope, c.crew_id,
   EXISTS (
@@ -221,7 +277,7 @@ SELECT c.created_at, c.id, c.scope, c.crew_id,
   ) AS crew_linked,
   EXISTS (SELECT 1 FROM credential_crews cc WHERE cc.credential_id = c.id) AS has_links
 FROM credentials c
-WHERE c.workspace_id = ? AND UPPER(c.type) = UPPER(?)
+WHERE c.workspace_id = ? AND ` + match + `
 ` + notEndpoint + `  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
 )
 `, args

@@ -57,9 +57,12 @@ CREATE TABLE IF NOT EXISTS credentials (
 	status TEXT NOT NULL DEFAULT 'ACTIVE',
 	deleted_at TEXT,
 	allowed_hosts TEXT,
+	crew_delivery TEXT NOT NULL DEFAULT 'all',
 	created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
-CREATE TABLE credential_crews (credential_id TEXT NOT NULL, crew_id TEXT NOT NULL, PRIMARY KEY (credential_id, crew_id));`); err != nil {
+CREATE TABLE credential_crews (credential_id TEXT NOT NULL, crew_id TEXT NOT NULL, PRIMARY KEY (credential_id, crew_id));
+CREATE TABLE agent_credentials (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL, credential_id TEXT NOT NULL, expires_at TEXT);
+CREATE TABLE credential_bindings (id TEXT PRIMARY KEY, credential_id TEXT NOT NULL, scope TEXT NOT NULL, agent_id TEXT);`); err != nil {
 		_ = db.Close()
 		t.Fatalf("policy schema: %v", err)
 	}

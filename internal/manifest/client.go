@@ -510,6 +510,23 @@ type AgentCredentialBinding struct {
 	CredentialID string `json:"credential_id"`
 	CredName     string `json:"credential_name"`
 	EnvVarName   string `json:"env_var_name"`
+	// GrantSource is "explicit" for an agent_credentials row the manifest
+	// can create and delete, or "crew" for a credential the agent inherits
+	// through its crew's link. Servers that predate the field send nothing;
+	// such a row is explicit only if it carries an assignment id.
+	GrantSource string `json:"grant_source,omitempty"`
+}
+
+// Explicit reports whether this row is an assignment the manifest owns —
+// one with an id that DELETE /agents/{id}/credentials/{assignmentId} can
+// remove. Inherited rows (crew link, binding) are delivery facts, not
+// declarations: planning a delete for one is a no-op that reads as a change,
+// and exporting one turns a crew link into a per-agent grant on re-apply.
+func (b AgentCredentialBinding) Explicit() bool {
+	if b.ID == "" {
+		return false
+	}
+	return b.GrantSource == "" || b.GrantSource == "explicit"
 }
 
 func (c *Client) ListAgentCredentials(ctx context.Context, agentID string) ([]AgentCredentialBinding, error) {
@@ -529,6 +546,11 @@ func (c *Client) ListAgentCredentials(ctx context.Context, agentID string) ([]Ag
 // RemoveCredentialFromAgent unlinks a credential binding (by the
 // agent_credentials row id) from an agent.
 func (c *Client) RemoveCredentialFromAgent(ctx context.Context, agentID, assignmentID string) error {
+	if assignmentID == "" {
+		// An empty id addresses the collection, not a row; the server 404s
+		// and the old code reported that as a successful delete.
+		return fmt.Errorf("remove credential from agent %s: no assignment id (inherited credentials are removed by unlinking them from the crew or binding)", agentID)
+	}
 	resp, err := c.api.Delete(ctx, "/api/v1/agents/"+agentID+"/credentials/"+assignmentID)
 	if err != nil {
 		return fmt.Errorf("remove credential from agent: %w", err)

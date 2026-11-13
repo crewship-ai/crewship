@@ -127,9 +127,13 @@ func coreResourceRequestSchemaCatalogV2() (map[string]DomainSchema, map[string]a
 		// PROVIDER_LOGIN only: subscription | api_key. Inferred from the
 		// value's shape when omitted (createCredentialRequest.Mode).
 		"mode": nullable(enum("subscription", "api_key")),
+		// Who in a linked crew receives it: every member (default) or only
+		// members with an explicit assignment or agent binding.
+		"crew_delivery": nullable(enum("all", "granted")),
 	}, "name", "value"))
 	request("CoreCredentialUpdateRequestV2", object(map[string]any{
 		"name": nullable(str()), "description": nullable(str()), "type": nullable(str()), "provider": nullable(str()), "scope": nullable(str()), "crew_id": nullable(str()), "crew_ids": nullable(stringArray), "account_label": nullable(str()), "account_email": nullable(str()), "token_expires_at": nullable(str()), "security_level": nullable(integer()), "username": nullable(str()),
+		"crew_delivery": nullable(enum("all", "granted")),
 	}))
 	request("CoreCredentialFieldRequestV2", object(map[string]any{"key": str(), "value": str(), "is_secret": nullable(boolean()), "ordinal": nullable(integer())}, "value"))
 	request("CoreCredentialBindingRequestV2", object(map[string]any{"credential_id": str(), "scope": str(), "crew_id": nullable(str()), "agent_id": nullable(str()), "slot": str()}, "credential_id", "scope", "slot"))

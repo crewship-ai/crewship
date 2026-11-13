@@ -21,6 +21,18 @@ import (
 // keeper.SecurityLevels rather than restated, so the flag help, the rejection
 // message and the policy that enforces them cannot drift into describing three
 // different scales.
+const crewDeliveryFlagHelp = "Who a crew link delivers the credential to: all (every member of its crews, the default) or granted (the crews own and see it; only agents given `crewship credential assign` receive it)"
+
+func parseCrewDeliveryFlag(v string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "all":
+		return "all", nil
+	case "granted":
+		return "granted", nil
+	}
+	return "", fmt.Errorf("--crew-delivery %q: want all or granted", v)
+}
+
 func securityLevelHelp() string {
 	parts := make([]string, 0, len(keeper.SecurityLevels()))
 	for _, l := range keeper.SecurityLevels() {
@@ -438,6 +450,13 @@ var credCreateCmd = &cobra.Command{
 		if secLevel >= 1 {
 			body["security_level"] = secLevel
 		}
+		if v, _ := flags.GetString("crew-delivery"); v != "" {
+			mode, err := parseCrewDeliveryFlag(v)
+			if err != nil {
+				return err
+			}
+			body["crew_delivery"] = mode
+		}
 
 		client := newAPIClient()
 		if ref, _ := flags.GetString("folder"); ref != "" {
@@ -637,6 +656,14 @@ var credUpdateCmd = &cobra.Command{
 				}
 				body["folder_id"] = id
 			}
+		}
+		if flags.Changed("crew-delivery") {
+			v, _ := flags.GetString("crew-delivery")
+			mode, err := parseCrewDeliveryFlag(v)
+			if err != nil {
+				return err
+			}
+			body["crew_delivery"] = mode
 		}
 		if flags.Changed("security-level") {
 			v, _ := flags.GetInt("security-level")

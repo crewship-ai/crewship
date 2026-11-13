@@ -89,6 +89,7 @@ var crewDeliveredCredentialsSQL = fmt.Sprintf(`
 	JOIN credentials c ON c.id = cc.credential_id
 	WHERE c.deleted_at IS NULL AND c.status = 'ACTIVE'
 	  AND c.workspace_id = s.workspace_id
+	  AND c.crew_delivery = 'all'
 	  AND NOT EXISTS (
 	      SELECT 1 FROM resolved_bindings rb WHERE rb.credential_id = c.id
 	  )

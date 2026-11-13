@@ -5661,6 +5661,14 @@
             "nullable": true,
             "type": "string"
           },
+          "crew_delivery": {
+            "enum": [
+              "all",
+              "granted"
+            ],
+            "nullable": true,
+            "type": "string"
+          },
           "crew_id": {
             "nullable": true,
             "type": "string"
@@ -5813,6 +5821,14 @@
             "type": "string"
           },
           "account_label": {
+            "nullable": true,
+            "type": "string"
+          },
+          "crew_delivery": {
+            "enum": [
+              "all",
+              "granted"
+            ],
             "nullable": true,
             "type": "string"
           },
@@ -6632,6 +6648,13 @@
           },
           "created_by_actor_type": {
             "nullable": true,
+            "type": "string"
+          },
+          "crew_delivery": {
+            "enum": [
+              "all",
+              "granted"
+            ],
             "type": "string"
           },
           "crew_id": {
