@@ -64,7 +64,11 @@ spec:
 	}
 }
 
-func TestValidate_RejectsDanglingCredRef(t *testing.T) {
+// An env_ref the manifest does not declare is no longer an offline error: it
+// may name a credential created outside Git. The planner resolves it against
+// the server (see TestPlan_UndeclaredEnvRef*), so a dry-run still fails on a
+// name that exists nowhere.
+func TestValidate_AcceptsUndeclaredCredRefForPlanTimeCheck(t *testing.T) {
 	b, err := Load([]byte(`
 apiVersion: crewship/v1
 kind: Crew
@@ -80,9 +84,8 @@ spec:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	err = b.Validate()
-	if err == nil || !strings.Contains(err.Error(), "unknown credential") {
-		t.Fatalf("want unknown-credential error, got %v", err)
+	if err := b.Validate(); err != nil {
+		t.Fatalf("an undeclared env_ref must be left to the planner, got %v", err)
 	}
 }
 

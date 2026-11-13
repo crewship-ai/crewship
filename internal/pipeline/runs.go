@@ -558,6 +558,29 @@ func DSLHasOutcomeCapableStep(dsl *DSL) bool {
 	return stepsHaveOutcomeCapableStep(dsl.Steps)
 }
 
+// ExecutedOutcomeCapableStep is DSLHasOutcomeCapableStep judged against what
+// the run actually executed: a top-level outcome-capable step counts only if
+// it produced an output that is not the skip sentinel. A conditional
+// agent_run whose `if:` was false had nobody to report a hand-off, so a clean
+// probe-only run settles SUCCEEDED instead of FAILED "no outcome reported".
+// An agent that ran and reported nothing still counts (an empty output is
+// still an execution), so the strict default is unchanged for it.
+func ExecutedOutcomeCapableStep(dsl *DSL, outputs map[string]string) bool {
+	if dsl == nil {
+		return false
+	}
+	for _, st := range dsl.Steps {
+		if !stepsHaveOutcomeCapableStep([]Step{st}) {
+			continue
+		}
+		out, ran := outputs[st.ID]
+		if ran && out != "<skipped>" {
+			return true
+		}
+	}
+	return false
+}
+
 func stepsHaveOutcomeCapableStep(steps []Step) bool {
 	for _, st := range steps {
 		switch st.Type {

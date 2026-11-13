@@ -75,7 +75,7 @@ spec:
 | `spec.prompt` | string | one-of | Inline system prompt body. |
 | `spec.prompt_file` | string | one-of | Manifest-relative path to a prompt body. Folded into `prompt` at parse time. |
 | `spec.skills` | []string | no | Skill slugs to bind (one POST each). |
-| `spec.env_refs` | []string | no | Credential names to bind as env vars (one POST each). The credential's `name` must equal the env-var (e.g. `ANTHROPIC_API_KEY`). |
+| `spec.env_refs` | []string | no | Credential names to bind as env vars (one POST each). The credential's `name` must equal the env-var (e.g. `ANTHROPIC_API_KEY`). It may be declared in the manifest or already exist on the server; the plan fails if it is neither. Credentials the agent inherits through a crew link are never planned for removal. |
 
 > **Exactly one** of `prompt` / `prompt_file` must be set. `prompt_file`
 > is resolved relative to the manifest file and folded into `prompt`

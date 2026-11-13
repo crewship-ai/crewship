@@ -187,7 +187,7 @@ Crew-scoped MCP integration. Mirrors what `POST /api/v1/crews/{id}/integrations`
 | `prompt_file` | string | — | Relative path. Mutually exclusive with `prompt:`. |
 | `suggested_prompts` | string | — | The agent's own chat suggestions — the chips under an empty composer — **one per line**, written as a YAML block scalar. At most 8 lines, at most 120 characters each; blank lines are ignored. Omit it to leave the server's value alone and fall back to the role packs. |
 | `skills` | `[]string` | — | Slug references; must resolve in the merged workspace + crew scope. |
-| `env_refs` | `[]string` | — | Env var name references; must resolve in the merged credential scope. |
+| `env_refs` | `[]string` | — | Credential names bound as env vars. A name declared in the manifest is created by the same apply; any other name must already exist on the server (for example one created with `crewship credential create`, which keeps the value out of Git). The plan, including `--dry-run`, fails on a name that exists in neither. |
 
 ## `Service`
 
@@ -250,7 +250,7 @@ The validator runs the following cross-checks at validate time (no network, no D
 | Rule | Failing message |
 | --- | --- |
 | Every `agent.skills[]` slug must be declared in the merged workspace + crew skill scope | `crew "X" agent "Y" references unknown skill "Z"` |
-| Every `agent.env_refs[]` env name must be declared in the merged credential scope | `crew "X" agent "Y" references unknown credential env "Z"` |
+| Every `agent.env_refs[]` name must be declared in the manifest or already exist on the server (checked at plan time) | `agent X/Y env_refs[Z]: no such credential — declare it in the manifest or create it with ...` |
 | Every `mcp.env_mapping[]` value must be declared in the merged credential scope | `crew "X" mcp "Y": env_mapping[KEY] -> "Z" references unknown credential` |
 | Every `service.env_refs[]` env name must be declared in the merged credential scope | `crew "X" service "Y": env_refs[Z] references unknown credential` |
 

@@ -113,16 +113,30 @@ var credUnassignCmd = &cobra.Command{
 		var assignments []struct {
 			ID           string `json:"id" yaml:"id"`
 			CredentialID string `json:"credential_id" yaml:"credential_id"`
+			GrantSource  string `json:"grant_source" yaml:"grant_source"`
 		}
 		if err := cli.ReadJSON(listResp, &assignments); err != nil {
 			return err
 		}
-		var assignmentID string
+		var assignmentID, inheritedVia string
 		for _, a := range assignments {
-			if a.CredentialID == credID {
+			if a.CredentialID != credID {
+				continue
+			}
+			if a.ID != "" {
 				assignmentID = a.ID
 				break
 			}
+			inheritedVia = a.GrantSource
+		}
+		if assignmentID == "" && inheritedVia != "" {
+			// The agent DOES receive it — through its crew, not an
+			// assignment. "not assigned" was literally true and misled the
+			// operator into thinking delivery had stopped.
+			return fmt.Errorf("credential %s is not assigned to agent %s, but the agent still receives it through its crew (grant_source=%s). "+
+				"A crew link delivers the credential to every agent in that crew. To stop delivery, unlink it from the crew "+
+				"(crewship credential update %s --crews ...); if only some agents may hold it, put those agents in a separate crew and link it there",
+				args[0], args[1], inheritedVia, args[0])
 		}
 		if assignmentID == "" {
 			return fmt.Errorf("credential %s not assigned to agent %s", args[0], args[1])

@@ -327,3 +327,21 @@ func ValidateImportURL(_ context.Context, rawURL string) error {
 
 	return nil
 }
+
+// PreflightSKILLMD runs the checks the import route applies to a SKILL.md
+// body before anything is stored: the frontmatter must parse and a declared
+// license must be on the allowlist unless the caller opted out. Manifest
+// validation calls it so `crewship apply --dry-run` reports what apply would
+// be refused for, instead of a clean plan followed by a 400.
+func PreflightSKILLMD(content string, allowUnsafeLicense bool) error {
+	parsed, err := ParseSKILLMD(content)
+	if err != nil {
+		return err
+	}
+	if !allowUnsafeLicense && parsed.Meta.License != "" {
+		if spdx := DetectSPDX(parsed.Meta.License); !LicenseAllowed(spdx) {
+			return &LicenseError{Detected: spdx, Raw: parsed.Meta.License}
+		}
+	}
+	return nil
+}
