@@ -83,7 +83,14 @@ jobs:
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           name: craft-packages
-          path: dist-craft
+          # Under the ignored build/ so goreleaser still sees a clean tree.
+          path: build/craft-packages
+      # The signed binaries carry each package's manifest digest; nothing is
+      # built unless the packages are exactly the pinned ones.
+      - name: Verify the Word and Sheet packages against their pins
+        env:
+          PINS: ${{ needs.craft-components.outputs.catalog }}
+        run: bash scripts/check-craft-packages.sh "$PINS" build/craft-packages
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
         with:
@@ -150,24 +157,15 @@ jobs:
           MACOS_NOTARY_KEY_ID: ${{ secrets.MACOS_NOTARY_KEY_ID }}
           MACOS_NOTARY_KEY: ${{ secrets.MACOS_NOTARY_KEY }}
         name: Build and sign final release assets without publishing
-      # The signed binaries carry each package's manifest digest; a package is
-      # published next to the archives only if it is exactly the pinned one.
+      # checksums.txt (signed above) already lists the packages; publish them
+      # next to the archives after checking them once more.
       - name: Publish the Word and Sheet packages with the archives
         env:
           PINS: ${{ needs.craft-components.outputs.catalog }}
         run: |
           set -euo pipefail
-          # Every pin has exactly its package and every package its pin, so a
-          # binary never trusts a package that is not published.
-          IFS=, read -ra pins <<<"$PINS"
-          packages=(dist-craft/crewship-craft-*.craftpkg)
-          [ "${#pins[@]}" -ge 1 ] && [ "${#pins[@]}" -eq "${#packages[@]}" ] || { echo "::error::${#pins[@]} pins but ${#packages[@]} packages"; exit 1; }
-          for pin in "${pins[@]}"; do
-            app="${pin%%=*}"; sha="${pin##*=}"; pkg="dist-craft/crewship-craft-${app}.craftpkg"
-            [ -f "$pkg" ] || { echo "::error::no package for pin $app"; exit 1; }
-            [ "$(tar -xOf "$pkg" manifest.json | sha256sum | cut -d' ' -f1)" = "$sha" ] || { echo "::error::$pkg is not the pinned package"; exit 1; }
-            cp "$pkg" dist/
-          done
+          bash scripts/check-craft-packages.sh "$PINS" build/craft-packages
+          cp build/craft-packages/crewship-craft-*.craftpkg dist/
       - name: Verify legal contents of built artifacts
         run: |
           sudo apt-get update -qq

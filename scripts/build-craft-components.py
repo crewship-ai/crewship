@@ -28,6 +28,10 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 RECIPE = ROOT / 'tools/craft-components'
 OUTPUT = ROOT / 'build/craft-components/dist'
+# The pins this recipe is expected to produce. A build that produces others
+# fails: the recipe changed without its pins, or the build is not
+# reproducible. Reviewers see a pin change in the diff.
+EXPECTED = ROOT / 'tools/craft-components/catalog.txt'
 SCHEMA_VERSION = 2
 sys.path.insert(0, str(ROOT / 'scripts'))
 
@@ -180,8 +184,11 @@ def fonts_commit(fonts):
 def crate_inventory(c, source, cargo, env):
     """Every crate linked into either target, with its declared license."""
     crates = {}
+    # Not --offline: a clean machine has only the crates the build fetched, and
+    # metadata also resolves the rest of the lock file. --locked keeps it to
+    # the pinned Cargo.lock.
     for target in ('wasm32-wasip1', 'wasm32-unknown-unknown'):
-        meta = json.loads(run([cargo, 'metadata', '--locked', '--offline', '--format-version', '1',
+        meta = json.loads(run([cargo, 'metadata', '--locked', '--format-version', '1',
                                '--filter-platform', target], cwd=source, env=env, capture=True))
         packages = {p['id']: p for p in meta['packages']}
         nodes = {n['id']: n for n in meta['resolve']['nodes']}
@@ -298,7 +305,19 @@ def sbom(component, crates, fonts_repository, fonts_commit_id):
 
 def font_notices(fonts):
     names = [p for p in sorted((fonts / 'fonts').rglob('*')) if p.is_file() and re.search(r'(OFL|LICEN[CS]E|COPYING)', p.name, re.I)]
+    check_font_licenses({str(p.relative_to(fonts)): p.read_bytes() for p in names})
     return {str(p.relative_to(fonts)): p.read_bytes() for p in names}
+
+
+def check_font_licenses(notices):
+    """The package and its SBOM declare the fonts as OFL-1.1; every font
+    license text must be the SIL Open Font License 1.1, or the build stops."""
+    if not notices:
+        raise ValueError('the fonts carry no license text')
+    for name, raw in notices.items():
+        text = raw.decode('utf-8', 'replace')
+        if 'SIL OPEN FONT LICENSE' not in text.upper() or 'Version 1.1' not in text:
+            raise ValueError(f'{name} is not the SIL Open Font License 1.1')
 
 
 def asset_name(app):
@@ -323,7 +342,7 @@ def write_package(stage, component, toolchain, out):
     return f'{component["application"]}={component["version"]}={sha256_bytes(manifest)}'
 
 
-def build(rust_bin, keep, build_dir=None, out=None):
+def build(rust_bin, keep, build_dir=None, out=None, update_expected=False):
     recipe = load_recipe()
     config = json.loads((ROOT / 'mooring/build-tools.json').read_text())
     cargo, env, rustc_version = rust_env(rust_bin, recipe['rust_version'], recipe['targets'])
@@ -367,11 +386,25 @@ def build(rust_bin, keep, build_dir=None, out=None):
         if out.exists():
             shutil.rmtree(out)
         pins = [write_package(stage, c, toolchain, out) for c in components]
-        (out / 'catalog.txt').write_text(','.join(sorted(pins)) + '\n')
+        catalog = ','.join(sorted(pins)) + '\n'
+        (out / 'catalog.txt').write_text(catalog)
         if keep:
             shutil.copytree(temp, Path(keep), dirs_exist_ok=False)
     print('Craft packages written to ' + str(out))
-    print('catalog: ' + ','.join(sorted(pins)))
+    print('catalog: ' + catalog.strip())
+    check_expected(catalog, update_expected)
+
+
+def check_expected(catalog, update=False, expected=None):
+    expected = expected or EXPECTED
+    if update:
+        expected.write_text(catalog)
+        print('expected catalog updated: ' + str(expected))
+        return
+    want = expected.read_text() if expected.exists() else ''
+    if catalog != want:
+        raise SystemExit(f'the build produced pins other than {expected}:\n  built:    {catalog.strip()}\n'
+                         f'  expected: {want.strip()}\nRebuild with --update-catalog after a deliberate recipe change.')
 
 
 if __name__ == '__main__':
@@ -380,5 +413,6 @@ if __name__ == '__main__':
     parser.add_argument('--build-dir', help='Cargo target and scratch directory (default build/craft-components)')
     parser.add_argument('--keep', help='copy the intermediate build tree here (debugging)')
     parser.add_argument('--out', help='package directory (default build/craft-components/dist)')
+    parser.add_argument('--update-catalog', action='store_true', help='write the produced pins to ' + str(EXPECTED.relative_to(ROOT)))
     args = parser.parse_args()
-    build(args.rust_bin, args.keep, args.build_dir, args.out)
+    build(args.rust_bin, args.keep, args.build_dir, args.out, args.update_catalog)

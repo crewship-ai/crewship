@@ -47,3 +47,33 @@ The Rust toolchain must be `rust_version` with both `targets` installed
 `mooring/build-tools.json`. Changing a pin changes the engine and editor digests,
 and documents pinned to the previous ones then need the compatibility path in
 the PRD (§6) before a release may ship it.
+
+The build stops when a crate's license expression cannot be satisfied by the
+permissive allowlist in the script (`ALLOWED_LICENSES`) or when a font license
+is not the SIL OFL 1.1. Each package carries `licenses/crates.json` and a
+CycloneDX SBOM, `licenses/sbom.cdx.json`; both are covered by the package's pin.
+
+## Release
+
+The release workflow builds both packages after the tag is verified. Then
+`scripts/check-craft-packages.sh` requires exactly one package per pin, every
+pin a known application once and every manifest the pinned one, before
+goreleaser builds the binaries with those pins. `checksums.txt`, which cosign
+signs, lists the packages, and they are published next to the archives.
+
+A release cannot ship without the packages. If the packages cannot be built
+(an unreachable source commit, a font repository or toolchain outage), no
+release ships, including an urgent fix. This is deliberate. A binary that
+trusts no package would turn Word and Sheet off for every instance that
+upgrades. There is no switch to skip the packages; the fix is to repair the
+recipe or to release from a tag whose recipe still builds.
+
+A pull request that changes the recipe, this script, `release.yml`,
+`.goreleaser.yml`, the Dockerfile or the code that installs packages runs
+`Craft Packages Candidate Check`, which builds both packages the same way and
+installs and runs them through the server.
+
+`catalog.txt` here holds the pins this recipe produces. The build fails when it
+produces other pins, so a recipe change has to update them visibly
+(`--update-catalog`), and a build that is not reproducible stops the release
+and the candidate check.

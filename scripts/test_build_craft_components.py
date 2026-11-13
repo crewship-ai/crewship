@@ -1,6 +1,11 @@
 """Unit tests of scripts/build-craft-components.py that need no Rust build."""
 import importlib.util
+import hashlib
+import io
 import json
+import subprocess
+import tarfile
+import tempfile
 from pathlib import Path
 import unittest
 
@@ -33,6 +38,16 @@ class LicensePolicy(unittest.TestCase):
         self.assertNotIn('ok 1', str(refused.exception))
 
 
+class FontLicenses(unittest.TestCase):
+    def test_only_ofl_1_1_fonts_pass(self):
+        ofl = b'Copyright 2020 X\nThis Font Software is licensed under the SIL Open Font License, Version 1.1.\n'
+        build.check_font_licenses({'fonts/a/OFL.txt': ofl})
+        for bad in ({}, {'fonts/b/LICENSE': b'Apache License Version 2.0'},
+                    {'fonts/a/OFL.txt': ofl, 'fonts/c/COPYING': b'GNU GENERAL PUBLIC LICENSE Version 2'}):
+            with self.assertRaises(ValueError):
+                build.check_font_licenses(bad)
+
+
 class SBOM(unittest.TestCase):
     component = {'application': 'wordcraft', 'version': '0.11.0+b0fb5cb571b6',
                  'source': {'repository': 'https://github.com/storytold/wordcraft', 'commit': 'b' * 40},
@@ -52,6 +67,53 @@ class SBOM(unittest.TestCase):
         serde = next(c for c in bom['components'] if c['name'] == 'serde')
         self.assertEqual(serde['licenses'], [{'expression': 'MIT OR Apache-2.0'}])
         self.assertIn('craft-fonts', {c['name'] for c in bom['components']})
+
+
+class ExpectedCatalog(unittest.TestCase):
+    def test_other_pins_fail_and_update_writes(self):
+        with tempfile.TemporaryDirectory() as d:
+            expected = Path(d) / 'catalog.txt'
+            expected.write_text('wordcraft=1=' + 'a' * 64 + '\n')
+            build.check_expected('wordcraft=1=' + 'a' * 64 + '\n', expected=expected)
+            with self.assertRaises(SystemExit):
+                build.check_expected('wordcraft=1=' + 'b' * 64 + '\n', expected=expected)
+            build.check_expected('wordcraft=1=' + 'b' * 64 + '\n', update=True, expected=expected)
+            self.assertIn('b' * 64, expected.read_text())
+
+    def test_the_committed_catalog_is_well_formed(self):
+        catalog = (build.EXPECTED).read_text()
+        self.assertRegex(catalog, r'^gridcraft=[A-Za-z0-9.+_-]+=[0-9a-f]{64},wordcraft=[A-Za-z0-9.+_-]+=[0-9a-f]{64}\n$')
+
+
+class PackageGate(unittest.TestCase):
+    """scripts/check-craft-packages.sh, the release's pin-to-package gate."""
+    script = Path(__file__).with_name('check-craft-packages.sh')
+
+    def package(self, directory, app, manifest):
+        with tarfile.open(Path(directory) / f'crewship-craft-{app}.craftpkg', 'w') as tar:
+            info = tarfile.TarInfo('manifest.json')
+            info.size = len(manifest)
+            tar.addfile(info, io.BytesIO(manifest))
+        return f'{app}=1.0={hashlib.sha256(manifest).hexdigest()}'
+
+    def check(self, catalog, directory):
+        return subprocess.run(['bash', str(self.script), catalog, directory], capture_output=True, text=True).returncode
+
+    def test_exact_match_passes_and_every_mismatch_fails(self):
+        with tempfile.TemporaryDirectory() as d:
+            word = self.package(d, 'wordcraft', b'{"w":1}')
+            sheet = self.package(d, 'gridcraft', b'{"s":1}')
+            self.assertEqual(self.check(f'{word},{sheet}', d), 0)
+            other = 'gridcraft=1.0=' + hashlib.sha256(b'other').hexdigest()
+            for catalog in ['', word,  # a package without a pin
+                            f'{word},{other}',  # a pin for different bytes
+                            f'{word},{word}',  # the same application twice
+                            f'{word},{sheet},powerpoint=1.0={"a" * 64}',  # unknown application
+                            f'{word},gridcraft={"v" * 65}={sheet.rsplit("=", 1)[1]}',  # version too long
+                            f'{word},{sheet};echo']:
+                self.assertNotEqual(self.check(catalog, d), 0, catalog)
+            (Path(d) / 'stray.txt').write_text('x')  # anything unpinned in the directory
+            self.assertNotEqual(self.check(f'{word},{sheet}', d), 0)
 
 
 if __name__ == '__main__':

@@ -288,6 +288,12 @@ archives:
 
 checksum:
   name_template: "checksums.txt"
+  # The Word and Sheet packages (#5315), verified against the binaries' pins
+  # before goreleaser runs, so the signed checksums cover them too. Only a
+  # build with pins has packages; elsewhere (snapshots) the glob is empty and
+  # goreleaser ignores it.
+  extra_files:
+    - glob: '{{ if index .Env "CRAFT_COMPONENT_PINS" }}build/craft-packages/*.craftpkg{{ end }}'
 
 # SBOM generation via syft (CRE-122).
 # Produces both SPDX (US federal procurement standard) and CycloneDX

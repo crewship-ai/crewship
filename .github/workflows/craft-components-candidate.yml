@@ -15,7 +15,14 @@ on:
       - scripts/test_build_craft_components.py
       - scripts/build-mooring-runtime.py
       - mooring/build-tools.json
+      - scripts/check-craft-packages.sh
+      - .goreleaser.yml
+      - Dockerfile
       - internal/craftassets/**
+      - internal/craftapps/**
+      - internal/craftengine/**
+      - internal/editororigin/**
+      - internal/server/craft_apps*.go
 
 permissions:
   contents: read
@@ -41,12 +48,12 @@ jobs:
         run: timeout --kill-after=15s 4m rustup toolchain install 1.99.1 --profile minimal --target wasm32-wasip1 --target wasm32-unknown-unknown
       - name: Build packages
         run: python3 scripts/build-craft-components.py --rust-bin "$(dirname "$(rustup which --toolchain 1.99.1 rustc)")"
-      - name: Read the catalog as the release does
+      - name: Check the packages against the catalog as the release does
         run: |
           set -euo pipefail
-          pins="$(tr -d '\n' < build/craft-components/dist/catalog.txt)"
-          [[ "$pins" =~ ^[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64}(,[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64})*$ ]]
-          echo "catalog: $pins"
+          mkdir -p build/craft-packages
+          cp build/craft-components/dist/*.craftpkg build/craft-packages/
+          bash scripts/check-craft-packages.sh "$(tr -d '\n' < build/craft-components/dist/catalog.txt)" build/craft-packages
       - uses: actions/setup-go@802e89cd7394b98352d79117a8b463bbfc2fdacf
         with:
           go-version: ${{ env.GO_VERSION }}
