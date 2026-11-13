@@ -17,6 +17,8 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -525,6 +527,13 @@ type MarkTerminalInput struct {
 	// (internal/api/pipeline_runs.go), which passes status=cancelled — an
 	// outcome the hand-off never gets a say in.
 	HasOutcomeCapableStep bool
+	// OutcomeSources are the outputs of the outcome-capable steps that
+	// actually executed, in definition order (see ExecutedOutcomeSources).
+	// The §9.6 hand-off is looked for in Output first and, when the final
+	// step is a tool result (a crewship comment, a transform, a notify),
+	// in these — newest first — so an agent's CHECKPOINT is not lost just
+	// because a later step returned something else.
+	OutcomeSources []string
 }
 
 // DSLHasOutcomeCapableStep reports whether a routine definition contains a
@@ -572,6 +581,92 @@ func stepsHaveOutcomeCapableStep(steps []Step) bool {
 	return false
 }
 
+// ExecutedOutcomeSources walks a definition against the outputs a run
+// actually recorded and returns (ran, sources): whether any outcome-capable
+// step (agent_run, call_pipeline, or a foreach holding one) really executed,
+// and those steps' outputs in definition order.
+//
+// A step whose `if:` was false records the "<skipped>" sentinel and a step
+// that never ran records nothing; neither could have reported a hand-off, so
+// neither makes "no outcome reported" a bug. A step that ran and produced an
+// empty output still counts — an agent that ran and said nothing is exactly
+// the failure §9.6 wants surfaced.
+func ExecutedOutcomeSources(dsl *DSL, outputs map[string]string) (bool, []string) {
+	if dsl == nil {
+		return false, nil
+	}
+	var sources []string
+	ran := false
+	for _, st := range dsl.Steps {
+		capable := st.Type == StepAgentRun || st.Type == StepCallPipeline ||
+			(st.Type == StepForeach && st.Foreach != nil && stepsHaveOutcomeCapableStep(st.Foreach.Steps))
+		if !capable {
+			continue
+		}
+		out, ok := outputs[st.ID]
+		if !ok || out == "<skipped>" {
+			continue
+		}
+		ran = true
+		sources = append(sources, out)
+	}
+	return ran, sources
+}
+
+// reportedOutcomeIn finds a §9.6 hand-off in a step output. Plain text is
+// parsed as-is. When the output is JSON (a crewship verb returns the created
+// comment; a transform may wrap the text), the markers sit inside an encoded
+// string whose newlines are the two characters `\n`, so the line-oriented
+// parsers never match; the decoded string values are parsed instead, last
+// one first. Only real decoded strings are inspected — the raw text is never
+// "unescaped" wholesale, which could fabricate markers.
+func reportedOutcomeIn(output string) string {
+	if v := orchestrator.ReportedOutcome(output); v != "" {
+		if _, ok := orchestrator.NormalizeOutcome(v); ok {
+			return v
+		}
+	}
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" || (trimmed[0] != '{' && trimmed[0] != '[' && trimmed[0] != '"') {
+		return ""
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(trimmed), &decoded); err != nil {
+		return ""
+	}
+	var strs []string
+	collectJSONStrings(decoded, &strs, 0)
+	for i := len(strs) - 1; i >= 0; i-- {
+		if v := orchestrator.ReportedOutcome(strs[i]); v != "" {
+			return v
+		}
+	}
+	return ""
+}
+
+func collectJSONStrings(v any, out *[]string, depth int) {
+	if depth > 8 {
+		return
+	}
+	switch t := v.(type) {
+	case string:
+		*out = append(*out, t)
+	case []any:
+		for _, e := range t {
+			collectJSONStrings(e, out, depth+1)
+		}
+	case map[string]any:
+		keys := make([]string, 0, len(t))
+		for k := range t {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			collectJSONStrings(t[k], out, depth+1)
+		}
+	}
+}
+
 // deriveRunOutcome computes the §9.6 outcome for a terminal pipeline run
 // (work package B6, #2349) — the same orchestrator.DeriveOutcome
 // finishAssignment uses for assignments, so the two run tables share one
@@ -589,7 +684,7 @@ func stepsHaveOutcomeCapableStep(steps []Step) bool {
 // outcome when the run held a step that could have reported one. An
 // agentless routine that ran clean settles SUCCEEDED with no reason —
 // see MarkTerminalInput.HasOutcomeCapableStep and DeriveOutcome.
-func deriveRunOutcome(status RunStatus, output, errorMessage string, hasOutcomeCapableStep bool) (outcome, resolvedErrorMessage string) {
+func deriveRunOutcome(status RunStatus, output, errorMessage string, hasOutcomeCapableStep bool, sources ...string) (outcome, resolvedErrorMessage string) {
 	if status == RunStatusDryRunOK {
 		// A dry run is, by definition, one that made no real change — the
 		// closest of the seven values to what actually happened, and
@@ -604,7 +699,11 @@ func deriveRunOutcome(status RunStatus, output, errorMessage string, hasOutcomeC
 	case RunStatusCancelled:
 		technical = "cancelled"
 	}
-	outcome, reason := orchestrator.DeriveOutcome(technical, orchestrator.ReportedOutcome(output), hasOutcomeCapableStep)
+	reported := reportedOutcomeIn(output)
+	for i := len(sources) - 1; reported == "" && i >= 0; i-- {
+		reported = reportedOutcomeIn(sources[i])
+	}
+	outcome, reason := orchestrator.DeriveOutcome(technical, reported, hasOutcomeCapableStep)
 	if reason != "" && errorMessage == "" {
 		errorMessage = reason
 	}
@@ -633,7 +732,7 @@ func (s *RunStore) MarkTerminal(ctx context.Context, in MarkTerminalInput) error
 	// error_message the caller passed in) so the outcome landing here can
 	// never disagree with the row it lands on. May rewrite ErrorMessage —
 	// see deriveRunOutcome's doc comment for when and why.
-	outcome, resolvedErrorMessage := deriveRunOutcome(in.Status, in.Output, in.ErrorMessage, in.HasOutcomeCapableStep)
+	outcome, resolvedErrorMessage := deriveRunOutcome(in.Status, in.Output, in.ErrorMessage, in.HasOutcomeCapableStep, in.OutcomeSources...)
 	in.ErrorMessage = resolvedErrorMessage
 
 	var fp any

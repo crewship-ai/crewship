@@ -2825,6 +2825,14 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 		// MarkTerminalInput.HasOutcomeCapableStep.
 		HasOutcomeCapableStep: DSLHasOutcomeCapableStep(in.dsl),
 	}
+	if result != nil {
+		// Judge the run by what it executed, not by what it declared: an
+		// agent_run whose `if:` was false never ran and could not report a
+		// hand-off, so a clean script-only completion is SUCCEEDED, not
+		// FAILED "no outcome reported". An agent that did run keeps the
+		// strict reading.
+		terminal.HasOutcomeCapableStep, terminal.OutcomeSources = ExecutedOutcomeSources(in.dsl, result.StepOutputs)
+	}
 	if result == nil {
 		terminal.Status = RunStatusFailed
 		terminal.ErrorMessage = "run aborted before result was constructed"
