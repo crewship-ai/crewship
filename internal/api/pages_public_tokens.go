@@ -511,11 +511,10 @@ func (h *PageHandler) RevokePublicLink(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "load page for revoke", err)
 		return
 	}
-	// Revoking is NOT gated on being human. An agent that notices a leaked link
-	// should be able to close it: rule 3 forbids WIDENING reach, and narrowing
-	// it is the opposite move. An agent keeps the owner gate. A human takes the
-	// publish authority, so a crew VIEWER or MEMBER cannot pull a manager's
-	// link, but may always revoke a link they created themselves.
+	// Revoking is NOT gated on being human: rule 3 forbids WIDENING reach, and
+	// narrowing it is the opposite move. It takes the publish authority, so a
+	// crew VIEWER or MEMBER cannot pull a manager's link, but anyone may revoke
+	// a link they created themselves.
 	if ok, err := h.mayRevokePublicLink(r, wsID, user.ID, rec, tokenID); err != nil {
 		replyInternalError(w, h.logger, "check public link authority", err)
 		return
@@ -891,17 +890,11 @@ func (h *PageHandler) mayPublishPage(ctx context.Context, wsID, userID, role str
 	}
 }
 
-// mayRevokePublicLink: a human needs the publish authority or to be the
-// link's own creator. A caller proven to be an agent by the internal-token
-// binding keeps the page-owner gate (narrowing reach is always allowed to the
-// page's owners). Header markers are not proof: pageGrantCallerIsAgent treats
-// them as "agent" so that it can refuse, and here "agent" would widen the
-// gate, so a header alone never selects it.
+// mayRevokePublicLink: the publish authority, or being the link's own
+// creator. Every caller of this route authenticates as a human session or CLI
+// token (RequireAuth), an agent included, so there is no separate agent gate:
+// header markers are not proof of anything and must never widen it.
 func (h *PageHandler) mayRevokePublicLink(r *http.Request, wsID, userID string, rec *pageRecord, tokenID string) (bool, error) {
-	ctx := r.Context()
-	if InternalTokenWorkspaceFromContext(ctx) != "" || InternalTokenCrewFromContext(ctx) != "" {
-		return h.isPageOwner(ctx, wsID, userID, rec) || canRole(RoleFromContext(ctx), "manage"), nil
-	}
 	ok, err := h.mayPublishPage(r.Context(), wsID, userID, RoleFromContext(r.Context()), rec)
 	if err != nil || ok {
 		return ok, err
