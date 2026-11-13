@@ -141,12 +141,14 @@ func TestPublicLinks_ListAndRevokeTakeThePublishAuthority(t *testing.T) {
 		name, workspaceRole string
 		crewRole            any
 		ownLink             bool
+		agentHeader         bool // a human session that only claims to be an agent
 		want                bool
 	}{
 		{name: "crew viewer", workspaceRole: "VIEWER"},
 		{name: "crew member", workspaceRole: "MEMBER"},
 		{name: "member with crew VIEWER override", workspaceRole: "MEMBER", crewRole: "VIEWER"},
 		{name: "crew member revokes the link they created", workspaceRole: "MEMBER", ownLink: true, want: true},
+		{name: "crew member claiming to be an agent by header", workspaceRole: "MEMBER", agentHeader: true},
 		{name: "crew manager", workspaceRole: "MANAGER", want: true},
 		{name: "member promoted to crew MANAGER", workspaceRole: "MEMBER", crewRole: "MANAGER", want: true},
 	}
@@ -175,16 +177,19 @@ func TestPublicLinks_ListAndRevokeTakeThePublishAuthority(t *testing.T) {
 			h.ListPublicLinks(list, listReq)
 			wantList := tc.want && !tc.ownLink
 			if wantList != (list.Code == http.StatusOK) {
-				t.Fatalf("list: got %d, want ok=%v: %s", list.Code, wantList, list.Body.String())
+				t.Errorf("list: got %d, want ok=%v: %s", list.Code, wantList, list.Body.String())
 			}
 			if !wantList && strings.Contains(list.Body.String(), ownerEmail) {
-				t.Fatalf("a refused list leaked the creator's email: %s", list.Body.String())
+				t.Errorf("a refused list leaked the creator's email: %s", list.Body.String())
 			}
 
 			rev := httptest.NewRecorder()
 			revReq := pagesHumanRequest(t, "DELETE", "/api/v1/pages/"+slug+"/public/"+target, wsID, actor, tc.workspaceRole, "")
 			revReq.SetPathValue("slug", slug)
 			revReq.SetPathValue("tokenId", target)
+			if tc.agentHeader {
+				revReq.Header.Set(actingAgentSlugHeader, "spoofed-agent")
+			}
 			h.RevokePublicLink(rev, revReq)
 			var revoked sql.NullString
 			if err := h.db.QueryRow(`SELECT revoked_at FROM page_public_tokens WHERE id=?`, target).Scan(&revoked); err != nil {
@@ -207,7 +212,7 @@ func TestPublicLinks_ExpiredLinkIsNotReportedWithheld(t *testing.T) {
 	listReq := pagesHumanRequest(t, "GET", "/api/v1/pages/expired-held/public", wsID, userID, "OWNER", "")
 	listReq.SetPathValue("slug", "expired-held")
 	h.ListPublicLinks(list, listReq)
-	if list.Code != http.StatusOK || strings.Contains(list.Body.String(), `"withheld":true`) {
+	if list.Code != http.StatusOK || strings.Contains(list.Body.String(), `"withheld":true`) || strings.Contains(list.Body.String(), `"live":true`) {
 		t.Fatalf("an expired link was reported withheld: %d %s", list.Code, list.Body.String())
 	}
 }

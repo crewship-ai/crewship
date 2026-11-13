@@ -891,12 +891,16 @@ func (h *PageHandler) mayPublishPage(ctx context.Context, wsID, userID, role str
 	}
 }
 
-// mayRevokePublicLink: an agent keeps the page-owner gate (narrowing reach is
-// always allowed to the page's owners); a human needs the publish authority
-// or to be the link's own creator.
+// mayRevokePublicLink: a human needs the publish authority or to be the
+// link's own creator. A caller proven to be an agent by the internal-token
+// binding keeps the page-owner gate (narrowing reach is always allowed to the
+// page's owners). Header markers are not proof: pageGrantCallerIsAgent treats
+// them as "agent" so that it can refuse, and here "agent" would widen the
+// gate, so a header alone never selects it.
 func (h *PageHandler) mayRevokePublicLink(r *http.Request, wsID, userID string, rec *pageRecord, tokenID string) (bool, error) {
-	if isAgent, _ := pageGrantCallerIsAgent(r); isAgent {
-		return h.isPageOwner(r.Context(), wsID, userID, rec) || canRole(RoleFromContext(r.Context()), "manage"), nil
+	ctx := r.Context()
+	if InternalTokenWorkspaceFromContext(ctx) != "" || InternalTokenCrewFromContext(ctx) != "" {
+		return h.isPageOwner(ctx, wsID, userID, rec) || canRole(RoleFromContext(ctx), "manage"), nil
 	}
 	ok, err := h.mayPublishPage(r.Context(), wsID, userID, RoleFromContext(r.Context()), rec)
 	if err != nil || ok {
