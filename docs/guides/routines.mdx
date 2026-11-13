@@ -1409,11 +1409,21 @@ steps:
 
 #### What bounds it
 
-- **Autonomy.** The verb is gated on the author crew's `autonomy_level`. A crew
-  whose level would *hold the action for approval* gets a refusal instead — a
-  routine has nobody attached to approve it — so on a `strict` crew, issue
-  writes and assignments do not happen. Raise the level with `crewship policy
-  set`. The full per-level table, and the reasoning for each cell, is in
+- **Autonomy.** The verb is gated on the author crew's `autonomy_level`. When
+  the level *holds the action for approval* (for example issue writes on a
+  `strict` crew), the step opens an approval card naming the action and its
+  rendered arguments, and waits: a top-level step parks the run as `WAITING`,
+  a step inside `foreach` or a nested routine blocks until decided. Approving
+  runs the action once, with the step's operation key; denial, timeout and
+  cancellation fail the step. The approval is bound to that exact call — run,
+  foreach item, step, verb and arguments — so it never unlocks another item or
+  changed arguments, and no standing trust grant approves it or is offered on
+  its card. Arguments too long for the card are marked as truncated, never cut
+  silently. `issue.create`, `issue.update`, `issue.comment`, `issue.link`,
+  `assignment.create` and `escalation.create` can wait; `page.create` and
+  `page.write` stage their own approval on the route and are still refused
+  when held. Rejected and blocked decisions are refusals; raise the level with
+  `crewship policy set`. The full per-level table, and the reasoning for each cell, is in
   [Autonomy → what a routine may do to the board](/guides/autonomy-and-self-learning#what-a-routine-may-do-to-the-board).
 - **Escalation volume.** `escalation.create` is allowed at *every* autonomy
   level, because an approval to authorise an interrupt is itself the interrupt.

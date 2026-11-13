@@ -465,7 +465,8 @@ func (s *SQLWaitpointStore) crewAutonomy(ctx context.Context, crewID string) str
 
 // consumeTrust fires a standing grant if one covers this gate.
 func (s *SQLWaitpointStore) consumeTrust(ctx context.Context, req WaitpointApprovalRequest, tc routineTrustCtx) (TrustGrantUse, bool) {
-	if req.DecisionForm != nil || tc.pipelineID == "" || tc.definitionHash == "" {
+	// NoStandingTrust is checked before the lookup: Consume spends a use.
+	if req.NoStandingTrust || req.DecisionForm != nil || tc.pipelineID == "" || tc.definitionHash == "" {
 		return TrustGrantUse{}, false
 	}
 	// A strict crew has opted out of every shortcut around the operator.
@@ -488,7 +489,8 @@ func (s *SQLWaitpointStore) consumeTrust(ctx context.Context, req WaitpointAppro
 // payload shape is stable for consumers.
 func (s *SQLWaitpointStore) trustOffer(ctx context.Context, req WaitpointApprovalRequest, tc routineTrustCtx) map[string]any {
 	offer := map[string]any{"eligible": false}
-	if req.DecisionForm != nil || tc.pipelineID == "" || tc.definitionHash == "" || tc.autonomy == string(policy.AutonomyStrict) {
+	// NoStandingTrust: decided by a person every time, so never offered.
+	if req.NoStandingTrust || req.DecisionForm != nil || tc.pipelineID == "" || tc.definitionHash == "" || tc.autonomy == string(policy.AutonomyStrict) {
 		return offer
 	}
 	prior, err := s.trust.PriorApprovals(ctx, req.WorkspaceID, tc.pipelineID, req.StepID, tc.definitionHash)

@@ -150,7 +150,7 @@ func TestPageWriteWholeObjectTemplatePreservesPayloadTypes(t *testing.T) {
 			actions := &recordingCrewship{}
 			e := &Executor{crewship: actions}
 			step := Step{ID: "publish", Type: StepCrewship, Action: "page.write", Args: map[string]any{"page": "ops", "panel": "memory", "data": "{{ steps.collect.output }}"}}
-			_, _, _, err := e.runCrewshipStep(context.Background(), step, RenderContext{StepOutputs: map[string]string{"collect": tc.output}}, RunInput{}, "run-test")
+			_, _, _, err := e.runCrewshipStep(context.Background(), step, RenderContext{StepOutputs: map[string]string{"collect": tc.output}}, RunInput{}, "run-test", 0)
 			if (err == nil) != tc.wantOK {
 				t.Fatalf("err=%v", err)
 			}
@@ -177,7 +177,7 @@ func TestPageWriteObjectTemplateDryRunDoesNotNeedCollectorOutput(t *testing.T) {
 	actions := &recordingCrewship{}
 	e := &Executor{crewship: actions}
 	step := Step{ID: "publish", Type: StepCrewship, Action: "page.write", Args: map[string]any{"page": "ops", "panel": "memory", "data": "{{ steps.collect.output }}"}}
-	_, _, _, err := e.runCrewshipStep(context.Background(), step, RenderContext{}, RunInput{Mode: ModeDryRun}, "dry-run")
+	_, _, _, err := e.runCrewshipStep(context.Background(), step, RenderContext{}, RunInput{Mode: ModeDryRun}, "dry-run", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
