@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,7 +18,7 @@ import (
 // an issue, an assignment, an escalation — and a preview that creates them is
 // not a preview. It reports what it would have done instead, matching how
 // dry_run treats every other side-effecting kind.
-func (e *Executor) runCrewshipStep(ctx context.Context, step Step, render RenderContext, in RunInput, runID string) (string, float64, int64, error) {
+func (e *Executor) runCrewshipStep(ctx context.Context, step Step, render RenderContext, in RunInput, runID string, depth int) (string, float64, int64, error) {
 	stepStart := time.Now()
 
 	// Save-time validation rejects both of these; this is the belt for a
@@ -58,10 +59,11 @@ func (e *Executor) runCrewshipStep(ctx context.Context, step Step, render Render
 			"(production wiring is ExecutorDeps.Crewship in cmd_start.go)", step.ID)
 	}
 
-	out, err := e.crewship.Do(ctx, CrewshipRequest{
+	req := CrewshipRequest{
 		Verb:         step.Action,
 		ChatOriginID: in.ChatOriginID,
 		OperationKey: routineOperationKey(ctx, runID, step.ID),
+		StepID:       step.ID,
 		Args:         args,
 		WorkspaceID:  in.WorkspaceID,
 		// The AUTHOR crew, not the invoker: a routine acts as the crew that
@@ -77,11 +79,96 @@ func (e *Executor) runCrewshipStep(ctx context.Context, step Step, render Render
 		// starting a fresh budget — which is what would make the cap
 		// unenforceable across the journal hop.
 		ChainDepth: in.ChainDepth,
-	})
+	}
+	// On resume, a waitpoint this step already opened is the approval (or
+	// pending question) for this exact call: pass it so an approved one is
+	// honoured without asking twice.
+	if finder, ok := e.waitpoints.(WaitpointResumer); ok && in.resume && runID != "" {
+		if tok, ferr := finder.FindApprovalForStep(ctx, runID, step.ID); ferr == nil && tok != "" {
+			req.ApprovalToken = tok
+		}
+	}
+	out, err := e.crewship.Do(ctx, req)
+	var held *CrewshipApprovalRequired
+	if errors.As(err, &held) {
+		return e.awaitCrewshipApproval(ctx, step, in, runID, depth, req, held, stepStart)
+	}
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("crewship step %q (%s): %w", step.ID, step.Action, err)
 	}
 	return out, 0, time.Since(stepStart).Milliseconds(), nil
+}
+
+// awaitCrewshipApproval turns a held autonomy decision into the same durable
+// approval a `wait: approval` step uses: one inbox card naming the action,
+// the run parks (top-level runs) or blocks (nested), and an approval repeats
+// the call once with the waitpoint token and the SAME operation key, so the
+// action executes exactly once. Denial, timeout and cancellation fail the
+// step as what they are. The crew's autonomy level is never changed.
+func (e *Executor) awaitCrewshipApproval(ctx context.Context, step Step, in RunInput, runID string, depth int, req CrewshipRequest, held *CrewshipApprovalRequired, stepStart time.Time) (string, float64, int64, error) {
+	elapsed := func() int64 { return time.Since(stepStart).Milliseconds() }
+	if e.waitpoints == nil || runID == "" {
+		return "", 0, elapsed(), fmt.Errorf("crewship step %q: %w — no approval store is wired, so the routine cannot wait", step.ID, held)
+	}
+	token := req.ApprovalToken
+	if token == "" {
+		argsJSON, _ := json.Marshal(req.Args)
+		created, err := e.waitpoints.CreateApproval(ctx, WaitpointApprovalRequest{
+			WorkspaceID:    in.WorkspaceID,
+			PipelineRunID:  runID,
+			StepID:         step.ID,
+			Title:          fmt.Sprintf("Approve %s from a routine", step.Action),
+			Prompt:         fmt.Sprintf("The crew's autonomy level (%s) requires approval for %s. Step %q will run %s with arguments %s once approved.", held.Level, held.Action, step.ID, step.Action, truncateForPrompt(string(argsJSON), 1500)),
+			InvokingCrewID: in.InvokingCrewID,
+			TimeoutSec:     step.TimeoutSec,
+		})
+		if err != nil {
+			return "", 0, elapsed(), fmt.Errorf("crewship step %q create approval: %w", step.ID, err)
+		}
+		token = created
+	}
+	if depth == 0 && in.Mode == ModeRun && e.runStore != nil && in.pipeline != nil {
+		park := true
+		if reader, ok := e.waitpoints.(WaitpointStatusReader); ok {
+			if st, serr := reader.WaitpointStatus(ctx, token); serr == nil && st != "pending" {
+				park = false
+			}
+		}
+		if park {
+			if err := e.runStore.MarkWaiting(ctx, runID, step.ID); err != nil {
+				return "", 0, elapsed(), fmt.Errorf("crewship step %q mark waiting: %w", step.ID, err)
+			}
+			return "", 0, elapsed(), &suspendError{token: token, stepID: step.ID}
+		}
+	}
+	approved, err := e.waitpoints.WaitFor(ctx, token)
+	if ctx.Err() != nil {
+		return "", 0, elapsed(), ctx.Err()
+	}
+	if err != nil {
+		return "", 0, elapsed(), fmt.Errorf("crewship step %q wait for approval: %w", step.ID, err)
+	}
+	if !approved {
+		if reader, ok := e.waitpoints.(WaitpointStatusReader); ok {
+			if st, serr := reader.WaitpointStatus(ctx, token); serr == nil && (st == "timed_out" || st == "cancelled") {
+				return "", 0, elapsed(), fmt.Errorf("crewship step %q (%s): approval %s", step.ID, step.Action, strings.ReplaceAll(st, "_", " "))
+			}
+		}
+		return "", 0, elapsed(), fmt.Errorf("crewship step %q (%s): approval denied", step.ID, step.Action)
+	}
+	req.ApprovalToken = token
+	out, err := e.crewship.Do(ctx, req)
+	if err != nil {
+		return "", 0, elapsed(), fmt.Errorf("crewship step %q (%s) after approval: %w", step.ID, step.Action, err)
+	}
+	return out, 0, elapsed(), nil
+}
+
+func truncateForPrompt(s string, max int) string {
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + "…"
 }
 
 // renderCrewshipArgs template-renders string values (including strings nested

@@ -61,6 +61,28 @@ type CrewshipRequest struct {
 	// this verb creates belongs to the same chain, so a downstream automation
 	// resolves depth+1 rather than 0. See GuardChainDepth.
 	ChainDepth int
+	// StepID and ApprovalToken carry a human approval for exactly this
+	// call. When the crew's autonomy level holds the action for approval,
+	// the step parks on an approval waitpoint; once a person approves it the
+	// call is repeated with that waitpoint's token, and the dispatcher
+	// verifies the token is APPROVED and belongs to this run and step before
+	// proceeding. Nothing else can satisfy a held decision.
+	StepID        string
+	ApprovalToken string
+}
+
+// CrewshipApprovalRequired is returned by CrewshipActions.Do when the crew's
+// autonomy level holds the action for a human decision (inbox_approve) and
+// the request carries no approval for it. The executor turns it into an
+// approval waitpoint instead of a failure; rejected or blocked decisions
+// stay ordinary errors.
+type CrewshipApprovalRequired struct {
+	Verb, Action, Level, CrewID, Decision string
+}
+
+func (e *CrewshipApprovalRequired) Error() string {
+	return fmt.Sprintf("crewship %s: held for approval (autonomy_level=%s, action=%s, crew=%s, decision=%s)",
+		e.Verb, e.Level, e.Action, e.CrewID, e.Decision)
 }
 
 // crewshipVerb is one entry in the registry: what the verb is, where it goes,

@@ -2089,7 +2089,7 @@ func (e *Executor) dispatchStep(
 	case StepForeach:
 		return e.runForeachStep(ctx, step, in, parentRender, runID, pipelineID, emit, depth)
 	case StepCrewship:
-		return e.runCrewshipStep(ctx, step, parentRender, in, runID)
+		return e.runCrewshipStep(ctx, step, parentRender, in, runID, depth)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
 	}

@@ -154,6 +154,45 @@ var crewshipTenantScopedArgs = map[string]string{
 	"chat_id": "chats",
 }
 
+// crewshipApprovalWaitable lists the verbs whose internal route applies no
+// autonomy gate of its own, so the dispatcher's held decision is the only
+// one and an approved waitpoint fully answers it. page.create and page.write
+// go through gateInternalAction on the route, which would stage the page
+// inert behind a second approval; they keep the refusal.
+var crewshipApprovalWaitable = map[string]bool{
+	"issue.create":      true,
+	"issue.update":      true,
+	"issue.comment":     true,
+	"issue.link":        true,
+	"assignment.create": true,
+	"escalation.create": true,
+}
+
+// verifyApproval reports whether the token names an APPROVED approval
+// waitpoint of this workspace, this run and this step. A token from another
+// run, another step or workspace, or an unknown token is an error, so an
+// approval cannot be replayed onto a different action; an undecided or
+// negative decision is (false, nil).
+func (c *crewshipActions) verifyApproval(ctx context.Context, req pipeline.CrewshipRequest) (bool, error) {
+	if c.db == nil {
+		return false, fmt.Errorf("approval cannot be verified: no database")
+	}
+	if req.RunID == "" || req.StepID == "" {
+		return false, fmt.Errorf("approval token presented without a run and step")
+	}
+	var status string
+	err := c.db.QueryRowContext(ctx, `SELECT status FROM pipeline_waitpoints
+WHERE token = ? AND kind = 'approval' AND workspace_id = ? AND pipeline_run_id = ? AND step_id = ?`,
+		req.ApprovalToken, req.WorkspaceID, req.RunID, req.StepID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, fmt.Errorf("approval does not belong to this run step")
+	}
+	if err != nil {
+		return false, fmt.Errorf("approval lookup: %w", err)
+	}
+	return status == "approved", nil
+}
+
 // Do gates the verb on the author crew's autonomy level, then performs the
 // call.
 func (c *crewshipActions) Do(ctx context.Context, req pipeline.CrewshipRequest) (string, error) {
@@ -194,15 +233,38 @@ func (c *crewshipActions) Do(ctx context.Context, req pipeline.CrewshipRequest) 
 	switch d.Decision {
 	case policy.DecisionAutoJournal, policy.DecisionAutoLogJournal, policy.DecisionAutoLogInbox:
 		// Proceed. The route itself writes the audit/inbox rows.
+	case policy.DecisionInboxApprove:
+		// Held for a human decision. The routine waits on an approval
+		// waitpoint for exactly this call (the executor opens it); a request
+		// carrying an APPROVED waitpoint of this run and step proceeds once.
+		// Nothing else satisfies a held decision: no standing grant, no
+		// raised autonomy level. Verbs whose route stages its own inert row
+		// behind a second gate stay refused — a second approval for the same
+		// thing would be the result.
+		if !crewshipApprovalWaitable[req.Verb] {
+			return "", fmt.Errorf("crewship %s: refused by policy (autonomy_level=%s, action=%s, crew=%s, decision=%s) — "+
+				"this action cannot wait for an approval inside a routine; raise the crew's autonomy level with `crewship policy set` to allow it unattended",
+				req.Verb, d.Level, actionName, d.CrewID, d.Decision)
+		}
+		held := &pipeline.CrewshipApprovalRequired{Verb: req.Verb, Action: actionName, Level: string(d.Level), CrewID: d.CrewID, Decision: string(d.Decision)}
+		if req.ApprovalToken == "" {
+			return "", held
+		}
+		approved, err := c.verifyApproval(ctx, req)
+		if err != nil {
+			return "", fmt.Errorf("crewship %s: %w", req.Verb, err)
+		}
+		if !approved {
+			// Pending, denied, timed out or cancelled: the executor reads the
+			// waitpoint and parks again or fails as that decision says.
+			return "", held
+		}
 	default:
-		// Rejected, blocked, or held for approval. A routine step cannot wait
-		// on an inbox approval — there is nobody attached to the run to
-		// approve it — so a held decision is a refusal here, named as one so
-		// the operator can act on it rather than wondering why the routine
-		// "does nothing". Raising the crew's autonomy level is the fix, and
-		// the message says so.
+		// Rejected or blocked: a refusal, named so the operator can act on
+		// it. Raising the crew's autonomy level is the fix, and the message
+		// says so.
 		return "", fmt.Errorf("crewship %s: refused by policy (autonomy_level=%s, action=%s, crew=%s, decision=%s) — "+
-			"a routine cannot wait for an approval; raise the crew's autonomy level with `crewship policy set` to allow it unattended",
+			"raise the crew's autonomy level with `crewship policy set` to allow it unattended",
 			req.Verb, d.Level, actionName, d.CrewID, d.Decision)
 	}
 
