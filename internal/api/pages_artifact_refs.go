@@ -289,8 +289,17 @@ func (h *InternalHandler) admitArtifactRefsStart(r *http.Request, entry journal.
 	if !enabled {
 		return 0, errArtifactRefsDisabled
 	}
-	// m1: the references are checked again at admission. A human who lost
-	// read access since sending does not hand it to the run.
+	// An exact retry of an admitted start is idempotent, as on the plain path.
+	// Otherwise the references are checked again: a human who lost read
+	// access since sending does not hand it to the run.
+	matched, err := matchRunStartQuery(ctx, tx, entry)
+	if err != nil {
+		if errors.Is(err, errRunStartIdentityConflict) || errors.Is(err, errRunAlreadyTerminal) {
+			return http.StatusConflict, err
+		}
+		return http.StatusInternalServerError, err
+	}
+
 	ctx = context.WithValue(ctx, ctxWorkspaceID, receipt.WorkspaceID)
 	rows, err := tx.QueryContext(ctx, `SELECT page_id FROM artifact_message_refs WHERE message_id=? AND workspace_id=? AND human_user_id=? AND chat_id=?`,
 		message, receipt.WorkspaceID, receipt.UserID, receipt.ChatID)
@@ -313,12 +322,15 @@ func (h *InternalHandler) admitArtifactRefsStart(r *http.Request, entry journal.
 	if len(refs) == 0 {
 		return http.StatusForbidden, errArtifactRefUnavailable
 	}
-	pages := &PageHandler{db: h.db}
+	pages := NewPageHandler(h.db, nil, h.logger)
 	viewer, err := pages.delegableViewer(ctx, receipt.WorkspaceID, receipt.UserID)
 	if err != nil {
 		return http.StatusInternalServerError, err
 	}
 	for _, id := range refs {
+		if matched {
+			break
+		}
 		ok, err := pages.delegableRead(ctx, receipt.WorkspaceID, id, viewer)
 		if err != nil {
 			return http.StatusInternalServerError, err
@@ -326,13 +338,6 @@ func (h *InternalHandler) admitArtifactRefsStart(r *http.Request, entry journal.
 		if !ok {
 			return http.StatusForbidden, errArtifactRefUnavailable
 		}
-	}
-	matched, err := matchRunStartQuery(ctx, tx, entry)
-	if err != nil {
-		if errors.Is(err, errRunStartIdentityConflict) || errors.Is(err, errRunAlreadyTerminal) {
-			return http.StatusConflict, err
-		}
-		return http.StatusInternalServerError, err
 	}
 	var notify func()
 	if !matched {

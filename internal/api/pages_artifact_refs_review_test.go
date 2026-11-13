@@ -145,3 +145,20 @@ func TestArtifactRefs_AdmissionChecksAccessAgain(t *testing.T) {
 		t.Fatalf("bound %v", got)
 	}
 }
+
+// An exact retry of an admitted start stays idempotent even if access changed
+// after admission: the run already started, and failing the retry would mark
+// it failed.
+func TestArtifactRefs_AdmittedRetryIsIdempotent(t *testing.T) {
+	f := artifactRefsFixture(t, true)
+	if err := f.pages.RecordArtifactRefs(t.Context(), f.receipt, f.a.MessageID, []string{"ref-own"}); err != nil {
+		t.Fatal(err)
+	}
+	if code := artifactRefsStartRun(t, f, f.a.RunID, f.a.MessageID); code != 201 {
+		t.Fatalf("first admission: %d", code)
+	}
+	mustExec(t, f.rig.db, `UPDATE pages SET archived_at='2026-11-13T10:00:00Z' WHERE id='ref-own'`)
+	if code := artifactRefsStartRun(t, f, f.a.RunID, f.a.MessageID); code != 201 {
+		t.Fatalf("exact retry after admission: %d", code)
+	}
+}
