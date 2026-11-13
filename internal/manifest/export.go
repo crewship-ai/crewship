@@ -171,6 +171,9 @@ func ExportCrew(ctx context.Context, c *Client, slug string, opts ExportOptions)
 		} else {
 			sort.Slice(credBindings, func(i, j int) bool { return credBindings[i].EnvVarName < credBindings[j].EnvVarName })
 			for _, b := range credBindings {
+				if !b.Explicit() {
+					continue // inherited through the crew; exporting it would mint a per-agent grant
+				}
 				agentDecl.EnvRefs = append(agentDecl.EnvRefs, b.EnvVarName)
 				credEnvSet[b.EnvVarName] = true
 			}

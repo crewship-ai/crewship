@@ -448,7 +448,18 @@ func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByR
 	// actual feature files means a feature that republishes new content under
 	// the same mutable ref (e.g. ":2") yields a new tag and a clean rebuild,
 	// instead of the exact-tag fast path silently reusing a stale image.
-	contentHash, err := hashBuildInputs(dockerfile, features)
+	// Hash the STAGED copies, not the shared cache directories: the copy is
+	// this build's private snapshot, so the tag describes exactly the bytes
+	// sent to the builder and a concurrent cache refill cannot change the
+	// tree underneath the walk.
+	staged := make([]stagedFeature, 0, len(features))
+	for _, f := range features {
+		if f == nil {
+			continue
+		}
+		staged = append(staged, stagedFeature{id: f.Metadata.ID, dir: filepath.Join(contextDir, featureContextDir, f.Metadata.ID)})
+	}
+	contentHash, err := hashStagedInputs(dockerfile, staged)
 	if err != nil {
 		cleanup()
 		return "", "", "", fmt.Errorf("hashing build inputs: %w", err)
@@ -462,23 +473,34 @@ func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByR
 // in lexical order for determinism. Folding feature file bytes into the tag is
 // what makes the cache key honor content changes, not just the Dockerfile.
 func hashBuildInputs(dockerfile string, features []*ResolvedFeature) (string, error) {
-	h := sha256.New()
-	h.Write([]byte(dockerfile))
+	staged := make([]stagedFeature, 0, len(features))
 	for _, f := range features {
 		if f == nil {
 			continue
 		}
+		staged = append(staged, stagedFeature{id: f.Metadata.ID, dir: f.Dir})
+	}
+	return hashStagedInputs(dockerfile, staged)
+}
+
+type stagedFeature struct{ id, dir string }
+
+func hashStagedInputs(dockerfile string, features []stagedFeature) (string, error) {
+	h := sha256.New()
+	h.Write([]byte(dockerfile))
+	for _, f := range features {
 		// Domain separator keyed by feature id so reordering or renaming a
 		// feature changes the hash even with identical file bytes.
-		fmt.Fprintf(h, "\x00feat:%s\x00", f.Metadata.ID)
-		walkErr := filepath.Walk(f.Dir, func(path string, info os.FileInfo, err error) error {
+		fmt.Fprintf(h, "\x00feat:%s\x00", f.id)
+		root := f.dir
+		walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
 			if !info.Mode().IsRegular() {
 				return nil // dirs/symlinks/etc. — only regular file bytes matter
 			}
-			rel, err := filepath.Rel(f.Dir, path)
+			rel, err := filepath.Rel(root, path)
 			if err != nil {
 				return err
 			}
@@ -537,7 +559,13 @@ func copyFile(src, dst string, perm os.FileMode) error {
 		out.Close()
 		return err
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		return err
+	}
+	// OpenFile's perm is masked by the process umask; set it exactly so the
+	// staged snapshot (which is what the image tag is hashed from) carries
+	// the same modes as the cache entry it was copied from.
+	return os.Chmod(dst, perm)
 }
 
 // featureRefsSummary is a small helper for logs: a compact comma list of leaf

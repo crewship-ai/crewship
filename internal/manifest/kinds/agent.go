@@ -1022,13 +1022,20 @@ func agentListCredentialEnvNames(ctx context.Context, c internalapi.Client, agen
 		return nil, nil
 	}
 	var rows []struct {
-		EnvVarName string `json:"env_var_name"`
+		ID          string `json:"id"`
+		EnvVarName  string `json:"env_var_name"`
+		GrantSource string `json:"grant_source"`
 	}
 	if err := json.Unmarshal(body, &rows); err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(rows))
 	for _, r := range rows {
+		// Only explicit assignments are the agent's declared env_refs; a
+		// crew-inherited row has no id and is not the agent's to export.
+		if r.ID == "" || (r.GrantSource != "" && r.GrantSource != "explicit") {
+			continue
+		}
 		if r.EnvVarName != "" {
 			out = append(out, r.EnvVarName)
 		}

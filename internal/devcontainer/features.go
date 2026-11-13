@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/google/go-containerregistry/pkg/name"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
@@ -251,6 +252,30 @@ func (d *FeatureDownloader) IsCached(ref string) bool {
 	return true
 }
 
+// featureEntryLocks holds one single-slot semaphore per absolute cache-entry
+// path. It is package-level because callers construct FeatureDownloaders
+// freely; a lock on the instance would not serialise two provisions in the
+// same server. Entries are never removed — there is one per distinct feature
+// ref.
+var featureEntryLocks sync.Map
+
+// lockFeatureEntry takes the entry's slot, or gives up when ctx ends so a
+// cancelled provision does not queue behind a slow pull it no longer needs.
+func lockFeatureEntry(ctx context.Context, dir string) (func(), error) {
+	key := dir
+	if abs, err := filepath.Abs(dir); err == nil {
+		key = abs
+	}
+	v, _ := featureEntryLocks.LoadOrStore(key, make(chan struct{}, 1))
+	slot := v.(chan struct{})
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, nil
+	case <-ctx.Done():
+		return nil, fmt.Errorf("waiting for feature cache entry %s: %w", dir, ctx.Err())
+	}
+}
+
 // ClearCache removes all cached features.
 func (d *FeatureDownloader) ClearCache() error {
 	return os.RemoveAll(d.cacheDir)
@@ -267,6 +292,21 @@ func (d *FeatureDownloader) Download(ctx context.Context, ref string, options ma
 	// Fast path: cache hit.
 	if d.IsCached(ref) {
 		d.logger.Debug("feature cache hit", "ref", ref, "dir", dir)
+		return d.resolveFromCache(ref, dir)
+	}
+
+	// Serialise pulls of the same cache entry. Two crews that share a feature
+	// used to both miss, both pull, and the second one's RemoveAll+Rename
+	// deleted the tree the first was already copying and hashing — the
+	// observed `lstat …/.crewship-digest: no such file or directory`. The
+	// winner fills the entry; everyone who waited re-checks and hits.
+	unlock, err := lockFeatureEntry(ctx, dir)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	if d.IsCached(ref) {
+		d.logger.Debug("feature cache hit after wait", "ref", ref, "dir", dir)
 		return d.resolveFromCache(ref, dir)
 	}
 
@@ -397,10 +437,25 @@ func (d *FeatureDownloader) pull(ctx context.Context, ref, destDir string) error
 		}
 	}
 
-	// Remove any existing destination before atomic rename.
-	_ = os.RemoveAll(destDir)
+	// Place the new entry. Only an incomplete entry can be here (Download
+	// re-checks under the entry lock), but it is moved aside rather than
+	// deleted first, so there is never a moment where the path holds a
+	// half-removed tree, and a failed rename leaves the old entry intact.
+	var stale string
+	if _, err := os.Lstat(destDir); err == nil {
+		stale = destDir + ".stale-" + filepath.Base(tempDir)
+		if err := os.Rename(destDir, stale); err != nil {
+			return fmt.Errorf("moving incomplete cache dir aside: %w", err)
+		}
+	}
 	if err := os.Rename(tempDir, destDir); err != nil {
+		if stale != "" {
+			_ = os.Rename(stale, destDir)
+		}
 		return fmt.Errorf("atomically placing cache dir: %w", err)
+	}
+	if stale != "" {
+		_ = os.RemoveAll(stale)
 	}
 	success = true
 

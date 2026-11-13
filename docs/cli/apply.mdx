@@ -236,7 +236,8 @@ Resources **not** synced (additive only):
 - **`crew "code-review" already exists`** — drop `--strict` to update in place, or pass `--replace` to recreate.
 - **`aborted: destructive plan requires confirmation (pass --yes)`** — `apply` saw a `-` line in the plan and stdin isn't a TTY. Pass `-y/--yes` in CI, or run interactively.
 - **`invalid services_json: services["xyz"]: name must be a DNS label`** — service names must be valid RFC 1035 DNS labels (1–63 chars, lowercase letters/digits/`-`, starting with a letter and ending with letter or digit) since they become bridge-network DNS aliases.
-- **`skill "X" references unknown credential env "Y"`** — every `env_refs:` entry must point at a credential declared in the same manifest (in the crew or at workspace scope).
+- **`agent X/Y env_refs[Z]: no such credential`** — an agent `env_refs:` entry must name a credential declared in the same manifest (crew or workspace scope) or one that already exists on the server, such as a secret created with `crewship credential create` and deliberately kept out of Git. The check runs while planning, so `--dry-run` reports it.
+- **`skill "X": SKILL.md would be refused by the server`** — the SKILL.md frontmatter is checked with the same rules the server import uses, so `--dry-run` catches it before anything is written.
 
 ## Next step after apply
 

@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
@@ -510,6 +511,23 @@ type AgentCredentialBinding struct {
 	CredentialID string `json:"credential_id"`
 	CredName     string `json:"credential_name"`
 	EnvVarName   string `json:"env_var_name"`
+	// GrantSource is "explicit" for an agent_credentials row the manifest
+	// can create and delete, or "crew" for a credential the agent inherits
+	// through its crew's link. Servers that predate the field send nothing;
+	// such a row is explicit only if it carries an assignment id.
+	GrantSource string `json:"grant_source,omitempty"`
+}
+
+// Explicit reports whether this row is an assignment the manifest owns —
+// one with an id that DELETE /agents/{id}/credentials/{assignmentId} can
+// remove. Inherited rows (crew link, binding) are delivery facts, not
+// declarations: planning a delete for one is a no-op that reads as a change,
+// and exporting one turns a crew link into a per-agent grant on re-apply.
+func (b AgentCredentialBinding) Explicit() bool {
+	if b.ID == "" {
+		return false
+	}
+	return b.GrantSource == "" || b.GrantSource == "explicit"
 }
 
 func (c *Client) ListAgentCredentials(ctx context.Context, agentID string) ([]AgentCredentialBinding, error) {
@@ -529,6 +547,11 @@ func (c *Client) ListAgentCredentials(ctx context.Context, agentID string) ([]Ag
 // RemoveCredentialFromAgent unlinks a credential binding (by the
 // agent_credentials row id) from an agent.
 func (c *Client) RemoveCredentialFromAgent(ctx context.Context, agentID, assignmentID string) error {
+	if assignmentID == "" {
+		// An empty id addresses the collection, not a row; the server 404s
+		// and the old code reported that as a successful delete.
+		return fmt.Errorf("remove credential from agent %s: no assignment id (inherited credentials are removed by unlinking them from the crew or binding)", agentID)
+	}
 	resp, err := c.api.Delete(ctx, "/api/v1/agents/"+agentID+"/credentials/"+assignmentID)
 	if err != nil {
 		return fmt.Errorf("remove credential from agent: %w", err)
@@ -779,16 +802,52 @@ func (c *Client) SaveCrewFile(ctx context.Context, crewID, destPath string, data
 	if !ok {
 		return fmt.Errorf("crew file upload not supported by this API client (missing raw PUT capability)")
 	}
-	resp, err := rp.PutBytes(ctx,
-		"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(destPath), data)
-	if err != nil {
-		return err
+	for attempt := 0; ; attempt++ {
+		resp, err := rp.PutBytes(ctx,
+			"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(destPath), data)
+		if err != nil {
+			return err
+		}
+		status := resp.StatusCode
+		msg := serverErrorText(resp.Body)
+		resp.Body.Close()
+		if status >= 200 && status < 300 {
+			return nil
+		}
+		// 409 means the file is owned by the crew runtime and the container
+		// is not running. Right after a crew PATCH in the same apply that is
+		// the asynchronous container recycle, not a stopped crew: wait a
+		// bounded time for it to come back instead of failing the apply.
+		if status == http.StatusConflict && attempt < len(crewFileConflictBackoff) {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(crewFileConflictBackoff[attempt]):
+			}
+			continue
+		}
+		if msg != "" {
+			return fmt.Errorf("crew file save %s: HTTP %d: %s", destPath, status, msg)
+		}
+		return fmt.Errorf("crew file save %s: HTTP %d", destPath, status)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("crew file save %s: HTTP %d", destPath, resp.StatusCode)
+}
+
+// crewFileConflictBackoff bounds the wait for a recycling crew container
+// (about 30 s in total). A var so tests can shorten it.
+var crewFileConflictBackoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 15 * time.Second}
+
+// serverErrorText returns the server's {"error": "..."} message, or the
+// first bytes of a plain-text body, so the operator sees why it refused.
+func serverErrorText(body io.Reader) string {
+	raw, _ := io.ReadAll(io.LimitReader(body, 4096))
+	var e struct {
+		Error string `json:"error"`
 	}
-	return nil
+	if json.Unmarshal(raw, &e) == nil && e.Error != "" {
+		return e.Error
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 // CrewContainerStatus reports whether a crew's runtime container is
