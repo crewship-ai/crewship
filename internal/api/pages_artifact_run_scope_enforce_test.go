@@ -26,10 +26,10 @@ type runScopeRig struct {
 	tokens   map[string]string
 }
 
-func newRunScopeRig(t *testing.T) *runScopeRig {
+func newRunScopeRig(t *testing.T, setup ...func(*artifactPrincipalFixture)) *runScopeRig {
 	t.Helper()
 	t.Setenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED", "true")
-	f := artifactRefsFixture(t, true)
+	f := artifactRefsFixture(t, true, setup...)
 	const master = "synthetic-artifact-run-scope-master"
 	router, err := NewRouter(f.rig.db, "synthetic-artifact-run-scope-secret", newTestLogger(), WithInternalToken(master))
 	if err != nil {
@@ -155,10 +155,36 @@ func TestRunScope_StandingAccessIsIntersectedWithTheHuman(t *testing.T) {
 	}
 }
 
-// Amendment 2 (role-only reach is never delegated) is covered at the
-// reference layer by TestArtifactRefs_DelegableViewerByStanding; the standing
-// path gets its own test with PR2, which needs a receipt minted after the
-// role change.
+// Amendment 2 on the standing path: a human who reaches a page only through
+// the workspace ADMIN or OWNER role does not lend that reach to the run, even
+// where the agent holds its own grant. The reference layer is covered by
+// TestArtifactRefs_DelegableViewerByStanding.
+func TestRunScope_RoleOnlyReachIsNotDelegatedThroughStandingAccess(t *testing.T) {
+	for _, role := range []string{"ADMIN", "OWNER"} {
+		t.Run(role, func(t *testing.T) {
+			g := newRunScopeRig(t, func(f *artifactPrincipalFixture) {
+				mustExec(t, f.rig.db, `UPDATE workspace_members SET role=? WHERE user_id=? AND workspace_id=?`, role, f.a.HumanUserID, f.a.WorkspaceID)
+			})
+			shared := g.create(t, g.f.rig.adminID, "OWNER", "scope-role-shared")
+			roleOnly := g.create(t, g.f.rig.adminID, "OWNER", "scope-role-only")
+			g.grant(t, shared, "user", g.f.a.HumanUserID, "read")
+			g.grant(t, shared, "agent", g.f.a.AgentID, "read")
+			g.grant(t, roleOnly, "agent", g.f.a.AgentID, "read")
+			g.start(t)
+			if w := g.tool("artifact_versions", "scope-role-shared", `{}`); w.Code != 200 {
+				t.Fatalf("baseline: a page the %s reads as a member was refused: %d %s", role, w.Code, w.Body)
+			}
+			refused := g.tool("artifact_versions", "scope-role-only", `{}`)
+			missing := g.tool("artifact_versions", "scope-role-nowhere", `{}`)
+			if refused.Code == 200 {
+				t.Fatalf("the %s role's reach was delegated to the run: %s", role, refused.Body)
+			}
+			if refused.Code != missing.Code || refused.Body.String() != missing.Body.String() {
+				t.Fatalf("refusal tells role-only from missing: %d %q vs %d %q", refused.Code, refused.Body, missing.Code, missing.Body)
+			}
+		})
+	}
+}
 
 // Test 3, read side: access the human loses mid-run is lost by the run.
 func TestRunScope_ReadStopsWhenTheHumanLosesAccess(t *testing.T) {
