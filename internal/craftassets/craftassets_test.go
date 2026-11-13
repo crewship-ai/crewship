@@ -329,7 +329,9 @@ func TestDownloadInstallsFromTheCatalogURL(t *testing.T) {
 func TestCatalog(t *testing.T) {
 	sha := strings.Repeat("a", 64)
 	c, err := ReleaseCatalog("wordcraft=0.11.0+b0fb5cb571b6="+sha+",gridcraft=0.4.0="+sha, "https://github.com/crewship-ai/crewship/releases/download/v1.0.0")
-	if err != nil || len(c.Pins) != 2 || c.Pins["wordcraft"].Version != "0.11.0+b0fb5cb571b6" {
+	// Pins named by configuration replace the release catalog; the operator,
+	// not the release, then decides what is trusted.
+	if err != nil || len(c.Pins) != 2 || c.Pins["wordcraft"].Version != "0.11.0+b0fb5cb571b6" || !c.Operator {
 		t.Fatalf("catalog %+v %v", c, err)
 	}
 	if got := c.URL("gridcraft"); got != "https://github.com/crewship-ai/crewship/releases/download/v1.0.0/crewship-craft-gridcraft.craftpkg" {
@@ -339,7 +341,7 @@ func TestCatalog(t *testing.T) {
 		t.Fatalf("String %s", String(c.Pins))
 	}
 	// An ordinary build trusts nothing.
-	if c, err := ReleaseCatalog("", ""); err != nil || len(c.Pins) != 0 || c.BaseURL != "" {
+	if c, err := ReleaseCatalog("", ""); err != nil || len(c.Pins) != 0 || c.BaseURL != "" || c.Operator {
 		t.Fatalf("default %+v %v", c, err)
 	}
 	for _, bad := range []string{"powerpoint=1=" + sha, "wordcraft=1=" + sha[:63], "wordcraft=1", "wordcraft==" + sha, "wordcraft=1/2=" + sha, "wordcraft=1=" + sha + ",wordcraft=2=" + sha} {

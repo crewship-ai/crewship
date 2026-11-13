@@ -203,6 +203,99 @@ def crate_inventory(c, source, cargo, env):
     return [{'name': n, 'version': v, 'license': l} for (n, v), l in sorted(crates.items())]
 
 
+# Licenses a crate may be distributed under in a package. An expression passes
+# when the OR/AND tree can be satisfied with these alone; anything else, an
+# unknown identifier or a crate that names only a license file, stops the
+# build. Copyleft is never chosen: "Apache-2.0 OR GPL-2.0-only" passes through
+# Apache-2.0, "GPL-2.0-only" alone does not.
+ALLOWED_LICENSES = frozenset({
+    '0BSD', 'Apache-2.0', 'BSD-2-Clause', 'BSD-3-Clause', 'BSL-1.0', 'CC0-1.0', 'ISC', 'MIT', 'MIT-0',
+    'OFL-1.1', 'Ubuntu-font-1.0', 'Unicode-3.0', 'Unicode-DFS-2016', 'Unlicense', 'Zlib',
+})
+ALLOWED_EXCEPTIONS = frozenset({'LLVM-exception'})
+
+
+def license_allowed(expression):
+    """Whether an SPDX expression (Cargo's legacy "A/B" included) is satisfiable."""
+    if not expression or not re.fullmatch(r'[A-Za-z0-9.+()/ -]+', expression):
+        return False
+    tokens = re.findall(r'\(|\)|[A-Za-z0-9.+-]+', re.sub(r'\s*/\s*', ' OR ', expression))
+    pos = 0
+
+    def peek():
+        return tokens[pos] if pos < len(tokens) else None
+
+    def take(expected=None):
+        nonlocal pos
+        tok = peek()
+        if tok is None or (expected and tok != expected):
+            raise ValueError(expression)
+        pos += 1
+        return tok
+
+    def factor():
+        if peek() == '(':
+            take('(')
+            value = disjunction()
+            take(')')
+            return value
+        name = take()
+        if name in ('AND', 'OR', 'WITH', ')'):
+            raise ValueError(expression)
+        ok = name in ALLOWED_LICENSES
+        if peek() == 'WITH':
+            take('WITH')
+            ok = ok and take() in ALLOWED_EXCEPTIONS
+        return ok
+
+    def conjunction():
+        value = factor()
+        while peek() == 'AND':
+            take('AND')
+            value = factor() and value
+        return value
+
+    def disjunction():
+        value = conjunction()
+        while peek() == 'OR':
+            take('OR')
+            value = conjunction() or value
+        return value
+
+    try:
+        value = disjunction()
+        return value and pos == len(tokens)
+    except ValueError:
+        return False
+
+
+def check_licenses(crates):
+    refused = [f'{c["name"]} {c["version"]}: {c["license"]}' for c in crates if not license_allowed(c['license'])]
+    if refused:
+        raise ValueError('crates under a license the packages may not carry:\n  ' + '\n  '.join(refused))
+
+
+def sbom(component, crates, fonts_repository, fonts_commit_id):
+    """A CycloneDX 1.5 inventory of what the package is built from. It is
+    deterministic (no timestamp, no serial number), so it is covered by the
+    package's pin like every other file."""
+    app, version = component['application'], component['version']
+    return json.dumps({
+        'bomFormat': 'CycloneDX', 'specVersion': '1.5', 'version': 1,
+        'metadata': {'component': {
+            'type': 'application', 'bom-ref': app, 'name': app, 'version': version,
+            'licenses': [{'expression': component['licenses'][0]['spdx']}],
+            'externalReferences': [{'type': 'vcs', 'url': component['source']['repository'] + '@' + component['source']['commit']}]}},
+        'components': [
+            {'type': 'library', 'bom-ref': f'pkg:cargo/{c["name"]}@{c["version"]}', 'name': c['name'], 'version': c['version'],
+             'purl': f'pkg:cargo/{c["name"]}@{c["version"]}', 'licenses': [{'expression': re.sub(r'\s*/\s*', ' OR ', c['license'])}]}
+            for c in crates] + [
+            {'type': 'data', 'bom-ref': 'craft-fonts', 'name': 'craft-fonts', 'version': fonts_commit_id,
+             'licenses': [{'expression': 'OFL-1.1'}],
+             'externalReferences': [{'type': 'vcs', 'url': fonts_repository.removesuffix('.git') + '@' + fonts_commit_id}]}],
+    }, indent=1, sort_keys=True).encode() + b'\n'
+
+
 def font_notices(fonts):
     names = [p for p in sorted((fonts / 'fonts').rglob('*')) if p.is_file() and re.search(r'(OFL|LICEN[CS]E|COPYING)', p.name, re.I)]
     return {str(p.relative_to(fonts)): p.read_bytes() for p in names}
@@ -258,13 +351,17 @@ def build(rust_bin, keep, build_dir=None, out=None):
             notices = [add_file(stage, f'{app}/licenses/{name}', (source / name).read_bytes()) for name in c['notices']]
             for name, raw in font_notices(fonts).items():
                 notices.append(add_file(stage, f'{app}/licenses/craft-fonts/{name}', raw))
-            inventory = json.dumps(crate_inventory(c, source, cargo, env), indent=1).encode() + b'\n'
-            notices.append(add_file(stage, f'{app}/licenses/crates.json', inventory))
-            components.append({
+            crates = crate_inventory(c, source, cargo, env)
+            check_licenses(crates)
+            notices.append(add_file(stage, f'{app}/licenses/crates.json', json.dumps(crates, indent=1).encode() + b'\n'))
+            component = {
                 'application': app, 'version': f'{version}+{c["commit"][:12]}', 'engine_revision': c['commit'],
                 'source': {'repository': c['repository'].removesuffix('.git'), 'commit': c['commit'], 'patch_sha256': c['patch_sha256']},
                 'engine': engine, 'editor': {'digest': editor_digest, 'files': editor_files},
-                'licenses': [c['license'], {'name': 'craft-fonts', 'spdx': 'OFL-1.1'}], 'notices': notices})
+                'licenses': [c['license'], {'name': 'craft-fonts', 'spdx': 'OFL-1.1'}], 'notices': notices}
+            notices.append(add_file(stage, f'{app}/licenses/sbom.cdx.json',
+                                    sbom(component, crates, recipe['fonts']['repository'], fonts_commit(fonts))))
+            components.append(component)
             print(f'{app}: engine {engine["sha256"]} ({engine["size"]} bytes), editor {editor_digest}', flush=True)
         toolchain = f'{rustc_version}; wasm-bindgen {config["tools"]["wasm-bindgen"]["version"]}; binaryen {config["tools"]["binaryen"]["version"]}'
         if out.exists():

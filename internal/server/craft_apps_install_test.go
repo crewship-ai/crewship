@@ -44,7 +44,7 @@ func TestCraftApplicationsInstallWithoutRestart(t *testing.T) {
 
 	craft := resolveCraftApps(cfg, logger)
 	for _, app := range craftapps.Applications {
-		if c := craft.components[app]; c.Available || c.Reason != craftapps.ReasonNotInstalled {
+		if c := craft.components[app]; c.Available || c.Reason != craftapps.ReasonNotInstalled || !c.Development {
 			t.Fatalf("%s before install = %+v", app, c)
 		}
 	}
@@ -74,7 +74,9 @@ func TestCraftApplicationsInstallWithoutRestart(t *testing.T) {
 	if err != nil || downloads != 1 {
 		t.Fatalf("install Word: %v (downloads %d)", err, downloads)
 	}
-	if !c.Available || c.Version != word.Pin.Version || c.EngineSHA256 != word.EngineSHA256 || c.EditorBundle != word.Editor {
+	// The pins come from configuration, not from this release: Admin and the
+	// CLI show the package as an operator's (development) override.
+	if !c.Available || !c.Development || c.Version != word.Pin.Version || c.EngineSHA256 != word.EngineSHA256 || c.EditorBundle != word.Editor {
 		t.Fatalf("Word component = %+v", c)
 	}
 	if p.EditorURL != "/_editor/b/"+word.Editor+"/index.html" || !editor.HasBundle(word.Editor) || !craft.fenced(word.Editor) {
@@ -104,7 +106,7 @@ func TestCraftApplicationsInstallWithoutRestart(t *testing.T) {
 		t.Fatalf("after restart: %d profiles, %v, downloads %d", len(out2.Profiles), err, downloads)
 	}
 	for app, pkg := range map[string]craftassetstest.Package{"wordcraft": word, "gridcraft": sheet} {
-		if s := out2.Components[app]; !s.Available || !editor2.HasBundle(pkg.Editor) || out2.Profiles[app].EditorBundle != pkg.Editor {
+		if s := out2.Components[app]; !s.Available || !s.Development || !editor2.HasBundle(pkg.Editor) || out2.Profiles[app].EditorBundle != pkg.Editor {
 			t.Fatalf("%s after restart = %+v", app, s)
 		}
 	}

@@ -34,6 +34,10 @@ type Catalog struct {
 	// BaseURL is where AssetName(application) is downloaded from; empty means
 	// packages can only be installed from a file.
 	BaseURL string
+	// Operator is true when the pins come from server configuration instead
+	// of this release. Configuration that can set them decides what Crewship
+	// trusts, as much as the choice of binary does.
+	Operator bool
 }
 
 // URL is the download address of the application's package.
@@ -47,7 +51,8 @@ func (c Catalog) URL(application string) string {
 // ReleaseCatalog is the catalog compiled into this binary. Operator
 // configuration may replace either part (a development build, a mirror).
 func ReleaseCatalog(pins, baseURL string) (Catalog, error) {
-	if pins == "" {
+	operator := pins != ""
+	if !operator {
 		pins = releaseCatalog
 	}
 	if baseURL == "" {
@@ -66,7 +71,7 @@ func ReleaseCatalog(pins, baseURL string) (Catalog, error) {
 			return Catalog{}, fmt.Errorf("invalid Craft component download URL %q", baseURL)
 		}
 	}
-	return Catalog{Pins: parsed, BaseURL: baseURL}, nil
+	return Catalog{Pins: parsed, BaseURL: baseURL, Operator: operator && len(parsed) > 0}, nil
 }
 
 // ParsePins reads "<application>=<version>=<manifest sha256>[,…]".

@@ -63,6 +63,10 @@ func resolveCraftApps(cfg *config.Config, logger *slog.Logger) *craftApps {
 		logger.Error("Craft component catalog refused", "error", err)
 	}
 	a.catalog = catalog
+	if catalog.Operator {
+		logger.Warn("Craft packages are trusted by server configuration, not by this release",
+			"pins", craftassets.String(catalog.Pins))
+	}
 	a.store = craftassets.Store{Root: n.ComponentsDir}
 	if a.store.Root == "" && len(catalog.Pins) > 0 {
 		if root, err := database.ResolveDataDirRoot(""); err == nil {
@@ -89,21 +93,23 @@ func resolveCraftApps(cfg *config.Config, logger *slog.Logger) *craftApps {
 		inst, err := a.store.Open(pin)
 		switch {
 		case errors.Is(err, craftassets.ErrNotInstalled):
-			a.components[app] = craftapps.Component{Reason: craftapps.ReasonNotInstalled, Version: pin.Version}
+			a.components[app] = craftapps.Component{Reason: craftapps.ReasonNotInstalled, Version: pin.Version, Development: catalog.Operator}
 		case err != nil:
 			logger.Error("installed Craft component refused", "application", app, "error", err)
-			a.components[app] = craftapps.Component{Reason: craftapps.ReasonComponentIntegrity, Version: pin.Version}
+			a.components[app] = craftapps.Component{Reason: craftapps.ReasonComponentIntegrity, Version: pin.Version, Development: catalog.Operator}
 		default:
 			a.installed[app] = inst
-			a.components[app] = componentOf(inst)
+			a.components[app] = a.componentOf(inst)
 		}
 	}
 	return a
 }
 
-func componentOf(inst *craftassets.Installed) craftapps.Component {
+// componentOf describes an installed package; it is a development override
+// when the operator, not this release, named its pin.
+func (a *craftApps) componentOf(inst *craftassets.Installed) craftapps.Component {
 	c := inst.Component
-	return craftapps.Component{Available: true, Runtime: craftengine.RuntimeWASM, Version: c.Version,
+	return craftapps.Component{Available: true, Development: a.catalog.Operator, Runtime: craftengine.RuntimeWASM, Version: c.Version,
 		EngineRevision: c.EngineRevision, EngineSHA256: c.Engine.SHA256, EditorBundle: c.Editor.Digest}
 }
 
@@ -175,7 +181,7 @@ func (a *craftApps) activate(editor *editororigin.Handler, inst *craftassets.Ins
 		}
 	}
 	return goapi.CraftNativeDocumentProfile{Application: c.Application, EngineRevision: c.EngineRevision, Engine: engine,
-		CLISHA256: c.Engine.SHA256, EditorBundle: c.Editor.Digest, EditorURL: editor.IndexURL(c.Editor.Digest), Bundled: true}, componentOf(inst), nil
+		CLISHA256: c.Engine.SHA256, EditorBundle: c.Editor.Digest, EditorURL: editor.IndexURL(c.Editor.Digest), Bundled: true}, a.componentOf(inst), nil
 }
 
 // installer is CraftNativeHTTPConfig.Install: archive nil downloads the

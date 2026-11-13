@@ -16,8 +16,10 @@ the same package is installed from a file (`crewship admin instance applications
 install --file`). Installed packages are verified again at every start and
 every read; versions live side by side, because documents stay pinned to the
 engine they were written with. A build without a catalog (an ordinary `go
-build`) trusts no package; an operator can name one with
-`CREWSHIP_CRAFT_COMPONENT_PINS` and a mirror with `CREWSHIP_CRAFT_COMPONENT_URL`.
+build`) trusts no package. The server's operator can replace the pins with
+`CREWSHIP_CRAFT_COMPONENT_PINS`, in a release binary too (logged at every start;
+the components report `development: true`), and name a mirror with
+`CREWSHIP_CRAFT_COMPONENT_URL`, which does not change what is trusted.
 On a system without a suspend-aware clock (today: not Linux) the server starts
 and both applications report `clock_unsupported`. Whether people may use an application is the instance
 administrator's setting (`craft_application_settings`, Admin › Artifacts ›

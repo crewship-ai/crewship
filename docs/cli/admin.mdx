@@ -930,10 +930,11 @@ crewship admin instance applications install sheet --file crewship-craft-gridcra
 ```
 
 Packages live in `<data directory>/craft-components/<application>/<pin>/`
-(`craft_native.components_dir`, `CREWSHIP_CRAFT_COMPONENTS_DIR`). An operator
-can name other trusted packages (`CREWSHIP_CRAFT_COMPONENT_PINS`, for example
-for a development build) or a mirror (`CREWSHIP_CRAFT_COMPONENT_URL`, https;
-http only to this machine). What an interrupted download leaves in that
+(`craft_native.components_dir`, `CREWSHIP_CRAFT_COMPONENTS_DIR`). The server's
+operator can replace the release's pins (`CREWSHIP_CRAFT_COMPONENT_PINS`, for
+example for a development build; such packages are listed as a "development
+override") or name a mirror (`CREWSHIP_CRAFT_COMPONENT_URL`, https; http only
+to this machine). See [Word and Sheet packages](/configuration/environment#word-and-sheet-packages). What an interrupted download leaves in that
 directory is removed at the next start.
 
 ### page-limit get

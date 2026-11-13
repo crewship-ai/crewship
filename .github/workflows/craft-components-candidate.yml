@@ -1,0 +1,56 @@
+name: Craft Packages Candidate Check
+
+# The release builds the Word and Sheet packages only after a tag (#5315).
+# This rehearses that job on a pull request that changes the recipe, the
+# build script or the release workflow, so a broken recipe is found before a
+# tag: it builds both packages exactly as the release does, enforces the
+# license policy, and installs and runs both through the server.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/craft-components-candidate.yml
+      - .github/workflows/release.yml
+      - tools/craft-components/**
+      - scripts/build-craft-components.py
+      - scripts/test_build_craft_components.py
+      - scripts/build-mooring-runtime.py
+      - mooring/build-tools.json
+      - internal/craftassets/**
+
+permissions:
+  contents: read
+
+env:
+  GO_VERSION: 1.27.4
+
+jobs:
+  verify:
+    name: Build and install the Word and Sheet packages
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Test the build script without a build
+        run: python3 -m unittest scripts/test_build_craft_components.py
+      # The same toolchain and command as the release's craft-components job.
+      - name: Install pinned Rust and both WASM targets
+        timeout-minutes: 5
+        run: timeout --kill-after=15s 4m rustup toolchain install 1.99.1 --profile minimal --target wasm32-wasip1 --target wasm32-unknown-unknown
+      - name: Build packages
+        run: python3 scripts/build-craft-components.py --rust-bin "$(dirname "$(rustup which --toolchain 1.99.1 rustc)")"
+      - name: Read the catalog as the release does
+        run: |
+          set -euo pipefail
+          pins="$(tr -d '\n' < build/craft-components/dist/catalog.txt)"
+          [[ "$pins" =~ ^[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64}(,[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64})*$ ]]
+          echo "catalog: $pins"
+      - uses: actions/setup-go@802e89cd7394b98352d79117a8b463bbfc2fdacf
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Install and run both packages through the server
+        env:
+          CREWSHIP_CRAFT_TEST_PACKAGES: ${{ github.workspace }}/build/craft-components/dist
+        run: go test -tags craftpackages -count=1 -timeout 15m -run ReleaseCraftPackages -v ./internal/server/
