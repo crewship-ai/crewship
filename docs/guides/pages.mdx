@@ -1296,6 +1296,10 @@ Six rules govern it:
    make it public, and it cannot add a panel to an already-public page
    without a human separately marking that panel public too. "Public" is the
    widest reach a page can have, and only a human may grant the widest reach.
+   That human is the page's owner, a MANAGER (or higher) of its owning crew,
+   or a workspace admin; a crew VIEWER or MEMBER can read a crew page but not
+   publish it. A link stops opening while the person who created it is
+   suspended or no longer in the workspace, and opens again if they return.
 4. **Every public link expires.** A required expiry, default 30 days,
    maximum 1 year. Tokens are high-entropy and individually revocable, and a
    page may have several — revoking the accountant's link never breaks the

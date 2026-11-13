@@ -1,0 +1,104 @@
+package api
+
+import (
+	"database/sql"
+	"net/http"
+	"testing"
+)
+
+// Publishing reaches the internet, so on a crew-owned Page it takes the crew's
+// manage authority: a MANAGER (or higher, workspace or crew override) who
+// belongs to the owning crew, an explicit crew Manage grant, or a workspace
+// admin. Plain crew membership is not enough.
+func TestPublish_CrewOwnedPageNeedsTheCrewsManager(t *testing.T) {
+	cases := []struct {
+		name          string
+		workspaceRole string
+		crewRole      any // nil = inherit the workspace role
+		inCrew        bool
+		wantPublish   bool
+	}{
+		{"crew viewer", "VIEWER", nil, true, false},
+		{"crew member", "MEMBER", nil, true, false},
+		{"member with crew VIEWER override", "MEMBER", "VIEWER", true, false},
+		{"workspace manager in the crew", "MANAGER", nil, true, true},
+		{"member promoted to crew MANAGER", "MEMBER", "MANAGER", true, true},
+		{"workspace admin outside the crew", "ADMIN", nil, false, true},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			slug := "crew-public-" + string(rune('a'+i))
+			h, _, _, wsID, _ := newPagesPublicFixture(t, slug)
+			mustExec(t, h.db, `UPDATE pages SET owner_user_id=NULL, owner_crew_id='crew-lookout' WHERE slug=?`, slug)
+			const actor = "user-actor"
+			mustExec(t, h.db, `INSERT INTO users (id, email, full_name) VALUES (?, 'actor@example.com', 'Actor')`, actor)
+			mustExec(t, h.db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES ('wm-actor', ?, ?, ?)`, wsID, actor, tc.workspaceRole)
+			if tc.inCrew {
+				mustExec(t, h.db, `INSERT INTO crew_members (id, crew_id, user_id, role) VALUES ('cm-actor', 'crew-lookout', ?, ?)`, actor, tc.crewRole)
+			}
+			rr := pagesPublishAs(t, h, wsID, actor, tc.workspaceRole, slug, `{}`)
+			var links int
+			if err := h.db.QueryRow(`SELECT COUNT(*) FROM page_public_tokens WHERE created_by_user_id=?`, actor).Scan(&links); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantPublish && (rr.Code != http.StatusCreated || links != 1) {
+				t.Fatalf("want a link: %d %s (links=%d)", rr.Code, rr.Body.String(), links)
+			}
+			if !tc.wantPublish && (rr.Code == http.StatusCreated || links != 0) {
+				t.Fatalf("published without the crew's manage authority: %d %s (links=%d)", rr.Code, rr.Body.String(), links)
+			}
+		})
+	}
+}
+
+// A link opens only while its creator still stands: not suspended, still a
+// member of the workspace. It is withheld, never revoked, so it works again
+// when the standing returns (permanent expiry is a separate product decision).
+func TestPublicView_WithheldWhileTheCreatorLacksStanding(t *testing.T) {
+	h, _, _, wsID, userID := newPagesPublicFixture(t, "standing")
+	link := pagesPublish(t, h, wsID, userID, "standing", `{}`)
+	token := link["token"].(string)
+	open := func(want int, step string) {
+		t.Helper()
+		if rr := pagesPublicGet(t, h, token); rr.Code != want {
+			t.Fatalf("%s: got %d, want %d: %s", step, rr.Code, want, rr.Body.String())
+		}
+	}
+	open(http.StatusOK, "baseline")
+
+	mustExec(t, h.db, `UPDATE users SET suspended_at='2026-11-13T10:00:00Z' WHERE id=?`, userID)
+	open(http.StatusNotFound, "creator suspended")
+	mustExec(t, h.db, `UPDATE users SET suspended_at=NULL WHERE id=?`, userID)
+	open(http.StatusOK, "suspension lifted")
+
+	var memberID, role string
+	if err := h.db.QueryRow(`SELECT id, role FROM workspace_members WHERE workspace_id=? AND user_id=?`, wsID, userID).Scan(&memberID, &role); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, h.db, `DELETE FROM workspace_members WHERE id=?`, memberID)
+	open(http.StatusNotFound, "creator no longer a member")
+	mustExec(t, h.db, `INSERT INTO workspace_members (id, workspace_id, user_id, role) VALUES (?, ?, ?, ?)`, memberID, wsID, userID, role)
+	open(http.StatusOK, "membership restored")
+
+	var revoked sql.NullString
+	if err := h.db.QueryRow(`SELECT revoked_at FROM page_public_tokens WHERE id=?`, link["id"]).Scan(&revoked); err != nil {
+		t.Fatal(err)
+	}
+	if revoked.Valid {
+		t.Fatal("withholding a link must not revoke it")
+	}
+}
+
+// The unlock path resolves the same token and must withhold it the same way,
+// with the same answer as an unknown token.
+func TestPublicUnlock_WithheldWhileTheCreatorIsSuspended(t *testing.T) {
+	h, _, _, wsID, userID := newPagesPublicFixture(t, "standing-pw")
+	link := pagesPublish(t, h, wsID, userID, "standing-pw", `{"password":"correct horse battery staple"}`)
+	token := link["token"].(string)
+	mustExec(t, h.db, `UPDATE users SET suspended_at='2026-11-13T10:00:00Z' WHERE id=?`, userID)
+	suspended := pagesPublicUnlock(t, h, token, "/api/v1/public/pages/"+token+"/unlock", `{"password":"correct horse battery staple"}`)
+	unknown := pagesPublicUnlock(t, h, "unknown-token-for-comparison", "/api/v1/public/pages/unknown-token-for-comparison/unlock", `{"password":"correct horse battery staple"}`)
+	if suspended.Code == http.StatusOK || suspended.Code != unknown.Code {
+		t.Fatalf("unlock of a suspended creator's link: %d (unknown token: %d) %s", suspended.Code, unknown.Code, suspended.Body.String())
+	}
+}

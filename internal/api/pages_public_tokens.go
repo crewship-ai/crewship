@@ -43,6 +43,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
@@ -202,13 +203,18 @@ func (h *PageHandler) Publish(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 409, "private artifacts cannot be published through legacy Page links")
 		return
 	}
+	// Publishing reaches the internet, so it takes more than the delete gate:
+	// on a crew-owned page, plain crew membership is not enough (mayPublishPage).
 	// Publishing is at least as consequential as deleting, so it takes the
 	// delete gate and not the edit gate: owner or workspace ADMIN/OWNER. A
 	// `write` grantee rearranges the page — §7.1b rule 2 makes that authority
 	// over arrangement, never over reach — and a write grant may be held by an
 	// agent, which rule 3 has just refused.
-	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(RoleFromContext(r.Context()), "manage") {
-		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may publish this page", "")
+	if ok, err := h.mayPublishPage(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec); err != nil {
+		replyInternalError(w, h.logger, "check publish authority", err)
+		return
+	} else if !ok {
+		h.refusePageAction(w, r, rec, "only the page's owner, a manager of its owning crew or a workspace admin may publish this page", "")
 		return
 	}
 
@@ -822,5 +828,38 @@ func (h *PageHandler) journalPublicLink(ctx context.Context, entryType journal.E
 	}); err != nil && h.logger != nil {
 		h.logger.Warn("pages: public link change was not journalled",
 			"page", rec.Slug, "type", string(entryType), "error", err)
+	}
+}
+
+// mayPublishPage is the publish gate. A workspace admin may publish anything
+// publishable. A user-owned page: its owner. A crew-owned page: a member of
+// the owning crew whose effective role there (workspace role or crew
+// override, whichever is higher) is MANAGER or above, or who holds the crew's
+// explicit Manage grant. A crew VIEWER or MEMBER may read the page but never
+// put it on the internet.
+func (h *PageHandler) mayPublishPage(ctx context.Context, wsID, userID, role string, rec *pageRecord) (bool, error) {
+	if canRole(role, "manage") {
+		return true, nil
+	}
+	if rec.OwnerUserID != "" {
+		return rec.OwnerUserID == userID, nil
+	}
+	if rec.OwnerCrewID == "" || !h.isPageOwner(ctx, wsID, userID, rec) {
+		return false, nil
+	}
+	crewRole, err := crewRoleIn(ctx, h.pageAuthReader(ctx), userID, rec.OwnerCrewID)
+	if err != nil {
+		return false, err
+	}
+	if canRole(crewRole, "create") {
+		return true, nil
+	}
+	switch err := (access.Store{DB: h.db}).CrewManage(ctx, userID, wsID, rec.OwnerCrewID); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, access.ErrDenied):
+		return false, nil
+	default:
+		return false, err
 	}
 }
