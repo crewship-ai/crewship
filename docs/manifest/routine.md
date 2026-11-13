@@ -409,7 +409,12 @@ a key containing dots (`inputs.a["b.c"]`). Templates inside raw, bytes or
 triple quoted literals are rejected; literals without templates are unchanged.
 
 Credential resolution keeps its existing explicit `{{ secrets.TYPE }}`
-declarations and workspace/crew scope. A direct `secrets.TYPE` selector alone
+declarations and workspace/crew scope. `{{ secrets.TYPE }}` picks the newest
+credential of that type the routine can reach and never selects one whose crew
+delivery is `granted`. To name exactly one credential, use
+`{{ secrets.name.<credential-name> }}`; a `granted` credential resolves by name
+only for a routine authored by a person or by an agent that holds an
+assignment or agent binding for it. A direct `secrets.TYPE` selector alone
 does not request a credential or enumerate the vault. Output/error scrubbing
 is retained. Lazy step decoding avoids unused outputs for ordinary selectors;
 whole-map operations can still decode all outputs and are not a memory budget.
@@ -615,6 +620,41 @@ restored and skipped, the wait step resolves from the recorded decision, and
 the rest of the routine runs. A parked run also survives a server restart — the
 boot-time resume scan re-enters `waiting` runs. (Timeouts on a parked approval
 are reconciled at the next boot scan rather than live.)
+
+### `crewship` steps held by the crew's autonomy level
+
+When the author crew's autonomy level answers `inbox_approve` for a
+`crewship` step (for example `issue.create` → `mission_create` under
+`strict`), the step does not fail and nothing is written: it opens an approval
+waitpoint naming the action and its arguments, and the run parks as `WAITING`
+exactly like a `wait: approval` step. Approving resumes the run and performs the
+action once, with the step's original operation key; rejecting fails the run
+with `approval denied`. The server accepts the approval only for the run and
+step that opened it. The crew's autonomy level is not changed and no standing
+permission is created. `page.create` and `page.write` keep refusing under a
+held decision, because their route stages its own approval. A `rejected` or
+`block_*` decision still fails the step.
+
+### Sub-issues from a routine
+
+`issue.create` accepts `parent_identifier`: the child is created and attached
+in one transaction, so a run that carries a person's chat authority can split
+work without `issue.link` (which stays refused for chat-originated runs). The
+parent must be an issue in the same workspace and in the same or a connected
+crew, and the requesting person must still be allowed to update issues. A
+retry with the same operation key returns the same child; the same key with a
+different parent is a 409.
+
+### Outcome of a run with a skipped agent step
+
+A run's `outcome` is judged by the agent steps that **executed**. An
+`agent_run` (or `call_pipeline`, or a `foreach` containing one) skipped by its
+`if:` does not count, so a probe-only run is `SUCCEEDED`. When an agent step
+did run, its `---CHECKPOINT---`/`---HANDOFF---` block counts even if a later
+`crewship` step's JSON (for example a posted comment) is the run's final
+output; a block inside a JSON string value of the final output is read after
+decoding. A run whose executed agent reported nothing is still `FAILED` with
+`no outcome reported`.
 
 ## See also
 
