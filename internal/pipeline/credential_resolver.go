@@ -211,7 +211,15 @@ LIMIT 1`, args...,
 // any crew links cannot silently fall back to workspace scope.
 func vaultCredentialCandidates(scope RunScope, credType string) (string, []any) {
 	notEndpoint, endpointArgs := excludeEndpointProviders()
-	args := append([]any{scope.AuthorCrewID, scope.WorkspaceID, credType}, endpointArgs...)
+	// A by-name reference matches exactly the credential with that name
+	// (UNIQUE per workspace, case-sensitive like an env var); every other
+	// selection rule below — workspace, crew links, ACTIVE, endpoint
+	// exclusion — applies unchanged.
+	match, key := "UPPER(c.type) = UPPER(?)", credType
+	if name, byName := CredentialRefName(credType); byName {
+		match, key = "c.name = ?", name
+	}
+	args := append([]any{scope.AuthorCrewID, scope.WorkspaceID, key}, endpointArgs...)
 	return `WITH candidates AS (
 SELECT c.created_at, c.id, c.scope, c.crew_id,
   EXISTS (
@@ -221,10 +229,57 @@ SELECT c.created_at, c.id, c.scope, c.crew_id,
   ) AS crew_linked,
   EXISTS (SELECT 1 FROM credential_crews cc WHERE cc.credential_id = c.id) AS has_links
 FROM credentials c
-WHERE c.workspace_id = ? AND UPPER(c.type) = UPPER(?)
+WHERE c.workspace_id = ? AND ` + match + `
 ` + notEndpoint + `  AND c.status = 'ACTIVE' AND c.deleted_at IS NULL
 )
 `, args
+}
+
+// secretNamePrefix marks a by-NAME credential reference. `{{ secrets.SECRET }}`
+// and `credential_ref: {type: SECRET}` select by credential TYPE, which is
+// ambiguous as soon as a crew can see two credentials of one type: the
+// newest silently wins. `{{ secrets.name.DEVICE_SSH_KEY }}` and
+// `credential_ref: {type: name.DEVICE_SSH_KEY}` name exactly one credential.
+// Credential types never contain a dot, so "name.<NAME>" cannot collide with
+// a type.
+const secretNamePrefix = "name."
+
+// CredentialRefName reports whether ref is a by-name reference and returns
+// the credential name it selects.
+func CredentialRefName(ref string) (string, bool) {
+	ref = strings.TrimSpace(ref)
+	if len(ref) <= len(secretNamePrefix) || !strings.EqualFold(ref[:len(secretNamePrefix)], secretNamePrefix) {
+		return "", false
+	}
+	name := strings.TrimSpace(ref[len(secretNamePrefix):])
+	return name, name != ""
+}
+
+// NormalizeCredentialRef is the canonical form of a credential reference:
+// a type is case-insensitive and lower-cased; a by-name reference keeps the
+// name's case, because the name is matched exactly.
+func NormalizeCredentialRef(ref string) string {
+	if name, ok := CredentialRefName(ref); ok {
+		return secretNamePrefix + name
+	}
+	return strings.ToLower(strings.TrimSpace(ref))
+}
+
+// secretRefKey maps a `secrets.…` template reference, split into at most
+// three parts, to the key resolveStepSecrets resolves and Render reads: the
+// type for `secrets.<TYPE>`, "name.<NAME>" for `secrets.name.<NAME>`.
+func secretRefKey(parts []string) (string, bool) {
+	if len(parts) < 2 || parts[0] != "secrets" {
+		return "", false
+	}
+	first := strings.TrimSpace(parts[1])
+	if first == "name" {
+		if len(parts) < 3 || strings.TrimSpace(parts[2]) == "" {
+			return "", false
+		}
+		return secretNamePrefix + strings.TrimSpace(parts[2]), true
+	}
+	return first, first != ""
 }
 
 // credentialTarget carries, through the context, the one host a resolved
