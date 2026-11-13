@@ -381,10 +381,15 @@ ambiguous as soon as the crew can see two credentials of one type (two `SECRET`
 keys, say): the newest silently wins. Name the one you mean instead:
 `{{ secrets.name.DEVICE_SSH_KEY }}`, or `credential_ref: {type: name.DEVICE_SSH_KEY}`
 on an `http` step, or `credentials_required: [{type: name.DEVICE_SSH_KEY}]`.
-The name is matched exactly (credential names are unique in a workspace); every
-other rule — workspace scope, crew isolation, ACTIVE only, host binding — is the
-same as by type. In a `code` step the value is `secrets.name.DEVICE_SSH_KEY` as
-well. A `credential_ref.type` with a dot that is not `name.<NAME>`, and a bare
+The name is matched exactly, case included (credential names are unique in a
+workspace); the `name.` prefix itself is case-insensitive. Every other rule —
+workspace scope, crew isolation, ACTIVE only, host binding at resolution — is
+the same as by type, so naming reaches nothing the crew could not already see;
+it lets you pick an older credential that selection by type would hide behind
+a newer one. In a `code` step the value is `secrets.name.DEVICE_SSH_KEY` as
+well, which works for names made of letters, digits and underscores; a name
+with dots, spaces or other punctuation is reachable from templates only.
+Leading or trailing spaces in a name cannot be referenced. A `credential_ref.type` with a dot that is not `name.<NAME>`, and a bare
 `{{ secrets.name }}`, are save-time errors (both used to resolve nothing,
 silently).
 

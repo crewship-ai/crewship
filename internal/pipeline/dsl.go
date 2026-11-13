@@ -658,7 +658,7 @@ func checkTemplateRef(ref string, inputs, earlier map[string]struct{}) error {
 		// unresolvable secret a hard validation failure).
 		// secrets.name.<NAME> selects one credential by name; the bare
 		// secrets.name has nothing to select.
-		if strings.TrimSpace(parts[1]) == "name" && (len(parts) < 3 || strings.TrimSpace(parts[2]) == "") {
+		if strings.EqualFold(strings.TrimSpace(parts[1]), "name") && (len(parts) < 3 || strings.TrimSpace(parts[2]) == "") {
 			return fmt.Errorf("invalid template ref %q (expected secrets.<TYPE> or secrets.name.<CREDENTIAL_NAME>)", ref)
 		}
 	case "routine":

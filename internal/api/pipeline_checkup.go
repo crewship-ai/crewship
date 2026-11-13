@@ -144,6 +144,18 @@ func (h *PipelineHandler) routineCheckup(ctx context.Context, p *pipeline.Pipeli
 		for _, e := range raw {
 			m, _ := e.(map[string]any)
 			t, _ := m["type"].(string)
+			if name, byName := pipeline.CredentialRefName(t); byName {
+				// name.<NAME> selects one credential by its exact name.
+				var n int
+				err := h.db.QueryRowContext(ctx, `
+				SELECT COUNT(*) FROM credentials
+				WHERE workspace_id = ? AND deleted_at IS NULL AND status = 'ACTIVE' AND name = ?`,
+					p.WorkspaceID, name).Scan(&n)
+				if err == nil && n == 0 {
+					missing = append(missing, "named "+name)
+				}
+				continue
+			}
 			t = strings.ToUpper(strings.TrimSpace(t))
 			if t == "" {
 				continue
@@ -159,7 +171,7 @@ func (h *PipelineHandler) routineCheckup(ctx context.Context, p *pipeline.Pipeli
 		}
 		sort.Strings(missing)
 		if len(missing) > 0 {
-			add("credentials", "bad", "A credential is missing", fmt.Sprintf("No active credential of type %s.", strings.Join(missing, ", ")), "steps")
+			add("credentials", "bad", "A credential is missing", fmt.Sprintf("No active credential %s.", credentialMissingList(missing)), "steps")
 		} else {
 			add("credentials", "ok", "Connections and credentials", "Everything the steps declare has an active credential.", "")
 		}
@@ -269,4 +281,18 @@ func (h *PipelineHandler) routineCheckup(ctx context.Context, p *pipeline.Pipeli
 		h.logger.Warn("checkup: draft lookup", "error", err)
 	}
 	return out
+}
+
+// credentialMissingList names each missing requirement: "of type X" for a
+// type, "named Y" for a by-name reference.
+func credentialMissingList(missing []string) string {
+	parts := make([]string, len(missing))
+	for i, m := range missing {
+		if strings.HasPrefix(m, "named ") {
+			parts[i] = m
+		} else {
+			parts[i] = "of type " + m
+		}
+	}
+	return strings.Join(parts, ", ")
 }

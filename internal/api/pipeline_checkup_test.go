@@ -123,3 +123,21 @@ func TestGetCheckup_UntestedChanges(t *testing.T) {
 		t.Fatalf("tested draft: %+v", resp.Checks)
 	}
 }
+
+// A by-name requirement is checked against the credential's name, not
+// upper-cased into a type that cannot exist.
+func TestGetCheckup_CredentialByName(t *testing.T) {
+	db := openSmokeDB(t)
+	h := NewPipelineHandler(db, slog.Default(), nil, nil)
+	if _, err := db.Exec(`INSERT INTO credentials (id, workspace_id, scope, name, encrypted_value, type, status, created_by) VALUES ('cr_dev','ws_smoke','WORKSPACE','DEVICE_SSH_KEY','x','SECRET','ACTIVE','user_1')`); err != nil {
+		t.Fatal(err)
+	}
+	for slug, want := range map[string]string{"present": "ok", "absent": "bad"} {
+		name := map[string]string{"present": "DEVICE_SSH_KEY", "absent": "OTHER_KEY"}[slug]
+		seedSmokePipelineDef(t, db, slug, `{"name":"`+slug+`","credentials_required":[{"type":"name.`+name+`"}],"steps":[{"id":"a","type":"agent_run","agent_slug":"agent_lead","prompt":"hi"}]}`)
+		code, resp := checkupOf(t, h, slug)
+		if code != http.StatusOK || resp.level("credentials") != want {
+			t.Fatalf("%s: code %d credentials=%q, want %q (%+v)", slug, code, resp.level("credentials"), want, resp.Checks)
+		}
+	}
+}

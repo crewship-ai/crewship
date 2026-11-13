@@ -273,7 +273,7 @@ func secretRefKey(parts []string) (string, bool) {
 		return "", false
 	}
 	first := strings.TrimSpace(parts[1])
-	if first == "name" {
+	if strings.EqualFold(first, "name") {
 		if len(parts) < 3 || strings.TrimSpace(parts[2]) == "" {
 			return "", false
 		}

@@ -79,7 +79,7 @@
     "credentials_required": {
       "type": "array",
       "items": { "$ref": "#/$defs/CredReq" },
-      "description": "Declared credential needs. Type-matched, not ID-matched, so the routine ports across workspaces."
+      "description": "Declared credential needs. Type-matched, not ID-matched, so the routine ports across workspaces; a type of name.<NAME> requires the one credential with that exact name instead."
     },
     "steps": {
       "type": "array",
