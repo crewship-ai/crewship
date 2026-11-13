@@ -380,8 +380,10 @@ type planBuilder struct {
 	plan   *Plan
 
 	// autoCredNames are the auto-managed service credentials this plan
-	// creates; an env_ref to one needs no server lookup.
-	autoCredNames map[string]bool
+	// creates, per crew slug; an env_ref from that crew to one needs no
+	// server lookup. Keyed by crew so one crew's planned credential never
+	// satisfies another crew's reference.
+	autoCredNames map[string]map[string]bool
 
 	// Workspace-scope state available to nested crew specs.
 	workspaceCreds      map[string]Credential
@@ -520,11 +522,13 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 		return fmt.Errorf("crew %q: auto-managed credentials: %w", slug, err)
 	}
 	if pb.autoCredNames == nil {
-		pb.autoCredNames = map[string]bool{}
+		pb.autoCredNames = map[string]map[string]bool{}
 	}
+	crewAuto := map[string]bool{}
 	for i := range plannedAutoCreds {
-		pb.autoCredNames[plannedAutoCreds[i].Name] = true
+		crewAuto[plannedAutoCreds[i].Name] = true
 	}
+	pb.autoCredNames[slug] = crewAuto
 
 	// Cross-crew collision check: a workspace-scoped credential
 	// already exists under one of our planned names. Two outcomes
@@ -873,7 +877,7 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 	agentDeclared := map[string]bool{}
 	declaredCreds := mergeCredIndex(wsCreds, spec.Credentials)
 	// Auto-managed service credentials are created by this apply too.
-	for name := range pb.autoCredNames {
+	for name := range pb.autoCredNames[crewSlug] {
 		declaredCreds[name] = Credential{EnvVar: name}
 	}
 	for i := range spec.Agents {

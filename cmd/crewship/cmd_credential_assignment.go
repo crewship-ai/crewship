@@ -130,13 +130,10 @@ var credUnassignCmd = &cobra.Command{
 			inheritedVia = a.GrantSource
 		}
 		if assignmentID == "" && inheritedVia != "" {
-			// The agent DOES receive it — through its crew, not an
-			// assignment. "not assigned" was literally true and misled the
+			// The agent DOES receive it — through its crew or a binding, not
+			// an assignment. "not assigned" was literally true and misled the
 			// operator into thinking delivery had stopped.
-			return fmt.Errorf("credential %s is not assigned to agent %s, but the agent still receives it through its crew (grant_source=%s). "+
-				"A crew link delivers the credential to every agent in that crew. To stop delivery, unlink it from the crew "+
-				"(crewship credential update %s --crews ...); if only some agents may hold it, put those agents in a separate crew and link it there",
-				args[0], args[1], inheritedVia, args[0])
+			return inheritedUnassignError(args[0], args[1], inheritedVia)
 		}
 		if assignmentID == "" {
 			return fmt.Errorf("credential %s not assigned to agent %s", args[0], args[1])
@@ -216,4 +213,21 @@ var credTestCmd = &cobra.Command{
 		}
 		return nil
 	},
+}
+
+// inheritedUnassignError explains how to stop a delivery that no assignment
+// made: each grant_source is removed at its own layer.
+func inheritedUnassignError(cred, agent, source string) error {
+	var how string
+	switch source {
+	case "crew":
+		how = "A crew link delivers the credential to every agent in that crew. To stop delivery, unlink it from the crew " +
+			"(crewship credential update " + cred + " --crews ...); if only some agents may hold it, put those agents in a separate crew and link it there"
+	case "binding":
+		how = "It is delivered by a credential binding (crew, workspace or agent scope). To stop delivery, find it with crewship credential bindings " +
+			"and remove it with crewship credential unbind <binding-id>"
+	default:
+		how = "Remove it at the layer that grants it"
+	}
+	return fmt.Errorf("credential %s is not assigned to agent %s, but the agent still receives it (grant_source=%s). %s", cred, agent, source, how)
 }
