@@ -112,8 +112,10 @@ class PackageGate(unittest.TestCase):
                             f'{word},gridcraft={"v" * 65}={sheet.rsplit("=", 1)[1]}',  # version too long
                             f'{word},{sheet};echo']:
                 self.assertNotEqual(self.check(catalog, d), 0, catalog)
-            (Path(d) / 'stray.txt').write_text('x')  # anything unpinned in the directory
-            self.assertNotEqual(self.check(f'{word},{sheet}', d), 0)
+            for stray in ('stray.txt', '.hidden'):  # anything unpinned in the directory
+                (Path(d) / stray).write_text('x')
+                self.assertNotEqual(self.check(f'{word},{sheet}', d), 0, stray)
+                (Path(d) / stray).unlink()
 
 
 if __name__ == '__main__':

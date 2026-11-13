@@ -184,11 +184,11 @@ def fonts_commit(fonts):
 def crate_inventory(c, source, cargo, env):
     """Every crate linked into either target, with its declared license."""
     crates = {}
-    # Not --offline: a clean machine has only the crates the build fetched, and
-    # metadata also resolves the rest of the lock file. --locked keeps it to
-    # the pinned Cargo.lock.
+    # metadata resolves the whole lock file, more than the build fetched: fetch
+    # it once (--locked, checksums from Cargo.lock), then read it offline.
+    run([cargo, 'fetch', '--locked'], cwd=source, env=env)
     for target in ('wasm32-wasip1', 'wasm32-unknown-unknown'):
-        meta = json.loads(run([cargo, 'metadata', '--locked', '--format-version', '1',
+        meta = json.loads(run([cargo, 'metadata', '--locked', '--offline', '--format-version', '1',
                                '--filter-platform', target], cwd=source, env=env, capture=True))
         packages = {p['id']: p for p in meta['packages']}
         nodes = {n['id']: n for n in meta['resolve']['nodes']}

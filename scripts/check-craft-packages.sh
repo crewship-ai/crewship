@@ -26,7 +26,7 @@ for pin in "${pins[@]}"; do
   [ -f "$pkg" ] || fail "no package for pin $app"
   [ "$(tar -xOf "$pkg" manifest.json | sha256sum | cut -d' ' -f1)" = "$sha" ] || fail "$pkg is not the pinned package"
 done
-shopt -s nullglob
+shopt -s nullglob dotglob
 packages=("$dir"/*)
 [ "${#packages[@]}" -eq "${#pins[@]}" ] || fail "${#pins[@]} pins but ${#packages[@]} files in $dir"
 echo "Craft packages match the catalog: $catalog"
