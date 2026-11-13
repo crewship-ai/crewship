@@ -8,6 +8,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/askforms"
 	"github.com/crewship-ai/crewship/internal/quota"
+	skillspkg "github.com/crewship-ai/crewship/internal/skills"
 )
 
 // slugFormat mirrors api.validSlugFormat: lowercase letters, digits,
@@ -152,7 +153,6 @@ func (v *validator) checkCrewSpec(meta Metadata, spec *CrewSpec, wsCreds map[str
 		v.errf("%s: at least one agent is required", crewLabel)
 	}
 
-	creds := mergeCredIndex(wsCreds, spec.Credentials)
 	skills := mergeSkillIndex(wsSkills, spec.Skills)
 
 	seenAgent := map[string]bool{}
@@ -192,9 +192,15 @@ func (v *validator) checkCrewSpec(meta Metadata, spec *CrewSpec, wsCreds map[str
 				v.errf("%s references unknown skill %q", label, sk)
 			}
 		}
+		// env_refs may name a credential this manifest does not declare
+		// (one created by `crewship credential create`, which is how device
+		// keys are kept out of Git). The offline validator cannot see the
+		// server, so the planner checks existence instead — a dry-run still
+		// fails on a name that exists nowhere. Only the shape is checked
+		// here.
 		for _, env := range a.EnvRefs {
-			if _, ok := creds[env]; !ok {
-				v.errf("%s references unknown credential env %q", label, env)
+			if strings.TrimSpace(env) == "" {
+				v.errf("%s: env_refs contains an empty name", label)
 			}
 		}
 	}
@@ -310,6 +316,18 @@ func (v *validator) checkSkills(scope string, skills []Skill) {
 		}
 		if sources > 1 {
 			v.errf("%s skill %q: only one of path, source, or inline may be set", scope, s.Slug)
+		}
+		// The body the import route will parse: inline, or a path the
+		// loader already read. A source URL is fetched server-side and
+		// cannot be checked offline.
+		body := s.resolved
+		if body == "" {
+			body = s.Inline
+		}
+		if body != "" {
+			if err := skillspkg.PreflightSKILLMD(body, s.AllowUnsafeLicense); err != nil {
+				v.errf("%s skill %q: SKILL.md would be refused by the server: %v", scope, s.Slug, err)
+			}
 		}
 	}
 }

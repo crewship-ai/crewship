@@ -379,6 +379,10 @@ type planBuilder struct {
 	opts   Options
 	plan   *Plan
 
+	// autoCredNames are the auto-managed service credentials this plan
+	// creates; an env_ref to one needs no server lookup.
+	autoCredNames map[string]bool
+
 	// Workspace-scope state available to nested crew specs.
 	workspaceCreds      map[string]Credential
 	workspaceSkillSlugs map[string]Skill
@@ -514,6 +518,12 @@ func (pb *planBuilder) planCrew(ctx context.Context, meta Metadata, spec *CrewSp
 	plannedAutoCreds, err := expandAutoCredentialsInCrewSpec(&specCopy, existingServicesJSON)
 	if err != nil {
 		return fmt.Errorf("crew %q: auto-managed credentials: %w", slug, err)
+	}
+	if pb.autoCredNames == nil {
+		pb.autoCredNames = map[string]bool{}
+	}
+	for i := range plannedAutoCreds {
+		pb.autoCredNames[plannedAutoCreds[i].Name] = true
 	}
 
 	// Cross-crew collision check: a workspace-scoped credential
@@ -861,9 +871,17 @@ func (pb *planBuilder) planCrewChildren(ctx context.Context, crewSlug, crewID st
 		agentExisting[a.Slug] = a
 	}
 	agentDeclared := map[string]bool{}
+	declaredCreds := mergeCredIndex(wsCreds, spec.Credentials)
+	// Auto-managed service credentials are created by this apply too.
+	for name := range pb.autoCredNames {
+		declaredCreds[name] = Credential{EnvVar: name}
+	}
 	for i := range spec.Agents {
 		a := spec.Agents[i]
 		agentDeclared[a.Slug] = true
+		if err := pb.checkUndeclaredEnvRefs(ctx, crewSlug, &a, declaredCreds); err != nil {
+			return err
+		}
 		desc := crewSlug + "/" + a.Slug
 		body := buildAgentBody(&a, crewID, crewSlug)
 		if existing, ok := agentExisting[a.Slug]; ok {
@@ -1389,4 +1407,26 @@ func checkCrewQuotaTransition(existing *CrewResponse, body map[string]any) error
 		return nil
 	}
 	return serviceconfig.QuotaTransition(*existing.ServicesJSON, next)
+}
+
+// checkUndeclaredEnvRefs resolves, at plan time, every env_ref that this
+// manifest does not declare, against the credentials that already exist on
+// the server. Declared ones are created earlier in the same apply and need no
+// lookup. The result is that a dry-run reports a missing credential as an
+// error instead of planning a link that fails at apply time, while a
+// credential created outside the manifest (and outside Git) is accepted.
+func (pb *planBuilder) checkUndeclaredEnvRefs(ctx context.Context, crewSlug string, a *Agent, declared map[string]Credential) error {
+	for _, env := range a.EnvRefs {
+		if _, ok := declared[env]; ok {
+			continue
+		}
+		cr, err := pb.client.FindCredentialByName(ctx, env)
+		if err != nil {
+			return fmt.Errorf("agent %s/%s env_refs[%s]: look up credential: %w", crewSlug, a.Slug, env, err)
+		}
+		if cr == nil {
+			return fmt.Errorf("agent %s/%s env_refs[%s]: no such credential — declare it in the manifest or create it with `crewship credential create %s`", crewSlug, a.Slug, env, env)
+		}
+	}
+	return nil
 }

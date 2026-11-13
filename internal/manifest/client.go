@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
 )
@@ -801,16 +802,52 @@ func (c *Client) SaveCrewFile(ctx context.Context, crewID, destPath string, data
 	if !ok {
 		return fmt.Errorf("crew file upload not supported by this API client (missing raw PUT capability)")
 	}
-	resp, err := rp.PutBytes(ctx,
-		"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(destPath), data)
-	if err != nil {
-		return err
+	for attempt := 0; ; attempt++ {
+		resp, err := rp.PutBytes(ctx,
+			"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(destPath), data)
+		if err != nil {
+			return err
+		}
+		status := resp.StatusCode
+		msg := serverErrorText(resp.Body)
+		resp.Body.Close()
+		if status >= 200 && status < 300 {
+			return nil
+		}
+		// 409 means the file is owned by the crew runtime and the container
+		// is not running. Right after a crew PATCH in the same apply that is
+		// the asynchronous container recycle, not a stopped crew: wait a
+		// bounded time for it to come back instead of failing the apply.
+		if status == http.StatusConflict && attempt < len(crewFileConflictBackoff) {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(crewFileConflictBackoff[attempt]):
+			}
+			continue
+		}
+		if msg != "" {
+			return fmt.Errorf("crew file save %s: HTTP %d: %s", destPath, status, msg)
+		}
+		return fmt.Errorf("crew file save %s: HTTP %d", destPath, status)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("crew file save %s: HTTP %d", destPath, resp.StatusCode)
+}
+
+// crewFileConflictBackoff bounds the wait for a recycling crew container
+// (about 30 s in total). A var so tests can shorten it.
+var crewFileConflictBackoff = []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second, 15 * time.Second}
+
+// serverErrorText returns the server's {"error": "..."} message, or the
+// first bytes of a plain-text body, so the operator sees why it refused.
+func serverErrorText(body io.Reader) string {
+	raw, _ := io.ReadAll(io.LimitReader(body, 4096))
+	var e struct {
+		Error string `json:"error"`
 	}
-	return nil
+	if json.Unmarshal(raw, &e) == nil && e.Error != "" {
+		return e.Error
+	}
+	return strings.TrimSpace(string(raw))
 }
 
 // CrewContainerStatus reports whether a crew's runtime container is

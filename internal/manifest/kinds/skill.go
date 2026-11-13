@@ -72,6 +72,7 @@ import (
 	"strings"
 
 	"github.com/crewship-ai/crewship/internal/manifest/internalapi"
+	skillspkg "github.com/crewship-ai/crewship/internal/skills"
 )
 
 // skillAPIVersion / skillKind are the only literal envelope values
@@ -310,6 +311,9 @@ func (d *SkillDocument) Validate(_ internalapi.WorkspaceContext) error {
 		// from a path source leaves resolved untouched (Inline is empty
 		// in that case).
 		d.resolved = d.Spec.Inline
+		if err := skillspkg.PreflightSKILLMD(d.resolved, d.Spec.AllowUnsafeLicense); err != nil {
+			return fmt.Errorf("skill %q: SKILL.md would be refused by the server: %w", d.Metadata.Slug, err)
+		}
 	case "path":
 		// Validate doesn't read the file itself — the bundle loader
 		// does that during Load (see parse.go:resolveLocalReferences).
@@ -321,6 +325,9 @@ func (d *SkillDocument) Validate(_ internalapi.WorkspaceContext) error {
 		if d.resolved == "" {
 			return fmt.Errorf("skill %q: spec.path %q is set but body was not resolved by the bundle loader (call SetResolved when constructing the document by hand)",
 				d.Metadata.Slug, d.Spec.Path)
+		}
+		if err := skillspkg.PreflightSKILLMD(d.resolved, d.Spec.AllowUnsafeLicense); err != nil {
+			return fmt.Errorf("skill %q: %s: SKILL.md would be refused by the server: %w", d.Metadata.Slug, d.Spec.Path, err)
 		}
 	case "source":
 		u, err := url.Parse(d.Spec.Source)
