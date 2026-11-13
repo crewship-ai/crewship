@@ -136,8 +136,8 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
           <span className="font-medium">{editor?.app ?? def.label}</span>
           {editor && <small className="truncate text-xs text-muted-foreground">{def.label} · {editor.extensions}</small>}
         </span>
-        {!live ? <span className="rounded-full border px-1.5 text-[11px] font-semibold text-muted-foreground">Off</span>
-          : key ? <kbd className="rounded border px-1 font-mono text-[11px] text-muted-foreground">{key}</kbd> : null}
+        {!live ? <span className="rounded-full border px-1.5 text-micro font-semibold text-muted-foreground">Off</span>
+          : key ? <kbd className="rounded border px-1 font-mono text-micro text-muted-foreground">{key}</kbd> : null}
       </button>
       {live && <Button type="button" variant="ghost" size="icon-sm" aria-pressed={pinned} aria-label={`${pinned ? "Unpin" : "Pin"} ${editor?.app ?? def.label}`}
         title={pinned ? "Unpin" : `Pin to this menu (up to ${PIN_MAX})`} onClick={() => star(kind)}
@@ -168,7 +168,7 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
       {pins.length ? <ul className="grid gap-px">{pins.map((kind, i) => <li key={kind} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm">
         <KindTile kind={kind} size="sm" className="size-6" />
         <span className="min-w-0 flex-1 truncate">{KIND_EDITOR[kind]?.app ?? KINDS[kind].label}</span>
-        <kbd className="rounded border px-1 font-mono text-[11px] text-muted-foreground">{i + 1}</kbd>
+        <kbd className="rounded border px-1 font-mono text-micro text-muted-foreground">{i + 1}</kbd>
         <Button type="button" variant="ghost" size="icon-sm" aria-label={`Move ${KINDS[kind].label} up`} disabled={i === 0} onClick={() => prefs.move(kind, -1)}><ArrowUp aria-hidden /></Button>
         <Button type="button" variant="ghost" size="icon-sm" aria-label={`Move ${KINDS[kind].label} down`} disabled={i === pins.length - 1} onClick={() => prefs.move(kind, 1)}><ArrowDown aria-hidden /></Button>
         <Button type="button" variant="ghost" size="icon-sm" aria-label={`Unpin ${KINDS[kind].label}`} onClick={() => { prefs.toggle(kind); setNote(null) }}><X aria-hidden /></Button>
@@ -205,7 +205,7 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
       <div className="mt-1 grid gap-px border-t pt-1">
         <button type="button" onClick={() => { setFamFilter(null); setMode("all") }} className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent coarse:min-h-[44px]">
           <LayoutGrid aria-hidden className="mx-1 size-4 text-muted-foreground" /><span className="flex-1">All kinds <small className="text-xs text-muted-foreground">{available.length} of {KIND_ORDER.length} here</small></span>
-          <kbd className="rounded border px-1 font-mono text-[11px] text-muted-foreground">⇧N</kbd>
+          <kbd className="rounded border px-1 font-mono text-micro text-muted-foreground">⇧N</kbd>
         </button>
         {!prefs.guide && <button type="button" onClick={() => { prefs.setGuide(true); onOpenChange(false) }} className="flex items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent coarse:min-h-[44px]">
           <Sparkles aria-hidden className="mx-1 size-4 text-muted-foreground" />Show the guide on Home
