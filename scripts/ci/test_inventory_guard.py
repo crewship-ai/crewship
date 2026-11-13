@@ -42,6 +42,7 @@ class GuardTests(unittest.TestCase):
         self.queue = None; self.queue_reads = 0
         self.main_sha = 'b' * 40; self.main_reads = 0; self.advance_main = False
         self.compare_mutation = None
+        self.commit_mutation = None
         self.tree_mutation = None
 
     def api(self, endpoint, payload=None):
@@ -56,6 +57,12 @@ class GuardTests(unittest.TestCase):
                 return {'ref': ref, 'object': {'type': 'commit', 'sha': 'c' * 40 if self.advance_main and self.main_reads > 1 else self.main_sha}}
             self.queue_reads += 1
             return {'ref': ref, 'object': {'type': 'commit', 'sha': 'c' * 40 if self.advance and self.queue_reads > 1 else self.head}}
+        if '/git/commits/' in endpoint:
+            head = endpoint.rsplit('/', 1)[1]
+            # Exercise the non-direct comparison fallback in existing cases.
+            data = {'sha': head, 'url': 'https://api.github.com/' + endpoint,
+                    'parents': [{'sha': 'e' * 40}]}
+            return self.commit_mutation(data) if self.commit_mutation else data
         if '/compare/' in endpoint:
             self.assertTrue(endpoint.endswith('?per_page=1&page=2'))
             base, head = endpoint.split('/compare/', 1)[1].split('?')[0].split('...')
@@ -507,6 +514,33 @@ class GuardTests(unittest.TestCase):
         with self.assertRaises(m.Rejected): m.execute(self.event, self.env, self.api, self.root)
         self.assertEqual([payload['state'] for _, payload in self.calls if payload is not None], ['pending', 'failure'])
 
+    def test_direct_parent_control_change_still_requires_exact_admin_dispatch(self):
+        self.merge_group()
+        self.commit_mutation = lambda data: {**data, 'parents': [{'sha': 'b' * 40}]}
+        path = 'scripts/ci/inventory-guard.py'
+        self.changes[path] = (self.root / path).read_bytes() + b'\n# candidate data only\n'
+        self.assertEqual(self.inspect()['state'], 'pending')
+        self.dispatch('false'); self.env['GITHUB_SHA'] = 'b' * 40
+        self.event['inputs'].update(pr_number='', queue_ref=self.queue, expected_base_sha='b' * 40)
+        self.assertEqual(self.inspect()['state'], 'failure')
+        self.event['inputs']['approve_control_changes'] = 'true'
+        self.assertEqual(self.inspect()['state'], 'success')
+        self.assertFalse(any('/compare/' in endpoint for endpoint, _ in self.calls))
+
+    def test_direct_parent_still_rechecks_live_queue_and_main_before_status(self):
+        self.merge_group()
+        self.commit_mutation = lambda data: {**data, 'parents': [{'sha': 'b' * 40}]}
+        for moving in ('queue', 'main'):
+            with self.subTest(moving=moving):
+                self.calls.clear(); self.queue_reads = self.main_reads = 0
+                self.advance = moving == 'queue'; self.advance_main = moving == 'main'
+                with self.assertRaises(m.Rejected):
+                    m.execute(self.event, self.env, self.api, self.root)
+                self.assertEqual([p['state'] for _, p in self.calls if p is not None],
+                                 ['pending', 'failure'])
+                self.assertFalse(any('/compare/' in endpoint for endpoint, _ in self.calls))
+                self.assertLessEqual(len(self.calls), 32)
+
     def test_queue_rejects_unrelated_or_malformed_ancestry(self):
         self.merge_group(); self.event['merge_group']['base_sha'] = 'c' * 40
         invalid = [None, {}, {'status': 'diverged'}, {'behind_by': 1}, {'ahead_by': True},
@@ -590,6 +624,72 @@ class ApiRetryTests(unittest.TestCase):
     @staticmethod
     def status(code):
         return urllib.error.HTTPError('https://api.github.com/x', code, 'error', {}, None)
+
+    def test_direct_parent_avoids_oversized_duplicate_signed_compare_metadata(self):
+        repo, base, head = m.REPOSITORY, 'b' * 40, 'a' * 40
+        endpoint = 'repos/' + repo + '/git/commits/' + head
+        signed_base = {'sha': base, 'commit': {'message': 'm' * 65516,
+                                               'verification': {'payload': 'p' * 305662}}}
+        comparison = json.dumps({'base_commit': signed_base,
+                                 'merge_base_commit': signed_base}).encode()
+        self.assertGreater(len(comparison), m.LIMIT * 2)
+        direct = json.dumps({'sha': head, 'url': 'https://api.github.com/' + endpoint,
+                             'parents': [{'sha': base}], 'message': 'q' * 16000}).encode()
+        requests = []
+        def open_request(request, **kwargs):
+            path = request.full_url.removeprefix('https://api.github.com/')
+            requests.append(path)
+            return Response(direct if path == endpoint else comparison)
+        opener = Mock(open=open_request)
+        with patch.object(m.urllib.request, 'build_opener', return_value=opener):
+            api = m.API('synthetic-key')
+            m.ancestor(api, repo, base, head)
+            self.assertEqual(requests, [endpoint])
+            # The fix must not raise or evade the original per-response cap.
+            with self.assertRaisesRegex(m.Rejected, 'API response exceeds limit'):
+                api('repos/' + repo + '/compare/' + base + '...' + head + '?per_page=1&page=2')
+        self.assertEqual(m.LIMIT, 256 * 1024)
+        self.assertEqual(m.TREE_LIMIT, 5 * 1024 * 1024)
+
+    def test_direct_parent_rejects_wrong_identity_and_malformed_parents(self):
+        repo, base, head = m.REPOSITORY, 'b' * 40, 'a' * 40
+        valid = {'sha': head, 'url': 'https://api.github.com/repos/' + repo + '/git/commits/' + head,
+                 'parents': [{'sha': base}]}
+        invalid = [None, {}, {**valid, 'sha': base}, {**valid, 'url': 'https://example.invalid'},
+                   {**valid, 'parents': None}, {**valid, 'parents': [base]},
+                   {**valid, 'parents': [{}]}, {**valid, 'parents': [{'sha': 'not-a-sha'}]},
+                   {**valid, 'parents': [{'sha': base}] * 33}]
+        for data in invalid:
+            with self.subTest(data=data):
+                api = self.client(json.dumps(data).encode())
+                with self.assertRaisesRegex(m.Rejected, 'commit ancestry metadata'):
+                    m.ancestor(api, repo, base, head)
+                self.assertEqual(len(self.requests), 1)
+
+    def test_direct_parent_commit_response_still_has_the_original_size_cap(self):
+        base, head = 'b' * 40, 'a' * 40
+        data = {'sha': head, 'url': 'https://api.github.com/repos/' + m.REPOSITORY + '/git/commits/' + head,
+                'parents': [{'sha': base}], 'message': 'm' * (m.LIMIT * 2)}
+        api = self.client(json.dumps(data).encode())
+        with self.assertRaisesRegex(m.Rejected, 'API response exceeds limit'):
+            m.ancestor(api, m.REPOSITORY, base, head)
+        self.assertEqual(len(self.requests), 1)
+
+    def test_non_direct_parent_requires_existing_comparison_proof(self):
+        repo, base, head = m.REPOSITORY, 'b' * 40, 'a' * 40
+        direct = {'sha': head, 'url': 'https://api.github.com/repos/' + repo + '/git/commits/' + head,
+                  'parents': [{'sha': 'c' * 40}]}
+        comparison = {'url': 'https://api.github.com/repos/' + repo + '/compare/' + base + '...' + head,
+                      'base_commit': {'sha': base}, 'merge_base_commit': {'sha': base},
+                      'status': 'ahead', 'ahead_by': 2, 'behind_by': 0, 'total_commits': 2}
+        for changes in ({}, {'merge_base_commit': {'sha': 'd' * 40}}):
+            with self.subTest(changes=changes):
+                api = self.client(json.dumps(direct).encode(), json.dumps({**comparison, **changes}).encode())
+                if changes:
+                    with self.assertRaises(m.Rejected): m.ancestor(api, repo, base, head)
+                else:
+                    m.ancestor(api, repo, base, head)
+                self.assertEqual(len(self.requests), 2)
 
     def test_transient_errors_are_retried_and_never_turn_into_success(self):
         for error in (self.status(502), self.status(503), self.status(429), urllib.error.URLError('down'),

@@ -1,0 +1,1 @@
+Fix queue ancestry checks for signed commit metadata that exceeds the compare-response cap by verifying a bounded direct-parent Git record first. Preserve all response/request/time caps, live queue identities and required control review.
