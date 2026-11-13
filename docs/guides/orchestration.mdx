@@ -669,8 +669,9 @@ Prefer step 1. On a run that carries a person's authority (a chat request, or an
 a person started) the separate link is refused with `chat_issue_action_not_supported`,
 and create-then-link would leave an unattached child. `parent_identifier` must name an
 issue of your crew or of a crew yours is connected to; under a person's authority that
-person must be allowed to update issues. An unknown or foreign-workspace parent is a
-`404`, an unconnected crew's parent a `403`, and either way no issue is created. A retry
+person must be allowed to update issues. An unknown, foreign-workspace or non-issue parent
+is a `404`, an unconnected crew's parent a `403`, a closed (`DONE`, `CANCELLED` or `DUPLICATE`) parent a
+`409`, and in every case no issue is created. A retry
 with the same `operation_key` and a different parent is a `409`, never a re-parent.
 
 `relation_type` is one of `blocks`, `blocked_by`, `relates_to`, `duplicate_of` or

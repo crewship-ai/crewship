@@ -24,7 +24,10 @@ func (e *issueParentError) Error() string { return e.msg }
 //
 //   - The parent row is never written. Only the new child's parent_issue_id
 //     is set, so the invariant "an agent only mutates issues in its own crew"
-//     holds exactly as for create.
+//     holds exactly as for create. The parent is still affected: its
+//     sub-issue list grows, and an open child holds back closing it (the
+//     terminal-children rule). A connection from the child's crew is what
+//     permits that effect on a connected crew's issue.
 //   - The parent must be an issue of the child's own crew, or of a crew the
 //     child's crew is connected to (same rule as AreCrewsConnected: an active
 //     connection from the child's crew, or a bidirectional one either way). Unrelated crews' work stays out of
@@ -35,14 +38,16 @@ func (e *issueParentError) Error() string { return e.msg }
 //     under an issue is a structural edit of it, the same verb the public
 //     route requires.
 //
-// A foreign-workspace or unknown identifier is a plain 404, not a
+// A closed (terminal) parent is a 409.
+//
+// A foreign-workspace, unknown or non-issue identifier is a plain 404, not a
 // distinguishable refusal (no existence oracle).
 func authorizeIssueParent(ctx context.Context, tx *sql.Tx, op *chatIssueOperation, workspaceID, childCrewID, parentIdentifier string) (string, error) {
-	var parentID, parentCrew string
+	var parentID, parentCrew, parentStatus string
 	err := tx.QueryRowContext(ctx,
-		`SELECT id, crew_id FROM missions
+		`SELECT id, crew_id, status FROM missions
 		 WHERE identifier = ? AND workspace_id = ? AND mission_type = 'issue'`,
-		parentIdentifier, workspaceID).Scan(&parentID, &parentCrew)
+		parentIdentifier, workspaceID).Scan(&parentID, &parentCrew, &parentStatus)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", &issueParentError{http.StatusNotFound, "Parent issue not found: " + parentIdentifier}
 	}
@@ -63,6 +68,13 @@ func authorizeIssueParent(ctx context.Context, tx *sql.Tx, op *chatIssueOperatio
 			return "", &issueParentError{http.StatusForbidden,
 				"parent issue " + parentIdentifier + " belongs to a crew this crew is not connected to"}
 		}
+	}
+	// A closed parent with a new open child is the state the terminal-
+	// children rule refuses elsewhere; splitting work under it is a mistake
+	// the caller should see, not a silent reopening hazard.
+	if terminalIssueStatuses[parentStatus] {
+		return "", &issueParentError{http.StatusConflict,
+			"parent issue " + parentIdentifier + " is " + parentStatus + "; reopen it before attaching new work"}
 	}
 	if op != nil && op.authority.HumanAuthority != nil {
 		allowed, err := issueRequesterAllowed(ctx, tx, op.authority.HumanAuthority.UserID, workspaceID, "updated")

@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,22 +63,22 @@ func TestInternalIssueCreate_WithParent_Refusals(t *testing.T) {
 		name   string
 		setup  func(t *testing.T, f chatIssueFixture) string // returns parent identifier
 		status int
+		msg    string
 	}{
-		{"unknown parent", func(t *testing.T, f chatIssueFixture) string { return "NOPE-9" }, http.StatusNotFound},
+		{"unknown parent", func(t *testing.T, f chatIssueFixture) string { return "NOPE-9" }, http.StatusNotFound, "not found"},
 		{"foreign workspace parent is indistinguishable from unknown", func(t *testing.T, f chatIssueFixture) string {
 			_, ident := seedForeignWorkspaceIssue(t, f.h.db, "parent")
 			return ident
-		}, http.StatusNotFound},
+		}, http.StatusNotFound, "not found"},
 		{"unconnected crew", func(t *testing.T, f chatIssueFixture) string {
 			execOrFatal(t, f.h.db, `INSERT INTO crews (id, workspace_id, name, slug, issue_prefix) VALUES ('crew-unrelated', ?, 'Unrelated', 'unrelated', 'UNR')`, f.workspace)
 			seedIssue(t, f.h.db, f.workspace, "crew-unrelated", f.agent, "UNR-1", "BACKLOG")
 			return "UNR-1"
-		}, http.StatusForbidden},
-		{"requester can no longer update issues", func(t *testing.T, f chatIssueFixture) string {
-			seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, "PAR-3", "BACKLOG")
-			execOrFatal(t, f.h.db, `UPDATE workspace_members SET role = 'VIEWER' WHERE workspace_id = ? AND user_id = ?`, f.workspace, f.user)
-			return "PAR-3"
-		}, http.StatusForbidden},
+		}, http.StatusForbidden, "not connected"},
+		{"closed parent", func(t *testing.T, f chatIssueFixture) string {
+			seedIssue(t, f.h.db, f.workspace, f.crew, f.agent, "PAR-4", "DONE")
+			return "PAR-4"
+		}, http.StatusConflict, "reopen it"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -88,8 +89,8 @@ func TestInternalIssueCreate_WithParent_Refusals(t *testing.T) {
 			body := f.createBody("refused-"+tc.name, "Should not exist")
 			body["parent_identifier"] = parent
 			rr := chatIssueCall(t, f.h.Create, "POST", "", body)
-			if rr.Code != tc.status && !(tc.status == http.StatusForbidden && rr.Code == http.StatusForbidden) {
-				t.Fatalf("status = %d, want %d: %s", rr.Code, tc.status, rr.Body.String())
+			if rr.Code != tc.status || !strings.Contains(rr.Body.String(), tc.msg) {
+				t.Fatalf("status = %d body %s, want %d containing %q", rr.Code, rr.Body.String(), tc.status, tc.msg)
 			}
 			var after, ops int
 			f.h.db.QueryRow(`SELECT COUNT(*) FROM missions`).Scan(&after)
@@ -171,4 +172,28 @@ func TestRoutineUnderHumanAuthority_CreatesAttachedSubIssues(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A requester who may create issues but not update them passes the general
+// "created" check; only the parent gate ("updated") refuses attaching work
+// under an existing issue. The role is set before the run is admitted so the
+// run's human authority is current, not stale.
+func TestInternalIssueCreate_WithParent_RequesterWithoutUpdate(t *testing.T) {
+	h, workspace, crew, agent, user := newInternalIssueHandler(t)
+	execOrFatal(t, h.db, `UPDATE workspace_members SET role = 'VIEWER', capabilities = '["chat","issue.create"]' WHERE workspace_id = ? AND user_id = ?`, workspace, user)
+	f := chatIssueFixture{h, workspace, crew, agent, user, "operation-chat", "operation-run"}
+	seedChatIssueRun(t, h, workspace, agent, user, f.chat, f.run)
+	seedIssue(t, h.db, workspace, crew, agent, "PAR-3", "BACKLOG")
+
+	// Without a parent the same requester may create: the refusal below is
+	// the parent gate, not the general one.
+	chatIssueJSON(t, chatIssueCall(t, h.Create, "POST", "", f.createBody("plain", "Allowed")), http.StatusCreated)
+
+	body := f.createBody("with-parent", "Refused")
+	body["parent_identifier"] = "PAR-3"
+	rr := chatIssueCall(t, h.Create, "POST", "", body)
+	if rr.Code != http.StatusForbidden || !strings.Contains(rr.Body.String(), "may not update issues") {
+		t.Fatalf("status = %d body %s, want 403 from the parent gate", rr.Code, rr.Body.String())
+	}
+	chatIssueCount(t, f, "missions", 2) // PAR-3 + the plain issue
 }
