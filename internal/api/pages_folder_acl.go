@@ -130,6 +130,9 @@ type pageFolderACLDocument struct {
 	ACL        []pageFolderACLWire `json:"acl"`
 	ACLVersion int64               `json:"acl_version"`
 	Entry      *pageFolderACLWire  `json:"entry,omitempty"`
+	// AgentAccess is the folder's setting for the agents of its owning crew
+	// (none, read or propose; #5317 D2, pages_folder_agent_access.go).
+	AgentAccess string `json:"agent_access"`
 }
 
 // pageFolderACLWriteRequest is PUT's body. CanRead is a pointer so a body that
@@ -358,7 +361,10 @@ func (h *PageHandler) folderACLSubjectLabel(ctx context.Context, wsID, subjectTy
 }
 
 func (h *PageHandler) folderACLDocument(ctx context.Context, wsID string, f *pageFolderRecord, entries []pageFolderACLRecord, entry *pageFolderACLRecord) *pageFolderACLDocument {
-	out := &pageFolderACLDocument{Folder: f.Slug, ACL: make([]pageFolderACLWire, 0, len(entries)), ACLVersion: f.ACLVersion}
+	out := &pageFolderACLDocument{Folder: f.Slug, ACL: make([]pageFolderACLWire, 0, len(entries)), ACLVersion: f.ACLVersion, AgentAccess: folderAgentAccessNone}
+	if level, err := h.folderAgentAccess(ctx, f.ID); err == nil {
+		out.AgentAccess = level
+	}
 	setters := map[string]string{}
 	render := func(e pageFolderACLRecord) pageFolderACLWire {
 		setBy := ""

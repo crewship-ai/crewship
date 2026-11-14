@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/manifest/internalapi"
 )
 
 // #5334: the combined-manifest planner converges like the kind path. A file
@@ -101,5 +103,27 @@ func TestClientCrewFileContent(t *testing.T) {
 				t.Fatalf("path = %q, want %q", tc.api.path, want)
 			}
 		})
+	}
+}
+
+// The standalone kind: Crew path raises the same stopped-crew advisory from
+// its plan items. Files already in place are not written, so they must not
+// count: an apply whose files are all up to date warns about nothing.
+func TestCrewFilesToWrite_SkipsUnchanged(t *testing.T) {
+	items := []internalapi.PlanItem{
+		{Kind: "crew", Action: internalapi.ActionUpdate},
+		{Kind: "crew-file", Action: internalapi.ActionUnchanged},
+		{Kind: "crew-file", Action: internalapi.ActionUpdate},
+		{Kind: "crew-file", Action: internalapi.ActionCreate},
+	}
+	if got := crewFilesToWrite(items); got != 2 {
+		t.Fatalf("crewFilesToWrite = %d, want 2", got)
+	}
+
+	pb := &planBuilder{plan: &Plan{}, client: &Client{}}
+	pb.containerStatusFn = func(string) (bool, bool) { return false, true } // stopped
+	pb.warnIfCrewStopped(context.Background(), "ops", "crew_1", crewFilesToWrite(items[:2]))
+	if len(pb.plan.Warnings) != 0 {
+		t.Fatalf("warnings = %v, want none when every file is up to date", pb.plan.Warnings)
 	}
 }
