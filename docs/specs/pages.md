@@ -611,9 +611,19 @@ owner on 2026-11-13.
    owns and that it reaches as attached or created; standing access is read
    only. An agent never shares, grants, moves or publishes. An exact-run
    consent the human gave today ("edit with agent", a comment task) keeps its
-   one page in reach with the flag on. Word and Sheet
-   documents and Design keep their exact-run consent path for now, so their
-   agent edits remain proposals under the document lease.
+   one page in reach with the flag on. A Design uses the same reach and
+   write rules as an artifact project (#5317 step 5.3); an agent still never
+   creates a Design. Its run reads the version the human is entitled to: an
+   Editor's run (edit as an ordinary member, never through the ADMIN or OWNER
+   role) reads the latest version, a Viewer's or Commenter's the shared one.
+   Word documents, Sheets (GridCraft) and Mooring documents keep their own
+   exact-run consent with the flag on: a drafting or iteration consent for a
+   Word document, a mandate for a Sheet or Mooring document. Attaching one does
+   not put it in reach. That consent binds every write's targets, base
+   revision and lease, so an agent write under another person's lease ends as
+   a proposal and never bypasses the lease. Native Word and Sheet Craft tasks
+   (`crewship craft task`) are a separate, explicitly consented runtime and are
+   unchanged.
 7. **Limits, read from the workspace policy on every use.** One chat run
    creates at most `chat_run_create_limit` artifacts (default 3, 1–20) and
    reads at most `run_read_limit` distinct artifacts through standing access
@@ -655,8 +665,12 @@ owner on 2026-11-13.
    a flag-on chat run makes to an artifact project (view, comments, dashboard
    data, slides and PDF export, publish, restore, reply, create) writes an
    `audit_logs` row `artifact.agent_run_accessed` in the same transaction as
-   the access. Word and Sheet documents, Design, GridCraft and Mooring keep
-   their exact-run consent path and are not audited by this row. The row's
+   the access. So does every access to a Design (read, write), and every
+   access through a kind's own exact-run consent: a Word document's read,
+   commit, checkpoint and proposal, its create (reach `created`), and a Sheet
+   or Mooring document's read and write under a mandate (reach `consented`).
+   Leases carry no content and are not recorded. Native Word and Sheet Craft
+   tasks are not audited by this row. The row's
    user is the human the agent acted for; its metadata names the agent, crew,
    run, chat, the reach (`referenced`, `created`, `consented`, `standing` or
    `folder`) and the operation (`read`, `write`, `create`). It holds no

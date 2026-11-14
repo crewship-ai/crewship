@@ -225,7 +225,24 @@ func (m *mooringHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		mooringError(w, e)
 		return
 	}
+	// Flag on (#5317 5.3): the mandate stays the only reach; each access is
+	// audited with its human in this transaction, failing closed.
+	operation := "write"
 	if packet.Action == "read" {
+		operation = "read"
+	}
+	if m.workbook.pages.recordConsentedRunAccess(r.Context(), tx, a, k.PageID, operation) != nil {
+		mooringError(w, appengine.ErrForbidden)
+		return
+	}
+	if packet.Action == "read" {
+		if m.workbook.pages.artifactRunModesOn(context.WithValue(r.Context(), pageAuthReaderKey{}, tx), a.WorkspaceID) {
+			// The read's audit row commits with the read, or the read fails.
+			if e = tx.Commit(); e != nil {
+				mooringError(w, e)
+				return
+			}
+		}
 		writeJSON(w, 200, map[string]any{"app_id": manifest.ID, "manifest": manifest, "state": state})
 		return
 	}

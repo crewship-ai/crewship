@@ -243,11 +243,22 @@ already-referenced runs the ordinary way, binding nothing.
   artifact tool.
 - Per-run limits (3 created, 50 distinct standing reads) and a per-crew hourly
   page limit (20) come from `crewship workspace artifact-policy`.
-- Every artifact project access through this path is audited as `artifact.agent_run_accessed`,
+- A Design is reached the same way as an artifact project. A run reads the
+  version its human is entitled to: the shared version for a Viewer or
+  Commenter, the latest for an Editor (edit held only through the ADMIN or
+  OWNER role does not count). Agents still never create a Design.
+- Word documents, Sheets (GridCraft) and Mooring documents stay on their own
+  exact-run consent (a drafting or iteration consent, or a mandate): attaching
+  one is not enough. That consent binds every write's targets, base revision
+  and lease, so an agent write under another person's lease ends as a proposal,
+  never a direct edit. Native Word and Sheet Craft tasks are unchanged.
+- Every access through this path is audited as `artifact.agent_run_accessed`,
   naming the human the agent acted for, the agent, run, reach and operation,
-  in the same transaction; no audit record, no access. Reads and writes are
-  recorded once per run and artifact, creates every time. Documents, Design,
-  GridCraft and Mooring stay on the exact-run consent path. Read them with
+  in the same transaction; no audit record, no access. This covers artifact
+  projects, Designs, Word documents, Sheets and Mooring documents (the last
+  three with reach `consented`, a created Word document with `created`).
+  Reads and writes are recorded once per run and artifact, creates every
+  time. Native Craft tasks are not covered. Read them with
   `crewship audit --action artifact.agent_run_accessed -f json`.
 
 Specification: `docs/specs/pages.md` §7.1c.

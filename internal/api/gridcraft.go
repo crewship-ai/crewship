@@ -794,6 +794,16 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
 
+		// Flag on (#5317 5.3): the mandate stays the only reach (its targets
+		// and base revision bind every write), and each access is audited
+		// with its human in this transaction, failing closed.
+		operation := "read"
+		if body.Action == "apply" {
+			operation = "write"
+		}
+		if h.pages.recordConsentedRunAccess(ctx, tx, a, k.PageID, operation) != nil {
+			return appengine.Principal{}, appengine.ErrForbidden
+		}
 		// The mandate's base revision is also the agent's history floor: the
 		// commits feed never shows it what changed before the mandate.
 		return appengine.Principal{AuthorityID: "agent:" + a.AgentID + ":run:" + a.RunID + ":mandate:" + body.MandateID, MandateID: body.MandateID, Targets: bounds, HistoryFloor: base}, nil

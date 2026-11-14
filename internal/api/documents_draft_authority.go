@@ -134,6 +134,23 @@ func (h *PageHandler) authorizeDocumentDraft(ctx context.Context, a *artifactRun
 	if _, err := h.documentDraftScope(ctx, a, k.PageID); err != nil {
 		return "", err
 	}
+	// Flag on (#5317 5.3): the drafting or iteration consent stays the only
+	// reach (it binds the generation, revision and lease of every write); the
+	// content access is audited with its human in this transaction, failing
+	// closed. Leases carry no content and are not recorded.
+	audited := ""
+	switch operation {
+	case "state", "receipt":
+		audited = "read"
+	case "commit", "checkpoint", "propose":
+		audited = "write"
+	}
+	if audited != "" {
+		tx, _ := ctx.Value(pageAuthReaderKey{}).(*sql.Tx)
+		if h.recordConsentedRunAccess(ctx, tx, a, k.PageID, audited) != nil {
+			return "", errDocumentAccess
+		}
+	}
 	return "agent:" + a.AgentID + ":" + a.RunID, nil
 }
 
