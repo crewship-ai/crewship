@@ -9,7 +9,7 @@ import { ACCOUNT_VARS, checkOrigin, jobArgs, runEnv } from "./runner-env.mjs"
 import { EXIT, HISTORY_NOT_ENABLED, SCENARIOS, evidencePath, fullChromium, isHeadlessShell, loadEvidence, parseListed, sameVersions, verdict } from "./verdict.mjs"
 
 const RC = "ce984daf1d5f9dad37e00228c269ad0ae06736dd"
-const ORIGIN = "https://crewship-dev3.unifylab.cz"
+const ORIGIN = "https://dev3.crewship.test"
 const CHROME = "/cache/ms-playwright/chromium-1248/chrome-linux64/chrome"
 const RUN = "6f1c1f7e-4a57-4c1e-9d3b-2f5f0d1a9e01"
 const OTHER_RUN = "0b9a2c11-0000-4000-8000-000000000000"
@@ -79,6 +79,33 @@ test("a listing that answers 200 with exactly the observed versions passes with 
   assert.deepEqual(v.notVerified, [])
 })
 
+// Sheet: Enter's move of the active cell can follow the lost save as a version of its own (sheet-versions.mjs).
+const lostThenMoved = (e) => {
+  const lost = e.steps.find((s) => s.name === "lost reply")
+  const moved = String(Number(lost.versionAfter) + 1)
+  const shift = (v) => String(Number(v) + (Number(v) >= Number(moved) ? 1 : 0))
+  const steps = e.steps.map((s) => (s.name === "lost reply" ? { ...s, versionAfter: moved } : Number(s.versionBefore) >= Number(moved) ? { ...s, versionBefore: shift(s.versionBefore), versionAfter: shift(s.versionAfter) } : s))
+  const head = String(Number(e.versions.head) + 1)
+  const receipts = Array.from({ length: Number(head) - 1 }, (_, i) => String(i + 2))
+  const lostAt = lost.versionAfter
+  const ops = receipts.filter((r) => r !== lostAt).map((version, i) => ({ n: i + 1, kind: "save", status: 200, version, baseVersion: String(Number(version) - 1) }))
+  ops.push({ n: ops.length + 1, kind: "reconcile", status: 200, version: lostAt })
+  return { ...e, steps, ops, versions: { ...e.versions, receipts, head, headAfterReload: head, cursorOnly: [{ version: moved, base: lostAt }] } }
+}
+
+test("a Sheet lost reply followed by a move of the active cell passes, and the move stays listed", () => {
+  const input = withEvidence("walk.sheet", lostThenMoved)
+  const v = verdict(input)
+  assert.equal(v.verdict, "PASS", v.reasons.join("; "))
+  assert.equal(input.evidence["walk.sheet"].versions.cursorOnly.length, 1)
+})
+
+test("an unchanged save answer (#5075) is no receipt", () => {
+  const input = withEvidence("walk.word", (e) => ({ ...e, ops: [...e.ops, { n: e.ops.length + 1, kind: "save", status: 200, version: e.versions.head, baseVersion: e.versions.head, unchanged: true }] }))
+  const v = verdict(input)
+  assert.equal(v.verdict, "PASS", v.reasons.join("; "))
+})
+
 // Each case changes one thing of a passing run and must not pass.
 const cases = [
   // The real run of 7 Nov (rc-ce984daf1/walk): both walks passed, but the rows were UNMAPPED and failed.
@@ -92,7 +119,7 @@ const cases = [
   { name: "the origin serves another SHA", input: good({ run: { ...RUN_JSON, appSha: "0".repeat(40) } }), want: "SETUP", reason: /not RC/ },
   { name: "the app build is dirty", input: good({ run: { ...RUN_JSON, appDirty: true } }), want: "SETUP", reason: /not clean/ },
   { name: "the dirty flag is unknown", input: good({ run: { ...RUN_JSON, appDirty: null } }), want: "SETUP", reason: /not clean/ },
-  { name: "the run recorded another origin", input: good({ run: { ...RUN_JSON, origin: "https://crewship-dev2.unifylab.cz" } }), want: "SETUP", reason: /run origin/ },
+  { name: "the run recorded another origin", input: good({ run: { ...RUN_JSON, origin: "https://dev2.crewship.test" } }), want: "SETUP", reason: /run origin/ },
   { name: "the run was in quick mode", input: good({ run: { ...RUN_JSON, mode: "quick" } }), want: "SETUP", reason: /mode quick/ },
   { name: "--rc is a short SHA", input: good({ rc: RC.slice(0, 12) }), want: "SETUP", reason: /full 40-character/ },
   { name: "nothing was listed", input: good({ listed: [] }), want: "FAIL", reason: /listed 0 times/ },
@@ -131,6 +158,10 @@ const cases = [
   { name: "ctrl+s without a change made a version", input: withEvidence("walk.word", (e) => ({ ...e, steps: e.steps.map((s) => (s.name === "ctrl+s without a change" ? { ...s, versionAfter: String(Number(s.versionBefore) + 1) } : s)) })), want: "FAIL", reason: /ctrl\+s without a change went from/ },
   { name: "the lost reply made two versions", input: withEvidence("walk.sheet", (e) => ({ ...e, steps: e.steps.map((s) => (s.name === "lost reply" ? { ...s, versionAfter: String(Number(s.versionBefore) + 2) } : s)) })), want: "FAIL", reason: /not exactly one version/ },
   { name: "the lost reply made no version", input: withEvidence("walk.sheet", (e) => ({ ...e, steps: e.steps.map((s) => (s.name === "lost reply" ? { ...s, versionAfter: s.versionBefore } : s)) })), want: "FAIL", reason: /not exactly one version/ },
+  { name: "the lost reply made two versions, the second listed as no move", input: withEvidence("walk.sheet", (e) => ({ ...lostThenMoved(e), versions: { ...lostThenMoved(e).versions, cursorOnly: [] } })), want: "FAIL", reason: /not exactly one version/ },
+  { name: "a cursor-only version that is not a receipt", input: withEvidence("walk.sheet", (e) => ({ ...e, versions: { ...e.versions, cursorOnly: [{ version: "99", base: "98" }] } })), want: "FAIL", reason: /cursor-only version .* is not a receipt/ },
+  { name: "a cursor-only version on a version other than the one before it", input: withEvidence("walk.sheet", (e) => ({ ...e, versions: { ...e.versions, cursorOnly: [{ version: "4", base: "2" }] } })), want: "FAIL", reason: /cursor-only version .* is not a receipt on the version before it/ },
+  { name: "an unchanged answer counted as a receipt", input: withEvidence("walk.word", (e) => ({ ...e, ops: [...e.ops, { kind: "save", status: 200, version: e.versions.head, baseVersion: e.versions.head }] })), want: "FAIL", reason: /recorded saves .* are not the receipts/ },
   { name: "no history record", input: withEvidence("walk.word", (e) => ({ ...e, history: undefined })), want: "FAIL", reason: /no history record/ },
   { name: "a 404 with another message", input: withEvidence("walk.word", (e) => ({ ...e, history: { listingStatus: 404, error: "page not found" } })), want: "FAIL", reason: /answered 404: page not found/ },
   { name: "a 500 from the listing", input: withEvidence("walk.word", (e) => ({ ...e, history: { listingStatus: 500, error: "native version history unavailable" } })), want: "FAIL", reason: /answered 500/ },
@@ -282,10 +313,10 @@ test("R2 account values arrive intact and never in an argv", () => {
   assert.ok(ACCOUNT_VARS.includes("PRD_OWNER_PASSWORD"))
 })
 test("R2 a rejected origin with userinfo and a token query prints neither", () => {
-  const r = checkOrigin("https://walker:hunter2@crewship-dev3.unifylab.cz/private?token=abc123#frag")
+  const r = checkOrigin("https://walker:hunter2@dev3.crewship.test/private?token=abc123#frag")
   assert.ok(r.error)
   for (const secret of ["walker", "hunter2", "token", "abc123", "private", "frag"]) assert.ok(!r.error.includes(secret), r.error)
-  assert.match(r.error, /https:\/\/crewship-dev3.unifylab.cz/)
+  assert.match(r.error, /https:\/\/dev3.crewship.test/)
   const bad = checkOrigin("not a url hunter2")
   assert.ok(bad.error && !bad.error.includes("hunter2"))
   const ftp = checkOrigin("ftp://walker:hunter2@host")

@@ -16,6 +16,7 @@ import { expect, prdRequirement, test, type PrdScenario } from "../prd/fixtures"
 import { disposeActors, isolatedActor } from "../prd/outage-lostack/actor"
 import * as N from "../prd/outage-lostack/native"
 import { EVIDENCE_FILE, HISTORY_NOT_ENABLED, SCENARIOS } from "./verdict.mjs"
+import { classifyVersions, lostReplyProblems, onlyCursorAfter } from "./sheet-versions.mjs"
 import { lockButton } from "../prd/craft-session/frame"
 
 const CONFIRM_MS = 30_000 // a save the status must confirm
@@ -128,6 +129,20 @@ for (const scenario of SCENARIOS) {
         const ref = await N.createNative(api, ws.id, app, `PRD native walk ${label}`)
         out.initVersion = ref.initVersion
         const ops = (opsRef.ops = N.instrument(context))
+        // Sheet only: the workbook each save or reconcile sent, by attempt, to tell a move of the active
+        // cell from a content change (sheet-versions.mjs). Word versions are all judged as content.
+        const sentBytes = new Map<string, string>()
+        const opened = app === "gridcraft" ? (await N.readHead(api, ref)).text : undefined
+        if (app === "gridcraft") context.on("request", (req) => {
+          if (req.method() !== "POST" || !/\/craft\/document\/(save|reconcile)$/.test(new URL(req.url()).pathname)) return
+          try {
+            const b = req.postDataJSON() as { attemptId?: unknown; bytes?: unknown }
+            if (typeof b?.attemptId === "string" && typeof b.bytes === "string") sentBytes.set(b.attemptId, Buffer.from(b.bytes, "base64").toString("utf8"))
+          } catch { /* unreadable: judged as content */ }
+        })
+        const versionKinds = () => classifyVersions({ version: ref.initVersion, text: opened },
+          ops.filter((o) => (o.kind === "save" || o.kind === "reconcile") && o.status === 200 && o.version !== undefined && o.unchanged !== true && o.baseVersion !== undefined)
+            .map((o) => ({ version: o.version as string, base: o.baseVersion as string, text: o.attemptId === undefined ? undefined : sentBytes.get(o.attemptId) })))
         page.on("pageerror", (e) => pageErrors.push({ at: new Date().toISOString(), step: steps.at(-1)?.name ?? "before the first step", message: String(e).slice(0, 240) }))
         page.on("console", (m) => { if (m.type() === "error") lines.push(`${new Date().toISOString()} error ${m.text().slice(0, 200)}`) })
 
@@ -317,9 +332,13 @@ for (const scenario of SCENARIOS) {
           const h1 = await settle()
           r.note = { label: v, base: h0.version, head: h1.version, saves: ops.slice(n0).map((o) => ({ kind: o.kind, sentAt: o.sentAt, base: o.baseVersion, version: o.version, status: o.status, hash: o.contentHash?.slice(7, 15) })), pressAt: new Date(pressAt).toISOString() }
           check(await pressSeen(pressAt), "the press never reached the editor")
-          check(BigInt(h1.version) === BigInt(h0.version) + 1n, `exactly one new version: v${h0.version} became v${h1.version}`)
-          check(committed(n0).length === 1, `exactly one committed save, saw ${committed(n0).length}`)
-          check(v === h1.version, v === undefined ? `status showed no version newer than v${h0.version}, head is v${h1.version}` : `status said v${v}, head is v${h1.version}`)
+          // One content version; in Sheet, moves of the active cell right after it are counted, not versions of the change.
+          const { kinds } = versionKinds(), next = String(BigInt(h0.version) + 1n)
+          const contentSaves = committed(n0).filter((o) => o.unchanged !== true && kinds[o.version as string] !== "cursor-only")
+          const cursorSaves = committed(n0).filter((o) => kinds[o.version as string] === "cursor-only").length
+          check(BigInt(h1.version) >= BigInt(next) && kinds[next] !== "cursor-only" && onlyCursorAfter(kinds, next, h1.version), `exactly one new content version: v${h0.version} became v${h1.version} (${cursorSaves} of them only moved the active cell)`)
+          check(contentSaves.length === 1, `exactly one committed content save, saw ${contentSaves.length}${cursorSaves ? ` and ${cursorSaves} cursor-only` : ""}`)
+          check(v !== undefined && (v === h1.version || onlyCursorAfter(kinds, v, h1.version)), v === undefined ? `status showed no version newer than v${h0.version}, head is v${h1.version}` : `status said v${v}, head is v${h1.version}`)
           checkContent(h1, "after ctrl+s")
         })
 
@@ -415,13 +434,17 @@ for (const scenario of SCENARIOS) {
           const v = await confirm(r, loss.at, h0.version, RECOVER_MS)
           if (v === undefined && (await page.getByRole("button", { name: VERIFY, exact: true }).count())) { await press(); await confirm(r, loss.at, h0.version, 15_000) }
           check(v !== undefined, `did not recover by itself within ${RECOVER_MS} ms: "${(await N.status(page)).slice(0, 50)}"`)
-          check(v === undefined || v === lostV, `recovered to v${v}, the server committed v${lostV}`)
           await N.pause(QUIET_MS)
           const h1 = await settle()
-          const sent = ops.slice(n0)
-          r.note = { base: h0.version, lostVersion: lostV, head: h1.version, recoveryMs: r.confirmationMs, sent: sent.map((o) => ({ kind: o.kind, status: o.status, version: o.version, phase: o.phase, failed: o.failed })) }
-          check(h1.version === lostV, `no duplicate version: head v${h1.version}, lost save v${lostV}`)
-          check(!sent.some((o) => o.kind === "save"), `re-saved after the lost reply: ${sent.filter((o) => o.kind === "save").length} saves`)
+          const after = ops.slice(n0)
+          const { kinds } = versionKinds()
+          r.note = { base: h0.version, lostVersion: lostV, head: h1.version, recoveryMs: r.confirmationMs, sent: after.map((o) => ({ kind: o.kind, status: o.status, version: o.version, phase: o.phase, failed: o.failed, change: o.version === undefined ? undefined : kinds[o.version] })) }
+          // Sheet: Enter's move of the active cell may follow the lost save as a version of its own; it may not
+          // repeat the lost bytes, build on another version or change content.
+          check(v === undefined || v === lostV || onlyCursorAfter(kinds, lostV, v), `recovered to v${v}, the server committed v${lostV}`)
+          check(h1.version === lostV || onlyCursorAfter(kinds, lostV, h1.version), `no duplicate version: head v${h1.version}, lost save v${lostV}`)
+          if (app === "gridcraft") for (const p of lostReplyProblems({ version: lostV, contentHash: loss.serverHash }, after, kinds)) violate(p)
+          else check(!after.some((o) => o.kind === "save"), `re-saved after the lost reply: ${after.filter((o) => o.kind === "save").length} saves`)
           checkContent(h1, "after the lost reply")
         })
 
@@ -504,14 +527,19 @@ for (const scenario of SCENARIOS) {
         if (finalStep?.versionAfter !== last) versionProblems.push(`final head v${finalStep?.versionAfter}, last receipt v${last}`)
         if (headAfterReload !== last) versionProblems.push(`head after the final reload v${headAfterReload}, last receipt v${last}`)
         if (!unchanged || unchanged.versionBefore !== unchanged.versionAfter) versionProblems.push(`ctrl+s without a change: v${unchanged?.versionBefore} to v${unchanged?.versionAfter}`)
-        if (!lostStep?.versionBefore || lostStep.versionAfter !== String(BigInt(lostStep.versionBefore) + 1n)) versionProblems.push(`lost reply: v${lostStep?.versionBefore} to v${lostStep?.versionAfter}`)
+        const classified = versionKinds()
+        versionProblems.push(...classified.problems)
+        if (!lostStep?.versionBefore || !lostStep.versionAfter || !onlyCursorAfter(classified.kinds, String(BigInt(lostStep.versionBefore) + 1n), lostStep.versionAfter) || BigInt(lostStep.versionAfter) <= BigInt(lostStep.versionBefore)) versionProblems.push(`lost reply: v${lostStep?.versionBefore} to v${lostStep?.versionAfter}`)
         out.versions = {
           start: ref.initVersion, receipts, head: finalStep?.versionAfter ?? null, headAfterReload,
           lostVersions: lost.map((x) => x.serverVersion ?? "?"), opsAtProof: proofAt,
           unchangedSave: { before: unchanged?.versionBefore ?? null, after: unchanged?.versionAfter ?? null },
           lostReply: { before: lostStep?.versionBefore ?? null, after: lostStep?.versionAfter ?? null },
           contiguous: versionProblems.length === 0, problems: versionProblems,
+          // Versions that only moved the active cell (Sheet), each right after a content change: allowed, kept visible.
+          cursorOnly: classified.cursorOnly, kinds: classified.kinds,
         }
+        if (classified.cursorOnly.length) console.log(`[walk] ${label}: ${classified.cursorOnly.length} version(s) only moved the active cell: ${classified.cursorOnly.map((c) => `v${c.version} on v${c.base}`).join(", ")}`)
         for (const p of versionProblems) violate(`version sequence: ${p}`)
         out.marks = marks.length
         const names = steps.map((x) => x.name)
