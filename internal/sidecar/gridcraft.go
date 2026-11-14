@@ -70,6 +70,10 @@ func gridcraftMCPCatalog() []memoryMCPToolDescriptor {
 			// mandate (#5317 5.3); the server decides. Writes keep the mandate.
 			required = []string{"artifact_id"}
 		}
+		description := "Experimental offline workbook operation under an explicit retained human mandate and current run authority. Keep original mutation, mandate, base revision and generation on uncertain retry. Only cell.set is supported; never renew scope or refresh preconditions automatically."
+		if name == "workbook_read" {
+			description += " A read may omit mandate_id for a workbook this run reaches whose human is its owner or an owner-named editor (attached to the message that started it or created in its chat; the server decides)."
+		}
 		if name == "workbook_apply" {
 			props["request"] = packet
 			required = append(required, "request")
@@ -78,7 +82,6 @@ func gridcraftMCPCatalog() []memoryMCPToolDescriptor {
 			props["mutation_id"] = text
 			required = append(required, "mutation_id")
 		}
-		description := "Experimental offline workbook operation under an explicit retained human mandate and current run authority. Keep original mutation, mandate, base revision and generation on uncertain retry. Only cell.set is supported; never renew scope or refresh preconditions automatically."
 		if name == "workbook_commits" {
 			props["since"] = map[string]any{"type": "integer", "minimum": 0}
 			props["limit"] = map[string]any{"type": "integer", "minimum": 1, "maximum": appengine.MaxFeedLimit}

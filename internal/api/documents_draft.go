@@ -108,7 +108,7 @@ func (h *PageHandler) GetDocumentDraftAgent(w http.ResponseWriter, r *http.Reque
 	}
 	readScope := func() (documentDraftScope, error) { return h.readDocumentDraftScope(r, a) }
 	if page != "" {
-		readScope = func() (documentDraftScope, error) { return h.readDocumentRunScope(r, a, page) }
+		readScope = func() (documentDraftScope, error) { return h.readDocumentViewScope(r, a, page) }
 	}
 	scope, err := readScope()
 	if err != nil {

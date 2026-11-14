@@ -105,11 +105,13 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
   const syncEpoch=state=>typeof state.database==="string"&&state.database&&Number.isSafeInteger(state.contentGeneration)?`db:${state.database}:${state.contentGeneration}`:`${state.incarnation??"legacy"}:${owner}:${state.generation??state.epoch}`;
   const advanced=state=>({...state,generation:(state.generation??0)+1,...(Number.isSafeInteger(state.contentGeneration)?{contentGeneration:state.contentGeneration+1}:{})});
   const documents = new Map(); let queued = 0; let draining = false;let ready=false;let admitted=0;const decoding=new Set();
-  async function go(page, operation, context, data = {}) {
+  // A state load names the closed dispatch operation it serves (purpose), so
+  // Go can admit scope-only reach for the agent draft view's read alone.
+  async function go(page, operation, context, data = {}, purpose) {
     let deadline;
     return new Promise((resolve, reject) => {
       const bytes = JSON.stringify(data);
-      const req = http.request({ socketPath: authoritySocket, path: operation === 'health' ? '/health/ready' : `/internal/docs/v1/${encodeURIComponent(page)}/${operation}`, method: operation === 'health' ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bytes), 'X-Crewship-Docs-Service': secret, 'X-Workspace-ID': context.workspace, ...(context.authorization ? { Authorization: context.authorization } : {}) } }, res => {
+      const req = http.request({ socketPath: authoritySocket, path: operation === 'health' ? '/health/ready' : `/internal/docs/v1/${encodeURIComponent(page)}/${operation}`, method: operation === 'health' ? 'GET' : 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bytes), 'X-Crewship-Docs-Service': secret, 'X-Workspace-ID': context.workspace, ...(context.authorization ? { Authorization: context.authorization } : {}), ...(operation === 'state' && purpose ? { 'X-Crewship-Docs-Purpose': purpose } : {}) } }, res => {
         const chunks = []; let size = 0;
         res.on('data', chunk => { size += chunk.length; if (size > 4 * 1024 * 1024) { res.destroy(); reject(fault(502, 'authority response limit')); } else chunks.push(chunk); });
         res.on('end', () => { try { const result = JSON.parse(Buffer.concat(chunks).toString()); if (res.statusCode >= 400) reject(fault(res.statusCode, result.error || 'authority rejected request',result.code)); else resolve(result); } catch { reject(fault(502, 'invalid authority response')); } });
@@ -183,7 +185,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     if (operation === 'verify-targets' && context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'human request admission required');
     if ((operation === 'proposals' || operation === 'proposal') && context.authorization.startsWith('Bearer agtv2.')) throw fault(403, 'human proposal review required');
     if (operation === 'proposal' && (!request || typeof request !== 'object' || Object.keys(request).length !== 1 || !id(request.proposal))) throw fault(400, 'one proposal ID required');
-    const state = await go(page, 'state', context);
+    const state = await go(page, 'state', context, {}, operation);
     if (!supportedSchema(state.schema)) throw fault(409, 'unsupported schema; content preserved');
     const version = contentSchema(state.schema);
     const doc = load(state.snapshot);
@@ -245,7 +247,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
       try { return await go(page, 'initialize', context, { id: request.id, fingerprint, schema: request.schema, snapshot: snapshot(doc), blocks: (await outline(doc,request.schema)).map(({ id, hash }) => ({ id, hash })) }); }
       finally { doc.destroy(); }
     }
-    const state = await go(page, 'state', context);
+    const state = await go(page, 'state', context, {}, operation);
     if (!supportedSchema(state.schema)) throw fault(409, 'unsupported schema; content preserved');
     const version = contentSchema(state.schema);
     if (!supportedSchema(request.schema)) throw fault(409,'unsupported client schema');
@@ -378,7 +380,7 @@ export async function startService({ socket, authoritySocket, tokenFile, idleMs 
     const fields = ['id','proposal','ifRev'];
     if (!request || typeof request !== 'object' || Array.isArray(request) || Object.keys(request).some(key => !fields.includes(key)) || fields.some(key => request[key] === undefined)) throw fault(400, 'closed proposal decision required');
     if (!id(request.id) || !id(request.proposal) || !Number.isSafeInteger(request.ifRev) || request.ifRev < 0) throw fault(400, 'decision ID, proposal ID and expected revision required');
-    const state = await go(page, 'state', context);
+    const state = await go(page, 'state', context, {}, operation);
     const fingerprint = await hash({ operation, request });
     const receipt = await go(page, 'receipt', context, { id: request.id, fingerprint });
     if (receipt.found) return { ...receipt, proposal: request.proposal, epoch: syncEpoch(state), duplicate: true };

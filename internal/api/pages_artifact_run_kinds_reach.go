@@ -204,6 +204,10 @@ func (h *PageHandler) documentScopedRunRead(ctx context.Context, a *artifactRunA
 		!documents.SchemaAllows(scope.Schema, documents.CapRead) {
 		return scope, errDocumentAccess
 	}
+	// A page a consent of this run names is served by that consent alone.
+	if named, e := h.documentConsentNamesPage(ctx, tx, a, rec.ID); e != nil || named {
+		return scope, errDocumentAccess
+	}
 	if err = h.kindScopedRunRead(ctx, tx, a, rec, true); err != nil {
 		if errors.Is(err, errArtifactRunCap) {
 			return scope, err
@@ -214,10 +218,12 @@ func (h *PageHandler) documentScopedRunRead(ctx context.Context, a *artifactRunA
 	return scope, nil
 }
 
-// readDocumentRunScope is readDocumentDraftScope for a Document the run
-// reaches through its scope: an access check under the writer fence that
-// records nothing (the Node read's own state callback records the read).
-func (h *PageHandler) readDocumentRunScope(r *http.Request, a *artifactRunAuthority, page string) (documentDraftScope, error) {
+// readDocumentViewScope is the scope of the draft view of one named page,
+// checked under the writer fence and recording nothing (the Node read's own
+// state callback records the read). A consent of this run that names the
+// page serves it, with its block limit and mode, exactly as the unnamed view
+// would; only without one does the run read the page through its scope.
+func (h *PageHandler) readDocumentViewScope(r *http.Request, a *artifactRunAuthority, page string) (documentDraftScope, error) {
 	tx, err := h.db.BeginTx(r.Context(), nil)
 	if err != nil {
 		return documentDraftScope{}, err
@@ -226,8 +232,25 @@ func (h *PageHandler) readDocumentRunScope(r *http.Request, a *artifactRunAuthor
 	if _, err = tx.ExecContext(r.Context(), `UPDATE document_writer_fence SET seq=seq WHERE id=1`); err != nil {
 		return documentDraftScope{}, err
 	}
-	ctx := context.WithValue(artifactAuditProbeContext(r.Context()), pageAuthReaderKey{}, tx)
-	return h.documentScopedRunRead(ctx, a, page)
+	ctx := context.WithValue(r.Context(), pageAuthReaderKey{}, tx)
+	consent, err := h.documentDraftScope(ctx, a, page)
+	if err == nil {
+		return consent, nil
+	}
+	if !errors.Is(err, errDocumentAccess) {
+		return documentDraftScope{}, err
+	}
+	return h.documentScopedRunRead(context.WithValue(artifactAuditProbeContext(r.Context()), pageAuthReaderKey{}, tx), a, page)
+}
+
+// documentConsentNamesPage reports whether an unrevoked iteration mandate of
+// this run (the consent that can limit blocks) names the page. Such a page is
+// never read through the scope, even once the mandate lapses, so its block
+// limit cannot be bypassed.
+func (h *PageHandler) documentConsentNamesPage(ctx context.Context, tx *sql.Tx, a *artifactRunAuthority, page string) (bool, error) {
+	var n int
+	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM document_iteration_intents WHERE run_id=? AND workspace_id=? AND page_id=? AND revoked_at IS NULL`, a.RunID, a.WorkspaceID, page).Scan(&n)
+	return n != 0, err
 }
 
 // artifactRunCapRefusal answers a run past its per-run read limit.

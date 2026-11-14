@@ -260,7 +260,13 @@ already-referenced runs the ordinary way, binding nothing.
   is taken. The run sidecar forwards only a single `page_id` on the Word
   draft view (`crewship doc draft view --page`) and refuses every other
   query; the server alone decides reach, and an unreached page is answered
-  like a missing one. Native Word and Sheet Craft tasks are unchanged.
+  like a missing one. Scope reach serves only that view: a Word document's
+  export, comments and checkpoints are never read through it, and a page one
+  of the run's own consents names is served by that consent alone, with its
+  block limit. With the flag off the server refuses all of this as before,
+  but some refusals now come from the server instead of the sidecar, with
+  another status or body (listed in `docs/specs/pages.md` §7.1c). Native Word
+  and Sheet Craft tasks are unchanged.
 - Every access through this path is audited as `artifact.agent_run_accessed`,
   naming the human the agent acted for, the agent, run, reach and operation,
   in the same transaction; no audit record, no access. This covers artifact

@@ -624,30 +624,52 @@ owner on 2026-11-13.
    lease, so an agent write under another person's lease ends as a proposal
    and never bypasses the lease.
    - *Reads.* A Word document is read through any reach (attached, created,
-     consented, standing, folder), its human reading it as an ordinary member:
-     the Docs authority's `state` callback, and the draft view with one
-     `page_id` (`crewship doc draft view --page`, MCP `doc_draft_view`; mode
-     `read`, every paragraph and heading). The run sidecar forwards `page_id`
-     only as the view's single query parameter and refuses every other query;
-     the server alone decides reach, so an unreached page gets a missing
-     page's answer end to end, and with the flag off the `page_id` is
-     refused. A Sheet is read
-     (`action: read`, no `mandate_id`) only when its human is the owner or an
-     owner-named editor, and a Mooring document only when its human owns it;
-     (`action: read` with no `mandate_id` also over MCP: `workbook_read`,
-     `mooring_command`); both kinds keep their rule that agent grants, crew grants and folders
-     never reach their content, so standing and folder reach do not apply to
-     them, and the audited ADMIN or OWNER read never passes to the agent.
-     Docs and Sheets have no shared version: every reader the human's own
-     read admits reads the head (a Sheet editor from the publication floor).
+     standing, folder), its human reading it as an ordinary member, through
+     the draft view with one `page_id` (`crewship doc draft view --page`, MCP
+     `doc_draft_view`; mode `read`, every paragraph and heading). The Docs
+     authority admits that reach only on the `state` callback Node makes for
+     the view's `read` (Node names the operation behind every state load);
+     export, comments and checkpoints never read through the scope. When a
+     consent of the run names the page (a drafting consent, or an iteration
+     mandate even once it lapses), that consent alone serves the view, with
+     its block limit and mode, and the audit names it (`consented`). The run
+     sidecar forwards `page_id` only as the view's single query parameter and
+     refuses every other query; the server alone decides reach, so an
+     unreached page gets a missing page's answer end to end. A Sheet is read
+     (`action: read` without `mandate_id`; MCP `workbook_read`) only when its
+     human is the owner or an owner-named editor, and a Mooring document
+     (`action: read` without `mandate_id`; MCP `mooring_command`) only when
+     its human owns it. Both kinds keep their rule that agent grants, crew
+     grants and folders never reach their content, so standing and folder
+     reach do not apply to them, and the audited ADMIN or OWNER read never
+     passes to the agent. Docs and Sheets have no shared version: every
+     reader the human's own read admits reads the head (a Sheet editor from
+     the publication floor).
    - *Changes.* Without a consent or mandate the scope never changes content
      and never takes a lease. A Sheet or Mooring change (`apply`, `command`)
      the run reaches answers 409 `proposal_required` (no proposal delivery
      exists for them yet); one it does not reach is refused like a missing
-     artifact. Over MCP every write tool still requires `mandate_id`. A Word
+     artifact. Over MCP, `workbook_apply`, `workbook_status` and
+     `workbook_commits` require `mandate_id` in their schema;
+     `mooring_command` lists it as optional, and the sidecar refuses a
+     `command` without it before anything reaches the server. A Word
      document's lease, commit, checkpoint and proposal are refused like a
      missing one; an agent proposal on a Word document needs an iteration
      propose mandate (proposals through the scope: #5357, #5359).
+   - *Flag off: known differences.* The server refuses every scope read as
+     before, but the run sidecar and its MCP tools do not know the flag, so
+     some refusals now come from the server instead of the sidecar:
+     the sidecar's draft view with `page_id` is forwarded and answered 400
+     "only the authenticated workspace query is supported" (it was 400 "draft
+     view has no caller-selected scope"); MCP `doc_draft_view` with a
+     `page_id` gets the same 400 from the server; MCP `workbook_read` without
+     `mandate_id` is forwarded and answered 404 "Workbook not found" (it was
+     400 "invalid workbook packet" from the sidecar); a `mooring_command`
+     `command` without `mandate_id` is refused by the sidecar with 400 "a
+     command needs the retained mandate_id" (the server answered 400 "invalid
+     Mooring command"); a Mooring read without it still gets the server's 400.
+     The MCP tool schemas list `page_id` and the optional `mandate_id`
+     whatever the flag.
    Native Word and Sheet Craft tasks (`crewship craft task`) are a separate,
    explicitly consented runtime and are unchanged.
 7. **Limits, read from the workspace policy on every use.** One chat run

@@ -160,10 +160,10 @@ func TestRunScopeSheetReach_WriteEndsAsProposalRequired(t *testing.T) {
 		t.Fatalf("a refused change moved the head to %d", rev)
 	}
 	sameRefusal(t, "a change to an unattached Sheet", g.sheetCall(sheetScopeApply("sheet-sibling")), g.sheetCall(sheetScopeApply("sheet-nowhere")))
-	for _, action := range []string{`{"action":"commits","artifact_id":"sheet-attached","since":0}`, `{"action":"status","artifact_id":"sheet-attached","mutation_id":"agent-edit"}`} {
-		if w := g.sheetCall(action); w.Code == 200 {
-			t.Fatalf("the scope admitted %s: %s", action, w.Body)
-		}
+	// Status and commits need a mandate: through the scope they get exactly a
+	// missing workbook's answer.
+	for _, action := range []string{`{"action":"commits","artifact_id":%q,"since":0}`, `{"action":"status","artifact_id":%q,"mutation_id":"agent-edit"}`} {
+		sameRefusal(t, "the scope's "+action, g.sheetCall(fmt.Sprintf(action, "sheet-attached")), g.sheetCall(fmt.Sprintf(action, "sheet-nowhere")))
 	}
 	if rows := kindAuditRows(t, g.f); len(rows) != 0 {
 		t.Fatalf("a refused change was recorded: %+v", rows)
@@ -355,13 +355,28 @@ func (g *kindReachRig) wordDoc(t *testing.T, id, owner string, private bool) {
 
 // docAuthority is the private Docs authority callback the Node service makes
 // with the run's bearer.
+// A state callback here is the Node read behind the draft view.
 func (g *kindReachRig) docAuthority(t *testing.T, page, op string, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	purpose := ""
+	if op == "state" {
+		purpose = "read"
+	}
+	return g.docAuthorityFor(t, page, op, purpose, body)
+}
+
+// docAuthorityFor is docAuthority with the Node operation that loads the
+// state named (Node names it on every state callback; "" names none).
+func (g *kindReachRig) docAuthorityFor(t *testing.T, page, op, purpose string, body map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	raw, err := json.Marshal(body)
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := g.agentRequest("POST", "/", string(raw))
+	if purpose != "" {
+		r.Header.Set(documentStatePurposeHeader, purpose)
+	}
 	r.SetPathValue("page", page)
 	r.SetPathValue("operation", op)
 	w := httptest.NewRecorder()
@@ -609,4 +624,108 @@ func TestRunScopeDocumentReach_DraftViewBinaryThroughSidecar(t *testing.T) {
 		t.Fatalf("flag off, a named page through the sidecar: %d", code)
 	}
 	wantKindAudit(t, g.f, map[string]string{})
+}
+
+// Reviewer finding 1: scope reach serves only the Node read behind the draft
+// view. A state load for an export, comments, checkpoints or a pinned
+// checkpoint, or one that names no operation, is refused exactly like a
+// missing Document, and nothing is recorded for it.
+func TestRunScopeDocumentReach_OnlyTheDraftViewReadLoadsState(t *testing.T) {
+	g := newKindReachRig(t)
+	g.wordDoc(t, "word-attached", g.f.a.HumanUserID, true)
+	g.start(t, "word-attached")
+	for _, purpose := range []string{"", "export", "comments", "checkpoints", "checkpoint-read", "patch", "propose", "Read", "read,export"} {
+		sameRefusal(t, "a state load for "+purpose, g.docAuthorityFor(t, "word-attached", "state", purpose, map[string]any{}), g.docAuthorityFor(t, "word-nowhere", "state", purpose, map[string]any{}))
+	}
+	for _, op := range []string{"comments", "checkpoints", "checkpoint-read"} {
+		sameRefusal(t, op+" through the scope", g.docAuthorityFor(t, "word-attached", op, op, map[string]any{}), g.docAuthorityFor(t, "word-nowhere", op, op, map[string]any{}))
+	}
+	if rows := kindAuditRows(t, g.f); len(rows) != 0 {
+		t.Fatalf("a refused state load was recorded: %+v", rows)
+	}
+	wantCode(t, g.docAuthorityFor(t, "word-attached", "state", "read", map[string]any{}), 200, "the draft view's read")
+	wantKindAudit(t, g.f, map[string]string{"word-attached/read": runReachReferenced})
+}
+
+// Reviewer finding 2: when the run holds a consent for the page it names, the
+// consent serves the view, with its block limit, and the audit names the
+// consent; another attached page without a consent is served by the scope
+// and audited as referenced.
+func TestRunScopeDocumentReach_ConsentKeepsItsBlocksInTheNamedView(t *testing.T) {
+	g := newKindReachRig(t)
+	g.wordDoc(t, "word-mandated", g.f.a.HumanUserID, true)
+	g.wordDoc(t, "word-other", g.f.a.HumanUserID, true)
+	mustExec(t, g.f.rig.db, `UPDATE documents SET schema_version=?,head_rev=0,snapshot_rev=0,generation=0 WHERE page_id='word-mandated'`, documents.FormattedSchema)
+	g.start(t, "word-mandated", "word-other")
+	intent := documents.IterationIntent{SubmissionID: "followup", PageID: "word-mandated", Schema: documents.FormattedSchema, Blocks: "intro"}
+	if err := g.f.pages.persistDocumentIterationIntent(httptest.NewRequest("POST", "/", nil), g.f.receipt, g.f.a.MessageID, intent); err != nil {
+		t.Fatalf("persist iteration: %v", err)
+	}
+	if err := bindIterationFixture(t, g.f, intent); err != nil {
+		t.Fatalf("bind iteration: %v", err)
+	}
+	hash := strings.Repeat("a", 64)
+	g.router.pages.documentCall = func(_ context.Context, _, _, page, op string, _ any) ([]byte, int, error) {
+		if op != "read" {
+			return nil, 500, fmt.Errorf("unexpected Docs call %s", op)
+		}
+		schema, rev, generation := documents.FormattedSchema, 0, 0
+		if page == "word-other" {
+			schema, rev, generation = 5, 3, 1
+		}
+		return []byte(fmt.Sprintf(`{"schema":%d,"rev":%d,"generation":%d,"epoch":"e1","outline":[{"id":"intro","type":"paragraph","hash":%q,"text":"Intro"},{"id":"body","type":"paragraph","hash":%q,"text":"Private body"}]}`, schema, rev, generation, hash, hash)), 200, nil
+	}
+	view := func(page string) DocumentDraftView {
+		t.Helper()
+		w := g.docView(page)
+		wantCode(t, w, 200, "view of "+page)
+		var v DocumentDraftView
+		if err := json.Unmarshal(w.Body.Bytes(), &v); err != nil {
+			t.Fatal(err)
+		}
+		return v
+	}
+	if v := view("word-mandated"); v.Mode != "propose" || len(v.Targets) != 1 || v.Targets[0].ID != "intro" {
+		t.Fatalf("the named mandated page lost its block limit: %+v", v)
+	}
+	if v := view("word-other"); v.Mode != "read" || len(v.Targets) != 2 {
+		t.Fatalf("the attached page without a consent: %+v", v)
+	}
+	wantCode(t, g.docAuthority(t, "word-mandated", "state", map[string]any{}), 200, "the mandated page's read")
+	wantCode(t, g.docAuthority(t, "word-other", "state", map[string]any{}), 200, "the attached page's read")
+	wantKindAudit(t, g.f, map[string]string{"word-mandated/read": runReachConsented, "word-other/read": runReachReferenced})
+	// Once the mandate lapses its page is still never read through the scope,
+	// so the block limit cannot be bypassed: it is refused like a missing one.
+	mustExec(t, g.f.rig.db, `UPDATE workspace_artifact_creation_policy SET version=version+1 WHERE workspace_id=?`, g.f.a.WorkspaceID)
+	if v := view("word-other"); v.Mode != "read" {
+		t.Fatalf("the scope stopped reading: %+v", v)
+	}
+	sameRefusal(t, "the page of a lapsed mandate", g.docView("word-mandated"), g.docView("word-nowhere"))
+	sameRefusal(t, "the state of a lapsed mandate's page", g.docAuthority(t, "word-mandated", "state", map[string]any{}), g.docAuthority(t, "word-nowhere", "state", map[string]any{}))
+}
+
+// Reviewer finding 3: Mooring output is owner-only. An ADMIN cannot attach
+// another member's Mooring document, private or shared: the reference is
+// refused exactly like a missing page's, so the run never reaches it (the
+// run read's own owner check stays behind this as defence in depth).
+func TestRunScopeMooringReach_AnotherOwnersDocumentIsRefusedLikeMissing(t *testing.T) {
+	g := newKindReachRig(t, humanAdmin)
+	g.mooringDoc(t, "mooring-private", g.f.rig.adminID)
+	g.mooringDoc(t, "mooring-shared", g.f.rig.adminID)
+	mustExec(t, g.f.rig.db, `UPDATE pages SET private_audience=0 WHERE id='mooring-shared'`)
+	missing := g.f.pages.RecordArtifactRefs(t.Context(), g.f.receipt, g.f.a.MessageID, []string{"mooring-nowhere"})
+	if missing == nil {
+		t.Fatal("a missing page was attached")
+	}
+	for _, page := range []string{"mooring-private", "mooring-shared"} {
+		err := g.f.pages.RecordArtifactRefs(t.Context(), g.f.receipt, g.f.a.MessageID, []string{page})
+		if err == nil || err.Error() != missing.Error() {
+			t.Fatalf("an ADMIN attached another owner's Mooring document %s: %v, missing: %v", page, err, missing)
+		}
+	}
+	g.start(t)
+	sameRefusal(t, "another owner's Mooring document", g.mooringCall(mooringScopeRead("mooring-shared")), g.mooringCall(mooringScopeRead("mooring-nowhere")))
+	if rows := kindAuditRows(t, g.f); len(rows) != 0 {
+		t.Fatalf("a refused Mooring read was recorded: %+v", rows)
+	}
 }

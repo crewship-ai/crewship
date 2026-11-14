@@ -84,3 +84,38 @@ func TestProtectedDocDraftSidecarURLIsLoopbackOnly(t *testing.T) {
 		t.Fatalf("selected sidecar not used: %q %v", host, err)
 	}
 }
+
+// Reviewer finding 5: CREWSHIP_SIDECAR_URL selects the sidecar of the
+// read-only view alone; apply, checkpoint and propose always use the fixed
+// protected origin, whatever the variable says.
+func TestProtectedDocDraftSidecarURLOnlyForTheView(t *testing.T) {
+	guardCLIState(t)
+	flagFormat = "json"
+	t.Setenv("CREWSHIP_AGENT_TOKEN", "agtv2.aaaa")
+	draft, err := runDocDraft(t, "prepare", draftPrepareFixture, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proposal, err := runDocDraft(t, "prepare", strings.Replace(strings.Replace(draftPrepareFixture, `"schema":3`, `"schema":4`, 1), `"view":{`, `"view":{"mode":"propose",`, 1), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, selected := range []string{"http://127.0.0.1:41234", "https://elsewhere.invalid"} {
+		t.Setenv("CREWSHIP_SIDECAR_URL", selected)
+		for _, c := range []struct{ op, packet string }{{"apply", draft}, {"checkpoint", draft}, {"propose", proposal}} {
+			var hosts []string
+			_, _ = runDocDraft(t, c.op, c.packet, docCreateTransport(func(r *http.Request) (*http.Response, error) {
+				hosts = append(hosts, r.URL.Host)
+				return &http.Response{StatusCode: 503, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{}`)), Request: r}, nil
+			}))
+			if len(hosts) == 0 {
+				t.Fatalf("%s sent nothing with %s", c.op, selected)
+			}
+			for _, host := range hosts {
+				if host != "127.0.0.1:9119" {
+					t.Fatalf("%s used %s with CREWSHIP_SIDECAR_URL=%s", c.op, host, selected)
+				}
+			}
+		}
+	}
+}

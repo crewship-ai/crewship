@@ -38,6 +38,20 @@ type documentDraftScope struct {
 	Read bool
 }
 
+// documentStatePurposeHeader names the Node operation behind a state
+// callback. Only the private, service-authenticated Docs authority reads it.
+const documentStatePurposeHeader = "X-Crewship-Docs-Purpose"
+
+// documentViewReadKey marks a state callback that Node makes for its "read"
+// operation, the one behind the agent draft view (#5317 5.3).
+type documentViewReadKey struct{}
+
+// documentStateLoadedForView: Node names exactly one operation, "read".
+func documentStateLoadedForView(r *http.Request) bool {
+	values := r.Header.Values(documentStatePurposeHeader)
+	return len(values) == 1 && values[0] == "read"
+}
+
 // admits reports whether a block is inside this mandate.
 func (s documentDraftScope) admits(block string) bool {
 	return (documents.IterationIntent{Schema: documents.FormattedSchema, Blocks: s.Blocks}).Admits(block)
@@ -136,9 +150,10 @@ func (h *PageHandler) authorizeDocumentDraft(ctx context.Context, a *artifactRun
 	}
 	if _, err := h.documentDraftScope(ctx, a, k.PageID); err != nil {
 		// Flag on (#5317 5.3): without a consent for this Document, the run
-		// may still read it through its scope (recorded there); it never
-		// leases, commits, checkpoints or proposes that way.
-		if operation != "state" || !errors.Is(err, errDocumentAccess) {
+		// may still read it through its scope (recorded there), but only for
+		// Node's draft-view read: never for an export, comments, checkpoints,
+		// a lease, commit, checkpoint or proposal.
+		if viewRead, _ := ctx.Value(documentViewReadKey{}).(bool); operation != "state" || !viewRead || !errors.Is(err, errDocumentAccess) {
 			return "", err
 		}
 		if _, scoped := h.documentScopedRunRead(ctx, a, k.PageID); scoped != nil {

@@ -175,6 +175,9 @@ func (h *documentAuthority) authorizeWithReadRecord(r *http.Request, k documents
 			if initialize {
 				return "", errDocumentAccess
 			}
+			if op := r.PathValue("operation"); op == "state" && documentStateLoadedForView(r) {
+				ctx = context.WithValue(ctx, documentViewReadKey{}, true)
+			}
 			return h.pages.authorizeDocumentDraft(ctx, a, k, r.PathValue("operation"))
 		}
 		// Exact session, not merely some other active session for this user.
