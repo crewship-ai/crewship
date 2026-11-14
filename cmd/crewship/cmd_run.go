@@ -159,12 +159,6 @@ Examples:
 			client.HTTPClient.Timeout = time.Duration(timeoutSecs) * time.Second
 		}
 
-		if len(extras.artifacts) > 0 {
-			if err := extras.resolveArtifactRefs(client); err != nil {
-				return err
-			}
-		}
-
 		// Create or reuse chat
 		chatID := existingChat
 		if chatID == "" {
@@ -238,6 +232,14 @@ Examples:
 		if len(projectVersions) > 0 {
 			return fmt.Errorf("project file versions require a restricted native run")
 		}
+		// After the restricted-chat refusal above, so a restricted chat makes
+		// no page reads.
+		if len(extras.artifacts) > 0 {
+			if err := extras.resolveArtifactRefs(client); err != nil {
+				return err
+			}
+		}
+
 		defer func() { runMessageExtras = nil }()
 		prompt, err = prepareRunExtras(cmd.Context(), client, agentID, chatID, prompt, extras)
 		if err != nil {

@@ -572,8 +572,8 @@ owner on 2026-11-13.
 
 1. **A reference is a structured chip, never text.** A chat message carries
    `metadata.artifact_refs: [{"page_id": "<id>"}]`, 1–10 entries, filled from
-   the composer's attachment chips or `crewship run --artifact`. Names, links or ids written in the message
-   body are never references.
+   the composer's attachment chips or `crewship run --artifact`. Names, links
+   or ids written in the message body are never references.
 2. **The server resolves references when the message is sent, as the human
    would be as an ordinary member.** Before the message is stored it checks
    each reference against the sending human with their workspace role read as

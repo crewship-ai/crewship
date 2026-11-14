@@ -169,7 +169,9 @@ func (f runExtrasFlags) validate(prompt, existingChat string, interactive, docum
 // validateArtifacts refuses what the server would refuse on a reference: more
 // than the bound, an empty or malformed value, and the turns that bind none
 // (page_context, Document create or update, an ask form, a session of several
-// sends). Mirrors chatbridge; the server stays the judge of access.
+// sends). The page_context, Document and interactive refusals follow
+// chatbridge; refusing --ask-form is a deliberate conservative choice, stricter
+// than the bridge, not a mirror of it. The server stays the judge of access.
 func (f runExtrasFlags) validateArtifacts(interactive, documentTarget bool) error {
 	if len(f.artifacts) > maxRunArtifactRefs {
 		return fmt.Errorf("--artifact takes at most %d artifacts, got %d", maxRunArtifactRefs, len(f.artifacts))
