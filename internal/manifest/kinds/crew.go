@@ -716,12 +716,17 @@ func putCrewFile(ctx context.Context, c internalapi.Client, crewID, dest string,
 	if !ok {
 		return fmt.Errorf("crew file upload not supported by this client (no raw-bytes PUT)")
 	}
-	resp, err := rp.PutBytes(ctx,
-		"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(dest), data)
-	if err != nil {
-		return fmt.Errorf("save crew file %s: %w", dest, err)
-	}
-	return checkStatus(resp, "save crew file "+dest)
+	// A crew PATCH earlier in the same apply recycles the container
+	// asynchronously; a save in that window answers 409 (see
+	// crewfile.SaveWithRecycleWait).
+	return crewfile.SaveWithRecycleWait(ctx, func() (int, error) {
+		resp, err := rp.PutBytes(ctx,
+			"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(dest), data)
+		if err != nil {
+			return 0, fmt.Errorf("save crew file %s: %w", dest, err)
+		}
+		return resp.StatusCode, checkStatus(resp, "save crew file "+dest)
+	})
 }
 
 // ── Body builders ────────────────────────────────────────────────────────
