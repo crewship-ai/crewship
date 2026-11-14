@@ -47,6 +47,29 @@ def full_matrix(event_name, paths, labels):
     return release_changed(paths) or FULL_CI_LABEL in labels
 
 
+# Inputs of the Word and Sheet packages and of the host that runs their editors
+# (#5315, #5362). A change to any of them builds the packages and runs the
+# browser gate (craft-packages): a package whose editor does not connect with
+# the real host can never be pinned in tools/craft-components/catalog.txt.
+CRAFT_PREFIXES = (
+    'tools/craft-components/', 'lib/mooring/', 'lib/workbooks/', 'e2e/craft-packages/',
+    'internal/craftassets/', 'internal/craftapps/', 'internal/craftengine/', 'internal/editororigin/',
+    'internal/server/craft_apps',
+)
+CRAFT_FILES = {
+    'scripts/build-craft-components.py', 'scripts/test_build_craft_components.py', 'scripts/build-mooring-runtime.py',
+    'mooring/build-tools.json', 'scripts/check-craft-packages.sh', 'scripts/ci/craft-package-gate.sh',
+    'playwright.craft-packages.config.ts', 'components/features/pages/native-craft-editor-host.tsx',
+    'components/features/pages/workbook-editor-host.tsx', '.github/workflows/ci.yml', '.github/workflows/release.yml',
+    '.goreleaser.yml', 'Dockerfile', 'e2e/acceptance/prd/outage-lostack/native.ts', 'e2e/acceptance/prd/auth.ts',
+    'e2e/acceptance/prd/craft-session/frame.ts',
+}
+
+
+def craft_changed(paths):
+    return any(path in CRAFT_FILES or path.startswith(CRAFT_PREFIXES) for path in paths)
+
+
 def changed_paths(base, head):
     # Rename detection can hide a deleted runtime input behind its new docs
     # path. Emit both paths so routing retains the source-side requirements.
@@ -95,10 +118,13 @@ def main():
         paths = changed_paths(base, head)
         result = classify(paths)
         result['release'] = release_changed(paths)
+        result['craft'] = craft_changed(paths)
     else:
         paths = ['unknown/full-suite']
         result = classify(paths)
         result['release'] = name == 'workflow_dispatch'
+        # Without a diff nothing proves the packages are unaffected.
+        result['craft'] = True
     labels = [label.get('name') for label in event.get('pull_request', {}).get('labels', [])]
     result['full'] = full_matrix(name, paths, labels)
     with open(os.environ['GITHUB_OUTPUT'], 'a') as out:

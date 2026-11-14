@@ -5,16 +5,16 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from plan import classify, changed_paths, full_matrix, release_changed
-from verdict import ALWAYS, CODE, FULL, GO, PARITY, failures
+from plan import classify, changed_paths, craft_changed, full_matrix, release_changed
+from verdict import ALWAYS, CODE, CRAFT, FULL, GO, PARITY, failures
 from parity import TESTS, missing_tests
 
 
 class GateTests(unittest.TestCase):
     def test_api_bootstrap_cannot_be_missing_or_skipped_for_go_change(self):
         self.assertIn('go-race-api-template', GO)
-        plan = {'code': 'true', 'go': 'true', 'release': 'true', 'full': 'true', **{key: 'false' for key in PARITY.values()}}
-        good = {name: {'result': 'success'} for name in ALWAYS | CODE | GO | {'release-rehearsal'}}
+        plan = {'code': 'true', 'go': 'true', 'release': 'true', 'craft': 'true', 'full': 'true', **{key: 'false' for key in PARITY.values()}}
+        good = {name: {'result': 'success'} for name in ALWAYS | CODE | GO | CRAFT | {'release-rehearsal'}}
         good.update({name: {'result': 'skipped'} for name in PARITY})
         good['changes']['outputs'] = plan
         self.assertEqual(failures(good), [])
@@ -164,6 +164,7 @@ class GateTests(unittest.TestCase):
                 self.assertTrue(result['code'])
                 self.assertTrue(result['go'])
                 self.assertEqual(result['release'], name == 'workflow_dispatch')
+                self.assertTrue(result['craft'])
                 self.assertFalse(result['go_parity'])
                 self.assertFalse(result['frontend_parity'])
                 self.assertFalse(result['docs_inventory'])
@@ -184,9 +185,10 @@ class GateTests(unittest.TestCase):
 
     def results(self, code='true', go='true'):
         needs = {n: {'result': 'success'} for n in ALWAYS | CODE | GO}
-        needs['changes']['outputs'] = {'code': code, 'go': go, 'release': 'false', 'full': 'true', 'go_parity': 'false', 'frontend_parity': 'false', 'docs_inventory': 'false'}
+        needs['changes']['outputs'] = {'code': code, 'go': go, 'release': 'false', 'craft': 'false', 'full': 'true', 'go_parity': 'false', 'frontend_parity': 'false', 'docs_inventory': 'false'}
         needs.update({name: {'result': 'skipped'} for name in PARITY})
         needs['release-rehearsal'] = {'result': 'skipped'}
+        needs.update({name: {'result': 'skipped'} for name in CRAFT})
         for n in CODE if code == 'false' else []:
             needs[n]['result'] = 'skipped'
         for n in GO if go == 'false' else []:
@@ -202,6 +204,32 @@ class GateTests(unittest.TestCase):
         self.assertTrue(failures(needs))
         needs['release-rehearsal']['result'] = 'success'
         self.assertEqual(failures(needs), [])
+
+    def test_craft_package_gate_is_required_when_planned(self):
+        for paths in (['tools/craft-components/catalog.txt'], ['scripts/build-craft-components.py'],
+                      ['components/features/pages/native-craft-editor-host.tsx'], ['lib/mooring/channel.ts'],
+                      ['lib/workbooks/bridge.ts'], ['internal/editororigin/editororigin.go'],
+                      ['scripts/ci/craft-package-gate.sh'], ['e2e/craft-packages/craft-package-gate.spec.ts']):
+            self.assertTrue(craft_changed(paths), paths)
+        self.assertFalse(craft_changed(['components/button.tsx', 'docs/guide.mdx', 'internal/api/foo.go']))
+        self.assertEqual(CRAFT, {'craft-packages-build', 'craft-packages'})
+        planned = self.results()
+        planned['changes']['outputs']['craft'] = 'true'
+        planned.update({name: {'result': 'success'} for name in CRAFT})
+        self.assertEqual(failures(planned), [])
+        for name in CRAFT:
+            for result in ['failure', 'cancelled', 'skipped', None]:
+                needs = {k: dict(v) for k, v in planned.items()}
+                needs[name]['result'] = result
+                self.assertTrue(failures(needs), (name, result))
+            needs = self.results()
+            del needs[name]
+            self.assertTrue(failures(needs), name)
+        # A plan without the key fails closed.
+        del planned['changes']['outputs']['craft']
+        self.assertTrue(failures(planned))
+        # Skipping the gate when it was not planned is accepted; running it is not required.
+        self.assertEqual(failures(self.results()), [])
 
     def test_all_actual_mooring_lane_cannot_be_missing_or_not_executed(self):
         self.assertIn('mooring-actual', CODE)

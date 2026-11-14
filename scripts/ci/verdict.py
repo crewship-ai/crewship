@@ -6,6 +6,8 @@ import sys
 
 GO = {'cli-subprocess-race', 'go', 'go-test', 'go-race', 'go-race-cli-shards', 'go-race-cli', 'go-race-api-template', 'go-race-api', 'go-race-api-shards', 'go-platforms', 'go-lint', 'go-shuffle', 'managed-environments'}
 CODE = {'mooring-actual', 'mooring', 'image', 'binary', 'frontend', 'frontend-test', 'frontend-test-types', 'frontend-test-shards', 'harness-pr', 'cli-command-smoke', 'onboarding-default-boots', 'pages-apps', 'playwright-pr', 'onboarding-journey'}
+# Word and Sheet packages and their browser gate (#5362), planned by plan.py's `craft`.
+CRAFT = {'craft-packages-build', 'craft-packages'}
 PARITY = {'go-parity': 'go_parity', 'frontend-parity': 'frontend_parity', 'docs-inventory': 'docs_inventory'}
 ALWAYS = {'changes', 'merge-conflict-markers', 'shell'}
 # Expensive lanes a pull request may skip (plan output full=false, #4752).
@@ -14,10 +16,10 @@ FULL = {'go-platforms', 'go-race', 'go-race-cli-shards', 'go-race-cli', 'go-race
 
 
 def failures(needs, event=None):
-    required = ALWAYS | GO | CODE | PARITY.keys() | {'release-rehearsal'}
+    required = ALWAYS | GO | CODE | PARITY.keys() | {'release-rehearsal'} | CRAFT
     errors = [f'{name}: missing result' for name in sorted(required - needs.keys())]
     plan = needs.get('changes', {}).get('outputs', {})
-    if any(plan.get(k) not in ('true', 'false') for k in ('code', 'go', 'release', 'full', *PARITY.values())):
+    if any(plan.get(k) not in ('true', 'false') for k in ('code', 'go', 'release', 'craft', 'full', *PARITY.values())):
         errors.append('missing or invalid change plan')
     if plan.get('full') == 'false' and event != 'pull_request':
         errors.append(f'reduced matrix is only allowed on pull_request, not {event}')
@@ -28,6 +30,9 @@ def failures(needs, event=None):
         if name in PARITY and plan.get(PARITY[name]) == 'false':
             expected = 'skipped'
         if name == 'release-rehearsal' and plan.get('release') == 'false':
+            expected = 'skipped'
+        # The Craft package gate (#5362) runs whenever a package or host input changed.
+        if name in CRAFT and plan.get('craft') == 'false':
             expected = 'skipped'
         if name in FULL and plan.get('full') == 'false':
             expected = 'skipped'

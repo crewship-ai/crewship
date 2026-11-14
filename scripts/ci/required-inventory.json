@@ -1,11 +1,11 @@
 {
   "version": 1,
   "protected_files": {
-    ".github/workflows/ci.yml": "c700a0055fe96892504f06ef9617fe442e5597b1a58bea9c29725e6dfed08c42",
+    ".github/workflows/ci.yml": "4daa1a16ba941871874b1f4cfed162930afec8370b001cdaa5e7f76813afbe74",
     ".github/workflows/security.yml": "cdfe9f0463c9a11b2f153a85d090f7af9a3b94854042a41e4a73723b08e4bf4a",
     ".github/workflows/codeql.yml": "f09dc28205bf4fdeca83a7638db3fdd028b2006149b83907bbaeb304dc04d0b8",
-    "scripts/ci/plan.py": "960710f8534588821b2c8f687450dc9414ec779b877d3e96b90de78342e2de49",
-    "scripts/ci/verdict.py": "8ebc9e4df4b2cdd222049baba89f722d5e478918d7118023591e173c0da62d3c"
+    "scripts/ci/plan.py": "75f083f1188dfed159068dae53ed8005bc4544a7bb4b6c0d69c047a2de03dde0",
+    "scripts/ci/verdict.py": "a248c6f05bef8c0e8e2932b88ad65bfbbe6fceb16396c5abf5051725a4d9d152"
   },
   "workflows": {
     ".github/workflows/ci.yml": {
@@ -15,6 +15,8 @@
         "changes",
         "cli-command-smoke",
         "cli-subprocess-race",
+        "craft-packages",
+        "craft-packages-build",
         "docs-inventory",
         "frontend",
         "frontend-parity",

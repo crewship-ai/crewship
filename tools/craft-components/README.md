@@ -69,11 +69,42 @@ upgrades. There is no switch to skip the packages; the fix is to repair the
 recipe or to release from a tag whose recipe still builds.
 
 A pull request that changes the recipe, this script, `release.yml`,
-`.goreleaser.yml`, the Dockerfile or the code that installs packages runs
-`Craft Packages Candidate Check`, which builds both packages the same way and
-installs and runs them through the server.
+`.goreleaser.yml`, the Dockerfile, the code that installs packages or the host
+that runs their editors runs the required `craft-packages-build` and `craft-packages` jobs of CI. They build
+both packages the same way, install and run them through the server, and then
+open each editor through the real host in a browser: open, edit, save, reopen
+(`scripts/ci/craft-package-gate.sh`, "Browser gate" below). A package whose editor does not connect
+cannot be pinned.
 
 `catalog.txt` here holds the pins this recipe produces. The build fails when it
 produces other pins, so a recipe change has to update them visibly
 (`--update-catalog`), and a build that is not reproducible stops the release
-and the candidate check.
+and the CI jobs.
+
+## Browser gate
+
+A Word or Sheet package may be pinned in `tools/craft-components/catalog.txt` only
+when its editor works with the real host (#5362: packages that installed and passed
+every server check never connected in a browser). The required CI job
+`craft-packages-build` builds both packages and checks them against the catalog;
+`craft-packages` then runs `scripts/ci/craft-package-gate.sh` against the CI server
+binary: a throwaway server (own data directory, `HOME` and port) trusts exactly the
+built pins, the packages are
+installed with `crewship admin instance applications install --file` and turned on,
+and `playwright.craft-packages.config.ts` runs `e2e/craft-packages/` in full headed
+Chromium under Xvfb with software WebGL. For Word and for Sheet it opens a new
+document, takes over editing, types a marker, saves with ctrl+s, reopens it in a
+fresh browser context, types a second marker and saves again; the server's head must
+hold both markers. Any host refusal ("did not connect safely", "cannot be opened
+safely") fails at once. `plan.py` plans both jobs for any change to the recipe, the
+build script, the install path, `native-craft-editor-host.tsx`, `lib/mooring/` or
+`lib/workbooks/`, and for every run without a diff.
+
+Locally, with a server binary that embeds the UI and a package directory:
+
+```bash
+crewship-heavy scripts/ci/craft-package-gate.sh ./crewship build/craft-components/dist "$OUT"
+```
+
+`$OUT` holds `server.log`, `seed.log`, `applications.txt`, `report.json` and
+`playwright/` (screenshot, trace and browser console of a failed test).

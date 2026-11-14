@@ -179,6 +179,7 @@ jobs:
       code: ${{ steps.plan.outputs.code }}
       go: ${{ steps.plan.outputs.go }}
       release: ${{ steps.plan.outputs.release }}
+      craft: ${{ steps.plan.outputs.craft }}
       go_parity: ${{ steps.plan.outputs.go_parity }}
       frontend_parity: ${{ steps.plan.outputs.frontend_parity }}
       docs_inventory: ${{ steps.plan.outputs.docs_inventory }}
@@ -2779,6 +2780,108 @@ jobs:
 
 
 
+  # ── Word and Sheet packages: build, install, browser gate (#5315, #5362) ──
+  # A package may be pinned (tools/craft-components/catalog.txt) only when its
+  # editor works with the real host. This builds both packages exactly as the
+  # release does (the build fails on pins other than catalog.txt), checks them
+  # against those pins, installs and runs them through the server, and then
+  # opens each editor through the real host page of the tested server in full
+  # Chromium: open, edit, save, reopen, edit, save. Planned by plan.py's
+  # `craft` output: any package, host or install-path input, and every run
+  # without a diff. #5362: packages that installed and passed every server
+  # check never connected in a browser.
+  craft-packages-build:
+    needs: [merge-conflict-markers, changes]
+    if: needs.changes.outputs.craft == 'true'
+    name: Craft packages build
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Test the build script without a build
+        run: python3 -m unittest scripts/test_build_craft_components.py
+      - name: Install pinned Rust and both WASM targets
+        timeout-minutes: 5
+        run: timeout --kill-after=15s 4m rustup toolchain install 1.99.1 --profile minimal --target wasm32-wasip1 --target wasm32-unknown-unknown
+      - name: Build packages
+        timeout-minutes: 60
+        run: python3 scripts/build-craft-components.py --rust-bin "$(dirname "$(rustup which --toolchain 1.99.1 rustc)")"
+      - name: Check the packages against the catalog as the release does
+        run: |
+          set -euo pipefail
+          mkdir -p build/craft-packages
+          cp build/craft-components/dist/*.craftpkg build/craft-packages/
+          bash scripts/check-craft-packages.sh "$(tr -d '\n' < build/craft-components/dist/catalog.txt)" build/craft-packages
+      - uses: actions/setup-go@802e89cd7394b98352d79117a8b463bbfc2fdacf
+        with:
+          go-version: ${{ env.GO_VERSION }}
+      - name: Install and run both packages through the server
+        timeout-minutes: 15
+        env:
+          CREWSHIP_CRAFT_TEST_PACKAGES: ${{ github.workspace }}/build/craft-components/dist
+        run: go test -tags craftpackages -count=1 -timeout 15m -run ReleaseCraftPackages -v ./internal/server/
+      - name: Share the built packages with the browser gate
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: craft-packages-${{ github.sha }}
+          path: |
+            build/craft-components/dist/catalog.txt
+            build/craft-components/dist/*.craftpkg
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  # The browser half: starts as soon as both the packages and the tested server exist.
+  craft-packages:
+    needs: [merge-conflict-markers, changes, binary, craft-packages-build]
+    if: needs.changes.outputs.craft == 'true'
+    name: Craft packages browser gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Download the built packages
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: craft-packages-${{ github.sha }}
+          path: build/craft-components/dist
+      - uses: ./.github/actions/setup-node-pnpm
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          pnpm-version: ${{ env.PNPM_VERSION }}
+      - name: Download the shared embedded server
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: ci-server-${{ github.sha }}
+      - run: chmod +x crewship
+      - name: Install Playwright Chromium (cached)
+        timeout-minutes: 14
+        uses: ./.github/actions/setup-playwright-browser
+        with:
+          browser: chromium
+      - name: Install xvfb
+        timeout-minutes: 4
+        run: command -v xvfb-run || { sudo apt-get update -q && sudo apt-get install -y -q xvfb; }
+      # Word and Sheet in one headed Chromium under xvfb, software WebGL.
+      - name: Browser gate (open, edit, save, reopen through the real host)
+        timeout-minutes: 15
+        env:
+          CI: "1"
+        run: bash scripts/ci/craft-package-gate.sh ./crewship build/craft-components/dist craft-gate-results
+      - name: Upload Craft package gate evidence
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: craft-package-gate-${{ github.run_id }}
+          path: |
+            craft-gate-results/
+            build/craft-components/dist/catalog.txt
+          if-no-files-found: warn
+
   # NOTE: E2E Devcontainer Provisioning was moved out of the per-PR gate.
   # It pulls real base images + features from ghcr.io (slow, rate-limited)
   # and exercises the full seed+provision path — that's ~8-15 min of CI time
@@ -2788,7 +2891,7 @@ jobs:
   result:
     name: CI Result
     if: always()
-    needs: [release-rehearsal, image, changes, mooring, mooring-actual, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-test, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-template, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey]
+    needs: [release-rehearsal, image, changes, mooring, mooring-actual, docs-inventory, go-parity, frontend-parity, merge-conflict-markers, shell, frontend, frontend-test-types, frontend-test-shards, frontend-test, binary, go, go-test, go-race, go-race-cli-shards, go-race-cli, cli-subprocess-race, go-race-api-template, go-race-api-shards, go-race-api, go-platforms, go-lint, go-shuffle, managed-environments, harness-pr, cli-command-smoke, onboarding-default-boots, pages-apps, playwright-pr, onboarding-journey, craft-packages-build, craft-packages]
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
