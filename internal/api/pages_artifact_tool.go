@@ -232,7 +232,11 @@ func (h *PageHandler) ArtifactProjectTool(w http.ResponseWriter, r *http.Request
 		return
 	}
 	a, _ := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
-	if h.checkOriginalUserArtifactRunPrincipal(r.Context(), a) != nil || !h.artifactAgentPolicyAllows(r.Context(), a.WorkspaceID, a.CrewID) {
+	policyAllows := h.artifactAgentPolicyAllows
+	if scoped {
+		policyAllows = h.artifactScopedPolicyAllows
+	}
+	if h.checkOriginalUserArtifactRunPrincipal(r.Context(), a) != nil || !policyAllows(r.Context(), a.WorkspaceID, a.CrewID) {
 		replyError(w, 403, "current artifact run authority required")
 		return
 	}

@@ -189,12 +189,20 @@ func TestPageInternalSave_CrewHourlyLimitWithTheFlagOn(t *testing.T) {
 		t.Fatalf("flag off must not apply the limit: %d %s", rr.Code, rr.Body)
 	}
 	execOrFatal(t, h.db, `INSERT INTO feature_flag_overrides(id,flag_id,workspace_id,enabled) VALUES('hourly-flag-on','ff_artifact_agent_access_modes',?,1)`, wsID)
-	rr := save("Hourly three")
+	execOrFatal(t, h.db, `UPDATE workspace_artifact_creation_policy SET crew_hourly_page_limit=3 WHERE workspace_id=?`, wsID)
+	// A crew page made by a person (no agent-authored first version) is not
+	// counted: the limit is on the sidecar save path.
+	execOrFatal(t, h.db, `INSERT INTO pages(id,workspace_id,slug,name,owner_crew_id,spec_json,created_at,updated_at) VALUES('human-crew-page',?,'human-crew-page','Human',?,'{}',strftime('%Y-%m-%dT%H:%M:%SZ','now'),strftime('%Y-%m-%dT%H:%M:%SZ','now'))`, wsID, crewID)
+	if rr := save("Hourly three"); rr.Code != http.StatusCreated {
+		t.Fatalf("a person's crew page counted toward the agent limit: %d %s", rr.Code, rr.Body)
+	}
+	rr := save("Hourly four")
 	if rr.Code != http.StatusTooManyRequests || !bytes.Contains(rr.Body.Bytes(), []byte("crew_hourly_page_limit")) {
 		t.Fatalf("over the hourly limit: %d %s", rr.Code, rr.Body)
 	}
 	execOrFatal(t, h.db, `UPDATE pages SET created_at='2020-01-01T00:00:00Z' WHERE workspace_id=?`, wsID)
-	if rr := save("Hourly four"); rr.Code != http.StatusCreated {
+	execOrFatal(t, h.db, `UPDATE workspace_artifact_creation_policy SET crew_hourly_page_limit=1 WHERE workspace_id=?`, wsID)
+	if rr := save("Hourly five"); rr.Code != http.StatusCreated {
 		t.Fatalf("older pages must not count: %d %s", rr.Code, rr.Body)
 	}
 }

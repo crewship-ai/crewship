@@ -2730,7 +2730,9 @@ creation also requires the run's human consent and content permissions.
 `GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy` returns
 `enabled`, sorted `crew_ids`, `version` and `limits`
 (`chat_run_create_limit`, `run_read_limit`, `crew_hourly_page_limit`;
-defaults 3, 50 and 20).
+defaults 3, 50 and 20), and `scoped_default`: true while no policy was ever
+saved and `artifact_agent_access_modes` is on, when chat runs of every live
+crew may use their artifact scope.
 `PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy` accepts a request
 body of at most 64 KiB and requires all
 three request fields: `enabled`, the complete `crew_ids` allowlist, and

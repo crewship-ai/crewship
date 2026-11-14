@@ -20,6 +20,9 @@ type artifactCreationPolicy struct {
 	// Limits apply with agent access modes on (#5317). A workspace without a
 	// stored policy reports the defaults.
 	Limits artifactRunLimits `json:"limits"`
+	// ScopedDefault is true while no policy was ever saved and agent access
+	// modes are on: chat runs of every live crew may then use their scope.
+	ScopedDefault bool `json:"scoped_default"`
 }
 
 // artifactRunLimitsUpdate changes some limits; an omitted field keeps its value.
@@ -62,17 +65,22 @@ type WorkspaceArtifactCreationPolicyError struct {
 func (h *PageHandler) artifactAgentPolicyAllows(ctx context.Context, workspace, crew string) bool {
 	var allowed int
 	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_artifact_creation_policy p JOIN workspace_artifact_creation_crews a ON a.workspace_id=p.workspace_id JOIN workspaces w ON w.id=p.workspace_id AND w.deleted_at IS NULL JOIN crews c ON c.id=a.crew_id AND c.workspace_id=p.workspace_id AND c.deleted_at IS NULL WHERE p.workspace_id=? AND a.crew_id=? AND p.enabled=1`, workspace, crew).Scan(&allowed)
-	if err == nil && allowed == 1 {
+	return err == nil && allowed == 1
+}
+
+// artifactScopedPolicyAllows is the policy ceiling for the flag-on chat-run
+// scope only (amendment 8, #5317): a workspace that never saved a policy
+// allows its live crews there. Every other caller keeps
+// artifactAgentPolicyAllows, so no other agent surface opens by default.
+func (h *PageHandler) artifactScopedPolicyAllows(ctx context.Context, workspace, crew string) bool {
+	if h.artifactAgentPolicyAllows(ctx, workspace, crew) {
 		return true
 	}
-	// Amendment 8 (#5317): with agent access modes on, a workspace that never
-	// set a policy defaults to on for its live crews. A stored policy, on or
-	// off, stays the ceiling; with the flag off nothing changes.
-	if err != nil || !h.artifactRunModesOn(ctx, workspace) {
+	if !h.artifactRunModesOn(ctx, workspace) {
 		return false
 	}
 	var rows, live int
-	err = h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM workspace_artifact_creation_policy WHERE workspace_id=?),
+	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM workspace_artifact_creation_policy WHERE workspace_id=?),
  (SELECT COUNT(*) FROM crews c JOIN workspaces w ON w.id=c.workspace_id AND w.deleted_at IS NULL WHERE c.id=? AND c.workspace_id=? AND c.deleted_at IS NULL)`, workspace, crew, workspace).Scan(&rows, &live)
 	return err == nil && rows == 0 && live == 1
 }
@@ -145,6 +153,7 @@ func (h *PageHandler) GetArtifactCreationPolicy(w http.ResponseWriter, r *http.R
 		replyInternalError(w, h.logger, "read artifact creation policy", err)
 		return
 	}
+	result.ScopedDefault = result.Version == 0 && h.artifactRunModesOn(ctx, WorkspaceIDFromContext(ctx))
 	if err := tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "finish artifact policy snapshot", err)
 		return

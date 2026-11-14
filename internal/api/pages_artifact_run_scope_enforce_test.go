@@ -258,8 +258,8 @@ func TestRunScope_ReadCapCountsDistinctArtifacts(t *testing.T) {
 	if w := g.tool("artifact_versions", "scope-cap-01", `{}`); w.Code != 200 {
 		t.Fatalf("re-reading an artifact already read must not count again: %d", w.Code)
 	}
-	if w := g.tool("artifact_versions", "scope-cap-51", `{}`); w.Code == 200 {
-		t.Fatal("the 51st distinct artifact was read")
+	if w := g.tool("artifact_versions", "scope-cap-51", `{}`); w.Code != http.StatusTooManyRequests || !strings.Contains(w.Body.String(), "artifact_run_limit") {
+		t.Fatalf("the 51st distinct artifact: %d %s", w.Code, w.Body)
 	}
 }
 
@@ -342,5 +342,169 @@ func TestRunScope_LimitsComeFromThePolicyOnEachUse(t *testing.T) {
 	var n int
 	if err := g.f.rig.db.QueryRow(`SELECT count(*) FROM pages WHERE slug='scope-limit-2'`).Scan(&n); err != nil || n != 0 {
 		t.Fatalf("refused create left a page: %d %v", n, err)
+	}
+}
+
+// Standing access is read only: even the agent's own write grant on an
+// artifact the human owns does not let a run write it unless the human
+// attached it (or the run created it).
+func TestRunScope_StandingAccessNeverWrites(t *testing.T) {
+	g := newRunScopeRig(t)
+	own := g.create(t, g.f.a.HumanUserID, "MEMBER", "scope-standing-own")
+	// The owner issues it, so the write grant is live (an inert one would
+	// prove nothing).
+	g.grant(t, own, "user", g.f.rig.adminID, "read")
+	mustExec(t, g.f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,?,?,?,?)`, own, "agent", g.f.a.AgentID, "write", g.f.a.HumanUserID)
+	g.start(t)
+	if w := g.tool("artifact_versions", "scope-standing-own", `{}`); w.Code != 200 {
+		t.Fatalf("standing read: %d %s", w.Code, w.Body)
+	}
+	if w := g.tool("artifact_publish", "scope-standing-own", artifactProjectBody(1, "Second")); w.Code == 200 {
+		t.Fatal("standing access wrote an artifact the human did not attach")
+	}
+}
+
+// Amendment 4: an artifact the run created stays in reach only while the human
+// still owns it. Once ownership moves on, the created path ends even where the
+// human can still read it another way.
+func TestRunScope_CreatedReachEndsWhenOwnershipMoves(t *testing.T) {
+	g := newRunScopeRig(t)
+	g.start(t)
+	body := `{"name":"scope-created-moved",` + strings.TrimPrefix(artifactProjectBody(0, "scope-created-moved"), "{")
+	if w := g.tool("artifact_create", "scope-created-moved", body); w.Code != 201 {
+		t.Fatalf("create: %d %s", w.Code, w.Body)
+	}
+	var id string
+	if err := g.f.rig.db.QueryRow(`SELECT id FROM pages WHERE slug='scope-created-moved'`).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if w := g.tool("artifact_versions", "scope-created-moved", `{}`); w.Code != 200 {
+		t.Fatalf("created artifact not in reach: %d %s", w.Code, w.Body)
+	}
+	mustExec(t, g.f.rig.db, `UPDATE pages SET owner_user_id=? WHERE id=?`, g.f.rig.adminID, id)
+	g.grant(t, id, "user", g.f.a.HumanUserID, "read")
+	if w := g.tool("artifact_versions", "scope-created-moved", `{}`); w.Code == 200 {
+		t.Fatal("the created path outlived the human's ownership")
+	}
+}
+
+// Amendment 4: the created path is per chat. An artifact this agent created
+// for the same human in another chat is not in this run's reach.
+func TestRunScope_CreatedReachIsPerChat(t *testing.T) {
+	g := newRunScopeRig(t)
+	g.start(t)
+	body := `{"name":"scope-created-elsewhere",` + strings.TrimPrefix(artifactProjectBody(0, "scope-created-elsewhere"), "{")
+	if w := g.tool("artifact_create", "scope-created-elsewhere", body); w.Code != 201 {
+		t.Fatalf("create: %d %s", w.Code, w.Body)
+	}
+	if w := g.tool("artifact_versions", "scope-created-elsewhere", `{}`); w.Code != 200 {
+		t.Fatalf("created artifact not in reach: %d %s", w.Code, w.Body)
+	}
+	// Rehome the origin to another private chat of the same human and agent,
+	// and drop this run's own created row, as if another chat had created it.
+	mustExec(t, g.f.rig.db, `CREATE TEMP TABLE chat_copy AS SELECT * FROM chats WHERE id=?`, g.f.a.ChatID)
+	mustExec(t, g.f.rig.db, `UPDATE chat_copy SET id='scope-other-chat'`)
+	mustExec(t, g.f.rig.db, `INSERT INTO chats SELECT * FROM chat_copy`)
+	mustExec(t, g.f.rig.db, `UPDATE artifact_project_origins SET chat_id='scope-other-chat' WHERE chat_id=?`, g.f.a.ChatID)
+	if w := g.tool("artifact_versions", "scope-created-elsewhere", `{}`); w.Code == 200 {
+		t.Fatal("an artifact created in another chat was in reach")
+	}
+}
+
+// Review finding 1: a refused principal capture (here a role change after the
+// message was sent) never blocks the chat run; it starts without a principal
+// and so reaches nothing through this path.
+func TestRunScope_StaleReceiptStartsThePlainRunWithoutAPrincipal(t *testing.T) {
+	g := newRunScopeRig(t)
+	g.create(t, g.f.a.HumanUserID, "MEMBER", "scope-stale")
+	mustExec(t, g.f.rig.db, `UPDATE workspace_members SET capabilities='["chat"]' WHERE user_id=?`, g.f.a.HumanUserID)
+	// Whatever today's start does with this receipt (flag off), the flag on
+	// does the same: the scope adds no new way to refuse a chat run.
+	mustExec(t, g.f.rig.db, `UPDATE feature_flag_overrides SET enabled=0 WHERE id='ref-flag-on'`)
+	off := artifactRefsStartRun(t, g.f, "scope-stale-flag-off", g.f.a.MessageID)
+	mustExec(t, g.f.rig.db, `UPDATE feature_flag_overrides SET enabled=1 WHERE id='ref-flag-on'`)
+	if code := artifactRefsStartRun(t, g.f, g.f.a.RunID, g.f.a.MessageID); code != off {
+		t.Fatalf("flag on start %d differs from flag off %d", code, off)
+	}
+	var n int
+	if err := g.f.rig.db.QueryRow(`SELECT count(*) FROM artifact_run_principals WHERE run_id=?`, g.f.a.RunID).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("stale receipt recorded a principal: %d %v", n, err)
+	}
+	if w := g.tool("artifact_versions", "scope-stale", `{}`); w.Code == 200 {
+		t.Fatal("a run without a principal reached an artifact")
+	}
+}
+
+// Review finding 3: the exact-run consent of today keeps its page in reach
+// with the flag on.
+func TestRunScope_ExactRunConsentKeepsItsPage(t *testing.T) {
+	g := newRunScopeRig(t)
+	id := g.create(t, g.f.a.HumanUserID, "MEMBER", "scope-consented")
+	g.create(t, g.f.a.HumanUserID, "MEMBER", "scope-not-consented")
+	g.start(t)
+	mustExec(t, g.f.rig.db, `INSERT INTO artifact_project_run_consents(run_id,workspace_id,human_user_id,chat_id,message_id,expires_at,created_at,result_page_id) SELECT run_id,workspace_id,human_user_id,chat_id,message_id,expires_at,expires_at,? FROM artifact_run_principals WHERE run_id=?`, id, g.f.a.RunID)
+	if w := g.tool("artifact_versions", "scope-consented", `{}`); w.Code != 200 {
+		t.Fatalf("consented page left the run's reach: %d %s", w.Code, w.Body)
+	}
+	if w := g.tool("artifact_publish", "scope-consented", artifactProjectBody(1, "Second")); w.Code != 200 {
+		t.Fatalf("consented page not writable: %d %s", w.Code, w.Body)
+	}
+	if w := g.tool("artifact_versions", "scope-not-consented", `{}`); w.Code == 200 {
+		t.Fatal("a consent for one page reached another")
+	}
+}
+
+// Review gaps M13, M16, M18: the run's chat must stay the human's private chat
+// with the agent, a stored disabled policy stays the ceiling, and a comment
+// grant is not standing read access.
+func TestRunScope_RunLevelGatesAndGrantLevels(t *testing.T) {
+	t.Run("chat no longer private", func(t *testing.T) {
+		g := newRunScopeRig(t)
+		id := g.create(t, g.f.a.HumanUserID, "MEMBER", "scope-gate-chat")
+		g.start(t, id)
+		mustExec(t, g.f.rig.db, `UPDATE chats SET visibility='workspace' WHERE id=?`, g.f.a.ChatID)
+		if w := g.tool("artifact_versions", "scope-gate-chat", `{}`); w.Code == 200 {
+			t.Fatal("reached an artifact from a chat that is no longer private")
+		}
+	})
+	t.Run("stored policy disabled", func(t *testing.T) {
+		g := newRunScopeRig(t)
+		id := g.create(t, g.f.a.HumanUserID, "MEMBER", "scope-gate-policy")
+		g.start(t, id)
+		mustExec(t, g.f.rig.db, `UPDATE workspace_artifact_creation_policy SET enabled=0, version=version+1 WHERE workspace_id=?`, g.f.a.WorkspaceID)
+		if w := g.tool("artifact_versions", "scope-gate-policy", `{}`); w.Code == 200 {
+			t.Fatal("a disabled stored policy did not stay the ceiling")
+		}
+	})
+	t.Run("produce grant is not standing read", func(t *testing.T) {
+		g := newRunScopeRig(t)
+		id := g.create(t, g.f.rig.adminID, "OWNER", "scope-gate-comment")
+		g.grant(t, id, "user", g.f.a.HumanUserID, "read")
+		g.grant(t, id, "agent", g.f.a.AgentID, "produce")
+		g.start(t)
+		if w := g.tool("artifact_versions", "scope-gate-comment", `{}`); w.Code == 200 {
+			t.Fatal("a produce grant gave standing read access")
+		}
+	})
+}
+
+// Amendment 8 and review finding 2: with the flag on and no saved policy, the
+// chat-run scope allows live crews, the API says so, and no other agent
+// surface opens by default.
+func TestRunScope_DefaultPolicyOpensOnlyTheScope(t *testing.T) {
+	g := newRunScopeRig(t)
+	id := g.create(t, g.f.a.HumanUserID, "MEMBER", "scope-default-policy")
+	mustExec(t, g.f.rig.db, `DELETE FROM workspace_artifact_creation_crews WHERE workspace_id=?`, g.f.a.WorkspaceID)
+	mustExec(t, g.f.rig.db, `DELETE FROM workspace_artifact_creation_policy WHERE workspace_id=?`, g.f.a.WorkspaceID)
+	g.start(t, id)
+	if w := g.tool("artifact_versions", "scope-default-policy", `{}`); w.Code != 200 {
+		t.Fatalf("no saved policy, flag on: %d %s", w.Code, w.Body)
+	}
+	if g.router.pages.artifactAgentPolicyAllows(t.Context(), g.f.a.WorkspaceID, g.f.a.CrewID) {
+		t.Fatal("the default opened the general agent policy ceiling")
+	}
+	w := artifactPolicyCall(t, g.router.pages, g.f.a.WorkspaceID, g.f.rig.adminID, "OWNER", "GET", "")
+	if w.Code != 200 || !strings.Contains(w.Body.String(), `"scoped_default":true`) {
+		t.Fatalf("policy read does not report the scoped default: %d %s", w.Code, w.Body)
 	}
 }

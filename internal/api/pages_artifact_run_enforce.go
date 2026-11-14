@@ -80,7 +80,7 @@ func (h *PageHandler) checkScopedArtifactRun(ctx context.Context, a *artifactRun
 	if a == nil || !h.artifactRunFamilyEnabled(ctx, a.WorkspaceID, "") {
 		return errArtifactProjectAccess
 	}
-	if h.checkOriginalUserArtifactRunPrincipal(ctx, a) != nil || !h.artifactAgentPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
+	if h.checkOriginalUserArtifactRunPrincipal(ctx, a) != nil || !h.artifactScopedPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
 		return errArtifactProjectAccess
 	}
 	var own int
@@ -110,6 +110,12 @@ func (h *PageHandler) artifactRunReach(ctx context.Context, a *artifactRunAuthor
 		return
 	}
 	if n == 1 {
+		return runReachReferenced, false, nil
+	}
+	// The exact-run consent of today (an explicit "edit with agent" or a
+	// comment task) keeps its one page in reach, so turning the flag on never
+	// takes away what the human deliberately granted to this run.
+	if bound, e := h.artifactProjectRunPage(ctx, a); e == nil && bound.Valid && bound.String == rec.ID && h.checkArtifactProjectRunConsent(ctx, a, rec.ID) == nil {
 		return runReachReferenced, false, nil
 	}
 	// Created in this chat by this agent and still owned by the human
@@ -152,11 +158,10 @@ func (h *PageHandler) authorizeScopedArtifactRun(ctx context.Context, tx *sql.Tx
 	if a.WorkspaceID != workspace || rec == nil || rec.ArchivedAt != "" {
 		return "", errArtifactRefNotFound
 	}
-	scope := "pages:read"
-	if write || share {
-		scope = "pages:write"
-	}
-	if err := h.checkScopedArtifactRun(ctx, a, scope); err != nil {
+	// The run-level gate is the same for every slug; the write scope is
+	// checked only once the run reaches the artifact, so its refusal says
+	// nothing about artifacts the run does not reach.
+	if err := h.checkScopedArtifactRun(ctx, a, "pages:read"); err != nil {
 		return "", err
 	}
 	reach, standingNew, err := h.artifactRunReach(ctx, a, rec)
@@ -178,6 +183,11 @@ func (h *PageHandler) authorizeScopedArtifactRun(ctx context.Context, tx *sql.Tx
 	// An agent never shares, grants, moves or publishes (spec §2).
 	if share {
 		return "", errArtifactProjectAccess
+	}
+	if write {
+		if _, err := h.validateArtifactPrincipalOriginalCredential(ctx, a, "pages:write"); err != nil {
+			return "", errArtifactProjectAccess
+		}
 	}
 	if write && (reach == runReachStanding || rec.OwnerUserID != a.HumanUserID || rec.OwnerCrewID != "") {
 		return "", errArtifactProjectAccess
@@ -238,7 +248,7 @@ func (h *PageHandler) crewHourlyPageCapReached(ctx context.Context, tx *sql.Tx, 
 	}
 	since := h.evaluator().Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
 	var n int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages WHERE workspace_id=? AND owner_crew_id=? AND julianday(created_at) >= julianday(?)`, workspace, crew, since).Scan(&n); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages p WHERE p.workspace_id=? AND p.owner_crew_id=? AND julianday(p.created_at) >= julianday(?) AND EXISTS(SELECT 1 FROM page_versions v WHERE v.page_id=p.id AND v.seq=1 AND v.author_agent_id IS NOT NULL)`, workspace, crew, since).Scan(&n); err != nil {
 		return false, 0, err
 	}
 	return n >= limits.CrewHourlyPage, limits.CrewHourlyPage, nil

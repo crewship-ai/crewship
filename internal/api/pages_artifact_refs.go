@@ -255,12 +255,11 @@ func (h *InternalHandler) admitArtifactRefsRun(r *http.Request, entry journal.En
 		if err != nil || !plain {
 			return false, 0, nil
 		}
-		status, err := h.admitArtifactChatRunStart(r, entry, receipt, message, false)
-		if errors.Is(err, errArtifactRefsDisabled) {
+		// A refused capture (a stale receipt, a changed role) never blocks the
+		// chat: the run starts the ordinary way without a principal, and so
+		// reaches no artifact through this path.
+		if _, err := h.admitArtifactChatRunStart(r, entry, receipt, message, false); err != nil {
 			return false, 0, nil
-		}
-		if err != nil {
-			return false, status, err
 		}
 		return true, 0, nil
 	}
