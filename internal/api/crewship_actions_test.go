@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -163,11 +165,10 @@ func TestCrewshipActions_InjectedIdentityBeatsAuthoredArgs(t *testing.T) {
 }
 
 // A crew that is not permitted to take the action unattended must not have it
-// taken. `guided` holds mission_create for approval on the agent path; a
-// routine has nobody to approve it, so a held decision is a refusal — and the
-// message has to say what would unblock it, or the routine just "does
-// nothing".
-func TestCrewshipActions_HeldDecisionRefusesWithoutCalling(t *testing.T) {
+// taken unattended. A held decision becomes a request for approval: the
+// executor parks the run on an approval waitpoint and nothing is written
+// until a person approves it.
+func TestCrewshipActions_HeldDecisionAsksForApprovalWithoutCalling(t *testing.T) {
 	var calls []capturedCall
 	srv := fakeInternalAPI(t, &calls)
 	db := crewshipPolicyDB(t, "crew_strict", "strict")
@@ -179,17 +180,127 @@ func TestCrewshipActions_HeldDecisionRefusesWithoutCalling(t *testing.T) {
 		WorkspaceID: "ws_real",
 		CrewID:      "crew_strict",
 	})
-	if err == nil {
-		t.Fatal("a strict crew must not create an issue unattended")
+	var held *pipeline.CrewshipApprovalRequired
+	if !errors.As(err, &held) {
+		t.Fatalf("a strict crew's issue.create must ask for an approval, got %v", err)
 	}
-	if !strings.Contains(err.Error(), "autonomy_level=strict") {
-		t.Errorf("the refusal must name the level that caused it, got %q", err)
-	}
-	if !strings.Contains(err.Error(), "crewship policy set") {
-		t.Errorf("the refusal must name the fix, got %q", err)
+	if !strings.Contains(err.Error(), "autonomy_level=strict") || held.Action != "mission_create" {
+		t.Errorf("the hold must name the level and action, got %q", err)
 	}
 	if len(calls) != 0 {
-		t.Errorf("made %d calls despite the refusal — the gate must run BEFORE the write", len(calls))
+		t.Errorf("made %d calls before approval — the gate must run BEFORE the write", len(calls))
+	}
+}
+
+// Only an APPROVED approval waitpoint of this run and step, decided by a
+// current OWNER or ADMIN of the workspace, satisfies a held decision.
+// Forged, foreign-run, foreign-step and foreign-workspace tokens, and
+// approvals by a lower role or the public callback, are refused outright; an
+// undecided one keeps the step held.
+func TestCrewshipActions_ApprovalTokenIsBoundToRunAndStep(t *testing.T) {
+	db := crewshipPolicyDB(t, "crew_strict", "strict")
+	if _, err := db.Exec(`CREATE TABLE pipeline_waitpoints (token TEXT PRIMARY KEY, workspace_id TEXT, pipeline_run_id TEXT, step_id TEXT, kind TEXT, status TEXT, decided_by_user_id TEXT)`); err != nil {
+		t.Fatal(err)
+	}
+	for _, q := range []string{
+		`CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, suspended_at TEXT)`,
+		`CREATE TABLE IF NOT EXISTS workspace_members (workspace_id TEXT, user_id TEXT, role TEXT, access_mode TEXT NOT NULL DEFAULT 'trusted')`,
+		`INSERT INTO users (id, suspended_at) VALUES ('u_admin',NULL),('u_owner',NULL),('u_manager',NULL),('u_member',NULL),('u_elsewhere',NULL),('u_suspended','2026-11-01T00:00:00Z')`,
+		`INSERT INTO workspace_members (workspace_id, user_id, role) VALUES
+ ('ws_real','u_admin','ADMIN'), ('ws_real','u_owner','OWNER'), ('ws_real','u_manager','MANAGER'), ('ws_real','u_member','MEMBER'), ('ws_other','u_elsewhere','ADMIN'), ('ws_real','u_suspended','ADMIN')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// The approval is stored under the step plus the binding of the exact
+	// call it answers: operation key (run, foreach item, step), verb, args.
+	args := map[string]any{"title": "x"}
+	key := pipeline.CrewshipApprovalStepKey("create", pipeline.CrewshipApprovalBinding("op-item-1", "issue.create", args))
+	if _, err := db.Exec(`INSERT INTO pipeline_waitpoints VALUES
+ ('tok-ok','ws_real','run-1',?,'approval','approved','u_admin'),
+ ('tok-owner','ws_real','run-1',?,'approval','approved','u_owner'),
+ ('tok-manager','ws_real','run-1',?,'approval','approved','u_manager'),
+ ('tok-member','ws_real','run-1',?,'approval','approved','u_member'),
+ ('tok-external','ws_real','run-1',?,'approval','approved','external-callback'),
+ ('tok-elsewhere','ws_real','run-1',?,'approval','approved','u_elsewhere'),
+ ('tok-suspended','ws_real','run-1',?,'approval','approved','u_suspended'),
+ ('tok-pending','ws_real','run-1',?,'approval','pending',NULL),
+ ('tok-denied','ws_real','run-1',?,'approval','denied','u_admin'),
+ ('tok-timer','ws_real','run-1',?,'timer','approved','u_admin'),
+ ('tok-bare-step','ws_real','run-1','create','approval','approved','u_admin')`, key, key, key, key, key, key, key, key, key, key); err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name, token, run, step, ws, op string
+		args                           map[string]any
+		wantCall, wantHeld             bool
+	}{
+		{"approved token of this exact call", "tok-ok", "run-1", "create", "ws_real", "op-item-1", args, true, false},
+		{"pending stays held", "tok-pending", "run-1", "create", "ws_real", "op-item-1", args, false, true},
+		{"denied stays held for the executor to fail", "tok-denied", "run-1", "create", "ws_real", "op-item-1", args, false, true},
+		{"forged token", "tok-forged", "run-1", "create", "ws_real", "op-item-1", args, false, false},
+		{"token of another run", "tok-ok", "run-2", "create", "ws_real", "op-item-1", args, false, false},
+		{"token of another step", "tok-ok", "run-1", "other", "ws_real", "op-item-1", args, false, false},
+		{"token of another foreach item", "tok-ok", "run-1", "create", "ws_real", "op-item-2", args, false, false},
+		{"token for other arguments", "tok-ok", "run-1", "create", "ws_real", "op-item-1", map[string]any{"title": "y"}, false, false},
+		{"an approval stored under the bare step id is not this call's", "tok-bare-step", "run-1", "create", "ws_real", "op-item-1", args, false, false},
+		{"not an approval waitpoint", "tok-timer", "run-1", "create", "ws_real", "op-item-1", args, false, false},
+		{"token presented in another workspace", "tok-ok", "run-1", "create", "ws_other", "op-item-1", args, false, false},
+		{"approved by an OWNER", "tok-owner", "run-1", "create", "ws_real", "op-item-1", args, true, false},
+		{"approved by a MANAGER is not enough", "tok-manager", "run-1", "create", "ws_real", "op-item-1", args, false, false},
+		{"approved by a MEMBER is not enough", "tok-member", "run-1", "create", "ws_real", "op-item-1", args, false, false},
+		{"approved through the public callback", "tok-external", "run-1", "create", "ws_real", "op-item-1", args, false, false},
+		{"approved by an admin of another workspace", "tok-elsewhere", "run-1", "create", "ws_real", "op-item-1", args, false, false},
+		{"approved by an admin suspended since", "tok-suspended", "run-1", "create", "ws_real", "op-item-1", args, false, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls []capturedCall
+			srv := fakeInternalAPI(t, &calls)
+			actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), db, slog.Default())
+			_, err := actions.Do(context.Background(), pipeline.CrewshipRequest{
+				Verb: "issue.create", Args: tc.args, OperationKey: tc.op,
+				WorkspaceID: tc.ws, CrewID: "crew_strict", RunID: tc.run, StepID: tc.step, ApprovalToken: tc.token,
+			})
+			var held *pipeline.CrewshipApprovalRequired
+			if got := errors.As(err, &held); got != tc.wantHeld {
+				t.Fatalf("held=%v (err %v), want %v", got, err, tc.wantHeld)
+			}
+			if (len(calls) == 1) != tc.wantCall {
+				t.Fatalf("calls=%d err=%v, want call=%v", len(calls), err, tc.wantCall)
+			}
+			if !tc.wantCall && !tc.wantHeld && err == nil {
+				t.Fatal("a refused token must be an error")
+			}
+			if tc.wantCall {
+				for _, c := range calls {
+					if strings.Contains(fmt.Sprint(c.body), tc.token) {
+						t.Fatal("the approval token must not travel to the route")
+					}
+				}
+			}
+		})
+	}
+}
+
+// A verb whose route stages its own inert row behind a second gate keeps the
+// refusal: waiting would end in a second approval for the same thing.
+func TestCrewshipActions_HeldPageCreateStaysRefused(t *testing.T) {
+	var calls []capturedCall
+	srv := fakeInternalAPI(t, &calls)
+	db := crewshipPolicyDB(t, "crew_strict", "strict")
+	actions := newCrewshipActions(srv.URL, "master-token", policy.NewResolver(db), db, slog.Default())
+	_, err := actions.Do(context.Background(), pipeline.CrewshipRequest{
+		Verb: "page.create", Args: map[string]any{"name": "n", "panels": []any{}},
+		WorkspaceID: "ws_real", CrewID: "crew_strict",
+	})
+	var held *pipeline.CrewshipApprovalRequired
+	if err == nil || errors.As(err, &held) {
+		t.Fatalf("page.create under a held decision must stay a refusal, got %v", err)
+	}
+	if len(calls) != 0 {
+		t.Fatal("refusal made a call")
 	}
 }
 

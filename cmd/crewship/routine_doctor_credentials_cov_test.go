@@ -109,3 +109,22 @@ func TestFetchActiveCredentialTypes_FiltersInactive(t *testing.T) {
 		t.Errorf("inactive provider must be excluded: %v", got)
 	}
 }
+
+// name.<NAME> is matched against credential names exactly, not upper-cased
+// into a type that cannot exist.
+func TestCheckCredentialsRequired_ByName(t *testing.T) {
+	g := &fakeDoctorGetter{status: 200, body: `[
+		{"name":"DEVICE_SSH_KEY","type":"SECRET","status":"ACTIVE"},
+		{"name":"OLD_KEY","type":"SECRET","status":"REVOKED"}
+	]`}
+	got := checkCredentialsRequired(g, "ws", credDef("name.DEVICE_SSH_KEY", "name.OLD_KEY", "name.device_ssh_key"))
+	levels := map[string]string{}
+	for _, c := range got {
+		levels[c.Name] = string(c.Level)
+	}
+	if levels["credential:name.DEVICE_SSH_KEY"] != string(doctorOK) ||
+		levels["credential:name.OLD_KEY"] != string(doctorFail) ||
+		levels["credential:name.device_ssh_key"] != string(doctorFail) {
+		t.Fatalf("levels = %v", levels)
+	}
+}

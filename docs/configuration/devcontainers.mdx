@@ -62,8 +62,52 @@ These two are considered the minimum to turn a bare Debian/Ubuntu image into a w
 }
 ```
 
-- `common-utils` creates the `agent` user at UID 1001 and installs `curl`, `git`, `ca-certificates`, `sudo`. Replaces the deleted `EnsureAgentUser` Go helper.
+- `common-utils` creates the `agent` user at UID 1001 and installs `curl`, `git`, `ca-certificates`, `sudo`. Crew create injects it when it is missing.
 - `claude-code` installs Node.js 22 (NodeSource) + `@anthropic-ai/claude-code` globally. Replaces the deleted `EnsureClaudeCode` Go helper.
+
+### The runtime account: `agent`, UID 1001
+
+Every crew container runs as UID 1001, so the image needs an account `agent`
+with UID and GID 1001. Without it, anything that looks up the current user fails:
+`sudo: you do not exist in the passwd database`, `whoami: cannot find name for
+user ID 1001`, and `git` or `ssh` refusing to run.
+
+- **No `common-utils` in the config:** crew create adds it with `username: agent`,
+  `userUid: 1001`, `userGid: 1001`.
+- **`common-utils` declared without account options**, or with `automatic`: they
+  are set to `agent` / `1001` / `1001`. Other options you set are kept.
+- **A different `username`, `userUid` or `userGid`:** create, update and
+  provisioning refuse the config with `common-utils must create user 'agent'
+  with UID/GID 1001` and name the option to change.
+- **`username: none` or `root`:** common-utils creates no account, and the
+  options are left alone. The base image must then provide `agent` at UID/GID
+  1001 itself.
+
+If the base image already has a different user or group at UID or GID 1001,
+the explicit 1001 can make the account step fail at build time. Use a base
+image without one; such an image never had a working runtime account anyway.
+
+The option names are `userUid` and `userGid`. Crewship versions before this
+change injected `uid` and `gid`, which common-utils does not read. The account
+then got an automatic UID: 1001 only when the base image already had a user at
+1000 (the `node` or `vscode` images), and 1000 on `debian:bookworm-slim`. Such a
+stored config is built with the correct names the next time it is provisioned
+(after a config change, or with `crewship crew provision <crew>` or
+`crewship crew rebuild <crew>`); the stored config itself is not rewritten, so
+reading it back still shows `uid` / `gid`. That changes its cache key, so it
+builds a new image **once**; crews with the same config share that build. This
+includes crews on the default configuration, whose stored definition also
+carries the old names; their image already had `agent` at 1001, so the rebuild
+changes nothing for them. Upgrading alone rebuilds nothing: restarting the
+server or the crew (`crewship crew stop` / `start`) keeps the current image, so
+a crew built on a slim image stays broken until it is provisioned again. To fix
+it, run `crewship crew rebuild <crew>`.
+
+`sudo` works while the image is built (in `postCreateCommand`), once the account
+exists. On the Docker runtime it does not work inside a running crew container:
+containers run with `no-new-privileges` and a read-only root filesystem (unless
+the crew is privileged), so install system packages at build time, preferably
+as features, not from an agent.
 
 ## `mise_config` schema
 

@@ -353,7 +353,7 @@ Anywhere a string is interpolated (prompt, http URL/body/headers, wait until, co
 - `steps.Y.output` — full text output of an earlier step
 - `steps.Y.output.path` — JSON path into a step's output (when output parses as JSON)
 - `env.AUTHOR_CREW_NAME` / etc. — read-only allowlist of execution context
-- `secrets.<type>` — a workspace-vault credential, resolved at run time **by type** (see [Secrets](#secrets-secrets-type) below)
+- `secrets.<type>` — a workspace-vault credential, resolved at run time **by type**; `secrets.name.<NAME>` selects one credential **by name** (see [Secrets](#secrets-secrets-type) below)
 - `routine.state.<key>` — durable cross-run state carried forward from a **previous** run (see [Cross-run state](#cross-run-state-routine-state-key) below)
 
 Save-time validator walks **every** template-bearing field (prompt, nested inputs, http url/body/headers, wait until, event_filter, approval_prompt, approval_title, code body, code env values, transform input, transform expression, if condition) and rejects placeholders that reference unknown inputs or unseen-yet steps.
@@ -374,6 +374,24 @@ A `code` / `script` / `notify` / `http` step that needs an API key, token, or pa
 ```
 
 The value **never** lands in the versioned DSL (the definition carries only the `{{ secrets.stripe }}` template), and it is **scrubbed** from the step's downstream output, the run journal, script-audit command lines, notification bodies, and error messages — so an echoed or reflected secret shows up as `[REDACTED:secret]`, not the real value. A type with no ACTIVE credential renders **empty** (like a missing input), so a public/optional call keeps working; to make an unresolvable credential a hard failure, declare it in [`credentials_required`](#required-credentials).
+
+**By name.** Selection by type takes the newest matching credential, so it is
+ambiguous as soon as the crew can see two credentials of one type (two `SECRET`
+keys, say): the newest silently wins. Name the one you mean instead:
+`{{ secrets.name.DEVICE_SSH_KEY }}`, or `credential_ref: {type: name.DEVICE_SSH_KEY}`
+on an `http` step, or `credentials_required: [{type: name.DEVICE_SSH_KEY}]`.
+The name is matched exactly, case included (credential names are unique in a
+workspace); the `name.` prefix itself is case-insensitive. Every other rule —
+workspace scope, crew isolation, ACTIVE only, host binding at resolution — is
+the same as by type, so naming reaches nothing the crew could not already see;
+it lets you pick an older credential that selection by type would hide behind
+a newer one. In a `code` step the value is `secrets.name.DEVICE_SSH_KEY` as
+well (any case of `name`), which works for names made of letters, digits,
+underscores and hyphens; a name with dots, spaces or other punctuation is
+reachable from templates only.
+Leading or trailing spaces in a name cannot be referenced. A `credential_ref.type` with a dot that is not `name.<NAME>`, and a bare
+`{{ secrets.name }}`, are save-time errors (both used to resolve nothing,
+silently).
 
 <Warning>
 Because secrets are scrubbed from step outputs, you **cannot** thread a secret between steps as `{{ steps.X.output }}` — each step re-resolves `{{ secrets.<type> }}` fresh. This is deliberate: a plaintext secret must never flow through the step-outputs record.
@@ -1415,11 +1433,27 @@ steps:
 
 #### What bounds it
 
-- **Autonomy.** The verb is gated on the author crew's `autonomy_level`. A crew
-  whose level would *hold the action for approval* gets a refusal instead — a
-  routine has nobody attached to approve it — so on a `strict` crew, issue
-  writes and assignments do not happen. Raise the level with `crewship policy
-  set`. The full per-level table, and the reasoning for each cell, is in
+- **Autonomy.** The verb is gated on the author crew's `autonomy_level`. When
+  the level *holds the action for approval* (for example issue writes on a
+  `strict` crew), the step opens an approval card naming the action and its
+  rendered arguments, and waits: a top-level step parks the run as `WAITING`,
+  a step inside `foreach` or a nested routine blocks until decided. Approving
+  runs the action once, with the step's operation key; denial, timeout and
+  cancellation fail the step. The approval is bound to that exact call — run,
+  foreach item, step, verb and arguments — so it never unlocks another item or
+  changed arguments, and no standing trust grant approves it or is offered on
+  its card. Arguments too long for the card are marked as truncated, never cut
+  silently. Only a trusted, unsuspended workspace OWNER or ADMIN may decide it, through any door (inbox, CLI, chat card). This rule applies only to held `crewship` actions; an ordinary `wait: approval` step is unchanged (a MANAGER may still decide it, and its public callback still works) — the tier
+  `crewship approvals approve` needs for the agent path's holds — and the
+  role is checked again when the call executes; the token's public callback
+  cannot decide it, so the card carries no `callback_url`. A crash after the
+  write but before the step finished re-runs the step on resume, as for any
+  `crewship` step, and only chat-origin issue writes dedupe that replay.
+  `issue.create`, `issue.update`, `issue.comment`, `issue.link`,
+  `assignment.create` and `escalation.create` can wait; `page.create` and
+  `page.write` stage their own approval on the route and are still refused
+  when held. Rejected and blocked decisions are refusals; raise the level with
+  `crewship policy set`. The full per-level table, and the reasoning for each cell, is in
   [Autonomy → what a routine may do to the board](/guides/autonomy-and-self-learning#what-a-routine-may-do-to-the-board).
 - **Escalation volume.** `escalation.create` is allowed at *every* autonomy
   level, because an approval to authorise an interrupt is itself the interrupt.
