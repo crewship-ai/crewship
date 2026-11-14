@@ -584,28 +584,30 @@ func runtimeReadsMiseBuildCache(runtimeEnv map[string]string) bool {
 }
 
 // cleanupScript renders the cache cleanup. Every listed directory is emptied
-// and kept; keepMiseBuildCache leaves mise's build-time cache in place.
+// and kept; keepMiseBuildCache leaves mise's build-time cache in place. The
+// directories are container-side paths inside one script text, the form this
+// step has always had.
 func cleanupScript(keepMiseBuildCache bool) string {
-	dirs := []string{
-		"/var/cache/apt",
-		"/var/lib/apt/lists",
-		"/var/tmp",
-		"/tmp",
-		"/root/.cache",
-		"/root/.npm",
-		"/root/.cargo/registry/cache",
-		"/root/.cargo/registry/src",
-		"/root/.yarn/cache",
-		"/home/agent/.cache/pip",
-		"/home/agent/.npm",
+	miseLine := "  " + miseBuildCacheDir + " \\\n"
+	if keepMiseBuildCache {
+		miseLine = ""
 	}
-	if !keepMiseBuildCache {
-		dirs = append([]string{miseBuildCacheDir}, dirs...)
-	}
-	return "set -u\nfor path in \\\n  " + strings.Join(dirs, " \\\n  ") + `; do
+	return "set -u\nfor path in \\\n" + miseLine + cleanupScriptTail
+}
+
+const cleanupScriptTail = `  /var/cache/apt \
+  /var/lib/apt/lists \
+  /var/tmp \
+  /tmp \
+  /root/.cache \
+  /root/.npm \
+  /root/.cargo/registry/cache \
+  /root/.cargo/registry/src \
+  /root/.yarn/cache \
+  /home/agent/.cache/pip \
+  /home/agent/.npm; do
   rm -rf "$path"/* "$path"/.[!.]* 2>/dev/null || true
 done
 # Keep mountpoints /tmp and /var/tmp themselves; recreate if the rm wiped them.
 mkdir -p /tmp /var/tmp
 chmod 1777 /tmp /var/tmp`
-}
