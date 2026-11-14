@@ -31,6 +31,12 @@ type unattendedRun struct {
 // does before the agent starts.
 func (g *runScopeRig) unattended(t *testing.T, runID, agentID, trigger string) unattendedRun {
 	t.Helper()
+	return g.unattendedFrom(t, runID, agentID, trigger, "test-source")
+}
+
+// unattendedFrom records the run with the source its host producer names.
+func (g *runScopeRig) unattendedFrom(t *testing.T, runID, agentID, trigger, source string) unattendedRun {
+	t.Helper()
 	writer := journal.NewWriter(g.f.rig.db, newTestLogger(), journal.WriterOptions{ChainKey: []byte("synthetic-unattended-chain"), FlushSize: 1})
 	t.Cleanup(func() { _ = writer.Close() })
 	h := NewInternalHandler(g.f.rig.db, unattendedRunMaster, newTestLogger())
@@ -41,7 +47,7 @@ func (g *runScopeRig) unattended(t *testing.T, runID, agentID, trigger string) u
 	if w.Code != 201 {
 		t.Fatalf("unattended run record: %d %s", w.Code, w.Body)
 	}
-	capability, err := artifactrun.Record(t.Context(), g.f.rig.db, artifactrun.Run{WorkspaceID: g.f.a.WorkspaceID, CrewID: g.f.a.CrewID, AgentID: agentID, RunID: runID, Trigger: trigger, Source: "test-source"}, time.Hour)
+	capability, err := artifactrun.Record(t.Context(), g.f.rig.db, artifactrun.Run{WorkspaceID: g.f.a.WorkspaceID, CrewID: g.f.a.CrewID, AgentID: agentID, RunID: runID, Trigger: trigger, Source: source}, time.Hour)
 	if err != nil {
 		t.Fatal("record unattended run", err)
 	}
@@ -82,7 +88,7 @@ func (g *runScopeRig) standing(t *testing.T, slug, agent, level, issuer string) 
 type unattendedAuditRow struct {
 	User                                          *string
 	Page, Agent, Crew, Run, Reach, Operation, Trg string
-	Chat                                          string
+	Chat, Schedule                                string
 }
 
 func unattendedAuditRows(t *testing.T, g *runScopeRig) []unattendedAuditRow {
@@ -104,6 +110,7 @@ func unattendedAuditRows(t *testing.T, g *runScopeRig) []unattendedAuditRow {
 			t.Fatalf("audit metadata %q: %v", meta, err)
 		}
 		r.Agent, r.Crew, r.Run, r.Reach, r.Operation, r.Trg, r.Chat = m["agent_id"], m["crew_id"], m["run_id"], m["reach"], m["operation"], m["trigger"], m["chat_id"]
+		r.Schedule = m["schedule_id"]
 		out = append(out, r)
 	}
 	return out
@@ -562,5 +569,35 @@ func TestUnattendedRun_LostCapabilityIsSaidPlainly(t *testing.T) {
 	generic("flag off", g.toolAs(other.token, "", "artifact_versions", "ua-lost", `{}`))
 	if n := lostRows(); n != 1 {
 		t.Fatalf("generic refusals journaled a loss: %d", n)
+	}
+}
+
+// A scheduled run's every read is audited naming its schedule (owner
+// requirement e): the audit row carries schedule_id, taken from the source
+// the host producer recorded, never from the caller. Other triggers name
+// none.
+func TestUnattendedRun_ScheduledReadIsAuditedWithItsSchedule(t *testing.T) {
+	g := newRunScopeRig(t)
+	id := g.standing(t, "ua-sched", g.f.a.AgentID, "read", g.f.rig.adminID)
+	u := g.unattendedFrom(t, "ua-run-sched", g.f.a.AgentID, "SCHEDULED", "schedule:psch_nightly/routine:pln_x/step_a")
+	if w := u.tool(g, "artifact_versions", "ua-sched", `{}`); w.Code != 200 {
+		t.Fatalf("scheduled read: %d %s", w.Code, w.Body)
+	}
+	hook := g.unattended(t, "ua-run-hook", g.f.a.AgentID, "WEBHOOK")
+	if w := hook.tool(g, "artifact_versions", "ua-sched", `{}`); w.Code != 200 {
+		t.Fatalf("webhook read: %d %s", w.Code, w.Body)
+	}
+	rows := unattendedAuditRows(t, g)
+	if len(rows) != 2 {
+		t.Fatalf("want two audit rows, got %+v", rows)
+	}
+	for _, r := range rows {
+		want := ""
+		if r.Run == u.runID {
+			want = "psch_nightly"
+		}
+		if r.Page != id || r.Schedule != want {
+			t.Fatalf("run %s audited schedule %q, want %q (%+v)", r.Run, r.Schedule, want, r)
+		}
 	}
 }

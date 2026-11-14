@@ -98,7 +98,7 @@ func (h *PageHandler) unattendedCapabilityLost(r *http.Request, ws, crew, agent,
 			Type: journalArtifactRunCapabilityLost, Severity: journal.SeverityWarn,
 			ActorType: journal.ActorAgent, ActorID: agent,
 			Summary: "A run lost its artifact access: its sidecar no longer holds the run's capability",
-			Payload: map[string]any{"run_id": run, "trigger": a.Trigger, "source": a.Source},
+			Payload: map[string]any{"run_id": run, "trigger": a.Trigger, "source": a.Source, "schedule_id": artifactrun.ScheduleID(a.Trigger, a.Source)},
 		}); err != nil && h.logger != nil {
 			h.logger.Warn("journal entry for a lost run capability not written", "run_id", run, "error", err)
 		}

@@ -308,7 +308,7 @@ already-referenced runs the ordinary way, binding nothing.
   projects, Designs, Word documents, Sheets and Mooring documents (under a
   consent or mandate with reach `consented`, a created Word document with
   `created`, a read through the scope with its reach). A run without a
-  human has no user on the record; its metadata names the trigger and source.
+  human has no user on the record; its metadata names the trigger and source, and a scheduled run also its `schedule_id`.
   Reads and writes are recorded once per run and artifact, creates every
   time. Native Craft tasks are not covered. Read them with
   `crewship audit --action artifact.agent_run_accessed -f json`.

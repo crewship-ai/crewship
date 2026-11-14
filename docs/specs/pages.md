@@ -849,7 +849,8 @@ owner on 2026-11-13.
    `folder`) and the operation (`read`, `write`, `create`). It holds no
    content. A run without a human (item 10) has no user on the row (`user_id`
    is NULL: no human acted, and the grant's issuer did not perform the
-   access); its metadata names the trigger and source instead of a chat.
+   access); its metadata names the trigger and source instead of a chat, and
+   a scheduled run also its `schedule_id` (read from the host-recorded source).
    Reads and writes are recorded once per run, artifact and operation
    (a later access re-verifies the existing row); each individual write is
    already in the version history with the run as its actor. The row keeps the

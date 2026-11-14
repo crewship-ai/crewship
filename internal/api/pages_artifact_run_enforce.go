@@ -9,6 +9,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifactrun"
 	"github.com/crewship-ai/crewship/internal/artifacts"
 	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -333,6 +334,9 @@ func recordAgentRunArtifactAccess(ctx context.Context, tx *sql.Tx, a *artifactRu
 		user = nil
 		delete(fields, "chat_id")
 		fields["trigger"], fields["source"] = a.Trigger, a.Source
+		if sched := artifactrun.ScheduleID(a.Trigger, a.Source); sched != "" {
+			fields["schedule_id"] = sched
+		}
 	}
 	meta, err := json.Marshal(fields)
 	if err != nil {

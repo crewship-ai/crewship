@@ -155,3 +155,14 @@ func Matches(capability, storedDigest string) bool {
 	}
 	return subtle.ConstantTimeCompare([]byte(Digest(capability)), []byte(storedDigest)) == 1
 }
+
+// ScheduleID is the schedule a scheduled run belongs to, read from the source
+// its host producer recorded ("schedule:<id>/routine:..."), or "".
+func ScheduleID(trigger, source string) string {
+	rest, ok := strings.CutPrefix(source, "schedule:")
+	if trigger != TriggerScheduled || !ok {
+		return ""
+	}
+	id, _, _ := strings.Cut(rest, "/")
+	return id
+}

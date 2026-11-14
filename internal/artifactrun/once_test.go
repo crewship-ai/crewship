@@ -46,3 +46,18 @@ func TestOnce_ForgetsAfterTheLongestRun(t *testing.T) {
 		t.Fatalf("past the limit the expired keys were not dropped first: %d kept", o.Len())
 	}
 }
+
+// Only a scheduled run's host-written source names a schedule.
+func TestScheduleID(t *testing.T) {
+	for _, tc := range []struct{ trigger, source, want string }{
+		{TriggerScheduled, "schedule:psch_1/routine:p/s", "psch_1"},
+		{TriggerScheduled, "routine:p/s", ""},
+		{TriggerRoutine, "schedule:psch_1/routine:p/s", ""},
+		{"WEBHOOK", "schedule:psch_1", ""},
+		{TriggerScheduled, "schedule:psch_2", "psch_2"},
+	} {
+		if got := ScheduleID(tc.trigger, tc.source); got != tc.want {
+			t.Errorf("ScheduleID(%q, %q) = %q, want %q", tc.trigger, tc.source, got, tc.want)
+		}
+	}
+}
