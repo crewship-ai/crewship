@@ -649,12 +649,6 @@ func bundleReferencesAgents(b *Bundle) bool {
 	return len(b.Pages) > 0
 }
 
-// appendKindItems converts a []internalapi.PlanItem into the
-// manifest-package PlanItem shape, mapping the action enum and
-// wrapping the Exec closure so the existing apply pipeline can run
-// it. The kinds package never sees manifest.Options, so its closures
-// take just (ctx, internalapi.Client); the wrapper here passes the
-// already-adapted client and ignores opts.
 // crewFilesToWrite counts the crew-file items of a kind: Crew plan that will
 // write. A file the crew already holds byte-for-byte plans as unchanged and
 // is never saved, so it cannot hit the stopped-crew 409 and must not count
@@ -669,6 +663,12 @@ func crewFilesToWrite(items []internalapi.PlanItem) int {
 	return n
 }
 
+// appendKindItems converts a []internalapi.PlanItem into the
+// manifest-package PlanItem shape, mapping the action enum and
+// wrapping the Exec closure so the existing apply pipeline can run
+// it. The kinds package never sees manifest.Options, so its closures
+// take just (ctx, internalapi.Client); the wrapper here passes the
+// already-adapted client and ignores opts.
 func (pb *planBuilder) appendKindItems(items []internalapi.PlanItem) {
 	for _, it := range items {
 		action := mapKindAction(it.Action)
