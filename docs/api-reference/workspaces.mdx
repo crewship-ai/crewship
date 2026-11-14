@@ -1592,8 +1592,8 @@ that JSON. Rejected decisions follow the wait step's failure behavior.
 | Status | Condition |
 |---|---|
 | `400` | Missing `token` or invalid body |
-| `403` | The decider is not a person: an agent's internal token, or no principal at all. The waitpoint is untouched and the attempt is on the audit log as `waitpoint.decision_refused`. |
-| `409` | Waitpoint already decided or expired |
+| `403` | The decider is not a person (an agent's internal token, or no principal at all), or, for a held routine action, not a trusted workspace OWNER or ADMIN (`a held routine action needs a workspace OWNER or ADMIN to decide it`). The waitpoint is untouched and the attempt is on the audit log as `waitpoint.decision_refused`. |
+| `409` | Waitpoint already decided, timed out, or its run was cancelled. The message names which, for a token of the caller's own workspace; otherwise it is `waitpoint: already decided or expired` |
 | `503` | Waitpoint store not wired, or the wired implementation does not support completion |
 
 #### Defaults differ from the public callback — intentionally
@@ -1642,7 +1642,7 @@ On success the parked run is resumed via the same path as the authed approve han
 | Status | Condition |
 |---|---|
 | `400` | Missing `token`, or an unparseable request body (`internal/api/pipeline_waitpoint_callback.go:26-42`) |
-| `409` | Waitpoint already decided or expired (`internal/api/pipeline_waitpoint_callback.go:65-67`) |
+| `409` | Waitpoint already decided, timed out, or its run was cancelled. The message names which, for a token of the caller's own workspace; otherwise it is `waitpoint: already decided or expired` (`internal/api/pipeline_waitpoint_callback.go:65-67`) |
 | `500` | Completion failed for any other reason (`internal/api/pipeline_waitpoint_callback.go:69-71`) |
 | `503` | Waitpoint store not wired, or the wired implementation does not support completion (`internal/api/pipeline_waitpoint_callback.go:22-24,56-59`) |
 
