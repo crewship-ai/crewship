@@ -40,6 +40,10 @@ const (
 	// scope by crew (credential metadata listing) consult this instead of
 	// trusting the query parameter.
 	ctxInternalTokenCrew contextKey = "internal_token_crew"
+	// ctxInternalTokenMaster is true only when requireInternal authenticated
+	// the unbound master token, which is pinned to loopback and held by
+	// host-side services only (never by a crew container) (#5336).
+	ctxInternalTokenMaster contextKey = "internal_token_master"
 	// ctxAuthKind records WHICH credential authenticated the request:
 	// AuthKindSession (an interactive user_sessions-backed login) or
 	// AuthKindCLIToken (a long-lived bearer token — the PAT analogue an
@@ -878,4 +882,11 @@ func internalWsCtx(next http.Handler) http.Handler {
 		ctx := context.WithValue(r.Context(), ctxWorkspaceID, wsID)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
+}
+
+// internalTokenIsMaster reports a request authenticated by the host-side
+// master internal token (see ctxInternalTokenMaster).
+func internalTokenIsMaster(ctx context.Context) bool {
+	v, _ := ctx.Value(ctxInternalTokenMaster).(bool)
+	return v
 }
