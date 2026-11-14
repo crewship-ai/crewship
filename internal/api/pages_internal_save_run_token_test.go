@@ -344,3 +344,24 @@ func TestPageSaveRunToken_ReadErrorsFailClosed(t *testing.T) {
 		}
 	})
 }
+
+// F1, below the host-origin guard: even if a forged routine header reached the
+// handler, the exemption is the master-token authentication alone.
+func TestPageSaveRunToken_ExemptionIgnoresRoutineHeaders(t *testing.T) {
+	g := runTokenSaveRig(t)
+	mustExec(t, g.f.rig.db, `UPDATE workspace_artifact_creation_policy SET save_requires_run_token=1 WHERE workspace_id=?`, g.f.a.WorkspaceID)
+	h := NewPageHandler(g.f.rig.db, nil, newTestLogger())
+	h.SetPolicyResolver(policy.NewResolver(g.f.rig.db))
+	h.artifactMasterToken = runTokenSaveMaster
+	body := `{"workspace_id":"` + g.f.a.WorkspaceID + `","crew_id":"` + g.f.a.CrewID + `","name":"Forged below guard",` +
+		`"panels":[{"id":"p1","schema":"status.v1","owner":"crew/principal-crew","producer":"agent/principal-agent","sla_seconds":30,"span":4}]}`
+	ctx := context.WithValue(context.WithValue(t.Context(), ctxInternalTokenWS, g.f.a.WorkspaceID), ctxInternalTokenCrew, g.f.a.CrewID)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/pages/save", bytes.NewBufferString(body)).WithContext(ctx)
+	req.Header.Set("X-Crewship-Pipeline-Run", "routine-run-1")
+	req.Header.Set("X-Crewship-Chat-Origin", g.f.a.ChatID)
+	w := httptest.NewRecorder()
+	h.InternalSave(w, req)
+	if w.Code != http.StatusForbidden || !bytes.Contains(w.Body.Bytes(), []byte(`"run_token_required"`)) {
+		t.Fatalf("forged routine headers below the guard: %d %s", w.Code, w.Body)
+	}
+}
