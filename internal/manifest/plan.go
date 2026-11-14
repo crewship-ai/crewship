@@ -394,6 +394,11 @@ type planBuilder struct {
 	// a seam for tests, which have no server to ask and would otherwise
 	// have to stand one up to exercise a single advisory line.
 	containerStatusFn func(crewID string) (running bool, known bool)
+
+	// crewFileContentFn reads a crew file's current bytes (ok=false when the
+	// server cannot hand them over). nil means pb.client.CrewFileContent; a
+	// seam so plan tests need no file-download fake.
+	crewFileContentFn func(crewID, path string) (data []byte, ok bool)
 }
 
 func (pb *planBuilder) appendItem(action Action, kind, desc string, exec func(ctx context.Context, c *Client, opts Options) error) {

@@ -45,6 +45,8 @@ crewship apply --file team.yaml --from-env
 
 The most common shape. Reads credential values from env vars matching each `env:` entry in the manifest. Re-running converges drift.
 
+A crew file (`files:`) whose bytes already match the crew's copy plans as unchanged (`=`) and is not written again; a changed, missing or unreadable file (for example on a stopped crew) is written. Skills are still re-imported on every apply.
+
 ### Dry-run as a CI check
 
 ```bash
