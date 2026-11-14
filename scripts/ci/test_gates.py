@@ -5,16 +5,16 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
-from plan import classify, changed_paths, full_matrix, release_changed
-from verdict import ALWAYS, CODE, FULL, GO, PARITY, failures
+from plan import classify, changed_paths, craft_changed, full_matrix, release_changed
+from verdict import ALWAYS, CODE, CRAFT, FULL, GO, PARITY, failures
 from parity import TESTS, missing_tests
 
 
 class GateTests(unittest.TestCase):
     def test_api_bootstrap_cannot_be_missing_or_skipped_for_go_change(self):
         self.assertIn('go-race-api-template', GO)
-        plan = {'code': 'true', 'go': 'true', 'release': 'true', 'full': 'true', **{key: 'false' for key in PARITY.values()}}
-        good = {name: {'result': 'success'} for name in ALWAYS | CODE | GO | {'release-rehearsal'}}
+        plan = {'code': 'true', 'go': 'true', 'release': 'true', 'craft': 'true', 'full': 'true', **{key: 'false' for key in PARITY.values()}}
+        good = {name: {'result': 'success'} for name in ALWAYS | CODE | GO | CRAFT | {'release-rehearsal'}}
         good.update({name: {'result': 'skipped'} for name in PARITY})
         good['changes']['outputs'] = plan
         self.assertEqual(failures(good), [])
@@ -164,6 +164,7 @@ class GateTests(unittest.TestCase):
                 self.assertTrue(result['code'])
                 self.assertTrue(result['go'])
                 self.assertEqual(result['release'], name == 'workflow_dispatch')
+                self.assertTrue(result['craft'])
                 self.assertFalse(result['go_parity'])
                 self.assertFalse(result['frontend_parity'])
                 self.assertFalse(result['docs_inventory'])
@@ -184,9 +185,10 @@ class GateTests(unittest.TestCase):
 
     def results(self, code='true', go='true'):
         needs = {n: {'result': 'success'} for n in ALWAYS | CODE | GO}
-        needs['changes']['outputs'] = {'code': code, 'go': go, 'release': 'false', 'full': 'true', 'go_parity': 'false', 'frontend_parity': 'false', 'docs_inventory': 'false'}
+        needs['changes']['outputs'] = {'code': code, 'go': go, 'release': 'false', 'craft': 'false', 'full': 'true', 'go_parity': 'false', 'frontend_parity': 'false', 'docs_inventory': 'false'}
         needs.update({name: {'result': 'skipped'} for name in PARITY})
         needs['release-rehearsal'] = {'result': 'skipped'}
+        needs.update({name: {'result': 'success' if code == 'true' else 'skipped'} for name in CRAFT})
         for n in CODE if code == 'false' else []:
             needs[n]['result'] = 'skipped'
         for n in GO if go == 'false' else []:
@@ -202,6 +204,179 @@ class GateTests(unittest.TestCase):
         self.assertTrue(failures(needs))
         needs['release-rehearsal']['result'] = 'success'
         self.assertEqual(failures(needs), [])
+
+    # Paths the gate drives through (#5362, #5365 review) and the inputs of the
+    # retired craft-components-candidate.yml: each is code, so the gate runs.
+    GATE_PATHS = [
+        'components/features/pages/native-craft-editor-host.tsx', 'components/features/pages/native-craft-lease-bar.tsx',
+        'components/features/pages/page-workbook.tsx', 'app/(dashboard)/pages/craft/editor/page.tsx',
+        'lib/mooring/channel.ts', 'lib/workbooks/bridge.ts', 'lib/editor-lifecycle/use-leave-guard.ts', 'lib/api-fetch.ts',
+        'hooks/use-realtime.ts', 'internal/server/security_headers.go', 'internal/server/craft_native.go',
+        'internal/server/editor_origin.go', 'internal/server/editor_selfcheck.go', 'internal/api/craft_native_sessions.go',
+        'internal/config/craft_native.go', 'cmd/crewship/cmd_admin_instance_applications.go',
+        '.github/actions/setup-playwright-browser/action.yml', 'package.json', 'pnpm-lock.yaml',
+        'e2e/acceptance/prd/env.ts', 'e2e/craft-packages/craft-package-gate.spec.ts', 'scripts/ci/craft-package-gate.sh',
+        'playwright.craft-packages.config.ts',
+        # craft-components-candidate.yml on.pull_request.paths
+        '.github/workflows/release.yml', 'tools/craft-components/components.json', 'scripts/build-craft-components.py',
+        'scripts/test_build_craft_components.py', 'scripts/build-mooring-runtime.py', 'mooring/build-tools.json',
+        'scripts/check-craft-packages.sh', '.goreleaser.yml', 'Dockerfile', 'internal/craftassets/catalog.go',
+        'internal/craftapps/policy.go', 'internal/craftengine/wasm.go', 'internal/editororigin/editororigin.go',
+        'internal/server/craft_apps.go', 'internal/server/craft_apps_release_packages_test.go',
+    ]
+
+    def test_craft_gate_runs_with_every_code_change(self):
+        self.assertEqual(CRAFT, {'craft-packages-build', 'craft-packages'})
+        for path in self.GATE_PATHS:
+            self.assertTrue(classify([path])['code'], path)
+        # A host-only change is code: both jobs must succeed although nothing is rebuilt.
+        host = ['components/features/pages/native-craft-editor-host.tsx']
+        self.assertFalse(craft_changed(host))
+        needs = self.results()
+        self.assertEqual(failures(needs), [])
+        for name in CRAFT:
+            for result in ['failure', 'cancelled', 'skipped', None]:
+                bad = {k: dict(v) for k, v in needs.items()}
+                bad[name]['result'] = result
+                self.assertTrue(failures(bad), (name, result))
+            bad = self.results()
+            del bad[name]
+            self.assertTrue(failures(bad), name)
+        # Skipped only without code; a plan without the craft key fails closed.
+        self.assertEqual(failures(self.results('false', 'false')), [])
+        del needs['changes']['outputs']['craft']
+        self.assertTrue(failures(needs))
+
+    def test_craft_rebuild_inputs(self):
+        for path in ['tools/craft-components/catalog.txt', 'tools/craft-components/patches/gridcraft-wasi.patch',
+                     'scripts/build-craft-components.py', 'scripts/build-mooring-runtime.py', 'mooring/build-tools.json',
+                     'scripts/check-craft-packages.sh', '.github/workflows/ci.yml', 'scripts/ci/plan.py', 'scripts/ci/verdict.py']:
+            self.assertTrue(craft_changed([path]), path)
+        self.assertFalse(craft_changed(['components/button.tsx', 'docs/guide.mdx', 'internal/api/foo.go']))
+
+    def craft_repo(self, root):
+        def git(*args):
+            return subprocess.check_output(['git', *args], cwd=root, text=True).strip()
+        git('init', '-q')
+        git('config', 'user.email', 'ci@example.invalid')
+        git('config', 'user.name', 'CI')
+        commits = {}
+        for name, path, text in [('base', 'README.md', 'a\n'), ('docs', 'README.md', 'b\n'),
+                                 ('pins', 'tools/craft-components/catalog.txt', 'pins\n'),
+                                 ('host', 'components/features/pages/native-craft-editor-host.tsx', 'host\n')]:
+            Path(root, path).parent.mkdir(parents=True, exist_ok=True)
+            Path(root, path).write_text(text)
+            git('add', '.')
+            git('commit', '-qm', name)
+            commits[name] = git('rev-parse', 'HEAD')
+        return commits
+
+    def run_plan(self, root, name, event):
+        # Inside .git: never part of a later commit's diff.
+        event_path, output = Path(root, '.git', 'event.json'), Path(root, '.git', 'out')
+        event_path.write_text(json.dumps(event))
+        return json.loads(subprocess.check_output(
+            ['python3', str(Path(__file__).with_name('plan.py'))], cwd=root, text=True,
+            env={**os.environ, 'GITHUB_EVENT_NAME': name, 'GITHUB_EVENT_PATH': str(event_path), 'GITHUB_OUTPUT': str(output)}))
+
+    def test_pull_request_and_merge_group_plan_craft_from_their_diff(self):
+        with tempfile.TemporaryDirectory() as root:
+            c = self.craft_repo(root)
+            for name, wrap in [('pull_request', lambda b, h: {'pull_request': {'base': {'sha': b}, 'head': {'sha': h}, 'labels': []}}),
+                               ('merge_group', lambda b, h: {'merge_group': {'base_sha': b, 'head_sha': h}})]:
+                pins = self.run_plan(root, name, wrap(c['docs'], c['pins']))
+                self.assertTrue(pins['craft'], name)
+                self.assertTrue(pins['code'], name)
+                host = self.run_plan(root, name, wrap(c['pins'], c['host']))
+                # Nothing to rebuild, but the host changed: the gate jobs are planned with code.
+                self.assertFalse(host['craft'], name)
+                self.assertTrue(host['code'], name)
+                docs = self.run_plan(root, name, wrap(c['base'], c['docs']))
+                self.assertFalse(docs['craft'] or docs['code'], name)
+
+    def test_push_plans_craft_from_its_diff(self):
+        with tempfile.TemporaryDirectory() as root:
+            c = self.craft_repo(root)
+            plan = lambda name, event: self.run_plan(root, name, event)
+            # A computable push diff decides; the other suites of a push stay complete.
+            quiet = plan('push', {'before': c['base'], 'after': c['docs']})
+            self.assertFalse(quiet['craft'])
+            self.assertTrue(quiet['code'] and quiet['go'] and quiet['full'])
+            self.assertTrue(plan('push', {'before': c['docs'], 'after': c['pins']})['craft'])
+            self.assertTrue(plan('push', {'before': c['base'], 'after': c['pins']})['craft'])
+            self.assertFalse(plan('push', {'before': c['pins'], 'after': c['host']})['craft'])
+            # No computable diff: a new branch, a forced push, an unknown commit, a dispatch.
+            for name, event in [('push', {'before': '0' * 40, 'after': c['docs']}),
+                                ('push', {'before': c['base'], 'after': c['docs'], 'forced': True}),
+                                ('push', {'before': 'f' * 40, 'after': c['docs']}),
+                                ('push', {'after': c['docs']}),
+                                ('push', {}),
+                                ('workflow_dispatch', {'before': c['base'], 'after': c['docs']})]:
+                self.assertTrue(plan(name, event)['craft'], (name, event))
+
+    # The host side of the packaged editors (#5362: #5134's bug was in the host, not
+    # in a package). Globs are enumerated from the checkout at test time, so a new file
+    # of a family is covered without editing this list.
+    HOST_FAMILIES = {
+        'native craft host': ['components/features/pages/native-craft-*.tsx'],
+        'wordcraft host': ['components/features/pages/wordcraft-editor-host.tsx'],
+        # channel.ts defines verifyEditorHello; the native port and the workbook bridge call it.
+        'hello verification': ['lib/mooring/channel.ts', 'lib/mooring/native-editor-port.ts', 'lib/workbooks/bridge.ts'],
+        # createEditorFrame builds the sandboxed iframe; nativeCraftFrameURL (in the
+        # native host above) builds its URL; the server serves the editor origin.
+        'frame embedding': ['components/features/pages/workbook-editor-host.tsx', 'internal/server/editor_origin.go'],
+        'editor origin': ['internal/editororigin/**', 'internal/server/editor_selfcheck.go', 'internal/server/security_headers.go'],
+        'editor assets': ['internal/craftassets/**'],
+        'native server': ['internal/server/craft_native.go'],
+        'native api': ['internal/api/craft_native_*.go'],
+    }
+
+    def host_paths(self):
+        root = Path(__file__).resolve().parents[2]
+        families = {}
+        for family, specs in self.HOST_FAMILIES.items():
+            paths = subprocess.check_output(['git', 'ls-files', '-z', '--', *specs], cwd=root, text=True).split('\0')
+            families[family] = sorted(p for p in paths if p)
+            # Every spec must match: a renamed or moved family must not drop out silently.
+            for spec in specs:
+                self.assertTrue(subprocess.check_output(['git', 'ls-files', '--', spec], cwd=root, text=True).strip(), spec)
+        return families
+
+    def assert_gate_required(self, plan, why):
+        self.assertTrue(plan['code'], why)
+        needs = self.results()
+        needs['changes']['outputs'] = {k: str(v).lower() for k, v in plan.items()}
+        for name in sorted(CRAFT):
+            bad = {k: dict(v) for k, v in needs.items()}
+            bad[name]['result'] = 'skipped'
+            self.assertIn(f'{name}: expected success, got skipped', failures(bad), (why, name))
+
+    def test_gate_runs_when_the_host_changes(self):
+        families = self.host_paths()
+        with tempfile.TemporaryDirectory() as root:
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=root, text=True).strip()
+            git('init', '-q')
+            git('config', 'user.email', 'ci@example.invalid')
+            git('config', 'user.name', 'CI')
+            Path(root, 'README.md').write_text('base\n')
+            git('add', '.')
+            git('commit', '-qm', 'base')
+            before = git('rev-parse', 'HEAD')
+            events = [('pull_request', lambda b, h: {'pull_request': {'base': {'sha': b}, 'head': {'sha': h}, 'labels': []}}),
+                      ('merge_group', lambda b, h: {'merge_group': {'base_sha': b, 'head_sha': h}}),
+                      ('push', lambda b, h: {'before': b, 'after': h})]
+            for family, paths in families.items():
+                for path in paths:
+                    # One commit that touches only this host file.
+                    Path(root, path).parent.mkdir(parents=True, exist_ok=True)
+                    Path(root, path).write_text(f'{path}\n')
+                    git('add', '.')
+                    git('commit', '-qm', path)
+                    after = git('rev-parse', 'HEAD')
+                    for name, wrap in events:
+                        self.assert_gate_required(self.run_plan(root, name, wrap(before, after)), (family, path, name))
+                    before = after
 
     def test_all_actual_mooring_lane_cannot_be_missing_or_not_executed(self):
         self.assertIn('mooring-actual', CODE)

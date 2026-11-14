@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Word and Sheet packages are pinned only after their editors work in a browser (#5362).** The required CI jobs `craft-packages-build` and `craft-packages` install both packages in a throwaway server and open each editor through the real host in Chromium: open, edit, save, reopen. They replace the Craft Packages Candidate Check and run with every code change; the packages are rebuilt only when their recipe changes.
+
 - **Fixed: the Word and Sheet editors connect again.** Since #5134 the page dropped the editor's first message, because its sandboxed frame always speaks with the opaque origin `null`, so native Word and Sheet documents never opened and showed "The editor did not connect safely" after 20 seconds. The page now accepts that message only from its own editor frame's window and still requires the opaque origin and the pinned bundle.
 - **An agent's chat-run artifact access is audited with its human, behind a flag (#5317).** With `artifact_agent_access_modes` on, every artifact project a chat run reads, writes or creates leaves an `artifact.agent_run_accessed` audit record naming the human, agent, run, reach and operation, written with the access; if it cannot be written the access is refused. Reads and writes are recorded once per run and artifact, creates every time. Designs, Word documents, Sheets and Mooring documents are covered too (see the Designs, Word, Sheet and Mooring entry below). `crewship audit -f json` now includes each record's metadata. With the flag off nothing changes.
 

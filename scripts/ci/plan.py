@@ -2,6 +2,7 @@
 """Conservative CI routing. Unknown inputs always require the full Go suite."""
 import json
 import os
+import re
 from pathlib import PurePosixPath
 import subprocess
 
@@ -45,6 +46,39 @@ def full_matrix(event_name, paths, labels):
     if event_name != 'pull_request':
         return True
     return release_changed(paths) or FULL_CI_LABEL in labels
+
+
+# Inputs that change what the Word and Sheet packages are built from, or how CI
+# builds and judges them (#5315, #5362). `craft` means "rebuild the packages,
+# do not trust the cache". The packages' browser gate itself (craft-packages)
+# runs on every code change: the host, server and install code it drives is
+# spread over the tree, so no path list can safely skip it.
+CRAFT_PREFIXES = ('tools/craft-components/',)
+CRAFT_FILES = {
+    'scripts/build-craft-components.py', 'scripts/test_build_craft_components.py', 'scripts/build-mooring-runtime.py',
+    'mooring/build-tools.json', 'scripts/check-craft-packages.sh', '.github/workflows/ci.yml',
+    '.github/workflows/release.yml', 'scripts/ci/plan.py', 'scripts/ci/verdict.py',
+}
+
+
+def craft_changed(paths):
+    return any(path in CRAFT_FILES or path.startswith(CRAFT_PREFIXES) for path in paths)
+
+
+def push_craft(name, event):
+    """Whether a run without a pull request or merge group diff needs the
+    Craft packages. Only a push with a computable before/after diff can rule
+    them out; a new branch, a forced push, a dispatch or an unreadable diff
+    cannot."""
+    before, after = event.get('before'), event.get('after')
+    if (name != 'push' or event.get('forced') or not isinstance(before, str) or not isinstance(after, str)
+            or not re.fullmatch(r'[0-9a-f]{40}', before) or not re.fullmatch(r'[0-9a-f]{40}', after)
+            or set(before) == {'0'}):
+        return True
+    try:
+        return craft_changed(changed_paths(before, after))
+    except (subprocess.CalledProcessError, OSError):
+        return True
 
 
 def changed_paths(base, head):
@@ -95,10 +129,14 @@ def main():
         paths = changed_paths(base, head)
         result = classify(paths)
         result['release'] = release_changed(paths)
+        result['craft'] = craft_changed(paths)
     else:
         paths = ['unknown/full-suite']
         result = classify(paths)
         result['release'] = name == 'workflow_dispatch'
+        # The package build costs 16-20 minutes, so a push is planned from its
+        # own diff; every other suite of a push stays complete.
+        result['craft'] = push_craft(name, event)
     labels = [label.get('name') for label in event.get('pull_request', {}).get('labels', [])]
     result['full'] = full_matrix(name, paths, labels)
     with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
