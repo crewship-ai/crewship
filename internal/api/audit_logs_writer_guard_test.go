@@ -76,6 +76,7 @@ var legacyAuditInsertSites = map[string]string{
 	"internal/api/pages_private_audience.go:recordPrivateOwnerAccess":            "read-access record (workspace OWNER/ADMIN reading a private Page; PRD §5); written on the read transaction, no access changes",
 	"internal/chataudience/private_artifact_read.go:CanReadArtifactConversation": "read-access record (OWNER reading a private chat artifact); conditional insert re-checks authority, no access changes",
 	"internal/api/agent_persona.go:SuggestAgentPersona":                          "persona.suggest_pending proposal record read by the inbox; a pending suggestion changes no access",
+	"internal/api/pages_artifact_run_enforce.go:recordAgentRunArtifactAccess":    "access record (a flag-on chat run reading, writing or creating an artifact for its human; #5317 §7.1c item 11); fail-closed in the access transaction, kept out of the member-readable journal, no access changes",
 }
 
 // Entity types whose rows carry fields that decide what someone may reach.

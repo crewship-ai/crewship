@@ -491,7 +491,7 @@ func (h *PageHandler) PublishArtifactProject(w http.ResponseWriter, r *http.Requ
 		artifactProjectError(w, err)
 		return
 	}
-	bound, cleanup, e := artifactStorageUpload(w, r, h.artifactProjectStore(r.Context()), k, 36<<20, h.artifactProjectAuthority(r, k, true, false))
+	bound, cleanup, e := artifactStorageUpload(w, r, h.artifactProjectStore(r.Context()), k, 36<<20, artifactAuditProbe(h.artifactProjectAuthority(r, k, true, false)))
 	if e != nil {
 		artifactProjectError(w, e)
 		return
@@ -515,7 +515,12 @@ func (h *PageHandler) PublishArtifactProject(w http.ResponseWriter, r *http.Requ
 	writeJSON(w, 200, h.artifactProjectReceipt(r, k, out))
 }
 func (h *PageHandler) artifactProjectCheck(r *http.Request, k artifacts.VersionKey, write bool) error {
-	_, err := h.artifactProjectStore(r.Context()).Quota(r.Context(), k, h.artifactProjectAuthority(r, k, write, false))
+	authority := h.artifactProjectAuthority(r, k, write, false)
+	if write {
+		// A write pre-check; the write's own transaction records the audit.
+		authority = artifactAuditProbe(authority)
+	}
+	_, err := h.artifactProjectStore(r.Context()).Quota(r.Context(), k, authority)
 	return err
 }
 func (h *PageHandler) RestoreArtifactProject(w http.ResponseWriter, r *http.Request) {
@@ -523,7 +528,7 @@ func (h *PageHandler) RestoreArtifactProject(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	if _, err := h.artifactProjectStore(r.Context()).Quota(r.Context(), k, h.artifactProjectOwnerAuthority(r, k)); err != nil {
+	if _, err := h.artifactProjectStore(r.Context()).Quota(r.Context(), k, artifactAuditProbe(h.artifactProjectOwnerAuthority(r, k))); err != nil {
 		artifactProjectError(w, err)
 		return
 	}
@@ -695,7 +700,7 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 			}
 		}
 		if owner || editor {
-			_, writeErr := h.artifactProjectAuthority(r, k, true, false)(ctx, tx)
+			_, writeErr := h.artifactProjectAuthority(r, k, true, false)(context.WithValue(ctx, artifactAuditProbeKey{}, true), tx)
 			if writeErr != nil && !errors.Is(writeErr, errArtifactProjectAccess) {
 				return "", artifacts.VersionSelection{}, writeErr
 			}
@@ -727,7 +732,10 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	notifyDesignAdminAudit(r)
-	comments, err := h.artifactProjectComments(r, k, view.State.Manifest.Version, !owner && !adminRead)
+	// The View transaction above recorded this read; loading its comments in a
+	// second transaction must not stand in for that record.
+	commentsReq := r.WithContext(context.WithValue(r.Context(), artifactAuditProbeKey{}, true))
+	comments, err := h.artifactProjectComments(commentsReq, k, view.State.Manifest.Version, !owner && !adminRead)
 	if err != nil {
 		artifactProjectError(w, err)
 		return
