@@ -685,8 +685,12 @@ owner on 2026-11-13.
    or Mooring document's read and write under a mandate (reach `consented`).
    A Docs proposal or read that reaches the Document through a folder at
    `propose` is recorded with reach `folder`.
-   Leases carry no content and are not recorded. Native Word and Sheet Craft
-   tasks are not audited by this row. The row's
+   Leases carry no content and are not recorded. A Sheet write is recorded by
+   the transaction that commits it; the read-only rebase prescan and the
+   reservation before the engine runs only admit it and record nothing. A
+   Design apply always saves a version, even when it changes no node, so it is
+   recorded as a write. Native Word and Sheet Craft tasks are not audited by
+   this row. The row's
    user is the human the agent acted for; its metadata names the agent, crew,
    run, chat, the reach (`referenced`, `created`, `consented`, `standing` or
    `folder`) and the operation (`read`, `write`, `propose`, `create`); a Docs

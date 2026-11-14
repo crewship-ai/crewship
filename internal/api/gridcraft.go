@@ -801,7 +801,13 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		if body.Action == "apply" {
 			operation = "write"
 		}
-		if h.pages.recordConsentedRunAccess(ctx, tx, a, k.PageID, operation) != nil {
+		auditCtx := ctx
+		if appengine.Precheck(ctx) {
+			// The read-only prescan and the reservation only admit the write;
+			// the commit transaction records it.
+			auditCtx = artifactAuditProbeContext(ctx)
+		}
+		if h.pages.recordConsentedRunAccess(auditCtx, tx, a, k.PageID, operation) != nil {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
 		// The mandate's base revision is also the agent's history floor: the

@@ -55,10 +55,12 @@ func wantKindAudit(t *testing.T, f *artifactPrincipalFixture, want map[string]st
 }
 
 type sheetRunRig struct {
-	f     *artifactPrincipalFixture
-	h     *gridcraftHTTP
-	human func(method, path, body string) *http.Request
-	token string
+	f      *artifactPrincipalFixture
+	h      *gridcraftHTTP
+	engine *gridcraftBlockingEngine
+	store  *appengine.Store
+	human  func(method, path, body string) *http.Request
+	token  string
 }
 
 func newSheetRunRig(t *testing.T, flagOn bool) *sheetRunRig {
@@ -93,7 +95,7 @@ func newSheetRunRig(t *testing.T, flagOn bool) *sheetRunRig {
 		agentAccessModesOn(t, f)
 	}
 	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(f.pages.artifactMasterToken, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, f.a.RunID)
-	return &sheetRunRig{f: f, h: h, human: human, token: token}
+	return &sheetRunRig{f: f, h: h, engine: engine, store: store, human: human, token: token}
 }
 
 func (g *sheetRunRig) call(body string) *httptest.ResponseRecorder {
@@ -361,5 +363,80 @@ func TestRunScopeDocument_WriteUnderAnotherPersonsLeaseEndsAsAProposal(t *testin
 	}
 	if got[intent.PageID+"/propose"] != "consented" {
 		t.Fatalf("the proposal was not audited as a propose: %v", got)
+	}
+}
+
+// The reservation only admits a Sheet write: when the write is refused after
+// it (here the mandate is revoked while the engine computes the candidate),
+// no write is recorded. The commit transaction records the write.
+func TestRunScopeSheet_WriteRefusedAfterReservationRecordsNothing(t *testing.T) {
+	g := newSheetRunRig(t, true)
+	g.engine.before = func() {
+		mustExec(t, g.f.rig.db, `UPDATE gridcraft_intents SET revoked_at='2026-01-01T00:00:00Z' WHERE mandate_id='cell-edit'`)
+	}
+	if w := g.call(sheetRunApply); w.Code == 200 {
+		t.Fatalf("write after revocation: %s", w.Body)
+	}
+	if rev := sheetHead(t, g.f); rev != 1 {
+		t.Fatalf("refused write moved the head to %d", rev)
+	}
+	if rows := kindAuditRows(t, g.f); len(rows) != 0 {
+		t.Fatalf("a write refused after its reservation was recorded: %+v", rows)
+	}
+}
+
+// The read-only rebase prescan is a precheck: with the flag on it records
+// nothing and still runs (it cannot write, so recording there would always
+// fail and silently disable it).
+func TestRunScopeSheet_PrescanRunsWithTheFlagOn(t *testing.T) {
+	g := newSheetRunRig(t, true)
+	wantCode(t, g.call(sheetRunApply), 200, "first write")
+	prescans := 0
+	g.store.ObserveWindowScan(func(inWriter bool, _ int64) {
+		if !inWriter {
+			prescans++
+		}
+	})
+	// The same mandate's next mutation is still at the mandate's base, behind
+	// the head: it is rebased, and the prescan scans that window first.
+	rebased := `{"action":"apply","artifact_id":"grid-run-page","mandate_id":"cell-edit","request":{"mutation_id":"agent-edit-2","mandate_id":"cell-edit","base_rev":1,"generation":1,"read_set":{"cells":[]},"command":{"kind":"cell.set","sheet":"Sheet1","cell":"B2","input":"43"}}}`
+	wantCode(t, g.call(rebased), 200, "rebased write")
+	if prescans == 0 {
+		t.Fatal("the read-only prescan did not run with the flag on")
+	}
+	if rev := sheetHead(t, g.f); rev != 3 {
+		t.Fatalf("head %d, want 3", rev)
+	}
+}
+
+// The member-read check of a consent-path access: the kind's own gate already
+// requires the human to own the artifact today, so this check is defence in
+// depth; asked directly, it refuses what the human cannot read as an ordinary
+// member (here another person's private artifact, seen by an ADMIN only
+// through the role) and records nothing.
+func TestRecordKindRunAccess_RefusesWhatTheHumanCannotReadAsAMember(t *testing.T) {
+	g := newSheetRunRig(t, true)
+	mustExec(t, g.f.rig.db, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id=?`, g.f.a.WorkspaceID, g.f.a.HumanUserID)
+	wmSeedPage(t, g.f.rig.db, g.f.a.WorkspaceID, "grid-run-foreign", "grid-run-foreign", "Foreign", g.f.rig.adminID, "")
+	mustExec(t, g.f.rig.db, `UPDATE pages SET private_audience=1 WHERE id='grid-run-foreign'`)
+	tx, err := g.f.rig.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	for _, op := range []struct{ reach, operation string }{{runReachConsented, "read"}, {runReachConsented, "write"}, {runReachCreated, "create"}} {
+		if err := g.f.pages.recordKindRunAccess(t.Context(), tx, &g.f.a, "grid-run-foreign", op.reach, op.operation); err == nil {
+			t.Fatalf("%s of a page the human reads only through the ADMIN role was admitted", op.operation)
+		}
+	}
+	if err := g.f.pages.recordKindRunAccess(t.Context(), tx, &g.f.a, "grid-run-page", runReachConsented, "read"); err != nil {
+		t.Fatalf("the human's own page: %v", err)
+	}
+	var foreign, own int
+	if err := tx.QueryRow(`SELECT count(*) FROM audit_logs WHERE action=? AND entity_id='grid-run-foreign'`, auditActionAgentRunArtifactAccess).Scan(&foreign); err != nil || foreign != 0 {
+		t.Fatalf("refused access recorded %d rows %v", foreign, err)
+	}
+	if err := tx.QueryRow(`SELECT count(*) FROM audit_logs WHERE action=? AND entity_id='grid-run-page'`, auditActionAgentRunArtifactAccess).Scan(&own); err != nil || own != 1 {
+		t.Fatalf("own access recorded %d rows %v", own, err)
 	}
 }

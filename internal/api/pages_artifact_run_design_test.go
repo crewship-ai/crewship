@@ -316,3 +316,85 @@ func TestRunScopeDesign_FlagOffUnchanged(t *testing.T) {
 		t.Fatalf("flag off wrote agent-run audit records: %+v", rows)
 	}
 }
+
+// Amendment 7 with role-only edit: a workspace ADMIN who holds only a read
+// grant reads as an ordinary member, so the run gets the shared version; the
+// ADMIN role's manager read of every Design is never delegated.
+func TestRunScopeDesign_AdminWithReadGrantReadsTheSharedVersion(t *testing.T) {
+	g := newDesignRunRig(t)
+	mustExec(t, g.f.rig.db, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id=?`, g.f.a.WorkspaceID, g.f.a.HumanUserID)
+	g.f.receipt = artifactRunFreshReceipt(t, g.f)
+	id := g.design(t, g.f.rig.adminID, "OWNER", "design-admin-read")
+	if w := g.designHuman(t, g.router.pages.ApplyDesign, g.f.rig.adminID, "OWNER", "design-admin-read", designRunOp); w.Code != 200 {
+		t.Fatalf("owner edit: %d %s", w.Code, w.Body)
+	}
+	g.grant(t, id, "user", g.f.a.HumanUserID, "read")
+	mustExec(t, g.f.rig.db, `UPDATE artifact_version_heads SET shared_version=1 WHERE page_id=?`, id)
+	g.start(t, id)
+	w := g.designTool("design_get", "design-admin-read", `{}`)
+	if w.Code != 200 {
+		t.Fatalf("read: %d %s", w.Code, w.Body)
+	}
+	if got := designVersionOf(t, w); got != 1 {
+		t.Fatalf("an ADMIN's run with a read grant read version %d, want the shared 1", got)
+	}
+	if w := g.designTool("design_get", "design-admin-read", `{"version":2}`); w.Code == 200 {
+		t.Fatalf("an ADMIN's run read the unshared latest: %s", w.Body)
+	}
+}
+
+// The project family gate applies to artifact projects only: with the
+// artifact_projects family off and Design on, a Design run works and an
+// artifact-project run is refused, both at the tool and at the run gate.
+func TestRunScopeDesign_ProjectFamilyOffKeepsDesignAndRefusesProjects(t *testing.T) {
+	g := newDesignRunRig(t)
+	design := g.design(t, g.f.a.HumanUserID, "MEMBER", "design-family")
+	project := g.create(t, g.f.a.HumanUserID, "MEMBER", "project-family")
+	g.start(t, design, project)
+	t.Setenv("CREWSHIP_ARTIFACT_PROJECTS_ENABLED", "false")
+	mustExec(t, g.f.rig.db, `UPDATE feature_flags SET enabled=0 WHERE key='artifact_projects'`)
+	mustExec(t, g.f.rig.db, `DELETE FROM feature_flag_overrides WHERE flag_id IN (SELECT id FROM feature_flags WHERE key='artifact_projects')`)
+	if w := g.designTool("design_get", "design-family", `{}`); w.Code != 200 {
+		t.Fatalf("Design run with the project family off: %d %s", w.Code, w.Body)
+	}
+	if w := g.tool("artifact_versions", "project-family", `{}`); w.Code == 200 {
+		t.Fatalf("artifact-project run with the project family off: %s", w.Body)
+	}
+	run := g.f.a
+	if err := g.router.pages.checkScopedArtifactRun(t.Context(), &run, "pages:read"); err == nil {
+		t.Fatal("the run gate admitted an artifact-project run with the family off")
+	}
+	tx, err := g.f.rig.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	rec := &pageRecord{ID: project, OwnerUserID: g.f.a.HumanUserID}
+	if _, err := g.router.pages.authorizeScopedArtifactRun(t.Context(), tx, &run, g.f.a.WorkspaceID, rec, false, false); err == nil {
+		t.Fatal("the artifact scope admitted a project read with the family off")
+	}
+}
+
+// An agent design_apply always saves a version, even when it changes no node,
+// so it is a write: recorded once with its reach, like any other write
+// authorization (spec §7.1c item 11).
+func TestRunScopeDesign_ApplyWithoutChangesIsAVersionAndAWrite(t *testing.T) {
+	g := newDesignRunRig(t)
+	id := g.design(t, g.f.a.HumanUserID, "MEMBER", "design-noop")
+	if w := g.designHuman(t, g.router.pages.ApplyDesign, g.f.a.HumanUserID, "MEMBER", "design-noop", designRunOp); w.Code != 200 {
+		t.Fatalf("human edit: %d %s", w.Code, w.Body)
+	}
+	g.start(t, id)
+	before := designVersionCount(t, g.f, id)
+	if w := g.designTool("design_apply", "design-noop", designRunOp); w.Code != 200 {
+		t.Fatalf("unchanged apply: %d %s", w.Code, w.Body)
+	}
+	if after := designVersionCount(t, g.f, id); after != before+1 {
+		t.Fatalf("an unchanged apply: versions %d -> %d, want one more", before, after)
+	}
+	rows := runAuditRows(t, g)
+	if len(rows) != 1 {
+		t.Fatalf("want one write record, got %+v", rows)
+	}
+	g.wantAudit(t, rows[0], id, "referenced", "write")
+}
