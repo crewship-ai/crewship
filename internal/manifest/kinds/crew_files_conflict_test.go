@@ -84,3 +84,18 @@ func TestPutCrewFile_ConflictWaitHonoursCancel(t *testing.T) {
 		t.Fatalf("err=%v calls=%d, want context.Canceled after one attempt", err, c.calls)
 	}
 }
+
+type nilPutBytes struct{ *crewFakeClient }
+
+func (nilPutBytes) PutBytes(context.Context, string, []byte) (*internalapi.Response, error) {
+	return nil, nil
+}
+
+// A client that answers with neither a response nor an error is reported,
+// not dereferenced.
+func TestPutCrewFile_NilResponse(t *testing.T) {
+	err := putCrewFile(context.Background(), nilPutBytes{newCrewFake()}, "c1", "shared/x", []byte("d"))
+	if err == nil || !strings.Contains(err.Error(), "response is nil") {
+		t.Fatalf("err = %v, want the nil-response error", err)
+	}
+}

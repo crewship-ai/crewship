@@ -725,6 +725,9 @@ func putCrewFile(ctx context.Context, c internalapi.Client, crewID, dest string,
 		if err != nil {
 			return 0, fmt.Errorf("save crew file %s: %w", dest, err)
 		}
+		if resp == nil {
+			return 0, checkStatus(nil, "save crew file "+dest)
+		}
 		return resp.StatusCode, checkStatus(resp, "save crew file "+dest)
 	})
 }
