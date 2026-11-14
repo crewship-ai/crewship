@@ -660,11 +660,14 @@ owner on 2026-11-13.
    - *Flag off: known differences.* The server refuses every scope read as
      before, but the run sidecar and its MCP tools do not know the flag, so
      some refusals now come from the server instead of the sidecar. The
-     server checks the run's human principal before the query, so an
-     ordinary chat run (no drafting consent) gets 403 `no_human_principal`
-     for every call below, attached artifacts included; the answers listed
-     here are what a run with a human principal (one started with drafting
-     consent) gets:
+     server checks the run's human principal before the query. A run with a
+     human principal (drafting consent, an artifact-project run, or a run
+     the person gave a Sheet or Mooring mandate) gets the answers listed
+     here. An ordinary chat run without one gets 403 `no_human_principal`
+     from the server for each forwarded call instead, attached artifacts
+     included (before, the sidecar refused the draft view and
+     `workbook_read` with the 400s named below); calls the sidecar still
+     refuses itself are unchanged:
      the sidecar's draft view with `page_id` is forwarded and answered 400
      "only the authenticated workspace query is supported" (it was 400 "draft
      view has no caller-selected scope"); MCP `doc_draft_view` with a
