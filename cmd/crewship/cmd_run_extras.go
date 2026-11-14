@@ -208,7 +208,7 @@ func (f *runExtrasFlags) resolveArtifactRefs(client *cli.Client) error {
 				return err
 			}
 			var page struct {
-				ID string `json:"id"`
+				ID string `json:"id" yaml:"id"`
 			}
 			if err := json.NewDecoder(resp.Body).Decode(&page); err != nil || page.ID == "" {
 				return cli.WithExitCode(errRunArtifactUnavailable, cli.ExitNotFound)
