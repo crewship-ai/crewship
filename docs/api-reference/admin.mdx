@@ -1113,6 +1113,141 @@ disabled origin is enabled again after three consecutive passing checks;
 | `401` | Missing authentication. |
 | `403` | Caller is not an instance administrator. |
 
+## `GET /api/v1/admin/instance/artifacts/applications`
+
+Word (`wordcraft`), Sheet (`gridcraft`) and agents in them, for the whole
+instance (#5315). Each release trusts one package of each application,
+downloaded when an administrator turns it on or installed from a file; each
+application and agents start off. For each application: the setting (`desired`: `enabled` or
+`disabled`; `source`: `default`, `admin` or `server_config`; `locked` when the
+server configuration fixes it), the resulting `state` (`ready`, `draining`,
+`disabled`, `unavailable`) with `reason` and `message`, `drain_until` while
+draining, the installed `component` (with `detail`, the last installation error)
+and the number of `documents`. `editor` is
+the editor origin's isolation check.
+
+**Auth:** instance administrator. **Request:** no body. **Response:**
+
+```json
+{
+  "applications": [
+    { "id": "wordcraft", "label": "Word", "desired": "enabled", "source": "admin", "locked": false,
+      "state": "ready", "updated_by": "admin@example.com", "updated_at": "2026-11-13T10:00:00Z",
+      "component": { "available": true, "runtime": "wasm", "version": "0.11.0+b0fb5cb571b6",
+        "engine_revision": "b0fb5cb571b6a4a3abb60e2c48ca7f5b22cd8d72", "engine_sha256": "6724…", "editor_bundle": "f2a5…" },
+      "documents": 12 },
+    { "id": "gridcraft", "label": "Sheet", "desired": "disabled", "source": "default", "locked": false,
+      "state": "disabled", "reason": "app_disabled", "message": "Turned off. …", "documents": 0 }
+  ],
+  "agents": { "id": "agents", "label": "Agents in Word and Sheet", "desired": "disabled", "source": "default",
+    "locked": false, "state": "disabled", "reason": "app_disabled" },
+  "editor": "ok"
+}
+```
+
+Reasons: `app_disabled`, `app_draining`, `component_not_installed`,
+`component_installing`, `component_install_failed`, `component_missing`,
+`component_integrity`, `clock_unsupported`, `engine_start_failed`,
+`engine_selftest_failed`, `editor_isolation_failed`, `agents_need_application`.
+
+| Status | Meaning |
+|---|---|
+| `200` | The applications and agents. |
+| `401` | Not signed in. |
+| `403` | Caller is not an instance administrator. |
+| `500` | A read failed. |
+
+## `PATCH /api/v1/admin/instance/artifacts/applications/{app}`
+
+Turn `wordcraft`, `gridcraft` or `agents` on or off. Turning an application off
+never deletes or changes a document: reading, export, release and reconcile keep
+working; nobody can create a document or start editing. Editors already open may
+renew and save until the drain ends (`drain_seconds`, default 900 for an
+application, at most 86400; `0` closes at once). Agents stop at once. Each change
+is recorded in the instance audit log (`instance.craft_application_set`);
+repeating the current setting changes nothing. Turning on an application that is
+not installed starts its download in the background (`component_installing`).
+
+**Auth:** instance administrator. **Request body:** JSON, unknown keys refused.
+
+```json
+{ "desired": "disabled", "drain_seconds": 900 }
+```
+
+**Response:** the same object as `GET`.
+
+| Status | Meaning |
+|---|---|
+| `200` | Saved; the current applications. |
+| `400` | Invalid JSON, `desired` other than `enabled`/`disabled`, or a drain outside 0-86400. |
+| `401` | Not signed in. |
+| `403` | Caller is not an instance administrator. |
+| `404` | Unknown application. |
+| `409` | The server configuration fixes this setting. |
+| `500` | The save failed; nothing changed. |
+
+## `POST /api/v1/admin/instance/artifacts/applications/{app}/diagnostics`
+
+Self-test of `wordcraft` or `gridcraft`: starts the document engine (compiling
+it on first use) and asks it for its version. It reads and writes no document.
+
+**Auth:** instance administrator. **Request:** no body (an empty JSON object is
+accepted). **Response:**
+
+```json
+{ "id": "wordcraft", "passed": true, "runtime": "wasm", "engine_sha256": "6724…",
+  "version": "wordcraft-cli 0.11.0", "duration_ms": 7890, "editor": "ok" }
+```
+
+A failed check is still `200`, with `passed: false`, `reason` and `message`.
+
+| Status | Meaning |
+|---|---|
+| `200` | The result of the check. |
+| `401` | Not signed in. |
+| `403` | Caller is not an instance administrator. |
+| `404` | Unknown application. |
+| `500` | The check could not run. |
+
+## `POST /api/v1/admin/instance/artifacts/applications/{app}/install`
+
+Install `wordcraft` or `gridcraft`. Each Crewship release trusts exactly one
+package of each application: the binary carries the SHA-256 of the package's
+`manifest.json`, and the manifest pins every file. The application runs as soon
+as it is installed, without a restart; whether people may use it is still the
+setting above.
+
+- **No body:** the server downloads the trusted package (published with the
+  release as `crewship-craft-<app>.craftpkg`) in the background and answers
+  `202` with the applications; the application shows `component_installing`,
+  then runs or shows `component_install_failed` with the error in
+  `component.detail`.
+- **`Content-Type: application/octet-stream`:** the body is the package (a tar
+  archive, at most 512 MiB), for a server without internet access. The server
+  answers when it is installed. Any other package is refused with `422` and
+  nothing is installed. This route alone is exempt from the API's 16 MiB body
+  limit; an upload that stops making progress for 2 minutes ends.
+
+Every file is verified against the manifest before the package becomes visible
+and again whenever it is read. Recorded in the instance audit log as
+`instance.craft_application_install` with `source` `download` or `file` and
+`result` `started` (download), `installed` (with version and pins) or `refused`
+(with the error); a refused `409` is not recorded.
+
+**Auth:** instance administrator. **Request body:** none, or the package bytes
+as `application/octet-stream`. **Response:** the same object as `GET`.
+
+| Status | Meaning |
+|---|---|
+| `200` | Installed from the uploaded package; the current applications. |
+| `202` | The download started; the current applications. |
+| `401` | Not signed in. |
+| `403` | Caller is not an instance administrator. |
+| `404` | Unknown application. |
+| `409` | The application already runs, is being installed, or this build trusts no package of it. |
+| `422` | The uploaded package is not the trusted one or is damaged; the error says why. |
+| `500` | The installation could not start. |
+
 ## `GET /api/v1/admin/instance/page-limit`
 
 The maximum number of pages a workspace may hold, for instance administrators.

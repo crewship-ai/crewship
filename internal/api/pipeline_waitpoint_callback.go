@@ -96,6 +96,7 @@ func (h *PipelineHandler) CompleteWaitpointToken(w http.ResponseWriter, r *http.
 	// person choosing to give it away.
 	if err := wp.Decide(r.Context(), workspaceID, token, approved,
 		pipeline.WaitpointDecider{Kind: pipeline.DeciderExternal, ID: "external-callback"}, payload); err != nil {
+		err = explainDecideError(r.Context(), wp, workspaceID, token, err)
 		replyWaitpointDecideError(w, h.logger, "waitpoint callback complete", token, err)
 		return
 	}

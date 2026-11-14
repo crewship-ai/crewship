@@ -161,6 +161,7 @@ func (e *Executor) awaitCrewshipApproval(ctx context.Context, step Step, in RunI
 			return "", 0, elapsed(), &suspendError{token: token, stepID: step.ID}
 		}
 	}
+	e.signalHumanWait(ctx, in, runID, step.ID, token)
 	approved, err := e.waitpoints.WaitFor(ctx, token)
 	if ctx.Err() != nil {
 		// The run died mid-wait: cancel its waitpoints so the card stops
@@ -263,4 +264,19 @@ func renderCrewshipValue(v any, render RenderContext) any {
 func routineOperationKey(ctx context.Context, runID, stepID string) string {
 	sum := sha256.Sum256([]byte(runID + "\x00" + executionIn(ctx).path + "\x00" + stepID))
 	return fmt.Sprintf("routine:%x", sum)
+}
+
+// signalHumanWait calls in.OnHumanWait before a nested step blocks on token,
+// but only while the waitpoint is pending: a decided one (a standing grant,
+// a resumed run) resolves at once and keeps nobody waiting.
+func (e *Executor) signalHumanWait(ctx context.Context, in RunInput, runID, stepID, token string) {
+	if in.OnHumanWait == nil {
+		return
+	}
+	if reader, ok := e.waitpoints.(WaitpointStatusReader); ok {
+		if st, err := reader.WaitpointStatus(ctx, token); err != nil || st != "pending" {
+			return
+		}
+	}
+	in.OnHumanWait(runID, stepID, token)
 }

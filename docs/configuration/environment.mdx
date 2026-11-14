@@ -30,6 +30,25 @@ All Crewship configuration can be set via environment variables. These override 
 
 See the [native Craft lease contract](/specs/craft-native) for admission and handoff.
 
+## Word and Sheet packages
+
+A release binary trusts exactly one package of Word and of Sheet: the manifest
+digests (pins) compiled into it. These variables work in a release binary too.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_CRAFT_COMPONENTS_DIR` | `<data directory>/craft-components` | Where installed packages are kept (`craft_native.components_dir`). |
+| `CREWSHIP_CRAFT_COMPONENT_PINS` | the release's pins | `<application>=<version>=<manifest sha256>`, comma separated (`craft_native.component_pins`). **Replaces** the release's pins: Crewship then installs and runs the packages these pins name, including their engine and the editor code served to browsers. |
+| `CREWSHIP_CRAFT_COMPONENT_URL` | the release's download page | Where packages are downloaded from (`craft_native.component_url`), for a mirror. https, or http only to this machine. It does not change what is trusted: every package must still match a pin. |
+
+Setting `CREWSHIP_CRAFT_COMPONENT_PINS` is an operator's authority, of the same
+weight as choosing which binary to run: whoever can set the server's
+environment or configuration file decides which Word and Sheet code runs. The
+server logs a warning at every start while it is set, and Admin and
+`crewship admin instance applications` show those packages as a
+**development override** instead of as installed release packages. Instance
+administrators cannot change it from Admin or the API.
+
 ## Mooring session profile
 
 | Variable | Default | Description |

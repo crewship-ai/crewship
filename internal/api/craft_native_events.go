@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/craftapps"
 )
 
 // craftNativeEventInterval is the server's authority recheck cadence on an open
@@ -130,7 +131,11 @@ func (m *craftNativeHTTP) eventsOnTick(w http.ResponseWriter, r *http.Request, t
 			return
 		}
 		readonly := false
-		if lease.Holder == craftNativePrincipal(entry) {
+		// A closed application stops renewing: the lease lapses and the
+		// editor keeps its draft, as when the lease is lost for any reason.
+		if lease.Holder == craftNativePrincipal(entry) && !m.apps.allows(r.Context(), entry.application, craftapps.OpContinue) {
+			readonly = true
+		} else if lease.Holder == craftNativePrincipal(entry) {
 			renewed, e := m.leases.Renew(r.Context(), lease)
 			if e != nil {
 				readonly = true

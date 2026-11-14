@@ -7,6 +7,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/manifest/crewfile"
 )
 
 // scriptedPutAPI answers PutBytes from a fixed sequence of (status, body).
@@ -33,9 +35,9 @@ const recycle409 = `{"error":"file is owned by the crew runtime; it can only be 
 // within the bounded wait now succeeds; one that does not reports the
 // server's reason.
 func TestSaveCrewFile_ConflictDuringRecycle(t *testing.T) {
-	old := crewFileConflictBackoff
-	crewFileConflictBackoff = []time.Duration{time.Millisecond, time.Millisecond}
-	defer func() { crewFileConflictBackoff = old }()
+	old := crewfile.ConflictBackoff
+	crewfile.ConflictBackoff = []time.Duration{time.Millisecond, time.Millisecond}
+	defer func() { crewfile.ConflictBackoff = old }()
 
 	t.Run("recycle finishes within the wait", func(t *testing.T) {
 		api := &scriptedPutAPI{}

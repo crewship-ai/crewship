@@ -229,26 +229,22 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		// `agent` account at 1001: inject common-utils when it is absent,
 		// fill its missing account options, and refuse a declaration that
 		// would create the account under another name or UID (see
-		// NormalizeAgentUser).
-		changed, nerr := cfg.NormalizeAgentUser()
+		// NormalizeAgentUser). Crew update and both apply planners store
+		// and compare the same form, so re-applying the manifest that
+		// created the crew plans no update (#5337).
+		normalised, nerr := devcontainer.NormalizeAgentUserJSON(*req.DevcontainerConfig)
 		if nerr != nil {
 			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+nerr.Error())
 			return
 		}
-		if changed {
-			normalised, err := json.Marshal(cfg)
-			if err != nil {
-				// Log the underlying error server-side; surface only a
-				// generic message to the client. The marshal payload
-				// could carry user-supplied keys / values that aren't
-				// useful to expose in an error response.
-				h.logger.Error("crews.create: marshal devcontainer_config after auto-inject", "error", err)
-				replyError(w, http.StatusInternalServerError, "internal error normalising devcontainer config")
-				return
-			}
-			s := string(normalised)
-			req.DevcontainerConfig = &s
+		// The limit applies to what is stored: the injected account must
+		// not push a config past it, or sending the stored config back
+		// unchanged would be refused.
+		if len(normalised) > 102400 {
+			replyError(w, http.StatusBadRequest, "devcontainer_config exceeds 100KB limit")
+			return
 		}
+		req.DevcontainerConfig = &normalised
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
 		if err := devcontainer.ValidateMiseConfigInput(*req.MiseConfig); err != nil {

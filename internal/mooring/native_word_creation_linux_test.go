@@ -8,6 +8,8 @@ import (
 	"errors"
 	"os"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/craftengine"
 )
 
 // Explicit release qualification uses the original pinned executable.
@@ -25,7 +27,11 @@ func TestNativeCLIValidatorCanonicalWordCreation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	validator := NativeCLIValidator{Application: "wordcraft", BinaryPath: binary, SHA256: hash}
+	engine, err := craftengine.NewNative("wordcraft", binary, hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validator := NativeCLIValidator{Application: "wordcraft", Engine: engine}
 	if err := validator.Validate(context.Background(), raw); err != nil {
 		t.Fatalf("canonical New Doc bytes rejected by pinned engine: %v", err)
 	}
