@@ -117,6 +117,12 @@ func designAuditProbe(r *http.Request) *http.Request {
 }
 
 func designAuditProbeContext(ctx context.Context) context.Context {
+	return artifactAuditProbeContext(ctx)
+}
+
+// artifactAuditProbeContext marks an authorization that only checks access:
+// it records no agent-run audit row.
+func artifactAuditProbeContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, artifactAuditProbeKey{}, true)
 }
 
