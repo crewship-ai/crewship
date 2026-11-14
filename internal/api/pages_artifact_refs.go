@@ -259,6 +259,7 @@ func (h *InternalHandler) admitArtifactRefsRun(r *http.Request, entry journal.En
 		// chat: the run starts the ordinary way without a principal, and so
 		// reaches no artifact through this path.
 		if _, err := h.admitArtifactChatRunStart(r, entry, receipt, message, false); err != nil {
+			h.logger.Debug("plain chat run starts without an artifact principal", "run", entry.TraceID, "reason", err)
 			return false, 0, nil
 		}
 		return true, 0, nil

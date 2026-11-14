@@ -236,6 +236,7 @@ func (h *PageHandler) reserveScopedArtifactRunCreate(ctx context.Context, tx *sq
 }
 
 // crewHourlyPageCapReached counts the crew's pages created in the last hour
+// that no person authored (agent, routine and onboarding saves alike),
 // inside the caller's transaction, with the flag on only.
 func (h *PageHandler) crewHourlyPageCapReached(ctx context.Context, tx *sql.Tx, workspace, crew string) (bool, int, error) {
 	ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
@@ -248,7 +249,7 @@ func (h *PageHandler) crewHourlyPageCapReached(ctx context.Context, tx *sql.Tx, 
 	}
 	since := h.evaluator().Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
 	var n int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages p WHERE p.workspace_id=? AND p.owner_crew_id=? AND julianday(p.created_at) >= julianday(?) AND EXISTS(SELECT 1 FROM page_versions v WHERE v.page_id=p.id AND v.seq=1 AND v.author_agent_id IS NOT NULL)`, workspace, crew, since).Scan(&n); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages p WHERE p.workspace_id=? AND p.owner_crew_id=? AND julianday(p.created_at) >= julianday(?) AND NOT EXISTS(SELECT 1 FROM page_versions v WHERE v.page_id=p.id AND v.seq=1 AND v.author_user_id IS NOT NULL)`, workspace, crew, since).Scan(&n); err != nil {
 		return false, 0, err
 	}
 	return n >= limits.CrewHourlyPage, limits.CrewHourlyPage, nil

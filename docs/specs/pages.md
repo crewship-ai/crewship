@@ -620,7 +620,8 @@ owner on 2026-11-13.
    (default 50, 1–500); past either the run gets 429 `artifact_run_limit`.
    One crew creates at most `crew_hourly_page_limit` pages per hour through
    the sidecar save path (default 20, 1–1000; 429 `crew_hourly_page_limit`);
-   only agent-saved pages count, not crew pages people create.
+   pages a person created for the crew do not count; agent, routine and
+   onboarding saves do.
    `crewship workspace artifact-policy set --chat-run-create-limit
    --run-read-limit --crew-hourly-page-limit` changes them; a change bumps the
    policy version. A workspace that never saved a policy allows every live

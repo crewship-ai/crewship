@@ -411,27 +411,28 @@ func TestRunScope_CreatedReachIsPerChat(t *testing.T) {
 	}
 }
 
-// Review finding 1: a refused principal capture (here a role change after the
-// message was sent) never blocks the chat run; it starts without a principal
-// and so reaches nothing through this path.
-func TestRunScope_StaleReceiptStartsThePlainRunWithoutAPrincipal(t *testing.T) {
+// Review finding 1: a refused principal capture never blocks the chat run.
+// CreateRun validates the receipt first, so the refusal is driven here at the
+// admission seam: a receipt that no longer matches the membership must make
+// admission report "not admitted" without an error, so the run starts the
+// ordinary way, and must record no principal.
+func TestRunScope_RefusedCaptureStartsThePlainRunWithoutAPrincipal(t *testing.T) {
 	g := newRunScopeRig(t)
-	g.create(t, g.f.a.HumanUserID, "MEMBER", "scope-stale")
-	mustExec(t, g.f.rig.db, `UPDATE workspace_members SET capabilities='["chat"]' WHERE user_id=?`, g.f.a.HumanUserID)
-	// Whatever today's start does with this receipt (flag off), the flag on
-	// does the same: the scope adds no new way to refuse a chat run.
-	mustExec(t, g.f.rig.db, `UPDATE feature_flag_overrides SET enabled=0 WHERE id='ref-flag-on'`)
-	off := artifactRefsStartRun(t, g.f, "scope-stale-flag-off", g.f.a.MessageID)
-	mustExec(t, g.f.rig.db, `UPDATE feature_flag_overrides SET enabled=1 WHERE id='ref-flag-on'`)
-	if code := artifactRefsStartRun(t, g.f, g.f.a.RunID, g.f.a.MessageID); code != off {
-		t.Fatalf("flag on start %d differs from flag off %d", code, off)
+	writer := journal.NewWriter(g.f.rig.db, newTestLogger(), journal.WriterOptions{ChainKey: []byte("synthetic-artifact-refs-chain"), FlushSize: 1})
+	t.Cleanup(func() { _ = writer.Close() })
+	h := NewInternalHandler(g.f.rig.db, "synthetic-refs-master", newTestLogger())
+	h.SetJournal(writer)
+	stale := *g.f.receipt
+	stale.MemberRevision++
+	entry := journal.Entry{ID: "run-start:" + g.f.a.RunID, WorkspaceID: g.f.a.WorkspaceID, CrewID: g.f.a.CrewID, AgentID: g.f.a.AgentID, Type: journal.EntryRunStarted, Severity: journal.SeverityInfo, ActorType: journal.ActorSidecar, TraceID: g.f.a.RunID}
+	req := httptest.NewRequest("POST", "/api/v1/internal/runs", nil)
+	admitted, status, err := h.admitArtifactRefsRun(req, entry, "USER", "", &stale, g.f.a.WorkspaceID, g.f.a.MessageID)
+	if admitted || status != 0 || err != nil {
+		t.Fatalf("a refused capture must fall back to the ordinary start: admitted=%v status=%d err=%v", admitted, status, err)
 	}
 	var n int
 	if err := g.f.rig.db.QueryRow(`SELECT count(*) FROM artifact_run_principals WHERE run_id=?`, g.f.a.RunID).Scan(&n); err != nil || n != 0 {
-		t.Fatalf("stale receipt recorded a principal: %d %v", n, err)
-	}
-	if w := g.tool("artifact_versions", "scope-stale", `{}`); w.Code == 200 {
-		t.Fatal("a run without a principal reached an artifact")
+		t.Fatalf("a refused capture recorded a principal: %d %v", n, err)
 	}
 }
 
@@ -451,6 +452,10 @@ func TestRunScope_ExactRunConsentKeepsItsPage(t *testing.T) {
 	}
 	if w := g.tool("artifact_versions", "scope-not-consented", `{}`); w.Code == 200 {
 		t.Fatal("a consent for one page reached another")
+	}
+	mustExec(t, g.f.rig.db, `UPDATE artifact_project_run_consents SET revoked_at='2026-11-14T00:00:00Z' WHERE run_id=?`, g.f.a.RunID)
+	if w := g.tool("artifact_versions", "scope-consented", `{}`); w.Code == 200 {
+		t.Fatal("a revoked consent kept its page in reach")
 	}
 }
 
