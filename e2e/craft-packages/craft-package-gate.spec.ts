@@ -42,10 +42,22 @@ async function open(browser: Browser, ref: N.NativeRef, log: string[]): Promise<
   return page
 }
 
+// Word may capitalise a marker that starts a sentence ("Gate-wordcraft-…"). Markers are
+// lower case and unique, so a case-insensitive match still identifies them.
+const holds = (text: string, marker: string) => text.toLowerCase().includes(marker)
+
+function edited(status: string, after: string): boolean {
+  const saved = status.match(/^Saved · version (\d+)/)
+  return saved ? BigInt(saved[1]) > BigInt(after) : /^(Unsaved draft|Saving)/.test(status)
+}
+
 /** Takes the lease, types a marker, saves with Ctrl+S and returns the new server version. */
 async function editAndSave(page: Page, app: N.NativeApp, marker: string, cell: string, after: string): Promise<string> {
   const frame = await N.acquire(page, app)
   await N.typeMarker(page, frame, app, marker, cell)
+  // Save only once the editor has told the host about the edit: the host shows an
+  // unsaved draft, a save in progress, or a save newer than `after`.
+  await expect.poll(async () => edited(await N.status(page), after), { timeout: SAVE_MS, message: `the editor never reported the ${marker} edit` }).toBe(true)
   await page.keyboard.press("Control+s")
   const version = await N.waitSaved(page, SAVE_MS, after)
   expect(version, `no "Saved · version" after ${marker}; status: ${await N.status(page)}`).toBeTruthy()
@@ -66,7 +78,7 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       const v1 = await editAndSave(page, app, first, "B2", ref.initVersion)
       const head1 = await N.readHead(api, ref)
       expect(head1.version).toBe(v1)
-      expect(head1.text, "the saved document holds the first marker").toContain(first)
+      expect(holds(head1.text, first), "the saved document holds the first marker").toBe(true)
       await page.context().close()
 
       // Reopen in a fresh browser context: a new frame, a new bootstrap from the saved version.
@@ -74,8 +86,8 @@ for (const app of ["wordcraft", "gridcraft"] as const) {
       const v2 = await editAndSave(again, app, second, "B3", v1)
       const head2 = await N.readHead(api, ref)
       expect(head2.version).toBe(v2)
-      expect(head2.text, "the reopened editor kept the first marker").toContain(first)
-      expect(head2.text, "the saved document holds the second marker").toContain(second)
+      expect(holds(head2.text, first), "the reopened editor kept the first marker").toBe(true)
+      expect(holds(head2.text, second), "the saved document holds the second marker").toBe(true)
       await again.context().close()
     } finally {
       await info.attach("console", { body: log.join("\n") || "(none)", contentType: "text/plain" })

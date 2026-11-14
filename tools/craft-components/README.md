@@ -94,8 +94,13 @@ Chromium under Xvfb with software WebGL. For Word and for Sheet it opens a new
 document, takes over editing, types a marker, saves with ctrl+s, reopens it in a
 fresh browser context, types a second marker and saves again; the server's head must
 hold both markers. Any host refusal ("did not connect safely", "cannot be opened
-safely") fails at once. Both jobs run with every code change: the host, server,
-install and route code the gate drives is spread over the tree. The packages are
+safely") fails at once. The spec types only once the editor has taken the keyboard
+(its canvas or its hidden text input has focus) and saves only once the host shows
+the edit: the editor handles keys on its next frame, so on a slow runner keys sent
+earlier were lost. Both jobs run with every code change: the host, server,
+install and route code the gate drives is spread over the tree;
+`scripts/ci/test_gates.py` proves that for every host file of the packaged editors
+(`test_gate_runs_when_the_host_changes`). The packages are
 cached by the hash of the recipe inputs (this directory, the build scripts,
 `mooring/build-tools.json`, `scripts/check-craft-packages.sh` and the Rust pin)
 and rebuilt exactly as the release builds them on a cache miss, or when `plan.py`'s
@@ -112,3 +117,4 @@ crewship-heavy scripts/ci/craft-package-gate.sh ./crewship build/craft-component
 
 `$OUT` holds `server.log`, `seed.log`, `applications.txt`, `report.json` and
 `playwright/` (screenshot, trace and browser console of a failed test).
+Prefix the script with `taskset -c <one CPU>` to approximate a slow CI runner.
