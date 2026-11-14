@@ -466,6 +466,15 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 
 	emitEvt(ProvisionEvent{Step: ProvStepStart, Detail: baseImage})
 
+	// The runtime account is part of what is built and of the cache key, so
+	// it is settled before either: a config stored by an older version (the
+	// legacy uid/gid keys common-utils ignored) builds once with an explicit
+	// agent/1001 account, and a conflicting declaration fails here with the
+	// fix instead of building an image whose runtime user does not exist.
+	if _, err := cfg.NormalizeDeclaredAgentUser(); err != nil {
+		return fail(ProvStepStart, err)
+	}
+
 	// Runtimes with no `commit` (Apple Containers) provision by building the
 	// whole image instead. Dispatching here rather than at the call site keeps
 	// every caller — the HTTP trigger, the dispatch gate, the seed — on one

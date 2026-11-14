@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/cli"
+	"github.com/crewship-ai/crewship/internal/manifest/crewfile"
 )
 
 // APIClient is the contract internal/manifest needs from an HTTP
@@ -792,6 +793,28 @@ func decodeJSON(r io.Reader, v any) error {
 		return nil
 	}
 	return json.Unmarshal(data, v)
+}
+
+// CrewFileContent returns the current bytes of a file in the crew's shared
+// tree through GET /crews/{id}/files/download, the endpoint `crewship crew
+// files get` uses. ok is false whenever the server does not hand over the
+// file (missing, stopped crew, older server, transport error) or it is larger
+// than a manifest file may be; callers treat that as "unknown", never as
+// "unchanged".
+func (c *Client) CrewFileContent(ctx context.Context, crewID, path string) (data []byte, ok bool) {
+	resp, err := c.api.Get(ctx, "/api/v1/crews/"+url.PathEscape(crewID)+"/files/download?path="+url.QueryEscape(path))
+	if err != nil || resp == nil {
+		return nil, false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, false
+	}
+	data, err = io.ReadAll(io.LimitReader(resp.Body, crewfile.MaxBytes+1))
+	if err != nil || len(data) > crewfile.MaxBytes {
+		return nil, false
+	}
+	return data, true
 }
 
 // SaveCrewFile uploads bytes into the crew's shared volume via the same

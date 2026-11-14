@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -66,6 +67,9 @@ const AuditActionWaitpointDecisionRefused = "waitpoint.decision_refused"
 // for has not earned the decision; failing closed here is what keeps a
 // missing context value from silently becoming an approval.
 func (s *SQLWaitpointStore) Decide(ctx context.Context, workspaceID, token string, approved bool, decider WaitpointDecider, payload string) error {
+	if err := s.checkHeldActionDecider(ctx, workspaceID, token, approved, decider); err != nil {
+		return err
+	}
 	switch decider.Kind {
 	case DeciderUser:
 		return s.CompleteApproval(ctx, workspaceID, token, approved, decider.ID, payload)
@@ -79,18 +83,79 @@ func (s *SQLWaitpointStore) Decide(ctx context.Context, workspaceID, token strin
 			return fmt.Errorf("waitpoints: check decision audience: %w", err)
 		}
 		if form != "" {
-			s.recordRefusal(ctx, workspaceID, token, approved, decider)
+			s.recordRefusal(ctx, workspaceID, token, approved, decider, refusalReasonDecider)
 			return fmt.Errorf("%w: typed decisions require an authenticated workspace user", ErrDeciderNotAllowed)
 		}
 		return s.CompleteApproval(ctx, workspaceID, token, approved, decider.ID, payload)
 	default:
-		s.recordRefusal(ctx, workspaceID, token, approved, decider)
+		s.recordRefusal(ctx, workspaceID, token, approved, decider, refusalReasonDecider)
 		kind := string(decider.Kind)
 		if kind == "" {
 			kind = "unidentified"
 		}
 		return fmt.Errorf("%w (actor kind %q)", ErrDeciderNotAllowed, kind)
 	}
+}
+
+const (
+	refusalReasonDecider    = "only a person or the token's external holder can decide a waitpoint"
+	refusalReasonHeldAction = "a held routine action is decided by a workspace OWNER or ADMIN, never by the token's holder"
+)
+
+// checkHeldActionDecider applies the held-action rule before any other:
+// a waitpoint that holds a crewship action for approval
+// (IsCrewshipApprovalStepKey) is decided only by a person whose CURRENT
+// workspace role is OWNER or ADMIN. The token's external holder, a member
+// of a lower role and an agent are refused, and the attempt is recorded.
+// Any other waitpoint passes through unchanged.
+func (s *SQLWaitpointStore) checkHeldActionDecider(ctx context.Context, workspaceID, token string, approved bool, decider WaitpointDecider) error {
+	var stepID string
+	err := s.db.QueryRowContext(ctx, `SELECT step_id FROM pipeline_waitpoints WHERE workspace_id = ? AND token = ?`, workspaceID, token).Scan(&stepID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil // the decide path below answers an unknown token
+	}
+	if err != nil {
+		return fmt.Errorf("waitpoints: check decider: %w", err)
+	}
+	if !IsCrewshipApprovalStepKey(stepID) {
+		return nil
+	}
+	if decider.Kind == DeciderUser && decider.ID != "" {
+		ok, err := HeldActionDeciderAllowed(ctx, s.db, workspaceID, decider.ID)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return nil
+		}
+	}
+	s.recordRefusal(ctx, workspaceID, token, approved, decider, refusalReasonHeldAction)
+	return fmt.Errorf("%w: a held routine action needs a workspace OWNER or ADMIN", ErrDeciderNotAllowed)
+}
+
+// HeldActionDeciderAllowed reports whether userID is currently a trusted,
+// unsuspended member of the workspace with a role in HeldActionDeciderRoles
+// (the same filter the chat decision path applies to its members). It is
+// asked inside the decision transaction (decideTxClock) and again by the
+// dispatcher at execution, so a decision by someone since demoted or
+// suspended does not run.
+func HeldActionDeciderAllowed(ctx context.Context, q interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, workspaceID, userID string) (bool, error) {
+	if userID == "" {
+		return false, nil
+	}
+	var role string
+	err := q.QueryRowContext(ctx, `SELECT wm.role FROM workspace_members wm
+JOIN users u ON u.id = wm.user_id AND u.suspended_at IS NULL
+WHERE wm.workspace_id = ? AND wm.user_id = ? AND wm.access_mode = 'trusted'`, workspaceID, userID).Scan(&role)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("waitpoints: decider role: %w", err)
+	}
+	return HeldActionDeciderRoles[strings.ToUpper(role)], nil
 }
 
 // SetAuditJournal wires the configured journal writer so a refused decision
@@ -108,7 +173,7 @@ func (s *SQLWaitpointStore) SetAuditJournal(j journal.TransactionEmitter) {
 // own status is read back so the record states what the attempt left
 // untouched. The journal entry references the run and step, never the
 // callback token.
-func (s *SQLWaitpointStore) recordRefusal(ctx context.Context, workspaceID, token string, approved bool, decider WaitpointDecider) {
+func (s *SQLWaitpointStore) recordRefusal(ctx context.Context, workspaceID, token string, approved bool, decider WaitpointDecider, reason string) {
 	status, runID, stepID := "", "", ""
 	_ = s.db.QueryRowContext(ctx,
 		`SELECT status, pipeline_run_id, step_id FROM pipeline_waitpoints WHERE token = ? AND workspace_id = ?`,
@@ -127,7 +192,7 @@ func (s *SQLWaitpointStore) recordRefusal(ctx context.Context, workspaceID, toke
 		"attempted":        map[bool]string{true: "approve", false: "deny"}[approved],
 		"waitpoint_status": status,
 		"pipeline_run_id":  runID,
-		"reason":           "only a person or the token's external holder can decide a waitpoint",
+		"reason":           reason,
 	}
 	meta, _ := json.Marshal(facts)
 	if err := s.appendRefusalAudit(ctx, workspaceID, token, runID, stepID, decider, string(meta), facts); err != nil {
