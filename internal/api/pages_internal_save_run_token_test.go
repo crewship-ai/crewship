@@ -303,19 +303,38 @@ func TestPageSaveRunToken_HostRoutineSaveIsExemptFromTheRequirement(t *testing.T
 	}
 }
 
-// F2: a token whose run principal is no longer live (here: expired) is
-// refused, not downgraded to a tokenless save.
-func TestPageSaveRunToken_ExpiredPrincipalRefused(t *testing.T) {
-	g := runTokenSaveRig(t)
-	g.start(t)
-	mustExec(t, g.f.rig.db, `UPDATE artifact_run_principals SET expires_at='2020-01-01T00:00:00Z' WHERE run_id=?`, g.f.a.RunID)
-	before := PageSaveWithoutRunTokenTotal()
-	w := g.save(t, "Expired principal", g.runToken)
-	if w.Code != http.StatusForbidden || !bytes.Contains(w.Body.Bytes(), []byte(`"invalid_run_token"`)) {
-		t.Fatalf("expired principal: %d %s", w.Code, w.Body)
-	}
-	if n := g.pageCount(t); n != 0 || PageSaveWithoutRunTokenTotal() != before {
-		t.Fatalf("expired principal saved (%d pages) or counted as tokenless", n)
+// F2 (review round 2): a verified token whose principal is no longer live
+// (expired, or the chat's authority changed) is treated like a run without a
+// human: crew hourly limit only, no created record, not counted as tokenless,
+// and it satisfies save_requires_run_token. Refusing it would cost
+// availability and buy nothing, since the token is accounting only.
+func TestPageSaveRunToken_StalePrincipalUsesTheCrewLimit(t *testing.T) {
+	for name, stale := range map[string]string{
+		"expired":       `UPDATE artifact_run_principals SET expires_at='2020-01-01T00:00:00Z' WHERE run_id=?`,
+		"chat revision": `UPDATE chats SET authority_revision=authority_revision+1 WHERE id=(SELECT chat_id FROM artifact_run_principals WHERE run_id=?)`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			g := runTokenSaveRig(t)
+			g.start(t)
+			mustExec(t, g.f.rig.db, `UPDATE workspace_artifact_creation_policy SET save_requires_run_token=1, chat_run_create_limit=1, crew_hourly_page_limit=3 WHERE workspace_id=?`, g.f.a.WorkspaceID)
+			mustExec(t, g.f.rig.db, stale, g.f.a.RunID)
+			before := PageSaveWithoutRunTokenTotal()
+			for _, page := range []string{"Stale one", "Stale two", "Stale three"} {
+				if w := g.save(t, page, g.runToken); w.Code != http.StatusCreated {
+					t.Fatalf("%s with a stale principal: %d %s", page, w.Code, w.Body)
+				}
+			}
+			if rows := g.runAccess(t, g.f.a.RunID); len(rows) != 0 {
+				t.Fatalf("a stale principal recorded created pages for the run: %v", rows)
+			}
+			if PageSaveWithoutRunTokenTotal() != before {
+				t.Fatal("a verified token was counted as tokenless")
+			}
+			w := g.save(t, "Stale four", g.runToken)
+			if w.Code != http.StatusTooManyRequests || !bytes.Contains(w.Body.Bytes(), []byte(`"crew_hourly_page_limit"`)) {
+				t.Fatalf("crew hourly limit must apply: %d %s", w.Code, w.Body)
+			}
+		})
 	}
 }
 
