@@ -343,6 +343,7 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "page.folder_changed": "page",
   "page.folder_membership_changed": "page",
   "page.folder_acl_changed": "page",
+  "page.folder_agent_access_changed": "page",
   "page.owner_transferred": "page",
   "artifact.mooring_created": "page",
   "artifact.mooring_committed": "page",
