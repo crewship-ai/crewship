@@ -755,8 +755,8 @@ owner on 2026-11-13.
    absent with the flag off). The folder settings dialog (owner decision 1)
    offers **Can suggest** for the "Agents of this folder's crew" row only
    when that list names a kind it knows, with the note that it works only for
-   those kinds (a person who can edit asks in a chat, a person with Edit
-   accepts) and acts as Viewer for other kinds in the folder. Without the list
+   those kinds (a person with their own Edit, not only through the ADMIN or
+   OWNER role, asks in a chat; a person with Edit accepts) and acts as Viewer for other kinds in the folder. Without the list
    a stored `propose` is shown as the disabled **Viewer (set as Can
    suggest)**.
 10. **Runs without a human reach nothing yet.** A routine, webhook or cron run

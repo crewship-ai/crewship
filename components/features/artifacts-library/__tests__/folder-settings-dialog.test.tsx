@@ -325,6 +325,9 @@ it("on the server, offers Can suggest where the server gives Docs proposals, and
   const note = screen.getByTestId("folder-agents-suggest-note")
   expect(note.textContent).toMatch(/only for Docs/)
   expect(note.textContent).toMatch(/person with Edit accepts/)
+  // Amendment 2: the requester's Edit must be their own, never only the Admin or Owner role.
+  expect(note.textContent).toMatch(/their own Edit on the document asks it/)
+  expect(note.textContent).toMatch(/only through the Admin or Owner role cannot start a suggestion/)
   expect(note.textContent).toMatch(/other kinds in this folder.*acts as Viewer/)
   // The standing note stays true: a suggestion is not an edit.
   expect(screen.getByText(/never edit through a folder/).textContent).toMatch(/never see Personal artifacts/)

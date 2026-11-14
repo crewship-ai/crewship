@@ -158,7 +158,7 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
         </select>
       </div>
       {suggestKinds.length > 0 && <p data-testid="folder-agents-suggest-note" className="text-muted-foreground">
-        Can suggest works only for {suggestLabel}: an agent proposes changes when a person who can edit the artifact asks it in a chat, and a person with Edit accepts each one.
+        Can suggest works only for {suggestLabel}: an agent proposes changes only when a person with their own Edit on the document asks it in a chat (Edit held only through the Admin or Owner role cannot start a suggestion), and a person with Edit accepts each one.
         For other kinds in this folder it acts as Viewer.
       </p>}
       <p className="text-muted-foreground">Agents never edit through a folder and never see Personal artifacts. Other agents need access on each artifact.</p>

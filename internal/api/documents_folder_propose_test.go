@@ -593,3 +593,87 @@ func TestFolderPropose_SameDocumentCountsOnce(t *testing.T) {
 		t.Fatalf("access rows %d, want 1", n)
 	}
 }
+
+// A page grant never reaches a private Document that is not the human's own
+// Personal one. A Document cannot be crew-owned (a trigger keeps a human
+// owner), so the non-Personal private Document here is one the human owns
+// (so the human edits it) filed in a folder whose agents have no access: only
+// the agent's propose grant could reach it, and it is refused like a missing
+// page, at the human send and on a proposal after the intent. Flag on and off.
+func TestFolderPropose_PageGrantOnFiledPrivateDocumentRefused(t *testing.T) {
+	grant := func(t *testing.T, flag bool, private int) func(f *artifactPrincipalFixture, intent *documents.IterationIntent) {
+		return func(f *artifactPrincipalFixture, intent *documents.IterationIntent) {
+			if flag {
+				agentAccessModesOn(t, f)
+			}
+			mustExec(t, f.rig.db, `UPDATE documents SET schema_version=? WHERE page_id=?`, documents.FormattedSchema, intent.PageID)
+			intent.Schema = documents.FormattedSchema
+			mustExec(t, f.rig.db, `INSERT INTO page_folders(id,workspace_id,slug,name,owner_crew_id,created_at,updated_at,agent_access) VALUES(?,?,?,?,?,'2026-11-14T00:00:00Z','2026-11-14T00:00:00Z','none')`,
+				folderProposeFolder, f.a.WorkspaceID, folderProposeFolder, "Docs", f.a.CrewID)
+			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=?,owner_user_id=?,folder_id=? WHERE id=?`, private, f.a.HumanUserID, folderProposeFolder, intent.PageID)
+			mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'propose',?)`, intent.PageID, f.a.AgentID, f.rig.adminID)
+		}
+	}
+	for _, flag := range []bool{true, false} {
+		t.Run(fmt.Sprintf("flag %v: at the human send", flag), func(t *testing.T) {
+			f, _, _, intent, err := iterationFixtureTry(t, grant(t, flag, 1))
+			if !errors.Is(err, errDocumentAccess) {
+				t.Fatalf("filed private Document: send %v, want errDocumentAccess", err)
+			}
+			var intents int
+			if err := f.rig.db.QueryRow(`SELECT count(*) FROM document_iteration_intents WHERE page_id=?`, intent.PageID).Scan(&intents); err != nil || intents != 0 {
+				t.Fatalf("refused send left %d intents (%v)", intents, err)
+			}
+		})
+		t.Run(fmt.Sprintf("flag %v: made private after the intent", flag), func(t *testing.T) {
+			// The same Document shared (private_audience=0) is admitted, so the
+			// refusal below is the private audience alone.
+			f, h, token, intent := iterationFixtureFor(t, grant(t, flag, 0))
+			f.rig.db.SetMaxOpenConns(1)
+			initializeDocumentDraftProjection(t, f, intent.PageID)
+			mustExec(t, f.rig.db, `UPDATE pages SET private_audience=1 WHERE id=?`, intent.PageID)
+			if w := folderPropose(t, f, h, token, intent.PageID, "private-grant-proposal"); w.Code != http.StatusForbidden {
+				t.Fatalf("proposal on a filed private Document: %d %s, want 403", w.Code, w.Body)
+			}
+			if _, proposals := docHeadAndProposals(t, f, intent.PageID); proposals != 0 {
+				t.Fatalf("refused proposal stored %d rows", proposals)
+			}
+		})
+	}
+}
+
+// The folder rule alone refuses a commit or checkpoint at authorization,
+// before the propose mandate's guard runs, and records no write.
+func TestFolderPropose_AuthorizeRefusesFolderCommitAndCheckpoint(t *testing.T) {
+	f, h, _, intent := mustFolderProposeDoc(t, nil)
+	key := documents.Key{WorkspaceID: f.a.WorkspaceID, PageID: intent.PageID}
+	for _, op := range []string{"commit", "checkpoint"} {
+		tx, err := f.rig.db.BeginTx(t.Context(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ctx := context.WithValue(t.Context(), pageAuthReaderKey{}, tx)
+		if _, err := h.pages.authorizeDocumentDraft(ctx, &f.a, key, op); !errors.Is(err, errDocumentAccess) {
+			_ = tx.Rollback()
+			t.Fatalf("folder %s authorized: %v, want errDocumentAccess", op, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, r := range kindAuditRows(t, f) {
+		if r.Operation == "write" {
+			t.Fatalf("a refused folder write was audited: %+v", r)
+		}
+	}
+	// The same authorization admits the run's proposal, so the refusal above
+	// is the operation, not a lost reach.
+	tx, err := f.rig.db.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if _, err := h.pages.authorizeDocumentDraft(context.WithValue(t.Context(), pageAuthReaderKey{}, tx), &f.a, key, "propose"); err != nil {
+		t.Fatalf("folder propose not authorized: %v", err)
+	}
+}
