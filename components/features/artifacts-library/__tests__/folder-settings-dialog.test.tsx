@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest"
 
-const flags = vi.hoisted(() => ({ mock: true, fetch: vi.fn((): Promise<Response> => { throw new Error("no HTTP in the mock") }) }))
+const flags = vi.hoisted(() => ({ mock: true, fetch: vi.fn((_url: string, _init?: RequestInit): Promise<Response> => { throw new Error("no HTTP in the mock") }) }))
 vi.mock("@/lib/feature-flags", async importOriginal => ({ ...(await importOriginal<typeof import("@/lib/feature-flags")>()), artifactsSharingMock: () => flags.mock }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: "me" } }, status: "authenticated" }) }))
 vi.mock("@/hooks/use-issue-people", () => ({ useIssuePeople: () => ({ people: [{ id: "u2", name: "Ann Novak" }, { id: "u3", name: "Bo Lind" }], error: false }) }))
@@ -101,4 +101,78 @@ it("returns focus to the control that opened it once the library unmounts the di
   unmount()
   await waitFor(() => expect(document.activeElement).toBe(opener))
   opener.remove()
+})
+
+// #5317 PR5 (Harbor 2 v92): one row for the agents of the folder's crew, at
+// most Viewer (Can suggest is hidden until a folder can give a proposal,
+// #5317 step 5.2), saved against the version that was read.
+it("on the server, sets the crew's agents to Viewer against the version it read", async () => {
+  flags.mock = false
+  const acl = { folder: "design", acl_version: 4, acl: [], agent_access: "none", agent_access_available: true }
+  flags.fetch.mockImplementation(async () => new Response(JSON.stringify(acl), { status: 200 }))
+  const onOpenChange = vi.fn()
+  renderDialog(onOpenChange)
+  const select = await screen.findByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement
+  expect([...select.options].map(o => o.textContent)).toEqual(["No access", "Viewer"])
+  expect(screen.getByText(/never edit through a folder/)).toBeTruthy()
+  change("Agents of this folder's crew", "read")
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  const writes = flags.fetch.mock.calls.map(call => call as unknown as [string, RequestInit | undefined]).filter(([, init]) => init?.method === "PUT")
+  expect(writes.map(([url, init]) => [new URL(url, "http://h").pathname, JSON.parse(String(init!.body))])).toEqual([
+    ["/api/v1/page-folders/design/agent-access", { level: "read", acl_version: 4 }],
+  ])
+})
+
+it("on the server, shows a propose level set elsewhere as Viewer access without offering it", async () => {
+  flags.mock = false
+  const acl = { folder: "design", acl_version: 4, acl: [], agent_access: "propose", agent_access_available: true }
+  flags.fetch.mockImplementation(async () => new Response(JSON.stringify(acl), { status: 200 }))
+  renderDialog()
+  const select = await screen.findByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement
+  expect(select.value).toBe("propose")
+  expect([...select.options].map(o => [o.textContent, o.disabled])).toEqual([["No access", false], ["Viewer", false], ["Viewer (set as Can suggest)", true]])
+})
+
+it("on the server, hides the agents row where it would not take effect", async () => {
+  flags.mock = false
+  const acl = { folder: "design", acl_version: 4, acl: [], agent_access: "none", agent_access_available: false }
+  flags.fetch.mockImplementation(async () => new Response(JSON.stringify(acl), { status: 200 }))
+  renderDialog()
+  await screen.findByRole("button", { name: "Save" })
+  expect(screen.queryByRole("combobox", { name: "Agents of this folder's crew" })).toBeNull()
+})
+
+it("on the server, a retry after a failed entry save does not resend the agents level on the old version", async () => {
+  flags.mock = false
+  let version = 4
+  let failEntry = true
+  flags.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    const path = new URL(url, "http://h").pathname
+    if (init?.method === "PUT" && path.endsWith("/agent-access")) {
+      const body = JSON.parse(String(init.body))
+      if (body.acl_version !== version) return new Response(JSON.stringify({ error: "conflict: acl_version" }), { status: 409 })
+      version++
+      return new Response(JSON.stringify({ folder: "design", agent_access: body.level, acl_version: version, agent_access_available: true }), { status: 200 })
+    }
+    if (init?.method === "PUT") {
+      if (failEntry) { failEntry = false; return new Response(JSON.stringify({ error: "try again" }), { status: 500 }) }
+      version++
+      return new Response("{}", { status: 200 })
+    }
+    return new Response(JSON.stringify({ folder: "design", acl_version: version, acl: [], agent_access: "none", agent_access_available: true }), { status: 200 })
+  })
+  const onOpenChange = vi.fn()
+  renderDialog(onOpenChange)
+  await screen.findByRole("combobox", { name: "Agents of this folder's crew" })
+  change("Agents of this folder's crew", "read")
+  change("Add person or everyone", "user:u2"); change("Level to add", "read")
+  fireEvent.click(screen.getByRole("button", { name: "Add" }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await screen.findByText(/try again/)
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  const agentPuts = flags.fetch.mock.calls.map(call => call as unknown as [string, RequestInit | undefined])
+    .filter(([url, init]) => init?.method === "PUT" && url.includes("/agent-access"))
+  expect(agentPuts).toHaveLength(1)
 })

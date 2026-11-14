@@ -181,3 +181,15 @@ it("a non-owner sees an agent's Can propose read-only", async () => {
   expect(within(agent).queryByRole("combobox")).toBeNull()
   expect(within(agent).queryByRole("button", { name: /Remove/ })).toBeNull()
 })
+
+// #5317 PR5 (Harbor 2 v92): a Personal artifact says who else can open it.
+it("says on a Personal artifact that admins can open it and every open is logged", async () => {
+  renderDialog(item({ private: true }))
+  expect(await screen.findByText("Personal: admins can open it, and every open is logged.")).toBeTruthy()
+})
+
+it("says nothing about admin opens on a shared artifact", async () => {
+  renderDialog()
+  await within(list()).findByText("You")
+  expect(screen.queryByText(/every open is logged/)).toBeNull()
+})
