@@ -81,7 +81,9 @@ export interface AccessEntry {
 export type DefaultAudience = "private" | "folder"
 /** What the agents of a folder's crew may do with its non-private artifacts (#5317 D2): never edit. */
 export type FolderAgentLevel = "none" | "read" | "propose"
-export const FOLDER_AGENT_LEVELS: readonly FolderAgentLevel[] = ["none", "read", "propose"]
+/** Levels the dialog offers. `propose` is not offered until a folder gives its
+ * agents a real proposal path (#5317 step 5.2); today it reads like `read`. */
+export const FOLDER_AGENT_LEVELS: readonly FolderAgentLevel[] = ["none", "read"]
 export const FOLDER_AGENT_LABEL: Record<FolderAgentLevel, string> = { none: "No access", read: "Viewer", propose: "Can suggest" }
 export interface FolderSettings {
   slug: string
@@ -310,7 +312,7 @@ export function httpSharingApi(workspaceId: string, guard?: RequestGuard, operat
       const id = type === "workspace" ? "" : str(raw.subject_id)
       return [{ subjectType: type, subjectId: id, label: type === "workspace" ? EVERYONE : str(raw.label) || id, level: raw.can_write === true ? "write" : "read", via: "folder" }]
     })
-    const level = FOLDER_AGENT_LEVELS.find(l => l === body.agent_access)
+    const level = (["none", "read", "propose"] as const).find(l => l === body.agent_access)
     const agents = body.agent_access_available === true && level && typeof body.acl_version === "number" ? { level, aclVersion: body.acl_version } : null
     return { slug, defaultAudience: null, entries, agents }
   }

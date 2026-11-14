@@ -104,7 +104,8 @@ it("returns focus to the control that opened it once the library unmounts the di
 })
 
 // #5317 PR5 (Harbor 2 v92): one row for the agents of the folder's crew, at
-// most Viewer or Can suggest, saved against the version that was read.
+// most Viewer (Can suggest is hidden until a folder can give a proposal,
+// #5317 step 5.2), saved against the version that was read.
 it("on the server, sets the crew's agents to Viewer against the version it read", async () => {
   flags.mock = false
   const acl = { folder: "design", acl_version: 4, acl: [], agent_access: "none", agent_access_available: true }
@@ -112,7 +113,7 @@ it("on the server, sets the crew's agents to Viewer against the version it read"
   const onOpenChange = vi.fn()
   renderDialog(onOpenChange)
   const select = await screen.findByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement
-  expect([...select.options].map(o => o.textContent)).toEqual(["No access", "Viewer", "Can suggest"])
+  expect([...select.options].map(o => o.textContent)).toEqual(["No access", "Viewer"])
   expect(screen.getByText(/never edit through a folder/)).toBeTruthy()
   change("Agents of this folder's crew", "read")
   fireEvent.click(screen.getByRole("button", { name: "Save" }))
@@ -121,6 +122,16 @@ it("on the server, sets the crew's agents to Viewer against the version it read"
   expect(writes.map(([url, init]) => [new URL(url, "http://h").pathname, JSON.parse(String(init!.body))])).toEqual([
     ["/api/v1/page-folders/design/agent-access", { level: "read", acl_version: 4 }],
   ])
+})
+
+it("on the server, shows a propose level set elsewhere as Viewer access without offering it", async () => {
+  flags.mock = false
+  const acl = { folder: "design", acl_version: 4, acl: [], agent_access: "propose", agent_access_available: true }
+  flags.fetch.mockImplementation(async () => new Response(JSON.stringify(acl), { status: 200 }))
+  renderDialog()
+  const select = await screen.findByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement
+  expect(select.value).toBe("propose")
+  expect([...select.options].map(o => [o.textContent, o.disabled])).toEqual([["No access", false], ["Viewer", false], ["Viewer (set as Can suggest)", true]])
 })
 
 it("on the server, hides the agents row where it would not take effect", async () => {

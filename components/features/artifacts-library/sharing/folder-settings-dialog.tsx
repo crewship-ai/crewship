@@ -128,6 +128,7 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
         <select aria-label="Agents of this folder's crew" className="h-7 rounded-md border bg-transparent px-2 text-xs" value={agents}
           onChange={e => setAgents(e.target.value as FolderAgentLevel)}>
           {FOLDER_AGENT_LEVELS.map(l => <option key={l} value={l}>{FOLDER_AGENT_LABEL[l]}</option>)}
+          {agents === "propose" && <option value="propose" disabled>Viewer (set as Can suggest)</option>}
         </select>
       </div>
       <p className="text-muted-foreground">Agents never edit through a folder and never see Personal artifacts. Other agents need access on each artifact.</p>
