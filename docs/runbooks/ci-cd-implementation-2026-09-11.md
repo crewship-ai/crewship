@@ -23,8 +23,8 @@ package durations. That combined metric has its own measured baseline (median
 4166 s over 46 main push runs, 2026-11-03 to 2026-11-05) and an explicit
 erosion alarm (`RACE_COMBINED_ALARM_SECONDS`) that fails pull requests, merge
 groups and main pushes. The alarm was 5200 s; on 2026-11-14 the owner raised it
-temporarily to 6000 s because identical content measured 4262–5667 s (#4761). The 2300-second unsplit
-package runtime from 2026-09-14 now only sets the per-partition 4600-second hang
+temporarily to 6000 s because identical content measured 4262–5667 s (#4761).
+The 2300-second unsplit package runtime from 2026-09-14 now only sets the per-partition 4600-second hang
 deadline and the bootstrap deadline (`RACE_API_TIMEOUT_BASIS_SECONDS`); the
 alarm never feeds a timeout. All migration work and package setup/cleanup remain
 measured.
