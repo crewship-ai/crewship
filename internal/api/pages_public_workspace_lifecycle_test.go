@@ -83,6 +83,10 @@ func TestWorkspaceDeletePublicLinks_PreservesOtherWorkspaceAndPriorRevocation(t 
 	if _, err := h.db.Exec(`INSERT INTO workspaces(id,name,slug) VALUES('other-public-ws','Other','other-public-ws')`); err != nil {
 		t.Fatal(err)
 	}
+	// A link opens only while its creator is a member of the page's workspace.
+	if _, err := h.db.Exec(`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('wm-other-public','other-public-ws',?,'OWNER')`, userID); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := h.db.Exec(`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('other-public-page','other-public-ws','other-public-page','Other',?,'{}')`, userID); err != nil {
 		t.Fatal(err)
 	}

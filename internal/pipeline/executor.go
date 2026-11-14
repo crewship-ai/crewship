@@ -690,6 +690,10 @@ type WaitpointApprovalRequest struct {
 	RiskLevel      string
 	InvokingCrewID string
 	TimeoutSec     int
+	// NoStandingTrust: this approval answers one held action and must be
+	// decided by a person every time. No standing trust grant is consumed
+	// (which would approve it without asking) and none is offered.
+	NoStandingTrust bool
 }
 
 // NewExecutor wires the dependencies together. emitter and pipes may
@@ -2083,7 +2087,7 @@ func (e *Executor) dispatchStep(
 	case StepForeach:
 		return e.runForeachStep(ctx, step, in, parentRender, runID, pipelineID, emit, depth)
 	case StepCrewship:
-		return e.runCrewshipStep(ctx, step, parentRender, in, runID)
+		return e.runCrewshipStep(ctx, step, parentRender, in, runID, depth)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
 	}

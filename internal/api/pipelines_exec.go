@@ -1374,7 +1374,9 @@ LIMIT 200`, workspaceID)
 		}
 		if form != "" {
 			row.DecisionForm = json.RawMessage(form)
-		} else {
+		} else if !pipeline.IsCrewshipApprovalStepKey(row.StepID) {
+			// A held routine action is decided by an OWNER or ADMIN only;
+			// its token's holder cannot complete it, so no callback is offered.
 			row.CallbackURL = base + "/api/v1/waitpoint-tokens/" + row.Token
 		}
 		out = append(out, row)

@@ -17,8 +17,10 @@ package api
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -489,4 +491,60 @@ func covCruRepeat(s string, n int) string {
 		b = append(b, s...)
 	}
 	return string(b)
+}
+
+// TestCovCruUpdate_CommonUtilsAccount pins the update side of the runtime
+// account rule: a common-utils declaration that would create the account under
+// another name or UID is refused before it is stored, while a compatible one,
+// or none at all, is accepted (update fills nothing in; provisioning does).
+func TestCovCruUpdate_CommonUtilsAccount(t *testing.T) {
+	const cu = "ghcr.io/devcontainers/features/common-utils:2"
+	for _, tc := range []struct {
+		name, cfg string
+		wantCode  int
+		wantIn    string
+	}{
+		{"other uid refused", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"username":"agent","userUid":"2000"}}}`, http.StatusBadRequest, "set userUid to"},
+		{"other user refused", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"username":"builder"}}}`, http.StatusBadRequest, "set username to"},
+		{"legacy uid key refused when it conflicts", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"uid":"2000"}}}`, http.StatusBadRequest, "UID 1001"},
+		{"compatible declaration accepted", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"installZsh":"false"}}}`, http.StatusOK, ""},
+		{"no common-utils accepted", `{"image":"debian:bookworm-slim"}`, http.StatusOK, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, db, userID, wsID := covCruNewCrew(t)
+			cr := covCruDoCreate(h, userID, wsID, "OWNER", `{"name":"Acct","slug":"acct"}`)
+			if cr.Code != http.StatusCreated {
+				t.Fatalf("create = %d: %s", cr.Code, cr.Body.String())
+			}
+			var created struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(cr.Body.Bytes(), &created)
+			var before sql.NullString
+			if err := db.QueryRow(`SELECT devcontainer_config FROM crews WHERE id = ?`, created.ID).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			body, _ := json.Marshal(map[string]any{"devcontainer_config": tc.cfg})
+			rr := covCruDoUpdate(h, created.ID, userID, wsID, "OWNER", string(body))
+			if rr.Code != tc.wantCode {
+				t.Fatalf("update = %d, want %d; body=%s", rr.Code, tc.wantCode, rr.Body.String())
+			}
+			var after sql.NullString
+			if err := db.QueryRow(`SELECT devcontainer_config FROM crews WHERE id = ?`, created.ID).Scan(&after); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantCode != http.StatusOK {
+				if !strings.Contains(rr.Body.String(), tc.wantIn) {
+					t.Fatalf("body %s does not name the fix %q", rr.Body.String(), tc.wantIn)
+				}
+				if after != before {
+					t.Fatalf("refused update changed the stored config: %v -> %v", before, after)
+				}
+				return
+			}
+			if after.String != tc.cfg {
+				t.Fatalf("stored = %q, want the submitted config %q unchanged", after.String, tc.cfg)
+			}
+		})
+	}
 }

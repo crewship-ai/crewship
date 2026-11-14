@@ -183,8 +183,12 @@ const pagePublicPasswordRefusal = "that link and password do not match"
 // resolvePublicToken looks a token up by its hash and applies rule 4.
 //
 // Returns sql.ErrNoRows for every unavailable case — unknown, revoked, expired,
-// page gone — so the caller has no branch on which to build a different answer
-// for each.
+// page gone, or a creator without standing — so the caller has no branch on
+// which to build a different answer for each.
+//
+// A link speaks for the human who published it, so it opens only while that
+// human still stands: not suspended and still a member of the workspace. The
+// link is withheld, not revoked; it opens again when the standing returns.
 func (h *PagePublicHandler) resolvePublicToken(ctx context.Context, token string, now time.Time) (*publicToken, error) {
 	token = strings.TrimSpace(token)
 	if token == "" {
@@ -199,6 +203,8 @@ func (h *PagePublicHandler) resolvePublicToken(ctx context.Context, token string
 		FROM page_public_tokens t
 		JOIN pages p ON p.id = t.page_id
 		JOIN workspaces w ON w.id = p.workspace_id AND w.deleted_at IS NULL
+		JOIN users creator ON creator.id = t.created_by_user_id AND creator.suspended_at IS NULL
+		JOIN workspace_members standing ON standing.workspace_id = p.workspace_id AND standing.user_id = t.created_by_user_id
 		WHERE t.token_hash = ? AND t.revoked_at IS NULL AND p.private_audience=0`,
 		hashPagePublicToken(token)).Scan(&t.ID, &t.PageID, &t.WorkspaceID,
 		&passwordHash, &expiresAt, &showProvenance, &lastSeen)

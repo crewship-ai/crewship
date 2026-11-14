@@ -52,6 +52,11 @@ func codeReference(ref string) (string, error) {
 	if parts[0] == "steps" && len(parts) < 3 {
 		return "", codeTemplateError()
 	}
+	// secrets.NAME.x is accepted ignoring case like the template form;
+	// codeSecrets keys the by-name object as lower-case "name".
+	if parts[0] == "secrets" && len(parts) >= 3 && strings.EqualFold(parts[1], "name") {
+		parts[1] = "name"
+	}
 	var out strings.Builder
 	out.WriteString(parts[0])
 	for _, part := range parts[1:] {
@@ -284,8 +289,29 @@ func codeContextVariables(render RenderContext) map[string]any {
 	return map[string]any{
 		"steps": newCodeStepMap(render.StepOutputs), "run": run, "env": render.Env,
 		"routine": map[string]any{"state": render.State},
-		"secrets": render.Secrets, "event": render.Event,
+		"secrets": codeSecrets(render.Secrets), "event": render.Event,
 	}
+}
+
+// codeSecrets exposes by-name secrets the way the template spells them:
+// `secrets.name.<NAME>` is a nested object in code, not a dotted key.
+func codeSecrets(flat map[string]string) map[string]any {
+	out := make(map[string]any, len(flat))
+	var byName map[string]any
+	for key, value := range flat {
+		if name, ok := CredentialRefName(key); ok {
+			if byName == nil {
+				byName = map[string]any{}
+			}
+			byName[name] = value
+			continue
+		}
+		out[key] = value
+	}
+	if byName != nil {
+		out["name"] = byName
+	}
+	return out
 }
 
 // Only fixed namespaces are exposed. In particular, inputs cannot override
