@@ -151,6 +151,8 @@ WHERE p.id=? AND p.workspace_id=? AND p.private_audience=0 AND f.agent_access IN
 		if n != 1 || a.CrewID == "" {
 			return runReachNone, false, nil
 		}
+		// Defence in depth: the run principal check already requires the agent to
+		// still belong to this crew; this re-reads it next to the folder grant.
 		var crew string
 		if err = q.QueryRowContext(ctx, `SELECT coalesce(crew_id,'') FROM agents WHERE id=? AND workspace_id=?`, a.AgentID, a.WorkspaceID).Scan(&crew); err != nil || crew != a.CrewID {
 			return runReachNone, false, err
@@ -262,7 +264,7 @@ func (h *PageHandler) crewHourlyPageCapReached(ctx context.Context, tx *sql.Tx, 
 	if err != nil {
 		return false, 0, err
 	}
-	since := h.evaluator().Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano)
+	since := tsformat.Format(h.evaluator().Now().Add(-time.Hour))
 	var n int
 	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM pages p WHERE p.workspace_id=? AND p.owner_crew_id=? AND julianday(p.created_at) >= julianday(?) AND NOT EXISTS(SELECT 1 FROM page_versions v WHERE v.page_id=p.id AND v.seq=1 AND v.author_user_id IS NOT NULL)`, workspace, crew, since).Scan(&n); err != nil {
 		return false, 0, err
