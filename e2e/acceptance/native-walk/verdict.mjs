@@ -11,6 +11,8 @@ export const EXIT = { pass: 0, failed: 1, setup: 2, partial: 3 }
 
 /** The 404 body of GET …/craft/document/versions while the craft_version_history flag is off. */
 export const HISTORY_NOT_ENABLED = "native version history is not enabled"
+/** The workspace flag behind the history listing (internal/api/craft_native_versions.go). */
+export const HISTORY_FLAG = "craft_version_history"
 
 export const SPEC_FILE = "native-walk.acceptance.ts"
 export const EVIDENCE_FILE = "walk.json"
@@ -143,14 +145,32 @@ export function versionProblems(evidence) {
 }
 
 /**
- * The history listing: 200 must list exactly the observed versions; a 404 with
- * the flag-off message is NOT VERIFIED (the flag is not accepted and stays off);
- * anything else fails. Derived from the recorded status and body, not from the
- * spec's own label.
+ * The flags the walk turned on in its own QA workspace (--workspace-flag): each one
+ * requested must have answered 200 and read back as on; none other may be on.
  */
-export function historyCheck(evidence) {
+export function workspaceFlagProblems(evidence, requested = []) {
+  const recorded = Array.isArray(evidence?.workspaceFlags) ? evidence.workspaceFlags : []
+  const problems = []
+  for (const key of requested) {
+    const f = recorded.find((x) => x?.key === key)
+    if (!f) problems.push(`workspace flag ${key} was not turned on: the walk recorded no override`)
+    else if (f.status !== 200 || f.overrideEnabled !== true) problems.push(`workspace flag ${key} was not turned on: PUT override answered ${f.status}, override reads back ${JSON.stringify(f.overrideEnabled)}${f.error ? ` (${String(f.error).slice(0, 120)})` : ""}`)
+  }
+  for (const f of recorded) if (!requested.includes(f?.key)) problems.push(`workspace flag ${f?.key} turned on without --workspace-flag`)
+  return problems
+}
+
+/**
+ * The history listing: 200 must list exactly the observed versions; a 404 with
+ * the flag-off message is NOT VERIFIED (the flag is not accepted and stays off),
+ * unless the run turned the flag on in its workspace (`--workspace-flag
+ * craft_version_history`): then it fails. Anything else fails. Derived from the
+ * recorded status and body, not from the spec's own label.
+ */
+export function historyCheck(evidence, requested = []) {
   const h = evidence?.history
   if (!h || typeof h !== "object") return { problem: "no history record in the evidence" }
+  if (h.listingStatus === 404 && h.error === HISTORY_NOT_ENABLED && requested.includes(HISTORY_FLAG)) return { problem: `version history listing answered 404 "${HISTORY_NOT_ENABLED}" although --workspace-flag ${HISTORY_FLAG} turned it on in the workspace` }
   if (h.listingStatus === 404 && h.error === HISTORY_NOT_ENABLED) return { notVerified: `version history listing answered 404 "${HISTORY_NOT_ENABLED}" (flag craft_version_history off): the listing was not compared` }
   if (h.listingStatus !== 200) return { problem: `version history listing answered ${h.listingStatus}: ${String(h.error ?? "").slice(0, 160)}` }
   const v = evidence.versions ?? {}
@@ -161,7 +181,7 @@ export function historyCheck(evidence) {
 }
 
 /** Everything one walk's evidence must show. */
-export function checkEvidence(scenario, evidence, { rc, origin, chrome, runId }) {
+export function checkEvidence(scenario, evidence, { rc, origin, chrome, runId, workspaceFlags = [] }) {
   if (evidence === null || evidence === undefined) return { problems: [`no evidence file ${evidencePath(scenario)}`], notVerified: [] }
   if (evidence.unreadable) return { problems: [`unreadable evidence ${evidencePath(scenario)}: ${evidence.unreadable}`], notVerified: [] }
   const problems = []
@@ -196,7 +216,8 @@ export function checkEvidence(scenario, evidence, { rc, origin, chrome, runId })
     if (s?.verifyPresses !== 0) problems.push(`step "${s?.name}": "Check the result" pressed ${JSON.stringify(s?.verifyPresses)} times`)
   }
   problems.push(...versionProblems(evidence))
-  const history = historyCheck(evidence)
+  problems.push(...workspaceFlagProblems(evidence, workspaceFlags))
+  const history = historyCheck(evidence, workspaceFlags)
   if (history.problem) problems.push(history.problem)
   return { problems, notVerified: history.notVerified ? [history.notVerified] : [] }
 }
@@ -206,11 +227,11 @@ export function checkEvidence(scenario, evidence, { rc, origin, chrome, runId })
  *   playwrightStatus: number | null, listed: string[], rows: Array<Record<string, any>>,
  *   run: Record<string, any> | null, finished: Record<string, any> | null, reporter: Record<string, any> | null,
  *   rc: string, origin: string, chrome?: string, runId: string, narrowed: boolean,
- *   evidence: Record<string, any>,
+ *   evidence: Record<string, any>, workspaceFlags?: string[],
  * }} input
  * @returns {{ exit: number, verdict: "PASS" | "FAIL" | "SETUP" | "PARTIAL", reasons: string[], notVerified: { id: string, item: string }[], expected: string[] }}
  */
-export function verdict({ playwrightStatus, listed, rows, run, finished, reporter, rc, origin, chrome, runId, narrowed, evidence }) {
+export function verdict({ playwrightStatus, listed, rows, run, finished, reporter, rc, origin, chrome, runId, narrowed, evidence, workspaceFlags = [] }) {
   const setup = [], failed = [], notVerified = []
   if (!/^[0-9a-f]{40}$/.test(String(rc ?? ""))) setup.push(`--rc ${JSON.stringify(rc)} is not a full 40-character SHA`)
   if (!runId) setup.push("no run id")
@@ -265,7 +286,7 @@ export function verdict({ playwrightStatus, listed, rows, run, finished, reporte
       if (r.mode !== "full") failed.push(`${s.id}: row mode ${r.mode}, need full`)
       if (!runId || r.runId !== runId) failed.push(`${s.id}: row is of run ${r.runId}, not ${runId}`)
     }
-    const e = checkEvidence(s, evidence?.[s.id], { rc, origin, chrome, runId })
+    const e = checkEvidence(s, evidence?.[s.id], { rc, origin, chrome, runId, workspaceFlags })
     failed.push(...e.problems.map((p) => `${s.id}: ${p}`))
     notVerified.push(...e.notVerified.map((item) => ({ id: s.id, item })))
   }

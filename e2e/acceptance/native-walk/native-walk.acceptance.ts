@@ -5,7 +5,7 @@
 //
 // A violation is recorded and the walk goes on, so one run shows every broken rule; the test
 // fails at the end on any violation. Only a walk that cannot continue aborts.
-import { chromium, type Frame, type Page } from "@playwright/test"
+import { chromium, type APIRequestContext, type Frame, type Page } from "@playwright/test"
 import { readFacts } from "../prd/craft-lease/sheet-workbook"
 import { holdsMarker, isUnconfirmedStatus, labelVersion, pendingReplies } from "../prd/craft-session/confirm"
 import { walk, wordFacts } from "../prd/craft-session/facts"
@@ -35,6 +35,34 @@ const VERIFY = "Check the result"
 // Voice group and noSpacing on the Find menu, which takes the keys. Word walks at WORD_VIEWPORT
 // (canvas 1626 px), and every ribbon click must hand the keys back to the document (keysBack).
 const WORD_UI = { homeTab: { x: 76, y: 53 }, heading1: { x: 918, y: 94 }, noSpacing: { x: 844, y: 94 } }
+// --workspace-flag (run.mjs): flags turned on in the walk's own QA workspace, never instance-wide.
+const WORKSPACE_FLAGS = (process.env.NATIVE_WALK_WORKSPACE_FLAGS ?? "").split(",").map((k) => k.trim()).filter(Boolean)
+const HISTORY_FLAG = "craft_version_history"
+
+type WorkspaceFlag = { key: string; status: number; overrideEnabled: boolean | null; error?: string }
+
+/**
+ * Turns each flag on for this workspace only, as `crewship feature-flag enable KEY` does
+ * (PUT /api/v1/feature-flags/{key}/override), and reads the override back from the list.
+ * A flag with no definition on the instance answers 404 and is not created here.
+ */
+async function enableWorkspaceFlags(owner: APIRequestContext, workspaceId: string, keys: string[]): Promise<WorkspaceFlag[]> {
+  const wsq = `workspace_id=${encodeURIComponent(workspaceId)}`
+  const set: WorkspaceFlag[] = []
+  for (const key of keys) {
+    const r = await owner.put(`/api/v1/feature-flags/${encodeURIComponent(key)}/override?${wsq}`, { data: { enabled: true } })
+    set.push({ key, status: r.status(), overrideEnabled: null, ...(r.status() === 200 ? {} : { error: (await r.text()).slice(0, 200) }) })
+  }
+  const l = await owner.get(`/api/v1/feature-flags?${wsq}`)
+  const listed = l.status() === 200 ? ((await l.json().catch(() => null)) as { key?: unknown; override_enabled?: unknown }[] | null) : null
+  for (const f of set) {
+    const row = Array.isArray(listed) ? listed.find((x) => x?.key === f.key) : undefined
+    f.overrideEnabled = typeof row?.override_enabled === "boolean" ? row.override_enabled : null
+    if (l.status() !== 200) f.error = `${f.error ? `${f.error}; ` : ""}list answered ${l.status()}`
+  }
+  return set
+}
+
 const BODY = { wordcraft: { x: 200, y: 215, width: 800, height: 480 }, gridcraft: { x: 60, y: 215, width: 800, height: 300 } }
 
 type Row = {
@@ -122,7 +150,14 @@ for (const scenario of SCENARIOS) {
     let proofAt: number | null = null // ops recorded when the version proof was taken
     try {
       await bounded(`${label} walk`, WALK_MS, (async () => {
-        const { context, page, api, ws } = await isolatedActor(prd, browser, `native walk ${label}`, { viewport: app === "wordcraft" ? WORD_VIEWPORT : N.VIEWPORT })
+        const { context, page, api, ws, owner } = await isolatedActor(prd, browser, `native walk ${label}`, { viewport: app === "wordcraft" ? WORD_VIEWPORT : N.VIEWPORT })
+        if (WORKSPACE_FLAGS.length) {
+          const flags = await enableWorkspaceFlags(owner, ws.id, WORKSPACE_FLAGS)
+          out.workspaceFlags = flags
+          console.log(`[walk] ${label}: workspace flags ${flags.map((f) => `${f.key} PUT ${f.status} override ${String(f.overrideEnabled)}`).join(", ")}`)
+          const off = flags.filter((f) => f.status !== 200 || f.overrideEnabled !== true)
+          if (off.length) throw new Error(`workspace flag not turned on: ${off.map((f) => `${f.key} (PUT ${f.status}${f.error ? ` ${f.error}` : ""}, override ${String(f.overrideEnabled)})`).join(", ")}`)
+        }
         page.setDefaultTimeout(60_000)
         await context.addInitScript(spy)
         expect((await N.nativeEnabled(api, ws.id)).enabled, "native editing is on").toBe(true)
@@ -472,7 +507,8 @@ for (const scenario of SCENARIOS) {
           const h = await settle()
           checkContent(h, "final")
           // The history listing: 200 must list exactly the observed versions, the flag-off 404 is
-          // recorded as not enabled (NOT VERIFIED in the verdict), anything else is a violation.
+          // recorded as not enabled (NOT VERIFIED in the verdict, a violation when this walk turned
+          // the flag on), anything else is a violation.
           const pageRef = encodeURIComponent("@" + ref.pageId), wsq = `workspace_id=${encodeURIComponent(ref.workspaceId)}`
           const s = await api.post(`/api/v1/pages/${pageRef}/craft/sessions?${wsq}`, { data: {} })
           check(s.status() === 201, `read admission for the history listing answered ${s.status()}`)
@@ -490,7 +526,9 @@ for (const scenario of SCENARIOS) {
           else if (l.status() !== 200) history = "error"
           else history = body?.truncated === false && sameVersions(listing, observed) ? "verified" : "mismatch"
           out.history = { result: history, listingStatus: l.status(), error, listing, truncated: body?.truncated ?? null, observed }
+          console.log(`[walk] ${label}: history ${history}, listing ${l.status()} ${JSON.stringify(listing)} (truncated ${String(body?.truncated ?? null)}), observed ${observed.join(",")}`)
           check(history !== "error", `version history listing answered ${l.status()}: ${error}`)
+          check(!(history === "not-enabled" && WORKSPACE_FLAGS.includes(HISTORY_FLAG)), `version history listing answered 404 "${HISTORY_NOT_ENABLED}" although ${HISTORY_FLAG} was turned on in the workspace`)
           check(history !== "mismatch", `version history listing ${JSON.stringify(listing)} (truncated ${String(body?.truncated)}) is not the observed ${observed.join(",")}`)
           await page.screenshot({ path: test.info().outputPath(`${app}-end.png`), timeout: 30_000 }).catch(() => {})
           releaseStatus = await N.release(page).then(() => "ok", (e: unknown) => `failed: ${String(e).slice(0, 200)}`)

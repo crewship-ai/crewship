@@ -58,7 +58,7 @@ function label(raw: string): string {
  * retires other people's open editor sessions).
  */
 export async function createQaWorkspace(owner: APIRequestContext, scenario: string): Promise<QaWorkspace> {
-  const slug = `prd-qa-${label(scenario)}-${suffix()}`
+  const slug = `qa-live-${label(scenario)}-${suffix()}`
   const res = await owner.post("/api/v1/workspaces", { data: { name: `PRD acceptance ${scenario}`, slug } })
   if (res.status() !== 201) throw new Error(`create QA workspace: ${res.status()} ${(await res.text()).slice(0, 300)}`)
   const body = (await res.json()) as { id: string; slug?: string }
@@ -91,7 +91,7 @@ export async function provisionMember(
   role: "ADMIN" | "MANAGER" | "MEMBER" | "VIEWER",
   name = "PRD acceptance person",
 ): Promise<ProvisionedMember> {
-  const email = `prd-qa-${suffix()}@example.test`
+  const email = `qa-live-${suffix()}@example.test`
   const password = `${randomBytes(24).toString("base64url")}Aa9!`
   const res = await owner.post(`/api/v1/workspaces/${encodeURIComponent(ws.id)}/members/provision?workspace_id=${encodeURIComponent(ws.id)}`, {
     data: { email, role, full_name: name, create_only: true },
