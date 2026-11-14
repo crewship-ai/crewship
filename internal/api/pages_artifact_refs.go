@@ -191,6 +191,21 @@ func (h *PageHandler) delegableRead(ctx context.Context, workspace, pageID strin
 	return h.canSeePage(ctx, workspace, rec, panels, viewer)
 }
 
+// delegableEdit: may the human edit this artifact as an ordinary member
+// (delegableViewer)? Edit held only through the ADMIN or OWNER role does not
+// count (amendment 2), so it never passes to an agent. Used for a Design write
+// and for a Docs proposal with the flag on.
+func (h *PageHandler) delegableEdit(ctx context.Context, workspace, humanID string, rec *pageRecord) (bool, error) {
+	viewer, err := h.delegableViewer(ctx, workspace, humanID)
+	if err != nil {
+		return false, err
+	}
+	if viewer.Role == "" || canRole(viewer.Role, "manage") {
+		return false, nil
+	}
+	return h.mayEditSpec(withDelegationUser(ctx, humanID), workspace, humanID, viewer.Role, rec), nil
+}
+
 // withDelegationUser names the delegating human for loaders that read the
 // caller from context. It never replaces a different authenticated user.
 func withDelegationUser(ctx context.Context, userID string) context.Context {

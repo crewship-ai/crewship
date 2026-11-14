@@ -7,6 +7,7 @@ import { Spinner } from "@/components/ui/spinner"
 import {
   CreateSurface, CreateSurfaceBody, CreateSurfaceFooter, CreateSurfaceHeader,
 } from "@/components/layout/create-surface"
+import { KINDS, type ArtifactKind } from "../kinds"
 import { LevelSelect, SubjectSelect, useSubjects, type Subject } from "./share-controls"
 import {
   entryKey, SharingError, useFolderSettings, useSharingApi, useSharingHuman, useSharingMutation,
@@ -68,6 +69,9 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
   const { subjects, error: peopleError } = useSubjects(workspaceId, true)
   const [agents, setAgents] = useState<FolderAgentLevel | null>(initial.agents?.level ?? null)
   const agentsSaved = useRef(initial.agents ?? null)
+  // Can suggest is offered only for the kinds the server says take a real proposal (#5317 step 5.2: Docs).
+  const suggestKinds = (initial.agents?.suggestKinds ?? []).filter((k): k is ArtifactKind => Object.prototype.hasOwnProperty.call(KINDS, k))
+  const suggestLabel = suggestKinds.map(k => KINDS[k].plural).join(", ")
   // A refused save (409) can come from this form's own entry writes after a partial save (#5343): they move the
   // folder's acl_version too. Read the folder again. When its agents level is still the one this form last saw,
   // the agents setting was not changed elsewhere (other entry edits may have moved the version; the agents setting
@@ -143,14 +147,20 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
 
     {agents !== null && <section aria-labelledby="folder-crew-agents" className="flex flex-col gap-1.5">
       <h3 id="folder-crew-agents" className="font-medium">Crew agents</h3>
-      <div className="flex items-center gap-2 rounded-md border border-border/50 px-2.5 py-1.5">
+      <div className="flex flex-wrap items-center gap-2 rounded-md border border-border/50 px-2.5 py-1.5">
         <span className="min-w-0 flex-1 truncate">Agents of this folder&apos;s crew</span>
-        <select aria-label="Agents of this folder's crew" className="h-7 rounded-md border bg-transparent px-2 text-xs" value={agents} disabled={save.isPending}
+        <select aria-label="Agents of this folder's crew" className="h-7 max-w-full rounded-md border bg-transparent px-2 text-xs" value={agents} disabled={save.isPending}
           onChange={e => setAgents(e.target.value as FolderAgentLevel)}>
           {FOLDER_AGENT_LEVELS.map(l => <option key={l} value={l}>{FOLDER_AGENT_LABEL[l]}</option>)}
-          {agents === "propose" && <option value="propose" disabled>Viewer (set as Can suggest)</option>}
+          {suggestKinds.length > 0
+            ? <option value="propose">{FOLDER_AGENT_LABEL.propose}</option>
+            : agents === "propose" && <option value="propose" disabled>Viewer (set as Can suggest)</option>}
         </select>
       </div>
+      {suggestKinds.length > 0 && <p data-testid="folder-agents-suggest-note" className="text-muted-foreground">
+        Can suggest works only for {suggestLabel}: an agent proposes changes when a person who can edit the artifact asks it in a chat, and a person with Edit accepts each one.
+        For other kinds in this folder it acts as Viewer.
+      </p>}
       <p className="text-muted-foreground">Agents never edit through a folder and never see Personal artifacts. Other agents need access on each artifact.</p>
     </section>}
 

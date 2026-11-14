@@ -289,14 +289,23 @@ folder has now.
 </Step>
 </Steps>
 
-### Let the crew's agents read a folder
+### Let the crew's agents read or suggest in a folder
 
 With the `artifact_agent_access_modes` flag on, **Folder settings** also shows
-**Crew agents** for the crew that owns the folder (**Agents of this folder's crew**). Pick **Viewer** to
-let that crew's agents read the folder's artifacts, or **No access** (the
-default). Agents never edit through a folder and never see Personal artifacts;
-any other agent needs access on each artifact. Click **Save**. The same setting
-is `crewship page folder agent-access <slug> --level none|read`.
+**Crew agents** for the crew that owns the folder (**Agents of this folder's crew**). Pick:
+
+- **No access** (the default).
+- **Viewer** to let that crew's agents read the folder's artifacts.
+- **Can suggest** to let them also propose changes on Docs. A suggestion
+  starts only when a person who can edit the Doc asks the agent for it in a
+  chat, and a person with Edit accepts or rejects each one. Can suggest works
+  only for Docs: for other kinds in the folder (Slides, Designs, Word, Sheets
+  and the rest) it acts as **Viewer**. The dialog shows this note under the
+  row.
+
+Agents never edit through a folder and never see Personal artifacts; any
+other agent needs access on each artifact. Click **Save**. The same setting is
+`crewship page folder agent-access <slug> --level none|read|propose`.
 
 After a save that failed part way, you can change the level and save again in
 the same dialog. If someone else changed the crew agents level in the
@@ -304,9 +313,9 @@ meantime, the dialog does not overwrite it: it shows the new level and asks
 you to check it and save again.
 
 <Note>
-**Can suggest** is not offered yet. The CLI still accepts `--level propose`,
-but today it gives the same read access as `read`, not a proposal. The dialog
-shows such a folder as **Viewer (set as Can suggest)**.
+The dialog offers **Can suggest** only when the server says which kinds take a
+suggestion (Docs). Against a server that does not, a folder already set to
+`propose` shows as **Viewer (set as Can suggest)**, which cannot be picked.
 </Note>
 
 ### Move an artifact to a folder

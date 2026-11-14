@@ -104,8 +104,8 @@ it("returns focus to the control that opened it once the library unmounts the di
 })
 
 // #5317 PR5 (Harbor 2 v92): one row for the agents of the folder's crew, at
-// most Viewer (Can suggest is hidden until a folder can give a proposal,
-// #5317 step 5.2), saved against the version that was read.
+// most Viewer where the server gives no folder proposal, saved against the
+// version that was read.
 it("on the server, sets the crew's agents to Viewer against the version it read", async () => {
   flags.mock = false
   const acl = { folder: "design", acl_version: 4, acl: [], agent_access: "none", agent_access_available: true }
@@ -124,7 +124,7 @@ it("on the server, sets the crew's agents to Viewer against the version it read"
   ])
 })
 
-it("on the server, shows a propose level set elsewhere as Viewer access without offering it", async () => {
+it("on the server, shows a propose level set elsewhere as Viewer access without offering it where no kind takes a suggestion", async () => {
   flags.mock = false
   const acl = { folder: "design", acl_version: 4, acl: [], agent_access: "propose", agent_access_available: true }
   flags.fetch.mockImplementation(async () => new Response(JSON.stringify(acl), { status: 200 }))
@@ -300,4 +300,85 @@ it("on the server, retries at most once: a 409 on the retry is shown (#5343)", a
   await screen.findByText(/folder changed since acl_version/)
   expect(server.agentPuts()).toBe(2)
   expect(onOpenChange).not.toHaveBeenCalledWith(false)
+})
+
+// #5317 step 5.2, owner decision 1: where the server says a folder at propose
+// gives a real proposal (agent_propose_kinds), the dialog offers Can suggest
+// and says it works only for those kinds and acts as Viewer for the others.
+const SUGGEST = { folder: "design", acl_version: 4, acl: [], agent_access: "none", agent_access_available: true, agent_propose_kinds: ["docs"] }
+
+it("on the server, offers Can suggest where the server gives Docs proposals, and saves it", async () => {
+  flags.mock = false
+  flags.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    if (init?.method === "PUT") return new Response(JSON.stringify({ folder: "design", agent_access: "propose", acl_version: 5, agent_access_available: true }), { status: 200 })
+    return new Response(JSON.stringify(SUGGEST), { status: 200 })
+  })
+  const onOpenChange = vi.fn()
+  renderDialog(onOpenChange)
+  const select = await screen.findByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement
+  expect([...select.options].map(o => [o.textContent, o.disabled])).toEqual([["No access", false], ["Viewer", false], ["Can suggest", false]])
+  // Before Can suggest is picked the note only says where it works.
+  expect(screen.getByText(/Can suggest works only for Docs/)).toBeTruthy()
+  expect(screen.queryByText(/acts as Viewer/)).toBeTruthy()
+  change("Agents of this folder's crew", "propose")
+  expect(select.value).toBe("propose")
+  const note = screen.getByTestId("folder-agents-suggest-note")
+  expect(note.textContent).toMatch(/only for Docs/)
+  expect(note.textContent).toMatch(/person with Edit accepts/)
+  expect(note.textContent).toMatch(/other kinds in this folder.*acts as Viewer/)
+  // The standing note stays true: a suggestion is not an edit.
+  expect(screen.getByText(/never edit through a folder/).textContent).toMatch(/never see Personal artifacts/)
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  const writes = flags.fetch.mock.calls.map(call => call as unknown as [string, RequestInit | undefined]).filter(([, init]) => init?.method === "PUT")
+  expect(writes.map(([url, init]) => [new URL(url, "http://h").pathname, JSON.parse(String(init!.body))])).toEqual([
+    ["/api/v1/page-folders/design/agent-access", { level: "propose", acl_version: 4 }],
+  ])
+})
+
+it("on the server, shows a saved Can suggest as a real, selected option", async () => {
+  flags.mock = false
+  flags.fetch.mockImplementation(async () => new Response(JSON.stringify({ ...SUGGEST, agent_access: "propose" }), { status: 200 }))
+  renderDialog()
+  const select = await screen.findByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement
+  expect(select.value).toBe("propose")
+  expect([...select.options].map(o => [o.textContent, o.disabled])).toEqual([["No access", false], ["Viewer", false], ["Can suggest", false]])
+  expect(screen.getByTestId("folder-agents-suggest-note").textContent).toMatch(/only for Docs/)
+})
+
+it("on the server, without agent_propose_kinds neither offers Can suggest nor shows the Docs note", async () => {
+  flags.mock = false
+  const { agent_propose_kinds: _omit, ...legacy } = SUGGEST
+  flags.fetch.mockImplementation(async () => new Response(JSON.stringify({ ...legacy, agent_propose_kinds: ["unknown-kind"] }), { status: 200 }))
+  renderDialog()
+  const select = await screen.findByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement
+  expect([...select.options].map(o => o.textContent)).toEqual(["No access", "Viewer"])
+  expect(screen.queryByTestId("folder-agents-suggest-note")).toBeNull()
+  expect(screen.queryByText(/Can suggest works only/)).toBeNull()
+})
+
+it("in the mock, offers Can suggest for Docs too", async () => {
+  renderDialog()
+  const select = await screen.findByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement
+  expect([...select.options].map(o => o.textContent)).toEqual(["No access", "Viewer", "Can suggest"])
+})
+
+// Phone width (375px): jsdom does not lay out, so pin the classes that keep the
+// agents row and its notes inside the dialog: the label shrinks and truncates,
+// the select does not grow, and the notes wrap (no nowrap, no fixed width).
+it("keeps the agents row and its Docs note within a phone-width dialog", async () => {
+  flags.mock = false
+  flags.fetch.mockImplementation(async () => new Response(JSON.stringify({ ...SUGGEST, agent_access: "propose" }), { status: 200 }))
+  renderDialog()
+  const select = await screen.findByRole("combobox", { name: "Agents of this folder's crew" })
+  const row = select.parentElement!
+  expect(row.className).toMatch(/\bflex\b/)
+  expect(row.className).toMatch(/flex-wrap/)
+  const label = row.querySelector("span")!
+  expect(label.className).toMatch(/min-w-0/)
+  expect(select.className).toMatch(/max-w-full/)
+  expect(select.className).not.toMatch(/\bw-\[|min-w-\[/)
+  for (const note of [screen.getByTestId("folder-agents-suggest-note"), screen.getByText(/never edit through a folder/)]) {
+    expect(note.className).not.toMatch(/nowrap|truncate|\bw-\[|min-w-\[/)
+  }
 })

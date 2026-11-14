@@ -671,6 +671,11 @@ owner on 2026-11-13.
      Mooring command"); a Mooring read without it still gets the server's 400.
      The MCP tool schemas list `page_id` and the optional `mandate_id`
      whatever the flag.
+   A propose mandate never needs the lease: with the flag on, a run under any
+   propose mandate (every iteration on a schema 4–6 Document, whether it
+   reaches the Document through a page grant, a folder at `propose` or the
+   human's own Document) may not take or renew the writer lease, only release
+   one, so an agent can never hold it against a person who edits or accepts.
    Native Word and Sheet Craft tasks (`crewship craft task`) are a separate,
    explicitly consented runtime and are unchanged.
 7. **Limits, read from the workspace policy on every use.** One chat run
@@ -728,11 +733,32 @@ owner on 2026-11-13.
    setting per folder, not an ACL row, so `page_folder_acl` still names no
    agent. A workspace admin or a MANAGER+ of the owning crew sets it, fenced on
    `acl_version` and audited (`page.folder_agent_access_changed`); levels other
-   than `none` need the flag. **Not built yet:** `propose` gives the same
-   access as `read`; a folder suggestion path is #5317 step 5.2. It reaches only non-private pages filed in the
-   folder, only agents whose live crew owns the folder, and only as standing
-   access: read only, counted against `run_read_limit`, and still intersected
-   with the run's human.
+   than `none` need the flag. It reaches only non-private pages filed in the
+   folder, only agents whose live crew owns the folder (the run's crew, not
+   deleted), and only as standing access: counted against `run_read_limit`,
+   still intersected with the run's human, and never a write. On every kind
+   but a Docs Document, `propose` reaches exactly what `read` does. On a Docs
+   Document (#5317 step 5.2), `propose` also lets the run propose changes
+   through the existing iteration path: the human's explicit iteration intent
+   on that Document is still required, the human must edit it as an ordinary
+   member (Edit held only through the ADMIN or OWNER role never passes to the
+   agent), and the folder rule is re-checked on every use, so a downgrade, a
+   crew move, a deleted crew, a page made private or moved out of the folder
+   stops the next proposal. Only a person with Edit accepts a proposal (an
+   ordinary human commit under the lease); a folder never lets the run
+   commit, pin a checkpoint, take the writer lease or accept. Each proposal or read of the Document
+   counts once per run against `run_read_limit`. The same rule (one query)
+   decides a folder read and a folder proposal. With the flag on the same
+   ordinary-member Edit is required of the human on the page-grant proposal
+   path too. With the flag on, the folder's ACL document names the kinds on
+   which `propose` is a real proposal (`agent_propose_kinds: ["docs"]`;
+   absent with the flag off). The folder settings dialog (owner decision 1)
+   offers **Can suggest** for the "Agents of this folder's crew" row only
+   when that list names a kind it knows, with the note that it works only for
+   those kinds (a person who can edit asks in a chat, a person with Edit
+   accepts) and acts as Viewer for other kinds in the folder. Without the list
+   a stored `propose` is shown as the disabled **Viewer (set as Can
+   suggest)**.
 10. **Runs without a human reach nothing yet.** A routine, webhook or cron run
    has no human principal and the artifact tool refuses it. Its own mode
    (standing grants only, the read cap per run) needs a run identity the
@@ -754,6 +780,8 @@ owner on 2026-11-13.
    the draft view's access checks before and after the Node read record
    nothing, the `state` callback that serves the content does. A refused
    change records nothing.
+   A Docs proposal or read that reaches the Document through a folder at
+   `propose` is recorded with reach `folder`.
    Leases carry no content and are not recorded. A Sheet write is recorded by
    the transaction that commits it; the read-only rebase prescan and the
    reservation before the engine runs only admit it and record nothing. A
@@ -762,7 +790,8 @@ owner on 2026-11-13.
    this row. The row's
    user is the human the agent acted for; its metadata names the agent, crew,
    run, chat, the reach (`referenced`, `created`, `consented`, `standing` or
-   `folder`) and the operation (`read`, `write`, `create`). It holds no
+   `folder`) and the operation (`read`, `write`, `propose`, `create`); a Docs
+   proposal is `propose`, never `write`. It holds no
    content. Reads and writes are recorded once per run, artifact and operation
    (a later access re-verifies the existing row); each individual write is
    already in the version history with the run as its actor. The row keeps the

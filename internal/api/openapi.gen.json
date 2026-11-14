@@ -133842,6 +133842,16 @@
                       "description": "True where agent_access takes effect (the artifact_agent_access_modes flag is on).",
                       "type": "boolean"
                     },
+                    "agent_propose_kinds": {
+                      "description": "Artifact kinds on which agent_access propose gives the agents a real proposal (Docs); on every other kind propose reads like read. Absent where the flag is off.",
+                      "items": {
+                        "enum": [
+                          "docs"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
                     "entry": {
                       "properties": {
                         "can_read": {
@@ -134135,6 +134145,16 @@
                     "agent_access_available": {
                       "description": "True where agent_access takes effect (the artifact_agent_access_modes flag is on).",
                       "type": "boolean"
+                    },
+                    "agent_propose_kinds": {
+                      "description": "Artifact kinds on which agent_access propose gives the agents a real proposal (Docs); on every other kind propose reads like read. Absent where the flag is off.",
+                      "items": {
+                        "enum": [
+                          "docs"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array"
                     },
                     "entry": {
                       "properties": {

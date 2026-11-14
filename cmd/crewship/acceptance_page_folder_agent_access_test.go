@@ -89,6 +89,17 @@ func TestAcceptance_PageFolderAgentAccess(t *testing.T) {
 	if got, after := level(); got != "propose" || after != before+1 {
 		t.Fatalf("after set: %q %d (was %d)", got, after, before)
 	}
+	// #5317 step 5.2: the server names the kinds where propose is a real
+	// proposal (the dialog offers Can suggest from it), and the table says so.
+	var kinds struct {
+		Kinds []string `json:"agent_propose_kinds"`
+	}
+	if out := must("page", "folder", "acl", "ops-board"); json.Unmarshal([]byte(out), &kinds) != nil || strings.Join(kinds.Kinds, ",") != "docs" {
+		t.Fatalf("agent_propose_kinds: %s", out)
+	}
+	if out := must("page", "folder", "acl", "ops-board", "-f", "table"); !strings.Contains(out, "propose (suggestions on docs, read on other kinds") {
+		t.Fatalf("table output: %s", out)
+	}
 	must("page", "folder", "agent-access", "ops-board", "--level", "none")
 	if got, _ := level(); got != "none" {
 		t.Fatalf("after reset: %q", got)
