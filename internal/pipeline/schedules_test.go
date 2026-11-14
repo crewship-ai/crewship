@@ -52,7 +52,9 @@ chat_origin_id TEXT,
     disabled_reason          TEXT,
     activation               TEXT,
     creator_kind             TEXT,
-    creator_user_id          TEXT
+    creator_user_id          TEXT,
+    creator_member_id        TEXT,
+    creator_set_at           TEXT
 );
 `
 

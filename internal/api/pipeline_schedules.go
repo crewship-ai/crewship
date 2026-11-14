@@ -94,6 +94,20 @@ type scheduleResponse struct {
 	UpdatedAt     time.Time `json:"updated_at"`
 }
 
+// scheduleContentKeys are the PATCH fields that change what a schedule runs.
+var scheduleContentKeys = []string{"cron_expr", "timezone", "inputs", "target_pipeline_id", "target_pipeline_slug", "target_pipeline_version", "wake_pipeline_id", "wake_pipeline_slug", "wake_inputs", "wake_fail_closed"}
+
+// scheduleContentMentioned reports whether a PATCH body sets any field that
+// changes what the schedule runs.
+func scheduleContentMentioned(rawKeys map[string]json.RawMessage) bool {
+	for _, k := range scheduleContentKeys {
+		if _, ok := rawKeys[k]; ok {
+			return true
+		}
+	}
+	return false
+}
+
 // scheduleCreatorFromRequest names who is saving a schedule (#5339). Only a
 // request authenticated by a person's own session or CLI token, through the
 // public API, counts as that person: the original credential captured by
@@ -756,7 +770,16 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		SpreadSeconds:          spreadSeconds,
 		MaxConsecutiveFailures: maxFailures,
 	}
-	in.CreatorKind, in.CreatorUserID = scheduleCreatorFromRequest(r)
+	// #5339: only a save that sets what the schedule runs (its timing, its
+	// target or pin, its inputs, its wake gate) names who vouches for it.
+	// Enable, disable, rename and spread/catch-up/breaker tweaks keep the
+	// stored creator, so an admin re-enabling an agent's schedule does not
+	// silently vouch for it.
+	if scheduleContentMentioned(rawKeys) {
+		in.CreatorKind, in.CreatorUserID = scheduleCreatorFromRequest(r)
+	} else {
+		in.KeepCreator = true
+	}
 	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		if isUserScheduleError(err) {

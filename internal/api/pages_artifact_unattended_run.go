@@ -88,7 +88,7 @@ func (h *PageHandler) unattendedCapabilityLost(r *http.Request, ws, crew, agent,
 	if h.checkUnattendedArtifactRun(ctx, a) != nil {
 		return false
 	}
-	if _, already := h.lostCapabilityJournaled.LoadOrStore(run, true); already {
+	if !h.lostCapabilityJournaled.First(run) {
 		return true
 	}
 	var seen int

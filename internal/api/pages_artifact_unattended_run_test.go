@@ -564,6 +564,9 @@ func TestUnattendedRun_LostCapabilityIsSaidPlainly(t *testing.T) {
 		t.Fatal(err)
 	}
 	generic("an ended run", g.toolAs(ended.token, "", "artifact_versions", "ua-lost", `{}`))
+	// A call that carries a capability, even a wrong one, did not lose it:
+	// it gets the generic refusal and journals nothing.
+	generic("a wrong capability", g.toolAs(u.token, "urcv1."+strings.Repeat("0", 64), "artifact_versions", "ua-lost", `{}`))
 	other := g.unattended(t, "ua-run-lost-flag", g.f.a.AgentID, "WEBHOOK")
 	mustExec(t, g.f.rig.db, `DELETE FROM feature_flag_overrides WHERE id='ref-flag-on'`)
 	generic("flag off", g.toolAs(other.token, "", "artifact_versions", "ua-lost", `{}`))

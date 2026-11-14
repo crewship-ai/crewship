@@ -650,25 +650,43 @@ owner on 2026-11-13.
    of its crew. Two routine starts count. A routine a person ran (or batch-ran)
    records each agent step as a routine run. A schedule's own fire (the cron
    scheduler, or the schedule's "run now") records each agent step as a
-   scheduled run only when a person created or last saved that schedule
-   (`pipeline_schedules.creator_kind = 'human'`, set only from that person's
-   own session or CLI token on the public API) and, checked again at that
-   step, the person is still a member of the workspace and not suspended.
+   scheduled run only when a person created the schedule or last changed what
+   it runs (`pipeline_schedules.creator_kind = 'human'`, set only from that
+   person's own session or CLI token on the public API) and, checked again at
+   that step, the person still holds the same workspace membership they held
+   then (`creator_member_id`; leaving and rejoining does not restore it), with
+   a role that may create schedules (MANAGER+), as a trusted (not restricted)
+   member, not suspended, and with no access revocation
+   (`users.access_revoked_at`, set by an admin's session revoke or recovery)
+   since the creator was written (`creator_set_at`).
    "Run now" follows the same rule: the schedule's creator decides, the person
    pressing it lends nothing. A schedule an agent saved (any internal path,
    including `/internal/routines/schedules` and save_routine's trigger,
    whatever `X-Caller-User-Id` it carries) is marked `agent`; a schedule
    saved before the creator was recorded has none. Neither ever records,
-   until a person saves it again; every save overwrites the creator, so an
-   agent's save of a person's schedule takes its access away. A delayed or
+   until a person changes what it runs. Creating a schedule, or changing its
+   cron, timezone, inputs, target, pinned version or wake check (any of
+   these fields named in the update, even with its old value), overwrites the
+   creator, so an agent's change to a person's schedule takes its access
+   away. Enabling, disabling, renaming it or changing its failure limit keeps
+   the creator: an admin re-enabling an agent's schedule after its circuit
+   breaker tripped does not vouch for it. A GDPR erasure of the creator
+   clears the whole creator, so the schedule vouches for nothing. A delayed or
    debounced start (its trigger defaults to schedule), a schedule occurrence
    that waited in the queue for capacity, a webhook, `call_pipeline`, another
    agent, an automation, an issue, a page action and a wake check record
    nothing and their steps reach no artifact, and neither does a routine an
    agent authored, whoever starts it. All of these fail closed. A scheduled
    step refused because of its schedule's creator, or a schedule claim the
-   host did not make, is journaled as `artifact.run_capability_withheld` with
-   the reason (flag on only). An agent's own webhook and cron runs,
+   host did not make, is journaled as `artifact.run_capability_withheld`
+   once per schedule fire (not per step), flag on only. Its reason is
+   `schedule_fire_unverified`, `schedule_target_mismatch`,
+   `schedule_saved_by_agent`, `schedule_creator_unknown` or, for every
+   problem with the person's standing, the one generic
+   `schedule_creator_not_in_good_standing`; the detail (left, suspended,
+   revoked, role, restricted) goes only to the server log. The entry names
+   the schedule only for a fire the host vouched for. With the flag off
+   nothing is read, recorded or journaled. An agent's own webhook and cron runs,
    configured on the agent by a person, record as before. So the host
    producer of such a run records the run in `artifact_unattended_runs` (agent, crew, trigger,
    source) after its run record and before its agent starts, and the server
@@ -683,6 +701,11 @@ owner on 2026-11-13.
    the run is live in the journal (started, no terminal entry), its work
    attempt (if any) is current, and the workspace policy allows the crew. The
    run's end, its terminal journal entry or the expiry ends the capability.
+   The creator's standing is checked when each step starts: a step already
+   running keeps its capability for its own lifetime (at most 2 hours) even
+   if the creator loses standing meanwhile, and the next step is checked
+   again. A run resumed after a wait or an approval carries no schedule fire,
+   so its later steps of a scheduled run get no capability.
    Such a run then reaches an artifact only when the agent holds its own live
    grant on it (`standing`) or the page sits in a folder that lets its crew's
    agents read or suggest (`folder`, item 9); never a private (Personal)

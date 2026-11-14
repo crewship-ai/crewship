@@ -243,11 +243,17 @@ already-referenced runs the ordinary way, binding nothing.
   agent's webhook or cron run) reaches artifacts only
   when crewshipd recorded the run (agent, crew, trigger, source) before its
   agent started and minted a random capability for that one run. A
-  schedule's fire (cron or "run now") counts only when a person created or
-  last saved the schedule with their own session or CLI token, and that
-  person is still a workspace member and not suspended when each step
-  starts. A schedule an agent saved, or one saved before the creator was
-  recorded, never counts until a person saves it again. A delayed or
+  schedule's fire (cron or "run now") counts only when a person created the
+  schedule or last changed what it runs (cron, timezone, inputs, target,
+  pin, wake check) with their own session or CLI token, and when each step
+  starts that person still holds the same membership (not left and
+  rejoined), a MANAGER+ role, trusted (not restricted) access, is not
+  suspended and has had no access revocation since. Enabling, disabling or
+  renaming a schedule does not change its creator. A schedule an agent
+  saved, or one saved before the creator was recorded, never counts until a
+  person changes what it runs. A step already running keeps its capability
+  until it ends (at most 2 hours); a run resumed after a wait or approval
+  gets none. A delayed or
   debounced run, a queued occurrence, a webhook, `call_pipeline`, an issue,
   an automation or another agent records nothing and reaches no artifact,
   and neither does a routine an agent authored, whoever runs it. A sidecar

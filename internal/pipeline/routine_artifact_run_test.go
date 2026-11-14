@@ -174,114 +174,216 @@ func TestRoutineArtifactRun_ExecutorCarriesTheStarter(t *testing.T) {
 }
 
 // A schedule's own fire reaches artifacts only when a person created or last
-// saved the schedule and is, at this run, still a member and not suspended
-// (#5339 owner decision A). An agent-saved or legacy schedule never does; a
-// person saving it again restores it; flag off records and journals nothing.
+// changed what the schedule runs and, at this run, still holds that same
+// membership with a MANAGER+ role, is trusted, is not suspended and has not
+// had their access revoked since (#5339 owner decision A, review round 3). An
+// agent-saved or legacy schedule never does; a person saving it again
+// restores it. The journal names one generic reason for a person's standing,
+// names the schedule only when the host vouched for the fire, and says it
+// once per fire.
 func TestRoutineArtifactRun_ScheduleCreatorDecidesAtEveryRun(t *testing.T) {
 	db := routineArtifactDB(t)
 	for _, q := range []string{
 		`INSERT INTO users(id,email,full_name) VALUES('human_1','h1@ex.com','H1'),('human_2','h2@ex.com','H2')`,
-		`INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('m1','ws_art','human_1','MEMBER'),('m2','ws_art','human_2','MEMBER')`,
-		`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash) VALUES('pipe_art','ws_art','art','art','{}','h')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('m1','ws_art','human_1','MANAGER','trusted'),('m2','ws_art','human_2','ADMIN','trusted')`,
+		`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash) VALUES('pipe_art','ws_art','art','art','{}','h'),('pipe_other','ws_art','other','other','{}','h')`,
 	} {
 		if _, err := db.Exec(q); err != nil {
 			t.Fatal(q, err)
 		}
 	}
 	store := NewScheduleStore(db.DB)
-	save := func(id, kind, user string) *Schedule {
+	saveTo := func(id, target, kind, user string) *Schedule {
 		t.Helper()
-		sched, err := store.Save(t.Context(), SaveScheduleInput{ID: id, WorkspaceID: "ws_art", Name: "s", TargetPipelineID: "pipe_art", CronExpr: "0 8 * * *", Timezone: "UTC", Enabled: true, CreatorKind: kind, CreatorUserID: user})
+		sched, err := store.Save(t.Context(), SaveScheduleInput{ID: id, WorkspaceID: "ws_art", Name: "s", TargetPipelineID: target, CronExpr: "0 8 * * *", Timezone: "UTC", Enabled: true, CreatorKind: kind, CreatorUserID: user})
 		if err != nil {
 			t.Fatal(err)
 		}
 		return sched
 	}
+	save := func(id, kind, user string) *Schedule { t.Helper(); return saveTo(id, "pipe_art", kind, user) }
 	emitter := &captureEmitter{}
 	n := 0
-	fire := func(sched *Schedule, vouched bool) (bool, []journal.Entry) {
+	step := func(req AgentStepRequest) (bool, []journal.Entry) {
 		t.Helper()
 		n++
-		req := AgentStepRequest{WorkspaceID: "ws_art", PipelineID: "pipe_art", PipelineRunID: "prun", StepID: "s", TriggeredVia: TriggeredViaSchedule, TriggeredByID: sched.ID}
-		if vouched {
-			req.ArtifactScheduleID = sched.ID
-		}
 		before := len(emitter.entries)
 		capability, end := recordRoutineArtifactRun(t.Context(), db.DB, nil, emitter, req, "crew_art", "agent_b", fmt.Sprintf("run_sched_%d", n), 10*time.Minute)
 		end()
 		return capability != "", emitter.entries[before:]
+	}
+	fireReq := func(sched *Schedule, vouched bool) AgentStepRequest {
+		req := AgentStepRequest{WorkspaceID: "ws_art", PipelineID: "pipe_art", PipelineRunID: fmt.Sprintf("prun_%d", n+1), StepID: "s", TriggeredVia: TriggeredViaSchedule, TriggeredByID: sched.ID}
+		if vouched {
+			req.ArtifactScheduleID = sched.ID
+		}
+		return req
+	}
+	fire := func(sched *Schedule, vouched bool) (bool, []journal.Entry) {
+		t.Helper()
+		return step(fireReq(sched, vouched))
 	}
 	reason := func(t *testing.T, entries []journal.Entry, want string) {
 		t.Helper()
 		if len(entries) != 1 || entries[0].Type != EntryArtifactRunCapabilityWithheld || entries[0].Payload["reason"] != want {
 			t.Fatalf("journal %+v, want one %s entry with reason %s", entries, EntryArtifactRunCapabilityWithheld, want)
 		}
+		for k, v := range entries[0].Payload {
+			if k == "detail" || strings.Contains(fmt.Sprint(v), "suspend") || strings.Contains(fmt.Sprint(v), "revoked") || strings.Contains(fmt.Sprint(v), "restricted") {
+				t.Fatalf("journal payload %s=%v says more than the generic reason", k, v)
+			}
+		}
+	}
+	refused := func(t *testing.T, sched *Schedule, want string) {
+		t.Helper()
+		ok, entries := fire(sched, true)
+		if ok {
+			t.Fatalf("got a capability, want refusal %s", want)
+		}
+		reason(t, entries, want)
+		if entries[0].Payload["schedule_id"] != sched.ID {
+			t.Fatalf("a vouched fire's journal names schedule %v, want %s", entries[0].Payload["schedule_id"], sched.ID)
+		}
+	}
+	admitted := func(t *testing.T, sched *Schedule, why string) {
+		t.Helper()
+		if ok, entries := fire(sched, true); !ok || len(entries) != 0 {
+			t.Fatalf("%s: capability=%v journal=%+v", why, ok, entries)
+		}
 	}
 
 	human := save("", ScheduleCreatorHuman, "human_1")
-	if human.CreatorKind != ScheduleCreatorHuman || human.CreatorUserID != "human_1" {
+	if human.CreatorKind != ScheduleCreatorHuman || human.CreatorUserID != "human_1" || human.CreatorSetAt == "" {
 		t.Fatalf("creator not stored: %+v", human)
 	}
-	if ok, entries := fire(human, true); !ok || len(entries) != 0 {
-		t.Fatalf("a person's schedule fire: capability=%v journal=%+v", ok, entries)
-	}
+	admitted(t, human, "a person's schedule fire")
 	var trigger, source string
 	if err := db.QueryRow(`SELECT trigger_type,source_ref FROM artifact_unattended_runs WHERE run_id='run_sched_1'`).Scan(&trigger, &source); err != nil || trigger != "SCHEDULED" || source != "schedule:"+human.ID+"/routine:pipe_art/s" {
 		t.Fatalf("recorded as %q %q %v", trigger, source, err)
 	}
-	if ok, entries := fire(human, false); ok {
-		t.Fatal("a schedule attribution the host did not vouch for got a capability")
-	} else {
+
+	t.Run("an unvouched claim is refused and its claimed schedule is not journaled", func(t *testing.T) {
+		ok, entries := fire(human, false)
+		if ok {
+			t.Fatal("a schedule attribution the host did not vouch for got a capability")
+		}
 		reason(t, entries, withheldScheduleUnverified)
-	}
-
-	agent := save("", ScheduleCreatorAgent, "human_2")
-	if agent.CreatorUserID != "" {
-		t.Fatalf("an agent's save kept a user id: %+v", agent)
-	}
-	ok, entries := fire(agent, true)
-	if ok {
-		t.Fatal("an agent-saved schedule got a capability")
-	}
-	reason(t, entries, withheldScheduleCreatorAgent)
-
-	legacy := save("", "", "")
-	ok, entries = fire(legacy, true)
-	if ok {
-		t.Fatal("a schedule with no recorded creator got a capability")
-	}
-	reason(t, entries, withheldScheduleCreatorLegacy)
-	save(legacy.ID, ScheduleCreatorHuman, "human_2")
-	if ok, _ := fire(legacy, true); !ok {
-		t.Fatal("a person's re-save did not restore the schedule")
-	}
-	save(legacy.ID, ScheduleCreatorAgent, "")
-	if ok, _ := fire(legacy, true); ok {
-		t.Fatal("an agent's re-save of a person's schedule kept its access")
-	}
-
-	mustExec(t, db.DB, `UPDATE users SET suspended_at=datetime('now') WHERE id='human_1'`)
-	ok, entries = fire(human, true)
-	if ok {
-		t.Fatal("a suspended creator's schedule got a capability")
-	}
-	reason(t, entries, withheldScheduleCreatorFrozen)
-	mustExec(t, db.DB, `UPDATE users SET suspended_at=NULL WHERE id='human_1'`)
-	mustExec(t, db.DB, `DELETE FROM workspace_members WHERE id='m1'`)
-	ok, entries = fire(human, true)
-	if ok {
-		t.Fatal("a creator who left the workspace still vouches")
-	}
-	reason(t, entries, withheldScheduleCreatorGone)
-
-	mustExec(t, db.DB, `UPDATE feature_flag_overrides SET enabled=0 WHERE id='art-flag'`)
-	mustExec(t, db.DB, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('m1b','ws_art','human_1','MEMBER')`)
-	if ok, entries := fire(human, true); ok || len(entries) != 0 {
-		t.Fatalf("flag off: capability=%v journal=%+v", ok, entries)
-	}
-	if ok, entries := fire(agent, true); ok || len(entries) != 0 {
-		t.Fatalf("flag off, agent schedule: capability=%v journal=%+v", ok, entries)
-	}
+		if _, named := entries[0].Payload["schedule_id"]; named {
+			t.Fatalf("an unverified fire's journal names the caller's schedule id: %+v", entries[0].Payload)
+		}
+	})
+	t.Run("the marker must be the schedule the fire claims", func(t *testing.T) {
+		other := save("", ScheduleCreatorHuman, "human_1")
+		req := fireReq(human, true)
+		req.ArtifactScheduleID = other.ID
+		ok, entries := step(req)
+		if ok {
+			t.Fatal("a fire marked for another schedule got a capability")
+		}
+		reason(t, entries, withheldScheduleUnverified)
+	})
+	t.Run("a schedule that targets another routine is refused", func(t *testing.T) {
+		refused(t, saveTo("", "pipe_other", ScheduleCreatorHuman, "human_1"), withheldScheduleTarget)
+	})
+	t.Run("an agent invoker or an agent author is refused on the schedule path", func(t *testing.T) {
+		for name, edit := range map[string]func(*AgentStepRequest){
+			"agent invoker": func(r *AgentStepRequest) { r.InvokingAgentID = "agent_a" },
+			"agent author":  func(r *AgentStepRequest) { r.AuthorAgentID = "agent_lead" },
+		} {
+			req := fireReq(human, true)
+			edit(&req)
+			if ok, _ := step(req); ok {
+				t.Fatalf("%s: a vouched person's schedule fire got a capability", name)
+			}
+		}
+	})
+	t.Run("an agent's or an unknown creator vouches for nothing", func(t *testing.T) {
+		agent := save("", ScheduleCreatorAgent, "human_2")
+		if agent.CreatorUserID != "" {
+			t.Fatalf("an agent's save kept a user id: %+v", agent)
+		}
+		refused(t, agent, withheldScheduleCreatorAgent)
+		legacy := save("", "", "")
+		refused(t, legacy, withheldScheduleCreatorLegacy)
+		save(legacy.ID, ScheduleCreatorHuman, "human_2")
+		admitted(t, legacy, "a person's re-save")
+		save(legacy.ID, ScheduleCreatorAgent, "")
+		refused(t, legacy, withheldScheduleCreatorAgent)
+	})
+	t.Run("suspended", func(t *testing.T) {
+		mustExec(t, db.DB, `UPDATE users SET suspended_at=datetime('now') WHERE id='human_1'`)
+		refused(t, human, withheldScheduleStanding)
+		mustExec(t, db.DB, `UPDATE users SET suspended_at=NULL WHERE id='human_1'`)
+		admitted(t, human, "unsuspended")
+	})
+	t.Run("access revoked after the save, not before", func(t *testing.T) {
+		revokeAt := func(at time.Time) {
+			t.Helper()
+			if _, err := db.Exec(`UPDATE users SET access_revoked_at=? WHERE id='human_1'`, at.Format(time.RFC3339Nano)); err != nil {
+				t.Fatal(err)
+			}
+		}
+		revokeAt(time.Now().UTC().Add(time.Second))
+		refused(t, human, withheldScheduleStanding)
+		revokeAt(time.Now().UTC().Add(-time.Hour))
+		admitted(t, human, "a revocation older than the save")
+		mustExec(t, db.DB, `UPDATE users SET access_revoked_at=NULL WHERE id='human_1'`)
+	})
+	t.Run("a role that can no longer create schedules", func(t *testing.T) {
+		mustExec(t, db.DB, `UPDATE workspace_members SET role='MEMBER' WHERE id='m1'`)
+		refused(t, human, withheldScheduleStanding)
+		mustExec(t, db.DB, `UPDATE workspace_members SET role='OWNER' WHERE id='m1'`)
+		admitted(t, human, "an owner")
+		mustExec(t, db.DB, `UPDATE workspace_members SET role='MANAGER' WHERE id='m1'`)
+	})
+	t.Run("a restricted member", func(t *testing.T) {
+		mustExec(t, db.DB, `UPDATE workspace_members SET access_mode='restricted' WHERE id='m1'`)
+		refused(t, human, withheldScheduleStanding)
+		mustExec(t, db.DB, `UPDATE workspace_members SET access_mode='trusted' WHERE id='m1'`)
+	})
+	t.Run("leaving, and leaving and rejoining", func(t *testing.T) {
+		mustExec(t, db.DB, `DELETE FROM workspace_members WHERE id='m1'`)
+		refused(t, human, withheldScheduleStanding)
+		mustExec(t, db.DB, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('m1b','ws_art','human_1','MANAGER','trusted')`)
+		refused(t, human, withheldScheduleStanding)
+		save(human.ID, ScheduleCreatorHuman, "human_1")
+		admitted(t, human, "a save by the rejoined member")
+	})
+	t.Run("one journal entry per fire, not per step", func(t *testing.T) {
+		mustExec(t, db.DB, `UPDATE users SET suspended_at=datetime('now') WHERE id='human_1'`)
+		req := fireReq(human, true)
+		_, first := step(req)
+		req.StepID = "s2"
+		_, second := step(req)
+		if len(first) != 1 || len(second) != 0 {
+			t.Fatalf("one fire, two refused steps journaled %d and %d entries, want 1 and 0", len(first), len(second))
+		}
+		mustExec(t, db.DB, `UPDATE users SET suspended_at=NULL WHERE id='human_1'`)
+	})
+	t.Run("flag off: nothing is read, recorded or journaled", func(t *testing.T) {
+		var logs strings.Builder
+		logger := slog.New(slog.NewTextHandler(&logs, nil))
+		mustExec(t, db.DB, `ALTER TABLE pipeline_schedules RENAME TO pipeline_schedules_away`)
+		defer mustExec(t, db.DB, `ALTER TABLE pipeline_schedules_away RENAME TO pipeline_schedules`)
+		probe := func() (string, []journal.Entry) {
+			logs.Reset()
+			before := len(emitter.entries)
+			n++
+			capability, end := recordRoutineArtifactRun(t.Context(), db.DB, logger, emitter, fireReq(human, true), "crew_art", "agent_b", fmt.Sprintf("run_sched_%d", n), 10*time.Minute)
+			end()
+			if capability != "" {
+				t.Fatal("a capability without its schedule table")
+			}
+			return logs.String(), emitter.entries[before:]
+		}
+		if out, _ := probe(); !strings.Contains(out, "admission failed") {
+			t.Fatalf("flag on, the probe must reach the schedule table; log %q", out)
+		}
+		mustExec(t, db.DB, `UPDATE feature_flag_overrides SET enabled=0 WHERE id='art-flag'`)
+		if out, entries := probe(); out != "" || len(entries) != 0 {
+			t.Fatalf("flag off: log %q journal %+v", out, entries)
+		}
+	})
 }
 
 // The cron scheduler vouches for its own fire, so the step sees the schedule
@@ -289,6 +391,8 @@ func TestRoutineArtifactRun_ScheduleCreatorDecidesAtEveryRun(t *testing.T) {
 func TestRoutineArtifactRun_SchedulerVouchesForItsOwnFire(t *testing.T) {
 	db := openPinningTestDB(t)
 	t.Cleanup(func() { _ = db.Close() })
+	mustExec(t, db, `CREATE TABLE IF NOT EXISTS workspace_members (id TEXT PRIMARY KEY, workspace_id TEXT, user_id TEXT, role TEXT, access_mode TEXT)`)
+	mustExec(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('m_human','ws_test','human','MANAGER','trusted')`)
 	mock := newMockRunner()
 	deps := fullExecutorDeps(t, db, mock)
 	store := NewScheduleStore(db)
@@ -302,6 +406,9 @@ func TestRoutineArtifactRun_SchedulerVouchesForItsOwnFire(t *testing.T) {
 	got, err := store.GetByID(t.Context(), sched.ID)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if got.CreatorKind != ScheduleCreatorHuman || got.CreatorUserID != "human" {
+		t.Fatalf("creator not stored: %+v", got)
 	}
 	due := time.Now().Add(-time.Minute).UTC()
 	got.NextRunAt = &due
