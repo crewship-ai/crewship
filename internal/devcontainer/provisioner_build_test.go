@@ -201,7 +201,7 @@ func TestStageBuildContext_WritesFeatureArchiveContainingInstallScript(t *testin
 	feat := &ResolvedFeature{Ref: "ghcr.io/x/common-utils:1", Dir: src}
 	feat.Metadata.ID = "common-utils"
 
-	dir, err := stageBuildContextWithSteps("debian:12", []*ResolvedFeature{feat}, nil, nil, nil, "tag:1")
+	dir, err := stageBuildContextWithSteps("debian:12", []*ResolvedFeature{feat}, nil, nil, nil, nil, "tag:1")
 	if err != nil {
 		t.Fatalf("stage: %v", err)
 	}

@@ -239,6 +239,7 @@ type Router struct {
 	instanceBackups    *InstanceBackupsHandler
 	imageBuilder       devcontainer.ImageBuilder
 	featureCacheDir    string
+	installationID     string
 	portExposeRegistry *PortExposeRegistry // closed via Shutdown() on server stop
 	// providerLogins owns the device-code sign-in pollers (#2428); stopped
 	// via Shutdown() so a pending sign-in is left for the next process to

@@ -704,6 +704,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Stash the handler on the router so cmd_start can wire it into chatbridge
 	// for the auto-provision-on-first-message UX without a second instance.
 	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher, r.dockerClient, r.imageBuilder, r.featureCacheDir, r.hub)
+	provisioning.SetInstallationID(r.installationID)
 	if sandbox, ok := r.activeContainer().(provider.SandboxRuntime); ok {
 		provisioning.sandboxRuntime = sandbox
 	}

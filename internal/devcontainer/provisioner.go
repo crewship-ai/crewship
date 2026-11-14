@@ -258,6 +258,10 @@ type Provisioner struct {
 	// (see lockCacheTag). Entries exist only while held or awaited.
 	cacheTagMu    sync.Mutex
 	cacheTagLocks map[string]*cacheTagLock
+
+	// instanceID is this installation's settled identity, normalised, or ""
+	// (see SetInstanceID). It namespaces image tags and labels new images.
+	instanceID string
 }
 
 // TempContainerLabelKey and TempContainerLabelValue identify temporary
@@ -485,7 +489,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	}
 
 	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg)+requiredBinariesHashSalt(o.requiredBinaries))
-	tag := cacheImageTag(hash)
+	tag := p.cacheTag(hash)
 
 	// One provision per tag at a time; the cache check below runs under the
 	// lock, so a caller that waited finds the first one's image (#4816).
@@ -740,9 +744,15 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// `${containerEnv:X}` references are expanded against the base image's
 	// env here — a committed ENV line is applied to the image config as-is,
 	// with no build-time substitution the way a Dockerfile ENV gets.
+	// Provenance labels close the change list. They also replace the kind the
+	// temp container inherited from an owned feature image.
+	ownerLabels, err := imageLabelDirectives(imageOwnerLabels(p.instanceID, ImageKindCrew))
+	if err != nil {
+		return fail("commit", err)
+	}
 	committed, commitErr := p.docker.ContainerCommit(ctx, containerID, client.ContainerCommitOptions{
 		Reference: tag,
-		Changes:   imageEnvChanges(requirements.ContainerEnv, p.containerEnvSnapshot(ctx, containerID)),
+		Changes:   append(imageEnvChanges(requirements.ContainerEnv, p.containerEnvSnapshot(ctx, containerID)), ownerLabels...),
 	})
 	if commitErr != nil {
 		return fail("commit", fmt.Errorf("committing container: %w", commitErr))

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Provisioned images belong to the installation that built them (#5375).** A crew image is now tagged `crewship-cache:{namespace}-{hash}` and its intermediate feature image `crewship-feat:{namespace}-{hash}`, where the namespace is the first 12 characters of the installation identity, and both carry the labels `crewship.image.instance-id` and `crewship.image.kind`. Two installations sharing one Docker daemon no longer resolve the same configuration to the same crew image. Crews are not rebuilt on upgrade: an image a crew already selected stays in use by its image ID, and the namespace applies from the crew's next build. Images built earlier keep their names, are not labelled and are not claimed. No cleanup behaviour changes. Without a settled installation identity the previous names are kept.
+
 - **Word and Sheet packages are pinned only after their editors work in a browser (#5362).** The required CI jobs `craft-packages-build` and `craft-packages` install both packages in a throwaway server and open each editor through the real host in Chromium: open, edit, save, reopen. They replace the Craft Packages Candidate Check and run with every code change; the packages are rebuilt only when their recipe changes.
 
 - **Fixed: the Word and Sheet editors connect again.** Since #5134 the page dropped the editor's first message, because its sandboxed frame always speaks with the opaque origin `null`, so native Word and Sheet documents never opened and showed "The editor did not connect safely" after 20 seconds. The page now accepts that message only from its own editor frame's window and still requires the opaque origin and the pinned bundle.

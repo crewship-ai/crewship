@@ -53,6 +53,9 @@ type DockerfileBuild struct {
 	// is applied as image ENV (root-wins over feature-declared containerEnv) so
 	// the runtime PATH/vars the agent exec inherits are authoritative. Optional.
 	RootEnv map[string]string
+	// Labels are image provenance labels (see imageOwnerLabels), emitted as
+	// the last directives so they never invalidate a cached layer. Optional.
+	Labels map[string]string
 }
 
 // containerEnvKeyRe validates an environment variable name. Unlike feature
@@ -160,6 +163,14 @@ func GenerateDockerfile(b DockerfileBuild) (string, error) {
 	// mirroring the commit path's ordering.
 	for _, step := range b.ExtraSteps {
 		sb.WriteString(step + "\n")
+	}
+
+	labels, err := imageLabelDirectives(b.Labels)
+	if err != nil {
+		return "", err
+	}
+	for _, line := range labels {
+		sb.WriteString(line + "\n")
 	}
 
 	return sb.String(), nil

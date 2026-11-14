@@ -87,7 +87,10 @@ where Crewship builds.
 
 Intermediate per-feature layers are tagged `crewship-feat:{hash}` (regenerable,
 never referenced directly); the final per-crew image is still tagged
-`crewship-cache:{hash[:12]}`. The transition is transparent: if BuildKit is
+`crewship-cache:{hash[:12]}`. An installation with a settled identity inserts
+its namespace before the hash in both tags and labels the images with their
+origin; see [Image ownership](/configuration/devcontainers#image-ownership).
+The transition is transparent: if BuildKit is
 unavailable on the host, provisioning falls back to the container-commit path
 shown above with **no operator action required**. Either way you trigger it
 with the same `crewship crew provision` / `crewship crew rebuild` commands.
