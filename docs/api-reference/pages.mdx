@@ -2473,7 +2473,10 @@ The response is `no-store`.
 
 Authentication: a current human session or CLI credential and workspace
 membership. Response: `{ "enabled": false }` until the instance is configured
-for documents. Statuses: 200 availability; 400 missing workspace; 401 invalid
+for documents. While native Word and Sheet run, `applications` gives the
+instance administrator's mode for each, `{"wordcraft": "open" | "draining" |
+"closed", "gridcraft": …}`; `wordcraft_native` and `gridcraft_native` are true
+only while it is `open`. Statuses: 200 availability; 400 missing workspace; 401 invalid
 credential; 403 workspace boundary; 500 unavailable storage. Responses are not
 cached. CLI: `crewship doc status`.
 

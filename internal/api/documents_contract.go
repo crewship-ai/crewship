@@ -1,6 +1,10 @@
 package api
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/crewship-ai/crewship/internal/craftapps"
+)
 
 // Public Docs wire contracts mirror the versioned managed engine projection.
 // Binary Yjs state is authoritative; these structs do not grant write authority.
@@ -10,6 +14,10 @@ type DocumentAvailability struct {
 	GridCraftNative    bool   `json:"gridcraft_native"`
 	WordCraftSDKPrefix string `json:"wordcraft_sdk_prefix,omitempty"`
 	WordCraftCommands  bool   `json:"wordcraft_commands,omitempty"`
+	// Applications is the instance administrator's mode for Word and Sheet
+	// ("open", "draining" or "closed"), present while native Craft runs, so
+	// "New Word" can say it is turned off rather than unavailable (#5381).
+	Applications map[string]craftapps.Mode `json:"applications,omitempty"`
 }
 type DocumentNode struct {
 	Type    string              `json:"type"`

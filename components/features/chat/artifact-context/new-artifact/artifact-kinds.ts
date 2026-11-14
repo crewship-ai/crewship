@@ -40,6 +40,8 @@ export interface ArtifactCapabilities {
   words?: boolean
   /** GridCraft workbook creation is switched on for the workspace. */
   sheets: boolean
+  /** The instance administrator's mode for Word and Sheet ("open", "draining", "closed"), when the server reports it. */
+  craftModes?: Partial<Record<"wordcraft" | "gridcraft", "open" | "draining" | "closed">>
   /** The caller may create Pages at all (role or page.create). Every kind needs it, agent-made ones too. */
   pages: boolean
 }

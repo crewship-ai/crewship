@@ -22,6 +22,14 @@ type craftNativeAvailabilityResponse struct {
 	// administrator: "open", "draining" (finish and save only) or "closed"
 	// (read only). Absent when Craft documents are unavailable.
 	Applications map[string]craftapps.Mode `json:"applications,omitempty"`
+	// Application is this document's application ("wordcraft" or
+	// "gridcraft"), present when the caller may open it.
+	Application string `json:"application,omitempty"`
+	// EditRefusal is set when the caller has Edit but the administrator's
+	// setting for Application refuses starting to edit ("app_draining" or
+	// "app_disabled", the reason lease/acquire answers with). can_edit is
+	// then false.
+	EditRefusal craftapps.Reason `json:"edit_refusal,omitempty"`
 }
 type craftNativeRenewalResponse struct {
 	Renewed bool `json:"renewed"`
@@ -71,6 +79,8 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 	canEdit := false
 	previewEnabled := false
 	agentsEnabled := false
+	application := ""
+	var refusal craftapps.Reason
 	if m.enabled && m.pages != nil {
 		source, err := craftNativeHuman(r.Context())
 		if err == nil {
@@ -81,12 +91,20 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 				ws := WorkspaceIDFromContext(ctx)
 				rec, e := m.pages.loadPageForRead(ctx, ws, r.PathValue("slug"))
 				if e == nil {
-					_, e = m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, false)
+					proof, e := m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, false)
 					enabled = e == nil
+					if enabled {
+						application = proof.application
+					}
 					_, previewErr := m.pageAuthorityForView(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, false, true)
 					previewEnabled = previewErr == nil
 					_, writeErr := m.pageAuthority(ctx, tx, source, mooring.EditLeaseScope{WorkspaceID: ws, ArtifactID: rec.ID}, true)
 					canEdit = writeErr == nil
+					// Never offer editing that lease/acquire would refuse (#5381).
+					if canEdit && application != "" && !m.apps.allows(r.Context(), application, craftLeaseOperation("acquire")) {
+						canEdit = false
+						refusal = m.apps.reason(r.Context(), application)
+					}
 					agentsEnabled = enabled && canEdit && m.agents != nil && m.agents.runtimeReady()
 				}
 			}
@@ -98,7 +116,7 @@ func (m *craftNativeHTTP) availability(w http.ResponseWriter, r *http.Request) {
 		agentsEnabled = agentsEnabled && m.apps.mode(r.Context(), craftapps.Agents) == craftapps.ModeOpen
 	}
 	w.Header().Set("Cache-Control", "no-store")
-	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled, CanEdit: canEdit, PreviewEnabled: previewEnabled, AgentsEnabled: agentsEnabled, Applications: modes})
+	writeJSON(w, 200, craftNativeAvailabilityResponse{Enabled: enabled, CanEdit: canEdit, PreviewEnabled: previewEnabled, AgentsEnabled: agentsEnabled, Applications: modes, Application: application, EditRefusal: refusal})
 }
 func craftNativeHTTPError(w http.ResponseWriter, err error) {
 	if artifactStorageRefusal(w, err) {

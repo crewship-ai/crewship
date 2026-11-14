@@ -87,6 +87,7 @@ func (r *Router) documentAvailability(req *http.Request) DocumentAvailability {
 		_, grid := d.application("gridcraft")
 		status.WordCraftNative = word && d.human.apps.allows(req.Context(), craftapps.Word, craftapps.OpCreate)
 		status.GridCraftNative = grid && d.human.apps.allows(req.Context(), craftapps.Sheet, craftapps.OpCreate)
+		status.Applications = map[string]craftapps.Mode{craftapps.Word: d.human.apps.mode(req.Context(), craftapps.Word), craftapps.Sheet: d.human.apps.mode(req.Context(), craftapps.Sheet)}
 	}
 	if m := r.mooringHTTP; m != nil && m.commandFactory != nil && m.commandFactory.editorBundle != nil {
 		f := m.commandFactory

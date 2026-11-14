@@ -38,6 +38,17 @@ refusal is `503` with `reason` `app_disabled` or `app_draining`. The metadata
 stream stops renewing a lease when the mode no longer allows it, so the editor
 keeps its draft. Turning off never changes stored documents.
 
+Availability agrees with that refusal (#5381): while the document's application
+is `draining` or `closed`, `GET .../craft/availability` answers `can_edit: false`
+(and `agents_enabled: false`), and, for a person who has Edit, `edit_refusal`
+carries the same reason acquire would answer with. The editor then opens
+read-only with "An administrator turned Word off on this server. You can read
+this document; editing is not available." (Sheet alike) and offers no take-over.
+An editor already open when the application is turned off keeps renewing and
+saving through the drain, as in the table above. The document status reports each
+application's mode in `applications`, so New artifact says Word or Sheet is
+turned off on this server by an administrator instead of not available.
+
 An operator can still configure a native development profile
 (`craft_native.enabled: true` or `CREWSHIP_CRAFT_NATIVE_ENABLED=true` with the
 profile variables below). It replaces the downloaded component of that
@@ -68,7 +79,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 
 | Method | Path | Request | Response / success status |
 |---|---|---|---|
-| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, can_edit: boolean, preview_enabled: boolean, agents_enabled: boolean}`, 200. |
+| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, can_edit: boolean, preview_enabled: boolean, agents_enabled: boolean, applications?: {wordcraft, gridcraft: "open" \| "draining" \| "closed"}, application?: "wordcraft" \| "gridcraft", edit_refusal?: "app_draining" \| "app_disabled"}`, 200. `can_edit` is false while the document's application is not `open`. |
 | POST | `/api/v1/pages/{slug}/craft/sessions` | `{}`. | `session_token`, public `session_id`, `application_id`, `page_id`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Separately refreshed original authentication; no body consumed. | `{renewed: boolean}`, 200. |
 | GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header; Page read or Edit. | Lease status described below, 200. |

@@ -28,7 +28,30 @@ function OnceAgentOpened({ children }: { children: ReactNode }) {
   return seen || opened ? <>{children}</> : null
 }
 
-type State = "loading" | "enabled" | "preview" | "readonly" | "disabled" | "error"
+type State = "loading" | "enabled" | "preview" | "readonly" | "off" | "disabled" | "error"
+
+const APP_LABEL: Record<string, string> = { wordcraft: "Word", gridcraft: "Sheet" }
+const OFF_REASONS = new Set(["app_draining", "app_disabled"])
+
+/**
+ * Whether the instance administrator has this document's application draining
+ * or off (#5381). The server sets `edit_refusal` when this person could
+ * otherwise edit; an answer that still claims `can_edit` while the
+ * application's mode is not open is treated the same, so the editor is never
+ * offered for editing the server would refuse.
+ */
+export function nativeAppOff(fields: Record<string, unknown>): string | null {
+  const application = typeof fields.application === "string" ? fields.application : ""
+  const label = APP_LABEL[application]
+  if (!label || fields.enabled !== true) return null
+  const modes = fields.applications && typeof fields.applications === "object" ? fields.applications as Record<string, unknown> : {}
+  const mode = modes[application]
+  const refused = typeof fields.edit_refusal === "string" && OFF_REASONS.has(fields.edit_refusal)
+  return refused || fields.can_edit === true && (mode === "draining" || mode === "closed") ? label : null
+}
+
+/** What the editor says while an administrator has the application draining or off. */
+export const appOffText = (label: string) => `An administrator turned ${label} off on this server. You can read this document; editing is not available.`
 
 /**
  * A native Word or Sheet opens inside its Artifacts detail: the same
@@ -38,7 +61,7 @@ type State = "loading" | "enabled" | "preview" | "readonly" | "disabled" | "erro
  * what it showed before (`fallback`) under a notice that says why, and
  * nothing is opened or written. An unconfirmed answer can be asked again.
  */
-export type NativeAvailability = State
+export type NativeAvailability = Exclude<State, "off">
 
 export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, onAvailability, placeLease, editorHidden, historyPresence }: { workspaceId: string; pageId: string; fallback: ReactNode
   /** Where the lock controls render: the frame's status popover. */
@@ -54,7 +77,7 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, 
   const session = useSessionSafe()
   const humanId = session.status === "authenticated" ? session.data?.user?.id ?? null : null
   const scope = humanId ? JSON.stringify([humanId, workspaceId, pageId]) : null
-  const [availability, setAvailability] = useState<{ scope: string; state: State }>()
+  const [availability, setAvailability] = useState<{ scope: string; state: State; app?: string }>()
   const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     if (!scope) return
@@ -68,9 +91,10 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, 
       if (!response.ok) throw Error("native_availability_unconfirmed")
       const value: unknown = await response.json()
       const fields = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
-      const state: State = fields.enabled === true && fields.can_edit === true ? "enabled" : fields.preview_enabled === true ? "preview" : fields.enabled === true ? "readonly" : "disabled"
+      const off = nativeAppOff(fields)
+      const state: State = off ? "off" : fields.enabled === true && fields.can_edit === true ? "enabled" : fields.preview_enabled === true ? "preview" : fields.enabled === true ? "readonly" : "disabled"
       if (abort.signal.aborted) return
-      setAvailability({ scope, state })
+      setAvailability({ scope, state, app: off ?? undefined })
       if (state !== "enabled") proveReadLoss()
     }).catch(() => { if (!abort.signal.aborted) { setAvailability({ scope, state: "error" }); proveReadLoss() } })
     return () => abort.abort()
@@ -78,7 +102,9 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, 
 
   // A previous person's or document's answer never authorizes this render.
   const state = availability?.scope === scope ? availability.state : "loading"
-  useEffect(() => { onAvailability?.(state) }, [state]) // eslint-disable-line react-hooks/exhaustive-deps -- report each answer once
+  // The frame treats an application turned off like any read-only answer.
+  const reported: NativeAvailability = state === "off" ? "readonly" : state
+  useEffect(() => { onAvailability?.(reported) }, [reported]) // eslint-disable-line react-hooks/exhaustive-deps -- report each answer once
   if (!scope || !humanId) return <>{fallback}</>
   if (state === "loading") return <p role="status" className="p-4 text-sm text-muted-foreground">Connecting…</p>
   // The host's UI and draft journal are remounted for every person and document.
@@ -95,9 +121,9 @@ export function ArtifactNativeEditor({ workspaceId, pageId, fallback, onStatus, 
       Editing could not be confirmed right now.
       <Button type="button" size="sm" variant="outline" onClick={() => setAttempt(n => n + 1)}>Try again</Button>
     </p> : <p role="status" className="text-sm text-muted-foreground">
-      {state === "readonly" ? "You can read this document but not edit it." : "Editing is not available here right now."}
+      {state === "off" ? appOffText(availability?.app ?? "This application") : state === "readonly" ? "You can read this document but not edit it." : "Editing is not available here right now."}
     </p>}
-    {state === "readonly" && inHistory(<NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} embedded />, historyPresence)}
+    {(state === "readonly" || state === "off") && inHistory(<NativeCraftReaderHistory key={scope} humanId={humanId} workspaceId={workspaceId} pageId={pageId} embedded />, historyPresence)}
     {fallback}
   </>
 }
