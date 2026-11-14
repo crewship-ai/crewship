@@ -669,7 +669,8 @@ owner on 2026-11-13.
    setting per folder, not an ACL row, so `page_folder_acl` still names no
    agent. A workspace admin or a MANAGER+ of the owning crew sets it, fenced on
    `acl_version` and audited (`page.folder_agent_access_changed`); levels other
-   than `none` need the flag. It reaches only non-private pages filed in the
+   than `none` need the flag. **Not built yet:** `propose` gives the same
+   access as `read`; a folder suggestion path is #5317 step 5.2. It reaches only non-private pages filed in the
    folder, only agents whose live crew owns the folder, and only as standing
    access: read only, counted against `run_read_limit`, and still intersected
    with the run's human.
