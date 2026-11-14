@@ -1,0 +1,1 @@
+The Go Race internal/api erosion alarm is temporarily 6000 s instead of 5200 s. Identical content measured 4262–5667 s and ejected merge groups at random; the real fix is tracked in #4761. Timeouts and coverage accounting are unchanged.
