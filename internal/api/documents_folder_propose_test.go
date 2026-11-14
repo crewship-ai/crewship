@@ -238,16 +238,22 @@ func TestFolderPropose_RefusedAfterTheIntent(t *testing.T) {
 func TestFolderPropose_NeverCommitsOrCheckpoints(t *testing.T) {
 	f, h, token, intent := mustFolderProposeDoc(t, nil)
 	before, _ := docHeadAndProposals(t, f, intent.PageID)
-	// The run cannot take the lease (TestFolderPropose_AgentNeverTakesTheLease);
-	// a write without one is refused by the folder rule before any fence.
-	lease := documents.Lease{Owner: "synthetic-engine", Writer: "guess", Epoch: 1}
+	// A person holds a real lease and the run presents it, so the only thing
+	// that can stop the write is authority: the folder rule and the propose
+	// mandate's guard, not the fence.
+	key := documents.Key{WorkspaceID: f.a.WorkspaceID, PageID: intent.PageID}
+	editorCtx, editor := humanDocumentAuthorize(t, f, h, key, f.a.HumanUserID)
+	lease, err := h.store.Acquire(editorCtx, key, "synthetic-engine", editor)
+	if err != nil {
+		t.Fatalf("editor lease: %v", err)
+	}
 	commit := documentDraftPayloadAt(t, documents.FormattedSchema, "folder-commit", "initial", "agent edit", before, lease)
-	if w := callDocumentDraftAuthority(t, f, h, token, intent.PageID, "commit", commit); w.Code == 200 {
-		t.Fatalf("a folder run committed: %s", w.Body)
+	if w := callDocumentDraftAuthority(t, f, h, token, intent.PageID, "commit", commit); w.Code != http.StatusForbidden {
+		t.Fatalf("a folder run's commit under a valid lease: %d %s, want 403", w.Code, w.Body)
 	}
 	checkpoint := map[string]any{"id": "folder-checkpoint", "fingerprint": "pin", "generation": 0, "ifRev": before, "epoch": lease.Epoch, "leaseToken": lease.Writer, "leaseOwner": lease.Owner, "snapshot": []byte("synthetic candidate")}
-	if w := callDocumentDraftAuthority(t, f, h, token, intent.PageID, "checkpoint", checkpoint); w.Code == 200 {
-		t.Fatalf("a folder run pinned a checkpoint: %s", w.Body)
+	if w := callDocumentDraftAuthority(t, f, h, token, intent.PageID, "checkpoint", checkpoint); w.Code != http.StatusForbidden {
+		t.Fatalf("a folder run's checkpoint under a valid lease: %d %s, want 403", w.Code, w.Body)
 	}
 	after, _ := docHeadAndProposals(t, f, intent.PageID)
 	var checkpoints int

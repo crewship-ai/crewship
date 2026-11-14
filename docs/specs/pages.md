@@ -621,10 +621,12 @@ owner on 2026-11-13.
    Word document, a mandate for a Sheet or Mooring document. Attaching one does
    not put it in reach. That consent binds every write's targets, base
    revision and lease, so an agent write under another person's lease ends as
-   a proposal and never bypasses the lease. A propose mandate (a page grant
-   or a folder at `propose`) never needs the lease: with the flag on its run
-   may not take or renew the writer lease, only release one, so an agent can
-   never hold it against a person who edits or accepts. Native Word and Sheet Craft tasks
+   a proposal and never bypasses the lease. A propose mandate never needs the
+   lease: with the flag on, a run under any propose mandate (every iteration
+   on a schema 4–6 Document, whether it reaches the Document through a page
+   grant, a folder at `propose` or the human's own Document) may not take or
+   renew the writer lease, only release one, so an agent can never hold it
+   against a person who edits or accepts. Native Word and Sheet Craft tasks
    (`crewship craft task`) are a separate, explicitly consented runtime and are
    unchanged.
 7. **Limits, read from the workspace policy on every use.** One chat run
