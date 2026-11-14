@@ -251,3 +251,45 @@ func TestArtifactPolicyAuthenticatedRoutesRejectPathShadow(t *testing.T) {
 		t.Fatalf("path shadow changed policy rows: before=%d after=%d err=%v", before, after, err)
 	}
 }
+
+// #5317 PR2: limits default to 3/50/20, change only where given, stay in the
+// schema's ranges, and every change bumps the policy version.
+func TestArtifactCreationPolicyLimits(t *testing.T) {
+	h, _, _, ws, user := newPagesFixture(t)
+	read := func() artifactCreationPolicy {
+		t.Helper()
+		w := artifactPolicyCall(t, h, ws, user, "OWNER", "GET", "")
+		artifactPolicyExpect(t, w, 200)
+		var p artifactCreationPolicy
+		if err := json.Unmarshal(w.Body.Bytes(), &p); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	if p := read(); p.Limits != (artifactRunLimits{3, 50, 20}) {
+		t.Fatalf("defaults %+v", p.Limits)
+	}
+	for _, body := range []string{
+		`{"enabled":true,"crew_ids":[],"base_version":0,"limits":{"chat_run_create_limit":0}}`,
+		`{"enabled":true,"crew_ids":[],"base_version":0,"limits":{"run_read_limit":501}}`,
+		`{"enabled":true,"crew_ids":[],"base_version":0,"limits":{"crew_hourly_page_limit":1001}}`,
+		`{"enabled":true,"crew_ids":[],"base_version":0,"limits":{"unknown_limit":1}}`,
+	} {
+		artifactPolicyExpect(t, artifactPolicyCall(t, h, ws, user, "OWNER", "PUT", body), 400)
+	}
+	if p := read(); p.Version != 0 {
+		t.Fatalf("refused limits saved a policy: %+v", p)
+	}
+	artifactPolicyExpect(t, artifactPolicyCall(t, h, ws, user, "OWNER", "PUT", `{"enabled":true,"crew_ids":[],"base_version":0,"limits":{"chat_run_create_limit":5}}`), 200)
+	if p := read(); p.Version != 1 || p.Limits != (artifactRunLimits{5, 50, 20}) {
+		t.Fatalf("partial update %+v", p)
+	}
+	artifactPolicyExpect(t, artifactPolicyCall(t, h, ws, user, "OWNER", "PUT", `{"enabled":true,"crew_ids":[],"base_version":1}`), 200)
+	if p := read(); p.Version != 2 || p.Limits != (artifactRunLimits{5, 50, 20}) {
+		t.Fatalf("omitted limits must keep their values %+v", p)
+	}
+	artifactPolicyExpect(t, artifactPolicyCall(t, h, ws, user, "OWNER", "PUT", `{"enabled":true,"crew_ids":[],"base_version":2,"limits":{"run_read_limit":10,"crew_hourly_page_limit":1}}`), 200)
+	if p := read(); p.Version != 3 || p.Limits != (artifactRunLimits{5, 10, 1}) {
+		t.Fatalf("second update %+v", p)
+	}
+}

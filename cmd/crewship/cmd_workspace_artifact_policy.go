@@ -66,7 +66,18 @@ func newWorkspaceArtifactPolicyCommand() *cobra.Command {
 		if err != nil {
 			return err
 		}
-		response, err := client.Put(path, map[string]any{"enabled": enabled, "crew_ids": crews, "base_version": version})
+		body := map[string]any{"enabled": enabled, "crew_ids": crews, "base_version": version}
+		limits := map[string]int{}
+		for flag, key := range map[string]string{"chat-run-create-limit": "chat_run_create_limit", "run-read-limit": "run_read_limit", "crew-hourly-page-limit": "crew_hourly_page_limit"} {
+			if cmd.Flags().Changed(flag) {
+				v, _ := cmd.Flags().GetInt(flag)
+				limits[key] = v
+			}
+		}
+		if len(limits) > 0 {
+			body["limits"] = limits
+		}
+		response, err := client.Put(path, body)
 		if err != nil {
 			return err
 		}
@@ -76,14 +87,23 @@ func newWorkspaceArtifactPolicyCommand() *cobra.Command {
 	set.Flags().Bool("enabled", false, "Explicitly enable or disable agent artifact publication")
 	set.Flags().StringSlice("crew-id", nil, "Complete allowlist of crew IDs, comma-separated or repeated")
 	set.Flags().Bool("clear-crews", false, "Explicitly replace the allowlist with an empty list")
+	set.Flags().Int("chat-run-create-limit", 0, "Artifacts one chat run may create (1-20, default 3); omitted keeps the current value")
+	set.Flags().Int("run-read-limit", 0, "Distinct artifacts one run may read through the agent's own access (1-500, default 50)")
+	set.Flags().Int("crew-hourly-page-limit", 0, "Pages one crew may create per hour through the internal save path (1-1000, default 20)")
 	command.Long = `Read or replace the workspace ceiling for agent work on artifacts: whether
 agents may create or change artifacts on a person's behalf, and which crews
-may do so. Requires the OWNER or ADMIN role and a token with workspace:admin.`
+may do so. Requires the OWNER or ADMIN role and a token with workspace:admin.
+
+With agent access modes on (feature flag artifact_agent_access_modes), the
+policy also carries limits: artifacts one chat run may create, distinct
+artifacts one run may read through the agent's own access, and pages one crew
+may create per hour. A workspace that never saved a policy uses the defaults
+(3, 50, 20) and, with the flag on, allows every live crew.`
 	show.Example = "  crewship workspace artifact-policy show -f json"
 	set.Long = `Replace the whole policy. Pass the version from show as --base-version;
 a newer saved policy returns 409 stale_policy. Give --enabled explicitly and
 exactly one of --crew-id (complete allowlist) or --clear-crews.`
-	set.Example = "  crewship workspace artifact-policy set --base-version 0 --enabled=true --crew-id <crew-id>\n  crewship workspace artifact-policy set --base-version 1 --enabled=false --clear-crews"
+	set.Example = "  crewship workspace artifact-policy set --base-version 0 --enabled=true --crew-id <crew-id>\n  crewship workspace artifact-policy set --base-version 1 --enabled=false --clear-crews\n  crewship workspace artifact-policy set --base-version 2 --enabled=true --crew-id <crew-id> --chat-run-create-limit 5"
 	command.AddCommand(show, set)
 	return command
 }

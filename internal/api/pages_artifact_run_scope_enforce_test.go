@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/journal"
 )
 
 // PR2 of #5317: read and write enforcement for a chat run's artifact scope.
@@ -101,6 +102,8 @@ func (g *runScopeRig) grant(t *testing.T, page, subjectType, subject, level stri
 	t.Helper()
 	// A created artifact starts in its author's Personal; sharing moves it out.
 	mustExec(t, g.f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, page)
+	// Readers other than the owner see only the shared version.
+	mustExec(t, g.f.rig.db, `UPDATE artifact_version_heads SET shared_version=latest_version WHERE page_id=?`, page)
 	mustExec(t, g.f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,?,?,?,?)`, page, subjectType, subject, level, g.f.rig.adminID)
 }
 
@@ -270,4 +273,74 @@ func TestRunScope_FlagOffKeepsTodaysRefusal(t *testing.T) {
 		t.Fatalf("flag off: %d %s", w.Code, w.Body)
 	}
 	_ = json.Valid
+}
+
+func runScopeStartWith(t *testing.T, g *runScopeRig, run, trigger string, ctx context.Context) int {
+	t.Helper()
+	writer := journal.NewWriter(g.f.rig.db, newTestLogger(), journal.WriterOptions{ChainKey: []byte("synthetic-artifact-refs-chain"), FlushSize: 1})
+	t.Cleanup(func() { _ = writer.Close() })
+	h := NewInternalHandler(g.f.rig.db, "synthetic-refs-master", newTestLogger())
+	h.SetJournal(writer)
+	raw, _ := json.Marshal(map[string]any{"id": run, "workspace_id": g.f.a.WorkspaceID, "agent_id": g.f.a.AgentID, "chat_id": g.f.a.ChatID, "trigger_type": trigger, "human_authority": g.f.receipt, "trigger_message_id": g.f.a.MessageID})
+	w := httptest.NewRecorder()
+	h.CreateRun(w, httptest.NewRequest("POST", "/api/v1/internal/runs", bytes.NewReader(raw)).WithContext(ctx))
+	return w.Code
+}
+
+// A plain chat run (no attachment) records its human with the flag on; a run
+// not started by the human's own message (routine, webhook, crew IPC) does not.
+func TestRunScope_OnlyAHumanMessageRecordsAPrincipal(t *testing.T) {
+	g := newRunScopeRig(t)
+	principals := func(run string) int {
+		var n int
+		if err := g.f.rig.db.QueryRow(`SELECT count(*) FROM artifact_run_principals WHERE run_id=?`, run).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	for _, trigger := range []string{"ROUTINE", "WEBHOOK", "CRON", "AGENT"} {
+		run := "principal-" + strings.ToLower(trigger)
+		runScopeStartWith(t, g, run, trigger, t.Context())
+		if principals(run) != 0 {
+			t.Fatalf("%s run recorded a human principal", trigger)
+		}
+	}
+	crew := context.WithValue(t.Context(), ctxInternalTokenCrew, g.f.a.CrewID)
+	runScopeStartWith(t, g, "principal-crew-ipc", "USER", crew)
+	if principals("principal-crew-ipc") != 0 {
+		t.Fatal("a crew-token run recorded a human principal")
+	}
+	g.start(t)
+	if principals(g.f.a.RunID) != 1 {
+		t.Fatal("a plain chat run with the flag on recorded no principal")
+	}
+}
+
+// The limits are read from the policy on every use: lowering the create
+// limit refuses the next create with its own code, and a limit change bumps
+// the policy version (which moves its authority epoch).
+func TestRunScope_LimitsComeFromThePolicyOnEachUse(t *testing.T) {
+	g := newRunScopeRig(t)
+	g.start(t)
+	create := func(slug string) *httptest.ResponseRecorder {
+		body := `{"name":"` + slug + `",` + strings.TrimPrefix(artifactProjectBody(0, slug), "{")
+		return g.tool("artifact_create", slug, body)
+	}
+	if w := create("scope-limit-1"); w.Code != 201 {
+		t.Fatalf("first create: %d %s", w.Code, w.Body)
+	}
+	var before, after int64
+	_ = g.f.rig.db.QueryRow(`SELECT version FROM workspace_artifact_creation_policy WHERE workspace_id=?`, g.f.a.WorkspaceID).Scan(&before)
+	mustExec(t, g.f.rig.db, `UPDATE workspace_artifact_creation_policy SET chat_run_create_limit=1, version=version+1 WHERE workspace_id=?`, g.f.a.WorkspaceID)
+	if err := g.f.rig.db.QueryRow(`SELECT version FROM workspace_artifact_creation_policy WHERE workspace_id=?`, g.f.a.WorkspaceID).Scan(&after); err != nil || after != before+1 {
+		t.Fatalf("the fixture has no stored policy to lower: %d->%d %v", before, after, err)
+	}
+	w := create("scope-limit-2")
+	if w.Code != http.StatusTooManyRequests || !strings.Contains(w.Body.String(), "artifact_run_limit") {
+		t.Fatalf("over the lowered limit: %d %s", w.Code, w.Body)
+	}
+	var n int
+	if err := g.f.rig.db.QueryRow(`SELECT count(*) FROM pages WHERE slug='scope-limit-2'`).Scan(&n); err != nil || n != 0 {
+		t.Fatalf("refused create left a page: %d %v", n, err)
+	}
 }

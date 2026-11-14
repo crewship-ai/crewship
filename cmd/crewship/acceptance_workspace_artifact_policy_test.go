@@ -54,6 +54,11 @@ func TestAcceptance_WorkspaceArtifactPolicy(t *testing.T) {
 		Enabled bool     `json:"enabled"`
 		CrewIDs []string `json:"crew_ids"`
 		Version int64    `json:"version"`
+		Limits  struct {
+			ChatRunCreate  int `json:"chat_run_create_limit"`
+			RunRead        int `json:"run_read_limit"`
+			CrewHourlyPage int `json:"crew_hourly_page_limit"`
+		} `json:"limits"`
 	}
 	read := func() {
 		t.Helper()
@@ -107,6 +112,25 @@ func TestAcceptance_WorkspaceArtifactPolicy(t *testing.T) {
 	}
 	if output, err := run("show", "--workspace", "no-such-workspace"); err == nil || !strings.Contains(output, "no-such-workspace") {
 		t.Fatalf("unknown slug must fail naming it: %v %s", err, output)
+	}
+	// #5317 PR2: limits travel through the same command; omitted ones keep
+	// their value, out-of-range ones are refused before anything is saved.
+	if policy.Limits.ChatRunCreate != 3 || policy.Limits.RunRead != 50 || policy.Limits.CrewHourlyPage != 20 {
+		t.Fatalf("default limits %+v", policy.Limits)
+	}
+	if output, err := run("set", "--base-version", "3", "--enabled=true", "--crew-id", "policy-crew", "--chat-run-create-limit", "5", "--crew-hourly-page-limit", "7"); err != nil {
+		t.Fatalf("set limits: %v %s", err, output)
+	}
+	read()
+	if policy.Version != 4 || policy.Limits.ChatRunCreate != 5 || policy.Limits.RunRead != 50 || policy.Limits.CrewHourlyPage != 7 {
+		t.Fatalf("limits after set %+v", policy)
+	}
+	if output, err := run("set", "--base-version", "4", "--enabled=true", "--crew-id", "policy-crew", "--run-read-limit", "501"); err == nil || !strings.Contains(output, "limits out of range") {
+		t.Fatalf("out-of-range limit: %v %s", err, output)
+	}
+	read()
+	if policy.Version != 4 || policy.Limits.RunRead != 50 {
+		t.Fatalf("refused limit changed policy %+v", policy)
 	}
 	if _, err := db.Exec(`UPDATE cli_tokens SET scopes='["pages:read"]' WHERE id='policy-cli-token'`); err != nil {
 		t.Fatal(err)

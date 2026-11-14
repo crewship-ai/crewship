@@ -167,3 +167,34 @@ func TestPageInternalSave_InvalidPanelSchemaRejected(t *testing.T) {
 		t.Fatalf("status=%d want 400; body=%s", rr.Code, rr.Body.String())
 	}
 }
+
+// #5317 PR2: with agent access modes on, a crew creates at most
+// crew_hourly_page_limit pages per hour through the sidecar save path; with
+// the flag off the same request is unaffected.
+func TestPageInternalSave_CrewHourlyLimitWithTheFlagOn(t *testing.T) {
+	h, wsID, crewID, agentID := pageInternalSaveFixture(t)
+	execOrFatal(t, h.db, `UPDATE crews SET autonomy_level = 'full' WHERE id = ?`, crewID)
+	execOrFatal(t, h.db, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_at,crew_hourly_page_limit) VALUES(?,1,1,'2026-11-14T00:00:00Z',1)`, wsID)
+	save := func(name string) *httptest.ResponseRecorder {
+		body := `{"workspace_id":"` + wsID + `","crew_id":"` + crewID + `","agent_id":"` + agentID + `",` +
+			`"name":"` + name + `","panels":[{"id":"p1","schema":"status.v1","owner":"crew/eng-pages","producer":"agent/lead-pages","sla_seconds":30,"span":4}]}`
+		rr := httptest.NewRecorder()
+		h.InternalSave(rr, httptest.NewRequest("POST", "/api/v1/internal/pages/save", bytes.NewBufferString(body)))
+		return rr
+	}
+	if rr := save("Hourly one"); rr.Code != http.StatusCreated {
+		t.Fatalf("first: %d %s", rr.Code, rr.Body)
+	}
+	if rr := save("Hourly two"); rr.Code != http.StatusCreated {
+		t.Fatalf("flag off must not apply the limit: %d %s", rr.Code, rr.Body)
+	}
+	execOrFatal(t, h.db, `INSERT INTO feature_flag_overrides(id,flag_id,workspace_id,enabled) VALUES('hourly-flag-on','ff_artifact_agent_access_modes',?,1)`, wsID)
+	rr := save("Hourly three")
+	if rr.Code != http.StatusTooManyRequests || !bytes.Contains(rr.Body.Bytes(), []byte("crew_hourly_page_limit")) {
+		t.Fatalf("over the hourly limit: %d %s", rr.Code, rr.Body)
+	}
+	execOrFatal(t, h.db, `UPDATE pages SET created_at='2020-01-01T00:00:00Z' WHERE workspace_id=?`, wsID)
+	if rr := save("Hourly four"); rr.Code != http.StatusCreated {
+		t.Fatalf("older pages must not count: %d %s", rr.Code, rr.Body)
+	}
+}

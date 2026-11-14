@@ -17,6 +17,35 @@ type artifactCreationPolicy struct {
 	Enabled bool     `json:"enabled"`
 	CrewIDs []string `json:"crew_ids"`
 	Version int64    `json:"version"`
+	// Limits apply with agent access modes on (#5317). A workspace without a
+	// stored policy reports the defaults.
+	Limits artifactRunLimits `json:"limits"`
+}
+
+// artifactRunLimitsUpdate changes some limits; an omitted field keeps its value.
+type artifactRunLimitsUpdate struct {
+	ChatRunCreate  *int `json:"chat_run_create_limit,omitempty"`
+	RunRead        *int `json:"run_read_limit,omitempty"`
+	CrewHourlyPage *int `json:"crew_hourly_page_limit,omitempty"`
+}
+
+// apply validates against the same ranges as the schema CHECKs.
+func (u *artifactRunLimitsUpdate) apply(l artifactRunLimits) (artifactRunLimits, bool) {
+	if u == nil {
+		return l, true
+	}
+	set := func(dst *int, v *int, lo, hi int) bool {
+		if v == nil {
+			return true
+		}
+		if *v < lo || *v > hi {
+			return false
+		}
+		*dst = *v
+		return true
+	}
+	ok := set(&l.ChatRunCreate, u.ChatRunCreate, 1, 20) && set(&l.RunRead, u.RunRead, 1, 500) && set(&l.CrewHourlyPage, u.CrewHourlyPage, 1, 1000)
+	return l, ok
 }
 
 // WorkspaceArtifactCreationPolicyResponse describes the administrative ceiling.
@@ -33,7 +62,19 @@ type WorkspaceArtifactCreationPolicyError struct {
 func (h *PageHandler) artifactAgentPolicyAllows(ctx context.Context, workspace, crew string) bool {
 	var allowed int
 	err := h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_artifact_creation_policy p JOIN workspace_artifact_creation_crews a ON a.workspace_id=p.workspace_id JOIN workspaces w ON w.id=p.workspace_id AND w.deleted_at IS NULL JOIN crews c ON c.id=a.crew_id AND c.workspace_id=p.workspace_id AND c.deleted_at IS NULL WHERE p.workspace_id=? AND a.crew_id=? AND p.enabled=1`, workspace, crew).Scan(&allowed)
-	return err == nil && allowed == 1
+	if err == nil && allowed == 1 {
+		return true
+	}
+	// Amendment 8 (#5317): with agent access modes on, a workspace that never
+	// set a policy defaults to on for its live crews. A stored policy, on or
+	// off, stays the ceiling; with the flag off nothing changes.
+	if err != nil || !h.artifactRunModesOn(ctx, workspace) {
+		return false
+	}
+	var rows, live int
+	err = h.pageAuthReader(ctx).QueryRowContext(ctx, `SELECT (SELECT COUNT(*) FROM workspace_artifact_creation_policy WHERE workspace_id=?),
+ (SELECT COUNT(*) FROM crews c JOIN workspaces w ON w.id=c.workspace_id AND w.deleted_at IS NULL WHERE c.id=? AND c.workspace_id=? AND c.deleted_at IS NULL)`, workspace, crew, workspace).Scan(&rows, &live)
+	return err == nil && rows == 0 && live == 1
 }
 func (h *PageHandler) artifactPolicyAdmin(w http.ResponseWriter, r *http.Request) bool {
 	user := UserFromContext(r.Context())
@@ -63,9 +104,9 @@ func (h *PageHandler) artifactPolicyAdmin(w http.ResponseWriter, r *http.Request
 	return true
 }
 func (h *PageHandler) loadArtifactCreationPolicy(ctx context.Context, workspace string) (artifactCreationPolicy, error) {
-	result := artifactCreationPolicy{CrewIDs: []string{}}
+	result := artifactCreationPolicy{CrewIDs: []string{}, Limits: artifactRunLimits{defaultChatRunCreateLimit, defaultRunReadLimit, defaultCrewHourlyPageLimit}}
 	q := h.pageAuthReader(ctx)
-	err := q.QueryRowContext(ctx, `SELECT enabled,version FROM workspace_artifact_creation_policy WHERE workspace_id=?`, workspace).Scan(&result.Enabled, &result.Version)
+	err := q.QueryRowContext(ctx, `SELECT enabled,version,chat_run_create_limit,run_read_limit,crew_hourly_page_limit FROM workspace_artifact_creation_policy WHERE workspace_id=?`, workspace).Scan(&result.Enabled, &result.Version, &result.Limits.ChatRunCreate, &result.Limits.RunRead, &result.Limits.CrewHourlyPage)
 	if errors.Is(err, sql.ErrNoRows) {
 		return result, nil
 	}
@@ -116,9 +157,10 @@ func (h *PageHandler) UpdateArtifactCreationPolicy(w http.ResponseWriter, r *htt
 		return
 	}
 	var req struct {
-		Enabled     *bool     `json:"enabled"`
-		CrewIDs     *[]string `json:"crew_ids"`
-		BaseVersion *int64    `json:"base_version"`
+		Enabled     *bool                    `json:"enabled"`
+		CrewIDs     *[]string                `json:"crew_ids"`
+		BaseVersion *int64                   `json:"base_version"`
+		Limits      *artifactRunLimitsUpdate `json:"limits,omitempty"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if !decodeArtifactPolicyJSON(w, r, &req) {
@@ -169,8 +211,15 @@ func (h *PageHandler) UpdateArtifactCreationPolicy(w http.ResponseWriter, r *htt
 			return
 		}
 	}
+	limits, ok := req.Limits.apply(current.Limits)
+	if !ok {
+		replyError(w, 400, "limits out of range: chat_run_create_limit 1-20, run_read_limit 1-500, crew_hourly_page_limit 1-1000")
+		return
+	}
 	stamp := tsformat.Format(h.clock.Now().UTC())
-	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_by_user_id,updated_at) VALUES(?,?,1,?,?) ON CONFLICT(workspace_id) DO UPDATE SET enabled=excluded.enabled,version=workspace_artifact_creation_policy.version+1,updated_by_user_id=excluded.updated_by_user_id,updated_at=excluded.updated_at`, workspace, *req.Enabled, UserFromContext(ctx).ID, stamp); err != nil {
+	// A limit change is a policy change: it bumps version, so the policy's
+	// authority epoch moves with it.
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_by_user_id,updated_at,chat_run_create_limit,run_read_limit,crew_hourly_page_limit) VALUES(?,?,1,?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET enabled=excluded.enabled,version=workspace_artifact_creation_policy.version+1,updated_by_user_id=excluded.updated_by_user_id,updated_at=excluded.updated_at,chat_run_create_limit=excluded.chat_run_create_limit,run_read_limit=excluded.run_read_limit,crew_hourly_page_limit=excluded.crew_hourly_page_limit`, workspace, *req.Enabled, UserFromContext(ctx).ID, stamp, limits.ChatRunCreate, limits.RunRead, limits.CrewHourlyPage); err != nil {
 		replyInternalError(w, h.logger, "save artifact creation policy", err)
 		return
 	}
@@ -186,7 +235,7 @@ func (h *PageHandler) UpdateArtifactCreationPolicy(w http.ResponseWriter, r *htt
 	}
 	// Which crews may create artifacts is an access ceiling: the change and
 	// its chained audit (old and new allowlist) commit together (F1).
-	next := artifactCreationPolicy{Enabled: *req.Enabled, CrewIDs: *req.CrewIDs, Version: current.Version + 1}
+	next := artifactCreationPolicy{Enabled: *req.Enabled, CrewIDs: *req.CrewIDs, Version: current.Version + 1, Limits: limits}
 	notify, err := appendSettingsAudit(r, tx, h.journal, "workspace.artifact_creation_policy.update", "WORKSPACE", workspace,
 		map[string]any{"previous": current, "current": next})
 	if err != nil {
@@ -201,7 +250,7 @@ func (h *PageHandler) UpdateArtifactCreationPolicy(w http.ResponseWriter, r *htt
 		notify()
 	}
 	broadcastWorkspaceEvent(h.hub, workspace, "workspace.updated", map[string]any{"workspace_id": workspace})
-	writeJSON(w, 200, artifactCreationPolicy{Enabled: *req.Enabled, CrewIDs: *req.CrewIDs, Version: current.Version + 1})
+	writeJSON(w, 200, next)
 }
 
 // Narrow source helpers keep policy requests independent of content uploads.
