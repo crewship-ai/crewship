@@ -135,7 +135,7 @@ and the host data behind them stay at removal; the unused noexec bind-record
 pass above may subsequently drop positively attributed bind metadata. The next
 start recreates the runtime.
 
-## Owned image collection (opt-in)
+## Owned image collection
 
 `CREWSHIP_IMAGE_GC=true` enables the experimental Docker image collector.
 It is **off by default**, pending another rollout review. The deprecated
