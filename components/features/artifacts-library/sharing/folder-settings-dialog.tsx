@@ -9,9 +9,9 @@ import {
 } from "@/components/layout/create-surface"
 import { LevelSelect, SubjectSelect, useSubjects, type Subject } from "./share-controls"
 import {
-  entryKey, useFolderSettings, useSharingApi, useSharingHuman, useSharingMutation,
+  entryKey, SharingError, useFolderSettings, useSharingApi, useSharingHuman, useSharingMutation,
   FOLDER_AGENT_LABEL, FOLDER_AGENT_LEVELS,
-  type AccessEntry, type DefaultAudience, type FolderAgentLevel, type FolderSettings, type ShareLevel, type SharingCapabilities,
+  type AccessEntry, type DefaultAudience, type FolderAgentLevel, type FolderSettings, type ShareLevel, type SharingApi, type SharingCapabilities,
 } from "./sharing-api"
 
 export interface FolderSettingsDialogProps {
@@ -68,13 +68,33 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
   const { subjects, error: peopleError } = useSubjects(workspaceId, true)
   const [agents, setAgents] = useState<FolderAgentLevel | null>(initial.agents?.level ?? null)
   const agentsSaved = useRef(initial.agents ?? null)
+  // A refused save (409) can come from this form's own entry writes after a partial save (#5343): they move the
+  // folder's acl_version too. Read the folder again. When its agents level is still the one this form last saw,
+  // the agents setting was not changed elsewhere (other entry edits may have moved the version; the agents setting
+  // is independent of them), so save once more, still fenced, against the current version. A level changed
+  // elsewhere is shown, never overwritten. Any other refusal, including the flag being off, passes through as is.
+  const saveAgents = async (api: SharingApi, next: FolderAgentLevel, was: { level: FolderAgentLevel; aclVersion: number }) => {
+    try {
+      return await api.saveFolderAgents(folder.slug, next, was.aclVersion)
+    } catch (error) {
+      if (!(error instanceof SharingError) || error.status !== 409) throw error
+      const fresh = (await api.folderSettings(folder.slug)).agents
+      if (!fresh) throw error
+      if (fresh.level !== was.level) {
+        agentsSaved.current = fresh
+        setAgents(fresh.level)
+        throw new SharingError(`The crew agents level was changed by someone else and is now ${FOLDER_AGENT_LABEL[fresh.level]}. Check it and save again.`, 409)
+      }
+      return api.saveFolderAgents(folder.slug, next, fresh.aclVersion)
+    }
+  }
   // The agents row saves first, against the version this form was read at, so a concurrent change is refused
   // rather than overwritten; the entries then save as before.
   const save = useSharingMutation(workspaceId, async (api, input: Pick<FolderSettings, "defaultAudience" | "entries"> & { agents: FolderAgentLevel | null }) => {
     const was = agentsSaved.current
     if (input.agents !== null && was && input.agents !== was.level) {
       // Remember what the server took, so a retry after a failed entry save neither resends it nor fences on the old version.
-      agentsSaved.current = { level: input.agents, aclVersion: await api.saveFolderAgents(folder.slug, input.agents, was.aclVersion) }
+      agentsSaved.current = { level: input.agents, aclVersion: await saveAgents(api, input.agents, was) }
     }
     await api.saveFolderSettings(folder.slug, { defaultAudience: input.defaultAudience, entries: input.entries })
   }, folder.slug)
@@ -125,7 +145,7 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
       <h3 id="folder-crew-agents" className="font-medium">Crew agents</h3>
       <div className="flex items-center gap-2 rounded-md border border-border/50 px-2.5 py-1.5">
         <span className="min-w-0 flex-1 truncate">Agents of this folder&apos;s crew</span>
-        <select aria-label="Agents of this folder's crew" className="h-7 rounded-md border bg-transparent px-2 text-xs" value={agents}
+        <select aria-label="Agents of this folder's crew" className="h-7 rounded-md border bg-transparent px-2 text-xs" value={agents} disabled={save.isPending}
           onChange={e => setAgents(e.target.value as FolderAgentLevel)}>
           {FOLDER_AGENT_LEVELS.map(l => <option key={l} value={l}>{FOLDER_AGENT_LABEL[l]}</option>)}
           {agents === "propose" && <option value="propose" disabled>Viewer (set as Can suggest)</option>}
