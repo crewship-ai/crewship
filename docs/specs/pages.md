@@ -638,9 +638,11 @@ owner on 2026-11-13.
    run token) is refused with 403 `invalid_run_token`, never treated as
    absent. A run without a human principal (routine, or admitted with the flag
    off) has no run to bind to and is counted under the crew hourly limit
-   only. A token whose principal is no longer live (the artifact tools' check:
-   expiry, suspended human, membership or chat revision, run ended) is refused
-   with 403 `invalid_run_token`. A save without a token (a sidecar that
+   only, and so is a verified token whose principal is no longer live (the
+   artifact tools' check: expiry, suspended or restricted human, membership or
+   chat revision, run ended); neither records a created page nor counts as a
+   save without a token, and a verified token always satisfies the
+   requirement below. A save without a token (a sidecar that
    predates this release, still running in an existing container, or an agent
    holding only a per-agent v1 token, which the sidecar does not forward) is
    accepted under the crew hourly limit only, logged and counted

@@ -448,11 +448,13 @@ func PageSaveWithoutRunTokenTotal() int64 { return pageSaveWithoutRunToken.Load(
 //     sidecar does not forward);
 //   - no run, not tokenless, when the flag is off, when the host itself saves
 //     (a routine page.create through the dispatcher, master token only), or
-//     when the token's run carries no human (a routine run, or a chat run
-//     admitted with the flag off): crew hourly limit only.
+//     when a verified token's run carries no live human (a routine run, a chat
+//     run admitted with the flag off, or a principal that expired or whose
+//     chat or human authority changed): crew hourly limit only. A verified
+//     token always satisfies save_requires_run_token.
 //
-// A token that does not verify, or whose principal is no longer live, is
-// refused; a read error is a 500. Neither falls back to "no token".
+// Only a token that fails verification is refused; a read error is a 500.
+// Neither falls back to "no token".
 func (h *PageHandler) internalSaveRun(w http.ResponseWriter, r *http.Request, workspace, crew, agent string) (run *artifactRunAuthority, tokenless, ok bool) {
 	ctx := r.Context()
 	if !h.artifactRunModesOn(ctx, workspace) {
@@ -480,7 +482,7 @@ func (h *PageHandler) internalSaveRun(w http.ResponseWriter, r *http.Request, wo
 		return nil, true, true
 	}
 	invalid := func() (*artifactRunAuthority, bool, bool) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "the agent run token is not a live run token of this crew and agent", "code": "invalid_run_token"})
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "the agent run token does not belong to this crew and agent", "code": "invalid_run_token"})
 		return nil, false, false
 	}
 	fields := strings.Fields(header)
@@ -500,10 +502,14 @@ func (h *PageHandler) internalSaveRun(w http.ResponseWriter, r *http.Request, wo
 		replyInternalError(w, h.logger, "resolve page save run", err)
 		return nil, false, false
 	}
-	// The same live-principal check the artifact tools make: not expired,
-	// human not suspended, membership and chat revision unchanged, run live.
+	// The same live-principal check the artifact tools make (not expired,
+	// human not suspended or restricted, membership and chat revision
+	// unchanged, run live). A stale principal is not a bad token: the save
+	// falls back to the crew hourly limit and records nothing for the run,
+	// since the token is accounting only and refusing would only cost
+	// availability.
 	if h.checkArtifactRunPrincipal(ctx, a) != nil {
-		return invalid()
+		return nil, false, true
 	}
 	return a, false, true
 }

@@ -604,7 +604,10 @@ the artifact tools send (#5336). With `artifact_agent_access_modes` off the
 bearer is ignored. With it on, a token that verifies for the crew and
 `agent_id` and whose human principal is still live binds the save to that
 run: it counts against `chat_run_create_limit` and the page is recorded as
-created by the run. A save without a bearer (an older sidecar, or one whose
+created by the run. A verified token whose run has no live human principal
+(a routine run, or one expired, restricted or changed since admission) is
+accepted under the crew hourly limit only, records nothing for the run, and
+satisfies `save_requires_run_token`. A save without a bearer (an older sidecar, or one whose
 agent holds only a per-agent v1 token, which is not forwarded) is accepted
 under the crew hourly limit only and counted in
 `crewshipd_page_save_without_run_token_total`, unless the workspace policy
@@ -650,7 +653,7 @@ for the general model this follows.
 |---|---|
 | 400 | Invalid JSON, missing `workspace_id`/`name`, empty `panels`, `crew_id` empty after delegation resolution, `agent_id` not in the authoring crew, or `name` slugifies to nothing. |
 | 403 | Cross-tenant `workspace_id`/`crew_id` against the token binding, or the autonomy gate held the request (see above). |
-| 403 `invalid_run_token` | Flag on: the bearer is not a run token of this crew and `agent_id`, or its run's human principal is no longer live (expired, human suspended, membership or chat changed, run ended). Never treated as a missing token. |
+| 403 `invalid_run_token` | Flag on: the bearer does not verify as a run token of this crew, workspace and `agent_id`. Never treated as a missing token. |
 | 403 `run_token_required` | Flag on, no bearer, and the workspace policy sets `save_requires_run_token`. |
 | 409 | A page with the resolved slug already exists in the workspace. |
 | 422 | Panel spec validation, reference resolution, or gate-expression resolution failed, or the workspace's page cap (`pages.CheckCap`, default 100, set by `crewship admin instance page-limit`) was reached. |
