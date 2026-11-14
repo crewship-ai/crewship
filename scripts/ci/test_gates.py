@@ -231,6 +231,59 @@ class GateTests(unittest.TestCase):
         # Skipping the gate when it was not planned is accepted; running it is not required.
         self.assertEqual(failures(self.results()), [])
 
+    def test_craft_inputs_cover_the_retired_candidate_workflow(self):
+        # on.pull_request.paths of the removed craft-components-candidate.yml,
+        # minus that file itself.
+        for path in ['.github/workflows/release.yml', 'tools/craft-components/components.json',
+                     'scripts/build-craft-components.py', 'scripts/test_build_craft_components.py',
+                     'scripts/build-mooring-runtime.py', 'mooring/build-tools.json', 'scripts/check-craft-packages.sh',
+                     '.goreleaser.yml', 'Dockerfile', 'internal/craftassets/catalog.go', 'internal/craftapps/policy.go',
+                     'internal/craftengine/wasm.go', 'internal/editororigin/editororigin.go',
+                     'internal/server/craft_apps.go', 'internal/server/craft_apps_release_packages_test.go']:
+            self.assertTrue(craft_changed([path]), path)
+
+    def test_push_plans_craft_from_its_diff(self):
+        with tempfile.TemporaryDirectory() as root:
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=root, text=True).strip()
+            git('init', '-q')
+            git('config', 'user.email', 'ci@example.invalid')
+            git('config', 'user.name', 'CI')
+            Path(root, 'README.md').write_text('a\n')
+            git('add', '.')
+            git('commit', '-qm', 'base')
+            base = git('rev-parse', 'HEAD')
+            Path(root, 'README.md').write_text('b\n')
+            git('commit', '-qam', 'docs')
+            docs = git('rev-parse', 'HEAD')
+            Path(root, 'tools/craft-components').mkdir(parents=True)
+            Path(root, 'tools/craft-components/catalog.txt').write_text('pins\n')
+            git('add', '.')
+            git('commit', '-qm', 'pins')
+            pins = git('rev-parse', 'HEAD')
+
+            def plan(name, event):
+                event_path, output = Path(root, 'event.json'), Path(root, 'out')
+                event_path.write_text(json.dumps(event))
+                return json.loads(subprocess.check_output(
+                    ['python3', str(Path(__file__).with_name('plan.py'))], cwd=root, text=True,
+                    env={**os.environ, 'GITHUB_EVENT_NAME': name, 'GITHUB_EVENT_PATH': str(event_path), 'GITHUB_OUTPUT': str(output)}))
+
+            # A computable push diff decides; the other suites of a push stay complete.
+            quiet = plan('push', {'before': base, 'after': docs})
+            self.assertFalse(quiet['craft'])
+            self.assertTrue(quiet['code'] and quiet['go'] and quiet['full'])
+            self.assertTrue(plan('push', {'before': docs, 'after': pins})['craft'])
+            self.assertTrue(plan('push', {'before': base, 'after': pins})['craft'])
+            # No computable diff: a new branch, a forced push, an unknown commit, a dispatch.
+            for name, event in [('push', {'before': '0' * 40, 'after': docs}),
+                                ('push', {'before': base, 'after': docs, 'forced': True}),
+                                ('push', {'before': 'f' * 40, 'after': docs}),
+                                ('push', {'after': docs}),
+                                ('push', {}),
+                                ('workflow_dispatch', {'before': base, 'after': docs})]:
+                self.assertTrue(plan(name, event)['craft'], (name, event))
+
     def test_all_actual_mooring_lane_cannot_be_missing_or_not_executed(self):
         self.assertIn('mooring-actual', CODE)
         for result in ['failure', 'cancelled', 'skipped', None]:

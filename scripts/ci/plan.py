@@ -2,6 +2,7 @@
 """Conservative CI routing. Unknown inputs always require the full Go suite."""
 import json
 import os
+import re
 from pathlib import PurePosixPath
 import subprocess
 
@@ -70,6 +71,22 @@ def craft_changed(paths):
     return any(path in CRAFT_FILES or path.startswith(CRAFT_PREFIXES) for path in paths)
 
 
+def push_craft(name, event):
+    """Whether a run without a pull request or merge group diff needs the
+    Craft packages. Only a push with a computable before/after diff can rule
+    them out; a new branch, a forced push, a dispatch or an unreadable diff
+    cannot."""
+    before, after = event.get('before'), event.get('after')
+    if (name != 'push' or event.get('forced') or not isinstance(before, str) or not isinstance(after, str)
+            or not re.fullmatch(r'[0-9a-f]{40}', before) or not re.fullmatch(r'[0-9a-f]{40}', after)
+            or set(before) == {'0'}):
+        return True
+    try:
+        return craft_changed(changed_paths(before, after))
+    except (subprocess.CalledProcessError, OSError):
+        return True
+
+
 def changed_paths(base, head):
     # Rename detection can hide a deleted runtime input behind its new docs
     # path. Emit both paths so routing retains the source-side requirements.
@@ -123,8 +140,9 @@ def main():
         paths = ['unknown/full-suite']
         result = classify(paths)
         result['release'] = name == 'workflow_dispatch'
-        # Without a diff nothing proves the packages are unaffected.
-        result['craft'] = True
+        # The package build costs 16-20 minutes, so a push is planned from its
+        # own diff; every other suite of a push stays complete.
+        result['craft'] = push_craft(name, event)
     labels = [label.get('name') for label in event.get('pull_request', {}).get('labels', [])]
     result['full'] = full_matrix(name, paths, labels)
     with open(os.environ['GITHUB_OUTPUT'], 'a') as out:
