@@ -72,7 +72,7 @@ func gridcraftMCPCatalog() []memoryMCPToolDescriptor {
 		}
 		description := "Experimental offline workbook operation under an explicit retained human mandate and current run authority. Keep original mutation, mandate, base revision and generation on uncertain retry. Only cell.set is supported; never renew scope or refresh preconditions automatically."
 		if name == "workbook_read" {
-			description += " A read may omit mandate_id for a workbook this run reaches whose human is its owner or an owner-named editor (attached to the message that started it or created in its chat; the server decides)."
+			description += " A read may omit mandate_id for a workbook this run reaches whose human is its owner or an owner-named editor (attached to the message that started it; the server decides)."
 		}
 		if name == "workbook_apply" {
 			props["request"] = packet

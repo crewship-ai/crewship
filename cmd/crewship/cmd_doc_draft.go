@@ -29,7 +29,7 @@ func newDocDraftCommandWithTransport(transport http.RoundTripper) *cobra.Command
   crewship doc draft view --page <page-id>
   crewship doc draft prepare --file input.json > packet.json
   crewship doc draft apply --file packet.json
-  crewship doc draft propose --file packet.json`, Long: "Use view, then prepare once and retain the immutable packet. prepare is unsaved. apply commits text then pins it; a failed pin does not undo committed text. Retry the exact packet, never regenerate its preconditions. Only this run’s admitted new or existing document; no other artifact or human-profile fallback. view --page reads, never drafts, one Document the run reaches without a consent (attached to the message that started it, created in its chat, or through the agent's own grant or its crew's folder); the server decides. On a schema 4, 5 or 6 document the view has mode propose: prepare builds a proposal packet and propose sends it; the document is unchanged until a human accepts it.", PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
+  crewship doc draft propose --file packet.json`, Long: "Use view, then prepare once and retain the immutable packet. prepare is unsaved. apply commits text then pins it; a failed pin does not undo committed text. Retry the exact packet, never regenerate its preconditions. Only this run’s admitted new or existing document; no other artifact or human-profile fallback. view --page reads, never drafts, one Document the run reaches without a consent (attached to the message that started it, or through the agent's own grant or its crew's folder); the server decides. On a schema 4, 5 or 6 document the view has mode propose: prepare builds a proposal packet and propose sends it; the document is unchanged until a human accepts it.", PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
 		for _, key := range []string{"config", "server", "profile", "workspace", "server-allow-mismatch"} {
 			if cmd.Flags().Changed(key) || cmd.InheritedFlags().Changed(key) {
 				return errors.New("protected Docs drafting does not accept config/server/profile/workspace overrides")
@@ -171,7 +171,7 @@ func newDocDraftCommandWithTransport(transport http.RoundTripper) *cobra.Command
 		if op != "view" {
 			command.Flags().String("file", "", "Original JSON input or immutable packet file; - reads stdin")
 		} else {
-			command.Flags().String("page", "", "Read a Document this run reaches without a consent (page ID): attached to the message that started it, created in its chat, or reached through the agent's own grant or its crew's folder; the view is read-only")
+			command.Flags().String("page", "", "Read a Document this run reaches without a consent (page ID): attached to the message that started it, or reached through the agent's own grant or its crew's folder; the view is read-only")
 		}
 		root.AddCommand(command)
 	}

@@ -71,7 +71,7 @@ func mooringMCPCatalog() []memoryMCPToolDescriptor {
 		"action":      map[string]any{"type": "string", "enum": []string{"read", "command"}},
 		"artifact_id": text, "mandate_id": text, "request": packet,
 	}, []string{"action", "artifact_id"}))
-	return []memoryMCPToolDescriptor{{Name: "mooring_command", Description: "Read or run a manifest-declared application command under an explicit human mandate for this live run. Read discovers the manifest and state; a read may omit mandate_id for a document this run reaches that its human owns (attached to the message that started it or created in its chat; the server decides). A command always needs mandate_id and is refused without it. Preserve mutation ID and preconditions on uncertain retry. Shared DIRECT documents are refused.", InputSchema: schema}}
+	return []memoryMCPToolDescriptor{{Name: "mooring_command", Description: "Read or run a manifest-declared application command under an explicit human mandate for this live run. Read discovers the manifest and state; a read may omit mandate_id for a document this run reaches that its human owns (attached to the message that started it; the server decides). A command always needs mandate_id and is refused without it. Preserve mutation ID and preconditions on uncertain retry. Shared DIRECT documents are refused.", InputSchema: schema}}
 }
 func (s *Server) respondMooringMCPToolCall(w http.ResponseWriter, r *http.Request, req memoryMCPRequest, name string, raw []byte) bool {
 	if name != "mooring_command" {

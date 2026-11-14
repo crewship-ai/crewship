@@ -24,7 +24,7 @@ import (
 
 // #5317 step 5.3, owner decision: a Sheet (GridCraft), a Mooring document and
 // a Word document (Docs) are reachable by a flag-on chat run through its scope
-// like every other artifact (attached, created, standing, folder), without a
+// like every other artifact (attached, standing, folder), without a
 // mandate or consent. Every access is intersected with the human as an
 // ordinary member and refused exactly like a missing artifact; standing and
 // folder reads count against run_read_limit. The scope only ever reads: an
@@ -160,19 +160,39 @@ func TestRunScopeSheetReach_WriteEndsAsProposalRequired(t *testing.T) {
 		t.Fatalf("a refused change moved the head to %d", rev)
 	}
 	sameRefusal(t, "a change to an unattached Sheet", g.sheetCall(sheetScopeApply("sheet-sibling")), g.sheetCall(sheetScopeApply("sheet-nowhere")))
-	// Status and commits need a mandate: through the scope they get exactly a
-	// missing workbook's answer.
-	for _, action := range []string{`{"action":"commits","artifact_id":%q,"since":0}`, `{"action":"status","artifact_id":%q,"mutation_id":"agent-edit"}`} {
-		sameRefusal(t, "the scope's "+action, g.sheetCall(fmt.Sprintf(action, "sheet-attached")), g.sheetCall(fmt.Sprintf(action, "sheet-nowhere")))
-	}
 	if rows := kindAuditRows(t, g.f); len(rows) != 0 {
 		t.Fatalf("a refused change was recorded: %+v", rows)
 	}
 }
 
+// Status and commits need a mandate. With the live editor on and a mutation
+// recorded under the scope's own authority (the scope itself never writes, so
+// the test plants a copy of the human import's operation there), an attached
+// workbook's status and commits are still byte-identical to a missing one's.
+func TestRunScopeSheetReach_StatusAndCommitsAreRefusedLikeMissing(t *testing.T) {
+	g := newKindReachRig(t)
+	g.sheet.editor = true
+	mustExec(t, g.f.rig.db, `INSERT INTO feature_flag_overrides(id,flag_id,workspace_id,enabled) VALUES('kind-reach-editor','ffl_gridcraft_editor',?,1)`, g.f.a.WorkspaceID)
+	g.workbook(t, "sheet-attached", g.f.a.HumanUserID)
+	g.start(t, "sheet-attached")
+	scope := "agent:" + g.f.a.AgentID + ":run:" + g.f.a.RunID + ":scope"
+	var human string
+	if err := g.f.rig.db.QueryRow(`SELECT authority_id FROM gridcraft_operations WHERE page_id='sheet-attached' AND mutation_id='import'`).Scan(&human); err != nil {
+		t.Fatal(err)
+	}
+	mustExec(t, g.f.rig.db, `INSERT INTO gridcraft_operations(workspace_id,page_id,authority_id,mutation_id,payload_hash,state,token,lease_until,receipt)
+SELECT workspace_id,page_id,?,'agent-edit',payload_hash,state,token,lease_until,CAST(replace(replace(CAST(receipt AS TEXT),?,?),'"mutation_id":"import"','"mutation_id":"agent-edit"') AS BLOB) FROM gridcraft_operations WHERE page_id='sheet-attached' AND mutation_id='import'`, scope, human, scope)
+	for _, action := range []string{`{"action":"commits","artifact_id":%q,"since":0}`, `{"action":"status","artifact_id":%q,"mutation_id":"agent-edit"}`} {
+		sameRefusal(t, "the scope's "+action, g.sheetCall(fmt.Sprintf(action, "sheet-attached")), g.sheetCall(fmt.Sprintf(action, "sheet-nowhere")))
+	}
+	if rows := kindAuditRows(t, g.f); len(rows) != 0 {
+		t.Fatalf("a refused status or commits call was recorded: %+v", rows)
+	}
+}
+
 // A workbook's own rule: agent, crew and folder access never reach workbook
 // content (workbookHumanAccess), so neither does a run's standing or folder
-// reach. Only attached, created or consented reach applies.
+// reach. Only attached or consented reach applies.
 func TestRunScopeSheetReach_StandingAndFolderDoNotReachAWorkbook(t *testing.T) {
 	g := newKindReachRig(t)
 	g.workbook(t, "sheet-standing", g.f.a.HumanUserID)
@@ -702,6 +722,50 @@ func TestRunScopeDocumentReach_ConsentKeepsItsBlocksInTheNamedView(t *testing.T)
 	}
 	sameRefusal(t, "the page of a lapsed mandate", g.docView("word-mandated"), g.docView("word-nowhere"))
 	sameRefusal(t, "the state of a lapsed mandate's page", g.docAuthority(t, "word-mandated", "state", map[string]any{}), g.docAuthority(t, "word-nowhere", "state", map[string]any{}))
+	// Revoking the mandate never widens the read from its blocks to the whole
+	// Document through the attachment either (review round 2, B).
+	mustExec(t, g.f.rig.db, `UPDATE workspace_artifact_creation_policy SET version=version-1 WHERE workspace_id=?`, g.f.a.WorkspaceID)
+	mustExec(t, g.f.rig.db, `UPDATE document_iteration_intents SET revoked_at='2026-11-14T00:00:00Z' WHERE run_id=?`, g.f.a.RunID)
+	sameRefusal(t, "the page of a revoked mandate", g.docView("word-mandated"), g.docView("word-nowhere"))
+	sameRefusal(t, "the state of a revoked mandate's page", g.docAuthority(t, "word-mandated", "state", map[string]any{}), g.docAuthority(t, "word-nowhere", "state", map[string]any{}))
+	if v := view("word-other"); v.Mode != "read" {
+		t.Fatalf("the scope stopped reading: %+v", v)
+	}
+}
+
+// Review round 2, D: Node sends exactly one purpose line; two lines, even
+// both "read", are not the draft view's read.
+func TestRunScopeDocumentReach_DuplicatePurposeLinesAreNotTheViewRead(t *testing.T) {
+	r := httptest.NewRequest("POST", "/", nil)
+	r.Header.Add(documentStatePurposeHeader, "read")
+	if !documentStateLoadedForView(r) {
+		t.Fatal("one read line refused")
+	}
+	r.Header.Add(documentStatePurposeHeader, "read")
+	if documentStateLoadedForView(r) {
+		t.Fatal("two read lines accepted")
+	}
+	g := newKindReachRig(t)
+	g.wordDoc(t, "word-attached", g.f.a.HumanUserID, true)
+	g.start(t, "word-attached")
+	twice := func(page string) *httptest.ResponseRecorder {
+		r := g.agentRequest("POST", "/", "{}")
+		r.Header.Add(documentStatePurposeHeader, "read")
+		r.Header.Add(documentStatePurposeHeader, "read")
+		r.SetPathValue("page", page)
+		r.SetPathValue("operation", "state")
+		w := httptest.NewRecorder()
+		checked, ok := g.router.pages.artifactAgentRequest(w, r)
+		if !ok {
+			t.Fatalf("run control: %d %s", w.Code, w.Body)
+		}
+		g.docs.operation(w, checked)
+		return w
+	}
+	sameRefusal(t, "a state load with two purpose lines", twice("word-attached"), twice("word-nowhere"))
+	if rows := kindAuditRows(t, g.f); len(rows) != 0 {
+		t.Fatalf("a refused state load was recorded: %+v", rows)
+	}
 }
 
 // Reviewer finding 3: Mooring output is owner-only. An ADMIN cannot attach
@@ -727,5 +791,24 @@ func TestRunScopeMooringReach_AnotherOwnersDocumentIsRefusedLikeMissing(t *testi
 	sameRefusal(t, "another owner's Mooring document", g.mooringCall(mooringScopeRead("mooring-shared")), g.mooringCall(mooringScopeRead("mooring-nowhere")))
 	if rows := kindAuditRows(t, g.f); len(rows) != 0 {
 		t.Fatalf("a refused Mooring read was recorded: %+v", rows)
+	}
+}
+
+// Review round 2 (optional): the run read's own backstop. The human attaches
+// their own Mooring document; it is then transferred to another member, who
+// names the human an editor (kept private, or published). The human still
+// edits it as a member but no longer owns it, and Mooring output is
+// owner-only, so the run's read is refused exactly like a missing one.
+func TestRunScopeMooringReach_TransferredIsRefusedLikeMissing(t *testing.T) {
+	for _, private := range []int{1, 0} {
+		t.Run(map[int]string{1: "private", 0: "published"}[private], func(t *testing.T) {
+			g := newKindReachRig(t)
+			g.mooringDoc(t, "mooring-attached", g.f.a.HumanUserID)
+			g.start(t, "mooring-attached")
+			wantCode(t, g.mooringCall(mooringScopeRead("mooring-attached")), 200, "baseline")
+			mustExec(t, g.f.rig.db, `UPDATE pages SET owner_user_id=?,private_audience=? WHERE id='mooring-attached'`, g.f.rig.adminID, private)
+			mustExec(t, g.f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES('mooring-attached','user',?,'write',?)`, g.f.a.HumanUserID, g.f.rig.adminID)
+			sameRefusal(t, "a transferred Mooring document", g.mooringCall(mooringScopeRead("mooring-attached")), g.mooringCall(mooringScopeRead("mooring-nowhere")))
+		})
 	}
 }

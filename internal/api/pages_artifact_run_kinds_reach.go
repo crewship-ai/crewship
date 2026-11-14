@@ -15,8 +15,10 @@ import (
 //
 // With the flag on, a chat run reaches these kinds through its scope like any
 // other artifact (artifactRunReach): attached to the message that started the
-// run, created in this chat, or its exact-run consent; a Document also through
-// the agent's standing grant or its crew's folder. A workbook and a Mooring
+// run, or its exact-run consent; a Document also through the agent's standing
+// grant or its crew's folder. These kinds have no created reach: their agent
+// create paths write no artifact project origin (a created Word document is
+// reached through its drafting consent). A workbook and a Mooring
 // document keep their own rule that agent grants, crew grants and folders
 // never reach their content, so standing and folder reach do not apply to
 // them. The kind's mandate or consent path is unchanged and stays the only way
@@ -50,7 +52,7 @@ var errMooringProposalRequired = errors.New("mooring proposal_required")
 
 // kindScopedRunRead admits a flag-on run's read of rec through its scope, in
 // tx. It returns errArtifactRefNotFound for anything the run does not reach.
-// Without standing, only attached, created or consented reach counts: a
+// Without standing, only attached or consented reach counts: a
 // workbook's or a Mooring document's own rule is that agent grants, crew
 // grants and folders never reach its content.
 func (h *PageHandler) kindScopedRunRead(ctx context.Context, tx *sql.Tx, a *artifactRunAuthority, rec *pageRecord, standing bool) error {
@@ -243,13 +245,13 @@ func (h *PageHandler) readDocumentViewScope(r *http.Request, a *artifactRunAutho
 	return h.documentScopedRunRead(context.WithValue(artifactAuditProbeContext(r.Context()), pageAuthReaderKey{}, tx), a, page)
 }
 
-// documentConsentNamesPage reports whether an unrevoked iteration mandate of
-// this run (the consent that can limit blocks) names the page. Such a page is
-// never read through the scope, even once the mandate lapses, so its block
-// limit cannot be bypassed.
+// documentConsentNamesPage reports whether any iteration mandate this run
+// ever held (the consent that can limit blocks) names the page. Such a page is
+// never read through the scope, even once the mandate lapses or is revoked,
+// so its block limit cannot be widened to the whole Document.
 func (h *PageHandler) documentConsentNamesPage(ctx context.Context, tx *sql.Tx, a *artifactRunAuthority, page string) (bool, error) {
 	var n int
-	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM document_iteration_intents WHERE run_id=? AND workspace_id=? AND page_id=? AND revoked_at IS NULL`, a.RunID, a.WorkspaceID, page).Scan(&n)
+	err := tx.QueryRowContext(ctx, `SELECT count(*) FROM document_iteration_intents WHERE run_id=? AND workspace_id=? AND page_id=?`, a.RunID, a.WorkspaceID, page).Scan(&n)
 	return n != 0, err
 }
 

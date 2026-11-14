@@ -623,15 +623,16 @@ owner on 2026-11-13.
    document. That consent binds every write's targets, base revision and
    lease, so an agent write under another person's lease ends as a proposal
    and never bypasses the lease.
-   - *Reads.* A Word document is read through any reach (attached, created,
-     standing, folder), its human reading it as an ordinary member, through
+   - *Reads.* A Word document is read through attached, standing or folder
+     reach (these kinds have no created reach; a Word document the run
+     created is reached through its drafting consent), its human reading it as an ordinary member, through
      the draft view with one `page_id` (`crewship doc draft view --page`, MCP
      `doc_draft_view`; mode `read`, every paragraph and heading). The Docs
      authority admits that reach only on the `state` callback Node makes for
      the view's `read` (Node names the operation behind every state load);
      export, comments and checkpoints never read through the scope. When a
      consent of the run names the page (a drafting consent, or an iteration
-     mandate even once it lapses), that consent alone serves the view, with
+     mandate the run ever held, even once it lapses or is revoked), that consent alone serves the view, with
      its block limit and mode, and the audit names it (`consented`). The run
      sidecar forwards `page_id` only as the view's single query parameter and
      refuses every other query; the server alone decides reach, so an
