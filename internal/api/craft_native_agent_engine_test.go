@@ -114,7 +114,7 @@ func TestCraftNativeAgentCLILinuxOnly(t *testing.T) {
 	if runtime.GOOS == "linux" {
 		return
 	}
-	if _, err := nativeAgentEngineExecutable(craftNativeProfileFixture(t)); err == nil {
+	if _, err := craftNativeProfileEngine(craftNativeProfileFixture(t)); err == nil {
 		t.Fatal("unsupported launcher accepted")
 	}
 }

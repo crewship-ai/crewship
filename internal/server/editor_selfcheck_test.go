@@ -28,7 +28,7 @@ func sameHostEditor(t *testing.T, studio string) (*config.Config, *editororigin.
 	dir := t.TempDir()
 	digest := writeEditorBundle(t, dir)
 	cfg.GridCraft = config.GridCraftConfig{Enabled: true, EditorEnabled: true, EditorBundleDir: dir, EditorBundles: []string{digest}}
-	editor := newEditorOrigin(cfg, slog.Default())
+	editor := newEditorOrigin(cfg, nil, slog.Default())
 	if editor == nil {
 		t.Fatal("same-host editor not built")
 	}
@@ -41,7 +41,7 @@ func sameHostEditor(t *testing.T, studio string) (*config.Config, *editororigin.
 func TestSameHostEditorKeepsStudioHSTS(t *testing.T) {
 	cfg, editor, digest := sameHostEditor(t, "")
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
-	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, editor)))
+	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, nil, editor)))
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, httptest.NewRequest("GET", "/chat", nil))
 	studioHSTS := w.Header().Get("Strict-Transport-Security")
@@ -87,7 +87,7 @@ func newSelfCheckStack(t *testing.T, configured bool) *selfCheckStack {
 	}
 	cfg, editor, digest := sameHostEditor(t, studio)
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
-	s.gated = editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, editor)))
+	s.gated = editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, nil, editor)))
 	s.editor, s.digest = editor, digest
 	return s
 }

@@ -161,7 +161,8 @@ func (h *PageHandler) artifactProjectRetryableComments(r *http.Request, ctx cont
 	if user == nil || validateContentHumanCredential(r.WithContext(ctx), tx, "pages:write") != nil {
 		return result, nil
 	}
-	if _, err := h.artifactProjectAuthority(r.WithContext(ctx), k, true, false)(ctx, tx); err != nil {
+	probe := context.WithValue(ctx, artifactAuditProbeKey{}, true)
+	if _, err := h.artifactProjectAuthority(r.WithContext(probe), k, true, false)(probe, tx); err != nil {
 		return result, nil
 	}
 	var chat, agent, crew string
@@ -412,7 +413,7 @@ func (h *PageHandler) ReplyArtifactProjectComment(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
-	if _, err := h.artifactProjectStore(r.Context()).Quota(r.Context(), k, h.artifactProjectOwnerAuthority(r, k)); err != nil {
+	if _, err := h.artifactProjectStore(r.Context()).Quota(r.Context(), k, artifactAuditProbe(h.artifactProjectOwnerAuthority(r, k))); err != nil {
 		artifactProjectError(w, err)
 		return
 	}
