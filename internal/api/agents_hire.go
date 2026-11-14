@@ -155,6 +155,10 @@ func (h *AgentHandler) Hire(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	model := strings.TrimSpace(req.Model)
+	if err := validateLLMModelID(model); err != nil {
+		replyError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if model == "" {
 		model = tmplDefaultModel
 	}

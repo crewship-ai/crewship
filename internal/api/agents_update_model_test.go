@@ -56,6 +56,9 @@ func TestAgentUpdate_MalformedModelIDRejected(t *testing.T) {
 		"space":     "claude sonnet",
 		"leading":   " gpt-6.1-sol",
 		"newline":   "gpt-6.1-sol\n--yolo",
+		"option":    "--yolo",
+		"dash":      "-m",
+		"dot":       ".hidden",
 		"shell":     "gpt;rm -rf",
 		"quote":     `gpt"6`,
 		"dollar":    "$(id)",
@@ -85,5 +88,14 @@ func TestAgentUpdate_EmptyModelClears(t *testing.T) {
 	rr := covAUPatch(t, h, userID, wsID, "OWNER", "ag-clear", `{"llm_model":""}`)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("empty model = %d, want 200 (%s)", rr.Code, rr.Body.String())
+	}
+}
+
+func TestAgentUpdate_NonStringModelRejected(t *testing.T) {
+	h, userID, wsID := covAUHandler(t)
+	seedAgentRow(t, h.db, "ag-num", wsID, "", "Num", "num", "AGENT")
+	rr := covAUPatch(t, h, userID, wsID, "OWNER", "ag-num", `{"llm_model":{"id":"x"}}`)
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("object llm_model = %d, want 400 (%s)", rr.Code, rr.Body.String())
 	}
 }

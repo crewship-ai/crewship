@@ -29,7 +29,7 @@ export function AgentModelSettings({ draft, setDraft, workspaceId, providerConfi
         onProviderConfirmed?.()
       }} />
     </CreateSurfaceField>
-    {providerConfirmed && <><ConfigModel draftMode label="Model" workspaceId={workspaceId} provider={draft.llmProvider} value={draft.llmModel} onSave={model => setDraft({ ...draft, llmModel: model })} />
+    {providerConfirmed && <><ConfigModel key={draft.llmProvider} draftMode label="Model" workspaceId={workspaceId} provider={draft.llmProvider} value={draft.llmModel} onSave={model => setDraft({ ...draft, llmModel: model })} />
     <CreateSurfaceField label="Runs with" hint="The application launched inside the crew container. Choosing a runner selects its matching provider; OpenCode can use multiple providers.">
       <div role="radiogroup" aria-label="Agent runner" onKeyDown={moveRadio} className="grid grid-cols-1 gap-2 md:grid-cols-2">{Object.entries(CLI_ADAPTERS).map(([key, adapter]) => {
         const Icon = adapter.icon

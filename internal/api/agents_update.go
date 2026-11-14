@@ -216,12 +216,15 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	// model released after the last catalog refresh, or a private deployment
 	// name, must be usable by typing it in; whether the account can actually
 	// run it is the runner's answer at first use, not ours (#5376).
-	if modelVal, ok := body["llm_model"]; ok {
-		if modelStr, isStr := modelVal.(string); isStr {
-			if err := validateLLMModelID(modelStr); err != nil {
-				replyError(w, http.StatusBadRequest, err.Error())
-				return
-			}
+	if modelVal, ok := body["llm_model"]; ok && modelVal != nil {
+		modelStr, isStr := modelVal.(string)
+		if !isStr {
+			replyError(w, http.StatusBadRequest, "llm_model must be a string")
+			return
+		}
+		if err := validateLLMModelID(modelStr); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 	}
 

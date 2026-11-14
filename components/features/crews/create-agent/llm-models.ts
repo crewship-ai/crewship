@@ -115,7 +115,7 @@ export function isKnownModel(provider: LLMProvider, model: string): boolean {
 /** Shape check for a hand-typed model id. Mirrors validateLLMModelID in
  *  internal/api/agents_model_id.go: membership in a catalog is never
  *  required, only an id the runners can take as a single argument. */
-export const MODEL_ID_PATTERN = /^[A-Za-z0-9._:/@+[\]-]{1,200}$/
+export const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/@+[\]-]{0,199}$/
 
 export function isValidModelId(id: string): boolean {
   return MODEL_ID_PATTERN.test(id)

@@ -128,7 +128,7 @@ var providerFallback = map[string]modelPrice{
 	// A per-channel max is the right shape precisely BECAUSE this row does not
 	// describe a real model: it is the bound below which no known model of this
 	// provider can be under-billed.
-	"openrouter":     {InputPerM: 150.00, OutputPerM: 600.00, CachedInputPerM: 150.00, CacheWritePerM: 150.00},
+	"openrouter": {InputPerM: 150.00, OutputPerM: 600.00, CachedInputPerM: 150.00, CacheWritePerM: 150.00},
 	// Raised 2026-11-14: the snapshot's Bedrock gpt-6-astra long-context tier
 	// publishes $22 input and $27.50 cache write.
 	"amazon-bedrock": {InputPerM: 22.00, OutputPerM: 82.50, CachedInputPerM: 2.50, CacheWritePerM: 27.50},

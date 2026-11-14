@@ -21,14 +21,19 @@ const maxLLMModelIDLen = 200
 // tags with ":", Bedrock and Vertex forms with "." "@" and ":", and Claude
 // Code's bracketed context suffix ("claude-opus-5-5[1m]"). Whitespace,
 // quotes and shell metacharacters are refused so an id can never be read
-// as more than one argument by a runner wrapper. An empty id is allowed; it
-// means "use the runner's default".
+// as more than one argument by a runner wrapper, and the first character
+// must be a letter or digit so an id such as "--yolo" can never be parsed
+// as an option by a runner that takes the model as "-m <id>". An empty id
+// is allowed; it means "use the runner's default".
 func validateLLMModelID(id string) error {
 	if id == "" {
 		return nil
 	}
 	if len(id) > maxLLMModelIDLen {
 		return fmt.Errorf("llm_model must be at most %d characters", maxLLMModelIDLen)
+	}
+	if c := id[0]; !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9') {
+		return errors.New("llm_model must start with a letter or digit")
 	}
 	for _, r := range id {
 		switch {

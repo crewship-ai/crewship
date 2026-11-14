@@ -240,7 +240,7 @@ export function ConfigModel({ label, hint, workspaceId, provider, value, onSave,
           </div>
           <p id="custom-model-id-hint" className={cn("type-meta mt-1", customInvalid ? "text-destructive" : "text-muted-foreground")}>
             {customInvalid
-              ? "Use only letters, digits and - _ . : / @ + [ ] with no spaces."
+              ? "Start with a letter or digit; use only letters, digits and - _ . : / @ + [ ] with no spaces."
               : "Any model ID the runner accepts, even if it is not listed above."}
           </p>
         </div>

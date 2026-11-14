@@ -23,7 +23,7 @@ function renderPicker(value: string, onSave = vi.fn()) {
 }
 
 async function openPicker(value: string) {
-  fireEvent.click(screen.getByRole("button", { name: new RegExp(`^Model: ${value.replace(/[.[\]]/g, "\\$&")}`) }))
+  fireEvent.click(screen.getByRole("button", { name: `Model: ${value}` }))
   await waitFor(() => expect(screen.getByText("gpt-6-astra")).toBeInTheDocument())
 }
 
@@ -53,6 +53,14 @@ describe("ConfigModel custom model id (#5376)", () => {
     expect(screen.getByRole("button", { name: "Use model" })).toBeDisabled()
     expect(screen.getByText(/no spaces/)).toBeInTheDocument()
     fireEvent.keyDown(screen.getByLabelText("Custom model ID"), { key: "Enter" })
+    expect(onSave).not.toHaveBeenCalled()
+  })
+
+  it("refuses an id that a runner could read as an option", async () => {
+    const onSave = renderPicker("gpt-6.1-sol")
+    await openPicker("gpt-6.1-sol")
+    fireEvent.change(screen.getByLabelText("Custom model ID"), { target: { value: "--yolo" } })
+    expect(screen.getByRole("button", { name: "Use model" })).toBeDisabled()
     expect(onSave).not.toHaveBeenCalled()
   })
 
