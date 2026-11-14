@@ -3,6 +3,9 @@ package api
 import (
 	"context"
 	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -43,6 +46,8 @@ func TestBuildStorageCheck(t *testing.T) {
 			free: map[string]uint64{"/data": 0}, wantErr: "Crewship data volume"},
 		{name: "in-memory database has no data volume", dataDir: "", dockerRoot: "/var/lib/docker", dockerKnown: true, floor: 4 << 30,
 			free: map[string]uint64{"/var/lib/docker": 50 * testGiB}},
+		{name: "a filesystem larger than int64 is not pressure", dataDir: "/data", dockerRoot: "/var/lib/docker", dockerKnown: true, floor: 4 << 30,
+			free: map[string]uint64{"/data": 1 << 63, "/var/lib/docker": 1<<64 - 1}},
 		{name: "a failing probe is unknown, not pressure", dataDir: "/data", dockerRoot: "/var/lib/docker", dockerKnown: true, floor: 4 << 30,
 			probeErr: map[string]error{"/data": errProbe, "/var/lib/docker": errProbe}},
 	}
@@ -85,6 +90,7 @@ func TestBuildMinFreeFromEnv(t *testing.T) {
 		{name: "explicit floor", set: true, value: "10", want: 10 << 30},
 		{name: "zero disables", set: true, value: "0", want: 0},
 		{name: "negative is unusable", set: true, value: "-1", want: defaultBuildMinFreeBytes, invalid: true},
+		{name: "absurdly large is unusable", set: true, value: "1048577", want: defaultBuildMinFreeBytes, invalid: true},
 		{name: "text is unusable", set: true, value: "lots", want: defaultBuildMinFreeBytes, invalid: true},
 	}
 	for _, tt := range tests {
@@ -153,5 +159,49 @@ func TestEnableBuildStoragePreflightInstallsTheCheck(t *testing.T) {
 	h.EnableBuildStoragePreflight()
 	if !h.provisioner.HasBuildPreflight() {
 		t.Fatal("no build preflight installed")
+	}
+}
+
+func TestBuildFailureAdvice(t *testing.T) {
+	storage := "Free up disk space on the server and send your message again."
+	config := "Fix the devcontainer configuration and send your message again."
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"storage refusal", fmt.Errorf("provision: %w: 3.0 GiB free", ErrBuildStorage), storage},
+		{"storage refusal rebuilt from a job's stored text", errors.New("build failed: provision: " + ErrBuildStorage.Error() + ": 3.0 GiB free"), storage},
+		{"an ordinary build failure", errors.New("build failed: docker build failed for crewship-feat:abc: exit status 1"), config},
+		{"no error", nil, config},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := buildFailureAdvice(tt.err); got != tt.want {
+				t.Errorf("buildFailureAdvice = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// The data-volume probe reads the main database's directory from SQLite.
+func TestEnableBuildStoragePreflightFindsTheDatabaseDirectory(t *testing.T) {
+	db := setupTestDB(t)
+	var file string
+	if err := db.QueryRow(`SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&file); err != nil {
+		t.Fatalf("pragma_database_list: %v", err)
+	}
+	h := &ProvisioningHandler{db: db, logger: newTestLogger(), provisioner: devcontainer.NewProvisioner(nil, nil, nil, nil)}
+	h.EnableBuildStoragePreflight()
+	if !h.provisioner.HasBuildPreflight() {
+		t.Fatal("no build preflight installed")
+	}
+	// An in-memory test database has no file: the probe must answer "no
+	// data volume" rather than measure the working directory.
+	if file == "" {
+		return
+	}
+	if _, err := os.Stat(filepath.Dir(file)); err != nil {
+		t.Errorf("database directory %q is not a real directory: %v", filepath.Dir(file), err)
 	}
 }

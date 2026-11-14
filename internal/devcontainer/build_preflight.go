@@ -4,7 +4,9 @@ import "context"
 
 // BuildPreflight decides whether a build may start writing image data. It is
 // consulted once per provision, after the cache lookup and before the base
-// image is pulled or any layer is written, so a cache hit is never refused.
+// image is pulled or any layer is built, so a cache hit is never refused. The
+// build-only path has downloaded the feature archives by then: it needs them
+// to recognise a cache hit.
 // A non-nil error fails the provision with that error; nothing is cleaned up
 // or deleted on its behalf.
 type BuildPreflight func(ctx context.Context) error

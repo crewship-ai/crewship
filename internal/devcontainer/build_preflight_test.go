@@ -77,3 +77,45 @@ func TestProvision_BuildPreflightPassingLetsTheBuildRun(t *testing.T) {
 		t.Errorf("commits = %v, want one", daemon.commitRefs)
 	}
 }
+
+// A forced rebuild writes a new image even though one exists, so it is
+// checked like any other build.
+func TestProvision_BuildPreflightIsConsultedOnForcedRebuild(t *testing.T) {
+	cfg := &Config{Image: offlineBaseImage, ContainerEnv: map[string]string{"FOO": "bar"}}
+	hash := configHash(offlineBaseImage, cfg, "", dockerfileGenFingerprint(offlineBaseImage, cfg))
+	daemon := &mockCommitClient{existingImages: []string{offlineBaseImage, cacheImageTag(hash)}}
+	p := NewProvisioner(daemon, NewInstaller(&mockDockerClient{exitCode: 0}, testLogger()), nil, testLogger())
+	p.SetBuildPreflight(func(context.Context) error { return errNoRoom })
+
+	if _, err := p.Provision(context.Background(), offlineBaseImage, cfg, "", WithForceRebuild(true)); !errors.Is(err, errNoRoom) {
+		t.Fatalf("forced rebuild error = %v, want the preflight's error", err)
+	}
+	if len(daemon.createdContainers) != 0 {
+		t.Errorf("a refused rebuild created %d containers", len(daemon.createdContainers))
+	}
+}
+
+// The build-only path (runtimes without commit) refuses before the builder
+// is invoked.
+func TestProvisionByBuild_BuildPreflightRefusesBeforeTheBuild(t *testing.T) {
+	b := &recordingBuilder{available: true}
+	p := NewBuildOnlyProvisioner(b, nil, testLogger())
+	p.SetBuildPreflight(func(context.Context) error { return errNoRoom })
+
+	cfg := &Config{Image: "debian:12", ContainerEnv: map[string]string{"CREW": "engineering"}}
+	var failedDetail string
+	sink := func(ev ProvisionEvent) {
+		if ev.Step == ProvStepFailed {
+			failedDetail = ev.Detail
+		}
+	}
+	if _, err := p.ProvisionByBuild(context.Background(), "debian:12", cfg, "", WithProvisionSink(sink)); !errors.Is(err, errNoRoom) {
+		t.Fatalf("ProvisionByBuild error = %v, want the preflight's error", err)
+	}
+	if b.calls != 0 {
+		t.Errorf("builder invoked %d times after a refusal", b.calls)
+	}
+	if failedDetail != ProvStepStoragePreflight {
+		t.Errorf("provision.failed detail = %q, want %q", failedDetail, ProvStepStoragePreflight)
+	}
+}

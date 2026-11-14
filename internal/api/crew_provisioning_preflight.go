@@ -20,7 +20,10 @@ import (
 // A build writes several gigabytes, and a disk that fills mid-build does not
 // only fail the build: the database on the same volume starts failing writes.
 // The check runs once per build, after the cache lookup, and refuses the build
-// with a message an operator can act on. It never deletes anything to make
+// with a message an operator can act on. On the commit path that is before
+// anything is pulled or written; on the build-only path the feature archives
+// are already in the feature cache by then (they are needed to tell a cache
+// hit), and the check precedes the image build. It never deletes anything to make
 // room, and where a volume cannot be measured the answer is "unknown" and the
 // build proceeds — a guessed number would refuse builds for no reason.
 
@@ -64,25 +67,36 @@ func (c buildStorageCheck) check(ctx context.Context) error {
 	}
 	if c.dataDir != nil {
 		if dir := c.dataDir(ctx); dir != "" {
-			if st, err := c.usage(dir); err == nil && int64(st.FreeBytes) < buildDataVolumeMinFreeBytes {
+			if st, err := c.usage(dir); err == nil && st.FreeBytes < uint64(buildDataVolumeMinFreeBytes) {
 				return fmt.Errorf("%w: %s free on the Crewship data volume (%s), at least %s must stay free for the database; free up space and build again",
-					ErrBuildStorage, gib(int64(st.FreeBytes)), dir, gib(buildDataVolumeMinFreeBytes))
+					ErrBuildStorage, gib(st.FreeBytes), dir, gib(uint64(buildDataVolumeMinFreeBytes)))
 			}
 		}
 	}
 	if c.dockerMinFree > 0 && c.dockerRoot != nil {
 		if root, ok := c.dockerRoot(ctx); ok && root != "" {
-			if st, err := c.usage(root); err == nil && int64(st.FreeBytes) < c.dockerMinFree {
+			if st, err := c.usage(root); err == nil && st.FreeBytes < uint64(c.dockerMinFree) {
 				return fmt.Errorf("%w: %s free on Docker's storage (%s), a build needs at least %s (%s); free up space and build again",
-					ErrBuildStorage, gib(int64(st.FreeBytes)), root, gib(c.dockerMinFree), buildMinFreeEnv)
+					ErrBuildStorage, gib(st.FreeBytes), root, gib(uint64(c.dockerMinFree)), buildMinFreeEnv)
 			}
 		}
 	}
 	return nil
 }
 
-func gib(n int64) string {
-	return strconv.FormatFloat(float64(n)/float64(int64(1)<<30), 'f', 1, 64) + " GiB"
+// buildFailureAdvice closes the chat message for a failed build with what the
+// user can do about it. A build refused for lack of disk space is not a
+// configuration mistake. The error may have been rebuilt from a job's stored
+// text, so the sentinel's text is matched as well.
+func buildFailureAdvice(err error) string {
+	if err != nil && (errors.Is(err, ErrBuildStorage) || strings.Contains(err.Error(), ErrBuildStorage.Error())) {
+		return "Free up disk space on the server and send your message again."
+	}
+	return "Fix the devcontainer configuration and send your message again."
+}
+
+func gib(n uint64) string {
+	return strconv.FormatFloat(float64(n)/float64(uint64(1)<<30), 'f', 1, 64) + " GiB"
 }
 
 // buildMinFreeFromEnv reads the Docker storage floor. Unset or unparseable

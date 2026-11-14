@@ -350,8 +350,9 @@ unchanged and not installation-specific.
 ### Storage check before a build
 
 A build that fills the disk does not only fail: the database on the same
-volume starts failing writes. Before a build writes anything, the server
-checks free space and refuses the build if there is too little. Reusing an
+volume starts failing writes. Before a build pulls the base image or builds a
+layer, the server checks free space and refuses the build if there is too
+little. (On Apple Containers the feature archives are downloaded first.) Reusing an
 existing image (a cache hit) is never refused, and nothing is deleted to make
 room.
 
