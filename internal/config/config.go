@@ -570,6 +570,7 @@ func applyEnvOverrides(cfg *Config) {
 	applyCraftNativeEnv(&cfg.CraftNative)
 	if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_ENABLED"); ok {
 		cfg.CraftNative.Enabled = value == "true" || value == "1"
+		cfg.CraftNative.EnabledFromEnv = true
 	}
 	if value, ok := os.LookupEnv("CREWSHIP_MOORING_ENABLED"); ok {
 		cfg.Mooring.Enabled = value == "true" || value == "1"
