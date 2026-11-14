@@ -225,15 +225,17 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 			replyDevcontainerSecurityError(w, verr)
 			return
 		}
-		// Auto-inject common-utils when the operator didn't declare a
-		// user-creating feature themselves. Crewship's runtime hard-
-		// codes UID 1001 but the IMAGE needs a matching `agent` user
-		// for that mapping to succeed — without this, an operator who
-		// forgot the feature would hit "user 'agent' does not exist"
-		// at exec time, which is the #1 onboarding footgun. Idempotent:
-		// if any common-utils variant is already present, the config
-		// is left untouched.
-		if cfg.EnsureAgentUser() {
+		// The runtime always runs as UID 1001, so the image must have an
+		// `agent` account at 1001: inject common-utils when it is absent,
+		// fill its missing account options, and refuse a declaration that
+		// would create the account under another name or UID (see
+		// NormalizeAgentUser).
+		changed, nerr := cfg.NormalizeAgentUser()
+		if nerr != nil {
+			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+nerr.Error())
+			return
+		}
+		if changed {
 			normalised, err := json.Marshal(cfg)
 			if err != nil {
 				// Log the underlying error server-side; surface only a
