@@ -230,6 +230,13 @@ already-referenced runs the ordinary way, binding nothing.
   reference that is not the human's own message and workspace page, and any
   other run scope row. Agents and internal tokens cannot widen it.
 - References are accepted only in the human's own private chat with the agent.
+- With the flag on, a chat run reads an artifact only if it was attached, was
+  created by the agent in this chat and is still the human's, or the agent
+  holds its own grant on it; the human's member-level access is rechecked on
+  every use. Writes are limited to the human's own attached or created
+  artifacts; agents never share or publish.
+- Per-run limits (3 created, 50 distinct standing reads) and a per-crew hourly
+  page limit (20) come from `crewship workspace artifact-policy`.
 
 Specification: `docs/specs/pages.md` §7.1c.
 

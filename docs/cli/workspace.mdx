@@ -640,6 +640,11 @@ Replace the entire administrative policy using the version just reviewed with
 | `--enabled` | Required explicit `true` or `false` switch value. |
 | `--crew-id` | Complete allowed crew IDs, repeated or comma-separated. |
 | `--clear-crews` | Explicitly empty the allowlist; mutually exclusive with `--crew-id`. |
+| `--chat-run-create-limit` | Artifacts one chat run may create (1–20, default 3). Omitted keeps the current value. |
+| `--run-read-limit` | Distinct artifacts one run may read through the agent's own access (1–500, default 50). |
+| `--crew-hourly-page-limit` | Pages one crew may create per hour through the sidecar save path (1–1000, default 20). |
+
+The three limits apply only with the `artifact_agent_access_modes` flag on.
 
 A stale version refuses the change. Read the policy again before deciding on a
 replacement. Use `--format json` for machine-readable responses.

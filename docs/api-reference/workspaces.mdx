@@ -2728,12 +2728,18 @@ version `0`. This administrative ceiling does not itself authorize an agent run;
 creation also requires the run's human consent and content permissions.
 
 `GET /api/v1/workspaces/{workspaceId}/artifact-creation-policy` returns
-`enabled`, sorted `crew_ids`, and `version`.
+`enabled`, sorted `crew_ids`, `version` and `limits`
+(`chat_run_create_limit`, `run_read_limit`, `crew_hourly_page_limit`;
+defaults 3, 50 and 20).
 `PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy` accepts a request
 body of at most 64 KiB and requires all
 three request fields: `enabled`, the complete `crew_ids` allowlist, and
 `base_version` from the last read. A stale version returns `409` with
 `code: "stale_policy"`; read the latest policy before deciding on a replacement.
+An optional `limits` object changes only the limits it names (ranges 1–20,
+1–500 and 1–1000; out of range returns `400`); omitted limits keep their value.
+The limits apply only with the `artifact_agent_access_modes` flag on
+(`docs/specs/pages.md` §7.1c).
 Only active crews from the selected workspace are accepted. Responses use
 `Cache-Control: no-store`. CLI access requires `workspace:admin`.
 
