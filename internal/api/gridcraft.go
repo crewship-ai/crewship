@@ -97,6 +97,10 @@ func gridcraftError(w http.ResponseWriter, err error) {
 		writeAuthError(w, http.StatusUnauthorized, reasonSessionInvalid)
 		return
 	}
+	if errors.Is(err, errArtifactRunCap) {
+		artifactRunCapRefusal(w)
+		return
+	}
 	code, message := 500, "Workbook operation failed"
 	switch {
 	case errors.Is(err, context.Canceled), errors.Is(err, context.DeadlineExceeded):
@@ -122,6 +126,8 @@ func gridcraftError(w http.ResponseWriter, err error) {
 		code, message = 429, "quota_exceeded"
 	case errors.Is(err, errWorkbookProposalRequired):
 		code, message = 409, "proposal_required: shared workbook changes require proposals; proposal delivery is not available yet"
+	case errors.Is(err, errMooringProposalRequired):
+		code, message = 409, "proposal_required: an agent change to a Mooring document needs a mandate; proposal delivery is not available yet"
 	case errors.Is(err, appengine.ErrDisabled), errors.Is(err, appengine.ErrEngineUnavailable):
 		code, message = 503, "Workbook unavailable"
 	}
@@ -758,6 +764,14 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 	k := appengine.Key{WorkspaceID: a.WorkspaceID, PageID: body.ArtifactID}
 	authority := func(ctx context.Context, tx *sql.Tx) (appengine.Principal, error) {
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
+		// Flag on (#5317 5.3): without a mandate the run may only read what
+		// its scope reaches; a change needs a mandate (refused below).
+		if body.MandateID == "" && h.pages.artifactRunModesOn(ctx, a.WorkspaceID) {
+			if body.Action != "read" {
+				return appengine.Principal{}, appengine.ErrForbidden
+			}
+			return h.pages.workbookScopedRunPrincipal(ctx, tx, a, k)
+		}
 		if strings.HasPrefix(body.MandateID, appengine.HumanMandatePrefix) || h.pages.checkArtifactRunPrincipal(ctx, a) != nil || !h.pages.artifactAgentPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
 			return appengine.Principal{}, appengine.ErrForbidden
 		}
@@ -816,6 +830,15 @@ func (h *gridcraftHTTP) agent(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Action != "commits" && (body.Since != nil || body.Limit != 0) {
 		gridcraftError(w, appengine.ErrInvalid)
+		return
+	}
+	if body.MandateID == "" && body.Action == "apply" && h.pages.artifactRunModesOn(r.Context(), a.WorkspaceID) {
+		// A change the run's scope reaches is a proposal, and no proposal
+		// delivery exists; one it does not reach is refused like a missing one.
+		gridcraftError(w, h.pages.scopedRunChange(r.Context(), func(ctx context.Context, tx *sql.Tx) error {
+			_, err := h.pages.workbookScopedRunPrincipal(ctx, tx, a, k)
+			return err
+		}, errWorkbookProposalRequired))
 		return
 	}
 	switch body.Action {

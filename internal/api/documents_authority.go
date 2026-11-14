@@ -238,6 +238,10 @@ func documentAuthorityError(w http.ResponseWriter, err error) {
 		writeJSON(w, 429, map[string]string{"error": "document quota exceeded; confirmed history preserved", "code": "document_quota"})
 		return
 	}
+	if errors.Is(err, errArtifactRunCap) {
+		artifactRunCapRefusal(w)
+		return
+	}
 	status := 500
 	message := "document authority failed"
 	switch {

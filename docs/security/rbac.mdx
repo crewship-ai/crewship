@@ -247,16 +247,23 @@ already-referenced runs the ordinary way, binding nothing.
   version its human is entitled to: the shared version for a Viewer or
   Commenter, the latest for an Editor (edit held only through the ADMIN or
   OWNER role does not count). Agents still never create a Design.
-- Word documents, Sheets (GridCraft) and Mooring documents stay on their own
-  exact-run consent (a drafting or iteration consent, or a mandate): attaching
-  one is not enough. That consent binds every write's targets, base revision
-  and lease, so an agent write under another person's lease ends as a proposal,
-  never a direct edit. Native Word and Sheet Craft tasks are unchanged.
+- Word documents, Sheets (GridCraft) and Mooring documents are read through
+  the run's scope like any other artifact, with the human's own read of that
+  kind rechecked on every use: a Word document as an ordinary member reads
+  it, a Sheet only as its owner or an owner-named editor, a Mooring document
+  only as its owner. Agent grants and folders never reach a Sheet or Mooring
+  document. Changing one still needs its own exact-run consent (a drafting or
+  iteration consent, or a mandate), which binds every write's targets, base
+  revision and lease, so an agent write under another person's lease ends as
+  a proposal, never a direct edit. Without it a Sheet or Mooring change
+  answers `proposal_required` and a Word document change is refused; no lease
+  is taken. Native Word and Sheet Craft tasks are unchanged.
 - Every access through this path is audited as `artifact.agent_run_accessed`,
   naming the human the agent acted for, the agent, run, reach and operation,
   in the same transaction; no audit record, no access. This covers artifact
-  projects, Designs, Word documents, Sheets and Mooring documents (the last
-  three with reach `consented`, a created Word document with `created`).
+  projects, Designs, Word documents, Sheets and Mooring documents (under a
+  consent or mandate with reach `consented`, a created Word document with
+  `created`, a read through the scope with its reach).
   Reads and writes are recorded once per run and artifact, creates every
   time. Native Craft tasks are not covered. Read them with
   `crewship audit --action artifact.agent_run_accessed -f json`.

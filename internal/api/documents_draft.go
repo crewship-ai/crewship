@@ -72,12 +72,45 @@ func (h *PageHandler) readDocumentDraftScope(r *http.Request, a *artifactRunAuth
 	return scope, tx.Commit()
 }
 
+// documentDraftReadRequest is documentDraftRequest for the draft view. With
+// the flag on (#5317 5.3) the view may also name one page_id, which the run
+// then reads through its scope instead of its consent.
+func (h *PageHandler) documentDraftReadRequest(w http.ResponseWriter, r *http.Request) (*http.Request, *artifactRunAuthority, string, bool) {
+	artifactCommentHeaders(w)
+	checked, ok := h.artifactAgentRequest(w, r)
+	if !ok {
+		return r, nil, "", false
+	}
+	a, _ := documentDraftRun(checked.Context())
+	query, err := url.ParseQuery(checked.URL.RawQuery)
+	page := ""
+	if values := query["page_id"]; err == nil && len(values) == 1 && values[0] != "" && h.artifactRunModesOn(checked.Context(), a.WorkspaceID) {
+		page = values[0]
+		query.Del("page_id")
+	}
+	for name, values := range query {
+		if err != nil || name != "workspace_id" || len(values) != 1 || values[0] != a.WorkspaceID {
+			replyError(w, 400, "only the authenticated workspace query is supported")
+			return checked, nil, "", false
+		}
+	}
+	if err != nil {
+		replyError(w, 400, "only the authenticated workspace query is supported")
+		return checked, nil, "", false
+	}
+	return checked, a, page, true
+}
+
 func (h *PageHandler) GetDocumentDraftAgent(w http.ResponseWriter, r *http.Request) {
-	r, a, ok := h.documentDraftRequest(w, r)
+	r, a, page, ok := h.documentDraftReadRequest(w, r)
 	if !ok {
 		return
 	}
-	scope, err := h.readDocumentDraftScope(r, a)
+	readScope := func() (documentDraftScope, error) { return h.readDocumentDraftScope(r, a) }
+	if page != "" {
+		readScope = func() (documentDraftScope, error) { return h.readDocumentRunScope(r, a, page) }
+	}
+	scope, err := readScope()
 	if err != nil {
 		documentAuthorityError(w, err)
 		return
@@ -115,6 +148,9 @@ func (h *PageHandler) GetDocumentDraftAgent(w http.ResponseWriter, r *http.Reque
 	if scope.Propose {
 		view.Mode = "propose"
 	}
+	if scope.Read {
+		view.Mode = "read"
+	}
 	for _, target := range remote.Outline {
 		// The run reads only blocks inside its mandate (PRD §0.3/3).
 		if target.Type != "paragraph" && target.Type != "heading" || !scope.admits(target.ID) {
@@ -135,7 +171,7 @@ func (h *PageHandler) GetDocumentDraftAgent(w http.ResponseWriter, r *http.Reque
 		replyError(w, 413, "document draft view exceeds 64 KiB; content unchanged")
 		return
 	}
-	current, err := h.readDocumentDraftScope(r, a)
+	current, err := readScope()
 	if err != nil {
 		documentAuthorityError(w, err)
 		return

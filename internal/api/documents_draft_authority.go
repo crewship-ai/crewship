@@ -33,6 +33,9 @@ type documentDraftScope struct {
 	Propose bool
 	// Blocks, comma-separated, are the only blocks a proposal may target; "" is the whole document.
 	Blocks string
+	// Read is a flag-on run's read through its scope (#5317 5.3): no
+	// consent, never a lease, commit, checkpoint or proposal.
+	Read bool
 }
 
 // admits reports whether a block is inside this mandate.
@@ -132,7 +135,19 @@ func (h *PageHandler) authorizeDocumentDraft(ctx context.Context, a *artifactRun
 		return "", errDocumentAccess
 	}
 	if _, err := h.documentDraftScope(ctx, a, k.PageID); err != nil {
-		return "", err
+		// Flag on (#5317 5.3): without a consent for this Document, the run
+		// may still read it through its scope (recorded there); it never
+		// leases, commits, checkpoints or proposes that way.
+		if operation != "state" || !errors.Is(err, errDocumentAccess) {
+			return "", err
+		}
+		if _, scoped := h.documentScopedRunRead(ctx, a, k.PageID); scoped != nil {
+			if errors.Is(scoped, errArtifactRunCap) {
+				return "", scoped
+			}
+			return "", err
+		}
+		return "agent:" + a.AgentID + ":" + a.RunID, nil
 	}
 	// Flag on (#5317 5.3): the drafting or iteration consent stays the only
 	// reach (it binds the generation, revision and lease of every write); the

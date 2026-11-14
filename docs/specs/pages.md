@@ -616,14 +616,34 @@ owner on 2026-11-13.
    creates a Design. Its run reads the version the human is entitled to: an
    Editor's run (edit as an ordinary member, never through the ADMIN or OWNER
    role) reads the latest version, a Viewer's or Commenter's the shared one.
-   Word documents, Sheets (GridCraft) and Mooring documents keep their own
-   exact-run consent with the flag on: a drafting or iteration consent for a
-   Word document, a mandate for a Sheet or Mooring document. Attaching one does
-   not put it in reach. That consent binds every write's targets, base
-   revision and lease, so an agent write under another person's lease ends as
-   a proposal and never bypasses the lease. Native Word and Sheet Craft tasks
-   (`crewship craft task`) are a separate, explicitly consented runtime and are
-   unchanged.
+   Word documents, Sheets (GridCraft) and Mooring documents are read through
+   the run's scope like any other artifact (owner decision, #5317 step 5.3),
+   and changed only through their own exact-run consent: a drafting or
+   iteration consent for a Word document, a mandate for a Sheet or Mooring
+   document. That consent binds every write's targets, base revision and
+   lease, so an agent write under another person's lease ends as a proposal
+   and never bypasses the lease.
+   - *Reads.* A Word document is read through any reach (attached, created,
+     consented, standing, folder), its human reading it as an ordinary member:
+     the Docs authority's `state` callback, and the server's draft view with
+     `?page_id=` (mode `read`, every paragraph and heading; the run sidecar
+     and `crewship doc draft view` do not forward a page yet). A Sheet is read
+     (`action: read`, no `mandate_id`) only when its human is the owner or an
+     owner-named editor, and a Mooring document only when its human owns it;
+     both kinds keep their rule that agent grants, crew grants and folders
+     never reach their content, so standing and folder reach do not apply to
+     them, and the audited ADMIN or OWNER read never passes to the agent.
+     Docs and Sheets have no shared version: every reader the human's own
+     read admits reads the head (a Sheet editor from the publication floor).
+   - *Changes.* Without a consent or mandate the scope never changes content
+     and never takes a lease. A Sheet or Mooring change (`apply`, `command`)
+     the run reaches answers 409 `proposal_required` (no proposal delivery
+     exists for them yet); one it does not reach is refused like a missing
+     artifact. A Word document's lease, commit, checkpoint and proposal are
+     refused like a missing one; an agent proposal on a Word document needs an
+     iteration propose mandate.
+   Native Word and Sheet Craft tasks (`crewship craft task`) are a separate,
+   explicitly consented runtime and are unchanged.
 7. **Limits, read from the workspace policy on every use.** One chat run
    creates at most `chat_run_create_limit` artifacts (default 3, 1–20) and
    reads at most `run_read_limit` distinct artifacts through standing access
@@ -669,6 +689,11 @@ owner on 2026-11-13.
    access through a kind's own exact-run consent: a Word document's read,
    commit, checkpoint and proposal, its create (reach `created`), and a Sheet
    or Mooring document's read and write under a mandate (reach `consented`).
+   A read of a Word document, Sheet or Mooring document through the run's
+   scope is recorded with its reach (`referenced`, `standing`, `folder`, ...);
+   the draft view's access checks before and after the Node read record
+   nothing, the `state` callback that serves the content does. A refused
+   change records nothing.
    Leases carry no content and are not recorded. A Sheet write is recorded by
    the transaction that commits it; the read-only rebase prescan and the
    reservation before the engine runs only admit it and record nothing. A
