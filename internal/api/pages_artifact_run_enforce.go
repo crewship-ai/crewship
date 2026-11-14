@@ -151,6 +151,8 @@ WHERE p.id=? AND p.workspace_id=? AND p.private_audience=0 AND f.agent_access IN
 		if n != 1 || a.CrewID == "" {
 			return runReachNone, false, nil
 		}
+		// Defence in depth: the run principal check already requires the agent to
+		// still belong to this crew; this re-reads it next to the folder grant.
 		var crew string
 		if err = q.QueryRowContext(ctx, `SELECT coalesce(crew_id,'') FROM agents WHERE id=? AND workspace_id=?`, a.AgentID, a.WorkspaceID).Scan(&crew); err != nil || crew != a.CrewID {
 			return runReachNone, false, err
