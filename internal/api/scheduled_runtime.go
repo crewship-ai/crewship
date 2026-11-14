@@ -50,7 +50,7 @@ func (rt *ScheduledRuntime) Run(ctx context.Context, a dispatch.Assignment, star
 	// Preserve the legacy scheduler's hard cap even if an agent has no
 	// per-run timeout configured. The dispatcher separately owns stop and
 	// reconciliation when this deadline fires.
-	runCtx, cancel := context.WithTimeout(ctx, 45*time.Minute)
+	runCtx, cancel := context.WithTimeout(ctx, scheduledAgentRunTimeout)
 	defer cancel()
 	launch := &webhookLaunch{cancel: cancel, workID: a.Item.ID, runID: a.RunID,
 		generation: a.Generation, store: work.NewStore(h.db)}
@@ -139,7 +139,7 @@ func (rt *ScheduledRuntime) Run(ctx context.Context, a dispatch.Assignment, star
 	capability, endArtifactRun := recordUnattendedArtifactRun(runCtx, h.db, h.logger, artifactrun.Run{
 		WorkspaceID: a.Item.WorkspaceID, CrewID: info.CrewID, AgentID: in.AgentID, RunID: a.RunID,
 		Trigger: artifactrun.TriggerScheduled, Source: "schedule",
-	}, 50*time.Minute)
+	}, artifactrun.TTLFor(scheduledAgentRunTimeout))
 	defer endArtifactRun()
 	req.ArtifactRunCapability = capability
 	location := orchestrator.RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID}

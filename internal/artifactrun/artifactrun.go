@@ -50,6 +50,21 @@ const FlagKey = "artifact_agent_access_modes"
 // MaxTTL bounds a recorded run even when its end is never reported.
 const MaxTTL = 2 * time.Hour
 
+// ttlSlack covers the time between recording a run and its agent starting,
+// and the run's own teardown, on top of the run's timeout.
+const ttlSlack = 5 * time.Minute
+
+// TTLFor is the capability lifetime for a run whose timeout is timeout: the
+// timeout plus a small slack, capped at MaxTTL. A run with no timeout (0) or
+// one longer than the cap gets MaxTTL; past it the run loses artifact access
+// even if it is still running (fail closed).
+func TTLFor(timeout time.Duration) time.Duration {
+	if timeout <= 0 || timeout+ttlSlack > MaxTTL {
+		return MaxTTL
+	}
+	return timeout + ttlSlack
+}
+
 // Triggers a run without a human may be recorded for.
 const (
 	TriggerRoutine   = "ROUTINE"

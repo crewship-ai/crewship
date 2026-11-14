@@ -239,11 +239,15 @@ already-referenced runs the ordinary way, binding nothing.
   non-private pages (`crewship page folder agent-access`, admin or the crew's
   MANAGER+). Never edit, never another crew's agents, never Personal pages;
   in a chat run the human's access is still required.
-- A run without a human (routine, webhook, scheduled) reaches artifacts only
+- A run without a human (a routine a person started, an agent's webhook or
+  cron run) reaches artifacts only
   when crewshipd recorded the run (agent, crew, trigger, source) before its
-  agent started and minted a random capability for that one run. The
+  agent started and minted a random capability for that one run. A routine
+  started by a schedule, a webhook, `call_pipeline` or another agent records
+  nothing and reaches no artifact. The
   capability goes to the crew's sidecar, never the agent's environment, and
-  ends with the run (its end, its terminal journal entry, or a 2-hour bound).
+  ends with the run (its end, its terminal journal entry, or its own timeout
+  plus 5 minutes, at most 2 hours).
   A run token alone is not enough, because the crew container holds the key
   that derives run tokens for any agent and run of the crew. Such a run reads
   only artifacts its agent holds its own live grant on, or non-private pages
@@ -252,7 +256,11 @@ already-referenced runs the ordinary way, binding nothing.
   per run (429 `artifact_run_limit`). It writes only through a live `write`
   grant the artifact's owner gave the agent on that artifact, never through a
   folder, and it does not create, share, restore, comment or touch dashboard
-  data.
+  data. Not solved: agents of one crew container share UID 1001, so a
+  sibling that steals another agent's run token (for example from
+  `/proc/<pid>/environ`) also gets that run's capability through the
+  sidecar. The capability adds nothing beyond the token; this is the same
+  exposure chat runs have.
 - Per-run limits (3 created, 50 distinct standing reads) and a per-crew hourly
   page limit (20) come from `crewship workspace artifact-policy`.
 - Every artifact project access through this path is audited as `artifact.agent_run_accessed`,

@@ -9,7 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/crewship-ai/crewship/internal/artifactrun"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/journal"
@@ -525,28 +524,11 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	if err := r.resolver.CreateRun(ctx, childRunID, agentID, chatID, req.WorkspaceID, "ROUTINE", map[string]interface{}{"pipeline_id": req.PipelineID, "pipeline_run_id": req.PipelineRunID, "step_id": req.StepID}); err != nil {
 		return AgentStepResult{}, fmt.Errorf("admit routine child: %w", err)
 	}
-	// #5339: record this run without a human before its agent starts, so (flag
-	// on) it may reach its agent's standing artifacts. A failure leaves it
-	// without artifact access; the step itself proceeds as before.
-	if r.db != nil && info.CrewID != "" {
-		source := "routine:" + req.PipelineID + "/" + req.StepID
-		if len(source) > 500 {
-			source = source[:500]
-		}
-		capability, err := artifactrun.Record(ctx, r.db, artifactrun.Run{WorkspaceID: req.WorkspaceID, CrewID: info.CrewID, AgentID: agentID, RunID: childRunID, Trigger: artifactrun.TriggerRoutine, Source: source}, time.Hour)
-		if err != nil {
-			r.logger.Warn("unattended artifact run not recorded; the step reaches no artifact", "run_id", childRunID, "error", err)
-		} else if capability != "" {
-			runReq.ArtifactRunCapability = capability
-			defer func() {
-				endCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
-				defer cancel()
-				if err := artifactrun.End(endCtx, r.db, childRunID); err != nil {
-					r.logger.Warn("unattended artifact run end not recorded", "run_id", childRunID, "error", err)
-				}
-			}()
-		}
-	}
+	// #5339: record this run without a human before its agent starts (see
+	// recordRoutineArtifactRun for which routine runs qualify).
+	capability, endArtifactRun := recordRoutineArtifactRun(ctx, r.db, r.logger, req, info.CrewID, agentID, childRunID, time.Duration(runReq.TimeoutSecs)*time.Second)
+	defer endArtifactRun()
+	runReq.ArtifactRunCapability = capability
 	runErr := r.orch.RunAgent(ctx, runReq, finalHandler)
 	if terminalErr := r.recordChildTerminal(ctx, childRunID, runErr); terminalErr != nil && runErr == nil {
 		runErr = fmt.Errorf("record routine child terminal: %w", terminalErr)

@@ -2245,6 +2245,10 @@ func (e *Executor) runAgentStep(
 			InvokingCrewID:   in.InvokingCrewID,
 			InvokingAgentID:  in.InvokingAgentID,
 			InputGuardAction: resolveInputGuardAction(in.dsl),
+			// #5339: provenance for the artifact run capability decision.
+			InvokingUserID:      in.InvokingUserID,
+			InvocationAuthority: in.InvocationAuthority,
+			TriggeredVia:        in.TriggeredVia,
 		}
 		res, err := e.runRunnerWithTransientRetry(ctx, req, step, emit)
 		totalCost += res.CostUSD

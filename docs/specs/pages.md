@@ -647,8 +647,14 @@ owner on 2026-11-13.
 10. **A run without a human reaches only its agent's standing access, from a
    host-recorded run (#5339).** A run token alone proves nothing here: the
    crew container holds the key that derives run tokens for any agent and run
-   of its crew. So the host producer of a routine, webhook or scheduled run
-   records the run in `artifact_unattended_runs` (agent, crew, trigger,
+   of its crew. Only a person's own start counts as a routine here: a routine
+   a person ran (or batch-ran) records each agent step; a routine started by
+   a schedule, a webhook, `call_pipeline`, another agent, an automation, a
+   page action or a wake check records nothing and its steps reach no
+   artifact (schedules have no creator, so an agent-created schedule cannot be
+   told apart and none qualifies). An agent's own webhook and cron runs,
+   configured on the agent by a person, record as before. So the host
+   producer of such a run records the run in `artifact_unattended_runs` (agent, crew, trigger,
    source) after its run record and before its agent starts, and the server
    mints a random capability for that one run, storing only its SHA-256. No
    HTTP endpoint and no internal token can record a run. The capability is
@@ -656,7 +662,8 @@ owner on 2026-11-13.
    by the run's own token) and attached by it to that run's artifact tool
    calls only; it never enters the agent's environment. The tool admits such
    a run only when the capability matches the record for the token's exact
-   run, agent and crew, the record is open and unexpired (at most 2 hours),
+   run, agent and crew, the record is open and unexpired (the run's own
+   timeout plus 5 minutes, at most 2 hours),
    the run is live in the journal (started, no terminal entry), its work
    attempt (if any) is current, and the workspace policy allows the crew. The
    run's end, its terminal journal entry or the expiry ends the capability.
@@ -673,6 +680,13 @@ owner on 2026-11-13.
    version, or the latest when it holds that write grant, and no comment text.
    Anything else is refused exactly like a missing artifact. Flag off, nothing
    is recorded and such a run reaches nothing, as before.
+   Not solved: all agents of one crew container run as UID 1001. A sibling
+   agent that reads another agent's run token (for example from
+   `/proc/<pid>/environ`) can call the sidecar with it, and the sidecar then
+   attaches that run's capability. The capability adds nothing beyond what
+   the stolen token already reaches; it is the same exposure chat runs have
+   today. It stops only a token minted from the crew key for a run the host
+   never recorded.
 
 11. **Every artifact project access is audited with its human.** Each access
    a flag-on chat run makes to an artifact project (view, comments, dashboard

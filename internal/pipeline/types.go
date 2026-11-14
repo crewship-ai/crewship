@@ -1149,6 +1149,14 @@ type AgentStepRequest struct {
 	InvokingCrewID  string
 	InvokingAgentID string
 
+	// Who started the run, copied from RunInput by the executor only. They
+	// decide whether a step may get an artifact run capability (#5339): only
+	// a run a person started directly, never an agent, a call_pipeline
+	// expansion, a schedule, a webhook or an automation. Host-only.
+	InvokingUserID      string       `json:"-"`
+	InvocationAuthority string       `json:"-"`
+	TriggeredVia        TriggeredVia `json:"-"`
+
 	// InputGuardAction is the lookout.GuardAction value derived from the
 	// routine's DSL.Guardrails.Input.PromptInjection.Action. Plain string
 	// here so this package doesn't import lookout (would create a cycle

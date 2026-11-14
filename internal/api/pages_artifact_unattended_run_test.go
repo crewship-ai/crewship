@@ -3,6 +3,7 @@ package api
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -424,5 +425,87 @@ func TestUnattendedRun_ProducerHelperRecordsAndEnds(t *testing.T) {
 	mustExec(t, g.f.rig.db, `DELETE FROM feature_flag_overrides WHERE id='ref-flag-on'`)
 	if c, _ := recordUnattendedArtifactRun(t.Context(), g.f.rig.db, newTestLogger(), artifactrun.Run{WorkspaceID: g.f.a.WorkspaceID, CrewID: g.f.a.CrewID, AgentID: g.f.a.AgentID, RunID: "ua-run-off", Trigger: artifactrun.TriggerWebhook}, time.Hour); c != "" {
 		t.Fatal("flag off recorded")
+	}
+}
+
+// Each layer binds the agent on its own (review M2): the record lookup refuses
+// another agent of the crew even with the right capability, and the run gate
+// refuses another agent even when that agent also has a live journal entry
+// for the run id.
+func TestUnattendedRun_EachLayerBindsTheAgent(t *testing.T) {
+	g := newRunScopeRig(t)
+	other := seedAgentRow(t, g.f.rig.db, "ua-agent-m2", g.f.a.WorkspaceID, g.f.a.CrewID, "Agent M2", "ua-agent-m2", "AGENT")
+	u := g.unattended(t, "ua-run-m2", g.f.a.AgentID, "WEBHOOK")
+	mustExec(t, g.f.rig.db, `INSERT INTO journal_entries(id,workspace_id,agent_id,entry_type,actor_type,summary,trace_id) VALUES('ua-m2-started',?,?,'run.started','orchestrator','started',?)`, g.f.a.WorkspaceID, other, u.runID)
+	h := g.router.pages
+	ctx := t.Context()
+	if a := h.lookupUnattendedRun(ctx, g.f.a.WorkspaceID, g.f.a.CrewID, g.f.a.AgentID, u.runID, u.capability); a == nil {
+		t.Fatal("baseline lookup refused")
+	}
+	if a := h.lookupUnattendedRun(ctx, g.f.a.WorkspaceID, g.f.a.CrewID, other, u.runID, u.capability); a != nil {
+		t.Fatal("lookup admitted another agent with the run's capability")
+	}
+	if err := h.checkUnattendedArtifactRun(ctx, &artifactRunAuthority{WorkspaceID: g.f.a.WorkspaceID, CrewID: g.f.a.CrewID, AgentID: g.f.a.AgentID, RunID: u.runID, Unattended: true}); err != nil {
+		t.Fatal("baseline gate refused", err)
+	}
+	if err := h.checkUnattendedArtifactRun(ctx, &artifactRunAuthority{WorkspaceID: g.f.a.WorkspaceID, CrewID: g.f.a.CrewID, AgentID: other, RunID: u.runID, Unattended: true}); err == nil {
+		t.Fatal("gate admitted another agent on the recorded run")
+	}
+}
+
+// A page that is private while a live agent grant on it still exists (the
+// grant written straight to the table, past any retire path) is refused like
+// a missing artifact, for reads and writes (review M5).
+func TestUnattendedRun_PrivateWithALiveGrantIsRefusedLikeMissing(t *testing.T) {
+	g := newRunScopeRig(t)
+	id := g.create(t, g.f.a.HumanUserID, "MEMBER", "ua-private-live")
+	mustExec(t, g.f.rig.db, `UPDATE artifact_version_heads SET shared_version=latest_version WHERE page_id=?`, id)
+	mustExec(t, g.f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,?,?,?,?)`, id, "agent", g.f.a.AgentID, "write", g.f.a.HumanUserID)
+	var private, live int
+	if err := g.f.rig.db.QueryRow(`SELECT p.private_audience,(SELECT count(*) FROM page_grants WHERE page_id=p.id AND subject_type='agent' AND retired_at IS NULL) FROM pages p WHERE p.id=?`, id).Scan(&private, &live); err != nil || private != 1 || live != 1 {
+		t.Fatalf("fixture: private=%d live grants=%d %v", private, live, err)
+	}
+	u := g.unattended(t, "ua-run-private-live", g.f.a.AgentID, "WEBHOOK")
+	missing := u.tool(g, "artifact_versions", "ua-nowhere", `{}`)
+	sameRefusal(t, "private read with a live grant", u.tool(g, "artifact_versions", "ua-private-live", `{}`), missing)
+	if w := u.tool(g, "artifact_publish", "ua-private-live", artifactProjectBody(1, "Second")); w.Code == 200 {
+		t.Fatal("private write with a live grant")
+	}
+	if rows := unattendedAuditRows(t, g); len(rows) != 0 {
+		t.Fatalf("refused private access audited: %+v", rows)
+	}
+	// The page loader already hides private pages from a caller with no user;
+	// the decision layer must refuse them on its own too.
+	h := g.router.pages
+	a := h.lookupUnattendedRun(t.Context(), g.f.a.WorkspaceID, g.f.a.CrewID, g.f.a.AgentID, u.runID, u.capability)
+	if a == nil {
+		t.Fatal("run lookup refused")
+	}
+	decide := func(private, write bool) error {
+		tx, err := g.f.rig.db.BeginTx(t.Context(), nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		rec := &pageRecord{ID: id, Slug: "ua-private-live", OwnerUserID: g.f.a.HumanUserID, PrivateAudience: private}
+		_, err = h.authorizeUnattendedArtifactRun(t.Context(), tx, a, g.f.a.WorkspaceID, rec, write, false)
+		return err
+	}
+	if err := decide(false, false); err != nil {
+		t.Fatal("baseline: the live grant should reach the page when it is not private:", err)
+	}
+	for _, write := range []bool{false, true} {
+		if err := decide(true, write); !errors.Is(err, errArtifactRefNotFound) {
+			t.Fatalf("private page with a live grant (write=%v): %v, want refused like missing", write, err)
+		}
+	}
+}
+
+// The api producers' capability lives as long as their hard run deadline.
+func TestUnattendedRun_ProducerTTLCoversTheRunDeadline(t *testing.T) {
+	for name, deadline := range map[string]time.Duration{"webhook": webhookAgentRunTimeout, "scheduled": scheduledAgentRunTimeout} {
+		if ttl := artifactrun.TTLFor(deadline); ttl < deadline || ttl > artifactrun.MaxTTL {
+			t.Fatalf("%s: ttl %s for a %s run", name, ttl, deadline)
+		}
 	}
 }

@@ -52,13 +52,20 @@ func (h *PageHandler) unattendedArtifactRequest(r *http.Request, ws, crew, agent
 	if capability == "" || !h.artifactRunModesOn(ctx, ws) {
 		return nil
 	}
+	a := h.lookupUnattendedRun(ctx, ws, crew, agent, run, capability)
+	if a == nil || h.checkUnattendedArtifactRun(ctx, a) != nil {
+		return nil
+	}
+	return a
+}
+
+// lookupUnattendedRun finds the host record for exactly this workspace, crew,
+// agent and run whose stored digest matches capability, or nil.
+func (h *PageHandler) lookupUnattendedRun(ctx context.Context, ws, crew, agent, run, capability string) *artifactRunAuthority {
 	a := &artifactRunAuthority{WorkspaceID: ws, CrewID: crew, AgentID: agent, RunID: run, Unattended: true}
 	var digest string
 	err := h.db.QueryRowContext(ctx, `SELECT capability_sha256,trigger_type,source_ref FROM artifact_unattended_runs WHERE run_id=? AND workspace_id=? AND crew_id=? AND agent_id=?`, run, ws, crew, agent).Scan(&digest, &a.Trigger, &a.Source)
 	if err != nil || !artifactrun.Matches(capability, digest) {
-		return nil
-	}
-	if h.checkUnattendedArtifactRun(ctx, a) != nil {
 		return nil
 	}
 	return a
@@ -253,3 +260,11 @@ func recordUnattendedArtifactRun(ctx context.Context, db *sql.DB, logger interfa
 		}
 	}
 }
+
+// The hard run deadlines of the two api-side producers. The artifact
+// capability of such a run lives exactly as long (artifactrun.TTLFor), so it
+// never ends while the run may still be working.
+const (
+	webhookAgentRunTimeout   = 10 * time.Minute
+	scheduledAgentRunTimeout = 45 * time.Minute
+)

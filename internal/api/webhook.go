@@ -993,7 +993,7 @@ func (h *WebhookHandler) runWebhookAgent(
 	// threaded in from the webhook handler.
 	// ctx already carries WithoutCancel from dispatchAccepted.
 	{
-		runCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		runCtx, cancel := context.WithTimeout(ctx, webhookAgentRunTimeout)
 		defer cancel()
 		// Put the run on the context so every journal entry the orchestrator
 		// emits beneath it inherits trace_id = runID. Its JournalEntry has no
@@ -1047,7 +1047,7 @@ func (h *WebhookHandler) runWebhookAgent(
 		capability, endArtifactRun := recordUnattendedArtifactRun(runCtx, h.db, h.logger, artifactrun.Run{
 			WorkspaceID: info.WorkspaceID, CrewID: info.CrewID, AgentID: agentID, RunID: runID,
 			Trigger: artifactrun.TriggerWebhook, Source: "agent_webhook",
-		}, 15*time.Minute)
+		}, artifactrun.TTLFor(webhookAgentRunTimeout))
 		defer endArtifactRun()
 		req.ArtifactRunCapability = capability
 
