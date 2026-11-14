@@ -649,7 +649,9 @@ The three limits and the run token requirement apply only with the
 `artifact_agent_access_modes` flag on. A sidecar page save that carries the
 agent run token counts against its run's `--chat-run-create-limit`; one
 without it (a sidecar older than this release) is accepted under the crew
-hourly limit only until `--save-requires-run-token=true`. The token is
+hourly limit only until `--save-requires-run-token=true`; so is a save from an
+agent that holds only a per-agent v1 token. The host's own routine
+`page.create` is not affected. The token is
 accounting, not a boundary between agents of one crew.
 
 A stale version refuses the change. Read the policy again before deciding on a

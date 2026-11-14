@@ -112,6 +112,9 @@ func TestPageSaveRunToken_WithoutTokenCountedUnderTheCrewLimit(t *testing.T) {
 	if w.Code != http.StatusTooManyRequests || !bytes.Contains(w.Body.Bytes(), []byte(`"crew_hourly_page_limit"`)) {
 		t.Fatalf("crew hourly limit must still apply: %d %s", w.Code, w.Body)
 	}
+	if got := PageSaveWithoutRunTokenTotal() - before; got != 5 {
+		t.Fatalf("a refused tokenless save was counted: %d, want 5", got)
+	}
 }
 
 // Issue test 4: once the workspace policy requires the token, a save without
@@ -281,8 +284,22 @@ func TestPageSaveRunToken_HostRoutineSaveIsExemptFromTheRequirement(t *testing.T
 	req.Header.Set("X-Crewship-Chat-Origin", g.f.a.ChatID)
 	w := httptest.NewRecorder()
 	g.router.ServeHTTP(w, req)
-	if w.Code != http.StatusForbidden || !bytes.Contains(w.Body.Bytes(), []byte(`"run_token_required"`)) {
+	// Refused: the host-origin guards turn the forged headers away before the
+	// save runs, and the exemption never looks at them.
+	if w.Code != http.StatusForbidden {
 		t.Fatalf("crew token forging the routine headers: %d %s", w.Code, w.Body)
+	}
+	if n := g.pageCount(t); n != 1 {
+		t.Fatalf("forged routine save created a page: %d crew pages, want only the host one", n)
+	}
+	// Without the forged headers the host guards do not apply, and the
+	// requirement refuses the crew token's tokenless save.
+	req.Header.Del("X-Crewship-Pipeline-Run")
+	req.Header.Del("X-Crewship-Chat-Origin")
+	w = httptest.NewRecorder()
+	g.router.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden || !bytes.Contains(w.Body.Bytes(), []byte(`"run_token_required"`)) {
+		t.Fatalf("crew token save without a run token: %d %s", w.Code, w.Body)
 	}
 }
 

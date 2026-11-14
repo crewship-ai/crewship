@@ -2745,7 +2745,9 @@ An optional boolean `save_requires_run_token` (omitted keeps its value) makes
 an agent page save without the agent run token fail with `403` and
 `code: "run_token_required"`; while it is `false`, such a save is accepted
 under the crew hourly limit only and counted in
-`crewshipd_page_save_without_run_token_total`. A save with the token counts
+`crewshipd_page_save_without_run_token_total` (an agent holding only a
+per-agent v1 token counts as tokenless; the host's own routine `page.create`
+is exempt). A save with the token counts
 against its run's `chat_run_create_limit`.
 The limits and the requirement apply only with the
 `artifact_agent_access_modes` flag on (`docs/specs/pages.md` §7.1c).

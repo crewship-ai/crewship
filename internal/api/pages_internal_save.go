@@ -150,7 +150,7 @@ func (h *PageHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	// #5336: with agent access modes on, the agent run token binds the save
 	// to its run. This is accounting, not a boundary between agents of one
 	// crew: they share the container, so a token can be omitted or borrowed.
-	run, ok := h.internalSaveRun(w, r, req.WorkspaceID, actorCrewID, req.AgentID)
+	run, tokenless, ok := h.internalSaveRun(w, r, req.WorkspaceID, actorCrewID, req.AgentID)
 	if !ok {
 		return
 	}
@@ -315,6 +315,12 @@ func (h *PageHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "reload agent-created panels", err)
 		return
 	}
+	if tokenless {
+		// Counted only once the save went through, so the counter tracks the
+		// old sidecars still saving, not refusals.
+		pageSaveWithoutRunToken.Add(1)
+		h.logger.Info("page save without an agent run token", "workspace", req.WorkspaceID, "crew", actorCrewID, "agent", req.AgentID, "page", rec.ID)
+	}
 	h.refreshAutomations(r.Context())
 	h.emitPageSpecChanged(r.Context(), req.WorkspaceID, rec, doc, true, pageArrangementFingerprint(doc))
 	broadcastWorkspaceEvent(h.hub, req.WorkspaceID, "page.updated", map[string]any{"page_id": rec.ID, "slug": rec.Slug})
@@ -434,35 +440,48 @@ var pageSaveWithoutRunToken atomic.Int64
 func PageSaveWithoutRunTokenTotal() int64 { return pageSaveWithoutRunToken.Load() }
 
 // internalSaveRun binds a flag-on sidecar save to the agent run named by the
-// Authorization bearer (#5336). It returns nil with ok for a save that is
-// accounted under the crew hourly limit only: the flag is off, no token was
-// sent and the workspace does not require one, or the run carries no human
-// (a routine run, or a chat run admitted with the flag off). A token that does
-// not verify for this crew and agent is refused, never treated as absent.
-func (h *PageHandler) internalSaveRun(w http.ResponseWriter, r *http.Request, workspace, crew, agent string) (*artifactRunAuthority, bool) {
+// Authorization bearer (#5336). It returns:
+//   - the run, when a token verifies for this crew and acting agent and its
+//     human principal is still live (per-run limit and bookkeeping apply);
+//   - no run and tokenless, for a save without a token while the workspace
+//     does not require one (an old sidecar, or a per-agent v1 token the
+//     sidecar does not forward);
+//   - no run, not tokenless, when the flag is off, when the host itself saves
+//     (a routine page.create through the dispatcher, master token only), or
+//     when the token's run carries no human (a routine run, or a chat run
+//     admitted with the flag off): crew hourly limit only.
+//
+// A token that does not verify, or whose principal is no longer live, is
+// refused; a read error is a 500. Neither falls back to "no token".
+func (h *PageHandler) internalSaveRun(w http.ResponseWriter, r *http.Request, workspace, crew, agent string) (run *artifactRunAuthority, tokenless, ok bool) {
 	ctx := r.Context()
 	if !h.artifactRunModesOn(ctx, workspace) {
-		return nil, true
+		return nil, false, true
 	}
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
 	if header == "" {
-		pageSaveWithoutRunToken.Add(1)
+		// The master internal token never enters a crew container (it is
+		// pinned to loopback), so a container cannot claim this exemption;
+		// the routine headers it could forge play no part in it.
+		if internalTokenIsMaster(ctx) {
+			return nil, false, true
+		}
 		var required bool
 		err := h.db.QueryRowContext(ctx, `SELECT save_requires_run_token FROM workspace_artifact_creation_policy WHERE workspace_id=?`, workspace).Scan(&required)
 		if err != nil && !errors.Is(err, sql.ErrNoRows) {
 			replyInternalError(w, h.logger, "read run token requirement", err)
-			return nil, false
+			return nil, false, false
 		}
-		h.logger.Info("page save without an agent run token", "workspace", workspace, "crew", crew, "agent", agent, "required", required)
 		if required {
+			h.logger.Info("page save without an agent run token refused", "workspace", workspace, "crew", crew, "agent", agent)
 			writeJSON(w, http.StatusForbidden, map[string]any{"error": "this workspace requires the agent run token on page saves; update the crew's sidecar or ask an admin to turn off save_requires_run_token", "code": "run_token_required"})
-			return nil, false
+			return nil, false, false
 		}
-		return nil, true
+		return nil, true, true
 	}
-	invalid := func() (*artifactRunAuthority, bool) {
-		writeJSON(w, http.StatusForbidden, map[string]any{"error": "the agent run token does not belong to this crew and agent", "code": "invalid_run_token"})
-		return nil, false
+	invalid := func() (*artifactRunAuthority, bool, bool) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "the agent run token is not a live run token of this crew and agent", "code": "invalid_run_token"})
+		return nil, false, false
 	}
 	fields := strings.Fields(header)
 	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") || h.artifactMasterToken == "" || crew == "" {
@@ -475,11 +494,16 @@ func (h *PageHandler) internalSaveRun(w http.ResponseWriter, r *http.Request, wo
 	a := &artifactRunAuthority{WorkspaceID: workspace, CrewID: crew, AgentID: tokenAgent, RunID: runID}
 	err := h.db.QueryRowContext(ctx, `SELECT human_user_id FROM artifact_run_principals WHERE run_id=? AND workspace_id=? AND agent_id=? AND crew_id=?`, runID, workspace, tokenAgent, crew).Scan(&a.HumanUserID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, true
+		return nil, false, true
 	}
 	if err != nil {
 		replyInternalError(w, h.logger, "resolve page save run", err)
-		return nil, false
+		return nil, false, false
 	}
-	return a, true
+	// The same live-principal check the artifact tools make: not expired,
+	// human not suspended, membership and chat revision unchanged, run live.
+	if h.checkArtifactRunPrincipal(ctx, a) != nil {
+		return invalid()
+	}
+	return a, false, true
 }

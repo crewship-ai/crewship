@@ -638,12 +638,20 @@ owner on 2026-11-13.
    run token) is refused with 403 `invalid_run_token`, never treated as
    absent. A run without a human principal (routine, or admitted with the flag
    off) has no run to bind to and is counted under the crew hourly limit
-   only. A save without a token (a sidecar that predates this release, still
-   running in an existing container) is accepted under the crew hourly limit
-   only, logged and counted (`crewshipd_page_save_without_run_token_total`),
+   only. A token whose principal is no longer live (the artifact tools' check:
+   expiry, suspended human, membership or chat revision, run ended) is refused
+   with 403 `invalid_run_token`. A save without a token (a sidecar that
+   predates this release, still running in an existing container, or an agent
+   holding only a per-agent v1 token, which the sidecar does not forward) is
+   accepted under the crew hourly limit only, logged and counted
+   (`crewshipd_page_save_without_run_token_total`, after a successful save),
    unless the workspace policy sets `save_requires_run_token` (`crewship
    workspace artifact-policy set --save-requires-run-token=true`); then it is
-   refused with 403 `run_token_required`. The requirement is an explicit
+   refused with 403 `run_token_required`. The host's own routine
+   `page.create` (dispatcher, master internal token, never held by a
+   container) is exempt from the requirement and the counter. An onboarding
+   save for a target crew (`target_crew_slug`) counts against the Guide's own
+   run. The requirement is an explicit
    opt-in, not a date: an admin turns it on once the counter stays at zero.
    **The token is accounting, not a boundary between agents of one crew:**
    they share the container, so a token can be omitted or borrowed; it only
