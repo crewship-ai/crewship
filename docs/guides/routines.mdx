@@ -1419,7 +1419,7 @@ steps:
   foreach item, step, verb and arguments — so it never unlocks another item or
   changed arguments, and no standing trust grant approves it or is offered on
   its card. Arguments too long for the card are marked as truncated, never cut
-  silently. Only a trusted, unsuspended workspace OWNER or ADMIN may decide it, through any door (inbox, CLI, chat card) — the tier
+  silently. Only a trusted, unsuspended workspace OWNER or ADMIN may decide it, through any door (inbox, CLI, chat card). This rule applies only to held `crewship` actions; an ordinary `wait: approval` step is unchanged (a MANAGER may still decide it, and its public callback still works) — the tier
   `crewship approvals approve` needs for the agent path's holds — and the
   role is checked again when the call executes; the token's public callback
   cannot decide it, so the card carries no `callback_url`. A crash after the

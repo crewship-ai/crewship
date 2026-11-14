@@ -507,3 +507,30 @@ func recaptureAudience(t *testing.T, d waitpointCardRig) chataudience.Receipt {
 	}
 	return *a
 }
+
+// The held-action rule does not touch an ordinary wait: approval card: a
+// MANAGER in the chat is still offered the decision and can make it.
+func TestChatDecisionWaitpointOrdinaryWaitManagerStillDecides(t *testing.T) {
+	d := newWaitpointCardRigAt(t, nil, "Ship it?", "review")
+	execOrFatal(t, d.f.h.db, `UPDATE workspace_members SET role='MANAGER' WHERE workspace_id=? AND user_id=?`, d.f.workspace, d.f.user)
+	d.a = recaptureAudience(t, d)
+	card := d.read(t).Decision
+	offered := false
+	for _, a := range card.AllowedActions {
+		if a != "view" {
+			offered = true
+		}
+	}
+	if !offered {
+		t.Fatalf("a MANAGER lost the decision on an ordinary wait card: %v", card.AllowedActions)
+	}
+	answer := chatentities.DecisionAnswer{SourceID: d.id, ExpectedVersion: card.Source.Version, Action: "approve", Values: map[string]json.RawMessage{}}
+	op := &decisionOperation{Audience: d.a, Version: answer.ExpectedVersion, Key: "ordinary-manager", Hash: "ordinary-manager"}
+	if err := d.resolve(t, answer, op); err != nil {
+		t.Fatalf("MANAGER answer on an ordinary wait: %v", err)
+	}
+	var status string
+	if err := d.f.h.db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE token=?`, d.token).Scan(&status); err != nil || status != "approved" {
+		t.Fatalf("status=%q (%v), want approved", status, err)
+	}
+}
