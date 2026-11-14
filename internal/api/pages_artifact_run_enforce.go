@@ -2,7 +2,10 @@ package api
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -99,7 +102,14 @@ const (
 	runReachReferenced = "referenced"
 	runReachCreated    = "created"
 	runReachStanding   = "standing"
+	// The two below behave like referenced and standing; they are kept apart
+	// only so the audit names why the run reached the artifact.
+	runReachConsented = "consented"
+	runReachFolder    = "folder"
 )
+
+// readOnlyReach: standing and folder reach never write.
+func readOnlyReach(reach string) bool { return reach == runReachStanding || reach == runReachFolder }
 
 // artifactRunReach says how the run reaches the page, without writing.
 // standingNew is true when the standing path would count a new distinct read.
@@ -116,7 +126,7 @@ func (h *PageHandler) artifactRunReach(ctx context.Context, a *artifactRunAuthor
 	// comment task) keeps its one page in reach, so turning the flag on never
 	// takes away what the human deliberately granted to this run.
 	if bound, e := h.artifactProjectRunPage(ctx, a); e == nil && bound.Valid && bound.String == rec.ID && h.checkArtifactProjectRunConsent(ctx, a, rec.ID) == nil {
-		return runReachReferenced, false, nil
+		return runReachConsented, false, nil
 	}
 	// Created in this chat by this agent and still owned by the human
 	// (amendment 4): it stays in reach for later messages of the chat.
@@ -131,7 +141,7 @@ WHERE o.page_id=? AND o.workspace_id=? AND o.human_user_id=? AND o.chat_id=? AND
 	if err != nil {
 		return runReachNone, false, err
 	}
-	readable := false
+	readable, standing := false, runReachStanding
 	for _, g := range grants {
 		switch g.Level {
 		case pageGrantRead, pageGrantPropose, pageGrantWrite:
@@ -157,11 +167,12 @@ WHERE p.id=? AND p.workspace_id=? AND p.private_audience=0 AND f.agent_access IN
 		if err = q.QueryRowContext(ctx, `SELECT coalesce(crew_id,'') FROM agents WHERE id=? AND workspace_id=?`, a.AgentID, a.WorkspaceID).Scan(&crew); err != nil || crew != a.CrewID {
 			return runReachNone, false, err
 		}
+		standing = runReachFolder
 	}
 	if err = q.QueryRowContext(ctx, `SELECT count(*) FROM artifact_run_access WHERE run_id=? AND page_id=? AND source='standing'`, a.RunID, rec.ID).Scan(&n); err != nil {
 		return
 	}
-	return runReachStanding, n == 0, nil
+	return standing, n == 0, nil
 }
 
 // errArtifactRunCap refuses past a per-run limit. It is only returned once the
@@ -206,10 +217,10 @@ func (h *PageHandler) authorizeScopedArtifactRun(ctx context.Context, tx *sql.Tx
 			return "", errArtifactProjectAccess
 		}
 	}
-	if write && (reach == runReachStanding || rec.OwnerUserID != a.HumanUserID || rec.OwnerCrewID != "") {
+	if write && (readOnlyReach(reach) || rec.OwnerUserID != a.HumanUserID || rec.OwnerCrewID != "") {
 		return "", errArtifactProjectAccess
 	}
-	if reach == runReachStanding && standingNew {
+	if readOnlyReach(reach) && standingNew {
 		limits, err := loadArtifactRunLimits(ctx, tx, workspace)
 		if err != nil {
 			return "", err
@@ -225,6 +236,13 @@ func (h *PageHandler) authorizeScopedArtifactRun(ctx context.Context, tx *sql.Tx
 			a.RunID, workspace, rec.ID, tsformat.Format(time.Now().UTC())); err != nil {
 			return "", err
 		}
+	}
+	operation := "read"
+	if write {
+		operation = "write"
+	}
+	if err := recordAgentRunArtifactAccess(ctx, tx, a, rec.ID, reach, operation); err != nil {
+		return "", err
 	}
 	return "agent:" + a.AgentID + ":" + a.RunID, nil
 }
@@ -247,9 +265,11 @@ func (h *PageHandler) reserveScopedArtifactRunCreate(ctx context.Context, tx *sq
 	if used >= limits.ChatRunCreate {
 		return errArtifactRunCap
 	}
-	_, err = tx.ExecContext(ctx, `INSERT INTO artifact_run_access(run_id,workspace_id,page_id,source,created_at) VALUES(?,?,?,'created',?)`,
-		a.RunID, workspace, pageID, tsformat.Format(time.Now().UTC()))
-	return err
+	if _, err = tx.ExecContext(ctx, `INSERT INTO artifact_run_access(run_id,workspace_id,page_id,source,created_at) VALUES(?,?,?,'created',?)`,
+		a.RunID, workspace, pageID, tsformat.Format(time.Now().UTC())); err != nil {
+		return err
+	}
+	return recordAgentRunArtifactAccess(ctx, tx, a, pageID, runReachCreated, "create")
 }
 
 // crewHourlyPageCapReached counts the crew's pages created in the last hour
@@ -270,4 +290,56 @@ func (h *PageHandler) crewHourlyPageCapReached(ctx context.Context, tx *sql.Tx, 
 		return false, 0, err
 	}
 	return n >= limits.CrewHourlyPage, limits.CrewHourlyPage, nil
+}
+
+// auditActionAgentRunArtifactAccess records an agent run's access to an
+// artifact on behalf of its human (#5317 PR4).
+const auditActionAgentRunArtifactAccess = "artifact.agent_run_accessed"
+
+// artifactAuditProbeKey marks a write-authority check that only shapes a read
+// response (may the caller edit?); it is not an access and is not audited.
+type artifactAuditProbeKey struct{}
+
+// artifactAuditProbe marks an authorization that checks access without
+// performing it (a pre-check before the write's own transaction, or a
+// capability probe): it records no agent-run audit row.
+func artifactAuditProbe(authorize artifacts.VersionAuthorize) artifacts.VersionAuthorize {
+	return func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return authorize(context.WithValue(ctx, artifactAuditProbeKey{}, true), tx)
+	}
+}
+
+// recordAgentRunArtifactAccess writes the audit of one flag-on run access in
+// the access's own transaction. The human the agent acted for is the row's
+// user; the record is content-free. A read and a write authorization are each
+// recorded once per run and artifact (each committed version already names
+// the run as its actor in the version history); a create every time. The row stays in audit_logs only:
+// the audit listing applies the private-artifact audience filter, the journal
+// has none. Any failure, including a silently dropped insert, refuses the
+// access.
+func recordAgentRunArtifactAccess(ctx context.Context, tx *sql.Tx, a *artifactRunAuthority, pageID, reach, operation string) error {
+	meta, err := json.Marshal(map[string]string{"agent_id": a.AgentID, "crew_id": a.CrewID, "run_id": a.RunID, "chat_id": a.ChatID, "reach": reach, "operation": operation})
+	if err != nil {
+		return err
+	}
+	if probe, _ := ctx.Value(artifactAuditProbeKey{}).(bool); probe {
+		return nil
+	}
+	id := generateCUID()
+	if operation != "create" {
+		sum := sha256.Sum256([]byte(a.RunID + "\x00" + pageID + "\x00" + operation))
+		id = "agent-run-" + operation + "-" + hex.EncodeToString(sum[:16])
+	}
+	if _, err = tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,'page',?,?,?) ON CONFLICT(id) DO NOTHING`,
+		id, a.WorkspaceID, a.HumanUserID, auditActionAgentRunArtifactAccess, pageID, string(meta), tsformat.Format(time.Now().UTC())); err != nil {
+		return err
+	}
+	var n int
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM audit_logs WHERE id=? AND workspace_id=? AND user_id=? AND action=? AND entity_id=?`, id, a.WorkspaceID, a.HumanUserID, auditActionAgentRunArtifactAccess, pageID).Scan(&n); err != nil {
+		return err
+	}
+	if n != 1 {
+		return errors.New("agent run artifact audit unavailable")
+	}
+	return nil
 }
