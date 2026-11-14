@@ -1135,7 +1135,7 @@ func crewBodyDiffers(existing *CrewResponse, body map[string]any) bool {
 	if v, ok := body["runtime_image"].(string); ok && deref(existing.RuntimeImage) != v {
 		return true
 	}
-	if v, ok := body["devcontainer_config"].(string); ok && deref(existing.DevcontainerConfig) != v {
+	if v, ok := body["devcontainer_config"].(string); ok && !sameJSONDocument(deref(existing.DevcontainerConfig), v) {
 		return true
 	}
 	if v, ok := body["mise_config"].(string); ok && deref(existing.MiseConfig) != v {

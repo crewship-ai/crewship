@@ -572,8 +572,8 @@ owner on 2026-11-13.
 
 1. **A reference is a structured chip, never text.** A chat message carries
    `metadata.artifact_refs: [{"page_id": "<id>"}]`, 1–10 entries, filled from
-   the composer's attachment chips. Names, links or ids written in the message
-   body are never references.
+   the composer's attachment chips or `crewship run --artifact`. Names, links
+   or ids written in the message body are never references.
 2. **The server resolves references when the message is sent, as the human
    would be as an ordinary member.** Before the message is stored it checks
    each reference against the sending human with their workspace role read as
@@ -616,19 +616,68 @@ owner on 2026-11-13.
    creates a Design. Its run reads the version the human is entitled to: an
    Editor's run (edit as an ordinary member, never through the ADMIN or OWNER
    role) reads the latest version, a Viewer's or Commenter's the shared one.
-   Word documents, Sheets (GridCraft) and Mooring documents keep their own
-   exact-run consent with the flag on: a drafting or iteration consent for a
-   Word document, a mandate for a Sheet or Mooring document. Attaching one does
-   not put it in reach. That consent binds every write's targets, base
-   revision and lease, so an agent write under another person's lease ends as
-   a proposal and never bypasses the lease. A propose mandate never needs the
-   lease: with the flag on, a run under any propose mandate (every iteration
-   on a schema 4–6 Document, whether it reaches the Document through a page
-   grant, a folder at `propose` or the human's own Document) may not take or
-   renew the writer lease, only release one, so an agent can never hold it
-   against a person who edits or accepts. Native Word and Sheet Craft tasks
-   (`crewship craft task`) are a separate, explicitly consented runtime and are
-   unchanged.
+   Word documents, Sheets (GridCraft) and Mooring documents are read through
+   the run's scope like any other artifact (owner decision, #5317 step 5.3),
+   and changed only through their own exact-run consent: a drafting or
+   iteration consent for a Word document, a mandate for a Sheet or Mooring
+   document. That consent binds every write's targets, base revision and
+   lease, so an agent write under another person's lease ends as a proposal
+   and never bypasses the lease.
+   - *Reads.* A Word document is read through attached, standing or folder
+     reach (these kinds have no created reach; a Word document the run
+     created is reached through its drafting consent), its human reading it as an ordinary member, through
+     the draft view with one `page_id` (`crewship doc draft view --page`, MCP
+     `doc_draft_view`; mode `read`, every paragraph and heading). The Docs
+     authority admits that reach only on the `state` callback Node makes for
+     the view's `read` (Node names the operation behind every state load);
+     export, comments and checkpoints never read through the scope. When a
+     consent of the run names the page (a drafting consent, or an iteration
+     mandate the run ever held, even once it lapses or is revoked), that consent alone serves the view, with
+     its block limit and mode, and the audit names it (`consented`). The run
+     sidecar forwards `page_id` only as the view's single query parameter and
+     refuses every other query; the server alone decides reach, so an
+     unreached page gets a missing page's answer end to end. A Sheet is read
+     (`action: read` without `mandate_id`; MCP `workbook_read`) only when its
+     human is the owner or an owner-named editor, and a Mooring document
+     (`action: read` without `mandate_id`; MCP `mooring_command`) only when
+     its human owns it. Both kinds keep their rule that agent grants, crew
+     grants and folders never reach their content, so standing and folder
+     reach do not apply to them, and the audited ADMIN or OWNER read never
+     passes to the agent. Docs and Sheets have no shared version: every
+     reader the human's own read admits reads the head (a Sheet editor from
+     the publication floor).
+   - *Changes.* Without a consent or mandate the scope never changes content
+     and never takes a lease. A Sheet or Mooring change (`apply`, `command`)
+     the run reaches answers 409 `proposal_required` (no proposal delivery
+     exists for them yet); one it does not reach is refused like a missing
+     artifact. Over MCP, `workbook_apply`, `workbook_status` and
+     `workbook_commits` require `mandate_id` in their schema;
+     `mooring_command` lists it as optional, and the sidecar refuses a
+     `command` without it before anything reaches the server. A Word
+     document's lease, commit, checkpoint and proposal are refused like a
+     missing one; an agent proposal on a Word document needs an iteration
+     propose mandate (proposals through the scope: #5357, #5359).
+   - *Flag off: known differences.* The server refuses every scope read as
+     before, but the run sidecar and its MCP tools do not know the flag, so
+     some refusals now come from the server instead of the sidecar:
+     the sidecar's draft view with `page_id` is forwarded and answered 400
+     "only the authenticated workspace query is supported" (it was 400 "draft
+     view has no caller-selected scope"); MCP `doc_draft_view` with a
+     `page_id` gets the same 400 from the server; MCP `workbook_read` without
+     `mandate_id` is forwarded and answered 404 "Workbook not found" (it was
+     400 "invalid workbook packet" from the sidecar); a `mooring_command`
+     `command` without `mandate_id` is refused by the sidecar with 400 "a
+     command needs the retained mandate_id" (the server answered 400 "invalid
+     Mooring command"); a Mooring read without it still gets the server's 400.
+     The MCP tool schemas list `page_id` and the optional `mandate_id`
+     whatever the flag.
+   A propose mandate never needs the lease: with the flag on, a run under any
+   propose mandate (every iteration on a schema 4–6 Document, whether it
+   reaches the Document through a page grant, a folder at `propose` or the
+   human's own Document) may not take or renew the writer lease, only release
+   one, so an agent can never hold it against a person who edits or accepts.
+   Native Word and Sheet Craft tasks (`crewship craft task`) are a separate,
+   explicitly consented runtime and are unchanged.
 7. **Limits, read from the workspace policy on every use.** One chat run
    creates at most `chat_run_create_limit` artifacts (default 3, 1–20) and
    reads at most `run_read_limit` distinct artifacts through standing access
@@ -643,7 +692,37 @@ owner on 2026-11-13.
    crew for this chat-run scope only while the flag is on (the policy read
    reports `scoped_default: true`); every other agent surface keeps requiring
    a saved, enabled policy, and a saved policy, on or off, stays the ceiling.
-8. **Only a run started by the human's own message carries a human.** A plain
+8. **The sidecar page save carries the agent run token (#5336).** The
+   `save_page` tool sends the same derived run token the artifact tools send,
+   as the `Authorization` bearer on `POST /api/v1/internal/pages/save`. With
+   the flag on and a token that verifies for the crew and the acting agent,
+   the save is bound to its run: it counts against `chat_run_create_limit`
+   (429 `artifact_run_limit` past it) and the page is recorded as created by
+   that run. A token that does not verify (another crew, another agent, not a
+   run token) is refused with 403 `invalid_run_token`, never treated as
+   absent. A run without a human principal (routine, or admitted with the flag
+   off) has no run to bind to and is counted under the crew hourly limit
+   only, and so is a verified token whose principal is no longer live (the
+   artifact tools' check: expiry, suspended or restricted human, membership or
+   chat revision, run ended); neither records a created page nor counts as a
+   save without a token, and a verified token always satisfies the
+   requirement below. A save without a token (a sidecar that
+   predates this release, still running in an existing container, or an agent
+   holding only a per-agent v1 token, which the sidecar does not forward) is
+   accepted under the crew hourly limit only, logged and counted
+   (`crewshipd_page_save_without_run_token_total`, after a successful save),
+   unless the workspace policy sets `save_requires_run_token` (`crewship
+   workspace artifact-policy set --save-requires-run-token=true`); then it is
+   refused with 403 `run_token_required`. The host's own routine
+   `page.create` (dispatcher, master internal token, never held by a
+   container) is exempt from the requirement and the counter. An onboarding
+   save for a target crew (`target_crew_slug`) counts against the Guide's own
+   run. The requirement is an explicit
+   opt-in, not a date: an admin turns it on once the counter stays at zero.
+   **The token is accounting, not a boundary between agents of one crew:**
+   they share the container, so a token can be omitted or borrowed; it only
+   makes the per-run limit apply on this path.
+9. **Only a run started by the human's own message carries a human.** A plain
    chat run records its human principal at admission; routine, webhook, cron,
    agent-to-agent and crew-token runs record none and reach nothing through
    this path.
@@ -688,6 +767,11 @@ owner on 2026-11-13.
    access through a kind's own exact-run consent: a Word document's read,
    commit, checkpoint and proposal, its create (reach `created`), and a Sheet
    or Mooring document's read and write under a mandate (reach `consented`).
+   A read of a Word document, Sheet or Mooring document through the run's
+   scope is recorded with its reach (`referenced`, `standing`, `folder`, ...);
+   the draft view's access checks before and after the Node read record
+   nothing, the `state` callback that serves the content does. A refused
+   change records nothing.
    A Docs proposal or read that reaches the Document through a folder at
    `propose` is recorded with reach `folder`.
    Leases carry no content and are not recorded. A Sheet write is recorded by

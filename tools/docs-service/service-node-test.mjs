@@ -220,6 +220,29 @@ test('read dispatch cannot turn mutation fields into a write or bypass live stat
     assert.equal(model.acquisitions, 0); assert.equal(model.commits, 0); assert.equal(model.receipts.size, 0);
   } finally { await f.close(); }
 });
+// #5317 5.3: Go admits a run's scope-only reach for the draft view's read
+// alone, so every state load names the one closed operation it serves.
+test('every state load names the operation it serves and nothing else', async () => {
+  const model = authorityModel(); const seen = [];
+  const f = await fixture((op, data, req, res) => {
+    if (op === 'state') seen.push(req.headers['x-crewship-docs-purpose'] ?? null);
+    else assert.equal(req.headers['x-crewship-docs-purpose'], undefined);
+    if (op === 'comments' || op === 'checkpoints') return [];
+    return model.handle(op, data, req, res);
+  });
+  await f.start();
+  try {
+    const agent = { Authorization: 'Bearer agtv2.synthetic-run' };
+    for (const operation of ['read', 'export', 'comments', 'checkpoints']) {
+      seen.length = 0;
+      assert.equal((await call(f.socket, `/v1/documents/p/${operation}`, {}, agent)).status, 200, operation);
+      assert.deepEqual(seen, [operation]);
+    }
+    seen.length = 0;
+    assert.equal((await call(f.socket, '/v1/documents/p/read', {}, { ...agent, 'X-Crewship-Docs-Purpose': 'export' })).status, 200);
+    assert.deepEqual(seen, ['read']);
+  } finally { await f.close(); }
+});
 test('every read route stays read-only with mutation-shaped fields and live authority', async () => {
   const model = authorityModel();
   const f = await fixture((op, data, req, res) => {

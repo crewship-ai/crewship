@@ -67,7 +67,9 @@ full version history, not only the shared version. This does not depend on
 anything else they hold: an owner or admin who also has an Edit, Comment or
 Read share on the artifact still reads every version.
 
-Every such read is written to the workspace audit log. An entry is written
+The share dialog of a Personal artifact says so: *Personal: admins can open
+it, and every open is logged.* Every such read is written to the workspace
+audit log. An entry is written
 whenever an owner or admin opens an artifact they do not own and reach only
 through their workspace role, not through its crew, a folder or a direct
 share. For a project, slides or dashboard, a version their own share already
@@ -286,6 +288,26 @@ how many were saved before it. Reopen **Folder settings** to see what the
 folder has now.
 </Step>
 </Steps>
+
+### Let the crew's agents read a folder
+
+With the `artifact_agent_access_modes` flag on, **Folder settings** also shows
+**Crew agents** for the crew that owns the folder (**Agents of this folder's crew**). Pick **Viewer** to
+let that crew's agents read the folder's artifacts, or **No access** (the
+default). Agents never edit through a folder and never see Personal artifacts;
+any other agent needs access on each artifact. Click **Save**. The same setting
+is `crewship page folder agent-access <slug> --level none|read`.
+
+After a save that failed part way, you can change the level and save again in
+the same dialog. If someone else changed the crew agents level in the
+meantime, the dialog does not overwrite it: it shows the new level and asks
+you to check it and save again.
+
+<Note>
+**Can suggest** is not offered yet. The CLI still accepts `--level propose`,
+but today it gives the same read access as `read`, not a proposal. The dialog
+shows such a folder as **Viewer (set as Can suggest)**.
+</Note>
 
 ### Move an artifact to a folder
 

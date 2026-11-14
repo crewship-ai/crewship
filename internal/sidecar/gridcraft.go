@@ -65,6 +65,15 @@ func gridcraftMCPCatalog() []memoryMCPToolDescriptor {
 	for _, name := range []string{"workbook_read", "workbook_apply", "workbook_status", "workbook_commits"} {
 		props := map[string]any{"artifact_id": text, "mandate_id": text}
 		required := []string{"artifact_id", "mandate_id"}
+		if name == "workbook_read" {
+			// A chat run may read a workbook its scope reaches without a
+			// mandate (#5317 5.3); the server decides. Writes keep the mandate.
+			required = []string{"artifact_id"}
+		}
+		description := "Experimental offline workbook operation under an explicit retained human mandate and current run authority. Keep original mutation, mandate, base revision and generation on uncertain retry. Only cell.set is supported; never renew scope or refresh preconditions automatically."
+		if name == "workbook_read" {
+			description += " A read may omit mandate_id for a workbook this run reaches whose human is its owner or an owner-named editor (attached to the message that started it; the server decides)."
+		}
 		if name == "workbook_apply" {
 			props["request"] = packet
 			required = append(required, "request")
@@ -73,7 +82,6 @@ func gridcraftMCPCatalog() []memoryMCPToolDescriptor {
 			props["mutation_id"] = text
 			required = append(required, "mutation_id")
 		}
-		description := "Experimental offline workbook operation under an explicit retained human mandate and current run authority. Keep original mutation, mandate, base revision and generation on uncertain retry. Only cell.set is supported; never renew scope or refresh preconditions automatically."
 		if name == "workbook_commits" {
 			props["since"] = map[string]any{"type": "integer", "minimum": 0}
 			props["limit"] = map[string]any{"type": "integer", "minimum": 1, "maximum": appengine.MaxFeedLimit}
@@ -111,7 +119,7 @@ func (s *Server) respondGridCraftMCPToolCall(w http.ResponseWriter, r *http.Requ
 		Since      *int64             `json:"since,omitempty"`
 		Limit      int                `json:"limit,omitempty"`
 	}
-	if appengine.DecodeStrict(raw, &args) != nil || args.ArtifactID == "" || args.MandateID == "" {
+	if appengine.DecodeStrict(raw, &args) != nil || args.ArtifactID == "" || args.MandateID == "" && action != "read" {
 		s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid workbook packet"}))
 		return true
 	}
@@ -124,7 +132,10 @@ func (s *Server) respondGridCraftMCPToolCall(w http.ResponseWriter, r *http.Requ
 		s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid workbook feed request"}))
 		return true
 	}
-	payload := map[string]any{"action": action, "artifact_id": args.ArtifactID, "mandate_id": args.MandateID}
+	payload := map[string]any{"action": action, "artifact_id": args.ArtifactID}
+	if args.MandateID != "" {
+		payload["mandate_id"] = args.MandateID
+	}
 	if args.Since != nil {
 		payload["since"] = *args.Since
 	}

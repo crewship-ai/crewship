@@ -73,7 +73,7 @@ func (s *SQLWaitpointStore) decideTxClock(ctx context.Context, tx DecisionDBTX, 
 			allowed = ok
 		}
 		if !allowed {
-			return nil, fmt.Errorf("%w: a held routine action needs a workspace OWNER or ADMIN", ErrDeciderNotAllowed)
+			return nil, ErrHeldActionDeciderNotAllowed
 		}
 	}
 	now := tsformat.Format(clock())

@@ -235,8 +235,8 @@ already-referenced runs the ordinary way, binding nothing.
   holds its own grant on it; the human's member-level access is rechecked on
   every use. Writes are limited to the human's own attached or created
   artifacts; agents never share or publish.
-- A folder can let the agents of its owning crew read or suggest on its
-  non-private pages (`crewship page folder agent-access`, admin or the crew's
+- A folder can let the agents of its owning crew read its non-private
+  pages (`propose` reads only, until folder suggestions are built) (`crewship page folder agent-access`, admin or the crew's
   MANAGER+). Never edit, never another crew's agents, never Personal pages;
   in a chat run the human's access is still required. At `propose`, agents
   can read; on Docs they can propose changes for an editor to accept: only
@@ -257,18 +257,34 @@ already-referenced runs the ordinary way, binding nothing.
   version its human is entitled to: the shared version for a Viewer or
   Commenter, the latest for an Editor (edit held only through the ADMIN or
   OWNER role does not count). Agents still never create a Design.
-- Word documents, Sheets (GridCraft) and Mooring documents stay on their own
-  exact-run consent (a drafting or iteration consent, or a mandate): attaching
-  one is not enough. That consent binds every write's targets, base revision
-  and lease, so an agent write under another person's lease ends as a proposal,
-  never a direct edit. Native Word and Sheet Craft tasks are unchanged.
+- Word documents, Sheets (GridCraft) and Mooring documents are read through
+  the run's scope like any other artifact, with the human's own read of that
+  kind rechecked on every use: a Word document as an ordinary member reads
+  it, a Sheet only as its owner or an owner-named editor, a Mooring document
+  only as its owner. Agent grants and folders never reach a Sheet or Mooring
+  document. Changing one still needs its own exact-run consent (a drafting or
+  iteration consent, or a mandate), which binds every write's targets, base
+  revision and lease, so an agent write under another person's lease ends as
+  a proposal, never a direct edit. Without it a Sheet or Mooring change
+  answers `proposal_required` and a Word document change is refused; no lease
+  is taken. The run sidecar forwards only a single `page_id` on the Word
+  draft view (`crewship doc draft view --page`) and refuses every other
+  query; the server alone decides reach, and an unreached page is answered
+  like a missing one. Scope reach serves only that view: a Word document's
+  export, comments and checkpoints are never read through it, and a page one
+  of the run's own consents names is served by that consent alone, with its
+  block limit. With the flag off the server refuses all of this as before,
+  but some refusals now come from the server instead of the sidecar, with
+  another status or body (listed in `docs/specs/pages.md` §7.1c). Native Word
+  and Sheet Craft tasks are unchanged.
 - Every access through this path is audited as `artifact.agent_run_accessed`,
   naming the human the agent acted for, the agent, run, reach and operation,
   in the same transaction; no audit record, no access. This covers artifact
-  projects, Designs, Word documents, Sheets and Mooring documents (the last
-  three with reach `consented`, a created Word document with `created`, a
-  Docs proposal through a folder with `folder`). A Docs proposal is recorded
-  with operation `propose`, never `write`.
+  projects, Designs, Word documents, Sheets and Mooring documents (under a
+  consent or mandate with reach `consented`, a created Word document with
+  `created`, a read through the scope with its reach, a Docs proposal through
+  a folder with `folder`). A Docs proposal is recorded with operation
+  `propose`, never `write`.
   Reads and writes are recorded once per run and artifact, creates every
   time. Native Craft tasks are not covered. Read them with
   `crewship audit --action artifact.agent_run_accessed -f json`.

@@ -175,6 +175,9 @@ func (h *documentAuthority) authorizeWithReadRecord(r *http.Request, k documents
 			if initialize {
 				return "", errDocumentAccess
 			}
+			if op := r.PathValue("operation"); op == "state" && documentStateLoadedForView(r) {
+				ctx = context.WithValue(ctx, documentViewReadKey{}, true)
+			}
 			return h.pages.authorizeDocumentDraft(ctx, a, k, r.PathValue("operation"))
 		}
 		// Exact session, not merely some other active session for this user.
@@ -239,7 +242,7 @@ func documentAuthorityError(w http.ResponseWriter, err error) {
 		return
 	}
 	if errors.Is(err, errArtifactRunCap) {
-		writeJSON(w, 429, map[string]string{"error": "This run reached its artifact limit. Ask the human to send a new message, or ask an admin to raise the limit.", "code": "artifact_run_limit"})
+		artifactRunCapRefusal(w)
 		return
 	}
 	status := 500

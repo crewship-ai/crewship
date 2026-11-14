@@ -23,6 +23,9 @@ type artifactCreationPolicy struct {
 	// ScopedDefault is true while no policy was ever saved and agent access
 	// modes are on: chat runs of every live crew may then use their scope.
 	ScopedDefault bool `json:"scoped_default"`
+	// SaveRequiresRunToken refuses, with agent access modes on, a sidecar page
+	// save that carries no agent run token (#5336). Off by default.
+	SaveRequiresRunToken bool `json:"save_requires_run_token"`
 }
 
 // artifactRunLimitsUpdate changes some limits; an omitted field keeps its value.
@@ -114,7 +117,7 @@ func (h *PageHandler) artifactPolicyAdmin(w http.ResponseWriter, r *http.Request
 func (h *PageHandler) loadArtifactCreationPolicy(ctx context.Context, workspace string) (artifactCreationPolicy, error) {
 	result := artifactCreationPolicy{CrewIDs: []string{}, Limits: artifactRunLimits{defaultChatRunCreateLimit, defaultRunReadLimit, defaultCrewHourlyPageLimit}}
 	q := h.pageAuthReader(ctx)
-	err := q.QueryRowContext(ctx, `SELECT enabled,version,chat_run_create_limit,run_read_limit,crew_hourly_page_limit FROM workspace_artifact_creation_policy WHERE workspace_id=?`, workspace).Scan(&result.Enabled, &result.Version, &result.Limits.ChatRunCreate, &result.Limits.RunRead, &result.Limits.CrewHourlyPage)
+	err := q.QueryRowContext(ctx, `SELECT enabled,version,chat_run_create_limit,run_read_limit,crew_hourly_page_limit,save_requires_run_token FROM workspace_artifact_creation_policy WHERE workspace_id=?`, workspace).Scan(&result.Enabled, &result.Version, &result.Limits.ChatRunCreate, &result.Limits.RunRead, &result.Limits.CrewHourlyPage, &result.SaveRequiresRunToken)
 	if errors.Is(err, sql.ErrNoRows) {
 		return result, nil
 	}
@@ -170,6 +173,8 @@ func (h *PageHandler) UpdateArtifactCreationPolicy(w http.ResponseWriter, r *htt
 		CrewIDs     *[]string                `json:"crew_ids"`
 		BaseVersion *int64                   `json:"base_version"`
 		Limits      *artifactRunLimitsUpdate `json:"limits,omitempty"`
+		// Omitted keeps the stored value.
+		SaveRequiresRunToken *bool `json:"save_requires_run_token,omitempty"`
 	}
 	r.Body = http.MaxBytesReader(w, r.Body, 64<<10)
 	if !decodeArtifactPolicyJSON(w, r, &req) {
@@ -225,10 +230,14 @@ func (h *PageHandler) UpdateArtifactCreationPolicy(w http.ResponseWriter, r *htt
 		replyError(w, 400, "limits out of range: chat_run_create_limit 1-20, run_read_limit 1-500, crew_hourly_page_limit 1-1000")
 		return
 	}
+	requireToken := current.SaveRequiresRunToken
+	if req.SaveRequiresRunToken != nil {
+		requireToken = *req.SaveRequiresRunToken
+	}
 	stamp := tsformat.Format(h.clock.Now().UTC())
 	// A limit change is a policy change: it bumps version, so the policy's
 	// authority epoch moves with it.
-	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_by_user_id,updated_at,chat_run_create_limit,run_read_limit,crew_hourly_page_limit) VALUES(?,?,1,?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET enabled=excluded.enabled,version=workspace_artifact_creation_policy.version+1,updated_by_user_id=excluded.updated_by_user_id,updated_at=excluded.updated_at,chat_run_create_limit=excluded.chat_run_create_limit,run_read_limit=excluded.run_read_limit,crew_hourly_page_limit=excluded.crew_hourly_page_limit`, workspace, *req.Enabled, UserFromContext(ctx).ID, stamp, limits.ChatRunCreate, limits.RunRead, limits.CrewHourlyPage); err != nil {
+	if _, err := tx.ExecContext(ctx, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_by_user_id,updated_at,chat_run_create_limit,run_read_limit,crew_hourly_page_limit,save_requires_run_token) VALUES(?,?,1,?,?,?,?,?,?) ON CONFLICT(workspace_id) DO UPDATE SET enabled=excluded.enabled,version=workspace_artifact_creation_policy.version+1,updated_by_user_id=excluded.updated_by_user_id,updated_at=excluded.updated_at,chat_run_create_limit=excluded.chat_run_create_limit,run_read_limit=excluded.run_read_limit,crew_hourly_page_limit=excluded.crew_hourly_page_limit,save_requires_run_token=excluded.save_requires_run_token`, workspace, *req.Enabled, UserFromContext(ctx).ID, stamp, limits.ChatRunCreate, limits.RunRead, limits.CrewHourlyPage, requireToken); err != nil {
 		replyInternalError(w, h.logger, "save artifact creation policy", err)
 		return
 	}
@@ -244,7 +253,7 @@ func (h *PageHandler) UpdateArtifactCreationPolicy(w http.ResponseWriter, r *htt
 	}
 	// Which crews may create artifacts is an access ceiling: the change and
 	// its chained audit (old and new allowlist) commit together (F1).
-	next := artifactCreationPolicy{Enabled: *req.Enabled, CrewIDs: *req.CrewIDs, Version: current.Version + 1, Limits: limits}
+	next := artifactCreationPolicy{Enabled: *req.Enabled, CrewIDs: *req.CrewIDs, Version: current.Version + 1, Limits: limits, SaveRequiresRunToken: requireToken}
 	notify, err := appendSettingsAudit(r, tx, h.journal, "workspace.artifact_creation_policy.update", "WORKSPACE", workspace,
 		map[string]any{"previous": current, "current": next})
 	if err != nil {

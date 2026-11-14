@@ -133,6 +133,9 @@ type pageFolderACLDocument struct {
 	// AgentAccess is the folder's setting for the agents of its owning crew
 	// (none, read or propose; #5317 D2, pages_folder_agent_access.go).
 	AgentAccess string `json:"agent_access"`
+	// AgentAccessAvailable is true where the setting takes effect (the
+	// workspace flag artifact_agent_access_modes is on).
+	AgentAccessAvailable bool `json:"agent_access_available"`
 }
 
 // pageFolderACLWriteRequest is PUT's body. CanRead is a pointer so a body that
@@ -365,6 +368,7 @@ func (h *PageHandler) folderACLDocument(ctx context.Context, wsID string, f *pag
 	if level, err := h.folderAgentAccess(ctx, f.ID); err == nil {
 		out.AgentAccess = level
 	}
+	out.AgentAccessAvailable = h.artifactRunModesOn(ctx, wsID)
 	setters := map[string]string{}
 	render := func(e pageFolderACLRecord) pageFolderACLWire {
 		setBy := ""
