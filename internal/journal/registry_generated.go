@@ -29,8 +29,8 @@ var AllEntryTypes = []EntryType{
 	EntryApprovalTimeout,
 	EntryTrustGranted,
 	EntryTrustRevoked,
-	EntryType("artifact.library_pinned"),           // journalArtifactLibraryPinned, internal/api/pages_artifact_library.go:31:2
-	EntryType("artifact.library_published"),        // journalArtifactLibraryPublished, internal/api/pages_artifact_library.go:30:2
+	EntryType("artifact.library_pinned"),           // journalArtifactLibraryPinned, internal/api/pages_artifact_library.go:32:2
+	EntryType("artifact.library_published"),        // journalArtifactLibraryPublished, internal/api/pages_artifact_library.go:31:2
 	EntryType("artifact.mooring_committed"),        // mooringCommitted, internal/api/mooring.go:23:2
 	EntryType("artifact.mooring_created"),          // mooringCreated, internal/api/mooring.go:22:2
 	EntryType("artifact.mooring_mandate_admitted"), // mooringMandateAdmitted, internal/api/mooring.go:24:2
@@ -124,9 +124,10 @@ var AllEntryTypes = []EntryType{
 	EntryNotificationFailed,
 	EntryType("onboarding.proposal_applied"), // journalEntryOnboardingProposalApplied, internal/api/onboarding_proposal.go:43:7
 	EntryPageActionDispatched,
-	EntryType("page.folder_acl_changed"),        // entryPageFolderACLChanged, internal/api/pages_folder_acl.go:84:7
-	EntryType("page.folder_changed"),            // entryPageFolderChanged, internal/api/pages_folders.go:77:2
-	EntryType("page.folder_membership_changed"), // entryPageFolderMembershipChanged, internal/api/pages_folders.go:81:2
+	EntryType("page.folder_acl_changed"),          // entryPageFolderACLChanged, internal/api/pages_folder_acl.go:84:7
+	EntryType("page.folder_agent_access_changed"), // entryPageFolderAgentAccessChanged, internal/api/pages_folder_agent_access.go:30:7
+	EntryType("page.folder_changed"),              // entryPageFolderChanged, internal/api/pages_folders.go:77:2
+	EntryType("page.folder_membership_changed"),   // entryPageFolderMembershipChanged, internal/api/pages_folders.go:81:2
 	EntryPageGrantAdded,
 	EntryPageGrantRemoved,
 	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:797:2
