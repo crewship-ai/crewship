@@ -18,11 +18,14 @@ import (
 type waitpointDecisionSource struct {
 	ID, Token, Workspace, PipelineRun, Run, Agent, Prompt, Created, Deadline, Status string
 	Form, Payload, Actor, Resolved, OperationKey, OperationHash                      string
+	// StepID is read for the audience rule only; it stays out of version()
+	// so existing card versions do not change.
+	StepID string `json:"-"`
 }
 
 func readWaitpointDecision(ctx context.Context, q issueOperationQueryer, workspace, id string) (waitpointDecisionSource, error) {
 	var s waitpointDecisionSource
-	err := q.QueryRowContext(ctx, `SELECT w.chat_source_id,w.token,w.workspace_id,w.pipeline_run_id,COALESCE(p.invocation_source_run_id,''),COALESCE(p.invoking_agent_id,''),COALESCE(w.prompt,''),w.created_at,w.timeout_at,w.status,w.decision_form_json,COALESCE(w.decision_payload,''),COALESCE(w.decided_by_user_id,''),COALESCE(w.decided_at,''),COALESCE(w.answer_operation_key,''),COALESCE(w.answer_operation_hash,'') FROM pipeline_waitpoints w JOIN pipeline_runs p ON p.id=w.pipeline_run_id AND p.workspace_id=w.workspace_id WHERE w.workspace_id=? AND w.chat_source_id=? AND w.kind='approval'`, workspace, id).Scan(&s.ID, &s.Token, &s.Workspace, &s.PipelineRun, &s.Run, &s.Agent, &s.Prompt, &s.Created, &s.Deadline, &s.Status, &s.Form, &s.Payload, &s.Actor, &s.Resolved, &s.OperationKey, &s.OperationHash)
+	err := q.QueryRowContext(ctx, `SELECT w.chat_source_id,w.token,w.workspace_id,w.pipeline_run_id,COALESCE(p.invocation_source_run_id,''),COALESCE(p.invoking_agent_id,''),COALESCE(w.prompt,''),w.created_at,w.timeout_at,w.status,w.decision_form_json,COALESCE(w.decision_payload,''),COALESCE(w.decided_by_user_id,''),COALESCE(w.decided_at,''),COALESCE(w.answer_operation_key,''),COALESCE(w.answer_operation_hash,''),w.step_id FROM pipeline_waitpoints w JOIN pipeline_runs p ON p.id=w.pipeline_run_id AND p.workspace_id=w.workspace_id WHERE w.workspace_id=? AND w.chat_source_id=? AND w.kind='approval'`, workspace, id).Scan(&s.ID, &s.Token, &s.Workspace, &s.PipelineRun, &s.Run, &s.Agent, &s.Prompt, &s.Created, &s.Deadline, &s.Status, &s.Form, &s.Payload, &s.Actor, &s.Resolved, &s.OperationKey, &s.OperationHash, &s.StepID)
 	return s, err
 }
 
@@ -124,7 +127,7 @@ func waitpointDecisionProjection(ctx context.Context, q issueOperationQueryer, a
 		}
 		if !deadline.After(time.Now()) {
 			d.Status = "expired"
-		} else if canRole(role, "update") && canScope(ctx, "workspace:admin") {
+		} else if canRole(role, "update") && canScope(ctx, "workspace:admin") && (!pipeline.IsCrewshipApprovalStepKey(s.StepID) || pipeline.HeldActionDeciderRoles[strings.ToUpper(role)]) {
 			if len(actions) > 0 {
 				d.AllowedActions = append(d.AllowedActions, "answer")
 			} else {

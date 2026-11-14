@@ -321,7 +321,7 @@ INSERT INTO pipeline_waitpoints (
 			senderName = name
 		}
 	}
-	inbox.Insert(ctx, s.db, slog.Default(), inbox.Item{
+	card := inbox.Item{
 		WorkspaceID: req.WorkspaceID,
 		Kind:        inbox.KindWaitpoint,
 		SourceID:    token,
@@ -352,9 +352,17 @@ INSERT INTO pipeline_waitpoints (
 			// by an agent — the resolve door (Decide) refuses an agent
 			// actor whatever route it arrives on. Stated on the card so the
 			// audience is readable without knowing the route's RBAC.
-			"who_can_act": []string{"role:MANAGER"},
+			// A held crewship action is decided by OWNER/ADMIN only (Decide's
+			// held-action rule), so its card is addressed to ADMIN.
+			"who_can_act": whoCanAct(req.StepID),
 		},
-	})
+	}
+	if IsCrewshipApprovalStepKey(req.StepID) {
+		// Decide's held-action rule takes OWNER/ADMIN, not the approve
+		// route's MANAGER tier: address who can act, not who gets a 403.
+		card.TargetRole = "ADMIN"
+	}
+	inbox.Insert(ctx, s.db, slog.Default(), card)
 	// Pre-create the listener channel so a fast CompleteApproval
 	// (somehow racing the WaitFor) doesn't get lost. Buffered 1
 	// so a complete-then-wait still delivers.
@@ -465,7 +473,8 @@ func (s *SQLWaitpointStore) crewAutonomy(ctx context.Context, crewID string) str
 
 // consumeTrust fires a standing grant if one covers this gate.
 func (s *SQLWaitpointStore) consumeTrust(ctx context.Context, req WaitpointApprovalRequest, tc routineTrustCtx) (TrustGrantUse, bool) {
-	if req.DecisionForm != nil || tc.pipelineID == "" || tc.definitionHash == "" {
+	// NoStandingTrust is checked before the lookup: Consume spends a use.
+	if req.NoStandingTrust || req.DecisionForm != nil || tc.pipelineID == "" || tc.definitionHash == "" {
 		return TrustGrantUse{}, false
 	}
 	// A strict crew has opted out of every shortcut around the operator.
@@ -488,7 +497,8 @@ func (s *SQLWaitpointStore) consumeTrust(ctx context.Context, req WaitpointAppro
 // payload shape is stable for consumers.
 func (s *SQLWaitpointStore) trustOffer(ctx context.Context, req WaitpointApprovalRequest, tc routineTrustCtx) map[string]any {
 	offer := map[string]any{"eligible": false}
-	if req.DecisionForm != nil || tc.pipelineID == "" || tc.definitionHash == "" || tc.autonomy == string(policy.AutonomyStrict) {
+	// NoStandingTrust: decided by a person every time, so never offered.
+	if req.NoStandingTrust || req.DecisionForm != nil || tc.pipelineID == "" || tc.definitionHash == "" || tc.autonomy == string(policy.AutonomyStrict) {
 		return offer
 	}
 	prior, err := s.trust.PriorApprovals(ctx, req.WorkspaceID, tc.pipelineID, req.StepID, tc.definitionHash)
@@ -982,4 +992,12 @@ func (s *SQLWaitpointStore) routineVersionForRun(ctx context.Context, runID stri
 		return int(head.Int64)
 	}
 	return 0
+}
+
+// whoCanAct is the audience stated on an approval card.
+func whoCanAct(stepID string) []string {
+	if IsCrewshipApprovalStepKey(stepID) {
+		return []string{"role:ADMIN"}
+	}
+	return []string{"role:MANAGER"}
 }
