@@ -170,6 +170,12 @@ func (p *Provisioner) ProvisionByBuild(ctx context.Context, baseImage string, cf
 }
 
 func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cfg *Config, miseConfig string, o *provisionOpts, runStart time.Time) (*ProvisionResult, error) {
+	if o.acquireImage != nil {
+		if err := o.acquireImage(ctx, baseImage); err != nil {
+			return nil, err
+		}
+	}
+
 	emitEvt := func(ev ProvisionEvent) { emitProvision(o.onProvision, ev) }
 	fail := func(step string, err error) (*ProvisionResult, error) {
 		emitEvt(ProvisionEvent{Step: ProvStepFailed, Status: ProvStatusFailed, Detail: step, Error: err.Error()})
@@ -190,6 +196,11 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	// rebuild what it already has.
 	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg)+requiredBinariesHashSalt(o.requiredBinaries))
 	tag := p.cacheTag(hash)
+	if o.acquireImage != nil {
+		if err := o.acquireImage(ctx, tag); err != nil {
+			return fail(ProvStepStart, err)
+		}
+	}
 
 	// Same per-tag serialisation as the commit path (#4816).
 	unlockTag, err := p.lockCacheTag(ctx, tag)

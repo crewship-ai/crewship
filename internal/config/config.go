@@ -165,8 +165,8 @@ type ContainerConfig struct {
 	// subnets from. It must not overlap a host route.
 	CrewNetworkPool string `yaml:"crew_network_pool"`
 	// CacheEviction is retained for configuration compatibility. Image collection
-	// is now ownership-scoped and controlled by CREWSHIP_IMAGE_GC. This field
-	// no longer starts an independent image sweeper.
+	// is ownership-scoped and off by default. True is a deprecated explicit
+	// opt-in alias; CREWSHIP_IMAGE_GC overrides it. No independent sweeper runs.
 	CacheEviction bool `yaml:"cache_eviction"`
 }
 

@@ -1189,8 +1189,6 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 // superseded by a definition edit. That leaves the job running and its pending
 // messages attached; actual build/publication errors remain terminal.
 func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID, workspaceID, cfgJSON, miseJSON, runtimeImg string, job *ProvisionJob) (superseded bool) {
-	releaseImages := resourcelifecycle.Images(h.db).Use()
-	defer releaseImages() // includes cache acquisition, qualification and DB publication
 
 	h.mu.Lock()
 	job.Status = "running"
@@ -1252,6 +1250,7 @@ func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID
 		return
 	}
 	miseJSON = cliPlan.MiseConfig
+
 	if len(cliPlan.AddedTools) > 0 || len(cliPlan.AddedCommands) > 0 {
 		h.logger.Info("adapter CLIs added to the build",
 			"crew_id", crewID, "adapters", adapters,
@@ -1339,7 +1338,21 @@ func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID
 		Refs: map[string]any{"crew_id": crewID},
 	})
 
+	var acquired []func()
+	defer func() {
+		for i := len(acquired) - 1; i >= 0; i-- {
+			acquired[i]()
+		}
+	}()
+	acquireImage := func(ctx context.Context, refs ...string) error {
+		release, err := resourcelifecycle.Images(h.db).UseImages(ctx, refs...)
+		if err == nil {
+			acquired = append(acquired, release)
+		}
+		return err
+	}
 	result, err := h.provisioner.Provision(ctx, baseImage, cfg, miseJSON,
+		devcontainer.WithImageAcquisition(acquireImage),
 		devcontainer.WithPlan(plan),
 		devcontainer.WithProgress(progress),
 		devcontainer.WithProvisionSink(provisionEventSink),

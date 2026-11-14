@@ -8,18 +8,18 @@ import (
 	"sync"
 	"time"
 
-	cerrdefs "github.com/containerd/errdefs"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/moby/moby/client"
 )
 
 type ProvisioningHandler struct {
-	instanceID     string                  // image ownership; read/written under the database image-use gate
-	sandboxRuntime provider.SandboxRuntime // optional qualification backend; set before serving
+	gcWake              chan struct{}
+	legacyImageEviction bool                    // deprecated opt-in alias; protected by mu
+	instanceID          string                  // image ownership; read/written under mu
+	sandboxRuntime      provider.SandboxRuntime // optional qualification backend; set before serving
 
 	db             *sql.DB
 	logger         *slog.Logger
@@ -135,37 +135,16 @@ func (h *ProvisioningHandler) SetInstallationID(id string) {
 	if id == "" {
 		return
 	}
-	gate := resourcelifecycle.Images(h.db)
-	gate.SetSelectionCheck(func(ctx context.Context, ref string) (bool, error) {
-		if h.docker == nil {
-			return true, nil
-		}
-		inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		defer cancel()
-		inspected, err := h.docker.ImageInspect(inspectCtx, ref)
-		if err != nil {
-			if cerrdefs.IsNotFound(err) {
-				// Ownership is not established for an absent ordinary registry base;
-				// let the provider pull it. The cached-image readiness probe separately
-				// treats absence as a reason to rebuild before managed admission.
-				return true, nil
-			}
-			return false, err
-		}
-		if inspected.Config == nil {
-			return false, nil
-		}
-		owner := inspected.Config.Labels[devcontainer.ImageInstanceLabel]
-		return owner == "" || owner == id, nil
-	})
-	release := gate.Use()
+	h.mu.Lock()
 	h.instanceID = id
-	release()
-	// Routes are still being wired: perform the owned startup pass only after
-	// identity and selection validation are available.
-	if h.bgCtx != nil {
-		h.sweepOrphanCacheImages(h.bgCtx)
+	h.mu.Unlock()
+	select {
+	case h.gcWake <- struct{}{}:
+	default:
 	}
+	// Constructor-owned lifecycle performs inventory asynchronously. Never make
+	// route wiring wait for Docker or mutate selected artifacts on identity change.
+
 }
 
 func NewProvisioningHandler(
@@ -203,6 +182,7 @@ func NewProvisioningHandler(
 		rateLimiter:    newProvisionRateLimiter(),
 		wsHub:          wsHub,
 		bgCtx:          bgCtx,
+		gcWake:         make(chan struct{}, 1),
 		bgCancel:       bgCancel,
 		journal:        noopEmitter{},
 	}
@@ -296,3 +276,14 @@ func nullStringPtr(s sql.NullString) *string {
 // ProvisionStatus returns the provisioning status for a crew. If an active job
 // exists in memory, its status (pending/running/completed/failed) is returned;
 // otherwise the status is derived from the persisted cached_image column.
+
+// SetLegacyImageEviction preserves the old explicit opt-in as an alias for the
+// owned policy. It no longer starts an independent global image sweeper.
+func (h *ProvisioningHandler) SetLegacyImageEviction(enabled bool) {
+	h.mu.Lock()
+	h.legacyImageEviction = enabled
+	h.mu.Unlock()
+	if enabled {
+		h.logger.Warn("container.cache_eviction is deprecated; use CREWSHIP_IMAGE_GC for owned image collection")
+	}
+}

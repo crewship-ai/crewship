@@ -349,20 +349,24 @@ unchanged and not installation-specific.
 
 ### Orphan deletion policy
 
-Owned crew and feature images are collected automatically on Docker with a
-settled installation identity. Current selections, the previous immutable
+Owned crew and feature image collection is experimental and **off by default**.
+Set `CREWSHIP_IMAGE_GC=true` only on a dedicated or coordinated Docker daemon. Current selections, the previous immutable
 selection of each live crew and all container source images are protected.
 Unused owned images older than 24 hours may be removed, including untagged
-abandoned builds. `CREWSHIP_IMAGE_GC=false` disables this policy.
+abandoned builds. `CREWSHIP_IMAGE_GC=false` explicitly disables this policy.
 
-Collection excludes image acquisition through database publication and backup
-restore. Missing ownership or incomplete inventory prevents automatic deletion.
+Inventory runs outside the lifecycle gate. Final deletion checks exclude only
+the candidate's acquisitions through publication and restore replay, with a
+two-second Docker operation budget. Missing ownership or incomplete inventory prevents deletion. Absent references
+and malformed crew configurations are logged without freezing all collection.
 The collector never recursively prunes parents or shared BuildKit cache.
 
 `CREWSHIP_CACHE_GC_AUTODELETE=true` remains the separate explicit opt-in for
 unlabelled historical artifacts, with its five-minute floor. Keep this legacy
-switch off on shared daemons. `CREWSHIP_CACHE_EVICTION` no longer starts a
-second image sweeper. See the [full lifecycle contract](/specs/container-cleanup#owned-image-collection).
+switch off on shared daemons. `CREWSHIP_CACHE_EVICTION` is a deprecated explicit opt-in alias for owned
+collection and no longer starts a second image sweeper. Copied/restored foreign
+selections remain compatible, so default enablement still needs a reviewed
+adoption/retention policy. See the [full lifecycle contract](/specs/container-cleanup#owned-image-collection).
 
 ### Image-list cache
 

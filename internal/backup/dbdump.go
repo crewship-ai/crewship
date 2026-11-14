@@ -1122,26 +1122,8 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	imageUse := resourcelifecycle.Images(db)
 	releaseImages := imageUse.Use()
 	defer releaseImages()
-	// Do not import a live selection owned by another installation. Preserve
-	// provenance history, but rebuild the selected toolchain locally on demand.
-	for _, crew := range dump.Tables["crews"] {
-		for _, field := range []string{"cached_image", "last_selected_image", "previous_image"} {
-			ref, _ := crew[field].(string)
-			if ref == "" {
-				continue
-			}
-			allowed, err := imageUse.CheckSelection(ctx, ref)
-			if err != nil {
-				return RestoreStats{}, fmt.Errorf("backup: verify selected image ownership: %w", err)
-			}
-			if !allowed {
-				crew[field] = nil
-				if field == "cached_image" {
-					crew["config_hash"], crew["cached_requirements"], crew["resolved_features"] = nil, nil, nil
-				}
-			}
-		}
-	}
+	// Restore preserves exact captured selections. Image ownership is not
+	// authority to replace an environment with newly resolved dependencies.
 
 	if err := rejectMooringCollaborationCollision(ctx, db, dump); err != nil {
 		return RestoreStats{}, err

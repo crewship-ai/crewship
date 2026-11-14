@@ -263,7 +263,7 @@ func buildOutputSuffix(tail *boundedLog) string {
 // BuildKit. The returned tag is used as the base for the temp container that
 // then runs mise/postCreate/env. emit reports plan progress (pull + per-feature)
 // so the UI checklist advances identically to the container-commit path.
-func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string, emit func(string), sink ProvisionSink, force bool) (string, error) {
+func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string, emit func(string), sink ProvisionSink, force bool, acquire ...func(context.Context, ...string) error) (string, error) {
 	emit(pullStepLabel(baseImage))
 
 	contextDir, _, featTag, err := stageOwnedBuildContext(p.instanceID, baseImage, features, optionsByRef, rootEnv)
@@ -272,6 +272,11 @@ func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, f
 		return "", err
 	}
 	defer func() { _ = os.RemoveAll(contextDir) }()
+	if len(acquire) > 0 && acquire[0] != nil {
+		if err := acquire[0](ctx, featTag); err != nil {
+			return "", err
+		}
+	}
 
 	buildStart := time.Now()
 	emitProvision(sink, ProvisionEvent{
