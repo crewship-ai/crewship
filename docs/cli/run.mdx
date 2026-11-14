@@ -155,6 +155,7 @@ packet for you.
 | `--show-thinking` | `false` | Surface reasoning blocks on stdout (un-truncated). |
 | `--attach <file>` | (unset) | Upload a file into the chat and name it in the message, exactly as the web composer does. Repeatable. A message may consist of attachments alone. |
 | `--page <slug>` | (unset) | Attach a Page as context (`page_context`). The server checks that you and the agent can read it and appends its snapshot. Not with `--interactive` or `--create-document`. |
+| `--artifact <page>` | (unset) | Attach an artifact as a reference (`metadata.artifact_refs`). Takes a page slug, or `@<page id>`; the CLI reads the page and sends its id. Repeatable, at most 10. Only takes effect where the workspace has `artifact_agent_access_modes` on (otherwise the server ignores it); the server checks each page as you read it as an ordinary member and refuses an unavailable one with `an attached artifact is not available`. Refused client-side (exit 2) with an empty value, one over 128 characters or containing `/` or a control character, more than 10, or `--page`, `--create-document`, `--ask-form`, `--document-target` or `--interactive`. |
 | `--ask-form <form-id>` | (unset) | Submit one of the agent's ask forms into an existing `--chat`, answered with `--var`. The form's rendered message is the text; do not pass a prompt. |
 | `--var <name=value>` | (unset) | With `--ask-form`: answer one field. Repeat for more fields; repeat a name for a multi-value. A `file`/`photo` field takes a local path, which is uploaded. A money field `amount` takes its currency as `amount_currency`. |
 | `--create-document` | `false` | Ask the agent to create a new private Document from this message — the composer's "Create document" intent. The server accepts it only in a private chat with a trusted human sender and the feature enabled. |
@@ -227,6 +228,9 @@ crewship run daniel --chat c_abc123 --attach ./trace.log --attach ./screenshot.p
 
 # A Page as context (the server snapshots it)
 crewship run daniel --chat c_abc123 --page fleet "summarise this page"
+
+# Artifacts as references the run may read (workspace flag artifact_agent_access_modes)
+crewship run daniel --artifact fleet --artifact @pg_9f3a "compare these two"
 
 # An ask form, answered from the command line
 crewship run lucy --chat c_abc123 --ask-form receipt \
