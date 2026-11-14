@@ -499,16 +499,26 @@ func covCruRepeat(s string, n int) string {
 // or none at all, is accepted (update fills nothing in; provisioning does).
 func TestCovCruUpdate_CommonUtilsAccount(t *testing.T) {
 	const cu = "ghcr.io/devcontainers/features/common-utils:2"
+	// #5337: update stores the same settled account as create. A config
+	// without common-utils gets it injected, and a declared one gets its
+	// missing options; otherwise a re-apply of a bare-image manifest
+	// replaced the injected config and the next build had no `agent`.
+	const settled = `"username":"agent","userUid":"1001","userGid":"1001"`
 	for _, tc := range []struct {
 		name, cfg string
 		wantCode  int
 		wantIn    string
+		// wantStored are substrings of the stored config (quotes
+		// stripped, see below); empty means the submitted config as is.
+		wantStored []string
 	}{
-		{"other uid refused", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"username":"agent","userUid":"2000"}}}`, http.StatusBadRequest, "set userUid to"},
-		{"other user refused", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"username":"builder"}}}`, http.StatusBadRequest, "set username to"},
-		{"legacy uid key refused when it conflicts", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"uid":"2000"}}}`, http.StatusBadRequest, "UID 1001"},
-		{"compatible declaration accepted", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"installZsh":"false"}}}`, http.StatusOK, ""},
-		{"no common-utils accepted", `{"image":"debian:bookworm-slim"}`, http.StatusOK, ""},
+		{"other uid refused", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"username":"agent","userUid":"2000"}}}`, http.StatusBadRequest, "set userUid to", nil},
+		{"other user refused", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"username":"builder"}}}`, http.StatusBadRequest, "set username to", nil},
+		{"legacy uid key refused when it conflicts", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"uid":"2000"}}}`, http.StatusBadRequest, "UID 1001", nil},
+		{"compatible declaration gets the account", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"installZsh":"false"}}}`, http.StatusOK, "", []string{"installZsh:false", "username:agent", "userUid:1001", "userGid:1001"}},
+		{"no common-utils gets it injected", `{"image":"debian:bookworm-slim","hostRequirements":{"memory":"4096mb"}}`, http.StatusOK, "", []string{cu, "username:agent", "userUid:1001", "userGid:1001", "hostRequirements"}},
+		{"settled config stored as is", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{` + settled + `}}}`, http.StatusOK, "", nil},
+		{"username none stored as is", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"username":"none"}}}`, http.StatusOK, "", nil},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h, db, userID, wsID := covCruNewCrew(t)
@@ -542,8 +552,17 @@ func TestCovCruUpdate_CommonUtilsAccount(t *testing.T) {
 				}
 				return
 			}
-			if after.String != tc.cfg {
-				t.Fatalf("stored = %q, want the submitted config %q unchanged", after.String, tc.cfg)
+			if tc.wantStored == nil {
+				if after.String != tc.cfg {
+					t.Fatalf("stored = %q, want the submitted config %q unchanged", after.String, tc.cfg)
+				}
+				return
+			}
+			flat := strings.ReplaceAll(after.String, `"`, "")
+			for _, want := range tc.wantStored {
+				if !strings.Contains(flat, strings.ReplaceAll(want, `"`, "")) {
+					t.Fatalf("stored config %s lacks %q", after.String, want)
+				}
 			}
 		})
 	}

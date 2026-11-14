@@ -144,13 +144,18 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			replyDevcontainerSecurityError(w, verr)
 			return
 		}
-		// Refuse a common-utils declaration that would create the runtime
-		// account under another name or UID now, not at the next build.
-		// The missing options are filled in at provision time.
-		if _, nerr := cfg.NormalizeDeclaredAgentUser(); nerr != nil {
+		// Store the same settled account as crew create (#5337): inject
+		// common-utils when it is absent, fill its missing account
+		// options, and refuse a declaration that would create the account
+		// under another name or UID. Without the injection, a re-apply of
+		// a bare-image manifest replaced the config create had injected
+		// and the next build ran UID 1001 without an account.
+		normalised, nerr := devcontainer.NormalizeAgentUserJSON(*req.DevcontainerConfig)
+		if nerr != nil {
 			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+nerr.Error())
 			return
 		}
+		req.DevcontainerConfig = &normalised
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
 		if err := devcontainer.ValidateMiseConfigInput(*req.MiseConfig); err != nil {

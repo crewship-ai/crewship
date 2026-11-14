@@ -866,8 +866,19 @@ func (d *CrewDocument) updatePatch(remote *CrewRemote) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if want != "" && !jsonStringEqual(want, deref(remote.DevcontainerConfig)) {
-			patch["devcontainer_config"] = want
+		if want != "" {
+			// Compare and send the form the server stores: create and
+			// update inject the agent account (#5337). Comparing the bare
+			// manifest config planned an update on every re-apply, and an
+			// older server stored that bare PATCH as is. A config the
+			// normalizer refuses goes out unchanged for the server to
+			// refuse with its own message.
+			if normalised, nerr := devcontainer.NormalizeAgentUserJSON(want); nerr == nil {
+				want = normalised
+			}
+			if !jsonStringEqual(want, deref(remote.DevcontainerConfig)) {
+				patch["devcontainer_config"] = want
+			}
 		}
 		// Diff container sizing against the remote columns so a
 		// converged manifest stops emitting no-op patches. A value
