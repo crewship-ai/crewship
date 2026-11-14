@@ -6,7 +6,7 @@ import sys
 
 GO = {'cli-subprocess-race', 'go', 'go-test', 'go-race', 'go-race-cli-shards', 'go-race-cli', 'go-race-api-template', 'go-race-api', 'go-race-api-shards', 'go-platforms', 'go-lint', 'go-shuffle', 'managed-environments'}
 CODE = {'mooring-actual', 'mooring', 'image', 'binary', 'frontend', 'frontend-test', 'frontend-test-types', 'frontend-test-shards', 'harness-pr', 'cli-command-smoke', 'onboarding-default-boots', 'pages-apps', 'playwright-pr', 'onboarding-journey'}
-# Word and Sheet packages and their browser gate (#5362), planned by plan.py's `craft`.
+# Word and Sheet packages and their browser gate (#5362): required with any code change.
 CRAFT = {'craft-packages-build', 'craft-packages'}
 PARITY = {'go-parity': 'go_parity', 'frontend-parity': 'frontend_parity', 'docs-inventory': 'docs_inventory'}
 ALWAYS = {'changes', 'merge-conflict-markers', 'shell'}
@@ -25,14 +25,11 @@ def failures(needs, event=None):
         errors.append(f'reduced matrix is only allowed on pull_request, not {event}')
     for name in sorted(required & needs.keys()):
         expected = 'success'
-        if (name in GO and plan.get('go') == 'false') or (name in CODE and plan.get('code') == 'false'):
+        if (name in GO and plan.get('go') == 'false') or (name in CODE | CRAFT and plan.get('code') == 'false'):
             expected = 'skipped'
         if name in PARITY and plan.get(PARITY[name]) == 'false':
             expected = 'skipped'
         if name == 'release-rehearsal' and plan.get('release') == 'false':
-            expected = 'skipped'
-        # The Craft package gate (#5362) runs whenever a package or host input changed.
-        if name in CRAFT and plan.get('craft') == 'false':
             expected = 'skipped'
         if name in FULL and plan.get('full') == 'false':
             expected = 'skipped'

@@ -2782,17 +2782,17 @@ jobs:
 
   # ── Word and Sheet packages: build, install, browser gate (#5315, #5362) ──
   # A package may be pinned (tools/craft-components/catalog.txt) only when its
-  # editor works with the real host. This builds both packages exactly as the
-  # release does (the build fails on pins other than catalog.txt), checks them
-  # against those pins, installs and runs them through the server, and then
-  # opens each editor through the real host page of the tested server in full
-  # Chromium: open, edit, save, reopen, edit, save. Planned by plan.py's
-  # `craft` output: any package, host or install-path input, and every run
-  # without a diff. #5362: packages that installed and passed every server
-  # check never connected in a browser.
+  # editor works with the real host. Both jobs run on every code change, since
+  # the host, server, install and route code the gate drives is spread over
+  # the tree (#5362 was a one-line host change). The packages themselves are
+  # cached by the hash of the recipe inputs and rebuilt exactly as the release
+  # builds them (failing on pins other than catalog.txt) only on a cache miss
+  # or when plan.py's `craft` output says a recipe or CI control input changed
+  # or there is no diff to compare. The catalog check and the server install
+  # test run on every build, cached or not.
   craft-packages-build:
     needs: [merge-conflict-markers, changes]
-    if: needs.changes.outputs.craft == 'true'
+    if: needs.changes.outputs.code == 'true'
     name: Craft packages build
     runs-on: ubuntu-latest
     timeout-minutes: 75
@@ -2802,18 +2802,30 @@ jobs:
           persist-credentials: false
       - name: Test the build script without a build
         run: python3 -m unittest scripts/test_build_craft_components.py
+      # Keyed on the recipe inputs and the toolchain pin only. A hit is still
+      # checked against catalog.txt and the pins below before anything uses it.
+      - name: Restore the packages built from this recipe
+        id: packages
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: build/craft-components/dist
+          key: craft-packages-v1-${{ runner.os }}-rust-1.99.1-${{ hashFiles('tools/craft-components/**', 'scripts/build-craft-components.py', 'scripts/build-mooring-runtime.py', 'mooring/build-tools.json', 'scripts/check-craft-packages.sh') }}
       - name: Install pinned Rust and both WASM targets
+        if: steps.packages.outputs.cache-hit != 'true' || needs.changes.outputs.craft == 'true'
         timeout-minutes: 5
         run: timeout --kill-after=15s 4m rustup toolchain install 1.99.1 --profile minimal --target wasm32-wasip1 --target wasm32-unknown-unknown
       - name: Build packages
+        if: steps.packages.outputs.cache-hit != 'true' || needs.changes.outputs.craft == 'true'
         timeout-minutes: 60
         run: python3 scripts/build-craft-components.py --rust-bin "$(dirname "$(rustup which --toolchain 1.99.1 rustc)")"
       - name: Check the packages against the catalog as the release does
         run: |
           set -euo pipefail
+          cmp build/craft-components/dist/catalog.txt tools/craft-components/catalog.txt
+          rm -rf build/craft-packages
           mkdir -p build/craft-packages
           cp build/craft-components/dist/*.craftpkg build/craft-packages/
-          bash scripts/check-craft-packages.sh "$(tr -d '\n' < build/craft-components/dist/catalog.txt)" build/craft-packages
+          bash scripts/check-craft-packages.sh "$(tr -d '\n' < tools/craft-components/catalog.txt)" build/craft-packages
       - uses: actions/setup-go@802e89cd7394b98352d79117a8b463bbfc2fdacf
         with:
           go-version: ${{ env.GO_VERSION }}
@@ -2836,7 +2848,7 @@ jobs:
   # The browser half: starts as soon as both the packages and the tested server exist.
   craft-packages:
     needs: [merge-conflict-markers, changes, binary, craft-packages-build]
-    if: needs.changes.outputs.craft == 'true'
+    if: needs.changes.outputs.code == 'true'
     name: Craft packages browser gate
     runs-on: ubuntu-latest
     timeout-minutes: 40

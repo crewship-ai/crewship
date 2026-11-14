@@ -28,17 +28,26 @@ for app in wordcraft gridcraft; do [ -f "$packages/crewship-craft-$app.craftpkg"
 state="$(mktemp -d "${TMPDIR:-/tmp}/craft-gate.XXXXXX")"
 server_pid=""
 cleanup() {
-  [ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null && wait "$server_pid" 2>/dev/null
+  if [ -n "$server_pid" ]; then
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
+  fi
   cp "$state/server.log" "$output/server.log" 2>/dev/null || true
   rm -rf "$state"
 }
 trap cleanup EXIT
 mkdir -p "$state/home" "$state/data" "$state/logs"
 
-# Every crewship process, server and CLI, gets the throwaway HOME: the CLI
-# profile written by `seed` never reaches the caller's account.
-run_crewship() { HOME="$state/home" CREWSHIP_DATA_DIR="$state/data" "$binary" "$@"; }
+# Every crewship process, server and CLI, starts without the caller's Crewship
+# settings and credentials (no CREWSHIP_*, no token, key, secret or password
+# variable) and with the throwaway HOME: it cannot reach another server, and
+# the CLI profile written by `seed` never reaches the caller's account.
+clean=()
+while IFS= read -r name; do clean+=(-u "$name"); done < <(compgen -e | grep -E '^CREWSHIP_|TOKEN|SECRET|PASSWORD|API_KEY|^DATABASE_URL$|^NEXTAUTH_' || true)
+run_crewship() { env "${clean[@]}" HOME="$state/home" CREWSHIP_DATA_DIR="$state/data" "${cli_extra[@]}" "$binary" "$@"; }
+cli_extra=()
 
+env "${clean[@]}" \
 HOME="$state/home" \
 CREWSHIP_DATA_DIR="$state/data" \
 CREWSHIP_STORAGE_BASE_PATH="$state/data" \
@@ -67,8 +76,10 @@ for attempt in 1 2 3; do
   sleep 5
 done
 workspace="$(run_crewship whoami --format json --server "$origin" | jq -r '.workspace.id')"
-[ -n "$workspace" ] && [ "$workspace" != null ] || { echo "no seeded workspace" >&2; exit 1; }
-CREWSHIP_WORKSPACE="$workspace" run_crewship admin ratelimits set http.api_per_min 1000 --server "$origin" >/dev/null
+if [ -z "$workspace" ] || [ "$workspace" = null ]; then echo "no seeded workspace" >&2; exit 1; fi
+cli_extra=(CREWSHIP_WORKSPACE="$workspace")
+run_crewship admin ratelimits set http.api_per_min 1000 --server "$origin" >/dev/null
+cli_extra=()
 
 # The real install path: upload, verify against the pin, start without a restart.
 for app in word:wordcraft sheet:gridcraft; do

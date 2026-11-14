@@ -9,7 +9,7 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
-- **Word and Sheet packages are pinned only after their editors work in a browser (#5362).** The required CI jobs `craft-packages-build` and `craft-packages` build both packages, installs them in a throwaway server and opens each editor through the real host in Chromium: open, edit, save, reopen. They replace the Craft Packages Candidate Check and runs for any change to the package recipe, its install path or the editor host.
+- **Word and Sheet packages are pinned only after their editors work in a browser (#5362).** The required CI jobs `craft-packages-build` and `craft-packages` install both packages in a throwaway server and open each editor through the real host in Chromium: open, edit, save, reopen. They replace the Craft Packages Candidate Check and run with every code change; the packages are rebuilt only when their recipe changes.
 
 - **Fixed: the Word and Sheet editors connect again.** Since #5134 the page dropped the editor's first message, because its sandboxed frame always speaks with the opaque origin `null`, so native Word and Sheet documents never opened and showed "The editor did not connect safely" after 20 seconds. The page now accepts that message only from its own editor frame's window and still requires the opaque origin and the pinned bundle.
 

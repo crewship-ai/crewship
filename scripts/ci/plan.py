@@ -48,22 +48,16 @@ def full_matrix(event_name, paths, labels):
     return release_changed(paths) or FULL_CI_LABEL in labels
 
 
-# Inputs of the Word and Sheet packages and of the host that runs their editors
-# (#5315, #5362). A change to any of them builds the packages and runs the
-# browser gate (craft-packages): a package whose editor does not connect with
-# the real host can never be pinned in tools/craft-components/catalog.txt.
-CRAFT_PREFIXES = (
-    'tools/craft-components/', 'lib/mooring/', 'lib/workbooks/', 'e2e/craft-packages/',
-    'internal/craftassets/', 'internal/craftapps/', 'internal/craftengine/', 'internal/editororigin/',
-    'internal/server/craft_apps',
-)
+# Inputs that change what the Word and Sheet packages are built from, or how CI
+# builds and judges them (#5315, #5362). `craft` means "rebuild the packages,
+# do not trust the cache". The packages' browser gate itself (craft-packages)
+# runs on every code change: the host, server and install code it drives is
+# spread over the tree, so no path list can safely skip it.
+CRAFT_PREFIXES = ('tools/craft-components/',)
 CRAFT_FILES = {
     'scripts/build-craft-components.py', 'scripts/test_build_craft_components.py', 'scripts/build-mooring-runtime.py',
-    'mooring/build-tools.json', 'scripts/check-craft-packages.sh', 'scripts/ci/craft-package-gate.sh',
-    'playwright.craft-packages.config.ts', 'components/features/pages/native-craft-editor-host.tsx',
-    'components/features/pages/workbook-editor-host.tsx', '.github/workflows/ci.yml', '.github/workflows/release.yml',
-    '.goreleaser.yml', 'Dockerfile', 'e2e/acceptance/prd/outage-lostack/native.ts', 'e2e/acceptance/prd/auth.ts',
-    'e2e/acceptance/prd/craft-session/frame.ts',
+    'mooring/build-tools.json', 'scripts/check-craft-packages.sh', '.github/workflows/ci.yml',
+    '.github/workflows/release.yml', 'scripts/ci/plan.py', 'scripts/ci/verdict.py',
 }
 
 
