@@ -243,10 +243,11 @@ already-referenced runs the ordinary way, binding nothing.
   artifact tool.
 - Per-run limits (3 created, 50 distinct standing reads) and a per-crew hourly
   page limit (20) come from `crewship workspace artifact-policy`.
-- Every access through this path is audited as `artifact.agent_run_accessed`,
+- Every artifact project access through this path is audited as `artifact.agent_run_accessed`,
   naming the human the agent acted for, the agent, run, reach and operation,
   in the same transaction; no audit record, no access. Reads and writes are
-  recorded once per run and artifact, creates every time. Read them with
+  recorded once per run and artifact, creates every time. Documents, Design,
+  GridCraft and Mooring stay on the exact-run consent path. Read them with
   `crewship audit --action artifact.agent_run_accessed -f json`.
 
 Specification: `docs/specs/pages.md` §7.1c.

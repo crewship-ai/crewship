@@ -298,6 +298,15 @@ const auditActionAgentRunArtifactAccess = "artifact.agent_run_accessed"
 // response (may the caller edit?); it is not an access and is not audited.
 type artifactAuditProbeKey struct{}
 
+// artifactAuditProbe marks an authorization that checks access without
+// performing it (a pre-check before the write's own transaction, or a
+// capability probe): it records no agent-run audit row.
+func artifactAuditProbe(authorize artifacts.VersionAuthorize) artifacts.VersionAuthorize {
+	return func(ctx context.Context, tx *sql.Tx) (string, error) {
+		return authorize(context.WithValue(ctx, artifactAuditProbeKey{}, true), tx)
+	}
+}
+
 // recordAgentRunArtifactAccess writes the audit of one flag-on run access in
 // the access's own transaction. The human the agent acted for is the row's
 // user; the record is content-free. A read and a write authorization are each

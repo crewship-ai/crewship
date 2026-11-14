@@ -413,7 +413,7 @@ func (h *PageHandler) ReplyArtifactProjectComment(w http.ResponseWriter, r *http
 	if !ok {
 		return
 	}
-	if _, err := h.artifactProjectStore(r.Context()).Quota(r.Context(), k, h.artifactProjectOwnerAuthority(r, k)); err != nil {
+	if _, err := h.artifactProjectStore(r.Context()).Quota(r.Context(), k, artifactAuditProbe(h.artifactProjectOwnerAuthority(r, k))); err != nil {
 		artifactProjectError(w, err)
 		return
 	}
