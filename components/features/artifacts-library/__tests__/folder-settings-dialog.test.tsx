@@ -237,10 +237,67 @@ it("on the server, changing the agents level after a partial save saves against 
 
 it("on the server, an agents level changed by someone else is not overwritten after a partial save (#5343)", async () => {
   flags.mock = false
-  const server = serverWithPartialEntrySave({ otherChangesAgentsTo: "none" })
+  const server = serverWithPartialEntrySave({ otherChangesAgentsTo: "propose" })
   const onOpenChange = await partialSaveThenChangeAgents("none")
-  await screen.findByText(/changed by someone else/)
+  await screen.findByText(/changed by someone else and is now Can suggest/)
   expect(onOpenChange).not.toHaveBeenCalledWith(false)
   expect(server.agentPuts().filter(b => b.level === "none")).toHaveLength(1) // the refused attempt only
-  expect((screen.getByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement).value).toBe("none")
+  expect((screen.getByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement).value).toBe("propose")
+})
+
+function agentPutServer(agentPut: (body: { level: string; acl_version: number }, n: number) => Response, get: () => Record<string, unknown>) {
+  let n = 0
+  flags.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    const path = new URL(url, "http://h").pathname
+    if (init?.method === "PUT" && path.endsWith("/agent-access")) return agentPut(JSON.parse(String(init.body)), ++n)
+    if (init?.method === "PUT") return new Response("{}", { status: 200 })
+    return new Response(JSON.stringify({ folder: "design", acl: [], ...get() }), { status: 200 })
+  })
+  const calls = () => flags.fetch.mock.calls.map(call => call as unknown as [string, RequestInit | undefined])
+  return {
+    agentPuts: () => calls().filter(([url, init]) => init?.method === "PUT" && url.includes("/agent-access")).length,
+    reads: () => calls().filter(([url, init]) => (init?.method ?? "GET") === "GET" && new URL(url, "http://h").pathname.endsWith("/acl")).length,
+  }
+}
+
+async function saveAgentsAs(level: string) {
+  const onOpenChange = vi.fn()
+  renderDialog(onOpenChange)
+  await screen.findByRole("combobox", { name: "Agents of this folder's crew" })
+  change("Agents of this folder's crew", level)
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  return onOpenChange
+}
+
+it("on the server, a 409 because the flag is off shows the server's reason, not a concurrent change (#5343)", async () => {
+  flags.mock = false
+  let available = true
+  agentPutServer(() => { available = false; return new Response(JSON.stringify({ error: "agent access modes are off in this workspace", code: "artifact_agent_access_modes_off" }), { status: 409 }) },
+    () => ({ acl_version: 4, agent_access: "none", agent_access_available: available }))
+  await saveAgentsAs("read")
+  await screen.findByText(/agent access modes are off in this workspace/)
+  expect(screen.queryByText(/changed by someone else/)).toBeNull()
+})
+
+it("on the server, an error other than 409 passes through without a re-read or retry (#5343)", async () => {
+  flags.mock = false
+  const server = agentPutServer(() => new Response(JSON.stringify({ error: "server is unhappy" }), { status: 500 }),
+    () => ({ acl_version: 4, agent_access: "none", agent_access_available: true }))
+  await saveAgentsAs("read")
+  await screen.findByText(/server is unhappy/)
+  const readsAfterOpen = server.reads()
+  expect(server.agentPuts()).toBe(1)
+  await new Promise(r => setTimeout(r, 50))
+  expect(server.reads()).toBe(readsAfterOpen)
+})
+
+it("on the server, retries at most once: a 409 on the retry is shown (#5343)", async () => {
+  flags.mock = false
+  let version = 4
+  const server = agentPutServer(() => { version++; return new Response(JSON.stringify({ error: "folder changed since acl_version; read its permissions again" }), { status: 409 }) },
+    () => ({ acl_version: version, agent_access: "none", agent_access_available: true }))
+  const onOpenChange = await saveAgentsAs("read")
+  await screen.findByText(/folder changed since acl_version/)
+  expect(server.agentPuts()).toBe(2)
+  expect(onOpenChange).not.toHaveBeenCalledWith(false)
 })
