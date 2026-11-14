@@ -257,7 +257,10 @@ already-referenced runs the ordinary way, binding nothing.
   revision and lease, so an agent write under another person's lease ends as
   a proposal, never a direct edit. Without it a Sheet or Mooring change
   answers `proposal_required` and a Word document change is refused; no lease
-  is taken. Native Word and Sheet Craft tasks are unchanged.
+  is taken. The run sidecar forwards only a single `page_id` on the Word
+  draft view (`crewship doc draft view --page`) and refuses every other
+  query; the server alone decides reach, and an unreached page is answered
+  like a missing one. Native Word and Sheet Craft tasks are unchanged.
 - Every access through this path is audited as `artifact.agent_run_accessed`,
   naming the human the agent acted for, the agent, run, reach and operation,
   in the same transaction; no audit record, no access. This covers artifact

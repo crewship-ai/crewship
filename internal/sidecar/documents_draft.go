@@ -435,10 +435,19 @@ func (s *Server) handleDocumentDraft(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unsupported draft method", 405)
 		return
 	}
+	// The view may name one Document the run reaches through its chat scope
+	// (#5317 step 5.3): a single page_id and nothing else. The server alone
+	// decides whether the run reaches it; an unreached page gets a missing
+	// page's answer there. Every other query is refused here.
 	q, err := url.ParseQuery(r.URL.RawQuery)
-	if err != nil || len(q) != 0 {
+	page, selected := q["page_id"]
+	if err != nil || len(q) > 1 || len(q) == 1 && (!selected || r.Method != http.MethodGet || len(page) != 1 || page[0] == "" || len(page[0]) > 256) {
 		http.Error(w, "draft view has no caller-selected scope", 400)
 		return
+	}
+	host := "/api/v1/internal/documents/draft"
+	if selected {
+		host += "?" + url.Values{"page_id": page}.Encode()
 	}
 	release, ok := acquireArtifactForward(w, r)
 	if !ok {
@@ -454,7 +463,7 @@ func (s *Server) handleDocumentDraft(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "draft view has no request body", 400)
 		return
 	}
-	response, err := s.documentHostRequest(r, r.Method, "/api/v1/internal/documents/draft", raw, 64<<10)
+	response, err := s.documentHostRequest(r, r.Method, host, raw, 64<<10)
 	if err != nil {
 		http.Error(w, "draft outcome unavailable; retain the exact packet", 503)
 		return

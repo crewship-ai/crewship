@@ -625,12 +625,17 @@ owner on 2026-11-13.
    and never bypasses the lease.
    - *Reads.* A Word document is read through any reach (attached, created,
      consented, standing, folder), its human reading it as an ordinary member:
-     the Docs authority's `state` callback, and the server's draft view with
-     `?page_id=` (mode `read`, every paragraph and heading; the run sidecar
-     and `crewship doc draft view` do not forward a page yet). A Sheet is read
+     the Docs authority's `state` callback, and the draft view with one
+     `page_id` (`crewship doc draft view --page`, MCP `doc_draft_view`; mode
+     `read`, every paragraph and heading). The run sidecar forwards `page_id`
+     only as the view's single query parameter and refuses every other query;
+     the server alone decides reach, so an unreached page gets a missing
+     page's answer end to end, and with the flag off the `page_id` is
+     refused. A Sheet is read
      (`action: read`, no `mandate_id`) only when its human is the owner or an
      owner-named editor, and a Mooring document only when its human owns it;
-     both kinds keep their rule that agent grants, crew grants and folders
+     (`action: read` with no `mandate_id` also over MCP: `workbook_read`,
+     `mooring_command`); both kinds keep their rule that agent grants, crew grants and folders
      never reach their content, so standing and folder reach do not apply to
      them, and the audited ADMIN or OWNER read never passes to the agent.
      Docs and Sheets have no shared version: every reader the human's own
@@ -639,9 +644,10 @@ owner on 2026-11-13.
      and never takes a lease. A Sheet or Mooring change (`apply`, `command`)
      the run reaches answers 409 `proposal_required` (no proposal delivery
      exists for them yet); one it does not reach is refused like a missing
-     artifact. A Word document's lease, commit, checkpoint and proposal are
-     refused like a missing one; an agent proposal on a Word document needs an
-     iteration propose mandate.
+     artifact. Over MCP every write tool still requires `mandate_id`. A Word
+     document's lease, commit, checkpoint and proposal are refused like a
+     missing one; an agent proposal on a Word document needs an iteration
+     propose mandate (proposals through the scope: #5357, #5359).
    Native Word and Sheet Craft tasks (`crewship craft task`) are a separate,
    explicitly consented runtime and are unchanged.
 7. **Limits, read from the workspace policy on every use.** One chat run

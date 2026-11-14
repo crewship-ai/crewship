@@ -70,8 +70,8 @@ func mooringMCPCatalog() []memoryMCPToolDescriptor {
 	schema, _ := json.Marshal(object(map[string]any{
 		"action":      map[string]any{"type": "string", "enum": []string{"read", "command"}},
 		"artifact_id": text, "mandate_id": text, "request": packet,
-	}, []string{"action", "artifact_id", "mandate_id"}))
-	return []memoryMCPToolDescriptor{{Name: "mooring_command", Description: "Read or run a manifest-declared application command under an explicit human mandate for this live run. Read discovers the manifest and state. Preserve mutation ID and preconditions on uncertain retry. Shared DIRECT documents are refused.", InputSchema: schema}}
+	}, []string{"action", "artifact_id"}))
+	return []memoryMCPToolDescriptor{{Name: "mooring_command", Description: "Read or run a manifest-declared application command under an explicit human mandate for this live run. Read discovers the manifest and state; a read may omit mandate_id for a document attached to the message that started this run. A command always needs mandate_id. Preserve mutation ID and preconditions on uncertain retry. Shared DIRECT documents are refused.", InputSchema: schema}}
 }
 func (s *Server) respondMooringMCPToolCall(w http.ResponseWriter, r *http.Request, req memoryMCPRequest, name string, raw []byte) bool {
 	if name != "mooring_command" {
@@ -83,6 +83,15 @@ func (s *Server) respondMooringMCPToolCall(w http.ResponseWriter, r *http.Reques
 	}
 	if len(raw) > appengine.MaxSnapshotBytes+16384 || !json.Valid(raw) {
 		s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "invalid application packet"}))
+		return true
+	}
+	// Only a read may omit the mandate (#5317 5.3); a command keeps needing it.
+	var envelope struct {
+		Action    string `json:"action"`
+		MandateID string `json:"mandate_id"`
+	}
+	if json.Unmarshal(raw, &envelope) != nil || envelope.Action != "read" && envelope.MandateID == "" {
+		s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": "a command needs the retained mandate_id"}))
 		return true
 	}
 	token := bearerToken(r)

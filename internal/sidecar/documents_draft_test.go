@@ -58,7 +58,7 @@ func TestDocumentDraftTransportIdentityAndBounds(t *testing.T) {
 	for _, test := range []struct {
 		method, path, token, body string
 		status                    int
-	}{{"GET", "/api/v1/documents/draft?workspace_id=ws-1", token, "", 400}, {"GET", "/api/v1/documents/draft?page_id=foreign", token, "", 400}, {"GET", "/api/v1/documents/draft", token, `{}`, 400}, {"DELETE", "/api/v1/documents/draft", token, "", 405}, {"GET", "/api/v1/documents/draft", "", "", 403}, {"GET", "/api/v1/documents/draft", s.ipc.AgentToken, "", 403}, {"GET", "/api/v1/documents/draft", internaltoken.DeriveAgentRunToken(key, "wrong-ws", "agent-boot", "run-boot"), "", 403}, {"POST", "/api/v1/documents/draft", token, strings.Repeat("x", (1<<20)+1), 413}} {
+	}{{"GET", "/api/v1/documents/draft?workspace_id=ws-1", token, "", 400}, {"GET", "/api/v1/documents/draft?page_id=foreign&workspace_id=ws-1", token, "", 400}, {"GET", "/api/v1/documents/draft", token, `{}`, 400}, {"DELETE", "/api/v1/documents/draft", token, "", 405}, {"GET", "/api/v1/documents/draft", "", "", 403}, {"GET", "/api/v1/documents/draft", s.ipc.AgentToken, "", 403}, {"GET", "/api/v1/documents/draft", internaltoken.DeriveAgentRunToken(key, "wrong-ws", "agent-boot", "run-boot"), "", 403}, {"POST", "/api/v1/documents/draft", token, strings.Repeat("x", (1<<20)+1), 413}} {
 		w := invoke(test.method, test.path, test.token, test.body)
 		if w.Code != test.status || calls != before {
 			t.Fatalf("scope/bound guard%d want%d calls%d %s", w.Code, test.status, calls, w.Body.String())

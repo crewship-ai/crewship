@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -25,6 +26,7 @@ func newDocDraftCommand() *cobra.Command { return newDocDraftCommandWithTranspor
 // Transport injection is available to Go tests only, never command flags.
 func newDocDraftCommandWithTransport(transport http.RoundTripper) *cobra.Command {
 	root := &cobra.Command{Use: "draft", Short: "Save guarded drafts of the document this live run was admitted to write", Example: `  crewship doc draft view
+  crewship doc draft view --page <page-id>
   crewship doc draft prepare --file input.json > packet.json
   crewship doc draft apply --file packet.json
   crewship doc draft propose --file packet.json`, Long: "Use view, then prepare once and retain the immutable packet. prepare is unsaved. apply commits text then pins it; a failed pin does not undo committed text. Retry the exact packet, never regenerate its preconditions. Only this run’s admitted new or existing document; no other artifact or human-profile fallback. On a schema 4, 5 or 6 document the view has mode propose: prepare builds a proposal packet and propose sends it; the document is unchanged until a human accepts it.", PersistentPreRunE: func(cmd *cobra.Command, _ []string) error {
@@ -49,8 +51,25 @@ func newDocDraftCommandWithTransport(transport http.RoundTripper) *cobra.Command
 			if !strings.HasPrefix(token, "agtv2.") || len(token) > 2048 || strings.ContainsAny(token, " \t\r\n") {
 				return errors.New("original CREWSHIP_AGENT_TOKEN run capability required; no human profile fallback")
 			}
+			origin, err := docDraftSidecarOrigin()
+			if err != nil {
+				return err
+			}
+			query := ""
+			if op == "view" {
+				if page, _ := cmd.Flags().GetString("page"); cmd.Flags().Changed("page") {
+					if page == "" {
+						return errors.New("--page needs the attached Document's page ID")
+					}
+					query = "?" + url.Values{"page_id": []string{page}}.Encode()
+				}
+			}
 			exchange := func(method string, body []byte) (int, []byte, error) {
-				req, err := http.NewRequestWithContext(cmd.Context(), method, selectedAgentOrigin+"/api/v1/documents/draft", bytes.NewReader(body))
+				target := origin + "/api/v1/documents/draft"
+				if method == http.MethodGet {
+					target += query
+				}
+				req, err := http.NewRequestWithContext(cmd.Context(), method, target, bytes.NewReader(body))
 				if err != nil {
 					return 0, nil, errors.New("invalid protected draft request")
 				}
@@ -146,8 +165,26 @@ func newDocDraftCommandWithTransport(transport http.RoundTripper) *cobra.Command
 		}}
 		if op != "view" {
 			command.Flags().String("file", "", "Original JSON input or immutable packet file; - reads stdin")
+		} else {
+			command.Flags().String("page", "", "Read a Document attached to the message that started this run (page ID); the view is read-only")
 		}
 		root.AddCommand(command)
 	}
 	return root
+}
+
+// docDraftSidecarOrigin is the protected run sidecar: the fixed loopback
+// origin, or CREWSHIP_SIDECAR_URL when it names another plain loopback http
+// origin (as for `mooring agent`). It is transport selection, never an
+// authority override: the run's own bearer still decides everything.
+func docDraftSidecarOrigin() (string, error) {
+	base := os.Getenv("CREWSHIP_SIDECAR_URL")
+	if base == "" {
+		return selectedAgentOrigin, nil
+	}
+	u, err := url.Parse(base)
+	if err != nil || u.Scheme != "http" || u.Hostname() != "127.0.0.1" || u.Port() == "" || u.RawQuery != "" || u.ForceQuery || u.Path != "" || u.User != nil || u.Fragment != "" || u.Opaque != "" {
+		return "", errors.New("loopback sidecar URL required")
+	}
+	return "http://" + u.Host, nil
 }

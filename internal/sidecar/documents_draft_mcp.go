@@ -38,7 +38,7 @@ func documentDraftMCPCatalog() []memoryMCPToolDescriptor {
 		name, description string
 		props             map[string]any
 	}{
-		{"doc_draft_view", "Read only this live run's explicitly admitted new or existing Document drafting view. No arbitrary Page, human profile, raw Yjs or renewed authority.", map[string]any{}},
+		{"doc_draft_view", "Read only this live run's explicitly admitted new or existing Document drafting view, or with page_id a Document attached to the message that started this run (mode read, never drafted). No arbitrary Page, human profile, raw Yjs or renewed authority.", map[string]any{}},
 		{"doc_draft_prepare", "Prepare UNSAVED replaceText and checkpoint packets from the permitted view. Select a paragraph/heading ID and text; the tool copies server hashes and original revision/generation/epoch. Retain this exact packet for uncertain retries. A view with mode propose returns a proposal packet for doc_draft_propose instead.", map[string]any{"view": map[string]any{"oneOf": []any{view, proposeView}}, "target": stringField, "text": stringField, "mutation_id": stringField}},
 		{"doc_draft_propose", "Send an immutable proposal packet (from doc_draft_prepare on a mode propose view). The document is unchanged; a human reviews and accepts or rejects the proposal. Retry only with the same packet.", map[string]any{"packet": proposalPacket}},
 		{"doc_draft_apply", "Apply an immutable prepared packet, then pin its committed revision. No reread or rederived retries. committed_checkpoint_pending means the patch is already durable; retry checkpoint with the same packet.", map[string]any{"packet": packet}},
@@ -46,7 +46,13 @@ func documentDraftMCPCatalog() []memoryMCPToolDescriptor {
 	}
 	tools := []memoryMCPToolDescriptor{}
 	for _, s := range specs {
-		schema, _ := json.Marshal(object(s.props))
+		properties := object(s.props)
+		if s.name == "doc_draft_view" {
+			// One optional Document the run reaches through its chat scope
+			// (#5317 5.3); the server decides whether it does.
+			properties = map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"page_id": stringField}, "required": []string{}}
+		}
+		schema, _ := json.Marshal(properties)
 		tools = append(tools, memoryMCPToolDescriptor{Name: s.name, Description: s.description, InputSchema: schema})
 	}
 	return tools
@@ -64,10 +70,14 @@ func (s *Server) respondDocumentDraftMCPToolCall(w http.ResponseWriter, r *http.
 	fail := func(err error) {
 		s.writeRoutinesMCPToolResult(w, req, 400, mustJSON(map[string]string{"error": err.Error()}))
 	}
+	viewQuery := ""
 	exchange := func(method string, body []byte) (int, []byte, error) {
 		forward := r.Clone(r.Context())
 		forward.Method = method
 		forward.URL, _ = url.Parse("/api/v1/documents/draft")
+		if method == http.MethodGet {
+			forward.URL.RawQuery = viewQuery
+		}
 		forward.Body = io.NopCloser(bytes.NewReader(body))
 		forward.ContentLength = int64(len(body))
 		forward.Header = r.Header.Clone()
@@ -112,9 +122,13 @@ func (s *Server) respondDocumentDraftMCPToolCall(w http.ResponseWriter, r *http.
 		s.writeRoutinesMCPToolResult(w, req, status, mustJSON(out))
 	case "doc_draft_view":
 		args := map[string]json.RawMessage{}
-		if err := DecodeDocumentDraft(raw, &args); err != nil || len(args) != 0 {
-			fail(errors.New("draft view accepts an empty object only"))
+		var page string
+		if err := DecodeDocumentDraft(raw, &args); err != nil || len(args) > 1 || len(args) == 1 && (args["page_id"] == nil || json.Unmarshal(args["page_id"], &page) != nil || page == "") {
+			fail(errors.New("draft view accepts an empty object or one page_id only"))
 			return true
+		}
+		if page != "" {
+			viewQuery = url.Values{"page_id": []string{page}}.Encode()
 		}
 		status, body, err := exchange(http.MethodGet, nil)
 		if err != nil || !json.Valid(body) {

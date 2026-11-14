@@ -4,15 +4,22 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/appengine"
 	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/mooring"
+	"github.com/crewship-ai/crewship/internal/sidecar"
 )
 
 // #5317 step 5.3, owner decision: a Sheet (GridCraft), a Mooring document and
@@ -504,4 +511,102 @@ func TestRunScopeDocumentReach_FlagOffUnchanged(t *testing.T) {
 	if rows := kindAuditRows(t, g.f); len(rows) != 0 {
 		t.Fatalf("flag off wrote agent-run audit records: %+v", rows)
 	}
+}
+
+// The agent's own path, end to end: the real CLI binary (`crewship doc draft
+// view --page`) through the real run sidecar to the server. An attached
+// Document is read; a Document the run does not reach gets exactly the
+// answer a missing one gets, through the sidecar; with the flag off a named
+// page is refused.
+func TestRunScopeDocumentReach_DraftViewBinaryThroughSidecar(t *testing.T) {
+	g := newKindReachRig(t)
+	g.fakeDocs(t)
+	g.wordDoc(t, "word-attached", g.f.a.HumanUserID, true)
+	g.wordDoc(t, "word-sibling", g.f.a.HumanUserID, true)
+	g.start(t, "word-attached")
+	host := httptest.NewServer(g.router)
+	t.Cleanup(host.Close)
+
+	const master = "synthetic-artifact-run-scope-master"
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := probe.Addr().String()
+	_ = probe.Close()
+	side := sidecar.NewServer(sidecar.ServerConfig{Addr: addr, Logger: newTestLogger(), IPC: &sidecar.IPCConfig{
+		BaseURL: host.URL, Token: g.crewTok, WorkspaceID: g.f.a.WorkspaceID, CrewID: g.f.a.CrewID,
+		AgentID: g.f.a.AgentID, AgentSlug: "principal-agent", AgentToken: internaltoken.DeriveAgentToken(master, g.f.a.WorkspaceID, g.f.a.AgentID),
+		AgentRunKey: internaltoken.DeriveAgentRunKey(master, g.f.a.WorkspaceID, g.f.a.CrewID), RunID: g.f.a.RunID, RunChatID: g.f.a.ChatID,
+	}})
+	ctx, cancel := context.WithCancel(t.Context())
+	t.Cleanup(cancel)
+	go func() { _ = side.Start(ctx) }()
+	<-side.Ready()
+
+	// The sidecar's own answer for a page the run does not reach is the
+	// answer for a missing page, status and body.
+	direct := func(page string) (int, string) {
+		t.Helper()
+		req, err := http.NewRequestWithContext(t.Context(), "GET", "http://"+addr+"/api/v1/documents/draft?page_id="+page, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Authorization", "Bearer "+g.runToken)
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer res.Body.Close()
+		raw, _ := io.ReadAll(res.Body)
+		return res.StatusCode, string(raw)
+	}
+	if code, body := direct("word-attached"); code != 200 || !strings.Contains(body, `"mode":"read"`) {
+		t.Fatalf("attached through the sidecar: %d %s", code, body)
+	}
+	siblingCode, siblingBody := direct("word-sibling")
+	missingCode, missingBody := direct("word-nowhere")
+	if siblingCode < 400 || siblingCode != missingCode || siblingBody != missingBody {
+		t.Fatalf("an unreached Document through the sidecar: %d %q, missing: %d %q", siblingCode, siblingBody, missingCode, missingBody)
+	}
+
+	dir := t.TempDir()
+	binary := filepath.Join(dir, "crewship")
+	build := exec.CommandContext(t.Context(), "go", "build", "-o", binary, "./cmd/crewship")
+	build.Dir = "../.."
+	build.Env = nestedGoBuildEnv(t)
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build actual binary: %v %s", err, out)
+	}
+	cli := func(args ...string) (string, error) {
+		t.Helper()
+		command := exec.CommandContext(t.Context(), binary, args...)
+		command.Dir = dir
+		for _, entry := range os.Environ() {
+			if !strings.HasPrefix(entry, "CREWSHIP_") {
+				command.Env = append(command.Env, entry)
+			}
+		}
+		command.Env = append(command.Env, "CREWSHIP_AGENT_TOKEN="+g.runToken, "CREWSHIP_SIDECAR_URL=http://"+addr, "CREWSHIP_NO_SLUG_CACHE=1", "NO_COLOR=1")
+		out, err := command.CombinedOutput()
+		return string(out), err
+	}
+	out, err := cli("doc", "draft", "view", "--page", "word-attached")
+	var v DocumentDraftView
+	if err != nil || json.Unmarshal([]byte(out), &v) != nil || v.PageID != "word-attached" || v.Mode != "read" || len(v.Targets) != 1 {
+		t.Fatalf("attached view through the binary: %v %s", err, out)
+	}
+	sibling, siblingErr := cli("doc", "draft", "view", "--page", "word-sibling")
+	missing, missingErr := cli("doc", "draft", "view", "--page", "word-nowhere")
+	if siblingErr == nil || missingErr == nil || sibling != missing {
+		t.Fatalf("an unreached Document through the binary: %v %q, missing: %v %q", siblingErr, sibling, missingErr, missing)
+	}
+	mustExec(t, g.f.rig.db, `DELETE FROM feature_flag_overrides WHERE id='ref-flag-on'`)
+	if out, err := cli("doc", "draft", "view", "--page", "word-attached"); err == nil || !strings.Contains(out, "HTTP400") {
+		t.Fatalf("flag off, a named page through the binary: %v %s", err, out)
+	}
+	if code, _ := direct("word-attached"); code != 400 {
+		t.Fatalf("flag off, a named page through the sidecar: %d", code)
+	}
+	wantKindAudit(t, g.f, map[string]string{})
 }
