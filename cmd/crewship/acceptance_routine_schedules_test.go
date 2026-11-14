@@ -137,6 +137,8 @@ type routineSchedulesJSONRow struct {
 	Enabled            bool           `json:"enabled"`
 	CreatorKind        string         `json:"creator_kind"`
 	CreatorUserID      string         `json:"creator_user_id"`
+	ArtifactAccess     string         `json:"artifact_access"`
+	StoppedReason      string         `json:"stopped_reason"`
 }
 
 type routineSchedulesJSONAck struct {
@@ -451,5 +453,55 @@ func TestAcceptanceRoutineSchedules_InvalidInput(t *testing.T) {
 	var cronExpr string
 	if err := db.QueryRow(`SELECT cron_expr FROM pipeline_schedules WHERE id = ?`, created.ID).Scan(&cronExpr); err != nil || cronExpr != "0 9 * * *" {
 		t.Fatalf("a refused update changed the cron: %q err=%v", cronExpr, err)
+	}
+}
+
+// With artifact access on, `schedules list` shows whether each schedule's
+// fires reach artifacts and why not (owner decision for #5356): JSON
+// artifact_access / stopped_reason and the ARTIFACTS column. A schedule whose
+// creator no longer holds the membership they saved it with is stopped; the
+// creator changing what it runs, through `schedules update --cron`, restores
+// it. The database is only used to arrange the state; every assertion reads
+// the CLI's output.
+func TestAcceptanceRoutineSchedules_ShowsWhyArtifactAccessStopped(t *testing.T) {
+	ownerCfg, _, db := startRoutineSchedulesAcceptanceServer(t)
+	saveRoutineSchedulesTarget(t, ownerCfg)
+	if _, err := db.Exec(`INSERT INTO feature_flag_overrides(id,flag_id,workspace_id,enabled) VALUES('sch-art','ff_artifact_agent_access_modes',?,1)`, routineSchedulesAcceptanceWorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	out, stderr, err := runRoutineSchedulesCLI(t, ownerCfg, "-f", "json", "routine", "schedules", "create", "--slug", "acceptance-sched", "--name", "art", "--cron", "0 9 * * *")
+	if err != nil {
+		t.Fatalf("create: %v\n%s%s", err, out, stderr)
+	}
+	var created routineSchedulesJSONRow
+	_ = json.Unmarshal([]byte(out), &created)
+	if created.ArtifactAccess != "active" {
+		t.Fatalf("a person's fresh schedule is not active: %+v", created)
+	}
+	state := func() routineSchedulesJSONRow {
+		t.Helper()
+		for _, r := range listRoutineSchedulesJSON(t, ownerCfg) {
+			if r.ID == created.ID {
+				return r
+			}
+		}
+		t.Fatalf("schedule %s not listed", created.ID)
+		return routineSchedulesJSONRow{}
+	}
+	if _, err := db.Exec(`UPDATE pipeline_schedules SET creator_member_id='schm-gone' WHERE id=?`, created.ID); err != nil {
+		t.Fatal(err)
+	}
+	if got := state(); got.ArtifactAccess != "stopped" || got.StoppedReason != "creator_not_member" {
+		t.Fatalf("a schedule whose creator left shows %q/%q", got.ArtifactAccess, got.StoppedReason)
+	}
+	table, _, err := runRoutineSchedulesCLI(t, ownerCfg, "routine", "schedules", "list")
+	if err != nil || !strings.Contains(table, "ARTIFACTS") || !strings.Contains(table, "stopped: creator_not_member") {
+		t.Fatalf("the table does not say why the schedule is stopped: %v\n%s", err, table)
+	}
+	if out, stderr, err := runRoutineSchedulesCLI(t, ownerCfg, "routine", "schedules", "update", created.ID, "--cron", "0 10 * * *"); err != nil {
+		t.Fatalf("update: %v\n%s%s", err, out, stderr)
+	}
+	if got := state(); got.ArtifactAccess != "active" || got.StoppedReason != "" {
+		t.Fatalf("the creator's re-save did not restore it: %q/%q", got.ArtifactAccess, got.StoppedReason)
 	}
 }

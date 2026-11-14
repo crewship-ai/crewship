@@ -390,3 +390,84 @@ func TestScheduleContentChanged(t *testing.T) {
 		}
 	}
 }
+
+// A schedule whose creator no longer vouches says so (owner decision for
+// #5356): artifact_access "stopped" with the reason. The person-standing
+// reason is shown only to the creator and to workspace OWNER/ADMIN; others
+// see the generic one. A content change by the creator in good standing
+// restores it. With the flag off nothing is shown.
+func TestScheduleCreator_ListShowsWhyAScheduleIsStopped(t *testing.T) {
+	h, db, ownerID, wsID := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, wsID, "pln_stop", "stop-routine")
+	mustExec(t, db, `INSERT INTO users(id,email) VALUES('u_mgr','mgr@ex.com'),('u_view','view@ex.com')`)
+	mustExec(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('wm_mgr',?,'u_mgr','MANAGER'),('wm_view',?,'u_view','VIEWER')`, wsID, wsID)
+	mustExec(t, db, `INSERT INTO feature_flag_overrides(id,flag_id,workspace_id,enabled) VALUES('stop-flag','ff_artifact_agent_access_modes',?,1)`, wsID)
+	rr := httptest.NewRecorder()
+	h.CreateSchedule(rr, asPerson(httptest.NewRequest("POST", "/", strings.NewReader(`{"cron_expr":"0 * * * *","target_pipeline_slug":"stop-routine","name":"mgr"}`)), "u_mgr", wsID, "MANAGER"))
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rr.Code, rr.Body)
+	}
+	var mine scheduleResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &mine)
+	rr = httptest.NewRecorder()
+	NewRoutineInternalAdapter(h).CreateSchedule(rr, httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, strings.NewReader(`{"cron_expr":"0 * * * *","target_pipeline_slug":"stop-routine","name":"agent"}`)))
+	var agent scheduleResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &agent)
+
+	list := func(user, role string) map[string]scheduleResponse {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		h.ListSchedules(rr, withWorkspaceUser(httptest.NewRequest("GET", "/", nil), user, wsID, role))
+		if rr.Code != http.StatusOK {
+			t.Fatalf("list: %d %s", rr.Code, rr.Body)
+		}
+		var rows []scheduleResponse
+		_ = json.Unmarshal(rr.Body.Bytes(), &rows)
+		out := map[string]scheduleResponse{}
+		for _, r := range rows {
+			out[r.ID] = r
+		}
+		return out
+	}
+	state := func(rows map[string]scheduleResponse, id string) string {
+		return rows[id].ArtifactAccess + ":" + rows[id].StoppedReason
+	}
+	if got := state(list(ownerID, "OWNER"), mine.ID); got != "active:" {
+		t.Fatalf("a good-standing creator's schedule shows %q", got)
+	}
+	for user, role := range map[string]string{ownerID: "OWNER", "u_view": "VIEWER"} {
+		if got := state(list(user, role), agent.ID); got != "stopped:agent_created" {
+			t.Fatalf("%s sees the agent's schedule as %q", role, got)
+		}
+	}
+
+	mustExec(t, db, `UPDATE users SET access_revoked_at='2999-01-01T00:00:00Z' WHERE id='u_mgr'`)
+	for _, tc := range []struct{ user, role, want string }{
+		{ownerID, "OWNER", "stopped:creator_access_revoked"},
+		{ownerID, "ADMIN", "stopped:creator_access_revoked"},
+		{"u_mgr", "MANAGER", "stopped:creator_access_revoked"},
+		{"u_view", "VIEWER", "stopped:creator_not_in_good_standing"},
+		{"u_view", "MANAGER", "stopped:creator_not_in_good_standing"},
+	} {
+		if got := state(list(tc.user, tc.role), mine.ID); got != tc.want {
+			t.Fatalf("%s as %s sees %q, want %q", tc.user, tc.role, got, tc.want)
+		}
+	}
+
+	// A person in good standing (here the OWNER; PATCH is the manage tier)
+	// changes what it runs: they adopt it, and it runs again.
+	r := asPerson(httptest.NewRequest("PATCH", "/", strings.NewReader(`{"cron_expr":"0 5 * * *"}`)), ownerID, wsID, "OWNER")
+	r.SetPathValue("scheduleId", mine.ID)
+	rr = httptest.NewRecorder()
+	h.UpdateSchedule(rr, r)
+	var patched scheduleResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &patched)
+	if rr.Code != http.StatusOK || patched.ArtifactAccess != "active" || patched.CreatorUserID != ownerID {
+		t.Fatalf("re-save: %d %s", rr.Code, rr.Body)
+	}
+
+	mustExec(t, db, `DELETE FROM feature_flag_overrides WHERE id='stop-flag'`)
+	if got := state(list(ownerID, "OWNER"), agent.ID); got != ":" {
+		t.Fatalf("flag off shows %q", got)
+	}
+}

@@ -22976,6 +22976,13 @@
       },
       "Schedule": {
         "properties": {
+          "artifact_access": {
+            "enum": [
+              "active",
+              "stopped"
+            ],
+            "type": "string"
+          },
           "catchup_policy": {
             "type": "string"
           },
@@ -23055,6 +23062,19 @@
           },
           "spread_seconds": {
             "type": "integer"
+          },
+          "stopped_reason": {
+            "enum": [
+              "agent_created",
+              "creator_unknown",
+              "creator_not_member",
+              "creator_suspended",
+              "creator_access_revoked",
+              "creator_role",
+              "creator_restricted",
+              "creator_not_in_good_standing"
+            ],
+            "type": "string"
           },
           "target_pipeline_id": {
             "type": "string"

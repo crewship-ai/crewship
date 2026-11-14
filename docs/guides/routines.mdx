@@ -1799,7 +1799,13 @@ not had their access revoked since; "run now" follows the same rule. Change an
 older or agent-saved schedule yourself
 (`crewship routine schedules update <id> --cron "0 9 * * *"`) to give it that
 access; `--enabled` alone does not. An agent's later change takes it away
-again.
+again. A schedule that has stopped reaching artifacts says so: the ARTIFACTS
+column of `crewship routine schedules list` (`artifact_access`,
+`stopped_reason` in JSON) and an "artifact access stopped" badge with the
+reason on the routine's schedules tab. Its runs still start. The creator and
+workspace admins see why (for example `creator_access_revoked` after an
+admin revoked their sessions); others see only that the creator is no longer
+in good standing.
 
 #### Natural-language schedules (`--when`)
 

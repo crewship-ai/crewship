@@ -777,7 +777,13 @@ owner on 2026-11-13.
    `schedule_creator_not_in_good_standing`; the detail (left, suspended,
    revoked, role, restricted) goes only to the server log. The entry names
    the schedule only for a fire the host vouched for. With the flag off
-   nothing is read, recorded or journaled. An agent's own webhook and cron runs,
+   nothing is read, recorded or journaled. A stopped schedule says so where
+   schedules are listed (API `artifact_access` "active" | "stopped" with
+   `stopped_reason`, the CLI's ARTIFACTS column, the schedules tab), computed
+   with the same standing check every fire runs
+   (`pipeline.ScheduleCreatorStopped`); a person-standing reason is shown only
+   to the creator and workspace OWNER/ADMIN, others see
+   `creator_not_in_good_standing`. An agent's own webhook and cron runs,
    configured on the agent by a person, record as before. So the host
    producer of such a run records the run in `artifact_unattended_runs` (agent, crew, trigger,
    source) after its run record and before its agent starts, and the server

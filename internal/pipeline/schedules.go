@@ -129,6 +129,9 @@ type Schedule struct {
 	// when unknown). A revocation of the creator's access after it voids
 	// the vouching.
 	CreatorSetAt string
+	// CreatorMemberID is the workspace_members row the person creator held
+	// when they saved it; leaving and rejoining does not restore it.
+	CreatorMemberID string
 
 	CreatedAt time.Time
 	UpdatedAt time.Time
@@ -1836,7 +1839,7 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        COALESCE(disabled_reason, ''),
        COALESCE(activation, ''),
        created_at, updated_at, deleted_at, COALESCE(chat_origin_id,''),
-       COALESCE(creator_kind,''), COALESCE(creator_user_id,''), COALESCE(creator_set_at,'')
+       COALESCE(creator_kind,''), COALESCE(creator_user_id,''), COALESCE(creator_set_at,''), COALESCE(creator_member_id,'')
 FROM pipeline_schedules`
 
 func scanSchedule(rs rowScanner) (*Schedule, error) {
@@ -1867,7 +1870,7 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		&s.DisabledReason,
 		&s.Activation,
 		&createdAt, &updatedAt, &deletedAt, &s.ChatOriginID,
-		&s.CreatorKind, &s.CreatorUserID, &s.CreatorSetAt,
+		&s.CreatorKind, &s.CreatorUserID, &s.CreatorSetAt, &s.CreatorMemberID,
 	)
 	if err != nil {
 		return nil, err

@@ -29,7 +29,7 @@
 #   FIRE_TIMEOUT      seconds to wait for each fire to finish (default 900)
 #
 # The schedule's creator is a throwaway account made for this run
-# (qa-5356-<stamp>@example.test, created with `workspace member invite
+# (qa-live-5356-<stamp>@example.test, created with `workspace member invite
 # --create-only`, which refuses any existing account). Its setup link is
 # redeemed with one anonymous POST /api/v1/auth/reset, the call the setup page
 # makes; there is no CLI command for it. Everything else is the CLI. No shared
@@ -84,7 +84,7 @@ if [ -n "${MANAGER_EMAIL:-}" ]; then
   echo "MANAGER_EMAIL is refused: this script demotes and may suspend its creator, so it only ever uses a throwaway account it creates" >&2
   exit 2
 fi
-MANAGER_EMAIL="qa-5356-$stamp@example.test"
+MANAGER_EMAIL="qa-live-5356-$stamp@example.test"
 MANAGER_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')Aa9!"
 FIRE_TIMEOUT="${FIRE_TIMEOUT:-900}"
 manager_config="$evidence/manager-cli.json"
@@ -155,7 +155,7 @@ say "Preflight"
 run owner version
 run owner whoami
 
-ws_slug="qa-5356-$stamp"
+ws_slug="qa-live-5356-$stamp"
 say "Fresh QA workspace with the flag on"
 run owner workspace create --name "QA 5356 $stamp" --slug "$ws_slug" -f json
 made_workspace=1
@@ -273,6 +273,9 @@ run manager page grant "qa-granted-$stamp" --agent qa-reader --level read
 
 say "C. The creator is demoted to MEMBER; the next fire gets no capability"
 run owner workspace member role "$manager_user_id" MEMBER
+run owner routine schedules list --slug "$routine_slug"
+shown="$(owner routine schedules list --slug "$routine_slug" -f json | jq -r --arg id "$schedule_id" '.[] | select(.id==$id) | "\(.artifact_access):\(.stopped_reason)"')"
+if [ "$shown" = "stopped:creator_role" ]; then check "C the schedule shows it is stopped and why" OK "$shown"; else check "C the schedule shows it is stopped and why" FAIL "got $shown, want stopped:creator_role"; fi
 fire
 reads="$(reads_since)"; withheld="$(withheld_since)"
 printf '\n$ crewship journal --type artifact.run_capability_withheld --since %s -f json  (this schedule)\n%s\n' "$fire_since" "$withheld" | tee -a "$log"

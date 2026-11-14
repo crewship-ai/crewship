@@ -430,3 +430,106 @@ func TestRoutineArtifactRun_SchedulerVouchesForItsOwnFire(t *testing.T) {
 		}
 	}
 }
+
+// ScheduleCreatorStopped is the one standing check behind both the fire and
+// the schedule's shown state: each way a creator stops vouching has its own
+// reason, and a person's change of what the schedule runs (a fresh creator
+// write) restores a schedule stopped by a revocation (owner decision for
+// #5356).
+func TestScheduleCreatorStopped_EachReasonAndRestore(t *testing.T) {
+	db := routineArtifactDB(t)
+	for _, q := range []string{
+		`INSERT INTO users(id,email,full_name) VALUES('u_s','s@ex.com','S')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('m_s','ws_art','u_s','MANAGER','trusted')`,
+		`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash) VALUES('pipe_s','ws_art','s','s','{}','h')`,
+	} {
+		mustExec(t, db.DB, q)
+	}
+	store := NewScheduleStore(db.DB)
+	save := func(id, kind, user string) *Schedule {
+		t.Helper()
+		s, err := store.Save(t.Context(), SaveScheduleInput{ID: id, WorkspaceID: "ws_art", Name: "s", TargetPipelineID: "pipe_s", CronExpr: "0 8 * * *", Timezone: "UTC", Enabled: true, CreatorKind: kind, CreatorUserID: user})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	stopped := func(s *Schedule) string {
+		t.Helper()
+		got, err := store.GetByID(t.Context(), s.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reason, err := ScheduleCreatorStopped(t.Context(), db.DB, "ws_art", CreatorOf(got))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return reason
+	}
+	fires := func(s *Schedule) bool {
+		t.Helper()
+		req := AgentStepRequest{WorkspaceID: "ws_art", PipelineID: "pipe_s", StepID: "s", TriggeredVia: TriggeredViaSchedule, TriggeredByID: s.ID, ArtifactScheduleID: s.ID}
+		_, _, _, ok, err := routineArtifactAdmission(t.Context(), db.DB, req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ok
+	}
+	human := save("", ScheduleCreatorHuman, "u_s")
+	if got := stopped(human); got != "" || !fires(human) {
+		t.Fatalf("a good-standing creator's schedule: stopped=%q fires=%v", got, fires(human))
+	}
+	for _, tc := range []struct {
+		name, set, undo, want string
+	}{
+		{"suspended", `UPDATE users SET suspended_at=datetime('now') WHERE id='u_s'`, `UPDATE users SET suspended_at=NULL WHERE id='u_s'`, ScheduleStoppedSuspended},
+		{"role", `UPDATE workspace_members SET role='MEMBER' WHERE id='m_s'`, `UPDATE workspace_members SET role='MANAGER' WHERE id='m_s'`, ScheduleStoppedRole},
+		{"restricted", `UPDATE workspace_members SET access_mode='restricted' WHERE id='m_s'`, `UPDATE workspace_members SET access_mode='trusted' WHERE id='m_s'`, ScheduleStoppedRestricted},
+		{"revoked", `UPDATE users SET access_revoked_at='2999-01-01T00:00:00Z' WHERE id='u_s'`, `UPDATE users SET access_revoked_at=NULL WHERE id='u_s'`, ScheduleStoppedAccessRevoked},
+	} {
+		mustExec(t, db.DB, tc.set)
+		if got := stopped(human); got != tc.want || fires(human) {
+			t.Fatalf("%s: stopped=%q fires=%v, want %q and no fire", tc.name, got, fires(human), tc.want)
+		}
+		mustExec(t, db.DB, tc.undo)
+	}
+	if got := stopped(save("", ScheduleCreatorAgent, "")); got != ScheduleStoppedAgentCreated {
+		t.Fatalf("agent-saved: %q", got)
+	}
+	if got := stopped(save("", "", "")); got != ScheduleStoppedCreatorUnknown {
+		t.Fatalf("legacy: %q", got)
+	}
+	// A human creator saved before membership was recorded is legacy too,
+	// not "no longer a member": nothing says they ever left.
+	noMember := CreatorOf(human)
+	noMember.MemberID = ""
+	if got, err := ScheduleCreatorStopped(t.Context(), db.DB, "ws_art", noMember); err != nil || got != ScheduleStoppedCreatorUnknown {
+		t.Fatalf("human without a recorded membership: %q %v", got, err)
+	}
+
+	// A revocation (revoke sessions, suspension, password recovery) stops the
+	// schedule; the person changing it again, in good standing, restores it.
+	revokedAt := time.Now().UTC()
+	if _, err := db.Exec(`UPDATE users SET access_revoked_at=? WHERE id='u_s'`, revokedAt.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+	if got := stopped(human); got != ScheduleStoppedAccessRevoked || fires(human) {
+		t.Fatalf("after the revocation: stopped=%q", got)
+	}
+	time.Sleep(2 * time.Millisecond)
+	save(human.ID, ScheduleCreatorHuman, "u_s")
+	if got := stopped(human); got != "" || !fires(human) {
+		t.Fatalf("the creator's re-save did not restore it: stopped=%q fires=%v", got, fires(human))
+	}
+
+	mustExec(t, db.DB, `DELETE FROM workspace_members WHERE id='m_s'`)
+	mustExec(t, db.DB, `INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('m_s2','ws_art','u_s','MANAGER','trusted')`)
+	if got := stopped(human); got != ScheduleStoppedNotMember {
+		t.Fatalf("left and rejoined: %q", got)
+	}
+	for reason, personal := range map[string]bool{ScheduleStoppedNotMember: true, ScheduleStoppedSuspended: true, ScheduleStoppedAccessRevoked: true, ScheduleStoppedRole: true, ScheduleStoppedRestricted: true, ScheduleStoppedAgentCreated: false, ScheduleStoppedCreatorUnknown: false} {
+		if ScheduleStoppedIsPersonal(reason) != personal {
+			t.Errorf("ScheduleStoppedIsPersonal(%q) != %v", reason, personal)
+		}
+	}
+}

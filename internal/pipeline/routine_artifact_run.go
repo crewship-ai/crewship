@@ -80,42 +80,102 @@ func scheduleFireAdmission(ctx context.Context, db *sql.DB, req AgentStepRequest
 	if req.ArtifactScheduleID == "" || req.ArtifactScheduleID != req.TriggeredByID {
 		return "", withheldScheduleUnverified, "", false, nil
 	}
-	var kind, user, member, setAt, target string
-	err = db.QueryRowContext(ctx, `SELECT COALESCE(creator_kind,''),COALESCE(creator_user_id,''),COALESCE(creator_member_id,''),COALESCE(creator_set_at,''),target_pipeline_id FROM pipeline_schedules WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, req.ArtifactScheduleID, req.WorkspaceID).Scan(&kind, &user, &member, &setAt, &target)
+	var c ScheduleCreator
+	var target string
+	err = db.QueryRowContext(ctx, `SELECT COALESCE(creator_kind,''),COALESCE(creator_user_id,''),COALESCE(creator_member_id,''),COALESCE(creator_set_at,''),target_pipeline_id FROM pipeline_schedules WHERE id=? AND workspace_id=? AND deleted_at IS NULL`, req.ArtifactScheduleID, req.WorkspaceID).Scan(&c.Kind, &c.UserID, &c.MemberID, &c.SetAt, &target)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", withheldScheduleUnverified, "", false, nil
 	}
 	if err != nil {
 		return "", "", "", false, err
 	}
-	switch {
-	case target != req.PipelineID:
+	if target != req.PipelineID {
 		return "", withheldScheduleTarget, "", false, nil
-	case kind == ScheduleCreatorAgent:
-		return "", withheldScheduleCreatorAgent, "", false, nil
-	case kind != ScheduleCreatorHuman || user == "" || member == "" || setAt == "":
-		return "", withheldScheduleCreatorLegacy, "", false, nil
 	}
-	var role, mode string
-	var suspended, revoked sql.NullString
-	err = db.QueryRowContext(ctx, `SELECT m.role,m.access_mode,u.suspended_at,u.access_revoked_at FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.id=? AND m.workspace_id=? AND m.user_id=?`, member, req.WorkspaceID, user).Scan(&role, &mode, &suspended, &revoked)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", withheldScheduleStanding, "creator is no longer the member who saved the schedule (left, or left and rejoined)", false, nil
-	}
+	stopped, err := ScheduleCreatorStopped(ctx, db, req.WorkspaceID, c)
 	if err != nil {
 		return "", "", "", false, err
 	}
+	switch stopped {
+	case "":
+		return artifactrun.TriggerScheduled, "", "", true, nil
+	case ScheduleStoppedAgentCreated:
+		return "", withheldScheduleCreatorAgent, "", false, nil
+	case ScheduleStoppedCreatorUnknown:
+		return "", withheldScheduleCreatorLegacy, "", false, nil
+	}
+	return "", withheldScheduleStanding, stopped, false, nil
+}
+
+// Why a schedule's fires reach no artifact, as the schedule's creator and the
+// workspace's admins see it (owner decision for #5356). The person-standing
+// reasons are personal: everyone else sees ScheduleStoppedNotInGoodStanding.
+const (
+	ScheduleStoppedAgentCreated      = "agent_created"
+	ScheduleStoppedCreatorUnknown    = "creator_unknown"
+	ScheduleStoppedNotMember         = "creator_not_member"
+	ScheduleStoppedSuspended         = "creator_suspended"
+	ScheduleStoppedAccessRevoked     = "creator_access_revoked"
+	ScheduleStoppedRole              = "creator_role"
+	ScheduleStoppedRestricted        = "creator_restricted"
+	ScheduleStoppedNotInGoodStanding = "creator_not_in_good_standing"
+)
+
+// ScheduleStoppedIsPersonal reports whether a stopped reason says something
+// about the creator as a person (shown only to them and to admins).
+func ScheduleStoppedIsPersonal(reason string) bool {
+	switch reason {
+	case ScheduleStoppedNotMember, ScheduleStoppedSuspended, ScheduleStoppedAccessRevoked, ScheduleStoppedRole, ScheduleStoppedRestricted:
+		return true
+	}
+	return false
+}
+
+// ScheduleCreator is a schedule's recorded creator.
+type ScheduleCreator struct{ Kind, UserID, MemberID, SetAt string }
+
+// CreatorOf is the schedule's recorded creator.
+func CreatorOf(s *Schedule) ScheduleCreator {
+	return ScheduleCreator{Kind: s.CreatorKind, UserID: s.CreatorUserID, MemberID: s.CreatorMemberID, SetAt: s.CreatorSetAt}
+}
+
+type rowQuerier interface {
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+// ScheduleCreatorStopped is the one standing check for a schedule's creator,
+// used at every fire and to show the schedule's state: "" when the creator
+// vouches now, else why not. A person vouches only while they hold the same
+// membership they saved it with (not left and rejoined), are not suspended,
+// have had no access revocation since the save, hold a MANAGER+ role and are
+// a trusted (not restricted) member.
+func ScheduleCreatorStopped(ctx context.Context, q rowQuerier, workspaceID string, c ScheduleCreator) (string, error) {
+	switch {
+	case c.Kind == ScheduleCreatorAgent:
+		return ScheduleStoppedAgentCreated, nil
+	case c.Kind != ScheduleCreatorHuman || c.UserID == "" || c.MemberID == "" || c.SetAt == "":
+		return ScheduleStoppedCreatorUnknown, nil
+	}
+	var role, mode string
+	var suspended, revoked sql.NullString
+	err := q.QueryRowContext(ctx, `SELECT m.role,m.access_mode,u.suspended_at,u.access_revoked_at FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.id=? AND m.workspace_id=? AND m.user_id=?`, c.MemberID, workspaceID, c.UserID).Scan(&role, &mode, &suspended, &revoked)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ScheduleStoppedNotMember, nil
+	}
+	if err != nil {
+		return "", err
+	}
 	switch {
 	case suspended.Valid:
-		return "", withheldScheduleStanding, "creator is suspended", false, nil
-	case revoked.Valid && revokedSince(revoked.String, setAt):
-		return "", withheldScheduleStanding, "creator's access was revoked after they saved the schedule", false, nil
+		return ScheduleStoppedSuspended, nil
+	case revoked.Valid && revokedSince(revoked.String, c.SetAt):
+		return ScheduleStoppedAccessRevoked, nil
 	case !scheduleCreatorRoles[role]:
-		return "", withheldScheduleStanding, "creator's role " + role + " can no longer create schedules", false, nil
+		return ScheduleStoppedRole, nil
 	case mode != "trusted":
-		return "", withheldScheduleStanding, "creator is a restricted member", false, nil
+		return ScheduleStoppedRestricted, nil
 	}
-	return artifactrun.TriggerScheduled, "", "", true, nil
+	return "", nil
 }
 
 // revokedSince reports whether a revocation at revokedAt is not older than

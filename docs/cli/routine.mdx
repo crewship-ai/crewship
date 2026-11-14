@@ -1795,7 +1795,19 @@ crewship routine schedules list --slug summarize-text
 crewship routine schedules list --json
 ```
 
-**Output columns:** ID, NAME, ROUTINE, CRON, TZ, ENABLED, FAILS, WAKE, NEXT, MISSED
+**Output columns:** ID, NAME, ROUTINE, CRON, TZ, ENABLED, FAILS, WAKE, NEXT, MISSED, CREATOR, ARTIFACTS
+
+With `artifact_agent_access_modes` on, ARTIFACTS says whether the schedule's
+fires reach their agents' standing artifacts now: `active`, or
+`stopped: <reason>` (`artifact_access` and `stopped_reason` in JSON). The
+reason is `agent_created`, `creator_unknown`, or, about the creator as a
+person, `creator_not_member`, `creator_suspended`, `creator_access_revoked`,
+`creator_role` or `creator_restricted`; those five are shown only to the
+creator and to workspace OWNER/ADMIN, everyone else sees
+`creator_not_in_good_standing`. The state is computed with the same check
+every fire runs. A change to what the schedule runs (for example
+`schedules update <id> --cron …`) by a person in good standing restores it.
+With the flag off ARTIFACTS is `—`.
 
 A schedule pinned to a specific routine version shows the pin in the ROUTINE column as `slug@vN` (e.g. `daily-digest@v3`). The `--json` output carries it as `target_pipeline_version`, plus `last_status` (`COMPLETED` | `FAILED` | `SKIPPED` | `WAITING` — `WAITING` means the run parked on an approval gate, which is healthy, not a failure).
 

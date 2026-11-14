@@ -11,7 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifactrun"
 	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/runauthority"
@@ -88,10 +90,17 @@ type scheduleResponse struct {
 	// CreatorKind is "human" or "agent": who created or last saved the
 	// schedule (#5339); omitted when unknown (saved before it was
 	// recorded). CreatorUserID is that person's id for "human".
-	CreatorKind   string    `json:"creator_kind,omitempty"`
-	CreatorUserID string    `json:"creator_user_id,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
+	CreatorKind   string `json:"creator_kind,omitempty"`
+	CreatorUserID string `json:"creator_user_id,omitempty"`
+	// ArtifactAccess says whether the schedule's fires may reach their
+	// agents' standing artifacts (#5339, owner decision for #5356): "active"
+	// or "stopped", with StoppedReason. Omitted with the flag off. The
+	// person-standing reasons are shown only to the creator and to workspace
+	// OWNER/ADMIN; others see creator_not_in_good_standing.
+	ArtifactAccess string    `json:"artifact_access,omitempty"`
+	StoppedReason  string    `json:"stopped_reason,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // scheduleContentKeys are the PATCH fields that change what a schedule runs.
@@ -495,7 +504,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "failed to create schedule")
 		return
 	}
-	writeJSON(w, http.StatusCreated, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug)))
+	writeJSON(w, http.StatusCreated, h.withArtifactAccess(r, saved, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug))))
 }
 
 // wakeRefFromBody collapses the wake_pipeline_slug / wake_pipeline_id
@@ -552,7 +561,7 @@ func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 			version := target.HeadVersion
 			row.EffectiveVersion = &version
 		}
-		out = append(out, row)
+		out = append(out, h.withArtifactAccess(r, s, row))
 	}
 	setRoutineListNextOffset(w, offset, limit, len(rows))
 	writeJSON(w, http.StatusOK, out)
@@ -612,6 +621,36 @@ func (h *PipelineHandler) applyEffectiveVersions(ctx context.Context, rows []sch
 
 // withEffectiveVersion is applyEffectiveVersions for a single-row response
 // (create / update / activate).
+// withArtifactAccess fills whether the schedule's fires reach artifacts now
+// (#5339, owner decision for #5356), from the same standing check every fire
+// runs (pipeline.ScheduleCreatorStopped). Flag off, or the check failing,
+// leaves both fields empty. A person-standing reason is shown only to the
+// creator and to workspace OWNER/ADMIN.
+func (h *PipelineHandler) withArtifactAccess(r *http.Request, s *pipeline.Schedule, row scheduleResponse) scheduleResponse {
+	ctx := r.Context()
+	if on, err := featureflags.IsEnabledWith(ctx, h.db, s.WorkspaceID, artifactrun.FlagKey); err != nil || !on {
+		return row
+	}
+	reason, err := pipeline.ScheduleCreatorStopped(ctx, h.db, s.WorkspaceID, pipeline.CreatorOf(s))
+	if err != nil {
+		h.logger.Warn("schedule artifact access state", "schedule", s.ID, "error", err)
+		return row
+	}
+	if reason == "" {
+		row.ArtifactAccess = "active"
+		return row
+	}
+	row.ArtifactAccess, row.StoppedReason = "stopped", reason
+	if pipeline.ScheduleStoppedIsPersonal(reason) {
+		viewer := UserFromContext(ctx)
+		role := RoleFromContext(ctx)
+		if (viewer == nil || viewer.ID != s.CreatorUserID) && role != "OWNER" && role != "ADMIN" {
+			row.StoppedReason = pipeline.ScheduleStoppedNotInGoodStanding
+		}
+	}
+	return row
+}
+
 func (h *PipelineHandler) withEffectiveVersion(ctx context.Context, row scheduleResponse) scheduleResponse {
 	batch := []scheduleResponse{row}
 	h.applyEffectiveVersions(ctx, batch)
@@ -839,7 +878,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "failed to update schedule")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug)))
+	writeJSON(w, http.StatusOK, h.withArtifactAccess(r, saved, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug))))
 }
 
 // DeleteSchedule DELETE /workspaces/{wsId}/pipeline-schedules/{scheduleId}
@@ -960,7 +999,7 @@ func (h *PipelineHandler) ActivateSchedule(w http.ResponseWriter, r *http.Reques
 	if p, perr := h.store.GetByID(r.Context(), activated.TargetPipelineID); perr == nil {
 		slug = p.Slug
 	}
-	writeJSON(w, http.StatusOK, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(activated, slug, "")))
+	writeJSON(w, http.StatusOK, h.withArtifactAccess(r, activated, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(activated, slug, ""))))
 }
 
 // schedulePreviewMaxCount caps how many fire times a single preview call

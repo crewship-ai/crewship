@@ -65,8 +65,14 @@ type scheduleRow struct {
 	// schedule (#5339). Empty for a schedule saved before it was recorded.
 	CreatorKind   string `json:"creator_kind,omitempty" yaml:"creator_kind,omitempty"`
 	CreatorUserID string `json:"creator_user_id,omitempty" yaml:"creator_user_id,omitempty"`
-	CreatedAt     string `json:"created_at" yaml:"created_at"`
-	UpdatedAt     string `json:"updated_at" yaml:"updated_at"`
+	// ArtifactAccess is "active" or "stopped" with artifact access on: whether
+	// the schedule's fires reach their agents' standing artifacts now, and
+	// StoppedReason why not (the creator's standing detail is shown to the
+	// creator and admins only).
+	ArtifactAccess string `json:"artifact_access,omitempty" yaml:"artifact_access,omitempty"`
+	StoppedReason  string `json:"stopped_reason,omitempty" yaml:"stopped_reason,omitempty"`
+	CreatedAt      string `json:"created_at" yaml:"created_at"`
+	UpdatedAt      string `json:"updated_at" yaml:"updated_at"`
 }
 
 // creatorCell renders the CREATOR column: the person who created or last
@@ -81,6 +87,18 @@ func creatorCell(s scheduleRow) string {
 		return "agent"
 	}
 	return "unknown"
+}
+
+// artifactsCell renders the ARTIFACTS column: "active", "stopped: <reason>",
+// or "—" with artifact access off.
+func artifactsCell(s scheduleRow) string {
+	switch s.ArtifactAccess {
+	case "":
+		return "—"
+	case "stopped":
+		return "stopped: " + s.StoppedReason
+	}
+	return s.ArtifactAccess
 }
 
 // routineCell renders the ROUTINE column for trigger lists: the target
@@ -246,7 +264,7 @@ var routineSchedulesListCmd = &cobra.Command{
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tFAILS\tWAKE\tNEXT\tMISSED\tCREATOR")
+		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tFAILS\tWAKE\tNEXT\tMISSED\tCREATOR\tARTIFACTS")
 		for _, s := range rows {
 			next := "—"
 			if s.NextRunAt != nil && *s.NextRunAt != "" {
@@ -259,9 +277,9 @@ var routineSchedulesListCmd = &cobra.Command{
 			if s.LastMissedCount > 0 {
 				missed = fmt.Sprintf("%d (%s)", s.LastMissedCount, defaultIfBlankCLI(s.CatchupPolicy, "once"))
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				shortID(s.ID), s.Name, routineCell(s.TargetPipelineSlug, s.TargetPipelineVersion), s.CronExpr, s.Timezone,
-				enabledCell(s), failsCell(s), wakeCell(s), next, missed, creatorCell(s))
+				enabledCell(s), failsCell(s), wakeCell(s), next, missed, creatorCell(s), artifactsCell(s))
 		}
 		return w.Flush()
 	},

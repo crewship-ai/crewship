@@ -108,3 +108,17 @@ describe("RoutineSchedulesTab — reliability display (read-only)", () => {
     expect(screen.getByText(/Missed last tick: 3/)).toBeInTheDocument()
   })
 })
+
+describe("RoutineSchedulesTab — artifact access (#5356)", () => {
+  it("shows that a schedule's artifact access stopped and why", () => {
+    h.schedules = [
+      baseSchedule({ id: "sch-stop", artifact_access: "stopped", stopped_reason: "creator_access_revoked" }),
+      baseSchedule({ id: "sch-ok", artifact_access: "active" }),
+    ]
+    render(<RoutineSchedulesTab workspaceId="ws-1" pipelineId="p1" slug="digest" />)
+
+    expect(screen.getByTestId("schedule-artifacts-sch-stop")).toHaveTextContent(/artifact access stopped/i)
+    expect(screen.getByTestId("schedule-artifacts-reason-sch-stop")).toHaveTextContent(/access was revoked/i)
+    expect(screen.queryByTestId("schedule-artifacts-sch-ok")).toBeNull()
+  })
+})
