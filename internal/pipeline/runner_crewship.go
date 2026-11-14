@@ -4,9 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // runCrewshipStep dispatches one `crewship` verb through the CrewshipActions
@@ -17,7 +19,7 @@ import (
 // an issue, an assignment, an escalation — and a preview that creates them is
 // not a preview. It reports what it would have done instead, matching how
 // dry_run treats every other side-effecting kind.
-func (e *Executor) runCrewshipStep(ctx context.Context, step Step, render RenderContext, in RunInput, runID string) (string, float64, int64, error) {
+func (e *Executor) runCrewshipStep(ctx context.Context, step Step, render RenderContext, in RunInput, runID string, depth int) (string, float64, int64, error) {
 	stepStart := time.Now()
 
 	// Save-time validation rejects both of these; this is the belt for a
@@ -58,10 +60,11 @@ func (e *Executor) runCrewshipStep(ctx context.Context, step Step, render Render
 			"(production wiring is ExecutorDeps.Crewship in cmd_start.go)", step.ID)
 	}
 
-	out, err := e.crewship.Do(ctx, CrewshipRequest{
+	req := CrewshipRequest{
 		Verb:         step.Action,
 		ChatOriginID: in.ChatOriginID,
 		OperationKey: routineOperationKey(ctx, runID, step.ID),
+		StepID:       step.ID,
 		Args:         args,
 		WorkspaceID:  in.WorkspaceID,
 		// The AUTHOR crew, not the invoker: a routine acts as the crew that
@@ -77,11 +80,146 @@ func (e *Executor) runCrewshipStep(ctx context.Context, step Step, render Render
 		// starting a fresh budget — which is what would make the cap
 		// unenforceable across the journal hop.
 		ChainDepth: in.ChainDepth,
-	})
+	}
+	// On resume, a waitpoint this step already opened is the approval (or
+	// pending question) for this exact call: pass it so an approved one is
+	// honoured without asking twice.
+	if finder, ok := e.waitpoints.(WaitpointResumer); ok && in.resume && runID != "" {
+		key := CrewshipApprovalStepKey(step.ID, CrewshipApprovalBinding(req.OperationKey, req.Verb, req.Args))
+		tok, ferr := finder.FindApprovalForStep(ctx, runID, key)
+		if ferr != nil {
+			// Asking again would open a second card and ignore a decision
+			// already made; fail the step instead, as the wait step does.
+			return "", 0, time.Since(stepStart).Milliseconds(), fmt.Errorf("crewship step %q: look up its approval: %w", step.ID, ferr)
+		}
+		if tok != "" {
+			req.ApprovalToken = tok
+		}
+	}
+	out, err := e.crewship.Do(ctx, req)
+	var held *CrewshipApprovalRequired
+	if errors.As(err, &held) {
+		return e.awaitCrewshipApproval(ctx, step, in, runID, depth, req, held, stepStart)
+	}
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("crewship step %q (%s): %w", step.ID, step.Action, err)
 	}
 	return out, 0, time.Since(stepStart).Milliseconds(), nil
+}
+
+// awaitCrewshipApproval turns a held autonomy decision into the same durable
+// approval a `wait: approval` step uses: one inbox card naming the action,
+// the run parks (top-level runs) or blocks (nested), and an approval repeats
+// the call once with the waitpoint token and the SAME operation key.
+// Denial, timeout and cancellation fail the step as what they are. The
+// crew's autonomy level is never changed.
+//
+// Like any crewship step, a crash after the route wrote but before the step
+// output is persisted re-runs the step on resume, and the still-approved
+// waitpoint lets it through again: only a route that dedupes on the
+// operation key (chat-origin issue writes) makes that a replay rather than a
+// second write.
+func (e *Executor) awaitCrewshipApproval(ctx context.Context, step Step, in RunInput, runID string, depth int, req CrewshipRequest, held *CrewshipApprovalRequired, stepStart time.Time) (string, float64, int64, error) {
+	elapsed := func() int64 { return time.Since(stepStart).Milliseconds() }
+	if e.waitpoints == nil || runID == "" {
+		return "", 0, elapsed(), fmt.Errorf("crewship step %q: %w — no approval store is wired, so the routine cannot wait", step.ID, held)
+	}
+	token := req.ApprovalToken
+	if token == "" {
+		argsJSON, _ := json.Marshal(req.Args)
+		binding := CrewshipApprovalBinding(req.OperationKey, req.Verb, req.Args)
+		created, err := e.waitpoints.CreateApproval(ctx, WaitpointApprovalRequest{
+			WorkspaceID:   in.WorkspaceID,
+			PipelineRunID: runID,
+			// Bound to this exact call: another foreach item or other
+			// arguments get their own approval.
+			StepID:         CrewshipApprovalStepKey(step.ID, binding),
+			Title:          fmt.Sprintf("Approve %s from a routine", step.Action),
+			Prompt:         fmt.Sprintf("The crew's autonomy level (%s) requires approval for %s. Step %q will run %s with these arguments once approved:\n\n%s", held.Level, held.Action, step.ID, step.Action, argsForPrompt(argsJSON, binding)),
+			InvokingCrewID: in.InvokingCrewID,
+			TimeoutSec:     step.TimeoutSec,
+			// Every held action is decided by a person: no standing grant
+			// approves it, and none is offered.
+			NoStandingTrust: true,
+		})
+		if err != nil {
+			return "", 0, elapsed(), fmt.Errorf("crewship step %q create approval: %w", step.ID, err)
+		}
+		token = created
+	}
+	if depth == 0 && in.Mode == ModeRun && e.runStore != nil && in.pipeline != nil {
+		park := true
+		if reader, ok := e.waitpoints.(WaitpointStatusReader); ok {
+			if st, serr := reader.WaitpointStatus(ctx, token); serr == nil && st != "pending" {
+				park = false
+			}
+		}
+		if park {
+			if err := e.runStore.MarkWaiting(ctx, runID, step.ID); err != nil {
+				return "", 0, elapsed(), fmt.Errorf("crewship step %q mark waiting: %w", step.ID, err)
+			}
+			return "", 0, elapsed(), &suspendError{token: token, stepID: step.ID}
+		}
+	}
+	approved, err := e.waitpoints.WaitFor(ctx, token)
+	if ctx.Err() != nil {
+		// The run died mid-wait: cancel its waitpoints so the card stops
+		// being actionable, as the wait step does. Detached context — ctx
+		// is already cancelled.
+		if wc, ok := e.waitpoints.(WaitpointCanceller); ok {
+			cctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			_, _ = wc.CancelWaitpointsForRun(cctx, runID)
+			cancel()
+		}
+		return "", 0, elapsed(), ctx.Err()
+	}
+	if err != nil {
+		return "", 0, elapsed(), fmt.Errorf("crewship step %q wait for approval: %w", step.ID, err)
+	}
+	if !approved {
+		if reader, ok := e.waitpoints.(WaitpointStatusReader); ok {
+			if st, serr := reader.WaitpointStatus(ctx, token); serr == nil && (st == "timed_out" || st == "cancelled") {
+				return "", 0, elapsed(), fmt.Errorf("crewship step %q (%s): approval %s", step.ID, step.Action, strings.ReplaceAll(st, "_", " "))
+			}
+		}
+		return "", 0, elapsed(), fmt.Errorf("crewship step %q (%s): approval denied", step.ID, step.Action)
+	}
+	req.ApprovalToken = token
+	out, err := e.crewship.Do(ctx, req)
+	if err != nil {
+		return "", 0, elapsed(), fmt.Errorf("crewship step %q (%s) after approval: %w", step.ID, step.Action, err)
+	}
+	return out, 0, elapsed(), nil
+}
+
+// approvalArgsShown bounds the arguments printed on the approval card.
+const approvalArgsShown = 4000
+
+// argsForPrompt prints the arguments the approval executes. When they are
+// too long to show, it says so — with the full size and the binding hash
+// the approval is tied to — instead of cutting them off silently, so a
+// person never approves arguments they were not shown without knowing it.
+func argsForPrompt(argsJSON []byte, binding string) string {
+	shown := argsJSON
+	if len(shown) > approvalArgsShown {
+		cut := approvalArgsShown
+		for cut > 0 && !utf8.RuneStart(argsJSON[cut]) {
+			cut-- // never split a character
+		}
+		shown = argsJSON[:cut]
+	}
+	// Fenced, so markdown in author-controlled strings is shown as text,
+	// not rendered on the card; the fence outgrows any backtick run inside.
+	fence := "```"
+	for strings.Contains(string(shown), fence) {
+		fence += "`"
+	}
+	out := fence + "json\n" + string(shown) + "\n" + fence
+	if len(shown) < len(argsJSON) {
+		out += fmt.Sprintf("\n\n[Arguments truncated: showing %d of %d bytes. The approval applies only to the full arguments with binding %s. Deny it if you need to see the rest.]",
+			len(shown), len(argsJSON), binding)
+	}
+	return out
 }
 
 // renderCrewshipArgs template-renders string values (including strings nested

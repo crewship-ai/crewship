@@ -2,7 +2,6 @@ package pipeline
 
 import (
 	"sort"
-	"strings"
 )
 
 // ReferencedCredentialTypes reports statically declared vault types in a
@@ -14,7 +13,7 @@ func ReferencedCredentialTypes(d *DSL) []string {
 	}
 	seen := map[string]struct{}{}
 	add := func(value string) {
-		value = strings.ToLower(strings.TrimSpace(value))
+		value = NormalizeCredentialRef(value)
 		if value != "" {
 			seen[value] = struct{}{}
 		}

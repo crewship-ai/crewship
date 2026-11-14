@@ -136,3 +136,47 @@ func TestCovCC_RuntimeImage_UnparseableRef_400(t *testing.T) {
 		t.Errorf("body = %s, want invalid runtime_image error", rr.Body.String())
 	}
 }
+
+// The runtime runs every crew container as agent/1001. A create that names
+// another account for common-utils is refused with the fix; one that omits
+// the account options is stored with agent/1001 explicit, in the option
+// names common-utils actually reads.
+func TestCovCC_DevcontainerCommonUtilsAccount(t *testing.T) {
+	for _, tc := range []struct {
+		name, cfg string
+		wantCode  int
+		wantIn    string
+	}{
+		{"other user refused", `{"image":"debian:bookworm-slim","features":{"ghcr.io/devcontainers/features/common-utils:2":{"username":"vscode"}}}`, http.StatusBadRequest, "UID 1001"},
+		{"missing account options filled", `{"image":"debian:bookworm-slim","features":{"ghcr.io/devcontainers/features/common-utils:2":{"installZsh":"false"}}}`, http.StatusCreated, `"userUid":"1001"`},
+		{"injected default uses userUid", `{"image":"debian:bookworm-slim"}`, http.StatusCreated, `"userUid":"1001"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, userID, wsID := covCCHandler(t)
+			rr := covCCPost(h, userID, wsID, map[string]any{
+				"name": "Acct " + tc.name, "slug": "covcc-acct-" + strings.ToLower(strings.ReplaceAll(tc.name, " ", "-")),
+				"devcontainer_config": tc.cfg,
+			})
+			if rr.Code != tc.wantCode {
+				t.Fatalf("status = %d, want %d; body=%s", rr.Code, tc.wantCode, rr.Body.String())
+			}
+			if tc.wantCode != http.StatusCreated {
+				if !strings.Contains(rr.Body.String(), tc.wantIn) {
+					t.Fatalf("body %s does not name the fix %q", rr.Body.String(), tc.wantIn)
+				}
+				return
+			}
+			var resp struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(rr.Body.Bytes(), &resp)
+			var stored string
+			if err := h.db.QueryRow(`SELECT devcontainer_config FROM crews WHERE id = ?`, resp.ID).Scan(&stored); err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(stored, tc.wantIn) || strings.Contains(stored, `"uid"`) {
+				t.Fatalf("stored = %s, want %s and no legacy uid key", stored, tc.wantIn)
+			}
+		})
+	}
+}

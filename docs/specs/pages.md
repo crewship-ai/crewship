@@ -710,7 +710,13 @@ makes it auditable.
 3. **Only a human publishes.** An agent can build the page; it cannot make it public, and it
    cannot add a panel to an already-public page without that panel being separately marked by a
    human. This is §7.1b rule 1 taken to its conclusion — an agent may not widen reach, and
-   "public" is the widest reach there is.
+   "public" is the widest reach there is. The human must also hold reach over the page: its user
+   owner, a member of its owning crew whose role there (workspace role or crew override) is
+   MANAGER or above or who holds the crew's Manage grant, or a workspace ADMIN/OWNER. Plain crew
+   membership reads a crew page but never publishes it. A link speaks for the human who created
+   it, so it opens only while that human is a member of the workspace and is not suspended; it is
+   withheld, not revoked, and opens again when their standing returns. Listing a page's links (which names their creators) takes the same authority
+   as publishing; revoking takes it too, except that anyone may revoke a link they created.
 4. **Every public link expires.** A required expiry, default 30 days, maximum 1 year. Tokens are
    high-entropy, revocable individually, and one page may have several so revoking the
    accountant's link does not break the client's.
