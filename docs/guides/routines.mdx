@@ -1437,11 +1437,14 @@ steps:
   the level *holds the action for approval* (for example issue writes on a
   `strict` crew), the step opens an approval card naming the action and its
   rendered arguments, and waits: a top-level step parks the run as `WAITING`,
-  a step inside `foreach` or a nested routine blocks until decided. A
-  synchronous `crewship routine run` (without `--async`) then returns
-  `WAITING` with that item's token as soon as the step starts waiting, and the
-  run continues without the CLI; other items' cards are in
-  `crewship routine waitpoints list`. Approving
+  a step inside `foreach` or a nested routine blocks until decided. For a
+  step inside the routine's own `foreach`, a synchronous `crewship routine
+  run` (without `--async`) returns `WAITING` with that item's token as soon
+  as the step starts waiting, and the run continues without the CLI; other
+  items' cards are in `crewship routine waitpoints list`. Such a run shows as
+  `running` (it keeps its slot), and a server restart cancels it and its
+  cards. A held action in a nested routine still blocks a synchronous call;
+  use `--async` there. Approving
   runs the action once, with the step's operation key; denial, timeout and
   cancellation fail the step. The approval is bound to that exact call — run,
   foreach item, step, verb and arguments — so it never unlocks another item or
