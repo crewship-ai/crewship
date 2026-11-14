@@ -272,7 +272,8 @@ class GateTests(unittest.TestCase):
         return commits
 
     def run_plan(self, root, name, event):
-        event_path, output = Path(root, 'event.json'), Path(root, 'out')
+        # Inside .git: never part of a later commit's diff.
+        event_path, output = Path(root, '.git', 'event.json'), Path(root, '.git', 'out')
         event_path.write_text(json.dumps(event))
         return json.loads(subprocess.check_output(
             ['python3', str(Path(__file__).with_name('plan.py'))], cwd=root, text=True,
@@ -312,6 +313,68 @@ class GateTests(unittest.TestCase):
                                 ('push', {}),
                                 ('workflow_dispatch', {'before': c['base'], 'after': c['docs']})]:
                 self.assertTrue(plan(name, event)['craft'], (name, event))
+
+    # The host side of the packaged editors (#5362: #5134's bug was in the host, not
+    # in a package). Globs are enumerated from the checkout at test time, so a new file
+    # of a family is covered without editing this list.
+    HOST_FAMILIES = {
+        'native craft host': ['components/features/pages/native-craft-*.tsx'],
+        'wordcraft host': ['components/features/pages/wordcraft-editor-host.tsx'],
+        'hello verification': ['lib/mooring/channel.ts'],
+        # createEditorFrame builds the sandboxed iframe; nativeCraftFrameURL (in the
+        # native host above) builds its URL; the server serves the editor origin.
+        'frame embedding': ['components/features/pages/workbook-editor-host.tsx', 'internal/server/editor_origin.go'],
+        'editor origin': ['internal/editororigin/**'],
+        'native server': ['internal/server/craft_native.go'],
+        'native api': ['internal/api/craft_native_*.go'],
+    }
+
+    def host_paths(self):
+        root = Path(__file__).resolve().parents[2]
+        families = {}
+        for family, specs in self.HOST_FAMILIES.items():
+            paths = subprocess.check_output(['git', 'ls-files', '-z', '--', *specs], cwd=root, text=True).split('\0')
+            families[family] = sorted(p for p in paths if p)
+            # Every spec must match: a renamed or moved family must not drop out silently.
+            for spec in specs:
+                self.assertTrue(subprocess.check_output(['git', 'ls-files', '--', spec], cwd=root, text=True).strip(), spec)
+        return families
+
+    def assert_gate_required(self, plan, why):
+        self.assertTrue(plan['code'], why)
+        needs = self.results()
+        needs['changes']['outputs'] = {k: str(v).lower() for k, v in plan.items()}
+        for name in sorted(CRAFT):
+            bad = {k: dict(v) for k, v in needs.items()}
+            bad[name]['result'] = 'skipped'
+            self.assertIn(f'{name}: expected success, got skipped', failures(bad), (why, name))
+
+    def test_gate_runs_when_the_host_changes(self):
+        families = self.host_paths()
+        with tempfile.TemporaryDirectory() as root:
+            def git(*args):
+                return subprocess.check_output(['git', *args], cwd=root, text=True).strip()
+            git('init', '-q')
+            git('config', 'user.email', 'ci@example.invalid')
+            git('config', 'user.name', 'CI')
+            Path(root, 'README.md').write_text('base\n')
+            git('add', '.')
+            git('commit', '-qm', 'base')
+            before = git('rev-parse', 'HEAD')
+            events = [('pull_request', lambda b, h: {'pull_request': {'base': {'sha': b}, 'head': {'sha': h}, 'labels': []}}),
+                      ('merge_group', lambda b, h: {'merge_group': {'base_sha': b, 'head_sha': h}}),
+                      ('push', lambda b, h: {'before': b, 'after': h})]
+            for family, paths in families.items():
+                for path in paths:
+                    # One commit that touches only this host file.
+                    Path(root, path).parent.mkdir(parents=True, exist_ok=True)
+                    Path(root, path).write_text(f'{path}\n')
+                    git('add', '.')
+                    git('commit', '-qm', path)
+                    after = git('rev-parse', 'HEAD')
+                    for name, wrap in events:
+                        self.assert_gate_required(self.run_plan(root, name, wrap(before, after)), (family, path, name))
+                    before = after
 
     def test_all_actual_mooring_lane_cannot_be_missing_or_not_executed(self):
         self.assertIn('mooring-actual', CODE)
