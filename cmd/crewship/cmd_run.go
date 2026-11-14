@@ -159,6 +159,12 @@ Examples:
 			client.HTTPClient.Timeout = time.Duration(timeoutSecs) * time.Second
 		}
 
+		if len(extras.artifacts) > 0 {
+			if err := extras.resolveArtifactRefs(client); err != nil {
+				return err
+			}
+		}
+
 		// Create or reuse chat
 		chatID := existingChat
 		if chatID == "" {
@@ -205,7 +211,7 @@ Examples:
 				return fmt.Errorf("targeted Document and artifact edits require a trusted human chat")
 			}
 			if extras.any() {
-				return fmt.Errorf("--attach, --page, --ask-form and --create-document require a trusted human chat")
+				return fmt.Errorf("--attach, --page, --artifact, --ask-form and --create-document require a trusted human chat")
 			}
 			if interactive {
 				return fmt.Errorf("restricted text interactive mode is not yet supported")
@@ -1312,6 +1318,7 @@ func init() {
 	runCmd.Flags().String("effort", "", "Reasoning effort: minimal|low|medium|high|xhigh")
 	runCmd.Flags().Bool("show-thinking", false, "Surface reasoning blocks on stdout (not truncated)")
 	addRunExtrasFlags(runCmd, true, true)
+	addRunArtifactFlag(runCmd)
 
 	runInsightsCmd.Flags().String("window", "24h", "Aggregation window: 24h, 7d, or 30d")
 	runInsightsCmd.Flags().String("agent", "", "Only this agent's runs (slug or ID)")
