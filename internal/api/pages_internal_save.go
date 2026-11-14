@@ -31,6 +31,7 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/inbox"
@@ -403,3 +404,11 @@ func insertPageVersionAuthoredByAgent(ctx context.Context, tx *sql.Tx, pageID st
 		VALUES (?, ?, ?, ?, ?)`, pageID, seq, specJSON, agentCol, now)
 	return err
 }
+
+// pageSaveWithoutRunToken counts flag-on sidecar saves that arrived without
+// an agent run token (#5336), exposed on /metrics as
+// crewshipd_page_save_without_run_token_total.
+var pageSaveWithoutRunToken atomic.Int64
+
+// PageSaveWithoutRunTokenTotal returns the count since process start.
+func PageSaveWithoutRunTokenTotal() int64 { return pageSaveWithoutRunToken.Load() }
