@@ -649,10 +649,13 @@ owner on 2026-11-13.
    crew container holds the key that derives run tokens for any agent and run
    of its crew. Only a person's own start counts as a routine here: a routine
    a person ran (or batch-ran) records each agent step; a routine started by
-   a schedule, a webhook, `call_pipeline`, another agent, an automation, a
-   page action or a wake check records nothing and its steps reach no
-   artifact (schedules have no creator, so an agent-created schedule cannot be
-   told apart and none qualifies). An agent's own webhook and cron runs,
+   a schedule (including a person's "run now" of a schedule), a delayed or
+   debounced run (its trigger defaults to schedule), a webhook,
+   `call_pipeline`, another agent, an automation, an issue, a page action or a
+   wake check records nothing and its steps reach no artifact, and neither
+   does a routine an agent authored, even when a person runs it (schedules
+   have no creator, so an agent-created schedule cannot be told apart and none
+   qualifies). All of these fail closed. An agent's own webhook and cron runs,
    configured on the agent by a person, record as before. So the host
    producer of such a run records the run in `artifact_unattended_runs` (agent, crew, trigger,
    source) after its run record and before its agent starts, and the server

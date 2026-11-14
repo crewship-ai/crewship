@@ -2249,6 +2249,7 @@ func (e *Executor) runAgentStep(
 			InvokingUserID:      in.InvokingUserID,
 			InvocationAuthority: in.InvocationAuthority,
 			TriggeredVia:        in.TriggeredVia,
+			AuthorAgentID:       in.AuthorAgentID,
 		}
 		res, err := e.runRunnerWithTransientRetry(ctx, req, step, emit)
 		totalCost += res.CostUSD

@@ -1,6 +1,8 @@
 package pipeline
 
 import (
+	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -46,7 +48,8 @@ func TestRoutineArtifactRun_OnlyAPersonStartedRoutineGetsACapability(t *testing.
 			r.InvokingAgentID, r.TriggeredVia = "agent_author", TriggeredViaCallPipeline
 		}, false},
 		"call_pipeline carrying a person and admission": {func(r *AgentStepRequest) { r.TriggeredVia = TriggeredViaCallPipeline }, false},
-		"agent invoker": {func(r *AgentStepRequest) { r.InvokingAgentID = "agent_a" }, false},
+		"agent invoker":                        {func(r *AgentStepRequest) { r.InvokingAgentID = "agent_a" }, false},
+		"agent-authored routine a person runs": {func(r *AgentStepRequest) { r.AuthorAgentID = "agent_lead" }, false},
 		"schedule": {func(r *AgentStepRequest) {
 			r.InvokingUserID, r.InvocationAuthority, r.TriggeredVia = "", "", TriggeredViaSchedule
 		}, false},
@@ -102,27 +105,64 @@ func TestRoutineArtifactRun_TTLFollowsTheRunTimeout(t *testing.T) {
 	}
 }
 
-// The executor copies who started the run onto each step request, so the
-// runner can tell a person's run from an agent's call_pipeline.
+// The executor hands each step the run's real starter, trigger and author
+// (round-2 review): a schedule (including a person's "run now" of one), a
+// person's nested call_pipeline step and an agent-authored routine reach the
+// runner as what they are, and only the person's own manual run records.
 func TestRoutineArtifactRun_ExecutorCarriesTheStarter(t *testing.T) {
-	db := openFactoryTestDB(t)
-	defer db.Close()
-	mustExec(t, db, `INSERT INTO users(id) VALUES('human')`)
-	mustExec(t, db, `CREATE TABLE workspace_members (workspace_id TEXT, user_id TEXT, access_mode TEXT NOT NULL DEFAULT 'trusted', role TEXT NOT NULL DEFAULT 'MANAGER', capabilities TEXT)`)
-	mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id) VALUES ('ws_test','human')`)
-	mock := newMockRunner()
-	deps := fullExecutorDeps(t, db, mock)
-	p := saveResumePipeline(t, deps.Store, "artifact-starter", resumeLinearDSL)
-	in := RunInput{PipelineID: p.ID, WorkspaceID: "ws_test", InvokingUserID: "human", InvocationAuthority: RoutineRunAuthority, TriggeredVia: TriggeredViaManual, Mode: ModeRun}
-	if res, err := NewWiredExecutor(deps).Run(t.Context(), in); err != nil || res.Status != "COMPLETED" {
-		t.Fatalf("run: %+v %v", res, err)
+	const childDSL = `{"dsl_version":"1.0","name":"artifact-child","steps":[{"id":"c1","type":"agent_run","agent_slug":"s_c","prompt":"child"}]}`
+	const parentDSL = `{"dsl_version":"1.0","name":"artifact-parent","steps":[{"id":"call","type":"call_pipeline","pipeline_slug":"artifact-child"}]}`
+	cases := []struct {
+		name        string
+		dsl         string
+		author      string
+		in          RunInput
+		wantVia     TriggeredVia
+		wantRecords bool
+	}{
+		{"manual run by a person", resumeLinearDSL, "", RunInput{InvokingUserID: "human", InvocationAuthority: RoutineRunAuthority, TriggeredVia: TriggeredViaManual}, TriggeredViaManual, true},
+		{"schedule", resumeLinearDSL, "", RunInput{TriggeredVia: TriggeredViaSchedule, TriggeredByID: "sched_1"}, TriggeredViaSchedule, false},
+		{"schedule run now by a person", resumeLinearDSL, "", RunInput{InvokingUserID: "human", InvocationAuthority: RoutineBatchAuthority, TriggeredVia: TriggeredViaSchedule, TriggeredByID: "sched_1"}, TriggeredViaSchedule, false},
+		{"person's run, nested call_pipeline step", parentDSL, "", RunInput{InvokingUserID: "human", InvocationAuthority: RoutineRunAuthority, TriggeredVia: TriggeredViaManual}, TriggeredViaCallPipeline, false},
+		{"agent-authored routine a person runs", resumeLinearDSL, "agent_lead", RunInput{InvokingUserID: "human", InvocationAuthority: RoutineRunAuthority, TriggeredVia: TriggeredViaManual}, TriggeredViaManual, false},
 	}
-	if len(mock.calls) == 0 {
-		t.Fatal("no step ran")
-	}
-	for _, c := range mock.calls {
-		if c.InvokingUserID != "human" || c.InvocationAuthority != RoutineRunAuthority || c.TriggeredVia != TriggeredViaManual || c.InvokingAgentID != "" {
-			t.Fatalf("step request lost its starter: %+v", c)
-		}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			db := openFactoryTestDB(t)
+			defer db.Close()
+			mustExec(t, db, `INSERT INTO users(id) VALUES('human')`)
+			mustExec(t, db, `CREATE TABLE workspace_members (workspace_id TEXT, user_id TEXT, access_mode TEXT NOT NULL DEFAULT 'trusted', role TEXT NOT NULL DEFAULT 'MANAGER', capabilities TEXT)`)
+			mustExec(t, db, `INSERT INTO workspace_members(workspace_id,user_id) VALUES ('ws_test','human')`)
+			mock := newMockRunner()
+			deps := fullExecutorDeps(t, db, mock)
+			child := fakePipeline(t, "artifact-child", childDSL, "crew_a", "", deps.Store)
+			p := fakePipeline(t, "artifact-routine", tc.dsl, "crew_a", tc.author, deps.Store)
+			exec := NewWiredExecutor(deps).WithPipelineResolver(pipeResolverFn(func(_ context.Context, _, slug string) (*Pipeline, error) {
+				if slug == "artifact-child" {
+					return child, nil
+				}
+				return nil, ErrNotFound
+			}))
+			in := tc.in
+			in.PipelineID, in.WorkspaceID, in.Mode = p.ID, "ws_test", ModeRun
+			if res, err := exec.Run(t.Context(), in); err != nil || res.Status != "COMPLETED" {
+				t.Fatalf("run: %+v %v", res, err)
+			}
+			if len(mock.calls) == 0 {
+				t.Fatal("no step ran")
+			}
+			adb := routineArtifactDB(t)
+			for i, c := range mock.calls {
+				if c.TriggeredVia != tc.wantVia || c.InvokingUserID != tc.in.InvokingUserID || c.InvocationAuthority != tc.in.InvocationAuthority || c.AuthorAgentID != tc.author || c.InvokingAgentID != "" {
+					t.Fatalf("step %d reached the runner as %+v", i, c)
+				}
+				c.WorkspaceID = "ws_art" // the recording fixture's flagged workspace
+				capability, end := recordRoutineArtifactRun(t.Context(), adb.DB, nil, c, "crew_art", "agent_b", fmt.Sprintf("run_%d", i), 10*time.Minute)
+				end()
+				if (capability != "") != tc.wantRecords {
+					t.Fatalf("step %d: capability=%v, want %v", i, capability != "", tc.wantRecords)
+				}
+			}
+		})
 	}
 }

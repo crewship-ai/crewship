@@ -1156,6 +1156,9 @@ type AgentStepRequest struct {
 	InvokingUserID      string       `json:"-"`
 	InvocationAuthority string       `json:"-"`
 	TriggeredVia        TriggeredVia `json:"-"`
+	// AuthorAgentID is the agent that authored the routine, if any; a
+	// routine an agent wrote never gets a capability, whoever runs it.
+	AuthorAgentID string `json:"-"`
 
 	// InputGuardAction is the lookout.GuardAction value derived from the
 	// routine's DSL.Guardrails.Input.PromptInjection.Action. Plain string

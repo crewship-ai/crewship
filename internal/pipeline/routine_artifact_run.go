@@ -14,11 +14,11 @@ import (
 // the invocation. A call_pipeline expansion (an agent starting a saved
 // routine, or a nested call), a schedule (an agent can create one through
 // /internal/routines/schedules and schedules carry no creator), a webhook, an
-// automation or a wake check never qualifies: an agent must not borrow
+// automation, a wake check or a routine an agent authored never qualifies: an agent must not borrow
 // another agent's standing access, or a fresh read cap, through a routine
 // (§7.1c item 8).
 func personStartedRoutine(req AgentStepRequest) bool {
-	if req.InvokingUserID == "" || req.InvokingAgentID != "" {
+	if req.InvokingUserID == "" || req.InvokingAgentID != "" || req.AuthorAgentID != "" {
 		return false
 	}
 	if req.InvocationAuthority != RoutineRunAuthority && req.InvocationAuthority != RoutineBatchAuthority {
