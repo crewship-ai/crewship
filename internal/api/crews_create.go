@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"net/http"
 	"strings"
 	"time"
@@ -76,6 +77,9 @@ type createCrewRequest struct {
 }
 
 func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
+	releaseImages := resourcelifecycle.Images(h.db).Use()
+	defer releaseImages()
+
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 

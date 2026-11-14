@@ -143,16 +143,29 @@ func ownedImage(img image.Summary, instanceID string) bool {
 // Current and previous selections protect bytes; immutable build history is
 // provenance, not the sequence of cache re-selections.
 func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[string]string) (map[string]bool, error) {
-	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,'') FROM crews WHERE deleted_at IS NULL`)
+	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,'') FROM crews WHERE deleted_at IS NULL`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	protected := map[string]bool{}
 	for rows.Next() {
-		var current, last, previous string
-		if err := rows.Scan(&current, &last, &previous); err != nil {
+		var current, last, previous, base, config string
+		if err := rows.Scan(&current, &last, &previous, &base, &config); err != nil {
 			return nil, err
+		}
+		// Protect configured bases even before a live crew has a container.
+		if id := byRef[base]; id != "" {
+			protected[id] = true
+		}
+		if config != "" {
+			cfg, err := devcontainer.ParseBytes([]byte(config))
+			if err != nil {
+				return nil, err
+			}
+			if id := byRef[cfg.Image]; id != "" {
+				protected[id] = true
+			}
 		}
 		for _, ref := range []string{current, last, previous} {
 			if ref == "" {
