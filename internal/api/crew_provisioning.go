@@ -119,6 +119,17 @@ func (h *ProvisioningHandler) InvalidateImageCache() {
 	h.provisioner.InvalidateImageListCache()
 }
 
+// SetInstallationID binds the provisioner to this installation, so the images
+// it builds are tagged inside the installation's namespace and labelled with
+// their origin (#5375). Called once while routes are wired, before any
+// provision can run. Safe with no provisioner.
+func (h *ProvisioningHandler) SetInstallationID(id string) {
+	if h == nil || h.provisioner == nil {
+		return
+	}
+	h.provisioner.SetInstanceID(id)
+}
+
 func NewProvisioningHandler(
 	db *sql.DB,
 	logger *slog.Logger,

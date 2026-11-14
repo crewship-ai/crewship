@@ -143,6 +143,14 @@ references stop eviction. Either use resets the continuous one-hour unused
 window in `resource_retention_images`; the image must also be older than one
 day, with no `crewship-provision-*` build container anywhere on the daemon.
 
+Images built by an installation with a settled identity are tagged
+`crewship-cache:<namespace>-<hash>` / `crewship-feat:<namespace>-<hash>` and
+labelled `crewship.image.instance-id` and `crewship.image.kind` (#5375); the
+namespace is the full installation identity. New build cache lookups use
+distinct tags per installation; copied or restored selections are unchanged. The labels are
+evidence of origin only and change no eligibility rule in this document:
+legacy-named and unlabelled images are not claimed by any installation.
+
 Immediately before removal, the current database selections are checked again.
 Removal addresses the inspected image ID, never a mutable tag, with `Force=false`;
 Docker refusing it keeps the artifact and restarts its hour. The checks are not

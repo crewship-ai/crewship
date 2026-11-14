@@ -189,7 +189,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	// the same cache lookup and a machine that later gains Docker does not
 	// rebuild what it already has.
 	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg)+requiredBinariesHashSalt(o.requiredBinaries))
-	tag := cacheImageTag(hash)
+	tag := p.cacheTag(hash)
 
 	// Same per-tag serialisation as the commit path (#4816).
 	unlockTag, err := p.lockCacheTag(ctx, tag)
@@ -275,7 +275,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	// The image ENV carries the aggregated env — the operator's containerEnv
 	// plus the agent tool PATH and MISE_* variables (ensureAgentToolPath) —
 	// so the image is usable on its own, not only through the runtime env.
-	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, requirements.ContainerEnv, rec.steps(), tag)
+	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, requirements.ContainerEnv, rec.steps(), imageOwnerLabels(p.instanceID, ImageKindCrew), tag)
 	if err != nil {
 		return fail(ProvStepImageBuildStart, err)
 	}
@@ -399,6 +399,7 @@ func stageBuildContextWithSteps(
 	optionsByRef map[string]map[string]any,
 	rootEnv map[string]string,
 	extraSteps []string,
+	labels map[string]string,
 	tag string,
 ) (string, error) {
 	dockerfile, err := GenerateDockerfile(DockerfileBuild{
@@ -407,6 +408,7 @@ func stageBuildContextWithSteps(
 		OptionsByRef: optionsByRef,
 		RootEnv:      rootEnv,
 		ExtraSteps:   extraSteps,
+		Labels:       labels,
 		// Directory COPY is broken on Apple's builder — see the field comment.
 		FeatureArchives: true,
 	})

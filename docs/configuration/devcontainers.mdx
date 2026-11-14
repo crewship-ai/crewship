@@ -315,6 +315,38 @@ to remove crash leaks:
   by a crew row, so the sweeper treats any unreferenced one beyond the age
   floor the same way it treats orphaned cache images.
 
+### Image ownership
+
+An installation with a settled identity builds its images inside its own
+namespace and labels them with their origin:
+
+| Image | Tag | Labels |
+|---|---|---|
+| Crew image | `crewship-cache:{namespace}-{hash[:12]}` | `crewship.image.instance-id`, `crewship.image.kind=crew` |
+| Intermediate feature image | `crewship-feat:{namespace}-{hash[:12]}` | `crewship.image.instance-id`, `crewship.image.kind=feature` |
+
+`{namespace}` is the full installation identity (the
+value of the `crewship.instance-id` container label). `config_hash` itself is
+unchanged and not installation-specific.
+
+- Crews of one installation still share an image when their configuration
+  matches. New build cache lookups use distinct tags for each installation.
+  This does not change existing selections or enforce deletion ownership. Base images
+  and BuildKit layers remain shared by the daemon.
+- A shared image names no crew. The labels record which installation built
+  it; they are evidence of origin, not a permission to delete. What an
+  installation still needs is decided by its database.
+- The label keys are image-specific. A container inherits its image's labels,
+  and these keys are never used to recognise a runtime container.
+- Without a settled identity (an in-memory database, or a second server on
+  the same database file) the legacy names `crewship-cache:{hash[:12]}` and
+  `crewship-feat:{hash[:12]}` are used and reserved ownership labels are cleared to prevent inheritance.
+- Upgrading does not rebuild crews. A crew keeps running from the image it
+  already selected, by immutable image ID; the namespace applies from the next
+  build the crew needs. Images built before the upgrade are not claimed: they
+  keep their legacy names, carry no labels, and stay under the opt-in policy
+  below.
+
 ### Orphan deletion policy
 
 Cache-image deletion is opt-in via the `CREWSHIP_CACHE_GC_AUTODELETE` environment variable (also described in [Environment → Devcontainer cache GC](/configuration/environment#devcontainer-cache-gc)):
