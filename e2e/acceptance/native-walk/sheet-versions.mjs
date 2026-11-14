@@ -1,5 +1,5 @@
 // What a Sheet version changed, judged from the workbook bytes the editor sent.
-// Pure; tested in sheet-versions.test.mjs.
+// Pure; tested in verdict.test.mjs ("sheet versions: …").
 //
 // The Sheet engine keeps the active cell (`sheets[*].view_active`) in the saved
 // workbook. When Enter lands after the 300 ms autosave has already captured the

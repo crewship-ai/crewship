@@ -609,8 +609,8 @@ changed content; it is counted in `walk.json` under `versions.cursorOnly` and
 printed in the log. A repeat of the lost attempt, a save not built on the lost
 version, any content change after the lost reply, and more than one content version
 from one ctrl+s stay violations. Word versions are always judged as content. The
-classifier is `e2e/acceptance/native-walk/sheet-versions.mjs`, tested by
-`node --test e2e/acceptance/native-walk/sheet-versions.test.mjs`.
+classifier is `e2e/acceptance/native-walk/sheet-versions.mjs`, tested with the
+verdict in `verdict.test.mjs`.
 
 ## RC gate: required IDs
 
