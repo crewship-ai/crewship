@@ -510,7 +510,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
   window.addEventListener('pageshow',checkOnReturn)
   // Only the editor frame's own window may speak. Its sandbox gives it the opaque
   // origin "null", never its URL's origin; the port requires exactly that and the hello.
-  const windowMessage=(event:MessageEvent)=>{const r=current;if(!r||event.source!==r.frame.contentWindow)return;r.port.handleWindowMessage(event)}
+  const windowMessage=(event:MessageEvent)=>{const r=current,w=r?.frame.contentWindow;if(!r||!w||event.source!==w)return;r.port.handleWindowMessage(event)}
   window.addEventListener('message',windowMessage)
   const unregisterPrivacy=registerDocumentDraftWriter(humanId,retirePrivacy,{suspend:suspendForAuth,hasDraft:()=>Boolean(metadataOnly||current?.phase?.dirty||current?.capture)})
   function wrapJournal(journal:NativeDraftJournal,r:Runtime):NativeDraftJournal{return {...journal,

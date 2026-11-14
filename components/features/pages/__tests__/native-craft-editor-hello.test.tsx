@@ -7,11 +7,11 @@ import {NativeCraftEditorHost} from "../native-craft-editor-host"
 // The real native port and the real host window listener: only the server and
 // the draft journal are stubbed. The sandboxed editor frame always speaks with
 // the opaque origin "null"; its hello must reach the port (#5134 regression).
-const m=vi.hoisted(()=>({apiFetch:vi.fn(),createClient:vi.fn(),openJournal:vi.fn(),createPort:vi.fn(),portError:vi.fn(),registerPrivacy:vi.fn()}))
+const m=vi.hoisted(()=>({apiFetch:vi.fn(),createClient:vi.fn(),openJournal:vi.fn(),createPort:vi.fn(),portError:vi.fn(),handled:vi.fn(),registerPrivacy:vi.fn()}))
 vi.mock("@/lib/api-fetch",()=>({apiFetch:m.apiFetch,AUTH_EVENT:"unit-native-auth-retired"}))
 vi.mock("../native-craft-agent-start",()=>({NativeCraftAgentStart:()=>null}))
 vi.mock("@/lib/mooring/native-document-client",()=>({createNativeDocumentClient:m.createClient}))
-vi.mock("@/lib/mooring/native-editor-port",async()=>{const actual=await vi.importActual<typeof import("@/lib/mooring/native-editor-port")>("@/lib/mooring/native-editor-port");return {...actual,createNativeEditorPort:(o:NativeEditorPortOptions)=>{m.createPort(o);return actual.createNativeEditorPort({...o,onError(reason){m.portError(reason);o.onError(reason)}})}}})
+vi.mock("@/lib/mooring/native-editor-port",async()=>{const actual=await vi.importActual<typeof import("@/lib/mooring/native-editor-port")>("@/lib/mooring/native-editor-port");return {...actual,createNativeEditorPort:(o:NativeEditorPortOptions)=>{m.createPort(o);const port=actual.createNativeEditorPort({...o,onError(reason){m.portError(reason);o.onError(reason)}});const handle=port.handleWindowMessage.bind(port);port.handleWindowMessage=(event)=>{m.handled(event);return handle(event)};return port}}})
 vi.mock("@/lib/mooring/native-draft",async()=>({...await vi.importActual("@/lib/mooring/native-draft"),openNativeDraftJournal:m.openJournal}))
 vi.mock("@/lib/document-queue",async()=>({...await vi.importActual("@/lib/document-queue"),registerDocumentDraftWriter:m.registerPrivacy,purgeDocumentDrafts:vi.fn()}))
 vi.mock("../workbook-editor-host",()=>({editorFrameSupported:()=>true,createEditorFrame:(doc:Document,src:string,onLoad:()=>void)=>{const f=doc.createElement('iframe');f.setAttribute('sandbox','allow-scripts');f.setAttribute('credentialless','');f.setAttribute('referrerpolicy','no-referrer');f.srcdoc='';f.src=src;queueMicrotask(onLoad);return f}}))
@@ -54,6 +54,8 @@ describe.each(['wordcraft','gridcraft'] as const)('%s editor hello through the r
   await hello(other.contentWindow,"null")
   await hello(window,"null")
   expect(connects()).toHaveLength(0)
+  // The host's own filter, not only the port's re-check, keeps foreign windows out.
+  expect(m.handled).not.toHaveBeenCalled()
   await hello(target,"null")
   expect(connects()).toHaveLength(1)
  })
@@ -64,6 +66,14 @@ describe.each(['wordcraft','gridcraft'] as const)('%s editor hello through the r
   await hello(target,"null")
   expect(connects()).toHaveLength(0)
   expect(m.portError).toHaveBeenCalledWith('native_editor_handshake')
+ })
+ it('ignores a message without a source while the frame has no window',async()=>{
+  const {frame,hello,connects}=await mountFrame(app)
+  Object.defineProperty(frame,'contentWindow',{configurable:true,get:()=>null})
+  await hello(null,"null")
+  expect(m.handled).not.toHaveBeenCalled()
+  expect(connects()).toHaveLength(0)
+  expect(m.portError).not.toHaveBeenCalled()
  })
  it('does not handshake again on a second hello',async()=>{
   const {target,hello,connects}=await mountFrame(app)
