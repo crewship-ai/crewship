@@ -10,7 +10,8 @@ import {
 import { LevelSelect, SubjectSelect, useSubjects, type Subject } from "./share-controls"
 import {
   entryKey, useFolderSettings, useSharingApi, useSharingHuman, useSharingMutation,
-  type AccessEntry, type DefaultAudience, type FolderSettings, type ShareLevel, type SharingCapabilities,
+  FOLDER_AGENT_LABEL, FOLDER_AGENT_LEVELS,
+  type AccessEntry, type DefaultAudience, type FolderAgentLevel, type FolderSettings, type ShareLevel, type SharingCapabilities,
 } from "./sharing-api"
 
 export interface FolderSettingsDialogProps {
@@ -65,7 +66,13 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
   const [subject, setSubject] = useState<Subject | null>(null)
   const [level, setLevel] = useState<ShareLevel>("read")
   const { subjects, error: peopleError } = useSubjects(workspaceId, true)
-  const save = useSharingMutation(workspaceId, (api, input: Pick<FolderSettings, "defaultAudience" | "entries">) => api.saveFolderSettings(folder.slug, input), folder.slug)
+  const [agents, setAgents] = useState<FolderAgentLevel | null>(initial.agents?.level ?? null)
+  // The agents row saves first, against the version this form was read at, so a concurrent change is refused
+  // rather than overwritten; the entries then save as before.
+  const save = useSharingMutation(workspaceId, async (api, input: Pick<FolderSettings, "defaultAudience" | "entries"> & { agents: FolderAgentLevel | null }) => {
+    if (input.agents !== null && initial.agents && input.agents !== initial.agents.level) await api.saveFolderAgents(folder.slug, input.agents, initial.agents.aclVersion)
+    await api.saveFolderSettings(folder.slug, { defaultAudience: input.defaultAudience, entries: input.entries })
+  }, folder.slug)
 
   const add = () => {
     if (!subject) return
@@ -78,7 +85,7 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
 
   const summary = `${entries.length} ${entries.length === 1 ? "entry" : "entries"}${audience === null ? "" : ` · new artifacts ${audience === "private" ? "private" : "shared like the folder"}`}`
 
-  const submit = () => { if (!save.isPending) save.mutate({ defaultAudience: audience, entries }, { onSuccess: onClose }) }
+  const submit = () => { if (!save.isPending) save.mutate({ defaultAudience: audience, entries, agents }, { onSuccess: onClose }) }
 
   return <>
   <CreateSurfaceBody className="flex flex-col gap-4 text-xs">
@@ -108,6 +115,18 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
       {peopleError && <p role="status" className="text-muted-foreground">People could not be read; Everyone is still available.</p>}
       {!levels.includes("comment") && <p className="text-muted-foreground">A folder shares Read or Edit. Give Comment on each artifact from Share.</p>}
     </section>
+
+    {agents !== null && <section aria-label="Crew agents" className="flex flex-col gap-1.5">
+      <h3 className="font-medium">Agents</h3>
+      <div className="flex items-center gap-2 rounded-md border border-border/50 px-2.5 py-1.5">
+        <span className="min-w-0 flex-1 truncate">Agents of this folder&apos;s crew</span>
+        <select aria-label="Agents of this folder's crew" className="h-7 rounded-md border bg-transparent px-2 text-xs" value={agents}
+          onChange={e => setAgents(e.target.value as FolderAgentLevel)}>
+          {FOLDER_AGENT_LEVELS.map(l => <option key={l} value={l}>{FOLDER_AGENT_LABEL[l]}</option>)}
+        </select>
+      </div>
+      <p className="text-muted-foreground">Agents never edit through a folder and never see Personal artifacts. Other agents need access on each artifact.</p>
+    </section>}
 
     <p role="status" data-slot="folder-settings-summary" className="text-muted-foreground">{summary}</p>
     {!capabilities.atomicFolderSave && <p className="text-muted-foreground">Each change is saved on its own; if one fails, the ones before it stay saved.</p>}

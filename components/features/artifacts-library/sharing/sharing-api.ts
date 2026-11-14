@@ -79,12 +79,18 @@ export interface AccessEntry {
 }
 
 export type DefaultAudience = "private" | "folder"
+/** What the agents of a folder's crew may do with its non-private artifacts (#5317 D2): never edit. */
+export type FolderAgentLevel = "none" | "read" | "propose"
+export const FOLDER_AGENT_LEVELS: readonly FolderAgentLevel[] = ["none", "read", "propose"]
+export const FOLDER_AGENT_LABEL: Record<FolderAgentLevel, string> = { none: "No access", read: "Viewer", propose: "Can suggest" }
 export interface FolderSettings {
   slug: string
   /** Null where the server has no default audience for new artifacts. */
   defaultAudience: DefaultAudience | null
   /** Who the folder itself shares with. */
   entries: AccessEntry[]
+  /** The crew's agents row, with the version it was read at; absent where it would not take effect. */
+  agents?: { level: FolderAgentLevel; aclVersion: number } | null
 }
 
 export type BulkAction = "archive" | "unarchive" | "move" | "share"
@@ -137,6 +143,8 @@ export interface SharingApi {
   revoke(item: LibraryItem, subjectType: AccessSubjectType, subjectId: string): Promise<void>
   folderSettings(slug: string, signal?: AbortSignal): Promise<FolderSettings>
   saveFolderSettings(slug: string, settings: Pick<FolderSettings, "defaultAudience" | "entries">): Promise<void>
+  /** Compare-and-set against the version the settings were read at; a stale one is refused. */
+  saveFolderAgents(slug: string, level: FolderAgentLevel, aclVersion: number): Promise<void>
   bulk(request: BulkRequest): Promise<BulkResult>
   libraryState(items: LibraryItem[]): LibraryState
 }
@@ -302,7 +310,9 @@ export function httpSharingApi(workspaceId: string, guard?: RequestGuard, operat
       const id = type === "workspace" ? "" : str(raw.subject_id)
       return [{ subjectType: type, subjectId: id, label: type === "workspace" ? EVERYONE : str(raw.label) || id, level: raw.can_write === true ? "write" : "read", via: "folder" }]
     })
-    return { slug, defaultAudience: null, entries }
+    const level = FOLDER_AGENT_LEVELS.find(l => l === body.agent_access)
+    const agents = body.agent_access_available === true && level && typeof body.acl_version === "number" ? { level, aclVersion: body.acl_version } : null
+    return { slug, defaultAudience: null, entries, agents }
   }
 
   const put = (slug: string, type: AccessSubjectType, id: string, level: AccessLevel) =>
@@ -330,6 +340,9 @@ export function httpSharingApi(workspaceId: string, guard?: RequestGuard, operat
       for (const level of new Set(heldLevels(await readGrants(item.slug), type, id))) await remove(item.slug, type, id, level)
     },
     folderSettings: readFolder,
+    async saveFolderAgents(slug, level, aclVersion) {
+      await call(`${folder(slug)}/agent-access?${ws}`, JSON_INIT("PUT", { level, acl_version: aclVersion }))
+    },
     async saveFolderSettings(slug, settings) {
       if (settings.defaultAudience !== null) throw new SharingError("This server has no default audience for new artifacts in a folder.", 400)
       if (settings.entries.some(e => e.level === "comment")) throw new SharingError("A folder shares Read or Edit; Comment is set on each artifact.", 400)
@@ -490,7 +503,7 @@ const TEST_NAME = /\b(?:test|tests|e2e|qa|probe|smoke|fixture|playwright)\b/i
 
 interface MockStore {
   grants: Record<string, AccessEntry[]>
-  folders: Record<string, { defaultAudience: DefaultAudience | null; entries: AccessEntry[] }>
+  folders: Record<string, { defaultAudience: DefaultAudience | null; entries: AccessEntry[]; agents?: FolderAgentLevel; version?: number }>
   archived: string[]
   moved: Record<string, { slug: string; name: string } | null>
 }
@@ -568,11 +581,19 @@ export function mockSharingApi(workspaceId: string): SharingApi {
     async folderSettings(slug) {
       await pause()
       const saved = store().folders[slug]
-      return { slug, defaultAudience: saved?.defaultAudience ?? "folder", entries: saved?.entries ?? [] }
+      return { slug, defaultAudience: saved?.defaultAudience ?? "folder", entries: saved?.entries ?? [], agents: { level: saved?.agents ?? "none", aclVersion: saved?.version ?? 0 } }
+    },
+    async saveFolderAgents(slug, level, aclVersion) {
+      await pause()
+      const saved = store().folders[slug] ?? { defaultAudience: "folder", entries: [] }
+      if ((saved.version ?? 0) !== aclVersion) throw new SharingError("The folder changed since it was read; reopen its settings.", 409)
+      store().folders[slug] = { ...saved, agents: level, version: aclVersion + 1 }
+      persist(workspaceId)
     },
     async saveFolderSettings(slug, settings) {
       await pause()
-      store().folders[slug] = { defaultAudience: settings.defaultAudience, entries: settings.entries.map(e => ({ ...e, via: "folder" })) }
+      const was = store().folders[slug]
+      store().folders[slug] = { ...was, defaultAudience: settings.defaultAudience, entries: settings.entries.map(e => ({ ...e, via: "folder" })), version: (was?.version ?? 0) + 1 }
       persist(workspaceId)
     },
     async bulk(request) {

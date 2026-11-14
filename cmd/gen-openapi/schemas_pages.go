@@ -152,6 +152,7 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"entry":       folderACLEntry,
 		"agent_access": map[string]any{"type": "string", "enum": []string{"none", "read", "propose"},
 			"description": "What the owning crew's agents may do with the folder's non-private pages (#5317 D2)."},
+		"agent_access_available": map[string]any{"type": "boolean", "description": "True where agent_access takes effect (the artifact_agent_access_modes flag is on)."},
 	})
 	folderACL["required"] = []string{"folder", "acl", "acl_version"}
 	accessMe := obj(map[string]any{
@@ -604,7 +605,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			RequestRequired: true,
 			Response: obj(map[string]any{
 				"folder": str(), "acl_version": integer(),
-				"agent_access": map[string]any{"type": "string", "enum": []string{"none", "read", "propose"}},
+				"agent_access":           map[string]any{"type": "string", "enum": []string{"none", "read", "propose"}},
+				"agent_access_available": map[string]any{"type": "boolean"},
 			}),
 		},
 		"DELETE /api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id}": {

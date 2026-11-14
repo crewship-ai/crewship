@@ -39,6 +39,8 @@ type folderAgentAccessDocument struct {
 	Folder      string `json:"folder"`
 	AgentAccess string `json:"agent_access"`
 	ACLVersion  int64  `json:"acl_version"`
+	// Available is true where the setting takes effect (flag on).
+	Available bool `json:"agent_access_available"`
 }
 
 func (h *PageHandler) folderAgentAccess(ctx context.Context, folderID string) (string, error) {
@@ -154,5 +156,5 @@ func (h *PageHandler) PutFolderAgentAccess(w http.ResponseWriter, r *http.Reques
 		notify()
 	}
 	broadcastWorkspaceEvent(h.hub, wsID, pageFolderEvent, map[string]any{"slug": f.Slug, "folder_id": f.ID})
-	writeJSON(w, http.StatusOK, folderAgentAccessDocument{Folder: f.Slug, AgentAccess: level, ACLVersion: f.ACLVersion})
+	writeJSON(w, http.StatusOK, folderAgentAccessDocument{Folder: f.Slug, AgentAccess: level, ACLVersion: f.ACLVersion, Available: h.artifactRunModesOn(r.Context(), wsID)})
 }

@@ -132003,6 +132003,10 @@
                       ],
                       "type": "string"
                     },
+                    "agent_access_available": {
+                      "description": "True where agent_access takes effect (the artifact_agent_access_modes flag is on).",
+                      "type": "boolean"
+                    },
                     "entry": {
                       "properties": {
                         "can_read": {
@@ -132292,6 +132296,10 @@
                         "propose"
                       ],
                       "type": "string"
+                    },
+                    "agent_access_available": {
+                      "description": "True where agent_access takes effect (the artifact_agent_access_modes flag is on).",
+                      "type": "boolean"
                     },
                     "entry": {
                       "properties": {
@@ -132694,6 +132702,9 @@
                         "propose"
                       ],
                       "type": "string"
+                    },
+                    "agent_access_available": {
+                      "type": "boolean"
                     },
                     "folder": {
                       "type": "string"

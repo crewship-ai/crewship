@@ -102,3 +102,32 @@ it("returns focus to the control that opened it once the library unmounts the di
   await waitFor(() => expect(document.activeElement).toBe(opener))
   opener.remove()
 })
+
+// #5317 PR5 (Harbor 2 v92): one row for the agents of the folder's crew, at
+// most Viewer or Can suggest, saved against the version that was read.
+it("on the server, sets the crew's agents to Viewer against the version it read", async () => {
+  flags.mock = false
+  const acl = { folder: "design", acl_version: 4, acl: [], agent_access: "none", agent_access_available: true }
+  flags.fetch.mockImplementation(async () => new Response(JSON.stringify(acl), { status: 200 }))
+  const onOpenChange = vi.fn()
+  renderDialog(onOpenChange)
+  const select = await screen.findByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement
+  expect([...select.options].map(o => o.textContent)).toEqual(["No access", "Viewer", "Can suggest"])
+  expect(screen.getByText(/never edit through a folder/)).toBeTruthy()
+  change("Agents of this folder's crew", "read")
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  const writes = flags.fetch.mock.calls.map(call => call as unknown as [string, RequestInit | undefined]).filter(([, init]) => init?.method === "PUT")
+  expect(writes.map(([url, init]) => [new URL(url, "http://h").pathname, JSON.parse(String(init!.body))])).toEqual([
+    ["/api/v1/page-folders/design/agent-access", { level: "read", acl_version: 4 }],
+  ])
+})
+
+it("on the server, hides the agents row where it would not take effect", async () => {
+  flags.mock = false
+  const acl = { folder: "design", acl_version: 4, acl: [], agent_access: "none", agent_access_available: false }
+  flags.fetch.mockImplementation(async () => new Response(JSON.stringify(acl), { status: 200 }))
+  renderDialog()
+  await screen.findByRole("button", { name: "Save" })
+  expect(screen.queryByRole("combobox", { name: "Agents of this folder's crew" })).toBeNull()
+})

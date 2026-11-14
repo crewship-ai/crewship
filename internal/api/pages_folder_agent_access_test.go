@@ -202,7 +202,7 @@ func TestFolderAgentAccess_WhoMaySetItAndToWhat(t *testing.T) {
 	}
 	rr := put("mia", "MANAGER", body("read", v))
 	expectStatus(t, rr, http.StatusOK)
-	if doc := decodeFoldersJSON(t, rr); doc["agent_access"] != "read" || doc["acl_version"] != float64(v+1) {
+	if doc := decodeFoldersJSON(t, rr); doc["agent_access"] != "read" || doc["acl_version"] != float64(v+1) || doc["agent_access_available"] != true {
 		t.Fatalf("response %v", doc)
 	}
 	expectStatus(t, put("erin", "ADMIN", body("propose", v+1)), http.StatusOK)
@@ -234,7 +234,12 @@ func TestFolderAgentAccess_FlagOffRefusesAnythingButNone(t *testing.T) {
 	if level, _ := folderAgentAccessOf(t, f, "engine-ops"); level != "none" {
 		t.Fatalf("flag off stored %s", level)
 	}
-	expectStatus(t, f.call(t, "PUT", "/api/v1/page-folders/engine-ops/agent-access", "erin", "ADMIN", fmt.Sprintf(`{"level":"none","acl_version":%d}`, v)), http.StatusOK)
+	rr = f.call(t, "PUT", "/api/v1/page-folders/engine-ops/agent-access", "erin", "ADMIN", fmt.Sprintf(`{"level":"none","acl_version":%d}`, v))
+	expectStatus(t, rr, http.StatusOK)
+	// The UI shows the agents row only where it can take effect.
+	if doc := decodeFoldersJSON(t, rr); doc["agent_access_available"] != false {
+		t.Fatalf("flag off reported agent access as available: %v", doc)
+	}
 }
 
 // #5317 required test: moving an artifact into a folder (even one its agents
