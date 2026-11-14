@@ -41,6 +41,13 @@ func (h *PageHandler) artifactAgentRequestMode(w http.ResponseWriter, r *http.Re
 			ctx = context.WithValue(ctx, ctxWorkspaceID, ws)
 			return r.WithContext(ctx), true
 		}
+		// A recorded, live run whose call arrives without its capability
+		// lost it in the sidecar (a restart forgets it). Say so plainly
+		// instead of the generic refusal, and journal it once.
+		if h.unattendedCapabilityLost(r, ws, crew, agent, run) {
+			replyErrorCode(w, 403, unattendedCapabilityLostMessage, errCodeRunCapabilityLost, "")
+			return r, false
+		}
 	}
 	if err != nil {
 		replyError(w, 403, "no_human_principal")

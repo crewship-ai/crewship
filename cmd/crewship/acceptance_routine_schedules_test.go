@@ -135,6 +135,8 @@ type routineSchedulesJSONRow struct {
 	Timezone           string         `json:"timezone"`
 	Inputs             map[string]any `json:"inputs"`
 	Enabled            bool           `json:"enabled"`
+	CreatorKind        string         `json:"creator_kind"`
+	CreatorUserID      string         `json:"creator_user_id"`
 }
 
 type routineSchedulesJSONAck struct {
@@ -209,11 +211,16 @@ func TestAcceptanceRoutineSchedules_Lifecycle(t *testing.T) {
 	if byName["nightly"].ID != id || !byName["nightly"].Enabled || byName["hourly"].Enabled {
 		t.Fatalf("list does not reflect the created schedules: %+v", rows)
 	}
+	// #5339: a schedule a person creates with their own CLI token records
+	// that person as its creator.
+	if byName["nightly"].CreatorKind != "human" || byName["nightly"].CreatorUserID != "sch-owner" {
+		t.Fatalf("a person's CLI create did not record them as the creator: %+v", byName["nightly"])
+	}
 	tableOut, _, err := runRoutineSchedulesCLI(t, ownerCfg, "routine", "schedules", "list", "--slug", "acceptance-sched")
 	if err != nil {
 		t.Fatalf("schedules list failed: %v\n%s", err, tableOut)
 	}
-	for _, want := range []string{"ID", "ROUTINE", "ENABLED", id, "nightly", "acceptance-sched", "0 9 * * *", "Europe/Prague", "yes"} {
+	for _, want := range []string{"ID", "ROUTINE", "ENABLED", "CREATOR", "human:sch-owner", id, "nightly", "acceptance-sched", "0 9 * * *", "Europe/Prague", "yes"} {
 		if !strings.Contains(tableOut, want) {
 			t.Fatalf("schedules table is missing %q:\n%s", want, tableOut)
 		}

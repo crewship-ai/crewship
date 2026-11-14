@@ -82,7 +82,11 @@ type PageHandler struct {
 	hub                              *ws.Hub
 	logger                           *slog.Logger
 	journal                          journal.Emitter
-	clock                            pages.Clock
+	// lostCapabilityJournaled holds the runs whose lost artifact capability
+	// was already journaled by this process (#5339), so concurrent calls of
+	// one run journal it once even before the async journal row lands.
+	lostCapabilityJournaled sync.Map
+	clock                   pages.Clock
 	// pushLimits is §10b.3's push rate, layer 1: per-panel and per-workspace
 	// token buckets over the values in internal/ratelimitcfg. Held on the
 	// handler rather than in a package global so a test owns its own buckets,

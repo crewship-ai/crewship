@@ -526,7 +526,7 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	}
 	// #5339: record this run without a human before its agent starts (see
 	// recordRoutineArtifactRun for which routine runs qualify).
-	capability, endArtifactRun := recordRoutineArtifactRun(ctx, r.db, r.logger, req, info.CrewID, agentID, childRunID, time.Duration(runReq.TimeoutSecs)*time.Second)
+	capability, endArtifactRun := recordRoutineArtifactRun(ctx, r.db, r.logger, r.journalE, req, info.CrewID, agentID, childRunID, time.Duration(runReq.TimeoutSecs)*time.Second)
 	defer endArtifactRun()
 	runReq.ArtifactRunCapability = capability
 	runErr := r.orch.RunAgent(ctx, runReq, finalHandler)

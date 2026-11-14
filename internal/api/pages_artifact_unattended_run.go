@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/artifactrun"
+	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
@@ -57,6 +58,52 @@ func (h *PageHandler) unattendedArtifactRequest(r *http.Request, ws, crew, agent
 		return nil
 	}
 	return a
+}
+
+// errCodeRunCapabilityLost is the refusal a recorded run gets when its call
+// reaches the server without the capability the host handed its sidecar
+// (owner decision B, #5339). The capability is never re-issued: nothing in
+// the container may fetch one, and the host delivers it once per run.
+const errCodeRunCapabilityLost = "run_capability_lost"
+
+const unattendedCapabilityLostMessage = "This run lost its artifact access: the crew sidecar no longer holds the run's artifact capability (it restarted or never received it). Artifact tools stay unavailable for the rest of this run; the next run gets a new capability."
+
+// journalArtifactRunCapabilityLost records, once per run, that a recorded run
+// lost its artifact capability. Payload: run_id, trigger, source.
+const journalArtifactRunCapabilityLost journal.EntryType = "artifact.run_capability_lost"
+
+// unattendedCapabilityLost reports whether a call that carries no capability
+// comes from a run the host recorded that is still live (open, unexpired,
+// live in the journal, policy allowing). It never admits anything. The first
+// such call per run is journaled.
+func (h *PageHandler) unattendedCapabilityLost(r *http.Request, ws, crew, agent, run string) bool {
+	ctx := r.Context()
+	if r.Header.Get(artifactrun.Header) != "" || !h.artifactRunModesOn(ctx, ws) {
+		return false
+	}
+	a := &artifactRunAuthority{WorkspaceID: ws, CrewID: crew, AgentID: agent, RunID: run, Unattended: true}
+	if h.db.QueryRowContext(ctx, `SELECT trigger_type,source_ref FROM artifact_unattended_runs WHERE run_id=? AND workspace_id=? AND crew_id=? AND agent_id=?`, run, ws, crew, agent).Scan(&a.Trigger, &a.Source) != nil {
+		return false
+	}
+	if h.checkUnattendedArtifactRun(ctx, a) != nil {
+		return false
+	}
+	if _, already := h.lostCapabilityJournaled.LoadOrStore(run, true); already {
+		return true
+	}
+	var seen int
+	if err := h.db.QueryRowContext(ctx, `SELECT count(*) FROM journal_entries WHERE workspace_id=? AND agent_id=? AND trace_id=? AND entry_type=?`, ws, agent, run, string(journalArtifactRunCapabilityLost)).Scan(&seen); err == nil && seen == 0 && h.journal != nil {
+		if _, err := h.journal.Emit(ctx, journal.Entry{
+			WorkspaceID: ws, CrewID: crew, AgentID: agent, TraceID: run,
+			Type: journalArtifactRunCapabilityLost, Severity: journal.SeverityWarn,
+			ActorType: journal.ActorAgent, ActorID: agent,
+			Summary: "A run lost its artifact access: its sidecar no longer holds the run's capability",
+			Payload: map[string]any{"run_id": run, "trigger": a.Trigger, "source": a.Source},
+		}); err != nil && h.logger != nil {
+			h.logger.Warn("journal entry for a lost run capability not written", "run_id", run, "error", err)
+		}
+	}
+	return true
 }
 
 // lookupUnattendedRun finds the host record for exactly this workspace, crew,

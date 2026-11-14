@@ -22975,6 +22975,16 @@
             "format": "date-time",
             "type": "string"
           },
+          "creator_kind": {
+            "enum": [
+              "human",
+              "agent"
+            ],
+            "type": "string"
+          },
+          "creator_user_id": {
+            "type": "string"
+          },
           "cron_expr": {
             "type": "string"
           },

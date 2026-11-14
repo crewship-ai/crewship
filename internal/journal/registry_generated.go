@@ -36,6 +36,8 @@ var AllEntryTypes = []EntryType{
 	EntryType("artifact.mooring_mandate_admitted"), // mooringMandateAdmitted, internal/api/mooring.go:24:2
 	EntryType("artifact.mooring_mandate_revoked"),  // mooringMandateRevoked, internal/api/mooring.go:25:2
 	EntryType("artifact.project_shared"),           // journalArtifactProjectShared, internal/api/pages_artifact_project.go:24:7
+	EntryType("artifact.run_capability_lost"),      // journalArtifactRunCapabilityLost, internal/api/pages_artifact_unattended_run.go:73:7
+	EntryType("artifact.run_capability_withheld"),  // EntryArtifactRunCapabilityWithheld, internal/pipeline/routine_artifact_run.go:18:7
 	EntryAssignmentCancel,
 	EntryAssignmentDone,
 	EntryAssignmentCreate,
@@ -130,14 +132,14 @@ var AllEntryTypes = []EntryType{
 	EntryType("page.folder_membership_changed"),   // entryPageFolderMembershipChanged, internal/api/pages_folders.go:81:2
 	EntryPageGrantAdded,
 	EntryPageGrantRemoved,
-	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:797:2
+	EntryType("page.link_revoked"),      // journalPageLinkRevoked, internal/api/pages_public_tokens.go:822:2
 	EntryType("page.owner_transferred"), // entryPageOwnerTransferred, internal/api/pages_transfer_owner.go:57:7
 	EntryPagePanelRecovered,
 	EntryPagePanelStale,
 	EntryPagePanelUpdated,
 	EntryPageProduceDenied,
-	EntryType("page.public_view"), // journalPagePublicView, internal/api/pages_public_tokens.go:800:2
-	EntryType("page.published"),   // journalPagePublished, internal/api/pages_public_tokens.go:796:2
+	EntryType("page.public_view"), // journalPagePublicView, internal/api/pages_public_tokens.go:825:2
+	EntryType("page.published"),   // journalPagePublished, internal/api/pages_public_tokens.go:821:2
 	EntryPageSpecChanged,
 	EntryPageWakeFired,
 	EntryType("page.webhook_issued"),  // journalPageWebhookIssued, internal/api/pages_webhooks.go:451:2

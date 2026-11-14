@@ -509,3 +509,65 @@ func TestUnattendedRun_ProducerTTLCoversTheRunDeadline(t *testing.T) {
 		}
 	}
 }
+
+// A recorded, live run whose call arrives without its capability (its sidecar
+// restarted and forgot it) is told so plainly, 403 run_capability_lost, and
+// the loss is journaled once per run. It still reaches nothing. A run the
+// host never recorded, an ended run, and the flag off keep the generic
+// refusal (owner decision B).
+func TestUnattendedRun_LostCapabilityIsSaidPlainly(t *testing.T) {
+	g := newRunScopeRig(t)
+	g.standing(t, "ua-lost", g.f.a.AgentID, "read", g.f.a.HumanUserID)
+	writer := journal.NewWriter(g.f.rig.db, newTestLogger(), journal.WriterOptions{ChainKey: []byte("synthetic-unattended-chain"), FlushSize: 1})
+	t.Cleanup(func() { _ = writer.Close() })
+	g.router.pages.SetJournal(writer)
+	lostRows := func() int {
+		t.Helper()
+		if err := writer.Flush(t.Context()); err != nil {
+			t.Fatal(err)
+		}
+		var n int
+		if err := g.f.rig.db.QueryRow(`SELECT count(*) FROM journal_entries WHERE entry_type='artifact.run_capability_lost'`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	u := g.unattended(t, "ua-run-lost", g.f.a.AgentID, "WEBHOOK")
+	for i := 0; i < 2; i++ {
+		w := g.toolAs(u.token, "", "artifact_versions", "ua-lost", `{}`)
+		var body map[string]string
+		_ = json.Unmarshal(w.Body.Bytes(), &body)
+		if w.Code != 403 || body["code"] != "run_capability_lost" || !strings.Contains(body["error"], "sidecar") {
+			t.Fatalf("call %d without the capability: %d %s", i, w.Code, w.Body)
+		}
+	}
+	if n := lostRows(); n != 1 {
+		t.Fatalf("lost capability journaled %d times, want once", n)
+	}
+	if rows := unattendedAuditRows(t, g); len(rows) != 0 {
+		t.Fatalf("a lost capability reached something: %+v", rows)
+	}
+	if w := u.tool(g, "artifact_versions", "ua-lost", `{}`); w.Code != 200 {
+		t.Fatalf("the capability itself still works: %d %s", w.Code, w.Body)
+	}
+
+	generic := func(what string, w *httptest.ResponseRecorder) {
+		t.Helper()
+		if w.Code != 403 || strings.Contains(w.Body.String(), "run_capability_lost") {
+			t.Fatalf("%s: %d %s, want the generic refusal", what, w.Code, w.Body)
+		}
+	}
+	key := internaltoken.DeriveAgentRunKey(unattendedRunMaster, g.f.a.WorkspaceID, g.f.a.CrewID)
+	generic("a run the host never recorded", g.toolAs(internaltoken.DeriveAgentRunToken(key, g.f.a.WorkspaceID, g.f.a.AgentID, "ua-run-unrecorded"), "", "artifact_versions", "ua-lost", `{}`))
+	ended := g.unattended(t, "ua-run-lost-ended", g.f.a.AgentID, "WEBHOOK")
+	if err := artifactrun.End(t.Context(), g.f.rig.db, ended.runID); err != nil {
+		t.Fatal(err)
+	}
+	generic("an ended run", g.toolAs(ended.token, "", "artifact_versions", "ua-lost", `{}`))
+	other := g.unattended(t, "ua-run-lost-flag", g.f.a.AgentID, "WEBHOOK")
+	mustExec(t, g.f.rig.db, `DELETE FROM feature_flag_overrides WHERE id='ref-flag-on'`)
+	generic("flag off", g.toolAs(other.token, "", "artifact_versions", "ua-lost", `{}`))
+	if n := lostRows(); n != 1 {
+		t.Fatalf("generic refusals journaled a loss: %d", n)
+	}
+}

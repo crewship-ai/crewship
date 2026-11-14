@@ -50,7 +50,9 @@ chat_origin_id TEXT,
     consecutive_failures     INTEGER NOT NULL DEFAULT 0,
     max_consecutive_failures INTEGER NOT NULL DEFAULT 5,
     disabled_reason          TEXT,
-    activation               TEXT
+    activation               TEXT,
+    creator_kind             TEXT,
+    creator_user_id          TEXT
 );
 `
 

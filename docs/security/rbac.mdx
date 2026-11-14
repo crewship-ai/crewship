@@ -239,14 +239,20 @@ already-referenced runs the ordinary way, binding nothing.
   non-private pages (`crewship page folder agent-access`, admin or the crew's
   MANAGER+). Never edit, never another crew's agents, never Personal pages;
   in a chat run the human's access is still required.
-- A run without a human (a routine a person started, an agent's webhook or
-  cron run) reaches artifacts only
+- A run without a human (a routine a person started, a schedule's fire, an
+  agent's webhook or cron run) reaches artifacts only
   when crewshipd recorded the run (agent, crew, trigger, source) before its
-  agent started and minted a random capability for that one run. A routine
-  started by a schedule (or a person's "run now" of one), a delayed or
-  debounced run, a webhook, `call_pipeline`, an issue, an automation or
-  another agent records nothing and reaches no artifact, and neither does a
-  routine an agent authored, whoever runs it. The
+  agent started and minted a random capability for that one run. A
+  schedule's fire (cron or "run now") counts only when a person created or
+  last saved the schedule with their own session or CLI token, and that
+  person is still a workspace member and not suspended when each step
+  starts. A schedule an agent saved, or one saved before the creator was
+  recorded, never counts until a person saves it again. A delayed or
+  debounced run, a queued occurrence, a webhook, `call_pipeline`, an issue,
+  an automation or another agent records nothing and reaches no artifact,
+  and neither does a routine an agent authored, whoever runs it. A sidecar
+  restart loses the run's capability: later calls get 403
+  `run_capability_lost` and the run reaches nothing more. The
   capability goes to the crew's sidecar, never the agent's environment, and
   ends with the run (its end, its terminal journal entry, or its own timeout
   plus 5 minutes, at most 2 hours).

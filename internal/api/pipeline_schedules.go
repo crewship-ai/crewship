@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/runauthority"
@@ -83,9 +84,31 @@ type scheduleResponse struct {
 	// one thing that tells an operator THIS `enabled: false` needs a
 	// `.../activate` call, not `schedules enable`. Omitted for every
 	// ordinary schedule.
-	Activation string    `json:"activation,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	Activation string `json:"activation,omitempty"`
+	// CreatorKind is "human" or "agent": who created or last saved the
+	// schedule (#5339); omitted when unknown (saved before it was
+	// recorded). CreatorUserID is that person's id for "human".
+	CreatorKind   string    `json:"creator_kind,omitempty"`
+	CreatorUserID string    `json:"creator_user_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// scheduleCreatorFromRequest names who is saving a schedule (#5339). Only a
+// request authenticated by a person's own session or CLI token, through the
+// public API, counts as that person: the original credential captured by
+// the auth middleware must name the same user, and no internal (crew or
+// workspace) token may be on the request. Everything else, including an
+// internal route that propagated X-Caller-User-Id, is an agent.
+func scheduleCreatorFromRequest(r *http.Request) (kind, userID string) {
+	ctx := r.Context()
+	user := UserFromContext(ctx)
+	original := auth.OriginalCredentialFromContext(ctx)
+	if user == nil || user.ID == "" || original == nil || original.UserID != user.ID || (user.SessionID == "" && user.TokenID == "") ||
+		InternalTokenWorkspaceFromContext(ctx) != "" || InternalTokenCrewFromContext(ctx) != "" {
+		return pipeline.ScheduleCreatorAgent, ""
+	}
+	return pipeline.ScheduleCreatorHuman, user.ID
 }
 
 // nominalNextRun is the unshifted cron occurrence, reported only when a spread
@@ -150,6 +173,8 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		MaxConsecutiveFailures: s.MaxConsecutiveFailures,
 		DisabledReason:         s.DisabledReason,
 		Activation:             s.Activation,
+		CreatorKind:            s.CreatorKind,
+		CreatorUserID:          s.CreatorUserID,
 		CreatedAt:              s.CreatedAt,
 		UpdatedAt:              s.UpdatedAt,
 	}
@@ -394,6 +419,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		SpreadSeconds:          derefInt(body.SpreadSeconds),
 		MaxConsecutiveFailures: maxFailures,
 	}
+	in.CreatorKind, in.CreatorUserID = scheduleCreatorFromRequest(r)
 	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		// Cron parse / timezone errors come back as plain errors —
@@ -730,6 +756,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		SpreadSeconds:          spreadSeconds,
 		MaxConsecutiveFailures: maxFailures,
 	}
+	in.CreatorKind, in.CreatorUserID = scheduleCreatorFromRequest(r)
 	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		if isUserScheduleError(err) {
@@ -1088,6 +1115,10 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		Mode:          pipeline.ModeRun,
 		TriggeredVia:  pipeline.TriggeredViaSchedule,
 		TriggeredByID: sched.ID,
+		// #5339: "run now" follows the schedule's own rule. Its steps reach
+		// artifacts only when the schedule's creator is a person still in
+		// good standing; the person pressing run now lends nothing.
+		ArtifactScheduleID: sched.ID,
 	})
 	if err != nil {
 		if writeRoutineOriginError(w, err) {

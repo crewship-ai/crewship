@@ -647,15 +647,28 @@ owner on 2026-11-13.
 10. **A run without a human reaches only its agent's standing access, from a
    host-recorded run (#5339).** A run token alone proves nothing here: the
    crew container holds the key that derives run tokens for any agent and run
-   of its crew. Only a person's own start counts as a routine here: a routine
-   a person ran (or batch-ran) records each agent step; a routine started by
-   a schedule (including a person's "run now" of a schedule), a delayed or
-   debounced run (its trigger defaults to schedule), a webhook,
-   `call_pipeline`, another agent, an automation, an issue, a page action or a
-   wake check records nothing and its steps reach no artifact, and neither
-   does a routine an agent authored, even when a person runs it (schedules
-   have no creator, so an agent-created schedule cannot be told apart and none
-   qualifies). All of these fail closed. An agent's own webhook and cron runs,
+   of its crew. Two routine starts count. A routine a person ran (or batch-ran)
+   records each agent step as a routine run. A schedule's own fire (the cron
+   scheduler, or the schedule's "run now") records each agent step as a
+   scheduled run only when a person created or last saved that schedule
+   (`pipeline_schedules.creator_kind = 'human'`, set only from that person's
+   own session or CLI token on the public API) and, checked again at that
+   step, the person is still a member of the workspace and not suspended.
+   "Run now" follows the same rule: the schedule's creator decides, the person
+   pressing it lends nothing. A schedule an agent saved (any internal path,
+   including `/internal/routines/schedules` and save_routine's trigger,
+   whatever `X-Caller-User-Id` it carries) is marked `agent`; a schedule
+   saved before the creator was recorded has none. Neither ever records,
+   until a person saves it again; every save overwrites the creator, so an
+   agent's save of a person's schedule takes its access away. A delayed or
+   debounced start (its trigger defaults to schedule), a schedule occurrence
+   that waited in the queue for capacity, a webhook, `call_pipeline`, another
+   agent, an automation, an issue, a page action and a wake check record
+   nothing and their steps reach no artifact, and neither does a routine an
+   agent authored, whoever starts it. All of these fail closed. A scheduled
+   step refused because of its schedule's creator, or a schedule claim the
+   host did not make, is journaled as `artifact.run_capability_withheld` with
+   the reason (flag on only). An agent's own webhook and cron runs,
    configured on the agent by a person, record as before. So the host
    producer of such a run records the run in `artifact_unattended_runs` (agent, crew, trigger,
    source) after its run record and before its agent starts, and the server
@@ -683,6 +696,13 @@ owner on 2026-11-13.
    version, or the latest when it holds that write grant, and no comment text.
    Anything else is refused exactly like a missing artifact. Flag off, nothing
    is recorded and such a run reaches nothing, as before.
+   The capability lives only in the sidecar's memory and is delivered once
+   per run; nothing in the container can fetch one. If the sidecar restarts,
+   the run's later artifact calls arrive without it: the server answers 403
+   `run_capability_lost` ("This run lost its artifact access …") for a
+   recorded, still-live run and journals `artifact.run_capability_lost` once
+   per run. The run reaches nothing for the rest of its life; the next run
+   gets a new capability.
    Not solved: all agents of one crew container run as UID 1001. A sibling
    agent that reads another agent's run token (for example from
    `/proc/<pid>/environ`) can call the sidecar with it, and the sidecar then
