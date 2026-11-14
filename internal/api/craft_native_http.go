@@ -30,6 +30,7 @@ type craftNativeRequest struct {
 }
 type craftNativeHTTP struct {
 	agents         *craftNativeAgentManager
+	apps           *craftAppsGate
 	pages          *PageHandler
 	enabled        bool
 	clock          mooring.OwnerClock
