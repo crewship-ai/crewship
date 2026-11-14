@@ -9,6 +9,7 @@ import { chromium, type Frame, type Page } from "@playwright/test"
 import { readFacts } from "../prd/craft-lease/sheet-workbook"
 import { holdsMarker, isUnconfirmedStatus, labelVersion, pendingReplies } from "../prd/craft-session/confirm"
 import { walk, wordFacts } from "../prd/craft-session/facts"
+import { WORD_VIEWPORT } from "../prd/craft-session/hour-steps"
 import { readAppBuild, type AppBuild } from "../prd/app-sha"
 import { apiAs, loginStorageState } from "../prd/auth"
 import { expect, prdRequirement, test, type PrdScenario } from "../prd/fixtures"
@@ -27,7 +28,11 @@ const RENDER_MS = 15_000
 const LEASE_MS = 90_000 // the server caps a lease TTL at one minute
 const BLANK_DOMINANT = 0.998 // share of the commonest colour at which the area counts as blank
 const VERIFY = "Check the result"
-// At the 1440x1000 viewport, in the editor frame.
+// Points on the editor canvas. They assume the Home ribbon shows the Styles gallery, which needs a
+// canvas about 1600 px wide: the Artifacts frame puts the canvas at x=285, so the 1440 px viewport
+// leaves 1146 px and the gallery collapses into a "Styles" button. heading1 then lands on the empty
+// Voice group and noSpacing on the Find menu, which takes the keys. Word walks at WORD_VIEWPORT
+// (canvas 1626 px), and every ribbon click must hand the keys back to the document (keysBack).
 const WORD_UI = { homeTab: { x: 76, y: 53 }, heading1: { x: 918, y: 94 }, noSpacing: { x: 844, y: 94 } }
 const BODY = { wordcraft: { x: 200, y: 215, width: 800, height: 480 }, gridcraft: { x: 60, y: 215, width: 800, height: 300 } }
 
@@ -116,7 +121,7 @@ for (const scenario of SCENARIOS) {
     let proofAt: number | null = null // ops recorded when the version proof was taken
     try {
       await bounded(`${label} walk`, WALK_MS, (async () => {
-        const { context, page, api, ws } = await isolatedActor(prd, browser, `native walk ${label}`, { viewport: N.VIEWPORT })
+        const { context, page, api, ws } = await isolatedActor(prd, browser, `native walk ${label}`, { viewport: app === "wordcraft" ? WORD_VIEWPORT : N.VIEWPORT })
         page.setDefaultTimeout(60_000)
         await context.addInitScript(spy)
         expect((await N.nativeEnabled(api, ws.id)).enabled, "native editing is on").toBe(true)
@@ -238,7 +243,17 @@ for (const scenario of SCENARIOS) {
         let wordCheck: (raw: string) => { heading: boolean; bold: boolean; style: string } = () => ({ heading: false, bold: false, style: "" })
         if (app === "wordcraft") {
           const canvas = () => f.locator("canvas").first()
-          const click = async (at: { x: number; y: number }) => { await canvas().click({ position: at }); await page.waitForTimeout(700) }
+          // The editor types through its hidden INPUT; a click that leaves the focus elsewhere (a ribbon
+          // menu on the canvas) would swallow every key that follows, so it is a violation, not typing.
+          const keysBack = (at: { x: number; y: number }) => f.waitForFunction(() => document.activeElement?.tagName === "INPUT", undefined, { timeout: 5_000 }).then(() => true, () => false)
+          const click = async (at: { x: number; y: number }) => {
+            await canvas().click({ position: at })
+            await page.waitForTimeout(700)
+            if (!(await keysBack(at))) {
+              const on = await f.evaluate(() => document.activeElement?.tagName ?? "nothing").catch(() => "?")
+              violate(`ribbon click at (${at.x},${at.y}) left the keys on ${on}, not the document: the ribbon is not laid out as WORD_UI assumes (canvas ${Math.round((await canvas().boundingBox())?.width ?? 0)} px wide)`)
+            }
+          }
           const m = { text: mark(), more: mark(), heading: mark(), style: mark(), bold: mark() }
           await step("home tab", async (r) => { lastInput = await input(r, async () => { await kb.press("Control+End"); await click(WORD_UI.homeTab); await kb.press("Control+End") }) })
           await step("type text", async (r) => { lastInput = await input(r, () => kb.type(m.text)) })
@@ -304,7 +319,7 @@ for (const scenario of SCENARIOS) {
           check(await pressSeen(pressAt), "the press never reached the editor")
           check(BigInt(h1.version) === BigInt(h0.version) + 1n, `exactly one new version: v${h0.version} became v${h1.version}`)
           check(committed(n0).length === 1, `exactly one committed save, saw ${committed(n0).length}`)
-          check(v === h1.version, `status said v${v}, head is v${h1.version}`)
+          check(v === h1.version, v === undefined ? `status showed no version newer than v${h0.version}, head is v${h1.version}` : `status said v${v}, head is v${h1.version}`)
           checkContent(h1, "after ctrl+s")
         })
 
@@ -425,8 +440,9 @@ for (const scenario of SCENARIOS) {
           checkContent(h1, "after the next save")
         })
 
-        // Save receipts: every committed save the browser saw, plus the one whose reply was dropped.
-        const receiptsNow = () => [...ops.filter((o) => o.kind === "save" && o.status === 200 && o.version).map((o) => o.version as string), ...lost.map((x) => x.serverVersion ?? "?")].sort((a, b) => Number(a) - Number(b))
+        // Save receipts: every committed save the browser saw, plus the one whose reply was dropped. An
+        // `unchanged` answer names the base and creates no version (#5075), as in confirmsWrite().
+        const receiptsNow = () => [...ops.filter((o) => o.kind === "save" && o.status === 200 && o.version && o.unchanged !== true).map((o) => o.version as string), ...lost.map((x) => x.serverVersion ?? "?")].sort((a, b) => Number(a) - Number(b))
         const sameVersions = (a: unknown, b: string[]) => Array.isArray(a) && a.length === b.length && a.every((v, i) => typeof v === "string" && /^\d+$/.test(v) && v === b[i])
         let headAfterReload: string | null = null
         await step("final", async () => {
