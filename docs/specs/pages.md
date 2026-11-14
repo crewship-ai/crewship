@@ -650,9 +650,23 @@ owner on 2026-11-13.
    agent. A workspace admin or a MANAGER+ of the owning crew sets it, fenced on
    `acl_version` and audited (`page.folder_agent_access_changed`); levels other
    than `none` need the flag. It reaches only non-private pages filed in the
-   folder, only agents whose live crew owns the folder, and only as standing
-   access: read only, counted against `run_read_limit`, and still intersected
-   with the run's human.
+   folder, only agents whose live crew owns the folder (the run's crew, not
+   deleted), and only as standing access: counted against `run_read_limit`,
+   still intersected with the run's human, and never a write. On every kind
+   but a Docs Document, `propose` reaches exactly what `read` does. On a Docs
+   Document (#5317 step 5.2), `propose` also lets the run propose changes
+   through the existing iteration path: the human's explicit iteration intent
+   on that Document is still required, the human must edit it as an ordinary
+   member (Edit held only through the ADMIN or OWNER role never passes to the
+   agent), and the folder rule is re-checked on every use, so a downgrade, a
+   crew move, a deleted crew, a page made private or moved out of the folder
+   stops the next proposal. Only a person with Edit accepts a proposal (an
+   ordinary human commit under the lease); a folder never lets the run
+   commit, pin a checkpoint or accept. Each proposal or read of the Document
+   counts once per run against `run_read_limit`. The same rule (one query)
+   decides a folder read and a folder proposal. With the flag on the same
+   ordinary-member Edit is required of the human on the page-grant proposal
+   path too.
 10. **Runs without a human reach nothing yet.** A routine, webhook or cron run
    has no human principal and the artifact tool refuses it. Its own mode
    (standing grants only, the read cap per run) needs a run identity the
@@ -669,11 +683,14 @@ owner on 2026-11-13.
    access through a kind's own exact-run consent: a Word document's read,
    commit, checkpoint and proposal, its create (reach `created`), and a Sheet
    or Mooring document's read and write under a mandate (reach `consented`).
+   A Docs proposal or read that reaches the Document through a folder at
+   `propose` is recorded with reach `folder`.
    Leases carry no content and are not recorded. Native Word and Sheet Craft
    tasks are not audited by this row. The row's
    user is the human the agent acted for; its metadata names the agent, crew,
    run, chat, the reach (`referenced`, `created`, `consented`, `standing` or
-   `folder`) and the operation (`read`, `write`, `create`). It holds no
+   `folder`) and the operation (`read`, `write`, `propose`, `create`); a Docs
+   proposal is `propose`, never `write`. It holds no
    content. Reads and writes are recorded once per run, artifact and operation
    (a later access re-verifies the existing row); each individual write is
    already in the version history with the run as its actor. The row keeps the

@@ -359,7 +359,7 @@ func TestRunScopeDocument_WriteUnderAnotherPersonsLeaseEndsAsAProposal(t *testin
 	for _, r := range kindAuditRows(t, f) {
 		got[r.Page+"/"+r.Operation] = r.Reach
 	}
-	if got[intent.PageID+"/write"] != "consented" {
-		t.Fatalf("the proposal was not audited as a write: %v", got)
+	if got[intent.PageID+"/propose"] != "consented" {
+		t.Fatalf("the proposal was not audited as a propose: %v", got)
 	}
 }

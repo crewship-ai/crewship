@@ -238,7 +238,13 @@ already-referenced runs the ordinary way, binding nothing.
 - A folder can let the agents of its owning crew read or suggest on its
   non-private pages (`crewship page folder agent-access`, admin or the crew's
   MANAGER+). Never edit, never another crew's agents, never Personal pages;
-  in a chat run the human's access is still required.
+  in a chat run the human's access is still required. At `propose`, agents
+  can read; on Docs they can propose changes for an editor to accept: only
+  through the human's explicit iteration request, only while the human edits
+  the Document as an ordinary member (never through the ADMIN or OWNER role),
+  re-checked on every proposal, and accepted only by a person with Edit. The
+  run never commits, checkpoints or accepts through a folder. On every other
+  kind `propose` is the same as `read`.
 - Runs without a human (routine, webhook, cron) reach no artifact through the
   artifact tool.
 - Per-run limits (3 created, 50 distinct standing reads) and a per-crew hourly
@@ -256,7 +262,9 @@ already-referenced runs the ordinary way, binding nothing.
   naming the human the agent acted for, the agent, run, reach and operation,
   in the same transaction; no audit record, no access. This covers artifact
   projects, Designs, Word documents, Sheets and Mooring documents (the last
-  three with reach `consented`, a created Word document with `created`).
+  three with reach `consented`, a created Word document with `created`, a
+  Docs proposal through a folder with `folder`). A Docs proposal is recorded
+  with operation `propose`, never `write`.
   Reads and writes are recorded once per run and artifact, creates every
   time. Native Craft tasks are not covered. Read them with
   `crewship audit --action artifact.agent_run_accessed -f json`.

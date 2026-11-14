@@ -65,7 +65,7 @@ exception in the other direction: it prints YAML unless you ask for
 | `folder acl <slug>` | Who a folder is shared with (owning crew's managers and admins only) |
 | `folder share <slug> <subject> --view\|--edit` | Share a folder with a user, a crew or everyone in the workspace |
 | `folder unshare <slug> <subject>` | Stop sharing a folder with a subject |
-| `folder agent-access <slug> --level none\|read\|propose` | Let the owning crew's agents read or suggest on the folder's pages |
+| `folder agent-access <slug> --level none\|read\|propose` | Let the owning crew's agents read the folder's pages, or also propose changes on its Docs |
 | `move <page>... --folder <slug>\|--unfiled` | Move pages into a folder, or out of the ones they are in |
 | `access <slug>` | Who reaches a page, and by which paths |
 | `access --subject <kind>:<ref>` | Which pages a user, crew or agent reaches, and how |
@@ -1208,9 +1208,13 @@ crewship page folder agent-access ops-board --level none
 ```
 
 Sets what the agents of the folder's owning crew may do with the pages filed
-in it: `none` (default), `read`, or `propose` (read and suggest; until
-folder suggestions ship, `propose` reaches exactly what `read` does). There is no
-edit level; an agent edits a page only through a grant on that page from its
+in it: `none` (default), `read`, or `propose`. At `propose`, agents can read;
+on Docs they can propose changes for an editor to accept. A proposal still
+needs the human's explicit iteration request in a chat run, the human must
+edit the Document as an ordinary member, the folder is re-checked on every
+proposal, and only a person with Edit accepts; the run never commits or
+pins a checkpoint. On every other kind `propose` reaches exactly what `read`
+does. There is no edit level; an agent edits a page only through a grant on that page from its
 owner. Private (Personal) pages are never reached and agents of other crews
 are not covered. Levels other than `none` need the workspace feature flag
 `artifact_agent_access_modes`; in a chat run the human must still be able to

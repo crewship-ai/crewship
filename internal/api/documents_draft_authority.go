@@ -33,6 +33,10 @@ type documentDraftScope struct {
 	Propose bool
 	// Blocks, comma-separated, are the only blocks a proposal may target; "" is the whole document.
 	Blocks string
+	// Reach is why a flag-on run reaches the Document, for its audit:
+	// consented (the drafting or iteration consent with a page grant or the
+	// human's own Document) or folder (a folder of its crew at propose).
+	Reach string
 }
 
 // admits reports whether a block is inside this mandate.
@@ -131,23 +135,48 @@ func (h *PageHandler) authorizeDocumentDraft(ctx context.Context, a *artifactRun
 	if k.WorkspaceID != a.WorkspaceID {
 		return "", errDocumentAccess
 	}
-	if _, err := h.documentDraftScope(ctx, a, k.PageID); err != nil {
+	scope, err := h.documentDraftScope(ctx, a, k.PageID)
+	if err != nil {
 		return "", err
 	}
 	// Flag on (#5317 5.3): the drafting or iteration consent stays the only
 	// reach (it binds the generation, revision and lease of every write); the
 	// content access is audited with its human in this transaction, failing
-	// closed. Leases carry no content and are not recorded.
+	// closed. Leases carry no content and are not recorded. A proposal is
+	// audited as propose, never as write.
+	//
+	// Folder reach (#5317 5.2) proposes and reads only: a commit or checkpoint
+	// is refused here as well as by the propose mandate's guard, and each
+	// access is charged to the run's read limit like any folder read.
+	folder := scope.Reach == runReachFolder
 	audited := ""
 	switch operation {
 	case "state", "receipt":
 		audited = "read"
-	case "commit", "checkpoint", "propose":
+	case "propose":
+		audited = "propose"
+	case "commit", "checkpoint":
+		if folder {
+			return "", errDocumentAccess
+		}
 		audited = "write"
 	}
 	if audited != "" {
 		tx, _ := ctx.Value(pageAuthReaderKey{}).(*sql.Tx)
-		if h.recordConsentedRunAccess(ctx, tx, a, k.PageID, audited) != nil {
+		reach := runReachConsented
+		if folder {
+			reach = runReachFolder
+			if tx == nil {
+				return "", errDocumentAccess
+			}
+			if err := chargeArtifactRunRead(context.WithValue(ctx, pageAuthReaderKey{}, tx), tx, a, a.WorkspaceID, k.PageID); err != nil {
+				if errors.Is(err, errArtifactRunCap) {
+					return "", err
+				}
+				return "", errDocumentAccess
+			}
+		}
+		if h.recordKindRunAccess(ctx, tx, a, k.PageID, reach, audited) != nil {
 			return "", errDocumentAccess
 		}
 	}
