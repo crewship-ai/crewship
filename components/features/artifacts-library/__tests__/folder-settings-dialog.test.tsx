@@ -131,3 +131,37 @@ it("on the server, hides the agents row where it would not take effect", async (
   await screen.findByRole("button", { name: "Save" })
   expect(screen.queryByRole("combobox", { name: "Agents of this folder's crew" })).toBeNull()
 })
+
+it("on the server, a retry after a failed entry save does not resend the agents level on the old version", async () => {
+  flags.mock = false
+  let version = 4
+  let failEntry = true
+  flags.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    const path = new URL(url, "http://h").pathname
+    if (init?.method === "PUT" && path.endsWith("/agent-access")) {
+      const body = JSON.parse(String(init.body))
+      if (body.acl_version !== version) return new Response(JSON.stringify({ error: "conflict: acl_version" }), { status: 409 })
+      version++
+      return new Response(JSON.stringify({ folder: "design", agent_access: body.level, acl_version: version, agent_access_available: true }), { status: 200 })
+    }
+    if (init?.method === "PUT") {
+      if (failEntry) { failEntry = false; return new Response(JSON.stringify({ error: "try again" }), { status: 500 }) }
+      version++
+      return new Response("{}", { status: 200 })
+    }
+    return new Response(JSON.stringify({ folder: "design", acl_version: version, acl: [], agent_access: "none", agent_access_available: true }), { status: 200 })
+  })
+  const onOpenChange = vi.fn()
+  renderDialog(onOpenChange)
+  await screen.findByRole("combobox", { name: "Agents of this folder's crew" })
+  change("Agents of this folder's crew", "read")
+  change("Add person or everyone", "user:u2"); change("Level to add", "read")
+  fireEvent.click(screen.getByRole("button", { name: "Add" }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await screen.findByText(/try again/)
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  const agentPuts = flags.fetch.mock.calls.map(call => call as unknown as [string, RequestInit | undefined])
+    .filter(([url, init]) => init?.method === "PUT" && url.includes("/agent-access"))
+  expect(agentPuts).toHaveLength(1)
+})

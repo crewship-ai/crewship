@@ -144,7 +144,8 @@ export interface SharingApi {
   folderSettings(slug: string, signal?: AbortSignal): Promise<FolderSettings>
   saveFolderSettings(slug: string, settings: Pick<FolderSettings, "defaultAudience" | "entries">): Promise<void>
   /** Compare-and-set against the version the settings were read at; a stale one is refused. */
-  saveFolderAgents(slug: string, level: FolderAgentLevel, aclVersion: number): Promise<void>
+  /** Returns the folder's new acl_version. */
+  saveFolderAgents(slug: string, level: FolderAgentLevel, aclVersion: number): Promise<number>
   bulk(request: BulkRequest): Promise<BulkResult>
   libraryState(items: LibraryItem[]): LibraryState
 }
@@ -341,7 +342,8 @@ export function httpSharingApi(workspaceId: string, guard?: RequestGuard, operat
     },
     folderSettings: readFolder,
     async saveFolderAgents(slug, level, aclVersion) {
-      await call(`${folder(slug)}/agent-access?${ws}`, JSON_INIT("PUT", { level, acl_version: aclVersion }))
+      const body = await call(`${folder(slug)}/agent-access?${ws}`, JSON_INIT("PUT", { level, acl_version: aclVersion })) as { acl_version?: unknown } | null
+      return typeof body?.acl_version === "number" ? body.acl_version : aclVersion + 1
     },
     async saveFolderSettings(slug, settings) {
       if (settings.defaultAudience !== null) throw new SharingError("This server has no default audience for new artifacts in a folder.", 400)
@@ -589,6 +591,7 @@ export function mockSharingApi(workspaceId: string): SharingApi {
       if ((saved.version ?? 0) !== aclVersion) throw new SharingError("The folder changed since it was read; reopen its settings.", 409)
       store().folders[slug] = { ...saved, agents: level, version: aclVersion + 1 }
       persist(workspaceId)
+      return aclVersion + 1
     },
     async saveFolderSettings(slug, settings) {
       await pause()

@@ -220,7 +220,7 @@ func TestFolderAgentAccess_WhoMaySetItAndToWhat(t *testing.T) {
 	}
 	rr = f.call(t, "GET", "/api/v1/page-folders/engine-ops/acl", "mia", "MANAGER", "")
 	expectStatus(t, rr, http.StatusOK)
-	if doc := decodeFoldersJSON(t, rr); doc["agent_access"] != "propose" {
+	if doc := decodeFoldersJSON(t, rr); doc["agent_access"] != "propose" || doc["agent_access_available"] != true {
 		t.Fatalf("ACL document %v", doc)
 	}
 }
@@ -239,6 +239,11 @@ func TestFolderAgentAccess_FlagOffRefusesAnythingButNone(t *testing.T) {
 	// The UI shows the agents row only where it can take effect.
 	if doc := decodeFoldersJSON(t, rr); doc["agent_access_available"] != false {
 		t.Fatalf("flag off reported agent access as available: %v", doc)
+	}
+	rr = f.call(t, "GET", "/api/v1/page-folders/engine-ops/acl", "erin", "ADMIN", "")
+	expectStatus(t, rr, http.StatusOK)
+	if doc := decodeFoldersJSON(t, rr); doc["agent_access_available"] != false {
+		t.Fatalf("flag off ACL document reported agent access as available: %v", doc)
 	}
 }
 

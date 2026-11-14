@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { FolderCog } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
@@ -67,10 +67,15 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
   const [level, setLevel] = useState<ShareLevel>("read")
   const { subjects, error: peopleError } = useSubjects(workspaceId, true)
   const [agents, setAgents] = useState<FolderAgentLevel | null>(initial.agents?.level ?? null)
+  const agentsSaved = useRef(initial.agents ?? null)
   // The agents row saves first, against the version this form was read at, so a concurrent change is refused
   // rather than overwritten; the entries then save as before.
   const save = useSharingMutation(workspaceId, async (api, input: Pick<FolderSettings, "defaultAudience" | "entries"> & { agents: FolderAgentLevel | null }) => {
-    if (input.agents !== null && initial.agents && input.agents !== initial.agents.level) await api.saveFolderAgents(folder.slug, input.agents, initial.agents.aclVersion)
+    const was = agentsSaved.current
+    if (input.agents !== null && was && input.agents !== was.level) {
+      // Remember what the server took, so a retry after a failed entry save neither resends it nor fences on the old version.
+      agentsSaved.current = { level: input.agents, aclVersion: await api.saveFolderAgents(folder.slug, input.agents, was.aclVersion) }
+    }
     await api.saveFolderSettings(folder.slug, { defaultAudience: input.defaultAudience, entries: input.entries })
   }, folder.slug)
 
@@ -116,8 +121,8 @@ function SettingsForm({ workspaceId, folder, initial, capabilities, onClose }: {
       {!levels.includes("comment") && <p className="text-muted-foreground">A folder shares Read or Edit. Give Comment on each artifact from Share.</p>}
     </section>
 
-    {agents !== null && <section aria-label="Crew agents" className="flex flex-col gap-1.5">
-      <h3 className="font-medium">Agents</h3>
+    {agents !== null && <section aria-labelledby="folder-crew-agents" className="flex flex-col gap-1.5">
+      <h3 id="folder-crew-agents" className="font-medium">Crew agents</h3>
       <div className="flex items-center gap-2 rounded-md border border-border/50 px-2.5 py-1.5">
         <span className="min-w-0 flex-1 truncate">Agents of this folder&apos;s crew</span>
         <select aria-label="Agents of this folder's crew" className="h-7 rounded-md border bg-transparent px-2 text-xs" value={agents}
