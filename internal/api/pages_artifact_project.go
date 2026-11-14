@@ -159,6 +159,8 @@ func artifactProjectError(w http.ResponseWriter, err error) {
 		writeJSON(w, 413, map[string]any{"error": "Project history quota is full. Every existing version is retained and your draft stays in this browser. Copy your source files to keep them; saving more versions is not possible until history space is available.", "code": "artifact_history_quota"})
 	case errors.Is(err, artifacts.ErrVersionInvalid):
 		replyError(w, 400, err.Error())
+	case errors.Is(err, errArtifactRunCap):
+		writeJSON(w, 429, map[string]any{"error": "This run reached its artifact limit. Ask the human to send a new message, or ask an admin to raise the limit.", "code": "artifact_run_limit"})
 	default:
 		replyError(w, 500, "artifact project operation failed; changes are not acknowledged")
 	}
@@ -207,6 +209,9 @@ func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.Vers
 			return "", artifacts.ErrVersionNotFound
 		}
 		if run, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); run != nil {
+			if h.artifactRunModesOn(ctx, k.WorkspaceID) {
+				return h.authorizeScopedArtifactRun(ctx, tx, run, k.WorkspaceID, rec, write, share)
+			}
 			// The authenticated run may not enumerate other projects belonging to its
 			// human. Recheck the retained Page binding in this same fenced transaction.
 			bound, scopeErr := h.artifactProjectRunPage(ctx, run)
@@ -363,7 +368,22 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 		}
 		r = r.WithContext(ctx)
 		actor := user.ID
-		if a, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); a != nil {
+		scopedRun := h.artifactRunModesRun(ctx)
+		if a := scopedRun; a != nil {
+			// Flag on (#5317): no exact-run consent. The per-run create cap is
+			// checked when the page is inserted below; a staged recheck must
+			// find this run's own created row.
+			if a.WorkspaceID != k.WorkspaceID || a.HumanUserID != user.ID || p.CreatedByTest || h.checkScopedArtifactRun(ctx, a, "pages:write") != nil {
+				return "", errArtifactProjectAccess
+			}
+			if staged {
+				var mine int
+				if tx.QueryRowContext(ctx, `SELECT count(*) FROM artifact_run_access WHERE run_id=? AND page_id=? AND source='created'`, a.RunID, k.PageID).Scan(&mine) != nil || mine != 1 {
+					return "", errArtifactProjectAccess
+				}
+			}
+			actor = "agent:" + a.AgentID + ":" + a.RunID
+		} else if a, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); a != nil {
 			if a.WorkspaceID != k.WorkspaceID || a.HumanUserID != user.ID || h.checkOriginalUserArtifactRunPrincipal(ctx, a) != nil || !h.artifactAgentPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {
 				return "", errArtifactProjectAccess
 			}
@@ -435,6 +455,13 @@ func (h *PageHandler) CreateArtifactProject(w http.ResponseWriter, r *http.Reque
 			}
 			if _, e = tx.ExecContext(ctx, `INSERT INTO artifact_project_origins(page_id,workspace_id,human_user_id,chat_id,agent_id,message_id,created_at) VALUES(?,?,?,?,?,?,?)`, k.PageID, k.WorkspaceID, user.ID, a.ChatID, a.AgentID, a.MessageID, stamp); e != nil {
 				return "", e
+			}
+			if scopedRun != nil {
+				if e = h.reserveScopedArtifactRunCreate(ctx, tx, a, k.WorkspaceID, k.PageID); e != nil {
+					return "", e
+				}
+				staged = true
+				return actor, nil
 			}
 			result, e := tx.ExecContext(ctx, `UPDATE artifact_project_run_consents SET result_page_id=? WHERE run_id=? AND result_page_id IS NULL AND revoked_at IS NULL`, k.PageID, a.RunID)
 			if e != nil {
@@ -636,16 +663,27 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 		if loadErr != nil {
 			return "", artifacts.VersionSelection{}, loadErr
 		}
-		viewer, viewerErr := h.loadViewer(context.WithValue(ctx, pageAuthReaderKey{}, tx), k.WorkspaceID, user.ID)
+		scopedRun := h.artifactRunModesRun(context.WithValue(ctx, pageAuthReaderKey{}, tx))
+		var viewer *pageViewer
+		var viewerErr error
+		if scopedRun != nil {
+			// A flag-on run reads what its human may read as an ordinary
+			// member (amendments 2 and 7): never the administrator's history.
+			viewer, viewerErr = h.delegableViewer(context.WithValue(ctx, pageAuthReaderKey{}, tx), k.WorkspaceID, user.ID)
+		} else {
+			viewer, viewerErr = h.loadViewer(context.WithValue(ctx, pageAuthReaderKey{}, tx), k.WorkspaceID, user.ID)
+		}
 		if viewerErr != nil {
 			return "", artifacts.VersionSelection{}, viewerErr
 		}
 		editor = !owner && h.artifactProjectHumanEditor(context.WithValue(ctx, pageAuthReaderKey{}, tx), k, rec, viewer)
 		// The administrator read is independent of any grant: an Edit or Read
 		// grant can only add rights, never take full-history read away.
-		adminRead, e = h.artifactAdminReader(context.WithValue(ctx, pageAuthReaderKey{}, tx), k.WorkspaceID, user.ID, owner)
-		if e != nil {
-			return "", artifacts.VersionSelection{}, e
+		if scopedRun == nil {
+			adminRead, e = h.artifactAdminReader(context.WithValue(ctx, pageAuthReaderKey{}, tx), k.WorkspaceID, user.ID, owner)
+			if e != nil {
+				return "", artifacts.VersionSelection{}, e
+			}
 		}
 		if adminRead {
 			// This response carries the whole retained history (and any selected

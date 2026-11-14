@@ -62,6 +62,7 @@ var workspaceTablesNotBundled = map[string]string{
 	"document_creation_consents":        "one-use human creation permission is bound to the original installation and run",
 	"artifact_run_principals":           "live human-chat admissions require fresh authority after restore; portable bundles must not replay them",
 	"artifact_run_scope":                "a run's bound references belong to its live admission; bundles must not replay them",
+	"artifact_run_access":               "what a run created or read belongs to its live admission; bundles must not replay it",
 	"journal_replay_receipts":           "dedup authority binds this installation's protected spool and run identities; workspace bundles retain visible journal history, not the excluded execution capability",
 	"service_operation_leases":          "provider operations must be admitted on the destination host",
 	"service_backup_fences":             "host maintenance fences are reconstructed by physical service-data restore",

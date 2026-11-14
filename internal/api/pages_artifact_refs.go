@@ -247,7 +247,22 @@ func (h *InternalHandler) admitArtifactRefsRun(r *http.Request, entry journal.En
 		return false, http.StatusInternalServerError, err
 	}
 	if !hasRefs {
-		return false, 0, nil
+		// Decision 3 (#5317 PR2): with the flag on, every chat run started by
+		// a human's own message in their private chat records that human,
+		// under the same rules (trusted admission only, immutable, one hour,
+		// checked on every use). A run without a human records nothing.
+		plain, err := h.plainChatRunRecordsHuman(r.Context(), triggerType, originID, receipt, workspace, message)
+		if err != nil || !plain {
+			return false, 0, nil
+		}
+		// A refused capture (a stale receipt, a changed role) never blocks the
+		// chat: the run starts the ordinary way without a principal, and so
+		// reaches no artifact through this path.
+		if _, err := h.admitArtifactChatRunStart(r, entry, receipt, message, false); err != nil {
+			h.logger.Debug("plain chat run starts without an artifact principal", "run", entry.TraceID, "reason", err)
+			return false, 0, nil
+		}
+		return true, 0, nil
 	}
 	if triggerType != "USER" || originID != "" || receipt == nil {
 		return false, http.StatusForbidden, errArtifactRefUnavailable
@@ -266,6 +281,29 @@ func (h *InternalHandler) admitArtifactRefsRun(r *http.Request, entry journal.En
 // references: the journal start, the immutable human principal and the run
 // scope commit together. Without a host human receipt nothing is bound.
 func (h *InternalHandler) admitArtifactRefsStart(r *http.Request, entry journal.Entry, receipt *chataudience.Receipt, message string) (int, error) {
+	return h.admitArtifactChatRunStart(r, entry, receipt, message, true)
+}
+
+// plainChatRunRecordsHuman: a host-dispatched USER run for the human's own
+// message, in that human's private chat with this agent, with the flag on.
+func (h *InternalHandler) plainChatRunRecordsHuman(ctx context.Context, triggerType, originID string, receipt *chataudience.Receipt, workspace, message string) (bool, error) {
+	if triggerType != "USER" || originID != "" || receipt == nil || message == "" || receipt.WorkspaceID != workspace ||
+		InternalTokenWorkspaceFromContext(ctx) != "" || InternalTokenCrewFromContext(ctx) != "" {
+		return false, nil
+	}
+	on, err := featureflags.IsEnabledWith(ctx, h.db, workspace, ArtifactAgentAccessModesFlag)
+	if err != nil || !on {
+		return false, err
+	}
+	var own int
+	err = h.db.QueryRowContext(ctx, `SELECT count(*) FROM chats c JOIN conversation_messages m ON m.session_id=c.id AND m.id=? AND m.author_user_id=c.created_by AND m.agent_id=c.agent_id AND m.role='user'
+WHERE c.id=? AND c.workspace_id=? AND c.created_by=? AND c.agent_id=? AND c.visibility='private'`, message, receipt.ChatID, workspace, receipt.UserID, receipt.AgentID).Scan(&own)
+	return err == nil && own == 1, err
+}
+
+// admitArtifactChatRunStart commits the journal start, the immutable human
+// principal and, when requireRefs, the run scope, in one transaction.
+func (h *InternalHandler) admitArtifactChatRunStart(r *http.Request, entry journal.Entry, receipt *chataudience.Receipt, message string, requireRefs bool) (int, error) {
 	if receipt == nil || message == "" || InternalTokenWorkspaceFromContext(r.Context()) != "" || InternalTokenCrewFromContext(r.Context()) != "" {
 		return http.StatusForbidden, errArtifactRefUnavailable
 	}
@@ -319,7 +357,7 @@ func (h *InternalHandler) admitArtifactRefsStart(r *http.Request, entry journal.
 	if err := rows.Err(); err != nil {
 		return http.StatusInternalServerError, err
 	}
-	if len(refs) == 0 {
+	if requireRefs && len(refs) == 0 || !requireRefs && len(refs) != 0 {
 		return http.StatusForbidden, errArtifactRefUnavailable
 	}
 	pages := NewPageHandler(h.db, nil, h.logger)

@@ -234,6 +234,20 @@ func (h *PageHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	// #5317 PR2: with agent access modes on, a crew may create only so many
+	// pages per hour through this sidecar path. The crew is the one the
+	// internal token proved (assertBoundCrewWorkspaceDB above), never a claim.
+	if over, limit, err := h.crewHourlyPageCapReached(r.Context(), tx, req.WorkspaceID, req.CrewID); err != nil {
+		replyInternalError(w, h.logger, "check crew hourly page limit", err)
+		return
+	} else if over {
+		writeJSON(w, http.StatusTooManyRequests, map[string]any{
+			"error": fmt.Sprintf("this crew created %d pages in the last hour, the workspace limit; try again later or ask an admin to raise crew_hourly_page_limit", limit),
+			"code":  "crew_hourly_page_limit",
+		})
+		return
+	}
+
 	if _, err := tx.ExecContext(r.Context(), `
 		INSERT INTO pages (id, workspace_id, slug, name, description, owner_crew_id, spec_json, created_at, updated_at)
 		VALUES (?, ?, ?, ?, NULLIF(?, ''), ?, ?, ?, ?)`,

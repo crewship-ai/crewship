@@ -14,9 +14,9 @@ import (
 // artifactRefsFixture is the original-run fixture (a MEMBER in their own
 // private chat with an agent, an OWNER admin beside them) plus pages to
 // reference and, unless off, the workspace flag turned on.
-func artifactRefsFixture(t *testing.T, flagOn bool) *artifactPrincipalFixture {
+func artifactRefsFixture(t *testing.T, flagOn bool, setup ...func(*artifactPrincipalFixture)) *artifactPrincipalFixture {
 	t.Helper()
-	f := artifactProjectOriginalRunFixture(t)
+	f := artifactProjectOriginalRunFixture(t, setup...)
 	db, ws := f.rig.db, f.a.WorkspaceID
 	mustExec(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('ref-own',?,'ref-own','Own',?,'{}')`, ws, f.a.HumanUserID)
 	mustExec(t, db, `INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json,private_audience) VALUES('ref-own-private',?,'ref-own-private','Own private',?,'{}',1)`, ws, f.a.HumanUserID)

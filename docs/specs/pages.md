@@ -599,9 +599,42 @@ owner on 2026-11-13.
    not in reach of the next run unless that message attaches it again (the
    composer keeps chips sticky and the server re-checks them every time).
 
-Read and write enforcement inside the run, artifacts created in the chat, the
-folder subject for a crew's agents and the audit with the human follow in later
-steps of #5317; until then a run scope grants nothing on its own.
+5. **With the flag on, a chat run reaches an artifact in one of three ways,
+   checked on every use** (no exact-run consent): it was attached to the
+   message that started the run; the run's agent created it in this chat and
+   the human still owns it (it stays in reach for later messages of the same
+   chat); or the agent holds its own live grant on it (standing access). In
+   every case the human must still read it as an ordinary member, so a human
+   who loses access mid-run stops the run's access too, and role-only reach is
+   never delegated. Anything else is refused exactly like a missing artifact.
+6. **Writes are narrower than reads.** A run writes only an artifact the human
+   owns and that it reaches as attached or created; standing access is read
+   only. An agent never shares, grants, moves or publishes. An exact-run
+   consent the human gave today ("edit with agent", a comment task) keeps its
+   one page in reach with the flag on. Word and Sheet
+   documents and Design keep their exact-run consent path for now, so their
+   agent edits remain proposals under the document lease.
+7. **Limits, read from the workspace policy on every use.** One chat run
+   creates at most `chat_run_create_limit` artifacts (default 3, 1–20) and
+   reads at most `run_read_limit` distinct artifacts through standing access
+   (default 50, 1–500); past either the run gets 429 `artifact_run_limit`.
+   One crew creates at most `crew_hourly_page_limit` pages per hour through
+   the sidecar save path (default 20, 1–1000; 429 `crew_hourly_page_limit`);
+   pages a person created for the crew do not count; agent, routine and
+   onboarding saves do.
+   `crewship workspace artifact-policy set --chat-run-create-limit
+   --run-read-limit --crew-hourly-page-limit` changes them; a change bumps the
+   policy version. A workspace that never saved a policy allows every live
+   crew for this chat-run scope only while the flag is on (the policy read
+   reports `scoped_default: true`); every other agent surface keeps requiring
+   a saved, enabled policy, and a saved policy, on or off, stays the ceiling.
+8. **Only a run started by the human's own message carries a human.** A plain
+   chat run records its human principal at admission; routine, webhook, cron,
+   agent-to-agent and crew-token runs record none and reach nothing through
+   this path.
+
+The folder subject for a crew's agents and the audit with the human follow in
+later steps of #5317.
 
 ### 7.2 What this costs
 
