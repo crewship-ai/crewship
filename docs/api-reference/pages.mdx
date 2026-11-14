@@ -58,7 +58,7 @@ validation.
 | GET | [`/api/v1/page-folders/{slug}/acl`](#read-a-folders-permissions) | Who a folder is shared with (managers only) |
 | PUT | [`/api/v1/page-folders/{slug}/acl`](#share-a-folder) | Share a folder with a user, a crew or everyone in the workspace |
 | DELETE | [`/api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id}`](#stop-sharing-a-folder) | Remove one entry from a folder's permissions |
-| PUT | [`/api/v1/page-folders/{slug}/agent-access`](#set-folder-access-for-the-owning-crews-agents) | Let the owning crew's agents read or suggest on the folder's pages |
+| PUT | [`/api/v1/page-folders/{slug}/agent-access`](#set-folder-access-for-the-owning-crews-agents) | Let the owning crew's agents read the folder's pages |
 | GET | [`/api/v1/pages/{slug}/access/me`](#my-access-to-a-page) | The caller's own paths to a page |
 | GET | [`/api/v1/pages/{slug}/panels/{panelId}/actions`](#list-a-panels-actions) | The actions a panel declares |
 | POST | [`/api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}`](#dispatch-an-action) | Dispatch a declared action |
@@ -1285,7 +1285,8 @@ PUT /api/v1/page-folders/{slug}/agent-access
 ```
 
 Sets what the agents of the folder's owning crew may do with the non-private
-pages filed in it: `none` (default), `read` or `propose` (read and suggest).
+pages filed in it: `none` (default), `read` or `propose`. For now `propose` gives exactly
+the access `read` does; folder suggestions are not built yet.
 There is no edit level: an agent edits a page only through a grant on that
 page from its owner. It applies only with the workspace feature flag
 `artifact_agent_access_modes` on, and in a chat run the human must still read

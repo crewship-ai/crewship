@@ -17,6 +17,7 @@ func artifactCreationPolicySchemaCatalog() (map[string]DomainSchema, map[string]
 	limit := func(lo, hi int, text string) map[string]any {
 		return described(map[string]any{"type": "integer", "minimum": lo, "maximum": hi}, text)
 	}
+	const saveRequiresRunToken = "With artifact_agent_access_modes on, refuse a sidecar page save without the agent run token (403 run_token_required). Default false: such a save is accepted under the crew hourly limit only."
 	limitProps := map[string]any{
 		"chat_run_create_limit":  limit(1, 20, "Artifacts one chat run may create (default 3)."),
 		"run_read_limit":         limit(1, 500, "Distinct artifacts one run may read through the agent's own access (default 50)."),
@@ -31,12 +32,14 @@ func artifactCreationPolicySchemaCatalog() (map[string]DomainSchema, map[string]
 				"Per-run and per-crew limits, applied with the artifact_agent_access_modes flag on."),
 			"scoped_default": described(map[string]any{"type": "boolean"},
 				"True while no policy was ever saved and artifact_agent_access_modes is on: chat runs of every live crew may use their artifact scope."),
-		}, "enabled", "crew_ids", "version", "limits", "scoped_default"),
+			"save_requires_run_token": described(map[string]any{"type": "boolean"}, saveRequiresRunToken),
+		}, "enabled", "crew_ids", "version", "limits", "scoped_default", "save_requires_run_token"),
 		"WorkspaceArtifactCreationPolicyRequest": object(map[string]any{
-			"enabled":      map[string]any{"type": "boolean"},
-			"crew_ids":     described(crews, "Complete replacement allowlist; every ID must be an active crew of this workspace."),
-			"base_version": described(version, "Policy version the caller last read. A different current version returns 409 stale_policy."),
-			"limits":       described(object(limitProps), "Optional: only the named limits change; omitted ones keep their value."),
+			"enabled":                 map[string]any{"type": "boolean"},
+			"crew_ids":                described(crews, "Complete replacement allowlist; every ID must be an active crew of this workspace."),
+			"base_version":            described(version, "Policy version the caller last read. A different current version returns 409 stale_policy."),
+			"limits":                  described(object(limitProps), "Optional: only the named limits change; omitted ones keep their value."),
+			"save_requires_run_token": described(map[string]any{"type": "boolean"}, "Optional; omitted keeps the current value. "+saveRequiresRunToken),
 		}, "enabled", "crew_ids", "base_version"),
 		"WorkspaceArtifactCreationPolicyError": object(map[string]any{
 			"error": map[string]any{"type": "string"}, "code": map[string]any{"type": "string", "enum": []string{"stale_policy"}},
