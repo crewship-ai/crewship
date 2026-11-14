@@ -12,8 +12,14 @@ WHEN length(NEW.cached_image)=71 AND substr(NEW.cached_image,1,7)='sha256:'
  AND substr(NEW.cached_image,8) NOT GLOB '*[^0-9a-f]*'
 BEGIN
  UPDATE crews SET
-  previous_image=CASE WHEN last_selected_image IS NOT NEW.cached_image
-    THEN last_selected_image ELSE previous_image END,
+  previous_image=CASE
+    WHEN last_selected_image IS NULL AND OLD.cached_image IS NOT NEW.cached_image
+      AND length(OLD.cached_image)=71 AND substr(OLD.cached_image,1,7)='sha256:'
+      AND substr(OLD.cached_image,8) NOT GLOB '*[^0-9a-f]*'
+      THEN OLD.cached_image
+    WHEN last_selected_image IS NOT NULL AND last_selected_image IS NOT NEW.cached_image
+      THEN last_selected_image
+    ELSE previous_image END,
   last_selected_image=NEW.cached_image
  WHERE id=NEW.id;
 END;

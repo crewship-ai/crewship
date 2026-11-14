@@ -326,3 +326,29 @@ func TestOwnedImageCollectionKeepsConfiguredBaseWithoutContainer(t *testing.T) {
 		t.Fatal("configured direct runtime removed before container creation")
 	}
 }
+
+func TestOwnedImageCollectionSeedsPreviousAfterLegacyBackupSelection(t *testing.T) {
+	config := `{"image":"ubuntu:22.04"}`
+	h, ws, crew := covProvRig(t, &covCommitClient{}, config)
+	h.instanceID = collectionOwner
+	images := []image.Summary{collectionImage("a", collectionOwner, devcontainer.ImageKindCrew), collectionImage("b", collectionOwner, devcontainer.ImageKindCrew)}
+	// Older bundles contain cached_image but not the new retention fields.
+	if _, err := h.db.Exec(`UPDATE crews SET cached_image=? WHERE id=?`, images[0].ID, crew); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.db.Exec(`UPDATE crews SET last_selected_image=NULL,previous_image=NULL WHERE id=?`, crew); err != nil {
+		t.Fatal(err)
+	}
+	r := revisionFixture()
+	r.CachedImage = images[1].ID
+	r.Requirements.Toolchain.ImageID = r.CachedImage
+	if _, err := h.saveProvisionResult(t.Context(), crew, ws, provisionDefinition{Config: config}, r); err != nil {
+		t.Fatal(err)
+	}
+	fake := &fakeGCClient{images: images}
+	h.gcClient = fake
+	h.sweepOrphanCacheImages(t.Context())
+	if len(fake.removedImages) > 0 {
+		t.Fatal("legacy restored selection lost on first publication")
+	}
+}
