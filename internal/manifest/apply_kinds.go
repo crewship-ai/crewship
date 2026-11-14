@@ -253,7 +253,7 @@ func (pb *planBuilder) planNewKinds(ctx context.Context, b *Bundle) error {
 		// package has no warnings channel, and giving it one for a single
 		// advisory is more plumbing than the warning is worth.
 		if remote != nil {
-			pb.warnIfCrewStopped(ctx, doc.Metadata.Slug, remote.ID, len(doc.Spec.Files))
+			pb.warnIfCrewStopped(ctx, doc.Metadata.Slug, remote.ID, crewFilesToWrite(items))
 		}
 		pb.appendKindItems(items)
 	}
@@ -647,6 +647,20 @@ func bundleReferencesAgents(b *Bundle) bool {
 		}
 	}
 	return len(b.Pages) > 0
+}
+
+// crewFilesToWrite counts the crew-file items of a kind: Crew plan that will
+// write. A file the crew already holds byte-for-byte plans as unchanged and
+// is never saved, so it cannot hit the stopped-crew 409 and must not count
+// toward that advisory (the legacy planner counts the same way).
+func crewFilesToWrite(items []internalapi.PlanItem) int {
+	n := 0
+	for _, it := range items {
+		if it.Kind == "crew-file" && it.Action != internalapi.ActionUnchanged {
+			n++
+		}
+	}
+	return n
 }
 
 // appendKindItems converts a []internalapi.PlanItem into the

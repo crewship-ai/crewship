@@ -50,6 +50,20 @@ type WaitpointDecider struct {
 // The waitpoint is left exactly as it was; the attempt is recorded.
 var ErrDeciderNotAllowed = errors.New("waitpoint: only a person or the token's external holder can decide it; an agent cannot")
 
+// ErrHeldActionDeciderNotAllowed refuses a person who may not decide a held
+// routine action. It is ErrDeciderNotAllowed (errors.Is), so every door
+// answers 403 as before, but its text leads with the held-action rule: the
+// generic prefix blamed an agent although the decider is a person (#5348).
+var ErrHeldActionDeciderNotAllowed error = heldActionDeciderError{}
+
+type heldActionDeciderError struct{}
+
+func (heldActionDeciderError) Error() string {
+	return "waitpoint: a held routine action needs a workspace OWNER or ADMIN to decide it"
+}
+
+func (heldActionDeciderError) Unwrap() error { return ErrDeciderNotAllowed }
+
 // AuditActionWaitpointDecisionRefused is the audit_logs.action under which
 // a refused decision attempt is recorded. `crewship audit --action
 // waitpoint.decision_refused` lists them.
@@ -130,7 +144,7 @@ func (s *SQLWaitpointStore) checkHeldActionDecider(ctx context.Context, workspac
 		}
 	}
 	s.recordRefusal(ctx, workspaceID, token, approved, decider, refusalReasonHeldAction)
-	return fmt.Errorf("%w: a held routine action needs a workspace OWNER or ADMIN", ErrDeciderNotAllowed)
+	return ErrHeldActionDeciderNotAllowed
 }
 
 // HeldActionDeciderAllowed reports whether userID is currently a trusted,
@@ -242,4 +256,45 @@ func (s *SQLWaitpointStore) appendRefusalAudit(ctx context.Context, workspaceID,
 		notify()
 	}
 	return nil
+}
+
+// closedWaitpointError is ErrAlreadyDecided with the waitpoint's actual
+// state, so a person deciding a closed card learns why it is closed.
+type closedWaitpointError struct{ reason string }
+
+func (e closedWaitpointError) Error() string { return "waitpoint: " + e.reason }
+func (closedWaitpointError) Unwrap() error   { return ErrAlreadyDecided }
+
+// IsExplainedClosedWaitpoint reports whether err came from
+// ExplainClosedWaitpoint with a state-specific reason, whose text is safe to
+// show the caller.
+func IsExplainedClosedWaitpoint(err error) bool {
+	var closed closedWaitpointError
+	return errors.As(err, &closed)
+}
+
+// ExplainClosedWaitpoint replaces a bare ErrAlreadyDecided from Decide with
+// the waitpoint's state: "already decided or expired" hid that the run had
+// been cancelled under a held foreach item (#5348). The lookup is scoped to
+// the caller's workspace; an unknown or foreign token keeps the bare error,
+// so it reveals nothing (#1415). Any other error is returned unchanged.
+func (s *SQLWaitpointStore) ExplainClosedWaitpoint(ctx context.Context, workspaceID, token string, err error) error {
+	if !errors.Is(err, ErrAlreadyDecided) || IsExplainedClosedWaitpoint(err) {
+		return err
+	}
+	var status string
+	if qerr := s.db.QueryRowContext(ctx, `SELECT status FROM pipeline_waitpoints WHERE workspace_id = ? AND token = ?`, workspaceID, token).Scan(&status); qerr != nil {
+		return err
+	}
+	switch status {
+	case "cancelled":
+		return closedWaitpointError{"its run was cancelled or ended before a decision, so there is nothing left to decide"}
+	case "timed_out":
+		return closedWaitpointError{"it timed out before a decision"}
+	case "approved":
+		return closedWaitpointError{"it was already approved"}
+	case "denied":
+		return closedWaitpointError{"it was already rejected"}
+	}
+	return err
 }
