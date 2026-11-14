@@ -310,3 +310,19 @@ func TestOwnedImageCollectionPreservesPreviousAcrossEquivalentRebuild(t *testing
 		t.Fatalf("equivalent rebuild lost previous distinct image: %v", fake.removedImages)
 	}
 }
+
+func TestOwnedImageCollectionKeepsConfiguredBaseWithoutContainer(t *testing.T) {
+	fake := &fakeGCClient{images: []image.Summary{collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)}}
+	h := newGCTestHandler(t, fake)
+	h.instanceID = collectionOwner
+	user := seedTestUser(t, h.db)
+	ws := seedTestWorkspace(t, h.db, user)
+	crew := seedCrewRow(t, h.db, "direct-base", ws, "Crew", "direct-base")
+	if _, err := h.db.Exec(`UPDATE crews SET runtime_image=?,devcontainer_config='{"image":"alpine:3"}' WHERE id=?`, fake.images[0].ID, crew); err != nil {
+		t.Fatal(err)
+	}
+	h.sweepOrphanCacheImages(t.Context())
+	if len(fake.removedImages) > 0 {
+		t.Fatal("configured direct runtime removed before container creation")
+	}
+}

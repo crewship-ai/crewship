@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"net/http"
 	"strings"
 
@@ -51,6 +52,9 @@ type updateCrewRequest struct {
 // GET /api/v1/crews
 
 func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
+	releaseImages := resourcelifecycle.Images(h.db).Use()
+	defer releaseImages()
+
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	crewID := r.PathValue("crewId")
