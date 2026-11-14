@@ -659,7 +659,18 @@ owner on 2026-11-13.
      propose mandate (proposals through the scope: #5357, #5359).
    - *Flag off: known differences.* The server refuses every scope read as
      before, but the run sidecar and its MCP tools do not know the flag, so
-     some refusals now come from the server instead of the sidecar:
+     some refusals now come from the server instead of the sidecar. The
+     server checks the run's human principal before the query. A run with a
+     human principal (drafting consent, an artifact-project run, or a run
+     the person gave a Sheet or Mooring mandate) gets the answers listed
+     here. An ordinary chat run without one gets 403 `no_human_principal`
+     from the server for each forwarded call instead, attached artifacts
+     included (before, the sidecar refused the draft view and
+     `workbook_read` with the 400s named below). The one call that moved the
+     other way is a `mooring_command` `command` without `mandate_id`: the
+     sidecar now refuses it itself with 400, where an ordinary run got the
+     server's 403 `no_human_principal` before. The answers for a run with a
+     principal:
      the sidecar's draft view with `page_id` is forwarded and answered 400
      "only the authenticated workspace query is supported" (it was 400 "draft
      view has no caller-selected scope"); MCP `doc_draft_view` with a
