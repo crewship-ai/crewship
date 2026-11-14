@@ -143,8 +143,7 @@ export interface SharingApi {
   revoke(item: LibraryItem, subjectType: AccessSubjectType, subjectId: string): Promise<void>
   folderSettings(slug: string, signal?: AbortSignal): Promise<FolderSettings>
   saveFolderSettings(slug: string, settings: Pick<FolderSettings, "defaultAudience" | "entries">): Promise<void>
-  /** Compare-and-set against the version the settings were read at; a stale one is refused. */
-  /** Returns the folder's new acl_version. */
+  /** Compare-and-set against the version the settings were read at (a stale one is refused); returns the new acl_version. */
   saveFolderAgents(slug: string, level: FolderAgentLevel, aclVersion: number): Promise<number>
   bulk(request: BulkRequest): Promise<BulkResult>
   libraryState(items: LibraryItem[]): LibraryState
