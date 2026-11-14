@@ -567,3 +567,37 @@ func TestCovCruUpdate_CommonUtilsAccount(t *testing.T) {
 		})
 	}
 }
+
+// #5352 review: the 100KB limit applies to the stored config. A bare config
+// just under the limit grows by the injected account; storing that would
+// leave a config the same endpoint refuses when it is sent back unchanged.
+func TestCovCruUpdate_SizeLimitAppliesAfterAccountInjection(t *testing.T) {
+	h, db, userID, wsID := covCruNewCrew(t)
+	cr := covCruDoCreate(h, userID, wsID, "OWNER", `{"name":"Big","slug":"big"}`)
+	if cr.Code != http.StatusCreated {
+		t.Fatalf("create = %d: %s", cr.Code, cr.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(cr.Body.Bytes(), &created)
+	head := `{"image":"debian:bookworm-slim","customizations":{"pad":"`
+	tail := `"}}`
+	cfg := head + strings.Repeat("x", 102400-len(head)-len(tail)) + tail
+	body, _ := json.Marshal(map[string]any{"devcontainer_config": cfg})
+	rr := covCruDoUpdate(h, created.ID, userID, wsID, "OWNER", string(body))
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "exceeds 100KB") {
+		msg := rr.Body.String()
+		if len(msg) > 200 {
+			msg = msg[:200] + "…"
+		}
+		t.Fatalf("update = %d %s; a config that the injected account pushes past 100KB must be refused", rr.Code, msg)
+	}
+	var stored sql.NullString
+	if err := db.QueryRow(`SELECT devcontainer_config FROM crews WHERE id = ?`, created.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.String) > 102400 {
+		t.Fatalf("stored config is %d bytes, over the limit", len(stored.String))
+	}
+}

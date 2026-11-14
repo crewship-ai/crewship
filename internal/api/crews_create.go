@@ -237,6 +237,13 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+nerr.Error())
 			return
 		}
+		// The limit applies to what is stored: the injected account must
+		// not push a config past it, or sending the stored config back
+		// unchanged would be refused.
+		if len(normalised) > 102400 {
+			replyError(w, http.StatusBadRequest, "devcontainer_config exceeds 100KB limit")
+			return
+		}
 		req.DevcontainerConfig = &normalised
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {

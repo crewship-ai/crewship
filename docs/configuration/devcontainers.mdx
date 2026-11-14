@@ -80,18 +80,27 @@ user ID 1001`, and `git` or `ssh` refusing to run.
   are set to `agent` / `1001` / `1001`. Other options you set are kept.
 - Only the `features` block changes. The rest of the config is stored as you
   wrote it, so reading it back shows your keys plus the account.
-
-`crewship apply` compares a manifest's devcontainer with the stored config in
-the same settled form. Re-applying the manifest that created a crew therefore
-plans `=` for it, not an update. A crew whose stored config lost the account
-(an update before this fix stored a bare config as is) plans one update that
-restores it, and builds once at its next provision.
 - **A different `username`, `userUid` or `userGid`:** create, update and
   provisioning refuse the config with `common-utils must create user 'agent'
   with UID/GID 1001` and name the option to change.
 - **`username: none` or `root`:** common-utils creates no account, and the
   options are left alone. The base image must then provide `agent` at UID/GID
   1001 itself.
+
+`crewship apply` compares a manifest's devcontainer with the stored config in
+the same settled form. Re-applying the manifest that created a crew therefore
+plans `=` for it, not an update. Some existing crews plan one update that
+settles their stored config and then rebuild once at the next provision: a
+crew whose stored config lost the account (an update before this fix stored a
+bare config as is), one whose stored config still carries the old `uid` /
+`gid` names, and one whose config an earlier create re-marshalled without keys
+Crewship does not model (such as `hostRequirements`).
+
+Because update now adds common-utils too, a crew on a prebuilt image that
+already has `agent` at 1001 and declares no features gets a feature build
+after its next config change, as it would at create. That build needs
+registry access and a package manager in the image. To skip it, declare
+common-utils with `username: none`.
 
 If the base image already has a different user or group at UID or GID 1001,
 the explicit 1001 can make the account step fail at build time. Use a base

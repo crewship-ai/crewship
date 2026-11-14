@@ -35,3 +35,21 @@ func TestBuildCrewBody_DevcontainerAgentAccount(t *testing.T) {
 }
 
 func strPtrPlan(s string) *string { return &s }
+
+// A pre-#5337 server re-marshalled the config at create, so the stored string
+// may differ from the body in key order and spacing only; that is no drift.
+func TestSameJSONDocument(t *testing.T) {
+	for _, tc := range []struct {
+		a, b string
+		want bool
+	}{
+		{`{"image":"x","features":{"f":{"a":"1"}}}`, `{ "features": {"f": {"a": "1"}}, "image": "x" }`, true},
+		{`{"image":"x"}`, `{"image":"y"}`, false},
+		{`{"image":"x"}`, `not json`, false},
+		{`same`, `same`, true},
+	} {
+		if got := sameJSONDocument(tc.a, tc.b); got != tc.want {
+			t.Errorf("sameJSONDocument(%s, %s) = %v, want %v", tc.a, tc.b, got, tc.want)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package devcontainer
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -18,6 +19,7 @@ func TestNormalizeAgentUserJSON(t *testing.T) {
 		wantKeys     []string
 		wantErr      error
 		wantOptValue map[string]string
+		wantRaw      string
 	}{
 		{name: "bare image gets the account", in: `{"image":"debian:bookworm-slim"}`, wantAccount: true},
 		{
@@ -29,6 +31,11 @@ func TestNormalizeAgentUserJSON(t *testing.T) {
 			name:        "declared feature gets its missing options and keeps the rest",
 			in:          `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"installZsh":"true"}}}`,
 			wantAccount: true, wantOptValue: map[string]string{"installZsh": "true"},
+		},
+		{
+			name:        "large numbers outside the model stay exact",
+			in:          `{"image":"x","customizations":{"id":12345678901234567890}}`,
+			wantAccount: true, wantKeys: []string{"customizations"}, wantRaw: `12345678901234567890`,
 		},
 		{name: "settled config is returned as is", in: `{"image":"x","features":{"` + cu + `":{"username":"agent","userUid":"1001","userGid":"1001"}}}`, wantSame: true},
 		{name: "username none is the operator's choice", in: `{"image":"x","features":{"` + cu + `":{"username":"none"}}}`, wantSame: true},
@@ -64,6 +71,9 @@ func TestNormalizeAgentUserJSON(t *testing.T) {
 			opts, _ := features[cu].(map[string]any)
 			if tc.wantAccount && (opts["username"] != "agent" || opts["userUid"] != "1001" || opts["userGid"] != "1001") {
 				t.Fatalf("no agent/1001/1001 account in %s", got)
+			}
+			if tc.wantRaw != "" && !strings.Contains(got, tc.wantRaw) {
+				t.Errorf("output %s lost %s", got, tc.wantRaw)
 			}
 			for k, v := range tc.wantOptValue {
 				if opts[k] != v {

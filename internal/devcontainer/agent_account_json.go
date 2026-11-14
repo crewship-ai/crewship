@@ -29,8 +29,12 @@ func NormalizeAgentUserJSON(raw string) (string, error) {
 	if !changed {
 		return raw, nil
 	}
+	// UseNumber keeps numbers in keys the model does not carry exact; a
+	// float64 round trip would change integers above 2^53.
 	var doc map[string]any
-	if err := json.Unmarshal([]byte(raw), &doc); err != nil {
+	dec := json.NewDecoder(strings.NewReader(raw))
+	dec.UseNumber()
+	if err := dec.Decode(&doc); err != nil {
 		return raw, err
 	}
 	doc["features"] = cfg.Features
