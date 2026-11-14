@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -266,13 +267,126 @@ func TestScheduleCreator_PersonsRoutineSaveTriggerIsThePerson(t *testing.T) {
 		"skip_test_gate": true,
 		"trigger":        map[string]any{"kind": "schedule", "cron": "0 9 * * *", "timezone": "UTC", "inputs": map[string]any{"region": "eu"}},
 	})
-	rr := httptest.NewRecorder()
-	h.Save(rr, asPerson(httptest.NewRequest("POST", "/save", bytes.NewReader(body)), user, ws, "OWNER"))
-	if rr.Code != http.StatusOK && rr.Code != http.StatusCreated {
-		t.Fatalf("save: %d %s", rr.Code, rr.Body)
+	check := func(what string) {
+		t.Helper()
+		rr := httptest.NewRecorder()
+		h.Save(rr, asPerson(httptest.NewRequest("POST", "/save", bytes.NewReader(body)), user, ws, "OWNER"))
+		if rr.Code != http.StatusOK && rr.Code != http.StatusCreated {
+			t.Fatalf("%s: %d %s", what, rr.Code, rr.Body)
+		}
+		var kind, who, member, setAt any
+		if err := h.db.QueryRow(`SELECT s.creator_kind,s.creator_user_id,s.creator_member_id,s.creator_set_at FROM pipeline_schedules s JOIN pipelines p ON p.id=s.target_pipeline_id WHERE p.slug='person-cron'`).Scan(&kind, &who, &member, &setAt); err != nil || kind != "human" || who != user || member == nil || setAt == nil {
+			t.Fatalf("%s: trigger creator %v/%v member %v at %v %v", what, kind, who, member, setAt, err)
+		}
 	}
-	var kind, who, member any
-	if err := h.db.QueryRow(`SELECT s.creator_kind,s.creator_user_id,s.creator_member_id FROM pipeline_schedules s JOIN pipelines p ON p.id=s.target_pipeline_id WHERE p.slug='person-cron'`).Scan(&kind, &who, &member); err != nil || kind != "human" || who != user || member == nil {
-		t.Fatalf("a person's trigger creator %v/%v member %v %v", kind, who, member, err)
+	check("first save")
+	// A re-save updates the existing trigger schedule in place (the upsert
+	// path), and must write the whole creator there too.
+	mustExec(t, h.db, `UPDATE pipeline_schedules SET creator_kind='agent',creator_user_id=NULL,creator_member_id=NULL,creator_set_at=NULL`)
+	check("re-save")
+}
+
+// Whatever the key's spelling (json.Unmarshal matches field names without
+// regard to case), a PATCH that changes what an agent's schedule runs makes
+// the person who sent it its creator; it can never change the content and
+// leave the agent's creator in place (round-3 review M1, X1-X3).
+func TestScheduleCreator_AnyContentChangeAdoptsWhateverTheKeySpelling(t *testing.T) {
+	h, db, userID, wsID := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, wsID, "pln_spell", "spell-routine")
+	seedPipelineRow(t, db, wsID, "pln_spell_other", "spell-other")
+	seedPipelineRow(t, db, wsID, "pln_spell_probe", "spell-probe")
+	mustExec(t, db, `UPDATE pipelines SET definition_json='{"name":"x","agentless":true,"steps":[]}' WHERE id='pln_spell_probe'`)
+	adapter := NewRoutineInternalAdapter(h)
+	for _, tc := range []struct {
+		body, column string
+		same         bool // names a content field with its stored value: still an adoption
+	}{
+		{`{"Inputs":{"x":"evil"}}`, "inputs_json", false},
+		{`{"inputs":{"x":"evil"}}`, "inputs_json", false},
+		{`{"CRON_EXPR":"0 4 * * *"}`, "cron_expr", false},
+		{`{"Cron_Expr":"0 4 * * *"}`, "cron_expr", false},
+		{`{"TimeZone":"Europe/Prague"}`, "timezone", false},
+		{`{"Target_Pipeline_Slug":"spell-other"}`, "target_pipeline_id", false},
+		{`{"target_pipeline_slug":"spell-other"}`, "target_pipeline_id", false},
+		{`{"TARGET_PIPELINE_ID":"pln_spell_other"}`, "target_pipeline_id", false},
+		{`{"Wake_Pipeline_Slug":"spell-probe"}`, "wake_pipeline_id", false},
+		{`{"wake_pipeline_slug":"spell-probe"}`, "wake_pipeline_id", false},
+		{`{"INPUTS":{}}`, "inputs_json", true},
+		{`{"Cron_Expr":"0 * * * *"}`, "cron_expr", true},
+		{`{"Target_Pipeline_Slug":"spell-routine"}`, "target_pipeline_id", true},
+		{`{"Target_Pipeline_Version":null}`, "target_pipeline_version", true},
+		{`{"Wake_Pipeline_Slug":""}`, "wake_pipeline_id", true},
+		{`{"WAKE_FAIL_CLOSED":false}`, "wake_fail_closed", true},
+	} {
+		t.Run(tc.body, func(t *testing.T) {
+			rr := httptest.NewRecorder()
+			adapter.CreateSchedule(rr, httptest.NewRequest(http.MethodPost, "/?workspace_id="+wsID, strings.NewReader(`{"cron_expr":"0 * * * *","target_pipeline_slug":"spell-routine"}`)))
+			if rr.Code != http.StatusCreated && rr.Code != http.StatusAccepted {
+				t.Fatalf("internal create: %d %s", rr.Code, rr.Body)
+			}
+			var agent scheduleResponse
+			_ = json.Unmarshal(rr.Body.Bytes(), &agent)
+			content := func() string {
+				t.Helper()
+				var v any
+				if err := db.QueryRow(`SELECT `+tc.column+` FROM pipeline_schedules WHERE id=?`, agent.ID).Scan(&v); err != nil {
+					t.Fatal(err)
+				}
+				return fmt.Sprint(v)
+			}
+			before := content()
+			r := asPerson(httptest.NewRequest("PATCH", "/", strings.NewReader(tc.body)), userID, wsID, "OWNER")
+			r.SetPathValue("scheduleId", agent.ID)
+			rr = httptest.NewRecorder()
+			h.UpdateSchedule(rr, r)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("patch: %d %s", rr.Code, rr.Body)
+			}
+			if (content() == before) != tc.same {
+				t.Fatalf("%s before %q after %q, same=%v expected", tc.column, before, content(), tc.same)
+			}
+			var kind, user any
+			if err := db.QueryRow(`SELECT creator_kind,creator_user_id FROM pipeline_schedules WHERE id=?`, agent.ID).Scan(&kind, &user); err != nil {
+				t.Fatal(err)
+			}
+			if kind != "human" || user != userID {
+				t.Fatalf("content changed but the creator stayed %v/%v", kind, user)
+			}
+		})
+	}
+}
+
+// The effective comparison stands on its own, whatever the key check does:
+// each field that decides what runs counts, and a PATCH that writes the
+// stored schedule back unchanged does not.
+func TestScheduleContentChanged(t *testing.T) {
+	pin := 2
+	existing := &pipeline.Schedule{CronExpr: "0 8 * * *", Timezone: "UTC", TargetPipelineID: "p1", TargetPipelineVersion: &pin,
+		InputsJSON: `{"a":1,"b":"x"}`, WakePipelineID: "w1", WakeInputsJSON: `{}`, WakeFailClosed: true}
+	same := func() pipeline.SaveScheduleInput {
+		p := 2
+		return pipeline.SaveScheduleInput{CronExpr: "0 8 * * *", Timezone: "UTC", TargetPipelineID: "p1", TargetPipelineVersion: &p,
+			Inputs: map[string]any{"b": "x", "a": float64(1)}, WakePipelineID: "w1", WakeFailClosed: true, Name: "renamed", Enabled: true, SpreadSeconds: 60, CatchupPolicy: "all"}
+	}
+	if scheduleContentChanged(existing, same()) {
+		t.Fatal("an unchanged schedule (renamed, enabled, spread, catch-up) counted as a content change")
+	}
+	three := 3
+	for name, edit := range map[string]func(*pipeline.SaveScheduleInput){
+		"cron":        func(in *pipeline.SaveScheduleInput) { in.CronExpr = "0 9 * * *" },
+		"timezone":    func(in *pipeline.SaveScheduleInput) { in.Timezone = "Europe/Prague" },
+		"target":      func(in *pipeline.SaveScheduleInput) { in.TargetPipelineID = "p2" },
+		"pin":         func(in *pipeline.SaveScheduleInput) { in.TargetPipelineVersion = &three },
+		"unpin":       func(in *pipeline.SaveScheduleInput) { in.TargetPipelineVersion = nil },
+		"inputs":      func(in *pipeline.SaveScheduleInput) { in.Inputs = map[string]any{"a": float64(2), "b": "x"} },
+		"wake":        func(in *pipeline.SaveScheduleInput) { in.WakePipelineID = "" },
+		"wake inputs": func(in *pipeline.SaveScheduleInput) { in.WakeInputs = map[string]any{"q": true} },
+		"fail closed": func(in *pipeline.SaveScheduleInput) { in.WakeFailClosed = false },
+	} {
+		in := same()
+		edit(&in)
+		if !scheduleContentChanged(existing, in) {
+			t.Errorf("%s: a content change was not seen", name)
+		}
 	}
 }

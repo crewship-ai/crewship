@@ -327,6 +327,14 @@ func TestRoutineArtifactRun_ScheduleCreatorDecidesAtEveryRun(t *testing.T) {
 		refused(t, human, withheldScheduleStanding)
 		revokeAt(time.Now().UTC().Add(-time.Hour))
 		admitted(t, human, "a revocation older than the save")
+		var setAt string
+		if err := db.QueryRow(`SELECT creator_set_at FROM pipeline_schedules WHERE id=?`, human.ID).Scan(&setAt); err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, db.DB, `UPDATE users SET access_revoked_at='`+setAt+`' WHERE id='human_1'`)
+		refused(t, human, withheldScheduleStanding) // the same instant counts as after
+		mustExec(t, db.DB, `UPDATE users SET access_revoked_at='not a time' WHERE id='human_1'`)
+		refused(t, human, withheldScheduleStanding) // unreadable counts as revoked
 		mustExec(t, db.DB, `UPDATE users SET access_revoked_at=NULL WHERE id='human_1'`)
 	})
 	t.Run("a role that can no longer create schedules", func(t *testing.T) {

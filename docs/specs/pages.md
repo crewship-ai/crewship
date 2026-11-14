@@ -666,10 +666,11 @@ owner on 2026-11-13.
    saved before the creator was recorded has none. Neither ever records,
    until a person changes what it runs. Creating a schedule, or changing its
    cron, timezone, inputs, target, pinned version or wake check (any of
-   these fields named in the update, even with its old value), overwrites the
-   creator, so an agent's change to a person's schedule takes its access
-   away. Enabling, disabling, renaming it or changing its failure limit keeps
-   the creator: an admin re-enabling an agent's schedule after its circuit
+   these fields named in the update in any letter case, even with its old
+   value, or changed in effect), overwrites the creator, so an agent's change
+   to a person's schedule takes its access away. Enabling, disabling,
+   renaming it or changing its failure limit, `catchup_policy` or
+   `spread_seconds` keeps the creator: an admin re-enabling an agent's schedule after its circuit
    breaker tripped does not vouch for it. A GDPR erasure of the creator
    clears the whole creator, so the schedule vouches for nothing. A delayed or
    debounced start (its trigger defaults to schedule), a schedule occurrence

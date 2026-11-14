@@ -97,15 +97,63 @@ type scheduleResponse struct {
 // scheduleContentKeys are the PATCH fields that change what a schedule runs.
 var scheduleContentKeys = []string{"cron_expr", "timezone", "inputs", "target_pipeline_id", "target_pipeline_slug", "target_pipeline_version", "wake_pipeline_id", "wake_pipeline_slug", "wake_inputs", "wake_fail_closed"}
 
-// scheduleContentMentioned reports whether a PATCH body sets any field that
-// changes what the schedule runs.
+// scheduleContentMentioned reports whether a PATCH body names any field that
+// changes what the schedule runs, in any letter case: json.Unmarshal fills
+// the request struct without regard to case, so the check must too.
 func scheduleContentMentioned(rawKeys map[string]json.RawMessage) bool {
-	for _, k := range scheduleContentKeys {
-		if _, ok := rawKeys[k]; ok {
-			return true
+	for key := range rawKeys {
+		for _, k := range scheduleContentKeys {
+			if strings.EqualFold(key, k) {
+				return true
+			}
 		}
 	}
 	return false
+}
+
+// scheduleContentChanged reports whether the schedule a PATCH writes runs
+// anything different from the stored one: cron, timezone, target, pin,
+// inputs or wake gate. It judges the effective result, so no spelling of a
+// key can change content without the creator following.
+func scheduleContentChanged(existing *pipeline.Schedule, in pipeline.SaveScheduleInput) bool {
+	pin := func(v *int) int {
+		if v == nil {
+			return -1
+		}
+		return *v
+	}
+	return in.CronExpr != existing.CronExpr ||
+		in.Timezone != existing.Timezone ||
+		in.TargetPipelineID != existing.TargetPipelineID ||
+		pin(in.TargetPipelineVersion) != pin(existing.TargetPipelineVersion) ||
+		in.WakePipelineID != existing.WakePipelineID ||
+		in.WakeFailClosed != existing.WakeFailClosed ||
+		canonicalScheduleInputs(in.Inputs) != canonicalStoredInputs(existing.InputsJSON) ||
+		canonicalScheduleInputs(in.WakeInputs) != canonicalStoredInputs(existing.WakeInputsJSON)
+}
+
+// canonicalScheduleInputs is a stable spelling of an inputs object; empty
+// and absent are the same.
+func canonicalScheduleInputs(m map[string]any) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, err := json.Marshal(m) // map keys are sorted
+	if err != nil {
+		return "\x00unencodable"
+	}
+	return string(b)
+}
+
+func canonicalStoredInputs(raw string) string {
+	if raw == "" {
+		return "{}"
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return raw
+	}
+	return canonicalScheduleInputs(m)
 }
 
 // scheduleCreatorFromRequest names who is saving a schedule (#5339). Only a
@@ -771,11 +819,12 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		MaxConsecutiveFailures: maxFailures,
 	}
 	// #5339: only a save that sets what the schedule runs (its timing, its
-	// target or pin, its inputs, its wake gate) names who vouches for it.
+	// target or pin, its inputs, its wake gate), by naming such a field in
+	// any letter case or by changing it in effect, names who vouches for it.
 	// Enable, disable, rename and spread/catch-up/breaker tweaks keep the
 	// stored creator, so an admin re-enabling an agent's schedule does not
 	// silently vouch for it.
-	if scheduleContentMentioned(rawKeys) {
+	if scheduleContentMentioned(rawKeys) || scheduleContentChanged(existing, in) {
 		in.CreatorKind, in.CreatorUserID = scheduleCreatorFromRequest(r)
 	} else {
 		in.KeepCreator = true
