@@ -682,7 +682,27 @@ owner on 2026-11-13.
    without a work-ledger record, so a per-run cap could be bypassed by minting
    a fresh run. That mode waits for that identity.
 
-The audit with the human follows in a later step of #5317.
+11. **Every artifact project access is audited with its human.** Each access
+   a flag-on chat run makes to an artifact project (view, comments, dashboard
+   data, slides and PDF export, publish, restore, reply, create) writes an
+   `audit_logs` row `artifact.agent_run_accessed` in the same transaction as
+   the access. Word and Sheet documents, Design, GridCraft and Mooring keep
+   their exact-run consent path and are not audited by this row. The row's
+   user is the human the agent acted for; its metadata names the agent, crew,
+   run, chat, the reach (`referenced`, `created`, `consented`, `standing` or
+   `folder`) and the operation (`read`, `write`, `create`). It holds no
+   content. Reads and writes are recorded once per run, artifact and operation
+   (a later access re-verifies the existing row); each individual write is
+   already in the version history with the run as its actor. The row keeps the
+   reach of the first such access; a later access by another reach is not
+   recorded again. Every create is recorded. If the row cannot be written, or
+   is silently dropped, the access is refused. Pre-checks and capability
+   probes record nothing; only the transaction that performs the access does,
+   so refused accesses and the flag off record nothing. Like admin reads of
+   private artifacts, these rows live only in the audit log, never the
+   workspace journal, so the audit listing's private-artifact audience filter
+   applies: `crewship audit --action artifact.agent_run_accessed -f json`
+   shows the human and the metadata.
 
 ### 7.2 What this costs
 
