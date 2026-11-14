@@ -561,6 +561,10 @@ func (h *CrewTemplateHandler) Deploy(w http.ResponseWriter, r *http.Request) {
 			writeProblem(w, r, http.StatusBadRequest, "Choose a provider, its matching runner and a model")
 			return
 		}
+		if err := validateLLMModelID(strings.TrimSpace(body.LLMModel)); err != nil {
+			writeProblem(w, r, http.StatusBadRequest, err.Error())
+			return
+		}
 		overrides = deployOverrides{Provider: provider.provider, CLIAdapter: body.CLIAdapter, LLMModel: strings.TrimSpace(body.LLMModel)}
 	}
 	result, err := deployCrewTemplate(r.Context(), h.db, h.logger, h.journal, wsID, slug, body.CrewName, body.CrewSlug, overrides)

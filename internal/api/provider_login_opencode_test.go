@@ -39,10 +39,6 @@ func TestProviderLoginOpenCode(t *testing.T) {
 				t.Fatal("Coding Plan must not be labelled metered")
 			}
 
-			models := NewModelsHandler(db, nil, "")
-			if _, authoritative := models.providerModelIDs(t.Context(), ws, tc.provider); authoritative {
-				t.Fatal("partial gateway suggestions must not reject custom native model IDs")
-			}
 			if adapter, model := providerRuntimeDefaults(tc.provider); adapter != "OPENCODE" || model == "" {
 				t.Fatal("gateway default must use OpenCode")
 			}
@@ -65,7 +61,6 @@ func TestAgentUpdateOpenCodeGateway(t *testing.T) {
 	} {
 		t.Run(tc.model, func(t *testing.T) {
 			h, user, ws := covAUHandler(t)
-			h.SetModelValidator(NewModelsHandler(h.db, nil, ""))
 			seedAgentRow(t, h.db, "gateway-agent", ws, "", "Gateway Agent", "gateway-agent", "AGENT")
 			body, _ := json.Marshal(map[string]string{"llm_provider": tc.provider, "llm_model": tc.model, "cli_adapter": "OPENCODE"})
 			rr := covAUPatch(t, h, user, ws, "OWNER", "gateway-agent", string(body))

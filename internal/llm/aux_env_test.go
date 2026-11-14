@@ -26,7 +26,7 @@ func TestAuxiliaryModelsFromEnv_OverridesOnlySetSlots(t *testing.T) {
 		t.Fatalf("curator timeout = %v, want 45s", got.Curator.Timeout)
 	}
 	// Untouched slot keeps the default.
-	if got.Keeper.Provider != "anthropic" || got.Keeper.Model != "claude-haiku-4-5" {
+	if got.Keeper.Provider != "anthropic" || got.Keeper.Model != "claude-haiku-5-5" {
 		t.Fatalf("keeper should keep default, got %+v", got.Keeper)
 	}
 	// The passed-in base must not be mutated (value semantics).

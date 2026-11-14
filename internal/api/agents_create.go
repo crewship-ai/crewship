@@ -209,6 +209,12 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, OPENCODE_GO, or ZAI_CODING_PLAN")
 		return
 	}
+	if req.LLMModel != nil {
+		if err := validateLLMModelID(*req.LLMModel); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
 	if req.ToolProfile == "" {
 		req.ToolProfile = "CODING"
 	}

@@ -26,14 +26,14 @@ func auxSlotsOf(cfg AuxiliaryModels) []struct {
 }
 
 // TestAuxiliaryModels_DefaultsAreHaiku locks the SHIPPED default: every aux slot
-// on anthropic/claude-haiku-4-5, sourced from the first registry row that names
+// on anthropic/claude-haiku-5-5, sourced from the first registry row that names
 // a DefaultAuxModel rather than from a literal in aux.go.
 //
 // Both halves are asserted on purpose. The registry half is the anti-drift one —
 // ProviderSpec.DefaultAuxModel is now what aux.go reads, so a row edited without
 // this in mind moves the shipped default. The literal half is the contract other
 // packages already encode (internal/api/system_aux_test.go asserts every slot
-// reads anthropic/claude-haiku-4-5, keepercfg uses this value as the `builtin`
+// reads anthropic/claude-haiku-5-5, keepercfg uses this value as the `builtin`
 // provenance layer), so a registry reorder that silently repointed the shipped
 // default must fail HERE, in the package that owns it, and not as a surprise
 // three packages away.
@@ -42,8 +42,8 @@ func TestAuxiliaryModels_DefaultsAreHaiku(t *testing.T) {
 	if !ok {
 		t.Fatal("no registry row names a DefaultAuxModel")
 	}
-	if spec.ID != "anthropic" || spec.DefaultAuxModel != "claude-haiku-4-5" {
-		t.Fatalf("shipped default is %s/%s, want anthropic/claude-haiku-4-5",
+	if spec.ID != "anthropic" || spec.DefaultAuxModel != "claude-haiku-5-5" {
+		t.Fatalf("shipped default is %s/%s, want anthropic/claude-haiku-5-5",
 			spec.ID, spec.DefaultAuxModel)
 	}
 
@@ -52,8 +52,8 @@ func TestAuxiliaryModels_DefaultsAreHaiku(t *testing.T) {
 		if s.got.Provider != "anthropic" {
 			t.Errorf("%s.Provider = %q, want anthropic", s.name, s.got.Provider)
 		}
-		if s.got.Model != "claude-haiku-4-5" {
-			t.Errorf("%s.Model = %q, want claude-haiku-4-5", s.name, s.got.Model)
+		if s.got.Model != "claude-haiku-5-5" {
+			t.Errorf("%s.Model = %q, want claude-haiku-5-5", s.name, s.got.Model)
 		}
 		if s.got.Timeout <= 0 {
 			t.Errorf("%s.Timeout = %v, want positive", s.name, s.got.Timeout)
@@ -79,8 +79,8 @@ func TestAuxiliaryModels_DefaultsIgnoreTheEnvironment(t *testing.T) {
 
 	cfg := DefaultAuxiliaryModels()
 	for _, s := range auxSlotsOf(cfg) {
-		if s.got.Provider != "anthropic" || s.got.Model != "claude-haiku-4-5" {
-			t.Errorf("%s = %s/%s, want the shipped anthropic/claude-haiku-4-5 regardless of env",
+		if s.got.Provider != "anthropic" || s.got.Model != "claude-haiku-5-5" {
+			t.Errorf("%s = %s/%s, want the shipped anthropic/claude-haiku-5-5 regardless of env",
 				s.name, s.got.Provider, s.got.Model)
 		}
 	}
@@ -88,7 +88,7 @@ func TestAuxiliaryModels_DefaultsIgnoreTheEnvironment(t *testing.T) {
 
 // TestAvailableAuxiliaryModels_PicksFirstCredentialedProvider is the behaviour
 // change: an unconfigured slot follows the credentials the instance actually
-// holds instead of a hardcoded anthropic/claude-haiku-4-5.
+// holds instead of a hardcoded anthropic/claude-haiku-5-5.
 //
 // The old shape gave an operator with only an OPENAI_API_KEY six evaluator slots
 // that each failed at first use asking for a key they have no reason to own.
@@ -106,19 +106,19 @@ func TestAvailableAuxiliaryModels_PicksFirstCredentialedProvider(t *testing.T) {
 			name:         "no keys keeps the shipped default",
 			env:          nil,
 			wantProvider: "anthropic",
-			wantModel:    "claude-haiku-4-5",
+			wantModel:    "claude-haiku-5-5",
 		},
 		{
 			name:         "anthropic key",
 			env:          map[string]string{"ANTHROPIC_API_KEY": "sk-ant"},
 			wantProvider: "anthropic",
-			wantModel:    "claude-haiku-4-5",
+			wantModel:    "claude-haiku-5-5",
 		},
 		{
 			name:         "openai key only",
 			env:          map[string]string{"OPENAI_API_KEY": "sk-openai"},
 			wantProvider: "openai",
-			wantModel:    "gpt-5.4-mini",
+			wantModel:    "gpt-6-luna",
 		},
 		{
 			// Declaration order decides, the same order the console's picker
@@ -129,7 +129,7 @@ func TestAvailableAuxiliaryModels_PicksFirstCredentialedProvider(t *testing.T) {
 				"OPENAI_API_KEY":    "sk-openai",
 			},
 			wantProvider: "anthropic",
-			wantModel:    "claude-haiku-4-5",
+			wantModel:    "claude-haiku-5-5",
 		},
 		{
 			// BuildAuxProviderWithKey would accept "  " and 401 on first use;
@@ -137,7 +137,7 @@ func TestAvailableAuxiliaryModels_PicksFirstCredentialedProvider(t *testing.T) {
 			name:         "whitespace-only key does not count",
 			env:          map[string]string{"OPENAI_API_KEY": "   "},
 			wantProvider: "anthropic",
-			wantModel:    "claude-haiku-4-5",
+			wantModel:    "claude-haiku-5-5",
 		},
 		{
 			// ollama needs no key, but its registry row names no DefaultAuxModel
@@ -147,7 +147,7 @@ func TestAvailableAuxiliaryModels_PicksFirstCredentialedProvider(t *testing.T) {
 			name:         "keyless ollama is not a default",
 			env:          map[string]string{"KEEPER_OLLAMA_URL": "http://localhost:11434"},
 			wantProvider: "anthropic",
-			wantModel:    "claude-haiku-4-5",
+			wantModel:    "claude-haiku-5-5",
 		},
 	}
 
@@ -202,8 +202,8 @@ func TestLoadAuxiliaryModels_EnvOverrideBeatsAvailability(t *testing.T) {
 			got.Curator.Provider, got.Curator.Model)
 	}
 	// An un-named slot follows the credential the instance holds.
-	if got.Behavior.Provider != "openai" || got.Behavior.Model != "gpt-5.4-mini" {
-		t.Errorf("behavior = %s/%s, want openai/gpt-5.4-mini",
+	if got.Behavior.Provider != "openai" || got.Behavior.Model != "gpt-6-luna" {
+		t.Errorf("behavior = %s/%s, want openai/gpt-6-luna",
 			got.Behavior.Provider, got.Behavior.Model)
 	}
 }
@@ -213,7 +213,7 @@ func TestLoadAuxiliaryModels_EnvOverrideBeatsAvailability(t *testing.T) {
 func TestResolveAux_ReturnsExplicitSlot(t *testing.T) {
 	cfg := AuxiliaryModels{
 		Keeper:   AuxModel{Provider: "ollama", Model: "phi3:medium", Timeout: 10 * time.Second},
-		Fallback: AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5", Timeout: 5 * time.Second},
+		Fallback: AuxModel{Provider: "anthropic", Model: "claude-haiku-5-5", Timeout: 5 * time.Second},
 	}
 	got, err := ResolveAux(cfg, SlotKeeper)
 	if err != nil {
@@ -231,14 +231,14 @@ func TestResolveAux_ReturnsExplicitSlot(t *testing.T) {
 func TestResolveAux_FallsBackWhenSlotEmpty(t *testing.T) {
 	cfg := AuxiliaryModels{
 		// Keeper deliberately empty
-		Fallback: AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5", Timeout: 5 * time.Second},
+		Fallback: AuxModel{Provider: "anthropic", Model: "claude-haiku-5-5", Timeout: 5 * time.Second},
 	}
 	got, err := ResolveAux(cfg, SlotKeeper)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Provider != "anthropic" || got.Model != "claude-haiku-4-5" {
-		t.Errorf("got %+v, want fallback anthropic/claude-haiku-4-5", got)
+	if got.Provider != "anthropic" || got.Model != "claude-haiku-5-5" {
+		t.Errorf("got %+v, want fallback anthropic/claude-haiku-5-5", got)
 	}
 }
 
@@ -257,8 +257,8 @@ func TestResolveAux_NoFallbackNoSlot_ReturnsError(t *testing.T) {
 // consumer — explicit slot wins, same as SlotKeeper etc.
 func TestResolveAux_RunSummarySlot(t *testing.T) {
 	cfg := AuxiliaryModels{
-		RunSummary: AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5", Timeout: 15 * time.Second},
-		Fallback:   AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5", Timeout: 5 * time.Second},
+		RunSummary: AuxModel{Provider: "anthropic", Model: "claude-haiku-5-5", Timeout: 15 * time.Second},
+		Fallback:   AuxModel{Provider: "anthropic", Model: "claude-haiku-5-5", Timeout: 5 * time.Second},
 	}
 	got, err := ResolveAux(cfg, SlotRunSummary)
 	if err != nil {
@@ -286,7 +286,7 @@ func TestResolveAux_ExplicitSlot_BorrowsFallbackTimeout(t *testing.T) {
 	t.Run("fallback timeout present", func(t *testing.T) {
 		cfg := AuxiliaryModels{
 			Keeper:   AuxModel{Provider: "ollama", Model: "phi3:medium"}, // no Timeout
-			Fallback: AuxModel{Provider: "anthropic", Model: "claude-haiku-4-5", Timeout: 7 * time.Second},
+			Fallback: AuxModel{Provider: "anthropic", Model: "claude-haiku-5-5", Timeout: 7 * time.Second},
 		}
 		got, err := ResolveAux(cfg, SlotKeeper)
 		if err != nil {

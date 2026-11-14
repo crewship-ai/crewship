@@ -4,54 +4,36 @@
   "providers": {
     "opencode": {
       "label": "OpenCode Zen",
-      "default": "opencode/claude-sonnet-5",
+      "default": "opencode/claude-sonnet-5-5",
       "models": [
-        {
-          "id": "opencode/claude-sonnet-5",
-          "label": "Claude Sonnet 5 (OpenCode Zen)",
-          "category": "frontier"
-        },
-        {
-          "id": "opencode/gpt-5.5",
-          "label": "GPT-5.5 (OpenCode Zen)",
-          "category": "frontier"
-        },
-        {
-          "id": "opencode/gemini-3.1-pro",
-          "label": "Gemini 3.1 Pro (OpenCode Zen)",
-          "category": "frontier"
-        },
-        {
-          "id": "opencode/kimi-k3",
-          "label": "Kimi K3 (OpenCode Zen)",
-          "category": "frontier"
-        }
+        { "id": "opencode/claude-opus-5-5", "label": "Claude Opus 5.5 (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/claude-sonnet-5-5", "label": "Claude Sonnet 5.5 (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/claude-fable-5-2", "label": "Claude Fable 5.2 (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/claude-haiku-5-5", "label": "Claude Haiku 5.5 (OpenCode Zen)", "category": "fast" },
+        { "id": "opencode/gpt-6-astra", "label": "GPT-6 Astra (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/gpt-6.1-sol", "label": "GPT-6.1 Sol (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/gpt-6-luna", "label": "GPT-6 Luna (OpenCode Zen)", "category": "fast" },
+        { "id": "opencode/gemini-4-carbon", "label": "Gemini 4 Carbon (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/kimi-k3", "label": "Kimi K3 (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/glm-5.3", "label": "GLM 5.3 (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/claude-sonnet-5", "label": "Claude Sonnet 5 (OpenCode Zen)", "category": "legacy" },
+        { "id": "opencode/gpt-5.5", "label": "GPT-5.5 (OpenCode Zen)", "category": "legacy" },
+        { "id": "opencode/gemini-3.1-pro", "label": "Gemini 3.1 Pro (OpenCode Zen)", "category": "legacy" }
       ]
     },
     "opencode_go": {
       "label": "OpenCode Go",
-      "default": "opencode-go/kimi-k3",
+      "default": "opencode-go/kimi-k3.1-pro",
       "models": [
-        {
-          "id": "opencode-go/kimi-k3",
-          "label": "Kimi K3 (OpenCode Go)",
-          "category": "frontier"
-        },
-        {
-          "id": "opencode-go/glm-5.3-flash",
-          "label": "GLM 5.3 Flash (OpenCode Go)",
-          "category": "frontier"
-        },
-        {
-          "id": "opencode-go/minimax-m3",
-          "label": "MiniMax M3 (OpenCode Go)",
-          "category": "frontier"
-        },
-        {
-          "id": "opencode-go/gpt-5.6-luna",
-          "label": "GPT-5.6 Luna (OpenCode Go)",
-          "category": "frontier"
-        }
+        { "id": "opencode-go/kimi-k3.1-pro", "label": "Kimi K3.1 Pro (OpenCode Go)", "category": "frontier" },
+        { "id": "opencode-go/kimi-k3", "label": "Kimi K3 (OpenCode Go)", "category": "frontier" },
+        { "id": "opencode-go/glm-5.3", "label": "GLM 5.3 (OpenCode Go)", "category": "frontier" },
+        { "id": "opencode-go/glm-5.3-flash", "label": "GLM 5.3 Flash (OpenCode Go)", "category": "fast" },
+        { "id": "opencode-go/deepseek-v4-pro", "label": "DeepSeek V4 Pro (OpenCode Go)", "category": "frontier" },
+        { "id": "opencode-go/minimax-m3", "label": "MiniMax M3 (OpenCode Go)", "category": "frontier" },
+        { "id": "opencode-go/claude-haiku-5-5", "label": "Claude Haiku 5.5 (OpenCode Go)", "category": "fast" },
+        { "id": "opencode-go/gpt-6-luna", "label": "GPT-6 Luna (OpenCode Go)", "category": "fast" },
+        { "id": "opencode-go/gpt-5.6-luna", "label": "GPT-5.6 Luna (OpenCode Go)", "category": "legacy" }
       ]
     },
     "zai_coding_plan": {
@@ -77,19 +59,24 @@
         {
           "id": "zai-coding-plan/glm-5.2",
           "label": "GLM 5.2 (Coding Plan)",
-          "category": "frontier"
+          "category": "legacy"
         }
       ]
     },
     "anthropic": {
       "label": "Anthropic",
-      "default": "claude-sonnet-5",
+      "default": "claude-sonnet-5-5",
       "models": [
-        { "id": "claude-fable-5", "label": "Claude Fable 5", "category": "frontier" },
-        { "id": "claude-opus-5", "label": "Claude Opus 5", "category": "frontier", "role": "top" },
-        { "id": "claude-opus-4-8", "label": "Claude Opus 4.8", "category": "frontier" },
-        { "id": "claude-sonnet-5", "label": "Claude Sonnet 5", "category": "frontier", "role": "default" },
-        { "id": "claude-haiku-4-5", "label": "Claude Haiku 4.5", "category": "fast", "role": "cheap" },
+        { "id": "claude-fable-5-2", "label": "Claude Fable 5.2", "category": "frontier" },
+        { "id": "claude-opus-5-5", "label": "Claude Opus 5.5", "category": "frontier", "role": "top" },
+        { "id": "claude-sonnet-5-5", "label": "Claude Sonnet 5.5", "category": "frontier", "role": "default" },
+        { "id": "claude-haiku-5-5", "label": "Claude Haiku 5.5", "category": "fast", "role": "cheap" },
+        { "id": "claude-fable-5-1", "label": "Claude Fable 5.1", "category": "legacy" },
+        { "id": "claude-fable-5", "label": "Claude Fable 5", "category": "legacy" },
+        { "id": "claude-opus-5", "label": "Claude Opus 5", "category": "legacy" },
+        { "id": "claude-sonnet-5", "label": "Claude Sonnet 5", "category": "legacy" },
+        { "id": "claude-opus-4-8", "label": "Claude Opus 4.8", "category": "legacy" },
+        { "id": "claude-haiku-4-5", "label": "Claude Haiku 4.5", "category": "legacy" },
         { "id": "claude-opus-4-7", "label": "Claude Opus 4.7", "category": "legacy" },
         { "id": "claude-opus-4-6", "label": "Claude Opus 4.6", "category": "legacy" },
         { "id": "claude-sonnet-4-6", "label": "Claude Sonnet 4.6", "category": "legacy" }
@@ -106,17 +93,21 @@
     },
     "openai": {
       "label": "OpenAI",
-      "default": "gpt-5.5",
+      "default": "gpt-6.1-sol",
       "models": [
-        { "id": "gpt-6-astra", "label": "GPT-6 Astra", "category": "frontier" },
-        { "id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "category": "fast" },
-        { "id": "gpt-5.5", "label": "GPT-5.5", "category": "frontier", "role": "default" },
-        { "id": "gpt-5.4", "label": "GPT-5.4", "category": "frontier" },
-        { "id": "gpt-5.4-mini", "label": "GPT-5.4 mini", "category": "fast", "role": "cheap" },
-        { "id": "gpt-5.4-nano", "label": "GPT-5.4 nano", "category": "cheap" },
-        { "id": "gpt-5.3-codex", "label": "GPT-5.3 Codex", "category": "frontier" },
-        { "id": "gpt-5.3-codex-spark", "label": "GPT-5.3 Codex Spark", "category": "reasoning" },
-        { "id": "o3", "label": "o3", "category": "reasoning", "role": "top" },
+        { "id": "gpt-6-astra", "label": "GPT-6 Astra", "category": "frontier", "role": "top" },
+        { "id": "gpt-6.1-sol", "label": "GPT-6.1 Sol", "category": "frontier", "role": "default" },
+        { "id": "gpt-6.1-terra", "label": "GPT-6.1 Terra", "category": "frontier" },
+        { "id": "gpt-6-luna", "label": "GPT-6 Luna", "category": "fast", "role": "cheap" },
+        { "id": "gpt-6-sol", "label": "GPT-6 Sol", "category": "legacy" },
+        { "id": "gpt-5.6-luna", "label": "GPT-5.6 Luna", "category": "legacy" },
+        { "id": "gpt-5.5", "label": "GPT-5.5", "category": "legacy" },
+        { "id": "gpt-5.4", "label": "GPT-5.4", "category": "legacy" },
+        { "id": "gpt-5.4-mini", "label": "GPT-5.4 mini", "category": "legacy" },
+        { "id": "gpt-5.4-nano", "label": "GPT-5.4 nano", "category": "legacy" },
+        { "id": "gpt-5.3-codex", "label": "GPT-5.3 Codex", "category": "legacy" },
+        { "id": "gpt-5.3-codex-spark", "label": "GPT-5.3 Codex Spark", "category": "legacy" },
+        { "id": "o3", "label": "o3", "category": "reasoning" },
         { "id": "o3-pro", "label": "o3 Pro", "category": "reasoning" },
         { "id": "gpt-5.2", "label": "GPT-5.2", "category": "legacy" }
       ]
@@ -125,6 +116,9 @@
       "label": "Google",
       "default": "gemini-2.5-pro",
       "models": [
+        { "id": "gemini-4-carbon", "label": "Gemini 4 Carbon", "category": "frontier" },
+        { "id": "gemini-4-argon", "label": "Gemini 4 Argon", "category": "frontier" },
+        { "id": "gemini-4-hydrogen", "label": "Gemini 4 Hydrogen", "category": "fast" },
         { "id": "gemini-3.1-pro-preview", "label": "Gemini 3.1 Pro (Preview)", "category": "frontier", "role": "top" },
         { "id": "gemini-3-flash-preview", "label": "Gemini 3 Flash (Preview)", "category": "fast" },
         { "id": "gemini-3.1-flash-lite-preview", "label": "Gemini 3.1 Flash Lite (Preview)", "category": "cheap" },
@@ -160,12 +154,17 @@
   "adapters": {
     "CLAUDE_CODE": {
       "provider": "anthropic",
-      "default": "claude-sonnet-5",
+      "default": "claude-sonnet-5-5",
       "models": [
+        "claude-fable-5-2",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5",
+        "claude-haiku-5-5",
+        "claude-fable-5-1",
         "claude-fable-5",
         "claude-opus-5",
-        "claude-opus-4-8",
         "claude-sonnet-5",
+        "claude-opus-4-8",
         "claude-haiku-4-5",
         "claude-opus-4-7",
         "claude-opus-4-6",
@@ -174,14 +173,17 @@
     },
     "CODEX_CLI": {
       "provider": "openai",
-      "default": "gpt-5.5",
-      "$comment": "Conservative Codex default; Astra remains opt-in because availability depends on account and rollout. Older models may require API-key sign-in. Source: learn.chatgpt.com/docs/models (2026-09-07)",
-      "models": ["gpt-6-astra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.3-codex-spark", "gpt-5.2"]
+      "default": "gpt-6.1-sol",
+      "$comment": "Codex default follows the model the Codex docs use in their config example. gpt-5.5, gpt-5.4, gpt-5.4-mini and gpt-5.3-codex-spark are retired for ChatGPT sign-in and need an API key. gpt-6.1-terra needs Codex CLI 0.159.0 or later. Source: learn.chatgpt.com/docs/models (2026-11-14)",
+      "models": ["gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-luna", "gpt-6-sol", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.3-codex"]
     },
     "GEMINI_CLI": {
       "provider": "google",
       "default": "gemini-2.5-pro",
       "models": [
+        "gemini-4-carbon",
+        "gemini-4-argon",
+        "gemini-4-hydrogen",
         "gemini-3.1-pro-preview",
         "gemini-3-flash-preview",
         "gemini-3.1-flash-lite-preview",
@@ -240,34 +242,49 @@
     },
     "OPENCODE": {
       "provider": "anthropic",
-      "default": "anthropic/claude-sonnet-5",
+      "default": "anthropic/claude-sonnet-5-5",
       "$comment": "OpenCode takes provider/model strings across 75+ providers (opencode.ai/docs/providers, models.dev). Curated to the most-deployed combinations. ollama/* rows are local: they need CREWSHIP_LOCAL_MODEL_BASE_URL on the server and no API key; the shortlist is deliberate — tool calling degrades sharply below this tier (anomalyco/opencode#1034, #4428).",
       "models": [
-        {"id": "opencode/claude-sonnet-5", "label": "Claude Sonnet 5 (OpenCode Zen)", "category": "frontier"},
-        {"id": "opencode/gpt-5.5", "label": "GPT-5.5 (OpenCode Zen)", "category": "frontier"},
-        {"id": "opencode/gemini-3.1-pro", "label": "Gemini 3.1 Pro (OpenCode Zen)", "category": "frontier"},
-        {"id": "opencode/kimi-k3", "label": "Kimi K3 (OpenCode Zen)", "category": "frontier"},
-        {"id": "opencode-go/kimi-k3", "label": "Kimi K3 (OpenCode Go)", "category": "frontier"},
-        {"id": "opencode-go/glm-5.3-flash", "label": "GLM 5.3 Flash (OpenCode Go)", "category": "frontier"},
-        {"id": "opencode-go/minimax-m3", "label": "MiniMax M3 (OpenCode Go)", "category": "frontier"},
-        {"id": "opencode-go/gpt-5.6-luna", "label": "GPT-5.6 Luna (OpenCode Go)", "category": "frontier"},
-        {"id": "zai-coding-plan/glm-5.3", "label": "GLM 5.3 (Z.AI Coding Plan)", "category": "frontier"},
-        {"id": "zai-coding-plan/glm-5.3-flash", "label": "GLM 5.3 Flash (Z.AI Coding Plan)", "category": "frontier"},
-        {"id": "zai-coding-plan/glm-5.3-highspeed", "label": "GLM 5.3 Highspeed (Z.AI Coding Plan)", "category": "frontier"},
-        {"id": "zai-coding-plan/glm-5.2", "label": "GLM 5.2 (Z.AI Coding Plan)", "category": "frontier"},
-        { "id": "anthropic/claude-fable-5", "label": "Anthropic / Claude Fable 5", "category": "frontier" },
-        { "id": "anthropic/claude-opus-4-8", "label": "Anthropic / Claude Opus 4.8", "category": "frontier" },
-        { "id": "anthropic/claude-sonnet-5", "label": "Anthropic / Claude Sonnet 5", "category": "frontier" },
-        { "id": "anthropic/claude-opus-4-7", "label": "Anthropic / Claude Opus 4.7", "category": "legacy" },
-        { "id": "anthropic/claude-sonnet-4-6", "label": "Anthropic / Claude Sonnet 4.6", "category": "legacy" },
-        { "id": "anthropic/claude-haiku-4-5", "label": "Anthropic / Claude Haiku 4.5", "category": "fast" },
-        { "id": "openai/gpt-5.5", "label": "OpenAI / GPT-5.5", "category": "frontier" },
-        { "id": "openai/gpt-5.4", "label": "OpenAI / GPT-5.4", "category": "frontier" },
-        { "id": "openai/gpt-5.4-mini", "label": "OpenAI / GPT-5.4 mini", "category": "fast" },
-        { "id": "openai/gpt-5.4-nano", "label": "OpenAI / GPT-5.4 nano", "category": "cheap" },
-        { "id": "openai/gpt-5.3-codex", "label": "OpenAI / GPT-5.3 Codex", "category": "frontier" },
+        { "id": "opencode/claude-opus-5-5", "label": "Claude Opus 5.5 (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/claude-sonnet-5-5", "label": "Claude Sonnet 5.5 (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/claude-fable-5-2", "label": "Claude Fable 5.2 (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/claude-haiku-5-5", "label": "Claude Haiku 5.5 (OpenCode Zen)", "category": "fast" },
+        { "id": "opencode/gpt-6-astra", "label": "GPT-6 Astra (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/gpt-6.1-sol", "label": "GPT-6.1 Sol (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/gpt-6-luna", "label": "GPT-6 Luna (OpenCode Zen)", "category": "fast" },
+        { "id": "opencode/gemini-4-carbon", "label": "Gemini 4 Carbon (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/kimi-k3", "label": "Kimi K3 (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode/glm-5.3", "label": "GLM 5.3 (OpenCode Zen)", "category": "frontier" },
+        { "id": "opencode-go/kimi-k3.1-pro", "label": "Kimi K3.1 Pro (OpenCode Go)", "category": "frontier" },
+        { "id": "opencode-go/kimi-k3", "label": "Kimi K3 (OpenCode Go)", "category": "frontier" },
+        { "id": "opencode-go/glm-5.3", "label": "GLM 5.3 (OpenCode Go)", "category": "frontier" },
+        { "id": "opencode-go/glm-5.3-flash", "label": "GLM 5.3 Flash (OpenCode Go)", "category": "fast" },
+        { "id": "opencode-go/deepseek-v4-pro", "label": "DeepSeek V4 Pro (OpenCode Go)", "category": "frontier" },
+        { "id": "opencode-go/minimax-m3", "label": "MiniMax M3 (OpenCode Go)", "category": "frontier" },
+        { "id": "opencode-go/claude-haiku-5-5", "label": "Claude Haiku 5.5 (OpenCode Go)", "category": "fast" },
+        { "id": "opencode-go/gpt-6-luna", "label": "GPT-6 Luna (OpenCode Go)", "category": "fast" },
+        { "id": "zai-coding-plan/glm-5.3", "label": "GLM 5.3 (Z.AI Coding Plan)", "category": "frontier" },
+        { "id": "zai-coding-plan/glm-5.3-flash", "label": "GLM 5.3 Flash (Z.AI Coding Plan)", "category": "fast" },
+        { "id": "zai-coding-plan/glm-5.3-highspeed", "label": "GLM 5.3 Highspeed (Z.AI Coding Plan)", "category": "frontier" },
+        { "id": "zai-coding-plan/glm-5.2", "label": "GLM 5.2 (Z.AI Coding Plan)", "category": "legacy" },
+        { "id": "anthropic/claude-fable-5-2", "label": "Anthropic / Claude Fable 5.2", "category": "frontier" },
+        { "id": "anthropic/claude-opus-5-5", "label": "Anthropic / Claude Opus 5.5", "category": "frontier" },
+        { "id": "anthropic/claude-sonnet-5-5", "label": "Anthropic / Claude Sonnet 5.5", "category": "frontier" },
+        { "id": "anthropic/claude-haiku-5-5", "label": "Anthropic / Claude Haiku 5.5", "category": "fast" },
+        { "id": "anthropic/claude-opus-5", "label": "Anthropic / Claude Opus 5", "category": "legacy" },
+        { "id": "anthropic/claude-sonnet-5", "label": "Anthropic / Claude Sonnet 5", "category": "legacy" },
+        { "id": "anthropic/claude-opus-4-8", "label": "Anthropic / Claude Opus 4.8", "category": "legacy" },
+        { "id": "anthropic/claude-haiku-4-5", "label": "Anthropic / Claude Haiku 4.5", "category": "legacy" },
+        { "id": "openai/gpt-6-astra", "label": "OpenAI / GPT-6 Astra", "category": "frontier" },
+        { "id": "openai/gpt-6.1-sol", "label": "OpenAI / GPT-6.1 Sol", "category": "frontier" },
+        { "id": "openai/gpt-6.1-terra", "label": "OpenAI / GPT-6.1 Terra", "category": "frontier" },
+        { "id": "openai/gpt-6-luna", "label": "OpenAI / GPT-6 Luna", "category": "fast" },
+        { "id": "openai/gpt-5.5", "label": "OpenAI / GPT-5.5", "category": "legacy" },
+        { "id": "openai/gpt-5.4-mini", "label": "OpenAI / GPT-5.4 mini", "category": "legacy" },
         { "id": "openai/o3", "label": "OpenAI / o3", "category": "reasoning" },
         { "id": "openai/o3-pro", "label": "OpenAI / o3 Pro", "category": "reasoning" },
+        { "id": "google/gemini-4-carbon", "label": "Google / Gemini 4 Carbon", "category": "frontier" },
+        { "id": "google/gemini-4-hydrogen", "label": "Google / Gemini 4 Hydrogen", "category": "fast" },
         { "id": "google/gemini-3.1-pro-preview", "label": "Google / Gemini 3.1 Pro", "category": "frontier" },
         { "id": "google/gemini-3-flash-preview", "label": "Google / Gemini 3 Flash", "category": "fast" },
         { "id": "google/gemini-2.5-pro", "label": "Google / Gemini 2.5 Pro", "category": "frontier" },
@@ -282,8 +299,8 @@
         { "id": "moonshotai/kimi-k2.6", "label": "Moonshot / Kimi K2.6", "category": "frontier" },
         { "id": "zai/glm-5.1", "label": "Z.ai / GLM 5.1", "category": "frontier" },
         { "id": "minimax/minimax-m2.7", "label": "MiniMax / M2.7", "category": "cheap" },
-        { "id": "openrouter/anthropic/claude-sonnet-4-6", "label": "OpenRouter / Claude Sonnet 4.6", "category": "frontier" },
-        { "id": "openrouter/openai/gpt-5.5", "label": "OpenRouter / GPT-5.5", "category": "frontier" },
+        { "id": "openrouter/anthropic/claude-sonnet-5.5", "label": "OpenRouter / Claude Sonnet 5.5", "category": "frontier" },
+        { "id": "openrouter/openai/gpt-6.1-sol", "label": "OpenRouter / GPT-6.1 Sol", "category": "frontier" },
         { "id": "ollama/qwen2.5-coder:7b", "label": "Ollama / Qwen2.5 Coder 7B (local, macOS-friendly)", "category": "local" },
         { "id": "ollama/qwen3-coder:30b", "label": "Ollama / Qwen3 Coder 30B (local)", "category": "local" },
         { "id": "ollama/devstral:24b", "label": "Ollama / Devstral Small 24B (local)", "category": "local" }
