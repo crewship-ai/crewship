@@ -1,6 +1,7 @@
 // Deletes the objects this harness created and left behind, by name pattern:
-//   workspaces  slug ^prd-qa-<label>-<10 hex>$  AND  name starting "PRD acceptance "
-//   pages       slug ^prd-                      AND  name starting "PRD "
+//   workspaces  slug ^qa-live-<label>-<10 hex>$  AND  name starting "PRD acceptance "
+//               (also ^prd-qa-…, the prefix of runs before the switch to qa-live-)
+//   pages       slug ^prd- or ^qa-live-         AND  name starting "PRD "
 //   (Designs and Projects are pages)
 // Pages are looked for in the workspaces of PRD_AGENT_WORKSPACE_ID /
 // PRD_WORKSPACE_ID and in every harness workspace that is kept. Anything that
@@ -8,9 +9,9 @@
 // (it may belong to a run in progress), is reported and left alone.
 // Used by `run.mjs --cleanup [--dry-run] [--older-than MIN]`.
 
-const WORKSPACE_SLUG = /^prd-qa-[a-z0-9-]*-[0-9a-f]{10}$/
+const WORKSPACE_SLUG = /^(?:qa-live|prd-qa)-[a-z0-9-]*-[0-9a-f]{10}$/
 const WORKSPACE_NAME = /^PRD acceptance /
-const PAGE_SLUG = /^prd-/
+const PAGE_SLUG = /^(?:prd|qa-live)-/
 const PAGE_NAME = /^PRD /
 
 export function isHarnessWorkspace(w) {

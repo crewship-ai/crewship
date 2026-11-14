@@ -5,7 +5,7 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { spawnSync } from "node:child_process"
 import { test } from "node:test"
-import { ACCOUNT_VARS, checkOrigin, jobArgs, runEnv } from "./runner-env.mjs"
+import { ACCOUNT_VARS, checkOrigin, jobArgs, runEnv, workspaceFlagProblems } from "./runner-env.mjs"
 import { EXIT, HISTORY_NOT_ENABLED, SCENARIOS, evidencePath, fullChromium, isHeadlessShell, loadEvidence, parseListed, sameVersions, verdict } from "./verdict.mjs"
 import { changeKind, classifyVersions, lostReplyProblems, onlyCursorAfter, withoutActiveCell } from "./sheet-versions.mjs"
 
@@ -219,6 +219,71 @@ for (const c of cases) {
     assert.ok(v.reasons.some((r) => c.reason.test(r)), `no reason matches ${c.reason}: ${v.reasons.join("; ")}`)
   })
 }
+
+// --workspace-flag craft_version_history: the walk turns the flag on in its own QA workspace,
+// so the history listing must be compared; the flag-off 404 is then a FAIL, not NOT VERIFIED.
+const FLAG = "craft_version_history"
+const flagOn = (e) => ({ ...e, workspaceFlags: [{ key: FLAG, status: 200, overrideEnabled: true }] })
+const withHistoryFlag = (change = (e) => e) => {
+  const input = good({ workspaceFlags: [FLAG] })
+  for (const s of SCENARIOS) input.evidence[s.id] = change(flagOn(historyOk(input.evidence[s.id])))
+  return input
+}
+
+test("workspace flag: history turned on and the listing matches passes with nothing NOT VERIFIED", () => {
+  const v = verdict(withHistoryFlag())
+  assert.equal(v.verdict, "PASS", v.reasons.join("; "))
+  assert.deepEqual(v.notVerified, [])
+})
+test("workspace flag: with history turned on, the flag-off 404 is a FAIL, not NOT VERIFIED", () => {
+  const v = verdict(withHistoryFlag((e) => ({ ...e, history: { result: "not-enabled", listingStatus: 404, error: HISTORY_NOT_ENABLED, listing: null, truncated: null } })))
+  assert.equal(v.verdict, "FAIL")
+  assert.equal(v.exit, EXIT.failed)
+  assert.deepEqual(v.notVerified, [])
+  assert.ok(v.reasons.some((r) => /walk.word: .*404 "native version history is not enabled" although --workspace-flag craft_version_history/.test(r)), v.reasons.join("; "))
+})
+test("workspace flag: with history turned on, a listing that is not the observed versions fails", () => {
+  const v = verdict(withHistoryFlag((e) => ({ ...e, history: { ...e.history, listing: e.history.listing.slice(1) } })))
+  assert.equal(v.verdict, "FAIL")
+  assert.ok(v.reasons.some((r) => /is not the observed/.test(r)), v.reasons.join("; "))
+})
+test("workspace flag: a walk that did not record turning the flag on fails", () => {
+  const v = verdict(withHistoryFlag((e) => ({ ...e, workspaceFlags: undefined })))
+  assert.equal(v.verdict, "FAIL")
+  assert.ok(v.reasons.some((r) => /walk.word: workspace flag craft_version_history was not turned on/.test(r)), v.reasons.join("; "))
+})
+test("workspace flag: an override the server refused (unknown flag) fails", () => {
+  const v = verdict(withHistoryFlag((e) => ({ ...e, workspaceFlags: [{ key: FLAG, status: 404, overrideEnabled: null, error: "Feature flag not found" }] })))
+  assert.equal(v.verdict, "FAIL")
+  assert.ok(v.reasons.some((r) => /workspace flag craft_version_history was not turned on: PUT override answered 404/.test(r)), v.reasons.join("; "))
+})
+test("workspace flag: an override that answered 200 but does not read back as on fails", () => {
+  const v = verdict(withHistoryFlag((e) => ({ ...e, workspaceFlags: [{ key: FLAG, status: 200, overrideEnabled: false }] })))
+  assert.equal(v.verdict, "FAIL")
+  assert.ok(v.reasons.some((r) => /craft_version_history was not turned on: .*override reads back false/.test(r)), v.reasons.join("; "))
+})
+test("workspace flag: a flag the walk turned on that the run did not ask for fails", () => {
+  const input = good()
+  input.evidence["walk.sheet"] = flagOn(input.evidence["walk.sheet"])
+  const v = verdict(input)
+  assert.equal(v.verdict, "FAIL")
+  assert.ok(v.reasons.some((r) => /walk.sheet: workspace flag craft_version_history turned on without --workspace-flag/.test(r)), v.reasons.join("; "))
+})
+test("workspace flag: without the option the flag-off 404 stays NOT VERIFIED (current behaviour)", () => {
+  const v = verdict(good({ workspaceFlags: [] }))
+  assert.equal(v.verdict, "PASS", v.reasons.join("; "))
+  assert.equal(v.notVerified.length, 2)
+})
+test("workspace flag: the job hands the requested flags to the walk, and none when there are none", () => {
+  const flags = runEnv({ path: "/bin", home: "/h", browsers: "/b", origin: ORIGIN, output: "/out", chrome: CHROME, runId: RUN, workspaceFlags: [FLAG, "gridcraft_editor"] })
+  assert.equal(flags.NATIVE_WALK_WORKSPACE_FLAGS, "craft_version_history,gridcraft_editor")
+  assert.equal(runEnv({ path: "/bin", home: "/h", browsers: "/b", origin: ORIGIN, output: "/out", chrome: CHROME, runId: RUN }).NATIVE_WALK_WORKSPACE_FLAGS, undefined)
+})
+test("workspace flag: only plain flag keys are accepted", () => {
+  assert.deepEqual(workspaceFlagProblems([FLAG, "gridcraft_editor"]), [])
+  for (const bad of ["", "Craft", "a,b", "../x", "flag key", "x".repeat(101)]) assert.equal(workspaceFlagProblems([bad]).length, 1, bad)
+  assert.equal(workspaceFlagProblems([FLAG, FLAG]).length, 1)
+})
 
 test("a narrowed green run is PARTIAL, never 0", () => {
   const v = verdict(good({ narrowed: true, listed: [WORD.test], rows: [row(WORD)], reporter: { runId: RUN, rows: 1 } }))

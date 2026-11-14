@@ -112,6 +112,12 @@ test("cleanup patterns need both slug and name to look like the harness's", asyn
   assert.equal(isHarnessWorkspace({ slug: "prd-qa-sheet-soak-6bcf1c9a8f", name: "PRD acceptance Sheet soak" }), true)
   assert.equal(isHarnessWorkspace({ slug: "qa-c2-rights-be389ab9e6514a46", name: "QA Codex2 Craft rights" }), false)
   assert.equal(isHarnessWorkspace({ slug: "prd-qa-sheet-soak-6bcf1c9a8f", name: "Someone's workspace" }), false)
+  // qa-live- is the prefix the harness generates now; prd-qa- leftovers of older runs still match.
+  assert.equal(isHarnessWorkspace({ slug: "qa-live-sheet-soak-6bcf1c9a8f", name: "PRD acceptance Sheet soak" }), true)
+  assert.equal(isHarnessWorkspace({ slug: "qa-live-sheet-soak-6bcf1c9a8f", name: "Someone's workspace" }), false)
+  assert.equal(isHarnessWorkspace({ slug: "qa-lives-sheet-soak-6bcf1c9a8f", name: "PRD acceptance Sheet soak" }), false)
+  assert.equal(isHarnessPage({ slug: "qa-live-wordcraft-0123456789", name: "PRD proposal Word" }), true)
+  assert.equal(isHarnessPage({ slug: "qa-live-wordcraft-0123456789", name: "Quarterly plan" }), false)
 })
 
 // ---- Required-ID gate (ZADANI G3 rule 3) ----------------------------------
