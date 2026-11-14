@@ -509,6 +509,20 @@ The agent works through the `design_get`, `design_apply`, `design_snapshot`,
 `design_versions` and `design_restore` tools, under the permissions of the
 person who connected the chat.
 
+### Attach a Design to a chat message
+
+With the workspace flag `artifact_agent_access_modes` on (off by default), a
+chat run also reaches a Design you attached to your message, one its agent
+holds its own grant on, or one in a folder whose owning crew's agents may read
+it, as long as you can read it yourself as an ordinary member. The run reads
+the version you may read: the shared version if you have Read or Comment
+access, the latest if you can edit. It edits only your own Design that you
+attached (or connected); a grant to the agent or a folder lets it read, never
+edit. A Design it cannot reach answers `design not found`, and past the run's
+read limit it gets `artifact_run_limit`. Every read and edit is recorded in the
+audit log as `artifact.agent_run_accessed`
+([agent access to artifacts](/security/rbac#agent-access-to-artifacts-from-chat)).
+
 ## Errors
 
 | Message | What happened | What to do |
