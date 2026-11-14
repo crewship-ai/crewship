@@ -666,8 +666,11 @@ owner on 2026-11-13.
      here. An ordinary chat run without one gets 403 `no_human_principal`
      from the server for each forwarded call instead, attached artifacts
      included (before, the sidecar refused the draft view and
-     `workbook_read` with the 400s named below); calls the sidecar still
-     refuses itself are unchanged:
+     `workbook_read` with the 400s named below). The one call that moved the
+     other way is a `mooring_command` `command` without `mandate_id`: the
+     sidecar now refuses it itself with 400, where an ordinary run got the
+     server's 403 `no_human_principal` before. The answers for a run with a
+     principal:
      the sidecar's draft view with `page_id` is forwarded and answered 400
      "only the authenticated workspace query is supported" (it was 400 "draft
      view has no caller-selected scope"); MCP `doc_draft_view` with a
