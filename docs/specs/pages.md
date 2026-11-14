@@ -630,8 +630,9 @@ owner on 2026-11-13.
    a saved, enabled policy, and a saved policy, on or off, stays the ceiling.
 8. **Only a run started by the human's own message carries a human.** A plain
    chat run records its human principal at admission; routine, webhook, cron,
-   agent-to-agent and crew-token runs record none and reach nothing through
-   this path.
+   agent-to-agent and crew-token runs record none. Agent-to-agent and
+   crew-token runs reach nothing through this path; routine, webhook and
+   scheduled runs reach only what item 10 allows.
 
 9. **A folder may let the agents of its owning crew read or suggest (D2).**
    `page_folders.agent_access` is `none` (default), `read` or `propose`, never
@@ -643,13 +644,35 @@ owner on 2026-11-13.
    folder, only agents whose live crew owns the folder, and only as standing
    access: read only, counted against `run_read_limit`, and still intersected
    with the run's human.
-10. **Runs without a human reach nothing yet.** A routine, webhook or cron run
-   has no human principal and the artifact tool refuses it. Its own mode
-   (standing grants only, the read cap per run) needs a run identity the
-   server can trust: today the crew container holds the key that mints run
-   tokens for any agent and run of its crew, and most producers start runs
-   without a work-ledger record, so a per-run cap could be bypassed by minting
-   a fresh run. That mode waits for that identity.
+10. **A run without a human reaches only its agent's standing access, from a
+   host-recorded run (#5339).** A run token alone proves nothing here: the
+   crew container holds the key that derives run tokens for any agent and run
+   of its crew. So the host producer of a routine, webhook or scheduled run
+   records the run in `artifact_unattended_runs` (agent, crew, trigger,
+   source) after its run record and before its agent starts, and the server
+   mints a random capability for that one run, storing only its SHA-256. No
+   HTTP endpoint and no internal token can record a run. The capability is
+   handed to the crew sidecar in the run's preflight (set once, authenticated
+   by the run's own token) and attached by it to that run's artifact tool
+   calls only; it never enters the agent's environment. The tool admits such
+   a run only when the capability matches the record for the token's exact
+   run, agent and crew, the record is open and unexpired (at most 2 hours),
+   the run is live in the journal (started, no terminal entry), its work
+   attempt (if any) is current, and the workspace policy allows the crew. The
+   run's end, its terminal journal entry or the expiry ends the capability.
+   Such a run then reaches an artifact only when the agent holds its own live
+   grant on it (`standing`) or the page sits in a folder that lets its crew's
+   agents read or suggest (`folder`, item 9); never a private (Personal)
+   artifact, never anything through a role, and at most `run_read_limit`
+   distinct artifacts per run (429 `artifact_run_limit`). It writes
+   (`artifact_publish`) only through a live `write` grant that the artifact's
+   owner gave the agent on that artifact, checked on every write; never
+   through a folder. Only `artifact_versions` and `artifact_publish` are open
+   to it; create, share, restore, comments, replies, dashboard data and slides
+   are refused before any artifact is looked up. Its read sees the shared
+   version, or the latest when it holds that write grant, and no comment text.
+   Anything else is refused exactly like a missing artifact. Flag off, nothing
+   is recorded and such a run reaches nothing, as before.
 
 11. **Every artifact project access is audited with its human.** Each access
    a flag-on chat run makes to an artifact project (view, comments, dashboard
@@ -660,7 +683,10 @@ owner on 2026-11-13.
    user is the human the agent acted for; its metadata names the agent, crew,
    run, chat, the reach (`referenced`, `created`, `consented`, `standing` or
    `folder`) and the operation (`read`, `write`, `create`). It holds no
-   content. Reads and writes are recorded once per run, artifact and operation
+   content. A run without a human (item 10) has no user on the row (`user_id`
+   is NULL: no human acted, and the grant's issuer did not perform the
+   access); its metadata names the trigger and source instead of a chat.
+   Reads and writes are recorded once per run, artifact and operation
    (a later access re-verifies the existing row); each individual write is
    already in the version history with the run as its actor. The row keeps the
    reach of the first such access; a later access by another reach is not

@@ -2,6 +2,8 @@ package api
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -9,6 +11,14 @@ import (
 )
 
 func (h *PageHandler) artifactAgentRequest(w http.ResponseWriter, r *http.Request) (*http.Request, bool) {
+	return h.artifactAgentRequestMode(w, r, false)
+}
+
+// artifactAgentRequestMode is artifactAgentRequest; with unattended set (the
+// artifact project tool only) a run without a human may also be admitted from
+// its host-recorded run and capability (#5339). Every other agent surface
+// keeps requiring a human principal.
+func (h *PageHandler) artifactAgentRequestMode(w http.ResponseWriter, r *http.Request, unattended bool) (*http.Request, bool) {
 	ws, crew := InternalTokenWorkspaceFromContext(r.Context()), InternalTokenCrewFromContext(r.Context())
 	fields := strings.Fields(r.Header.Get("Authorization"))
 	if ws == "" || crew == "" || h.artifactMasterToken == "" || len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
@@ -23,6 +33,15 @@ func (h *PageHandler) artifactAgentRequest(w http.ResponseWriter, r *http.Reques
 	a := &artifactRunAuthority{WorkspaceID: ws, CrewID: crew, AgentID: agent, RunID: run}
 	var role string
 	err := h.db.QueryRowContext(r.Context(), `SELECT p.human_user_id,p.chat_id,p.message_id,m.role FROM artifact_run_principals p JOIN workspace_members m ON m.workspace_id=p.workspace_id AND m.user_id=p.human_user_id WHERE p.run_id=? AND p.workspace_id=? AND p.agent_id=? AND p.crew_id=?`, run, ws, agent, crew).Scan(&a.HumanUserID, &a.ChatID, &a.MessageID, &role)
+	if unattended && errors.Is(err, sql.ErrNoRows) {
+		// A run without a human (#5339): only a host-recorded run with its
+		// host-minted capability, flag on. It carries no user and no role.
+		if u := h.unattendedArtifactRequest(r, ws, crew, agent, run); u != nil {
+			ctx := context.WithValue(r.Context(), artifactRunKey{}, u)
+			ctx = context.WithValue(ctx, ctxWorkspaceID, ws)
+			return r.WithContext(ctx), true
+		}
+	}
 	if err != nil {
 		replyError(w, 403, "no_human_principal")
 		return r, false

@@ -89,7 +89,14 @@ func captureOriginalUserArtifactPrincipalContextQuery(ctx context.Context, db ar
 	return captureArtifactChatPrincipalContextQuery(ctx, db, run, ws, agent, crew, chat, message, receipt)
 }
 
-type artifactRunAuthority struct{ WorkspaceID, AgentID, CrewID, RunID, HumanUserID, ChatID, MessageID, RequestID string }
+type artifactRunAuthority struct {
+	WorkspaceID, AgentID, CrewID, RunID, HumanUserID, ChatID, MessageID, RequestID string
+	// Unattended marks a run without a human (#5339): admitted only from a
+	// host-recorded run and its capability, never from a human principal.
+	// Trigger and Source are copied from that record for the audit.
+	Unattended      bool
+	Trigger, Source string
+}
 type artifactRunKey struct{}
 
 // This additional admission requirement is deliberately not imposed on legacy

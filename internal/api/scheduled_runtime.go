@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifactrun"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
@@ -134,6 +135,13 @@ func (rt *ScheduledRuntime) Run(ctx context.Context, a dispatch.Assignment, star
 		req.CrewID = cfg.ID
 	}
 	req.RunID = a.RunID
+	// #5339: record this run without a human before its agent starts.
+	capability, endArtifactRun := recordUnattendedArtifactRun(runCtx, h.db, h.logger, artifactrun.Run{
+		WorkspaceID: a.Item.WorkspaceID, CrewID: info.CrewID, AgentID: in.AgentID, RunID: a.RunID,
+		Trigger: artifactrun.TriggerScheduled, Source: "schedule",
+	}, 50*time.Minute)
+	defer endArtifactRun()
+	req.ArtifactRunCapability = capability
 	location := orchestrator.RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID}
 	if err := launch.Launch(location); err != nil {
 		stageCtx, stageCancel := context.WithTimeout(context.WithoutCancel(runCtx), 30*time.Second)

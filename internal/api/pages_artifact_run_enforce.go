@@ -182,6 +182,9 @@ var errArtifactRunCap = errors.New("artifact run limit reached")
 // authorizeScopedArtifactRun decides a flag-on run's access to one artifact,
 // inside the operation's own transaction. It returns the run's actor label.
 func (h *PageHandler) authorizeScopedArtifactRun(ctx context.Context, tx *sql.Tx, a *artifactRunAuthority, workspace string, rec *pageRecord, write, share bool) (string, error) {
+	if a != nil && a.Unattended {
+		return h.authorizeUnattendedArtifactRun(ctx, tx, a, workspace, rec, write, share)
+	}
 	ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 	if a.WorkspaceID != workspace || rec == nil || rec.ArchivedAt != "" {
 		return "", errArtifactRefNotFound
@@ -318,7 +321,20 @@ func artifactAuditProbe(authorize artifacts.VersionAuthorize) artifacts.VersionA
 // has none. Any failure, including a silently dropped insert, refuses the
 // access.
 func recordAgentRunArtifactAccess(ctx context.Context, tx *sql.Tx, a *artifactRunAuthority, pageID, reach, operation string) error {
-	meta, err := json.Marshal(map[string]string{"agent_id": a.AgentID, "crew_id": a.CrewID, "run_id": a.RunID, "chat_id": a.ChatID, "reach": reach, "operation": operation})
+	fields := map[string]string{"agent_id": a.AgentID, "crew_id": a.CrewID, "run_id": a.RunID, "chat_id": a.ChatID, "reach": reach, "operation": operation}
+	// A run without a human (#5339): no user acted, so the row has none
+	// (user_id NULL, never the grant issuer, who did not perform this access).
+	// The metadata names the trigger and source instead of a chat.
+	var user any = a.HumanUserID
+	if a.Unattended {
+		if a.HumanUserID != "" {
+			return errors.New("unattended run cannot carry a human")
+		}
+		user = nil
+		delete(fields, "chat_id")
+		fields["trigger"], fields["source"] = a.Trigger, a.Source
+	}
+	meta, err := json.Marshal(fields)
 	if err != nil {
 		return err
 	}
@@ -331,11 +347,11 @@ func recordAgentRunArtifactAccess(ctx context.Context, tx *sql.Tx, a *artifactRu
 		id = "agent-run-" + operation + "-" + hex.EncodeToString(sum[:16])
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,user_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,?,?,'page',?,?,?) ON CONFLICT(id) DO NOTHING`,
-		id, a.WorkspaceID, a.HumanUserID, auditActionAgentRunArtifactAccess, pageID, string(meta), tsformat.Format(time.Now().UTC())); err != nil {
+		id, a.WorkspaceID, user, auditActionAgentRunArtifactAccess, pageID, string(meta), tsformat.Format(time.Now().UTC())); err != nil {
 		return err
 	}
 	var n int
-	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM audit_logs WHERE id=? AND workspace_id=? AND user_id=? AND action=? AND entity_id=?`, id, a.WorkspaceID, a.HumanUserID, auditActionAgentRunArtifactAccess, pageID).Scan(&n); err != nil {
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM audit_logs WHERE id=? AND workspace_id=? AND user_id IS ? AND action=? AND entity_id=?`, id, a.WorkspaceID, user, auditActionAgentRunArtifactAccess, pageID).Scan(&n); err != nil {
 		return err
 	}
 	if n != 1 {

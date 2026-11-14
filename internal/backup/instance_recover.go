@@ -692,6 +692,8 @@ var runtimeResets = []struct{ table, what string }{
 	{"artifact_project_run_consents", "artifact project run permissions"},
 	{"artifact_run_scope", "artifact run reference scopes"},
 	{"artifact_run_access", "artifact run created and read pages"},
+	{"artifact_unattended_run_access", "unattended artifact run read pages"},
+	{"artifact_unattended_runs", "unattended artifact runs"},
 	{"artifact_run_principals", "artifact run principal admissions"},
 	{"artifact_message_refs", "artifact chat references"},
 	{"sessions", "sign-in sessions"},

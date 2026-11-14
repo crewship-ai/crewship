@@ -12,6 +12,7 @@ import (
 	"io"
 	"log/slog"
 	"path"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -288,6 +289,40 @@ func sidecarRunEndScript(runToken string) string {
 		"-K /dev/fd/3 3<<'RUNEND_AUTH_HEREDOC' >/dev/null 2>&1 || true\n" +
 		"header = \"Authorization: Bearer " + runToken + "\"\n" +
 		"RUNEND_AUTH_HEREDOC\n"
+}
+
+// runCapabilityShape mirrors the sidecar's check of an artifactrun capability.
+var runCapabilityShape = regexp.MustCompile(`^urcv1\.[0-9a-f]{64}$`)
+
+// runTokenShape is a v2 run token: prefix plus base64url segments and a hex MAC.
+var runTokenShape = regexp.MustCompile(`^agtv2\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[0-9a-f]+$`)
+
+// sidecarRunCapabilityScript builds the shell that hands a run without a
+// human its host-minted artifact capability (#5339) to the crew's sidecar,
+// before the agent starts. Like sidecarRunEndScript, the bearer token and the
+// capability ride a heredoc on fd 3, never argv, and the script itself is
+// delivered on stdin. Best-effort: a lost registration means the run reaches
+// no artifact, which is the safe direction. Both values are shape-checked, so
+// nothing else can be spliced into the curl config.
+func sidecarRunCapabilityScript(runToken, capability string) string {
+	if !runTokenShape.MatchString(runToken) || !runCapabilityShape.MatchString(capability) {
+		return ""
+	}
+	return "curl -s -m 2 -X POST http://127.0.0.1:9119/agent/run/artifact-capability " +
+		"-K /dev/fd/3 3<<'RUNCAP_AUTH_HEREDOC' >/dev/null 2>&1 || true\n" +
+		"header = \"Authorization: Bearer " + runToken + "\"\n" +
+		"header = \"X-Crewship-Run-Capability: " + capability + "\"\n" +
+		"RUNCAP_AUTH_HEREDOC\n"
+}
+
+// agentRunTokenFromEnv returns the per-run token ensureSidecar put in env.
+func agentRunTokenFromEnv(env []string) string {
+	for _, kv := range env {
+		if v, ok := strings.CutPrefix(kv, "CREWSHIP_AGENT_TOKEN="); ok && strings.HasPrefix(v, "agtv2.") {
+			return v
+		}
+	}
+	return ""
 }
 
 // PreRunInstallPackages installs system packages as root before the agent starts.

@@ -239,13 +239,26 @@ already-referenced runs the ordinary way, binding nothing.
   non-private pages (`crewship page folder agent-access`, admin or the crew's
   MANAGER+). Never edit, never another crew's agents, never Personal pages;
   in a chat run the human's access is still required.
-- Runs without a human (routine, webhook, cron) reach no artifact through the
-  artifact tool.
+- A run without a human (routine, webhook, scheduled) reaches artifacts only
+  when crewshipd recorded the run (agent, crew, trigger, source) before its
+  agent started and minted a random capability for that one run. The
+  capability goes to the crew's sidecar, never the agent's environment, and
+  ends with the run (its end, its terminal journal entry, or a 2-hour bound).
+  A run token alone is not enough, because the crew container holds the key
+  that derives run tokens for any agent and run of the crew. Such a run reads
+  only artifacts its agent holds its own live grant on, or non-private pages
+  of a folder that lets its crew's agents read, never Personal artifacts and
+  never anything through a role, at most `run_read_limit` distinct artifacts
+  per run (429 `artifact_run_limit`). It writes only through a live `write`
+  grant the artifact's owner gave the agent on that artifact, never through a
+  folder, and it does not create, share, restore, comment or touch dashboard
+  data.
 - Per-run limits (3 created, 50 distinct standing reads) and a per-crew hourly
   page limit (20) come from `crewship workspace artifact-policy`.
 - Every artifact project access through this path is audited as `artifact.agent_run_accessed`,
   naming the human the agent acted for, the agent, run, reach and operation,
-  in the same transaction; no audit record, no access. Reads and writes are
+  in the same transaction; no audit record, no access. A run without a human
+  has no user on the record; its metadata names the trigger and source. Reads and writes are
   recorded once per run and artifact, creates every time. Documents, Design,
   GridCraft and Mooring stay on the exact-run consent path. Read them with
   `crewship audit --action artifact.agent_run_accessed -f json`.

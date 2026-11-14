@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifactrun"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/encryption"
@@ -1040,6 +1041,15 @@ func (h *WebhookHandler) runWebhookAgent(
 		// crew's allowed_domains still apply (empty → the sidecar's
 		// DefaultAllowedDomains, so LLM/CLI providers keep working).
 		req.NetworkMode = "restricted"
+		// #5339: record this run without a human before its agent starts, so
+		// (flag on) it may reach its agent's standing artifacts; ended when the
+		// run returns.
+		capability, endArtifactRun := recordUnattendedArtifactRun(runCtx, h.db, h.logger, artifactrun.Run{
+			WorkspaceID: info.WorkspaceID, CrewID: info.CrewID, AgentID: agentID, RunID: runID,
+			Trigger: artifactrun.TriggerWebhook, Source: "agent_webhook",
+		}, 15*time.Minute)
+		defer endArtifactRun()
+		req.ArtifactRunCapability = capability
 
 		logBuf := logcollector.NewOutputBuffer(h.logWriter, info.CrewID, info.AgentSlug)
 		defer logBuf.Close()
