@@ -691,7 +691,7 @@ func TestCleanupCaches(t *testing.T) {
 
 	exec := newCovExecClient(nil)
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	if err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser); err != nil {
+	if err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser, nil); err != nil {
 		t.Fatalf("cleanupCaches: %v", err)
 	}
 	cmd := exec.execCmd(0)
@@ -702,10 +702,31 @@ func TestCleanupCaches(t *testing.T) {
 	}
 }
 
+// mainCleanupScript is the cleanup script as it was before #5384, byte for
+// byte. Keeping the mise build cache must reproduce it exactly.
+const mainCleanupScript = `set -u
+for path in \
+  /var/cache/apt \
+  /var/lib/apt/lists \
+  /var/tmp \
+  /tmp \
+  /root/.cache \
+  /root/.npm \
+  /root/.cargo/registry/cache \
+  /root/.cargo/registry/src \
+  /root/.yarn/cache \
+  /home/agent/.cache/pip \
+  /home/agent/.npm; do
+  rm -rf "$path"/* "$path"/.[!.]* 2>/dev/null || true
+done
+# Keep mountpoints /tmp and /var/tmp themselves; recreate if the rm wiped them.
+mkdir -p /tmp /var/tmp
+chmod 1777 /tmp /var/tmp`
+
 // The build pins mise's cache under /opt/mise, the running container reads it
-// from the agent's home on a read-only root. What the build downloaded there
-// is never read again, and it was 766 MB of a 982 MB commit layer (#5384).
-func TestCleanupCaches_EmptiesMiseBuildCache(t *testing.T) {
+// from the agent's home on a read-only root. What the build cached there is
+// never read again (#5384).
+func TestCleanupScript_EmptiesMiseBuildCache(t *testing.T) {
 	t.Parallel()
 
 	var buildCache, runtimeCache string
@@ -719,24 +740,65 @@ func TestCleanupCaches_EmptiesMiseBuildCache(t *testing.T) {
 			runtimeCache = kv[1]
 		}
 	}
-	if buildCache == "" || buildCache == runtimeCache {
-		t.Fatalf("build cache %q must be set and differ from the runtime cache %q: cleaning it is only safe while nothing reads it at runtime", buildCache, runtimeCache)
+	if buildCache != miseBuildCacheDir || buildCache == runtimeCache {
+		t.Fatalf("build cache %q must be %q and differ from the runtime cache %q", buildCache, miseBuildCacheDir, runtimeCache)
 	}
 
-	exec := newCovExecClient(nil)
-	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	if err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser); err != nil {
-		t.Fatalf("cleanupCaches: %v", err)
+	// The directory is one more entry of the loop, nothing else changes.
+	want := strings.Replace(mainCleanupScript, "for path in \\\n", "for path in \\\n  /opt/mise/cache \\\n", 1)
+	if got := cleanupScript(false); got != want {
+		t.Errorf("cleanup script:\n%s\nwant:\n%s", got, want)
 	}
-	cmd := exec.execCmd(0)
-	if !strings.Contains(cmd, buildCache) {
-		t.Errorf("cleanup script does not empty the mise build cache %s:\n%s", buildCache, cmd)
+	if got := cleanupScript(true); got != mainCleanupScript {
+		t.Errorf("keeping the mise cache must leave the script as it was:\n%s", got)
 	}
-	// Only the cache goes. mise's tools, config and shims stay untouched.
-	for _, keep := range []string{miseRoot + "/data", miseRoot + "/config", miseRoot + "/state"} {
-		if strings.Contains(cmd, keep) {
-			t.Errorf("cleanup script must not touch %q:\n%s", keep, cmd)
-		}
+}
+
+func TestRuntimeReadsMiseBuildCache(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		env  map[string]string
+		want bool
+	}{
+		{"nil env", nil, false},
+		{"runtime default", ensureAgentToolPath(nil), false},
+		{"operator points the runtime at the build cache", map[string]string{"MISE_CACHE_DIR": "/opt/mise/cache"}, true},
+		{"same directory, different spelling", map[string]string{"MISE_CACHE_DIR": " /opt/mise//cache/ "}, true},
+		{"another directory", map[string]string{"MISE_CACHE_DIR": "/opt/mise/cache2"}, false},
+		{"empty value", map[string]string{"MISE_CACHE_DIR": ""}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := runtimeReadsMiseBuildCache(tt.env); got != tt.want {
+				t.Errorf("runtimeReadsMiseBuildCache(%v) = %t, want %t", tt.env, got, tt.want)
+			}
+		})
+	}
+}
+
+// Both paths that produce an image hand the aggregated runtime env to the
+// cleanup: the exec'd script on the commit path keeps or empties accordingly.
+func TestCleanupCaches_KeepsMiseCacheTheRuntimeReads(t *testing.T) {
+	t.Parallel()
+	for _, tt := range []struct {
+		name string
+		env  map[string]string
+		want string
+	}{
+		{"default runtime", ensureAgentToolPath(nil), cleanupScript(false)},
+		{"operator override", ensureAgentToolPath(map[string]string{"MISE_CACHE_DIR": "/opt/mise/cache"}), mainCleanupScript},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			exec := newCovExecClient(nil)
+			p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
+			if err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser, tt.env); err != nil {
+				t.Fatal(err)
+			}
+			if cmd := exec.execCmd(0); !strings.Contains(cmd, tt.want) {
+				t.Errorf("exec'd script:\n%s\nwant it to contain:\n%s", cmd, tt.want)
+			}
+		})
 	}
 }
 
@@ -747,7 +809,7 @@ func TestCleanupCaches_Failures(t *testing.T) {
 		return covExecResult{exitCode: 9}
 	})
 	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser)
+	err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser, nil)
 	if err == nil || !strings.Contains(err.Error(), "exited with code 9") {
 		t.Errorf("expected exit-code error, got %v", err)
 	}
@@ -756,7 +818,7 @@ func TestCleanupCaches_Failures(t *testing.T) {
 		return covExecResult{createErr: errors.New("daemon gone")}
 	})
 	p = newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
-	if err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser); err == nil {
+	if err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser, nil); err == nil {
 		t.Error("expected exec error to propagate")
 	}
 }
