@@ -695,7 +695,7 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 			}
 		}
 		if owner || editor {
-			_, writeErr := h.artifactProjectAuthority(r, k, true, false)(ctx, tx)
+			_, writeErr := h.artifactProjectAuthority(r, k, true, false)(context.WithValue(ctx, artifactAuditProbeKey{}, true), tx)
 			if writeErr != nil && !errors.Is(writeErr, errArtifactProjectAccess) {
 				return "", artifacts.VersionSelection{}, writeErr
 			}

@@ -8,9 +8,10 @@ import (
 )
 
 // PR4 of #5317: every access a flag-on chat run makes through its scope is
-// audited, naming the human the agent acted for. Reads are recorded once per
-// run and artifact; writes and creates every time. A failed audit refuses the
-// access.
+// audited, naming the human the agent acted for. Reads and write
+// authorizations are recorded once per run and artifact (each version already
+// names the run in the version history); creates every time. A failed audit
+// refuses the access.
 
 type runAuditRow struct {
 	User, Page, Agent, Run, Reach, Operation string
@@ -64,7 +65,7 @@ func TestRunAudit_ReadIsRecordedOncePerRunAndArtifact(t *testing.T) {
 	g.wantAudit(t, rows[0], id, "referenced", "read")
 }
 
-func TestRunAudit_WritesAndCreatesAreRecordedEachTime(t *testing.T) {
+func TestRunAudit_WritesOncePerArtifactCreatesEachTime(t *testing.T) {
 	g := newRunScopeRig(t)
 	id := g.create(t, g.f.a.HumanUserID, "MEMBER", "audit-write")
 	g.start(t, id)
@@ -92,8 +93,12 @@ func TestRunAudit_WritesAndCreatesAreRecordedEachTime(t *testing.T) {
 			creates++
 		}
 	}
-	if writes != 2 || creates != 1 {
-		t.Fatalf("writes=%d creates=%d, want 2 and 1: %+v", writes, creates, runAuditRows(t, g))
+	if writes != 1 || creates != 1 {
+		t.Fatalf("writes=%d creates=%d, want 1 and 1: %+v", writes, creates, runAuditRows(t, g))
+	}
+	var actors int
+	if err := g.f.rig.db.QueryRow(`SELECT count(*) FROM artifact_versions WHERE page_id=? AND version>1`, id).Scan(&actors); err != nil || actors != 2 {
+		t.Fatalf("both writes must be in the version history: %d %v", actors, err)
 	}
 }
 
