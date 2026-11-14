@@ -26040,6 +26040,10 @@
             },
             "required": null,
             "type": "object"
+          },
+          "save_requires_run_token": {
+            "description": "Optional; omitted keeps the current value. With artifact_agent_access_modes on, refuse a sidecar page save without the agent run token (403 run_token_required). Default false: such a save is accepted under the crew hourly limit only.",
+            "type": "boolean"
           }
         },
         "required": [
@@ -26097,6 +26101,10 @@
             ],
             "type": "object"
           },
+          "save_requires_run_token": {
+            "description": "With artifact_agent_access_modes on, refuse a sidecar page save without the agent run token (403 run_token_required). Default false: such a save is accepted under the crew hourly limit only.",
+            "type": "boolean"
+          },
           "scoped_default": {
             "description": "True while no policy was ever saved and artifact_agent_access_modes is on: chat runs of every live crew may use their artifact scope.",
             "type": "boolean"
@@ -26113,7 +26121,8 @@
           "crew_ids",
           "version",
           "limits",
-          "scoped_default"
+          "scoped_default",
+          "save_requires_run_token"
         ],
         "type": "object"
       },
