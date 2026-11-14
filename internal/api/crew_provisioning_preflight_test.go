@@ -172,6 +172,7 @@ func TestBuildFailureAdvice(t *testing.T) {
 	}{
 		{"storage refusal", fmt.Errorf("provision: %w: 3.0 GiB free", ErrBuildStorage), storage},
 		{"storage refusal rebuilt from a job's stored text", errors.New("build failed: provision: " + ErrBuildStorage.Error() + ": 3.0 GiB free"), storage},
+		{"a build that ran out of space part-way", errors.New("build failed: committing container: write /var/lib/docker/overlay2/x: No space left on device"), storage},
 		{"an ordinary build failure", errors.New("build failed: docker build failed for crewship-feat:abc: exit status 1"), config},
 		{"no error", nil, config},
 	}

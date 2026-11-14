@@ -86,10 +86,13 @@ func (c buildStorageCheck) check(ctx context.Context) error {
 
 // buildFailureAdvice closes the chat message for a failed build with what the
 // user can do about it. A build refused for lack of disk space is not a
-// configuration mistake. The error may have been rebuilt from a job's stored
-// text, so the sentinel's text is matched as well.
+// configuration mistake, and neither is one that ran out of space part-way
+// (the kernel's ENOSPC text, as the daemon and BuildKit relay it). The error
+// may have been rebuilt from a job's stored text, so texts are matched too.
 func buildFailureAdvice(err error) string {
-	if err != nil && (errors.Is(err, ErrBuildStorage) || strings.Contains(err.Error(), ErrBuildStorage.Error())) {
+	if err != nil && (errors.Is(err, ErrBuildStorage) ||
+		strings.Contains(err.Error(), ErrBuildStorage.Error()) ||
+		strings.Contains(strings.ToLower(err.Error()), "no space left on device")) {
 		return "Free up disk space on the server and send your message again."
 	}
 	return "Fix the devcontainer configuration and send your message again."
