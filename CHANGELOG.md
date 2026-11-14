@@ -22,6 +22,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 - **Routine execution attempts distinguish waiting for an agent from work (#5299).** The executions API, CLI and attempt history show measured lock waiting and elapsed time excluding that wait. Historical attempts retain unknown timing; aggregate parent steps do not double-count child waits. This adds a forward-only database migration: the previous binary refuses to start against the migrated database. Fix forward with a compatible binary, or restore the pre-migration snapshot together with the matching previous binary. Restoring the snapshot discards writes made since that snapshot. See the [downgrade procedure](docs/guides/upgrades.mdx#rollback--downgrade).
 
+- **`crewship run --artifact <page>` attaches an artifact reference (#5317).** Repeatable, at most 10; takes a page slug or `@<page id>` and sends the page id as `metadata.artifact_refs`. It does nothing unless the workspace has `artifact_agent_access_modes` on, and the server decides what is readable. The CLI refuses an empty value, more than 10, and use with `--page`, `--create-document`, `--ask-form`, `--document-target` or `--interactive` (exit 2).
+
 - **Routine run logs show when a step waits for an occupied agent (#5290).** The journal records when waiting begins and whether the agent becomes available, the wait times out, or the run is cancelled. The outcome includes elapsed wait time.
 
 - ⚠️ **Behaviour change: routine budgets include costs reported by every agent attempt.** Reported costs from empty responses, failed attempts, and attempts preceding cancellation during backoff now count toward the run total. A routine close to its configured cost cap can stop earlier.
