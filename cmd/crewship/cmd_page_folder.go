@@ -19,6 +19,7 @@ package main
 //	GET    /api/v1/page-folders/{slug}/acl          page folder acl     <slug>
 //	PUT    /api/v1/page-folders/{slug}/acl          page folder share   <slug> <subject> --view|--edit
 //	DELETE /api/v1/page-folders/{slug}/acl/{t}/{id} page folder unshare <slug> <subject>
+//	PUT    /api/v1/page-folders/{slug}/agent-access page folder agent-access <slug> --level none|read|propose
 //
 // A subject is `user:<email or id>`, `crew:<slug>` or `workspace` (everyone
 // in the workspace). Never an agent: an agent reaches a page only by a grant
@@ -124,6 +125,8 @@ type pageFolderACLJSON struct {
 	Folder     string                   `json:"folder" yaml:"folder"`
 	ACL        []pageFolderACLEntryJSON `json:"acl" yaml:"acl"`
 	ACLVersion int64                    `json:"acl_version" yaml:"acl_version"`
+	// AgentAccess: none, read or propose for the agents of the owning crew.
+	AgentAccess string `json:"agent_access" yaml:"agent_access"`
 }
 
 type pageFolderACLWriteBody struct {
@@ -617,6 +620,64 @@ folder and stays when whoever set it leaves.`,
 	},
 }
 
+var pageFolderAgentAccessCmd = &cobra.Command{
+	Use:   "agent-access <slug> --level none|read|propose",
+	Short: "Let the agents of a folder's owning crew read or suggest on its pages",
+	Long: `Set what the agents of the folder's owning crew may do with the pages filed
+in it: none (the default), read, or propose (read and suggest). Never edit: an
+agent edits a page only through a grant on that page from its owner. Private
+(Personal) pages are never reached, and agents of other crews are not covered.
+
+It takes effect only with the workspace feature flag
+artifact_agent_access_modes on (levels other than none are refused without
+it), and in a chat run the human must still be able to read the page.
+
+Only a workspace admin or a MANAGER (or higher) of the owning crew may run
+this. The command reads the folder's acl_version first and sends it, so a
+concurrent change of the folder's permissions is a 409, not an overwrite.
+
+  crewship page folder agent-access ops-board --level read
+  crewship page folder agent-access ops-board --level none`,
+	Args: cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		level, _ := cmd.Flags().GetString("level")
+		switch level {
+		case "none", "read", "propose":
+		default:
+			return cli.WithExitCode(errors.New("--level must be none, read or propose; a folder never gives its agents edit access"), cli.ExitValidation)
+		}
+		client, err := pageClient()
+		if err != nil {
+			return err
+		}
+		path := "/api/v1/page-folders/" + pagePathEscape(args[0])
+		raw, err := pageFolderGet(client, path+"/acl")
+		if err != nil {
+			return err
+		}
+		var doc pageFolderACLJSON
+		if err := json.Unmarshal(raw, &doc); err != nil {
+			return fmt.Errorf("decode folder permissions: %w", err)
+		}
+		resp, err := client.Put(path+"/agent-access", map[string]any{"level": level, "acl_version": doc.ACLVersion})
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		out, err := pageFolderRead(resp)
+		if err != nil {
+			return err
+		}
+		f := newFormatter()
+		switch f.Format {
+		case "json", "yaml", "ndjson":
+			return pageEmitMachine(f, out, "{}")
+		}
+		fmt.Printf("Agents of the owning crew of folder %s: %s.\n", args[0], level)
+		return nil
+	},
+}
+
 var pageFolderUnshareCmd = &cobra.Command{
 	Use:   "unshare <slug> <subject>",
 	Short: "Stop sharing a folder with a user, a crew or everyone in the workspace",
@@ -717,6 +778,9 @@ func pageFolderPrintACL(raw []byte, did string) error {
 	}
 	if did != "" {
 		fmt.Println(did)
+	}
+	if doc.AgentAccess != "" && doc.AgentAccess != "none" {
+		fmt.Printf("Agents of the owning crew: %s (crewship page folder agent-access).\n", doc.AgentAccess)
 	}
 	if len(doc.ACL) == 0 {
 		fmt.Printf("Folder %s is shared with nobody: its owning crew and workspace admins reach it. (acl_version %d)\n", doc.Folder, doc.ACLVersion)
@@ -941,6 +1005,8 @@ func init() {
 	pageFolderCmd.AddCommand(pageFolderACLCmd)
 	pageFolderCmd.AddCommand(pageFolderShareCmd)
 	pageFolderCmd.AddCommand(pageFolderUnshareCmd)
+	pageFolderAgentAccessCmd.Flags().String("level", "", "none, read or propose (suggest); never edit")
+	pageFolderCmd.AddCommand(pageFolderAgentAccessCmd)
 	pageCmd.AddCommand(pageFolderCmd)
 	pageCmd.AddCommand(pageMoveCmd)
 }

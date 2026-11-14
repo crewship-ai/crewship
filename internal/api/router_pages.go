@@ -187,6 +187,8 @@ func (r *Router) registerPageRoutes() {
 	r.mux.Handle("GET /api/v1/page-folders/{slug}/acl", authed(wsCtx(http.HandlerFunc(p.GetFolderACL))))
 	// openapi: responses 200,400,401,403,404,413,500
 	r.authedMut("PUT", "/api/v1/page-folders/{slug}/acl", roleCreate, p.PutFolderACL)
+	// Access for the agents of the owning crew (#5317 D2): none, read or propose.
+	r.authedMut("PUT", "/api/v1/page-folders/{slug}/agent-access", roleCreate, p.PutFolderAgentAccess)
 	// openapi: responses 204,400,401,403,404,500
 	r.authedMut("DELETE", "/api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id}", roleCreate, p.DeleteFolderACL)
 	// openapi: responses 200,400,401,403,404,409,413,500

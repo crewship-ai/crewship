@@ -58,6 +58,7 @@ validation.
 | GET | [`/api/v1/page-folders/{slug}/acl`](#read-a-folders-permissions) | Who a folder is shared with (managers only) |
 | PUT | [`/api/v1/page-folders/{slug}/acl`](#share-a-folder) | Share a folder with a user, a crew or everyone in the workspace |
 | DELETE | [`/api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id}`](#stop-sharing-a-folder) | Remove one entry from a folder's permissions |
+| PUT | [`/api/v1/page-folders/{slug}/agent-access`](#set-folder-access-for-the-owning-crews-agents) | Let the owning crew's agents read or suggest on the folder's pages |
 | GET | [`/api/v1/pages/{slug}/access/me`](#my-access-to-a-page) | The caller's own paths to a page |
 | GET | [`/api/v1/pages/{slug}/panels/{panelId}/actions`](#list-a-panels-actions) | The actions a panel declares |
 | POST | [`/api/v1/pages/{slug}/panels/{panelId}/actions/{actionId}`](#dispatch-an-action) | Dispatch a declared action |
@@ -1270,6 +1271,44 @@ the owning crew's MANAGER (or higher). No request body.
 | 401 | No session or token. |
 | 403 | Not an admin and not the owning crew's MANAGER+. |
 | 404 | No such folder, or no such entry. |
+
+---
+
+## Set folder access for the owning crew's agents
+
+```
+PUT /api/v1/page-folders/{slug}/agent-access
+```
+
+```json
+{ "level": "read", "acl_version": 4 }
+```
+
+Sets what the agents of the folder's owning crew may do with the non-private
+pages filed in it: `none` (default), `read` or `propose` (read and suggest).
+There is no edit level: an agent edits a page only through a grant on that
+page from its owner. It applies only with the workspace feature flag
+`artifact_agent_access_modes` on, and in a chat run the human must still read
+the page as a member (`docs/specs/pages.md` §7.1c). The request is fenced on
+`acl_version`, bumps it, and is journalled as
+`page.folder_agent_access_changed`. `GET …/acl` reports the level as
+`agent_access`.
+
+**Authentication:** session cookie or CLI token. A workspace ADMIN/OWNER, or
+the owning crew's MANAGER (or higher).
+
+**Response 200:** `{"folder": "ops-board", "agent_access": "read", "acl_version": 5}`
+
+**Statuses:**
+
+| Status | Condition |
+|---|---|
+| 200 | Set. |
+| 400 | An unknown level (including `write`), a missing `acl_version`, or unknown fields. |
+| 401 | No session or token. |
+| 403 | Not an admin and not the owning crew's MANAGER+. |
+| 404 | No such folder, or the caller cannot see it. |
+| 409 | `acl_version` is stale (`conflict: acl_version`), or a level other than `none` with the flag off (`code: artifact_agent_access_modes_off`). |
 
 ---
 

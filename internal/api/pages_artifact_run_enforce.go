@@ -139,7 +139,22 @@ WHERE o.page_id=? AND o.workspace_id=? AND o.human_user_id=? AND o.chat_id=? AND
 		}
 	}
 	if !readable {
-		return runReachNone, false, nil
+		// D2 (#5317 PR3): a folder may let the agents of its owning crew read
+		// (or suggest on) the non-private pages filed in it. The agent's live
+		// crew must be the folder's owner; a folder never gives write.
+		if err = q.QueryRowContext(ctx, `SELECT count(*) FROM pages p JOIN page_folders f ON f.id=p.folder_id AND f.workspace_id=p.workspace_id
+JOIN agents a ON a.id=? AND a.workspace_id=p.workspace_id AND a.deleted_at IS NULL AND a.crew_id=f.owner_crew_id
+JOIN crews c ON c.id=f.owner_crew_id AND c.workspace_id=p.workspace_id AND c.deleted_at IS NULL
+WHERE p.id=? AND p.workspace_id=? AND p.private_audience=0 AND f.agent_access IN ('read','propose')`, a.AgentID, rec.ID, a.WorkspaceID).Scan(&n); err != nil {
+			return
+		}
+		if n != 1 || a.CrewID == "" {
+			return runReachNone, false, nil
+		}
+		var crew string
+		if err = q.QueryRowContext(ctx, `SELECT coalesce(crew_id,'') FROM agents WHERE id=? AND workspace_id=?`, a.AgentID, a.WorkspaceID).Scan(&crew); err != nil || crew != a.CrewID {
+			return runReachNone, false, err
+		}
 	}
 	if err = q.QueryRowContext(ctx, `SELECT count(*) FROM artifact_run_access WHERE run_id=? AND page_id=? AND source='standing'`, a.RunID, rec.ID).Scan(&n); err != nil {
 		return

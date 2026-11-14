@@ -633,8 +633,25 @@ owner on 2026-11-13.
    agent-to-agent and crew-token runs record none and reach nothing through
    this path.
 
-The folder subject for a crew's agents and the audit with the human follow in
-later steps of #5317.
+9. **A folder may let the agents of its owning crew read or suggest (D2).**
+   `page_folders.agent_access` is `none` (default), `read` or `propose`, never
+   write: a folder has no issuer whose standing could be re-checked. It is one
+   setting per folder, not an ACL row, so `page_folder_acl` still names no
+   agent. A workspace admin or a MANAGER+ of the owning crew sets it, fenced on
+   `acl_version` and audited (`page.folder_agent_access_changed`); levels other
+   than `none` need the flag. It reaches only non-private pages filed in the
+   folder, only agents whose live crew owns the folder, and only as standing
+   access: read only, counted against `run_read_limit`, and still intersected
+   with the run's human.
+10. **Runs without a human reach nothing yet.** A routine, webhook or cron run
+   has no human principal and the artifact tool refuses it. Its own mode
+   (standing grants only, the read cap per run) needs a run identity the
+   server can trust: today the crew container holds the key that mints run
+   tokens for any agent and run of its crew, and most producers start runs
+   without a work-ledger record, so a per-run cap could be bypassed by minting
+   a fresh run. That mode waits for that identity.
+
+The audit with the human follows in a later step of #5317.
 
 ### 7.2 What this costs
 

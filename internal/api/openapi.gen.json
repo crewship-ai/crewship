@@ -131994,6 +131994,15 @@
                     "acl_version": {
                       "type": "integer"
                     },
+                    "agent_access": {
+                      "description": "What the owning crew's agents may do with the folder's non-private pages (#5317 D2).",
+                      "enum": [
+                        "none",
+                        "read",
+                        "propose"
+                      ],
+                      "type": "string"
+                    },
                     "entry": {
                       "properties": {
                         "can_read": {
@@ -132274,6 +132283,15 @@
                     },
                     "acl_version": {
                       "type": "integer"
+                    },
+                    "agent_access": {
+                      "description": "What the owning crew's agents may do with the folder's non-private pages (#5317 D2).",
+                      "enum": [
+                        "none",
+                        "read",
+                        "propose"
+                      ],
+                      "type": "string"
                     },
                     "entry": {
                       "properties": {
@@ -132615,6 +132633,181 @@
           }
         ],
         "summary": "Delete page folder acl",
+        "tags": [
+          "page-folders"
+        ],
+        "x-crewship-read-only": false
+      }
+    },
+    "/api/v1/page-folders/{slug}/agent-access": {
+      "put": {
+        "description": "Update page folder agent access (PUT /api/v1/page-folders/{slug}/agent-access).",
+        "operationId": "put_api_v1_page-folders_slug_agent-access",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "properties": {
+                  "acl_version": {
+                    "description": "The folder's acl_version as last read. Required; a stale one is 409.",
+                    "type": "integer"
+                  },
+                  "level": {
+                    "description": "Never write: a folder gives its agents at most read and suggest. Levels other than none need the artifact_agent_access_modes flag (409 otherwise).",
+                    "enum": [
+                      "none",
+                      "read",
+                      "propose"
+                    ],
+                    "type": "string"
+                  }
+                },
+                "type": "object"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "acl_version": {
+                      "type": "integer"
+                    },
+                    "agent_access": {
+                      "enum": [
+                        "none",
+                        "read",
+                        "propose"
+                      ],
+                      "type": "string"
+                    },
+                    "folder": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "sessionCookie": []
+          },
+          {
+            "secureSessionCookie": []
+          }
+        ],
+        "summary": "Update page folder agent access",
         "tags": [
           "page-folders"
         ],
