@@ -492,6 +492,10 @@ async function runSession(input: SessionInput, d: Driver): Promise<SessionResult
 // ---------------------------------------------------------------------------
 // Word
 
+// Canvas points that assume the Home ribbon shows the Styles gallery (a canvas about 1600 px wide;
+// craft-hour runs Word at WORD_VIEWPORT). At 1440 px the gallery collapses and heading1 misses.
+/** Word's viewport: the Artifacts frame puts the canvas at x=285, so 1920 px leaves it 1626 px wide. */
+export const WORD_VIEWPORT = { width: 1920, height: 1000 }
 const WORD_UI = {
   homeTab: { x: 76, y: 53 },
   insertTab: { x: 130, y: 53 },
@@ -548,6 +552,13 @@ export function wordSession(input: SessionInput) {
         await canvas.click({ position: at })
         await page.waitForTimeout(700)
       }
+      // A tab or style click must hand the keys back to the editor's hidden INPUT; a click that opened
+      // a ribbon menu instead would swallow the typing that follows (native walk, Word, #5362).
+      const ribbon = async (at: { x: number; y: number }) => {
+        await click(at)
+        const back = await f.waitForFunction(() => document.activeElement?.tagName === "INPUT", undefined, { timeout: 5_000 }).then(() => true, () => false)
+        if (!back) fail(`ribbon click at (${at.x},${at.y}) left the keys on ${await f.evaluate(() => document.activeElement?.tagName ?? "nothing").catch(() => "?")}, not the document: the ribbon is not laid out as WORD_UI assumes`)
+      }
       const typed: string[] = []
       const tick = async (label: string) => step(`${label}: ${(await N.status(page)).slice(0, 36)}`)
       const once = async (name: string, at: number, fn: () => Promise<void>) => {
@@ -560,12 +571,12 @@ export function wordSession(input: SessionInput) {
       }
       await kb.press("Control+End")
       await once("heading", 0, async () => {
-        await click(WORD_UI.homeTab)
+        await ribbon(WORD_UI.homeTab)
         await tick("home tab")
         await kb.press("Control+End")
         await kb.type(m.heading)
         await tick("heading typed")
-        await click(WORD_UI.heading1)
+        await ribbon(WORD_UI.heading1)
         await tick("heading style")
         await kb.press("End")
         await kb.press("Enter")

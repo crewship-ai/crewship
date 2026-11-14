@@ -14,7 +14,7 @@
 //
 // Full mode only. A run shorter than 60 minutes (PRD_HOUR_SHORT_RUN=1, for
 // debugging) does the same work and then fails on purpose: it is not evidence.
-import { readHeadText, sheetSession, wordSession, type Checkpoint, type CycleChain, type SessionKind } from "./craft-session/hour-steps"
+import { readHeadText, sheetSession, wordSession, WORD_VIEWPORT, type Checkpoint, type CycleChain, type SessionKind } from "./craft-session/hour-steps"
 import type { CraftCall } from "./craft-lease/helpers"
 import { hourInterruptions, PAGE_STALLS_DESCRIPTION, pageStalls, saveAccounting, type ForcedCtrlS, type SaveWait, type TrailMark, type VerifyPress } from "./craft-session/confirm"
 import { restartServer, type RestartRecord } from "./craft-session/restart"
@@ -58,7 +58,7 @@ for (const { app, label } of KINDS) {
       test.setTimeout((minutes + 25) * 60_000)
       // The QA workspace stays after the row (keepWorkspace): its stored versions are the
       // evidence a later reader needs, and result.json names the workspace and the page.
-      const { context, api, ws } = await isolatedActor(prd, browser, `hour ${label}`, { viewport: N.VIEWPORT }, { keepWorkspace: true })
+      const { context, api, ws } = await isolatedActor(prd, browser, `hour ${label}`, { viewport: app === "wordcraft" ? WORD_VIEWPORT : N.VIEWPORT }, { keepWorkspace: true })
       const probe = await N.nativeEnabled(api, ws.id)
       expect(probe.enabled, `native ${label} editing must be on: ${probe.detail}`).toBe(true)
       const ref = await N.createNative(api, ws.id, app, `PRD hour ${label}`)

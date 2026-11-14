@@ -564,7 +564,7 @@ It does not prove:
 
 ```bash
 pnpm acceptance:native-walk \
-  --origin https://crewship-dev3.unifylab.cz \
+  --origin "$ORIGIN" \
   --rc "$RC_SHA" \
   --env-file "$HOME/.config/crewship/prd-qa-dev3.env" \
   --output "$OUT"
@@ -599,6 +599,18 @@ The verdict never reads Playwright's text output. `$OUT` holds `verdict.json`
 `evidence/native-walk/<test>/walk.json` with a screenshot after the reload, and
 `playwright/`. The rules are `e2e/acceptance/native-walk/verdict.mjs`, tested by
 `node --test e2e/acceptance/native-walk/verdict.test.mjs`.
+
+The Sheet editor stores the active cell (`sheets[*].view_active`) in the saved
+workbook, so when Enter lands after the autosave already captured the typed value,
+Enter's move of the active cell reaches the server as a version of its own (#5370). The walk
+reads the workbook each save sent and accepts such a version only when it differs
+from its base in nothing but `view_active` and directly follows a version that
+changed content; it is counted in `walk.json` under `versions.cursorOnly` and
+printed in the log. A repeat of the lost attempt, a save not built on the lost
+version, any content change after the lost reply, and more than one content version
+from one ctrl+s stay violations. Word versions are always judged as content. The
+classifier is `e2e/acceptance/native-walk/sheet-versions.mjs`, tested with the
+verdict in `verdict.test.mjs`.
 
 ## RC gate: required IDs
 

@@ -93,7 +93,10 @@ const big = (v) => { try { return typeof v === "string" && /^\d+$/.test(v) ? Big
  * dropped reply, they run from the starting head +1 without a gap or a repeat, the
  * head after the final step and after its reload is the last receipt, nothing saved
  * after the proof, ctrl+s without a change keeps the version and the lost reply
- * makes exactly one.
+ * makes exactly one. An `unchanged` save answer names its base and is no receipt
+ * (#5075). A Sheet version the walk classified as only moving the active cell
+ * (`versions.cursorOnly`, sheet-versions.mjs) must be a receipt built on the one
+ * before it; the lost reply may be followed by such versions and nothing else.
  */
 export function versionProblems(evidence) {
   const v = evidence?.versions
@@ -114,7 +117,7 @@ export function versionProblems(evidence) {
   const ops = Array.isArray(evidence.ops) ? evidence.ops : null
   if (!ops) problems.push("evidence records no save ops")
   else if (receipts && !receipts.some((r) => r === null)) {
-    const fromOps = [...ops.filter((o) => o?.kind === "save" && o?.status === 200 && o?.version !== undefined && o?.version !== null).map((o) => String(o.version)), ...(Array.isArray(v.lostVersions) ? v.lostVersions.map(String) : [])]
+    const fromOps = [...ops.filter((o) => o?.kind === "save" && o?.status === 200 && o?.version !== undefined && o?.version !== null && o?.unchanged !== true).map((o) => String(o.version)), ...(Array.isArray(v.lostVersions) ? v.lostVersions.map(String) : [])]
       .sort((a, b) => (big(a) ?? -1n) < (big(b) ?? -1n) ? -1 : (big(a) ?? -1n) > (big(b) ?? -1n) ? 1 : 0)
     if (!sameVersions(fromOps, v.receipts)) problems.push(`the recorded saves ${fromOps.join(",")} are not the receipts ${v.receipts.join(",")}`)
   }
@@ -124,9 +127,18 @@ export function versionProblems(evidence) {
   const step = (name) => (Array.isArray(evidence.steps) ? evidence.steps.find((s) => s?.name === name) : undefined)
   const unchanged = step("ctrl+s without a change")
   if (unchanged && (big(unchanged.versionBefore) === null || unchanged.versionBefore !== unchanged.versionAfter)) problems.push(`ctrl+s without a change went from v${unchanged.versionBefore} to v${unchanged.versionAfter}`)
+  const cursorOnly = v.cursorOnly === undefined ? [] : v.cursorOnly
+  const moved = new Set()
+  if (!Array.isArray(cursorOnly)) problems.push(`cursor-only versions ${JSON.stringify(v.cursorOnly)} are not a list`)
+  else for (const c of cursorOnly) {
+    const cv = big(c?.version), cb = big(c?.base)
+    if (cv === null || cb === null || cv !== cb + 1n || !Array.isArray(v.receipts) || !v.receipts.includes(c.version)) problems.push(`cursor-only version ${JSON.stringify(c)} is not a receipt on the version before it`)
+    else moved.add(c.version)
+  }
   const lost = step("lost reply")
   const lb = big(lost?.versionBefore), la = big(lost?.versionAfter)
-  if (lost && (lb === null || la === null || la !== lb + 1n)) problems.push(`the lost reply went from v${lost.versionBefore} to v${lost.versionAfter}, not exactly one version`)
+  const onlyMovesAfter = (from, to) => { for (let x = from + 1n; x <= to; x++) if (!moved.has(String(x))) return false; return true }
+  if (lost && (lb === null || la === null || la <= lb || !onlyMovesAfter(lb + 1n, la))) problems.push(`the lost reply went from v${lost.versionBefore} to v${lost.versionAfter}, not exactly one version`)
   return problems
 }
 
