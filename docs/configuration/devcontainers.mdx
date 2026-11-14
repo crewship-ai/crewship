@@ -92,12 +92,16 @@ change injected `uid` and `gid`, which common-utils does not read. The account
 then got an automatic UID: 1001 only when the base image already had a user at
 1000 (the `node` or `vscode` images), and 1000 on `debian:bookworm-slim`. Such a
 stored config is built with the correct names the next time it is provisioned
-(after a config change, or with `crewship crew rebuild <crew>`); the stored
-config itself is not rewritten, so reading it back still shows `uid` / `gid`. That changes
-its cache key, so it builds a new image **once**; crews with the same config
-share that build. Upgrading alone rebuilds nothing: a running crew keeps its
-current image until it is provisioned again. To fix a crew built on a slim
-image, run `crewship crew rebuild <crew>`.
+(after a config change, or with `crewship crew provision <crew>` or
+`crewship crew rebuild <crew>`); the stored config itself is not rewritten, so
+reading it back still shows `uid` / `gid`. That changes its cache key, so it
+builds a new image **once**; crews with the same config share that build. This
+includes crews on the default configuration, whose stored definition also
+carries the old names; their image already had `agent` at 1001, so the rebuild
+changes nothing for them. Upgrading alone rebuilds nothing: restarting the
+server or the crew (`crewship crew stop` / `start`) keeps the current image, so
+a crew built on a slim image stays broken until it is provisioned again. To fix
+it, run `crewship crew rebuild <crew>`.
 
 `sudo` works while the image is built (in `postCreateCommand`), once the account
 exists. On the Docker runtime it does not work inside a running crew container:
