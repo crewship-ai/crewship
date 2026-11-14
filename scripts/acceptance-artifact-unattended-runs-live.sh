@@ -12,15 +12,33 @@
 #                     /etc/crewship/environments.json)
 #   CREWSHIP_SERVER   server URL (default http://localhost:8081, dev1)
 #   CREWSHIP_CONFIG   the operator's CLI config: an instance admin who may
-#                     create workspaces and grant members (default: ~/.config)
-#   MANAGER_EMAIL     an existing account that becomes MANAGER of the QA
-#                     workspace (default manager-baseline@crewship.local, the
-#                     RBAC demo fixture)
-#   MANAGER_PASSWORD  its password (default: the documented demo password)
-#   QA_SETUP_HOOK     optional command run after the crew exists, with
-#                     CREWSHIP_WORKSPACE and QA_CREW set, to give the crew a
-#                     model provider (a fresh workspace has none)
+#                     create workspaces, add members and suspend accounts
+#                     (default: ~/.config)
+#   QA_SETUP_HOOK     command run (as the operator, CREWSHIP_WORKSPACE and
+#                     QA_CREW=qa-crew, QA_AGENT=qa-reader set) after the agent
+#                     exists, to give it a model provider; a fresh workspace
+#                     has none. On dev1, with an Anthropic API key in a file:
+#                       QA_SETUP_HOOK='crewship credential create --name qa-anthropic
+#                         --type API_KEY --provider ANTHROPIC --crews qa-crew
+#                         --value-stdin < "$HOME/.qa-anthropic-key" &&
+#                         crewship credential assign qa-anthropic qa-reader
+#                         --env-var-name ANTHROPIC_API_KEY'
+#                     (a Claude setup-token instead: --type PROVIDER_LOGIN
+#                     --provider ANTHROPIC --value-stdin, see
+#                     docs/guides/credentials.mdx "Provider logins")
 #   FIRE_TIMEOUT      seconds to wait for each fire to finish (default 900)
+#
+# The schedule's creator is a throwaway account made for this run
+# (qa-5356-<stamp>@example.test, created with `workspace member invite
+# --create-only`, which refuses any existing account). Its setup link is
+# redeemed with one anonymous POST /api/v1/auth/reset, the call the setup page
+# makes; there is no CLI command for it. Everything else is the CLI. No shared
+# or pre-existing account is ever demoted or suspended (MANAGER_EMAIL is
+# refused). At exit the script undoes only what it did: it logs the throwaway
+# account out and deletes its CLI config, removes it from the QA workspace,
+# suspends it (the API cannot delete accounts) and deletes the QA workspace.
+# Evidence logs stay. A failed cleanup step is logged and makes the exit code
+# non-zero.
 #
 # What it shows, from server evidence (audit, journal, run records):
 #   A. a MANAGER's schedule fire: the agent reads the artifact it holds its own
@@ -31,8 +49,7 @@
 #   C. after the creator is demoted to MEMBER, the next fire gets no capability
 #      and the journal says artifact.run_capability_withheld with the generic
 #      reason schedule_creator_not_in_good_standing and the schedule_id;
-#   D. (--suspend) the same after the creator is suspended; the account is
-#      reactivated on exit.
+#   D. (--suspend) the same after the throwaway creator is suspended.
 # The schedule is fired with "run now" by the operator, not the creator: the
 # creator decides, the person pressing lends nothing.
 #
@@ -49,7 +66,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --suspend) suspend=1 ;;
     --evidence) evidence="$2"; shift ;;
-    -h|--help) sed -n '2,45p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,70p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -63,8 +80,12 @@ log="$evidence/run.log"
 
 BIN="${CREWSHIP_BIN:-$(jq -r '.dev1.binary' /etc/crewship/environments.json)}"
 export CREWSHIP_SERVER="${CREWSHIP_SERVER:-http://localhost:8081}"
-MANAGER_EMAIL="${MANAGER_EMAIL:-manager-baseline@crewship.local}"
-MANAGER_PASSWORD="${MANAGER_PASSWORD:-rbac-demo-1234}"
+if [ -n "${MANAGER_EMAIL:-}" ]; then
+  echo "MANAGER_EMAIL is refused: this script demotes and may suspend its creator, so it only ever uses a throwaway account it creates" >&2
+  exit 2
+fi
+MANAGER_EMAIL="qa-5356-$stamp@example.test"
+MANAGER_PASSWORD="$(head -c 24 /dev/urandom | base64 | tr -d '/+=')Aa9!"
 FIRE_TIMEOUT="${FIRE_TIMEOUT:-900}"
 manager_config="$evidence/manager-cli.json"
 results=()
@@ -88,13 +109,47 @@ check() { # check NAME OK|FAIL|INCONCLUSIVE DETAIL
   printf '   -> %s: %s (%s)\n' "$2" "$1" "$3" | tee -a "$log"
 }
 
+# What this run created, so the exit trap undoes exactly that.
 manager_user_id=""
-restore() {
-  if [ "$suspend" = 1 ]; then
-    owner admin instance reactivate "$MANAGER_EMAIL" >/dev/null 2>&1 || true
-  fi
+made_workspace=0
+made_account=0
+manager_logged_in=0
+cleanup_step() { # cleanup_step LABEL CMD...: log it; a failure fails the run.
+  printf '\n$ %s\n' "${*:2}" | tee -a "$log"
+  if "${@:2}" >>"$log" 2>&1; then return 0; fi
+  printf '   -> CLEANUP FAILED: %s\n' "$1" | tee -a "$log"
+  cleanup_failed=1
 }
-trap restore EXIT
+cleanup() {
+  local rc=$?
+  cleanup_failed=0
+  set +e
+  say "Cleanup (undoes only what this run created)"
+  if [ "$manager_logged_in" = 1 ]; then
+    cleanup_step "log the throwaway account out" env CREWSHIP_CONFIG="$manager_config" "$BIN" logout
+  fi
+  if [ -e "$manager_config" ]; then cleanup_step "delete its CLI config" rm -f -- "$manager_config"; fi
+  if [ "$made_account" = 1 ]; then
+    if [ "$made_workspace" = 1 ] && [ -n "$manager_user_id" ]; then
+      cleanup_step "remove it from the QA workspace" "$BIN" workspace member remove "$manager_user_id" --yes
+    fi
+    # Accounts cannot be deleted through the API; a throwaway one is left
+    # suspended (it may already be, after phase D).
+    if [ "$suspended" != 1 ]; then
+      cleanup_step "suspend the throwaway account" "$BIN" admin instance suspend "$MANAGER_EMAIL" --reason "QA #5356 acceptance finished"
+    fi
+  fi
+  if [ "$made_workspace" = 1 ]; then
+    cleanup_step "delete the QA workspace" "$BIN" workspace delete "$ws_slug" --confirm "$ws_slug" --yes
+  fi
+  if [ "$cleanup_failed" = 1 ]; then
+    echo "cleanup failed; see $log" >&2
+    [ "$rc" = 0 ] && rc=4
+  fi
+  exit "$rc"
+}
+suspended=0
+trap cleanup EXIT
 
 say "Preflight"
 run owner version
@@ -103,13 +158,30 @@ run owner whoami
 ws_slug="qa-5356-$stamp"
 say "Fresh QA workspace with the flag on"
 run owner workspace create --name "QA 5356 $stamp" --slug "$ws_slug" -f json
+made_workspace=1
 export CREWSHIP_WORKSPACE="$ws_slug"
 run owner feature-flag enable artifact_agent_access_modes
-run owner admin instance grant "$MANAGER_EMAIL" --workspace "$ws_slug" --role MANAGER
+
+say "A throwaway MANAGER account, created for this run only"
+printf '\n$ crewship workspace member invite %s --role MANAGER --create-only -f json  (setup link withheld from the log)\n' "$MANAGER_EMAIL" | tee -a "$log"
+invite="$(owner workspace member invite "$MANAGER_EMAIL" --role MANAGER --create-only -f json)"
+if [ "$(printf '%s' "$invite" | jq -r '.created_user')" != true ]; then
+  echo "the server did not create a new account for $MANAGER_EMAIL; refusing to continue" | tee -a "$log"
+  exit 2
+fi
+made_account=1
+printf '%s' "$invite" | jq '{email, role, created_user, expires_at}' | tee -a "$log"
+setup_token="$(printf '%s' "$invite" | jq -r '.setup_url' | sed -n 's/.*[?&]token=\([^&]*\).*/\1/p')"
+[ -n "$setup_token" ] || { echo "the invite carries no setup token" | tee -a "$log"; exit 2; }
+printf '\n$ POST %s/api/v1/auth/reset  (anonymous, as the setup page does; no CLI command exists)\n' "$CREWSHIP_SERVER" | tee -a "$log"
+jq -n --arg t "$setup_token" --arg p "$MANAGER_PASSWORD" '{token:$t,new_password:$p}' |
+  curl -fsS -o /dev/null -w '%{http_code}\n' -H 'Content-Type: application/json' --data-binary @- "$CREWSHIP_SERVER/api/v1/auth/reset" | tee -a "$log"
+unset setup_token invite
 
 say "The MANAGER logs in with their own credential"
 printf '\n$ crewship login --email %s --password-stdin  (separate CLI config)\n' "$MANAGER_EMAIL" | tee -a "$log"
 printf '%s' "$MANAGER_PASSWORD" | CREWSHIP_CONFIG="$manager_config" "$BIN" login --server "$CREWSHIP_SERVER" --email "$MANAGER_EMAIL" --password-stdin 2>&1 | tee -a "$log"
+manager_logged_in=1
 run manager whoami -f json
 run owner workspace member list -f json
 manager_user_id="$(printf '%s' "$out" | jq -r --arg e "$MANAGER_EMAIL" '[.[] | select((.email // .user_email // .user.email) == $e)][0].user_id // empty')"
@@ -120,7 +192,7 @@ run manager crew create --name "QA Crew" --slug qa-crew -f json
 run manager agent create --name "QA Reader" --slug qa-reader --crew qa-crew --timeout 600 -f json
 if [ -n "${QA_SETUP_HOOK:-}" ]; then
   say "Model provider setup hook"
-  QA_CREW=qa-crew run bash -c "$QA_SETUP_HOOK"
+  run env QA_CREW=qa-crew QA_AGENT=qa-reader PATH="$(dirname "$BIN"):$PATH" bash -c "$QA_SETUP_HOOK"
 fi
 
 say "Two shared artifacts; the agent holds its own read grant on the first only"
@@ -214,6 +286,7 @@ run owner workspace member role "$manager_user_id" MANAGER
 if [ "$suspend" = 1 ]; then
   say "D. The creator is suspended; the next fire gets no capability"
   run owner admin instance suspend "$MANAGER_EMAIL" --reason "QA #5356 acceptance"
+  suspended=1
   fire
   reads="$(reads_since)"; withheld="$(withheld_since)"
   printf '\n$ crewship journal --type artifact.run_capability_withheld … (this schedule)\n%s\n' "$withheld" | tee -a "$log"
@@ -222,7 +295,6 @@ if [ "$suspend" = 1 ]; then
   else
     check "D suspended creator: withheld with the generic reason" FAIL "reads=$reads withheld=$withheld"
   fi
-  run owner admin instance reactivate "$MANAGER_EMAIL"
 fi
 
 say "Summary (evidence: $evidence)"
