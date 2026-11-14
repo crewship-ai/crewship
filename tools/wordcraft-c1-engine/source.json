@@ -14,7 +14,7 @@
   },
   "dependency_patch": {
     "path": "zip-advisory.patch",
-    "sha256": "c4c3e214a2c22554d7a290a105da3bc333fa97bb1bb1a678367d15a08d2345a6",
+    "sha256": "85eb4177106722b14c53006d0ce15120132ca02663c1a7caac390e596e906b07",
     "advisories": [
       "GHSA-m665-v7pm-7grj",
       "GHSA-q7v9-x93c-xqv3",
@@ -79,7 +79,7 @@
       },
       "crates/formats/src/odt.rs": {
         "before_sha256": "d74df702b23eaf2dc575191258cf7bc12eb96bcff5e8229c49c8743fa1494662",
-        "after_sha256": "8aee2cf060bd678bcdf272298a02680da6e7cc5555b535e3103cd68b97aad94e"
+        "after_sha256": "7c657892422bc234f2b003b9938f8ac943a7920d064c4eb20c449a8955642d58"
       }
     }
   }

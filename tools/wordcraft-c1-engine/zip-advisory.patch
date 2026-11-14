@@ -304,17 +304,30 @@ index 5932f98..5df37d9 100644
      out
  }
 diff --git a/crates/formats/src/odt.rs b/crates/formats/src/odt.rs
-index fd4c74d..46afc04 100644
+index fd4c74d..0f3d240 100644
 --- a/crates/formats/src/odt.rs
 +++ b/crates/formats/src/odt.rs
-@@ -2839,14 +2839,14 @@ mod tests {
+@@ -2483,8 +2483,9 @@ fn read_entry(z: &mut zip::ZipArchive<Cursor<&[u8]>>, name: &str) -> Option<Vec<
+ 
+ /// The pictures a package's frames point at, within one byte budget. Each entry is inflated
+ /// at most once, and only when the size it declares fits in what is left; the bytes inflated
+-/// (even from an entry bigger than it declares) and every later copy are charged, so repeated
+-/// references and lying entries can't go past the budget, and nothing is inflated after it.
++/// and every later copy are charged, so repeated references can't go past the budget. An entry
++/// bigger than it declares fails (zip >= 9) at the read that crosses its declared size: it is
++/// refused, and the bytes read before that point, at most its declared size, are charged.
+ struct Pictures {
+     /// Entry name → its bytes (`None`: missing, unreadable or over the budget; not retried).
+     seen: HashMap<String, Option<Vec<u8>>>,
+@@ -2839,14 +2840,30 @@ mod tests {
          assert_eq!(pics.get(&mut z, "big.png"), None);
          assert_eq!(pics.room, 1000);
          assert_eq!(pics.get(&mut z, "ok.png").map(|d| d.len()), Some(300));
 -        // One inflating to more than it declares stops a byte past the budget and uses it up:
 -        // nothing is inflated after it.
-+        // One inflating to more than it declares is refused by zip (>= 9) itself before a
-+        // byte reaches the budget, so it costs nothing and later entries still fit.
++        // One inflating to more than it declares is refused: zip (>= 9) fails the read that
++        // crosses the declared size. Declaring only 10 bytes, that is the first read, so
++        // nothing is charged here and later entries still fit (see the large-declaration test).
          let liar = declare_size(zip_of(&[("liar.png", &[0u8; 5000]), ("ok.png", &[5u8; 10])]), "liar.png", 10);
          let mut z = archive(&liar);
          let mut pics = Pictures::new(1000);
@@ -323,6 +336,21 @@ index fd4c74d..46afc04 100644
 -        assert_eq!(pics.get(&mut z, "ok.png"), None);
 +        assert_eq!(pics.room, 1000);
 +        assert_eq!(pics.get(&mut z, "ok.png").map(|d| d.len()), Some(10));
++    }
++
++    #[test]
++    fn a_liar_declaring_a_large_size_is_charged_what_it_inflated() {
++        // zip (>= 9) fails the read that crosses the declared size; the bytes read before
++        // it are charged, never more than the entry declared, and the entry is refused.
++        let data: Vec<u8> = (0..50_000u32).map(|i| (i.wrapping_mul(2_654_435_761) >> 13) as u8).collect();
++        let liar = declare_size(zip_of(&[("liar.png", &data), ("ok.png", &[5u8; 10])]), "liar.png", 300);
++        let mut z = archive(&liar);
++        let mut pics = Pictures::new(1000);
++        assert_eq!(pics.get(&mut z, "liar.png"), None);
++        let charged = 1000 - pics.room;
++        assert!(charged > 0 && charged <= 300, "charged {charged}");
++        assert_eq!(pics.get(&mut z, "liar.png"), None);
++        assert_eq!(pics.room, 1000 - charged);
      }
  
      #[test]

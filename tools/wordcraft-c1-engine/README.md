@@ -15,9 +15,11 @@ pinned under `dependency_patch` in source.json and applied after the clock
 patch. It moves the pinned revision from `zip` 3.0.0 to 9.1.0 (GHSA-m665-v7pm-7grj,
 GHSA-q7v9-x93c-xqv3, GHSA-8hxf-qr8p-62x4) and adapts the call sites to
 `ZipFile::name()` returning a `Result`: the DOCX reader skips an entry whose name
-cannot be decoded, like any other unreadable entry. zip 9 also refuses an entry
-that inflates past its declared size before any byte reaches the ODT picture
-budget, so that one upstream test now expects the budget untouched. The engine identity stays the
+cannot be decoded, like any other unreadable entry. zip 9 also fails the read
+that carries an entry past its declared size: the DOCX reader then skips that
+entry with a warning, and the ODT picture budget is charged the bytes read before
+that point (at most the declared size). The patch updates one upstream test
+accordingly and adds one for a large declared size. The engine identity stays the
 revision plus the clock patch digest, so the qualified catalog is unchanged.
 Upstream `main` replaced `zip` with its own `craft-zip`; moving the revision
 would require a new qualification.
