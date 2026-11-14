@@ -746,12 +746,20 @@ func putCrewFile(ctx context.Context, c internalapi.Client, crewID, dest string,
 	if !ok {
 		return fmt.Errorf("crew file upload not supported by this client (no raw-bytes PUT)")
 	}
-	resp, err := rp.PutBytes(ctx,
-		"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(dest), data)
-	if err != nil {
-		return fmt.Errorf("save crew file %s: %w", dest, err)
-	}
-	return checkStatus(resp, "save crew file "+dest)
+	// A crew PATCH earlier in the same apply recycles the container
+	// asynchronously; a save in that window answers 409 (see
+	// crewfile.SaveWithRecycleWait).
+	return crewfile.SaveWithRecycleWait(ctx, func() (int, error) {
+		resp, err := rp.PutBytes(ctx,
+			"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(dest), data)
+		if err != nil {
+			return 0, fmt.Errorf("save crew file %s: %w", dest, err)
+		}
+		if resp == nil {
+			return 0, checkStatus(nil, "save crew file "+dest)
+		}
+		return resp.StatusCode, checkStatus(resp, "save crew file "+dest)
+	})
 }
 
 // ── Body builders ────────────────────────────────────────────────────────
@@ -866,8 +874,19 @@ func (d *CrewDocument) updatePatch(remote *CrewRemote) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if want != "" && !jsonStringEqual(want, deref(remote.DevcontainerConfig)) {
-			patch["devcontainer_config"] = want
+		if want != "" {
+			// Compare and send the form the server stores: create and
+			// update inject the agent account (#5337). Comparing the bare
+			// manifest config planned an update on every re-apply, and an
+			// older server stored that bare PATCH as is. A config the
+			// normalizer refuses goes out unchanged for the server to
+			// refuse with its own message.
+			if normalised, nerr := devcontainer.NormalizeAgentUserJSON(want); nerr == nil {
+				want = normalised
+			}
+			if !jsonStringEqual(want, deref(remote.DevcontainerConfig)) {
+				patch["devcontainer_config"] = want
+			}
 		}
 		// Diff container sizing against the remote columns so a
 		// converged manifest stops emitting no-op patches. A value

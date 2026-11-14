@@ -3,30 +3,29 @@ package mooring
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"math/big"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/crewship-ai/crewship/internal/craftengine"
 )
 
 var ErrNativeValidation = errors.New("native document failed pinned engine validation")
 
-// NativeCLIValidator invokes a configured, qualified original application CLI.
-// The hash identifies the exact binary; engine revision and editor bundle are
-// separately pinned by NativeStore. Validation never replaces original bytes
-// with the engine's normalized export. It runs outside the SQL writer.
+// NativeCLIValidator runs the pinned document engine of the application on a
+// candidate. The engine's SHA-256 identifies its exact bytes; engine revision
+// and editor bundle are separately pinned by NativeStore. Validation never
+// replaces original bytes with the engine's normalized export. It runs outside
+// the SQL writer.
 type NativeCLIValidator struct {
-	Application, BinaryPath, SHA256 string
-	Timeout                         time.Duration
+	Application string
+	Engine      craftengine.Engine
+	Timeout     time.Duration
 }
 
 type nativeEngineOutput struct {
@@ -45,29 +44,7 @@ func (v NativeCLIValidator) Validate(ctx context.Context, raw []byte) error {
 	if len(raw) == 0 || len(raw) > 32<<20 || len(trimmed) == 0 || trimmed[0] != '{' || !json.Valid(raw) {
 		return ErrNativeValidation
 	}
-	// /proc/self/fd executes the descriptor we hashed, closing replacement races.
-	// Other platforms need an equally qualified launcher before enabling this profile.
-	if runtime.GOOS != "linux" || v.Application != "wordcraft" && v.Application != "gridcraft" || !filepath.IsAbs(v.BinaryPath) || len(v.SHA256) != 64 {
-		return ErrNativeValidation
-	}
-	expected, err := hex.DecodeString(v.SHA256)
-	if err != nil {
-		return ErrNativeValidation
-	}
-	f, err := os.Open(v.BinaryPath)
-	if err != nil {
-		return ErrNativeValidation
-	}
-	defer f.Close()
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > 512<<20 {
-		return ErrNativeValidation
-	}
-	digest := sha256.New()
-	if _, err = io.Copy(digest, f); err != nil || !bytes.Equal(digest.Sum(nil), expected) {
-		return ErrNativeValidation
-	}
-	if _, err = f.Seek(0, io.SeekStart); err != nil {
+	if v.Application != "wordcraft" && v.Application != "gridcraft" || v.Engine == nil || v.Engine.Application() != v.Application {
 		return ErrNativeValidation
 	}
 	timeout := v.Timeout
@@ -89,28 +66,23 @@ func (v NativeCLIValidator) Validate(ctx context.Context, raw []byte) error {
 	if err = os.WriteFile(input, raw, 0600); err != nil {
 		return ErrNativeValidation
 	}
-	args := []string{"convert", input, output}
-	cmd := exec.CommandContext(ctx, "/proc/self/fd/3", args...)
-	cmd.ExtraFiles = []*os.File{f}
-	cmd.Dir = dir
-	cmd.Env = []string{"LANG=C.UTF-8", "HOME=" + dir, "TMPDIR=" + dir}
-	cmd.WaitDelay = 100 * time.Millisecond
+	root := v.Engine.Root(dir)
+	seenOutput := root + "/validated.json"
 	stdout := &nativeEngineOutput{limit: 1 << 20}
 	stderr := &nativeEngineOutput{limit: 64 << 10}
-	cmd.Stdout, cmd.Stderr = stdout, stderr
-	if err = cmd.Run(); err != nil {
+	if err = v.Engine.Run(ctx, dir, []string{"convert", root + "/candidate.json", seenOutput}, stdout, stderr); err != nil {
 		return ErrNativeValidation
 	}
-	info, err = os.Stat(output)
+	info, err := os.Stat(output)
 	if err != nil || !info.Mode().IsRegular() || info.Size() == 0 || info.Size() > 64<<20 {
 		return ErrNativeValidation
 	}
-	expectedSuccess := "wrote " + output + "\n"
+	expectedSuccess := "wrote " + seenOutput + "\n"
 	if v.Application == "gridcraft" {
-		expectedSuccess = "wrote " + output + " (" + strconv.FormatInt(info.Size(), 10) + " bytes)\n"
+		expectedSuccess = "wrote " + seenOutput + " (" + strconv.FormatInt(info.Size(), 10) + " bytes)\n"
 	}
-	// Both qualified CLIs log a success line on stderr. Any additional warning
-	// or diagnostic refuses publication, even when the process exits zero.
+	// Both qualified engines log a success line on stderr. Any additional
+	// warning or diagnostic refuses publication, even when the run succeeds.
 	if stdout.Len() != 0 || stderr.String() != expectedSuccess {
 		return ErrNativeValidation
 	}

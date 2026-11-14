@@ -270,6 +270,12 @@ crewship apply --file workspace.yaml --yes
 
 `crew start` is idempotent, so it is safe to put in front of every
 apply that ships crew files.
+
+A crew update earlier in the same apply also recycles the container, and a
+file save in that window gets the same `409`. Apply waits for the container
+for about 30 seconds before it fails, on both the combined manifest and
+standalone `kind: Crew` documents; a crew that is still stopped after that
+fails with the server's message.
 </Warning>
 
 ## See also

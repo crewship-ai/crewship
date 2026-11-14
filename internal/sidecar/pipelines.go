@@ -510,6 +510,13 @@ type ipcResponse struct {
 // exceed it surface as "test_run forward: context deadline" to the
 // agent, which is correct (the agent should split the pipeline).
 func (s *Server) ipcRequestJSON(ctx context.Context, method, path string, body []byte) (*ipcResponse, error) {
+	return s.ipcRequestJSONWithRun(ctx, method, path, body, "")
+}
+
+// ipcRequestJSONWithRun is ipcRequestJSON that also forwards the agent run
+// token as the Authorization bearer, as the artifact tools do, when one is
+// given.
+func (s *Server) ipcRequestJSONWithRun(ctx context.Context, method, path string, body []byte, runToken string) (*ipcResponse, error) {
 	if s.ipc == nil {
 		return nil, fmt.Errorf("IPC not configured")
 	}
@@ -528,6 +535,9 @@ func (s *Server) ipcRequestJSON(ctx context.Context, method, path string, body [
 		req.Header.Set("Content-Type", "application/json")
 	}
 	req.Header.Set("X-Internal-Token", s.ipc.Token)
+	if runToken != "" {
+		req.Header.Set("Authorization", "Bearer "+runToken)
+	}
 	if token := routineSourceToken(ctx); token != "" {
 		req.Header.Set("X-Crewship-Run-Token", token)
 	}

@@ -33,9 +33,9 @@ func TestZeroConfigEditorFollowsTheRequestOrigin(t *testing.T) {
 	dir := t.TempDir()
 	digest := writeEditorBundle(t, dir)
 	cfg.GridCraft = config.GridCraftConfig{Enabled: true, EditorEnabled: true, EditorBundleDir: dir, EditorBundles: []string{digest}}
-	editor := newEditorOrigin(cfg, slog.Default())
+	editor := newEditorOrigin(cfg, nil, slog.Default())
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
-	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, editor)))
+	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, nil, editor)))
 
 	for _, host := range []string{"crewship.example.test", "studio.other.example:8443"} {
 		studio := "https://" + host
@@ -73,9 +73,9 @@ func TestZeroConfigSchemeAndCaching(t *testing.T) {
 	cfg := config.Default()
 	dir := t.TempDir()
 	cfg.GridCraft = config.GridCraftConfig{Enabled: true, EditorEnabled: true, EditorBundleDir: dir, EditorBundles: []string{writeEditorBundle(t, dir)}}
-	editor := newEditorOrigin(cfg, slog.Default())
+	editor := newEditorOrigin(cfg, nil, slog.Default())
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
-	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, editor)))
+	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, nil, editor)))
 	for _, tc := range []struct {
 		remote, proto, want string
 	}{
@@ -120,7 +120,7 @@ func TestZeroConfigSchemeAndCaching(t *testing.T) {
 func TestConfiguredStudioOriginFailsClosedOnOtherHosts(t *testing.T) {
 	cfg, editor, digest := sameHostEditor(t, "https://crewship.example.test")
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })
-	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, editor)))
+	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, nil, editor)))
 	for host, want := range map[string]int{"crewship.example.test": 200, "127.0.0.1:8080": http.StatusMisdirectedRequest, "other.example.test": http.StatusMisdirectedRequest} {
 		r := httptest.NewRequest("GET", "/_editor/b/"+digest+"/index.html", nil)
 		r.Host = host

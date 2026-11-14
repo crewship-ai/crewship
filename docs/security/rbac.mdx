@@ -235,8 +235,8 @@ already-referenced runs the ordinary way, binding nothing.
   holds its own grant on it; the human's member-level access is rechecked on
   every use. Writes are limited to the human's own attached or created
   artifacts; agents never share or publish.
-- A folder can let the agents of its owning crew read or suggest on its
-  non-private pages (`crewship page folder agent-access`, admin or the crew's
+- A folder can let the agents of its owning crew read its non-private
+  pages (`propose` reads only, until folder suggestions are built) (`crewship page folder agent-access`, admin or the crew's
   MANAGER+). Never edit, never another crew's agents, never Personal pages;
   in a chat run the human's access is still required.
 - Runs without a human (routine, webhook, cron) reach no artifact through the

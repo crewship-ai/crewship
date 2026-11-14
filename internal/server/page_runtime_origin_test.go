@@ -104,9 +104,9 @@ func TestSameHostEditorRefusesTheDerivedRuntimeOrigin(t *testing.T) {
 	dir := t.TempDir()
 	digest := writeEditorBundle(t, dir)
 	cfg.GridCraft = config.GridCraftConfig{Enabled: true, EditorEnabled: true, EditorBundleDir: dir, EditorBundles: []string{digest}}
-	editor := newEditorOrigin(cfg, slog.Default())
+	editor := newEditorOrigin(cfg, nil, slog.Default())
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
-	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, editor)))
+	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, nil, editor)))
 
 	for host, want := range map[string]bool{"localhost:8080": true, "127.0.0.1:8080": false} {
 		r := httptest.NewRequest("GET", "http://"+host+"/_editor/b/"+digest+"/index.html", nil)

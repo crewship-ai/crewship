@@ -139,3 +139,25 @@ func TestCraftNativeGridExplicitEnvProfileOverridesPreserveWordAndDefaultOff(t *
 		t.Fatal("explicit empty operator override silently reused YAML qualification")
 	}
 }
+
+// The Word and Sheet package settings (#5315) come only from operator
+// startup configuration: YAML, overridden by the environment.
+func TestCraftComponentSettingsFromYAMLAndEnv(t *testing.T) {
+	var c CraftNativeConfig
+	if err := yaml.Unmarshal([]byte("components_dir: /srv/craft\ncomponent_pins: wordcraft=1=abc\ncomponent_url: https://mirror.example/v1/\n"), &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.ComponentsDir != "/srv/craft" || c.ComponentPins != "wordcraft=1=abc" || c.ComponentURL != "https://mirror.example/v1/" {
+		t.Fatalf("YAML = %+v", c)
+	}
+	t.Setenv("CREWSHIP_CRAFT_COMPONENTS_DIR", "/data/craft")
+	t.Setenv("CREWSHIP_CRAFT_COMPONENT_PINS", "")
+	t.Setenv("CREWSHIP_CRAFT_COMPONENT_URL", "https://other.example/")
+	applyCraftNativeEnv(&c)
+	if c.ComponentsDir != "/data/craft" || c.ComponentPins != "" || c.ComponentURL != "https://other.example/" {
+		t.Fatalf("env = %+v", c)
+	}
+	if d := Default().CraftNative; d.ComponentsDir != "" || d.ComponentPins != "" || d.ComponentURL != "" || d.Enabled {
+		t.Fatalf("default = %+v", d)
+	}
+}

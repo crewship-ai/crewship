@@ -475,7 +475,7 @@ func (s *Server) respondRoutinesMCPToolsCall(w http.ResponseWriter, r *http.Requ
 				return
 			}
 		}
-		status, bodyBytes = s.savePage(r.Context(), save, actingAgentID)
+		status, bodyBytes = s.savePage(r.Context(), save, actingAgentID, s.liveRunToken(r))
 	case "list_routines":
 		status, bodyBytes = s.listPipelines(r.Context(), "")
 	case "workspace_overview":
