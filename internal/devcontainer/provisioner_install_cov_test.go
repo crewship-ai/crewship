@@ -702,6 +702,44 @@ func TestCleanupCaches(t *testing.T) {
 	}
 }
 
+// The build pins mise's cache under /opt/mise, the running container reads it
+// from the agent's home on a read-only root. What the build downloaded there
+// is never read again, and it was 766 MB of a 982 MB commit layer (#5384).
+func TestCleanupCaches_EmptiesMiseBuildCache(t *testing.T) {
+	t.Parallel()
+
+	var buildCache, runtimeCache string
+	for _, kv := range miseBuildEnv {
+		if kv[0] == "MISE_CACHE_DIR" {
+			buildCache = kv[1]
+		}
+	}
+	for _, kv := range MiseRuntimeEnv {
+		if kv[0] == "MISE_CACHE_DIR" {
+			runtimeCache = kv[1]
+		}
+	}
+	if buildCache == "" || buildCache == runtimeCache {
+		t.Fatalf("build cache %q must be set and differ from the runtime cache %q: cleaning it is only safe while nothing reads it at runtime", buildCache, runtimeCache)
+	}
+
+	exec := newCovExecClient(nil)
+	p := newCovProvisioner(&mockCommitClient{}, exec, t.TempDir())
+	if err := p.cleanupCaches(context.Background(), "cid", p.installer.execInContainerAsUser); err != nil {
+		t.Fatalf("cleanupCaches: %v", err)
+	}
+	cmd := exec.execCmd(0)
+	if !strings.Contains(cmd, buildCache) {
+		t.Errorf("cleanup script does not empty the mise build cache %s:\n%s", buildCache, cmd)
+	}
+	// Only the cache goes. mise's tools, config and shims stay untouched.
+	for _, keep := range []string{miseRoot + "/data", miseRoot + "/config", miseRoot + "/state"} {
+		if strings.Contains(cmd, keep) {
+			t.Errorf("cleanup script must not touch %q:\n%s", keep, cmd)
+		}
+	}
+}
+
 func TestCleanupCaches_Failures(t *testing.T) {
 	t.Parallel()
 

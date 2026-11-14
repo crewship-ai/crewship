@@ -540,12 +540,24 @@ func (p *Provisioner) writeAggregatedContainerEnv(ctx context.Context, container
 // by community feature install.sh scripts: apt, npm, pip, and the two tmp
 // directories which many scripts use as scratch space.
 //
+// mise's build-time cache goes too. The build pins MISE_CACHE_DIR under
+// /opt/mise (miseBuildEnv); the running container reads its cache from the
+// agent's home on a read-only root (MiseRuntimeEnv), so the tarballs and npm
+// metadata `mise install` downloaded are never read again. They were 766 MB of
+// a 982 MB commit layer on a default crew image (#5384). Only the cache is
+// emptied; mise's data, config and shims are what the runtime uses.
+//
+// On the build-only path this step is a later RUN layer, which cannot take
+// bytes back out of the layer that wrote them, so the saving there is limited
+// to what a squashing builder gives.
+//
 // Uses `2>/dev/null || true` so missing directories on exotic base images do
 // not fail the cleanup step.
 
 func (p *Provisioner) cleanupCaches(ctx context.Context, containerID string, exec ExecFunc) error {
 	const script = `set -u
 for path in \
+  ` + miseRoot + `/cache \
   /var/cache/apt \
   /var/lib/apt/lists \
   /var/tmp \
