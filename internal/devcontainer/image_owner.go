@@ -29,11 +29,6 @@ const (
 	ImageKindFeature = "feature"
 )
 
-// imageNamespaceLen is how much of the installation identity enters an image
-// tag. Twelve hex characters keep the tag readable and are as wide as the
-// configuration hash that follows them.
-const imageNamespaceLen = 12
-
 // normalizeInstanceID returns the installation identity in the one spelling
 // tags and labels use, or "" when it is not a settled identity (32 random
 // bytes in hex, see resourcelifecycle.LoadIdentity).
@@ -54,7 +49,7 @@ func ImageNamespace(instanceID string) string {
 	if id == "" {
 		return ""
 	}
-	return id[:imageNamespaceLen]
+	return id
 }
 
 // namespacedTag joins a repository prefix ("crewship-cache:"), the
@@ -77,7 +72,7 @@ func featureImageTag(instanceID, contentHash string) string {
 
 // SetInstanceID binds the provisioner to its installation. Images built from
 // then on carry the installation's tag namespace and provenance labels. An
-// empty or malformed identity leaves the legacy names and labels nothing:
+// empty or malformed identity leaves legacy names and clears reserved labels:
 // such images have no established owner and stay outside automatic deletion.
 // Call before the first Provision; it is not synchronised against one.
 func (p *Provisioner) SetInstanceID(id string) {
@@ -90,12 +85,13 @@ func (p *Provisioner) cacheTag(configHash string) string {
 }
 
 // imageOwnerLabels returns the provenance labels for an image of the given
-// kind, or nil when the installation has no settled identity. A shared image
+// kind, or empty reserved values when identity is unavailable. Clearing them
+// prevents an unowned build from inheriting ownership from its base. A shared image
 // names no crew: several crews of one installation may select it.
 func imageOwnerLabels(instanceID, kind string) map[string]string {
 	id := normalizeInstanceID(instanceID)
 	if id == "" {
-		return nil
+		return map[string]string{ImageInstanceLabel: "", ImageKindLabel: ""}
 	}
 	return map[string]string{ImageInstanceLabel: id, ImageKindLabel: kind}
 }

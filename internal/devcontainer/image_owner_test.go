@@ -10,16 +10,16 @@ import (
 
 const (
 	installationA = "aaaaaaaaaaaa1111111111111111111111111111111111111111111111111111"
-	installationB = "bbbbbbbbbbbb2222222222222222222222222222222222222222222222222222"
+	installationB = "aaaaaaaaaaaa2222222222222222222222222222222222222222222222222222"
 )
 
 func TestImageNamespace(t *testing.T) {
 	tests := []struct {
 		name, id, want string
 	}{
-		{"settled identity", installationA, "aaaaaaaaaaaa"},
-		{"upper case is folded", strings.ToUpper(installationA), "aaaaaaaaaaaa"},
-		{"surrounding space is ignored", " " + installationB + "\n", "bbbbbbbbbbbb"},
+		{"settled identity", installationA, installationA},
+		{"upper case is folded", strings.ToUpper(installationA), installationA},
+		{"surrounding space is ignored", " " + installationB + "\n", installationB},
 		{"no identity", "", ""},
 		{"too short", "abc123", ""},
 		{"not hex", strings.Repeat("z", 64), ""},
@@ -39,8 +39,8 @@ func TestProvisionerTagsAreNamespacedByInstallation(t *testing.T) {
 	tests := []struct {
 		name, id, wantCache, wantFeat string
 	}{
-		{"installation A", installationA, "crewship-cache:aaaaaaaaaaaa-0123456789ab", "crewship-feat:aaaaaaaaaaaa-0123456789ab"},
-		{"installation B", installationB, "crewship-cache:bbbbbbbbbbbb-0123456789ab", "crewship-feat:bbbbbbbbbbbb-0123456789ab"},
+		{"installation A", installationA, "crewship-cache:" + installationA + "-0123456789ab", "crewship-feat:" + installationA + "-0123456789ab"},
+		{"installation B", installationB, "crewship-cache:" + installationB + "-0123456789ab", "crewship-feat:" + installationB + "-0123456789ab"},
 		{"no identity keeps the legacy names", "", "crewship-cache:0123456789ab", "crewship-feat:0123456789ab"},
 		{"invalid identity keeps the legacy names", "not-an-identity", "crewship-cache:0123456789ab", "crewship-feat:0123456789ab"},
 	}
@@ -59,8 +59,8 @@ func TestProvisionerTagsAreNamespacedByInstallation(t *testing.T) {
 }
 
 func TestImageOwnerLabels(t *testing.T) {
-	if got := imageOwnerLabels("", ImageKindCrew); got != nil {
-		t.Errorf("no identity must label nothing, got %v", got)
+	if got := imageOwnerLabels("", ImageKindCrew); got[ImageInstanceLabel] != "" || got[ImageKindLabel] != "" || len(got) != 2 {
+		t.Errorf("no identity must clear inherited provenance, got %v", got)
 	}
 	got := imageOwnerLabels(installationA, ImageKindFeature)
 	if got[ImageInstanceLabel] != installationA || got[ImageKindLabel] != ImageKindFeature || len(got) != 2 {
@@ -124,7 +124,7 @@ func TestStageOwnedBuildContext_NamespacesAndLabelsFeatureImage(t *testing.T) {
 	_, tagB := stage(installationB)
 	dfNone, tagNone := stage("")
 
-	if !strings.HasPrefix(tagA, "crewship-feat:aaaaaaaaaaaa-") || !strings.HasPrefix(tagB, "crewship-feat:bbbbbbbbbbbb-") {
+	if !strings.HasPrefix(tagA, "crewship-feat:"+installationA+"-") || !strings.HasPrefix(tagB, "crewship-feat:"+installationB+"-") {
 		t.Errorf("feature tags must carry the installation namespace: %q %q", tagA, tagB)
 	}
 	if strings.Contains(strings.TrimPrefix(tagNone, FeatureImageTagPrefix), "-") {
@@ -133,8 +133,10 @@ func TestStageOwnedBuildContext_NamespacesAndLabelsFeatureImage(t *testing.T) {
 	if !strings.Contains(dfA, `LABEL "crewship.image.kind"="feature"`) || !strings.Contains(dfA, installationA) {
 		t.Errorf("owned feature image must be labelled:\n%s", dfA)
 	}
-	if strings.Contains(dfNone, "LABEL") {
-		t.Errorf("without identity nothing is labelled:\n%s", dfNone)
+	for _, key := range []string{ImageInstanceLabel, ImageKindLabel} {
+		if !strings.Contains(dfNone, `LABEL "`+key+`"=""`) {
+			t.Errorf("identityless build must clear inherited %s", key)
+		}
 	}
 	// The legacy helper stays byte-identical for callers without identity.
 	dir, dfLegacy, tagLegacy, err := stageBuildContext("ubuntu:22.04", nil, nil, nil)
@@ -173,7 +175,7 @@ func TestProvision_InstallationsOnOneDaemonDoNotShareImages(t *testing.T) {
 	}
 
 	resA := provision(installationA)
-	if got, want := daemon.commitRefs, []string{"crewship-cache:aaaaaaaaaaaa-" + hash[:12]}; !slices.Equal(got, want) {
+	if got, want := daemon.commitRefs, []string{"crewship-cache:" + installationA + "-" + hash[:12]}; !slices.Equal(got, want) {
 		t.Fatalf("installation A commits = %v, want %v", got, want)
 	}
 	wantChanges := []string{
@@ -187,7 +189,7 @@ func TestProvision_InstallationsOnOneDaemonDoNotShareImages(t *testing.T) {
 	}
 
 	resB := provision(installationB)
-	if len(daemon.commitRefs) != 2 || daemon.commitRefs[1] != "crewship-cache:bbbbbbbbbbbb-"+hash[:12] {
+	if len(daemon.commitRefs) != 2 || daemon.commitRefs[1] != "crewship-cache:"+installationB+"-"+hash[:12] {
 		t.Fatalf("installation B must build its own image, commits = %v", daemon.commitRefs)
 	}
 	if resA.ConfigHash != resB.ConfigHash {
@@ -203,7 +205,7 @@ func TestProvision_InstallationsOnOneDaemonDoNotShareImages(t *testing.T) {
 }
 
 // Without a settled identity the provisioner behaves exactly as before: the
-// legacy tag, no provenance labels. Such images are never owned.
+// legacy tag, cleared provenance labels. Such images are never owned.
 func TestProvision_WithoutIdentityKeepsLegacyNamesAndLabelsNothing(t *testing.T) {
 	cfg := &Config{Image: offlineBaseImage, ContainerEnv: map[string]string{"FOO": "bar"}}
 	hash := configHash(offlineBaseImage, cfg, "", dockerfileGenFingerprint(offlineBaseImage, cfg))
@@ -217,8 +219,44 @@ func TestProvision_WithoutIdentityKeepsLegacyNamesAndLabelsNothing(t *testing.T)
 		t.Errorf("commits = %v, want the legacy tag %s", daemon.commitRefs, cacheImageTag(hash))
 	}
 	for _, change := range daemon.commitChanges[0] {
-		if strings.HasPrefix(change, "LABEL") {
-			t.Errorf("unowned image must not be labelled: %s", change)
+		if strings.HasPrefix(change, "LABEL") && !strings.HasSuffix(change, `=""`) {
+			t.Errorf("unowned image must clear provenance: %s", change)
 		}
 	}
+}
+
+// An owned base may be supplied as a custom image. Docker inherits its image
+// labels on both FROM and commit; identityless output must override them.
+func TestIdentitylessBuildClearsInheritedOwner(t *testing.T) {
+	labels := func(lines []string) map[string]string {
+		effective := map[string]string{ImageInstanceLabel: installationA, ImageKindLabel: ImageKindCrew}
+		for _, line := range lines {
+			for _, key := range []string{ImageInstanceLabel, ImageKindLabel} {
+				if strings.TrimSpace(line) == `LABEL "`+key+`"=""` {
+					effective[key] = ""
+				}
+			}
+		}
+		return effective
+	}
+	assertUnowned := func(lines []string) {
+		t.Helper()
+		effective := labels(lines)
+		if effective[ImageInstanceLabel] != "" || effective[ImageKindLabel] != "" {
+			t.Fatalf("inherited ownership survived: %v; changes=%v", effective, lines)
+		}
+	}
+	cfg := &Config{Image: offlineBaseImage, ContainerEnv: map[string]string{"FOO": "bar"}}
+	daemon := &mockCommitClient{existingImages: []string{offlineBaseImage}}
+	p := NewProvisioner(daemon, NewInstaller(&mockDockerClient{exitCode: 0}, testLogger()), nil, testLogger())
+	if _, err := p.Provision(t.Context(), offlineBaseImage, cfg, ""); err != nil {
+		t.Fatal(err)
+	}
+	assertUnowned(daemon.commitChanges[0])
+	builder := &recordingBuilder{available: true}
+	buildOnly := NewBuildOnlyProvisioner(builder, nil, testLogger())
+	if _, err := buildOnly.Provision(t.Context(), offlineBaseImage, cfg, ""); err != nil {
+		t.Fatal(err)
+	}
+	assertUnowned(strings.Split(builder.dockerfile, "\n"))
 }

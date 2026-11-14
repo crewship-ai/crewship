@@ -325,13 +325,13 @@ namespace and labels them with their origin:
 | Crew image | `crewship-cache:{namespace}-{hash[:12]}` | `crewship.image.instance-id`, `crewship.image.kind=crew` |
 | Intermediate feature image | `crewship-feat:{namespace}-{hash[:12]}` | `crewship.image.instance-id`, `crewship.image.kind=feature` |
 
-`{namespace}` is the first 12 characters of the installation identity (the
+`{namespace}` is the full installation identity (the
 value of the `crewship.instance-id` container label). `config_hash` itself is
 unchanged and not installation-specific.
 
 - Crews of one installation still share an image when their configuration
-  matches. Two installations on one Docker daemon never resolve to the same
-  crew image, so neither can remove an image the other selected. Base images
+  matches. New build cache lookups use distinct tags for each installation.
+  This does not change existing selections or enforce deletion ownership. Base images
   and BuildKit layers remain shared by the daemon.
 - A shared image names no crew. The labels record which installation built
   it; they are evidence of origin, not a permission to delete. What an
@@ -340,7 +340,7 @@ unchanged and not installation-specific.
   and these keys are never used to recognise a runtime container.
 - Without a settled identity (an in-memory database, or a second server on
   the same database file) the legacy names `crewship-cache:{hash[:12]}` and
-  `crewship-feat:{hash[:12]}` are used and nothing is labelled.
+  `crewship-feat:{hash[:12]}` are used and reserved ownership labels are cleared to prevent inheritance.
 - Upgrading does not rebuild crews. A crew keeps running from the image it
   already selected, by immutable image ID; the namespace applies from the next
   build the crew needs. Images built before the upgrade are not claimed: they
