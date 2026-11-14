@@ -566,3 +566,9 @@ func WithSkillGitImportPolicy(policy skills.GitImportPolicy) RouterOption {
 	copyPolicy := skills.GitImportPolicy{PrivateHosts: append([]string(nil), policy.PrivateHosts...)}
 	return func(r *Router) { r.skillGitImportPolicy = copyPolicy }
 }
+
+// WithLegacyImageEviction maps the deprecated YAML/ENV opt-in onto the single
+// ownership-aware collector. An explicit CREWSHIP_IMAGE_GC value takes priority.
+func WithLegacyImageEviction(enabled bool) RouterOption {
+	return func(r *Router) { r.legacyImageEviction = enabled }
+}

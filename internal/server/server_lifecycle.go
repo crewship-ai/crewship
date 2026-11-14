@@ -260,7 +260,7 @@ func (s *Server) Start(ctx context.Context) error {
 			DB: s.db, InstanceID: s.cfg.Container.InstanceID, Runtime: docker, Logger: s.logger,
 			RuntimeAfter: time.Duration(s.cfg.Container.IdleRuntimeRetentionDays) * 24 * time.Hour,
 		}
-		s.logger.Info("idle retention enabled", "runtime_after_days", s.cfg.Container.IdleRuntimeRetentionDays, "cache_eviction", s.cfg.Container.CacheEviction)
+		s.logger.Info("idle retention enabled", "runtime_after_days", s.cfg.Container.IdleRuntimeRetentionDays)
 		s.bgWg.Add(1)
 		go func() { defer s.bgWg.Done(); retention.Run(ctx) }()
 	}

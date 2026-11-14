@@ -3,6 +3,7 @@ package backup
 import (
 	"archive/tar"
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -500,4 +501,44 @@ func dropRootEntry(r io.Reader, contexts ...context.Context) io.Reader {
 		}
 	}()
 	return pr
+}
+
+// selectRestoredEnvironments publishes the captured snapshot, not the source
+// image ID from before docker commit. Immutable source IDs cannot be recreated
+// by tagging an imported snapshot. Called inside the database restore tx.
+func selectRestoredEnvironments(ctx context.Context, tx *sql.Tx, ex *ExtractedPayload, outcomes []EnvironmentOutcome, inserted map[string]bool) error {
+	for _, out := range outcomes {
+		if out.Result != EnvRestored {
+			continue
+		}
+		env := ex.EnvironmentBySlug[out.Crew]
+		if env == nil || env.Crew != out.Crew || out.Image != env.ImageRef || out.Image == "" {
+			return fmt.Errorf("backup: captured environment outcome does not match its descriptor")
+		}
+		if !env.Managed {
+			continue
+		}
+		var crewID, workspaceID, slug string
+		if ex.DBDump != nil {
+			for _, row := range ex.DBDump.Tables["crews"] {
+				if rowString(row, "slug") == out.Crew {
+					crewID = rowString(row, "id")
+					workspaceID = rowString(row, "workspace_id")
+					slug = out.Crew
+					break
+				}
+			}
+		}
+		if crewID == "" || workspaceID == "" || (env.CrewID != "" && env.CrewID != crewID) {
+			return fmt.Errorf("backup: environment %s does not match a restored crew", out.Crew)
+		}
+		if !inserted[crewID] {
+			continue
+		} // never modify a row ignored because it already existed
+		_, err := tx.ExecContext(ctx, `UPDATE crews SET cached_image=? WHERE id=? AND workspace_id=? AND slug=? AND (cached_image IS NULL OR cached_image='' OR cached_image=? OR cached_image=?)`, out.Image, crewID, workspaceID, slug, env.SourceImage, env.SourceImageID)
+		if err != nil {
+			return fmt.Errorf("backup: select captured environment for %s: %w", env.Crew, err)
+		}
+	}
+	return nil
 }

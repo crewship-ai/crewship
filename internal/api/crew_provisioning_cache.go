@@ -230,9 +230,39 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer releaseImages()
+	releaseArtifact, available := resourcelifecycle.Images(h.db).TryCollectImages(tag)
+	if !available {
+		replyError(w, http.StatusConflict, "this image is being acquired or built; retry deletion later")
+		return
+	}
+	defer releaseArtifact()
+	// Output tags and immutable base IDs are both acquisition keys.
+	inventory, inventoryErr := h.gcClient.ImageList(r.Context(), client.ImageListOptions{All: true})
+	if inventoryErr != nil {
+		replyInternalError(w, h.logger, "resolve image deletion target", inventoryErr)
+		return
+	}
+	var candidateID string
+	for _, img := range inventory.Items {
+		if slices.Contains(img.RepoTags, tag) {
+			candidateID = img.ID
+			break
+		}
+	}
+	if candidateID != "" {
+		releaseID, available := resourcelifecycle.Images(h.db).TryCollectImages(candidateID)
+		if !available {
+			replyError(w, http.StatusConflict, "this image is in use by a build; retry deletion later")
+			return
+		}
+		defer releaseID()
+	}
 
 	force := r.URL.Query().Get("force") == "true"
 	removeRef := tag
+	if dockerutil.IsLocalImageID(candidateID) {
+		removeRef = candidateID
+	}
 
 	if !force {
 		refs, err := h.referencedCacheImages(r.Context())
@@ -254,11 +284,8 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 			hasPinned = hasPinned || dockerutil.IsLocalImageID(ref)
 		}
 		if hasPinned {
-			images, err := h.gcClient.ImageList(r.Context(), client.ImageListOptions{})
-			if err != nil {
-				replyInternalError(w, h.logger, "resolve cached image identity", err)
-				return
-			}
+			images := inventory
+
 			found := false
 			for _, img := range images.Items {
 				if !slices.Contains(img.RepoTags, tag) {
