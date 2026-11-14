@@ -1208,7 +1208,8 @@ crewship page folder agent-access ops-board --level none
 ```
 
 Sets what the agents of the folder's owning crew may do with the pages filed
-in it: `none` (default), `read`, or `propose` (read and suggest). There is no
+in it: `none` (default), `read`, or `propose` (read and suggest; until
+folder suggestions ship, `propose` reaches exactly what `read` does). There is no
 edit level; an agent edits a page only through a grant on that page from its
 owner. Private (Personal) pages are never reached and agents of other crews
 are not covered. Levels other than `none` need the workspace feature flag

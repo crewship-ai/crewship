@@ -259,3 +259,37 @@ func TestFolderAgentAccess_MovingIntoAFolderKeepsTheOwner(t *testing.T) {
 		t.Fatalf("owner %q -> %q %v", before, after, err)
 	}
 }
+
+// Review (PR3): folder reach follows the agent's and the crew's live state.
+func TestFolderAgents_FollowLiveAgentAndCrew(t *testing.T) {
+	cases := []struct {
+		name   string
+		change func(g *runScopeRig)
+	}{
+		{"agent moved to another crew", func(g *runScopeRig) {
+			other := seedCrewRow(t, g.f.rig.db, "crew-folder-moved", g.f.a.WorkspaceID, "Moved", "folder-moved")
+			mustExec(t, g.f.rig.db, `UPDATE agents SET crew_id=? WHERE id=?`, other, g.f.a.AgentID)
+		}},
+		{"owning crew deleted", func(g *runScopeRig) {
+			mustExec(t, g.f.rig.db, `UPDATE crews SET deleted_at='2026-11-14T00:00:00Z' WHERE id=?`, g.f.a.CrewID)
+		}},
+		{"agent deleted", func(g *runScopeRig) {
+			mustExec(t, g.f.rig.db, `UPDATE agents SET deleted_at='2026-11-14T00:00:00Z' WHERE id=?`, g.f.a.AgentID)
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			g := newRunScopeRig(t)
+			page := g.shared(t, "folder-live")
+			g.folder(t, "live", g.f.a.CrewID, "read", page)
+			g.start(t)
+			if w := g.tool("artifact_versions", "folder-live", `{}`); w.Code != 200 {
+				t.Fatalf("folder reach before the change: %d %s", w.Code, w.Body)
+			}
+			tc.change(g)
+			if w := g.tool("artifact_versions", "folder-live", `{}`); w.Code == 200 {
+				t.Fatalf("folder reach survived: %s", tc.name)
+			}
+		})
+	}
+}
