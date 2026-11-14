@@ -45,7 +45,18 @@ carries the same reason acquire would answer with. The editor then opens
 read-only with "An administrator turned Word off on this server. You can read
 this document; editing is not available." (Sheet alike) and offers no take-over.
 An editor already open when the application is turned off keeps renewing and
-saving through the drain, as in the table above. The document status reports each
+saving through the drain, as in the table above: custody belongs to the session
+that holds the lease (`craftNativePrincipal`), so only that session keeps
+saving, and it may still hand back. Its hand-over is refused while draining; the
+editor checks availability first and keeps writing, saying "An administrator
+turned Word off on this server, so editing cannot be handed over. You can keep
+editing; your changes keep saving until it closes." A reload opens a new
+session, which cannot take custody during the drain, so it opens read-only; the
+local draft is kept. When the drain ends the lease is no longer renewed and the
+editor turns read-only, draft kept. Every other editor that tries to take over,
+ask for editing or initialize a document gets the 503 `app_draining` or
+`app_disabled` refusal shown as the administrator text, and the editor stops
+offering those actions. The document status reports each
 application's mode in `applications`, so New artifact says Word or Sheet is
 turned off on this server by an administrator instead of not available.
 

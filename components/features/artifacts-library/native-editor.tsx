@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { apiFetch } from "@/lib/api-fetch"
 import { verifyNativeReadLoss } from "@/lib/mooring/native-read-loss"
+import { appOffText, nativeAppOff } from "@/lib/mooring/native-app-off"
 import { NativeCraftEditorHost, type NativeCraftHostStatus } from "@/components/features/pages/native-craft-editor-host"
 import { NativeCraftPreview } from "@/components/features/pages/native-craft-preview"
 import { NativeCraftReaderHistory } from "@/components/features/pages/native-craft-reader-history"
@@ -30,28 +31,6 @@ function OnceAgentOpened({ children }: { children: ReactNode }) {
 
 type State = "loading" | "enabled" | "preview" | "readonly" | "off" | "disabled" | "error"
 
-const APP_LABEL: Record<string, string> = { wordcraft: "Word", gridcraft: "Sheet" }
-const OFF_REASONS = new Set(["app_draining", "app_disabled"])
-
-/**
- * Whether the instance administrator has this document's application draining
- * or off (#5381). The server sets `edit_refusal` when this person could
- * otherwise edit; an answer that still claims `can_edit` while the
- * application's mode is not open is treated the same, so the editor is never
- * offered for editing the server would refuse.
- */
-export function nativeAppOff(fields: Record<string, unknown>): string | null {
-  const application = typeof fields.application === "string" ? fields.application : ""
-  const label = APP_LABEL[application]
-  if (!label || fields.enabled !== true) return null
-  const modes = fields.applications && typeof fields.applications === "object" ? fields.applications as Record<string, unknown> : {}
-  const mode = modes[application]
-  const refused = typeof fields.edit_refusal === "string" && OFF_REASONS.has(fields.edit_refusal)
-  return refused || fields.can_edit === true && (mode === "draining" || mode === "closed") ? label : null
-}
-
-/** What the editor says while an administrator has the application draining or off. */
-export const appOffText = (label: string) => `An administrator turned ${label} off on this server. You can read this document; editing is not available.`
 
 /**
  * A native Word or Sheet opens inside its Artifacts detail: the same

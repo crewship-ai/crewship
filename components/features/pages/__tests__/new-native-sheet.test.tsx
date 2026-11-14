@@ -66,3 +66,16 @@ it.each([{}, {application_id:'wordcraft',page_id:'sheet-page',session_token:'a'.
  expect(mocks.fetch.mock.calls.filter(([url])=>!url.includes('/craft/'))).toHaveLength(1)
  expect(created).not.toHaveBeenCalled();client.clear()
 })
+
+// #5381: initialize refused because an administrator turned Sheet off names
+// the cause instead of "could not be confirmed".
+it('says an administrator turned Sheet off when initialize is refused for it',async()=>{
+ const {client,created}=prepare()
+ const base=mocks.fetch.getMockImplementation()!
+ mocks.fetch.mockImplementation((url:string,init?:unknown)=>url.includes('/craft/initialize')?response({error:'Sheet: turned off',reason:'app_disabled',application:'gridcraft'},503):base(url,init))
+ fireEvent.click(screen.getByRole('button',{name:'Create Doc'}))
+ expect(await screen.findByText(/An administrator turned Sheet off on this server/)).toBeInTheDocument()
+ expect(screen.queryByText(/Native initialization could not be confirmed/)).not.toBeInTheDocument()
+ expect(created).not.toHaveBeenCalled()
+ client.clear()
+})

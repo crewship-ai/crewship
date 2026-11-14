@@ -13,7 +13,7 @@ import {artifactsLibrary} from "@/lib/feature-flags"
 import {legacyPagesTarget} from "@/components/features/artifacts-library/legacy-pages-url"
 import {LegacyPagesRedirect} from "@/components/features/artifacts-library/legacy-pages-redirect"
 import {RestrictedPagesRedirect} from "@/components/features/artifacts-library/restricted-pages-redirect"
-import {appOffText,nativeAppOff} from "@/components/features/artifacts-library/native-editor"
+import {appOffText,nativeAppOff} from "@/lib/mooring/native-app-off"
 
 interface Availability {scope:string;state:"loading"|"enabled"|"preview"|"disabled"|"error";off?:string;preview?:boolean}
 export default function CraftPage(){return <Suspense fallback={<p className="p-6">Connecting…</p>}><CraftEntry/></Suspense>}

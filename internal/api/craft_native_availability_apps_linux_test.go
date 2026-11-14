@@ -86,3 +86,41 @@ func TestCraftNativeAvailabilityRefusalNeedsEditAuthority(t *testing.T) {
 		t.Fatalf("read-only availability %d %s", status, raw)
 	}
 }
+
+// The drain is for the session that already holds the lease (#5381): it keeps
+// renewing and saving, while a new session of the same person, which is what a
+// reload opens, is refused custody like anyone else. Custody is bound to the
+// session (craftNativePrincipal), so availability's can_edit:false matches
+// what that reloaded page can do.
+func TestCraftNativeDrainKeepsOnlyTheHoldingSession(t *testing.T) {
+	f, router, call, owner, _, cfg := craftNativeDataTCPFixture(t, true)
+	now := time.Date(2026, 11, 14, 10, 0, 0, 0, time.UTC)
+	policy := &craftapps.Policy{Now: func() time.Time { return now }}
+	router.craftNativeHTTP.apps = newCraftAppsGate(policy, f.db)
+	if _, _, err := policy.Set(t.Context(), f.db, craftapps.Word, craftapps.Enabled, "admin", 0); err != nil {
+		t.Fatal(err)
+	}
+	held, heldID := craftNativeDataTCPAdmission(t, call, owner)
+	if status, raw := call("POST", "lease", owner, held, struct{}{}); status != 200 {
+		t.Fatalf("acquire %d %s", status, raw)
+	}
+	if _, _, err := policy.Set(t.Context(), f.db, craftapps.Word, craftapps.Disabled, "admin", time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	if status, raw := call("POST", "lease/renew", owner, held, map[string]string{"generation": "1"}); status != 200 {
+		t.Fatalf("holder renew while draining %d %s", status, raw)
+	}
+	save := craftNativeDataTCPBody(f, cfg, heldID, "1", "1", "opaque:drain:1", []byte(`{"v":2}`))
+	if status, raw := call("POST", "document/save", owner, held, save); status != 200 {
+		t.Fatalf("holder save while draining %d %s", status, raw)
+	}
+	reloaded, _ := craftNativeDataTCPAdmission(t, call, owner)
+	status, raw := call("POST", "lease", owner, reloaded, struct{}{})
+	var refusal struct{ Reason string }
+	if status != 503 || json.Unmarshal(raw, &refusal) != nil || refusal.Reason != "app_draining" {
+		t.Fatalf("reloaded session acquire %d %s, want 503 app_draining", status, raw)
+	}
+	if status, raw = call("GET", "document", owner, reloaded, nil); status != 200 {
+		t.Fatalf("reloaded session read %d %s", status, raw)
+	}
+}
