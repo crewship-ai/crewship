@@ -153,6 +153,8 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"agent_access": map[string]any{"type": "string", "enum": []string{"none", "read", "propose"},
 			"description": "What the owning crew's agents may do with the folder's non-private pages (#5317 D2)."},
 		"agent_access_available": map[string]any{"type": "boolean", "description": "True where agent_access takes effect (the artifact_agent_access_modes flag is on)."},
+		"agent_propose_kinds": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"docs"}},
+			"description": "Artifact kinds on which agent_access propose gives the agents a real proposal (Docs); on every other kind propose reads like read. Absent where the flag is off."},
 	})
 	folderACL["required"] = []string{"folder", "acl", "acl_version"}
 	accessMe := obj(map[string]any{

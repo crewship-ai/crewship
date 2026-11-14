@@ -136,6 +136,10 @@ type pageFolderACLDocument struct {
 	// AgentAccessAvailable is true where the setting takes effect (the
 	// workspace flag artifact_agent_access_modes is on).
 	AgentAccessAvailable bool `json:"agent_access_available"`
+	// AgentProposeKinds names the artifact kinds (UI ids) on which the level
+	// propose gives the agents a real proposal (#5317 step 5.2: Docs); on
+	// every other kind it reads like read. Absent where the flag is off.
+	AgentProposeKinds []string `json:"agent_propose_kinds,omitempty"`
 }
 
 // pageFolderACLWriteRequest is PUT's body. CanRead is a pointer so a body that
@@ -369,6 +373,9 @@ func (h *PageHandler) folderACLDocument(ctx context.Context, wsID string, f *pag
 		out.AgentAccess = level
 	}
 	out.AgentAccessAvailable = h.artifactRunModesOn(ctx, wsID)
+	if out.AgentAccessAvailable {
+		out.AgentProposeKinds = folderAgentProposeKinds
+	}
 	setters := map[string]string{}
 	render := func(e pageFolderACLRecord) pageFolderACLWire {
 		setBy := ""

@@ -149,23 +149,9 @@ WHERE o.page_id=? AND o.workspace_id=? AND o.human_user_id=? AND o.chat_id=? AND
 		}
 	}
 	if !readable {
-		// D2 (#5317 PR3): a folder may let the agents of its owning crew read
-		// (or suggest on) the non-private pages filed in it. The agent's live
-		// crew must be the folder's owner; a folder never gives write.
-		if err = q.QueryRowContext(ctx, `SELECT count(*) FROM pages p JOIN page_folders f ON f.id=p.folder_id AND f.workspace_id=p.workspace_id
-JOIN agents a ON a.id=? AND a.workspace_id=p.workspace_id AND a.deleted_at IS NULL AND a.crew_id=f.owner_crew_id
-JOIN crews c ON c.id=f.owner_crew_id AND c.workspace_id=p.workspace_id AND c.deleted_at IS NULL
-WHERE p.id=? AND p.workspace_id=? AND p.private_audience=0 AND f.agent_access IN ('read','propose')`, a.AgentID, rec.ID, a.WorkspaceID).Scan(&n); err != nil {
-			return
-		}
-		if n != 1 || a.CrewID == "" {
-			return runReachNone, false, nil
-		}
-		// Defence in depth: the run principal check already requires the agent to
-		// still belong to this crew; this re-reads it next to the folder grant.
-		var crew string
-		if err = q.QueryRowContext(ctx, `SELECT coalesce(crew_id,'') FROM agents WHERE id=? AND workspace_id=?`, a.AgentID, a.WorkspaceID).Scan(&crew); err != nil || crew != a.CrewID {
-			return runReachNone, false, err
+		level, e := folderAgentLevel(ctx, q, a.WorkspaceID, rec.ID, a.AgentID, a.CrewID)
+		if e != nil || level == folderAgentAccessNone {
+			return runReachNone, false, e
 		}
 		standing = runReachFolder
 	}
@@ -173,6 +159,31 @@ WHERE p.id=? AND p.workspace_id=? AND p.private_audience=0 AND f.agent_access IN
 		return
 	}
 	return standing, n == 0, nil
+}
+
+// folderAgentLevel is the one rule for folder reach (D2, #5317 PR3 and step
+// 5.2): a folder may let the agents of its owning crew read, or suggest on,
+// the non-private pages filed in it. It returns that level ("read" or
+// "propose") or "none". The agent must be live, its live crew must own the
+// folder and equal crew (the run's crew), and that crew must not be deleted.
+// A folder never gives write. It does not check the workspace flag; callers
+// run only with the flag on.
+func folderAgentLevel(ctx context.Context, q pageAuthQueryer, workspace, pageID, agentID, crew string) (string, error) {
+	if crew == "" || agentID == "" {
+		return folderAgentAccessNone, nil
+	}
+	var level string
+	err := q.QueryRowContext(ctx, `SELECT f.agent_access FROM pages p JOIN page_folders f ON f.id=p.folder_id AND f.workspace_id=p.workspace_id
+JOIN agents a ON a.id=? AND a.workspace_id=p.workspace_id AND a.deleted_at IS NULL AND a.crew_id=f.owner_crew_id AND a.crew_id=?
+JOIN crews c ON c.id=f.owner_crew_id AND c.workspace_id=p.workspace_id AND c.deleted_at IS NULL
+WHERE p.id=? AND p.workspace_id=? AND p.private_audience=0 AND f.agent_access IN ('read','propose')`, agentID, crew, pageID, workspace).Scan(&level)
+	if errors.Is(err, sql.ErrNoRows) {
+		return folderAgentAccessNone, nil
+	}
+	if err != nil {
+		return folderAgentAccessNone, err
+	}
+	return level, nil
 }
 
 // errArtifactRunCap refuses past a per-run limit. It is only returned once the
@@ -221,19 +232,7 @@ func (h *PageHandler) authorizeScopedArtifactRun(ctx context.Context, tx *sql.Tx
 		return "", errArtifactProjectAccess
 	}
 	if readOnlyReach(reach) && standingNew {
-		limits, err := loadArtifactRunLimits(ctx, tx, workspace)
-		if err != nil {
-			return "", err
-		}
-		var used int
-		if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM artifact_run_access WHERE run_id=? AND source='standing'`, a.RunID).Scan(&used); err != nil {
-			return "", err
-		}
-		if used >= limits.RunRead {
-			return "", errArtifactRunCap
-		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO artifact_run_access(run_id,workspace_id,page_id,source,created_at) VALUES(?,?,?,'standing',?) ON CONFLICT(run_id,page_id) DO NOTHING`,
-			a.RunID, workspace, rec.ID, tsformat.Format(time.Now().UTC())); err != nil {
+		if err := chargeArtifactRunRead(ctx, tx, a, workspace, rec.ID); err != nil {
 			return "", err
 		}
 	}
@@ -245,6 +244,33 @@ func (h *PageHandler) authorizeScopedArtifactRun(ctx context.Context, tx *sql.Tx
 		return "", err
 	}
 	return "agent:" + a.AgentID + ":" + a.RunID, nil
+}
+
+// chargeArtifactRunRead counts one distinct standing or folder read of a page
+// against the run's read limit (run_read_limit), in the access's own
+// transaction. A page the run already counted is not counted again.
+func chargeArtifactRunRead(ctx context.Context, tx *sql.Tx, a *artifactRunAuthority, workspace, pageID string) error {
+	var counted int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM artifact_run_access WHERE run_id=? AND page_id=? AND source='standing'`, a.RunID, pageID).Scan(&counted); err != nil {
+		return err
+	}
+	if counted != 0 {
+		return nil
+	}
+	limits, err := loadArtifactRunLimits(ctx, tx, workspace)
+	if err != nil {
+		return err
+	}
+	var used int
+	if err = tx.QueryRowContext(ctx, `SELECT count(*) FROM artifact_run_access WHERE run_id=? AND source='standing'`, a.RunID).Scan(&used); err != nil {
+		return err
+	}
+	if used >= limits.RunRead {
+		return errArtifactRunCap
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO artifact_run_access(run_id,workspace_id,page_id,source,created_at) VALUES(?,?,?,'standing',?) ON CONFLICT(run_id,page_id) DO NOTHING`,
+		a.RunID, workspace, pageID, tsformat.Format(time.Now().UTC()))
+	return err
 }
 
 // errArtifactRefNotFound is how a flag-on run is refused an artifact it does

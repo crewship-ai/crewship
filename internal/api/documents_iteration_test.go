@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http/httptest"
 	"strconv"
 	"testing"
@@ -24,7 +25,28 @@ func iterationFixture(t *testing.T, expiry ...string) (*artifactPrincipalFixture
 // human send admits it (for example a schema-4 propose mandate).
 func iterationFixtureFor(t *testing.T, prepare func(*artifactPrincipalFixture, *documents.IterationIntent), expiry ...string) (*artifactPrincipalFixture, *documentAuthority, string, documents.IterationIntent) {
 	t.Helper()
+	f, authority, token, intent, err := iterationFixtureTry(t, prepare, expiry...)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return f, authority, token, intent
+}
+
+// iterationFixtureTry is iterationFixtureFor that returns a refused human
+// send or run admission instead of failing the test.
+func iterationFixtureTry(t *testing.T, prepare func(*artifactPrincipalFixture, *documents.IterationIntent), expiry ...string) (*artifactPrincipalFixture, *documentAuthority, string, documents.IterationIntent, error) {
+	t.Helper()
+	return iterationFixtureTryBefore(t, nil, prepare, expiry...)
+}
+
+// iterationFixtureTryBefore runs before ahead of the human's chat receipt, so
+// a change it makes (a workspace role) is part of the captured principal.
+func iterationFixtureTryBefore(t *testing.T, before func(*artifactPrincipalFixture), prepare func(*artifactPrincipalFixture, *documents.IterationIntent), expiry ...string) (*artifactPrincipalFixture, *documentAuthority, string, documents.IterationIntent, error) {
+	t.Helper()
 	f, authority, _, created := newDocumentDraftFixture(t, true)
+	if before != nil {
+		before(f)
+	}
 	f.a.RunID = "iteration-run"
 	f.a.ChatID = "iteration-chat"
 	mustExec(t, f.rig.db, `INSERT INTO chats(id,workspace_id,agent_id,created_by,visibility) VALUES(?,?,?,?,'private')`, f.a.ChatID, f.a.WorkspaceID, f.a.AgentID, f.a.HumanUserID)
@@ -46,14 +68,14 @@ func iterationFixtureFor(t *testing.T, prepare func(*artifactPrincipalFixture, *
 	if len(expiry) != 0 {
 		mustExec(t, f.rig.db, `UPDATE artifact_run_principals SET expires_at=? WHERE run_id=?`, expiry[0], f.a.RunID)
 	}
+	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(f.pages.artifactMasterToken, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, f.a.RunID)
 	if err := f.pages.persistDocumentIterationIntent(httptest.NewRequest("POST", "/", nil), f.receipt, f.a.MessageID, intent); err != nil {
-		t.Fatalf("persist iteration: %v", err)
+		return f, authority, token, intent, fmt.Errorf("persist iteration: %w", err)
 	}
 	if err := bindIterationFixture(t, f, intent); err != nil {
-		t.Fatalf("bind iteration: %v", err)
+		return f, authority, token, intent, fmt.Errorf("bind iteration: %w", err)
 	}
-	token := internaltoken.DeriveAgentRunToken(internaltoken.DeriveAgentRunKey(f.pages.artifactMasterToken, f.a.WorkspaceID, f.a.CrewID), f.a.WorkspaceID, f.a.AgentID, f.a.RunID)
-	return f, authority, token, intent
+	return f, authority, token, intent, nil
 }
 
 func bindIterationFixture(t *testing.T, f *artifactPrincipalFixture, intent documents.IterationIntent) error {
@@ -174,7 +196,7 @@ func TestDocumentIterationGuardAdvancesOnlyAtomicAuthorizedWrites(t *testing.T) 
 func TestDocumentIterationSharedDefaultNeverFallsBackToDirect(t *testing.T) {
 	f, _, _, intent := iterationFixture(t)
 	mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, intent.PageID)
-	_, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, intent)
+	_, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, f.a.CrewID, intent)
 	if !errors.Is(err, errDocumentIterationProposalUnavailable) {
 		t.Fatalf("shared default did not require proposal: %v", err)
 	}
