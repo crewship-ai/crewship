@@ -73,6 +73,7 @@ import (
 	"path"
 	"slices"
 	"strings"
+	"sync"
 
 	"golang.org/x/net/html"
 	"golang.org/x/net/publicsuffix"
@@ -169,7 +170,9 @@ type Handler struct {
 	// loopback: the server listens on loopback only (Options.LoopbackServer).
 	loopback bool
 	scheme   func(*http.Request) string
-	bundles  map[string]bundle
+	// mu guards bundles, which AddPackages extends while requests are served.
+	mu      sync.RWMutex
+	bundles map[string]bundle
 	// order lists the loaded bundles in allowlist order; the first one is
 	// the bundle new editor sessions frame (SessionBundle).
 	order []string
@@ -924,7 +927,9 @@ func (h *Handler) HasBundle(digest string) bool {
 	if h == nil || h.all || h.broken || !IsDigest(digest) {
 		return false
 	}
+	h.mu.RLock()
 	_, loaded := h.bundles[digest]
+	h.mu.RUnlock()
 	return loaded
 }
 
@@ -1078,7 +1083,9 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	rest, ok := strings.CutPrefix(p, BundlePrefix)
 	digest, name, ok2 := strings.Cut(rest, "/")
+	h.mu.RLock()
 	b, known := h.bundles[digest]
+	h.mu.RUnlock()
 	f, found := b.files[name]
 	if !inPrefix || !ok || !ok2 || !known || !found {
 		http.Error(w, "not found", http.StatusNotFound)

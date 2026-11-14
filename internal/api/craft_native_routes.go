@@ -1,8 +1,11 @@
 package api
 
 import (
+	"context"
+	"io"
 	"net/http"
 
+	"github.com/crewship-ai/crewship/internal/craftapps"
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
@@ -14,9 +17,22 @@ type CraftNativeHTTPConfig struct {
 	AgentsEnabled bool
 	AgentApply    CraftNativeAgentApply
 	AgentInspect  CraftNativeAgentInspect
+	// Policy applies the instance administrator's Word, Sheet and agent
+	// settings. Nil allows everything the profiles allow (package tests).
+	Policy *craftapps.Policy
+	// Components describes each application's runnable parts for Admin.
+	Components map[string]craftapps.Component
+	// Install installs an application's package (downloading it when
+	// archive is nil) and returns its profile, ready to run. Nil means
+	// applications cannot be installed while the server runs.
+	Install CraftComponentInstall
 	// Package-private trusted clock injection; server configuration uses the native boot clock.
 	newOwnerClock func() (mooring.OwnerClock, error)
 }
+
+// CraftComponentInstall installs one application's package; see
+// CraftNativeHTTPConfig.Install.
+type CraftComponentInstall func(ctx context.Context, application string, archive io.Reader) (CraftNativeDocumentProfile, craftapps.Component, error)
 
 func WithCraftNativeHTTP(c CraftNativeHTTPConfig) RouterOption {
 	profiles := make(map[string]CraftNativeDocumentProfile, len(c.Profiles))
@@ -24,6 +40,11 @@ func WithCraftNativeHTTP(c CraftNativeHTTPConfig) RouterOption {
 		profiles[key] = profile
 	}
 	c.Profiles = profiles
+	components := make(map[string]craftapps.Component, len(c.Components))
+	for key, component := range c.Components {
+		components[key] = component
+	}
+	c.Components = components
 	return func(r *Router) { r.craftNativeHTTPConfig = c }
 }
 func (r *Router) registerCraftNativeRoutes() {
@@ -31,7 +52,7 @@ func (r *Router) registerCraftNativeRoutes() {
 	var applications map[string]craftNativeApplication
 	if r.craftNativeHTTPConfig.Enabled {
 		var err error
-		applications, err = qualifyCraftNativeProfiles(r.craftNativeHTTPConfig.Profiles)
+		applications, r.craftNativeHTTPConfig.Profiles, err = r.qualifyStartupProfiles()
 		if err != nil {
 			r.craftNativeStartupErr = err
 			return
@@ -41,14 +62,30 @@ func (r *Router) registerCraftNativeRoutes() {
 			factory = mooring.NewBootOwnerClock
 		}
 		clock, err = factory()
-		if err != nil {
+		if err != nil && (r.craftNativeHTTPConfig.Install == nil || !craftNativeOnlyReleaseProfiles(r.craftNativeHTTPConfig)) {
 			r.craftNativeStartupErr = err
 			return
 		}
+		if err != nil {
+			// Release components on a system without a suspend-aware clock:
+			// the server starts, Word and Sheet are unavailable and say why.
+			r.logger.Warn("Word and Sheet are unavailable: no suspend-aware clock for edit locks", "error", err)
+			for app := range r.craftNativeHTTPConfig.Components {
+				r.craftNativeHTTPConfig.Components[app] = craftapps.Component{Reason: craftapps.ReasonClockUnsupported}
+			}
+			r.craftNativeHTTPConfig.Enabled, r.craftNativeHTTPConfig.AgentsEnabled, r.craftNativeHTTPConfig.Install = false, false, nil
+			r.craftNativeHTTPConfig.Profiles, applications, clock = map[string]CraftNativeDocumentProfile{}, nil, nil
+		}
 	}
 	m := newCraftNativeHTTP(r.pages, r.craftNativeHTTPConfig.Enabled, clock)
+	if r.pages != nil {
+		m.apps = newCraftAppsGate(r.craftNativeHTTPConfig.Policy, r.pages.db)
+	}
 	r.craftNativeHTTP = m
 	d := newCraftNativeDocumentsHTTP(m, applications)
+	for app, p := range r.craftNativeHTTPConfig.Profiles {
+		d.profiles[app] = p
+	}
 	r.craftNativeDocuments = d
 	m.agents = newCraftNativeAgentManager(m, d, r.craftNativeHTTPConfig)
 	_ = m.agents.start(r.webhookHandler)
@@ -117,4 +154,53 @@ func (r *Router) registerCraftNativeRoutes() {
 	// openapi: responses 200,400,401,403,404,409,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/craft/proposals/{proposalID}/reject", roleSelf, d.rejectProposal)
 
+}
+
+// craftNativeOnlyReleaseProfiles reports whether every profile comes from a
+// release package (none from an operator's explicit native configuration).
+// Only then, and only while packages can be installed, does a missing clock
+// leave the server running with Word and Sheet unavailable; an operator's
+// explicit native configuration still refuses to start.
+func craftNativeOnlyReleaseProfiles(c CraftNativeHTTPConfig) bool {
+	for _, p := range c.Profiles {
+		if !p.Bundled {
+			return false
+		}
+	}
+	return true
+}
+
+// qualifyStartupProfiles qualifies the operator's profiles together (any
+// error refuses startup, as before) and each installed release package on
+// its own: one that does not qualify leaves only that application
+// unavailable, so installing a package can never take the server down.
+func (r *Router) qualifyStartupProfiles() (map[string]craftNativeApplication, map[string]CraftNativeDocumentProfile, error) {
+	operator := map[string]CraftNativeDocumentProfile{}
+	release := map[string]CraftNativeDocumentProfile{}
+	for app, p := range r.craftNativeHTTPConfig.Profiles {
+		if p.Bundled {
+			release[app] = p
+		} else {
+			operator[app] = p
+		}
+	}
+	applications, profiles, err := qualifyCraftNativeProfiles(operator)
+	if err != nil {
+		return nil, nil, err
+	}
+	for app, p := range release {
+		a, q, err := qualifyCraftNativeProfiles(map[string]CraftNativeDocumentProfile{app: p})
+		if err != nil {
+			r.logger.Error("installed Craft application cannot run", "application", app, "error", err)
+			c := r.craftNativeHTTPConfig.Components[app]
+			c.Available, c.Reason, c.Detail = false, craftapps.ReasonEngineStartFailed, err.Error()
+			if r.craftNativeHTTPConfig.Components == nil {
+				r.craftNativeHTTPConfig.Components = map[string]craftapps.Component{}
+			}
+			r.craftNativeHTTPConfig.Components[app] = c
+			continue
+		}
+		applications[app], profiles[app] = a[app], q[app]
+	}
+	return applications, profiles, nil
 }

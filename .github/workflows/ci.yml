@@ -2480,11 +2480,14 @@ jobs:
         # 4166 s over 46 main push runs 41633012332..41979975587 (2026-11-03
         # 12:07 to 2026-11-05 06:22 UTC, 6 shards + bootstrap in every run);
         # mean 4183 s, sd 280 s, p95 4581 s, max 4876 s.
-        # Alarm 5200 s: 6.6% over that max, 3.6 sd over the mean. It is not a
-        # timeout: partition timeouts, the bootstrap deadline and job caps are
-        # unchanged. The same alarm fails PRs, merge groups and main pushes.
+        # Alarm 6000 s (temporary, owner decision 2026-11-14, #4761): the
+        # earlier 5200 s alarm failed identical content on one run and passed
+        # it on the next (4262–5667 s on 2026-11-13/14), ejecting every third
+        # merge group. It is not a timeout: partition timeouts, the bootstrap
+        # deadline and job caps are unchanged. The same alarm fails PRs, merge
+        # groups and main pushes.
         env:
-          RACE_COMBINED_ALARM_SECONDS: "5200"
+          RACE_COMBINED_ALARM_SECONDS: "6000"
         run: python3 scripts/ci/api-race-shard.py report .ci-api-shards 6 4166 .ci-api-template
 
 
