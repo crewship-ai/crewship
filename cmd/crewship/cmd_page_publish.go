@@ -70,6 +70,7 @@ type pagePublicTokenJSON struct {
 	RevokedAt      string   `json:"revoked_at" yaml:"revoked_at"`
 	LastSeenAt     string   `json:"last_seen_at" yaml:"last_seen_at"`
 	Live           bool     `json:"live" yaml:"live"`
+	Withheld       bool     `json:"withheld" yaml:"withheld"`
 	Panels         []string `json:"panels" yaml:"panels"`
 }
 
@@ -276,13 +277,16 @@ roughly where.`,
 	},
 }
 
-// pagePublicStatus is the verdict a person is actually looking for. `live` is
-// the server's, computed from both columns and its own clock, so the CLI never
-// disagrees with the thing enforcing it.
+// pagePublicStatus is the verdict a person is actually looking for. `live` and
+// `withheld` are the server's, computed from its columns and its own clock, so
+// the CLI never disagrees with the thing enforcing it. A withheld link's
+// creator is suspended or gone; it opens again when their standing returns.
 func pagePublicStatus(t pagePublicTokenJSON) string {
 	switch {
 	case t.RevokedAt != "":
 		return "revoked"
+	case t.Withheld:
+		return "withheld"
 	case t.Live:
 		return "live"
 	default:
