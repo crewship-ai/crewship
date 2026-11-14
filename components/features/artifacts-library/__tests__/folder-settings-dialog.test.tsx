@@ -176,3 +176,71 @@ it("on the server, a retry after a failed entry save does not resend the agents 
     .filter(([url, init]) => init?.method === "PUT" && url.includes("/agent-access"))
   expect(agentPuts).toHaveLength(1)
 })
+
+// #5343: a partial save moves acl_version through this form's own entry writes.
+// Changing the agents level afterwards must save against the current version
+// when only this form moved it, and refuse when someone else changed the row.
+function serverWithPartialEntrySave(opts: { otherChangesAgentsTo?: "read" | "none" | "propose" } = {}) {
+  let version = 4
+  let agentLevel = "none"
+  let entryPuts = 0
+  flags.fetch.mockImplementation(async (url: string, init?: RequestInit) => {
+    const path = new URL(url, "http://h").pathname
+    if (init?.method === "PUT" && path.endsWith("/agent-access")) {
+      const body = JSON.parse(String(init.body))
+      if (body.acl_version !== version) return new Response(JSON.stringify({ error: "folder changed since acl_version; read its permissions again" }), { status: 409 })
+      version++
+      agentLevel = body.level
+      return new Response(JSON.stringify({ folder: "design", agent_access: body.level, acl_version: version, agent_access_available: true }), { status: 200 })
+    }
+    if (init?.method === "PUT") {
+      entryPuts++
+      // The first entry lands, the second fails: a partial save.
+      if (entryPuts === 2) {
+        if (opts.otherChangesAgentsTo) { agentLevel = opts.otherChangesAgentsTo; version++ }
+        return new Response(JSON.stringify({ error: "try again" }), { status: 500 })
+      }
+      version++
+      return new Response("{}", { status: 200 })
+    }
+    return new Response(JSON.stringify({ folder: "design", acl_version: version, acl: [], agent_access: agentLevel, agent_access_available: true }), { status: 200 })
+  })
+  return { agentPuts: () => flags.fetch.mock.calls.map(call => call as unknown as [string, RequestInit | undefined])
+    .filter(([url, init]) => init?.method === "PUT" && url.includes("/agent-access")).map(([, init]) => JSON.parse(String(init!.body))) }
+}
+
+async function partialSaveThenChangeAgents(next: string) {
+  const onOpenChange = vi.fn()
+  renderDialog(onOpenChange)
+  await screen.findByRole("combobox", { name: "Agents of this folder's crew" })
+  change("Agents of this folder's crew", "read")
+  change("Add person or everyone", "user:u2"); change("Level to add", "read")
+  fireEvent.click(screen.getByRole("button", { name: "Add" }))
+  change("Add person or everyone", "user:u3"); change("Level to add", "read")
+  fireEvent.click(screen.getByRole("button", { name: "Add" }))
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  await screen.findByText(/try again/)
+  change("Agents of this folder's crew", next)
+  fireEvent.click(screen.getByRole("button", { name: "Save" }))
+  return onOpenChange
+}
+
+it("on the server, changing the agents level after a partial save saves against the current version (#5343)", async () => {
+  flags.mock = false
+  const server = serverWithPartialEntrySave()
+  const onOpenChange = await partialSaveThenChangeAgents("none")
+  await vi.waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false))
+  // The first try fences on the version this form saved (5) and is refused; the retry uses the current one.
+  expect(server.agentPuts()).toEqual([{ level: "read", acl_version: 4 }, { level: "none", acl_version: 5 }, { level: "none", acl_version: 6 }])
+  expect(screen.queryByText(/changed since/)).toBeNull()
+})
+
+it("on the server, an agents level changed by someone else is not overwritten after a partial save (#5343)", async () => {
+  flags.mock = false
+  const server = serverWithPartialEntrySave({ otherChangesAgentsTo: "none" })
+  const onOpenChange = await partialSaveThenChangeAgents("none")
+  await screen.findByText(/changed by someone else/)
+  expect(onOpenChange).not.toHaveBeenCalledWith(false)
+  expect(server.agentPuts().filter(b => b.level === "none")).toHaveLength(1) // the refused attempt only
+  expect((screen.getByRole("combobox", { name: "Agents of this folder's crew" }) as HTMLSelectElement).value).toBe("none")
+})

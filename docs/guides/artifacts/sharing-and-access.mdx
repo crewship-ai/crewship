@@ -298,6 +298,11 @@ default). Agents never edit through a folder and never see Personal artifacts;
 any other agent needs access on each artifact. Click **Save**. The same setting
 is `crewship page folder agent-access <slug> --level none|read`.
 
+After a save that failed part way, you can change the level and save again in
+the same dialog. If someone else changed the crew agents level in the
+meantime, the dialog does not overwrite it: it shows the new level and asks
+you to check it and save again.
+
 <Note>
 **Can suggest** is not offered yet. The CLI still accepts `--level propose`,
 but today it gives the same read access as `read`, not a proposal. The dialog
