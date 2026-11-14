@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/pipeline"
+	"github.com/crewship-ai/crewship/internal/policy"
 )
 
 // #5336: the sidecar save_page tool sends the agent run token on
@@ -125,8 +128,8 @@ func TestPageSaveRunToken_RequiredRefusesASaveWithoutIt(t *testing.T) {
 	if n := g.pageCount(t); n != 0 {
 		t.Fatalf("refused save left a page: %d", n)
 	}
-	if PageSaveWithoutRunTokenTotal() != before+1 {
-		t.Fatal("a refused save without a token must still be counted")
+	if PageSaveWithoutRunTokenTotal() != before {
+		t.Fatal("a refused save must not be counted: the counter tracks accepted tokenless saves")
 	}
 	if w := g.save(t, "Required with token", g.runToken); w.Code != http.StatusCreated {
 		t.Fatalf("save with the token when required: %d %s", w.Code, w.Body)
@@ -240,4 +243,87 @@ func TestArtifactCreationPolicySaveRequiresRunToken(t *testing.T) {
 	if p := read(); p["save_requires_run_token"] != false || p["version"] != float64(3) {
 		t.Fatalf("clear: %v", p)
 	}
+}
+
+// F1: a routine page.create is issued by the host dispatcher with the master
+// internal token, which no crew container holds. It is the server's own save,
+// so the requirement and the tokenless counter do not apply to it. A crew
+// token that forges the dispatcher's routine headers is still refused.
+func TestPageSaveRunToken_HostRoutineSaveIsExemptFromTheRequirement(t *testing.T) {
+	g := runTokenSaveRig(t)
+	mustExec(t, g.f.rig.db, `UPDATE workspace_artifact_creation_policy SET save_requires_run_token=1 WHERE workspace_id=?`, g.f.a.WorkspaceID)
+	server := httptest.NewServer(g.router)
+	t.Cleanup(server.Close)
+	before := PageSaveWithoutRunTokenTotal()
+	actions := newCrewshipActions(server.URL, runTokenSaveMaster, policy.NewResolver(g.f.rig.db), g.f.rig.db, newTestLogger())
+	out, err := actions.Do(context.Background(), pipeline.CrewshipRequest{
+		Verb:        "page.create",
+		Args:        map[string]any{"name": "Routine page", "panels": []any{map[string]any{"id": "p1", "schema": "status.v1", "owner": "crew/principal-crew", "producer": "agent/principal-agent", "sla_seconds": 30, "span": 4}}},
+		WorkspaceID: g.f.a.WorkspaceID, CrewID: g.f.a.CrewID, RunID: "routine-run-1",
+	})
+	if err != nil {
+		t.Fatalf("routine page.create with the requirement on: %v", err)
+	}
+	if !bytes.Contains([]byte(out), []byte("routine-page")) {
+		t.Fatalf("routine page.create output: %s", out)
+	}
+	if PageSaveWithoutRunTokenTotal() != before {
+		t.Fatal("a host save must not count as a tokenless sidecar save")
+	}
+	// The same request from the crew container, forging the routine headers.
+	body := `{"workspace_id":"` + g.f.a.WorkspaceID + `","crew_id":"` + g.f.a.CrewID + `","name":"Forged routine",` +
+		`"panels":[{"id":"p1","schema":"status.v1","owner":"crew/principal-crew","producer":"agent/principal-agent","sla_seconds":30,"span":4}]}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/internal/pages/save", bytes.NewBufferString(body))
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("X-Internal-Token", g.crewTok)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Crewship-Pipeline-Run", "routine-run-1")
+	req.Header.Set("X-Crewship-Chat-Origin", g.f.a.ChatID)
+	w := httptest.NewRecorder()
+	g.router.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden || !bytes.Contains(w.Body.Bytes(), []byte(`"run_token_required"`)) {
+		t.Fatalf("crew token forging the routine headers: %d %s", w.Code, w.Body)
+	}
+}
+
+// F2: a token whose run principal is no longer live (here: expired) is
+// refused, not downgraded to a tokenless save.
+func TestPageSaveRunToken_ExpiredPrincipalRefused(t *testing.T) {
+	g := runTokenSaveRig(t)
+	g.start(t)
+	mustExec(t, g.f.rig.db, `UPDATE artifact_run_principals SET expires_at='2020-01-01T00:00:00Z' WHERE run_id=?`, g.f.a.RunID)
+	before := PageSaveWithoutRunTokenTotal()
+	w := g.save(t, "Expired principal", g.runToken)
+	if w.Code != http.StatusForbidden || !bytes.Contains(w.Body.Bytes(), []byte(`"invalid_run_token"`)) {
+		t.Fatalf("expired principal: %d %s", w.Code, w.Body)
+	}
+	if n := g.pageCount(t); n != 0 || PageSaveWithoutRunTokenTotal() != before {
+		t.Fatalf("expired principal saved (%d pages) or counted as tokenless", n)
+	}
+}
+
+// F3: a read error while resolving the run or the requirement fails closed
+// (500), never as "no run" or "not required".
+func TestPageSaveRunToken_ReadErrorsFailClosed(t *testing.T) {
+	t.Run("principal lookup", func(t *testing.T) {
+		g := runTokenSaveRig(t)
+		g.start(t)
+		mustExec(t, g.f.rig.db, `ALTER TABLE artifact_run_principals RENAME TO artifact_run_principals_gone`)
+		if w := g.save(t, "Lookup error", g.runToken); w.Code != http.StatusInternalServerError {
+			t.Fatalf("principal lookup error: %d %s", w.Code, w.Body)
+		}
+		if n := g.pageCount(t); n != 0 {
+			t.Fatalf("lookup error saved %d pages", n)
+		}
+	})
+	t.Run("requirement read", func(t *testing.T) {
+		g := runTokenSaveRig(t)
+		mustExec(t, g.f.rig.db, `ALTER TABLE workspace_artifact_creation_policy DROP COLUMN save_requires_run_token`)
+		if w := g.save(t, "Requirement error", ""); w.Code != http.StatusInternalServerError {
+			t.Fatalf("requirement read error: %d %s", w.Code, w.Body)
+		}
+		if n := g.pageCount(t); n != 0 {
+			t.Fatalf("requirement read error saved %d pages", n)
+		}
+	})
 }
