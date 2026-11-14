@@ -40,6 +40,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 )
 
@@ -106,6 +107,26 @@ func buildCrewRuntimeConfig(ctx context.Context, db *sql.DB, crewID, workspaceID
 		&devcontainerCfg, &servicesJSON)
 	if err != nil {
 		return provider.CrewConfig{}, fmt.Errorf("load crew runtime config: %w", err)
+	}
+
+	imageUse := resourcelifecycle.Images(db)
+	releaseImages := imageUse.Use()
+	executionImage := cachedImage.String
+	if executionImage == "" {
+		executionImage = runtimeImage.String
+		if executionImage == "" {
+			if base, err := devcontainer.ParseBytes([]byte(database.EffectiveCrewDevcontainerConfig(devcontainerCfg.String, devcontainerCfg.Valid))); err == nil {
+				executionImage = base.Image
+			}
+		}
+	}
+	allowed, selectionErr := imageUse.CheckSelection(ctx, executionImage)
+	releaseImages()
+	if selectionErr != nil {
+		return provider.CrewConfig{}, fmt.Errorf("verify selected environment ownership: %w", selectionErr)
+	}
+	if !allowed {
+		return provider.CrewConfig{}, fmt.Errorf("selected environment is unavailable or owned by another installation; provision the crew locally")
 	}
 
 	// This is the config that actually starts the container: a NULL/empty
@@ -426,13 +447,19 @@ func (h *ProvisioningHandler) imagePresentLocally(ctx context.Context, ref strin
 	}
 	ictx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	if _, err := h.docker.ImageInspect(ictx, ref); err != nil {
+	if inspected, err := h.docker.ImageInspect(ictx, ref); err != nil {
 		if cerrdefs.IsNotFound(err) {
 			return false
 		}
 		return true
+	} else if inspected.Config != nil {
+		gate := resourcelifecycle.Images(h.db)
+		release := gate.Use()
+		allowed, err := gate.CheckSelection(ictx, ref)
+		release()
+		return err == nil && allowed
 	}
-	return true
+	return false // an inspection without image configuration is incomplete
 }
 
 func (c *CrewConfigCompleter) FilterServices(ctx context.Context, cfg provider.CrewConfig) (provider.CrewConfig, error) {

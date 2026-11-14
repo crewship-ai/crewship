@@ -15,6 +15,7 @@ import (
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/dockerutil"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
 // cacheArtifactReferences joins immutable IDs and legacy tag references. An
@@ -222,6 +223,13 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 		})
 		return
 	}
+
+	releaseImages, idle := resourcelifecycle.Images(h.db).TryCollect()
+	if !idle {
+		replyError(w, http.StatusConflict, "environment acquisition or restore is active; retry image deletion later")
+		return
+	}
+	defer releaseImages()
 
 	force := r.URL.Query().Get("force") == "true"
 	removeRef := tag

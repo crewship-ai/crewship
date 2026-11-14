@@ -24,6 +24,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/toolchain"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -1188,6 +1189,9 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 // superseded by a definition edit. That leaves the job running and its pending
 // messages attached; actual build/publication errors remain terminal.
 func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID, workspaceID, cfgJSON, miseJSON, runtimeImg string, job *ProvisionJob) (superseded bool) {
+	releaseImages := resourcelifecycle.Images(h.db).Use()
+	defer releaseImages() // includes cache acquisition, qualification and DB publication
+
 	h.mu.Lock()
 	job.Status = "running"
 	h.mu.Unlock()

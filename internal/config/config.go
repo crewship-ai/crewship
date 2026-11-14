@@ -164,9 +164,9 @@ type ContainerConfig struct {
 	// CrewNetworkPool is the IPv4 range crew networks take small (/27)
 	// subnets from. It must not overlap a host route.
 	CrewNetworkPool string `yaml:"crew_network_pool"`
-	// CacheEviction removes crewship-cache images that no container on the
-	// daemon has used for an hour; the next start rebuilds them. Off by
-	// default.
+	// CacheEviction is retained for configuration compatibility. Image collection
+	// is now ownership-scoped and controlled by CREWSHIP_IMAGE_GC. This field
+	// no longer starts an independent image sweeper.
 	CacheEviction bool `yaml:"cache_eviction"`
 }
 

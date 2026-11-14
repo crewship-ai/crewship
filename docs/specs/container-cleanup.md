@@ -104,14 +104,14 @@ halfway through its destructive operation. The barrier also covers cleanup
 diagnostic writes. This coordination is local to one server process; it does
 not add the strong restore/revive fencing excluded above.
 
-Idle runtime retention and cache eviction register with the same barrier,
-including their database observations, and yield between eligible resources.
+Idle runtime retention and owned image collection register with the same barrier,
+including their database observations.
 ## Idle retention
 
 Opt-in, separate from deletion cleanup, and never acting on deleted owners
 (those are the controller above) or on another installation's containers.
-Enabled by `CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS` and `CREWSHIP_CACHE_EVICTION`
-(`container.idle_runtime_retention_days`, `container.cache_eviction`); runs at
+Enabled by `CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS`
+(`container.idle_runtime_retention_days`); runs at
 boot and every 10 minutes while the Docker provider is available. Cancellation
 is checked before each pass and again after writer admission, before provider
 work. An already-canceled lifecycle starts no cleanup pass; a simultaneously
@@ -135,30 +135,68 @@ and the host data behind them stay at removal; the unused noexec bind-record
 pass above may subsequently drop positively attributed bind metadata. The next
 start recreates the runtime.
 
-**Cache images.** A `crewship-cache:*` image is eligible only when no container
-on the daemon uses it (any installation, any state) and no live crew in this
-installation's database selects it through `cached_image`. Selection is checked
-across all workspaces by image ID and legacy tag aliases. Unknown database
-references stop eviction. Either use resets the continuous one-hour unused
-window in `resource_retention_images`; the image must also be older than one
-day, with no `crewship-provision-*` build container anywhere on the daemon.
+## Owned image collection
 
-Images built by an installation with a settled identity are tagged
-`crewship-cache:<namespace>-<hash>` / `crewship-feat:<namespace>-<hash>` and
-labelled `crewship.image.instance-id` and `crewship.image.kind` (#5375); the
-namespace is the full installation identity. New build cache lookups use
-distinct tags per installation; copied or restored selections are unchanged. The labels are
-evidence of origin only and change no eligibility rule in this document:
-legacy-named and unlabelled images are not claimed by any installation.
+Docker image collection runs at startup after identity wiring and every 30 minutes.
+It is enabled by default for images with this installation's full
+`crewship.image.instance-id` and `crewship.image.kind=crew|feature` labels.
+Set `CREWSHIP_IMAGE_GC=false` or `0` to disable it. Apple image collection is
+unsupported. An absent installation identity disables owned collection.
 
-Immediately before removal, the current database selections are checked again.
-Removal addresses the inspected image ID, never a mutable tag, with `Force=false`;
-Docker refusing it keeps the artifact and restarts its hour. The checks are not
-a transaction spanning database publication and Docker operations. Another
-installation's database is not visible, so a shared daemon still requires a
-coordinated retention policy. Historical environment revisions do not retain
-image bytes; this is neither an archive nor a rollback guarantee. Base images,
-`crewship-feat:*` images and BuildKit cache are out of scope.
+The collector inventories all images and all containers, including stopped and
+foreign containers. It keeps container source images, current crew selections
+and each live crew's last successful and previous distinct selections, across
+all workspaces. SQLite records these as `last_selected_image` and `previous_image`
+on successful immutable selection. Configuration invalidation can clear the
+operational `cached_image` without discarding either retained selection;
+reselecting the same artifact does not advance them.
+This is selection order, not immutable revision creation order. Existing build
+history cannot establish previous selection order, so the migration does not
+invent an initial rollback pointer. Subsequent changes establish it.
+
+Unreferenced owned images at least 24 hours old are candidates, including
+untagged abandoned builds and superseded images. A non-Crewship or foreign tag
+on an image prevents its automatic removal. Missing identities, incomplete
+container/image observations, database failures and unresolved mutable
+references stop collection. A complete inventory can establish an immutable
+selected ID is already absent; this does not prevent collection of other images.
+Any provisioning scratch container on the daemon defers the owned pass.
+
+A process-local gate shared by the server's database handle spans acquisition
+(cache hits included), offline qualification and database publication. Restore
+replay takes the same gate. Collection takes exclusive admission without waiting;
+active builds/restores defer collection. Non-force manual cache deletion also
+requires exclusive admission and returns a conflict while these operations run.
+No durable holds survive a crash: abandoned labelled builds become candidates
+after the age floor. A second server without the installation identity cannot
+collect images. Independent database handles/processes and direct Docker
+operator actions are outside this local coordination contract.
+
+After a database copy or restore, a foreign labelled cached selection cannot be
+used as this installation's environment. The global managed-start image gate
+reprovisions locally before use. The runtime completer also refuses direct
+foreign managed images; imported cached/previous selections are checked during
+restore and foreign artifacts lose their local selection, while build provenance remains.
+Absent cached images are rebuilt through managed admission; an absent ordinary
+registry base retains its normal first-start pull behavior. Unlabelled legacy images retain compatibility and are never
+claimed by the new default collector.
+
+Removal addresses only the observed immutable ID with `Force=false` and
+`PruneChildren=false`; Docker refusal retains the image. Parent images,
+BuildKit cache, persistent volumes, host data and backup archives are not pruned.
+Image metadata sizes are not reported as reclaimable bytes.
+
+`CREWSHIP_CACHE_EVICTION` / `container.cache_eviction` are retained as deprecated
+configuration inputs and no longer launch a second image collector.
+`CREWSHIP_CACHE_GC_AUTODELETE=true` remains an explicit, operator-managed escape
+hatch for unlabelled historical `crewship-cache:*` / `crewship-feat:*` images
+and known untagged revision artifacts, with the old five-minute floor. It never
+collects labelled artifacts belonging to any installation. It cannot see another
+installation's legacy database selections and must stay off on shared daemons.
+
+Keeping the previous selected image protects its image bytes from this collector;
+it is not an automatic rollback command, a volume snapshot or a guarantee against
+external image deletion. Older provenance records do not retain image bytes.
 
 ## Observations
 

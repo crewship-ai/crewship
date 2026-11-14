@@ -728,8 +728,8 @@ The check and publication are one database transaction.
 This history is provenance metadata. It neither preserves Docker images from
 pruning nor changes a running container, and it does not provide rollback or
 RAM snapshots. Builds without recorded immutable image identity do not invent
-a revision. These records will support a later explicit retention and safe
-activation policy.
+a revision. Owned image collection protects the current and previous immutable selections
+separately from this history; older records do not retain image bytes.
 
 ### Immutable Docker build references
 
@@ -745,9 +745,8 @@ rewritten. Native Apple builds still return tags because that provider does not
 yet expose equivalent image inspection through this interface.
 
 The provisioning API's cache inventory, deletion and orphan sweeper recognize
-crew references by image ID. The separate opt-in
-[idle cache eviction policy](/specs/container-cleanup#idle-retention) also keeps
-images selected by live crews in this installation, including legacy tag aliases. Revision history does not retain image bytes or guarantee rollback. External
+crew references by image ID. The [owned image collector](/specs/container-cleanup#owned-image-collection)
+protects current and previous selections and every container source image. Revision history does not retain image bytes or guarantee rollback. External
 `docker image prune`, forced admin deletion and disk loss also remain outside
 this protection. A bare provider start requesting a different image returns
 `image update pending` while the current container is running, paused or its

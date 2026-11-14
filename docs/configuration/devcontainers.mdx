@@ -349,18 +349,24 @@ unchanged and not installation-specific.
 
 ### Orphan deletion policy
 
-Cache-image deletion is opt-in via the `CREWSHIP_CACHE_GC_AUTODELETE` environment variable (also described in [Environment → Devcontainer cache GC](/configuration/environment#devcontainer-cache-gc)):
+Owned crew and feature images are collected automatically on Docker with a
+settled installation identity. Current selections, the previous immutable
+selection of each live crew and all container source images are protected.
+Unused owned images older than 24 hours may be removed, including untagged
+abandoned builds. `CREWSHIP_IMAGE_GC=false` disables this policy.
 
-| Value | Behaviour |
-|---|---|
-| unset / `0` / `false` (default) | **Log-only.** Orphans are enumerated and logged; nothing is deleted. Operators see the list and can decide. |
-| `1` / `true` | **Auto-delete.** Orphans beyond the 5-minute age floor are force-removed each pass. |
+Collection excludes image acquisition through database publication and backup
+restore. Missing ownership or incomplete inventory prevents automatic deletion.
+The collector never recursively prunes parents or shared BuildKit cache.
 
-The sweeper logs a single line per pass with `removed`, `total_orphans`, and `skipped_too_young` so dashboards can alert on cache growth regardless of mode.
+`CREWSHIP_CACHE_GC_AUTODELETE=true` remains the separate explicit opt-in for
+unlabelled historical artifacts, with its five-minute floor. Keep this legacy
+switch off on shared daemons. `CREWSHIP_CACHE_EVICTION` no longer starts a
+second image sweeper. See the [full lifecycle contract](/specs/container-cleanup#owned-image-collection).
 
 ### Image-list cache
 
-Docker's `ImageList` is O(n) over every image on the host. The sweeper and `GET /api/v1/cache/images` share a **10-second image-list cache** so admin UI polling does not pay that cost on every request. The cache is invalidated on any commit/delete performed by the provisioner itself, so the caller always sees its own writes.
+Docker's `ImageList` is O(n) over every image on the host. The cache inventory endpoint uses a **10-second image-list cache**; deletion decisions use fresh inventory. `GET /api/v1/cache/images` caches its list so admin UI polling does not pay that cost on every request. The cache is invalidated on any commit/delete performed by the provisioner itself, so the caller always sees its own writes.
 
 ## Code of record
 

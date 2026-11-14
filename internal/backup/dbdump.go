@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"strings"
 )
 
@@ -1118,6 +1119,30 @@ type RestoreDumpHooks struct {
 // with the supplied lifecycle hooks. See RestoreDumpHooks for the
 // contract of each hook.
 func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *RestoreDumpHooks) (RestoreStats, error) {
+	imageUse := resourcelifecycle.Images(db)
+	releaseImages := imageUse.Use()
+	defer releaseImages()
+	// Do not import a live selection owned by another installation. Preserve
+	// provenance history, but rebuild the selected toolchain locally on demand.
+	for _, crew := range dump.Tables["crews"] {
+		for _, field := range []string{"cached_image", "last_selected_image", "previous_image"} {
+			ref, _ := crew[field].(string)
+			if ref == "" {
+				continue
+			}
+			allowed, err := imageUse.CheckSelection(ctx, ref)
+			if err != nil {
+				return RestoreStats{}, fmt.Errorf("backup: verify selected image ownership: %w", err)
+			}
+			if !allowed {
+				crew[field] = nil
+				if field == "cached_image" {
+					crew["config_hash"], crew["cached_requirements"], crew["resolved_features"] = nil, nil, nil
+				}
+			}
+		}
+	}
+
 	if err := rejectMooringCollaborationCollision(ctx, db, dump); err != nil {
 		return RestoreStats{}, err
 	}
