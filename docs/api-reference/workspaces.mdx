@@ -2732,7 +2732,8 @@ creation also requires the run's human consent and content permissions.
 (`chat_run_create_limit`, `run_read_limit`, `crew_hourly_page_limit`;
 defaults 3, 50 and 20), and `scoped_default`: true while no policy was ever
 saved and `artifact_agent_access_modes` is on, when chat runs of every live
-crew may use their artifact scope.
+crew may use their artifact scope, and `save_requires_run_token` (default
+`false`).
 `PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy` accepts a request
 body of at most 64 KiB and requires all
 three request fields: `enabled`, the complete `crew_ids` allowlist, and
@@ -2740,8 +2741,14 @@ three request fields: `enabled`, the complete `crew_ids` allowlist, and
 `code: "stale_policy"`; read the latest policy before deciding on a replacement.
 An optional `limits` object changes only the limits it names (ranges 1–20,
 1–500 and 1–1000; out of range returns `400`); omitted limits keep their value.
-The limits apply only with the `artifact_agent_access_modes` flag on
-(`docs/specs/pages.md` §7.1c).
+An optional boolean `save_requires_run_token` (omitted keeps its value) makes
+an agent page save without the agent run token fail with `403` and
+`code: "run_token_required"`; while it is `false`, such a save is accepted
+under the crew hourly limit only and counted in
+`crewshipd_page_save_without_run_token_total`. A save with the token counts
+against its run's `chat_run_create_limit`.
+The limits and the requirement apply only with the
+`artifact_agent_access_modes` flag on (`docs/specs/pages.md` §7.1c).
 Only active crews from the selected workspace are accepted. Responses use
 `Cache-Control: no-store`. CLI access requires `workspace:admin`.
 

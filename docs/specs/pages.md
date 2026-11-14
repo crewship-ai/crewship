@@ -628,7 +628,27 @@ owner on 2026-11-13.
    crew for this chat-run scope only while the flag is on (the policy read
    reports `scoped_default: true`); every other agent surface keeps requiring
    a saved, enabled policy, and a saved policy, on or off, stays the ceiling.
-8. **Only a run started by the human's own message carries a human.** A plain
+8. **The sidecar page save carries the agent run token (#5336).** The
+   `save_page` tool sends the same derived run token the artifact tools send,
+   as the `Authorization` bearer on `POST /api/v1/internal/pages/save`. With
+   the flag on and a token that verifies for the crew and the acting agent,
+   the save is bound to its run: it counts against `chat_run_create_limit`
+   (429 `artifact_run_limit` past it) and the page is recorded as created by
+   that run. A token that does not verify (another crew, another agent, not a
+   run token) is refused with 403 `invalid_run_token`, never treated as
+   absent. A run without a human principal (routine, or admitted with the flag
+   off) has no run to bind to and is counted under the crew hourly limit
+   only. A save without a token (a sidecar that predates this release, still
+   running in an existing container) is accepted under the crew hourly limit
+   only, logged and counted (`crewshipd_page_save_without_run_token_total`),
+   unless the workspace policy sets `save_requires_run_token` (`crewship
+   workspace artifact-policy set --save-requires-run-token=true`); then it is
+   refused with 403 `run_token_required`. The requirement is an explicit
+   opt-in, not a date: an admin turns it on once the counter stays at zero.
+   **The token is accounting, not a boundary between agents of one crew:**
+   they share the container, so a token can be omitted or borrowed; it only
+   makes the per-run limit apply on this path.
+9. **Only a run started by the human's own message carries a human.** A plain
    chat run records its human principal at admission; routine, webhook, cron,
    agent-to-agent and crew-token runs record none and reach nothing through
    this path.

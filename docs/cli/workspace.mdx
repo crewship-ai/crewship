@@ -643,8 +643,14 @@ Replace the entire administrative policy using the version just reviewed with
 | `--chat-run-create-limit` | Artifacts one chat run may create (1–20, default 3). Omitted keeps the current value. |
 | `--run-read-limit` | Distinct artifacts one run may read through the agent's own access (1–500, default 50). |
 | `--crew-hourly-page-limit` | Pages one crew may create per hour through the sidecar save path (1–1000, default 20). |
+| `--save-requires-run-token` | `true` refuses an agent page save without the agent run token (`403 run_token_required`); default `false`. Omitted keeps the current value. |
 
-The three limits apply only with the `artifact_agent_access_modes` flag on.
+The three limits and the run token requirement apply only with the
+`artifact_agent_access_modes` flag on. A sidecar page save that carries the
+agent run token counts against its run's `--chat-run-create-limit`; one
+without it (a sidecar older than this release) is accepted under the crew
+hourly limit only until `--save-requires-run-token=true`. The token is
+accounting, not a boundary between agents of one crew.
 
 A stale version refuses the change. Read the policy again before deciding on a
 replacement. Use `--format json` for machine-readable responses.

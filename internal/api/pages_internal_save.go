@@ -28,12 +28,14 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync/atomic"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pages"
 	"github.com/crewship-ai/crewship/internal/policy"
@@ -46,6 +48,8 @@ import (
 func (r *Router) registerInternalPageSaveRoute(internalAuth func(http.Handler) http.Handler) {
 	p := NewPageHandler(r.db, r.hub, r.logger).SetJournal(r.Journal())
 	p.SetPolicyResolver(r.PolicyResolver())
+	// Verifies the agent run token save_page forwards (#5336).
+	p.artifactMasterToken = r.internalToken
 	// Reuse the public project store and single compiler slot, not another handler.
 	r.pages.SetPolicyResolver(r.PolicyResolver())
 	r.mux.Handle("POST /api/v1/internal/pages/project", internalAuth(http.HandlerFunc(r.pages.InternalProject)))
@@ -143,6 +147,13 @@ func (h *PageHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	// other way would hold a page the Guide is plainly permitted to create
 	// because the brand-new crew it is FOR defaults to `guided`.
 	actorCrewID := req.CrewID
+	// #5336: with agent access modes on, the agent run token binds the save
+	// to its run. This is accounting, not a boundary between agents of one
+	// crew: they share the container, so a token can be omitted or borrowed.
+	run, ok := h.internalSaveRun(w, r, req.WorkspaceID, actorCrewID, req.AgentID)
+	if !ok {
+		return
+	}
 	if !resolveDelegatedAuthorCrew(w, r, h.db, h.logger, req.WorkspaceID, req.TargetCrewSlug, &req.CrewID) {
 		return
 	}
@@ -260,6 +271,15 @@ func (h *PageHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 		}
 		replyInternalError(w, h.logger, "insert agent-authored page", err)
 		return
+	}
+	if run != nil {
+		if err := h.reserveScopedArtifactRunCreate(r.Context(), tx, run, req.WorkspaceID, pageID); errors.Is(err, errArtifactRunCap) {
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{"error": "This run reached its artifact limit. Ask the human to send a new message, or ask an admin to raise chat_run_create_limit.", "code": "artifact_run_limit"})
+			return
+		} else if err != nil {
+			replyInternalError(w, h.logger, "record agent page create for its run", err)
+			return
+		}
 	}
 	for i := range doc.Spec.Panels {
 		if err := insertPanel(r.Context(), tx, pageID, &doc.Spec.Panels[i], resolved[doc.Spec.Panels[i].ID], now, ""); err != nil {
@@ -412,3 +432,54 @@ var pageSaveWithoutRunToken atomic.Int64
 
 // PageSaveWithoutRunTokenTotal returns the count since process start.
 func PageSaveWithoutRunTokenTotal() int64 { return pageSaveWithoutRunToken.Load() }
+
+// internalSaveRun binds a flag-on sidecar save to the agent run named by the
+// Authorization bearer (#5336). It returns nil with ok for a save that is
+// accounted under the crew hourly limit only: the flag is off, no token was
+// sent and the workspace does not require one, or the run carries no human
+// (a routine run, or a chat run admitted with the flag off). A token that does
+// not verify for this crew and agent is refused, never treated as absent.
+func (h *PageHandler) internalSaveRun(w http.ResponseWriter, r *http.Request, workspace, crew, agent string) (*artifactRunAuthority, bool) {
+	ctx := r.Context()
+	if !h.artifactRunModesOn(ctx, workspace) {
+		return nil, true
+	}
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	if header == "" {
+		pageSaveWithoutRunToken.Add(1)
+		var required bool
+		err := h.db.QueryRowContext(ctx, `SELECT save_requires_run_token FROM workspace_artifact_creation_policy WHERE workspace_id=?`, workspace).Scan(&required)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			replyInternalError(w, h.logger, "read run token requirement", err)
+			return nil, false
+		}
+		h.logger.Info("page save without an agent run token", "workspace", workspace, "crew", crew, "agent", agent, "required", required)
+		if required {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "this workspace requires the agent run token on page saves; update the crew's sidecar or ask an admin to turn off save_requires_run_token", "code": "run_token_required"})
+			return nil, false
+		}
+		return nil, true
+	}
+	invalid := func() (*artifactRunAuthority, bool) {
+		writeJSON(w, http.StatusForbidden, map[string]any{"error": "the agent run token does not belong to this crew and agent", "code": "invalid_run_token"})
+		return nil, false
+	}
+	fields := strings.Fields(header)
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") || h.artifactMasterToken == "" || crew == "" {
+		return invalid()
+	}
+	tw, tokenAgent, runID, valid := internaltoken.ValidateAgentRunToken(internaltoken.DeriveAgentRunKey(h.artifactMasterToken, workspace, crew), fields[1])
+	if !valid || tw != workspace || tokenAgent != agent {
+		return invalid()
+	}
+	a := &artifactRunAuthority{WorkspaceID: workspace, CrewID: crew, AgentID: tokenAgent, RunID: runID}
+	err := h.db.QueryRowContext(ctx, `SELECT human_user_id FROM artifact_run_principals WHERE run_id=? AND workspace_id=? AND agent_id=? AND crew_id=?`, runID, workspace, tokenAgent, crew).Scan(&a.HumanUserID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, true
+	}
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve page save run", err)
+		return nil, false
+	}
+	return a, true
+}

@@ -77,6 +77,10 @@ func newWorkspaceArtifactPolicyCommand() *cobra.Command {
 		if len(limits) > 0 {
 			body["limits"] = limits
 		}
+		if cmd.Flags().Changed("save-requires-run-token") {
+			v, _ := cmd.Flags().GetBool("save-requires-run-token")
+			body["save_requires_run_token"] = v
+		}
 		response, err := client.Put(path, body)
 		if err != nil {
 			return err
@@ -90,6 +94,7 @@ func newWorkspaceArtifactPolicyCommand() *cobra.Command {
 	set.Flags().Int("chat-run-create-limit", 0, "Artifacts one chat run may create (1-20, default 3); omitted keeps the current value")
 	set.Flags().Int("run-read-limit", 0, "Distinct artifacts one run may read through the agent's own access (1-500, default 50)")
 	set.Flags().Int("crew-hourly-page-limit", 0, "Pages one crew may create per hour through the internal save path (1-1000, default 20)")
+	set.Flags().Bool("save-requires-run-token", false, "Refuse an agent page save without the agent run token (403 run_token_required); omitted keeps the current value")
 	command.Long = `Read or replace the workspace ceiling for agent work on artifacts: whether
 agents may create or change artifacts on a person's behalf, and which crews
 may do so. Requires the OWNER or ADMIN role and a token with workspace:admin.
@@ -98,12 +103,18 @@ With agent access modes on (feature flag artifact_agent_access_modes), the
 policy also carries limits: artifacts one chat run may create, distinct
 artifacts one run may read through the agent's own access, and pages one crew
 may create per hour. A workspace that never saved a policy uses the defaults
-(3, 50, 20) and, with the flag on, allows every live crew.`
+(3, 50, 20) and, with the flag on, allows every live crew.
+
+A page save from the crew sidecar that carries the agent run token counts
+against its run's create limit. One without the token (an older sidecar) is
+accepted under the crew hourly limit only, until --save-requires-run-token=true
+makes it refused. The token is accounting, not a boundary between the agents
+of one crew.`
 	show.Example = "  crewship workspace artifact-policy show -f json"
 	set.Long = `Replace the whole policy. Pass the version from show as --base-version;
 a newer saved policy returns 409 stale_policy. Give --enabled explicitly and
 exactly one of --crew-id (complete allowlist) or --clear-crews.`
-	set.Example = "  crewship workspace artifact-policy set --base-version 0 --enabled=true --crew-id <crew-id>\n  crewship workspace artifact-policy set --base-version 1 --enabled=false --clear-crews\n  crewship workspace artifact-policy set --base-version 2 --enabled=true --crew-id <crew-id> --chat-run-create-limit 5"
+	set.Example = "  crewship workspace artifact-policy set --base-version 0 --enabled=true --crew-id <crew-id>\n  crewship workspace artifact-policy set --base-version 1 --enabled=false --clear-crews\n  crewship workspace artifact-policy set --base-version 2 --enabled=true --crew-id <crew-id> --chat-run-create-limit 5\n  crewship workspace artifact-policy set --base-version 3 --enabled=true --crew-id <crew-id> --save-requires-run-token=true"
 	command.AddCommand(show, set)
 	return command
 }
