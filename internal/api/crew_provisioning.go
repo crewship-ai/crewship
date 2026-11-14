@@ -8,14 +8,17 @@ import (
 	"sync"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/moby/moby/client"
 )
 
 type ProvisioningHandler struct {
+	instanceID     string                  // image ownership; read/written under the database image-use gate
 	sandboxRuntime provider.SandboxRuntime // optional qualification backend; set before serving
 
 	db             *sql.DB
@@ -128,6 +131,41 @@ func (h *ProvisioningHandler) SetInstallationID(id string) {
 		return
 	}
 	h.provisioner.SetInstanceID(id)
+	id = devcontainer.ImageNamespace(id)
+	if id == "" {
+		return
+	}
+	gate := resourcelifecycle.Images(h.db)
+	gate.SetSelectionCheck(func(ctx context.Context, ref string) (bool, error) {
+		if h.docker == nil {
+			return true, nil
+		}
+		inspectCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		defer cancel()
+		inspected, err := h.docker.ImageInspect(inspectCtx, ref)
+		if err != nil {
+			if cerrdefs.IsNotFound(err) {
+				// Ownership is not established for an absent ordinary registry base;
+				// let the provider pull it. The cached-image readiness probe separately
+				// treats absence as a reason to rebuild before managed admission.
+				return true, nil
+			}
+			return false, err
+		}
+		if inspected.Config == nil {
+			return false, nil
+		}
+		owner := inspected.Config.Labels[devcontainer.ImageInstanceLabel]
+		return owner == "" || owner == id, nil
+	})
+	release := gate.Use()
+	h.instanceID = id
+	release()
+	// Routes are still being wired: perform the owned startup pass only after
+	// identity and selection validation are available.
+	if h.bgCtx != nil {
+		h.sweepOrphanCacheImages(h.bgCtx)
+	}
 }
 
 func NewProvisioningHandler(

@@ -159,7 +159,7 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 // referenced by a crew row). Removal of both is opt-in via
 // CREWSHIP_CACHE_GC_AUTODELETE=true — default is log-only for visibility.
 
-func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
+func (h *ProvisioningHandler) sweepLegacyCacheImages(ctx context.Context) {
 	if h.gcClient == nil {
 		return
 	}
@@ -222,8 +222,8 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 	orphans := make([]string, 0, len(listed.Items))
 	tooYoung := 0
 	for _, img := range listed.Items {
-		if img.ID == "" {
-			continue
+		if img.ID == "" || img.Labels[devcontainer.ImageInstanceLabel] != "" {
+			continue // labelled artifacts belong to the ownership-aware collector
 		}
 		_, inUse := referenced[img.ID]
 		_, managed := knownArtifacts[img.ID]
@@ -253,7 +253,7 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 	}
 	removed := 0
 	for _, imageID := range orphans {
-		if _, err := h.gcClient.ImageRemove(ctx, imageID, client.ImageRemoveOptions{Force: false, PruneChildren: true}); err != nil {
+		if _, err := h.gcClient.ImageRemove(ctx, imageID, client.ImageRemoveOptions{Force: false, PruneChildren: false}); err != nil {
 			h.logger.Warn("orphan cache-image GC: remove failed", "image_id", imageID, "error", err)
 			continue
 		}
