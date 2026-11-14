@@ -119,3 +119,48 @@ func TestCredentialDependents_SecondCrewGrantMatchesRuntime(t *testing.T) {
 		t.Fatalf("revoked second crew: %+v", got)
 	}
 }
+
+// One crew, two routines: one selects by type (a newer credential of the
+// type wins), one names this credential. The per-crew selection cache is
+// keyed by reference, so each gets its own answer; keyed by crew alone the
+// second routine would reuse the first's selection.
+func TestCredentialDependents_TypeAndNameInOneCrew(t *testing.T) {
+	rig := newFieldRig(t)
+	var name string
+	if err := rig.db.QueryRow(`SELECT name FROM credentials WHERE id=?`, rig.credID).Scan(&name); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := rig.db.Exec(`INSERT INTO credentials
+		(id,workspace_id,name,encrypted_value,type,provider,scope,status,created_by,created_at,updated_at)
+		VALUES ('cred-newer',?,'newer-login','encrypted-unused','USERPASS','NONE','WORKSPACE','ACTIVE',?,datetime('now','+1 day'),datetime('now'))`,
+		rig.wsID, rig.userID); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []struct{ id, ref string }{{"by-type", "userpass"}, {"by-name", "name." + name}} {
+		definition := `{"dsl_version":"1.0","name":"` + p.id + `","credentials_required":[{"type":"` + p.ref + `"}],"steps":[]}`
+		if _, err := rig.db.Exec(`INSERT INTO pipelines
+			(id,workspace_id,slug,name,definition_json,definition_hash,dsl_version,head_version,workspace_visible,created_at,updated_at)
+			VALUES (?,?,?,?,?,'hash','1.0',1,1,datetime('now'),datetime('now'))`,
+			p.id, rig.wsID, p.id, p.id, definition); err != nil {
+			t.Fatal(err)
+		}
+	}
+	req := httptest.NewRequest("GET", "/api/v1/credentials/"+rig.credID+"/dependents", nil)
+	req.SetPathValue("credentialId", rig.credID)
+	req = withWorkspaceUser(req, rig.userID, rig.wsID, "OWNER")
+	rec := httptest.NewRecorder()
+	rig.creds.Dependents(rec, req)
+	var result credentialDependentsResponse
+	if rec.Code != 200 || json.Unmarshal(rec.Body.Bytes(), &result) != nil {
+		t.Fatalf("dependents: %d %s", rec.Code, rec.Body.String())
+	}
+	want := map[string]string{"by-type": "another_credential", "by-name": "would_resolve"}
+	if len(result.Routines) != 2 {
+		t.Fatalf("routines = %+v, want both", result.Routines)
+	}
+	for _, r := range result.Routines {
+		if r.Resolution != want[r.Slug] {
+			t.Fatalf("%s resolution = %q, want %q (%+v)", r.Slug, r.Resolution, want[r.Slug], result.Routines)
+		}
+	}
+}

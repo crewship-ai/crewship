@@ -24,17 +24,18 @@ type credentialDependentsResponse struct {
 }
 
 // Dependents gives a bounded, read-only view of routine definitions that
-// statically reference this credential's TYPE. It never decrypts vault values.
+// statically reference this credential's TYPE or its name
+// (`secrets.name.<NAME>`). It never decrypts vault values.
 // A type reference is not proof that a run used this credential.
 func (h *CredentialHandler) Dependents(w http.ResponseWriter, r *http.Request) {
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	credID := r.PathValue("credentialId")
 	role := RoleFromContext(r.Context())
 	filter, filterArgs := credentialVisibilityFilter(role, UserFromContext(r.Context()))
-	var credType string
+	var credType, credName string
 	args := append([]any{credID, workspaceID}, filterArgs...)
-	err := h.db.QueryRowContext(r.Context(), `SELECT c.type FROM credentials c
-		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`+filter, args...).Scan(&credType)
+	err := h.db.QueryRowContext(r.Context(), `SELECT c.type, c.name FROM credentials c
+		WHERE c.id = ? AND c.workspace_id = ? AND c.deleted_at IS NULL`+filter, args...).Scan(&credType, &credName)
 	if errors.Is(err, sql.ErrNoRows) {
 		replyError(w, http.StatusNotFound, "Credential not found")
 		return
@@ -66,10 +67,17 @@ func (h *CredentialHandler) Dependents(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			for _, reference := range pipeline.ReferencedCredentialTypes(definition) {
-				if !strings.EqualFold(reference, credType) {
+				// A type reference may select this credential; a by-name
+				// reference selects it only when it names it.
+				if name, byName := pipeline.CredentialRefName(reference); byName {
+					if name != credName {
+						continue
+					}
+				} else if !strings.EqualFold(reference, credType) {
 					continue
 				}
-				selected, cached := selectedByCrew[routine.AuthorCrewID]
+				cacheKey := routine.AuthorCrewID + "\x00" + reference
+				selected, cached := selectedByCrew[cacheKey]
 				if !cached {
 					selected, err = selectID(r.Context(), pipeline.RunScope{
 						WorkspaceID: workspaceID, AuthorCrewID: routine.AuthorCrewID,
@@ -78,7 +86,7 @@ func (h *CredentialHandler) Dependents(w http.ResponseWriter, r *http.Request) {
 						replyInternalError(w, h.logger, "resolve credential dependent", err)
 						return
 					}
-					selectedByCrew[routine.AuthorCrewID] = selected
+					selectedByCrew[cacheKey] = selected
 				}
 				resolution := "unavailable"
 				if selected == credID {
