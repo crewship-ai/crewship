@@ -186,6 +186,22 @@ export async function release(page: Page): Promise<void> {
   await pause(500)
 }
 
+/**
+ * Waits until the editor routes keys to a text field (`text`: the name box or a cell
+ * editor) or to the grid itself (`grid`). The editor (eframe) handles input only on
+ * its next painted frame, and the browser routes each key by the DOM focus at that
+ * moment: while its hidden text input still has focus, typed keys go to the text
+ * field that held it, whatever the test meant. Two animation frames do not prove the
+ * editor caught up; on a slow runner the marker typed right after the name box's Enter
+ * never reached the grid and the cell stayed empty. Only keys that reach the canvas
+ * (grid) or the active hidden input (text field) count, and the focus switch is the
+ * editor's own acknowledgement, so wait for it.
+ */
+async function keysTo(f: Frame, target: "text" | "grid") {
+  const tag = target === "text" ? "INPUT" : "CANVAS"
+  await f.waitForFunction((t) => document.activeElement?.tagName === t, tag, { timeout: 30_000 })
+}
+
 async function gotoCell(page: Page, f: Frame, app: NativeApp, cell: string) {
   const kb = page.keyboard
   for (let k = 0; k < 3; k++) {
@@ -193,10 +209,11 @@ async function gotoCell(page: Page, f: Frame, app: NativeApp, cell: string) {
     await barrier(page, app)
   }
   await f.locator("canvas").first().click({ position: { x: 68, y: 178 } }) // name box
+  await keysTo(f, "text")
   await kb.press("Control+a")
   await kb.type(cell)
   await kb.press("Enter")
-  await barrier(page, app)
+  await keysTo(f, "grid")
 }
 
 /** Types a unique marker: a new paragraph in Word, a cell value in Sheet. */
@@ -209,7 +226,9 @@ export async function typeMarker(page: Page, f: Frame, app: NativeApp, text: str
   } else {
     await gotoCell(page, f, app, cell)
     await kb.type(text)
+    await keysTo(f, "text") // the cell editor opened with the marker
     await kb.press("Enter")
+    await keysTo(f, "grid") // and committed it
   }
   await barrier(page, app).catch(() => {})
 }

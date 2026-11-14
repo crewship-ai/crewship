@@ -7,9 +7,10 @@ import { spawnSync } from "node:child_process"
 import { test } from "node:test"
 import { ACCOUNT_VARS, checkOrigin, jobArgs, runEnv } from "./runner-env.mjs"
 import { EXIT, HISTORY_NOT_ENABLED, SCENARIOS, evidencePath, fullChromium, isHeadlessShell, loadEvidence, parseListed, sameVersions, verdict } from "./verdict.mjs"
+import { changeKind, classifyVersions, lostReplyProblems, onlyCursorAfter, withoutActiveCell } from "./sheet-versions.mjs"
 
 const RC = "ce984daf1d5f9dad37e00228c269ad0ae06736dd"
-const ORIGIN = "https://crewship-dev3.unifylab.cz"
+const ORIGIN = "https://dev3.crewship.test"
 const CHROME = "/cache/ms-playwright/chromium-1248/chrome-linux64/chrome"
 const RUN = "6f1c1f7e-4a57-4c1e-9d3b-2f5f0d1a9e01"
 const OTHER_RUN = "0b9a2c11-0000-4000-8000-000000000000"
@@ -79,6 +80,33 @@ test("a listing that answers 200 with exactly the observed versions passes with 
   assert.deepEqual(v.notVerified, [])
 })
 
+// Sheet: Enter's move of the active cell can follow the lost save as a version of its own (sheet-versions.mjs).
+const lostThenMoved = (e) => {
+  const lost = e.steps.find((s) => s.name === "lost reply")
+  const moved = String(Number(lost.versionAfter) + 1)
+  const shift = (v) => String(Number(v) + (Number(v) >= Number(moved) ? 1 : 0))
+  const steps = e.steps.map((s) => (s.name === "lost reply" ? { ...s, versionAfter: moved } : Number(s.versionBefore) >= Number(moved) ? { ...s, versionBefore: shift(s.versionBefore), versionAfter: shift(s.versionAfter) } : s))
+  const head = String(Number(e.versions.head) + 1)
+  const receipts = Array.from({ length: Number(head) - 1 }, (_, i) => String(i + 2))
+  const lostAt = lost.versionAfter
+  const ops = receipts.filter((r) => r !== lostAt).map((version, i) => ({ n: i + 1, kind: "save", status: 200, version, baseVersion: String(Number(version) - 1) }))
+  ops.push({ n: ops.length + 1, kind: "reconcile", status: 200, version: lostAt })
+  return { ...e, steps, ops, versions: { ...e.versions, receipts, head, headAfterReload: head, cursorOnly: [{ version: moved, base: lostAt }] } }
+}
+
+test("a Sheet lost reply followed by a move of the active cell passes, and the move stays listed", () => {
+  const input = withEvidence("walk.sheet", lostThenMoved)
+  const v = verdict(input)
+  assert.equal(v.verdict, "PASS", v.reasons.join("; "))
+  assert.equal(input.evidence["walk.sheet"].versions.cursorOnly.length, 1)
+})
+
+test("an unchanged save answer (#5075) is no receipt", () => {
+  const input = withEvidence("walk.word", (e) => ({ ...e, ops: [...e.ops, { n: e.ops.length + 1, kind: "save", status: 200, version: e.versions.head, baseVersion: e.versions.head, unchanged: true }] }))
+  const v = verdict(input)
+  assert.equal(v.verdict, "PASS", v.reasons.join("; "))
+})
+
 // Each case changes one thing of a passing run and must not pass.
 const cases = [
   // The real run of 7 Nov (rc-ce984daf1/walk): both walks passed, but the rows were UNMAPPED and failed.
@@ -92,7 +120,7 @@ const cases = [
   { name: "the origin serves another SHA", input: good({ run: { ...RUN_JSON, appSha: "0".repeat(40) } }), want: "SETUP", reason: /not RC/ },
   { name: "the app build is dirty", input: good({ run: { ...RUN_JSON, appDirty: true } }), want: "SETUP", reason: /not clean/ },
   { name: "the dirty flag is unknown", input: good({ run: { ...RUN_JSON, appDirty: null } }), want: "SETUP", reason: /not clean/ },
-  { name: "the run recorded another origin", input: good({ run: { ...RUN_JSON, origin: "https://crewship-dev2.unifylab.cz" } }), want: "SETUP", reason: /run origin/ },
+  { name: "the run recorded another origin", input: good({ run: { ...RUN_JSON, origin: "https://dev2.crewship.test" } }), want: "SETUP", reason: /run origin/ },
   { name: "the run was in quick mode", input: good({ run: { ...RUN_JSON, mode: "quick" } }), want: "SETUP", reason: /mode quick/ },
   { name: "--rc is a short SHA", input: good({ rc: RC.slice(0, 12) }), want: "SETUP", reason: /full 40-character/ },
   { name: "nothing was listed", input: good({ listed: [] }), want: "FAIL", reason: /listed 0 times/ },
@@ -131,6 +159,10 @@ const cases = [
   { name: "ctrl+s without a change made a version", input: withEvidence("walk.word", (e) => ({ ...e, steps: e.steps.map((s) => (s.name === "ctrl+s without a change" ? { ...s, versionAfter: String(Number(s.versionBefore) + 1) } : s)) })), want: "FAIL", reason: /ctrl\+s without a change went from/ },
   { name: "the lost reply made two versions", input: withEvidence("walk.sheet", (e) => ({ ...e, steps: e.steps.map((s) => (s.name === "lost reply" ? { ...s, versionAfter: String(Number(s.versionBefore) + 2) } : s)) })), want: "FAIL", reason: /not exactly one version/ },
   { name: "the lost reply made no version", input: withEvidence("walk.sheet", (e) => ({ ...e, steps: e.steps.map((s) => (s.name === "lost reply" ? { ...s, versionAfter: s.versionBefore } : s)) })), want: "FAIL", reason: /not exactly one version/ },
+  { name: "the lost reply made two versions, the second listed as no move", input: withEvidence("walk.sheet", (e) => ({ ...lostThenMoved(e), versions: { ...lostThenMoved(e).versions, cursorOnly: [] } })), want: "FAIL", reason: /not exactly one version/ },
+  { name: "a cursor-only version that is not a receipt", input: withEvidence("walk.sheet", (e) => ({ ...e, versions: { ...e.versions, cursorOnly: [{ version: "99", base: "98" }] } })), want: "FAIL", reason: /cursor-only version .* is not a receipt/ },
+  { name: "a cursor-only version on a version other than the one before it", input: withEvidence("walk.sheet", (e) => ({ ...e, versions: { ...e.versions, cursorOnly: [{ version: "4", base: "2" }] } })), want: "FAIL", reason: /cursor-only version .* is not a receipt on the version before it/ },
+  { name: "an unchanged answer counted as a receipt", input: withEvidence("walk.word", (e) => ({ ...e, ops: [...e.ops, { kind: "save", status: 200, version: e.versions.head, baseVersion: e.versions.head }] })), want: "FAIL", reason: /recorded saves .* are not the receipts/ },
   { name: "no history record", input: withEvidence("walk.word", (e) => ({ ...e, history: undefined })), want: "FAIL", reason: /no history record/ },
   { name: "a 404 with another message", input: withEvidence("walk.word", (e) => ({ ...e, history: { listingStatus: 404, error: "page not found" } })), want: "FAIL", reason: /answered 404: page not found/ },
   { name: "a 500 from the listing", input: withEvidence("walk.word", (e) => ({ ...e, history: { listingStatus: 500, error: "native version history unavailable" } })), want: "FAIL", reason: /answered 500/ },
@@ -282,13 +314,89 @@ test("R2 account values arrive intact and never in an argv", () => {
   assert.ok(ACCOUNT_VARS.includes("PRD_OWNER_PASSWORD"))
 })
 test("R2 a rejected origin with userinfo and a token query prints neither", () => {
-  const r = checkOrigin("https://walker:hunter2@crewship-dev3.unifylab.cz/private?token=abc123#frag")
+  const r = checkOrigin("https://walker:hunter2@dev3.crewship.test/private?token=abc123#frag")
   assert.ok(r.error)
   for (const secret of ["walker", "hunter2", "token", "abc123", "private", "frag"]) assert.ok(!r.error.includes(secret), r.error)
-  assert.match(r.error, /https:\/\/crewship-dev3.unifylab.cz/)
+  assert.match(r.error, /https:\/\/dev3.crewship.test/)
   const bad = checkOrigin("not a url hunter2")
   assert.ok(bad.error && !bad.error.includes("hunter2"))
   const ftp = checkOrigin("ftp://walker:hunter2@host")
   assert.ok(ftp.error && !ftp.error.includes("hunter2") && !ftp.error.includes("walker"))
   assert.deepEqual(checkOrigin(`${ORIGIN}/`), { origin: ORIGIN })
+})
+
+// Sheet versions (sheet-versions.mjs): a move of the active cell vs a content change vs a re-sent lost attempt.
+// The shape the Sheet engine saves (lib/mooring/gridcraft-empty.ts), cut to what matters here.
+const book = (cells, row, col = 0, extra = {}) => JSON.stringify({
+  sheets: [{ name: "Sheet1", cells: { bands: { 0: { rows: Object.fromEntries(cells.map((v, r) => [r, { 0: { value: { t: "Text", v }, formula: null, style: 0 } }])) } }, len: cells.length }, view_active: { row, col }, view_top_left: { row: 0, col: 0 }, ...extra }],
+  active_sheet: 0,
+})
+
+test("sheet versions: a move of the active cell alone is cursor-only", () => {
+  assert.equal(changeKind(book(["A"], 0), book(["A"], 1)), "cursor-only")
+  assert.equal(changeKind(book(["A"], 0), book(["A"], 3, 2)), "cursor-only")
+})
+
+test("sheet versions: a new or changed cell is a content change, also when the active cell moves with it", () => {
+  assert.equal(changeKind(book(["A"], 1), book(["A", "B"], 1)), "content")
+  assert.equal(changeKind(book(["A"], 0), book(["A", "B"], 1)), "content")
+  assert.equal(changeKind(book(["A"], 0), book(["X"], 1)), "content")
+})
+
+test("sheet versions: any other view field is content, not the active cell", () => {
+  assert.equal(changeKind(book(["A"], 0), book(["A"], 0, 0, { view_top_left: { row: 5, col: 0 } })), "content")
+  assert.equal(changeKind(book(["A"], 0), book(["A"], 1, 0, { zoom: 120 })), "content")
+})
+
+test("sheet versions: same bytes are identical; unknown or non-workbook text is content", () => {
+  assert.equal(changeKind(book(["A"], 0), book(["A"], 0)), "identical")
+  assert.equal(changeKind(undefined, book(["A"], 0)), "content")
+  assert.equal(changeKind("not json", "not json either"), "content")
+  assert.equal(withoutActiveCell('{"body":[]}'), null)
+})
+
+test("sheet versions: cursor-only versions after a content save are counted, not rejected", () => {
+  const initial = { version: "1", text: book([], 0) }
+  const writes = [
+    { version: "2", base: "1", text: book(["A"], 0) },
+    { version: "3", base: "2", text: book(["A"], 1) },
+    { version: "4", base: "3", text: book(["A", "B"], 2) },
+  ]
+  const r = classifyVersions(initial, writes)
+  assert.deepEqual(r.kinds, { 2: "content", 3: "cursor-only", 4: "content" })
+  assert.deepEqual(r.cursorOnly, [{ version: "3", base: "2" }])
+  assert.deepEqual(r.problems, [])
+  assert.equal(onlyCursorAfter(r.kinds, "2", "3"), true)
+  assert.equal(onlyCursorAfter(r.kinds, "2", "4"), false)
+})
+
+test("sheet versions: a cursor-only version that does not follow a content save is a problem", () => {
+  const initial = { version: "1", text: book(["A"], 0) }
+  const chain = classifyVersions(initial, [{ version: "2", base: "1", text: book(["A"], 1) }])
+  assert.match(chain.problems.join(), /v2 changes only the active cell and does not follow a content change/)
+  const twice = classifyVersions(initial, [
+    { version: "2", base: "1", text: book(["A", "B"], 1) },
+    { version: "3", base: "2", text: book(["A", "B"], 2) },
+    { version: "4", base: "3", text: book(["A", "B"], 3) },
+  ])
+  assert.deepEqual(twice.problems, ["v4 changes only the active cell and does not follow a content change (v3 is cursor-only)"])
+})
+
+test("sheet versions: after a lost reply: a move of the active cell on the lost version passes", () => {
+  const kinds = { 8: "content", 9: "content", 10: "cursor-only" }
+  const lost = { version: "9", contentHash: "sha256:lostlostlost" }
+  const after = [{ kind: "reconcile", baseVersion: "8", contentHash: "sha256:lostlostlost", version: "9" }, { kind: "save", baseVersion: "9", contentHash: "sha256:cursorcursor", version: "10" }]
+  assert.deepEqual(lostReplyProblems(lost, after, kinds), [])
+})
+
+test("sheet versions: after a lost reply: a re-sent attempt, a wrong base or a content change is flagged", () => {
+  const lost = { version: "9", contentHash: "sha256:lostlostlost" }
+  const resent = lostReplyProblems(lost, [{ kind: "save", baseVersion: "9", contentHash: "sha256:lostlostlost", version: "9", unchanged: true }], { 9: "content" })
+  assert.match(resent.join(), /re-sent the lost attempt/)
+  const duplicate = lostReplyProblems(lost, [{ kind: "save", baseVersion: "8", contentHash: "sha256:lostlostlost", version: "10" }], { 10: "content" })
+  assert.match(duplicate.join(), /re-sent the lost attempt/)
+  assert.match(duplicate.join(), /builds on v8, not the lost save's v9/)
+  assert.match(duplicate.join(), /save v10 after the lost reply is a content change/)
+  const content = lostReplyProblems(lost, [{ kind: "save", baseVersion: "9", contentHash: "sha256:newcontent", version: "10" }], { 10: "content" })
+  assert.deepEqual(content, ["save v10 after the lost reply is a content change, not a move of the active cell"])
 })
