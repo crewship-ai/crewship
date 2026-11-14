@@ -2055,6 +2055,15 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 	// system-prompt files, the login file — writes inside it.
 	batch.add(preflightStepRunHome, "", runHomeSetupScript(req.AgentSlug, req.RunID))
 
+	// #5339: a run without a human gets its host-minted artifact capability
+	// registered with the crew sidecar here, before the agent process exists,
+	// so nothing in the container can register one first.
+	if req.ArtifactRunCapability != "" && req.sidecarActive {
+		if script := sidecarRunCapabilityScript(agentRunTokenFromEnv(env), req.ArtifactRunCapability); script != "" {
+			batch.add(preflightStepRunCapability, "", script)
+		}
+	}
+
 	// Pre-create /crew/manifest.json writable by both agent (1001) and sidecar (1002).
 	manifestCfg := provider.ExecConfig{
 		ContainerID: req.ContainerID,

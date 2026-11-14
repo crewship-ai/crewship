@@ -1242,6 +1242,12 @@ func (s *Server) boundedHostRequest(r *http.Request, method, path string, body [
 // sendBoundedHostRequest preserves the existing bounded IPC transport. Its
 // callers separately establish the route's required acting identity.
 func (s *Server) sendBoundedHostRequest(r *http.Request, method, path string, body []byte, responseLimit int64, slug string) (*memoryHostResponse, error) {
+	return s.sendBoundedHostRequestWithHeaders(r, method, path, body, responseLimit, slug, nil)
+}
+
+// sendBoundedHostRequestWithHeaders is sendBoundedHostRequest with headers the
+// sidecar itself adds (never copied from the agent's request).
+func (s *Server) sendBoundedHostRequestWithHeaders(r *http.Request, method, path string, body []byte, responseLimit int64, slug string, extra map[string]string) (*memoryHostResponse, error) {
 	if s.ipc == nil {
 		return nil, &memoryHostTransportError{err: errors.New("IPC not configured")}
 	}
@@ -1277,6 +1283,9 @@ func (s *Server) sendBoundedHostRequest(r *http.Request, method, path string, bo
 	}
 	if slug != "" {
 		httpReq.Header.Set(actingAgentSlugHeader, slug)
+	}
+	for k, v := range extra {
+		httpReq.Header.Set(k, v)
 	}
 
 	// The sent/not-sent evidence R5 turns on. GotConn fires once this call

@@ -719,8 +719,9 @@ owner on 2026-11-13.
    makes the per-run limit apply on this path.
 9. **Only a run started by the human's own message carries a human.** A plain
    chat run records its human principal at admission; routine, webhook, cron,
-   agent-to-agent and crew-token runs record none and reach nothing through
-   this path.
+   agent-to-agent and crew-token runs record none. Agent-to-agent and
+   crew-token runs reach nothing through this path; routine, webhook and
+   scheduled runs reach only what item 10 allows.
 
 9. **A folder may let the agents of its owning crew read or suggest (D2).**
    `page_folders.agent_access` is `none` (default), `read` or `propose`, never
@@ -733,13 +734,96 @@ owner on 2026-11-13.
    folder, only agents whose live crew owns the folder, and only as standing
    access: read only, counted against `run_read_limit`, and still intersected
    with the run's human.
-10. **Runs without a human reach nothing yet.** A routine, webhook or cron run
-   has no human principal and the artifact tool refuses it. Its own mode
-   (standing grants only, the read cap per run) needs a run identity the
-   server can trust: today the crew container holds the key that mints run
-   tokens for any agent and run of its crew, and most producers start runs
-   without a work-ledger record, so a per-run cap could be bypassed by minting
-   a fresh run. That mode waits for that identity.
+10. **A run without a human reaches only its agent's standing access, from a
+   host-recorded run (#5339).** A run token alone proves nothing here: the
+   crew container holds the key that derives run tokens for any agent and run
+   of its crew. Two routine starts count. A routine a person ran (or batch-ran)
+   records each agent step as a routine run. A schedule's own fire (the cron
+   scheduler, or the schedule's "run now") records each agent step as a
+   scheduled run only when a person created the schedule or last changed what
+   it runs (`pipeline_schedules.creator_kind = 'human'`, set only from that
+   person's own session or CLI token on the public API) and, checked again at
+   that step, the person still holds the same workspace membership they held
+   then (`creator_member_id`; leaving and rejoining does not restore it), with
+   a role that may create schedules (MANAGER+), as a trusted (not restricted)
+   member, not suspended, and with no access revocation
+   (`users.access_revoked_at`, set by an admin's session revoke or recovery)
+   since the creator was written (`creator_set_at`).
+   "Run now" follows the same rule: the schedule's creator decides, the person
+   pressing it lends nothing. A schedule an agent saved (any internal path,
+   including `/internal/routines/schedules` and save_routine's trigger,
+   whatever `X-Caller-User-Id` it carries) is marked `agent`; a schedule
+   saved before the creator was recorded has none. Neither ever records,
+   until a person changes what it runs. Creating a schedule, or changing its
+   cron, timezone, inputs, target, pinned version or wake check (any of
+   these fields named in the update in any letter case, even with its old
+   value, or changed in effect), overwrites the creator, so an agent's change
+   to a person's schedule takes its access away. Enabling, disabling,
+   renaming it or changing its failure limit, `catchup_policy` or
+   `spread_seconds` keeps the creator: an admin re-enabling an agent's schedule after its circuit
+   breaker tripped does not vouch for it. A GDPR erasure of the creator
+   clears the whole creator, so the schedule vouches for nothing. A delayed or
+   debounced start (its trigger defaults to schedule), a schedule occurrence
+   that waited in the queue for capacity, a webhook, `call_pipeline`, another
+   agent, an automation, an issue, a page action and a wake check record
+   nothing and their steps reach no artifact, and neither does a routine an
+   agent authored, whoever starts it. All of these fail closed. A scheduled
+   step refused because of its schedule's creator, or a schedule claim the
+   host did not make, is journaled as `artifact.run_capability_withheld`
+   once per schedule fire (not per step), flag on only. Its reason is
+   `schedule_fire_unverified`, `schedule_target_mismatch`,
+   `schedule_saved_by_agent`, `schedule_creator_unknown` or, for every
+   problem with the person's standing, the one generic
+   `schedule_creator_not_in_good_standing`; the detail (left, suspended,
+   revoked, role, restricted) goes only to the server log. The entry names
+   the schedule only for a fire the host vouched for. With the flag off
+   nothing is read, recorded or journaled. An agent's own webhook and cron runs,
+   configured on the agent by a person, record as before. So the host
+   producer of such a run records the run in `artifact_unattended_runs` (agent, crew, trigger,
+   source) after its run record and before its agent starts, and the server
+   mints a random capability for that one run, storing only its SHA-256. No
+   HTTP endpoint and no internal token can record a run. The capability is
+   handed to the crew sidecar in the run's preflight (set once, authenticated
+   by the run's own token) and attached by it to that run's artifact tool
+   calls only; it never enters the agent's environment. The tool admits such
+   a run only when the capability matches the record for the token's exact
+   run, agent and crew, the record is open and unexpired (the run's own
+   timeout plus 5 minutes, at most 2 hours),
+   the run is live in the journal (started, no terminal entry), its work
+   attempt (if any) is current, and the workspace policy allows the crew. The
+   run's end, its terminal journal entry or the expiry ends the capability.
+   The creator's standing is checked when each step starts: a step already
+   running keeps its capability for its own lifetime (at most 2 hours) even
+   if the creator loses standing meanwhile, and the next step is checked
+   again. A run resumed after a wait or an approval carries no schedule fire,
+   so its later steps of a scheduled run get no capability.
+   Such a run then reaches an artifact only when the agent holds its own live
+   grant on it (`standing`) or the page sits in a folder that lets its crew's
+   agents read or suggest (`folder`, item 9); never a private (Personal)
+   artifact, never anything through a role, and at most `run_read_limit`
+   distinct artifacts per run (429 `artifact_run_limit`). It writes
+   (`artifact_publish`) only through a live `write` grant that the artifact's
+   owner gave the agent on that artifact, checked on every write; never
+   through a folder. Only `artifact_versions` and `artifact_publish` are open
+   to it; create, share, restore, comments, replies, dashboard data and slides
+   are refused before any artifact is looked up. Its read sees the shared
+   version, or the latest when it holds that write grant, and no comment text.
+   Anything else is refused exactly like a missing artifact. Flag off, nothing
+   is recorded and such a run reaches nothing, as before.
+   The capability lives only in the sidecar's memory and is delivered once
+   per run; nothing in the container can fetch one. If the sidecar restarts,
+   the run's later artifact calls arrive without it: the server answers 403
+   `run_capability_lost` ("This run lost its artifact access …") for a
+   recorded, still-live run and journals `artifact.run_capability_lost` once
+   per run. The run reaches nothing for the rest of its life; the next run
+   gets a new capability.
+   Not solved: all agents of one crew container run as UID 1001. A sibling
+   agent that reads another agent's run token (for example from
+   `/proc/<pid>/environ`) can call the sidecar with it, and the sidecar then
+   attaches that run's capability. The capability adds nothing beyond what
+   the stolen token already reaches; it is the same exposure chat runs have
+   today. It stops only a token minted from the crew key for a run the host
+   never recorded.
 
 11. **Every artifact project access is audited with its human.** Each access
    a flag-on chat run makes to an artifact project (view, comments, dashboard
@@ -763,7 +847,11 @@ owner on 2026-11-13.
    user is the human the agent acted for; its metadata names the agent, crew,
    run, chat, the reach (`referenced`, `created`, `consented`, `standing` or
    `folder`) and the operation (`read`, `write`, `create`). It holds no
-   content. Reads and writes are recorded once per run, artifact and operation
+   content. A run without a human (item 10) has no user on the row (`user_id`
+   is NULL: no human acted, and the grant's issuer did not perform the
+   access); its metadata names the trigger and source instead of a chat, and
+   a scheduled run also its `schedule_id` (read from the host-recorded source).
+   Reads and writes are recorded once per run, artifact and operation
    (a later access re-verifies the existing row); each individual write is
    already in the version history with the run as its actor. The row keeps the
    reach of the first such access; a later access by another reach is not

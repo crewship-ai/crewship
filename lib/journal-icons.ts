@@ -340,6 +340,8 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "artifact.project_shared": Globe,
   "artifact.library_published": Globe,
   "artifact.library_pinned": FilePen,
+  "artifact.run_capability_withheld": Ban,
+  "artifact.run_capability_lost": Ban,
   "craft.native_preview_shared": Eye,
   "artifact.orphaned_workbook_deleted": Trash2,
   "artifact.private_output_published": Globe,

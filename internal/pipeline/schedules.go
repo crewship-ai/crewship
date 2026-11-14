@@ -117,9 +117,56 @@ type Schedule struct {
 	// the review item.
 	Activation string
 
+	// CreatorKind / CreatorUserID say who created or last saved the
+	// schedule (#5339): ScheduleCreatorHuman with that person's id, or
+	// ScheduleCreatorAgent (an agent or any internal path). "" means unknown
+	// (a schedule saved before the creator was recorded). Only a schedule a
+	// person saved can give its routine runs artifact access, and that
+	// person's standing is re-checked at every run.
+	CreatorKind   string
+	CreatorUserID string
+	// CreatorSetAt is when the creator was last written (RFC3339Nano, ""
+	// when unknown). A revocation of the creator's access after it voids
+	// the vouching.
+	CreatorSetAt string
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 	DeletedAt *time.Time
+}
+
+// Schedule creator kinds (pipeline_schedules.creator_kind, #5339).
+const (
+	ScheduleCreatorHuman = "human"
+	ScheduleCreatorAgent = "agent"
+)
+
+// scheduleCreatorRow is a creator as stored: kind, user, the person's
+// workspace membership row at the time they saved (so leaving and rejoining
+// the workspace does not restore their vouching), and when it was set.
+type scheduleCreatorRow struct{ kind, user, member, setAt any }
+
+// resolveScheduleCreator normalises a creator for storage through x (so a
+// caller inside a tx sees its own writes): a human needs a user id and a
+// current membership of the workspace, an agent never carries one, and
+// anything else is unknown (all NULL).
+func resolveScheduleCreator(ctx context.Context, x sqlExecQuerier, workspaceID, kind, userID string) (scheduleCreatorRow, error) {
+	now := tsformat.Format(time.Now().UTC())
+	switch {
+	case kind == ScheduleCreatorHuman && userID != "":
+		var member string
+		err := x.QueryRowContext(ctx, `SELECT id FROM workspace_members WHERE workspace_id=? AND user_id=?`, workspaceID, userID).Scan(&member)
+		if errors.Is(err, sql.ErrNoRows) {
+			return scheduleCreatorRow{}, nil
+		}
+		if err != nil {
+			return scheduleCreatorRow{}, fmt.Errorf("schedule creator membership: %w", err)
+		}
+		return scheduleCreatorRow{kind, userID, member, now}, nil
+	case kind == ScheduleCreatorAgent:
+		return scheduleCreatorRow{kind: kind, setAt: now}, nil
+	}
+	return scheduleCreatorRow{}, nil
 }
 
 // Trigger activation states (B8, #2359). TriggerActivationActive is the
@@ -204,6 +251,16 @@ type SaveScheduleInput struct {
 	// ActivateSchedule can find it later (B8, #2359). Rejected on update —
 	// activation is a one-time create-time decision, not an editable field.
 	Activation string
+	// CreatorKind / CreatorUserID are who is saving the schedule now (see
+	// Schedule.CreatorKind). Set by the API from the request's verified
+	// credential only; every save overwrites them, so an agent saving a
+	// schedule a person made takes its artifact access away.
+	CreatorKind   string `json:"-"`
+	CreatorUserID string `json:"-"`
+	// KeepCreator (update only) leaves the stored creator untouched: an
+	// enable, disable, rename or timing tweak does not change what the
+	// schedule runs, so it neither vouches for nor un-vouches it.
+	KeepCreator bool `json:"-"`
 }
 
 // ScheduleStore is the persistence + listing API for
@@ -364,7 +421,11 @@ func prepareScheduleWrite(in SaveScheduleInput) (preparedSchedule, error) {
 // its own uncommitted write).
 func insertScheduleRow(ctx context.Context, x sqlExecQuerier, id string, p preparedSchedule) (*Schedule, error) {
 	now := time.Now().UTC()
-	_, err := x.ExecContext(ctx, `
+	creator, err := resolveScheduleCreator(ctx, x, p.in.WorkspaceID, p.in.CreatorKind, p.in.CreatorUserID)
+	if err != nil {
+		return nil, err
+	}
+	_, err = x.ExecContext(ctx, `
 INSERT INTO pipeline_schedules (
     id, workspace_id, name, target_pipeline_id, target_pipeline_version,
     cron_expr, timezone, inputs_json, enabled, next_run_at,
@@ -373,8 +434,9 @@ INSERT INTO pipeline_schedules (
     max_consecutive_failures,
     activation,
     created_at, updated_at, chat_origin_id,
-    spread_seconds, spread_offset_seconds
-) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    spread_seconds, spread_offset_seconds,
+    creator_kind, creator_user_id, creator_member_id, creator_set_at
+) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		id, p.in.WorkspaceID, p.in.Name, p.in.TargetPipelineID,
 		nullInt(p.in.TargetPipelineVersion),
 		p.in.CronExpr, p.in.Timezone, string(p.inputsJSON), boolToInt(p.enabled),
@@ -385,6 +447,7 @@ INSERT INTO pipeline_schedules (
 		nullStr(p.in.Activation),
 		tsformat.Format(now), tsformat.Format(now), nullableStr(p.in.ChatOriginID),
 		p.in.SpreadSeconds, ScheduleSpreadOffset(id, p.in.SpreadSeconds),
+		creator.kind, creator.user, creator.member, creator.setAt,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("insert schedule: %w", err)
@@ -426,6 +489,10 @@ func upsertTriggerSchedule(ctx context.Context, x sqlExecQuerier, in SaveSchedul
 		return nil, fmt.Errorf("look up existing trigger schedule: %w", err)
 	}
 	now := time.Now().UTC()
+	creator, err := resolveScheduleCreator(ctx, x, in.WorkspaceID, in.CreatorKind, in.CreatorUserID)
+	if err != nil {
+		return nil, err
+	}
 	// The trigger path has no spread field: keep what the schedule API set,
 	// unless the new cron interval no longer admits it.
 	if validateSpread(prepared.in.CronExpr, prepared.in.Timezone, existingSpread) != nil {
@@ -446,13 +513,15 @@ SET name = ?, cron_expr = ?, timezone = ?, inputs_json = ?, enabled = ?,
     spread_seconds = ?, spread_offset_seconds = ?,
     next_run_at = ?, catchup_policy = ?,
     max_consecutive_failures = COALESCE(?, max_consecutive_failures),
-    activation = ?, updated_at = ?, chat_origin_id = COALESCE(?,chat_origin_id)
+    activation = ?, updated_at = ?, chat_origin_id = COALESCE(?,chat_origin_id),
+    creator_kind = ?, creator_user_id = ?, creator_member_id = ?, creator_set_at = ?
 WHERE id = ?`,
 		prepared.in.Name, prepared.in.CronExpr, prepared.in.Timezone, string(prepared.inputsJSON),
 		boolToInt(prepared.enabled), existingSpread, ScheduleSpreadOffset(existingID, existingSpread),
 		tsformat.Format(nextRunToStore), prepared.in.CatchupPolicy,
 		nullIntIfPositive(prepared.in.MaxConsecutiveFailures),
 		nullStr(prepared.in.Activation), tsformat.Format(now), nullableStr(in.ChatOriginID),
+		creator.kind, creator.user, creator.member, creator.setAt,
 		existingID,
 	); err != nil {
 		return nil, fmt.Errorf("update existing trigger schedule: %w", err)
@@ -495,6 +564,11 @@ func updateSchedule(ctx context.Context, x sqlExecQuerier, in SaveScheduleInput)
 	if in.ChatOriginID == "" {
 		in.ChatOriginID = existingRow.ChatOriginID
 	}
+	creator, err := resolveScheduleCreator(ctx, x, in.WorkspaceID, in.CreatorKind, in.CreatorUserID)
+	if err != nil {
+		return nil, err
+	}
+	keepCreator := boolToInt(in.KeepCreator)
 	if existingRow.Activation == TriggerActivationDraft && in.Enabled {
 		return nil, fmt.Errorf(
 			"pipeline_schedules: %q is awaiting activation — use ActivateSchedule (POST .../activate), not update, to enable it",
@@ -579,7 +653,11 @@ SET name = ?, target_pipeline_id = ?, target_pipeline_version = ?,
     disabled_reason = CASE WHEN ? = 1 AND enabled = 0 THEN NULL ELSE disabled_reason END,
     next_run_at = ?, wake_pipeline_id = ?, wake_inputs_json = ?,
     wake_fail_closed = ?, catchup_policy = ?, updated_at = ?, chat_origin_id = ?,
-    spread_seconds = ?, spread_offset_seconds = ?
+    spread_seconds = ?, spread_offset_seconds = ?,
+    creator_kind = CASE WHEN ? = 1 THEN creator_kind ELSE ? END,
+    creator_user_id = CASE WHEN ? = 1 THEN creator_user_id ELSE ? END,
+    creator_member_id = CASE WHEN ? = 1 THEN creator_member_id ELSE ? END,
+    creator_set_at = CASE WHEN ? = 1 THEN creator_set_at ELSE ? END
 WHERE id = ? AND deleted_at IS NULL`,
 		in.Name, in.TargetPipelineID, nullInt(in.TargetPipelineVersion),
 		in.CronExpr, in.Timezone, string(inputsJSON), boolToInt(in.Enabled),
@@ -590,6 +668,7 @@ WHERE id = ? AND deleted_at IS NULL`,
 		in.CatchupPolicy,
 		tsformat.Format(now), nullableStr(in.ChatOriginID),
 		in.SpreadSeconds, ScheduleSpreadOffset(in.ID, in.SpreadSeconds),
+		keepCreator, creator.kind, keepCreator, creator.user, keepCreator, creator.member, keepCreator, creator.setAt,
 		in.ID,
 	)
 	if err != nil {
@@ -1355,6 +1434,10 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 		TriggeredVia:  TriggeredViaSchedule,
 		ChatOriginID:  sched.ChatOriginID,
 		TriggeredByID: sched.ID,
+		// #5339: the host vouches that this run is this schedule's own fire,
+		// so its steps may be judged by the schedule's creator. A queued
+		// (capacity-blocked) occurrence dispatched later does not carry it.
+		ArtifactScheduleID: sched.ID,
 		// The occurrence itself, persisted on the run as due_at so the
 		// punctuality of this fire (started_at - due_at) is a fact the
 		// schema holds, not one that has to be inferred from the schedule
@@ -1752,7 +1835,8 @@ SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        COALESCE(consecutive_failures, 0), COALESCE(max_consecutive_failures, 5),
        COALESCE(disabled_reason, ''),
        COALESCE(activation, ''),
-       created_at, updated_at, deleted_at, COALESCE(chat_origin_id,'')
+       created_at, updated_at, deleted_at, COALESCE(chat_origin_id,''),
+       COALESCE(creator_kind,''), COALESCE(creator_user_id,''), COALESCE(creator_set_at,'')
 FROM pipeline_schedules`
 
 func scanSchedule(rs rowScanner) (*Schedule, error) {
@@ -1783,6 +1867,7 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 		&s.DisabledReason,
 		&s.Activation,
 		&createdAt, &updatedAt, &deletedAt, &s.ChatOriginID,
+		&s.CreatorKind, &s.CreatorUserID, &s.CreatorSetAt,
 	)
 	if err != nil {
 		return nil, err

@@ -285,6 +285,13 @@ var identitySteps = []identityStep{
 	{key: "recurring_issues_anonymised",
 		sql:  `UPDATE recurring_issues SET created_by = NULL WHERE workspace_id = ? AND created_by = ?`,
 		args: []identityArg{argWorkspace, argSubject}},
+	// The schedule's person creator (#5339) goes as a whole: the CHECK pairs
+	// kind with user, and a schedule with no creator vouches for no run.
+	{key: "pipeline_schedules_anonymised",
+		sql: `UPDATE pipeline_schedules
+		         SET creator_kind = NULL, creator_user_id = NULL, creator_member_id = NULL, creator_set_at = NULL
+		       WHERE workspace_id = ? AND creator_user_id = ?`,
+		args: []identityArg{argWorkspace, argSubject}},
 	// default_user_id is a Composio-side identity, not ours; it is cleared
 	// only when it literally equals the subject's id (an operator who keys
 	// Composio users by Crewship id), and the default re-derives itself.

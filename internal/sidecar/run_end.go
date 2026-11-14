@@ -42,6 +42,7 @@ func (s *Server) handleRunEnd(w http.ResponseWriter, r *http.Request) {
 	}
 	s.runs.end(runID)
 	s.runs.sweep()
+	s.runCapabilities.forget(runID)
 	if s.logger != nil {
 		s.logger.Info("run marked ended; its token no longer authenticates",
 			"run_id", runID, "agent_id", agentID)

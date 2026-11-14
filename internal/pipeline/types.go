@@ -1049,6 +1049,12 @@ type TriggerInput struct {
 	// the store has no notion of inbox items, so raising it is the API
 	// handler's job (see internal/api's propose-trigger-activation code).
 	Activation string
+
+	// CreatorKind / CreatorUserID are who is saving the trigger's schedule
+	// (see Schedule.CreatorKind), set by the API from the verified request
+	// only. Zero means unknown: the schedule then reaches no artifact.
+	CreatorKind   string `json:"-"`
+	CreatorUserID string `json:"-"`
 }
 
 // ListFilters narrows a Store.List query. Zero value = "all
@@ -1148,6 +1154,21 @@ type AgentStepRequest struct {
 	StepID          string
 	InvokingCrewID  string
 	InvokingAgentID string
+
+	// Who started the run, copied from RunInput by the executor only. They
+	// decide whether a step may get an artifact run capability (#5339): only
+	// a run a person started directly, never an agent, a call_pipeline
+	// expansion, a schedule, a webhook or an automation. Host-only.
+	InvokingUserID      string       `json:"-"`
+	InvocationAuthority string       `json:"-"`
+	TriggeredVia        TriggeredVia `json:"-"`
+	// AuthorAgentID is the agent that authored the routine, if any; a
+	// routine an agent wrote never gets a capability, whoever runs it.
+	AuthorAgentID string `json:"-"`
+	// TriggeredByID and ArtifactScheduleID (see RunInput) let a step of a
+	// schedule's own fire be judged by that schedule's creator.
+	TriggeredByID      string `json:"-"`
+	ArtifactScheduleID string `json:"-"`
 
 	// InputGuardAction is the lookout.GuardAction value derived from the
 	// routine's DSL.Guardrails.Input.PromptInjection.Action. Plain string

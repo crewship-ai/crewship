@@ -1784,6 +1784,23 @@ crewship routine schedules create --slug summarize-text \
 Single-instance only — running multiple replicas would double-fire (no leader election yet).
 </Warning>
 
+Every schedule records who created it or last changed what it runs (cron,
+timezone, inputs, target, pinned version, wake check): `human` with that
+person's id when they used their own session or CLI token, `agent` for any
+agent or internal path, or nothing for a schedule saved before this was
+recorded. Enabling, disabling or renaming a schedule, or changing its failure
+limit, `catchup_policy` or `spread_seconds`, keeps its creator. `crewship routine schedules list` shows it in the CREATOR column
+(`creator_kind` / `creator_user_id` in JSON). With `artifact_agent_access_modes`
+on, only a schedule a person saved lets its routine's agent steps reach their
+agents' standing artifacts, and only while that person, checked at every
+step, still holds the same membership (leaving and rejoining does not count),
+is a MANAGER or above, is not a restricted member, is not suspended and has
+not had their access revoked since; "run now" follows the same rule. Change an
+older or agent-saved schedule yourself
+(`crewship routine schedules update <id> --cron "0 9 * * *"`) to give it that
+access; `--enabled` alone does not. An agent's later change takes it away
+again.
+
 #### Natural-language schedules (`--when`)
 
 Pass `--when` instead of `--cron` for the common phrasings — it parses to a

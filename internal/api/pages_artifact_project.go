@@ -201,12 +201,20 @@ func (h *PageHandler) artifactProjectAuthority(r *http.Request, k artifacts.Vers
 			return "", artifacts.ErrVersionNotFound
 		}
 		user := UserFromContext(ctx)
-		if user == nil {
+		unattended := unattendedRunFrom(ctx)
+		if user == nil && unattended == nil {
 			return "", artifacts.ErrVersionNotFound
 		}
 		rec, err := h.loadPageForRead(ctx, k.WorkspaceID, "@"+k.PageID)
 		if err != nil || rec.OwnerUserID == "" || rec.OwnerCrewID != "" {
 			return "", artifacts.ErrVersionNotFound
+		}
+		if unattended != nil {
+			// A run without a human (#5339) exists only with the flag on.
+			if user != nil || !h.artifactRunModesOn(ctx, k.WorkspaceID) {
+				return "", artifacts.ErrVersionNotFound
+			}
+			return h.authorizeUnattendedArtifactRun(ctx, tx, unattended, k.WorkspaceID, rec, write, share)
 		}
 		if run, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); run != nil {
 			if h.artifactRunModesOn(ctx, k.WorkspaceID) {
@@ -653,6 +661,33 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 		if e != nil {
 			return "", artifacts.VersionSelection{}, e
 		}
+		if u := unattendedRunFrom(ctx); u != nil {
+			// A run without a human (#5339) reads the shared version, or the
+			// latest when the owner gave its agent a write grant (it must
+			// publish against the latest). Never history, never provenance.
+			owner, adminRead, origin = false, false, nil
+			if e = tx.QueryRowContext(ctx, `SELECT name,slug FROM pages WHERE id=? AND workspace_id=?`, k.PageID, k.WorkspaceID).Scan(&name, &slug); e != nil {
+				return "", artifacts.VersionSelection{}, e
+			}
+			rec, loadErr := h.loadPageForRead(context.WithValue(ctx, pageAuthReaderKey{}, tx), k.WorkspaceID, "@"+k.PageID)
+			if loadErr != nil {
+				return "", artifacts.VersionSelection{}, loadErr
+			}
+			if editor, e = h.unattendedOwnerWriteGrant(context.WithValue(ctx, pageAuthReaderKey{}, tx), u, rec); e != nil {
+				return "", artifacts.VersionSelection{}, e
+			}
+			canWrite = editor
+			if editor && selected != 0 {
+				var latest int64
+				if e = tx.QueryRowContext(ctx, `SELECT latest_version FROM artifact_version_heads WHERE workspace_id=? AND page_id=?`, k.WorkspaceID, k.PageID).Scan(&latest); e != nil {
+					return "", artifacts.VersionSelection{}, e
+				}
+				if selected != latest {
+					return "", artifacts.VersionSelection{}, artifacts.ErrVersionNotFound
+				}
+			}
+			return actor, artifacts.VersionSelection{Version: selected, SharedOnly: !editor}, nil
+		}
 		user := UserFromContext(ctx)
 		if user == nil {
 			return "", artifacts.VersionSelection{}, errArtifactProjectAccess
@@ -735,10 +770,16 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 	// The View transaction above recorded this read; loading its comments in a
 	// second transaction must not stand in for that record.
 	commentsReq := r.WithContext(context.WithValue(r.Context(), artifactAuditProbeKey{}, true))
-	comments, err := h.artifactProjectComments(commentsReq, k, view.State.Manifest.Version, !owner && !adminRead)
-	if err != nil {
-		artifactProjectError(w, err)
-		return
+	unattended := unattendedRunFrom(r.Context()) != nil
+	comments := []artifactProjectComment{}
+	if !unattended {
+		// A run without a human gets no comment text: other people's free text
+		// is not offered to a run nobody is watching (#5339).
+		comments, err = h.artifactProjectComments(commentsReq, k, view.State.Manifest.Version, !owner && !adminRead)
+		if err != nil {
+			artifactProjectError(w, err)
+			return
+		}
 	}
 	if editor && !adminRead {
 		view.State.Quota = artifacts.VersionQuota{Retention: "latest-version-only"}
@@ -749,7 +790,7 @@ func (h *PageHandler) GetArtifactProject(w http.ResponseWriter, r *http.Request)
 			kind = "slides"
 		}
 	}
-	writeJSON(w, 200, artifactProjectSnapshotResponse{ArtifactKind: kind, Interactive: h.artifactInteractiveFor(r, view.State.Manifest.Files), PageID: k.PageID, Name: name, Slug: slug, Origin: origin, Enabled: true, CanWrite: canWrite, CanShare: owner && canWrite, CanRestore: owner && canWrite, CanSendToAgent: owner && canWrite && origin != nil, CanComment: h.artifactProjectCanComment(r, k, view.State.Manifest.Version), LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion, Manifest: artifactProjectManifest(view.State.Manifest), Versions: artifactProjectVersionInfos(view.Versions), Quota: view.State.Quota, RetentionPreview: view.Retention, Comments: comments})
+	writeJSON(w, 200, artifactProjectSnapshotResponse{ArtifactKind: kind, Interactive: h.artifactInteractiveFor(r, view.State.Manifest.Files), PageID: k.PageID, Name: name, Slug: slug, Origin: origin, Enabled: true, CanWrite: canWrite, CanShare: owner && canWrite, CanRestore: owner && canWrite, CanSendToAgent: owner && canWrite && origin != nil, CanComment: !unattended && h.artifactProjectCanComment(r, k, view.State.Manifest.Version), LatestVersion: view.State.LatestVersion, SharedVersion: view.State.SharedVersion, Manifest: artifactProjectManifest(view.State.Manifest), Versions: artifactProjectVersionInfos(view.Versions), Quota: view.State.Quota, RetentionPreview: view.Retention, Comments: comments})
 }
 
 func (h *PageHandler) artifactProjectAttached(ctx context.Context, page string) (bool, error) {

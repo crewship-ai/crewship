@@ -46,6 +46,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifactrun"
 	"github.com/crewship-ai/crewship/internal/documents"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pagebuild"
@@ -82,7 +83,12 @@ type PageHandler struct {
 	hub                              *ws.Hub
 	logger                           *slog.Logger
 	journal                          journal.Emitter
-	clock                            pages.Clock
+	// lostCapabilityJournaled holds the runs whose lost artifact capability
+	// was already journaled by this process (#5339), so concurrent calls of
+	// one run journal it once even before the async journal row lands. It is
+	// bounded and forgets a run after the longest run TTL.
+	lostCapabilityJournaled artifactrun.Once
+	clock                   pages.Clock
 	// pushLimits is §10b.3's push rate, layer 1: per-panel and per-workspace
 	// token buckets over the values in internal/ratelimitcfg. Held on the
 	// handler rather than in a package global so a test owns its own buckets,

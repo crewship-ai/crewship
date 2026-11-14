@@ -61,8 +61,26 @@ type scheduleRow struct {
 	// Activation is "draft" for a trigger still awaiting MANAGER activation
 	// (B8, #2359) — distinct from an operator/circuit-breaker disable.
 	Activation string `json:"activation,omitempty" yaml:"activation,omitempty"`
-	CreatedAt  string `json:"created_at" yaml:"created_at"`
-	UpdatedAt  string `json:"updated_at" yaml:"updated_at"`
+	// CreatorKind is "human" or "agent": who created or last saved the
+	// schedule (#5339). Empty for a schedule saved before it was recorded.
+	CreatorKind   string `json:"creator_kind,omitempty" yaml:"creator_kind,omitempty"`
+	CreatorUserID string `json:"creator_user_id,omitempty" yaml:"creator_user_id,omitempty"`
+	CreatedAt     string `json:"created_at" yaml:"created_at"`
+	UpdatedAt     string `json:"updated_at" yaml:"updated_at"`
+}
+
+// creatorCell renders the CREATOR column: the person who created or last
+// saved the schedule, "agent", or "unknown" for a schedule saved before the
+// creator was recorded (#5339). Only a person's schedule can give its
+// routine runs artifact access.
+func creatorCell(s scheduleRow) string {
+	switch s.CreatorKind {
+	case "human":
+		return "human:" + s.CreatorUserID
+	case "agent":
+		return "agent"
+	}
+	return "unknown"
 }
 
 // routineCell renders the ROUTINE column for trigger lists: the target
@@ -228,7 +246,7 @@ var routineSchedulesListCmd = &cobra.Command{
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tFAILS\tWAKE\tNEXT\tMISSED")
+		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tFAILS\tWAKE\tNEXT\tMISSED\tCREATOR")
 		for _, s := range rows {
 			next := "—"
 			if s.NextRunAt != nil && *s.NextRunAt != "" {
@@ -241,9 +259,9 @@ var routineSchedulesListCmd = &cobra.Command{
 			if s.LastMissedCount > 0 {
 				missed = fmt.Sprintf("%d (%s)", s.LastMissedCount, defaultIfBlankCLI(s.CatchupPolicy, "once"))
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				shortID(s.ID), s.Name, routineCell(s.TargetPipelineSlug, s.TargetPipelineVersion), s.CronExpr, s.Timezone,
-				enabledCell(s), failsCell(s), wakeCell(s), next, missed)
+				enabledCell(s), failsCell(s), wakeCell(s), next, missed, creatorCell(s))
 		}
 		return w.Flush()
 	},

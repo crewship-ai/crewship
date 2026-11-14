@@ -239,8 +239,43 @@ already-referenced runs the ordinary way, binding nothing.
   pages (`propose` reads only, until folder suggestions are built) (`crewship page folder agent-access`, admin or the crew's
   MANAGER+). Never edit, never another crew's agents, never Personal pages;
   in a chat run the human's access is still required.
-- Runs without a human (routine, webhook, cron) reach no artifact through the
-  artifact tool.
+- A run without a human (a routine a person started, a schedule's fire, an
+  agent's webhook or cron run) reaches artifacts only
+  when crewshipd recorded the run (agent, crew, trigger, source) before its
+  agent started and minted a random capability for that one run. A
+  schedule's fire (cron or "run now") counts only when a person created the
+  schedule or last changed what it runs (cron, timezone, inputs, target,
+  pin, wake check) with their own session or CLI token, and when each step
+  starts that person still holds the same membership (not left and
+  rejoined), a MANAGER+ role, trusted (not restricted) access, is not
+  suspended and has had no access revocation since. Enabling, disabling or
+  renaming a schedule, or changing its failure limit, catch-up policy or
+  spread, does not change its creator. A schedule an agent
+  saved, or one saved before the creator was recorded, never counts until a
+  person changes what it runs. A step already running keeps its capability
+  until it ends (at most 2 hours); a run resumed after a wait or approval
+  gets none. A delayed or
+  debounced run, a queued occurrence, a webhook, `call_pipeline`, an issue,
+  an automation or another agent records nothing and reaches no artifact,
+  and neither does a routine an agent authored, whoever runs it. A sidecar
+  restart loses the run's capability: later calls get 403
+  `run_capability_lost` and the run reaches nothing more. The
+  capability goes to the crew's sidecar, never the agent's environment, and
+  ends with the run (its end, its terminal journal entry, or its own timeout
+  plus 5 minutes, at most 2 hours).
+  A run token alone is not enough, because the crew container holds the key
+  that derives run tokens for any agent and run of the crew. Such a run reads
+  only artifacts its agent holds its own live grant on, or non-private pages
+  of a folder that lets its crew's agents read, never Personal artifacts and
+  never anything through a role, at most `run_read_limit` distinct artifacts
+  per run (429 `artifact_run_limit`). It writes only through a live `write`
+  grant the artifact's owner gave the agent on that artifact, never through a
+  folder, and it does not create, share, restore, comment or touch dashboard
+  data. Not solved: agents of one crew container share UID 1001, so a
+  sibling that steals another agent's run token (for example from
+  `/proc/<pid>/environ`) also gets that run's capability through the
+  sidecar. The capability adds nothing beyond the token; this is the same
+  exposure chat runs have.
 - Per-run limits (3 created, 50 distinct standing reads) and a per-crew hourly
   page limit (20) come from `crewship workspace artifact-policy`.
 - A Design is reached the same way as an artifact project. A run reads the
@@ -272,7 +307,8 @@ already-referenced runs the ordinary way, binding nothing.
   in the same transaction; no audit record, no access. This covers artifact
   projects, Designs, Word documents, Sheets and Mooring documents (under a
   consent or mandate with reach `consented`, a created Word document with
-  `created`, a read through the scope with its reach).
+  `created`, a read through the scope with its reach). A run without a
+  human has no user on the record; its metadata names the trigger and source, and a scheduled run also its `schedule_id`.
   Reads and writes are recorded once per run and artifact, creates every
   time. Native Craft tasks are not covered. Read them with
   `crewship audit --action artifact.agent_run_accessed -f json`.

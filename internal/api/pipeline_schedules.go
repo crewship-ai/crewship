@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/runauthority"
@@ -83,9 +84,93 @@ type scheduleResponse struct {
 	// one thing that tells an operator THIS `enabled: false` needs a
 	// `.../activate` call, not `schedules enable`. Omitted for every
 	// ordinary schedule.
-	Activation string    `json:"activation,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	Activation string `json:"activation,omitempty"`
+	// CreatorKind is "human" or "agent": who created or last saved the
+	// schedule (#5339); omitted when unknown (saved before it was
+	// recorded). CreatorUserID is that person's id for "human".
+	CreatorKind   string    `json:"creator_kind,omitempty"`
+	CreatorUserID string    `json:"creator_user_id,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// scheduleContentKeys are the PATCH fields that change what a schedule runs.
+var scheduleContentKeys = []string{"cron_expr", "timezone", "inputs", "target_pipeline_id", "target_pipeline_slug", "target_pipeline_version", "wake_pipeline_id", "wake_pipeline_slug", "wake_inputs", "wake_fail_closed"}
+
+// scheduleContentMentioned reports whether a PATCH body names any field that
+// changes what the schedule runs, in any letter case: json.Unmarshal fills
+// the request struct without regard to case, so the check must too.
+func scheduleContentMentioned(rawKeys map[string]json.RawMessage) bool {
+	for key := range rawKeys {
+		for _, k := range scheduleContentKeys {
+			if strings.EqualFold(key, k) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// scheduleContentChanged reports whether the schedule a PATCH writes runs
+// anything different from the stored one: cron, timezone, target, pin,
+// inputs or wake gate. It judges the effective result, so no spelling of a
+// key can change content without the creator following.
+func scheduleContentChanged(existing *pipeline.Schedule, in pipeline.SaveScheduleInput) bool {
+	pin := func(v *int) int {
+		if v == nil {
+			return -1
+		}
+		return *v
+	}
+	return in.CronExpr != existing.CronExpr ||
+		in.Timezone != existing.Timezone ||
+		in.TargetPipelineID != existing.TargetPipelineID ||
+		pin(in.TargetPipelineVersion) != pin(existing.TargetPipelineVersion) ||
+		in.WakePipelineID != existing.WakePipelineID ||
+		in.WakeFailClosed != existing.WakeFailClosed ||
+		canonicalScheduleInputs(in.Inputs) != canonicalStoredInputs(existing.InputsJSON) ||
+		canonicalScheduleInputs(in.WakeInputs) != canonicalStoredInputs(existing.WakeInputsJSON)
+}
+
+// canonicalScheduleInputs is a stable spelling of an inputs object; empty
+// and absent are the same.
+func canonicalScheduleInputs(m map[string]any) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, err := json.Marshal(m) // map keys are sorted
+	if err != nil {
+		return "\x00unencodable"
+	}
+	return string(b)
+}
+
+func canonicalStoredInputs(raw string) string {
+	if raw == "" {
+		return "{}"
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return raw
+	}
+	return canonicalScheduleInputs(m)
+}
+
+// scheduleCreatorFromRequest names who is saving a schedule (#5339). Only a
+// request authenticated by a person's own session or CLI token, through the
+// public API, counts as that person: the original credential captured by
+// the auth middleware must name the same user, and no internal (crew or
+// workspace) token may be on the request. Everything else, including an
+// internal route that propagated X-Caller-User-Id, is an agent.
+func scheduleCreatorFromRequest(r *http.Request) (kind, userID string) {
+	ctx := r.Context()
+	user := UserFromContext(ctx)
+	original := auth.OriginalCredentialFromContext(ctx)
+	if user == nil || user.ID == "" || original == nil || original.UserID != user.ID || (user.SessionID == "" && user.TokenID == "") ||
+		InternalTokenWorkspaceFromContext(ctx) != "" || InternalTokenCrewFromContext(ctx) != "" {
+		return pipeline.ScheduleCreatorAgent, ""
+	}
+	return pipeline.ScheduleCreatorHuman, user.ID
 }
 
 // nominalNextRun is the unshifted cron occurrence, reported only when a spread
@@ -150,6 +235,8 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		MaxConsecutiveFailures: s.MaxConsecutiveFailures,
 		DisabledReason:         s.DisabledReason,
 		Activation:             s.Activation,
+		CreatorKind:            s.CreatorKind,
+		CreatorUserID:          s.CreatorUserID,
 		CreatedAt:              s.CreatedAt,
 		UpdatedAt:              s.UpdatedAt,
 	}
@@ -394,6 +481,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		SpreadSeconds:          derefInt(body.SpreadSeconds),
 		MaxConsecutiveFailures: maxFailures,
 	}
+	in.CreatorKind, in.CreatorUserID = scheduleCreatorFromRequest(r)
 	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		// Cron parse / timezone errors come back as plain errors —
@@ -729,6 +817,17 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		CatchupPolicy:          catchupPolicy,
 		SpreadSeconds:          spreadSeconds,
 		MaxConsecutiveFailures: maxFailures,
+	}
+	// #5339: only a save that sets what the schedule runs (its timing, its
+	// target or pin, its inputs, its wake gate), by naming such a field in
+	// any letter case or by changing it in effect, names who vouches for it.
+	// Enable, disable, rename and spread/catch-up/breaker tweaks keep the
+	// stored creator, so an admin re-enabling an agent's schedule does not
+	// silently vouch for it.
+	if scheduleContentMentioned(rawKeys) || scheduleContentChanged(existing, in) {
+		in.CreatorKind, in.CreatorUserID = scheduleCreatorFromRequest(r)
+	} else {
+		in.KeepCreator = true
 	}
 	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
@@ -1088,6 +1187,10 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		Mode:          pipeline.ModeRun,
 		TriggeredVia:  pipeline.TriggeredViaSchedule,
 		TriggeredByID: sched.ID,
+		// #5339: "run now" follows the schedule's own rule. Its steps reach
+		// artifacts only when the schedule's creator is a person still in
+		// good standing; the person pressing run now lends nothing.
+		ArtifactScheduleID: sched.ID,
 	})
 	if err != nil {
 		if writeRoutineOriginError(w, err) {
