@@ -320,11 +320,13 @@ class GateTests(unittest.TestCase):
     HOST_FAMILIES = {
         'native craft host': ['components/features/pages/native-craft-*.tsx'],
         'wordcraft host': ['components/features/pages/wordcraft-editor-host.tsx'],
-        'hello verification': ['lib/mooring/channel.ts'],
+        # channel.ts defines verifyEditorHello; the native port and the workbook bridge call it.
+        'hello verification': ['lib/mooring/channel.ts', 'lib/mooring/native-editor-port.ts', 'lib/workbooks/bridge.ts'],
         # createEditorFrame builds the sandboxed iframe; nativeCraftFrameURL (in the
         # native host above) builds its URL; the server serves the editor origin.
         'frame embedding': ['components/features/pages/workbook-editor-host.tsx', 'internal/server/editor_origin.go'],
-        'editor origin': ['internal/editororigin/**'],
+        'editor origin': ['internal/editororigin/**', 'internal/server/editor_selfcheck.go', 'internal/server/security_headers.go'],
+        'editor assets': ['internal/craftassets/**'],
         'native server': ['internal/server/craft_native.go'],
         'native api': ['internal/api/craft_native_*.go'],
     }
