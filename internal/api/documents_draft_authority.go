@@ -149,6 +149,12 @@ func (h *PageHandler) authorizeDocumentDraft(ctx context.Context, a *artifactRun
 	// is refused here as well as by the propose mandate's guard, and each
 	// access is charged to the run's read limit like any folder read.
 	folder := scope.Reach == runReachFolder
+	// A propose mandate never needs the writer lease (a proposal is not a
+	// commit). With the flag on the run may not take or renew it, so it can
+	// never hold the lease against a human Editor; release stays allowed.
+	if (operation == "lease" || operation == "renew") && scope.Propose && h.artifactRunModesOn(ctx, a.WorkspaceID) {
+		return "", errDocumentAccess
+	}
 	audited := ""
 	switch operation {
 	case "state", "receipt":

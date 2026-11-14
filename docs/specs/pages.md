@@ -621,7 +621,10 @@ owner on 2026-11-13.
    Word document, a mandate for a Sheet or Mooring document. Attaching one does
    not put it in reach. That consent binds every write's targets, base
    revision and lease, so an agent write under another person's lease ends as
-   a proposal and never bypasses the lease. Native Word and Sheet Craft tasks
+   a proposal and never bypasses the lease. A propose mandate (a page grant
+   or a folder at `propose`) never needs the lease: with the flag on its run
+   may not take or renew the writer lease, only release one, so an agent can
+   never hold it against a person who edits or accepts. Native Word and Sheet Craft tasks
    (`crewship craft task`) are a separate, explicitly consented runtime and are
    unchanged.
 7. **Limits, read from the workspace policy on every use.** One chat run
@@ -662,7 +665,7 @@ owner on 2026-11-13.
    crew move, a deleted crew, a page made private or moved out of the folder
    stops the next proposal. Only a person with Edit accepts a proposal (an
    ordinary human commit under the lease); a folder never lets the run
-   commit, pin a checkpoint or accept. Each proposal or read of the Document
+   commit, pin a checkpoint, take the writer lease or accept. Each proposal or read of the Document
    counts once per run against `run_read_limit`. The same rule (one query)
    decides a folder read and a folder proposal. With the flag on the same
    ordinary-member Edit is required of the human on the page-grant proposal

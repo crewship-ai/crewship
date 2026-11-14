@@ -238,7 +238,9 @@ func TestFolderPropose_RefusedAfterTheIntent(t *testing.T) {
 func TestFolderPropose_NeverCommitsOrCheckpoints(t *testing.T) {
 	f, h, token, intent := mustFolderProposeDoc(t, nil)
 	before, _ := docHeadAndProposals(t, f, intent.PageID)
-	lease := documentDraftLease(t, f, h, token, intent.PageID)
+	// The run cannot take the lease (TestFolderPropose_AgentNeverTakesTheLease);
+	// a write without one is refused by the folder rule before any fence.
+	lease := documents.Lease{Owner: "synthetic-engine", Writer: "guess", Epoch: 1}
 	commit := documentDraftPayloadAt(t, documents.FormattedSchema, "folder-commit", "initial", "agent edit", before, lease)
 	if w := callDocumentDraftAuthority(t, f, h, token, intent.PageID, "commit", commit); w.Code == 200 {
 		t.Fatalf("a folder run committed: %s", w.Body)
@@ -512,5 +514,76 @@ func TestFolderPropose_RoleOnlyEditNeverPassesToTheAgent(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// Review (5.2): a propose mandate never needs the writer lease. With the flag
+// on the agent cannot take or renew it, through a folder or a page grant, so
+// it can never block a human Editor; a person still takes the lease and
+// accepts while the agent's run is active.
+func TestFolderPropose_AgentNeverTakesTheLease(t *testing.T) {
+	f, h, token, intent := mustFolderProposeDoc(t, nil)
+	key := documents.Key{WorkspaceID: f.a.WorkspaceID, PageID: intent.PageID}
+	if w := callDocumentDraftAuthority(t, f, h, token, intent.PageID, "lease", map[string]any{"owner": "synthetic-engine"}); w.Code != http.StatusForbidden {
+		t.Fatalf("a folder propose run took the lease: %d %s", w.Code, w.Body)
+	}
+	if w := callDocumentDraftAuthority(t, f, h, token, intent.PageID, "renew", map[string]any{"leaseOwner": "synthetic-engine", "leaseToken": "guess", "epoch": 1}); w.Code != http.StatusForbidden {
+		t.Fatalf("a folder propose run renewed a lease: %d %s", w.Code, w.Body)
+	}
+	if w := folderPropose(t, f, h, token, intent.PageID, "while-editing"); w.Code != 200 {
+		t.Fatalf("proposal: %d %s", w.Code, w.Body)
+	}
+	head, _ := docHeadAndProposals(t, f, intent.PageID)
+	candidate, base := acceptCandidate(t, f, intent.PageID, "while-editing")
+	editorCtx, editor := humanDocumentAuthorize(t, f, h, key, f.a.HumanUserID)
+	lease, err := h.store.Acquire(editorCtx, key, "editor", editor)
+	if err != nil {
+		t.Fatalf("the Editor could not take the lease while the run is active: %v", err)
+	}
+	generation := intent.Generation
+	receipt, err := h.store.Commit(editorCtx, key, documents.Commit{Lease: lease, ID: "editor-accept", Fingerprint: "f-editor-accept", IfRev: head, IfGeneration: &generation, Schema: documents.FormattedSchema,
+		Update: []byte("u"), CandidateSnapshot: []byte("c"), Projection: candidate, IfHashes: map[string]string{"paragraph": base}, Kind: "human", Guard: documents.AcceptProposalGuard(key, "while-editing", "editor-accept", candidate)}, editor)
+	if err != nil || receipt.Kind != "human" {
+		t.Fatalf("editor accept: %+v %v", receipt, err)
+	}
+}
+
+func TestFolderPropose_PageGrantProposeLeaseByFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		flag bool
+		want int
+	}{{"flag on refuses the lease", true, http.StatusForbidden}, {"flag off unchanged", false, http.StatusOK}} {
+		t.Run(tc.name, func(t *testing.T) {
+			f, h, token, intent := iterationFixtureFor(t, func(f *artifactPrincipalFixture, intent *documents.IterationIntent) {
+				mustExec(t, f.rig.db, `UPDATE documents SET schema_version=? WHERE page_id=?`, documents.FormattedSchema, intent.PageID)
+				intent.Schema = documents.FormattedSchema
+				if tc.flag {
+					agentAccessModesOn(t, f)
+				}
+				mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, intent.PageID)
+				mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'propose',?)`, intent.PageID, f.a.AgentID, f.rig.adminID)
+			})
+			f.rig.db.SetMaxOpenConns(1)
+			if w := callDocumentDraftAuthority(t, f, h, token, intent.PageID, "lease", map[string]any{"owner": "synthetic-engine"}); w.Code != tc.want {
+				t.Fatalf("page-grant propose lease: %d %s, want %d", w.Code, w.Body, tc.want)
+			}
+		})
+	}
+}
+
+// The read limit counts a Document once per run: with run_read_limit=1 the
+// same folder Document is read and proposed on repeatedly.
+func TestFolderPropose_SameDocumentCountsOnce(t *testing.T) {
+	f, h, token, intent := mustFolderProposeDoc(t, nil)
+	mustExec(t, f.rig.db, `UPDATE workspace_artifact_creation_policy SET run_read_limit=1 WHERE workspace_id=?`, f.a.WorkspaceID)
+	for _, id := range []string{"once-1", "once-2"} {
+		if w := folderPropose(t, f, h, token, intent.PageID, id); w.Code != 200 {
+			t.Fatalf("proposal %s within run_read_limit=1: %d %s", id, w.Code, w.Body)
+		}
+	}
+	wantCode(t, callDocumentDraftAuthority(t, f, h, token, intent.PageID, "state", map[string]any{}), 200, "read of the same Document")
+	if n := runAccessRows(t, f); n != 1 {
+		t.Fatalf("access rows %d, want 1", n)
 	}
 }

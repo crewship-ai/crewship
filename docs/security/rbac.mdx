@@ -243,7 +243,10 @@ already-referenced runs the ordinary way, binding nothing.
   through the human's explicit iteration request, only while the human edits
   the Document as an ordinary member (never through the ADMIN or OWNER role),
   re-checked on every proposal, and accepted only by a person with Edit. The
-  run never commits, checkpoints or accepts through a folder. On every other
+  run never commits, checkpoints or accepts through a folder.
+- With the flag on, a run under a propose mandate (a page grant or a folder at
+  `propose`) cannot take or renew a Document's writer lease, so it can never
+  block a person who edits or accepts; it may still release one. On every other
   kind `propose` is the same as `read`.
 - Runs without a human (routine, webhook, cron) reach no artifact through the
   artifact tool.
