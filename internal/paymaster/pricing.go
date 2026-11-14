@@ -129,7 +129,9 @@ var providerFallback = map[string]modelPrice{
 	// describe a real model: it is the bound below which no known model of this
 	// provider can be under-billed.
 	"openrouter":     {InputPerM: 150.00, OutputPerM: 600.00, CachedInputPerM: 150.00, CacheWritePerM: 150.00},
-	"amazon-bedrock": {InputPerM: 16.50, OutputPerM: 82.50, CachedInputPerM: 2.50, CacheWritePerM: 20.625},
+	// Raised 2026-11-14: the snapshot's Bedrock gpt-6-astra long-context tier
+	// publishes $22 input and $27.50 cache write.
+	"amazon-bedrock": {InputPerM: 22.00, OutputPerM: 82.50, CachedInputPerM: 2.50, CacheWritePerM: 27.50},
 
 	"ollama": {},
 	"local":  {},

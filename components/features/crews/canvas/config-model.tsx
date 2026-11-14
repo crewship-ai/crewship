@@ -8,6 +8,8 @@ import {
   CommandDialog, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList,
 } from "@/components/ui/command"
 import { MODEL_META } from "@/components/features/crews/model-library-picker"
+import { isKnownModel, isValidModelId } from "@/components/features/crews/create-agent/llm-models"
+import type { LLMProvider } from "@/lib/entities"
 import { apiFetch } from "@/lib/api-fetch"
 import { toApiError } from "@/lib/api-error"
 import { cn } from "@/lib/utils"
@@ -29,6 +31,11 @@ import { ConfigRow } from "./config-field"
 //
 // It opens as a centred dialog rather than a dropdown because the useful part
 // of a model is the sentence next to it, not the id.
+//
+// The list is a suggestion, not a gate. Providers ship models faster than the
+// catalog is refreshed, so the dialog also takes a custom model id typed by
+// hand; the server checks only its shape (#5376). A custom id stays in place
+// until the user picks something else.
 // =============================================================================
 
 interface ModelInfo {
@@ -99,21 +106,39 @@ export function ConfigModel({ label, hint, workspaceId, provider, value, onSave,
     }
   }
 
-  const stale = value && models && models.length > 0 && !models.some((m) => m.id === value)
+  // Before the dialog has listed anything, the bundled catalog decides; after,
+  // the provider's own list does.
+  const listed = models && models.length > 0
+    ? models.some((m) => m.id === value)
+    : isKnownModel(provider as LLMProvider, value)
+  const isCustom = !!value && !listed
+
+  // Opening the dialog on a custom id puts that id in the custom field, so a
+  // one-character fix does not mean retyping the whole id.
+  function openDialog() {
+    setCustom(isCustom ? value : "")
+    setOpen(true)
+  }
+
+  const customId = custom.trim()
+  const customInvalid = customId !== "" && !isValidModelId(customId)
+  function applyCustom() {
+    if (customId && !customInvalid) void pick(customId)
+  }
 
   return (
     <>
       <ConfigRow label={label} hint={hint}>
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={openDialog}
           aria-label={`${label}: ${value || "not set"}`}
           className={cn(
             "type-row flex h-7 w-full items-center gap-2 rounded-lg border border-border bg-background px-2.5",
             "text-left font-mono text-foreground outline-none transition-[border-color,box-shadow]",
             "hover:border-foreground/25 focus:border-primary",
             "focus:shadow-[0_0_0_3px_color-mix(in_oklch,var(--primary)_20%,transparent)]",
-            stale && "border-warn/50",
+            isCustom && "border-primary/40",
           )}
         >
           <span className="min-w-0 flex-1 truncate">{value || "choose a model"}</span>
@@ -121,9 +146,9 @@ export function ConfigModel({ label, hint, workspaceId, provider, value, onSave,
         </button>
       </ConfigRow>
 
-      {stale && (
-        <p className="type-meta border-b border-border px-3 pb-2 text-warn">
-          {value} is not in this catalog. It is preserved until you choose a different model.
+      {isCustom && (
+        <p className="type-meta border-b border-border px-3 pb-2 text-muted-foreground">
+          Custom model ID — not in this catalog. It is sent to the runner exactly as typed.
         </p>
       )}
 
@@ -177,7 +202,48 @@ export function ConfigModel({ label, hint, workspaceId, provider, value, onSave,
             </CommandGroup>
           )}
         </CommandList>
-        <div className="border-t border-border p-3 flex items-end gap-2"><label className="text-xs text-muted-foreground flex-1">Custom model ID<input value={custom} onChange={(event) => setCustom(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); if (custom.trim()) void pick(custom.trim()) } }} className="mt-1 w-full rounded-lg border border-border bg-background p-2 text-sm text-foreground" /></label><button type="button" className="text-sm text-primary px-2 py-2 disabled:opacity-40" disabled={!custom.trim()} onClick={() => void pick(custom.trim())}>Use model</button></div>
+        <div className="border-t border-border p-3">
+          <div className="flex items-end gap-2">
+            <label htmlFor="custom-model-id" className="type-meta flex-1 text-muted-foreground">
+              Custom model ID
+              <input
+                id="custom-model-id"
+                value={custom}
+                placeholder="e.g. claude-sonnet-5-5 or gpt-6.1-sol"
+                autoComplete="off"
+                spellCheck={false}
+                aria-invalid={customInvalid}
+                aria-describedby="custom-model-id-hint"
+                onChange={(event) => setCustom(event.target.value)}
+                // cmdk listens for Enter on the dialog root to select the
+                // highlighted row; this field's Enter must use the typed id.
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  applyCustom()
+                }}
+                className={cn(
+                  "mt-1 w-full rounded-lg border bg-background p-2 font-mono text-sm text-foreground",
+                  customInvalid ? "border-destructive" : "border-border",
+                )}
+              />
+            </label>
+            <button
+              type="button"
+              className="px-2 py-2 text-sm text-primary disabled:opacity-40"
+              disabled={!customId || customInvalid}
+              onClick={applyCustom}
+            >
+              Use model
+            </button>
+          </div>
+          <p id="custom-model-id-hint" className={cn("type-meta mt-1", customInvalid ? "text-destructive" : "text-muted-foreground")}>
+            {customInvalid
+              ? "Use only letters, digits and - _ . : / @ + [ ] with no spaces."
+              : "Any model ID the runner accepts, even if it is not listed above."}
+          </p>
+        </div>
       </CommandDialog>
     </>
   )

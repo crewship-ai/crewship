@@ -23,7 +23,7 @@ type AuxModel struct {
 //
 // The SHIPPED defaults (DefaultAuxiliaryModels) put every slot on the
 // first row of the provider registry that names a DefaultAuxModel —
-// anthropic/claude-haiku-4-5 today. What an instance actually boots
+// anthropic/claude-haiku-5-5 today. What an instance actually boots
 // with is LoadAuxiliaryModels, which retargets that at the first
 // registered provider whose credential is present, so an operator
 // holding only an OPENAI_API_KEY gets working evaluators instead of
@@ -142,7 +142,7 @@ func auxiliaryModelsOn(provider, model string) AuxiliaryModels {
 }
 
 // DefaultAuxiliaryModels returns the SHIPPED config: every slot on the first
-// registry row that names a DefaultAuxModel — anthropic/claude-haiku-4-5 — with
+// registry row that names a DefaultAuxModel — anthropic/claude-haiku-5-5 — with
 // the per-call budget each evaluator enforces.
 //
 // Deliberately environment-independent, which is the whole reason it is a
@@ -282,7 +282,7 @@ func ResolveAux(cfg AuxiliaryModels, slot Slot) (AuxModel, error) {
 	}
 	return AuxModel{}, fmt.Errorf(
 		"llm: aux slot %q is empty and no Fallback provider configured; "+
-			"set cfg.auxiliary.%s.provider+model (or cfg.auxiliary.fallback.*) — F3 MVP defaults to anthropic/claude-haiku-4-5",
+			"set cfg.auxiliary.%s.provider+model (or cfg.auxiliary.fallback.*) — F3 MVP defaults to anthropic/claude-haiku-5-5",
 		slot, slot,
 	)
 }

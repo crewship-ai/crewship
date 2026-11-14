@@ -1,6 +1,6 @@
 ---
 title: "Model Discovery"
-description: "List the models a provider can serve, live from the provider or from a curated fallback, and validate an agent's model against that set."
+description: "List the models a provider can serve, live from the provider or from a curated fallback, and accept any well-formed custom model id."
 icon: "list-checks"
 stability: experimental
 tag: Experimental
@@ -57,8 +57,8 @@ Response:
 The three gateway providers have **no live lister** — the endpoint always
 answers them from a curated list (`source: "curated"`). That list is
 deliberately partial: OpenCode's own catalog decides at run time which ids
-actually work, so the curated suggestions never reject a custom model id on
-the agent update path.
+actually work. No provider's list rejects a custom model id; see
+[Custom model ids](#custom-model-ids).
 
 <Note>
 **OLLAMA has no curated fallback.** Its model set is whatever the local Ollama
@@ -116,20 +116,32 @@ anthropic models  (source=live, 3 total)
 `--format json` / `--format yaml` emit the full payload, including the `source`
 field, for programmatic use.
 
-## Model validation on agent update
+## Custom model ids
 
-Because Crewship knows each provider's model set, updating an agent now
-**validates `llm_model`** instead of silently accepting any string. A
-`PATCH /api/v1/agents/{id}` that sets `llm_model` to a value the provider can't
-serve returns **400 Bad Request**:
+The model list is a set of suggestions, not a gate. Providers release models
+faster than Crewship's catalog is refreshed, and an account can see models the
+catalog does not list, so creating or updating an agent accepts **any
+well-formed model id**:
 
 ```bash
-crewship agent update my-agent --llm-provider ANTHROPIC --llm-model claude-made-up-9
-# => API error (400): llm_model is not a known model for provider ANTHROPIC
+crewship agent create --name Pinned --slug pinned --cli-adapter CODEX_CLI \
+  --llm-provider OPENAI --llm-model gpt-7-preview
+crewship agent update my-agent --llm-model claude-opus-5-5[1m]
 ```
 
-The provider used for validation is the `llm_provider` in the same request if
-present, otherwise the agent's currently stored provider. Validation is
-**skipped** (the model passes through) only when the model set can't be
-determined — for example an OLLAMA daemon that isn't reachable — so Crewship
-never rejects a model it can't prove invalid.
+In the web app, the model picker has a **Custom model ID** field under the
+list. A stored custom id is marked as custom, is pre-filled when you reopen the
+picker, and stays in place when you switch the runner; only switching to a
+different provider replaces it with that provider's default.
+
+Crewship checks only the shape of the id: at most 200 characters of letters,
+digits and `- _ . : / @ + [ ]`, with no spaces. Anything else returns
+**400 Bad Request**:
+
+```bash
+crewship agent update my-agent --llm-model "claude sonnet"
+# => API error (400): llm_model may contain only letters, digits and - _ . : / @ + [ ]
+```
+
+Whether the account can actually run the model is answered by the runner at
+the agent's first run, not by the catalog.

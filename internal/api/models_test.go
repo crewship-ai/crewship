@@ -243,49 +243,6 @@ func TestDefaultModelLister(t *testing.T) {
 	}
 }
 
-func TestProviderModelIDs_OpenAICuratedLuna(t *testing.T) {
-	h, wsID, _ := newModelsHandler(t, func(string, string, string) (llm.ModelLister, bool) {
-		t.Fatal("without an API credential, validation must use the curated catalog")
-		return nil, false
-	})
-	set, ok := h.providerModelIDs(context.Background(), wsID, "OPENAI")
-	if !ok || !set["gpt-5.6-luna"] {
-		t.Fatal("curated OpenAI validation must accept the documented Codex Luna model")
-	}
-	if set["gpt-unknown-model"] {
-		t.Fatal("unknown models must remain rejected")
-	}
-}
-
-// TestProviderModelIDs covers the ModelValidator path used by agents_update.
-func TestProviderModelIDs(t *testing.T) {
-	h, wsID, userID := newModelsHandler(t, func(string, string, string) (llm.ModelLister, bool) {
-		return &fakeLister{models: []llm.ModelInfo{{ID: "m1"}, {ID: "m2"}}}, true
-	})
-	seedProviderCredential(t, h.db, wsID, userID, "ANTHROPIC", "k")
-
-	set, ok := h.providerModelIDs(context.Background(), wsID, "anthropic")
-	if !ok {
-		t.Fatalf("ok = false, want true")
-	}
-	if !set["m1"] || set["nope"] {
-		t.Errorf("set = %+v", set)
-	}
-
-	// Unsupported provider -> not determinable.
-	if _, ok := h.providerModelIDs(context.Background(), wsID, "COHERE"); ok {
-		t.Errorf("COHERE should be undeterminable")
-	}
-
-	// Provider with empty resolved set (OLLAMA unreachable) -> undeterminable.
-	hEmpty, wsE, _ := newModelsHandler(t, func(string, string, string) (llm.ModelLister, bool) {
-		return &fakeLister{err: errLiveDown}, true
-	})
-	if _, ok := hEmpty.providerModelIDs(context.Background(), wsE, "OLLAMA"); ok {
-		t.Errorf("unreachable OLLAMA should be undeterminable")
-	}
-}
-
 var errLiveDown = errTest("live provider down")
 
 type errTest string

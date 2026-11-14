@@ -125,7 +125,7 @@ func TestAdminKeeperAux_GetListsEverySlotWithProvenance(t *testing.T) {
 	}
 
 	behavior := auxRow(t, resp, string(llm.SlotBehavior))
-	if behavior.Model.Value != "claude-haiku-4-5" || behavior.Model.Source != "default" {
+	if behavior.Model.Value != "claude-haiku-5-5" || behavior.Model.Source != "default" {
 		t.Errorf("behavior model = %q/%s, want the shipped default", behavior.Model.Value, behavior.Model.Source)
 	}
 	if !behavior.Model.Editable {
@@ -182,7 +182,7 @@ func TestAdminKeeperAux_PutOverridesOneSlot(t *testing.T) {
 		t.Errorf("resolved curator model = %q", got)
 	}
 	// Unrelated slots are untouched.
-	if got := store.Resolved().Behavior.Model; got != "claude-haiku-4-5" {
+	if got := store.Resolved().Behavior.Model; got != "claude-haiku-5-5" {
 		t.Errorf("an unrelated slot changed: %q", got)
 	}
 }
@@ -210,7 +210,7 @@ func TestAdminKeeperAux_PutRejects(t *testing.T) {
 				t.Errorf("body %q does not mention %q", rr.Body.String(), tc.want)
 			}
 			// A refused write must leave the slot inheriting, not half-applied.
-			if got := store.Resolved().Curator.Model; got != "claude-haiku-4-5" {
+			if got := store.Resolved().Curator.Model; got != "claude-haiku-5-5" {
 				t.Errorf("a rejected write changed the resolved model to %q", got)
 			}
 		})
@@ -304,7 +304,7 @@ func TestAdminKeeperAux_ResetOneSlotAndAll(t *testing.T) {
 	if resp.AnyOverridden {
 		t.Error("any_overridden = true after a full reset")
 	}
-	if got := store.Resolved().Curator.Model; got != "claude-haiku-4-5" {
+	if got := store.Resolved().Curator.Model; got != "claude-haiku-5-5" {
 		t.Errorf("resolved model after reset = %q, want the inherited default", got)
 	}
 }
