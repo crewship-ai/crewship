@@ -424,7 +424,7 @@ func TestRunScope_RefusedCaptureStartsThePlainRunWithoutAPrincipal(t *testing.T)
 	h.SetJournal(writer)
 	stale := *g.f.receipt
 	stale.MemberRevision++
-	entry := journal.Entry{ID: "run-start:" + g.f.a.RunID, WorkspaceID: g.f.a.WorkspaceID, CrewID: g.f.a.CrewID, AgentID: g.f.a.AgentID, Type: journal.EntryRunStarted, Severity: journal.SeverityInfo, ActorType: journal.ActorSidecar, TraceID: g.f.a.RunID}
+	entry := journal.Entry{ID: "run-start:" + g.f.a.RunID, WorkspaceID: g.f.a.WorkspaceID, CrewID: g.f.a.CrewID, AgentID: g.f.a.AgentID, Type: journal.EntryRunStarted, Severity: journal.SeverityInfo, ActorType: journal.ActorSidecar, Summary: "run started", TraceID: g.f.a.RunID}
 	req := httptest.NewRequest("POST", "/api/v1/internal/runs", nil)
 	admitted, status, err := h.admitArtifactRefsRun(req, entry, "USER", "", &stale, g.f.a.WorkspaceID, g.f.a.MessageID)
 	if admitted || status != 0 || err != nil {
