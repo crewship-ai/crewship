@@ -236,19 +236,21 @@ already-referenced runs the ordinary way, binding nothing.
   every use. Writes are limited to the human's own attached or created
   artifacts; agents never share or publish.
 - A folder can let the agents of its owning crew read its non-private
-  pages (`propose` reads only, until folder suggestions are built) (`crewship page folder agent-access`, admin or the crew's
+  pages (`crewship page folder agent-access`, or **Can suggest** / **Viewer** in Folder settings; admin or the crew's
   MANAGER+). Never edit, never another crew's agents, never Personal pages;
   in a chat run the human's access is still required. At `propose`, agents
   can read; on Docs they can propose changes for an editor to accept: only
   through the human's explicit iteration request, only while the human edits
   the Document as an ordinary member (never through the ADMIN or OWNER role),
   re-checked on every proposal, and accepted only by a person with Edit. The
-  run never commits, checkpoints or accepts through a folder.
+  run never commits, checkpoints or accepts through a folder. On every other
+  kind `propose` is the same as `read`; the folder dialog says so and offers
+  **Can suggest** only for the kinds the server names in
+  `agent_propose_kinds` (Docs).
 - With the flag on, a run under any propose mandate (every iteration on a
   schema 4–6 Document: through a page grant, a folder at `propose`, or on the
   human's own Document) cannot take or renew a Document's writer lease, so it
-  can never block a person who edits or accepts; it may still release one. On every other
-  kind `propose` is the same as `read`.
+  can never block a person who edits or accepts; it may still release one.
 - Runs without a human (routine, webhook, cron) reach no artifact through the
   artifact tool.
 - Per-run limits (3 created, 50 distinct standing reads) and a per-crew hourly

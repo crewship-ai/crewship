@@ -750,7 +750,15 @@ owner on 2026-11-13.
    counts once per run against `run_read_limit`. The same rule (one query)
    decides a folder read and a folder proposal. With the flag on the same
    ordinary-member Edit is required of the human on the page-grant proposal
-   path too.
+   path too. With the flag on, the folder's ACL document names the kinds on
+   which `propose` is a real proposal (`agent_propose_kinds: ["docs"]`;
+   absent with the flag off). The folder settings dialog (owner decision 1)
+   offers **Can suggest** for the "Agents of this folder's crew" row only
+   when that list names a kind it knows, with the note that it works only for
+   those kinds (a person who can edit asks in a chat, a person with Edit
+   accepts) and acts as Viewer for other kinds in the folder. Without the list
+   a stored `propose` is shown as the disabled **Viewer (set as Can
+   suggest)**.
 10. **Runs without a human reach nothing yet.** A routine, webhook or cron run
    has no human principal and the artifact tool refuses it. Its own mode
    (standing grants only, the read cap per run) needs a run identity the

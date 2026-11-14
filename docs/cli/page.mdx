@@ -1220,7 +1220,10 @@ are not covered. Levels other than `none` need the workspace feature flag
 `artifact_agent_access_modes`; in a chat run the human must still be able to
 read the page. The command reads the folder's `acl_version` first and sends
 it, so a concurrent change is a 409. Only a workspace admin or a MANAGER (or
-higher) of the owning crew may run this. `page folder acl` shows the level.
+higher) of the owning crew may run this. `page folder acl` shows the level;
+at `propose` with the flag on its table says
+`propose (suggestions on docs, read on other kinds; …)`, and its JSON carries
+`agent_propose_kinds`.
 Changes are journalled as `page.folder_agent_access_changed`.
 
 ---

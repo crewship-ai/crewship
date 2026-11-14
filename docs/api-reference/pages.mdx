@@ -1295,7 +1295,10 @@ on that page from its owner. It applies only with the workspace feature flag
 the page as a member (`docs/specs/pages.md` §7.1c). The request is fenced on
 `acl_version`, bumps it, and is journalled as
 `page.folder_agent_access_changed`. `GET …/acl` reports the level as
-`agent_access`.
+`agent_access`, `agent_access_available` (true where the flag is on), and,
+with the flag on, `agent_propose_kinds: ["docs"]`: the artifact kinds on which
+`propose` gives a real proposal. The folder settings dialog offers **Can
+suggest** only when this list names a kind it knows.
 
 **Authentication:** session cookie or CLI token. A workspace ADMIN/OWNER, or
 the owning crew's MANAGER (or higher).
