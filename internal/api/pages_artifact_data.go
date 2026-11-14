@@ -266,7 +266,7 @@ func (h *PageHandler) BatchArtifactData(w http.ResponseWriter, r *http.Request) 
 		artifactDataError(w, err)
 		return
 	}
-	bound, cleanup, e := artifactStorageUpload(w, r, h.artifactProjectStore(r.Context()), k, artifacts.MaxDataBatchBytes, h.artifactProjectAuthority(r, k, true, false))
+	bound, cleanup, e := artifactStorageUpload(w, r, h.artifactProjectStore(r.Context()), k, artifacts.MaxDataBatchBytes, artifactAuditProbe(h.artifactProjectAuthority(r, k, true, false)))
 	if e != nil {
 		artifactDataError(w, e)
 		return
