@@ -79,16 +79,6 @@ func (g *runScopeRig) standing(t *testing.T, slug, agent, level, issuer string) 
 	return id
 }
 
-func sameRefusal(t *testing.T, what string, got, missing *httptest.ResponseRecorder) {
-	t.Helper()
-	if got.Code == 200 || got.Code == 201 {
-		t.Fatalf("%s succeeded: %s", what, got.Body)
-	}
-	if got.Code != missing.Code || got.Body.String() != missing.Body.String() {
-		t.Fatalf("%s: refusal differs from a missing artifact: %d %q vs %d %q", what, got.Code, got.Body, missing.Code, missing.Body)
-	}
-}
-
 type unattendedAuditRow struct {
 	User                                          *string
 	Page, Agent, Crew, Run, Reach, Operation, Trg string

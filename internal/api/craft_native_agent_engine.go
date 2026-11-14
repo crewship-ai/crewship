@@ -3,21 +3,17 @@ package api
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
 	"math"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/crewship-ai/crewship/internal/craftengine"
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
@@ -158,29 +154,6 @@ func (b *nativeAgentEngineOutput) Write(p []byte) (int, error) {
 	return b.Buffer.Write(p)
 }
 
-func nativeAgentEngineExecutable(p CraftNativeDocumentProfile) (*os.File, error) {
-	if runtime.GOOS != "linux" || (p.Application != "wordcraft" && p.Application != "gridcraft") || !filepath.IsAbs(p.CLIPath) || filepath.Clean(p.CLIPath) != p.CLIPath || !craftNativePin(p.CLISHA256, 64) {
-		return nil, ErrCraftNativeAgentEngine
-	}
-	f, err := os.Open(p.CLIPath)
-	if err != nil {
-		return nil, ErrCraftNativeAgentEngine
-	}
-	fail := func() (*os.File, error) { f.Close(); return nil, ErrCraftNativeAgentEngine }
-	info, err := f.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 || info.Size() <= 0 || info.Size() > 512<<20 {
-		return fail()
-	}
-	sum := sha256.New()
-	if _, err = io.Copy(sum, io.LimitReader(f, (512<<20)+1)); err != nil || hex.EncodeToString(sum.Sum(nil)) != p.CLISHA256 {
-		return fail()
-	}
-	if _, err = f.Seek(0, io.SeekStart); err != nil {
-		return fail()
-	}
-	return f, nil
-}
-
 func (a *CraftNativeAgentCLIAdapter) run(ctx context.Context, p CraftNativeDocumentProfile, raw []byte, commands []nativeAgentEngineCommand, inspect bool) ([]byte, error) {
 	if len(raw) == 0 || len(raw) > 32<<20 || !utf8.Valid(raw) || len(bytes.TrimSpace(raw)) == 0 || bytes.TrimSpace(raw)[0] != '{' {
 		return nil, ErrCraftNativeAgentEngine
@@ -192,22 +165,24 @@ func (a *CraftNativeAgentCLIAdapter) run(ctx context.Context, p CraftNativeDocum
 	defer cancel()
 	// Refuse import that silently drops authored fields before editing it. Store
 	// validation remains independent and validates the returned candidate again.
-	v := mooring.NativeCLIValidator{Application: p.Application, BinaryPath: p.CLIPath, SHA256: p.CLISHA256, Timeout: a.timeout}
+	engine, err := craftNativeProfileEngine(p)
+	if err != nil {
+		return nil, ErrCraftNativeAgentEngine
+	}
+	p.Engine = engine
+	v := mooring.NativeCLIValidator{Application: p.Application, Engine: p.Engine, Timeout: a.timeout}
 	if err := v.Validate(ctx, raw); err != nil {
 		return nil, ErrCraftNativeAgentEngine
 	}
-	f, err := nativeAgentEngineExecutable(p)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
 	dir, err := os.MkdirTemp("", "craft-native-agent-")
 	if err != nil {
 		return nil, ErrCraftNativeAgentEngine
 	}
 	defer os.RemoveAll(dir)
-	input, output := filepath.Join(dir, "document.json"), filepath.Join(dir, "result.json")
-	if err = os.WriteFile(input, raw, 0600); err != nil {
+	output := filepath.Join(dir, "result.json")
+	root := p.Engine.Root(dir)
+	input, seenOutput := root+"/document.json", root+"/result.json"
+	if err = os.WriteFile(filepath.Join(dir, "document.json"), raw, 0600); err != nil {
 		return nil, ErrCraftNativeAgentEngine
 	}
 	var args []string
@@ -232,17 +207,11 @@ func (a *CraftNativeAgentCLIAdapter) run(ctx context.Context, p CraftNativeDocum
 		if p.Application == "gridcraft" {
 			flag = "--out"
 		}
-		args = append(args, flag, output)
+		args = append(args, flag, seenOutput)
 	}
-	// Execute the descriptor we hashed, never look up the path again at exec.
-	cmd := exec.CommandContext(ctx, "/proc/self/fd/3", args...)
-	cmd.ExtraFiles, cmd.Dir = []*os.File{f}, dir
-	cmd.Env = []string{"LANG=C.UTF-8", "HOME=" + dir, "TMPDIR=" + dir}
-	cmd.WaitDelay = 100 * time.Millisecond
 	stdout := &nativeAgentEngineOutput{limit: 1 << 20}
 	stderr := &nativeAgentEngineOutput{limit: 64 << 10}
-	cmd.Stdout, cmd.Stderr = stdout, stderr
-	if err = cmd.Run(); err != nil {
+	if err = p.Engine.Run(ctx, dir, args, stdout, stderr); err != nil {
 		return nil, ErrCraftNativeAgentEngine
 	}
 	if inspect {
@@ -263,9 +232,9 @@ func (a *CraftNativeAgentCLIAdapter) run(ctx context.Context, p CraftNativeDocum
 	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > 32<<20 {
 		return nil, ErrCraftNativeAgentEngine
 	}
-	expected := "wrote " + output + "\n"
+	expected := "wrote " + seenOutput + "\n"
 	if p.Application == "gridcraft" {
-		expected = "wrote " + output + " (" + strconv.FormatInt(info.Size(), 10) + " bytes)\n"
+		expected = "wrote " + seenOutput + " (" + strconv.FormatInt(info.Size(), 10) + " bytes)\n"
 	}
 	if stdout.Len() != 0 || stderr.String() != expected {
 		return nil, ErrCraftNativeAgentEngine
@@ -294,4 +263,19 @@ func (a *CraftNativeAgentCLIAdapter) Inspect(ctx context.Context, p CraftNativeD
 		return nil, err
 	}
 	return a.run(ctx, p, raw, parsed, true)
+}
+
+// craftNativeProfileEngine returns the profile's engine, or the native
+// development override its CLI pin names when no engine was resolved yet.
+func craftNativeProfileEngine(p CraftNativeDocumentProfile) (craftengine.Engine, error) {
+	if p.Engine != nil {
+		if p.Engine.Application() != p.Application {
+			return nil, ErrCraftNativeAgentEngine
+		}
+		return p.Engine, nil
+	}
+	if p.CLIPath == "" {
+		return nil, ErrCraftNativeAgentEngine
+	}
+	return craftengine.NewNative(p.Application, p.CLIPath, p.CLISHA256)
 }

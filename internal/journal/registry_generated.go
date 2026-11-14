@@ -63,7 +63,7 @@ var AllEntryTypes = []EntryType{
 	EntryContainerSnapshot,
 	EntryConversationCompacted,
 	EntryCostIncurred,
-	EntryType("craft.native_preview_shared"), // journalCraftNativePreviewShared, internal/api/craft_native_preview.go:19:7
+	EntryType("craft.native_preview_shared"), // journalCraftNativePreviewShared, internal/api/craft_native_preview.go:20:7
 	EntryCredentialAutoAssignEmpty,
 	EntryCredentialAutoAssignFailed,
 	EntryCredentialLeaseIssued,

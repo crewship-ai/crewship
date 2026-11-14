@@ -14,7 +14,8 @@ Everything here is off by default.
 
 | Switch | Kind | Default | Effect |
 |---|---|---|---|
-| `craft_native.enabled` / `CREWSHIP_CRAFT_NATIVE_ENABLED=true` | Instance config, read at startup | off | Serves the human session and lease API. When off, lease mutations return 503 and lease reads return 403. Requires a Linux boot-aware clock. The lease API registers without a profile, but a usable editor needs at least one qualified Word or Sheet profile. |
+| Admin › Artifacts › Applications (`craft_application_settings`) | Instance setting, read per request | off | Word, Sheet and agents in them. Off refuses new documents and new editing; draining still lets the holder renew and save. See craft-native.md. |
+| `craft_native.enabled` / `CREWSHIP_CRAFT_NATIVE_ENABLED=true` | Instance config, read at startup; fixes the Admin setting | off | Serves the human session and lease API. When off, lease mutations return 503 and lease reads return 403. Requires a Linux boot-aware clock. The lease API registers without a profile, but a usable editor needs at least one qualified Word or Sheet profile. |
 | `craft_native.agents_enabled` / `CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true` | Instance config, read at startup | off | Lets an explicitly consented agent task take the lease. Enabling the human editor alone grants agents nothing. |
 | `NEXT_PUBLIC_CHAT_CRAFT_LEASE=true` | Frontend build variable | `false` in the production build | Shows the lease bar (who is editing, request handoff) for a Craft artifact opened from chat. |
 

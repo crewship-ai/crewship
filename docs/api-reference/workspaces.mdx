@@ -1592,8 +1592,8 @@ that JSON. Rejected decisions follow the wait step's failure behavior.
 | Status | Condition |
 |---|---|
 | `400` | Missing `token` or invalid body |
-| `403` | The decider is not a person: an agent's internal token, or no principal at all. The waitpoint is untouched and the attempt is on the audit log as `waitpoint.decision_refused`. |
-| `409` | Waitpoint already decided or expired |
+| `403` | The decider is not a person (an agent's internal token, or no principal at all), or, for a held routine action, not a trusted workspace OWNER or ADMIN (`a held routine action needs a workspace OWNER or ADMIN to decide it`). The waitpoint is untouched and the attempt is on the audit log as `waitpoint.decision_refused`. |
+| `409` | Waitpoint already decided, timed out, or its run was cancelled. The message names which, for a token of the caller's own workspace; otherwise it is `waitpoint: already decided or expired` |
 | `503` | Waitpoint store not wired, or the wired implementation does not support completion |
 
 #### Defaults differ from the public callback — intentionally
@@ -1642,7 +1642,7 @@ On success the parked run is resumed via the same path as the authed approve han
 | Status | Condition |
 |---|---|
 | `400` | Missing `token`, or an unparseable request body (`internal/api/pipeline_waitpoint_callback.go:26-42`) |
-| `409` | Waitpoint already decided or expired (`internal/api/pipeline_waitpoint_callback.go:65-67`) |
+| `409` | Waitpoint already decided, timed out, or its run was cancelled. The message names which, for a token of the caller's own workspace; otherwise it is `waitpoint: already decided or expired` (`internal/api/pipeline_waitpoint_callback.go:65-67`) |
 | `500` | Completion failed for any other reason (`internal/api/pipeline_waitpoint_callback.go:69-71`) |
 | `503` | Waitpoint store not wired, or the wired implementation does not support completion (`internal/api/pipeline_waitpoint_callback.go:22-24,56-59`) |
 
@@ -2732,7 +2732,8 @@ creation also requires the run's human consent and content permissions.
 (`chat_run_create_limit`, `run_read_limit`, `crew_hourly_page_limit`;
 defaults 3, 50 and 20), and `scoped_default`: true while no policy was ever
 saved and `artifact_agent_access_modes` is on, when chat runs of every live
-crew may use their artifact scope.
+crew may use their artifact scope, and `save_requires_run_token` (default
+`false`).
 `PUT /api/v1/workspaces/{workspaceId}/artifact-creation-policy` accepts a request
 body of at most 64 KiB and requires all
 three request fields: `enabled`, the complete `crew_ids` allowlist, and
@@ -2740,8 +2741,16 @@ three request fields: `enabled`, the complete `crew_ids` allowlist, and
 `code: "stale_policy"`; read the latest policy before deciding on a replacement.
 An optional `limits` object changes only the limits it names (ranges 1–20,
 1–500 and 1–1000; out of range returns `400`); omitted limits keep their value.
-The limits apply only with the `artifact_agent_access_modes` flag on
-(`docs/specs/pages.md` §7.1c).
+An optional boolean `save_requires_run_token` (omitted keeps its value) makes
+an agent page save without the agent run token fail with `403` and
+`code: "run_token_required"`; while it is `false`, such a save is accepted
+under the crew hourly limit only and counted in
+`crewshipd_page_save_without_run_token_total` (an agent holding only a
+per-agent v1 token counts as tokenless; the host's own routine `page.create`
+is exempt). A save with the token counts
+against its run's `chat_run_create_limit`.
+The limits and the requirement apply only with the
+`artifact_agent_access_modes` flag on (`docs/specs/pages.md` §7.1c).
 Only active crews from the selected workspace are accepted. Responses use
 `Cache-Control: no-store`. CLI access requires `workspace:admin`.
 

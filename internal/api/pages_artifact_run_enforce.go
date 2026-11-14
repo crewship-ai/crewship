@@ -80,7 +80,7 @@ func (h *PageHandler) artifactRunModesRun(ctx context.Context) *artifactRunAutho
 // principal, the workspace policy ceiling, the original credential, and the
 // human's own private chat with this agent.
 func (h *PageHandler) checkScopedArtifactRun(ctx context.Context, a *artifactRunAuthority, scope string) error {
-	if a == nil || !h.artifactRunFamilyEnabled(ctx, a.WorkspaceID, "") {
+	if a == nil || !scopedRunFamilyChecked(ctx) && !h.artifactRunFamilyEnabled(ctx, a.WorkspaceID, "") {
 		return errArtifactProjectAccess
 	}
 	if h.checkOriginalUserArtifactRunPrincipal(ctx, a) != nil || !h.artifactScopedPolicyAllows(ctx, a.WorkspaceID, a.CrewID) {

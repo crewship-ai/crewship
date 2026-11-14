@@ -179,7 +179,7 @@ func TestCraftNativeAgentHTTPOriginalCLIQualification(t *testing.T) {
 				t.Fatal("frozen qualification fixture hash mismatch")
 			}
 			adapter := NewCraftNativeAgentCLIAdapter()
-			validator := mooring.NativeCLIValidator{Application: p.Application, BinaryPath: p.CLIPath, SHA256: p.CLISHA256}
+			validator := mooring.NativeCLIValidator{Application: p.Application, Engine: mustCraftNativeEngine(t, p)}
 			if err = validator.Validate(t.Context(), initial); err != nil {
 				t.Fatal("pinned original input", err)
 			}
@@ -196,7 +196,7 @@ func TestCraftNativeAgentHTTPOriginalCLIQualification(t *testing.T) {
 			mustExec(t, f.rig.db, `PRAGMA synchronous=FULL`)
 			cfg := mooring.NativeStoreConfig{Application: p.Application, EngineRevision: p.EngineRevision, EngineSHA256: p.CLISHA256, EditorBundle: p.EditorBundle, Validate: validator.Validate}
 			m.documents.applications = map[string]craftNativeApplication{p.Application: {Store: cfg}}
-			m.config.Profiles = map[string]CraftNativeDocumentProfile{p.Application: p}
+			m.documents.profiles = map[string]CraftNativeDocumentProfile{p.Application: p}
 			m.config.AgentApply = adapter.Apply
 			m.config.AgentInspect = adapter.Inspect
 			m.human.agents = m

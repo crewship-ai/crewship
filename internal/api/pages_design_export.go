@@ -31,9 +31,16 @@ var designExportSlug = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
 // writer is the admitted write actor (empty without Edit access); GetDesign
 // compares it with the Page owner for canShare, as ShareDesign does.
 func (h *PageHandler) designHistoryReader(ctx context.Context, tx *sql.Tx, r *http.Request, k artifacts.VersionKey) (writer string, canEdit, history bool, err error) {
-	writer, writeErr := h.designAuthority(r, k, true)(ctx, tx)
+	// Only a probe: the read that asks has its own authorization (and audit).
+	writer, writeErr := h.designAuthority(r, k, true)(designAuditProbeContext(ctx), tx)
 	if writeErr == nil {
 		return writer, true, true, nil
+	}
+	if run := h.designScopedRun(ctx, tx); run != nil {
+		// Flag on (#5317 5.3, amendment 7): the run reads the latest only
+		// where its human edits as an ordinary member; never through a role.
+		live, err := h.designScopedRunLive(ctx, tx, run, k)
+		return "", false, live, err
 	}
 	// A run whose human may edit, but which the owner did not delegate Edit
 	// to, keeps its human's live read and loses only the write.

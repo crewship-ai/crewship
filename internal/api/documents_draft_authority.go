@@ -33,6 +33,23 @@ type documentDraftScope struct {
 	Propose bool
 	// Blocks, comma-separated, are the only blocks a proposal may target; "" is the whole document.
 	Blocks string
+	// Read is a flag-on run's read through its scope (#5317 5.3): no
+	// consent, never a lease, commit, checkpoint or proposal.
+	Read bool
+}
+
+// documentStatePurposeHeader names the Node operation behind a state
+// callback. Only the private, service-authenticated Docs authority reads it.
+const documentStatePurposeHeader = "X-Crewship-Docs-Purpose"
+
+// documentViewReadKey marks a state callback that Node makes for its "read"
+// operation, the one behind the agent draft view (#5317 5.3).
+type documentViewReadKey struct{}
+
+// documentStateLoadedForView: Node names exactly one operation, "read".
+func documentStateLoadedForView(r *http.Request) bool {
+	values := r.Header.Values(documentStatePurposeHeader)
+	return len(values) == 1 && values[0] == "read"
 }
 
 // admits reports whether a block is inside this mandate.
@@ -132,7 +149,37 @@ func (h *PageHandler) authorizeDocumentDraft(ctx context.Context, a *artifactRun
 		return "", errDocumentAccess
 	}
 	if _, err := h.documentDraftScope(ctx, a, k.PageID); err != nil {
-		return "", err
+		// Flag on (#5317 5.3): without a consent for this Document, the run
+		// may still read it through its scope (recorded there), but only for
+		// Node's draft-view read: never for an export, comments, checkpoints,
+		// a lease, commit, checkpoint or proposal.
+		if viewRead, _ := ctx.Value(documentViewReadKey{}).(bool); operation != "state" || !viewRead || !errors.Is(err, errDocumentAccess) {
+			return "", err
+		}
+		if _, scoped := h.documentScopedRunRead(ctx, a, k.PageID); scoped != nil {
+			if errors.Is(scoped, errArtifactRunCap) {
+				return "", scoped
+			}
+			return "", err
+		}
+		return "agent:" + a.AgentID + ":" + a.RunID, nil
+	}
+	// Flag on (#5317 5.3): the drafting or iteration consent stays the only
+	// reach (it binds the generation, revision and lease of every write); the
+	// content access is audited with its human in this transaction, failing
+	// closed. Leases carry no content and are not recorded.
+	audited := ""
+	switch operation {
+	case "state", "receipt":
+		audited = "read"
+	case "commit", "checkpoint", "propose":
+		audited = "write"
+	}
+	if audited != "" {
+		tx, _ := ctx.Value(pageAuthReaderKey{}).(*sql.Tx)
+		if h.recordConsentedRunAccess(ctx, tx, a, k.PageID, audited) != nil {
+			return "", errDocumentAccess
+		}
 	}
 	return "agent:" + a.AgentID + ":" + a.RunID, nil
 }

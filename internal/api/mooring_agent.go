@@ -188,11 +188,18 @@ func (m *mooringHTTP) agent(w http.ResponseWriter, r *http.Request) {
 	}
 	r = checked
 	var packet mooringAgentPacket
-	if decodeGridCraftBody(w, r, &packet) != nil || packet.ArtifactID == "" || packet.MandateID == "" || (packet.Action != "read" && packet.Action != "command") || (packet.Action == "read" && packet.Request != nil) || (packet.Action == "command" && packet.Request == nil) {
+	if decodeGridCraftBody(w, r, &packet) != nil {
 		mooringError(w, mooring.ErrInvalid)
 		return
 	}
 	a, _ := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
+	// Flag on (#5317 5.3): without a mandate the run reads what its scope
+	// reaches, and every change is refused.
+	scoped := packet.MandateID == "" && a != nil && m.workbook.pages.artifactRunModesOn(r.Context(), a.WorkspaceID)
+	if packet.ArtifactID == "" || packet.MandateID == "" && !scoped || (packet.Action != "read" && packet.Action != "command") || (packet.Action == "read" && packet.Request != nil) || (packet.Action == "command" && packet.Request == nil) {
+		mooringError(w, mooring.ErrInvalid)
+		return
+	}
 	if a != nil {
 		var native bool
 		err := m.workbook.pages.db.QueryRowContext(r.Context(), `SELECT EXISTS(SELECT 1 FROM gridcraft_heads WHERE workspace_id=? AND page_id=?)`, a.WorkspaceID, packet.ArtifactID).Scan(&native)
@@ -207,6 +214,10 @@ func (m *mooringHTTP) agent(w http.ResponseWriter, r *http.Request) {
 	}
 	if a == nil {
 		mooringError(w, appengine.ErrForbidden)
+		return
+	}
+	if scoped {
+		m.scopedAgent(w, r, a, packet)
 		return
 	}
 	tx, e := m.begin(r)
@@ -225,7 +236,24 @@ func (m *mooringHTTP) agent(w http.ResponseWriter, r *http.Request) {
 		mooringError(w, e)
 		return
 	}
+	// Flag on (#5317 5.3): the mandate stays the only reach; each access is
+	// audited with its human in this transaction, failing closed.
+	operation := "write"
 	if packet.Action == "read" {
+		operation = "read"
+	}
+	if m.workbook.pages.recordConsentedRunAccess(r.Context(), tx, a, k.PageID, operation) != nil {
+		mooringError(w, appengine.ErrForbidden)
+		return
+	}
+	if packet.Action == "read" {
+		if m.workbook.pages.artifactRunModesOn(context.WithValue(r.Context(), pageAuthReaderKey{}, tx), a.WorkspaceID) {
+			// The read's audit row commits with the read, or the read fails.
+			if e = tx.Commit(); e != nil {
+				mooringError(w, e)
+				return
+			}
+		}
 		writeJSON(w, 200, map[string]any{"app_id": manifest.ID, "manifest": manifest, "state": state})
 		return
 	}

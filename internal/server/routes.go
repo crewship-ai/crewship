@@ -245,6 +245,7 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 		{"crewshipd_gc_runs_total", "Total GC runs", "counter", mem.NumGC},
 		{"crewshipd_ws_connections", "Active WebSocket connections", "gauge", s.wsHub.ConnectionCount()},
 		{"crewshipd_credential_audit_dropped_total", "Credential audit events lost by best-effort writers (mutation succeeded, timeline row did not)", "counter", api.CredentialAuditDroppedTotal()},
+		{"crewshipd_page_save_without_run_token_total", "Agent page saves without an agent run token while artifact_agent_access_modes is on", "counter", api.PageSaveWithoutRunTokenTotal()},
 	}
 
 	for _, m := range metrics {

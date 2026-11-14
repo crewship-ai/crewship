@@ -1106,6 +1106,16 @@ type RunInput struct {
 	InvocationSourceRunID string `json:"-"` // Fresh verified invocation only; never inherited recipe authority.
 	// OnStarted runs after the run row is durable, before the first step.
 	OnStarted func(runID string)
+	// OnHumanWait runs when a step of this run starts blocking on a pending
+	// person's decision (a held crewship action, or `wait: approval` in a
+	// run that cannot park), with the run, the step and the waitpoint token.
+	// In practice that is a held action inside foreach; a top-level step of
+	// a stored run parks it instead and does not call this. It is not
+	// passed to nested routines (buildNestedRunInput): their steps run as a
+	// child run and still block without a signal. The
+	// synchronous run endpoint uses it to return a WAITING receipt and let
+	// the run continue without the request (#5348). It must not block.
+	OnHumanWait func(runID, stepID, token string)
 
 	PipelineID      string // optional; required only for Run (not RunDefinition)
 	WorkspaceID     string
