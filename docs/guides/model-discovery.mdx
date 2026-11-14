@@ -135,8 +135,10 @@ picker, and stays in place when you switch the runner; only switching to a
 different provider replaces it with that provider's default.
 
 Crewship checks only the shape of the id: at most 200 characters of letters,
-digits and `- _ . : / @ + [ ]`, with no spaces. Anything else returns
-**400 Bad Request**:
+digits and `- _ . : / @ + [ ]`, with no spaces, starting with a letter or
+digit (so a runner can never read the id as an option). The same check
+applies to agent create, update, hire and template deploy. Anything else
+returns **400 Bad Request**:
 
 ```bash
 crewship agent update my-agent --llm-model "claude sonnet"
