@@ -43,7 +43,7 @@ describe.each(['wordcraft','gridcraft'] as const)('%s editor hello through the r
   const {target,hello,connects}=await mountFrame(app)
   await hello(target,"null")
   expect(connects()).toHaveLength(1)
-  const [message,targetOrigin,transfer]=connects()[0] as [Record<string,unknown>,string,unknown[]]
+  const [message,targetOrigin,transfer]=connects()[0] as unknown as [Record<string,unknown>,string,unknown[]]
   expect(message).toEqual({type:`${app}:connect`,protocol:1,bundle})
   expect(targetOrigin).toBe("*")
   expect(transfer).toHaveLength(1)
