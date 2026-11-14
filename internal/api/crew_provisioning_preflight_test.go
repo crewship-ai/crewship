@@ -1,0 +1,157 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+
+	"github.com/moby/moby/api/types/system"
+	"github.com/moby/moby/client"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/diskusage"
+)
+
+const testGiB = uint64(1) << 30
+
+func TestBuildStorageCheck(t *testing.T) {
+	errProbe := errors.New("statfs unavailable")
+	tests := []struct {
+		name        string
+		dataDir     string
+		dockerRoot  string
+		dockerKnown bool
+		floor       int64
+		free        map[string]uint64
+		probeErr    map[string]error
+		wantErr     string // substring; "" = build allowed
+	}{
+		{name: "plenty of room everywhere", dataDir: "/data", dockerRoot: "/var/lib/docker", dockerKnown: true, floor: 4 << 30,
+			free: map[string]uint64{"/data": 50 * testGiB, "/var/lib/docker": 50 * testGiB}},
+		{name: "data volume below its floor", dataDir: "/data", dockerRoot: "/var/lib/docker", dockerKnown: true, floor: 4 << 30,
+			free: map[string]uint64{"/data": testGiB / 2, "/var/lib/docker": 50 * testGiB}, wantErr: "0.5 GiB free on the Crewship data volume (/data)"},
+		{name: "data volume exactly at its floor", dataDir: "/data", floor: 4 << 30,
+			free: map[string]uint64{"/data": testGiB}},
+		{name: "docker storage below its floor", dataDir: "/data", dockerRoot: "/var/lib/docker", dockerKnown: true, floor: 4 << 30,
+			free: map[string]uint64{"/data": 50 * testGiB, "/var/lib/docker": 3 * testGiB}, wantErr: "3.0 GiB free on Docker's storage (/var/lib/docker), a build needs at least 4.0 GiB"},
+		{name: "docker storage not measurable is unknown, not pressure", dataDir: "/data", dockerRoot: "/var/lib/docker", dockerKnown: false, floor: 4 << 30,
+			free: map[string]uint64{"/data": 50 * testGiB, "/var/lib/docker": 0}},
+		{name: "docker floor disabled", dataDir: "/data", dockerRoot: "/var/lib/docker", dockerKnown: true, floor: 0,
+			free: map[string]uint64{"/data": 50 * testGiB, "/var/lib/docker": 0}},
+		{name: "data volume floor stays when the docker floor is disabled", dataDir: "/data", floor: 0,
+			free: map[string]uint64{"/data": 0}, wantErr: "Crewship data volume"},
+		{name: "in-memory database has no data volume", dataDir: "", dockerRoot: "/var/lib/docker", dockerKnown: true, floor: 4 << 30,
+			free: map[string]uint64{"/var/lib/docker": 50 * testGiB}},
+		{name: "a failing probe is unknown, not pressure", dataDir: "/data", dockerRoot: "/var/lib/docker", dockerKnown: true, floor: 4 << 30,
+			probeErr: map[string]error{"/data": errProbe, "/var/lib/docker": errProbe}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			check := buildStorageCheck{
+				dataDir:    func(context.Context) string { return tt.dataDir },
+				dockerRoot: func(context.Context) (string, bool) { return tt.dockerRoot, tt.dockerKnown },
+				usage: func(path string) (diskusage.Stats, error) {
+					if err := tt.probeErr[path]; err != nil {
+						return diskusage.Stats{}, err
+					}
+					return diskusage.Stats{Path: path, FreeBytes: tt.free[path]}, nil
+				},
+				dockerMinFree: tt.floor,
+			}
+			err := check.check(context.Background())
+			if tt.wantErr == "" {
+				if err != nil {
+					t.Fatalf("build refused: %v", err)
+				}
+				return
+			}
+			if !errors.Is(err, ErrBuildStorage) || !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %v, want ErrBuildStorage containing %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestBuildMinFreeFromEnv(t *testing.T) {
+	tests := []struct {
+		name, value string
+		set         bool
+		want        int64
+		invalid     bool
+	}{
+		{name: "unset keeps the default", want: defaultBuildMinFreeBytes},
+		{name: "blank keeps the default", set: true, value: "  ", want: defaultBuildMinFreeBytes},
+		{name: "explicit floor", set: true, value: "10", want: 10 << 30},
+		{name: "zero disables", set: true, value: "0", want: 0},
+		{name: "negative is unusable", set: true, value: "-1", want: defaultBuildMinFreeBytes, invalid: true},
+		{name: "text is unusable", set: true, value: "lots", want: defaultBuildMinFreeBytes, invalid: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.set {
+				t.Setenv(buildMinFreeEnv, tt.value)
+			}
+			got, invalid := buildMinFreeFromEnv()
+			if got != tt.want || invalid != tt.invalid {
+				t.Errorf("buildMinFreeFromEnv() = %d, %t; want %d, %t", got, invalid, tt.want, tt.invalid)
+			}
+		})
+	}
+}
+
+type fakeInfoClient struct {
+	host string
+	info system.Info
+	err  error
+}
+
+func (f fakeInfoClient) DaemonHost() string { return f.host }
+func (f fakeInfoClient) Info(context.Context, client.InfoOptions) (client.SystemInfoResult, error) {
+	return client.SystemInfoResult{Info: f.info}, f.err
+}
+
+func TestMeasurableDockerRoot(t *testing.T) {
+	present := func(string) error { return nil }
+	absent := func(string) error { return errors.New("no such file or directory") }
+	linux := system.Info{DockerRootDir: "/var/lib/docker", OperatingSystem: "Ubuntu 24.04 LTS"}
+	tests := []struct {
+		name   string
+		docker dockerInfoClient
+		stat   func(string) error
+		want   bool
+	}{
+		{"local engine with visible root", fakeInfoClient{host: "unix:///var/run/docker.sock", info: linux}, present, true},
+		{"no docker client", nil, present, false},
+		{"remote daemon over TCP", fakeInfoClient{host: "tcp://10.0.0.5:2376", info: linux}, present, false},
+		{"Docker Desktop keeps its data in a VM", fakeInfoClient{host: "unix:///var/run/docker.sock", info: system.Info{DockerRootDir: "/var/lib/docker", OperatingSystem: "Docker Desktop"}}, present, false},
+		{"root not visible to this process (server in a container, VM-backed runtime)", fakeInfoClient{host: "unix:///var/run/docker.sock", info: linux}, absent, false},
+		{"daemon does not answer", fakeInfoClient{host: "unix:///var/run/docker.sock", err: errors.New("unavailable")}, present, false},
+		{"daemon reports no root", fakeInfoClient{host: "unix:///var/run/docker.sock", info: system.Info{}}, present, false},
+		{"daemon reports a relative root", fakeInfoClient{host: "unix:///var/run/docker.sock", info: system.Info{DockerRootDir: "docker"}}, present, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			root, ok := measurableDockerRoot(context.Background(), tt.docker, tt.stat)
+			if ok != tt.want || (ok && root != "/var/lib/docker") {
+				t.Errorf("measurableDockerRoot = %q, %t; want measurable=%t", root, ok, tt.want)
+			}
+		})
+	}
+}
+
+// The router enables the check on every handler that can build.
+func TestEnableBuildStoragePreflightInstallsTheCheck(t *testing.T) {
+	var none *ProvisioningHandler
+	none.EnableBuildStoragePreflight() // nil handler and nil provisioner are no-ops
+	(&ProvisioningHandler{}).EnableBuildStoragePreflight()
+
+	h := &ProvisioningHandler{
+		logger:      newTestLogger(),
+		provisioner: devcontainer.NewProvisioner(nil, nil, nil, nil),
+	}
+	h.EnableBuildStoragePreflight()
+	if !h.provisioner.HasBuildPreflight() {
+		t.Fatal("no build preflight installed")
+	}
+}
