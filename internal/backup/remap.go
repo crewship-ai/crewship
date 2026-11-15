@@ -379,7 +379,7 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 			// These IDs identify history or authored dataset keys within the
 			// remapped workspace/Page. Reminting them breaks receipt digests,
 			// checkpoints or HTML data-row bindings; anchor FKs still remap.
-			if table == "document_receipts" || table == "document_checkpoints" || table == "document_comments" || table == "document_proposals" || table == "artifact_data_documents" {
+			if table == "document_receipts" || table == "document_checkpoints" || table == "document_comments" || table == "document_proposals" || table == "artifact_data_documents" || table == "artifact_data_runs" {
 				continue
 			}
 			oldID, ok := row["id"].(string)
@@ -455,7 +455,7 @@ func RemapIDs(ctx context.Context, db *sql.DB, dump *DBDump) error {
 	// Dataset keys and live Design state belong to a Page. Rewrite their
 	// composite anchors, which reference heads rather than pages; authored node
 	// IDs and opaque Yjs bytes remain unchanged.
-	for _, table := range []string{"artifact_data_collections", "artifact_data_documents", "artifact_design_documents"} {
+	for _, table := range []string{"artifact_data_collections", "artifact_data_documents", "artifact_data_runs", "artifact_design_documents"} {
 		for _, row := range dump.Tables[table] {
 			for column, anchor := range map[string]string{"workspace_id": "workspaces", "page_id": "pages"} {
 				if old, ok := row[column].(string); ok {

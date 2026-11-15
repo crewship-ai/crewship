@@ -293,6 +293,8 @@ var requiredQueryParametersInSpec = []string{
 	// Pinned by TestDashboardDataReadsRequireSelectedCodeVersion.
 	"GET /api/v1/pages/{slug}/artifact/data ?version",
 	"GET /api/v1/pages/{slug}/artifact/data/{collection} ?version",
+	// Pinned by TestDashboardProducerRunAuthority (dataCodeVersion guard).
+	"GET /api/v1/pages/{slug}/artifact/data-runs ?version",
 	// Both Slides reads delegate their exact pin guard to serveArtifactSlides.
 	// Pinned by TestArtifactSlidesSelectedProjectionAndPDF.
 	"GET /api/v1/pages/{slug}/artifact/slides ?version",

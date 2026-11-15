@@ -11,4 +11,10 @@ func (r *Router) registerArtifactDataRoutes() {
 	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/data/{collection}", authed(wsCtx(http.HandlerFunc(r.pages.GetArtifactData))))
 	// openapi: responses 200,400,401,403,404,409,413,500,503
 	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/data/{collection}", roleInline, r.pages.BatchArtifactData)
+	// openapi: responses 200,400,401,403,404,409,500,503
+	r.mux.Handle("GET /api/v1/pages/{slug}/artifact/data-runs", authed(wsCtx(http.HandlerFunc(r.pages.ListArtifactDataRuns))))
+	// openapi: responses 200,201,400,401,403,404,409,413,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/data/{collection}/runs", roleInline, r.pages.StartArtifactDataRun)
+	// openapi: responses 200,400,401,403,404,409,500,503
+	r.authedMut("POST", "/api/v1/pages/{slug}/artifact/data/{collection}/runs/{run}", roleInline, r.pages.FinishArtifactDataRun)
 }

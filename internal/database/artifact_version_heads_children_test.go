@@ -12,6 +12,7 @@ import (
 // this list changes, check every such rebuild and update it here on purpose.
 var artifactVersionHeadsChildren = []string{
 	"artifact_data_collections",
+	"artifact_data_runs",
 	"artifact_design_documents",
 	"artifact_library_pins",
 	"artifact_library_publications",

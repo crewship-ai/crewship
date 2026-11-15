@@ -448,7 +448,7 @@ func buildDocument(routes []route) map[string]any {
 				"schema":   map[string]any{"type": "string"},
 			})
 		}
-		if rt.method == "GET" && (rt.path == "/api/v1/pages/{slug}/artifact/data" || rt.path == "/api/v1/pages/{slug}/artifact/data/{collection}") {
+		if rt.method == "GET" && (rt.path == "/api/v1/pages/{slug}/artifact/data" || rt.path == "/api/v1/pages/{slug}/artifact/data/{collection}" || rt.path == "/api/v1/pages/{slug}/artifact/data-runs") {
 			info.query["version"] = queryParam{typ: "integer", required: true}
 		}
 		for name, param := range info.query {
