@@ -524,6 +524,11 @@ func (r *OrchestratorRunner) RunStep(ctx context.Context, req AgentStepRequest) 
 	if err := r.resolver.CreateRun(ctx, childRunID, agentID, chatID, req.WorkspaceID, "ROUTINE", map[string]interface{}{"pipeline_id": req.PipelineID, "pipeline_run_id": req.PipelineRunID, "step_id": req.StepID}); err != nil {
 		return AgentStepResult{}, fmt.Errorf("admit routine child: %w", err)
 	}
+	// #5339: record this run without a human before its agent starts (see
+	// recordRoutineArtifactRun for which routine runs qualify).
+	capability, endArtifactRun := recordRoutineArtifactRun(ctx, r.db, r.logger, r.journalE, req, info.CrewID, agentID, childRunID, time.Duration(runReq.TimeoutSecs)*time.Second)
+	defer endArtifactRun()
+	runReq.ArtifactRunCapability = capability
 	runErr := r.orch.RunAgent(ctx, runReq, finalHandler)
 	if terminalErr := r.recordChildTerminal(ctx, childRunID, runErr); terminalErr != nil && runErr == nil {
 		runErr = fmt.Errorf("record routine child terminal: %w", terminalErr)

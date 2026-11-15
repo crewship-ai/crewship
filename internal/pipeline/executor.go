@@ -1179,6 +1179,12 @@ type RunInput struct {
 	// the projection accurately reflects the trigger.
 	TriggeredVia  TriggeredVia
 	TriggeredByID string
+	// ArtifactScheduleID is set only by the host's own schedule fire (the
+	// cron scheduler and a schedule's "run now"), never from a request body
+	// or a queued row: TriggeredVia/TriggeredByID can be claimed by a caller
+	// of the run API, so they alone never let a schedule's creator vouch for
+	// a run's artifact access (#5339). Nested runs do not inherit it.
+	ArtifactScheduleID string
 	// DueAt is the cron occurrence this run is being fired FOR — set by the
 	// scheduler (fireSingleOccurrence) and by nothing else, so the
 	// persisted run can answer "how late did this fire" (§19.3 scheduled
@@ -2255,6 +2261,13 @@ func (e *Executor) runAgentStep(
 			InvokingCrewID:   in.InvokingCrewID,
 			InvokingAgentID:  in.InvokingAgentID,
 			InputGuardAction: resolveInputGuardAction(in.dsl),
+			// #5339: provenance for the artifact run capability decision.
+			InvokingUserID:      in.InvokingUserID,
+			InvocationAuthority: in.InvocationAuthority,
+			TriggeredVia:        in.TriggeredVia,
+			AuthorAgentID:       in.AuthorAgentID,
+			TriggeredByID:       in.TriggeredByID,
+			ArtifactScheduleID:  in.ArtifactScheduleID,
 		}
 		res, err := e.runRunnerWithTransientRetry(ctx, req, step, emit)
 		totalCost += res.CostUSD

@@ -123,6 +123,17 @@ func executionSchemaComponents() map[string]any {
 		"catchup_policy": str(), "last_missed_count": integer(),
 		"spread_seconds": integer(), "spread_offset_seconds": integer(), "next_occurrence_at": timeString(), "consecutive_failures": integer(),
 		"max_consecutive_failures": integer(), "disabled_reason": str(), "created_at": timeString(), "updated_at": timeString(),
+		// creator_kind / creator_user_id (#5339): who created or last saved
+		// the schedule — "human" (with that user) or "agent"; omitted when
+		// unknown (saved before it was recorded).
+		"creator_kind": map[string]any{"type": "string", "enum": []string{"human", "agent"}}, "creator_user_id": str(),
+		// artifact_access / stopped_reason (owner decision for #5356): with
+		// artifact access on, whether the schedule's fires reach artifacts
+		// now and why not; person-standing reasons only for the creator and
+		// OWNER/ADMIN, creator_not_in_good_standing for everyone else;
+		// routine_agent_authored (the routine an agent authored) for all.
+		"artifact_access": map[string]any{"type": "string", "enum": []string{"active", "stopped"}},
+		"stopped_reason":  map[string]any{"type": "string", "enum": []string{"routine_agent_authored", "agent_created", "creator_unknown", "creator_not_member", "creator_suspended", "creator_access_revoked", "creator_role", "creator_restricted", "creator_not_in_good_standing"}},
 	})
 	warning := obj(map[string]any{"stage": str(), "message": str(), "at": timeString()})
 	span := obj(map[string]any{"seq": integer(), "kind": str(), "name": str(), "started_at": timeString(), "duration_ms": integer(), "status": str(), "detail": anyObject, "input": anyObject, "output": anyObject, "input_truncated": boolean(), "output_truncated": boolean()})

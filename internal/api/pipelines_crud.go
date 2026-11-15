@@ -825,6 +825,9 @@ func (h *PipelineHandler) saveWithPublication(w http.ResponseWriter, r *http.Req
 		replyError(w, http.StatusUnprocessableEntity, triggerErr.Error())
 		return
 	}
+	if trigger != nil {
+		trigger.CreatorKind, trigger.CreatorUserID = scheduleCreatorFromRequest(r)
+	}
 
 	dsl, err := pipeline.Parse(body.Definition)
 	if err != nil {
@@ -1162,6 +1165,11 @@ func (h *PipelineHandler) InternalSave(w http.ResponseWriter, r *http.Request) {
 	if triggerErr != nil {
 		replyError(w, http.StatusUnprocessableEntity, triggerErr.Error())
 		return
+	}
+	if trigger != nil {
+		// The internal save path is an agent's, whatever caller header it
+		// carries: its schedule never gives a routine artifact access.
+		trigger.CreatorKind = pipeline.ScheduleCreatorAgent
 	}
 
 	// Governance maker-checker (mirrors the user save path): classify the

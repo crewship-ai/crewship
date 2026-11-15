@@ -65,6 +65,10 @@ export interface PipelineSchedule {
   // omitted for every ordinary schedule. The editor must not offer a plain
   // enable toggle for a draft — only the activate action clears it.
   activation?: "draft"
+  /** "active" or "stopped" with artifact access on (#5339, #5356); absent when off. */
+  artifact_access?: "active" | "stopped"
+  /** Why artifact access stopped; a person's standing detail only for the creator and admins. */
+  stopped_reason?: string
 }
 
 // SchedulePatchBody is the PATCH wire shape: every field absent-keeps-

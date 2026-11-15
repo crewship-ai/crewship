@@ -164,7 +164,10 @@ type RouteAuth struct {
 // It provides an HTTP forward proxy with credential injection,
 // optional memory search API, and assignment routing for lead agents.
 type Server struct {
-	httpServer       *http.Server
+	httpServer *http.Server
+	// runCapabilities holds the host-minted capability of each run without a
+	// human (#5339), attached to that run's artifact tool calls only.
+	runCapabilities  runCapabilities
 	credStore        *CredStore
 	allowlist        *DomainAllowlist
 	proxy            *Proxy
@@ -622,6 +625,9 @@ func (s *Server) buildHandler(proxy *Proxy) http.Handler {
 			// to the very test that exists to stop routes going unclassified.
 			case r.Method == http.MethodPost && r.URL.Path == "/agent/run/end":
 				s.handleRunEnd(w, r)
+			case r.Method == http.MethodPost && r.URL.Path == "/agent/run/artifact-capability":
+				s.handleRunArtifactCapability(w, r)
+				return
 			case r.Method == http.MethodPost && r.URL.Path == "/memory/search":
 				s.handleMemorySearch(w, r)
 				return

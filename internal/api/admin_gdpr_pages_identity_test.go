@@ -145,6 +145,7 @@ var identityShapes = map[string]struct {
 	"hooks_config_anonymised":                {"hooks_config", 1},
 	"automations_anonymised":                 {"automations", 1},
 	"recurring_issues_anonymised":            {"recurring_issues", 1},
+	"pipeline_schedules_anonymised":          {"pipeline_schedules", 1},
 	"composio_settings_anonymised":           {"composio_settings", 1},
 	"agents_anonymised":                      {"agents", 1},
 	"crews_anonymised":                       {"crews", 1},
@@ -246,6 +247,9 @@ func (r *pagesIdentityRig) seedIdentityShapes(t *testing.T, wsID, tag, crew stri
 		VALUES (?,?,'auto','issue.created','issue',?,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z')`, id("au"), wsID, u)
 	pidExec(t, r.db, `INSERT INTO recurring_issues (id, workspace_id, crew_id, title, cron_expression, created_by)
 		VALUES (?,?,?,'weekly','0 9 * * 1',?)`, id("ri"), wsID, crew, u)
+	// A schedule the subject saved names them as its person creator (#5339).
+	pidExec(t, r.db, `INSERT INTO pipeline_schedules (id, workspace_id, name, target_pipeline_id, cron_expr, creator_kind, creator_user_id, creator_member_id, creator_set_at)
+		VALUES (?,?,'nightly',?,'0 3 * * *','human',?,?,'2026-01-01T00:00:00Z')`, id("ps"), wsID, id("pl"), u, id("m"))
 	pidExec(t, r.db, `INSERT INTO composio_settings (workspace_id, encrypted_api_key, created_by, default_user_id)
 		VALUES (?,'enc',?,?)`, wsID, u, u)
 
@@ -1055,5 +1059,28 @@ func TestGDPRErasure_RetiredGrantMemoryNoLongerNamesSubject(t *testing.T) {
 	}
 	if a, b := count(pidWSA), count(pidWSB); a != 0 || b != 2 {
 		t.Fatalf("retired issuances after erasure: erased workspace %d, other workspace %d", a, b)
+	}
+}
+
+// A schedule the subject saved loses its whole person creator (#5339): kind,
+// user, membership and time go together, so nothing is left that vouches for
+// a run or names who did.
+func TestGDPRErasure_ScheduleCreatorGoesAsAWhole(t *testing.T) {
+	r := pagesIdentitySetup(t)
+	r.erase(t, pidWSA)
+
+	var kind, user, member, setAt sql.NullString
+	if err := r.db.QueryRow(`SELECT creator_kind, creator_user_id, creator_member_id, creator_set_at
+		FROM pipeline_schedules WHERE id = 'pid-ps-a'`).Scan(&kind, &user, &member, &setAt); err != nil {
+		t.Fatalf("load schedule: %v", err)
+	}
+	if kind.Valid || user.Valid || member.Valid || setAt.Valid {
+		t.Errorf("creator after erasure = (%v, %v, %v, %v), want all NULL", kind, user, member, setAt)
+	}
+	if err := r.db.QueryRow(`SELECT creator_kind, creator_user_id FROM pipeline_schedules WHERE id = 'pid-ps-b'`).Scan(&kind, &user); err != nil {
+		t.Fatalf("load other workspace's schedule: %v", err)
+	}
+	if kind.String != "human" || user.String != r.userID {
+		t.Errorf("the other workspace's schedule creator = (%v, %v), want it untouched", kind, user)
 	}
 }

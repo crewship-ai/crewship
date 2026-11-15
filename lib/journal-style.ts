@@ -352,6 +352,8 @@ export const TYPE_TO_GROUP: Record<string, EntryGroup> = {
   "artifact.project_shared": "page",
   "artifact.library_published": "page",
   "artifact.library_pinned": "page",
+  "artifact.run_capability_withheld": "page",
+  "artifact.run_capability_lost": "page",
   "craft.native_preview_shared": "page",
   "artifact.orphaned_workbook_deleted": "page",
   "artifact.private_output_published": "page",

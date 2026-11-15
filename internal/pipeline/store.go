@@ -521,6 +521,8 @@ func (s *Store) createTriggerTx(ctx context.Context, tx *sql.Tx, in SaveInput, p
 		CatchupPolicy:          trigger.CatchupPolicy,
 		MaxConsecutiveFailures: trigger.MaxConsecutiveFailures,
 		Activation:             trigger.Activation,
+		CreatorKind:            trigger.CreatorKind,
+		CreatorUserID:          trigger.CreatorUserID,
 	}
 	schedule, err := upsertTriggerSchedule(ctx, tx, schedIn)
 	if err != nil {
