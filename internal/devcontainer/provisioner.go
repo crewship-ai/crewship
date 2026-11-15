@@ -178,6 +178,7 @@ func elapsedMs(start time.Time) int64 { return time.Since(start).Milliseconds() 
 type ProvisionOption func(*provisionOpts)
 
 type provisionOpts struct {
+	acquireImage func(context.Context, ...string) error
 	forceRebuild bool
 	onProgress   ProgressCallback
 	onPlan       PlanCallback
@@ -188,6 +189,13 @@ type provisionOpts struct {
 	// in both provisioning paths; a miss fails the build with the binary's
 	// name instead of surfacing as "No such file or directory" in a chat.
 	requiredBinaries []string
+}
+
+// WithImageAcquisition reports actual normalized image references before use.
+// The caller retains the corresponding leases until it publishes or rejects
+// the result; intermediate feature images participate in the same lifetime.
+func WithImageAcquisition(acquire func(context.Context, ...string) error) ProvisionOption {
+	return func(o *provisionOpts) { o.acquireImage = acquire }
 }
 
 // WithForceRebuild bypasses both the final-image cache and installation-layer
@@ -494,6 +502,11 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 
 	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg)+requiredBinariesHashSalt(o.requiredBinaries))
 	tag := p.cacheTag(hash)
+	if o.acquireImage != nil {
+		if err := o.acquireImage(ctx, baseImage, tag); err != nil {
+			return fail(ProvStepStart, err)
+		}
+	}
 
 	// One provision per tag at a time; the cache check below runs under the
 	// lock, so a caller that waited finds the first one's image (#4816).
@@ -624,7 +637,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		// buildFeatureImage emits image_build_start, per-feature feature_install,
 		// image_build_done, and on any failure provision.failed (with the build
 		// log tail) — so we just propagate its error here.
-		featImage, berr := p.buildFeatureImage(ctx, baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, emit, o.onProvision, o.forceRebuild)
+		featImage, berr := p.buildFeatureImage(ctx, baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, emit, o.onProvision, o.forceRebuild, o.acquireImage)
 		if berr != nil {
 			return nil, berr
 		}
