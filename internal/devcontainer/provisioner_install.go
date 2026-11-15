@@ -326,6 +326,11 @@ func (p *Provisioner) installMise(ctx context.Context, containerID string, miseC
 	if err := cfg.Validate(); err != nil {
 		return err
 	}
+	return p.installMiseConfig(ctx, containerID, cfg, exec)
+}
+
+// installMiseConfig installs an already parsed and validated configuration.
+func (p *Provisioner) installMiseConfig(ctx context.Context, containerID string, cfg *MiseConfig, exec ExecFunc) error {
 	if cfg.IsEmpty() {
 		p.logger.Debug("mise config has no tools, skipping")
 		return nil
@@ -553,9 +558,8 @@ func (p *Provisioner) writeAggregatedContainerEnv(ctx context.Context, container
 // operator-set value). runtimeEnv is the aggregated containerEnv, and that
 // directory is then left alone.
 //
-// On the build-only path this step is a later RUN layer, which cannot take
-// bytes back out of the layer that wrote them, so the saving there is limited
-// to what a squashing builder gives.
+// The build-only path also empties mise’s cache in the installation RUN,
+// before switching users, so those bytes never enter the installation layer.
 //
 // Uses `2>/dev/null || true` so missing directories on exotic base images do
 // not fail the cleanup step.
@@ -580,7 +584,8 @@ const miseBuildCacheDir = miseRoot + "/cache"
 // to use the build-time cache directory as its mise cache.
 func runtimeReadsMiseBuildCache(runtimeEnv map[string]string) bool {
 	dir := strings.TrimSpace(runtimeEnv["MISE_CACHE_DIR"])
-	return dir != "" && path.Clean(dir) == miseBuildCacheDir
+	dir = path.Clean(dir)
+	return dir == miseBuildCacheDir || strings.HasPrefix(dir, miseBuildCacheDir+"/")
 }
 
 // cleanupScript renders the cache cleanup. Every listed directory is emptied
@@ -606,8 +611,30 @@ const cleanupScriptTail = `  /var/cache/apt \
   /root/.yarn/cache \
   /home/agent/.cache/pip \
   /home/agent/.npm; do
-  rm -rf "$path"/* "$path"/.[!.]* 2>/dev/null || true
+` + emptyCacheDirectoryScript + `
 done
 # Keep mountpoints /tmp and /var/tmp themselves; recreate if the rm wiped them.
 mkdir -p /tmp /var/tmp
 chmod 1777 /tmp /var/tmp`
+
+// Skip symlink cleanup roots: globbing their children would delete the target's
+// contents, which a custom base may use for installed tools or runtime state.
+const emptyCacheDirectoryScript = `  [ ! -L "$path" ] || continue
+  rm -rf "$path"/* "$path"/.[!.]* "$path"/..?* 2>/dev/null || true`
+
+// cleanupMiseBuildCache records cleanup in the same agent RUN as mise install.
+// A later root RUN would only hide the downloaded bytes in a lower image layer.
+func (p *Provisioner) cleanupMiseBuildCache(ctx context.Context, containerID string, exec ExecFunc, runtimeEnv map[string]string) error {
+	if runtimeReadsMiseBuildCache(runtimeEnv) {
+		return nil
+	}
+	script := "set -u\nfor path in " + shellQuote(miseBuildCacheDir) + "; do\n" + emptyCacheDirectoryScript + "\ndone"
+	_, code, err := exec(ctx, containerID, []string{"bash", "-c", script}, "1001:1001", nil)
+	if err != nil {
+		return err
+	}
+	if code != 0 {
+		return fmt.Errorf("mise cache cleanup exited with code %d", code)
+	}
+	return nil
+}

@@ -768,7 +768,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// with no build-time substitution the way a Dockerfile ENV gets.
 	// Provenance labels close the change list. They also replace the kind the
 	// temp container inherited from an owned feature image.
-	ownerLabels, err := imageLabelDirectives(imageOwnerLabels(p.instanceID, ImageKindCrew))
+	ownerLabels, err := imageLabelDirectives(imageBuildLabels(p.instanceID, ImageKindCrew, hash))
 	if err != nil {
 		return fail("commit", err)
 	}

@@ -23004,6 +23004,13 @@
       },
       "Schedule": {
         "properties": {
+          "artifact_access": {
+            "enum": [
+              "active",
+              "stopped"
+            ],
+            "type": "string"
+          },
           "catchup_policy": {
             "type": "string"
           },
@@ -23012,6 +23019,16 @@
           },
           "created_at": {
             "format": "date-time",
+            "type": "string"
+          },
+          "creator_kind": {
+            "enum": [
+              "human",
+              "agent"
+            ],
+            "type": "string"
+          },
+          "creator_user_id": {
             "type": "string"
           },
           "cron_expr": {
@@ -23073,6 +23090,20 @@
           },
           "spread_seconds": {
             "type": "integer"
+          },
+          "stopped_reason": {
+            "enum": [
+              "routine_agent_authored",
+              "agent_created",
+              "creator_unknown",
+              "creator_not_member",
+              "creator_suspended",
+              "creator_access_revoked",
+              "creator_role",
+              "creator_restricted",
+              "creator_not_in_good_standing"
+            ],
+            "type": "string"
           },
           "target_pipeline_id": {
             "type": "string"
@@ -86943,6 +86974,24 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -87494,6 +87543,24 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [
@@ -87653,6 +87720,24 @@
               }
             },
             "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "properties": {
+                    "error": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Service Unavailable"
           }
         },
         "security": [

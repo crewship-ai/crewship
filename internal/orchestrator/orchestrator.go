@@ -232,6 +232,13 @@ type AgentRunRequest struct {
 	// Store.Write wiring land in dev3's separate PR and must be reconciled
 	// before either ships. Not consumed by the orchestrator yet.
 	MemoryBinding MemoryBinding
+
+	// ArtifactRunCapability is the capability crewshipd minted for a run
+	// without a human after recording it (internal/artifactrun, #5339). It is
+	// handed to the crew sidecar in this run's preflight, before the agent
+	// starts, and never enters the agent's environment. Host-only: JSON can
+	// neither set nor read it. Empty for every other run.
+	ArtifactRunCapability string `json:"-"`
 }
 
 // MemoryBinding scopes an agent run's durable memory writes for the memory

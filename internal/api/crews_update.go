@@ -472,6 +472,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		where += " AND services_json IS ?"
 		whereArgs = append(whereArgs, previousServices)
 	}
+	if err := preserveConfiguredImageReferences(r.Context(), h.db, req.RuntimeImage, req.DevcontainerConfig, req.ServicesJSON); err != nil {
+		replyError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	tx, currentRole := h.beginCrewManageMutation(w, r, crewID, "manage")
 	if tx == nil {
 		return

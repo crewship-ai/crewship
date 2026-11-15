@@ -227,7 +227,7 @@ func (s *Server) respondArtifactProjectMCPToolCall(w http.ResponseWriter, r *htt
 		return true
 	}
 	token := bearerToken(r)
-	_, slug, _, present, valid := s.identityForRunTokenCtx(r.Context(), token)
+	_, slug, runID, present, valid := s.identityForRunTokenCtx(r.Context(), token)
 	if !strings.HasPrefix(token, "agtv2.") || !present || !valid || s.ipc == nil {
 		s.writeRoutinesMCPToolResult(w, req, 403, mustJSON(map[string]string{"error": "current live run required"}))
 		return true
@@ -236,7 +236,13 @@ func (s *Server) respondArtifactProjectMCPToolCall(w http.ResponseWriter, r *htt
 	if name == "artifact_data_read" || artifactSlidesMCPTool(name) {
 		limit = artifacts.MaxDataResponseBytes
 	}
-	response, err := s.sendBoundedHostRequest(r, http.MethodPost, "/api/v1/internal/pages/artifact-tool", packet, limit, slug)
+	// A run without a human (#5339) carries the capability the host registered
+	// for this run; any other run carries none.
+	var extra map[string]string
+	if capability := s.runCapabilities.get(runID); capability != "" && runID != "" {
+		extra = map[string]string{runCapabilityHeader: capability}
+	}
+	response, err := s.sendBoundedHostRequestWithHeaders(r, http.MethodPost, "/api/v1/internal/pages/artifact-tool", packet, limit, slug, extra)
 	if err != nil || response == nil || !json.Valid(response.body) {
 		s.writeRoutinesMCPToolResult(w, req, 503, mustJSON(map[string]string{"error": "outcome unavailable; retain candidate and inspect project before retrying"}))
 		return true

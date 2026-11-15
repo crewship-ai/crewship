@@ -217,6 +217,8 @@ export const ENTRY_TYPES_BY_GROUP: Record<EntryGroup, string[]> = {
     "artifact.project_shared",
     "artifact.library_published",
     "artifact.library_pinned",
+    "artifact.run_capability_withheld",
+    "artifact.run_capability_lost",
     "craft.native_preview_shared",
     "artifact.orphaned_workbook_deleted",
     "artifact.private_output_published",

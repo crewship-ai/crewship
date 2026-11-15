@@ -271,6 +271,7 @@ func ownedImage(img image.Summary, instanceID string) bool {
 	if kind == devcontainer.ImageKindFeature {
 		prefix = devcontainer.FeatureImageTagPrefix
 	}
+	tagged := false
 	for _, tag := range img.RepoTags {
 		if tag == "<none>:<none>" {
 			continue
@@ -278,8 +279,12 @@ func ownedImage(img image.Summary, instanceID string) bool {
 		if !strings.HasPrefix(tag, prefix+instanceID+"-") {
 			return false
 		}
+		tagged = true
 	}
-	return true
+	// An untagged artifact must still reserve its canonical build alias.
+	// Otherwise a cached BuildKit export can reacquire this ID under that
+	// alias after the final inventory while collection leases only the ID.
+	return tagged || devcontainer.ImageAcquisitionRef(img.Labels) != ""
 }
 
 // Current and previous selections protect bytes; immutable build history is
@@ -346,7 +351,7 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 		return nil
 	}
 	defer release()
-	refs := append([]string{candidate.ID}, candidate.RepoTags...)
+	refs := append([]string{candidate.ID, devcontainer.ImageAcquisitionRef(candidate.Labels)}, candidate.RepoTags...)
 	releaseImage, ok := gate.TryCollectImages(refs...)
 	if !ok {
 		h.logger.Info("image collection: candidate build active; retaining artifact", "image_id", candidate.ID)

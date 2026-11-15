@@ -11,6 +11,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/provider"
+	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/moby/moby/client"
 )
@@ -28,9 +30,10 @@ type ProvisioningHandler struct {
 
 	// Provisioner pipeline. May be nil in tests or when no Docker client is
 	// available -- in that case the trigger endpoint returns 503.
-	docker      *client.Client
-	gcClient    orphanGCClient // narrowed view for sweepers + CacheList; usually == docker
-	provisioner *devcontainer.Provisioner
+	docker          *client.Client
+	imageReferences *dockerprovider.ImageReferences
+	gcClient        orphanGCClient // narrowed view for sweepers + CacheList; usually == docker
+	provisioner     *devcontainer.Provisioner
 
 	// In-memory provisioning job state, keyed by crewID. MVP only.
 	mu   sync.RWMutex
@@ -135,8 +138,16 @@ func (h *ProvisioningHandler) SetInstallationID(id string) {
 	if id == "" {
 		return
 	}
+	var references *dockerprovider.ImageReferences
+	if h.docker != nil {
+		references = dockerprovider.NewImageReferences(h.docker, id)
+	}
+	if references != nil {
+		resourcelifecycle.Images(h.db).SetReferenceProtector(references)
+	}
 	h.mu.Lock()
 	h.instanceID = id
+	h.imageReferences = references
 	h.mu.Unlock()
 	select {
 	case h.gcWake <- struct{}{}:

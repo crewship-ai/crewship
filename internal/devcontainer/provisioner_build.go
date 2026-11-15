@@ -291,7 +291,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	// The image ENV carries the aggregated env — the operator's containerEnv
 	// plus the agent tool PATH and MISE_* variables (ensureAgentToolPath) —
 	// so the image is usable on its own, not only through the runtime env.
-	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, requirements.ContainerEnv, rec.steps(), imageOwnerLabels(p.instanceID, ImageKindCrew), tag)
+	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, requirements.ContainerEnv, rec.steps(), imageBuildLabels(p.instanceID, ImageKindCrew, hash), tag)
 	if err != nil {
 		return fail(ProvStepImageBuildStart, err)
 	}
@@ -380,8 +380,20 @@ func (p *Provisioner) recordProvisionSteps(
 		return fmt.Errorf("agent home: %w", err)
 	}
 	if miseConfig != "" {
-		if err := p.installMise(ctx, noContainer, miseConfig, rec.exec); err != nil {
+		tools, err := ParseMiseConfig(miseConfig)
+		if err != nil {
 			return fmt.Errorf("mise provisioning: %w", err)
+		}
+		if err := tools.Validate(); err != nil {
+			return fmt.Errorf("mise provisioning: %w", err)
+		}
+		if err := p.installMiseConfig(ctx, noContainer, tools, rec.exec); err != nil {
+			return fmt.Errorf("mise provisioning: %w", err)
+		}
+		if !tools.IsEmpty() {
+			if err := p.cleanupMiseBuildCache(ctx, noContainer, rec.exec, containerEnv); err != nil {
+				return fmt.Errorf("mise cache cleanup: %w", err)
+			}
 		}
 	}
 	if err := p.runFeatureLifecycleCommands(ctx, noContainer, features, rec.exec); err != nil {
