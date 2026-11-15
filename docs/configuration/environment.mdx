@@ -527,6 +527,7 @@ acquisition/publication/restore and retains artifacts on incomplete evidence.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `CREWSHIP_BUILD_MIN_FREE_GB` | `4` | Free space, in whole GiB, that Docker's storage must have before a crew image build starts. `0` turns this check off. Applies only where the server can measure Docker's storage; see [Storage check before a build](/configuration/devcontainers#storage-check-before-a-build). |
 | `CREWSHIP_CACHE_GC_AUTODELETE` | unset (legacy log-only) | Explicitly delete unlabelled historical cache/feature images and known untagged revision artifacts beyond the old five-minute age floor. Labelled images belong to the owned collector instead. |
 
 Leave the legacy switch unset on shared Docker daemons: another installation's

@@ -199,3 +199,26 @@ describe("native save attempt retirement (#4899)",()=>{
   const saving=client.save(attempt,signal());await expect(saving).rejects.toThrow("native_snapshot_unconfirmed");await expect(saving).rejects.not.toBeInstanceOf(NativeSaveError)
  })
 })
+
+// #5381: a 503 from the administrator's setting says so; any other 503 stays unconfirmed.
+describe('native lease actions while the application is turned off',()=>{
+ it.each([
+  ['acquire','app_draining','wordcraft','Word'],
+  ['request-handoff','app_disabled','gridcraft','Sheet'],
+ ] as const)('%s refused with %s reports the application',async(action,reason,application,label)=>{
+  const {NativeAppOffError}=await import('./native-app-off')
+  const send=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({session_token:'b'.repeat(64),session_id:'public-session',application_id:application,page_id:'page'}))).mockResolvedValue(new Response(JSON.stringify({error:'off',reason,application}),{status:503}))
+  const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page',fetch:send});await client.open(signal())
+  const refused=await client.leaseAction(action,{},signal()).catch((e:unknown)=>e)
+  expect(refused).toBeInstanceOf(NativeAppOffError)
+  expect((refused as InstanceType<typeof NativeAppOffError>).reason).toBe(reason)
+  expect((refused as InstanceType<typeof NativeAppOffError>).label).toBe(label)
+ })
+ it('keeps an unexplained 503 unconfirmed',async()=>{
+  const {NativeAppOffError}=await import('./native-app-off')
+  const send=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({session_token:'b'.repeat(64),session_id:'public-session',application_id:'wordcraft',page_id:'page'}))).mockResolvedValue(new Response('{"error":"busy"}',{status:503}))
+  const client=createNativeDocumentClient({workspaceId:'ws',pageId:'page',fetch:send});await client.open(signal())
+  const refused=await client.leaseAction('acquire',{},signal()).catch((e:unknown)=>e)
+  expect(refused).not.toBeInstanceOf(NativeAppOffError);expect((refused as Error).message).toBe('native_lease_unconfirmed')
+ })
+})

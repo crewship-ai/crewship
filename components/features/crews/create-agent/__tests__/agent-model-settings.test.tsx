@@ -6,8 +6,8 @@ import { initialAgentDraft, type AgentDraft } from "../types"
 
 vi.mock("../../canvas/config-model", () => ({ ConfigModel: ({ value }: { value: string }) => <div data-testid="model">{value}</div> }))
 
-function Harness() {
-  const [draft, setDraft] = useState<AgentDraft>({ ...initialAgentDraft(null), cliAdapter: "CLAUDE_CODE" as const })
+function Harness({ initial }: { initial?: Partial<AgentDraft> }) {
+  const [draft, setDraft] = useState<AgentDraft>({ ...initialAgentDraft(null), cliAdapter: "CLAUDE_CODE" as const, ...initial })
   return <><AgentModelSettings draft={draft} setDraft={setDraft} workspaceId="ws1" /><output data-testid="draft">{JSON.stringify(draft)}</output></>
 }
 const draft = () => JSON.parse(screen.getByTestId("draft").textContent || "{}")
@@ -49,5 +49,20 @@ describe("Agent model settings", () => {
     expect(within(group).getByRole("radio", { name: "OpenAI" })).toHaveFocus()
     expect(draft()).toMatchObject({ llmProvider: "OPENAI", cliAdapter: "CODEX_CLI" })
     expect(within(group).getAllByRole("radio").filter(radio => radio.tabIndex === 0)).toHaveLength(1)
+  })
+
+  it("keeps a custom model id when the runner changes but the provider does not (#5376)", () => {
+    render(<Harness initial={{ llmProvider: "OPENAI", cliAdapter: "CODEX_CLI", llmModel: "gpt-7-preview" }} />)
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Agent runner" })).getByRole("radio", { name: /^OpenCode/ }))
+    expect(draft()).toMatchObject({ cliAdapter: "OPENCODE", llmProvider: "OPENAI", llmModel: "gpt-7-preview" })
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "OpenAI" }))
+    expect(draft().llmModel).toBe("gpt-7-preview")
+  })
+
+  it("replaces a custom model id when the provider changes", () => {
+    render(<Harness initial={{ llmProvider: "OPENAI", cliAdapter: "CODEX_CLI", llmModel: "gpt-7-preview" }} />)
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "Anthropic" }))
+    expect(draft()).toMatchObject({ llmProvider: "ANTHROPIC", cliAdapter: "CLAUDE_CODE" })
+    expect(draft().llmModel).toBe("claude-sonnet-5-5")
   })
 })

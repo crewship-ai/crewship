@@ -27,5 +27,7 @@ export function useArtifactCapabilities(workspaceId: string): ArtifactCapabiliti
     // The Doc format creates Docs; Word needs one of the Word editor formats.
     docs: documents.data === true,
     words: documents.wordcraftNative === true || Boolean(documents.wordcraftSDKPrefix) || documents.wordcraftCommands === true,
+    // Why Word or Sheet is missing, when the administrator turned it off (#5381).
+    craftModes: documents.applications,
   }
 }

@@ -8,8 +8,8 @@ import (
 // snapshotJSON is a TRIMMED models.dev snapshot, not the full index.
 //
 //	Source:  https://models.dev/api.json
-//	Fetched: 2026-09-06
-//	Zen added: 2026-09-16 (other provider snapshots unchanged).
+//	Fetched: 2026-11-14
+//	(Zen first added 2026-09-16; full re-fetch 2026-11-14.)
 //	Trim:    9 providers kept — amazon-bedrock, anthropic, deepseek,
 //	         google, mistral, openai, opencode, openrouter, xai. Every model those
 //	         providers publish is kept verbatim, including fields this package

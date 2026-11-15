@@ -160,6 +160,35 @@ func TestAcceptance_AdminInstanceApplications(t *testing.T) {
 		return status.WordCraftNative
 	}
 
+	// What the editor and the New artifact menu learn through the CLI: the
+	// document's availability and the documents status (#5381).
+	type craftAvailability struct {
+		Enabled     bool   `json:"enabled"`
+		CanEdit     bool   `json:"can_edit"`
+		Application string `json:"application"`
+		EditRefusal string `json:"edit_refusal"`
+	}
+	availability := func() craftAvailability {
+		t.Helper()
+		raw, err := run(admin, "craft", "availability", "@ca-word", "-w", "alpha", "--format", "json")
+		var got craftAvailability
+		if err != nil || json.Unmarshal([]byte(raw), &got) != nil {
+			t.Fatalf("craft availability: %v\n%s", err, raw)
+		}
+		return got
+	}
+	docModes := func() map[string]string {
+		t.Helper()
+		raw, err := run(admin, "doc", "status", "-w", "alpha", "--format", "json")
+		var got struct {
+			Applications map[string]string `json:"applications"`
+		}
+		if err != nil || json.Unmarshal([]byte(raw), &got) != nil {
+			t.Fatalf("doc status: %v\n%s", err, raw)
+		}
+		return got.Applications
+	}
+
 	ready := func(id string) adminCraftApplication {
 		t.Helper()
 		deadline := time.Now().Add(30 * time.Second)
@@ -226,6 +255,21 @@ func TestAcceptance_AdminInstanceApplications(t *testing.T) {
 	if !newWord() {
 		t.Fatal("New Word not offered while Word is on")
 	}
+	// A native Word, for what `craft availability` reports (#5381).
+	for _, q := range []string{
+		`INSERT INTO pages(id,workspace_id,slug,name,owner_user_id,spec_json) VALUES('ca-word','ca-a','ca-word','Word','ca-boss','{}')`,
+		`INSERT INTO craft_native_documents(page_id,workspace_id,application_id,engine_revision,engine_sha256,editor_bundle) VALUES('ca-word','ca-a','wordcraft','` + strings.Repeat("a", 40) + `','` + strings.Repeat("b", 64) + `','` + strings.Repeat("c", 64) + `')`,
+	} {
+		if _, err := db.Exec(q); err != nil {
+			t.Fatalf("%v\n%s", err, q)
+		}
+	}
+	if a := availability(); !a.Enabled || !a.CanEdit || a.Application != "wordcraft" || a.EditRefusal != "" {
+		t.Fatalf("availability while Word is on = %+v", a)
+	}
+	if m := docModes(); m["wordcraft"] != "open" || m["gridcraft"] != "closed" {
+		t.Fatalf("doc status while Word is on = %v", m)
+	}
 	// Repeating is a no-op and writes no second audit row; a running
 	// application is not installed again.
 	if _, err := run(admin, "admin", "instance", "applications", "enable", "word"); err != nil {
@@ -270,11 +314,24 @@ func TestAcceptance_AdminInstanceApplications(t *testing.T) {
 	if newWord() {
 		t.Fatal("New Word offered while Word drains")
 	}
+	// Draining: reading stays, editing is not offered, and the answer says why.
+	if a := availability(); !a.Enabled || a.CanEdit || a.EditRefusal != "app_draining" {
+		t.Fatalf("availability while Word drains = %+v", a)
+	}
+	if m := docModes(); m["wordcraft"] != "draining" {
+		t.Fatalf("doc status while Word drains = %v", m)
+	}
 	if out, err := run(admin, "admin", "instance", "applications", "disable", "word", "--now"); err != nil {
 		t.Fatalf("disable now: %v\n%s", err, out)
 	}
 	if w := app(show(), "wordcraft"); w.State != "disabled" || w.DrainUntil != nil {
 		t.Fatalf("closed = %+v", w)
+	}
+	if a := availability(); !a.Enabled || a.CanEdit || a.EditRefusal != "app_disabled" {
+		t.Fatalf("availability while Word is off = %+v", a)
+	}
+	if m := docModes(); m["wordcraft"] != "closed" {
+		t.Fatalf("doc status while Word is off = %v", m)
 	}
 	var audited int
 	if err := db.QueryRow(`SELECT count(*) FROM instance_audit_logs WHERE action='instance.craft_application_set'`).Scan(&audited); err != nil || audited != 4 {

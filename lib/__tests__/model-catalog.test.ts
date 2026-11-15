@@ -22,9 +22,9 @@ describe("config/models.json", () => {
     expect(adapterModels("CODEX_CLI").map((model) => model.id)).toContain("gpt-5.6-luna")
   })
 
-  it("keeps Astra opt-in while Codex uses the compatible existing default", () => {
-    expect(adapterDefaultModel("CODEX_CLI")).toBe("gpt-5.5")
-    expect(providerDefaultModel("openai")).toBe("gpt-5.5")
+  it("defaults Codex to GPT-6.1 Sol and keeps Astra selectable", () => {
+    expect(adapterDefaultModel("CODEX_CLI")).toBe("gpt-6.1-sol")
+    expect(providerDefaultModel("openai")).toBe("gpt-6.1-sol")
     expect(adapterModels("CODEX_CLI").some((model) => model.id === "gpt-6-astra")).toBe(true)
   })
   it("is the same file the Go side embeds", () => {
@@ -76,11 +76,11 @@ describe("config/models.json", () => {
 })
 
 describe("the Claude Code model picker", () => {
-  it("offers the whole curated Anthropic list, most capable first, Sonnet 5 recommended", () => {
+  it("offers the whole curated Anthropic list, most capable first, Sonnet 5.5 recommended", () => {
     const offered = getModelsForAdapter("CLAUDE_CODE").map((m) => m.value)
     expect(offered).toEqual(providerModels("anthropic").map((m) => m.id))
     expect(offered.length).toBeGreaterThanOrEqual(5)
-    expect(CLI_ADAPTERS.CLAUDE_CODE.defaultModel).toBe("claude-sonnet-5")
+    expect(CLI_ADAPTERS.CLAUDE_CODE.defaultModel).toBe("claude-sonnet-5-5")
   })
 
   it("carries bare aliases only — never a date-suffixed id", () => {

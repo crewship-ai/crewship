@@ -250,7 +250,7 @@ func init() {
 	agentCreateCmd.Flags().String("system-prompt", "", "System prompt text or @file.txt")
 	agentCreateCmd.Flags().String("tool-profile", "CODING", "Tool profile: MINIMAL|CODING|FULL")
 	agentCreateCmd.Flags().String("llm-provider", "", "LLM provider: ANTHROPIC|OPENAI|GOOGLE")
-	agentCreateCmd.Flags().String("llm-model", "", "LLM model (e.g., claude-haiku-4-5)")
+	agentCreateCmd.Flags().String("llm-model", "", "LLM model id; any well-formed id is accepted, catalog or not (e.g., claude-sonnet-5-5)")
 	agentCreateCmd.Flags().Bool("memory", false, "Enable memory")
 	agentCreateCmd.Flags().String("lead-mode", "", "Lead mode: active|passive")
 	agentCreateCmd.Flags().Int("timeout", 0, "Timeout in seconds")
@@ -264,7 +264,7 @@ func init() {
 	agentUpdateCmd.Flags().String("system-prompt", "", "System prompt text or @file.txt")
 	agentUpdateCmd.Flags().String("tool-profile", "", "Tool profile")
 	agentUpdateCmd.Flags().String("llm-provider", "", "LLM provider: ANTHROPIC|OPENAI|GOOGLE")
-	agentUpdateCmd.Flags().String("llm-model", "", "LLM model")
+	agentUpdateCmd.Flags().String("llm-model", "", "LLM model id; any well-formed id is accepted, catalog or not")
 	agentUpdateCmd.Flags().Bool("memory", false, "Enable memory")
 	agentUpdateCmd.Flags().String("suggested-prompts", "",
 		"Chat suggestions shown as buttons under an empty chat: one per line, max 8, max 120 chars each. Text or @file.txt; pass \"\" to clear")

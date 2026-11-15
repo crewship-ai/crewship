@@ -1703,3 +1703,51 @@ describe('native agent start gating',()=>{
   expect(new URLSearchParams(window.location.search).get('craft_task_id')).toBe('work-7')
  })
 })
+
+// #5381: an editor already open when an administrator turns Word or Sheet off.
+describe('application turned off while the editor is open',()=>{
+ afterEach(()=>{m.apiFetch.mockReset()})
+ const WORD_OFF='An administrator turned Word off on this server. You can read this document; editing is not available.'
+ const SHEET_OFF='An administrator turned Sheet off on this server. You can read this document; editing is not available.'
+ it('a refused take-over says an administrator turned Word off and offers only reading',async()=>{
+  const {NativeAppOffError}=await import('@/lib/mooring/native-app-off')
+  mount();await ready()
+  client.leaseAction.mockRejectedValueOnce(new NativeAppOffError('app_draining','wordcraft'))
+  fireEvent.click(screen.getByRole('button',{name:'Take over editing'}))
+  expect(await screen.findByText(WORD_OFF)).toBeInTheDocument()
+  expect(screen.queryByText(/The result of the action was not confirmed/)).not.toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'Take over editing'})).not.toBeInTheDocument()
+  expect(within(screen.getByRole('toolbar',{name:'Document editing'})).getByText('Read-only')).toBeInTheDocument()
+  expect(ports.at(-1)!.setReadOnly).not.toHaveBeenCalledWith(false,expect.anything())
+ })
+ it('a refused edit request on a Sheet says Sheet is off and stops offering it',async()=>{
+  const {NativeAppOffError}=await import('@/lib/mooring/native-app-off')
+  client.lease.mockResolvedValue({...ownedLease,mine:false,can_write:false,holder:otherPerson})
+  mount();const ask=await screen.findByRole('button',{name:'Request edit'})
+  await waitFor(()=>expect(ports[0]?.bootstrap).toHaveBeenCalled())
+  client.leaseAction.mockRejectedValueOnce(new NativeAppOffError('app_disabled','gridcraft'))
+  fireEvent.click(ask)
+  expect(await screen.findByText(SHEET_OFF)).toBeInTheDocument()
+  expect(screen.queryByRole('button',{name:'Request edit'})).not.toBeInTheDocument()
+ })
+ it('the holder keeps editing and saving through the drain when a hand-over is refused',async()=>{
+  const {NativeAppOffError}=await import('@/lib/mooring/native-app-off')
+  mount();await ready();await acquire();await screen.findByText('Ready to edit')
+  act(()=>stream?.('lease',{...ownedLease,handoff_requested_by:[{actor_id:'user:other',request_id:'request',display_name:'Jana',kind:'human'}]}))
+  // The server still renews and saves for this session while draining
+  // (TestCraftNativeDrainKeepsOnlyTheHoldingSession); a hand-over is refused.
+  m.apiFetch.mockImplementation(async(url:string)=>String(url).includes('/craft/availability')?new Response(JSON.stringify({enabled:true,can_edit:false,application:'wordcraft',edit_refusal:'app_draining',applications:{wordcraft:'draining',gridcraft:'open'}})):undefined)
+  client.leaseAction.mockRejectedValueOnce(new NativeAppOffError('app_draining','wordcraft'))
+  fireEvent.click(await screen.findByRole('button',{name:'Hand over to Jana'}))
+  expect(await screen.findByText('An administrator turned Word off on this server, so editing cannot be handed over. You can keep editing; your changes keep saving until it closes.')).toBeInTheDocument()
+  expect(client.leaseAction.mock.calls.some(c=>c[0]==='handoff')).toBe(false)
+  expect(ports.at(-1)!.setReadOnly).not.toHaveBeenCalledWith(true,expect.anything())
+  await waitFor(()=>expect(screen.getByText('Ready to edit')).toBeInTheDocument())
+  expect(screen.getByRole('button',{name:'Hand back'})).toBeInTheDocument()
+  const saves=client.save.mock.calls.length
+  ports.at(-1)!.snapshot.mockResolvedValue({bytes:new TextEncoder().encode('{"body":[3]}'),editorRevision:'drain-edit',documentId:'doc'})
+  act(()=>portOptions.at(-1)!.onChanged('drain-edit','doc'))
+  act(()=>portOptions.at(-1)!.onSaveRequest({documentId:'doc',editorRevision:'drain-edit'}))
+  await waitFor(()=>expect(client.save.mock.calls.length).toBeGreaterThan(saves))
+ })
+})

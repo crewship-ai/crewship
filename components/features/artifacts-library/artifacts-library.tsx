@@ -36,7 +36,7 @@ import { ArtifactFrame, NO_FRAME_CAPABILITIES } from "./frame"
 import { kindOf, kindText } from "./kinds"
 import { KindBadge, KindTile } from "./kind-tile"
 import { creatableUiKinds, LibraryHome, type LibraryCreationFlow } from "./library-home"
-import { NewArtifactButton, NewArtifactGuide, useNewArtifactPrefs } from "./new-artifact-button"
+import { NewArtifactButton, NewArtifactGuide, newArtifactReasons, useNewArtifactPrefs } from "./new-artifact-button"
 import type { KindFamily } from "./kinds"
 import { LibraryPanel } from "./library-panel"
 import { KindThumb } from "./kind-thumb"
@@ -356,6 +356,7 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
   // The New artifact button: what this person can make, as UI kinds, and what they pinned and made last.
   const newEntries = creatableUiKinds(creatable, canCreateDocs)
   const newPrefs = useNewArtifactPrefs(workspaceId, newEntries.map(entry => entry.kind))
+  const newReasons = newArtifactReasons(caps.craftModes ?? {})
   const [newMenu, setNewMenu] = useState<{ open: boolean; family: KindFamily | null }>({ open: false, family: null })
   // The main button opens the general dialog (Docs included) on the kind made last; the dialog can still switch kind.
   const [newDefault, setNewDefault] = useState<LibraryCreationFlow | undefined>(undefined)
@@ -441,7 +442,7 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
 
   // The open artifact's frame owns the bar; the library's bar is only for lists.
   const subBar = item === null ? <SubBar icon={Library} title="Artifacts" ariaLabel="Artifacts" heading={false}
-    actions={<NewArtifactButton entries={newEntries} prefs={newPrefs} onNew={startNew} open={newMenu.open} family={newMenu.family}
+    actions={<NewArtifactButton entries={newEntries} prefs={newPrefs} reasons={newReasons} onNew={startNew} open={newMenu.open} family={newMenu.family}
       onOpenChange={open => setNewMenu({ open, family: open ? newMenu.family : null })} />} /> : null
   // Not in the catalog: ask the server why, so the frame can say signed out, no access or not there.
   const access = useArtifactAccess(workspaceId, item === null ? null : bySlug ? item : "@" + item, item !== null && !selected && !loading)
@@ -477,7 +478,7 @@ export function ArtifactsLibrary({ workspaceId, item, version, bySlug, onSelect,
     const inHome = inView(items, "all", personal).filter(entry => filters.folder === null || (entry.folder?.slug ?? "") === filters.folder)
     content = <LibraryHome items={inHome} attention={attentionItems(inHome, { drafts })} title={folderInView?.name ?? (filters.folder === "" ? "Unfiled" : "All artifacts")}
       onOpen={pick} peeked={peeked?.slug}
-      guide={newEntries.length > 0 && newPrefs.guide ? <NewArtifactGuide available={newEntries.map(entry => entry.kind)}
+      guide={newEntries.length > 0 && newPrefs.guide ? <NewArtifactGuide available={newEntries.map(entry => entry.kind)} reasons={newReasons}
         onNew={kind => { const flow = newEntries.find(entry => entry.kind === kind)?.flow; if (flow) { newPrefs.record(kind); startNew(flow) } }}
         onBrowse={family => setNewMenu({ open: true, family })} onDismiss={() => newPrefs.setGuide(false)} /> : undefined} />
   } else if (serverParams && catalogWindow.loading) {
