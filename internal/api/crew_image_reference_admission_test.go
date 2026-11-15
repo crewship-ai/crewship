@@ -86,3 +86,26 @@ func TestReferenceInventoryRejectsIncompleteConfigurationAndIncludesServices(t *
 	}
 	t.Fatal("configured service image was not retained before container creation")
 }
+
+func TestRuntimeInputsRequireMissingLocalAliasesButNotFutureBuildOutputs(t *testing.T) {
+	db := setupTestDB(t)
+	gate := resourcelifecycle.Images(db)
+	local := "crewship-cache:borrowed-artifact"
+	gate.SetReferenceProtector(imageProtectionFunc(func(_ context.Context, refs []resourcelifecycle.ImageReference) (map[string]string, error) {
+		for _, ref := range refs {
+			if ref.Ref == local && ref.Required {
+				return nil, errors.New("selected local alias unavailable")
+			}
+		}
+		return nil, nil
+	}))
+	if _, release, err := acquireCrewImages(t.Context(), db, provider.CrewConfig{Image: local}); err == nil {
+		release()
+		t.Fatal("runtime treated missing local environment as a remote pull")
+	}
+	h := &ProvisioningHandler{db: db}
+	if _, release, err := h.AcquireImageReferences(t.Context(), []string{local}); err == nil {
+		release()
+		t.Fatal("service treated missing local environment as a remote pull")
+	}
+}

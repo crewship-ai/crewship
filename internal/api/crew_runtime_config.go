@@ -551,7 +551,7 @@ func (c *CrewConfigCompleter) AcquireCrewImages(ctx context.Context, cfg provide
 }
 
 func acquireCrewImages(ctx context.Context, db *sql.DB, cfg provider.CrewConfig) (provider.CrewConfig, func(), error) {
-	refs := []resourcelifecycle.ImageReference{{Ref: cfg.CachedImage, Required: cfg.CachedImage != ""}, {Ref: cfg.Image}}
+	refs := []resourcelifecycle.ImageReference{{Ref: cfg.CachedImage, Required: cfg.CachedImage != ""}, {Ref: cfg.Image, Required: isLocalEnvironmentReference(cfg.Image)}}
 	resolved, release, err := resourcelifecycle.Images(db).Acquire(ctx, refs)
 	if err != nil {
 		return cfg, nil, err
@@ -571,7 +571,11 @@ func acquireCrewImages(ctx context.Context, db *sql.DB, cfg provider.CrewConfig)
 func (h *ProvisioningHandler) AcquireImageReferences(ctx context.Context, inputs []string) (map[string]string, func(), error) {
 	refs := make([]resourcelifecycle.ImageReference, 0, len(inputs))
 	for _, ref := range inputs {
-		refs = append(refs, resourcelifecycle.ImageReference{Ref: ref, Required: dockerutil.IsLocalImageID(ref)})
+		refs = append(refs, resourcelifecycle.ImageReference{Ref: ref, Required: isLocalEnvironmentReference(ref)})
 	}
 	return resourcelifecycle.Images(h.db).Acquire(ctx, refs)
+}
+
+func isLocalEnvironmentReference(ref string) bool {
+	return dockerutil.IsLocalImageID(ref) || strings.HasPrefix(ref, "crewship-cache:") || strings.HasPrefix(ref, devcontainer.FeatureImageTagPrefix)
 }

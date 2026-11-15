@@ -1358,7 +1358,7 @@ func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID
 		acquired = append(acquired, release)
 		references := make([]resourcelifecycle.ImageReference, 0, len(refs))
 		for _, ref := range refs {
-			references = append(references, resourcelifecycle.ImageReference{Ref: ref, BuildInput: true})
+			references = append(references, resourcelifecycle.ImageReference{Ref: ref, Required: ref == baseImage && isLocalEnvironmentReference(ref), BuildInput: true})
 		}
 		_, err = resourcelifecycle.Images(h.db).Preserve(ctx, references)
 		return err
