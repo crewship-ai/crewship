@@ -70,9 +70,12 @@
 package kinds
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -579,7 +582,7 @@ func validateCrewServices(crewSlug string, services []Service) error {
 // The crew PATCH endpoint treats nil fields as "leave alone" and
 // non-nil as "overwrite" — matching how we want the manifest to
 // behave for fields it declares.
-func (d *CrewDocument) Plan(_ context.Context, _ internalapi.Client, remote *CrewRemote, opts ...PlanCrewOptions) ([]internalapi.PlanItem, error) {
+func (d *CrewDocument) Plan(ctx context.Context, c internalapi.Client, remote *CrewRemote, opts ...PlanCrewOptions) ([]internalapi.PlanItem, error) {
 	var opt PlanCrewOptions
 	if len(opts) > 0 {
 		opt = opts[0]
@@ -640,7 +643,7 @@ func (d *CrewDocument) Plan(_ context.Context, _ internalapi.Client, remote *Cre
 	}
 
 	items := []internalapi.PlanItem{crewItem}
-	fileItems, err := d.planCrewFiles(crewID, opt.BaseDir)
+	fileItems, err := d.planCrewFiles(ctx, c, crewID, opt.BaseDir)
 	if err != nil {
 		return nil, err
 	}
@@ -661,7 +664,7 @@ type PlanCrewOptions struct {
 // checked at plan time so a missing/oversized src fails --dry-run, not
 // mid-apply. Delivery re-reads the source and PUTs the bytes through the same
 // /files/save endpoint the legacy path and `crewship crew files save` use.
-func (d *CrewDocument) planCrewFiles(crewID, baseDir string) ([]internalapi.PlanItem, error) {
+func (d *CrewDocument) planCrewFiles(ctx context.Context, c internalapi.Client, crewID, baseDir string) ([]internalapi.PlanItem, error) {
 	if len(d.Spec.Files) == 0 {
 		return nil, nil
 	}
@@ -672,12 +675,23 @@ func (d *CrewDocument) planCrewFiles(crewID, baseDir string) ([]internalapi.Plan
 		if err != nil {
 			return nil, fmt.Errorf("crew %q: files[%d]: %w", d.Metadata.Slug, i, err)
 		}
-		if _, err := crewfile.Load(baseDir, f.Src); err != nil {
+		local, err := crewfile.Load(baseDir, f.Src)
+		if err != nil {
 			return nil, fmt.Errorf("crew %q: files[%d]: %w", d.Metadata.Slug, i, err)
 		}
 		action := internalapi.ActionUpdate
 		if crewID == "" {
 			action = internalapi.ActionCreate
+		} else if crewFileUnchanged(ctx, c, crewID, dest, local) {
+			// The crew already holds these exact bytes, so a
+			// steady-state apply converges to "no changes".
+			items = append(items, internalapi.PlanItem{
+				Kind:        "crew-file",
+				Slug:        d.Metadata.Slug + "/" + dest,
+				Action:      internalapi.ActionUnchanged,
+				Description: fmt.Sprintf("%s in crew %q is up to date", dest, d.Metadata.Slug),
+			})
+			continue
 		}
 		src := f.Src
 		id := crewID
@@ -707,6 +721,22 @@ func (d *CrewDocument) planCrewFiles(crewID, baseDir string) ([]internalapi.Plan
 	return items, nil
 }
 
+// crewFileUnchanged reports whether the crew's copy of dest is byte-identical
+// to local, read through GET /crews/{id}/files/download. Anything short of a
+// confirmed match (no client, a missing file, a stopped crew, an older server,
+// a transport error) answers false, so the plan keeps the write.
+func crewFileUnchanged(ctx context.Context, c internalapi.Client, crewID, dest string, local []byte) bool {
+	if c == nil {
+		return false
+	}
+	resp, err := c.Get(ctx, "/api/v1/crews/"+url.PathEscape(crewID)+"/files/download?path="+url.QueryEscape(dest))
+	if err != nil || resp == nil || resp.StatusCode != http.StatusOK || resp.Body == nil {
+		return false
+	}
+	remote, err := io.ReadAll(io.LimitReader(resp.Body, crewfile.MaxBytes+1))
+	return err == nil && len(remote) <= crewfile.MaxBytes && bytes.Equal(remote, local)
+}
+
 // putCrewFile PUTs raw file bytes to the crew's /files/save endpoint via the
 // client's optional raw-bytes capability. It fails loudly when the client
 // can't do an octet-stream PUT rather than corrupting the file through a
@@ -716,12 +746,20 @@ func putCrewFile(ctx context.Context, c internalapi.Client, crewID, dest string,
 	if !ok {
 		return fmt.Errorf("crew file upload not supported by this client (no raw-bytes PUT)")
 	}
-	resp, err := rp.PutBytes(ctx,
-		"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(dest), data)
-	if err != nil {
-		return fmt.Errorf("save crew file %s: %w", dest, err)
-	}
-	return checkStatus(resp, "save crew file "+dest)
+	// A crew PATCH earlier in the same apply recycles the container
+	// asynchronously; a save in that window answers 409 (see
+	// crewfile.SaveWithRecycleWait).
+	return crewfile.SaveWithRecycleWait(ctx, func() (int, error) {
+		resp, err := rp.PutBytes(ctx,
+			"/api/v1/crews/"+url.PathEscape(crewID)+"/files/save?path="+url.QueryEscape(dest), data)
+		if err != nil {
+			return 0, fmt.Errorf("save crew file %s: %w", dest, err)
+		}
+		if resp == nil {
+			return 0, checkStatus(nil, "save crew file "+dest)
+		}
+		return resp.StatusCode, checkStatus(resp, "save crew file "+dest)
+	})
 }
 
 // ── Body builders ────────────────────────────────────────────────────────
@@ -836,8 +874,19 @@ func (d *CrewDocument) updatePatch(remote *CrewRemote) (map[string]any, error) {
 		if err != nil {
 			return nil, err
 		}
-		if want != "" && !jsonStringEqual(want, deref(remote.DevcontainerConfig)) {
-			patch["devcontainer_config"] = want
+		if want != "" {
+			// Compare and send the form the server stores: create and
+			// update inject the agent account (#5337). Comparing the bare
+			// manifest config planned an update on every re-apply, and an
+			// older server stored that bare PATCH as is. A config the
+			// normalizer refuses goes out unchanged for the server to
+			// refuse with its own message.
+			if normalised, nerr := devcontainer.NormalizeAgentUserJSON(want); nerr == nil {
+				want = normalised
+			}
+			if !jsonStringEqual(want, deref(remote.DevcontainerConfig)) {
+				patch["devcontainer_config"] = want
+			}
 		}
 		// Diff container sizing against the remote columns so a
 		// converged manifest stops emitting no-op patches. A value

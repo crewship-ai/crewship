@@ -26,10 +26,22 @@ func (h *PageHandler) DesignTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	run, _ := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
-	bound, err := h.artifactProjectRunPage(r.Context(), run)
-	if err != nil || !bound.Valid || h.checkArtifactProjectRunConsent(r.Context(), run, bound.String) != nil {
-		designError(w, errDesignAccess)
-		return
+	// Flag on (#5317 5.3): the run's scope replaces the exact-run consent; the
+	// Design's own authorization then checks the Design in each transaction.
+	scoped := h.artifactRunModesRun(r.Context()) != nil
+	var bound sql.NullString
+	if scoped {
+		if h.checkScopedArtifactRun(withScopedRunKind(r.Context(), scopedRunKind{FamilyChecked: true}), run, "pages:read") != nil {
+			designError(w, errDesignAccess)
+			return
+		}
+	} else {
+		var err error
+		bound, err = h.artifactProjectRunPage(r.Context(), run)
+		if err != nil || !bound.Valid || h.checkArtifactProjectRunConsent(r.Context(), run, bound.String) != nil {
+			designError(w, errDesignAccess)
+			return
+		}
 	}
 	var p struct {
 		Operation string          `json:"operation"`
@@ -45,7 +57,7 @@ func (h *PageHandler) DesignTool(w http.ResponseWriter, r *http.Request) {
 	reference := p.Slug
 	// The original human mandate already disambiguates this immutable ID.
 	// Never treat arbitrary bare IDs as Page references or widen the mandate.
-	if reference == bound.String {
+	if !scoped && reference == bound.String {
 		reference = "@" + bound.String
 	}
 	forward.SetPathValue("slug", reference)
@@ -56,7 +68,7 @@ func (h *PageHandler) DesignTool(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if k.PageID != bound.String {
+	if !scoped && k.PageID != bound.String {
 		designError(w, artifacts.ErrVersionNotFound)
 		return
 	}

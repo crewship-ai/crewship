@@ -1,12 +1,15 @@
 package api
 
 import (
+	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/crewship-ai/crewship/internal/craftapps"
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
@@ -41,5 +44,31 @@ func TestCraftNativeRouterClockFactoryErrorFailsClosed(t *testing.T) {
 	}
 	if !errors.Is(err, sentinel) || calls != 1 || router != nil {
 		t.Fatalf("native clock failure must refuse router startup: calls=%d router=%v err=%v", calls, router != nil, err)
+	}
+}
+
+// With only downloadable release components (#5315), a system without a
+// suspend-aware clock still starts: Word and Sheet are unavailable and say
+// why, and nothing can be installed. An operator's explicit native profile
+// keeps refusing to start (above).
+func TestCraftNativeClockFailureWithReleaseComponentsStartsUnavailable(t *testing.T) {
+	f, _, _ := craftNativeHTTPFixture(t)
+	install := func(context.Context, string, io.Reader) (CraftNativeDocumentProfile, craftapps.Component, error) {
+		t.Fatal("install called without a clock")
+		return CraftNativeDocumentProfile{}, craftapps.Component{}, nil
+	}
+	router, err := NewRouter(f.db, "native-agent-task-original-secret-32", newTestLogger(), WithCraftNativeHTTP(CraftNativeHTTPConfig{
+		Enabled: true, AgentsEnabled: true, Install: install,
+		Components:    map[string]craftapps.Component{craftapps.Word: {Reason: craftapps.ReasonNotInstalled}},
+		newOwnerClock: func() (mooring.OwnerClock, error) { return nil, errors.New("no boot clock") }}))
+	if err != nil {
+		t.Fatalf("release components without a clock refused startup: %v", err)
+	}
+	t.Cleanup(router.Shutdown)
+	if router.craftNativeHTTP.enabled || router.craftNativeHTTPConfig.Install != nil || router.craftNativeHTTPConfig.Components[craftapps.Word].Reason != craftapps.ReasonClockUnsupported {
+		t.Fatalf("without a clock: enabled=%v components=%+v", router.craftNativeHTTP.enabled, router.craftNativeHTTPConfig.Components)
+	}
+	if (&CraftAppsAdminHandler{r: router}).installable(craftapps.Word) {
+		t.Fatal("installable without a clock")
 	}
 }

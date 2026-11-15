@@ -45,7 +45,7 @@ func TestCraftNativeAgentCLIOriginalEngineQualification(t *testing.T) {
 	if err != nil || bytes.Equal(raw, changed) {
 		t.Fatalf("original engine did not mutate the native document: %v", err)
 	}
-	v := mooring.NativeCLIValidator{Application: p.Application, BinaryPath: p.CLIPath, SHA256: p.CLISHA256}
+	v := mooring.NativeCLIValidator{Application: p.Application, Engine: mustCraftNativeEngine(t, p)}
 	if err := v.Validate(t.Context(), changed); err != nil {
 		t.Fatalf("original engine rejected its mutated native candidate: %v", err)
 	}

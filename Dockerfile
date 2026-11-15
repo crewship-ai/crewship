@@ -162,6 +162,10 @@ ARG DATE=unknown
 # crashreport package treats empty DSN as "stay disabled regardless of
 # opt-in" so dev images never phone home).
 ARG SENTRY_DSN=""
+# The Word and Sheet packages the release trusts and where they are published
+# (#5315); empty in local builds, which then trust no package.
+ARG CRAFT_COMPONENT_PINS=""
+ARG CRAFT_COMPONENT_URL=""
 # The daemon validates the bundled sidecar even in --no-docker mode.
 # Build it for the same target architecture as the server.
 RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
@@ -177,7 +181,7 @@ RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
 RUN --mount=type=cache,id=go-mod,target=/go/pkg/mod \
     --mount=type=cache,id=go-build,target=/root/.cache/go-build \
     CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
-    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE} -X github.com/crewship-ai/crewship/internal/crashreport.DSN=${SENTRY_DSN}" \
+    -ldflags="-s -w -X main.version=${VERSION} -X main.commit=${COMMIT} -X main.date=${DATE} -X github.com/crewship-ai/crewship/internal/crashreport.DSN=${SENTRY_DSN} -X github.com/crewship-ai/crewship/internal/craftassets.releaseCatalog=${CRAFT_COMPONENT_PINS} -X github.com/crewship-ai/crewship/internal/craftassets.releaseBase=${CRAFT_COMPONENT_URL}" \
     -o /crewship ./cmd/crewship
 # The workbook test barrier exists only in binaries built with the
 # crewship_testbarrier tag. No image may carry it, whatever build args or

@@ -3,6 +3,8 @@ package manifest
 import (
 	"context"
 	"fmt"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
 // ApplyMode controls what apply does when a slug already exists in
@@ -304,6 +306,14 @@ func buildCrewBody(name, slug string, spec *CrewSpec) (map[string]any, error) {
 			return nil, fmt.Errorf("build devcontainer_config: %w", err)
 		}
 		if cfg != "" {
+			// The form the server stores (#5337): create and update inject
+			// the agent account, so the body must carry it to compare equal
+			// on re-apply and to restore it on a server that stores a bare
+			// PATCH as is. A refused config is sent unchanged for the
+			// server's own error.
+			if normalised, nerr := devcontainer.NormalizeAgentUserJSON(cfg); nerr == nil {
+				cfg = normalised
+			}
 			body["devcontainer_config"] = cfg
 		}
 	}

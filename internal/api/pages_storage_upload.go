@@ -48,7 +48,14 @@ func (h *PageHandler) artifactCreationUploadAuthority(r *http.Request, workspace
 		ctx = context.WithValue(ctx, pageAuthReaderKey{}, tx)
 		request := r.WithContext(ctx)
 		actor := user.ID
-		if run, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); run != nil {
+		if run, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority); run != nil && h.artifactRunModesOn(ctx, workspace) {
+			// Flag on: the scoped gate replaces the exact-run consent; the
+			// create cap is charged in the creation transaction itself.
+			if run.WorkspaceID != workspace || run.HumanUserID != user.ID || h.checkScopedArtifactRun(ctx, run, "pages:write") != nil {
+				return "", errArtifactProjectAccess
+			}
+			actor = "agent:" + run.AgentID + ":" + run.RunID
+		} else if run != nil {
 			if run.WorkspaceID != workspace || run.HumanUserID != user.ID || h.checkOriginalUserArtifactRunPrincipal(ctx, run) != nil || !h.artifactAgentPolicyAllows(ctx, workspace, run.CrewID) || h.checkArtifactProjectRunConsent(ctx, run, "") != nil {
 				return "", errArtifactProjectAccess
 			}

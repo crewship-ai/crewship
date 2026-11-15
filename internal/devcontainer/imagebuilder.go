@@ -263,15 +263,20 @@ func buildOutputSuffix(tail *boundedLog) string {
 // BuildKit. The returned tag is used as the base for the temp container that
 // then runs mise/postCreate/env. emit reports plan progress (pull + per-feature)
 // so the UI checklist advances identically to the container-commit path.
-func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string, emit func(string), sink ProvisionSink, force bool) (string, error) {
+func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string, emit func(string), sink ProvisionSink, force bool, acquire ...func(context.Context, ...string) error) (string, error) {
 	emit(pullStepLabel(baseImage))
 
-	contextDir, _, featTag, err := stageBuildContext(baseImage, features, optionsByRef, rootEnv)
+	contextDir, _, featTag, err := stageOwnedBuildContext(p.instanceID, baseImage, features, optionsByRef, rootEnv)
 	if err != nil {
 		emitProvision(sink, ProvisionEvent{Step: ProvStepFailed, Status: ProvStatusFailed, Detail: ProvStepImageBuildStart, Error: err.Error()})
 		return "", err
 	}
 	defer func() { _ = os.RemoveAll(contextDir) }()
+	if len(acquire) > 0 && acquire[0] != nil {
+		if err := acquire[0](ctx, featTag); err != nil {
+			return "", err
+		}
+	}
 
 	buildStart := time.Now()
 	emitProvision(sink, ProvisionEvent{
@@ -410,11 +415,21 @@ func (b *boundedLog) tail() string {
 // feature's own files yields a new tag and a clean rebuild). The caller is
 // responsible for removing contextDir.
 func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string) (contextDir, dockerfile, tag string, err error) {
+	return stageOwnedBuildContext("", baseImage, features, optionsByRef, rootEnv)
+}
+
+// stageOwnedBuildContext is stageBuildContext for an installation with a
+// settled identity: the feature image is labelled with its origin and tagged
+// inside the installation's namespace. BuildKit still shares the layers
+// themselves across installations. An empty instanceID stages the legacy,
+// unowned form.
+func stageOwnedBuildContext(instanceID, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string) (contextDir, dockerfile, tag string, err error) {
 	dockerfile, err = GenerateDockerfile(DockerfileBuild{
 		BaseImage:    baseImage,
 		Features:     features,
 		OptionsByRef: optionsByRef,
 		RootEnv:      rootEnv,
+		Labels:       imageBuildLabels(instanceID, ImageKindFeature, ""),
 	})
 	if err != nil {
 		return "", "", "", err
@@ -426,11 +441,6 @@ func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByR
 	}
 	// Best-effort cleanup on any error after this point.
 	cleanup := func() { _ = os.RemoveAll(contextDir) }
-
-	if err = os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
-		cleanup()
-		return "", "", "", fmt.Errorf("writing Dockerfile: %w", err)
-	}
 
 	for _, f := range features {
 		if f == nil {
@@ -448,13 +458,33 @@ func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByR
 	// actual feature files means a feature that republishes new content under
 	// the same mutable ref (e.g. ":2") yields a new tag and a clean rebuild,
 	// instead of the exact-tag fast path silently reusing a stale image.
-	contentHash, err := hashBuildInputs(dockerfile, features)
+	// Hash the STAGED copies, not the shared cache directories: the copy is
+	// this build's private snapshot, so the tag describes exactly the bytes
+	// sent to the builder and a concurrent cache refill cannot change the
+	// tree underneath the walk.
+	staged := make([]stagedFeature, 0, len(features))
+	for _, f := range features {
+		if f == nil {
+			continue
+		}
+		staged = append(staged, stagedFeature{id: f.Metadata.ID, dir: filepath.Join(contextDir, featureContextDir, f.Metadata.ID)})
+	}
+	contentHash, err := hashStagedInputs(dockerfile, staged)
 	if err != nil {
 		cleanup()
 		return "", "", "", fmt.Errorf("hashing build inputs: %w", err)
 	}
-	tag = FeatureImageTagPrefix + contentHash[:12]
-	return contextDir, dockerfile, tag, nil
+	// Derive the key from the payload with an empty key, then append the
+	// derived value. The derivation excludes itself; staged bytes and returned
+	// Dockerfile still match exactly. This avoids a self-referential hash.
+	if ImageNamespace(instanceID) != "" {
+		dockerfile += "\nLABEL \"" + ImageAcquisitionKeyLabel + "\"=\"" + contentHash + "\"\n"
+	}
+	if err = os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
+		cleanup()
+		return "", "", "", fmt.Errorf("writing Dockerfile: %w", err)
+	}
+	return contextDir, dockerfile, featureImageTag(instanceID, contentHash), nil
 }
 
 // hashBuildInputs returns a hex content hash over the generated Dockerfile and
@@ -462,23 +492,34 @@ func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByR
 // in lexical order for determinism. Folding feature file bytes into the tag is
 // what makes the cache key honor content changes, not just the Dockerfile.
 func hashBuildInputs(dockerfile string, features []*ResolvedFeature) (string, error) {
-	h := sha256.New()
-	h.Write([]byte(dockerfile))
+	staged := make([]stagedFeature, 0, len(features))
 	for _, f := range features {
 		if f == nil {
 			continue
 		}
+		staged = append(staged, stagedFeature{id: f.Metadata.ID, dir: f.Dir})
+	}
+	return hashStagedInputs(dockerfile, staged)
+}
+
+type stagedFeature struct{ id, dir string }
+
+func hashStagedInputs(dockerfile string, features []stagedFeature) (string, error) {
+	h := sha256.New()
+	h.Write([]byte(dockerfile))
+	for _, f := range features {
 		// Domain separator keyed by feature id so reordering or renaming a
 		// feature changes the hash even with identical file bytes.
-		fmt.Fprintf(h, "\x00feat:%s\x00", f.Metadata.ID)
-		walkErr := filepath.Walk(f.Dir, func(path string, info os.FileInfo, err error) error {
+		fmt.Fprintf(h, "\x00feat:%s\x00", f.id)
+		root := f.dir
+		walkErr := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
 			if err != nil {
 				return err
 			}
 			if !info.Mode().IsRegular() {
 				return nil // dirs/symlinks/etc. — only regular file bytes matter
 			}
-			rel, err := filepath.Rel(f.Dir, path)
+			rel, err := filepath.Rel(root, path)
 			if err != nil {
 				return err
 			}
@@ -537,7 +578,13 @@ func copyFile(src, dst string, perm os.FileMode) error {
 		out.Close()
 		return err
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		return err
+	}
+	// OpenFile's perm is masked by the process umask; set it exactly so the
+	// staged snapshot (which is what the image tag is hashed from) carries
+	// the same modes as the cache entry it was copied from.
+	return os.Chmod(dst, perm)
 }
 
 // featureRefsSummary is a small helper for logs: a compact comma list of leaf

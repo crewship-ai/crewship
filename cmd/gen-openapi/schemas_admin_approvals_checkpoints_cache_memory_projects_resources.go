@@ -256,6 +256,15 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 	retentionPatch := object(retentionProps)
 	pageLimitAdmin := object(map[string]any{"max_pages_per_workspace": integer(), "default": integer(), "min": integer(), "max": integer()},
 		"max_pages_per_workspace", "default", "min", "max")
+	craftComponent := object(map[string]any{
+		"available": boolean(), "reason": str(), "development": boolean(), "version": str(), "engine_revision": str(),
+		"engine_sha256": str(), "editor_bundle": str(), "runtime": str(), "detail": str(),
+	}, "available")
+	craftApp := object(map[string]any{
+		"id": str(), "label": str(), "desired": str(), "source": str(), "locked": boolean(), "state": str(), "reason": str(),
+		"message": str(), "drain_until": str(), "updated_by": str(), "updated_at": str(), "component": craftComponent, "documents": integer(),
+	}, "id", "label", "desired", "source", "locked", "state")
+	craftApps := object(map[string]any{"applications": array(craftApp), "agents": craftApp, "editor": str()}, "applications", "agents", "editor")
 	artifactStorageAdmin := object(map[string]any{
 		"workspace_limit_bytes": integer(), "instance_limit_bytes": integer(), "used_bytes": integer(), "reserved_bytes": integer(),
 		"level": str(), "workspaces": integer(), "retention": str(),
@@ -381,7 +390,18 @@ func schemaCatalogAdminApprovalsCheckpointsCacheMemoryProjectsResources() map[st
 		}, "mode")},
 		// Aggregate artifact storage: limits and instance counters, and the
 		// counter recompute (drift is reported per workspace, before and after).
-		"GET /api/v1/admin/instance/page-limit": {Response: pageLimitAdmin},
+		// Word, Sheet and agents in them (#5315); turning off changes no document.
+		"GET /api/v1/admin/instance/artifacts/applications": {Response: craftApps},
+		"PATCH /api/v1/admin/instance/artifacts/applications/{app}": {
+			Request:  object(map[string]any{"desired": str(), "drain_seconds": integer()}, "desired"),
+			Response: craftApps},
+		"POST /api/v1/admin/instance/artifacts/applications/{app}/diagnostics": {Request: object(map[string]any{}), Response: object(map[string]any{
+			"id": str(), "passed": boolean(), "reason": str(), "message": str(), "runtime": str(), "engine_sha256": str(),
+			"version": str(), "duration_ms": integer(), "editor": str(),
+		}, "id", "passed", "duration_ms", "editor")},
+		// No body downloads the trusted package (202); a package body installs it.
+		"POST /api/v1/admin/instance/artifacts/applications/{app}/install": {Request: map[string]any{"type": "string", "format": "binary"}, RequestMedia: []string{"application/octet-stream"}, Response: craftApps},
+		"GET /api/v1/admin/instance/page-limit":                            {Response: pageLimitAdmin},
 		"PUT /api/v1/admin/instance/page-limit": {
 			Request:  object(map[string]any{"max_pages_per_workspace": integer()}, "max_pages_per_workspace"),
 			Response: pageLimitAdmin},

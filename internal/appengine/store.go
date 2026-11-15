@@ -26,6 +26,26 @@ type Store struct {
 	windowScanned func(inWriter bool, rows int64)
 }
 
+// precheckKey marks an authorization that admits a write without performing
+// it: the read-only prescan and the reservation. A host that records each
+// access in the access's own transaction records nothing for a precheck (the
+// prescan transaction is read-only and cannot write at all).
+type precheckKey struct{}
+
+func withPrecheck(ctx context.Context) context.Context {
+	return context.WithValue(ctx, precheckKey{}, true)
+}
+
+// Precheck reports whether an Authorize call is a precheck (see precheckKey).
+func Precheck(ctx context.Context) bool {
+	p, _ := ctx.Value(precheckKey{}).(bool)
+	return p
+}
+
+// ObserveWindowScan installs a test observer of rebase window scans: how many
+// audit rows each read and whether it ran inside the writer transaction.
+func (s *Store) ObserveWindowScan(f func(inWriter bool, rows int64)) { s.windowScanned = f }
+
 func New(db *sql.DB, o Options) *Store {
 	if o.MaxWorkers <= 0 {
 		o.MaxWorkers = 4
@@ -127,7 +147,9 @@ type reservation struct {
 
 func (s *Store) reserve(ctx context.Context, k Key, r Request, a Authorize, e Engine, digest string) (res reservation, err error) {
 	pre := s.prescan(ctx, k, r, a)
-	err = s.tx(ctx, k, a, func(tx *sql.Tx, p Principal) error {
+	// The reservation admits the write without performing it; the commit
+	// transaction in Execute is the access.
+	err = s.tx(withPrecheck(ctx), k, a, func(tx *sql.Tx, p Principal) error {
 		if p.MandateID != r.MandateID {
 			return ErrForbidden
 		}
@@ -523,7 +545,7 @@ func (s *Store) prescan(ctx context.Context, k Key, r Request, a Authorize) *win
 		return nil
 	}
 	defer tx.Rollback()
-	p, err := a(ctx, tx)
+	p, err := a(withPrecheck(ctx), tx)
 	if err != nil || p.MandateID != r.MandateID || !permits(p, commandTargets(r.Command)) || r.BaseRev < p.HistoryFloor {
 		return nil
 	}

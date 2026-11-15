@@ -1701,9 +1701,9 @@ the server's configuration.
 </Note>
 
 A slot with no override inherits `CREWSHIP_AUX_<SLOT>_{PROVIDER,MODEL,TIMEOUT}`,
-or the shipped default (`anthropic` / `claude-haiku-4-5`) when that is unset —
+or the shipped default (`anthropic` / `claude-haiku-5-5`) when that is unset —
 retargeted at the first registry provider whose key you actually have, so an
-instance holding only an `OPENAI_API_KEY` boots on `openai` / `gpt-5.4-mini`
+instance holding only an `OPENAI_API_KEY` boots on `openai` / `gpt-6-luna`
 instead of six slots demanding a key nobody owns. An instance holding both keys
 keeps the Anthropic default; declaration order breaks the tie, so adding a
 second key never silently repoints a working evaluator

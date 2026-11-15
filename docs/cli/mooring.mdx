@@ -50,6 +50,14 @@ the authenticated local sidecar. Use `--file -` for stdin. It requires the runti
 `action: read|command`, `artifact_id`, `mandate_id` and, for commands, `request`.
 Read returns the installed command manifest and current confirmed state.
 
+With the workspace flag `artifact_agent_access_modes` on, a chat run may also
+read a document without a mandate (omit `mandate_id`) when the document was
+attached to the message that started the run and the run's human owns it;
+agent grants and folders never reach it, and every other document answers like
+a missing one. A `command` without a mandate answers `409 proposal_required`
+and changes nothing: Mooring has no proposal delivery. Each read is recorded as
+`artifact.agent_run_accessed`.
+
 `CREWSHIP_SIDECAR_URL` optionally selects the protected loopback sidecar URL
 (default `http://127.0.0.1:9119`); remote hosts and redirects are refused. This is
 transport selection, not an authority override. The equivalent generic MCP tool

@@ -18,6 +18,7 @@ func TestTruncateImageRef(t *testing.T) {
 		{"crewship-cache:ab12", "cache:ab12"}, // short tag untouched
 		{"ubuntu:24.04", "ubuntu:24.04"},      // no registry prefix
 		{"ghcr.io/org/crewship-cache:0123456789abcdef", "cache:01234567"},
+		{"crewship-cache:aaaaaaaaaaaa-02be226ac713", "cache:02be226a"}, // installation namespace dropped
 	}
 	for _, tc := range cases {
 		if got := truncateImageRef(tc.in); got != tc.want {

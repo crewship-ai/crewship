@@ -155,7 +155,7 @@ func parsePolymorphicCommand(data json.RawMessage, field string) (any, error) {
 // commonUtilsFeatureRef is the canonical devcontainer common-utils
 // feature, version-pinned so behaviour stays stable when upstream
 // publishes a new tag. Bumping requires re-verifying that the
-// `username` / `uid` / `gid` install options are still respected.
+// `username` / `userUid` / `userGid` install options are still respected.
 const commonUtilsFeatureRef = "ghcr.io/devcontainers/features/common-utils:2"
 
 // commonUtilsRefPrefix is the registry prefix used to detect ANY
@@ -224,14 +224,120 @@ func (c *Config) EnsureAgentUser() bool {
 		}
 	}
 	c.Features[commonUtilsFeatureRef] = map[string]any{
-		"username":                   "agent",
-		"uid":                        "1001",
-		"gid":                        "1001",
+		"username":                   agentUsername,
+		"userUid":                    agentUID,
+		"userGid":                    agentUID,
 		"installZsh":                 "false", // keep image lean; agents bash
 		"upgradePackages":            "false", // determinism > freshness for cached images
 		"configureZshAsDefaultShell": "false",
 	}
 	return true
+}
+
+const (
+	agentUsername = "agent"
+	agentUID      = "1001"
+)
+
+// legacyCommonUtilsKeys are option names older Crewship versions injected.
+// common-utils never read them: it reads userUid / userGid, so the account
+// was created with an "automatic" UID — 1001 only when the base image
+// already had a user at 1000 (node, vscode), and 1000 on a slim image, where
+// the runtime's UID 1001 then had no account ("sudo: you do not exist").
+var legacyCommonUtilsKeys = map[string]string{"uid": "userUid", "gid": "userGid"}
+
+// ErrAgentAccountConflict is returned when a declared common-utils feature
+// would create the runtime account under another name or UID.
+var ErrAgentAccountConflict = errors.New("devcontainer: common-utils must create user 'agent' with UID/GID 1001")
+
+// NormalizeAgentUser makes the image's runtime account explicit: the
+// container always runs as UID 1001, so common-utils must create `agent`
+// with UID and GID 1001.
+//
+//   - No common-utils: inject it (EnsureAgentUser).
+//   - Declared: migrate the legacy uid/gid keys, fill an absent or
+//     "automatic" username/userUid/userGid with agent/1001/1001, and keep
+//     every other option the operator set.
+//   - A different explicit username, UID or GID is an error naming the fix,
+//     not a build that succeeds and then fails at run time.
+//   - username "none" or "root" creates no account; the base image is then
+//     trusted to provide agent at 1001, and the options are left alone.
+//
+// changed reports whether the options were rewritten. Because the options
+// are part of the cache key, a config that changes here builds a new image
+// once; an unchanged one keeps its cached image.
+func (c *Config) NormalizeAgentUser() (changed bool, err error) {
+	if c == nil {
+		return false, nil
+	}
+	if c.EnsureAgentUser() {
+		return true, nil
+	}
+	return c.NormalizeDeclaredAgentUser()
+}
+
+// NormalizeDeclaredAgentUser is NormalizeAgentUser without the injection:
+// it settles the account options of a common-utils feature the config
+// already declares and leaves a config without one untouched. Provisioning
+// uses it, so a stored config keeps its shape (and a config with nothing to
+// build keeps skipping the build), while every common-utils it does build
+// creates agent/1001.
+func (c *Config) NormalizeDeclaredAgentUser() (changed bool, err error) {
+	if c == nil {
+		return false, nil
+	}
+	for ref, opts := range c.Features {
+		if !isCommonUtilsRef(ref) {
+			continue
+		}
+		if opts == nil {
+			opts = map[string]any{}
+			c.Features[ref] = opts
+			changed = true
+		}
+		// username none/root: this feature creates no account, so the base
+		// image must provide agent at 1001 itself. Nothing to settle here.
+		if u := strings.ToLower(strings.TrimSpace(fmt.Sprint(opts["username"]))); u == "none" || u == "root" {
+			continue
+		}
+		for legacy, current := range legacyCommonUtilsKeys {
+			v, ok := opts[legacy]
+			if !ok {
+				continue
+			}
+			if cur, has := opts[current]; has && !isAutomatic(cur) && fmt.Sprint(cur) != fmt.Sprint(v) {
+				return false, fmt.Errorf("%w: %s sets both %s=%v and %s=%v; keep only %s=%s", ErrAgentAccountConflict, ref, legacy, v, current, cur, current, agentUID)
+			}
+			if cur, has := opts[current]; !has || isAutomatic(cur) {
+				opts[current] = v
+			}
+			delete(opts, legacy)
+			changed = true
+		}
+		for key, want := range map[string]string{"username": agentUsername, "userUid": agentUID, "userGid": agentUID} {
+			v, ok := opts[key]
+			got := strings.TrimSpace(fmt.Sprint(v))
+			if !ok || isAutomatic(v) {
+				opts[key] = want
+				changed = true
+				continue
+			}
+			if got != want {
+				return false, fmt.Errorf("%w: %s has %s=%q, but Crewship runs every crew container as user %s (UID %s); set %s to %q or remove it", ErrAgentAccountConflict, ref, key, got, agentUsername, agentUID, key, want)
+			}
+			if _, isString := v.(string); !isString {
+				opts[key] = want
+				changed = true
+			}
+		}
+	}
+	return changed, nil
+}
+
+// isAutomatic reports an absent-equivalent common-utils account option.
+func isAutomatic(v any) bool {
+	got := strings.TrimSpace(fmt.Sprint(v))
+	return v == nil || got == "" || strings.EqualFold(got, "automatic")
 }
 
 // Validate checks that the Config is well-formed.

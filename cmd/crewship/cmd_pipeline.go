@@ -942,8 +942,10 @@ var pipelineRunCmd = &cobra.Command{
 			return fmt.Errorf("routine run failed")
 		}
 		if result.Status == "WAITING" {
-			// Parked on a human approval — NOT a failure. The run released
-			// its slot; approve (or reject) to resume it.
+			// Waiting on a human approval — NOT a failure. A top-level
+			// approval parked the run and released its slot; a held action
+			// inside foreach keeps the run running on the server with its
+			// slot (#5348). Either way, approve (or reject) to continue it.
 			fmt.Printf("  paused at approval step: %s\n", result.CurrentStep)
 			fmt.Printf("  approve: crewship routine waitpoints approve %s --comment \"LGTM\"\n", result.WaitpointToken)
 			fmt.Printf("  reject:  crewship routine waitpoints reject %s\n", result.WaitpointToken)

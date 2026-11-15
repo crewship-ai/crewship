@@ -1,0 +1,1 @@
+- **New artifact is a split button.** In the Artifacts library the main part makes the kind you made last (N), and the arrow (Shift+N) opens a menu with up to five pinned kinds (keys 1–5), recent kinds, all kinds by family, and search by name, editor or file type. Pins and recent kinds are your own preferences. Home shows a short guide to Artifacts and Craft until you dismiss it.

@@ -405,9 +405,8 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	crewAI.SetJournal(r.Journal())
 	r.authedMut("POST", "/api/v1/crew-ai-suggest", roleCreate, crewAI.Suggest)
 
-	// Model discovery — live-or-curated per provider. The agent update path
-	// reuses this same resolver to validate llm_model, so the handler is also
-	// stashed on the AgentHandler as its ModelValidator.
+	// Model discovery — live-or-curated per provider. These are suggestions
+	// for the picker; agent create and update accept any well-formed model id.
 	ollamaURL := ""
 	if r.keeperConfig != nil {
 		ollamaURL = r.keeperConfig.OllamaURL
@@ -423,7 +422,6 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 		})
 	}
 	r.mux.Handle("GET /api/v1/models", authed(wsCtx(http.HandlerFunc(models.List))))
-	agents.SetModelValidator(models)
 
 	// Agents (require workspace context)
 	r.mux.Handle("GET /api/v1/agents/crews-status", authed(wsCtx(http.HandlerFunc(agents.CrewsStatus))))
@@ -704,6 +702,12 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// Stash the handler on the router so cmd_start can wire it into chatbridge
 	// for the auto-provision-on-first-message UX without a second instance.
 	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher, r.dockerClient, r.imageBuilder, r.featureCacheDir, r.hub)
+	provisioning.SetLegacyImageEviction(r.legacyImageEviction)
+	provisioning.SetInstallationID(r.installationID)
+	if runtime, ok := r.keeperContainer.(provider.ImageReferenceAcquirerSetter); ok {
+		runtime.SetImageReferenceAcquirer(provisioning)
+	}
+	provisioning.EnableBuildStoragePreflight()
 	if sandbox, ok := r.activeContainer().(provider.SandboxRuntime); ok {
 		provisioning.sandboxRuntime = sandbox
 	}

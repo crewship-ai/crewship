@@ -1,0 +1,1 @@
+- **CI binary checks avoid repeated process startup.** The executable guard reads every tracked file header in one process, retaining the existing formats, filename handling and failure verdict without raising the Shell time limit.

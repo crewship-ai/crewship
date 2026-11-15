@@ -60,10 +60,45 @@ See the [pilot editor SDK](../development/mooring-editor-sdk.md) for its exact
 handshake and editor lifecycle.
 
 Native HTTP admission, snapshot saving, draft journals and version operations
-are separate host modules. They are not exports of that root SDK. Project,
-Design, Dashboard and Docs clients also retain their existing profile-specific
-entrypoints. There is no shipped common `lib/mooring/sdk` facade to import from
-this inventory. Adding a wrapper must preserve the underlying profile's authority, receipts and recovery behavior.
+are separate host modules. They are not exports of that root SDK, and the root
+does not re-export the experimental entry point below. Project, Design,
+Dashboard and Docs clients also retain their existing profile-specific
+entrypoints. Adding a wrapper must preserve the underlying profile's
+authority, receipts and recovery behavior.
+
+## The experimental SDK entry point
+
+`lib/mooring/sdk/index.ts` is an experimental, separately imported entry point
+for whole-native Craft application authors, described in the
+[experimental Mooring SDK guide](../development/mooring-sdk.md). No external
+application or product code uses it and it carries no compatibility promise.
+It is not a common facade for the other profiles: it covers the whole-native
+Word/Sheet lease, save vocabulary, recovery offers and version history, plus
+an adapter for artifact project versions.
+
+Its boundary:
+
+- It may re-export the root in-frame SDK (`sdk/editor`), runtime-import
+  `validNativeVersion` from `native-draft.ts` and the `NativeSaveError` class
+  from `single-editor-save.ts`, and import types from host modules. It
+  imports no other names from host modules at runtime. Those two imports
+  still evaluate their modules (and what they import), so the SDK is a host
+  bundle, never an editor-frame bundle.
+- The host save lifecycle (`createSingleEditorSave`), the private draft
+  journal (`openNativeDraftJournal`, `openJournalWithRetry`), the native
+  admission client (`createNativeDocumentClient`) and the native version
+  parsers are not part of it. The host constructs the lifecycle, opens the
+  journal for the signed-in person and Page, and passes the application a
+  save factory, a journal handle and an authorized transport. The SDK never
+  opens private draft storage itself.
+- Native version history reuses `native-versions.ts` through the host
+  client; the SDK does not parse that wire contract a second time.
+- Lease and ownership checks in the SDK are advisory. The server's lease,
+  generation and base-version fences on each request remain the authority.
+
+`lib/mooring/sdk/__tests__/boundary.test.ts` enforces the root export list,
+the absence of host modules from the root import graph, and the SDK's
+runtime-import allowlist.
 
 ## Profile limits are separate
 

@@ -71,7 +71,7 @@ func nativeAgentToolFixture(t *testing.T) (*artifactPrincipalFixture, *craftNati
 	}
 	cfg := mooring.NativeStoreConfig{Application: "wordcraft", EngineRevision: strings.Repeat("a", 40), EngineSHA256: strings.Repeat("b", 64), EditorBundle: strings.Repeat("c", 64), Validate: func(context.Context, []byte) error { return nil }}
 	m.documents.applications["wordcraft"] = craftNativeApplication{Store: cfg}
-	m.config.Profiles = map[string]CraftNativeDocumentProfile{"wordcraft": {Application: "wordcraft"}}
+	m.documents.profiles = map[string]CraftNativeDocumentProfile{"wordcraft": {Application: "wordcraft"}}
 	calls := new(int)
 	m.config.AgentApply = func(context.Context, CraftNativeDocumentProfile, []byte, json.RawMessage) ([]byte, error) {
 		*calls++

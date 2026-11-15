@@ -175,6 +175,9 @@ func (h *documentAuthority) authorizeWithReadRecord(r *http.Request, k documents
 			if initialize {
 				return "", errDocumentAccess
 			}
+			if op := r.PathValue("operation"); op == "state" && documentStateLoadedForView(r) {
+				ctx = context.WithValue(ctx, documentViewReadKey{}, true)
+			}
 			return h.pages.authorizeDocumentDraft(ctx, a, k, r.PathValue("operation"))
 		}
 		// Exact session, not merely some other active session for this user.
@@ -236,6 +239,10 @@ func documentAuthorityError(w http.ResponseWriter, err error) {
 	}
 	if errors.Is(err, documents.ErrQuota) {
 		writeJSON(w, 429, map[string]string{"error": "document quota exceeded; confirmed history preserved", "code": "document_quota"})
+		return
+	}
+	if errors.Is(err, errArtifactRunCap) {
+		artifactRunCapRefusal(w)
 		return
 	}
 	status := 500

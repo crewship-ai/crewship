@@ -13,6 +13,9 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/dockerutil"
+	"github.com/crewship-ai/crewship/internal/quiesce"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
 )
 
@@ -49,8 +52,30 @@ const (
 
 // runStartupAndPeriodicGC performs one sweep at process startup and then
 
+func (h *ProvisioningHandler) reconcileImageReferences(ctx context.Context) {
+	h.mu.RLock()
+	references := h.imageReferences
+	h.mu.RUnlock()
+	if references == nil {
+		return
+	}
+	writer, ok := quiesce.Enter(ctx)
+	if !ok {
+		return
+	}
+	defer writer.Leave()
+	ctx, cancel := context.WithTimeout(writer.Context(), 30*time.Second)
+	defer cancel()
+	if err := references.Reconcile(ctx, resourcelifecycle.Images(h.db), func(ctx context.Context) ([]resourcelifecycle.ImageReference, error) {
+		return resourcelifecycle.SelectedImageReferences(ctx, h.db)
+	}); err != nil {
+		h.logger.Warn("environment reference reconciliation deferred; retaining references", "error", err)
+	}
+}
+
 func (h *ProvisioningHandler) runStartupAndPeriodicGC(ctx context.Context) {
 	// Startup sweep — tolerate failures (Docker may not yet be reachable).
+	h.reconcileImageReferences(ctx)
 	h.sweepOrphanTempContainers(ctx)
 	h.sweepOrphanCacheImages(ctx)
 
@@ -60,7 +85,11 @@ func (h *ProvisioningHandler) runStartupAndPeriodicGC(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-h.gcWake:
+			h.reconcileImageReferences(ctx)
+			h.sweepOrphanCacheImages(ctx)
 		case <-ticker.C:
+			h.reconcileImageReferences(ctx)
 			h.sweepOrphanTempContainers(ctx)
 			h.sweepOrphanCacheImages(ctx)
 		}
@@ -159,7 +188,7 @@ func (h *ProvisioningHandler) sweepOrphanTempContainers(ctx context.Context) {
 // referenced by a crew row). Removal of both is opt-in via
 // CREWSHIP_CACHE_GC_AUTODELETE=true — default is log-only for visibility.
 
-func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
+func (h *ProvisioningHandler) sweepLegacyCacheImages(ctx context.Context) {
 	if h.gcClient == nil {
 		return
 	}
@@ -220,10 +249,11 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 	// Delete the inspected ID, never a moving tag. Docker refuses non-force
 	// removal when another alias or a container still uses the artifact.
 	orphans := make([]string, 0, len(listed.Items))
+	candidates := map[string]image.Summary{}
 	tooYoung := 0
 	for _, img := range listed.Items {
-		if img.ID == "" {
-			continue
+		if img.ID == "" || img.Labels[devcontainer.ImageInstanceLabel] != "" {
+			continue // labelled artifacts belong to the ownership-aware collector
 		}
 		_, inUse := referenced[img.ID]
 		_, managed := knownArtifacts[img.ID]
@@ -241,6 +271,7 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 			continue
 		}
 		orphans = append(orphans, img.ID)
+		candidates[img.ID] = img
 	}
 	if len(orphans) == 0 {
 		h.logger.Debug("orphan cache-image GC: nothing to report", "skipped_too_young", tooYoung)
@@ -251,16 +282,10 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 			"orphans", orphans, "count", len(orphans), "skipped_too_young", tooYoung)
 		return
 	}
-	removed := 0
 	for _, imageID := range orphans {
-		if _, err := h.gcClient.ImageRemove(ctx, imageID, client.ImageRemoveOptions{Force: false, PruneChildren: true}); err != nil {
-			h.logger.Warn("orphan cache-image GC: remove failed", "image_id", imageID, "error", err)
-			continue
-		}
-		removed++
+		h.removeCollectedImage(ctx, candidates[imageID], false)
 	}
-	h.logger.Info("orphan cache-image GC: removed unreferenced cache images",
-		"removed", removed, "total_orphans", len(orphans), "skipped_too_young", tooYoung)
+
 }
 
 // cleanupOldJobs removes completed/failed jobs older than 1h from the jobs map.

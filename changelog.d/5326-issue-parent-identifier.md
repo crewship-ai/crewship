@@ -1,0 +1,1 @@
+- **Agents can split work into sub-issues on runs started by a person.** `issue.create` accepts `parent_identifier` and attaches the child in the same call; previously the separate link was refused with `chat_issue_action_not_supported` and left an unattached child behind.

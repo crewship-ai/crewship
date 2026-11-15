@@ -30,9 +30,10 @@ hour, and the person can stop it at any time.
 A person starts the task with the CLI:
 `crewship craft task start <page> --chat-id <chat> --message-id <message> --whole-document=true`.
 They can stop it in the app or with `crewship craft task stop <page>`.
-The instance must enable native documents and native agents with
-`CREWSHIP_CRAFT_NATIVE_ENABLED=true` and
-`CREWSHIP_CRAFT_NATIVE_AGENTS_ENABLED=true`. Both are off by default.
+An instance administrator must turn on the application (Word or Sheet) and
+agents in it, in Admin or with `crewship admin instance applications enable`.
+Both are off by default. A `503` with `reason` `app_disabled` or
+`app_draining` means the administrator turned it off: stop and tell the person.
 
 If a tool answers `403` ("live native Craft task required" or "confirmed
 native Craft task required") or `503` ("native Craft agents unavailable" or

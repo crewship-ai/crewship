@@ -26,6 +26,7 @@ import { toStatusTone } from "@/lib/status-tone"
 import { WakeGateChip } from "./routine-wake-gate-chip"
 import { describeCron } from "@/lib/cron-describe"
 import { scheduleHealth } from "@/lib/schedule-health"
+import { scheduleArtifactAccess } from "@/lib/schedule-artifact-access"
 import { RoutineOnceSchedule } from "./routine-once-schedule"
 import { RoutineRecurrenceFields } from "./routine-recurrence-fields"
 import {
@@ -252,6 +253,7 @@ export function RoutineSchedulesTab({
             <ol className="divide-y divide-border/40">
               {ours.map((s) => {
                 const health = scheduleHealth(s)
+                const artifacts = scheduleArtifactAccess(s)
                 const uses = scheduleVersionLine(s, headVersion)
                 const isDraft = s.activation === "draft"
                 return (
@@ -294,6 +296,14 @@ export function RoutineSchedulesTab({
                             data-testid={`schedule-health-${s.id}`}
                           />
                         )}
+                        {artifacts && (
+                          <StatusPill
+                            size="md"
+                            tone="warn"
+                            label={artifacts.label}
+                            data-testid={`schedule-artifacts-${s.id}`}
+                          />
+                        )}
                         <WakeGateChip wakePipelineSlug={s.wake_pipeline_slug} />
                       </div>
                       <p className="text-xs text-muted-foreground" data-testid={`schedule-uses-${s.id}`}>
@@ -329,6 +339,11 @@ export function RoutineSchedulesTab({
                           data-testid={`schedule-health-reason-${s.id}`}
                         >
                           {health.reason}
+                        </p>
+                      )}
+                      {artifacts && (
+                        <p className="text-micro leading-relaxed text-warn" data-testid={`schedule-artifacts-reason-${s.id}`}>
+                          {artifacts.reason}
                         </p>
                       )}
                       {/* Reliability telemetry — read-only (F18). Consecutive

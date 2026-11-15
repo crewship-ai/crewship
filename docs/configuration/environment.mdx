@@ -30,6 +30,25 @@ All Crewship configuration can be set via environment variables. These override 
 
 See the [native Craft lease contract](/specs/craft-native) for admission and handoff.
 
+## Word and Sheet packages
+
+A release binary trusts exactly one package of Word and of Sheet: the manifest
+digests (pins) compiled into it. These variables work in a release binary too.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CREWSHIP_CRAFT_COMPONENTS_DIR` | `<data directory>/craft-components` | Where installed packages are kept (`craft_native.components_dir`). |
+| `CREWSHIP_CRAFT_COMPONENT_PINS` | the release's pins | `<application>=<version>=<manifest sha256>`, comma separated (`craft_native.component_pins`). **Replaces** the release's pins: Crewship then installs and runs the packages these pins name, including their engine and the editor code served to browsers. |
+| `CREWSHIP_CRAFT_COMPONENT_URL` | the release's download page | Where packages are downloaded from (`craft_native.component_url`), for a mirror. https, or http only to this machine. It does not change what is trusted: every package must still match a pin. |
+
+Setting `CREWSHIP_CRAFT_COMPONENT_PINS` is an operator's authority, of the same
+weight as choosing which binary to run: whoever can set the server's
+environment or configuration file decides which Word and Sheet code runs. The
+server logs a warning at every start while it is set, and Admin and
+`crewship admin instance applications` show those packages as a
+**development override** instead of as installed release packages. Instance
+administrators cannot change it from Admin or the API.
+
 ## Mooring session profile
 
 | Variable | Default | Description |
@@ -490,54 +509,31 @@ The Docker provider checks `DOCKER_HOST` first, then auto-detects from candidate
 
 ## Idle runtime retention and cache eviction
 
-Both are **off by default**. They reclaim disk held by crews nobody is using;
-neither removes volumes or host data. Idle cache eviction keeps images selected
-by live crews in this installation; stopped runtimes are recreated when needed. See `docs/specs/container-cleanup.md` (section "Idle retention") in the repository
-for the exact rules.
+Idle container retention is opt-in and preserves volumes and host data.
+Owned image collection is experimental and off by default on Docker. See [the lifecycle contract](https://github.com/crewship-ai/crewship/blob/main/docs/specs/container-cleanup.md).
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS` | `0` (off) | Remove this installation's **stopped** runtime container of a **live** crew once it has been stopped this many days. The stop time comes from Docker; an unknown stop time keeps the container. Volumes, host data and sidecar services stay. The next start recreates the runtime (about 35–40 s when its cache image must be rebuilt as well). |
-| `CREWSHIP_CACHE_EVICTION` | (unset — off) | Set to `true` or `1` to remove `crewship-cache:*` images that no container on the Docker daemon — of any installation, in any state — has used for a continuous hour, are older than a day, and while no `crewship-provision-*` build runs anywhere on the daemon. Images selected by live crews in this installation are kept; unreadable database references stop eviction. |
-
-<Note>
-  Images are shared through the Docker daemon. On a host where several
-  installations share one daemon, eviction enabled on one of them can make
-  another lose a selected artifact: its database references are not visible.
-  Coordinate retention across those installations. Historical revision records
-  are not a backup of image bytes.
-</Note>
+| `CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS` | `0` (off) | Remove this installation's stopped runtime containers of live crews after this many days stopped. Unknown stop times, volumes, host data and service containers stay. |
+| `CREWSHIP_IMAGE_GC` | off | Set to `true` or `1` to opt into owned image collection on a dedicated or coordinated Docker daemon. Keeps current selections, one previous immutable selection per crew and every container source image; removes unused own crew/feature images older than 24 hours. Legacy unlabelled images and shared BuildKit cache are excluded. |
+| `CREWSHIP_CACHE_EVICTION` | deprecated | Deprecated explicit opt-in alias for owned collection, with a warning; no independent image sweeper. An explicit `CREWSHIP_IMAGE_GC` value takes precedence. |
 
 ## Devcontainer Cache GC
 
-Crewship runs a background sweeper every 30 minutes that detects three kinds
-of leaks: temporary provisioning containers orphaned by a `crewshipd` crash
-(matched by the `crewship-provision-*` name **and** the
-`crewship.temp=provision` label — see
-[Devcontainers → Background GC](/configuration/devcontainers#background-gc)
-for why the name is the one that authorises deletion), unreferenced
-`crewship-cache:*` images left behind when the process is killed between
-`docker commit` and the database write that links the image to a crew, and
-intermediate `crewship-feat:*` BuildKit feature images (per-feature layers
-that are regenerable and never directly referenced by a crew row).
-
-Temp containers older than one hour are always removed. Cache and feature
-images are **logged only by default**; deletion must be explicitly enabled.
+Temporary provisioning containers orphaned by a crash are removed after one
+hour, matched by both their `crewship-provision-*` name and provision label.
+The image collector runs at startup and every 30 minutes, skips active image
+acquisition/publication/restore and retains artifacts on incomplete evidence.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CREWSHIP_CACHE_GC_AUTODELETE` | (unset) | Set to `true` or `1` to remove unreferenced `crewship-cache:*` and intermediate `crewship-feat:*` images automatically. Default behaviour is to log the orphans only — destructive removal is opt-in because deleting a freshly-built local image is surprising in interactive environments. |
+| `CREWSHIP_BUILD_MIN_FREE_GB` | `4` | Free space, in whole GiB, that Docker's storage must have before a crew image build starts. `0` turns this check off. Applies only where the server can measure Docker's storage; see [Storage check before a build](/configuration/devcontainers#storage-check-before-a-build). |
+| `CREWSHIP_CACHE_GC_AUTODELETE` | unset (legacy log-only) | Explicitly delete unlabelled historical cache/feature images and known untagged revision artifacts beyond the old five-minute age floor. Labelled images belong to the owned collector instead. |
 
-A 5-minute age floor protects images that were committed in the last few
-minutes (closing the race between `docker commit` and the DB update inside
-`Provision()`), so enabling auto-delete is safe even on busy systems.
-
-<Note>
-  Leave `CREWSHIP_CACHE_GC_AUTODELETE` unset on developer machines. Enable
-  it on long-running production hosts where reclaiming disk matters more
-  than preserving incidental cached images. Inspect the orphan list in the
-  logs first to verify nothing important would be removed.
-</Note>
+Leave the legacy switch unset on shared Docker daemons: another installation's
+legacy selections are invisible. Owned collection checks local ownership, but copied/restored selections can still borrow another installation's artifact. Keep automatic deletion off on uncoordinated shared daemons.
+It does not clean global BuildKit cache or remove volumes, backups or base images.
+Apple Containers image collection remains unsupported.
 
 ## CLI client
 

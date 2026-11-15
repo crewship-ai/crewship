@@ -164,9 +164,9 @@ type ContainerConfig struct {
 	// CrewNetworkPool is the IPv4 range crew networks take small (/27)
 	// subnets from. It must not overlap a host route.
 	CrewNetworkPool string `yaml:"crew_network_pool"`
-	// CacheEviction removes crewship-cache images that no container on the
-	// daemon has used for an hour; the next start rebuilds them. Off by
-	// default.
+	// CacheEviction is retained for configuration compatibility. Image collection
+	// is ownership-scoped and off by default. True is a deprecated explicit
+	// opt-in alias; CREWSHIP_IMAGE_GC overrides it. No independent sweeper runs.
 	CacheEviction bool `yaml:"cache_eviction"`
 }
 
@@ -570,6 +570,7 @@ func applyEnvOverrides(cfg *Config) {
 	applyCraftNativeEnv(&cfg.CraftNative)
 	if value, ok := os.LookupEnv("CREWSHIP_CRAFT_NATIVE_ENABLED"); ok {
 		cfg.CraftNative.Enabled = value == "true" || value == "1"
+		cfg.CraftNative.EnabledFromEnv = true
 	}
 	if value, ok := os.LookupEnv("CREWSHIP_MOORING_ENABLED"); ok {
 		cfg.Mooring.Enabled = value == "true" || value == "1"

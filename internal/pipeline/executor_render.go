@@ -102,10 +102,8 @@ func secretTypesInStep(step Step) map[string]struct{} {
 		}
 		for _, m := range templateRE.FindAllStringSubmatch(s, -1) {
 			parts := strings.SplitN(strings.TrimSpace(m[1]), ".", 3)
-			if len(parts) >= 2 && parts[0] == "secrets" {
-				if t := strings.TrimSpace(parts[1]); t != "" {
-					out[t] = struct{}{}
-				}
+			if key, ok := secretRefKey(parts); ok {
+				out[key] = struct{}{}
 			}
 		}
 	}

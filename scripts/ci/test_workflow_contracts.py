@@ -387,7 +387,7 @@ class WorkflowContracts(unittest.TestCase):
         alarm = int(re.fullmatch(r'          RACE_COMBINED_ALARM_SECONDS: "(\d+)"\n', env_block).group(1))
         self.assertRegex(report_step, r'(?m)^        run: python3 scripts/ci/api-race-shard\.py report \.ci-api-shards 6 4166 \.ci-api-template$')
         self.assertNotIn('shell:', report_step)
-        self.assertEqual((count, report_baseline, alarm), (6, 4166, 5200))
+        self.assertEqual((count, report_baseline, alarm), (6, 4166, 6000))
         self.assertGreater(alarm, report_baseline)
         self.assertEqual(int(re.search(r'timeout-minutes: (\d+)', api).group(1)), 5)
         # Recalibrating the API alarm freezes every neighbouring limit.

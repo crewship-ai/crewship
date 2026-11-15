@@ -273,6 +273,16 @@ An agent retains this exact packet for apply and uncertain retries:
 ```
 
 For `read`, retain `action`, `artifact_id` and `mandate_id`; omit `request`.
+
+With the workspace flag `artifact_agent_access_modes` on, a chat run may also
+read a workbook without a mandate (`{"action":"read","artifact_id":"PAGE_ID"}`)
+when the workbook was attached to the message that started the run and the
+run's human is its owner or an owner-named editor. Agent grants, crew grants
+and folders never reach a workbook this way, and a workspace OWNER or ADMIN's
+audited read does not pass to the agent. Every other workbook answers
+`404 Workbook not found`. Without a mandate the run never changes the
+workbook: `apply` answers `409 proposal_required`, and `status` and `commits`
+need a mandate. Each read is recorded as `artifact.agent_run_accessed`.
 For `status`, use those fields with `action: "status"` and
 `mutation_id: "cell-edit-1"`. For the commits feed, use `action: "commits"` with
 `since` (and optionally `limit`, 1 to 200); it needs live editing to be enabled

@@ -11,8 +11,13 @@ import (
 // is only descriptive: agents added after container startup may not have one.
 // Never substitute the boot identity or copy a caller-supplied acting header.
 func (s *Server) documentHostRequest(r *http.Request, method, path string, body []byte, responseLimit int64) (*memoryHostResponse, error) {
-	if !((path == "/api/v1/internal/documents/create" && method == http.MethodPost) ||
-		(path == "/api/v1/internal/documents/draft" && (method == http.MethodGet || method == http.MethodPost))) {
+	// The draft view alone may carry its single page_id selection.
+	route, query, _ := strings.Cut(path, "?")
+	if query != "" && (route != "/api/v1/internal/documents/draft" || method != http.MethodGet || !strings.HasPrefix(query, "page_id=") || strings.Contains(query, "&")) {
+		return nil, &memoryHostTransportError{err: errors.New("unsupported Document transport")}
+	}
+	if !((route == "/api/v1/internal/documents/create" && method == http.MethodPost) ||
+		(route == "/api/v1/internal/documents/draft" && (method == http.MethodGet || method == http.MethodPost))) {
 		return nil, &memoryHostTransportError{err: errors.New("unsupported Document transport")}
 	}
 	token := bearerToken(r)

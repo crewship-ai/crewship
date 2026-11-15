@@ -522,6 +522,7 @@ var startCmd = &cobra.Command{
 			bridge.SetPageChatContextResolver(apiRouter.Pages())
 			bridge.SetDocumentIterationRecorder(apiRouter.Pages())
 			bridge.SetArtifactProjectIntentRecorder(apiRouter.Pages())
+			bridge.SetArtifactRefRecorder(apiRouter.Pages())
 		}
 
 		// Wire mid-turn steering: the API's POST /chats/{id}/steer route
@@ -641,6 +642,7 @@ var startCmd = &cobra.Command{
 				// already, but routines, schedules, webhooks and the
 				// terminal, which failed on it.
 				crewstart.SetImageGate(ph.EnsureCrewImage)
+				crewstart.SetImageAcquirer(ph.AcquireCrewImages)
 			}
 		}
 

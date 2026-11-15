@@ -36,6 +36,11 @@ func newWaitpointCardRig(t *testing.T, form *pipeline.DecisionForm) waitpointCar
 
 func newWaitpointCardRigWithPrompt(t *testing.T, form *pipeline.DecisionForm, prompt string) waitpointCardRig {
 	t.Helper()
+	return newWaitpointCardRigAt(t, form, prompt, "review")
+}
+
+func newWaitpointCardRigAt(t *testing.T, form *pipeline.DecisionForm, prompt, stepID string) waitpointCardRig {
+	t.Helper()
 	f := newChatIssueFixture(t)
 	seedVersionedPipeline(t, f.h.db, f.workspace, "card-recipe", "card-recipe")
 	execOrFatal(t, f.h.db, `INSERT INTO pipeline_runs(id,workspace_id,pipeline_id,pipeline_slug,status,started_at,invocation_source_run_id,invoking_agent_id) VALUES('card-pipeline-run',?,'card-recipe','card-recipe','running','2026-10-16T08:00:00Z',?,?)`, f.workspace, f.run, f.agent)
@@ -43,7 +48,7 @@ func newWaitpointCardRigWithPrompt(t *testing.T, form *pipeline.DecisionForm, pr
 	store := pipeline.NewSQLWaitpointStore(f.h.db)
 	t.Cleanup(store.Close)
 	h.SetWaitpointStore(store)
-	token, err := store.CreateApproval(t.Context(), pipeline.WaitpointApprovalRequest{WorkspaceID: f.workspace, PipelineRunID: "card-pipeline-run", StepID: "review", Prompt: prompt, TimeoutSec: 3600, DecisionForm: form, InvokingCrewID: f.crew})
+	token, err := store.CreateApproval(t.Context(), pipeline.WaitpointApprovalRequest{WorkspaceID: f.workspace, PipelineRunID: "card-pipeline-run", StepID: stepID, Prompt: prompt, TimeoutSec: 3600, DecisionForm: form, InvokingCrewID: f.crew})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,5 +456,81 @@ func TestChatDecisionWaitpointCanonicalEmptyPrompt(t *testing.T) {
 	}
 	if card := d.read(t).Decision; card.Status != "approved" || card.Title != "Waitpoint pending approval" {
 		t.Fatalf("terminal card %+v", card)
+	}
+}
+
+// A held crewship action's waitpoint reaches a chat as a decision card too.
+// Only an OWNER or ADMIN may decide it there, as on every other door: a
+// MANAGER is offered no decision and an answer from one is denied with the
+// waitpoint left pending.
+func TestChatDecisionWaitpointHeldActionNeedsAdmin(t *testing.T) {
+	held := pipeline.CrewshipApprovalStepKey("create", pipeline.CrewshipApprovalBinding("op", "issue.create", map[string]any{"title": "x"}))
+	d := newWaitpointCardRigAt(t, nil, "Approve issue.create", held)
+	execOrFatal(t, d.f.h.db, `UPDATE workspace_members SET role='MANAGER' WHERE workspace_id=? AND user_id=?`, d.f.workspace, d.f.user)
+	d.a = recaptureAudience(t, d)
+	card := d.read(t).Decision
+	for _, a := range card.AllowedActions {
+		if a != "view" {
+			t.Fatalf("a MANAGER is offered %q on a held action's card: %v", a, card.AllowedActions)
+		}
+	}
+	answer := chatentities.DecisionAnswer{SourceID: d.id, ExpectedVersion: card.Source.Version, Action: "approve", Values: map[string]json.RawMessage{}}
+	op := &decisionOperation{Audience: d.a, Version: answer.ExpectedVersion, Key: "held-manager", Hash: "held-manager"}
+	if err := d.resolve(t, answer, op); !errors.Is(err, errDecisionDenied) {
+		t.Fatalf("MANAGER answer err=%v, want errDecisionDenied", err)
+	}
+	var status string
+	if err := d.f.h.db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE token=?`, d.token).Scan(&status); err != nil || status != "pending" {
+		t.Fatalf("status=%q (%v), want pending", status, err)
+	}
+
+	execOrFatal(t, d.f.h.db, `UPDATE workspace_members SET role='ADMIN' WHERE workspace_id=? AND user_id=?`, d.f.workspace, d.f.user)
+	d.a = recaptureAudience(t, d)
+	card = d.read(t).Decision
+	answer.ExpectedVersion = card.Source.Version
+	op = &decisionOperation{Audience: d.a, Version: answer.ExpectedVersion, Key: "held-admin", Hash: "held-admin"}
+	if err := d.resolve(t, answer, op); err != nil {
+		t.Fatalf("ADMIN answer: %v", err)
+	}
+	if err := d.f.h.db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE token=?`, d.token).Scan(&status); err != nil || status != "approved" {
+		t.Fatalf("status=%q (%v), want approved", status, err)
+	}
+}
+
+// recaptureAudience re-reads the trusted audience after a role change; a
+// captured audience pins the member's role at capture time.
+func recaptureAudience(t *testing.T, d waitpointCardRig) chataudience.Receipt {
+	t.Helper()
+	a, err := chataudience.CaptureTrusted(t.Context(), d.f.h.db, d.f.chat, d.f.user, nil)
+	if err != nil || a == nil {
+		t.Fatalf("audience %v %v", a, err)
+	}
+	return *a
+}
+
+// The held-action rule does not touch an ordinary wait: approval card: a
+// MANAGER in the chat is still offered the decision and can make it.
+func TestChatDecisionWaitpointOrdinaryWaitManagerStillDecides(t *testing.T) {
+	d := newWaitpointCardRigAt(t, nil, "Ship it?", "review")
+	execOrFatal(t, d.f.h.db, `UPDATE workspace_members SET role='MANAGER' WHERE workspace_id=? AND user_id=?`, d.f.workspace, d.f.user)
+	d.a = recaptureAudience(t, d)
+	card := d.read(t).Decision
+	offered := false
+	for _, a := range card.AllowedActions {
+		if a != "view" {
+			offered = true
+		}
+	}
+	if !offered {
+		t.Fatalf("a MANAGER lost the decision on an ordinary wait card: %v", card.AllowedActions)
+	}
+	answer := chatentities.DecisionAnswer{SourceID: d.id, ExpectedVersion: card.Source.Version, Action: "approve", Values: map[string]json.RawMessage{}}
+	op := &decisionOperation{Audience: d.a, Version: answer.ExpectedVersion, Key: "ordinary-manager", Hash: "ordinary-manager"}
+	if err := d.resolve(t, answer, op); err != nil {
+		t.Fatalf("MANAGER answer on an ordinary wait: %v", err)
+	}
+	var status string
+	if err := d.f.h.db.QueryRow(`SELECT status FROM pipeline_waitpoints WHERE token=?`, d.token).Scan(&status); err != nil || status != "approved" {
+		t.Fatalf("status=%q (%v), want approved", status, err)
 	}
 }

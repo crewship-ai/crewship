@@ -1,0 +1,1 @@
+- **`crewship apply` no longer warns that a stopped crew's file saves will fail when every file is already up to date.** On standalone `kind: Crew` documents the stopped-crew advisory now counts only the files the apply will write, as the combined manifest does.

@@ -11,12 +11,17 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/provider"
+	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/ws"
 	"github.com/moby/moby/client"
 )
 
 type ProvisioningHandler struct {
-	sandboxRuntime provider.SandboxRuntime // optional qualification backend; set before serving
+	gcWake              chan struct{}
+	legacyImageEviction bool                    // deprecated opt-in alias; protected by mu
+	instanceID          string                  // image ownership; read/written under mu
+	sandboxRuntime      provider.SandboxRuntime // optional qualification backend; set before serving
 
 	db             *sql.DB
 	logger         *slog.Logger
@@ -25,9 +30,10 @@ type ProvisioningHandler struct {
 
 	// Provisioner pipeline. May be nil in tests or when no Docker client is
 	// available -- in that case the trigger endpoint returns 503.
-	docker      *client.Client
-	gcClient    orphanGCClient // narrowed view for sweepers + CacheList; usually == docker
-	provisioner *devcontainer.Provisioner
+	docker          *client.Client
+	imageReferences *dockerprovider.ImageReferences
+	gcClient        orphanGCClient // narrowed view for sweepers + CacheList; usually == docker
+	provisioner     *devcontainer.Provisioner
 
 	// In-memory provisioning job state, keyed by crewID. MVP only.
 	mu   sync.RWMutex
@@ -119,6 +125,39 @@ func (h *ProvisioningHandler) InvalidateImageCache() {
 	h.provisioner.InvalidateImageListCache()
 }
 
+// SetInstallationID binds the provisioner to this installation, so the images
+// it builds are tagged inside the installation's namespace and labelled with
+// their origin (#5375). Called once while routes are wired, before any
+// provision can run. Safe with no provisioner.
+func (h *ProvisioningHandler) SetInstallationID(id string) {
+	if h == nil || h.provisioner == nil {
+		return
+	}
+	h.provisioner.SetInstanceID(id)
+	id = devcontainer.ImageNamespace(id)
+	if id == "" {
+		return
+	}
+	var references *dockerprovider.ImageReferences
+	if h.docker != nil {
+		references = dockerprovider.NewImageReferences(h.docker, id)
+	}
+	if references != nil {
+		resourcelifecycle.Images(h.db).SetReferenceProtector(references)
+	}
+	h.mu.Lock()
+	h.instanceID = id
+	h.imageReferences = references
+	h.mu.Unlock()
+	select {
+	case h.gcWake <- struct{}{}:
+	default:
+	}
+	// Constructor-owned lifecycle performs inventory asynchronously. Never make
+	// route wiring wait for Docker or mutate selected artifacts on identity change.
+
+}
+
 func NewProvisioningHandler(
 	db *sql.DB,
 	logger *slog.Logger,
@@ -154,6 +193,7 @@ func NewProvisioningHandler(
 		rateLimiter:    newProvisionRateLimiter(),
 		wsHub:          wsHub,
 		bgCtx:          bgCtx,
+		gcWake:         make(chan struct{}, 1),
 		bgCancel:       bgCancel,
 		journal:        noopEmitter{},
 	}
@@ -247,3 +287,14 @@ func nullStringPtr(s sql.NullString) *string {
 // ProvisionStatus returns the provisioning status for a crew. If an active job
 // exists in memory, its status (pending/running/completed/failed) is returned;
 // otherwise the status is derived from the persisted cached_image column.
+
+// SetLegacyImageEviction preserves the old explicit opt-in as an alias for the
+// owned policy. It no longer starts an independent global image sweeper.
+func (h *ProvisioningHandler) SetLegacyImageEviction(enabled bool) {
+	h.mu.Lock()
+	h.legacyImageEviction = enabled
+	h.mu.Unlock()
+	if enabled {
+		h.logger.Warn("container.cache_eviction is deprecated; use CREWSHIP_IMAGE_GC for owned image collection")
+	}
+}

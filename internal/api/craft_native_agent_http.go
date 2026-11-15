@@ -1,6 +1,8 @@
 package api
 
 import (
+	"github.com/crewship-ai/crewship/internal/craftapps"
+
 	"io"
 	"net/http"
 )
@@ -28,6 +30,10 @@ func (m *craftNativeAgentManager) task(w http.ResponseWriter, r *http.Request) {
 	input, err := parseCraftNativeAgentTask(raw)
 	if err != nil {
 		replyError(w, 400, "invalid native Craft whole-document consent")
+		return
+	}
+	if !m.human.apps.agentsAllow(r.Context(), "", craftapps.OpStartEdit) {
+		m.human.apps.refuse(w, r.Context(), craftapps.Agents)
 		return
 	}
 	// Runtime dispatch wiring is installed only after startup qualification.

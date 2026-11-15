@@ -690,6 +690,10 @@ type WaitpointApprovalRequest struct {
 	RiskLevel      string
 	InvokingCrewID string
 	TimeoutSec     int
+	// NoStandingTrust: this approval answers one held action and must be
+	// decided by a person every time. No standing trust grant is consumed
+	// (which would approve it without asking) and none is offered.
+	NoStandingTrust bool
 }
 
 // NewExecutor wires the dependencies together. emitter and pipes may
@@ -1102,6 +1106,16 @@ type RunInput struct {
 	InvocationSourceRunID string `json:"-"` // Fresh verified invocation only; never inherited recipe authority.
 	// OnStarted runs after the run row is durable, before the first step.
 	OnStarted func(runID string)
+	// OnHumanWait runs when a step of this run starts blocking on a pending
+	// person's decision (a held crewship action, or `wait: approval` in a
+	// run that cannot park), with the run, the step and the waitpoint token.
+	// In practice that is a held action inside foreach; a top-level step of
+	// a stored run parks it instead and does not call this. It is not
+	// passed to nested routines (buildNestedRunInput): their steps run as a
+	// child run and still block without a signal. The
+	// synchronous run endpoint uses it to return a WAITING receipt and let
+	// the run continue without the request (#5348). It must not block.
+	OnHumanWait func(runID, stepID, token string)
 
 	PipelineID      string // optional; required only for Run (not RunDefinition)
 	WorkspaceID     string
@@ -1165,6 +1179,12 @@ type RunInput struct {
 	// the projection accurately reflects the trigger.
 	TriggeredVia  TriggeredVia
 	TriggeredByID string
+	// ArtifactScheduleID is set only by the host's own schedule fire (the
+	// cron scheduler and a schedule's "run now"), never from a request body
+	// or a queued row: TriggeredVia/TriggeredByID can be claimed by a caller
+	// of the run API, so they alone never let a schedule's creator vouch for
+	// a run's artifact access (#5339). Nested runs do not inherit it.
+	ArtifactScheduleID string
 	// DueAt is the cron occurrence this run is being fired FOR — set by the
 	// scheduler (fireSingleOccurrence) and by nothing else, so the
 	// persisted run can answer "how late did this fire" (§19.3 scheduled
@@ -2083,7 +2103,7 @@ func (e *Executor) dispatchStep(
 	case StepForeach:
 		return e.runForeachStep(ctx, step, in, parentRender, runID, pipelineID, emit, depth)
 	case StepCrewship:
-		return e.runCrewshipStep(ctx, step, parentRender, in, runID)
+		return e.runCrewshipStep(ctx, step, parentRender, in, runID, depth)
 	default:
 		return "", 0, 0, fmt.Errorf("unsupported step type %q", step.Type)
 	}
@@ -2241,6 +2261,13 @@ func (e *Executor) runAgentStep(
 			InvokingCrewID:   in.InvokingCrewID,
 			InvokingAgentID:  in.InvokingAgentID,
 			InputGuardAction: resolveInputGuardAction(in.dsl),
+			// #5339: provenance for the artifact run capability decision.
+			InvokingUserID:      in.InvokingUserID,
+			InvocationAuthority: in.InvocationAuthority,
+			TriggeredVia:        in.TriggeredVia,
+			AuthorAgentID:       in.AuthorAgentID,
+			TriggeredByID:       in.TriggeredByID,
+			ArtifactScheduleID:  in.ArtifactScheduleID,
 		}
 		res, err := e.runRunnerWithTransientRetry(ctx, req, step, emit)
 		totalCost += res.CostUSD
@@ -2824,6 +2851,11 @@ func (e *Executor) persistRunTerminal(runCtx context.Context, runID string, in R
 		// being flagged for a hand-off it had nobody to make. See
 		// MarkTerminalInput.HasOutcomeCapableStep.
 		HasOutcomeCapableStep: DSLHasOutcomeCapableStep(in.dsl),
+	}
+	if result != nil {
+		// Judge by what executed: an agent step skipped by its `if:` could
+		// not have reported a hand-off.
+		terminal.HasOutcomeCapableStep = ExecutedOutcomeCapableStep(in.dsl, result.StepOutputs)
 	}
 	if result == nil {
 		terminal.Status = RunStatusFailed

@@ -256,6 +256,12 @@ func (h *PageHandler) CreateDocumentAgent(w http.ResponseWriter, r *http.Request
 		replyError(w, 403, err.Error())
 		return
 	}
+	// Flag on (#5317 5.3): the create is audited with its human in this
+	// transaction, failing closed.
+	if err = h.recordKindRunAccess(ctx, tx, a, pageID, runReachCreated, "create"); err != nil {
+		replyError(w, 403, "document creation audit unavailable")
+		return
+	}
 	if err = tx.Commit(); err != nil {
 		replyInternalError(w, h.logger, "commit document creation", err)
 		return

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"net/http"
 	"strings"
 	"time"
@@ -76,6 +77,9 @@ type createCrewRequest struct {
 }
 
 func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
+	releaseImages := resourcelifecycle.Images(h.db).Use()
+	defer releaseImages()
+
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 
@@ -225,28 +229,26 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 			replyDevcontainerSecurityError(w, verr)
 			return
 		}
-		// Auto-inject common-utils when the operator didn't declare a
-		// user-creating feature themselves. Crewship's runtime hard-
-		// codes UID 1001 but the IMAGE needs a matching `agent` user
-		// for that mapping to succeed — without this, an operator who
-		// forgot the feature would hit "user 'agent' does not exist"
-		// at exec time, which is the #1 onboarding footgun. Idempotent:
-		// if any common-utils variant is already present, the config
-		// is left untouched.
-		if cfg.EnsureAgentUser() {
-			normalised, err := json.Marshal(cfg)
-			if err != nil {
-				// Log the underlying error server-side; surface only a
-				// generic message to the client. The marshal payload
-				// could carry user-supplied keys / values that aren't
-				// useful to expose in an error response.
-				h.logger.Error("crews.create: marshal devcontainer_config after auto-inject", "error", err)
-				replyError(w, http.StatusInternalServerError, "internal error normalising devcontainer config")
-				return
-			}
-			s := string(normalised)
-			req.DevcontainerConfig = &s
+		// The runtime always runs as UID 1001, so the image must have an
+		// `agent` account at 1001: inject common-utils when it is absent,
+		// fill its missing account options, and refuse a declaration that
+		// would create the account under another name or UID (see
+		// NormalizeAgentUser). Crew update and both apply planners store
+		// and compare the same form, so re-applying the manifest that
+		// created the crew plans no update (#5337).
+		normalised, nerr := devcontainer.NormalizeAgentUserJSON(*req.DevcontainerConfig)
+		if nerr != nil {
+			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+nerr.Error())
+			return
 		}
+		// The limit applies to what is stored: the injected account must
+		// not push a config past it, or sending the stored config back
+		// unchanged would be refused.
+		if len(normalised) > 102400 {
+			replyError(w, http.StatusBadRequest, "devcontainer_config exceeds 100KB limit")
+			return
+		}
+		req.DevcontainerConfig = &normalised
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
 		if err := devcontainer.ValidateMiseConfigInput(*req.MiseConfig); err != nil {
@@ -329,6 +331,10 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		storedServices = &sealed
+	}
+	if err := preserveConfiguredImageReferences(r.Context(), h.db, req.RuntimeImage, req.DevcontainerConfig, req.ServicesJSON); err != nil {
+		replyError(w, http.StatusServiceUnavailable, err.Error())
+		return
 	}
 	_, err = h.db.ExecContext(r.Context(),
 		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, allow_private_endpoints, runtime_image, devcontainer_config, mise_config, services_json, created_at, updated_at)

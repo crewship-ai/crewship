@@ -136,7 +136,10 @@ Examples:
 				// distinguish deleting Riley from deleting Sam.
 				EntityName *string `json:"entity_name" yaml:"entity_name"`
 				UserEmail  *string `json:"user_email" yaml:"user_email"`
-				CreatedAt  string  `json:"created_at" yaml:"created_at"`
+				// Metadata is the row's content-free context, e.g. which agent
+				// and run acted for the user on an artifact (#5317).
+				Metadata  *string `json:"metadata,omitempty" yaml:"metadata,omitempty"`
+				CreatedAt string  `json:"created_at" yaml:"created_at"`
 			} `json:"data" yaml:"data"`
 		}
 		if err := cli.ReadJSON(resp, &result); err != nil {

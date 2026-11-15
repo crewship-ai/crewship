@@ -43,6 +43,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/crewship-ai/crewship/internal/access"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
@@ -119,6 +120,9 @@ type pagePublicTokenWire struct {
 	// expired. Two columns and a clock is a calculation every reader would
 	// otherwise have to repeat, and one of them would get it wrong.
 	Live bool `json:"live"`
+	// Withheld: not revoked, but its creator is suspended or no longer a
+	// member, so it does not open until their standing returns.
+	Withheld bool `json:"withheld,omitempty"`
 	// Panels are the panel ids this link exposes — the human-attested set
 	// (§7.3.2 rules 2 and 3), so "what does this link show" is answerable
 	// without reading the spec.
@@ -202,13 +206,18 @@ func (h *PageHandler) Publish(w http.ResponseWriter, r *http.Request) {
 		replyError(w, 409, "private artifacts cannot be published through legacy Page links")
 		return
 	}
+	// Publishing reaches the internet, so it takes more than the delete gate:
+	// on a crew-owned page, plain crew membership is not enough (mayPublishPage).
 	// Publishing is at least as consequential as deleting, so it takes the
 	// delete gate and not the edit gate: owner or workspace ADMIN/OWNER. A
 	// `write` grantee rearranges the page — §7.1b rule 2 makes that authority
 	// over arrangement, never over reach — and a write grant may be held by an
 	// agent, which rule 3 has just refused.
-	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(RoleFromContext(r.Context()), "manage") {
-		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may publish this page", "")
+	if ok, err := h.mayPublishPage(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec); err != nil {
+		replyInternalError(w, h.logger, "check publish authority", err)
+		return
+	} else if !ok {
+		h.refusePageAction(w, r, rec, "only the page's owner, a manager of its owning crew or a workspace admin may publish this page", "")
 		return
 	}
 
@@ -404,8 +413,13 @@ func (h *PageHandler) ListPublicLinks(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "load page for public links", err)
 		return
 	}
-	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(RoleFromContext(r.Context()), "manage") {
-		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may see this page's public links", "")
+	// The list names each link's creator, so it takes the publish authority:
+	// a crew VIEWER or MEMBER may read the page but not see who published it.
+	if ok, err := h.mayPublishPage(r.Context(), wsID, user.ID, RoleFromContext(r.Context()), rec); err != nil {
+		replyInternalError(w, h.logger, "check public link authority", err)
+		return
+	} else if !ok {
+		h.refusePageAction(w, r, rec, "only the page's owner, a manager of its owning crew or a workspace admin may see this page's public links", "")
 		return
 	}
 
@@ -418,7 +432,10 @@ func (h *PageHandler) ListPublicLinks(w http.ResponseWriter, r *http.Request) {
 	rows, err := h.db.QueryContext(r.Context(), `
 		SELECT t.id, t.expires_at, t.show_provenance, t.password_hash IS NOT NULL,
 		       COALESCE(u.email, ''), t.created_at,
-		       COALESCE(t.revoked_at, ''), COALESCE(t.last_seen_at, '')
+		       COALESCE(t.revoked_at, ''), COALESCE(t.last_seen_at, ''),
+		       EXISTS(SELECT 1 FROM users cu JOIN workspace_members cm ON cm.user_id = cu.id
+		              JOIN pages p ON p.id = t.page_id AND cm.workspace_id = p.workspace_id
+		              WHERE cu.id = t.created_by_user_id AND cu.suspended_at IS NULL)
 		FROM page_public_tokens t
 		LEFT JOIN users u ON u.id = t.created_by_user_id
 		WHERE t.page_id = ?
@@ -433,15 +450,19 @@ func (h *PageHandler) ListPublicLinks(w http.ResponseWriter, r *http.Request) {
 	out := pagePublicTokensWire{Page: rec.Slug, Tokens: []pagePublicTokenWire{}}
 	for rows.Next() {
 		var t pagePublicTokenWire
-		var showProvenance, hasPassword int
+		var showProvenance, hasPassword, standing int
 		if err := rows.Scan(&t.ID, &t.ExpiresAt, &showProvenance, &hasPassword,
-			&t.CreatedBy, &t.CreatedAt, &t.RevokedAt, &t.LastSeenAt); err != nil {
+			&t.CreatedBy, &t.CreatedAt, &t.RevokedAt, &t.LastSeenAt, &standing); err != nil {
 			replyInternalError(w, h.logger, "scan public page token", err)
 			return
 		}
 		t.ShowProvenance = showProvenance == 1
 		t.HasPassword = hasPassword == 1
-		t.Live = t.RevokedAt == "" && parsePageTime(t.ExpiresAt).After(now)
+		// A link whose creator is suspended or gone is withheld (it opens
+		// again when their standing returns), so it is not live either.
+		unexpired := parsePageTime(t.ExpiresAt).After(now)
+		t.Withheld = t.RevokedAt == "" && unexpired && standing == 0
+		t.Live = t.RevokedAt == "" && unexpired && !t.Withheld
 		// A live link shows what it currently exposes; a dead one shows
 		// nothing, because it exposes nothing.
 		if t.Live {
@@ -490,11 +511,15 @@ func (h *PageHandler) RevokePublicLink(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "load page for revoke", err)
 		return
 	}
-	// Revoking is NOT gated on being human. An agent that notices a leaked link
-	// should be able to close it: rule 3 forbids WIDENING reach, and narrowing
-	// it is the opposite move. The owner gate still applies.
-	if !h.isPageOwner(r.Context(), wsID, user.ID, rec) && !canRole(RoleFromContext(r.Context()), "manage") {
-		h.refusePageAction(w, r, rec, "only the page owner or a workspace admin may revoke this page's public links", "")
+	// Revoking is NOT gated on being human: rule 3 forbids WIDENING reach, and
+	// narrowing it is the opposite move. It takes the publish authority, so a
+	// crew VIEWER or MEMBER cannot pull a manager's link, but anyone may revoke
+	// a link they created themselves.
+	if ok, err := h.mayRevokePublicLink(r, wsID, user.ID, rec, tokenID); err != nil {
+		replyInternalError(w, h.logger, "check public link authority", err)
+		return
+	} else if !ok {
+		h.refusePageAction(w, r, rec, "only the link's creator, the page's owner, a manager of its owning crew or a workspace admin may revoke this public link", "")
 		return
 	}
 
@@ -822,5 +847,67 @@ func (h *PageHandler) journalPublicLink(ctx context.Context, entryType journal.E
 	}); err != nil && h.logger != nil {
 		h.logger.Warn("pages: public link change was not journalled",
 			"page", rec.Slug, "type", string(entryType), "error", err)
+	}
+}
+
+// mayPublishPage is the publish gate. A workspace admin may publish anything
+// publishable. A user-owned page: its owner. A crew-owned page: a member of
+// the owning crew whose effective role there (workspace role or crew
+// override, whichever is higher) is MANAGER or above, or the holder of the
+// crew's explicit Manage grant. A crew VIEWER or MEMBER may read the page but never
+// put it on the internet.
+func (h *PageHandler) mayPublishPage(ctx context.Context, wsID, userID, role string, rec *pageRecord) (bool, error) {
+	if canRole(role, "manage") {
+		return true, nil
+	}
+	if rec.OwnerUserID != "" {
+		return rec.OwnerUserID == userID, nil
+	}
+	if rec.OwnerCrewID == "" {
+		return false, nil
+	}
+	// crewRoleIn falls back to the workspace role for a non-member, so crew
+	// membership is checked first: a workspace MANAGER outside the crew is
+	// not its manager.
+	if h.isPageOwner(ctx, wsID, userID, rec) {
+		crewRole, err := crewRoleIn(ctx, h.pageAuthReader(ctx), userID, rec.OwnerCrewID)
+		if err != nil {
+			return false, err
+		}
+		if canRole(crewRole, "create") {
+			return true, nil
+		}
+	}
+	// The crew's explicit Manage grant stands on its own (trusted, live
+	// holder, live crew), as it does for every other crew-manage action.
+	switch err := (access.Store{DB: h.db}).CrewManage(ctx, userID, wsID, rec.OwnerCrewID); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, access.ErrDenied):
+		return false, nil
+	default:
+		return false, err
+	}
+}
+
+// mayRevokePublicLink: the publish authority, or being the link's own
+// creator. Every caller of this route authenticates as a human session or CLI
+// token (RequireAuth), an agent included, so there is no separate agent gate:
+// header markers are not proof of anything and must never widen it.
+func (h *PageHandler) mayRevokePublicLink(r *http.Request, wsID, userID string, rec *pageRecord, tokenID string) (bool, error) {
+	ok, err := h.mayPublishPage(r.Context(), wsID, userID, RoleFromContext(r.Context()), rec)
+	if err != nil || ok {
+		return ok, err
+	}
+	var own int
+	switch err := h.db.QueryRowContext(r.Context(),
+		`SELECT 1 FROM page_public_tokens WHERE id = ? AND page_id = ? AND created_by_user_id = ?`,
+		tokenID, rec.ID, userID).Scan(&own); {
+	case err == nil:
+		return true, nil
+	case errors.Is(err, sql.ErrNoRows):
+		return false, nil
+	default:
+		return false, err
 	}
 }

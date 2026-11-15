@@ -7,6 +7,7 @@ package main
 //	--page <slug>         ask the server to attach a Page snapshot (page_context)
 //	--ask-form <form-id>  submit one of the agent's ask forms (ask_submission)
 //	--create-document     the composer's "Create document" intent
+//	--artifact <page>     attach an artifact reference (artifact_refs), run only
 //
 // Each is the CLI half of one composer behaviour and builds the SAME bytes the
 // browser sends, so the server's checks (the Page access re-check, the ask-form
@@ -20,9 +21,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -32,6 +35,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/crewship-ai/crewship/internal/askforms"
+	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/cli"
 	"github.com/crewship-ai/crewship/internal/documents"
 )
@@ -50,17 +54,30 @@ type runExtrasFlags struct {
 	askForm        string
 	askVars        []string
 	createDocument bool
+	// artifacts are the --artifact values as typed; artifactIDs are their page
+	// ids once resolveArtifactRefs has read each page.
+	artifacts   []string
+	artifactIDs []string
 }
 
+// maxRunArtifactRefs mirrors chatbridge's bound on one message's references.
+const maxRunArtifactRefs = 10
+
+// errRunArtifactUnavailable is the sentence the server answers a refused
+// reference with (chatbridge.ErrArtifactRefUnavailable). A page that cannot be
+// read at resolution gets the same words, so the CLI does not tell a missing
+// page from an unreadable one either.
+var errRunArtifactUnavailable = chatbridge.ErrArtifactRefUnavailable
+
 func (f runExtrasFlags) any() bool {
-	return len(f.attach) > 0 || f.page != "" || f.askForm != "" || f.createDocument
+	return len(f.attach) > 0 || f.page != "" || f.askForm != "" || f.createDocument || len(f.artifacts) > 0
 }
 
 // metadataFlags reports the flags that ride on the send's metadata rather
 // than in its text — the ones an interactive session cannot carry, because its
 // later turns are plain sends.
 func (f runExtrasFlags) metadataFlags() bool {
-	return f.page != "" || f.askForm != "" || f.createDocument
+	return f.page != "" || f.askForm != "" || f.createDocument || len(f.artifacts) > 0
 }
 
 func addRunExtrasFlags(cmd *cobra.Command, withAskForm, withCreate bool) {
@@ -75,6 +92,12 @@ func addRunExtrasFlags(cmd *cobra.Command, withAskForm, withCreate bool) {
 	}
 }
 
+// addRunArtifactFlag registers --artifact on `run` only: references are
+// admitted in the human's own chat, which `ask` does not offer.
+func addRunArtifactFlag(cmd *cobra.Command) {
+	cmd.Flags().StringArray("artifact", nil, "Attach an artifact (page slug, or @<page id>) as a reference the agent may read (repeatable, at most 10; needs the artifact_agent_access_modes flag)")
+}
+
 func readRunExtrasFlags(cmd *cobra.Command) runExtrasFlags {
 	var f runExtrasFlags
 	f.attach, _ = cmd.Flags().GetStringArray("attach")
@@ -87,6 +110,12 @@ func readRunExtrasFlags(cmd *cobra.Command) runExtrasFlags {
 	}
 	if cmd.Flags().Lookup("create-document") != nil {
 		f.createDocument, _ = cmd.Flags().GetBool("create-document")
+	}
+	if cmd.Flags().Lookup("artifact") != nil {
+		f.artifacts, _ = cmd.Flags().GetStringArray("artifact")
+		for i := range f.artifacts {
+			f.artifacts[i] = strings.TrimSpace(f.artifacts[i])
+		}
 	}
 	return f
 }
@@ -105,6 +134,11 @@ func (f runExtrasFlags) validate(prompt, existingChat string, interactive, docum
 	}
 	if len(f.page) > 128 || strings.ContainsAny(f.page, "\r\n\x00") {
 		return fmt.Errorf("--page must be one Page slug of at most 128 characters")
+	}
+	if len(f.artifacts) > 0 {
+		if err := f.validateArtifacts(interactive, documentTarget); err != nil {
+			return cli.WithExitCode(err, cli.ExitValidation)
+		}
 	}
 	if interactive && f.metadataFlags() {
 		return fmt.Errorf("--page, --ask-form and --create-document apply to one send and cannot be used with --interactive")
@@ -130,6 +164,76 @@ func (f runExtrasFlags) validate(prompt, existingChat string, interactive, docum
 		return fmt.Errorf("--document-target cannot be combined with --page, --ask-form or --create-document")
 	}
 	return nil
+}
+
+// validateArtifacts refuses what the server would refuse on a reference: more
+// than the bound, an empty or malformed value, and the turns that bind none
+// (page_context, Document create or update, an ask form, a session of several
+// sends). The page_context, Document and interactive refusals follow
+// chatbridge; refusing --ask-form is a deliberate conservative choice, stricter
+// than the bridge, not a mirror of it. The server stays the judge of access.
+func (f runExtrasFlags) validateArtifacts(interactive, documentTarget bool) error {
+	if len(f.artifacts) > maxRunArtifactRefs {
+		return fmt.Errorf("--artifact takes at most %d artifacts, got %d", maxRunArtifactRefs, len(f.artifacts))
+	}
+	for _, a := range f.artifacts {
+		if a == "" || len(a) > 128 || strings.ContainsAny(a, "\r\n\x00/") {
+			return fmt.Errorf("--artifact needs a page slug or @<page id> of at most 128 characters")
+		}
+	}
+	if f.page != "" || f.createDocument || f.askForm != "" || interactive || documentTarget {
+		return fmt.Errorf("--artifact cannot be combined with --page, --create-document, --ask-form, --document-target or --interactive: those turns do not bind attached artifacts")
+	}
+	return nil
+}
+
+// resolveArtifactRefs reads each page and keeps its id: a reference carries
+// the id, never the slug. A page that cannot be read answers with the
+// server's one refusal. Run before the chat is created, so a refusal leaves no
+// empty session behind.
+func (f *runExtrasFlags) resolveArtifactRefs(client *cli.Client) error {
+	f.artifactIDs = nil
+	seen := map[string]bool{}
+	for _, a := range f.artifacts {
+		resp, err := client.Get("/api/v1/pages/" + pagePathEscape(a))
+		if err != nil {
+			return err
+		}
+		err = func() error {
+			defer resp.Body.Close()
+			if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusForbidden {
+				return cli.WithExitCode(errRunArtifactUnavailable, cli.ExitNotFound)
+			}
+			if err := pageCheckError(resp); err != nil {
+				return err
+			}
+			var page struct {
+				ID string `json:"id" yaml:"id"`
+			}
+			if err := json.NewDecoder(resp.Body).Decode(&page); err != nil || page.ID == "" {
+				return cli.WithExitCode(errRunArtifactUnavailable, cli.ExitNotFound)
+			}
+			if !seen[page.ID] {
+				seen[page.ID] = true
+				f.artifactIDs = append(f.artifactIDs, page.ID)
+			}
+			return nil
+		}()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// artifactRefsMetadata is the exact shape chatbridge.requestedArtifactRefs
+// accepts: one object per reference holding page_id and nothing else.
+func artifactRefsMetadata(ids []string) []any {
+	refs := make([]any, 0, len(ids))
+	for _, id := range ids {
+		refs = append(refs, map[string]any{"page_id": id})
+	}
+	return refs
 }
 
 // prepareRunExtras uploads attachments, builds the send's metadata and returns
@@ -174,6 +278,9 @@ func prepareRunExtras(ctx context.Context, client *cli.Client, agentID, chatID, 
 			"submission_id": uuid.NewString(),
 			"drafting":      true,
 		}
+	}
+	if len(f.artifactIDs) > 0 {
+		metadata[chatbridge.ArtifactRefsMetadataKey] = artifactRefsMetadata(f.artifactIDs)
 	}
 	if len(metadata) > 0 {
 		runMessageExtras = metadata

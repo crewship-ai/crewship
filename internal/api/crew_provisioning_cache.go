@@ -14,7 +14,9 @@ import (
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/dockerutil"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
 
 // cacheArtifactReferences joins immutable IDs and legacy tag references. An
@@ -49,6 +51,10 @@ const imageListCacheTTL = 10 * time.Second
 // and small-team workspaces to provision everything in parallel, low enough
 
 const cacheImagePrefix = "crewship-cache:"
+
+// cacheDeleteGateBudget bounds the work a manual cache delete does while it
+// holds the image-use gate exclusively.
+const cacheDeleteGateBudget = 15 * time.Second
 
 // CacheImageInfo describes a cached devcontainer image for the CLI/UI.
 
@@ -223,11 +229,64 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	releaseImages, idle := resourcelifecycle.Images(h.db).TryCollect()
+	if !idle {
+		replyError(w, http.StatusConflict, "environment acquisition or restore is active; retry image deletion later")
+		return
+	}
+	defer releaseImages()
+	// The exclusive gate holds back crew create, update, onboarding and
+	// restore. Bound the daemon and database work done under it, so a wedged
+	// daemon costs this request, not every crew edit.
+	ctx, cancel := context.WithTimeout(r.Context(), cacheDeleteGateBudget)
+	defer cancel()
+	releaseArtifact, available := resourcelifecycle.Images(h.db).TryCollectImages(tag)
+	if !available {
+		replyError(w, http.StatusConflict, "this image is being acquired or built; retry deletion later")
+		return
+	}
+	defer releaseArtifact()
+	// Output tags and immutable base IDs are both acquisition keys.
+	inventory, inventoryErr := h.gcClient.ImageList(ctx, client.ImageListOptions{All: true})
+	if inventoryErr != nil {
+		replyInternalError(w, h.logger, "resolve image deletion target", inventoryErr)
+		return
+	}
+	var candidateID string
+	var candidateRefs []string
+	for _, img := range inventory.Items {
+		if slices.Contains(img.RepoTags, tag) {
+			candidateID = img.ID
+			seen := map[string]bool{tag: true, "": true}
+			for _, ref := range append([]string{img.ID, devcontainer.ImageAcquisitionRef(img.Labels)}, img.RepoTags...) {
+				if !seen[ref] {
+					candidateRefs = append(candidateRefs, ref)
+					seen[ref] = true
+				}
+			}
+			break
+		}
+	}
+	if candidateID != "" {
+		releaseID, available := resourcelifecycle.Images(h.db).TryCollectImages(candidateRefs...)
+		if !available {
+			replyError(w, http.StatusConflict, "this image is in use by a build; retry deletion later")
+			return
+		}
+		defer releaseID()
+	}
+
 	force := r.URL.Query().Get("force") == "true"
 	removeRef := tag
+	// A forced delete removes the named tag, as it always has. Forcing by
+	// image ID would drop every other alias of the artifact too, including
+	// a crewship-env/* tag a restore published.
+	if !force && dockerutil.IsLocalImageID(candidateID) {
+		removeRef = candidateID
+	}
 
 	if !force {
-		refs, err := h.referencedCacheImages(r.Context())
+		refs, err := h.referencedCacheImages(ctx)
 		if err != nil {
 			replyInternalError(w, h.logger, "query referenced cache images", err)
 			return
@@ -246,11 +305,8 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 			hasPinned = hasPinned || dockerutil.IsLocalImageID(ref)
 		}
 		if hasPinned {
-			images, err := h.gcClient.ImageList(r.Context(), client.ImageListOptions{})
-			if err != nil {
-				replyInternalError(w, h.logger, "resolve cached image identity", err)
-				return
-			}
+			images := inventory
+
 			found := false
 			for _, img := range images.Items {
 				if !slices.Contains(img.RepoTags, tag) {
@@ -280,7 +336,7 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 	// Use the narrow gcClient interface — same underlying *client.Client, but
 	// keeps the destructive surface aligned with the orphan sweeper for both
 	// readability and test parity.
-	_, err := h.gcClient.ImageRemove(r.Context(), removeRef, client.ImageRemoveOptions{Force: force, PruneChildren: true})
+	_, err := h.gcClient.ImageRemove(ctx, removeRef, client.ImageRemoveOptions{Force: force, PruneChildren: true})
 	if err != nil {
 		h.logger.Error("docker image remove", "tag", tag, "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to remove cached image")

@@ -687,6 +687,9 @@ func (h *InternalHandler) requireInternal(next http.Handler) http.Handler {
 			replyError(w, http.StatusForbidden, "Forbidden")
 			return
 		}
-		next.ServeHTTP(w, r)
+		// Mark the host-side master caller positively, so a handler can tell
+		// it from a crew or workspace token without inferring it from an
+		// absent binding (a unit test calling the handler directly has none).
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxInternalTokenMaster, true)))
 	})
 }

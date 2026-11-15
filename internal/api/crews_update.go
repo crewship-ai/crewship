@@ -9,6 +9,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"net/http"
 	"strings"
 
@@ -51,6 +52,9 @@ type updateCrewRequest struct {
 // GET /api/v1/crews
 
 func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
+	releaseImages := resourcelifecycle.Images(h.db).Use()
+	defer releaseImages()
+
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	role := RoleFromContext(r.Context())
 	crewID := r.PathValue("crewId")
@@ -144,6 +148,25 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 			replyDevcontainerSecurityError(w, verr)
 			return
 		}
+		// Store the same settled account as crew create (#5337): inject
+		// common-utils when it is absent, fill its missing account
+		// options, and refuse a declaration that would create the account
+		// under another name or UID. Without the injection, a re-apply of
+		// a bare-image manifest replaced the config create had injected
+		// and the next build ran UID 1001 without an account.
+		normalised, nerr := devcontainer.NormalizeAgentUserJSON(*req.DevcontainerConfig)
+		if nerr != nil {
+			replyError(w, http.StatusBadRequest, "invalid devcontainer_config: "+nerr.Error())
+			return
+		}
+		// The limit applies to what is stored: the injected account must
+		// not push a config past it, or sending the stored config back
+		// unchanged would be refused.
+		if len(normalised) > 102400 {
+			replyError(w, http.StatusBadRequest, "devcontainer_config exceeds 100KB limit")
+			return
+		}
+		req.DevcontainerConfig = &normalised
 	}
 	if req.MiseConfig != nil && *req.MiseConfig != "" {
 		if err := devcontainer.ValidateMiseConfigInput(*req.MiseConfig); err != nil {
@@ -448,6 +471,10 @@ func (h *CrewHandler) Update(w http.ResponseWriter, r *http.Request) {
 		// writing the configuration; a concurrent writer must not be lost.
 		where += " AND services_json IS ?"
 		whereArgs = append(whereArgs, previousServices)
+	}
+	if err := preserveConfiguredImageReferences(r.Context(), h.db, req.RuntimeImage, req.DevcontainerConfig, req.ServicesJSON); err != nil {
+		replyError(w, http.StatusServiceUnavailable, err.Error())
+		return
 	}
 	tx, currentRole := h.beginCrewManageMutation(w, r, crewID, "manage")
 	if tx == nil {

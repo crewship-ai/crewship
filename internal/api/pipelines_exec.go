@@ -432,7 +432,12 @@ func (h *PipelineHandler) Run(w http.ResponseWriter, r *http.Request) {
 			res, err = done.result, done.err
 		}
 	} else {
-		res, err = exec.Run(r.Context(), input)
+		var receipt *pipeline.RunResult
+		res, receipt, err = h.runSynchronously(r, exec, input)
+		if receipt != nil {
+			writeCostAwareJSON(w, r, http.StatusOK, receipt)
+			return
+		}
 	}
 	if err != nil {
 		// Concurrency rejection is a normal 429, not an internal
@@ -1299,6 +1304,7 @@ func (h *PipelineHandler) ApproveWaitpoint(w http.ResponseWriter, r *http.Reques
 	// approve/deny B's gated run.
 	workspaceID := WorkspaceIDFromContext(r.Context())
 	if err := wp.Decide(r.Context(), workspaceID, token, body.Approved, decider, payload); err != nil {
+		err = explainDecideError(r.Context(), wp, workspaceID, token, err)
 		replyWaitpointDecideError(w, h.logger, "waitpoint complete", token, err)
 		return
 	}
@@ -1374,7 +1380,9 @@ LIMIT 200`, workspaceID)
 		}
 		if form != "" {
 			row.DecisionForm = json.RawMessage(form)
-		} else {
+		} else if !pipeline.IsCrewshipApprovalStepKey(row.StepID) {
+			// A held routine action is decided by an OWNER or ADMIN only;
+			// its token's holder cannot complete it, so no callback is offered.
 			row.CallbackURL = base + "/api/v1/waitpoint-tokens/" + row.Token
 		}
 		out = append(out, row)

@@ -38,6 +38,7 @@ import "sort"
 var BackupTableIntent = map[string]ScopedTableIntent{
 	"artifact_storage_global":       IntentExcludeRuntime, // instance-wide capacity counters and limits, never portable
 	"instance_page_limits":          IntentExcludeRuntime, // instance-wide admin setting, never portable
+	"craft_application_settings":    IntentExcludeRuntime, // instance-wide Word/Sheet/agents switches (#5315), never portable
 	"artifact_storage_pages":        IntentExcludeRuntime, // derived Page/workspace accounting scope, not portable data
 	"artifact_storage_workspaces":   IntentExcludeRuntime, // derived target-local capacity accounting
 	"artifact_storage_reservations": IntentExcludeRuntime, // in-flight uploads never survive portable restore
@@ -52,6 +53,7 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"artifact_project_origins":         IntentInclude,
 	"artifact_project_run_consents":    IntentExcludeRuntime,
 	"artifact_project_message_intents": IntentExcludeRuntime,
+	"artifact_message_refs":            IntentExcludeRuntime, // checked chat references must be re-admitted after restore, never replayed
 
 	"artifact_version_heads": IntentInclude, // immutable storage family and separate latest/shared pins
 	"artifact_version_blobs": IntentInclude, // binary project assets, encoded losslessly
@@ -120,6 +122,10 @@ var BackupTableIntent = map[string]ScopedTableIntent{
 	"workspace_artifact_creation_policy":    IntentInclude,
 	"workspace_artifact_creation_crews":     IntentInclude,
 	"artifact_run_principals":               IntentExcludeRuntime, // active chat/run admission must be freshly captured after restore
+	"artifact_run_scope":                    IntentExcludeRuntime, // a run's bound references belong to its live admission
+	"artifact_run_access":                   IntentExcludeRuntime, // what a run created or read belongs to its live admission
+	"artifact_unattended_runs":              IntentExcludeRuntime, // a run without a human and its capability live only as long as the run
+	"artifact_unattended_run_access":        IntentExcludeRuntime, // what such a run read belongs to its live record
 	"restricted_workflow_recipe_bindings":   IntentExcludeRuntime, // frozen private recipe authority requires fresh admission after restore
 	"restricted_workflow_provider_policies": IntentExcludeRuntime, // immutable provider policies belong to private queued authority
 	"restricted_workflow_delegate_slots":    IntentExcludeRuntime, // active host delegation slots cannot survive restore

@@ -2,6 +2,9 @@ package pipeline
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -61,6 +64,28 @@ type CrewshipRequest struct {
 	// this verb creates belongs to the same chain, so a downstream automation
 	// resolves depth+1 rather than 0. See GuardChainDepth.
 	ChainDepth int
+	// StepID and ApprovalToken carry a human approval for exactly this
+	// call. When the crew's autonomy level holds the action for approval,
+	// the step parks on an approval waitpoint; once a person approves it the
+	// call is repeated with that waitpoint's token, and the dispatcher
+	// verifies the token is APPROVED and belongs to this run and step before
+	// proceeding. Nothing else can satisfy a held decision.
+	StepID        string
+	ApprovalToken string
+}
+
+// CrewshipApprovalRequired is returned by CrewshipActions.Do when the crew's
+// autonomy level holds the action for a human decision (inbox_approve) and
+// the request carries no approval for it. The executor turns it into an
+// approval waitpoint instead of a failure; rejected or blocked decisions
+// stay ordinary errors.
+type CrewshipApprovalRequired struct {
+	Verb, Action, Level, CrewID, Decision string
+}
+
+func (e *CrewshipApprovalRequired) Error() string {
+	return fmt.Sprintf("crewship %s: held for approval (autonomy_level=%s, action=%s, crew=%s, decision=%s)",
+		e.Verb, e.Level, e.Action, e.CrewID, e.Decision)
 }
 
 // crewshipVerb is one entry in the registry: what the verb is, where it goes,
@@ -392,3 +417,41 @@ func ValidateCrewshipArgs(stepID, action string, args map[string]any) error {
 	}
 	return nil
 }
+
+// CrewshipApprovalBinding identifies the one call an approval answers: the
+// operation key (run, foreach path and step) plus the verb and its rendered
+// arguments. An approval for one iteration or one set of arguments therefore
+// never satisfies another, and the dispatcher recomputes it from the request
+// it is about to execute rather than trusting the caller's word for it.
+// json.Marshal orders map keys, so the encoding is canonical.
+func CrewshipApprovalBinding(operationKey, verb string, args map[string]any) string {
+	raw, err := json.Marshal(args)
+	if err != nil {
+		raw = []byte(fmt.Sprintf("%v", args))
+	}
+	sum := sha256.Sum256([]byte(operationKey + "\x00" + verb + "\x00" + string(raw)))
+	return hex.EncodeToString(sum[:])
+}
+
+// CrewshipApprovalStepKey is the step_id an approval waitpoint for a held
+// crewship call is stored under: the step plus its binding, so a lookup by
+// step can only find the approval for this exact call.
+func CrewshipApprovalStepKey(stepID, binding string) string {
+	return stepID + crewshipApprovalMarker + binding
+}
+
+const crewshipApprovalMarker = "#approval:"
+
+// IsCrewshipApprovalStepKey reports whether a waitpoint step_id is a held
+// crewship action's approval (CrewshipApprovalStepKey). Such a waitpoint
+// stands in for the autonomy hold the agent path queues for an OWNER or
+// ADMIN, so only a person of that role may decide it — never the token's
+// external holder.
+func IsCrewshipApprovalStepKey(stepID string) bool {
+	return strings.Contains(stepID, crewshipApprovalMarker)
+}
+
+// HeldActionDeciderRoles are the workspace roles that may decide a held
+// crewship action's approval: the same tier as POST /approvals/{id}/decide,
+// which decides the agent path's autonomy holds.
+var HeldActionDeciderRoles = map[string]bool{"OWNER": true, "ADMIN": true}

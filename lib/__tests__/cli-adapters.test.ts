@@ -74,8 +74,8 @@ describe("CLI_ADAPTERS registry", () => {
     // — bare model IDs are rejected by the CLI. Pre-fix our list mixed bare
     // and namespaced; this test pins the canonical convention.
     const values = CLI_ADAPTERS.OPENCODE.models.map((m) => m.value)
-    expect(values).toContain("anthropic/claude-sonnet-4-6")
-    expect(values).toContain("openai/gpt-5.5")
+    expect(values).toContain("anthropic/claude-sonnet-5-5")
+    expect(values).toContain("openai/gpt-6.1-sol")
     expect(values).toContain("openai/o3")
     expect(values).toContain("google/gemini-2.5-pro")
   })
@@ -163,8 +163,8 @@ describe("getModelLabel", () => {
   })
 
   it("returns OpenCode 'provider/model' label", () => {
-    expect(getModelLabel("anthropic/claude-sonnet-4-6")).toBe("Anthropic / Claude Sonnet 4.6")
-    expect(getModelLabel("openai/gpt-5.5")).toBe("OpenAI / GPT-5.5")
+    expect(getModelLabel("anthropic/claude-sonnet-5-5")).toBe("Anthropic / Claude Sonnet 5.5")
+    expect(getModelLabel("openai/gpt-6.1-sol")).toBe("OpenAI / GPT-6.1 Sol")
   })
 
   it("returns input unchanged for unknown / custom models", () => {

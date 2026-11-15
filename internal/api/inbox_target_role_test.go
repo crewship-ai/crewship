@@ -71,6 +71,10 @@ func TestInboxTargetRoleMatchesDecider(t *testing.T) {
 			requiredTier: "roleCreate",
 		},
 		{
+			// A held crewship action's waitpoint is the exception, re-addressed
+			// to ADMIN in the same function because Decide (not the route)
+			// requires OWNER/ADMIN for it; TestDecide_HeldActionNeedsOwnerOrAdmin
+			// pins both the audience and the rule.
 			name:         "pipeline waitpoint",
 			writer:       "internal/pipeline/waitpoints.go",
 			targetRole:   "MANAGER",

@@ -11,6 +11,8 @@ export const EXIT = { pass: 0, failed: 1, setup: 2, partial: 3 }
 
 /** The 404 body of GET …/craft/document/versions while the craft_version_history flag is off. */
 export const HISTORY_NOT_ENABLED = "native version history is not enabled"
+/** The workspace flag behind the history listing (internal/api/craft_native_versions.go). */
+export const HISTORY_FLAG = "craft_version_history"
 
 export const SPEC_FILE = "native-walk.acceptance.ts"
 export const EVIDENCE_FILE = "walk.json"
@@ -93,7 +95,10 @@ const big = (v) => { try { return typeof v === "string" && /^\d+$/.test(v) ? Big
  * dropped reply, they run from the starting head +1 without a gap or a repeat, the
  * head after the final step and after its reload is the last receipt, nothing saved
  * after the proof, ctrl+s without a change keeps the version and the lost reply
- * makes exactly one.
+ * makes exactly one. An `unchanged` save answer names its base and is no receipt
+ * (#5075). A Sheet version the walk classified as only moving the active cell
+ * (`versions.cursorOnly`, sheet-versions.mjs) must be a receipt built on the one
+ * before it; the lost reply may be followed by such versions and nothing else.
  */
 export function versionProblems(evidence) {
   const v = evidence?.versions
@@ -114,7 +119,7 @@ export function versionProblems(evidence) {
   const ops = Array.isArray(evidence.ops) ? evidence.ops : null
   if (!ops) problems.push("evidence records no save ops")
   else if (receipts && !receipts.some((r) => r === null)) {
-    const fromOps = [...ops.filter((o) => o?.kind === "save" && o?.status === 200 && o?.version !== undefined && o?.version !== null).map((o) => String(o.version)), ...(Array.isArray(v.lostVersions) ? v.lostVersions.map(String) : [])]
+    const fromOps = [...ops.filter((o) => o?.kind === "save" && o?.status === 200 && o?.version !== undefined && o?.version !== null && o?.unchanged !== true).map((o) => String(o.version)), ...(Array.isArray(v.lostVersions) ? v.lostVersions.map(String) : [])]
       .sort((a, b) => (big(a) ?? -1n) < (big(b) ?? -1n) ? -1 : (big(a) ?? -1n) > (big(b) ?? -1n) ? 1 : 0)
     if (!sameVersions(fromOps, v.receipts)) problems.push(`the recorded saves ${fromOps.join(",")} are not the receipts ${v.receipts.join(",")}`)
   }
@@ -124,21 +129,48 @@ export function versionProblems(evidence) {
   const step = (name) => (Array.isArray(evidence.steps) ? evidence.steps.find((s) => s?.name === name) : undefined)
   const unchanged = step("ctrl+s without a change")
   if (unchanged && (big(unchanged.versionBefore) === null || unchanged.versionBefore !== unchanged.versionAfter)) problems.push(`ctrl+s without a change went from v${unchanged.versionBefore} to v${unchanged.versionAfter}`)
+  const cursorOnly = v.cursorOnly === undefined ? [] : v.cursorOnly
+  const moved = new Set()
+  if (!Array.isArray(cursorOnly)) problems.push(`cursor-only versions ${JSON.stringify(v.cursorOnly)} are not a list`)
+  else for (const c of cursorOnly) {
+    const cv = big(c?.version), cb = big(c?.base)
+    if (cv === null || cb === null || cv !== cb + 1n || !Array.isArray(v.receipts) || !v.receipts.includes(c.version)) problems.push(`cursor-only version ${JSON.stringify(c)} is not a receipt on the version before it`)
+    else moved.add(c.version)
+  }
   const lost = step("lost reply")
   const lb = big(lost?.versionBefore), la = big(lost?.versionAfter)
-  if (lost && (lb === null || la === null || la !== lb + 1n)) problems.push(`the lost reply went from v${lost.versionBefore} to v${lost.versionAfter}, not exactly one version`)
+  const onlyMovesAfter = (from, to) => { for (let x = from + 1n; x <= to; x++) if (!moved.has(String(x))) return false; return true }
+  if (lost && (lb === null || la === null || la <= lb || !onlyMovesAfter(lb + 1n, la))) problems.push(`the lost reply went from v${lost.versionBefore} to v${lost.versionAfter}, not exactly one version`)
+  return problems
+}
+
+/**
+ * The flags the walk turned on in its own QA workspace (--workspace-flag): each one
+ * requested must have answered 200 and read back as on; none other may be on.
+ */
+export function workspaceFlagProblems(evidence, requested = []) {
+  const recorded = Array.isArray(evidence?.workspaceFlags) ? evidence.workspaceFlags : []
+  const problems = []
+  for (const key of requested) {
+    const f = recorded.find((x) => x?.key === key)
+    if (!f) problems.push(`workspace flag ${key} was not turned on: the walk recorded no override`)
+    else if (f.status !== 200 || f.overrideEnabled !== true) problems.push(`workspace flag ${key} was not turned on: PUT override answered ${f.status}, override reads back ${JSON.stringify(f.overrideEnabled)}${f.error ? ` (${String(f.error).slice(0, 120)})` : ""}`)
+  }
+  for (const f of recorded) if (!requested.includes(f?.key)) problems.push(`workspace flag ${f?.key} turned on without --workspace-flag`)
   return problems
 }
 
 /**
  * The history listing: 200 must list exactly the observed versions; a 404 with
- * the flag-off message is NOT VERIFIED (the flag is not accepted and stays off);
- * anything else fails. Derived from the recorded status and body, not from the
- * spec's own label.
+ * the flag-off message is NOT VERIFIED (the flag is not accepted and stays off),
+ * unless the run turned the flag on in its workspace (`--workspace-flag
+ * craft_version_history`): then it fails. Anything else fails. Derived from the
+ * recorded status and body, not from the spec's own label.
  */
-export function historyCheck(evidence) {
+export function historyCheck(evidence, requested = []) {
   const h = evidence?.history
   if (!h || typeof h !== "object") return { problem: "no history record in the evidence" }
+  if (h.listingStatus === 404 && h.error === HISTORY_NOT_ENABLED && requested.includes(HISTORY_FLAG)) return { problem: `version history listing answered 404 "${HISTORY_NOT_ENABLED}" although --workspace-flag ${HISTORY_FLAG} turned it on in the workspace` }
   if (h.listingStatus === 404 && h.error === HISTORY_NOT_ENABLED) return { notVerified: `version history listing answered 404 "${HISTORY_NOT_ENABLED}" (flag craft_version_history off): the listing was not compared` }
   if (h.listingStatus !== 200) return { problem: `version history listing answered ${h.listingStatus}: ${String(h.error ?? "").slice(0, 160)}` }
   const v = evidence.versions ?? {}
@@ -149,7 +181,7 @@ export function historyCheck(evidence) {
 }
 
 /** Everything one walk's evidence must show. */
-export function checkEvidence(scenario, evidence, { rc, origin, chrome, runId }) {
+export function checkEvidence(scenario, evidence, { rc, origin, chrome, runId, workspaceFlags = [] }) {
   if (evidence === null || evidence === undefined) return { problems: [`no evidence file ${evidencePath(scenario)}`], notVerified: [] }
   if (evidence.unreadable) return { problems: [`unreadable evidence ${evidencePath(scenario)}: ${evidence.unreadable}`], notVerified: [] }
   const problems = []
@@ -184,7 +216,8 @@ export function checkEvidence(scenario, evidence, { rc, origin, chrome, runId })
     if (s?.verifyPresses !== 0) problems.push(`step "${s?.name}": "Check the result" pressed ${JSON.stringify(s?.verifyPresses)} times`)
   }
   problems.push(...versionProblems(evidence))
-  const history = historyCheck(evidence)
+  problems.push(...workspaceFlagProblems(evidence, workspaceFlags))
+  const history = historyCheck(evidence, workspaceFlags)
   if (history.problem) problems.push(history.problem)
   return { problems, notVerified: history.notVerified ? [history.notVerified] : [] }
 }
@@ -194,11 +227,11 @@ export function checkEvidence(scenario, evidence, { rc, origin, chrome, runId })
  *   playwrightStatus: number | null, listed: string[], rows: Array<Record<string, any>>,
  *   run: Record<string, any> | null, finished: Record<string, any> | null, reporter: Record<string, any> | null,
  *   rc: string, origin: string, chrome?: string, runId: string, narrowed: boolean,
- *   evidence: Record<string, any>,
+ *   evidence: Record<string, any>, workspaceFlags?: string[],
  * }} input
  * @returns {{ exit: number, verdict: "PASS" | "FAIL" | "SETUP" | "PARTIAL", reasons: string[], notVerified: { id: string, item: string }[], expected: string[] }}
  */
-export function verdict({ playwrightStatus, listed, rows, run, finished, reporter, rc, origin, chrome, runId, narrowed, evidence }) {
+export function verdict({ playwrightStatus, listed, rows, run, finished, reporter, rc, origin, chrome, runId, narrowed, evidence, workspaceFlags = [] }) {
   const setup = [], failed = [], notVerified = []
   if (!/^[0-9a-f]{40}$/.test(String(rc ?? ""))) setup.push(`--rc ${JSON.stringify(rc)} is not a full 40-character SHA`)
   if (!runId) setup.push("no run id")
@@ -253,7 +286,7 @@ export function verdict({ playwrightStatus, listed, rows, run, finished, reporte
       if (r.mode !== "full") failed.push(`${s.id}: row mode ${r.mode}, need full`)
       if (!runId || r.runId !== runId) failed.push(`${s.id}: row is of run ${r.runId}, not ${runId}`)
     }
-    const e = checkEvidence(s, evidence?.[s.id], { rc, origin, chrome, runId })
+    const e = checkEvidence(s, evidence?.[s.id], { rc, origin, chrome, runId, workspaceFlags })
     failed.push(...e.problems.map((p) => `${s.id}: ${p}`))
     notVerified.push(...e.notVerified.map((item) => ({ id: s.id, item })))
   }

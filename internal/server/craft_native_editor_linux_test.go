@@ -18,7 +18,7 @@ import (
 func TestNativeOnlyEditorServesQualifiedBundleWithoutEnablingC1(t *testing.T) {
 	cfg, bundle := nativeEditorConfigFixture(t)
 	cfg.CraftNative.Enabled = false
-	if newEditorOrigin(cfg, slog.Default()) != nil {
+	if newEditorOrigin(cfg, nil, slog.Default()) != nil {
 		t.Fatal("native off enabled assets")
 	}
 	cfg.CraftNative.Enabled = true
@@ -108,11 +108,11 @@ func TestNativeDedicatedEditorModuleAndWASMShareLegacyMountAndRejectCredentials(
 	profile.EditorBundle = nativePin
 	profile.EditorURL = cfg.GridCraft.EditorOrigin + "/b/" + nativePin + "/index.html"
 	cfg.CraftNative.Profiles["wordcraft"] = profile
-	editor := newEditorOrigin(cfg, slog.Default())
+	editor := newEditorOrigin(cfg, nil, slog.Default())
 	if editor == nil || !editor.HasBundle(nativePin) || !editor.HasBundle(legacyPin) {
 		t.Fatal("native dedicated union dropped a qualified native or existing legacy bundle")
 	}
-	if _, err := nativeCraftHTTPConfig(cfg, editor); err != nil {
+	if _, err := nativeCraftHTTPConfig(cfg, nil, editor); err != nil {
 		t.Fatal(err)
 	}
 	server := New(cfg, slog.Default(), &Deps{DB: openTestDB(t)})
@@ -151,7 +151,7 @@ func TestNativeDedicatedEditorModuleAndWASMShareLegacyMountAndRejectCredentials(
 	}
 	// The native additional credential gate must not consume ordinary Studio paths
 	// that happen to have the dedicated bundle spelling.
-	pass := nativeCraftCredentialGate(cfg, editor, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) }))
+	pass := nativeCraftCredentialGate(cfg, nil, editor, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) }))
 	req := httptest.NewRequest("GET", "https://studio.example.test/b/"+nativePin+"/native.js", nil)
 	req.Header.Set("Authorization", "ordinary-studio-auth")
 	out := httptest.NewRecorder()

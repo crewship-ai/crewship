@@ -164,7 +164,7 @@ func decodeArtifactProjectToolJSON(w http.ResponseWriter, r *http.Request, targe
 
 func (h *PageHandler) ArtifactProjectTool(w http.ResponseWriter, r *http.Request) {
 	artifactCommentHeaders(w)
-	checked, ok := h.artifactAgentRequest(w, r)
+	checked, ok := h.artifactAgentRequestMode(w, r, true)
 	if !ok {
 		return
 	}
@@ -176,10 +176,27 @@ func (h *PageHandler) ArtifactProjectTool(w http.ResponseWriter, r *http.Request
 	// Reject missing, revoked or expired consent before looking up any requested
 	// Page. This is a uniform run-level denial, independent of slug existence.
 	run, _ := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
-	bound, err := h.artifactProjectRunPage(r.Context(), run)
-	if err != nil || h.checkArtifactProjectRunConsent(r.Context(), run, bound.String) != nil {
-		replyError(w, http.StatusForbidden, "current exact-run artifact permission required")
-		return
+	scoped := h.artifactRunModesRun(r.Context()) != nil
+	unattended := run != nil && run.Unattended
+	if unattended {
+		// A run without a human (#5339): the host-recorded run is the gate.
+		if !scoped || h.checkUnattendedArtifactRun(r.Context(), run) != nil {
+			replyError(w, http.StatusForbidden, "current artifact run authority required")
+			return
+		}
+	} else if scoped {
+		// Flag on (#5317): the run's scope replaces the exact-run consent. Each
+		// operation then checks the artifact itself, in its own transaction.
+		if h.checkScopedArtifactRun(r.Context(), run, "pages:read") != nil {
+			replyError(w, http.StatusForbidden, "current artifact run authority required")
+			return
+		}
+	} else {
+		bound, err := h.artifactProjectRunPage(r.Context(), run)
+		if err != nil || h.checkArtifactProjectRunConsent(r.Context(), run, bound.String) != nil {
+			replyError(w, http.StatusForbidden, "current exact-run artifact permission required")
+			return
+		}
 	}
 	var body struct {
 		Operation string          `json:"operation"`
@@ -222,7 +239,17 @@ func (h *PageHandler) ArtifactProjectTool(w http.ResponseWriter, r *http.Request
 		return
 	}
 	a, _ := r.Context().Value(artifactRunKey{}).(*artifactRunAuthority)
-	if h.checkOriginalUserArtifactRunPrincipal(r.Context(), a) != nil || !h.artifactAgentPolicyAllows(r.Context(), a.WorkspaceID, a.CrewID) {
+	policyAllows := h.artifactAgentPolicyAllows
+	if scoped {
+		policyAllows = h.artifactScopedPolicyAllows
+	}
+	if unattended {
+		// Only reading and publishing; checked before any slug is looked up.
+		if !unattendedArtifactOperations[body.Operation] || h.checkUnattendedArtifactRun(r.Context(), a) != nil {
+			replyError(w, 403, "current artifact run authority required")
+			return
+		}
+	} else if h.checkOriginalUserArtifactRunPrincipal(r.Context(), a) != nil || !policyAllows(r.Context(), a.WorkspaceID, a.CrewID) {
 		replyError(w, 403, "current artifact run authority required")
 		return
 	}

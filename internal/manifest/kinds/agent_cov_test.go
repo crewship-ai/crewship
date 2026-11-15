@@ -158,9 +158,9 @@ func TestAgentCov_ListSkillSlugsAndCredentialEnvNames(t *testing.T) {
 
 	t.Run("credential env names success sorted", func(t *testing.T) {
 		c := newCovClient(map[string]covRoute{"GET " + credsPath: {body: `[
-			{"env_var_name":"Z_KEY"},
-			{"env_var_name":"A_KEY"},
-			{"env_var_name":""}
+			{"id":"ac-z","env_var_name":"Z_KEY"},
+			{"id":"ac-a","env_var_name":"A_KEY"},
+			{"id":"ac-e","env_var_name":""}
 		]`}})
 		out, err := agentListCredentialEnvNames(context.Background(), c, "a1")
 		if err != nil || len(out) != 2 || out[0] != "A_KEY" || out[1] != "Z_KEY" {
@@ -488,7 +488,7 @@ func TestAgentCov_ExportAgents(t *testing.T) {
 			}]`},
 			"GET /api/v1/crews":                 {body: `[{"id":"c1","slug":"alpha"}]`},
 			"GET /api/v1/agents/a1/skills":      {body: `[{"skill":{"slug":"research"}}]`},
-			"GET /api/v1/agents/a1/credentials": {body: `[{"env_var_name":"API_KEY"}]`},
+			"GET /api/v1/agents/a1/credentials": {body: `[{"id":"ac-1","env_var_name":"API_KEY"},{"id":"","env_var_name":"CREW_ONLY","grant_source":"crew"}]`},
 		})
 		docs, err := ExportAgents(context.Background(), c)
 		if err != nil || len(docs) != 1 {

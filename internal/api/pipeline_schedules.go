@@ -11,6 +11,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifactrun"
+	"github.com/crewship-ai/crewship/internal/auth"
+	"github.com/crewship-ai/crewship/internal/featureflags"
 	"github.com/crewship-ai/crewship/internal/inbox"
 	"github.com/crewship-ai/crewship/internal/pipeline"
 	"github.com/crewship-ai/crewship/internal/runauthority"
@@ -83,9 +86,100 @@ type scheduleResponse struct {
 	// one thing that tells an operator THIS `enabled: false` needs a
 	// `.../activate` call, not `schedules enable`. Omitted for every
 	// ordinary schedule.
-	Activation string    `json:"activation,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	Activation string `json:"activation,omitempty"`
+	// CreatorKind is "human" or "agent": who created or last saved the
+	// schedule (#5339); omitted when unknown (saved before it was
+	// recorded). CreatorUserID is that person's id for "human".
+	CreatorKind   string `json:"creator_kind,omitempty"`
+	CreatorUserID string `json:"creator_user_id,omitempty"`
+	// ArtifactAccess says whether the schedule's fires may reach their
+	// agents' standing artifacts (#5339, owner decision for #5356): "active"
+	// or "stopped", with StoppedReason. Omitted with the flag off. The
+	// person-standing reasons are shown only to the creator and to workspace
+	// OWNER/ADMIN; others see creator_not_in_good_standing.
+	ArtifactAccess string    `json:"artifact_access,omitempty"`
+	StoppedReason  string    `json:"stopped_reason,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
+}
+
+// scheduleContentKeys are the PATCH fields that change what a schedule runs.
+var scheduleContentKeys = []string{"cron_expr", "timezone", "inputs", "target_pipeline_id", "target_pipeline_slug", "target_pipeline_version", "wake_pipeline_id", "wake_pipeline_slug", "wake_inputs", "wake_fail_closed"}
+
+// scheduleContentMentioned reports whether a PATCH body names any field that
+// changes what the schedule runs, in any letter case: json.Unmarshal fills
+// the request struct without regard to case, so the check must too.
+func scheduleContentMentioned(rawKeys map[string]json.RawMessage) bool {
+	for key := range rawKeys {
+		for _, k := range scheduleContentKeys {
+			if strings.EqualFold(key, k) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// scheduleContentChanged reports whether the schedule a PATCH writes runs
+// anything different from the stored one: cron, timezone, target, pin,
+// inputs or wake gate. It judges the effective result, so no spelling of a
+// key can change content without the creator following.
+func scheduleContentChanged(existing *pipeline.Schedule, in pipeline.SaveScheduleInput) bool {
+	pin := func(v *int) int {
+		if v == nil {
+			return -1
+		}
+		return *v
+	}
+	return in.CronExpr != existing.CronExpr ||
+		in.Timezone != existing.Timezone ||
+		in.TargetPipelineID != existing.TargetPipelineID ||
+		pin(in.TargetPipelineVersion) != pin(existing.TargetPipelineVersion) ||
+		in.WakePipelineID != existing.WakePipelineID ||
+		in.WakeFailClosed != existing.WakeFailClosed ||
+		canonicalScheduleInputs(in.Inputs) != canonicalStoredInputs(existing.InputsJSON) ||
+		canonicalScheduleInputs(in.WakeInputs) != canonicalStoredInputs(existing.WakeInputsJSON)
+}
+
+// canonicalScheduleInputs is a stable spelling of an inputs object; empty
+// and absent are the same.
+func canonicalScheduleInputs(m map[string]any) string {
+	if len(m) == 0 {
+		return "{}"
+	}
+	b, err := json.Marshal(m) // map keys are sorted
+	if err != nil {
+		return "\x00unencodable"
+	}
+	return string(b)
+}
+
+func canonicalStoredInputs(raw string) string {
+	if raw == "" {
+		return "{}"
+	}
+	var m map[string]any
+	if err := json.Unmarshal([]byte(raw), &m); err != nil {
+		return raw
+	}
+	return canonicalScheduleInputs(m)
+}
+
+// scheduleCreatorFromRequest names who is saving a schedule (#5339). Only a
+// request authenticated by a person's own session or CLI token, through the
+// public API, counts as that person: the original credential captured by
+// the auth middleware must name the same user, and no internal (crew or
+// workspace) token may be on the request. Everything else, including an
+// internal route that propagated X-Caller-User-Id, is an agent.
+func scheduleCreatorFromRequest(r *http.Request) (kind, userID string) {
+	ctx := r.Context()
+	user := UserFromContext(ctx)
+	original := auth.OriginalCredentialFromContext(ctx)
+	if user == nil || user.ID == "" || original == nil || original.UserID != user.ID || (user.SessionID == "" && user.TokenID == "") ||
+		InternalTokenWorkspaceFromContext(ctx) != "" || InternalTokenCrewFromContext(ctx) != "" {
+		return pipeline.ScheduleCreatorAgent, ""
+	}
+	return pipeline.ScheduleCreatorHuman, user.ID
 }
 
 // nominalNextRun is the unshifted cron occurrence, reported only when a spread
@@ -150,6 +244,8 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		MaxConsecutiveFailures: s.MaxConsecutiveFailures,
 		DisabledReason:         s.DisabledReason,
 		Activation:             s.Activation,
+		CreatorKind:            s.CreatorKind,
+		CreatorUserID:          s.CreatorUserID,
 		CreatedAt:              s.CreatedAt,
 		UpdatedAt:              s.UpdatedAt,
 	}
@@ -394,6 +490,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		SpreadSeconds:          derefInt(body.SpreadSeconds),
 		MaxConsecutiveFailures: maxFailures,
 	}
+	in.CreatorKind, in.CreatorUserID = scheduleCreatorFromRequest(r)
 	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		// Cron parse / timezone errors come back as plain errors —
@@ -407,7 +504,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "failed to create schedule")
 		return
 	}
-	writeJSON(w, http.StatusCreated, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug)))
+	writeJSON(w, http.StatusCreated, h.withOneArtifactAccess(r, saved, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug))))
 }
 
 // wakeRefFromBody collapses the wake_pipeline_slug / wake_pipeline_id
@@ -456,6 +553,7 @@ func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusInternalServerError, "failed to load schedule routines")
 		return
 	}
+	access := h.scheduleAccess(r.Context(), workspaceID)
 	for _, s := range rows {
 		target := projections[s.TargetPipelineID]
 		wake := projections[s.WakePipelineID]
@@ -464,7 +562,7 @@ func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 			version := target.HeadVersion
 			row.EffectiveVersion = &version
 		}
-		out = append(out, row)
+		out = append(out, h.withArtifactAccess(r, access, s, target.AuthorAgentID, row))
 	}
 	setRoutineListNextOffset(w, offset, limit, len(rows))
 	writeJSON(w, http.StatusOK, out)
@@ -520,6 +618,69 @@ func (h *PipelineHandler) applyEffectiveVersions(ctx context.Context, rows []sch
 			rows[i].EffectiveVersion = &v
 		}
 	}
+}
+
+// Seams for the per-request read counts (tests only).
+var (
+	scheduleArtifactFlag = featureflags.IsEnabledWith
+	newScheduleAccess    = func(q pipeline.RowQuerier, workspaceID string) *pipeline.ScheduleAccess {
+		return pipeline.NewScheduleAccess(q, workspaceID)
+	}
+)
+
+// scheduleAccess is the check for one response's schedules, nil with the
+// flag off (or unreadable): then no artifact state is shown.
+func (h *PipelineHandler) scheduleAccess(ctx context.Context, workspaceID string) *pipeline.ScheduleAccess {
+	if on, err := scheduleArtifactFlag(ctx, h.db, workspaceID, artifactrun.FlagKey); err != nil || !on {
+		return nil
+	}
+	return newScheduleAccess(h.db, workspaceID)
+}
+
+// withOneArtifactAccess is withArtifactAccess for a single-row response
+// (create / update / activate).
+func (h *PipelineHandler) withOneArtifactAccess(r *http.Request, s *pipeline.Schedule, row scheduleResponse) scheduleResponse {
+	access := h.scheduleAccess(r.Context(), s.WorkspaceID)
+	if access == nil {
+		return row
+	}
+	projections, err := loadRoutineProjections(r.Context(), h.db, s.WorkspaceID, []string{s.TargetPipelineID})
+	if err != nil {
+		h.logger.Warn("schedule artifact access routine", "schedule", s.ID, "error", err)
+		return row
+	}
+	return h.withArtifactAccess(r, access, s, projections[s.TargetPipelineID].AuthorAgentID, row)
+}
+
+// withArtifactAccess fills whether the schedule's fires reach artifacts now
+// (#5339, owner decision for #5356), from the same check every fire runs
+// (pipeline.ScheduleAccess.Stopped, with the routine's agent author). A nil
+// access (flag off), or the check failing, leaves both fields empty. A
+// person-standing reason is shown only to the creator and to workspace
+// OWNER/ADMIN.
+func (h *PipelineHandler) withArtifactAccess(r *http.Request, access *pipeline.ScheduleAccess, s *pipeline.Schedule, routineAuthorAgentID string, row scheduleResponse) scheduleResponse {
+	if access == nil {
+		return row
+	}
+	ctx := r.Context()
+	reason, err := access.Stopped(ctx, pipeline.CreatorOf(s), routineAuthorAgentID)
+	if err != nil {
+		h.logger.Warn("schedule artifact access state", "schedule", s.ID, "error", err)
+		return row
+	}
+	if reason == "" {
+		row.ArtifactAccess = "active"
+		return row
+	}
+	row.ArtifactAccess, row.StoppedReason = "stopped", reason
+	if pipeline.ScheduleStoppedIsPersonal(reason) {
+		viewer := UserFromContext(ctx)
+		role := RoleFromContext(ctx)
+		if (viewer == nil || viewer.ID != s.CreatorUserID) && role != "OWNER" && role != "ADMIN" {
+			row.StoppedReason = pipeline.ScheduleStoppedNotInGoodStanding
+		}
+	}
+	return row
 }
 
 // withEffectiveVersion is applyEffectiveVersions for a single-row response
@@ -730,6 +891,17 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		SpreadSeconds:          spreadSeconds,
 		MaxConsecutiveFailures: maxFailures,
 	}
+	// #5339: only a save that sets what the schedule runs (its timing, its
+	// target or pin, its inputs, its wake gate), by naming such a field in
+	// any letter case or by changing it in effect, names who vouches for it.
+	// Enable, disable, rename and spread/catch-up/breaker tweaks keep the
+	// stored creator, so an admin re-enabling an agent's schedule does not
+	// silently vouch for it.
+	if scheduleContentMentioned(rawKeys) || scheduleContentChanged(existing, in) {
+		in.CreatorKind, in.CreatorUserID = scheduleCreatorFromRequest(r)
+	} else {
+		in.KeepCreator = true
+	}
 	saved, err := h.schedules.SaveValidated(r.Context(), in)
 	if err != nil {
 		if isUserScheduleError(err) {
@@ -740,7 +912,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "failed to update schedule")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug)))
+	writeJSON(w, http.StatusOK, h.withOneArtifactAccess(r, saved, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug))))
 }
 
 // DeleteSchedule DELETE /workspaces/{wsId}/pipeline-schedules/{scheduleId}
@@ -861,7 +1033,7 @@ func (h *PipelineHandler) ActivateSchedule(w http.ResponseWriter, r *http.Reques
 	if p, perr := h.store.GetByID(r.Context(), activated.TargetPipelineID); perr == nil {
 		slug = p.Slug
 	}
-	writeJSON(w, http.StatusOK, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(activated, slug, "")))
+	writeJSON(w, http.StatusOK, h.withOneArtifactAccess(r, activated, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(activated, slug, ""))))
 }
 
 // schedulePreviewMaxCount caps how many fire times a single preview call
@@ -1088,6 +1260,10 @@ func (h *PipelineHandler) RunSchedule(w http.ResponseWriter, r *http.Request) {
 		Mode:          pipeline.ModeRun,
 		TriggeredVia:  pipeline.TriggeredViaSchedule,
 		TriggeredByID: sched.ID,
+		// #5339: "run now" follows the schedule's own rule. Its steps reach
+		// artifacts only when the schedule's creator is a person still in
+		// good standing; the person pressing run now lends nothing.
+		ArtifactScheduleID: sched.ID,
 	})
 	if err != nil {
 		if writeRoutineOriginError(w, err) {

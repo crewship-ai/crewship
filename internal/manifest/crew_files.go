@@ -1,6 +1,7 @@
 package manifest
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
@@ -58,7 +59,7 @@ func (v *validator) checkFiles(scope string, files []CrewFile) {
 // crewID is empty and the closure resolves it by slug at apply time, exactly
 // like the other crew children.
 func (pb *planBuilder) planCrewFiles(ctx context.Context, crewSlug, crewID string, files []CrewFile) error {
-	pb.warnIfCrewStopped(ctx, crewSlug, crewID, len(files))
+	toWrite := 0
 	for i := range files {
 		f := files[i]
 		dest, err := normalizeCrewFileDest(f.Src, f.Dest)
@@ -67,13 +68,20 @@ func (pb *planBuilder) planCrewFiles(ctx context.Context, crewSlug, crewID strin
 		}
 		// Plan-time existence + size check: a missing or oversized local
 		// file fails the plan (and --dry-run) instead of mid-apply.
-		if _, err := loadCrewFile(pb.opts.BaseDir, f.Src); err != nil {
+		local, err := loadCrewFile(pb.opts.BaseDir, f.Src)
+		if err != nil {
 			return fmt.Errorf("crew %q files[%d]: %w", crewSlug, i, err)
 		}
 		action := ActionUpdate
 		if crewID == "" {
 			action = ActionCreate
+		} else if pb.crewFileUnchanged(ctx, crewID, dest, local) {
+			// The crew already holds these exact bytes: nothing to write,
+			// so a steady-state apply converges to "no changes".
+			pb.appendItem(ActionUnchanged, "crew-file", crewSlug+"/"+dest, nil)
+			continue
 		}
+		toWrite++
 		src := f.Src
 		id := crewID
 		pb.appendItem(action, "crew-file", crewSlug+"/"+dest,
@@ -93,7 +101,23 @@ func (pb *planBuilder) planCrewFiles(ctx context.Context, crewSlug, crewID strin
 				return client.SaveCrewFile(ctx, cid, dest, data)
 			})
 	}
+	pb.warnIfCrewStopped(ctx, crewSlug, crewID, toWrite)
 	return nil
+}
+
+// crewFileUnchanged reports whether the crew's copy of dest is byte-identical
+// to local. Anything short of a confirmed match (a missing file, a stopped
+// crew, an older server, a transport error) answers false, so the plan keeps
+// the write.
+func (pb *planBuilder) crewFileUnchanged(ctx context.Context, crewID, dest string, local []byte) bool {
+	read := pb.crewFileContentFn
+	if read == nil {
+		read = func(id, path string) ([]byte, bool) {
+			return pb.client.CrewFileContent(ctx, id, path)
+		}
+	}
+	remote, ok := read(crewID, dest)
+	return ok && bytes.Equal(remote, local)
 }
 
 // warnIfCrewStopped adds a plan-time advisory when the manifest ships

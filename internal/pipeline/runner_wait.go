@@ -165,6 +165,7 @@ func (e *Executor) runWaitStep(ctx context.Context, step Step, parentRender Rend
 			}
 		}
 
+		e.signalHumanWait(ctx, in, runID, step.ID, token)
 		approved, err := e.waitpoints.WaitFor(ctx, token)
 		// Blocking run died mid-wait (#1426, 3.2): the run's ctx was cancelled
 		// rather than the waitpoint resolving. Flip the waitpoint to cancelled

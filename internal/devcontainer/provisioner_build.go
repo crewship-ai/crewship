@@ -170,6 +170,12 @@ func (p *Provisioner) ProvisionByBuild(ctx context.Context, baseImage string, cf
 }
 
 func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cfg *Config, miseConfig string, o *provisionOpts, runStart time.Time) (*ProvisionResult, error) {
+	if o.acquireImage != nil {
+		if err := o.acquireImage(ctx, baseImage); err != nil {
+			return nil, err
+		}
+	}
+
 	emitEvt := func(ev ProvisionEvent) { emitProvision(o.onProvision, ev) }
 	fail := func(step string, err error) (*ProvisionResult, error) {
 		emitEvt(ProvisionEvent{Step: ProvStepFailed, Status: ProvStatusFailed, Detail: step, Error: err.Error()})
@@ -189,7 +195,12 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	// the same cache lookup and a machine that later gains Docker does not
 	// rebuild what it already has.
 	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg)+requiredBinariesHashSalt(o.requiredBinaries))
-	tag := cacheImageTag(hash)
+	tag := p.cacheTag(hash)
+	if o.acquireImage != nil {
+		if err := o.acquireImage(ctx, tag); err != nil {
+			return fail(ProvStepStart, err)
+		}
+	}
 
 	// Same per-tag serialisation as the commit path (#4816).
 	unlockTag, err := p.lockCacheTag(ctx, tag)
@@ -224,6 +235,11 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 			}, nil
 		}
 	}
+	// From here on the build pulls and writes image data.
+	if err := p.checkBuildPreflight(ctx); err != nil {
+		return fail(ProvStepStoragePreflight, err)
+	}
+
 	// The plan and the per-step progress are what drive the Builder popover's
 	// checklist and the CLI's live output. The commit path emits both; this one
 	// emitted neither, so a macOS user clicking Build watched an empty popover
@@ -275,7 +291,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	// The image ENV carries the aggregated env — the operator's containerEnv
 	// plus the agent tool PATH and MISE_* variables (ensureAgentToolPath) —
 	// so the image is usable on its own, not only through the runtime env.
-	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, requirements.ContainerEnv, rec.steps(), tag)
+	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, requirements.ContainerEnv, rec.steps(), imageBuildLabels(p.instanceID, ImageKindCrew, hash), tag)
 	if err != nil {
 		return fail(ProvStepImageBuildStart, err)
 	}
@@ -364,8 +380,20 @@ func (p *Provisioner) recordProvisionSteps(
 		return fmt.Errorf("agent home: %w", err)
 	}
 	if miseConfig != "" {
-		if err := p.installMise(ctx, noContainer, miseConfig, rec.exec); err != nil {
+		tools, err := ParseMiseConfig(miseConfig)
+		if err != nil {
 			return fmt.Errorf("mise provisioning: %w", err)
+		}
+		if err := tools.Validate(); err != nil {
+			return fmt.Errorf("mise provisioning: %w", err)
+		}
+		if err := p.installMiseConfig(ctx, noContainer, tools, rec.exec); err != nil {
+			return fmt.Errorf("mise provisioning: %w", err)
+		}
+		if !tools.IsEmpty() {
+			if err := p.cleanupMiseBuildCache(ctx, noContainer, rec.exec, containerEnv); err != nil {
+				return fmt.Errorf("mise cache cleanup: %w", err)
+			}
 		}
 	}
 	if err := p.runFeatureLifecycleCommands(ctx, noContainer, features, rec.exec); err != nil {
@@ -385,7 +413,7 @@ func (p *Provisioner) recordProvisionSteps(
 	if err := writeToolchainInventory(ctx, noContainer, requiredBinaries, containerEnv, rec.exec); err != nil {
 		return err
 	}
-	if err := p.cleanupCaches(ctx, noContainer, rec.exec); err != nil {
+	if err := p.cleanupCaches(ctx, noContainer, rec.exec, containerEnv); err != nil {
 		return fmt.Errorf("cache cleanup: %w", err)
 	}
 	return nil
@@ -399,6 +427,7 @@ func stageBuildContextWithSteps(
 	optionsByRef map[string]map[string]any,
 	rootEnv map[string]string,
 	extraSteps []string,
+	labels map[string]string,
 	tag string,
 ) (string, error) {
 	dockerfile, err := GenerateDockerfile(DockerfileBuild{
@@ -407,6 +436,7 @@ func stageBuildContextWithSteps(
 		OptionsByRef: optionsByRef,
 		RootEnv:      rootEnv,
 		ExtraSteps:   extraSteps,
+		Labels:       labels,
 		// Directory COPY is broken on Apple's builder — see the field comment.
 		FeatureArchives: true,
 	})

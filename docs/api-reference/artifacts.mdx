@@ -258,7 +258,7 @@ documented in [`crewship craft`](/cli/craft).
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/api/v1/pages/{slug}/craft/availability` | Whether Craft, preview and agents are available for this artifact |
+| GET | `/api/v1/pages/{slug}/craft/availability` | Whether Craft, preview and agents are available for this artifact; `can_edit` is false and `edit_refusal` says `app_draining` or `app_disabled` while an administrator has its application off |
 | POST | `/api/v1/pages/{slug}/craft/sessions` | Open an editing session |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Refresh the session's credential |
 | GET | `/api/v1/pages/{slug}/craft/events` | Server-sent heartbeat that keeps the lease alive |

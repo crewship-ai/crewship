@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/craftapps"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/mooring"
 	"github.com/crewship-ai/crewship/internal/tsformat"
@@ -61,7 +62,7 @@ func (d *craftNativeDocumentsHTTP) preview(w http.ResponseWriter, r *http.Reques
 		craftNativeHTTPError(w, err)
 		return
 	}
-	profile, ok := d.applications[proof.application]
+	profile, ok := d.application(proof.application)
 	if !ok || profile.Store.Application != proof.application {
 		craftNativeDocumentError(w, mooring.ErrNativeDisabled)
 		return
@@ -126,6 +127,10 @@ func (d *craftNativeDocumentsHTTP) shareSnapshot(w http.ResponseWriter, r *http.
 	r, entry, store, _, err := d.bind(r)
 	if err != nil {
 		craftNativeDocumentError(w, err)
+		return
+	}
+	if !d.human.apps.allows(r.Context(), entry.application, craftapps.OpContinue) {
+		d.human.apps.refuse(w, r.Context(), entry.application)
 		return
 	}
 	w.Header().Set("Cache-Control", "no-store")

@@ -58,10 +58,29 @@ func replyWaitpointDecideError(w http.ResponseWriter, logger *slog.Logger, op, t
 			"error":  err.Error(),
 			"reason": "waitpoint_decider_not_allowed",
 		})
+	case pipeline.IsExplainedClosedWaitpoint(err):
+		// The waitpoint's own state (run cancelled, timed out, already
+		// decided), looked up in the caller's workspace (#5348).
+		replyError(w, http.StatusConflict, err.Error())
 	case errors.Is(err, pipeline.ErrAlreadyDecided), err.Error() == pipeline.ErrAlreadyDecided.Error():
 		replyError(w, http.StatusConflict, pipeline.ErrAlreadyDecided.Error())
 	default:
 		logger.Error(op, "error", err, "token", tokenFingerprint(token))
 		replyError(w, http.StatusInternalServerError, "Failed to complete waitpoint")
 	}
+}
+
+// closedWaitpointExplainer is the store half of a state-specific 409.
+type closedWaitpointExplainer interface {
+	ExplainClosedWaitpoint(ctx context.Context, workspaceID, token string, err error) error
+}
+
+// explainDecideError swaps a bare "already decided or expired" for the
+// waitpoint's actual state when the store can tell it; anything else is
+// returned unchanged.
+func explainDecideError(ctx context.Context, store any, workspaceID, token string, err error) error {
+	if ex, ok := store.(closedWaitpointExplainer); ok {
+		return ex.ExplainClosedWaitpoint(ctx, workspaceID, token, err)
+	}
+	return err
 }

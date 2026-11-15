@@ -16,6 +16,7 @@ import (
 // The candidate's tag moves after enumeration. Retention must remove only
 // the inspected old image, never the new artifact now carrying that tag.
 func TestCacheEvictionRealDockerRetag(t *testing.T) {
+	t.Run("cross-installation exact references", testImageReferencesRealDocker)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
 	defer cancel()
 	d, err := client.New(client.FromEnv)

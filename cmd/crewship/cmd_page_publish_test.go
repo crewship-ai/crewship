@@ -225,6 +225,37 @@ func TestPageCLI_LinksShowsStatusAndNeverATokenValue(t *testing.T) {
 	}
 }
 
+// TestPageCLI_LinksShowsAWithheldLink — the server withholds a link whose
+// creator is suspended or gone. The listing says so instead of calling it
+// expired, because it opens again when the creator's standing returns.
+func TestPageCLI_LinksShowsAWithheldLink(t *testing.T) {
+	stub := pageStub(t)
+	stub.OnGet(pagePublicRoute, func(_ *http.Request, _ []byte) (int, []byte, string) {
+		return http.StatusOK, []byte(`{
+			"page": "` + pagePublishSlug + `",
+			"tokens": [
+				{"id":"tok_held","expires_at":"2099-01-01T00:00:00Z","show_provenance":false,
+				 "has_password":false,"created_by":"ada@example.com","created_at":"2026-08-12T09:14:22Z",
+				 "live":false,"withheld":true,"panels":[]}
+			]
+		}`), "application/json"
+	})
+
+	out, err := runPagePublishCLI(t, "", "page", "links", pagePublishSlug)
+	if err != nil {
+		t.Fatalf("page links: %v\n%s", err, out)
+	}
+	if !strings.Contains(out, "tok_held") || !strings.Contains(out, "withheld") {
+		t.Fatalf("the listing does not mark the link withheld:\n%s", out)
+	}
+	if strings.Contains(out, "expired") || strings.Contains(out, " live") {
+		t.Fatalf("a withheld link must not read as expired or live:\n%s", out)
+	}
+	if got := pagePublicStatus(pagePublicTokenJSON{Withheld: true, RevokedAt: "2026-08-02T09:00:00Z"}); got != "revoked" {
+		t.Fatalf("revoked wins over withheld, got %q", got)
+	}
+}
+
 // TestPageCLI_UnpublishRequiresYesAndTargetsOneLink — a destructive command
 // takes --yes (§11b decision 5), and it takes back exactly one link.
 func TestPageCLI_UnpublishRequiresYesAndTargetsOneLink(t *testing.T) {

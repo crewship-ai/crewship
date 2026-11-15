@@ -156,7 +156,7 @@ as uid 1001:
   "containerEnv": { "PATH": "/home/agent/.local/bin:/home/agent/.local/share/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" },
   "features": {
     "ghcr.io/devcontainers/features/common-utils:2": {
-      "username": "agent", "uid": "1001", "gid": "1001",
+      "username": "agent", "userUid": "1001", "userGid": "1001",
       "installZsh": false, "upgradePackages": false
     },
     "ghcr.io/devcontainers-extra/features/claude-code:2": {}

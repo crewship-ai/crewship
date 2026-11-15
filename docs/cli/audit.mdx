@@ -44,7 +44,7 @@ Default table columns:
 | `2026-05-19 14:02:11` | `agent.run` | `AGENT` | `a_abc123def4` | `petra@acme-engineering.com` |
 | `2026-05-19 14:01:48` | `credential.rotate` | `CREDENTIAL` | `c_xyz789ghi0` | `pavel@acme-engineering.com` |
 
-Entity IDs are truncated to 12 characters in the table view; switch to `--format json` to see the full ID and additional fields.
+Entity IDs are truncated to 12 characters in the table view; switch to `--format json` to see the full ID and additional fields. JSON and YAML include the entry's `metadata` when it has one, for example the agent, run, reach and operation of an `artifact.agent_run_accessed` record.
 
 ## Examples
 

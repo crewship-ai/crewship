@@ -84,6 +84,7 @@ function ShareBody({ workspaceId, item }: { workspaceId: string; item: LibraryIt
 
     <section aria-label="People with access" className="flex flex-col gap-1">
       <h3 className="text-xs font-semibold text-muted-foreground">Who has access</h3>
+      {item.private && <p className="flex items-center gap-1.5 text-micro text-muted-foreground"><Lock aria-hidden className="size-3" />Personal: admins can open it, and every open is logged.</p>}
       {access.isPending ? <p role="status" className="text-xs text-muted-foreground">Loading access…</p>
         : access.error ? <p role="alert" className="text-xs text-destructive">{access.error.message}</p>
         : entries.length === 0 ? <p className="text-xs text-muted-foreground">Nobody yet.</p>

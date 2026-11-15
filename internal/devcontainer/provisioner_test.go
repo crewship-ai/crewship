@@ -29,6 +29,7 @@ type mockCommitClient struct {
 	removedIDs        []string
 	committedIDs      []string
 	commitRefs        []string
+	commitChanges     [][]string
 
 	// Configurable errors.
 	createErr  error
@@ -78,6 +79,7 @@ func (m *mockCommitClient) ContainerRemove(_ context.Context, containerID string
 func (m *mockCommitClient) ContainerCommit(_ context.Context, containerID string, options client.ContainerCommitOptions) (client.ContainerCommitResult, error) {
 	m.committedIDs = append(m.committedIDs, containerID)
 	m.commitRefs = append(m.commitRefs, options.Reference)
+	m.commitChanges = append(m.commitChanges, options.Changes)
 	if m.commitErr != nil {
 		return client.ContainerCommitResult{}, m.commitErr
 	}

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/artifactrun"
 	"github.com/crewship-ai/crewship/internal/chatbridge"
 	"github.com/crewship-ai/crewship/internal/conversation"
 	"github.com/crewship-ai/crewship/internal/crewstart"
@@ -49,7 +50,7 @@ func (rt *ScheduledRuntime) Run(ctx context.Context, a dispatch.Assignment, star
 	// Preserve the legacy scheduler's hard cap even if an agent has no
 	// per-run timeout configured. The dispatcher separately owns stop and
 	// reconciliation when this deadline fires.
-	runCtx, cancel := context.WithTimeout(ctx, 45*time.Minute)
+	runCtx, cancel := context.WithTimeout(ctx, scheduledAgentRunTimeout)
 	defer cancel()
 	launch := &webhookLaunch{cancel: cancel, workID: a.Item.ID, runID: a.RunID,
 		generation: a.Generation, store: work.NewStore(h.db)}
@@ -134,6 +135,13 @@ func (rt *ScheduledRuntime) Run(ctx context.Context, a dispatch.Assignment, star
 		req.CrewID = cfg.ID
 	}
 	req.RunID = a.RunID
+	// #5339: record this run without a human before its agent starts.
+	capability, endArtifactRun := recordUnattendedArtifactRun(runCtx, h.db, h.logger, artifactrun.Run{
+		WorkspaceID: a.Item.WorkspaceID, CrewID: info.CrewID, AgentID: in.AgentID, RunID: a.RunID,
+		Trigger: artifactrun.TriggerScheduled, Source: "schedule",
+	}, artifactrun.TTLFor(scheduledAgentRunTimeout))
+	defer endArtifactRun()
+	req.ArtifactRunCapability = capability
 	location := orchestrator.RunLocation{ContainerID: req.ContainerID, AgentSlug: req.AgentSlug, RunID: req.RunID}
 	if err := launch.Launch(location); err != nil {
 		stageCtx, stageCancel := context.WithTimeout(context.WithoutCancel(runCtx), 30*time.Second)

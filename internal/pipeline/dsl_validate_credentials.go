@@ -21,6 +21,9 @@ func validateStepCredentials(st Step) error {
 	if cr.Type == "" {
 		return fmt.Errorf("pipeline: step %q (http) credential_ref missing type", st.ID)
 	}
+	if err := checkCredentialRefShape(cr.Type); err != nil {
+		return fmt.Errorf("pipeline: step %q (http) credential_ref.type: %w", st.ID, err)
+	}
 	switch cr.InjectAs {
 	case "", "bearer", "header", "query":
 		// ok
@@ -49,7 +52,7 @@ func RequiredCredentialTypes(d *DSL) []string {
 	seen := make(map[string]struct{}, len(d.CredsRequired))
 	out := make([]string, 0, len(d.CredsRequired))
 	for _, cr := range d.CredsRequired {
-		t := strings.ToLower(strings.TrimSpace(cr.Type))
+		t := NormalizeCredentialRef(cr.Type)
 		if t == "" {
 			continue
 		}
@@ -72,3 +75,17 @@ func RequiredCredentialTypes(d *DSL) []string {
 // path — this file only supplies the parse-time shape gate
 // (validateStepCredentials) and the normalized required-type set
 // (RequiredCredentialTypes) it consumes.
+
+// checkCredentialRefShape accepts a credential type (no dot) or a by-name
+// reference "name.<NAME>". Any other dotted value used to be looked up as a
+// type that cannot exist, so the step silently ran without its credential.
+func checkCredentialRefShape(ref string) error {
+	ref = strings.TrimSpace(ref)
+	if !strings.Contains(ref, ".") {
+		return nil
+	}
+	if _, ok := CredentialRefName(ref); ok {
+		return nil
+	}
+	return fmt.Errorf("%q is neither a credential type nor name.<CREDENTIAL_NAME>", ref)
+}

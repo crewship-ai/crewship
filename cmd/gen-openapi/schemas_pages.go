@@ -150,6 +150,11 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 		"acl":         arr(folderACLEntry),
 		"acl_version": integer(),
 		"entry":       folderACLEntry,
+		"agent_access": map[string]any{"type": "string", "enum": []string{"none", "read", "propose"},
+			"description": "What the owning crew's agents may do with the folder's non-private pages (#5317 D2)."},
+		"agent_access_available": map[string]any{"type": "boolean", "description": "True where agent_access takes effect (the artifact_agent_access_modes flag is on)."},
+		"agent_propose_kinds": map[string]any{"type": "array", "items": map[string]any{"type": "string", "enum": []string{"docs"}},
+			"description": "Artifact kinds on which agent_access propose gives the agents a real proposal (Docs); on every other kind propose reads like read. Absent where the flag is off."},
 	})
 	folderACL["required"] = []string{"folder", "acl", "acl_version"}
 	accessMe := obj(map[string]any{
@@ -593,6 +598,18 @@ func pagesSchemaCatalog() map[string]DomainSchema {
 			}),
 			RequestRequired: true,
 			Response:        folderACL,
+		},
+		"PUT /api/v1/page-folders/{slug}/agent-access": {
+			Request: obj(map[string]any{
+				"level":       map[string]any{"type": "string", "enum": []string{"none", "read", "propose"}, "description": "Never write: a folder gives its agents at most read and suggest. Levels other than none need the artifact_agent_access_modes flag (409 otherwise)."},
+				"acl_version": map[string]any{"type": "integer", "description": "The folder's acl_version as last read. Required; a stale one is 409."},
+			}),
+			RequestRequired: true,
+			Response: obj(map[string]any{
+				"folder": str(), "acl_version": integer(),
+				"agent_access":           map[string]any{"type": "string", "enum": []string{"none", "read", "propose"}},
+				"agent_access_available": map[string]any{"type": "boolean"},
+			}),
 		},
 		"DELETE /api/v1/page-folders/{slug}/acl/{subject_type}/{subject_id}": {
 			// 204, no body. The workspace subject is `workspace/workspace`.

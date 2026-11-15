@@ -63,10 +63,17 @@ func (b *keeperWSBroadcaster) BroadcastInboxUpdated(workspaceID string, source s
 }
 
 type Router struct {
-	craftNativeHTTPConfig  CraftNativeHTTPConfig
-	craftNativeStartupErr  error
-	craftNativeHTTP        *craftNativeHTTP
-	craftNativeDocuments   *craftNativeDocumentsHTTP
+	craftNativeHTTPConfig CraftNativeHTTPConfig
+	craftNativeStartupErr error
+	craftNativeHTTP       *craftNativeHTTP
+	craftNativeDocuments  *craftNativeDocumentsHTTP
+	// craftComponentsMu guards craftNativeHTTPConfig.Components and
+	// craftInstalling while Admin installs an application (#5315).
+	craftComponentsMu sync.Mutex
+	craftInstalling   map[string]bool
+	// craftInstallCtx ends background installations at Shutdown.
+	craftInstallCtx        context.Context
+	craftInstallCancel     context.CancelFunc
 	mooringStartupErr      error
 	mooringHTTPConfig      MooringHTTPConfig
 	mooringHTTP            *collaborationHTTPManager
@@ -229,10 +236,12 @@ type Router struct {
 	dockerClient         *dockerclient.Client
 	// instanceBackups is Admin › Backups across the instance, kept so tests
 	// can point its instance backup at a temp directory.
-	instanceBackups    *InstanceBackupsHandler
-	imageBuilder       devcontainer.ImageBuilder
-	featureCacheDir    string
-	portExposeRegistry *PortExposeRegistry // closed via Shutdown() on server stop
+	instanceBackups     *InstanceBackupsHandler
+	imageBuilder        devcontainer.ImageBuilder
+	featureCacheDir     string
+	legacyImageEviction bool
+	installationID      string
+	portExposeRegistry  *PortExposeRegistry // closed via Shutdown() on server stop
 	// providerLogins owns the device-code sign-in pollers (#2428); stopped
 	// via Shutdown() so a pending sign-in is left for the next process to
 	// resume rather than polled by a goroutine outliving the listener.
@@ -1103,6 +1112,11 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 // reference to the DB handle or the Docker client.
 
 func (r *Router) Shutdown() {
+	r.craftComponentsMu.Lock()
+	if r.craftInstallCancel != nil {
+		r.craftInstallCancel()
+	}
+	r.craftComponentsMu.Unlock()
 	if r.craftNativeHTTP != nil && r.craftNativeHTTP.agents != nil {
 		r.craftNativeHTTP.agents.Close()
 	}

@@ -12,7 +12,7 @@ import (
 // Inserting this migration before main's last version would also leave an old
 // binary's version-skew guard unable to distinguish the new schema by its max.
 func TestArtifactDataRunsMigrationUpgradesShippedMain(t *testing.T) {
-	const shippedMainVersion = 20261111104000 // 7c8d0bef, pipeline_execution_agent_wait
+	const shippedMainVersion = 20261114213809 // 5054bf506, crew_previous_image
 	var producerVersion int
 	for _, m := range migrations {
 		if m.name == "artifact_data_runs" {

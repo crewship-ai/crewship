@@ -54,6 +54,12 @@ func TestAcceptance_WorkspaceArtifactPolicy(t *testing.T) {
 		Enabled bool     `json:"enabled"`
 		CrewIDs []string `json:"crew_ids"`
 		Version int64    `json:"version"`
+		Limits  struct {
+			ChatRunCreate  int `json:"chat_run_create_limit"`
+			RunRead        int `json:"run_read_limit"`
+			CrewHourlyPage int `json:"crew_hourly_page_limit"`
+		} `json:"limits"`
+		SaveRequiresRunToken *bool `json:"save_requires_run_token"`
 	}
 	read := func() {
 		t.Helper()
@@ -107,6 +113,51 @@ func TestAcceptance_WorkspaceArtifactPolicy(t *testing.T) {
 	}
 	if output, err := run("show", "--workspace", "no-such-workspace"); err == nil || !strings.Contains(output, "no-such-workspace") {
 		t.Fatalf("unknown slug must fail naming it: %v %s", err, output)
+	}
+	// #5317 PR2: limits travel through the same command; omitted ones keep
+	// their value, out-of-range ones are refused before anything is saved.
+	if policy.Limits.ChatRunCreate != 3 || policy.Limits.RunRead != 50 || policy.Limits.CrewHourlyPage != 20 {
+		t.Fatalf("default limits %+v", policy.Limits)
+	}
+	if output, err := run("set", "--base-version", "3", "--enabled=true", "--crew-id", "policy-crew", "--chat-run-create-limit", "5", "--crew-hourly-page-limit", "7"); err != nil {
+		t.Fatalf("set limits: %v %s", err, output)
+	}
+	read()
+	if policy.Version != 4 || policy.Limits.ChatRunCreate != 5 || policy.Limits.RunRead != 50 || policy.Limits.CrewHourlyPage != 7 {
+		t.Fatalf("limits after set %+v", policy)
+	}
+	if output, err := run("set", "--base-version", "4", "--enabled=true", "--crew-id", "policy-crew", "--run-read-limit", "501"); err == nil || !strings.Contains(output, "limits out of range") {
+		t.Fatalf("out-of-range limit: %v %s", err, output)
+	}
+	read()
+	if policy.Version != 4 || policy.Limits.RunRead != 50 {
+		t.Fatalf("refused limit changed policy %+v", policy)
+	}
+	// #5336: the run-token requirement on the sidecar save path is an
+	// explicit opt-in, false until set, kept when the flag is omitted.
+	if policy.SaveRequiresRunToken == nil || *policy.SaveRequiresRunToken {
+		t.Fatalf("default save_requires_run_token must be reported false: %+v", policy)
+	}
+	if output, err := run("set", "--base-version", "4", "--enabled=true", "--crew-id", "policy-crew", "--save-requires-run-token=true"); err != nil {
+		t.Fatalf("require run token: %v %s", err, output)
+	}
+	read()
+	if policy.Version != 5 || policy.SaveRequiresRunToken == nil || !*policy.SaveRequiresRunToken {
+		t.Fatalf("save_requires_run_token after set %+v", policy)
+	}
+	if output, err := run("set", "--base-version", "5", "--enabled=true", "--crew-id", "policy-crew", "--chat-run-create-limit", "4"); err != nil {
+		t.Fatalf("set without the flag: %v %s", err, output)
+	}
+	read()
+	if policy.Version != 6 || !*policy.SaveRequiresRunToken || policy.Limits.ChatRunCreate != 4 {
+		t.Fatalf("omitted --save-requires-run-token must keep the value %+v", policy)
+	}
+	if output, err := run("set", "--base-version", "6", "--enabled=true", "--crew-id", "policy-crew", "--save-requires-run-token=false"); err != nil {
+		t.Fatalf("clear run token requirement: %v %s", err, output)
+	}
+	read()
+	if policy.Version != 7 || *policy.SaveRequiresRunToken {
+		t.Fatalf("save_requires_run_token after clear %+v", policy)
 	}
 	if _, err := db.Exec(`UPDATE cli_tokens SET scopes='["pages:read"]' WHERE id='policy-cli-token'`); err != nil {
 		t.Fatal(err)

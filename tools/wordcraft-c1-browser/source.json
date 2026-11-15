@@ -1,15 +1,15 @@
 {
   "revision": "7ef2633a7e84956522d1ca47b99fe6feef16c1db",
-  "engine_source_manifest_sha256": "c6a784cc85d7bce594a0f049e07af79ffa353694f32cde18d04f526c2af1e4dc",
+  "engine_source_manifest_sha256": "9fbe4e6c19ee40dcf7eb04e44898e5b0692a39ec2af685ae61716a094b35adef",
   "patch_sha256": "b2a2e06cc70260f0e6a5a84b8b53557e8da486179bd504abc0271070fdadceb3",
   "files": {
     "Cargo.toml": {
-      "before_sha256": "e7594df0f5f9556f465586bf752eef7fe743740422b6b7d5c4c4f7a97c8146c8",
-      "after_sha256": "e5e53c80b6a59a8fa0c2da173ca42c5972c85e090e8dd7f121efce31415272b1"
+      "before_sha256": "a3c48fa264944acd4560f8d1a3ead8cfbb540ba9ddf3639de0cb89349d7378f5",
+      "after_sha256": "03d25841dc67536dea4d6d55d54837f460036374446545dcc06148632fc3ee47"
     },
     "Cargo.lock": {
-      "before_sha256": "ece0a03e437dd7448d681dbf76f4c21480990ea7f0f552636e0be608e1539383",
-      "after_sha256": "a87a04fa5f3cb1af701967e69e49ced48c1008e732db413af50c6f99d81a30a9"
+      "before_sha256": "cb106352c3c2acd2136339e62943b83fe6f2ee1e1f12cb24b4e060e817c8de6c",
+      "after_sha256": "272809c448599492926fe7e3be53d83cf7ad5ab30d0d176fcad6f4e58a4f39e6"
     },
     "apps/wordcraft-web/src/c1.rs": {
       "before_sha256": null,

@@ -91,10 +91,9 @@ container:
   idle_runtime_retention_days: 0  # Remove stopped runtimes of live crews after this
                                 # many days stopped; volumes stay. 0 = off.
                                 # Env override: CREWSHIP_IDLE_RUNTIME_RETENTION_DAYS
-  cache_eviction: false         # Evict crewship-cache images no container on the
-                                # daemon has used for an hour; live crew selections
-                                # in this installation stay. Env override:
-                                # CREWSHIP_CACHE_EVICTION
+  cache_eviction: false         # Deprecated compatibility setting. Owned image
+                                # collection is experimental and off by default.
+                                # Prefer CREWSHIP_IMAGE_GC=true for explicit opt-in.
 
 # Note: Crewship injects the sidecar binary and entrypoint script into the
 # container at runtime via bind mount from the host. Any glibc-based Linux

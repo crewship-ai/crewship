@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"strings"
 )
 
@@ -1119,6 +1120,12 @@ type RestoreDumpHooks struct {
 // with the supplied lifecycle hooks. See RestoreDumpHooks for the
 // contract of each hook.
 func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *RestoreDumpHooks) (RestoreStats, error) {
+	imageUse := resourcelifecycle.Images(db)
+	releaseImages := imageUse.Use()
+	defer releaseImages()
+	// Restore preserves exact captured selections. Image ownership is not
+	// authority to replace an environment with newly resolved dependencies.
+
 	if err := rejectMooringCollaborationCollision(ctx, db, dump); err != nil {
 		return RestoreStats{}, err
 	}
@@ -1129,6 +1136,7 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	if hooks == nil {
 		hooks = &RestoreDumpHooks{}
 	}
+	var restoredImageCrews []string
 	var stats RestoreStats
 	if err := rejectRunAdmissionInput(dump, false); err != nil {
 		return stats, err
@@ -1524,6 +1532,11 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 			if replaceWork && !landed {
 				return stats, fmt.Errorf("backup: replacement issue work did not insert")
 			}
+			if table == "crews" && landed {
+				if id, ok := row["id"].(string); ok {
+					restoredImageCrews = append(restoredImageCrews, id)
+				}
+			}
 			if table == "missions" && landed {
 				if id, ok := row["id"].(string); ok {
 					restoredMissions[id] = true
@@ -1593,6 +1606,15 @@ func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *Re
 	if hooks.PreCommit != nil {
 		if err := hooks.PreCommit(ctx); err != nil {
 			return stats, fmt.Errorf("backup: pre-commit hook: %w", err)
+		}
+	}
+	if len(restoredImageCrews) > 0 && imageUse.ReferenceProtectionEnabled() {
+		refs, err := resourcelifecycle.SelectedImageReferences(ctx, tx, restoredImageCrews...)
+		if err != nil {
+			return stats, fmt.Errorf("backup: read restored image references: %w", err)
+		}
+		if _, err := imageUse.Preserve(ctx, refs); err != nil {
+			return stats, fmt.Errorf("backup: retain restored environments: %w", err)
 		}
 	}
 	if err := tx.Commit(); err != nil {

@@ -19,7 +19,7 @@ func TestEnsureAgentUser_InjectsWhenFeaturesEmpty(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected %s key in Features, got %+v", commonUtilsFeatureRef, c.Features)
 	}
-	if feat["username"] != "agent" || feat["uid"] != "1001" || feat["gid"] != "1001" {
+	if feat["username"] != "agent" || feat["userUid"] != "1001" || feat["userGid"] != "1001" {
 		t.Errorf("injected options wrong: %+v", feat)
 	}
 }

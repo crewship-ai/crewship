@@ -40,8 +40,8 @@ func TestBuildKitProvision_RealWorld(t *testing.T) {
 		githubCLI: nil,
 		commonUtils: {
 			"username": "agent",
-			"uid":      "1001",
-			"gid":      "1001",
+			"userUid":  "1001",
+			"userGid":  "1001",
 		},
 	}
 

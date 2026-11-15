@@ -1,0 +1,70 @@
+diff --git a/crates/core/Cargo.toml b/crates/core/Cargo.toml
+index e7d36955..e6d34ad8 100644
+--- a/crates/core/Cargo.toml
++++ b/crates/core/Cargo.toml
+@@ -13,7 +13,7 @@ serde = { workspace = true }
+ thiserror = { workspace = true }
+ chrono = { workspace = true }
+ 
+-[target.'cfg(target_arch = "wasm32")'.dependencies]
++[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
+ js-sys = "0.3"
+ 
+ [dev-dependencies]
+diff --git a/crates/core/src/date.rs b/crates/core/src/date.rs
+index 8e68695f..d6dbfd0e 100644
+--- a/crates/core/src/date.rs
++++ b/crates/core/src/date.rs
+@@ -50,12 +50,12 @@ pub fn days_from_civil(y: i32, m: u32, d: u32) -> i64 {
+ /// On wasm32 `std::time::SystemTime::now` traps, so the browser clock is read through `Date.now()`.
+ #[allow(clippy::disallowed_methods)] // the std clock is read only off wasm
+ pub fn unix_now_ms() -> Option<f64> {
+-    #[cfg(not(target_arch = "wasm32"))]
++    #[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+     {
+         let d = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).ok()?;
+         Some(d.as_secs_f64() * 1000.0)
+     }
+-    #[cfg(target_arch = "wasm32")]
++    #[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+     {
+         Some(js_sys::Date::now())
+     }
+diff --git a/crates/engine/src/io.rs b/crates/engine/src/io.rs
+index f51fcbe6..7a3c888e 100644
+--- a/crates/engine/src/io.rs
++++ b/crates/engine/src/io.rs
+@@ -608,7 +608,7 @@ fn script_sandbox_check(path: &str) -> Result<()> {
+ /// reads whose bytes arrive faster than metadata can claim (device files, growing files).
+ const MAX_READ_BYTES: u64 = 2 * 1024 * 1024 * 1024;
+ 
+-#[cfg(not(target_arch = "wasm32"))]
++#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+ pub fn read_file(path: &str) -> Result<Vec<u8>> {
+     use std::io::Read;
+     script_sandbox_check(path)?;
+@@ -627,13 +627,13 @@ pub fn read_file(path: &str) -> Result<Vec<u8>> {
+     Ok(buf)
+ }
+ 
+-#[cfg(target_arch = "wasm32")]
++#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+ pub fn read_file(path: &str) -> Result<Vec<u8>> {
+     script_sandbox_check(path)?;
+     Err(EngineError::Other(format!("{path}: no file system in the browser")))
+ }
+ 
+-#[cfg(not(target_arch = "wasm32"))]
++#[cfg(not(all(target_arch = "wasm32", target_os = "unknown")))]
+ pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
+     use std::io::Write;
+     script_sandbox_check(path)?;
+@@ -671,7 +671,7 @@ pub fn write_file(path: &str, bytes: &[u8]) -> Result<()> {
+     })
+ }
+ 
+-#[cfg(target_arch = "wasm32")]
++#[cfg(all(target_arch = "wasm32", target_os = "unknown"))]
+ pub fn write_file(path: &str, _bytes: &[u8]) -> Result<()> {
+     script_sandbox_check(path)?;
+     Err(EngineError::Other(format!("{path}: no file system in the browser")))

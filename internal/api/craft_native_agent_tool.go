@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
+	"github.com/crewship-ai/crewship/internal/craftapps"
 	"github.com/crewship-ai/crewship/internal/mooring"
 )
 
@@ -193,6 +194,14 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 		replyError(w, 400, "invalid native Craft operation")
 		return
 	}
+	if op := craftAgentToolOperation(input.Operation); !m.human.apps.agentsAllow(r.Context(), e.grant.Application, op) {
+		subject := craftapps.Agents
+		if m.human.apps.mode(r.Context(), craftapps.Agents).Allows(op) {
+			subject = e.grant.Application
+		}
+		m.human.apps.refuse(w, r.Context(), subject)
+		return
+	}
 	e.callMu.Lock()
 	defer func() {
 		// Close/retirement never waits behind an engine conversion. Release
@@ -226,8 +235,8 @@ func (m *craftNativeAgentManager) toolCall(w http.ResponseWriter, r *http.Reques
 		craftNativeDocumentError(w, err)
 		return
 	}
-	application, ok := m.documents.applications[e.grant.Application]
-	profile, pinned := m.config.Profiles[e.grant.Application]
+	application, ok := m.documents.application(e.grant.Application)
+	profile, pinned := m.documents.profile(e.grant.Application)
 	if !ok || !pinned {
 		replyError(w, 503, "native Craft profile unavailable")
 		return

@@ -33,6 +33,27 @@ type documentDraftScope struct {
 	Propose bool
 	// Blocks, comma-separated, are the only blocks a proposal may target; "" is the whole document.
 	Blocks string
+	// Read is a flag-on run's read through its scope (#5317 5.3): no
+	// consent, never a lease, commit, checkpoint or proposal.
+	Read bool
+	// Reach is why a flag-on run reaches the Document, for its audit:
+	// consented (the drafting or iteration consent with a page grant or the
+	// human's own Document) or folder (a folder of its crew at propose).
+	Reach string
+}
+
+// documentStatePurposeHeader names the Node operation behind a state
+// callback. Only the private, service-authenticated Docs authority reads it.
+const documentStatePurposeHeader = "X-Crewship-Docs-Purpose"
+
+// documentViewReadKey marks a state callback that Node makes for its "read"
+// operation, the one behind the agent draft view (#5317 5.3).
+type documentViewReadKey struct{}
+
+// documentStateLoadedForView: Node names exactly one operation, "read".
+func documentStateLoadedForView(r *http.Request) bool {
+	values := r.Header.Values(documentStatePurposeHeader)
+	return len(values) == 1 && values[0] == "read"
 }
 
 // admits reports whether a block is inside this mandate.
@@ -131,8 +152,69 @@ func (h *PageHandler) authorizeDocumentDraft(ctx context.Context, a *artifactRun
 	if k.WorkspaceID != a.WorkspaceID {
 		return "", errDocumentAccess
 	}
-	if _, err := h.documentDraftScope(ctx, a, k.PageID); err != nil {
-		return "", err
+	scope, err := h.documentDraftScope(ctx, a, k.PageID)
+	if err != nil {
+		// Flag on (#5317 5.3): without a consent for this Document, the run
+		// may still read it through its scope (recorded there), but only for
+		// Node's draft-view read: never for an export, comments, checkpoints,
+		// a lease, commit, checkpoint or proposal.
+		if viewRead, _ := ctx.Value(documentViewReadKey{}).(bool); operation != "state" || !viewRead || !errors.Is(err, errDocumentAccess) {
+			return "", err
+		}
+		if _, scoped := h.documentScopedRunRead(ctx, a, k.PageID); scoped != nil {
+			if errors.Is(scoped, errArtifactRunCap) {
+				return "", scoped
+			}
+			return "", err
+		}
+		return "agent:" + a.AgentID + ":" + a.RunID, nil
+	}
+	// Flag on (#5317 5.3): the drafting or iteration consent stays the only
+	// reach (it binds the generation, revision and lease of every write); the
+	// content access is audited with its human in this transaction, failing
+	// closed. Leases carry no content and are not recorded. A proposal is
+	// audited as propose, never as write.
+	//
+	// Folder reach (#5317 5.2) proposes and reads only: a commit or checkpoint
+	// is refused here as well as by the propose mandate's guard, and each
+	// access is charged to the run's read limit like any folder read.
+	folder := scope.Reach == runReachFolder
+	// A propose mandate never needs the writer lease (a proposal is not a
+	// commit). With the flag on the run may not take or renew it, so it can
+	// never hold the lease against a human Editor; release stays allowed.
+	if (operation == "lease" || operation == "renew") && scope.Propose && h.artifactRunModesOn(ctx, a.WorkspaceID) {
+		return "", errDocumentAccess
+	}
+	audited := ""
+	switch operation {
+	case "state", "receipt":
+		audited = "read"
+	case "propose":
+		audited = "propose"
+	case "commit", "checkpoint":
+		if folder {
+			return "", errDocumentAccess
+		}
+		audited = "write"
+	}
+	if audited != "" {
+		tx, _ := ctx.Value(pageAuthReaderKey{}).(*sql.Tx)
+		reach := runReachConsented
+		if folder {
+			reach = runReachFolder
+			if tx == nil {
+				return "", errDocumentAccess
+			}
+			if err := chargeArtifactRunRead(context.WithValue(ctx, pageAuthReaderKey{}, tx), tx, a, a.WorkspaceID, k.PageID); err != nil {
+				if errors.Is(err, errArtifactRunCap) {
+					return "", err
+				}
+				return "", errDocumentAccess
+			}
+		}
+		if h.recordKindRunAccess(ctx, tx, a, k.PageID, reach, audited) != nil {
+			return "", errDocumentAccess
+		}
 	}
 	return "agent:" + a.AgentID + ":" + a.RunID, nil
 }

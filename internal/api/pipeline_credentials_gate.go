@@ -121,5 +121,8 @@ func missingCredentialsDetail(missing []string, crewName string) string {
 		return fmt.Sprintf("routine requires %d credentials not present in the vault for crew %q: %s",
 			len(missing), crewName, strings.Join(missing, ", "))
 	}
+	if name, byName := pipeline.CredentialRefName(missing[0]); byName {
+		return fmt.Sprintf("routine requires the credential named %q, which is not present in the vault for crew %q", name, crewName)
+	}
 	return fmt.Sprintf("routine requires credential of type %q not present in the vault for crew %q", missing[0], crewName)
 }

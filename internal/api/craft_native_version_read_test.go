@@ -291,13 +291,12 @@ func TestCraftNativeVersionRestorePreservesNewerVersionsAndStorageLimits(t *test
 	undo()
 
 	// Per-document history quota: same refusal class as a save, nothing written.
-	tight := *d
-	tight.applications = map[string]craftNativeApplication{}
+	tight := &craftNativeDocumentsHTTP{human: d.human, profiles: d.profiles, applications: map[string]craftNativeApplication{}}
 	for app, p := range d.applications {
 		p.Store.MaxHistoryBytes = 1
 		tight.applications[app] = p
 	}
-	if w := craftNativeDocumentCall(t, &tight, owner, ownerToken, "restore", restore("2", "1")); w.Code != 413 || count() != 2 {
+	if w := craftNativeDocumentCall(t, tight, owner, ownerToken, "restore", restore("2", "1")); w.Code != 413 || count() != 2 {
 		t.Fatalf("restore over the history quota: %d %s, %d versions", w.Code, w.Body, count())
 	}
 

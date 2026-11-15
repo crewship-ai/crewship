@@ -207,13 +207,18 @@ func TestArtifactProjectToolsConsentCreatePublishReplyAndRevocation(t *testing.T
 	}
 }
 
-func artifactProjectOriginalRunFixture(t *testing.T) *artifactPrincipalFixture {
+// setup runs before the human's receipt is minted, so a role change there is
+// part of the authority the receipt carries.
+func artifactProjectOriginalRunFixture(t *testing.T, setup ...func(*artifactPrincipalFixture)) *artifactPrincipalFixture {
 	t.Helper()
 	f, source := originalSessionFixture(t)
 	f.rig.db = artifactProjectFullDurability(t, f.rig.db)
 	f.pages.db = f.rig.db
 	mustExec(t, f.rig.db, `UPDATE chats SET visibility='private' WHERE id=?`, f.a.ChatID)
 	mustExec(t, f.rig.db, `UPDATE workspace_members SET capabilities='["chat","page.create"]' WHERE user_id=?`, f.a.HumanUserID)
+	for _, fn := range setup {
+		fn(f)
+	}
 	mustExec(t, f.rig.db, `INSERT INTO workspace_artifact_creation_policy(workspace_id,enabled,version,updated_at) VALUES(?,1,1,'2026-10-27T00:00:00Z')`, f.a.WorkspaceID)
 	mustExec(t, f.rig.db, `INSERT INTO workspace_artifact_creation_crews(workspace_id,crew_id) VALUES(?,?)`, f.a.WorkspaceID, f.a.CrewID)
 	expiry, err := source.Expiry()

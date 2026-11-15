@@ -26,33 +26,37 @@
 # font assets are not affected — none of them start with these signatures.
 set -uo pipefail
 
-cd "$(git rev-parse --show-toplevel)" || exit 2
+# One Python process reads four bytes per tracked file. Spawning head/od/tr/grep
+# for every path exhausted Shell's five-minute CI budget on the full tree.
+exec python3 - <<'PYTHON'
+import os
+import subprocess
+import sys
 
-# ELF · Mach-O 32/64, both endiannesses · Mach-O universal · PE/COFF
-MAGIC='^(7f454c46|feedface|cefaedfe|feedfacf|cffaedfe|cafebabe|bebafeca|4d5a)'
+os.chdir(subprocess.check_output(["git", "rev-parse", "--show-toplevel"]).rstrip(b"\n"))
+paths = [p for p in subprocess.check_output(["git", "ls-files", "-z"]).split(b"\0") if p]
+magic = {bytes.fromhex(value) for value in (
+    "7f454c46", "feedface", "cefaedfe", "feedfacf", "cffaedfe", "cafebabe", "bebafeca",
+)}
+offenders = []
+for path in paths:
+    if not os.path.isfile(path):
+        continue
+    try:
+        with open(path, "rb") as source:
+            prefix = source.read(4)
+    except OSError:
+        # Match the original head pipeline: a missing/unreadable file has no
+        # executable signature. Git tracks paths, not their current existence.
+        continue
+    if prefix in magic or prefix.startswith(b"MZ"):
+        offenders.append((os.fsdecode(path), os.path.getsize(path)))
 
-offenders=()
-while IFS= read -r -d '' path; do
-  [ -f "$path" ] || continue
-  head -c4 -- "$path" 2>/dev/null | od -An -tx1 -v 2>/dev/null | tr -d ' \n' | grep -qE "$MAGIC" || continue
-  size=$(wc -c <"$path" | tr -d ' ')
-  offenders+=("$path (${size} bytes)")
-done < <(git ls-files -z)
-
-if [ ${#offenders[@]} -gt 0 ]; then
-  printf 'no-root-binaries: compiled executable(s) tracked in git:\n'
-  printf '  %s\n' "${offenders[@]}"
-  cat <<'EOF'
-
-A compiled binary must never be committed. It is usually `go build ./cmd/<x>`
-or `go build ./scripts/<x>` with no -o, which drops the binary in the repo
-root named after its directory, followed by `git add -A`.
-
-  git rm --cached <path> && rm <path>
-
-and add the name to .gitignore next to the others under "# Go".
-EOF
-  exit 1
-fi
-
-printf 'no-root-binaries: no compiled executables tracked (%s files checked)\n' "$(git ls-files | wc -l | tr -d ' ')"
+if offenders:
+    print("no-root-binaries: compiled executable(s) tracked in git:")
+    for path, size in offenders:
+        print(f"  {path} ({size} bytes)")
+    print('\nA compiled binary must never be committed. It is usually `go build ./cmd/<x>`\nor `go build ./scripts/<x>` with no -o, which drops the binary in the repo\nroot named after its directory, followed by `git add -A`.\n\n  git rm --cached <path> && rm <path>\n\nand add the name to .gitignore next to the others under "# Go".\n')
+    sys.exit(1)
+print(f"no-root-binaries: no compiled executables tracked ({len(paths)} files checked)")
+PYTHON

@@ -2,8 +2,25 @@ package manifest
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
 )
+
+// sameJSONDocument reports whether two JSON documents hold the same value.
+// The server may store a devcontainer config with other key order or
+// spacing than the manifest builds (for example one a pre-#5337 server
+// re-marshalled at create), and only a different value is drift. Input that
+// does not parse compares byte for byte.
+func sameJSONDocument(a, b string) bool {
+	if a == b {
+		return true
+	}
+	var av, bv any
+	if json.Unmarshal([]byte(a), &av) != nil || json.Unmarshal([]byte(b), &bv) != nil {
+		return false
+	}
+	return reflect.DeepEqual(av, bv)
+}
 
 // jsonMarshal is a thin wrapper around encoding/json.Marshal with
 // HTML-escape turned off. devcontainer.json strings end up embedded

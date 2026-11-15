@@ -72,6 +72,8 @@ func designError(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, artifacts.ErrDisabled), errors.Is(err, sql.ErrNoRows), errors.Is(err, artifacts.ErrVersionNotFound):
 		replyError(w, 404, "design not found")
+	case errors.Is(err, errArtifactRunCap):
+		writeJSON(w, 429, map[string]any{"error": "This run reached its artifact limit. Ask the human to send a new message, or ask an admin to raise the limit.", "code": "artifact_run_limit"})
 	case errors.Is(err, errDesignAccess), errors.Is(err, artifacts.ErrVersionAuthority):
 		replyError(w, 403, "current Design edit permission required")
 	case errors.Is(err, design.ErrUnavailable):
@@ -215,6 +217,11 @@ func (h *PageHandler) designAuthority(r *http.Request, k artifacts.VersionKey, w
 		request := r.WithContext(ctx)
 		agent, _ := ctx.Value(artifactRunKey{}).(*artifactRunAuthority)
 		undelegated := false
+		if agent != nil && h.artifactRunModesOn(ctx, k.WorkspaceID) {
+			// Flag on (#5317 5.3): the run's scope replaces the exact-run
+			// consent, as for an artifact project.
+			return h.designScopedRunAuthority(ctx, tx, &stamp, agent, k, u.ID, write)
+		}
 		if agent != nil {
 			if agent.WorkspaceID != k.WorkspaceID || agent.HumanUserID != u.ID || h.checkOriginalUserArtifactRunPrincipal(ctx, agent) != nil || !h.artifactAgentPolicyAllows(ctx, k.WorkspaceID, agent.CrewID) {
 				return "", errDesignAccess
@@ -353,7 +360,7 @@ func (h *PageHandler) designAuthorizedTx(r *http.Request, k artifacts.VersionKey
 		if _, absent := designAuthorityRevision(ctx, tx, k.WorkspaceID); absent != nil {
 			// A first Feedback admission reads generations before any Design
 			// check; the canonical read check installs them only when allowed.
-			_, _ = h.designAuthority(r, k, false)(ctx, tx)
+			_, _ = h.designAuthority(r, k, false)(designAuditProbeContext(ctx), tx)
 		}
 	}
 	actor, err := auth(ctx, tx)
@@ -568,7 +575,7 @@ func (h *PageHandler) GetDesign(w http.ResponseWriter, r *http.Request) {
 			return e
 		}
 		canShare = canEdit && owner != "" && writer == owner
-		_, commentErr := h.designCommentAuthority(r, k)(ctx, tx)
+		_, commentErr := h.designCommentAuthority(r, k)(designAuditProbeContext(ctx), tx)
 		canComment = commentErr == nil
 		if !readLive {
 			if selected, e = designReadableVersion(selected, version, shared, false); e != nil {
@@ -663,7 +670,7 @@ func (h *PageHandler) ApplyDesign(w http.ResponseWriter, r *http.Request) {
 func (h *PageHandler) designSnapshotLocked(r *http.Request, k artifacts.VersionKey, message string) (artifacts.VersionReceipt, error) {
 	var state []byte
 	var base, revision int64
-	if err := h.designTx(r, k, true, func(ctx context.Context, tx *sql.Tx, _ string) error {
+	if err := h.designTx(designAuditProbe(r), k, true, func(ctx context.Context, tx *sql.Tx, _ string) error {
 		return tx.QueryRowContext(ctx, `SELECT d.state,h.latest_version,d.revision FROM artifact_design_documents d JOIN artifact_version_heads h ON h.workspace_id=d.workspace_id AND h.page_id=d.page_id WHERE d.workspace_id=? AND d.page_id=?`, k.WorkspaceID, k.PageID).Scan(&state, &base, &revision)
 	}); err != nil {
 		return artifacts.VersionReceipt{}, err
@@ -735,7 +742,7 @@ func (h *PageHandler) RestoreDesign(w http.ResponseWriter, r *http.Request) {
 	room := h.designRoom(k)
 	room.mu.Lock()
 	defer room.mu.Unlock()
-	manifest, err := h.designStore(r.Context()).ReadVersion(r.Context(), k, p.Version, h.designAuthority(r, k, true))
+	manifest, err := h.designStore(r.Context()).ReadVersion(r.Context(), k, p.Version, artifactAuditProbe(h.designAuthority(r, k, true)))
 	if err != nil {
 		designError(w, err)
 		return
@@ -760,7 +767,7 @@ func (h *PageHandler) RestoreDesign(w http.ResponseWriter, r *http.Request) {
 func (h *PageHandler) designVersionedMutationLocked(r *http.Request, k artifacts.VersionKey, input design.Request, message string) (design.Result, artifacts.VersionReceipt, error) {
 	var state []byte
 	var base, revision int64
-	err := h.designTx(r, k, true, func(ctx context.Context, tx *sql.Tx, _ string) error {
+	err := h.designTx(designAuditProbe(r), k, true, func(ctx context.Context, tx *sql.Tx, _ string) error {
 		return tx.QueryRowContext(ctx, `SELECT d.state,d.revision,h.latest_version FROM artifact_design_documents d JOIN artifact_version_heads h ON h.workspace_id=d.workspace_id AND h.page_id=d.page_id WHERE d.workspace_id=? AND d.page_id=?`, k.WorkspaceID, k.PageID).Scan(&state, &revision, &base)
 	})
 	if err != nil {

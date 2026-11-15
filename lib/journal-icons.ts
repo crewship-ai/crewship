@@ -319,6 +319,7 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "page.folder_membership_changed": FolderInput,
   // Folder permissions (#2533): who a folder is shared with changed.
   "page.folder_acl_changed": FolderKey,
+  "page.folder_agent_access_changed": FolderKey,
   // Freshness (§4) reads as a clock going quiet and a clock catching up; a
   // wake gate (§5) is the one entry here that means an agent was started.
   "page.panel.stale": Clock,
@@ -339,6 +340,8 @@ export const JOURNAL_ENTRY_ICONS: Partial<Record<JournalEntryType, LucideIcon>> 
   "artifact.project_shared": Globe,
   "artifact.library_published": Globe,
   "artifact.library_pinned": FilePen,
+  "artifact.run_capability_withheld": Ban,
+  "artifact.run_capability_lost": Ban,
   "craft.native_preview_shared": Eye,
   "artifact.orphaned_workbook_deleted": Trash2,
   "artifact.private_output_published": Globe,

@@ -2,6 +2,7 @@ package editororigin
 
 import (
 	"embed"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -49,7 +50,20 @@ func (h *Handler) loadPackages(source fs.FS, root string) error {
 		for _, hash := range inlineScriptHashes(files["index.html"].body) {
 			extra += " " + hash
 		}
+		h.mu.Lock()
 		h.bundles[digest] = bundle{files: files, inline: extra}
+		h.mu.Unlock()
 	}
 	return nil
+}
+
+// AddPackages verifies digest-named packages and serves them from now on,
+// without a restart: the Word and Sheet editors installed after startup
+// (#5315). The caller supplies only packages whose pin it trusts; each one
+// passes exactly the same verification and CSP as a startup package.
+func (h *Handler) AddPackages(source fs.FS) error {
+	if h == nil || h.all || h.broken {
+		return errors.New("the editor origin is disabled")
+	}
+	return h.loadPackages(source, ".")
 }

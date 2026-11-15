@@ -95,6 +95,9 @@ func (f *foldersFixture) call(t *testing.T, method, path, userID, role, body str
 	case len(parts) == 2 && parts[1] == "acl" && method == "PUT":
 		req.SetPathValue("slug", parts[0])
 		f.h.PutFolderACL(rr, req)
+	case len(parts) == 2 && parts[1] == "agent-access" && method == "PUT":
+		req.SetPathValue("slug", parts[0])
+		f.h.PutFolderAgentAccess(rr, req)
 	case len(parts) == 4 && parts[1] == "acl" && method == "DELETE":
 		req.SetPathValue("slug", parts[0])
 		req.SetPathValue("subject_type", parts[2])

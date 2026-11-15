@@ -21,6 +21,10 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 		Priority     string `json:"priority"`
 		ProjectID    string `json:"project_id"`
 		AssigneeID   string `json:"assignee_id"`
+		// ParentIdentifier creates the issue as a sub-issue in one atomic
+		// call — the decomposition path that also works for human-requested
+		// runs, where a separate sub_issue_of link is refused.
+		ParentIdentifier string `json:"parent_identifier"`
 	}
 	if !decodeCappedJSON(w, r, &req) {
 		return
@@ -79,6 +83,9 @@ func (s *Server) handleIssueCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.AssigneeID != "" {
 		body["assignee_id"] = req.AssigneeID
+	}
+	if req.ParentIdentifier != "" {
+		body["parent_identifier"] = req.ParentIdentifier
 	}
 
 	bodyJSON, err := json.Marshal(body)

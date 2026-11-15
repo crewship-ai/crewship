@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/pipeline"
 )
 
 func checkCredentialsRequired(client doctorHTTPGetter, ws string, def map[string]interface{}) []doctorCheck {
@@ -34,6 +36,20 @@ func checkCredentialsRequired(client doctorHTTPGetter, ws string, def map[string
 			continue
 		}
 		credType, _ := creq["type"].(string)
+		// name.<NAME> selects one credential by its exact name.
+		if name, byName := pipeline.CredentialRefName(credType); byName {
+			if _, found := available["name."+name]; found {
+				out = append(out, doctorCheck{Name: "credential:name." + name, Level: doctorOK, Message: "active credential with this name found"})
+			} else {
+				out = append(out, doctorCheck{
+					Name:    "credential:name." + name,
+					Level:   doctorFail,
+					Message: fmt.Sprintf("declared credential %q has no active credential with that name in workspace", name),
+					Hint:    "create it with `crewship credential create " + name + " ...`",
+				})
+			}
+			continue
+		}
 		credType = strings.ToUpper(credType)
 		if credType == "" {
 			continue
@@ -73,6 +89,7 @@ func fetchActiveCredentialTypes(client doctorHTTPGetter, _ string) map[string]st
 		return nil
 	}
 	var rows []struct {
+		Name     string `json:"name" yaml:"name"`
 		Provider string `json:"provider" yaml:"provider"`
 		Type     string `json:"type" yaml:"type"`
 		Status   string `json:"status" yaml:"status"`
@@ -93,6 +110,11 @@ func fetchActiveCredentialTypes(client doctorHTTPGetter, _ string) map[string]st
 		}
 		if r.Type != "" {
 			out[strings.ToUpper(r.Type)] = struct{}{}
+		}
+		// By-name references keep the name's case ("name." cannot collide
+		// with an upper-cased type or provider key).
+		if r.Name != "" {
+			out["name."+r.Name] = struct{}{}
 		}
 	}
 	return out

@@ -293,11 +293,14 @@ architecture and reuses two systems that already exist here.
 ## 7. Permission model
 
 Private chat artifacts are an explicit exception to the ordinary Page role and
-grant paths described below. Their persisted private audience permits only the
-human custodian and workspace OWNER; ADMIN has no automatic access. Unauthorized
-reads return 404 and catalogs omit the name and entry. OWNER opening another
-human's private output writes a content-free audit before metadata or content is
-released; unavailable audit storage refuses that access. Ordinary grants,
+grant paths described below. Their custody (write, administration) belongs only
+to the human custodian and the workspace OWNER. Their read audience is the
+custodian plus workspace OWNERs and ADMINs (owner decision 2026-10-30): an
+ADMIN's read is read-only and never becomes write, share, publish or custody
+power. Unauthorized reads return 404 and catalogs omit the name and entry. An
+OWNER or ADMIN opening another human's private output writes a content-free
+audit before metadata or content is released; unavailable audit storage refuses
+that access. Neither role's reach passes to an agent (§7.1c). Ordinary grants,
 folders and legacy public links cannot silently publish a private artifact. Private grant administration and production are also limited to the custodian and workspace OWNER; an ADMIN role or a legacy producer grant does not widen those controls.
 The only explicit publication path is the experimental workbook share
 (`docs/cli/workbook.mdx`). The owner confirms it, it is audited and one-way, and
@@ -559,6 +562,357 @@ crewship page revoke <slug> --agent <agent-slug>
 crewship page grants <slug>
 ```
 
+### 7.1c Agent access modes — what a chat run may reach (#5317)
+
+Behind the workspace flag `artifact_agent_access_modes` (off by default). Off
+changes nothing: the chat bridge ignores the `artifact_refs` key as it did
+before the flag existed, and turning the flag off after references were
+recorded starts their runs the ordinary way, binding nothing. Decided by the
+owner on 2026-11-13.
+
+1. **A reference is a structured chip, never text.** A chat message carries
+   `metadata.artifact_refs: [{"page_id": "<id>"}]`, 1–10 entries, filled from
+   the composer's attachment chips or `crewship run --artifact`. Names, links
+   or ids written in the message body are never references.
+2. **The server resolves references when the message is sent, as the human
+   would be as an ordinary member.** Before the message is stored it checks
+   each reference against the sending human with their workspace role read as
+   MEMBER (never above their own role): reach that comes only from the ADMIN or
+   OWNER role does not pass to an agent, for reads or for writes. A reference
+   that is missing, unreadable, in another workspace or malformed is refused
+   with one identical error, so a refusal never reveals that something exists.
+   References are admitted only in the human's own private chat with the agent,
+   and are refused, never silently dropped, on a turn that would not bind
+   them: with `page_context`, a Document create or update, a Native Craft
+   instruction or an origin run.
+3. **Only the trusted human admission writes the run scope.** After the message
+   is stored, the references are recorded (`artifact_message_refs`), and the
+   run's admission copies them into `artifact_run_scope` in the transaction
+   that captures the run principal, checking each one against the human again;
+   access lost since sending refuses the run. Database triggers hold the same
+   shape: a reference row names the human's own message in their chat and a
+   page of the workspace, and a scope row mirrors its own principal message's
+   references. An internal token or an agent can neither record a reference
+   nor widen a scope. If access is lost between the pre-check and the record,
+   the stored message keeps no references and starts no run.
+4. **A follow-up message carries its own references.** An attached artifact is
+   not in reach of the next run unless that message attaches it again (the
+   composer keeps chips sticky and the server re-checks them every time).
+
+5. **With the flag on, a chat run reaches an artifact in one of three ways,
+   checked on every use** (no exact-run consent): it was attached to the
+   message that started the run; the run's agent created it in this chat and
+   the human still owns it (it stays in reach for later messages of the same
+   chat); or the agent holds its own live grant on it (standing access). In
+   every case the human must still read it as an ordinary member, so a human
+   who loses access mid-run stops the run's access too, and role-only reach is
+   never delegated. Anything else is refused exactly like a missing artifact.
+6. **Writes are narrower than reads.** A run writes only an artifact the human
+   owns and that it reaches as attached or created; standing access is read
+   only. An agent never shares, grants, moves or publishes. An exact-run
+   consent the human gave today ("edit with agent", a comment task) keeps its
+   one page in reach with the flag on. A Design uses the same reach and
+   write rules as an artifact project (#5317 step 5.3); an agent still never
+   creates a Design. Its run reads the version the human is entitled to: an
+   Editor's run (edit as an ordinary member, never through the ADMIN or OWNER
+   role) reads the latest version, a Viewer's or Commenter's the shared one.
+   Word documents, Sheets (GridCraft) and Mooring documents are read through
+   the run's scope like any other artifact (owner decision, #5317 step 5.3),
+   and changed only through their own exact-run consent: a drafting or
+   iteration consent for a Word document, a mandate for a Sheet or Mooring
+   document. That consent binds every write's targets, base revision and
+   lease, so an agent write under another person's lease ends as a proposal
+   and never bypasses the lease.
+   - *Reads.* A Word document is read through attached, standing or folder
+     reach (these kinds have no created reach; a Word document the run
+     created is reached through its drafting consent), its human reading it as an ordinary member, through
+     the draft view with one `page_id` (`crewship doc draft view --page`, MCP
+     `doc_draft_view`; mode `read`, every paragraph and heading). The Docs
+     authority admits that reach only on the `state` callback Node makes for
+     the view's `read` (Node names the operation behind every state load);
+     export, comments and checkpoints never read through the scope. When a
+     consent of the run names the page (a drafting consent, or an iteration
+     mandate the run ever held, even once it lapses or is revoked), that consent alone serves the view, with
+     its block limit and mode, and the audit names it (`consented`). The run
+     sidecar forwards `page_id` only as the view's single query parameter and
+     refuses every other query; the server alone decides reach, so an
+     unreached page gets a missing page's answer end to end. A Sheet is read
+     (`action: read` without `mandate_id`; MCP `workbook_read`) only when its
+     human is the owner or an owner-named editor, and a Mooring document
+     (`action: read` without `mandate_id`; MCP `mooring_command`) only when
+     its human owns it. Both kinds keep their rule that agent grants, crew
+     grants and folders never reach their content, so standing and folder
+     reach do not apply to them, and the audited ADMIN or OWNER read never
+     passes to the agent. Docs and Sheets have no shared version: every
+     reader the human's own read admits reads the head (a Sheet editor from
+     the publication floor).
+   - *Changes.* Without a consent or mandate the scope never changes content
+     and never takes a lease. A Sheet or Mooring change (`apply`, `command`)
+     the run reaches answers 409 `proposal_required` (no proposal delivery
+     exists for them yet); one it does not reach is refused like a missing
+     artifact. Over MCP, `workbook_apply`, `workbook_status` and
+     `workbook_commits` require `mandate_id` in their schema;
+     `mooring_command` lists it as optional, and the sidecar refuses a
+     `command` without it before anything reaches the server. A Word
+     document's lease, commit, checkpoint and proposal are refused like a
+     missing one; an agent proposal on a Word document needs an iteration
+     propose mandate (proposals through the scope: #5357, #5359).
+   - *Flag off: known differences.* The server refuses every scope read as
+     before, but the run sidecar and its MCP tools do not know the flag, so
+     some refusals now come from the server instead of the sidecar. The
+     server checks the run's human principal before the query. A run with a
+     human principal (drafting consent, an artifact-project run, or a run
+     the person gave a Sheet or Mooring mandate) gets the answers listed
+     here. An ordinary chat run without one gets 403 `no_human_principal`
+     from the server for each forwarded call instead, attached artifacts
+     included (before, the sidecar refused the draft view and
+     `workbook_read` with the 400s named below). The one call that moved the
+     other way is a `mooring_command` `command` without `mandate_id`: the
+     sidecar now refuses it itself with 400, where an ordinary run got the
+     server's 403 `no_human_principal` before. The answers for a run with a
+     principal:
+     the sidecar's draft view with `page_id` is forwarded and answered 400
+     "only the authenticated workspace query is supported" (it was 400 "draft
+     view has no caller-selected scope"); MCP `doc_draft_view` with a
+     `page_id` gets the same 400 from the server; MCP `workbook_read` without
+     `mandate_id` is forwarded and answered 404 "Workbook not found" (it was
+     400 "invalid workbook packet" from the sidecar); a `mooring_command`
+     `command` without `mandate_id` is refused by the sidecar with 400 "a
+     command needs the retained mandate_id" (the server answered 400 "invalid
+     Mooring command"); a Mooring read without it still gets the server's 400.
+     The MCP tool schemas list `page_id` and the optional `mandate_id`
+     whatever the flag.
+   A propose mandate never needs the lease: with the flag on, a run under any
+   propose mandate (every iteration on a schema 4–6 Document, whether it
+   reaches the Document through a page grant, a folder at `propose` or the
+   human's own Document) may not take or renew the writer lease, only release
+   one, so an agent can never hold it against a person who edits or accepts.
+   Native Word and Sheet Craft tasks (`crewship craft task`) are a separate,
+   explicitly consented runtime and are unchanged.
+7. **Limits, read from the workspace policy on every use.** One chat run
+   creates at most `chat_run_create_limit` artifacts (default 3, 1–20) and
+   reads at most `run_read_limit` distinct artifacts through standing access
+   (default 50, 1–500); past either the run gets 429 `artifact_run_limit`.
+   One crew creates at most `crew_hourly_page_limit` pages per hour through
+   the sidecar save path (default 20, 1–1000; 429 `crew_hourly_page_limit`);
+   pages a person created for the crew do not count; agent, routine and
+   onboarding saves do.
+   `crewship workspace artifact-policy set --chat-run-create-limit
+   --run-read-limit --crew-hourly-page-limit` changes them; a change bumps the
+   policy version. A workspace that never saved a policy allows every live
+   crew for this chat-run scope only while the flag is on (the policy read
+   reports `scoped_default: true`); every other agent surface keeps requiring
+   a saved, enabled policy, and a saved policy, on or off, stays the ceiling.
+8. **The sidecar page save carries the agent run token (#5336).** The
+   `save_page` tool sends the same derived run token the artifact tools send,
+   as the `Authorization` bearer on `POST /api/v1/internal/pages/save`. With
+   the flag on and a token that verifies for the crew and the acting agent,
+   the save is bound to its run: it counts against `chat_run_create_limit`
+   (429 `artifact_run_limit` past it) and the page is recorded as created by
+   that run. A token that does not verify (another crew, another agent, not a
+   run token) is refused with 403 `invalid_run_token`, never treated as
+   absent. A run without a human principal (routine, or admitted with the flag
+   off) has no run to bind to and is counted under the crew hourly limit
+   only, and so is a verified token whose principal is no longer live (the
+   artifact tools' check: expiry, suspended or restricted human, membership or
+   chat revision, run ended); neither records a created page nor counts as a
+   save without a token, and a verified token always satisfies the
+   requirement below. A save without a token (a sidecar that
+   predates this release, still running in an existing container, or an agent
+   holding only a per-agent v1 token, which the sidecar does not forward) is
+   accepted under the crew hourly limit only, logged and counted
+   (`crewshipd_page_save_without_run_token_total`, after a successful save),
+   unless the workspace policy sets `save_requires_run_token` (`crewship
+   workspace artifact-policy set --save-requires-run-token=true`); then it is
+   refused with 403 `run_token_required`. The host's own routine
+   `page.create` (dispatcher, master internal token, never held by a
+   container) is exempt from the requirement and the counter. An onboarding
+   save for a target crew (`target_crew_slug`) counts against the Guide's own
+   run. The requirement is an explicit
+   opt-in, not a date: an admin turns it on once the counter stays at zero.
+   **The token is accounting, not a boundary between agents of one crew:**
+   they share the container, so a token can be omitted or borrowed; it only
+   makes the per-run limit apply on this path.
+9. **Only a run started by the human's own message carries a human.** A plain
+   chat run records its human principal at admission; routine, webhook, cron,
+   agent-to-agent and crew-token runs record none. Agent-to-agent and
+   crew-token runs reach nothing through this path; routine, webhook and
+   scheduled runs reach only what item 10 allows.
+
+9. **A folder may let the agents of its owning crew read or suggest (D2).**
+   `page_folders.agent_access` is `none` (default), `read` or `propose`, never
+   write: a folder has no issuer whose standing could be re-checked. It is one
+   setting per folder, not an ACL row, so `page_folder_acl` still names no
+   agent. A workspace admin or a MANAGER+ of the owning crew sets it, fenced on
+   `acl_version` and audited (`page.folder_agent_access_changed`); levels other
+   than `none` need the flag. It reaches only non-private pages filed in the
+   folder, only agents whose live crew owns the folder (the run's crew, not
+   deleted), and only as standing access: counted against `run_read_limit`,
+   still intersected with the run's human, and never a write. On every kind
+   but a Docs Document, `propose` reaches exactly what `read` does. On a Docs
+   Document (#5317 step 5.2), `propose` also lets the run propose changes
+   through the existing iteration path: the human's explicit iteration intent
+   on that Document is still required, the human must edit it as an ordinary
+   member (Edit held only through the ADMIN or OWNER role never passes to the
+   agent), and the folder rule is re-checked on every use, so a downgrade, a
+   crew move, a deleted crew, a page made private or moved out of the folder
+   stops the next proposal. Only a person with Edit accepts a proposal (an
+   ordinary human commit under the lease); a folder never lets the run
+   commit, pin a checkpoint, take the writer lease or accept. Each proposal or read of the Document
+   counts once per run against `run_read_limit`. The same rule (one query)
+   decides a folder read and a folder proposal. With the flag on the same
+   ordinary-member Edit is required of the human on the page-grant proposal
+   path too. With the flag on, the folder's ACL document names the kinds on
+   which `propose` is a real proposal (`agent_propose_kinds: ["docs"]`;
+   absent with the flag off). The folder settings dialog (owner decision 1)
+   offers **Can suggest** for the "Agents of this folder's crew" row only
+   when that list names a kind it knows, with the note that it works only for
+   those kinds (a person with their own Edit, not only through the ADMIN or
+   OWNER role, asks in a chat; a person with Edit accepts) and acts as Viewer for other kinds in the folder. Without the list
+   a stored `propose` is shown as the disabled **Viewer (set as Can
+   suggest)**.
+10. **A run without a human reaches only its agent's standing access, from a
+   host-recorded run (#5339).** A run token alone proves nothing here: the
+   crew container holds the key that derives run tokens for any agent and run
+   of its crew. Two routine starts count. A routine a person ran (or batch-ran)
+   records each agent step as a routine run. A schedule's own fire (the cron
+   scheduler, or the schedule's "run now") records each agent step as a
+   scheduled run only when a person created the schedule or last changed what
+   it runs (`pipeline_schedules.creator_kind = 'human'`, set only from that
+   person's own session or CLI token on the public API) and, checked again at
+   that step, the person still holds the same workspace membership they held
+   then (`creator_member_id`; leaving and rejoining does not restore it), with
+   a role that may create schedules (MANAGER+), as a trusted (not restricted)
+   member, not suspended, and with no access revocation
+   (`users.access_revoked_at`, set by an admin's session revoke or recovery)
+   since the creator was written (`creator_set_at`).
+   "Run now" follows the same rule: the schedule's creator decides, the person
+   pressing it lends nothing. A schedule an agent saved (any internal path,
+   including `/internal/routines/schedules` and save_routine's trigger,
+   whatever `X-Caller-User-Id` it carries) is marked `agent`; a schedule
+   saved before the creator was recorded has none. Neither ever records,
+   until a person changes what it runs. Creating a schedule, or changing its
+   cron, timezone, inputs, target, pinned version or wake check (any of
+   these fields named in the update in any letter case, even with its old
+   value, or changed in effect), overwrites the creator, so an agent's change
+   to a person's schedule takes its access away. Enabling, disabling,
+   renaming it or changing its failure limit, `catchup_policy` or
+   `spread_seconds` keeps the creator: an admin re-enabling an agent's schedule after its circuit
+   breaker tripped does not vouch for it. A GDPR erasure of the creator
+   clears the whole creator, so the schedule vouches for nothing. A delayed or
+   debounced start (its trigger defaults to schedule), a schedule occurrence
+   that waited in the queue for capacity, a webhook, `call_pipeline`, another
+   agent, an automation, an issue, a page action and a wake check record
+   nothing and their steps reach no artifact, and neither does a routine an
+   agent authored, whoever starts it. All of these fail closed. A scheduled
+   step refused because of its schedule's creator or its routine's agent
+   author, or a schedule claim the host did not make, is journaled as
+   `artifact.run_capability_withheld`
+   once per schedule fire (not per step), flag on only. Its reason is
+   `schedule_fire_unverified`, `schedule_target_mismatch`,
+   `schedule_saved_by_agent`, `schedule_routine_agent_authored`,
+   `schedule_creator_unknown` or, for every
+   problem with the person's standing, the one generic
+   `schedule_creator_not_in_good_standing`; the detail (left, suspended,
+   revoked, role, restricted) goes only to the server log. The entry names
+   the schedule only for a fire the host vouched for. With the flag off
+   nothing is read, recorded or journaled. A stopped schedule says so where
+   schedules are listed (API `artifact_access` "active" | "stopped" with
+   `stopped_reason`, the CLI's ARTIFACTS column, the schedules tab), computed
+   with the same check every fire runs (`pipeline.ScheduleAccess.Stopped`,
+   which also refuses a routine an agent authored: `routine_agent_authored`,
+   journaled as `schedule_routine_agent_authored`); a person-standing reason is shown only
+   to the creator and workspace OWNER/ADMIN, others see
+   `creator_not_in_good_standing`. An agent's own webhook and cron runs,
+   configured on the agent by a person, record as before. So the host
+   producer of such a run records the run in `artifact_unattended_runs` (agent, crew, trigger,
+   source) after its run record and before its agent starts, and the server
+   mints a random capability for that one run, storing only its SHA-256. No
+   HTTP endpoint and no internal token can record a run. The capability is
+   handed to the crew sidecar in the run's preflight (set once, authenticated
+   by the run's own token) and attached by it to that run's artifact tool
+   calls only; it never enters the agent's environment. The tool admits such
+   a run only when the capability matches the record for the token's exact
+   run, agent and crew, the record is open and unexpired (the run's own
+   timeout plus 5 minutes, at most 2 hours),
+   the run is live in the journal (started, no terminal entry), its work
+   attempt (if any) is current, and the workspace policy allows the crew. The
+   run's end, its terminal journal entry or the expiry ends the capability.
+   The creator's standing is checked when each step starts: a step already
+   running keeps its capability for its own lifetime (at most 2 hours) even
+   if the creator loses standing meanwhile, and the next step is checked
+   again. A run resumed after a wait or an approval carries no schedule fire,
+   so its later steps of a scheduled run get no capability.
+   Such a run then reaches an artifact only when the agent holds its own live
+   grant on it (`standing`) or the page sits in a folder that lets its crew's
+   agents read or suggest (`folder`, item 9); never a private (Personal)
+   artifact, never anything through a role, and at most `run_read_limit`
+   distinct artifacts per run (429 `artifact_run_limit`). It writes
+   (`artifact_publish`) only through a live `write` grant that the artifact's
+   owner gave the agent on that artifact, checked on every write; never
+   through a folder. Only `artifact_versions` and `artifact_publish` are open
+   to it; create, share, restore, comments, replies, dashboard data and slides
+   are refused before any artifact is looked up. Its read sees the shared
+   version, or the latest when it holds that write grant, and no comment text.
+   Anything else is refused exactly like a missing artifact. Flag off, nothing
+   is recorded and such a run reaches nothing, as before.
+   The capability lives only in the sidecar's memory and is delivered once
+   per run; nothing in the container can fetch one. If the sidecar restarts,
+   the run's later artifact calls arrive without it: the server answers 403
+   `run_capability_lost` ("This run lost its artifact access …") for a
+   recorded, still-live run and journals `artifact.run_capability_lost` once
+   per run. The run reaches nothing for the rest of its life; the next run
+   gets a new capability.
+   Not solved: all agents of one crew container run as UID 1001. A sibling
+   agent that reads another agent's run token (for example from
+   `/proc/<pid>/environ`) can call the sidecar with it, and the sidecar then
+   attaches that run's capability. The capability adds nothing beyond what
+   the stolen token already reaches; it is the same exposure chat runs have
+   today. It stops only a token minted from the crew key for a run the host
+   never recorded.
+
+11. **Every artifact project access is audited with its human.** Each access
+   a flag-on chat run makes to an artifact project (view, comments, dashboard
+   data, slides and PDF export, publish, restore, reply, create) writes an
+   `audit_logs` row `artifact.agent_run_accessed` in the same transaction as
+   the access. So does every access to a Design (read, write), and every
+   access through a kind's own exact-run consent: a Word document's read,
+   commit, checkpoint and proposal, its create (reach `created`), and a Sheet
+   or Mooring document's read and write under a mandate (reach `consented`).
+   A read of a Word document, Sheet or Mooring document through the run's
+   scope is recorded with its reach (`referenced`, `standing`, `folder`, ...);
+   the draft view's access checks before and after the Node read record
+   nothing, the `state` callback that serves the content does. A refused
+   change records nothing.
+   A Docs proposal or read that reaches the Document through a folder at
+   `propose` is recorded with reach `folder`.
+   Leases carry no content and are not recorded. A Sheet write is recorded by
+   the transaction that commits it; the read-only rebase prescan and the
+   reservation before the engine runs only admit it and record nothing. A
+   Design apply always saves a version, even when it changes no node, so it is
+   recorded as a write. Native Word and Sheet Craft tasks are not audited by
+   this row. The row's
+   user is the human the agent acted for; its metadata names the agent, crew,
+   run, chat, the reach (`referenced`, `created`, `consented`, `standing` or
+   `folder`) and the operation (`read`, `write`, `propose`, `create`); a Docs
+   proposal is `propose`, never `write`. It holds no
+   content. A run without a human (item 10) has no user on the row (`user_id`
+   is NULL: no human acted, and the grant's issuer did not perform the
+   access); its metadata names the trigger and source instead of a chat, and
+   a scheduled run also its `schedule_id` (read from the host-recorded source).
+   Reads and writes are recorded once per run, artifact and operation
+   (a later access re-verifies the existing row); each individual write is
+   already in the version history with the run as its actor. The row keeps the
+   reach of the first such access; a later access by another reach is not
+   recorded again. Every create is recorded. If the row cannot be written, or
+   is silently dropped, the access is refused. Pre-checks and capability
+   probes record nothing; only the transaction that performs the access does,
+   so refused accesses and the flag off record nothing. Like admin reads of
+   private artifacts, these rows live only in the audit log, never the
+   workspace journal, so the audit listing's private-artifact audience filter
+   applies: `crewship audit --action artifact.agent_run_accessed -f json`
+   shows the human and the metadata.
+
 ### 7.2 What this costs
 
 This is greenfield in this repo, and the PRD should not pretend otherwise. Per-resource ACLs are
@@ -603,7 +957,13 @@ makes it auditable.
 3. **Only a human publishes.** An agent can build the page; it cannot make it public, and it
    cannot add a panel to an already-public page without that panel being separately marked by a
    human. This is §7.1b rule 1 taken to its conclusion — an agent may not widen reach, and
-   "public" is the widest reach there is.
+   "public" is the widest reach there is. The human must also hold reach over the page: its user
+   owner, a member of its owning crew whose role there (workspace role or crew override) is
+   MANAGER or above or who holds the crew's Manage grant, or a workspace ADMIN/OWNER. Plain crew
+   membership reads a crew page but never publishes it. A link speaks for the human who created
+   it, so it opens only while that human is a member of the workspace and is not suspended; it is
+   withheld, not revoked, and opens again when their standing returns. Listing a page's links (which names their creators) takes the same authority
+   as publishing; revoking takes it too, except that anyone may revoke a link they created.
 4. **Every public link expires.** A required expiry, default 30 days, maximum 1 year. Tokens are
    high-entropy, revocable individually, and one page may have several so revoking the
    accountant's link does not break the client's.

@@ -151,6 +151,11 @@ func (r *Router) resolveWaitpointDecision(req *http.Request, op *decisionOperati
 	if !canRole(role, "update") || !canScope(ctx, "workspace:admin") {
 		return errDecisionDenied
 	}
+	// A held routine action is decided by OWNER/ADMIN only; DecideTx
+	// enforces it too, this answers the chat with a plain denial first.
+	if pipeline.IsCrewshipApprovalStepKey(source.StepID) && !pipeline.HeldActionDeciderRoles[strings.ToUpper(role)] {
+		return errDecisionDenied
+	}
 	if source.version() != op.Version {
 		return errDecisionVersion
 	}
@@ -165,6 +170,9 @@ func (r *Router) resolveWaitpointDecision(req *http.Request, op *decisionOperati
 	if decisionErr != nil && (result == nil || !result.Applied) {
 		if errors.Is(decisionErr, pipeline.ErrAlreadyDecided) {
 			return errDecisionVersion
+		}
+		if errors.Is(decisionErr, pipeline.ErrDeciderNotAllowed) {
+			return errDecisionDenied
 		}
 		return decisionErr
 	}

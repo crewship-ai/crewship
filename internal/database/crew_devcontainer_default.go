@@ -46,6 +46,12 @@ import "strings"
 // git, curl, wget, bash and ca-certificates but NOT uid 1001 (it has `node` at
 // 1000), which is why common-utils is not optional here — the runtime execs as
 // 1001:1001 and would have nothing to exec as.
+//
+// The literal still says uid/gid, which common-utils does not read; agent got
+// 1001 here only because node holds 1000. Provisioning normalizes them to
+// userUid/userGid (devcontainer.NormalizeDeclaredAgentUser) before building.
+// The literal is left as is on purpose: it is part of every defaulted crew's
+// stored definition, so editing it would mark all of them changed at once.
 const DefaultCrewDevcontainerConfig = `{
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
   "containerEnv": {

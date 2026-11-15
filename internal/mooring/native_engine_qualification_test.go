@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/craftengine"
 )
 
 // Explicit release qualification supplies a pinned CLI and two different native
@@ -39,7 +41,11 @@ func TestNativeStorePinnedEngineWholeVersionQualification(t *testing.T) {
 	cfg.EngineRevision = required("CRAFT_QUALIFICATION_REVISION")
 	cfg.EngineSHA256 = required("CRAFT_QUALIFICATION_SHA256")
 	cfg.MaxHistoryBytes = DefaultNativeHistoryBytes
-	validator := NativeCLIValidator{Application: app, BinaryPath: required("CRAFT_QUALIFICATION_ENGINE"), SHA256: cfg.EngineSHA256}
+	engine, err := craftengine.NewNative(app, required("CRAFT_QUALIFICATION_ENGINE"), cfg.EngineSHA256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	validator := NativeCLIValidator{Application: app, Engine: engine}
 	cfg.Validate = validator.Validate
 	store := NewNativeStore(db, cfg)
 	lease, initial, err := store.Initialize(t.Context(), scope, principal, first)

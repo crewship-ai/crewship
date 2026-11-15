@@ -119,6 +119,33 @@ The routines MCP tools `doc_draft_view`, `doc_draft_prepare`, `doc_draft_apply`
 and `doc_draft_checkpoint` use the same permission and immutable requests. They
 do not accept raw Yjs updates or whole-document replacement.
 
+### Reading a document the run reaches
+
+With the workspace flag `artifact_agent_access_modes` on, a chat run can also
+read a Docs document the human attached to the message that started the run,
+or one the agent reaches through its own grant or its crew's folder, as long as the human can read it as an ordinary
+member:
+
+```bash
+crewship doc draft view --page <page-id>
+```
+
+The view has `"mode": "read"` and lists every heading and paragraph of the
+current confirmed revision (Docs keep no separate shared version). It is
+read-only: `prepare`, `apply`, `checkpoint` and `propose` do not accept it,
+and no lease is taken. A page the run does not reach is refused exactly like
+a missing one (`draft view HTTP403 denied or unavailable`); with the flag off
+the `page_id` is refused (`HTTP400`). Reads through agent grants or folders
+count toward the run's read limit (`HTTP429`, `artifact_run_limit`). Each read
+is recorded in the audit log as `artifact.agent_run_accessed`. When the run's
+own drafting consent or iteration mandate names the page, `--page` returns the
+same view as plain `view`: that consent's mode and block limit apply, and the
+read is recorded as `consented`. The MCP tool `doc_draft_view` takes the same
+optional `page_id`. For `view` only, `CREWSHIP_SIDECAR_URL` optionally selects
+another loopback sidecar origin (`http://127.0.0.1:<port>`; any other value is
+refused); `prepare`, `apply`, `checkpoint` and `propose` always use the fixed
+sidecar.
+
 ### Proposing on a schema 4, 5 or 6 document
 
 On a schema 4, 5 or 6 document an agent never edits directly: it proposes, and a

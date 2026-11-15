@@ -104,7 +104,7 @@ func TestDocumentIterationProposeMandateGates(t *testing.T) {
 			t.Run(fmt.Sprintf("schema%d/%s", schema, tt.name), func(t *testing.T) {
 				f, _, intent := proposeIterationFixtureSchema(t, "", schema)
 				tt.setup(t, f, intent.PageID)
-				scope, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, intent)
+				scope, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, f.a.CrewID, intent)
 				if tt.want == nil {
 					if err != nil || !scope.Propose || scope.PageID != intent.PageID {
 						t.Fatalf("propose mandate refused: %+v %v", scope, err)
@@ -124,7 +124,7 @@ func TestDocumentIterationSchemaThreeSharedUnchangedWithAgentWriteGrant(t *testi
 	f, _, _, intent := iterationFixture(t)
 	mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, intent.PageID)
 	mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'write',?)`, intent.PageID, f.a.AgentID, f.rig.adminID)
-	if _, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, intent); !errors.Is(err, errDocumentIterationProposalUnavailable) {
+	if _, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, f.a.CrewID, intent); !errors.Is(err, errDocumentIterationProposalUnavailable) {
 		t.Fatalf("schema 3 shared mandate changed: %v", err)
 	}
 }
@@ -135,7 +135,7 @@ func TestDocumentIterationProposeGrantNeverAdmitsDirectEdit(t *testing.T) {
 	f, _, _, intent := iterationFixture(t)
 	mustExec(t, f.rig.db, `UPDATE pages SET private_audience=0 WHERE id=?`, intent.PageID)
 	mustExec(t, f.rig.db, `INSERT INTO page_grants(page_id,subject_type,subject_id,level,granted_by_user_id) VALUES(?,'agent',?,'propose',?)`, intent.PageID, f.a.AgentID, f.rig.adminID)
-	if _, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, intent); !errors.Is(err, errDocumentIterationProposalUnavailable) {
+	if _, _, err := f.pages.documentIterationPage(t.Context(), f.a.WorkspaceID, f.a.HumanUserID, f.a.AgentID, f.a.CrewID, intent); !errors.Is(err, errDocumentIterationProposalUnavailable) {
 		t.Fatalf("propose grant and a direct edit mandate: %v", err)
 	}
 	var slug string

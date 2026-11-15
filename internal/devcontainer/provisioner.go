@@ -178,6 +178,7 @@ func elapsedMs(start time.Time) int64 { return time.Since(start).Milliseconds() 
 type ProvisionOption func(*provisionOpts)
 
 type provisionOpts struct {
+	acquireImage func(context.Context, ...string) error
 	forceRebuild bool
 	onProgress   ProgressCallback
 	onPlan       PlanCallback
@@ -188,6 +189,13 @@ type provisionOpts struct {
 	// in both provisioning paths; a miss fails the build with the binary's
 	// name instead of surfacing as "No such file or directory" in a chat.
 	requiredBinaries []string
+}
+
+// WithImageAcquisition reports actual normalized image references before use.
+// The caller retains the corresponding leases until it publishes or rejects
+// the result; intermediate feature images participate in the same lifetime.
+func WithImageAcquisition(acquire func(context.Context, ...string) error) ProvisionOption {
+	return func(o *provisionOpts) { o.acquireImage = acquire }
 }
 
 // WithForceRebuild bypasses both the final-image cache and installation-layer
@@ -258,6 +266,14 @@ type Provisioner struct {
 	// (see lockCacheTag). Entries exist only while held or awaited.
 	cacheTagMu    sync.Mutex
 	cacheTagLocks map[string]*cacheTagLock
+
+	// instanceID is this installation's settled identity, normalised, or ""
+	// (see SetInstanceID). It namespaces image tags and labels new images.
+	instanceID string
+
+	// buildPreflight is consulted before a build writes anything (see
+	// SetBuildPreflight). nil = no check.
+	buildPreflight BuildPreflight
 }
 
 // TempContainerLabelKey and TempContainerLabelValue identify temporary
@@ -466,6 +482,15 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 
 	emitEvt(ProvisionEvent{Step: ProvStepStart, Detail: baseImage})
 
+	// The runtime account is part of what is built and of the cache key, so
+	// it is settled before either: a config stored by an older version (the
+	// legacy uid/gid keys common-utils ignored) builds once with an explicit
+	// agent/1001 account, and a conflicting declaration fails here with the
+	// fix instead of building an image whose runtime user does not exist.
+	if _, err := cfg.NormalizeDeclaredAgentUser(); err != nil {
+		return fail(ProvStepStart, err)
+	}
+
 	// Runtimes with no `commit` (Apple Containers) provision by building the
 	// whole image instead. Dispatching here rather than at the call site keeps
 	// every caller — the HTTP trigger, the dispatch gate, the seed — on one
@@ -476,7 +501,12 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	}
 
 	hash := configHash(baseImage, cfg, miseConfig, dockerfileGenFingerprint(baseImage, cfg)+requiredBinariesHashSalt(o.requiredBinaries))
-	tag := cacheImageTag(hash)
+	tag := p.cacheTag(hash)
+	if o.acquireImage != nil {
+		if err := o.acquireImage(ctx, baseImage, tag); err != nil {
+			return fail(ProvStepStart, err)
+		}
+	}
 
 	// One provision per tag at a time; the cache check below runs under the
 	// lock, so a caller that waited finds the first one's image (#4816).
@@ -527,6 +557,11 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		}
 		emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Detail: "no customizations", DurationMs: elapsedMs(runStart)})
 		return &ProvisionResult{CachedImage: "", ConfigHash: hash}, nil
+	}
+
+	// From here on the build pulls and writes image data.
+	if err := p.checkBuildPreflight(ctx); err != nil {
+		return fail(ProvStepStoragePreflight, err)
 	}
 
 	p.logger.Info("provisioning devcontainer image", "base", baseImage, "tag", tag)
@@ -602,7 +637,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		// buildFeatureImage emits image_build_start, per-feature feature_install,
 		// image_build_done, and on any failure provision.failed (with the build
 		// log tail) — so we just propagate its error here.
-		featImage, berr := p.buildFeatureImage(ctx, baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, emit, o.onProvision, o.forceRebuild)
+		featImage, berr := p.buildFeatureImage(ctx, baseImage, resolvedFeatures, optionsByRef, cfg.ContainerEnv, emit, o.onProvision, o.forceRebuild, o.acquireImage)
 		if berr != nil {
 			return nil, berr
 		}
@@ -719,7 +754,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	}
 
 	// 8. Clean up caches inside the container.
-	if err := p.cleanupCaches(ctx, containerID, p.installer.execInContainerAsUser); err != nil {
+	if err := p.cleanupCaches(ctx, containerID, p.installer.execInContainerAsUser, requirements.ContainerEnv); err != nil {
 		p.logger.Warn("cache cleanup failed", "error", err)
 	}
 
@@ -731,9 +766,15 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	// `${containerEnv:X}` references are expanded against the base image's
 	// env here — a committed ENV line is applied to the image config as-is,
 	// with no build-time substitution the way a Dockerfile ENV gets.
+	// Provenance labels close the change list. They also replace the kind the
+	// temp container inherited from an owned feature image.
+	ownerLabels, err := imageLabelDirectives(imageBuildLabels(p.instanceID, ImageKindCrew, hash))
+	if err != nil {
+		return fail("commit", err)
+	}
 	committed, commitErr := p.docker.ContainerCommit(ctx, containerID, client.ContainerCommitOptions{
 		Reference: tag,
-		Changes:   imageEnvChanges(requirements.ContainerEnv, p.containerEnvSnapshot(ctx, containerID)),
+		Changes:   append(imageEnvChanges(requirements.ContainerEnv, p.containerEnvSnapshot(ctx, containerID)), ownerLabels...),
 	})
 	if commitErr != nil {
 		return fail("commit", fmt.Errorf("committing container: %w", commitErr))

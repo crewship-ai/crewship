@@ -67,7 +67,9 @@ full version history, not only the shared version. This does not depend on
 anything else they hold: an owner or admin who also has an Edit, Comment or
 Read share on the artifact still reads every version.
 
-Every such read is written to the workspace audit log. An entry is written
+The share dialog of a Personal artifact says so: *Personal: admins can open
+it, and every open is logged.* Every such read is written to the workspace
+audit log. An entry is written
 whenever an owner or admin opens an artifact they do not own and reach only
 through their workspace role, not through its crew, a folder or a direct
 share. For a project, slides or dashboard, a version their own share already
@@ -286,6 +288,36 @@ how many were saved before it. Reopen **Folder settings** to see what the
 folder has now.
 </Step>
 </Steps>
+
+### Let the crew's agents read or suggest in a folder
+
+With the `artifact_agent_access_modes` flag on, **Folder settings** also shows
+**Crew agents** for the crew that owns the folder (**Agents of this folder's crew**). Pick:
+
+- **No access** (the default).
+- **Viewer** to let that crew's agents read the folder's artifacts.
+- **Can suggest** to let them also propose changes on Docs. A suggestion
+  starts only when a person with their own Edit on the Doc asks the agent for
+  it in a chat (Edit held only through the Admin or Owner role cannot start
+  one), and a person with Edit accepts or rejects each one. Can suggest works
+  only for Docs: for other kinds in the folder (Slides, Designs, Word, Sheets
+  and the rest) it acts as **Viewer**. The dialog shows this note under the
+  row.
+
+Agents never edit through a folder and never see Personal artifacts; any
+other agent needs access on each artifact. Click **Save**. The same setting is
+`crewship page folder agent-access <slug> --level none|read|propose`.
+
+After a save that failed part way, you can change the level and save again in
+the same dialog. If someone else changed the crew agents level in the
+meantime, the dialog does not overwrite it: it shows the new level and asks
+you to check it and save again.
+
+<Note>
+The dialog offers **Can suggest** only when the server says which kinds take a
+suggestion (Docs). Against a server that does not, a folder already set to
+`propose` shows as **Viewer (set as Can suggest)**, which cannot be picked.
+</Note>
 
 ### Move an artifact to a folder
 

@@ -1,9 +1,70 @@
 # Native Craft sessions, leases, agent tasks and whole-document API
 
-The separate whole-native WordCraft/GridCraft profile is experimental and off by
-default. `craft_native.enabled: true` or `CREWSHIP_CRAFT_NATIVE_ENABLED=true`
-enables its human session and EditLease HTTP API. It requires a Linux boot-aware
-clock. A qualified Word profile is advertised as `wordcraft_native` by the authenticated
+Word (WordCraft) and Sheet (GridCraft) run inside Crewship (#5315): each
+document engine is a WebAssembly module run inside the server by wazero, each
+editor a pinned bundle served by the editor origin. They are not part of the
+binary. A release binary carries a catalog: for each application the version and
+the SHA-256 of its package's `manifest.json` (`craftassets.releaseCatalog`, set
+at build time), and the address the packages are published at. When an
+administrator turns an application on, Crewship downloads
+`crewship-craft-<application>.craftpkg`, unpacks only regular files with valid
+names, accepts it only if its manifest matches the pin and every file matches
+the manifest, and moves it into `<data directory>/craft-components/<application>/<pin>/`
+(`craft_native.components_dir`). It then serves the editor, fences it with the
+native credential gate and registers the profile, without a restart. Offline,
+the same package is installed from a file (`crewship admin instance applications
+install --file`). Installed packages are verified again at every start and
+every read; versions live side by side, because documents stay pinned to the
+engine they were written with. A build without a catalog (an ordinary `go
+build`) trusts no package. The server's operator can replace the pins with
+`CREWSHIP_CRAFT_COMPONENT_PINS`, in a release binary too (logged at every start;
+the components report `development: true`), and name a mirror with
+`CREWSHIP_CRAFT_COMPONENT_URL`, which does not change what is trusted.
+On a system without a suspend-aware clock (today: not Linux) the server starts
+and both applications report `clock_unsupported`. Whether people may use an application is the instance
+administrator's setting (`craft_application_settings`, Admin › Artifacts ›
+Applications, `crewship admin instance applications`); Word, Sheet and agents
+start **off**. The setting is applied per request:
+
+| Mode | Allowed |
+|---|---|
+| `open` | everything |
+| `draining` (off, within `drain_until`) | renew, save, import, restore, share, accept a proposal, agent apply; reads, release, reconcile |
+| `closed` | reads, release, reconcile only |
+
+New documents (`initialize`, the `wordcraft_native`/`gridcraft_native` document
+status) need `open`; acquire, handoff and new agent tasks need `open`. A
+refusal is `503` with `reason` `app_disabled` or `app_draining`. The metadata
+stream stops renewing a lease when the mode no longer allows it, so the editor
+keeps its draft. Turning off never changes stored documents.
+
+Availability agrees with that refusal (#5381): while the document's application
+is `draining` or `closed`, `GET .../craft/availability` answers `can_edit: false`
+(and `agents_enabled: false`), and, for a person who has Edit, `edit_refusal`
+carries the same reason acquire would answer with. The editor then opens
+read-only with "An administrator turned Word off on this server. You can read
+this document; editing is not available." (Sheet alike) and offers no take-over.
+An editor already open when the application is turned off keeps renewing and
+saving through the drain, as in the table above: custody belongs to the session
+that holds the lease (`craftNativePrincipal`), so only that session keeps
+saving, and it may still hand back. Its hand-over is refused while draining; the
+editor checks availability first and keeps writing, saying "An administrator
+turned Word off on this server, so editing cannot be handed over. You can keep
+editing; your changes keep saving until it closes." A reload opens a new
+session, which cannot take custody during the drain, so it opens read-only; the
+local draft is kept. When the drain ends the lease is no longer renewed and the
+editor turns read-only, draft kept. Every other editor that tries to take over,
+ask for editing or initialize a document gets the 503 `app_draining` or
+`app_disabled` refusal shown as the administrator text, and the editor stops
+offering those actions. The document status reports each
+application's mode in `applications`, so New artifact says Word or Sheet is
+turned off on this server by an administrator instead of not available.
+
+An operator can still configure a native development profile
+(`craft_native.enabled: true` or `CREWSHIP_CRAFT_NATIVE_ENABLED=true` with the
+profile variables below). It replaces the downloaded component of that
+application, runs only on Linux, and fixes the setting (`server_config`). It
+requires a Linux boot-aware clock. A qualified Word profile is advertised as `wordcraft_native` by the authenticated
 workspace document status endpoint. New Doc then creates a fresh empty personal
 Page, initializes its native Word model and releases the initial lease before
 opening the full editor. An ambiguous initialization is never blindly replayed. Native format metadata on
@@ -29,7 +90,7 @@ mutation is disabled or unavailable. A generic denial does not prove read loss.
 
 | Method | Path | Request | Response / success status |
 |---|---|---|---|
-| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, can_edit: boolean, preview_enabled: boolean, agents_enabled: boolean}`, 200. |
+| GET | `/api/v1/pages/{slug}/craft/availability` | No Craft admission. | `{enabled: boolean, can_edit: boolean, preview_enabled: boolean, agents_enabled: boolean, applications?: {wordcraft, gridcraft: "open" \| "draining" \| "closed"}, application?: "wordcraft" \| "gridcraft", edit_refusal?: "app_draining" \| "app_disabled"}`, 200. `can_edit` is false while the document's application is not `open`. |
 | POST | `/api/v1/pages/{slug}/craft/sessions` | `{}`. | `session_token`, public `session_id`, `application_id`, `page_id`, 201. |
 | POST | `/api/v1/pages/{slug}/craft/sessions/reauthorize` | Separately refreshed original authentication; no body consumed. | `{renewed: boolean}`, 200. |
 | GET | `/api/v1/pages/{slug}/craft/lease` | Craft admission header; Page read or Edit. | Lease status described below, 200. |

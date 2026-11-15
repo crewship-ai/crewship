@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/artifacts"
@@ -20,8 +21,12 @@ type craftNativeApplication struct {
 	EditorURL string
 }
 type craftNativeDocumentsHTTP struct {
-	human        *craftNativeHTTP
+	human *craftNativeHTTP
+	// mu guards applications and profiles: an application installed after
+	// startup (#5315) is added while requests are served.
+	mu           sync.RWMutex
 	applications map[string]craftNativeApplication
+	profiles     map[string]CraftNativeDocumentProfile
 }
 
 func newCraftNativeDocumentsHTTP(h *craftNativeHTTP, applications map[string]craftNativeApplication) *craftNativeDocumentsHTTP {
@@ -29,8 +34,51 @@ func newCraftNativeDocumentsHTTP(h *craftNativeHTTP, applications map[string]cra
 	for app, p := range applications {
 		profiles[app] = p
 	}
-	return &craftNativeDocumentsHTTP{h, profiles}
+	return &craftNativeDocumentsHTTP{human: h, applications: profiles, profiles: map[string]CraftNativeDocumentProfile{}}
 }
+
+func (d *craftNativeDocumentsHTTP) application(app string) (craftNativeApplication, bool) {
+	if d == nil {
+		return craftNativeApplication{}, false
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	a, ok := d.applications[app]
+	return a, ok
+}
+
+func (d *craftNativeDocumentsHTTP) profile(app string) (CraftNativeDocumentProfile, bool) {
+	if d == nil {
+		return CraftNativeDocumentProfile{}, false
+	}
+	d.mu.RLock()
+	defer d.mu.RUnlock()
+	p, ok := d.profiles[app]
+	return p, ok
+}
+
+// activate qualifies one profile exactly like a startup profile and serves
+// it from now on. An application that already runs is not replaced: its
+// documents are pinned to the engine they were written with.
+func (d *craftNativeDocumentsHTTP) activate(p CraftNativeDocumentProfile) error {
+	if d == nil || d.human == nil || !d.human.enabled {
+		return errors.New("native Craft documents are not available on this server")
+	}
+	applications, profiles, err := qualifyCraftNativeProfiles(map[string]CraftNativeDocumentProfile{p.Application: p})
+	if err != nil {
+		return err
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if _, running := d.applications[p.Application]; running {
+		return errCraftAppRunning
+	}
+	d.applications[p.Application] = applications[p.Application]
+	d.profiles[p.Application] = profiles[p.Application]
+	return nil
+}
+
+var errCraftAppRunning = errors.New("the application already runs; a new version needs a restart")
 
 type craftNativeSnapshotBody struct {
 	WorkspaceID    string `json:"workspaceId"`
@@ -67,7 +115,7 @@ func (d *craftNativeDocumentsHTTP) bind(r *http.Request) (*http.Request, *craftN
 	}
 	bound = bound.WithContext(context.WithValue(bound.Context(), craftNativeReadCaptureKey{}, &craftNativeReadCapture{}))
 	entry, _ := bound.Context().Value(craftNativeContextKey{}).(*craftNativeSession)
-	profile, ok := d.applications[entry.application]
+	profile, ok := d.application(entry.application)
 	if !ok || profile.Store.Application != entry.application {
 		return nil, nil, nil, zero, mooring.ErrNativeDisabled
 	}
@@ -146,6 +194,10 @@ func (d *craftNativeDocumentsHTTP) mutateSnapshot(w http.ResponseWriter, r *http
 	r, entry, s, _, err := d.bind(r)
 	if err != nil {
 		craftNativeDocumentError(w, err)
+		return
+	}
+	if !d.human.apps.allows(r.Context(), entry.application, craftSnapshotOperation(operation)) {
+		d.human.apps.refuse(w, r.Context(), entry.application)
 		return
 	}
 	if operation == "save" {

@@ -13,8 +13,9 @@ import {artifactsLibrary} from "@/lib/feature-flags"
 import {legacyPagesTarget} from "@/components/features/artifacts-library/legacy-pages-url"
 import {LegacyPagesRedirect} from "@/components/features/artifacts-library/legacy-pages-redirect"
 import {RestrictedPagesRedirect} from "@/components/features/artifacts-library/restricted-pages-redirect"
+import {appOffText,nativeAppOff} from "@/lib/mooring/native-app-off"
 
-interface Availability {scope:string;state:"loading"|"enabled"|"preview"|"disabled"|"error"}
+interface Availability {scope:string;state:"loading"|"enabled"|"preview"|"disabled"|"error";off?:string;preview?:boolean}
 export default function CraftPage(){return <Suspense fallback={<p className="p-6">Connecting…</p>}><CraftEntry/></Suspense>}
 // With the library on, a trusted session opens the document in its Artifacts
 // detail, /artifacts/<id>, which mounts this same editor host (#5129). Any
@@ -67,9 +68,11 @@ function NativeWordEntry(){
    const value:unknown=await response.json()
    const enabled=Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&(value as {enabled?:unknown}).enabled===true&&(value as {can_edit?:unknown}).can_edit===true
    const preview=Boolean(value)&&typeof value==='object'&&!Array.isArray(value)&&(value as {preview_enabled?:unknown}).preview_enabled===true
+   // An application the administrator turned off never opens for editing (#5381).
+   const off=Boolean(value)&&typeof value==='object'&&!Array.isArray(value)?nativeAppOff(value as Record<string,unknown>)??undefined:undefined
    if(abort.signal.aborted)return
-   setAvailability({scope,state:enabled?'enabled':preview?'preview':'disabled'})
-   if(!enabled)proveReadLoss()
+   setAvailability({scope,state:off?'disabled':enabled?'enabled':preview?'preview':'disabled',off,preview})
+   if(!enabled||off)proveReadLoss()
   }).catch(()=>{if(!abort.signal.aborted){setAvailability({scope,state:'error'});proveReadLoss()}})
   return()=>abort.abort()
  },[scope,request,humanId,workspaceId,pageId])
@@ -80,6 +83,7 @@ function NativeWordEntry(){
  if(availability?.scope!==scope||availability.state==='loading')return <p className="p-6">Connecting…</p>
  if(availability.state==='error')return <p role="alert" className="p-6">Editor availability was not confirmed.</p>
  if(availability.state==='preview')return <NativeCraftPreview key={scope!} humanId={humanId!} workspaceId={workspaceId!} pageId={pageId}/>
+ if(availability.off)return <><p role="status" className="p-6">{appOffText(availability.off)}</p>{availability.preview&&<NativeCraftPreview key={scope!} humanId={humanId!} workspaceId={workspaceId!} pageId={pageId}/>}</>
  if(availability.state!=='enabled')return <p className="p-6">The native editor is not turned on.</p>
  // The host's local UI and journal lifecycle must be remounted for every
  // identity/document scope; recovery data is never carried into a new scope.

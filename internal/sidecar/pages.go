@@ -56,6 +56,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/pages"
 )
 
@@ -296,8 +297,11 @@ type pagesSaveRequest struct {
 //
 // authorAgentID is the ACTING agent resolved from the per-agent bearer
 // token by the calling handler (respondRoutinesMCPToolsCall), matching
-// savePipeline's own authorAgentID parameter.
-func (s *Server) savePage(ctx context.Context, body pagesSaveRequest, authorAgentID string) (int, []byte) {
+// savePipeline's own authorAgentID parameter. runToken is the caller's live
+// agent run token, or empty (#5336): the host binds the save to that run for
+// its per-run limit. It is accounting, not a boundary between the crew's
+// agents, which share this container.
+func (s *Server) savePage(ctx context.Context, body pagesSaveRequest, authorAgentID, runToken string) (int, []byte) {
 	if s.ipc == nil {
 		return http.StatusServiceUnavailable, mustJSON(map[string]string{"error": "IPC not configured"})
 	}
@@ -320,9 +324,24 @@ func (s *Server) savePage(ctx context.Context, body pagesSaveRequest, authorAgen
 	if err != nil {
 		return http.StatusInternalServerError, mustJSON(map[string]string{"error": "marshal save body"})
 	}
-	saveRes, err := s.ipcRequestJSON(ctx, http.MethodPost, "/api/v1/internal/pages/save", saveBody)
+	saveRes, err := s.ipcRequestJSONWithRun(ctx, http.MethodPost, "/api/v1/internal/pages/save", saveBody, runToken)
 	if err != nil {
 		return http.StatusBadGateway, mustJSON(map[string]string{"error": "page-save request failed: " + err.Error()})
 	}
 	return saveRes.status, saveRes.body
+}
+
+// liveRunToken returns the caller's bearer when it is a verified agent run
+// token of a current run of this crew (the check the artifact tools make), and
+// empty otherwise: a per-agent token is not a run token, and forwarding it
+// would only get the save refused.
+func (s *Server) liveRunToken(r *http.Request) string {
+	token := bearerToken(r)
+	if !strings.HasPrefix(token, internaltoken.AgentRunPrefix+".") {
+		return ""
+	}
+	if _, _, _, present, valid := s.identityForRunTokenCtx(r.Context(), token); !present || !valid {
+		return ""
+	}
+	return token
 }

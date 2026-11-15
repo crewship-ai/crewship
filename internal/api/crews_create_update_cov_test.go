@@ -17,8 +17,10 @@ package api
 import (
 	"bytes"
 	"database/sql"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -489,4 +491,113 @@ func covCruRepeat(s string, n int) string {
 		b = append(b, s...)
 	}
 	return string(b)
+}
+
+// TestCovCruUpdate_CommonUtilsAccount pins the update side of the runtime
+// account rule: a common-utils declaration that would create the account under
+// another name or UID is refused before it is stored, while a compatible one,
+// or none at all, is accepted (update fills nothing in; provisioning does).
+func TestCovCruUpdate_CommonUtilsAccount(t *testing.T) {
+	const cu = "ghcr.io/devcontainers/features/common-utils:2"
+	// #5337: update stores the same settled account as create. A config
+	// without common-utils gets it injected, and a declared one gets its
+	// missing options; otherwise a re-apply of a bare-image manifest
+	// replaced the injected config and the next build had no `agent`.
+	const settled = `"username":"agent","userUid":"1001","userGid":"1001"`
+	for _, tc := range []struct {
+		name, cfg string
+		wantCode  int
+		wantIn    string
+		// wantStored are substrings of the stored config (quotes
+		// stripped, see below); empty means the submitted config as is.
+		wantStored []string
+	}{
+		{"other uid refused", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"username":"agent","userUid":"2000"}}}`, http.StatusBadRequest, "set userUid to", nil},
+		{"other user refused", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"username":"builder"}}}`, http.StatusBadRequest, "set username to", nil},
+		{"legacy uid key refused when it conflicts", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"uid":"2000"}}}`, http.StatusBadRequest, "UID 1001", nil},
+		{"compatible declaration gets the account", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"installZsh":"false"}}}`, http.StatusOK, "", []string{"installZsh:false", "username:agent", "userUid:1001", "userGid:1001"}},
+		{"no common-utils gets it injected", `{"image":"debian:bookworm-slim","hostRequirements":{"memory":"4096mb"}}`, http.StatusOK, "", []string{cu, "username:agent", "userUid:1001", "userGid:1001", "hostRequirements"}},
+		{"settled config stored as is", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{` + settled + `}}}`, http.StatusOK, "", nil},
+		{"username none stored as is", `{"image":"debian:bookworm-slim","features":{"` + cu + `":{"username":"none"}}}`, http.StatusOK, "", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h, db, userID, wsID := covCruNewCrew(t)
+			cr := covCruDoCreate(h, userID, wsID, "OWNER", `{"name":"Acct","slug":"acct"}`)
+			if cr.Code != http.StatusCreated {
+				t.Fatalf("create = %d: %s", cr.Code, cr.Body.String())
+			}
+			var created struct {
+				ID string `json:"id"`
+			}
+			_ = json.Unmarshal(cr.Body.Bytes(), &created)
+			var before sql.NullString
+			if err := db.QueryRow(`SELECT devcontainer_config FROM crews WHERE id = ?`, created.ID).Scan(&before); err != nil {
+				t.Fatal(err)
+			}
+			body, _ := json.Marshal(map[string]any{"devcontainer_config": tc.cfg})
+			rr := covCruDoUpdate(h, created.ID, userID, wsID, "OWNER", string(body))
+			if rr.Code != tc.wantCode {
+				t.Fatalf("update = %d, want %d; body=%s", rr.Code, tc.wantCode, rr.Body.String())
+			}
+			var after sql.NullString
+			if err := db.QueryRow(`SELECT devcontainer_config FROM crews WHERE id = ?`, created.ID).Scan(&after); err != nil {
+				t.Fatal(err)
+			}
+			if tc.wantCode != http.StatusOK {
+				if !strings.Contains(rr.Body.String(), tc.wantIn) {
+					t.Fatalf("body %s does not name the fix %q", rr.Body.String(), tc.wantIn)
+				}
+				if after != before {
+					t.Fatalf("refused update changed the stored config: %v -> %v", before, after)
+				}
+				return
+			}
+			if tc.wantStored == nil {
+				if after.String != tc.cfg {
+					t.Fatalf("stored = %q, want the submitted config %q unchanged", after.String, tc.cfg)
+				}
+				return
+			}
+			flat := strings.ReplaceAll(after.String, `"`, "")
+			for _, want := range tc.wantStored {
+				if !strings.Contains(flat, strings.ReplaceAll(want, `"`, "")) {
+					t.Fatalf("stored config %s lacks %q", after.String, want)
+				}
+			}
+		})
+	}
+}
+
+// #5352 review: the 100KB limit applies to the stored config. A bare config
+// just under the limit grows by the injected account; storing that would
+// leave a config the same endpoint refuses when it is sent back unchanged.
+func TestCovCruUpdate_SizeLimitAppliesAfterAccountInjection(t *testing.T) {
+	h, db, userID, wsID := covCruNewCrew(t)
+	cr := covCruDoCreate(h, userID, wsID, "OWNER", `{"name":"Big","slug":"big"}`)
+	if cr.Code != http.StatusCreated {
+		t.Fatalf("create = %d: %s", cr.Code, cr.Body.String())
+	}
+	var created struct {
+		ID string `json:"id"`
+	}
+	_ = json.Unmarshal(cr.Body.Bytes(), &created)
+	head := `{"image":"debian:bookworm-slim","customizations":{"pad":"`
+	tail := `"}}`
+	cfg := head + strings.Repeat("x", 102400-len(head)-len(tail)) + tail
+	body, _ := json.Marshal(map[string]any{"devcontainer_config": cfg})
+	rr := covCruDoUpdate(h, created.ID, userID, wsID, "OWNER", string(body))
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "exceeds 100KB") {
+		msg := rr.Body.String()
+		if len(msg) > 200 {
+			msg = msg[:200] + "…"
+		}
+		t.Fatalf("update = %d %s; a config that the injected account pushes past 100KB must be refused", rr.Code, msg)
+	}
+	var stored sql.NullString
+	if err := db.QueryRow(`SELECT devcontainer_config FROM crews WHERE id = ?`, created.ID).Scan(&stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.String) > 102400 {
+		t.Fatalf("stored config is %d bytes, over the limit", len(stored.String))
+	}
 }

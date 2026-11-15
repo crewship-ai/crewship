@@ -79,7 +79,7 @@ func TestEditorOriginWidensFrameSrcOfEveryUIDocumentWhenEnabled(t *testing.T) {
 func TestEditorOriginServesNothingWhileDisabled(t *testing.T) {
 	cfg := config.Default()
 	cfg.Auth.NextjsURL = "https://studio.example.test"
-	if newEditorOrigin(cfg, slog.Default()) != nil {
+	if newEditorOrigin(cfg, nil, slog.Default()) != nil {
 		t.Fatal("editor origin without configuration")
 	}
 	dir := t.TempDir()
@@ -95,7 +95,7 @@ func TestEditorOriginServesNothingWhileDisabled(t *testing.T) {
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
 	for _, enabled := range []bool{false, true} {
 		cfg.GridCraft.Enabled, cfg.GridCraft.EditorEnabled = enabled, enabled
-		gate := editororigin.Gate(newEditorOrigin(cfg, slog.Default()), main)
+		gate := editororigin.Gate(newEditorOrigin(cfg, nil, slog.Default()), main)
 		r := httptest.NewRequest("GET", "/b/"+digest+"/index.html", nil)
 		r.Host = "editor.example.test"
 		w := httptest.NewRecorder()
@@ -112,7 +112,7 @@ func TestUnparsableEditorOriginFailsClosed(t *testing.T) {
 	cfg.GridCraft = config.GridCraftConfig{EditorOrigin: "https://editor.example.test/path?x"}
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
 	w := httptest.NewRecorder()
-	editororigin.Gate(newEditorOrigin(cfg, slog.Default()), main).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
+	editororigin.Gate(newEditorOrigin(cfg, nil, slog.Default()), main).ServeHTTP(w, httptest.NewRequest("GET", "/", nil))
 	if w.Code != 404 {
 		t.Fatalf("misconfigured editor origin let the application through: %d", w.Code)
 	}
@@ -142,18 +142,18 @@ func TestZeroConfigEditorServesUnderStudioPrefix(t *testing.T) {
 	dir := t.TempDir()
 	digest := writeEditorBundle(t, dir)
 	cfg.GridCraft = config.GridCraftConfig{EditorBundleDir: dir, EditorBundles: []string{digest}}
-	if newEditorOrigin(cfg, slog.Default()) != nil {
+	if newEditorOrigin(cfg, nil, slog.Default()) != nil {
 		t.Fatal("disabled editor without an origin must change nothing")
 	}
 	cfg.GridCraft.Enabled, cfg.GridCraft.EditorEnabled = true, true
-	editor := newEditorOrigin(cfg, slog.Default())
+	editor := newEditorOrigin(cfg, nil, slog.Default())
 	if editor == nil {
 		t.Fatal("enabled editor without an origin is not served")
 	}
 	if got := editor.IndexURL(digest); got != "/_editor/b/"+digest+"/index.html" {
 		t.Fatalf("index URL %q", got)
 	}
-	opts := editorHeaderOptions(cfg, editor)
+	opts := editorHeaderOptions(cfg, nil, editor)
 	if opts.editorFrameSrc == nil || !opts.editorPerRequest {
 		t.Fatal("same-host frame-src is not per request")
 	}
@@ -186,7 +186,7 @@ func TestZeroConfigEditorServesUnderStudioPrefix(t *testing.T) {
 	} {
 		c := *cfg
 		off(&c.GridCraft)
-		if e := newEditorOrigin(&c, slog.Default()); e != nil || editorHeaderOptions(&c, e).editorFrameSrc != nil {
+		if e := newEditorOrigin(&c, nil, slog.Default()); e != nil || editorHeaderOptions(&c, nil, e).editorFrameSrc != nil {
 			t.Fatal("same-host editor served while disabled")
 		}
 	}
@@ -197,8 +197,8 @@ func TestDedicatedEditorOriginOverridesSameHost(t *testing.T) {
 	cfg := config.Default()
 	cfg.Auth.NextjsURL = "https://studio.example.test"
 	cfg.GridCraft = config.GridCraftConfig{Enabled: true, EditorEnabled: true, EditorOrigin: "https://editor.example.org"}
-	editor := newEditorOrigin(cfg, slog.Default())
-	if o := editorHeaderOptions(cfg, editor); o.editorFrameSrc(httptest.NewRequest("GET", "/chat", nil)) != "https://editor.example.org" || o.editorPerRequest {
+	editor := newEditorOrigin(cfg, nil, slog.Default())
+	if o := editorHeaderOptions(cfg, nil, editor); o.editorFrameSrc(httptest.NewRequest("GET", "/chat", nil)) != "https://editor.example.org" || o.editorPerRequest {
 		t.Fatal("dedicated frame-src source")
 	}
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
@@ -220,12 +220,12 @@ func TestMooringOnlyEditorPreservesSandboxAndStudioFramePolicy(t *testing.T) {
 	if cfg.GridCraft.Enabled || cfg.GridCraft.EditorEnabled {
 		t.Fatal("GridCraft must remain disabled")
 	}
-	editor := newEditorOrigin(cfg, slog.Default())
+	editor := newEditorOrigin(cfg, nil, slog.Default())
 	if !editor.HasBundle(digest) {
 		t.Fatal("Mooring editor bundle not loaded")
 	}
 	main := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(299) })
-	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, editor)))
+	handler := editororigin.Gate(editor, securityHeadersMiddlewareWith(main, editorHeaderOptions(cfg, nil, editor)))
 	r := httptest.NewRequest("GET", "https://studio.example.test/_editor/b/"+digest+"/index.html", nil)
 	r.Header.Set("Sec-Fetch-Dest", "iframe")
 	r.Header.Set("Sec-Fetch-Site", "same-origin")

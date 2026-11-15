@@ -261,30 +261,3 @@ func (h *ModelsHandler) activeCredential(ctx context.Context, wsID, provider str
 	}
 	return encryption.Decrypt(encryptedValue)
 }
-
-// providerModelIDs returns the set of valid model IDs for a provider in a
-// workspace, drawn from the same live-or-curated resolution the HTTP endpoint
-// uses. Returned ok=false means the set could not be determined (no live
-// lister and no curated set, e.g. an OLLAMA daemon that's unreachable) — the
-// caller should then NOT reject an unknown model, since it cannot prove the
-// model invalid. Used by the agent update path to validate llm_model.
-func (h *ModelsHandler) providerModelIDs(ctx context.Context, wsID, provider string) (map[string]bool, bool) {
-	provider = strings.ToUpper(strings.TrimSpace(provider))
-	// Gateway suggestions are deliberately partial. OpenCode's current native
-	// catalog decides availability; a curated subset cannot reject custom IDs.
-	if provider == "OPENCODE" || provider == "OPENCODE_GO" || provider == "ZAI_CODING_PLAN" {
-		return nil, false
-	}
-	if !supportedModelProviders[provider] {
-		return nil, false
-	}
-	models, _ := h.resolveModels(ctx, wsID, provider)
-	if len(models) == 0 {
-		return nil, false
-	}
-	set := make(map[string]bool, len(models))
-	for _, m := range models {
-		set[m.ID] = true
-	}
-	return set, true
-}

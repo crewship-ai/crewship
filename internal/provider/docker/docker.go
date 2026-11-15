@@ -95,6 +95,7 @@ type DetectResult struct {
 // It auto-detects the container runtime (Docker, Podman, Colima, OrbStack, etc.)
 // and manages crew containers with security isolation (non-root, cap-drop ALL).
 type Provider struct {
+	imageReferences provider.ImageReferenceAcquirer
 	// fenced maps a crew container id to the State.StartedAt at which its
 	// egress fence was installed. A restart recreates the network namespace
 	// and drops the fence, so a different StartedAt means "install again".
@@ -1701,6 +1702,45 @@ func verifySidecarIsLinuxELF(path string) error {
 // Info() failure ⇒ VM-backed/remote, where we must trust VolumeInspect instead.
 // This is more reliable than a GOOS check (Docker Desktop on Linux is VM-backed
 // too).
+// DaemonStorageInfo describes storage reported by the daemon. DockerRootDir
+// does not identify the containerd content/snapshot filesystem.
+type DaemonStorageInfo struct {
+	RootDir         string
+	OperatingSystem string
+	Driver          string
+	DriverStatus    [][2]string
+}
+
+// ClassicImageStore identifies file-backed graph drivers for which probing
+// DockerRootDir is meaningful. Pool/quota drivers, unknown drivers and containerd
+// snapshotters need independent storage measurement and return false.
+func (s DaemonStorageInfo) ClassicImageStore() bool {
+	for _, status := range s.DriverStatus {
+		if status[0] == "driver-type" && status[1] != "" {
+			return false
+		}
+	}
+	switch s.Driver {
+	case "overlay2", "aufs", "vfs", "fuse-overlayfs", "windowsfilter":
+		return true
+	default:
+		return false
+	}
+}
+
+// DaemonStorage keeps daemon API access in the provider package.
+func DaemonStorage(ctx context.Context, cli *client.Client) (DaemonStorageInfo, error) {
+	if cli == nil {
+		return DaemonStorageInfo{}, fmt.Errorf("docker: no client")
+	}
+	info, err := cli.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return DaemonStorageInfo{}, err
+	}
+	return DaemonStorageInfo{RootDir: info.Info.DockerRootDir, OperatingSystem: info.Info.OperatingSystem,
+		Driver: info.Info.Driver, DriverStatus: info.Info.DriverStatus}, nil
+}
+
 func daemonSharesHostFS(ctx context.Context, cli *client.Client) bool {
 	info, err := cli.Info(ctx, client.InfoOptions{})
 	if err != nil || info.Info.DockerRootDir == "" {

@@ -209,6 +209,7 @@ export const JOURNAL_ENTRY_TYPES = [
   "page.folder_membership_changed",
   // Folder permissions (#2533): an entry set or removed on a folder's ACL.
   "page.folder_acl_changed",
+  "page.folder_agent_access_changed",
   // §4 freshness verdicts and §5's wake gates.
   "page.panel.stale",
   "page.panel.recovered",
@@ -238,6 +239,8 @@ export const JOURNAL_ENTRY_TYPES = [
   "artifact.project_shared",
   "artifact.library_published",
   "artifact.library_pinned",
+  "artifact.run_capability_withheld",
+  "artifact.run_capability_lost",
   "craft.native_preview_shared",
   "artifact.orphaned_workbook_deleted",
   "artifact.private_output_published",

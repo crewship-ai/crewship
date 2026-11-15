@@ -3,6 +3,9 @@
 This page covers the pilot editor connection, not every application transport.
 See the [implementation profile inventory](../specs/mooring-profiles.md) for
 whole-native Craft, projects, Design, Dashboard data and structured Docs.
+The separately imported, experimental
+[Mooring SDK for Craft applications](mooring-sdk.md) builds lease, save,
+recovery and version helpers on top; this root entry point does not include it.
 
 Mooring's pilot connects a personal Artifact to an isolated editor and an agent.
 It is an experimental protocol-1 integration, not an L3 collaboration claim or
