@@ -147,8 +147,20 @@ Invalid boolean settings disable deletion. Apple image collection is unsupported
 Candidates have the installation's full `crewship.image.instance-id` and
 `crewship.image.kind=crew|feature` labels. Their images must be older than 24
 hours, unused by any container and unselected by every live crew in this
-installation. Current selections, configured bases, `last_selected_image` and
-`previous_image` are protected. SQLite records successful immutable selection
+installation, and must have stayed that way for 24 hours as this installation
+observed it: the first pass that sees an eligible image only records the time
+in `resource_retention_images`, a use or protection seen at a later pass
+restarts the window, and the record of an image that is gone or was removed is
+dropped. Passes (every 30 minutes) are the only observations: a use shorter
+than that interval is not seen, and after more than two hours without a
+completed pass (collection switched off, the server down) every window starts
+over. A host that is stopped or asleep for more than two hours every day
+therefore never completes a window and never collects; that is the safe
+direction, and such a host should prune by hand. An image's age alone is not a
+grace period. Current selections, configured bases,
+`last_selected_image` and `previous_image` are protected. A soft-deleted crew
+keeps the same protection for 7 days after its deletion, so reviving it does
+not rebuild its environment; a deletion time that cannot be read protects. SQLite records successful immutable selection
 order, including cache reuse; configuration invalidation does not discard it.
 The migration records known current selections but does not invent predecessors.
 

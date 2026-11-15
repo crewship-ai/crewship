@@ -15,6 +15,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/provider"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
@@ -32,6 +33,7 @@ func collectionImage(char string, owner, kind string) image.Summary {
 
 func TestOwnedImageCollectionProtectsSelectionsRollbackAndContainers(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	config := `{"image":"ubuntu:22.04"}`
 	h, ws, crew := covProvRig(t, &covCommitClient{}, config)
 	h.instanceID = collectionOwner
@@ -63,6 +65,7 @@ func TestOwnedImageCollectionProtectsSelectionsRollbackAndContainers(t *testing.
 
 func TestOwnedImageCollectionKeepsOnIncompleteEvidence(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	for _, failure := range []string{"containers", "images", "database", "incomplete-container", "disabled", "invalid-setting", "no-identity"} {
 		t.Run(failure, func(t *testing.T) {
 			fake := &fakeGCClient{images: []image.Summary{collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)}}
@@ -94,6 +97,7 @@ func TestOwnedImageCollectionKeepsOnIncompleteEvidence(t *testing.T) {
 
 func TestOwnedImageCollectionExcludesAcquisitionAndCollectsAbandonedBuild(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	fake := &fakeGCClient{images: []image.Summary{collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)}}
 	h := newGCTestHandler(t, fake)
 	h.instanceID = collectionOwner
@@ -113,6 +117,7 @@ func TestOwnedImageCollectionExcludesAcquisitionAndCollectsAbandonedBuild(t *tes
 
 func TestOwnedImageCollectionDoesNotTrustForeignAliases(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	fake := &fakeGCClient{images: []image.Summary{collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)}}
 	fake.images[0].RepoTags = append(fake.images[0].RepoTags, "custom:keep")
 	h := newGCTestHandler(t, fake)
@@ -126,6 +131,7 @@ func TestOwnedImageCollectionDoesNotTrustForeignAliases(t *testing.T) {
 
 func TestOwnedImageCollectionProtectsActualPreviousSelectionOnCacheReuse(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	config := `{"image":"ubuntu:22.04"}`
 	h, ws, crew := covProvRig(t, &covCommitClient{}, config)
 	h.instanceID = collectionOwner
@@ -171,6 +177,7 @@ func (q *blockedQualification) SandboxCapabilities() provider.SandboxCapabilitie
 // original deletion window: a build-tag lock alone has already been released.
 func TestOwnedImageCollectionExcludesCacheHitThroughPublication(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	config := `{"image":"synthetic/base:1"}`
 	h, ws, crew := covProvRig(t, &covCommitClient{}, config)
 	if _, err := h.db.Exec(`INSERT INTO agents(id,crew_id,workspace_id,name,slug,cli_adapter) VALUES('collection-agent',?,?, 'Agent','agent','CODEX_CLI')`, crew, ws); err != nil {
@@ -242,6 +249,7 @@ func TestIdentityChangePreservesExactSelectedArtifact(t *testing.T) {
 
 func TestOwnedImageCollectionPreservesLastSelectionDuringConfigInvalidation(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	fake := &fakeGCClient{images: []image.Summary{collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)}}
 	h := newGCTestHandler(t, fake)
 	h.instanceID = collectionOwner
@@ -283,6 +291,7 @@ func TestColdRegistryBaseKeepsFirstStartPullBehavior(t *testing.T) {
 
 func TestOwnedImageCollectionPreservesPreviousAcrossEquivalentRebuild(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	config := `{"image":"ubuntu:22.04"}`
 	h, ws, crew := covProvRig(t, &covCommitClient{}, config)
 	h.instanceID = collectionOwner
@@ -317,6 +326,7 @@ func TestOwnedImageCollectionPreservesPreviousAcrossEquivalentRebuild(t *testing
 
 func TestOwnedImageCollectionKeepsConfiguredBaseWithoutContainer(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	fake := &fakeGCClient{images: []image.Summary{collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)}}
 	h := newGCTestHandler(t, fake)
 	h.instanceID = collectionOwner
@@ -334,6 +344,7 @@ func TestOwnedImageCollectionKeepsConfiguredBaseWithoutContainer(t *testing.T) {
 
 func TestOwnedImageCollectionSeedsPreviousAfterLegacyBackupSelection(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	config := `{"image":"ubuntu:22.04"}`
 	h, ws, crew := covProvRig(t, &covCommitClient{}, config)
 	h.instanceID = collectionOwner
@@ -361,6 +372,7 @@ func TestOwnedImageCollectionSeedsPreviousAfterLegacyBackupSelection(t *testing.
 
 func TestCollectionSkipsMissingReferencesAndInvalidCrewConfig(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	candidate := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
 	fake := &fakeGCClient{images: []image.Summary{candidate}, containers: []container.Summary{{ID: "foreign-builder", ImageID: "sha256:" + strings.Repeat("b", 64), Names: tempNames("foreign-builder")}}}
 	h := newGCTestHandler(t, fake)
@@ -379,6 +391,7 @@ func TestCollectionSkipsMissingReferencesAndInvalidCrewConfig(t *testing.T) {
 
 func TestCollectionDoesNotWaitForUnrelatedBuild(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	busy := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
 	unused := collectionImage("b", collectionOwner, devcontainer.ImageKindCrew)
 	fake := &fakeGCClient{images: []image.Summary{busy, unused}}
@@ -396,6 +409,7 @@ func TestCollectionDoesNotWaitForUnrelatedBuild(t *testing.T) {
 }
 
 func TestOwnedCollectionIsOffByDefaultAndLegacyOptInHasExplicitPrecedence(t *testing.T) {
+	removeAtFirstSight(t)
 	t.Setenv(imageGCEnv, "")
 	_ = os.Unsetenv(imageGCEnv)
 	fake := &fakeGCClient{images: []image.Summary{collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)}}
@@ -436,6 +450,7 @@ func (f *slowCollectionInventory) ImageList(ctx context.Context, options client.
 }
 func TestSlowInventoryDoesNotBlockCrewEdits(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
+	removeAtFirstSight(t)
 	fake := &slowCollectionInventory{fakeGCClient: &fakeGCClient{images: []image.Summary{collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)}}, entered: make(chan struct{}), proceed: make(chan struct{})}
 	h := newGCTestHandler(t, fake.fakeGCClient)
 	h.instanceID = collectionOwner
@@ -510,5 +525,254 @@ func TestManualCacheDeletionExcludesImmutableBuildBase(t *testing.T) {
 	h.CacheDelete(out, req)
 	if out.Code != http.StatusConflict || len(fake.removedImages) != 0 {
 		t.Fatalf("deleted active immutable base: status=%d removed=%v", out.Code, fake.removedImages)
+	}
+}
+
+// removeAtFirstSight turns the unused window off for tests that are about
+// which images are eligible, not about how long they must have been unused.
+func removeAtFirstSight(t *testing.T) {
+	t.Helper()
+	previous := ownedImageUnusedWindow
+	ownedImageUnusedWindow = 0
+	t.Cleanup(func() { ownedImageUnusedWindow = previous })
+}
+
+func unusedSinceRows(t *testing.T, h *ProvisioningHandler) map[string]time.Time {
+	t.Helper()
+	got, err := h.ownedImagesUnusedSince(t.Context(), collectionOwner)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+func setUnusedSince(t *testing.T, h *ProvisioningHandler, imageID string, at time.Time) {
+	t.Helper()
+	if _, err := h.db.Exec(`INSERT INTO resource_retention_images(instance_id,image_id,first_unused_at) VALUES(?,?,?)
+		ON CONFLICT(instance_id,image_id) DO UPDATE SET first_unused_at=excluded.first_unused_at`,
+		collectionOwner, imageID, tsformat.Format(at)); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// An image's age is not a grace period. An old image that only just became
+// unused is observed first and removed only after it stayed unused for the
+// whole window (#5398).
+func TestOwnedImageCollectionWaitsForTheUnusedWindow(t *testing.T) {
+	t.Setenv(imageGCEnv, "true")
+	old := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew) // built 48h ago
+	fake := &fakeGCClient{images: []image.Summary{old}}
+	h := newGCTestHandler(t, fake)
+	h.instanceID = collectionOwner
+
+	h.sweepOrphanCacheImages(t.Context())
+	if len(fake.removedImages) != 0 {
+		t.Fatalf("removed at first sight although the window is %s: %v", ownedImageUnusedWindow, fake.removedImages)
+	}
+	first, tracked := unusedSinceRows(t, h)[old.ID]
+	if !tracked || time.Since(first) > time.Minute {
+		t.Fatalf("first unused observation not recorded now: %v tracked=%t", first, tracked)
+	}
+
+	// Still inside the window on a later pass: kept, and the first
+	// observation is not moved forward.
+	setUnusedSince(t, h, old.ID, time.Now().Add(-ownedImageUnusedWindow+time.Hour))
+	before := unusedSinceRows(t, h)[old.ID]
+	h.sweepOrphanCacheImages(t.Context())
+	if len(fake.removedImages) != 0 {
+		t.Fatalf("removed inside the unused window: %v", fake.removedImages)
+	}
+	if after := unusedSinceRows(t, h)[old.ID]; !after.Equal(before) {
+		t.Fatalf("the window was restarted by an idle pass: %v -> %v", before, after)
+	}
+
+	setUnusedSince(t, h, old.ID, time.Now().Add(-ownedImageUnusedWindow-time.Minute))
+	h.sweepOrphanCacheImages(t.Context())
+	if len(fake.removedImages) != 1 || fake.removedImages[0] != old.ID {
+		t.Fatalf("not removed after the whole window: %v", fake.removedImages)
+	}
+}
+
+// Any use or protection in between restarts the window, and bookkeeping for
+// images that are gone is dropped.
+func TestOwnedImageCollectionRestartsTheWindowOnUse(t *testing.T) {
+	t.Setenv(imageGCEnv, "true")
+	img := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
+	gone := "sha256:" + strings.Repeat("9", 64)
+	fake := &fakeGCClient{images: []image.Summary{img}, containers: []container.Summary{{ID: "c1", ImageID: img.ID, State: "exited"}}}
+	h := newGCTestHandler(t, fake)
+	h.instanceID = collectionOwner
+	h.sweepOrphanCacheImages(t.Context()) // observation is continuous from here
+	longAgo := time.Now().Add(-10 * ownedImageUnusedWindow)
+	setUnusedSince(t, h, img.ID, longAgo)
+	setUnusedSince(t, h, gone, longAgo)
+
+	h.sweepOrphanCacheImages(t.Context()) // a container uses it again
+	if len(fake.removedImages) != 0 {
+		t.Fatalf("removed an image a container uses: %v", fake.removedImages)
+	}
+	rows := unusedSinceRows(t, h)
+	delete(rows, lastPassMarker)
+	if len(rows) != 0 {
+		t.Fatalf("use must forget the old observation, and a vanished image's row must go: %v", rows)
+	}
+
+	fake.containers = nil // unused again: the window starts over
+	h.sweepOrphanCacheImages(t.Context())
+	if len(fake.removedImages) != 0 {
+		t.Fatalf("removed on the old observation after being used in between: %v", fake.removedImages)
+	}
+	if first := unusedSinceRows(t, h)[img.ID]; time.Since(first) > time.Minute {
+		t.Fatalf("the window did not restart: first unused %v", first)
+	}
+}
+
+// A young image is neither removed nor does it start a window.
+func TestOwnedImageCollectionLeavesYoungImagesAlone(t *testing.T) {
+	t.Setenv(imageGCEnv, "true")
+	young := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
+	young.Created = time.Now().Add(-ownedImageMinAge + time.Hour).Unix()
+	fake := &fakeGCClient{images: []image.Summary{young}}
+	h := newGCTestHandler(t, fake)
+	h.instanceID = collectionOwner
+	h.sweepOrphanCacheImages(t.Context())
+	if _, tracked := unusedSinceRows(t, h)[young.ID]; tracked {
+		t.Fatal("a young image started an unused window")
+	}
+	removeAtFirstSight(t)
+	h.sweepOrphanCacheImages(t.Context())
+	if len(fake.removedImages) != 0 {
+		t.Fatalf("removed an image younger than %s: %v", ownedImageMinAge, fake.removedImages)
+	}
+}
+
+// Passes are the only observations. After a silence longer than the gap
+// (collection switched off, the server down) an image may have been used
+// unseen, so every window starts over instead of acting on the old row.
+func TestOwnedImageCollectionRestartsWindowsAfterAnObservationGap(t *testing.T) {
+	t.Setenv(imageGCEnv, "true")
+	img := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
+	fake := &fakeGCClient{images: []image.Summary{img}}
+	h := newGCTestHandler(t, fake)
+	h.instanceID = collectionOwner
+	longAgo := time.Now().Add(-10 * ownedImageUnusedWindow)
+
+	for name, lastPass := range map[string]*time.Time{
+		"no pass was ever recorded":         nil,
+		"the last pass is older than a gap": ptrTime(time.Now().Add(-ownedImageObservationGap - time.Minute)),
+		"the last pass is in the future":    ptrTime(time.Now().Add(time.Hour)),
+	} {
+		if _, err := h.db.Exec(`DELETE FROM resource_retention_images`); err != nil {
+			t.Fatal(err)
+		}
+		setUnusedSince(t, h, img.ID, longAgo)
+		if lastPass != nil {
+			setUnusedSince(t, h, lastPassMarker, *lastPass)
+		}
+		h.sweepOrphanCacheImages(t.Context())
+		if len(fake.removedImages) != 0 {
+			t.Fatalf("%s: removed on an observation from before the gap: %v", name, fake.removedImages)
+		}
+		rows := unusedSinceRows(t, h)
+		if first := rows[img.ID]; time.Since(first) > time.Minute {
+			t.Fatalf("%s: the window did not start over: %v", name, first)
+		}
+		if marker := rows[lastPassMarker]; time.Since(marker) > time.Minute || marker.After(time.Now().Add(time.Minute)) {
+			t.Fatalf("%s: the completed pass was not recorded: %v", name, marker)
+		}
+	}
+
+	// Continuous observation: a recent pass keeps the old row valid.
+	setUnusedSince(t, h, img.ID, longAgo)
+	setUnusedSince(t, h, lastPassMarker, time.Now().Add(-ownedImageObservationGap+time.Minute))
+	h.sweepOrphanCacheImages(t.Context())
+	if len(fake.removedImages) != 1 || fake.removedImages[0] != img.ID {
+		t.Fatalf("not removed although observed unused throughout: %v", fake.removedImages)
+	}
+	// The removed image's row is gone at once: the same ID coming back must
+	// not inherit the window.
+	if _, tracked := unusedSinceRows(t, h)[img.ID]; tracked {
+		t.Fatal("the removed image kept its unused window")
+	}
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
+
+// A crew selecting the image again protects it, and that restarts the window
+// just as a container using it does.
+func TestOwnedImageCollectionRestartsTheWindowOnSelection(t *testing.T) {
+	t.Setenv(imageGCEnv, "true")
+	img := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
+	fake := &fakeGCClient{images: []image.Summary{img}}
+	h := newGCTestHandler(t, fake)
+	h.instanceID = collectionOwner
+	user := seedTestUser(t, h.db)
+	ws := seedTestWorkspace(t, h.db, user)
+	crew := seedCrewRow(t, h.db, "picks", ws, "Picks", "picks")
+	h.sweepOrphanCacheImages(t.Context()) // records the marker and the first observation
+	setUnusedSince(t, h, img.ID, time.Now().Add(-10*ownedImageUnusedWindow))
+
+	if _, err := h.db.Exec(`UPDATE crews SET cached_image=? WHERE id=?`, img.ID, crew); err != nil {
+		t.Fatal(err)
+	}
+	h.sweepOrphanCacheImages(t.Context())
+	if _, tracked := unusedSinceRows(t, h)[img.ID]; tracked || len(fake.removedImages) != 0 {
+		t.Fatalf("a selected image kept its old window or was removed: %v", fake.removedImages)
+	}
+}
+
+// A row whose time cannot be read must not pin the image forever: it is
+// dropped and the window starts over at that pass.
+func TestOwnedImageCollectionHealsAnUnreadableObservation(t *testing.T) {
+	t.Setenv(imageGCEnv, "true")
+	img := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
+	fake := &fakeGCClient{images: []image.Summary{img}}
+	h := newGCTestHandler(t, fake)
+	h.instanceID = collectionOwner
+	h.sweepOrphanCacheImages(t.Context())
+	if _, err := h.db.Exec(`UPDATE resource_retention_images SET first_unused_at='garbage' WHERE instance_id=? AND image_id=?`, collectionOwner, img.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.sweepOrphanCacheImages(t.Context())
+	if first, tracked := unusedSinceRows(t, h)[img.ID]; !tracked || time.Since(first) > time.Minute {
+		t.Fatalf("an unreadable row was not replaced by a fresh observation: %v tracked=%t", first, tracked)
+	}
+	if len(fake.removedImages) != 0 {
+		t.Fatalf("removed on an unreadable observation: %v", fake.removedImages)
+	}
+}
+
+// A soft-deleted crew can be revived. Its selections stay protected for the
+// retention period after deletion, and are released after it (#5398).
+func TestOwnedImageCollectionProtectsRecentlyDeletedCrews(t *testing.T) {
+	tests := []struct {
+		name        string
+		deletedAt   string
+		wantRemoved bool
+	}{
+		{"deleted an hour ago", time.Now().Add(-time.Hour).UTC().Format(time.RFC3339), false},
+		{"deleted inside the retention period", time.Now().Add(-deletedCrewImageRetention + time.Hour).UTC().Format(time.RFC3339), false},
+		{"deleted before the retention period", time.Now().Add(-deletedCrewImageRetention - time.Hour).UTC().Format(time.RFC3339), true},
+		{"unreadable deletion time protects", "not-a-time", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(imageGCEnv, "true")
+			removeAtFirstSight(t)
+			selected := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
+			fake := &fakeGCClient{images: []image.Summary{selected}}
+			h := newGCTestHandler(t, fake)
+			h.instanceID = collectionOwner
+			user := seedTestUser(t, h.db)
+			ws := seedTestWorkspace(t, h.db, user)
+			crew := seedCrewRow(t, h.db, "gone", ws, "Gone", "gone")
+			if _, err := h.db.Exec(`UPDATE crews SET cached_image=?, deleted_at=? WHERE id=?`, selected.ID, tt.deletedAt, crew); err != nil {
+				t.Fatal(err)
+			}
+			h.sweepOrphanCacheImages(t.Context())
+			if removed := len(fake.removedImages) == 1; removed != tt.wantRemoved {
+				t.Fatalf("removed = %v, want removed=%t", fake.removedImages, tt.wantRemoved)
+			}
+		})
 	}
 }

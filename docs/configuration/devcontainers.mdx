@@ -378,8 +378,12 @@ a message naming the volume, its free space and the floor, for example
 Owned crew and feature image collection is experimental and **off by default**.
 Set `CREWSHIP_IMAGE_GC=true` only on a dedicated or coordinated Docker daemon. Current selections, the previous immutable
 selection of each live crew and all container source images are protected.
-Unused owned images older than 24 hours may be removed, including untagged
-abandoned builds. `CREWSHIP_IMAGE_GC=false` explicitly disables this policy.
+An owned image older than 24 hours may be removed, including an untagged
+abandoned build, once it has stayed unused and unprotected for 24 hours as
+observed by this installation at its 30-minute passes; a use seen at a pass
+restarts that window, and so does a gap of more than two hours without a
+completed pass. A
+deleted crew's selections stay protected for 7 days after the deletion. `CREWSHIP_IMAGE_GC=false` explicitly disables this policy.
 
 Inventory runs outside the lifecycle gate. Final deletion checks exclude only
 the candidate's acquisitions through publication and restore replay, with a
