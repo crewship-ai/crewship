@@ -12,12 +12,26 @@ import (
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/quiesce"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
 )
 
 const imageGCEnv = "CREWSHIP_IMAGE_GC"
 const ownedImageMinAge = 24 * time.Hour
+
+// ownedImageUnusedWindow is how long an owned image must have stayed unused
+// and unprotected, as this installation observed it, before it is removed.
+// The image's age alone is not a grace period: an image built days ago and
+// deselected a minute ago would otherwise go on the next pass (#5398). The
+// first observation is recorded in resource_retention_images; any use or
+// protection in between restarts the window. Zero removes at first sight.
+var ownedImageUnusedWindow = 24 * time.Hour
+
+// deletedCrewImageRetention keeps a soft-deleted crew's selections protected
+// for this long after the deletion, so reviving it (the onboarding setup crew
+// is revived routinely) does not silently rebuild its environment (#5398).
+const deletedCrewImageRetention = 7 * 24 * time.Hour
 
 // One image collector for the installation. The legacy opt-in is restricted
 // to unlabelled artifacts; shared BuildKit records and base images are excluded.
@@ -97,15 +111,79 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 	h.mu.RLock()
 	owner := h.instanceID
 	h.mu.RUnlock()
+	unusedSince, err := h.ownedImagesUnusedSince(ctx, owner)
+	if err != nil {
+		h.logger.Warn("image collection: unused-image state unavailable; retaining images", "error", err)
+		return
+	}
+	now := time.Now()
+	present := map[string]bool{}
 	for _, img := range listed.Items {
 		if ctx.Err() != nil {
 			return
 		}
-		if !ownedImage(img, owner) || img.Created <= 0 || img.Created > cutoff || used[img.ID] || protected[img.ID] {
+		if !ownedImage(img, owner) {
 			continue
 		}
+		present[img.ID] = true
+		if used[img.ID] || protected[img.ID] {
+			if _, tracked := unusedSince[img.ID]; tracked {
+				h.forgetOwnedImageUnused(ctx, owner, img.ID) // any use restarts the window
+			}
+			continue
+		}
+		if img.Created <= 0 || img.Created > cutoff {
+			continue
+		}
+		if ownedImageUnusedWindow > 0 {
+			first, tracked := unusedSince[img.ID]
+			if !tracked {
+				if _, err := h.db.ExecContext(ctx, `INSERT INTO resource_retention_images(instance_id,image_id,first_unused_at) VALUES(?,?,?) ON CONFLICT(instance_id,image_id) DO NOTHING`,
+					owner, img.ID, tsformat.Format(now)); err != nil {
+					h.logger.Warn("image collection: unused-image state write failed", "error", err)
+				}
+				continue
+			}
+			if now.Sub(first) < ownedImageUnusedWindow {
+				continue
+			}
+		}
 		h.removeCollectedImage(ctx, img, true)
+	}
+	for id := range unusedSince {
+		if ctx.Err() != nil {
+			return
+		}
+		if !present[id] {
+			h.forgetOwnedImageUnused(ctx, owner, id)
+		}
+	}
+}
 
+// ownedImagesUnusedSince reads when this installation first observed each
+// owned image unused. Unreadable bookkeeping restarts that image's window.
+func (h *ProvisioningHandler) ownedImagesUnusedSince(ctx context.Context, owner string) (map[string]time.Time, error) {
+	rows, err := h.db.QueryContext(ctx, `SELECT image_id, first_unused_at FROM resource_retention_images WHERE instance_id=?`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]time.Time{}
+	for rows.Next() {
+		var id, at string
+		if err := rows.Scan(&id, &at); err != nil {
+			return nil, err
+		}
+		if t, err := time.Parse(time.RFC3339Nano, at); err == nil { // tsformat:allow: parse only; the value is written with tsformat.Format and compared as time.Time in Go
+			out[id] = t
+		}
+	}
+	return out, rows.Err()
+}
+
+func (h *ProvisioningHandler) forgetOwnedImageUnused(ctx context.Context, owner, imageID string) {
+	if _, err := h.db.ExecContext(ctx, `DELETE FROM resource_retention_images WHERE instance_id=? AND image_id=?`, owner, imageID); err != nil {
+		h.logger.Warn("image collection: unused-image state write failed", "error", err)
 	}
 }
 
@@ -138,16 +216,24 @@ func ownedImage(img image.Summary, instanceID string) bool {
 // Current and previous selections protect bytes; immutable build history is
 // provenance, not the sequence of cache re-selections.
 func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[string]string, report bool) (map[string]bool, error) {
-	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,'') FROM crews WHERE deleted_at IS NULL`)
+	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,''),COALESCE(deleted_at,'') FROM crews`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	protected := map[string]bool{}
 	for rows.Next() {
-		var current, last, previous, base, config string
-		if err := rows.Scan(&current, &last, &previous, &base, &config); err != nil {
+		var current, last, previous, base, config, deletedAt string
+		if err := rows.Scan(&current, &last, &previous, &base, &config, &deletedAt); err != nil {
 			return nil, err
+		}
+		// A soft-deleted crew keeps its selections for a while: it can be
+		// revived. A deletion time that cannot be read protects, never frees.
+		if deletedAt != "" {
+			at, err := time.Parse(time.RFC3339Nano, deletedAt) // tsformat:allow: parse only; deleted_at is read and compared as time.Time in Go
+			if err == nil && time.Since(at) > deletedCrewImageRetention {
+				continue
+			}
 		}
 		// Protect configured bases even before a live crew has a container.
 		if id := byRef[base]; id != "" {
