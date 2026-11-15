@@ -41,16 +41,18 @@ func (g *craftAppsGate) agentsAllow(ctx context.Context, application string, op 
 	return g.mode(ctx, craftapps.Agents).Allows(op) && (application == "" || g.allows(ctx, application, op))
 }
 
+// reason is the refusal code for a subject that is not open.
+func (g *craftAppsGate) reason(ctx context.Context, subject string) craftapps.Reason {
+	if subject != craftapps.Agents && g.mode(ctx, subject) == craftapps.ModeDraining {
+		return craftapps.ReasonAppDraining
+	}
+	return craftapps.ReasonAppDisabled
+}
+
 // refuse writes the uniform refusal: 503 with a reason code the editor and
 // the CLI show as "turned off by the instance administrator".
 func (g *craftAppsGate) refuse(w http.ResponseWriter, ctx context.Context, subject string) {
-	reason := craftapps.ReasonAppDisabled
-	if g.mode(ctx, subject) == craftapps.ModeDraining {
-		reason = craftapps.ReasonAppDraining
-	}
-	if subject == craftapps.Agents {
-		reason = craftapps.ReasonAppDisabled
-	}
+	reason := g.reason(ctx, subject)
 	w.Header().Set("Cache-Control", "no-store")
 	writeJSON(w, http.StatusServiceUnavailable, map[string]string{
 		"error":       craftapps.Label(subject) + ": " + reason.Message(),

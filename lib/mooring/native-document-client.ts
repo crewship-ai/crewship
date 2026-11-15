@@ -2,6 +2,7 @@ import { apiFetch,tryRefresh,type RefreshResult } from "../api-fetch"
 import {getAuthMode} from "../server-base"
 import {validNativeDraft,validNativeVersion} from "./native-draft"
 import {NativeSaveError,type NativeSaveRequest} from "./single-editor-save"
+import {nativeAppOffFrom} from "./native-app-off"
 import {NATIVE_REAUTHORIZE_DEADLINE_MS} from "./native-revocation-bounds"
 import {parseNativeRestoreReceipt,parseNativeVersionDocument,parseNativeVersionList,type NativeRestoreReceipt,type NativeRestoreRequest,type NativeVersionDocument,type NativeVersionList} from "./native-versions"
 
@@ -149,6 +150,8 @@ export function createNativeDocumentClient(options: NativeDocumentClientOptions)
    if(!["acquire","release","request-handoff","handoff"].includes(action)||!body||Object.keys(body).some(key=>key!=="generation"&&key!=="request_id")||(action==="release"||action==="handoff")&&(!validNativeVersion(body.generation)||body.generation==="0")||action==="handoff"&&!identifier(body.request_id))throw new Error("invalid_native_lease_action")
    const response=await send(`${base}lease/${action}?${query}`,{method:"POST",cache:"no-store",signal,headers:{"Content-Type":"application/json","X-Craft-Session":token!},body:JSON.stringify({...body})})
    ready()
+   // The administrator turned the application off or it is draining (#5381).
+   const off=await nativeAppOffFrom(response,applicationId);ready();if(off)throw off
    if(response.status===409)throw new NativeSaveError("conflict")
    if(response.status===401||response.status===403)throw new NativeSaveError("write_revoked")
    if(!response.ok)throw new Error("native_lease_unconfirmed")

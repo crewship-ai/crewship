@@ -11,6 +11,7 @@ import { createEmptyWordCraftCheckpoint } from "@/lib/mooring/wordcraft-create"
 import { openWordCraftSession } from "@/lib/mooring/wordcraft-host-session"
 import { commandRequest } from "@/lib/mooring/wordcraft-command-session"
 import { CREATE_SCHEMA, verifyInitialization } from "@/lib/documents/contracts"
+import { nativeAppLabel } from "@/lib/mooring/native-app-off"
 
 export type DocumentFormat = "native" | "sheet" | "wordcraft" | "doc" | "commands"
 
@@ -92,6 +93,9 @@ export function useWordDocumentCreation(workspaceId: string) {
         original.nativeAttempted = true
         const initialized = await apiFetch(`${base}initialize?${query}`, { method: "POST", redirect: "error", skipRefresh: true, headers: { "Content-Type": "application/json" }, body: JSON.stringify({ application_id: application, bytes: btoa(binary) }) })
         const value = await initialized.json().catch(() => null)
+        // Refused before anything was written: the administrator turned it off (#5381).
+        const off = initialized.status === 503 && (value?.reason === "app_draining" || value?.reason === "app_disabled") ? nativeAppLabel(value?.application) ?? nativeAppLabel(application) : null
+        if (off) { original.nativeAttempted = false; throw new Error(`An administrator turned ${off} off on this server, so the document was not created.`) }
         if (!initialized.ok || value?.application_id !== application || value?.page_id !== pageId || value?.version !== "1" || typeof value?.session_token !== "string" || !/^[a-f0-9]{64}$/.test(value.session_token) || typeof value?.generation !== "string" || !/^[1-9][0-9]*$/.test(value.generation)) throw new Error("Native initialization could not be confirmed. Check the original Page before starting again.")
         original.nativeAdmission = { token: value.session_token, generation: value.generation }
       }
