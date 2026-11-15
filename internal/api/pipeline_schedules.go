@@ -504,7 +504,7 @@ func (h *PipelineHandler) CreateSchedule(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "failed to create schedule")
 		return
 	}
-	writeJSON(w, http.StatusCreated, h.withArtifactAccess(r, saved, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug))))
+	writeJSON(w, http.StatusCreated, h.withOneArtifactAccess(r, saved, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug))))
 }
 
 // wakeRefFromBody collapses the wake_pipeline_slug / wake_pipeline_id
@@ -553,6 +553,7 @@ func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 		replyError(w, http.StatusInternalServerError, "failed to load schedule routines")
 		return
 	}
+	access := h.scheduleAccess(r.Context(), workspaceID)
 	for _, s := range rows {
 		target := projections[s.TargetPipelineID]
 		wake := projections[s.WakePipelineID]
@@ -561,7 +562,7 @@ func (h *PipelineHandler) ListSchedules(w http.ResponseWriter, r *http.Request) 
 			version := target.HeadVersion
 			row.EffectiveVersion = &version
 		}
-		out = append(out, h.withArtifactAccess(r, s, row))
+		out = append(out, h.withArtifactAccess(r, access, s, target.AuthorAgentID, row))
 	}
 	setRoutineListNextOffset(w, offset, limit, len(rows))
 	writeJSON(w, http.StatusOK, out)
@@ -621,17 +622,50 @@ func (h *PipelineHandler) applyEffectiveVersions(ctx context.Context, rows []sch
 
 // withEffectiveVersion is applyEffectiveVersions for a single-row response
 // (create / update / activate).
-// withArtifactAccess fills whether the schedule's fires reach artifacts now
-// (#5339, owner decision for #5356), from the same standing check every fire
-// runs (pipeline.ScheduleCreatorStopped). Flag off, or the check failing,
-// leaves both fields empty. A person-standing reason is shown only to the
-// creator and to workspace OWNER/ADMIN.
-func (h *PipelineHandler) withArtifactAccess(r *http.Request, s *pipeline.Schedule, row scheduleResponse) scheduleResponse {
-	ctx := r.Context()
-	if on, err := featureflags.IsEnabledWith(ctx, h.db, s.WorkspaceID, artifactrun.FlagKey); err != nil || !on {
+// Seams for the per-request read counts (tests only).
+var (
+	scheduleArtifactFlag = featureflags.IsEnabledWith
+	newScheduleAccess    = func(q pipeline.RowQuerier, workspaceID string) *pipeline.ScheduleAccess {
+		return pipeline.NewScheduleAccess(q, workspaceID)
+	}
+)
+
+// scheduleAccess is the check for one response's schedules, nil with the
+// flag off (or unreadable): then no artifact state is shown.
+func (h *PipelineHandler) scheduleAccess(ctx context.Context, workspaceID string) *pipeline.ScheduleAccess {
+	if on, err := scheduleArtifactFlag(ctx, h.db, workspaceID, artifactrun.FlagKey); err != nil || !on {
+		return nil
+	}
+	return newScheduleAccess(h.db, workspaceID)
+}
+
+// withOneArtifactAccess is withArtifactAccess for a single-row response
+// (create / update / activate).
+func (h *PipelineHandler) withOneArtifactAccess(r *http.Request, s *pipeline.Schedule, row scheduleResponse) scheduleResponse {
+	access := h.scheduleAccess(r.Context(), s.WorkspaceID)
+	if access == nil {
 		return row
 	}
-	reason, err := pipeline.ScheduleCreatorStopped(ctx, h.db, s.WorkspaceID, pipeline.CreatorOf(s))
+	projections, err := loadRoutineProjections(r.Context(), h.db, s.WorkspaceID, []string{s.TargetPipelineID})
+	if err != nil {
+		h.logger.Warn("schedule artifact access routine", "schedule", s.ID, "error", err)
+		return row
+	}
+	return h.withArtifactAccess(r, access, s, projections[s.TargetPipelineID].AuthorAgentID, row)
+}
+
+// withArtifactAccess fills whether the schedule's fires reach artifacts now
+// (#5339, owner decision for #5356), from the same check every fire runs
+// (pipeline.ScheduleAccess.Stopped, with the routine's agent author). A nil
+// access (flag off), or the check failing, leaves both fields empty. A
+// person-standing reason is shown only to the creator and to workspace
+// OWNER/ADMIN.
+func (h *PipelineHandler) withArtifactAccess(r *http.Request, access *pipeline.ScheduleAccess, s *pipeline.Schedule, routineAuthorAgentID string, row scheduleResponse) scheduleResponse {
+	if access == nil {
+		return row
+	}
+	ctx := r.Context()
+	reason, err := access.Stopped(ctx, pipeline.CreatorOf(s), routineAuthorAgentID)
 	if err != nil {
 		h.logger.Warn("schedule artifact access state", "schedule", s.ID, "error", err)
 		return row
@@ -878,7 +912,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 		replyError(w, http.StatusInternalServerError, "failed to update schedule")
 		return
 	}
-	writeJSON(w, http.StatusOK, h.withArtifactAccess(r, saved, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug))))
+	writeJSON(w, http.StatusOK, h.withOneArtifactAccess(r, saved, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(saved, slug, wakeSlug))))
 }
 
 // DeleteSchedule DELETE /workspaces/{wsId}/pipeline-schedules/{scheduleId}
@@ -999,7 +1033,7 @@ func (h *PipelineHandler) ActivateSchedule(w http.ResponseWriter, r *http.Reques
 	if p, perr := h.store.GetByID(r.Context(), activated.TargetPipelineID); perr == nil {
 		slug = p.Slug
 	}
-	writeJSON(w, http.StatusOK, h.withArtifactAccess(r, activated, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(activated, slug, ""))))
+	writeJSON(w, http.StatusOK, h.withOneArtifactAccess(r, activated, h.withEffectiveVersion(r.Context(), h.toScheduleResponse(activated, slug, ""))))
 }
 
 // schedulePreviewMaxCount caps how many fire times a single preview call

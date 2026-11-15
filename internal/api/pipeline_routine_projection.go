@@ -15,6 +15,9 @@ type routineProjection struct {
 	Name        string
 	Status      string
 	HeadVersion int
+	// AuthorAgentID is the agent that authored the routine ("" for a
+	// person's); its schedules' fires reach no artifact.
+	AuthorAgentID string
 }
 
 const routineProjectionBatchSize = 500
@@ -45,7 +48,7 @@ func loadRoutineProjections(ctx context.Context, db *sql.DB, workspaceID string,
 			args = append(args, id)
 		}
 		rows, err := db.QueryContext(ctx,
-			`SELECT id, slug, name, COALESCE(status, 'active'), COALESCE(head_version, 0)
+			`SELECT id, slug, name, COALESCE(status, 'active'), COALESCE(head_version, 0), COALESCE(author_agent_id, '')
 			   FROM pipelines
 			  WHERE workspace_id = ? AND deleted_at IS NULL AND id IN (`+placeholders+")",
 			args...)
@@ -56,7 +59,7 @@ func loadRoutineProjections(ctx context.Context, db *sql.DB, workspaceID string,
 		for rows.Next() {
 			var id string
 			var projection routineProjection
-			if err := rows.Scan(&id, &projection.Slug, &projection.Name, &projection.Status, &projection.HeadVersion); err != nil {
+			if err := rows.Scan(&id, &projection.Slug, &projection.Name, &projection.Status, &projection.HeadVersion, &projection.AuthorAgentID); err != nil {
 				return fmt.Errorf("scan routine projection: %w", err)
 			}
 			out[id] = projection

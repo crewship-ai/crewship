@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"io"
 	"log/slog"
@@ -296,6 +297,12 @@ func TestRoutineArtifactRun_ScheduleCreatorDecidesAtEveryRun(t *testing.T) {
 				t.Fatalf("%s: a vouched person's schedule fire got a capability", name)
 			}
 		}
+		// The agent author is decided by the same check the list shows, so
+		// the fire says why.
+		req := fireReq(human, true)
+		req.AuthorAgentID = "agent_lead"
+		_, entries := step(req)
+		reason(t, entries, withheldScheduleRoutineAgent)
 	})
 	t.Run("an agent's or an unknown creator vouches for nothing", func(t *testing.T) {
 		agent := save("", ScheduleCreatorAgent, "human_2")
@@ -431,7 +438,7 @@ func TestRoutineArtifactRun_SchedulerVouchesForItsOwnFire(t *testing.T) {
 	}
 }
 
-// ScheduleCreatorStopped is the one standing check behind both the fire and
+// ScheduleAccess.Stopped is the one standing check behind both the fire and
 // the schedule's shown state: each way a creator stops vouching has its own
 // reason, and a person's change of what the schedule runs (a fresh creator
 // write) restores a schedule stopped by a revocation (owner decision for
@@ -460,7 +467,7 @@ func TestScheduleCreatorStopped_EachReasonAndRestore(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		reason, err := ScheduleCreatorStopped(t.Context(), db.DB, "ws_art", CreatorOf(got))
+		reason, err := NewScheduleAccess(db.DB, "ws_art").Stopped(t.Context(), CreatorOf(got), "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -503,8 +510,25 @@ func TestScheduleCreatorStopped_EachReasonAndRestore(t *testing.T) {
 	// not "no longer a member": nothing says they ever left.
 	noMember := CreatorOf(human)
 	noMember.MemberID = ""
-	if got, err := ScheduleCreatorStopped(t.Context(), db.DB, "ws_art", noMember); err != nil || got != ScheduleStoppedCreatorUnknown {
+	if got, err := NewScheduleAccess(db.DB, "ws_art").Stopped(t.Context(), noMember, ""); err != nil || got != ScheduleStoppedCreatorUnknown {
 		t.Fatalf("human without a recorded membership: %q %v", got, err)
+	}
+	// A routine an agent authored reaches nothing, whoever's schedule fires
+	// it; that comes first and says nothing about the person.
+	if got, err := NewScheduleAccess(db.DB, "ws_art").Stopped(t.Context(), CreatorOf(human), "agent_lead"); err != nil || got != ScheduleStoppedRoutineAgentAuthored || ScheduleStoppedIsPersonal(got) {
+		t.Fatalf("agent-authored routine: %q %v", got, err)
+	}
+	// One checker reads a creator's standing once, however many of their
+	// schedules it is asked about.
+	reads := 0
+	access := NewScheduleAccess(countingQuerier{db.DB, &reads}, "ws_art")
+	for range 3 {
+		if got, err := access.Stopped(t.Context(), CreatorOf(human), ""); err != nil || got != "" {
+			t.Fatalf("cached standing: %q %v", got, err)
+		}
+	}
+	if reads != 1 {
+		t.Fatalf("three checks of one creator read standing %d times", reads)
 	}
 
 	// A revocation (revoke sessions, suspension, password recovery) stops the
@@ -527,9 +551,35 @@ func TestScheduleCreatorStopped_EachReasonAndRestore(t *testing.T) {
 	if got := stopped(human); got != ScheduleStoppedNotMember {
 		t.Fatalf("left and rejoined: %q", got)
 	}
+	// One checker (one list) keeps the person's old and new membership apart:
+	// the schedule saved after rejoining vouches, the older one does not.
+	rejoined := save("", ScheduleCreatorHuman, "u_s")
+	shared := NewScheduleAccess(db.DB, "ws_art")
+	for _, tc := range []struct {
+		s    *Schedule
+		want string
+	}{{human, ScheduleStoppedNotMember}, {rejoined, ""}, {human, ScheduleStoppedNotMember}} {
+		got, err := store.GetByID(t.Context(), tc.s.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r, err := shared.Stopped(t.Context(), CreatorOf(got), ""); err != nil || r != tc.want {
+			t.Fatalf("one checker, schedule %s: %q %v, want %q", tc.s.ID, r, err, tc.want)
+		}
+	}
 	for reason, personal := range map[string]bool{ScheduleStoppedNotMember: true, ScheduleStoppedSuspended: true, ScheduleStoppedAccessRevoked: true, ScheduleStoppedRole: true, ScheduleStoppedRestricted: true, ScheduleStoppedAgentCreated: false, ScheduleStoppedCreatorUnknown: false} {
 		if ScheduleStoppedIsPersonal(reason) != personal {
 			t.Errorf("ScheduleStoppedIsPersonal(%q) != %v", reason, personal)
 		}
 	}
+}
+
+type countingQuerier struct {
+	q RowQuerier
+	n *int
+}
+
+func (c countingQuerier) QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row {
+	*c.n++
+	return c.q.QueryRowContext(ctx, query, args...)
 }

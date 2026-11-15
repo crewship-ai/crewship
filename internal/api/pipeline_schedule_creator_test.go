@@ -399,8 +399,8 @@ func TestScheduleContentChanged(t *testing.T) {
 func TestScheduleCreator_ListShowsWhyAScheduleIsStopped(t *testing.T) {
 	h, db, ownerID, wsID := scheduleHandlerRig(t)
 	seedPipelineRow(t, db, wsID, "pln_stop", "stop-routine")
-	mustExec(t, db, `INSERT INTO users(id,email) VALUES('u_mgr','mgr@ex.com'),('u_view','view@ex.com')`)
-	mustExec(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('wm_mgr',?,'u_mgr','MANAGER'),('wm_view',?,'u_view','VIEWER')`, wsID, wsID)
+	mustExec(t, db, `INSERT INTO users(id,email) VALUES('u_mgr','mgr@ex.com'),('u_view','view@ex.com'),('u_mem','mem@ex.com')`)
+	mustExec(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('wm_mgr',?,'u_mgr','MANAGER'),('wm_view',?,'u_view','VIEWER'),('wm_mem',?,'u_mem','MEMBER')`, wsID, wsID, wsID)
 	mustExec(t, db, `INSERT INTO feature_flag_overrides(id,flag_id,workspace_id,enabled) VALUES('stop-flag','ff_artifact_agent_access_modes',?,1)`, wsID)
 	rr := httptest.NewRecorder()
 	h.CreateSchedule(rr, asPerson(httptest.NewRequest("POST", "/", strings.NewReader(`{"cron_expr":"0 * * * *","target_pipeline_slug":"stop-routine","name":"mgr"}`)), "u_mgr", wsID, "MANAGER"))
@@ -447,6 +447,7 @@ func TestScheduleCreator_ListShowsWhyAScheduleIsStopped(t *testing.T) {
 		{ownerID, "ADMIN", "stopped:creator_access_revoked"},
 		{"u_mgr", "MANAGER", "stopped:creator_access_revoked"},
 		{"u_view", "VIEWER", "stopped:creator_not_in_good_standing"},
+		{"u_mem", "MEMBER", "stopped:creator_not_in_good_standing"},
 		{"u_view", "MANAGER", "stopped:creator_not_in_good_standing"},
 	} {
 		if got := state(list(tc.user, tc.role), mine.ID); got != tc.want {
@@ -469,5 +470,35 @@ func TestScheduleCreator_ListShowsWhyAScheduleIsStopped(t *testing.T) {
 	mustExec(t, db, `DELETE FROM feature_flag_overrides WHERE id='stop-flag'`)
 	if got := state(list(ownerID, "OWNER"), agent.ID); got != ":" {
 		t.Fatalf("flag off shows %q", got)
+	}
+}
+
+// A schedule of a routine an agent authored never reaches artifacts (the
+// fire refuses an agent author before anything else), so its list row says
+// so to everyone, whoever created the schedule: it says nothing about a
+// person. Single-row responses (create) agree with the list.
+func TestScheduleCreator_AgentAuthoredRoutineShowsStopped(t *testing.T) {
+	h, db, ownerID, wsID := scheduleHandlerRig(t)
+	seedPipelineRow(t, db, wsID, "pln_agent", "agent-routine")
+	mustExec(t, db, `INSERT INTO agents (id, workspace_id, name, slug) VALUES ('agent_lead', ?, 'Lead', 'lead')`, wsID)
+	mustExec(t, db, `UPDATE pipelines SET author_agent_id='agent_lead' WHERE id='pln_agent'`)
+	mustExec(t, db, `INSERT INTO users(id,email) VALUES('u_mem','mem@ex.com')`)
+	mustExec(t, db, `INSERT INTO workspace_members(id,workspace_id,user_id,role) VALUES('wm_mem',?,'u_mem','MEMBER')`, wsID)
+	mustExec(t, db, `INSERT INTO feature_flag_overrides(id,flag_id,workspace_id,enabled) VALUES('agent-flag','ff_artifact_agent_access_modes',?,1)`, wsID)
+	rr := httptest.NewRecorder()
+	h.CreateSchedule(rr, asPerson(httptest.NewRequest("POST", "/", strings.NewReader(`{"cron_expr":"0 * * * *","target_pipeline_slug":"agent-routine","name":"a"}`)), ownerID, wsID, "OWNER"))
+	var created scheduleResponse
+	_ = json.Unmarshal(rr.Body.Bytes(), &created)
+	if rr.Code != http.StatusCreated || created.ArtifactAccess+":"+created.StoppedReason != "stopped:routine_agent_authored" {
+		t.Fatalf("create: %d %s", rr.Code, rr.Body)
+	}
+	for user, role := range map[string]string{ownerID: "OWNER", "u_mem": "MEMBER"} {
+		rr := httptest.NewRecorder()
+		h.ListSchedules(rr, withWorkspaceUser(httptest.NewRequest("GET", "/", nil), user, wsID, role))
+		var rows []scheduleResponse
+		_ = json.Unmarshal(rr.Body.Bytes(), &rows)
+		if len(rows) != 1 || rows[0].ArtifactAccess+":"+rows[0].StoppedReason != "stopped:routine_agent_authored" {
+			t.Fatalf("%s sees %s", role, rr.Body)
+		}
 	}
 }

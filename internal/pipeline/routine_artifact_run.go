@@ -27,6 +27,7 @@ const (
 	withheldScheduleCreatorLegacy = "schedule_creator_unknown"
 	withheldScheduleStanding      = "schedule_creator_not_in_good_standing"
 	withheldScheduleTarget        = "schedule_target_mismatch"
+	withheldScheduleRoutineAgent  = "schedule_routine_agent_authored"
 )
 
 // scheduleCreatorRoles may create schedules on their own role (MANAGER+);
@@ -58,13 +59,15 @@ var withheldJournaled artifactrun.Once
 // withheld (the journal reason) is set only for a schedule fire refused
 // because of the fire or its schedule; detail adds the server-log detail.
 func routineArtifactAdmission(ctx context.Context, db *sql.DB, req AgentStepRequest) (trigger, withheld, detail string, ok bool, err error) {
-	if req.InvokingAgentID != "" || req.AuthorAgentID != "" {
+	if req.InvokingAgentID != "" {
 		return "", "", "", false, nil
 	}
 	if req.TriggeredVia == TriggeredViaSchedule {
+		// The agent author is refused inside, by the same check the
+		// schedule list shows.
 		return scheduleFireAdmission(ctx, db, req)
 	}
-	if req.InvokingUserID == "" {
+	if req.AuthorAgentID != "" || req.InvokingUserID == "" {
 		return "", "", "", false, nil
 	}
 	if req.InvocationAuthority != RoutineRunAuthority && req.InvocationAuthority != RoutineBatchAuthority {
@@ -92,13 +95,15 @@ func scheduleFireAdmission(ctx context.Context, db *sql.DB, req AgentStepRequest
 	if target != req.PipelineID {
 		return "", withheldScheduleTarget, "", false, nil
 	}
-	stopped, err := ScheduleCreatorStopped(ctx, db, req.WorkspaceID, c)
+	stopped, err := NewScheduleAccess(db, req.WorkspaceID).Stopped(ctx, c, req.AuthorAgentID)
 	if err != nil {
 		return "", "", "", false, err
 	}
 	switch stopped {
 	case "":
 		return artifactrun.TriggerScheduled, "", "", true, nil
+	case ScheduleStoppedRoutineAgentAuthored:
+		return "", withheldScheduleRoutineAgent, "", false, nil
 	case ScheduleStoppedAgentCreated:
 		return "", withheldScheduleCreatorAgent, "", false, nil
 	case ScheduleStoppedCreatorUnknown:
@@ -111,14 +116,15 @@ func scheduleFireAdmission(ctx context.Context, db *sql.DB, req AgentStepRequest
 // workspace's admins see it (owner decision for #5356). The person-standing
 // reasons are personal: everyone else sees ScheduleStoppedNotInGoodStanding.
 const (
-	ScheduleStoppedAgentCreated      = "agent_created"
-	ScheduleStoppedCreatorUnknown    = "creator_unknown"
-	ScheduleStoppedNotMember         = "creator_not_member"
-	ScheduleStoppedSuspended         = "creator_suspended"
-	ScheduleStoppedAccessRevoked     = "creator_access_revoked"
-	ScheduleStoppedRole              = "creator_role"
-	ScheduleStoppedRestricted        = "creator_restricted"
-	ScheduleStoppedNotInGoodStanding = "creator_not_in_good_standing"
+	ScheduleStoppedRoutineAgentAuthored = "routine_agent_authored"
+	ScheduleStoppedAgentCreated         = "agent_created"
+	ScheduleStoppedCreatorUnknown       = "creator_unknown"
+	ScheduleStoppedNotMember            = "creator_not_member"
+	ScheduleStoppedSuspended            = "creator_suspended"
+	ScheduleStoppedAccessRevoked        = "creator_access_revoked"
+	ScheduleStoppedRole                 = "creator_role"
+	ScheduleStoppedRestricted           = "creator_restricted"
+	ScheduleStoppedNotInGoodStanding    = "creator_not_in_good_standing"
 )
 
 // ScheduleStoppedIsPersonal reports whether a stopped reason says something
@@ -139,32 +145,59 @@ func CreatorOf(s *Schedule) ScheduleCreator {
 	return ScheduleCreator{Kind: s.CreatorKind, UserID: s.CreatorUserID, MemberID: s.CreatorMemberID, SetAt: s.CreatorSetAt}
 }
 
-type rowQuerier interface {
-	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+// ScheduleAccess is the one check of whether a schedule's fire reaches
+// artifacts, used at every fire and to show the schedule's state. It
+// remembers each creator's standing for its own lifetime (one fire, or one
+// list response), so a list reads each creator once.
+type ScheduleAccess struct {
+	q           RowQuerier
+	workspaceID string
+	standing    map[[2]string]creatorStanding
 }
 
-// ScheduleCreatorStopped is the one standing check for a schedule's creator,
-// used at every fire and to show the schedule's state: "" when the creator
-// vouches now, else why not. A person vouches only while they hold the same
-// membership they saved it with (not left and rejoined), are not suspended,
-// have had no access revocation since the save, hold a MANAGER+ role and are
-// a trusted (not restricted) member.
-func ScheduleCreatorStopped(ctx context.Context, q rowQuerier, workspaceID string, c ScheduleCreator) (string, error) {
+type creatorStanding struct {
+	found              bool
+	role, mode         string
+	suspended, revoked sql.NullString
+}
+
+// NewScheduleAccess checks schedules of one workspace.
+func NewScheduleAccess(q RowQuerier, workspaceID string) *ScheduleAccess {
+	return &ScheduleAccess{q: q, workspaceID: workspaceID, standing: map[[2]string]creatorStanding{}}
+}
+
+// Stopped is "" when a fire of the schedule with creator c, of a routine
+// authored by routineAuthorAgentID ("" for a person's routine), reaches
+// artifacts now, else why not. A routine an agent authored never does. A
+// person vouches only while they hold the same membership they saved it with
+// (not left and rejoined), are not suspended, have had no access revocation
+// since the save, hold a MANAGER+ role and are a trusted (not restricted)
+// member.
+func (a *ScheduleAccess) Stopped(ctx context.Context, c ScheduleCreator, routineAuthorAgentID string) (string, error) {
 	switch {
+	case routineAuthorAgentID != "":
+		return ScheduleStoppedRoutineAgentAuthored, nil
 	case c.Kind == ScheduleCreatorAgent:
 		return ScheduleStoppedAgentCreated, nil
 	case c.Kind != ScheduleCreatorHuman || c.UserID == "" || c.MemberID == "" || c.SetAt == "":
 		return ScheduleStoppedCreatorUnknown, nil
 	}
-	var role, mode string
-	var suspended, revoked sql.NullString
-	err := q.QueryRowContext(ctx, `SELECT m.role,m.access_mode,u.suspended_at,u.access_revoked_at FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.id=? AND m.workspace_id=? AND m.user_id=?`, c.MemberID, workspaceID, c.UserID).Scan(&role, &mode, &suspended, &revoked)
-	if errors.Is(err, sql.ErrNoRows) {
+	key := [2]string{c.MemberID, c.UserID}
+	st, cached := a.standing[key]
+	if !cached {
+		err := a.q.QueryRowContext(ctx, `SELECT m.role,m.access_mode,u.suspended_at,u.access_revoked_at FROM workspace_members m JOIN users u ON u.id=m.user_id WHERE m.id=? AND m.workspace_id=? AND m.user_id=?`, c.MemberID, a.workspaceID, c.UserID).Scan(&st.role, &st.mode, &st.suspended, &st.revoked)
+		switch {
+		case err == nil:
+			st.found = true
+		case !errors.Is(err, sql.ErrNoRows):
+			return "", err
+		}
+		a.standing[key] = st
+	}
+	if !st.found {
 		return ScheduleStoppedNotMember, nil
 	}
-	if err != nil {
-		return "", err
-	}
+	role, mode, suspended, revoked := st.role, st.mode, st.suspended, st.revoked
 	switch {
 	case suspended.Valid:
 		return ScheduleStoppedSuspended, nil

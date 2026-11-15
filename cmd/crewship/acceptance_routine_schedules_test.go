@@ -504,4 +504,19 @@ func TestAcceptanceRoutineSchedules_ShowsWhyArtifactAccessStopped(t *testing.T) 
 	if got := state(); got.ArtifactAccess != "active" || got.StoppedReason != "" {
 		t.Fatalf("the creator's re-save did not restore it: %q/%q", got.ArtifactAccess, got.StoppedReason)
 	}
+
+	// A routine an agent authored never reaches artifacts, whoever schedules
+	// it; the fire refuses it first and the list says so.
+	if _, err := db.Exec(`INSERT INTO agents (id, workspace_id, name, slug) VALUES ('sch-author', ?, 'Author', 'sch-author')`, routineSchedulesAcceptanceWorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE pipelines SET author_agent_id='sch-author' WHERE workspace_id=? AND slug='acceptance-sched'`, routineSchedulesAcceptanceWorkspaceID); err != nil {
+		t.Fatal(err)
+	}
+	if got := state(); got.ArtifactAccess != "stopped" || got.StoppedReason != "routine_agent_authored" {
+		t.Fatalf("a schedule of an agent-authored routine shows %q/%q", got.ArtifactAccess, got.StoppedReason)
+	}
+	if table, _, err := runRoutineSchedulesCLI(t, ownerCfg, "routine", "schedules", "list"); err != nil || !strings.Contains(table, "stopped: routine_agent_authored") {
+		t.Fatalf("the table does not say the routine is agent-authored: %v\n%s", err, table)
+	}
 }
