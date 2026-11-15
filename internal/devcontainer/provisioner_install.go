@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path"
 	"sort"
 	"strings"
 	"sync"
@@ -540,13 +541,61 @@ func (p *Provisioner) writeAggregatedContainerEnv(ctx context.Context, container
 // by community feature install.sh scripts: apt, npm, pip, and the two tmp
 // directories which many scripts use as scratch space.
 //
+// mise's build-time cache goes too. The build pins MISE_CACHE_DIR under
+// /opt/mise (miseBuildEnv); the running container reads its cache from the
+// agent's home on a read-only root (MiseRuntimeEnv), so what mise and npm
+// cached there during `mise install` is never read again. It was 766 MB of a
+// 982 MB commit layer on the one crew image measured (#5384). Only the cache
+// is emptied; mise's data, config and shims are what the runtime uses.
+//
+// The one case where the runtime does read it: an operator whose containerEnv
+// points MISE_CACHE_DIR at the build location (ensureAgentToolPath keeps an
+// operator-set value). runtimeEnv is the aggregated containerEnv, and that
+// directory is then left alone.
+//
+// On the build-only path this step is a later RUN layer, which cannot take
+// bytes back out of the layer that wrote them, so the saving there is limited
+// to what a squashing builder gives.
+//
 // Uses `2>/dev/null || true` so missing directories on exotic base images do
 // not fail the cleanup step.
 
-func (p *Provisioner) cleanupCaches(ctx context.Context, containerID string, exec ExecFunc) error {
-	const script = `set -u
-for path in \
-  /var/cache/apt \
+func (p *Provisioner) cleanupCaches(ctx context.Context, containerID string, exec ExecFunc, runtimeEnv map[string]string) error {
+	script := cleanupScript(runtimeReadsMiseBuildCache(runtimeEnv))
+	cmd := []string{"bash", "-c", script}
+	_, exitCode, err := exec(ctx, containerID, cmd, "0:0", nil)
+	if err != nil {
+		return err
+	}
+	if exitCode != 0 {
+		return fmt.Errorf("cache cleanup exited with code %d", exitCode)
+	}
+	return nil
+}
+
+// miseBuildCacheDir is where `mise install` caches at build time.
+const miseBuildCacheDir = miseRoot + "/cache"
+
+// runtimeReadsMiseBuildCache reports whether the running container was told
+// to use the build-time cache directory as its mise cache.
+func runtimeReadsMiseBuildCache(runtimeEnv map[string]string) bool {
+	dir := strings.TrimSpace(runtimeEnv["MISE_CACHE_DIR"])
+	return dir != "" && path.Clean(dir) == miseBuildCacheDir
+}
+
+// cleanupScript renders the cache cleanup. Every listed directory is emptied
+// and kept; keepMiseBuildCache leaves mise's build-time cache in place. The
+// directories are container-side paths inside one script text, the form this
+// step has always had.
+func cleanupScript(keepMiseBuildCache bool) string {
+	miseLine := "  " + miseBuildCacheDir + " \\\n"
+	if keepMiseBuildCache {
+		miseLine = ""
+	}
+	return "set -u\nfor path in \\\n" + miseLine + cleanupScriptTail
+}
+
+const cleanupScriptTail = `  /var/cache/apt \
   /var/lib/apt/lists \
   /var/tmp \
   /tmp \
@@ -562,13 +611,3 @@ done
 # Keep mountpoints /tmp and /var/tmp themselves; recreate if the rm wiped them.
 mkdir -p /tmp /var/tmp
 chmod 1777 /tmp /var/tmp`
-	cmd := []string{"bash", "-c", script}
-	_, exitCode, err := exec(ctx, containerID, cmd, "0:0", nil)
-	if err != nil {
-		return err
-	}
-	if exitCode != 0 {
-		return fmt.Errorf("cache cleanup exited with code %d", exitCode)
-	}
-	return nil
-}

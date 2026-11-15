@@ -741,7 +741,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	}
 
 	// 8. Clean up caches inside the container.
-	if err := p.cleanupCaches(ctx, containerID, p.installer.execInContainerAsUser); err != nil {
+	if err := p.cleanupCaches(ctx, containerID, p.installer.execInContainerAsUser, requirements.ContainerEnv); err != nil {
 		p.logger.Warn("cache cleanup failed", "error", err)
 	}
 
