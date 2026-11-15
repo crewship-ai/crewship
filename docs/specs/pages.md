@@ -772,7 +772,8 @@ owner on 2026-11-13.
    host did not make, is journaled as `artifact.run_capability_withheld`
    once per schedule fire (not per step), flag on only. Its reason is
    `schedule_fire_unverified`, `schedule_target_mismatch`,
-   `schedule_saved_by_agent`, `schedule_creator_unknown` or, for every
+   `schedule_saved_by_agent`, `schedule_routine_agent_authored`,
+   `schedule_creator_unknown` or, for every
    problem with the person's standing, the one generic
    `schedule_creator_not_in_good_standing`; the detail (left, suspended,
    revoked, role, restricted) goes only to the server log. The entry names
@@ -780,8 +781,9 @@ owner on 2026-11-13.
    nothing is read, recorded or journaled. A stopped schedule says so where
    schedules are listed (API `artifact_access` "active" | "stopped" with
    `stopped_reason`, the CLI's ARTIFACTS column, the schedules tab), computed
-   with the same standing check every fire runs
-   (`pipeline.ScheduleCreatorStopped`); a person-standing reason is shown only
+   with the same check every fire runs (`pipeline.ScheduleAccess.Stopped`,
+   which also refuses a routine an agent authored: `routine_agent_authored`,
+   journaled as `schedule_routine_agent_authored`); a person-standing reason is shown only
    to the creator and workspace OWNER/ADMIN, others see
    `creator_not_in_good_standing`. An agent's own webhook and cron runs,
    configured on the agent by a person, record as before. So the host

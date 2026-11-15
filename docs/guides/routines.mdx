@@ -1805,7 +1805,9 @@ column of `crewship routine schedules list` (`artifact_access`,
 reason on the routine's schedules tab. Its runs still start. The creator and
 workspace admins see why (for example `creator_access_revoked` after an
 admin revoked their sessions); others see only that the creator is no longer
-in good standing.
+in good standing. A schedule of a routine an agent authored shows
+`routine_agent_authored` to everyone: such a routine never reaches artifacts,
+whoever schedules it.
 
 #### Natural-language schedules (`--when`)
 

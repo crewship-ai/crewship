@@ -1800,7 +1800,9 @@ crewship routine schedules list --json
 With `artifact_agent_access_modes` on, ARTIFACTS says whether the schedule's
 fires reach their agents' standing artifacts now: `active`, or
 `stopped: <reason>` (`artifact_access` and `stopped_reason` in JSON). The
-reason is `agent_created`, `creator_unknown`, or, about the creator as a
+reason is `routine_agent_authored` (the schedule runs a routine an agent
+authored, which never reaches artifacts; point it at a routine a person
+authored), `agent_created`, `creator_unknown`, or, about the creator as a
 person, `creator_not_member`, `creator_suspended`, `creator_access_revoked`,
 `creator_role` or `creator_restricted`; those five are shown only to the
 creator and to workspace OWNER/ADMIN, everyone else sees

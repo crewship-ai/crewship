@@ -23065,6 +23065,7 @@
           },
           "stopped_reason": {
             "enum": [
+              "routine_agent_authored",
               "agent_created",
               "creator_unknown",
               "creator_not_member",

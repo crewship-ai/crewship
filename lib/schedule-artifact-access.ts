@@ -17,6 +17,10 @@ export interface ScheduleArtifactAccess {
 
 const restore = "A change to what it runs (its time, inputs or routine) by someone in good standing who may edit schedules restores it."
 
+// A routine an agent authored reaches nothing whoever schedules it; only
+// pointing the schedule at a person's routine helps.
+const agentRoutine = "It runs a routine an agent authored, which never reaches artifacts. Pointing it at a routine a person authored restores it."
+
 const reasons: Record<string, string> = {
   creator_access_revoked: "Its creator's access was revoked (sessions revoked, suspended or password recovered) after they saved it.",
   creator_suspended: "Its creator is suspended.",
@@ -31,6 +35,9 @@ const reasons: Record<string, string> = {
 /** null while artifact access is active, or when the server reports none (flag off). */
 export function scheduleArtifactAccess(s: ScheduleArtifactAccessInput): ScheduleArtifactAccess | null {
   if (s.artifact_access !== "stopped") return null
+  if (s.stopped_reason === "routine_agent_authored") {
+    return { label: "artifact access stopped", reason: `Runs start, but reach no artifacts. ${agentRoutine}` }
+  }
   const why = (s.stopped_reason && reasons[s.stopped_reason]) || "Its creator no longer vouches for it."
   return { label: "artifact access stopped", reason: `Runs start, but reach no artifacts. ${why} ${restore}` }
 }

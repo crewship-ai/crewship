@@ -27,6 +27,13 @@ describe("scheduleArtifactAccess", () => {
     expect(s!.reason).toMatch(/change|save/i)
   })
 
+  it("says a routine an agent authored never reaches artifacts, and what restores it", () => {
+    const s = scheduleArtifactAccess({ artifact_access: "stopped", stopped_reason: "routine_agent_authored" })
+    expect(s!.reason).toMatch(/routine an agent authored/i)
+    expect(s!.reason).toMatch(/routine a person authored/i)
+    expect(s!.reason).not.toMatch(/its time, inputs/i)
+  })
+
   it("still says it stopped for a reason it does not know", () => {
     const s = scheduleArtifactAccess({ artifact_access: "stopped", stopped_reason: "something_new" })
     expect(s?.label).toMatch(/stopped/i)
