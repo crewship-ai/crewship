@@ -545,6 +545,7 @@ images are **logged only by default**; deletion must be explicitly enabled.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `CREWSHIP_BUILD_MIN_FREE_GB` | `4` | Free space, in whole GiB, that Docker's storage must have before a crew image build starts. `0` turns this check off. Applies only where the server can measure Docker's storage; see [Storage check before a build](/configuration/devcontainers#storage-check-before-a-build). |
 | `CREWSHIP_CACHE_GC_AUTODELETE` | (unset) | Set to `true` or `1` to remove unreferenced `crewship-cache:*` and intermediate `crewship-feat:*` images automatically. Default behaviour is to log the orphans only — destructive removal is opt-in because deleting a freshly-built local image is surprising in interactive environments. |
 
 A 5-minute age floor protects images that were committed in the last few

@@ -746,7 +746,7 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	}
 	if buildErr != nil {
 		h.clearDeferredResume(pendingMessageKey(msg))
-		if rejectPendingAsk(fmt.Sprintf("Your message could not run: the environment build failed (%s). Fix the devcontainer configuration and send your message again.", buildErr.Error())) {
+		if rejectPendingAsk(fmt.Sprintf("Your message could not run: the environment build failed (%s). %s", buildErr.Error(), buildFailureAdvice(buildErr))) {
 			return
 		}
 		run := h.wsHub.BeginSessionRun(msg.ChatID)
@@ -758,8 +758,8 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		run.Emit(ws.ChatEvent{
 			Type: "error",
 			Content: fmt.Sprintf(
-				"Your message could not run: the environment build failed (%s). Fix the devcontainer configuration and send your message again.",
-				buildErr.Error(),
+				"Your message could not run: the environment build failed (%s). %s",
+				buildErr.Error(), buildFailureAdvice(buildErr),
 			),
 			Metadata: map[string]any{"reason": "provisioning_failed"},
 		})

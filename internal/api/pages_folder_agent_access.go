@@ -35,6 +35,12 @@ const (
 	folderAgentAccessPropose = "propose"
 )
 
+// folderAgentProposeKinds are the kinds on which a folder at propose gives
+// its crew's agents a real proposal: only Docs Documents, through the
+// iteration proposal path (documents_iteration.go). The folder dialog offers
+// Can suggest only for these.
+var folderAgentProposeKinds = []string{"docs"}
+
 type folderAgentAccessDocument struct {
 	Folder      string `json:"folder"`
 	AgentAccess string `json:"agent_access"`

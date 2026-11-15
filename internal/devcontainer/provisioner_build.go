@@ -224,6 +224,11 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 			}, nil
 		}
 	}
+	// From here on the build pulls and writes image data.
+	if err := p.checkBuildPreflight(ctx); err != nil {
+		return fail(ProvStepStoragePreflight, err)
+	}
+
 	// The plan and the per-step progress are what drive the Builder popover's
 	// checklist and the CLI's live output. The commit path emits both; this one
 	// emitted neither, so a macOS user clicking Build watched an empty popover

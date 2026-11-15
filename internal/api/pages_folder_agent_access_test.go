@@ -223,6 +223,11 @@ func TestFolderAgentAccess_WhoMaySetItAndToWhat(t *testing.T) {
 	if doc := decodeFoldersJSON(t, rr); doc["agent_access"] != "propose" || doc["agent_access_available"] != true {
 		t.Fatalf("ACL document %v", doc)
 	}
+	// #5317 step 5.2: the dialog offers Can suggest only for the kinds the
+	// server names here, the ones where propose gives a real proposal.
+	if doc := decodeFoldersJSON(t, rr); fmt.Sprint(doc["agent_propose_kinds"]) != "[docs]" {
+		t.Fatalf("agent_propose_kinds %v, want [docs]", doc["agent_propose_kinds"])
+	}
 }
 
 func TestFolderAgentAccess_FlagOffRefusesAnythingButNone(t *testing.T) {
@@ -244,6 +249,9 @@ func TestFolderAgentAccess_FlagOffRefusesAnythingButNone(t *testing.T) {
 	expectStatus(t, rr, http.StatusOK)
 	if doc := decodeFoldersJSON(t, rr); doc["agent_access_available"] != false {
 		t.Fatalf("flag off ACL document reported agent access as available: %v", doc)
+	}
+	if doc := decodeFoldersJSON(t, rr); doc["agent_propose_kinds"] != nil {
+		t.Fatalf("flag off ACL document named proposal kinds: %v", doc["agent_propose_kinds"])
 	}
 }
 

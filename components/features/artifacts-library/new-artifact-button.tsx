@@ -48,6 +48,19 @@ export function useNewArtifactPrefs(workspaceId: string, available: readonly Art
 }
 
 const UNAVAILABLE = "Not available in this workspace yet"
+/** The reason a Craft kind is off when the instance administrator turned its application off or it is draining (#5381). */
+export const TURNED_OFF = "Turned off on this server by an administrator"
+/** Why each unavailable kind cannot be made; kinds without one say UNAVAILABLE. */
+export type NewArtifactReasons = Partial<Record<ArtifactKind, string>>
+/** Word and Sheet the administrator turned off (or is draining) say so instead of "not available yet". */
+export function newArtifactReasons(modes: Partial<Record<"wordcraft" | "gridcraft", string>>): NewArtifactReasons {
+  const off = (mode?: string) => mode === "draining" || mode === "closed"
+  const reasons: NewArtifactReasons = {}
+  if (off(modes.wordcraft)) reasons.word = TURNED_OFF
+  if (off(modes.gridcraft)) reasons.sheet = TURNED_OFF
+  return reasons
+}
+const lower = (text: string) => text.charAt(0).toLowerCase() + text.slice(1)
 const typing = (target: EventTarget | null) => {
   const el = target as HTMLElement | null
   return !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable)
@@ -63,7 +76,7 @@ type Mode = "short" | "all" | "edit"
  * Kinds this workspace cannot make stay visible with the reason and cannot be
  * pinned. Built for many kinds: search and grouping, not one tile per kind.
  */
-export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, open, onOpenChange, family = null }: {
+export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, open, onOpenChange, family = null, reasons }: {
   entries: readonly NewEntry<Flow>[]
   prefs: NewArtifactPrefs
   /** Start making this flow; `fromMain` is the main button (the dialog may still switch kind). */
@@ -72,7 +85,10 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
   onOpenChange: (open: boolean) => void
   /** Opened from the Home guide: show every kind of this family. */
   family?: KindFamily | null
+  /** Why an unavailable kind cannot be made, when it is more than "not available yet". */
+  reasons?: NewArtifactReasons
 }) {
+  const reasonOf = (kind: ArtifactKind) => reasons?.[kind] ?? UNAVAILABLE
   const [mode, setMode] = useState<Mode>("short")
   const [query, setQuery] = useState("")
   const [famFilter, setFamFilter] = useState<KindFamily | null>(null)
@@ -95,14 +111,14 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
 
   const start = (kind: ArtifactKind, fromMain = false) => {
     const flow = flowOf(kind)
-    if (!flow) { setNote(`${KINDS[kind].label}: ${UNAVAILABLE.toLowerCase()}`); return }
+    if (!flow) { setNote(`${KINDS[kind].label}: ${lower(reasonOf(kind))}`); return }
     prefs.record(kind)
     onOpenChange(false)
     onNew(flow, fromMain)
   }
   const star = (kind: ArtifactKind) => {
     const result = prefs.toggle(kind)
-    setNote(result === "full" ? `Pinned is full (${PIN_MAX}). Unpin one first.` : result === "unavailable" ? `${KINDS[kind].label} can’t be pinned: ${UNAVAILABLE.toLowerCase()}.` : null)
+    setNote(result === "full" ? `Pinned is full (${PIN_MAX}). Unpin one first.` : result === "unavailable" ? `${KINDS[kind].label} can’t be pinned: ${lower(reasonOf(kind))}.` : null)
     if (result === "full") setMode("edit")
   }
 
@@ -129,7 +145,7 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
     const pinned = pins.includes(kind)
     const editor = KIND_EDITOR[kind]
     return <li key={kind} className={cn("group flex min-w-0 items-center rounded-md hover:bg-accent", !live && "opacity-60")}>
-      <button type="button" aria-label={`New ${def.label}`} aria-disabled={!live || undefined} title={live ? def.description : UNAVAILABLE}
+      <button type="button" aria-label={`New ${def.label}`} aria-disabled={!live || undefined} title={live ? def.description : reasonOf(kind)}
         onClick={() => start(kind)} data-new-kind={kind}
         className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm coarse:min-h-[44px]">
         <KindTile kind={kind} size="sm" className={cn("size-6", !live && "grayscale")} />
@@ -137,7 +153,7 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
           <span className="font-medium">{editor?.app ?? def.label}</span>
           {editor && <small className="truncate text-xs text-muted-foreground">{def.label} · {editor.extensions}</small>}
         </span>
-        {!live ? <span className="rounded-full border px-1.5 text-micro font-semibold text-muted-foreground">Off</span>
+        {!live ? <span title={reasonOf(kind)} className="rounded-full border px-1.5 text-micro font-semibold text-muted-foreground">Off</span>
           : key ? <kbd className="rounded border px-1 font-mono text-micro text-muted-foreground">{key}</kbd> : null}
       </button>
       {live && <Button type="button" variant="ghost" size="icon-sm" aria-pressed={pinned} aria-label={`${pinned ? "Unpin" : "Pin"} ${editor?.app ?? def.label}`}
@@ -261,8 +277,9 @@ export function NewArtifactButton<Flow extends string>({ entries, prefs, onNew, 
  * First-run guide on Home: what Artifacts and Craft are, with the kinds of
  * each. "Got it" hides it for this person; the New menu brings it back.
  */
-export function NewArtifactGuide({ available, onNew, onBrowse, onDismiss }: {
+export function NewArtifactGuide({ available, onNew, onBrowse, onDismiss, reasons }: {
   available: readonly ArtifactKind[]
+  reasons?: NewArtifactReasons
   onNew: (kind: ArtifactKind) => void
   onBrowse: (family: KindFamily) => void
   onDismiss: () => void
@@ -276,7 +293,7 @@ export function NewArtifactGuide({ available, onNew, onBrowse, onDismiss }: {
       <div className="flex flex-wrap gap-1.5">
         {kinds.map(kind => {
           const live = available.includes(kind)
-          return <button key={kind} type="button" aria-label={`Start ${KINDS[kind].label}`} disabled={!live} title={live ? `New ${KINDS[kind].label}` : UNAVAILABLE}
+          return <button key={kind} type="button" aria-label={`Start ${KINDS[kind].label}`} disabled={!live} title={live ? `New ${KINDS[kind].label}` : reasons?.[kind] ?? UNAVAILABLE}
             onClick={() => onNew(kind)} className="rounded-lg p-0.5 hover:ring-2 hover:ring-primary/25 disabled:cursor-default disabled:opacity-45 disabled:grayscale disabled:hover:ring-0 coarse:min-h-[44px]">
             <KindTile kind={kind} />
           </button>

@@ -59,7 +59,7 @@ func (h *PageHandler) designScopedRunAuthority(ctx context.Context, tx *sql.Tx, 
 		return "", err
 	}
 	if write {
-		edit, err := h.designDelegableEdit(ctx, k.WorkspaceID, a.HumanUserID, rec)
+		edit, err := h.delegableEdit(ctx, k.WorkspaceID, a.HumanUserID, rec)
 		if err != nil {
 			return "", err
 		}
@@ -77,19 +77,6 @@ func (h *PageHandler) designScopedRunAuthority(ctx context.Context, tx *sql.Tx, 
 	return stamp.admit(actor, revision)
 }
 
-// designDelegableEdit: may the human edit this Design as an ordinary member?
-// Edit held only through the ADMIN or OWNER role does not count (amendment 2).
-func (h *PageHandler) designDelegableEdit(ctx context.Context, workspace, humanID string, rec *pageRecord) (bool, error) {
-	viewer, err := h.delegableViewer(ctx, workspace, humanID)
-	if err != nil {
-		return false, err
-	}
-	if viewer.Role == "" || canRole(viewer.Role, "manage") {
-		return false, nil
-	}
-	return h.mayEditSpec(withDelegationUser(ctx, humanID), workspace, humanID, viewer.Role, rec), nil
-}
-
 // designScopedRunLive decides, for a flag-on run whose write probe failed,
 // whether it still reads the latest version (amendment 7): an Editor's run
 // reads the latest, a Viewer's or Commenter's the shared version. It is asked
@@ -100,7 +87,7 @@ func (h *PageHandler) designScopedRunLive(ctx context.Context, tx *sql.Tx, a *ar
 	if err != nil {
 		return false, err
 	}
-	return h.designDelegableEdit(ctx, k.WorkspaceID, a.HumanUserID, rec)
+	return h.delegableEdit(ctx, k.WorkspaceID, a.HumanUserID, rec)
 }
 
 // designScopedRun returns the run when this Design request is a flag-on chat

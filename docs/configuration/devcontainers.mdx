@@ -347,6 +347,32 @@ unchanged and not installation-specific.
   keep their legacy names, carry no labels, and stay under the opt-in policy
   below.
 
+### Storage check before a build
+
+A build that fills the disk does not only fail: the database on the same
+volume starts failing writes. Before a build pulls the base image or builds a
+layer, the server checks free space and refuses the build if there is too
+little. (On Apple Containers the feature archives are downloaded first.) Reusing an
+existing image (a cache hit) is never refused, and nothing is deleted to make
+room.
+
+| Volume | Floor | When it is checked |
+|---|---|---|
+| Crewship data volume (the directory of the main database file) | 1 GiB, fixed | Always, for a file-backed database |
+| Docker's storage (`DockerRootDir`) | 4 GiB, `CREWSHIP_BUILD_MIN_FREE_GB` | Only when the server can measure it |
+
+The server can measure Docker's storage when it reaches the daemon over a
+local Unix socket, the daemon is not Docker Desktop, and Docker's root
+directory is visible to the server process. Docker Desktop, a remote daemon,
+a VM-backed runtime and a server running in a container without that
+directory mounted are not measured: the result is unknown and the build
+proceeds. A probe that fails is treated the same way.
+
+A refused build fails with `provision.failed` (detail `storage_preflight`) and
+a message naming the volume, its free space and the floor, for example
+`3.0 GiB free on Docker's storage (/var/lib/docker), a build needs at least
+4.0 GiB`. Free up space and build again.
+
 ### Orphan deletion policy
 
 Cache-image deletion is opt-in via the `CREWSHIP_CACHE_GC_AUTODELETE` environment variable (also described in [Environment → Devcontainer cache GC](/configuration/environment#devcontainer-cache-gc)):

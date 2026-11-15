@@ -115,14 +115,14 @@ func TestRegisteredProviderSpecs_Values(t *testing.T) {
 			codec: CodecAnthropicMessages, auth: AuthAnthropicKey,
 			keyEnv: "ANTHROPIC_API_KEY", baseEnv: "",
 			baseDefault: "https://api.anthropic.com/v1/messages",
-			catalogID:   "anthropic", defaultAuxModel: "claude-haiku-4-5",
+			catalogID:   "anthropic", defaultAuxModel: "claude-haiku-5-5",
 		},
 		{
 			id: "openai", displayName: "OpenAI",
 			codec: CodecOpenAICompat, auth: AuthBearer,
 			keyEnv: "OPENAI_API_KEY", baseEnv: "",
 			baseDefault: "https://api.openai.com/v1/chat/completions",
-			catalogID:   "openai", defaultAuxModel: "gpt-5.4-mini",
+			catalogID:   "openai", defaultAuxModel: "gpt-6-luna",
 			maxTokensField: "max_completion_tokens",
 		},
 		{

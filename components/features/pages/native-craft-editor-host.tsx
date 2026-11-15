@@ -20,6 +20,7 @@ import {createEditorFrame,editorFrameSupported} from "./workbook-editor-host"
 import {downloadNativeExport} from "@/lib/mooring/native-export-download"
 import {NativeCraftLeaseBar,type NativeCraftLeaseAction,type NativeCraftLeaseView} from "./native-craft-lease-bar"
 import {NativeCraftVersionHistory} from "./native-craft-version-history"
+import {NativeAppOffError,appDrainHolderText,appOffText,nativeAppOff} from "@/lib/mooring/native-app-off"
 import type {NativeVersionDocument,NativeVersionList} from "@/lib/mooring/native-versions"
 
 interface Lease extends NativeCraftLeaseView {expires_at: string|null}
@@ -132,6 +133,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  const [applicationId,setApplicationId]=React.useState<NativeDocumentSnapshot['applicationId']>()
  const mount=React.useRef<HTMLDivElement>(null),control=React.useRef<(action:NativeCraftLeaseAction,body:{generation?:string;request_id?:string})=>void>(()=>{})
  const [view,setView]=React.useState<Lease>(vacant),[busy,setBusy]=React.useState(false),[label,setLabel]=React.useState('Connecting…'),[savedVersion,setSavedVersion]=React.useState<string>(),[error,setError]=React.useState<string>(),[mismatch,setMismatch]=React.useState<{message:string;address:string}>(),[dirty,setDirty]=React.useState(false),[recoveries,setRecoveries]=React.useState<NativeRecovery[]>([]),[comparison,setComparison]=React.useState<Comparison>(),[ownsEditor,setOwnsEditor]=React.useState(false),[connectionRetired,setConnectionRetired]=React.useState(false),[quota,setQuota]=React.useState<NativeDocumentSnapshot['quota']>()
+ // An administrator turned this application off or it is draining (#5381): the label, once the server said so.
+ const [appOff,setAppOff]=React.useState<string>()
  const [saveTrace,setSaveTrace]=React.useState<{phase:string;reason?:string}>()
  const [handoffRequest,setHandoffRequest]=React.useState<{generation:string;holder:string}>()
  const [agentWork,setAgentWork]=React.useState<string>(),[hostBlocked,setHostBlocked]=React.useState(false),[hostRetiring,setHostRetiring]=React.useState(false)
@@ -145,7 +148,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  React.useEffect(()=>{statusSink.current?.({ready:readVerified&&!connectionRetired,phase:saveTrace?.phase,savedVersion,dirty,canEdit:view.can_edit===true,editing:ownsEditor,holder:view.holder?{kind:view.holder.kind,name:view.holder.display_name}:null,holderIsMe:view.mine,openProposals,recoveredDrafts:recoveries.length,version:savedVersion??openedVersion})},[readVerified,connectionRetired,saveTrace?.phase,savedVersion,openedVersion,dirty,view.can_edit,ownsEditor,view.holder,view.mine,openProposals,recoveries.length])
  React.useEffect(()=>{
   if(!enabled||!humanId||!workspaceId||!pageId)return
-  setOfferWithdrawn(false);setAccessCheck(false);setStateScope(scopeKey);setReadVerified(false);setRetainedBuffer(false);setAuthEnded(false);setView(vacant);setRecoveries([]);setComparison(undefined);setProposals([]);setQuota(undefined);setApplicationId(undefined);setPublishedVersion(undefined);setHistoryKey(0);setOpenedVersion(undefined);setSavedVersion(undefined);setDirty(false);setOwnsEditor(false);setError(undefined);setMismatch(undefined);setSaveTrace(undefined);setLabel('Connecting…')
+  setOfferWithdrawn(false);setAccessCheck(false);setStateScope(scopeKey);setReadVerified(false);setRetainedBuffer(false);setAuthEnded(false);setView(vacant);setRecoveries([]);setComparison(undefined);setProposals([]);setQuota(undefined);setApplicationId(undefined);setPublishedVersion(undefined);setHistoryKey(0);setOpenedVersion(undefined);setSavedVersion(undefined);setDirty(false);setOwnsEditor(false);setError(undefined);setAppOff(undefined);setMismatch(undefined);setSaveTrace(undefined);setLabel('Connecting…')
   setBusy(true);setConnectionRetired(false);setHandoffRequest(undefined)
   const lifetime=new AbortController()
   // Replaced only by a fresh read admission after the server retires write (#4348).
@@ -881,6 +884,16 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     setError('Restoring the version was not confirmed. The document and the local draft are kept.')
    }finally{transition=false;if(!dead){setBusy(false);setHistoryKey(n=>n+1)}}
   })()}}
+  // Whether the administrator has this application off right now: a hand-over
+  // would be refused, and the writer must not retire for it (#5381). Unknown is no.
+  const appOffNow=async():Promise<string|null>=>{
+   try{
+    const response=await apiFetch(`/api/v1/pages/${encodeURIComponent('@'+pageId)}/craft/availability?${new URLSearchParams({workspace_id:workspaceId})}`,{signal:lifetime.signal,cache:'no-store',redirect:'error'})
+    if(!response?.ok)return null
+    const value:unknown=await response.json()
+    return object(value)?nativeAppOff(value):null
+   }catch{return null}
+  }
   control.current=(action,body)=>{
    if(dead||networkRetired||transition||viewNow.can_edit!==true||!current?.ready||acquiring)return
    transition=true;setBusy(true);setError(undefined)
@@ -889,6 +902,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
     if(action==='acquire'){await acquire();return}
     if(action==='handoff'||action==='release'){
      const r=current;if(!r||body.generation!==r.generation||!owns(viewNow,r.generation))throw Error('lease_not_current')
+     // During a drain the holder keeps editing and saving; only the hand-over is refused.
+     if(action==='handoff'&&!r.transferSaved){const off=await appOffNow();if(dead)return;if(off){setAppOff(off);setError(appDrainHolderText(off));return}}
      // After a failed POST the final save is still proven and write stays retired;
      // the coordinator refuses a second flush, so a retry only sends the POST again.
      if(!r.transferSaved){
@@ -926,6 +941,8 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
      if(r.writable&&owns(viewNow,r.generation)&&r.phase?.phase!=='read-only')resumeViewing(r)
      else if(!r.nativeReadOnly)await retireWrite(r).catch(()=>stop('Editor access was not confirmed.'))
     }
+    const off=cause instanceof AcquireFailure?cause.inner:cause
+    if(!dead&&off instanceof NativeAppOffError){setAppOff(off.label);setError(viewNow.mine&&current?.writable?appDrainHolderText(off.label):appOffText(off.label));setSavedVersion(undefined);return}
     if(!dead){setError(cause instanceof AcquireFailure&&cause.released!==undefined?acquireFailure(cause.stage,cause.released):handoffConfirmed?'The request was sent, but the current editing state cannot be loaded. The draft is kept.':'The result of the action was not confirmed. The draft is kept.');setSavedVersion(undefined)}
    }).finally(()=>{transition=false;if(!dead){setBusy(false);catchUpReader()}})
   }
@@ -980,7 +997,7 @@ export function NativeCraftEditorHost({workspaceId,pageId,humanId,enabled=false,
  if(stateScope!==scopeKey)return <p role="status" className="p-6">Connecting…</p>
  if(!enabled)return <p className="p-6">The native editor is not turned on.</p>
  return <section className={editorHidden?'flex flex-col':'flex h-full min-h-[600px] flex-col'} aria-label={applicationId==='gridcraft'?'GridCraft workbook':'WordCraft document'}>
-  {(()=>{const controls=<><NativeCraftLeaseBar variant={placeLease?'popover':'bar'} view={view} self={humanId} mayEdit={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired} pending={busy} requested={Boolean(handoffRequest&&!connectionRetired&&!view.mine&&view.generation===handoffRequest.generation&&view.holder?.actor_id===handoffRequest.holder)} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>{readVerified&&!retainedBuffer&&!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&<Button disabled={busy} onClick={()=>control.current('acquire',{})}>Take over editing</Button>}</>;return placeLease?placeLease(controls):controls})()}
+  {(()=>{const controls=<><NativeCraftLeaseBar variant={placeLease?'popover':'bar'} view={view} self={humanId} mayEdit={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired&&!(appOff&&!view.mine)} pending={busy} requested={Boolean(handoffRequest&&!connectionRetired&&!view.mine&&view.generation===handoffRequest.generation&&view.holder?.actor_id===handoffRequest.holder)} onAction={(action,body)=>control.current(action,body)} onStopAgent={()=>stopAgent.current()}/>{readVerified&&!retainedBuffer&&!connectionRetired&&view.can_edit===true&&view.mine&&view.can_write&&!ownsEditor&&!appOff&&<Button disabled={busy} onClick={()=>control.current('acquire',{})}>Take over editing</Button>}</>;return placeLease?placeLease(controls):controls})()}
   <NativeCraftAgentTaskStatus workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired} workId={agentWork}/>
   <NativeCraftAgentStart workspaceId={workspaceId} pageId={pageId} humanId={humanId} enabled={readVerified&&!retainedBuffer&&view.can_edit===true&&!connectionRetired&&applicationId!==undefined&&!hostBlocked&&!hostRetiring} holder={view.holder?.kind??null} onStarted={agentStarted} place={placeAgentStart}/>
   {!connectionRetired&&view.can_edit===true&&view.can_share===true&&ownsEditor&&<Button variant="outline" disabled={busy} onClick={()=>publishPreview.current()}>Publish preview</Button>}

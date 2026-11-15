@@ -9,7 +9,7 @@ import { CreateSurfaceField, CreateSurfaceSection } from "@/components/layout/cr
 import { ConfigModel } from "../canvas/config-model"
 import { cn } from "@/lib/utils"
 import type { AgentDraft } from "./types"
-import { defaultModelForProvider, isKnownModel } from "./llm-models"
+import { modelAfterSwitch } from "./llm-models"
 
 import { PROVIDERS, DEFAULT_RUNNER } from "./provider-options"
 
@@ -25,17 +25,17 @@ export function AgentModelSettings({ draft, setDraft, workspaceId, providerConfi
   return <CreateSurfaceSection title="Model and execution" icon={Cpu} accent="teal" hint="Choose the AI model and the program that runs it.">
     <CreateSurfaceField label="Model provider">
       <ProviderPicker value={providerConfirmed ? draft.llmProvider : null} onChange={provider => {
-        setDraft({ ...draft, llmProvider: provider, llmModel: isKnownModel(provider, draft.llmModel) ? draft.llmModel : defaultModelForProvider(provider), cliAdapter: providerConfirmed && draft.cliAdapter === "OPENCODE" ? "OPENCODE" : DEFAULT_RUNNER[provider] })
+        setDraft({ ...draft, llmProvider: provider, llmModel: modelAfterSwitch(draft.llmProvider, provider, draft.llmModel), cliAdapter: providerConfirmed && draft.cliAdapter === "OPENCODE" ? "OPENCODE" : DEFAULT_RUNNER[provider] })
         onProviderConfirmed?.()
       }} />
     </CreateSurfaceField>
-    {providerConfirmed && <><ConfigModel draftMode label="Model" workspaceId={workspaceId} provider={draft.llmProvider} value={draft.llmModel} onSave={model => setDraft({ ...draft, llmModel: model })} />
+    {providerConfirmed && <><ConfigModel key={draft.llmProvider} draftMode label="Model" workspaceId={workspaceId} provider={draft.llmProvider} value={draft.llmModel} onSave={model => setDraft({ ...draft, llmModel: model })} />
     <CreateSurfaceField label="Runs with" hint="The application launched inside the crew container. Choosing a runner selects its matching provider; OpenCode can use multiple providers.">
       <div role="radiogroup" aria-label="Agent runner" onKeyDown={moveRadio} className="grid grid-cols-1 gap-2 md:grid-cols-2">{Object.entries(CLI_ADAPTERS).map(([key, adapter]) => {
         const Icon = adapter.icon
         return <button key={key} type="button" role="radio" aria-checked={draft.cliAdapter === key} tabIndex={draft.cliAdapter === key ? 0 : -1} onClick={() => {
           const provider = (key === "OPENCODE" ? draft.llmProvider : adapter.provider) as AgentDraft["llmProvider"]
-          setDraft({ ...draft, cliAdapter: key as AgentDraft["cliAdapter"], llmProvider: provider, llmModel: isKnownModel(provider, draft.llmModel) ? draft.llmModel : defaultModelForProvider(provider) })
+          setDraft({ ...draft, cliAdapter: key as AgentDraft["cliAdapter"], llmProvider: provider, llmModel: modelAfterSwitch(draft.llmProvider, provider, draft.llmModel) })
         }} className={cn("flex items-start gap-3 rounded-lg border p-3 text-left focus-visible:ring-2 focus-visible:ring-primary", draft.cliAdapter === key ? "border-primary bg-primary/10" : "border-border hover:bg-muted")}><Icon className="mt-0.5 h-5 w-5 shrink-0 text-foreground" style={{ color: BRAND_ICON_COLOR[key] }} aria-hidden="true" /><span><span className="block text-sm">{adapter.label}</span><span className="mt-1 block text-xs text-muted-foreground">{adapter.description}</span></span></button>
       })}</div>
     </CreateSurfaceField>

@@ -63,7 +63,7 @@ test.describe("craft proposal", () => {
     async ({ prd, request }) => {
       const ws = await prd.qaWorkspace()
       const q = `workspace_id=${encodeURIComponent(ws.id)}`
-      const slug = `prd-qa-plain-${randomUUID().replaceAll("-", "").slice(0, 10)}`
+      const slug = `qa-live-plain-${randomUUID().replaceAll("-", "").slice(0, 10)}`
       const created = await request.post(`/api/v1/pages?${q}`, {
         data: {
           name: "PRD proposal admission",

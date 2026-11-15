@@ -11,12 +11,12 @@ import * as os from "node:os"
 import * as path from "node:path"
 import { fileURLToPath } from "node:url"
 import { formatTable, readRows, summarize, writeSummary } from "../prd/report.mjs"
-import { checkOrigin, jobArgs, runEnv } from "./runner-env.mjs"
+import { checkOrigin, jobArgs, runEnv, workspaceFlagProblems } from "./runner-env.mjs"
 import { EXIT, SCENARIOS, fullChromium, loadEvidence, parseListed, verdict } from "./verdict.mjs"
 
-const HELP = `Usage: pnpm acceptance:native-walk --origin URL --rc SHA --output DIR [--env-file FILE] [--chrome PATH] [--grep RE]
+const HELP = `Usage: pnpm acceptance:native-walk --origin URL --rc SHA --output DIR [--env-file FILE] [--chrome PATH] [--grep RE] [--workspace-flag KEY]...
 
-  --origin URL     deployed origin under test, e.g. https://crewship-dev3.unifylab.cz
+  --origin URL     deployed origin under test, e.g. https://dev3.crewship.test
   --rc SHA         full 40-character commit the origin must serve (GET /api/v1/system/version), clean
   --output DIR     new or empty results directory: verdict.json, summary.md, summary.json, run.json,
                    finished.json, rows/, evidence/native-walk/<test>/walk.json, playwright/
@@ -26,6 +26,11 @@ const HELP = `Usage: pnpm acceptance:native-walk --origin URL --rc SHA --output 
   --chrome PATH    full Chromium (default: Playwright's own, else the newest chromium-* under
                    PLAYWRIGHT_BROWSERS_PATH). The headless shell is refused
   --grep RE        only the matching walks. Such a run exits 3, never 0
+  --workspace-flag KEY
+                   turn the feature flag KEY on in each walk's own QA workspace right after
+                   creating it (PUT /api/v1/feature-flags/KEY/override, as \`crewship feature-flag
+                   enable\`), never instance-wide. Repeatable. With craft_version_history the
+                   history listing must be compared: its flag-off 404 is a FAIL, not NOT VERIFIED
 
 Exit: 0 PASS; 1 FAIL (a walk, a row, the evidence or the run itself); 2 SETUP (arguments, browser,
 credentials, or the origin does not serve --rc clean); 3 PARTIAL (--grep).`
@@ -48,6 +53,7 @@ function parse(argv) {
     else if (flag === "--env-file") out.envFile = path.resolve(value())
     else if (flag === "--chrome") out.chrome = path.resolve(value())
     else if (flag === "--grep") out.grep = value()
+    else if (flag === "--workspace-flag") out.workspaceFlags = [...(out.workspaceFlags ?? []), value()]
     else if (flag === "--help" || flag === "-h") { console.log(HELP); process.exit(EXIT.pass) }
     else fail(`unknown flag ${flag}\n\n${HELP}`)
   }
@@ -93,6 +99,9 @@ if (checked.error) fail(checked.error)
 const origin = checked.origin
 const rc = args.rc.toLowerCase()
 if (!/^[0-9a-f]{40}$/.test(rc)) fail(`--rc must be the full 40-character commit, got ${args.rc}`)
+const workspaceFlags = args.workspaceFlags ?? []
+const flagProblems = workspaceFlagProblems(workspaceFlags)
+if (flagProblems.length) fail(flagProblems.join("; "))
 if (fs.existsSync(args.output) && fs.readdirSync(args.output).length) fail(`${args.output} is not empty: a stale run.json or row must not count for this run`)
 if (args.envFile && !fs.existsSync(args.envFile)) fail(`no env file at ${args.envFile}`)
 if (spawnSync("sh", ["-c", "command -v xvfb-run"]).status !== 0) fail("xvfb-run is required: the walk runs headed")
@@ -122,8 +131,8 @@ const listedOut = list.stdout ?? ""
 if (list.status !== 0) { accounts.remove(); fail(`playwright --list exited ${list.status}: ${(list.stderr ?? "").trim().slice(-300)}`) }
 // Whatever discovery left in the output directory does not belong to the run.
 for (const name of fs.readdirSync(args.output)) fs.rmSync(path.join(args.output, name), { recursive: true, force: true })
-console.log(`Native walk ${runId} on ${origin}, RC ${rc}, ${chromeVersion} (${chrome})`)
-const run = queued(accounts.file, runEnv({ path: process.env.PATH, home: os.homedir(), browsers, origin, output: args.output, chrome, runId }), "xvfb-run", ["-a", "-s", "-screen 0 1600x1200x24", process.execPath, cli, "test", "--config", config, ...select], { cwd: root, stdio: "inherit" })
+console.log(`Native walk ${runId} on ${origin}, RC ${rc}, ${chromeVersion} (${chrome})${workspaceFlags.length ? `, workspace flags ${workspaceFlags.join(", ")}` : ""}`)
+const run = queued(accounts.file, runEnv({ path: process.env.PATH, home: os.homedir(), browsers, origin, output: args.output, chrome, runId, workspaceFlags }), "xvfb-run", ["-a", "-s", "-screen 0 1600x1200x24", process.execPath, cli, "test", "--config", config, ...select], { cwd: root, stdio: "inherit" })
 accounts.remove()
 
 const listed = parseListed(listedOut)
@@ -132,12 +141,15 @@ const record = readJson(path.join(args.output, "run.json"))
 const finished = readJson(path.join(args.output, "finished.json"))
 const reporter = readJson(path.join(args.output, "reporter.json"))
 writeSummary(args.output, rows, record)
-const result = verdict({ playwrightStatus: run.status, listed, rows, run: record, finished, reporter, rc, origin, chrome, runId, narrowed: Boolean(args.grep), evidence: loadEvidence(args.output) })
+const evidence = loadEvidence(args.output)
+const result = verdict({ playwrightStatus: run.status, listed, rows, run: record, finished, reporter, rc, origin, chrome, runId, narrowed: Boolean(args.grep), evidence, workspaceFlags })
 const counts = summarize(rows)
 fs.writeFileSync(path.join(args.output, "verdict.json"), JSON.stringify({
   ...result, runId, rc, origin, appSha: record?.appSha ?? null, appDirty: record?.appDirty ?? null, playwrightStatus: run.status,
   listed, scenarios: SCENARIOS.map((s) => s.id), passed: counts.passed, failed: counts.failed, skipped: counts.skipped, rows: counts.total,
-  chrome: { path: chrome, version: chromeVersion }, grep: args.grep ?? null,
+  chrome: { path: chrome, version: chromeVersion }, grep: args.grep ?? null, workspaceFlags,
+  // Per walk: the flags it turned on in its workspace and what the history listing answered.
+  walks: Object.fromEntries(SCENARIOS.map((s) => { const e = evidence[s.id]; const h = e?.history; return [s.id, { workspaceFlags: e?.workspaceFlags ?? null, history: h ? { result: h.result ?? null, listingStatus: h.listingStatus ?? null, error: h.error ?? null, listing: h.listing ?? null, observed: h.observed ?? null, truncated: h.truncated ?? null } : null }] })),
 }, null, 2) + "\n")
 console.log(rows.length ? formatTable(rows) : "No result rows were recorded.")
 for (const n of result.notVerified) console.log(`NOT VERIFIED ${n.id}: ${n.item}`)

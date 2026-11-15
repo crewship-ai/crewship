@@ -262,6 +262,10 @@ type Provisioner struct {
 	// instanceID is this installation's settled identity, normalised, or ""
 	// (see SetInstanceID). It namespaces image tags and labels new images.
 	instanceID string
+
+	// buildPreflight is consulted before a build writes anything (see
+	// SetBuildPreflight). nil = no check.
+	buildPreflight BuildPreflight
 }
 
 // TempContainerLabelKey and TempContainerLabelValue identify temporary
@@ -540,6 +544,11 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 		}
 		emitEvt(ProvisionEvent{Step: ProvStepReady, Status: ProvStatusCompleted, Detail: "no customizations", DurationMs: elapsedMs(runStart)})
 		return &ProvisionResult{CachedImage: "", ConfigHash: hash}, nil
+	}
+
+	// From here on the build pulls and writes image data.
+	if err := p.checkBuildPreflight(ctx); err != nil {
+		return fail(ProvStepStoragePreflight, err)
 	}
 
 	p.logger.Info("provisioning devcontainer image", "base", baseImage, "tag", tag)

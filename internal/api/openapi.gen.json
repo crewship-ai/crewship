@@ -8789,6 +8789,18 @@
       },
       "DocumentAvailability": {
         "properties": {
+          "applications": {
+            "additionalProperties": {
+              "enum": [
+                "open",
+                "draining",
+                "closed"
+              ],
+              "type": "string"
+            },
+            "description": "The instance administrator's mode for Word (wordcraft) and Sheet (gridcraft), present while native Craft runs.",
+            "type": "object"
+          },
           "enabled": {
             "type": "boolean"
           },
@@ -15849,6 +15861,14 @@
           "agents_enabled": {
             "type": "boolean"
           },
+          "application": {
+            "description": "This document's application, present when the caller may open it.",
+            "enum": [
+              "wordcraft",
+              "gridcraft"
+            ],
+            "type": "string"
+          },
           "applications": {
             "additionalProperties": {
               "enum": [
@@ -15862,6 +15882,14 @@
           },
           "can_edit": {
             "type": "boolean"
+          },
+          "edit_refusal": {
+            "description": "Present when the caller has Edit but the instance administrator turned the application off or it is draining; can_edit is then false. The same reason lease acquire answers with.",
+            "enum": [
+              "app_draining",
+              "app_disabled"
+            ],
+            "type": "string"
           },
           "enabled": {
             "type": "boolean"
@@ -133842,6 +133870,16 @@
                       "description": "True where agent_access takes effect (the artifact_agent_access_modes flag is on).",
                       "type": "boolean"
                     },
+                    "agent_propose_kinds": {
+                      "description": "Artifact kinds on which agent_access propose gives the agents a real proposal (Docs); on every other kind propose reads like read. Absent where the flag is off.",
+                      "items": {
+                        "enum": [
+                          "docs"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array"
+                    },
                     "entry": {
                       "properties": {
                         "can_read": {
@@ -134135,6 +134173,16 @@
                     "agent_access_available": {
                       "description": "True where agent_access takes effect (the artifact_agent_access_modes flag is on).",
                       "type": "boolean"
+                    },
+                    "agent_propose_kinds": {
+                      "description": "Artifact kinds on which agent_access propose gives the agents a real proposal (Docs); on every other kind propose reads like read. Absent where the flag is off.",
+                      "items": {
+                        "enum": [
+                          "docs"
+                        ],
+                        "type": "string"
+                      },
+                      "type": "array"
                     },
                     "entry": {
                       "properties": {

@@ -32,12 +32,25 @@ export function jobArgs(envFile, env, command, commandArgs) {
 }
 
 /** The run's own settings. PRD_TRACE=0: a trace records request bodies, logins included. */
-export function runEnv({ path, home, browsers, origin, output, chrome, runId }) {
+export function runEnv({ path, home, browsers, origin, output, chrome, runId, workspaceFlags }) {
   return {
     PATH: path, HOME: home, PLAYWRIGHT_BROWSERS_PATH: browsers, CI: "1",
     PRD_MODE: "full", PRD_ORIGIN: origin, PRD_OUTPUT_DIR: output, NATIVE_WALK_CHROME: chrome, PRD_TRACE: "0",
     ...(runId ? { PRD_RUN_ID: runId } : {}),
+    ...(workspaceFlags?.length ? { NATIVE_WALK_WORKSPACE_FLAGS: workspaceFlags.join(",") } : {}),
   }
+}
+
+/** Why the --workspace-flag keys cannot be used: a plain flag key each, no repeat. */
+export function workspaceFlagProblems(keys) {
+  const problems = []
+  const seen = new Set()
+  for (const k of keys) {
+    if (typeof k !== "string" || !/^[a-z0-9][a-z0-9_]{0,99}$/.test(k)) problems.push(`--workspace-flag ${JSON.stringify(k)} is not a flag key (lowercase letters, digits, _)`)
+    else if (seen.has(k)) problems.push(`--workspace-flag ${k} given twice`)
+    seen.add(k)
+  }
+  return problems
 }
 
 /**
