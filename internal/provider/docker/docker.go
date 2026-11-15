@@ -95,6 +95,7 @@ type DetectResult struct {
 // It auto-detects the container runtime (Docker, Podman, Colima, OrbStack, etc.)
 // and manages crew containers with security isolation (non-root, cap-drop ALL).
 type Provider struct {
+	imageReferences provider.ImageReferenceAcquirer
 	// fenced maps a crew container id to the State.StartedAt at which its
 	// egress fence was installed. A restart recreates the network namespace
 	// and drops the fence, so a different StartedAt means "install again".

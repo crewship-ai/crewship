@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/provider"
 	"sync/atomic"
 )
 
@@ -30,6 +31,7 @@ var imageGate atomic.Pointer[ImageGate]
 // headless harnesses), which starts whatever image the config names.
 func SetImageGate(gate ImageGate) {
 	if gate == nil {
+		SetImageAcquirer(nil)
 		imageGate.Store(nil)
 		return
 	}
@@ -65,3 +67,30 @@ func (e PartialConfigError) Error() string { return string(e) }
 
 // Is makes errors.Is(err, ErrPartialConfig) true for every PartialConfigError.
 func (e PartialConfigError) Is(target error) bool { return target == ErrPartialConfig }
+
+// ImageAcquirer holds exact artifact references from resolved configuration
+// through runtime and service creation, when Docker establishes its own refs.
+type ImageAcquirer func(context.Context, provider.CrewConfig) (provider.CrewConfig, func(), error)
+
+var imageAcquirer atomic.Pointer[ImageAcquirer]
+
+func SetImageAcquirer(acquire ImageAcquirer) {
+	if acquire == nil {
+		imageAcquirer.Store(nil)
+		return
+	}
+	imageAcquirer.Store(&acquire)
+}
+
+func acquireImageReferences(ctx context.Context, cfg provider.CrewConfig, completer Completer) (provider.CrewConfig, func(), error) {
+	if local, ok := completer.(interface {
+		AcquireCrewImages(context.Context, provider.CrewConfig) (provider.CrewConfig, func(), error)
+	}); ok {
+		return local.AcquireCrewImages(ctx, cfg)
+	}
+	acquire := imageAcquirer.Load()
+	if acquire == nil {
+		return cfg, func() {}, nil
+	}
+	return (*acquire)(ctx, cfg)
+}

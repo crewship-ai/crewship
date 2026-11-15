@@ -14,6 +14,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/dockerutil"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/toolchain"
 )
 
@@ -60,6 +61,9 @@ func (h *ProvisioningHandler) publishProvisionResult(crewID, workspaceID string,
 // build evidence and publishes the cached result. It never changes a running
 // container. Raw configuration/env values are deliberately absent from history.
 func (h *ProvisioningHandler) saveProvisionResult(ctx context.Context, crewID, workspaceID string, expected provisionDefinition, result *devcontainer.ProvisionResult) (string, error) {
+	if _, err := resourcelifecycle.Images(h.db).Preserve(ctx, []resourcelifecycle.ImageReference{{Ref: result.CachedImage, Required: true}}); err != nil {
+		return "", err
+	}
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err

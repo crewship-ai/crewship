@@ -39,7 +39,9 @@ import (
 	"github.com/crewship-ai/crewship/internal/crewstart"
 	"github.com/crewship-ai/crewship/internal/database"
 	"github.com/crewship-ai/crewship/internal/devcontainer"
+	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/servicelifecycle"
 )
 
@@ -355,6 +357,14 @@ func (h *ProvisioningHandler) EnsureProvisioned(ctx context.Context, crewID, wor
 		return nil
 	}
 
+	var selected string
+	if err := h.db.QueryRowContext(ctx, `SELECT COALESCE(cached_image,'') FROM crews WHERE id=? AND (?='' OR workspace_id=?) AND deleted_at IS NULL`, crewID, workspaceID, workspaceID).Scan(&selected); err != nil {
+		return err
+	}
+	if _, err := resourcelifecycle.Images(h.db).Preserve(ctx, []resourcelifecycle.ImageReference{{Ref: selected, Required: selected != ""}}); err != nil {
+		return err
+	}
+
 	// One truth for "can this crew's image run its agents": the EFFECTIVE
 	// config (a NULL column defaults to an image with the agent CLI — the
 	// defect this chokepoint was first written for), the cached image
@@ -510,4 +520,58 @@ func (h *ProvisioningHandler) EnsureCrewImage(ctx context.Context, crewID string
 		return "", fmt.Errorf("read crew image after image gate: %w", err)
 	}
 	return image.String, nil
+}
+
+// Enroll local managed bases before publishing configuration that borrows them.
+// Public repository aliases and not-yet-pulled bases need no reference pin.
+func preserveConfiguredImageReferences(ctx context.Context, db *sql.DB, runtimeImage, config, services *string) error {
+	value := func(p *string) string {
+		if p == nil {
+			return ""
+		}
+		return *p
+	}
+	refs, err := resourcelifecycle.ConfiguredImageReferences(value(runtimeImage), value(config), value(services))
+	if err != nil {
+		return err
+	}
+	_, err = resourcelifecycle.Images(db).Preserve(ctx, refs)
+	return err
+}
+
+// AcquireCrewImages is the single crewstart hook, including chat starters that
+// have no DB completer. The short global read gate protects resolution until
+// immutable-ID leases exist; scoped leases then last through ContainerCreate.
+func (h *ProvisioningHandler) AcquireCrewImages(ctx context.Context, cfg provider.CrewConfig) (provider.CrewConfig, func(), error) {
+	return acquireCrewImages(ctx, h.db, cfg)
+}
+
+func (c *CrewConfigCompleter) AcquireCrewImages(ctx context.Context, cfg provider.CrewConfig) (provider.CrewConfig, func(), error) {
+	return acquireCrewImages(ctx, c.db, cfg)
+}
+
+func acquireCrewImages(ctx context.Context, db *sql.DB, cfg provider.CrewConfig) (provider.CrewConfig, func(), error) {
+	refs := []resourcelifecycle.ImageReference{{Ref: cfg.CachedImage, Required: cfg.CachedImage != ""}, {Ref: cfg.Image}}
+	resolved, release, err := resourcelifecycle.Images(db).Acquire(ctx, refs)
+	if err != nil {
+		return cfg, nil, err
+	}
+	if id := resolved[cfg.CachedImage]; id != "" {
+		cfg.CachedImage = id
+	}
+	if id := resolved[cfg.Image]; id != "" {
+		cfg.Image = id
+	}
+	return cfg, release, nil
+}
+
+// AcquireImageReferences also serves the provider's direct service-controller
+// path, which does not run through crewstart. Preserve declaration strings;
+// resolved identities are runtime-only provider input.
+func (h *ProvisioningHandler) AcquireImageReferences(ctx context.Context, inputs []string) (map[string]string, func(), error) {
+	refs := make([]resourcelifecycle.ImageReference, 0, len(inputs))
+	for _, ref := range inputs {
+		refs = append(refs, resourcelifecycle.ImageReference{Ref: ref, Required: dockerutil.IsLocalImageID(ref)})
+	}
+	return resourcelifecycle.Images(h.db).Acquire(ctx, refs)
 }

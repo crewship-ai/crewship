@@ -13,6 +13,8 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/dockerutil"
+	"github.com/crewship-ai/crewship/internal/quiesce"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
 )
@@ -50,8 +52,30 @@ const (
 
 // runStartupAndPeriodicGC performs one sweep at process startup and then
 
+func (h *ProvisioningHandler) reconcileImageReferences(ctx context.Context) {
+	h.mu.RLock()
+	references := h.imageReferences
+	h.mu.RUnlock()
+	if references == nil {
+		return
+	}
+	writer, ok := quiesce.Enter(ctx)
+	if !ok {
+		return
+	}
+	defer writer.Leave()
+	ctx, cancel := context.WithTimeout(writer.Context(), 30*time.Second)
+	defer cancel()
+	if err := references.Reconcile(ctx, resourcelifecycle.Images(h.db), func(ctx context.Context) ([]resourcelifecycle.ImageReference, error) {
+		return resourcelifecycle.SelectedImageReferences(ctx, h.db)
+	}); err != nil {
+		h.logger.Warn("environment reference reconciliation deferred; retaining references", "error", err)
+	}
+}
+
 func (h *ProvisioningHandler) runStartupAndPeriodicGC(ctx context.Context) {
 	// Startup sweep — tolerate failures (Docker may not yet be reachable).
+	h.reconcileImageReferences(ctx)
 	h.sweepOrphanTempContainers(ctx)
 	h.sweepOrphanCacheImages(ctx)
 
@@ -62,8 +86,10 @@ func (h *ProvisioningHandler) runStartupAndPeriodicGC(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-h.gcWake:
+			h.reconcileImageReferences(ctx)
 			h.sweepOrphanCacheImages(ctx)
 		case <-ticker.C:
+			h.reconcileImageReferences(ctx)
 			h.sweepOrphanTempContainers(ctx)
 			h.sweepOrphanCacheImages(ctx)
 		}

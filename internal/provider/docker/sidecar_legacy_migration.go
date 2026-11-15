@@ -149,12 +149,12 @@ func (p *Provider) migrateLegacySidecarResources(ctx context.Context, crewID, cr
 		// guaranteed to be appropriate for this data, and the ensure loop is
 		// about to pull it anyway. Best-effort pull (tolerates a registry
 		// outage when a local copy exists), same policy as ensureSidecar.
-		if err := p.pullSidecarImage(ctx, svc.Image); err != nil {
+		if err := p.pullSidecarImage(ctx, serviceImageReference(svc)); err != nil {
 			return fmt.Errorf("legacy sidecar volume migration for service %q needs image %q to run the copy helper "+
 				"and it could not be pulled: %w; the legacy volume was NOT removed — its data is intact", svc.Name, svc.Image, err)
 		}
 		for _, m := range pending {
-			if err := p.migrateLegacyVolumeLabeled(ctx, m.legacy, m.target, svc.Image,
+			if err := p.migrateLegacyVolumeLabeled(ctx, m.legacy, m.target, serviceImageReference(svc),
 				sidecarVolumeLabels(crewID, crewSlug, svc.Name, m.volName)); err != nil {
 				return fmt.Errorf("legacy sidecar volume migration (service %q): %w", svc.Name, err)
 			}

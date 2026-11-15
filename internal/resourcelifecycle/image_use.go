@@ -11,10 +11,12 @@ import (
 // Collection never waits on a build: it retries on its next ordinary tick.
 // All users of one live database share this gate, including backup replay.
 type ImageUse struct {
-	mu       sync.RWMutex
-	refsMu   sync.Mutex
-	active   map[string]int
-	deleting map[string]chan struct{}
+	protectorMu sync.RWMutex
+	protector   ImageReferenceProtector
+	mu          sync.RWMutex
+	refsMu      sync.Mutex
+	active      map[string]int
+	deleting    map[string]chan struct{}
 }
 
 var imageUses sync.Map // *sql.DB -> *ImageUse; one entry per opened database

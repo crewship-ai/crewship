@@ -291,7 +291,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	// The image ENV carries the aggregated env — the operator's containerEnv
 	// plus the agent tool PATH and MISE_* variables (ensureAgentToolPath) —
 	// so the image is usable on its own, not only through the runtime env.
-	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, requirements.ContainerEnv, rec.steps(), imageOwnerLabels(p.instanceID, ImageKindCrew), tag)
+	contextDir, err := stageBuildContextWithSteps(baseImage, resolvedFeatures, optionsByRef, requirements.ContainerEnv, rec.steps(), imageBuildLabels(p.instanceID, ImageKindCrew, hash), tag)
 	if err != nil {
 		return fail(ProvStepImageBuildStart, err)
 	}

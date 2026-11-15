@@ -132,8 +132,9 @@ type CrewConfig struct {
 // the provider.
 type CrewService struct {
 	// ControllerManaged is server-derived durable intent, never public config.
-	ControllerManaged bool `json:"-" yaml:"-"`
-	QuotaEnforced     bool // opt-in readonly root and helper-backed bounded durable volumes
+	ControllerManaged bool   `json:"-" yaml:"-"`
+	ResolvedImage     string `json:"-" yaml:"-"` // runtime-only exact image, declaration stays unchanged
+	QuotaEnforced     bool   // opt-in readonly root and helper-backed bounded durable volumes
 	Name              string
 	Image             string
 	Command           []string
@@ -777,3 +778,13 @@ func CrewNetworkName(base, crewID string) string {
 // ErrContainerNotFound means an authoritative provider lookup found no such
 // container. Transport, permission and daemon errors must not wrap this value.
 var ErrContainerNotFound = errors.New("container not found")
+
+// ImageReferenceAcquirer binds daemon-visible image protection to an existing
+// runtime's application database without coupling the provider to SQL.
+type ImageReferenceAcquirer interface {
+	AcquireImageReferences(context.Context, []string) (map[string]string, func(), error)
+}
+
+type ImageReferenceAcquirerSetter interface {
+	SetImageReferenceAcquirer(ImageReferenceAcquirer)
+}
