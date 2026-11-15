@@ -54,30 +54,45 @@ type buildStorageCheck struct {
 	dataDir func(ctx context.Context) string
 	// dockerRoot returns Docker's storage directory and whether this process
 	// can measure it.
-	dockerRoot func(ctx context.Context) (string, bool)
+	dockerRoot func(ctx context.Context) (string, error)
 	usage      func(path string) (diskusage.Stats, error)
 	// dockerMinFree is the floor on Docker's storage; 0 disables that check.
 	dockerMinFree int64
+	unknown       func(volume string, err error)
 }
 
 func (c buildStorageCheck) check(ctx context.Context) error {
+	report := func(volume string, err error) {
+		if c.unknown != nil {
+			c.unknown(volume, err)
+		}
+	}
 	if c.usage == nil {
+		report("all", errors.New("filesystem usage probe unavailable"))
 		return nil
 	}
 	if c.dataDir != nil {
 		if dir := c.dataDir(ctx); dir != "" {
-			if st, err := c.usage(dir); err == nil && st.FreeBytes < uint64(buildDataVolumeMinFreeBytes) {
+			st, err := c.usage(dir)
+			if err != nil {
+				report("Crewship data", err)
+			} else if st.FreeBytes < uint64(buildDataVolumeMinFreeBytes) {
 				return fmt.Errorf("%w: %s free on the Crewship data volume (%s), at least %s must stay free for the database; free up space and build again",
 					ErrBuildStorage, gib(st.FreeBytes), dir, gib(uint64(buildDataVolumeMinFreeBytes)))
 			}
 		}
 	}
 	if c.dockerMinFree > 0 && c.dockerRoot != nil {
-		if root, ok := c.dockerRoot(ctx); ok && root != "" {
-			if st, err := c.usage(root); err == nil && st.FreeBytes < uint64(c.dockerMinFree) {
-				return fmt.Errorf("%w: %s free on Docker's storage (%s), a build needs at least %s (%s); free up space and build again",
-					ErrBuildStorage, gib(st.FreeBytes), root, gib(uint64(c.dockerMinFree)), buildMinFreeEnv)
-			}
+		root, err := c.dockerRoot(ctx)
+		if err != nil {
+			report("Docker image", err)
+		} else if root == "" {
+			report("Docker image", errors.New("image storage path unavailable"))
+		} else if st, err := c.usage(root); err != nil {
+			report("Docker image", err)
+		} else if st.FreeBytes < uint64(c.dockerMinFree) {
+			return fmt.Errorf("%w: %s free on Docker's storage (%s), a build needs at least %s (%s); free up space and build again",
+				ErrBuildStorage, gib(st.FreeBytes), root, gib(uint64(c.dockerMinFree)), buildMinFreeEnv)
 		}
 	}
 	return nil
@@ -115,32 +130,37 @@ func buildMinFreeFromEnv() (floor int64, invalid bool) {
 	return int64(gb) << 30, false
 }
 
-// dockerStorageFunc answers where the daemon keeps its data and what it runs
-// on (dockerprovider.DaemonStorage).
-type dockerStorageFunc func(ctx context.Context) (rootDir, operatingSystem string, err error)
+type dockerStorageFunc func(ctx context.Context) (dockerprovider.DaemonStorageInfo, error)
 
-// measurableDockerRoot returns Docker's root directory when free space
-// measured by this process is the daemon's free space: the daemon is reached
-// over a local Unix socket, is not Docker Desktop (its storage is a VM disk),
-// and the directory exists here. A server running in a container without the
-// directory mounted, a remote daemon and a VM-backed daemon all answer false.
-func measurableDockerRoot(ctx context.Context, daemonHost string, storage dockerStorageFunc, stat func(string) error) (string, bool) {
-	if storage == nil || !strings.HasPrefix(daemonHost, "unix://") {
-		return "", false
+// measurableDockerRoot is a conservative local graph-driver probe. A local
+// Unix endpoint and visible path are prerequisites, not proof for containerd,
+// VM storage, thin pools or independently configured snapshotters.
+func measurableDockerRoot(ctx context.Context, daemonHost string, storage dockerStorageFunc, stat func(string) error) (string, error) {
+	if storage == nil {
+		return "", errors.New("daemon storage probe unavailable")
+	}
+	if !strings.HasPrefix(daemonHost, "unix://") {
+		return "", errors.New("daemon is remote or behind a socket proxy")
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	root, operatingSystem, err := storage(ctx)
+	info, err := storage(ctx)
 	if err != nil {
-		return "", false
+		return "", fmt.Errorf("daemon storage inspection: %w", err)
 	}
-	if root == "" || !filepath.IsAbs(root) || strings.Contains(operatingSystem, "Docker Desktop") {
-		return "", false
+	if strings.Contains(info.OperatingSystem, "Docker Desktop") {
+		return "", errors.New("Docker Desktop image storage is inside a VM")
 	}
-	if stat(root) != nil {
-		return "", false
+	if !info.ClassicImageStore() {
+		return "", fmt.Errorf("image storage backend %q has no measurable filesystem from daemon info", info.Driver)
 	}
-	return root, true
+	if info.RootDir == "" || !filepath.IsAbs(info.RootDir) {
+		return "", errors.New("daemon did not report an absolute storage path")
+	}
+	if err := stat(info.RootDir); err != nil {
+		return "", fmt.Errorf("daemon storage path not accessible: %w", err)
+	}
+	return info.RootDir, nil
 }
 
 // EnableBuildStoragePreflight makes the provisioner check free disk space
@@ -161,21 +181,30 @@ func (h *ProvisioningHandler) EnableBuildStoragePreflight() {
 				return ""
 			}
 			var file string
-			if err := h.db.QueryRowContext(ctx, `SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&file); err != nil || file == "" {
+			if err := h.db.QueryRowContext(ctx, `SELECT file FROM pragma_database_list WHERE name='main'`).Scan(&file); err != nil {
+				h.logger.Warn("build storage check unknown; continuing without data-volume measurement", "error", err)
+				return ""
+			}
+			if file == "" {
 				return ""
 			}
 			return filepath.Dir(file)
 		},
-		dockerRoot: func(ctx context.Context) (string, bool) {
+		dockerRoot: func(ctx context.Context) (string, error) {
 			if h.docker == nil {
-				return "", false
+				return "", errors.New("no Docker client; image storage measurement unsupported")
 			}
 			return measurableDockerRoot(ctx, h.docker.DaemonHost(),
-				func(ctx context.Context) (string, string, error) { return dockerprovider.DaemonStorage(ctx, h.docker) },
+				func(ctx context.Context) (dockerprovider.DaemonStorageInfo, error) {
+					return dockerprovider.DaemonStorage(ctx, h.docker)
+				},
 				func(p string) error { _, err := os.Stat(p); return err })
 		},
 		usage:         diskusage.Usage,
 		dockerMinFree: floor,
+		unknown: func(volume string, err error) {
+			h.logger.Warn("build storage check unknown; continuing without this measurement", "volume", volume, "reason", err)
+		},
 	}
 	h.provisioner.SetBuildPreflight(check.check)
 }

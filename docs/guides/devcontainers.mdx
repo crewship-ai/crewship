@@ -304,6 +304,19 @@ Binaries the build installs on the agent's behalf that mise does not carry (the 
 
 Provisioning is **asynchronous**. The CLI command returns immediately after the backend enqueues a job; you then poll for status. Five triggers can put a crew into provisioning state:
 
+Before a cache-miss build, the server checks for at least 1 GiB free on the
+Crewship database filesystem and 4 GiB on measurable local Docker image storage
+(`CREWSHIP_BUILD_MIN_FREE_GB`, `0` disables only the Docker floor). This samples
+free space; it does not reserve space against concurrent builds. Cache reuse
+skips the check. Non-Unix endpoints (including TCP socket proxies), Docker Desktop, containerd stores,
+pool/quota storage drivers and failed probes report unknown measurements in
+server logs and continue. The server does not substitute the host's filesystem
+for an unknown image store or delete anything to make room. Even a visible local
+path is a mount-namespace heuristic; filesystem free space does not account for
+all per-container quotas. Docker's
+[containerd storage documentation](https://docs.docker.com/engine/storage/containerd/)
+explains why its image storage can be separate from `DockerRootDir`.
+
 0. **Proactive auto-provision on config save** — when a crew is **created** (`POST /api/v1/crews`, `crewship apply`, `crewship crew create`) or its **devcontainer / mise / runtime-image config changes** (`PATCH /api/v1/crews/{crewId}`), the handler immediately kicks off the build in the background (`CrewHandler.maybeAutoProvision`). This is the primary path: by the time anyone dispatches an issue the image is usually already cached, so operators never touch a "Build now" button. Editing the config invalidates the old cache selection and prepares an updated image. Managed Docker starts wait for current reservations and replace the container only after confirming it is idle. Unresolved occupancy leaves the update pending; an explicit stop/restart remains available after finishing existing work.
 1. **Explicit CLI/API trigger** — `crewship crew provision <slug>` or `POST /api/v1/crews/{crewId}/provision`.
 2. **Crew rebuild** — `crewship crew rebuild <slug>` bypasses the provisioned-image cache and installation-layer caches. It re-runs provisioning, so floating tool selectors can resolve newer versions; explicit versions in the configuration are retained. A rejected request (already provisioning or rate limited) leaves the current cache marker intact. This builds an image; it does not itself replace an already running container.

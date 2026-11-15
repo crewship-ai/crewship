@@ -11,6 +11,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/diskusage"
+	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
 )
 
 const testGiB = uint64(1) << 30
@@ -51,8 +52,13 @@ func TestBuildStorageCheck(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			check := buildStorageCheck{
-				dataDir:    func(context.Context) string { return tt.dataDir },
-				dockerRoot: func(context.Context) (string, bool) { return tt.dockerRoot, tt.dockerKnown },
+				dataDir: func(context.Context) string { return tt.dataDir },
+				dockerRoot: func(context.Context) (string, error) {
+					if !tt.dockerKnown {
+						return "", errors.New("not measurable")
+					}
+					return tt.dockerRoot, nil
+				},
 				usage: func(path string) (diskusage.Stats, error) {
 					if err := tt.probeErr[path]; err != nil {
 						return diskusage.Stats{}, err
@@ -107,7 +113,9 @@ func TestMeasurableDockerRoot(t *testing.T) {
 	present := func(string) error { return nil }
 	absent := func(string) error { return errors.New("no such file or directory") }
 	storage := func(root, operatingSystem string, err error) dockerStorageFunc {
-		return func(context.Context) (string, string, error) { return root, operatingSystem, err }
+		return func(context.Context) (dockerprovider.DaemonStorageInfo, error) {
+			return dockerprovider.DaemonStorageInfo{RootDir: root, OperatingSystem: operatingSystem, Driver: "overlay2"}, err
+		}
 	}
 	linux := storage("/var/lib/docker", "Ubuntu 24.04 LTS", nil)
 	const socket = "unix:///var/run/docker.sock"
@@ -129,7 +137,8 @@ func TestMeasurableDockerRoot(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			root, ok := measurableDockerRoot(context.Background(), tt.host, tt.storage, tt.stat)
+			root, err := measurableDockerRoot(context.Background(), tt.host, tt.storage, tt.stat)
+			ok := err == nil
 			if ok != tt.want || (ok && root != "/var/lib/docker") {
 				t.Errorf("measurableDockerRoot = %q, %t; want measurable=%t", root, ok, tt.want)
 			}
@@ -179,5 +188,49 @@ func TestEnableBuildStoragePreflightFindsTheDatabaseDirectory(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Dir(file)); err != nil {
 		t.Errorf("database directory %q is not a real directory: %v", filepath.Dir(file), err)
+	}
+}
+
+func TestBuildStorageUnknownIsReportedAndDoesNotProbeWrongFilesystem(t *testing.T) {
+	t.Parallel()
+	reported := map[string]error{}
+	check := buildStorageCheck{
+		dataDir:       func(context.Context) string { return "/data" },
+		dockerRoot:    func(context.Context) (string, error) { return "", errors.New("containerd store path unknown") },
+		dockerMinFree: 4 << 30,
+		usage: func(p string) (diskusage.Stats, error) {
+			if p != "/data" {
+				t.Fatalf("unexpected filesystem probe: %s", p)
+			}
+			return diskusage.Stats{}, errors.New("statfs denied")
+		},
+		unknown: func(volume string, err error) { reported[volume] = err },
+	}
+	if err := check.check(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	if len(reported) != 2 || reported["Crewship data"] == nil || reported["Docker image"] == nil {
+		t.Fatalf("unknown measurements were not reported: %v", reported)
+	}
+}
+
+func TestMeasurableDockerRootRejectsSplitAndUnrecognisedBackends(t *testing.T) {
+	t.Parallel()
+	for _, info := range []dockerprovider.DaemonStorageInfo{
+		{Driver: "overlayfs"},
+		{Driver: "overlay2", DriverStatus: [][2]string{{"driver-type", "io.containerd.snapshotter.v1"}}},
+		{Driver: "future-snapshotter"},
+		{Driver: "devicemapper"},
+		{Driver: "zfs"},
+		{Driver: "btrfs"},
+		{},
+	} {
+		info.RootDir = "/var/lib/docker"
+		root, err := measurableDockerRoot(t.Context(), "unix:///var/run/docker.sock",
+			func(context.Context) (dockerprovider.DaemonStorageInfo, error) { return info, nil },
+			func(string) error { t.Fatal("must not stat a guessed image-store filesystem"); return nil })
+		if err == nil || root != "" {
+			t.Fatalf("backend %+v measured as %q: %v", info, root, err)
+		}
 	}
 }
