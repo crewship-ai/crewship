@@ -43,8 +43,6 @@ jobs:
       - verified
     permissions:
       contents: read
-    outputs:
-      catalog: ${{ steps.catalog.outputs.pins }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
@@ -56,13 +54,14 @@ jobs:
       # every file; the binaries carry the manifest digests (#5315).
       - name: Build packages
         run: python3 scripts/build-craft-components.py --rust-bin "$(dirname "$(rustup which --toolchain 1.99.1 rustc)")"
-      - name: Read the catalog
-        id: catalog
+      # The pins are not a job output: GitHub drops one that contains a
+      # secret's value, and a version may carry a hyphen. The later jobs read
+      # the committed catalog at this same commit, so the build must match it.
+      - name: Require the committed catalog
         run: |
           set -euo pipefail
-          pins="$(tr -d '\n' < build/craft-components/dist/catalog.txt)"
-          [[ "$pins" =~ ^[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64}(,[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64})*$ ]]
-          echo "pins=$pins" >> "$GITHUB_OUTPUT"
+          bash scripts/ci/craft-catalog-pins.sh build/craft-components/dist/catalog.txt
+          cmp build/craft-components/dist/catalog.txt tools/craft-components/catalog.txt
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: craft-packages
@@ -87,9 +86,12 @@ jobs:
           path: build/craft-packages
       # The signed binaries carry each package's manifest digest; nothing is
       # built unless the packages are exactly the pinned ones.
+      - name: Read the pinned catalog
+        id: catalog
+        run: bash scripts/ci/craft-catalog-pins.sh tools/craft-components/catalog.txt >> "$GITHUB_OUTPUT"
       - name: Verify the Word and Sheet packages against their pins
         env:
-          PINS: ${{ needs.craft-components.outputs.catalog }}
+          PINS: ${{ steps.catalog.outputs.pins }}
         run: bash scripts/check-craft-packages.sh "$PINS" build/craft-packages
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1
@@ -149,7 +151,7 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SENTRY_DSN: ${{ secrets.SENTRY_DSN }}
-          CRAFT_COMPONENT_PINS: ${{ needs.craft-components.outputs.catalog }}
+          CRAFT_COMPONENT_PINS: ${{ steps.catalog.outputs.pins }}
           NFPM_PACKAGES_PASSPHRASE: ${{ secrets.GPG_SIGNING_PASSPHRASE }}
           MACOS_SIGN_P12: ${{ secrets.MACOS_SIGN_P12 }}
           MACOS_SIGN_PASSWORD: ${{ secrets.MACOS_SIGN_PASSWORD }}
@@ -161,7 +163,7 @@ jobs:
       # next to the archives after checking them once more.
       - name: Publish the Word and Sheet packages with the archives
         env:
-          PINS: ${{ needs.craft-components.outputs.catalog }}
+          PINS: ${{ steps.catalog.outputs.pins }}
         run: |
           set -euo pipefail
           bash scripts/check-craft-packages.sh "$PINS" build/craft-packages
@@ -245,10 +247,6 @@ jobs:
           TAG="${GITHUB_REF#refs/tags/}"
           echo "version=${TAG}" >> "$GITHUB_OUTPUT"
 
-          # vX.Y series tag for users pinning to a major.minor line.
-          MAJMIN=$(echo "$TAG" | sed -E 's/^(v[0-9]+\.[0-9]+).*/\1/')
-          echo "majmin=${MAJMIN}" >> "$GITHUB_OUTPUT"
-
           # Commit timestamp of the tagged commit — not
           # `github.event.repository.updated_at`, which reflects ANY recent
           # repo push (docs, branches) and can drift between re-runs of the
@@ -256,32 +254,13 @@ jobs:
           BUILD_DATE=$(git log -1 --format=%cI "$GITHUB_SHA")
           echo "build_date=${BUILD_DATE}" >> "$GITHUB_OUTPUT"
 
-          # `:latest` only on clean releases. Pre-release tags (v0.1.0-beta.1,
-          # v0.1.0-rc.1) must not move `:latest` or `docker pull crewship:latest`
-          # would silently deliver beta to users who expect stable.
-          if echo "$TAG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "is_stable=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "is_stable=false" >> "$GITHUB_OUTPUT"
-          fi
-      - name: Compute tag list
-        id: tags
-        run: |
-          BASE="ghcr.io/${{ github.repository_owner }}/crewship"
-          # Always publish the full version tag (v1.2.3 / v1.2.3-beta.1).
-          # The majmin alias (v1.2) and the `latest` rolling tag are only
-          # emitted for stable releases — moving a stable-looking alias
-          # onto a beta/rc image would silently downgrade everyone pinned
-          # to v1.2 the next time they pulled. Keep stable aliases off prerelease images.
-          {
-            echo "list<<EOF"
-            echo "${BASE}:${{ steps.meta.outputs.version }}"
-            if [ "${{ steps.meta.outputs.is_stable }}" = "true" ]; then
-              echo "${BASE}:${{ steps.meta.outputs.majmin }}"
-              echo "${BASE}:latest"
-            fi
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+      # Fail before building when the tag cannot be promoted. promote computes
+      # the same list itself: a job output carrying it is dropped by GitHub
+      # whenever it contains a secret's value (v0.1.0-rc.2, see the script).
+      - name: Check the promotion tag list
+        env:
+          BASE: ghcr.io/${{ github.repository_owner }}/crewship
+        run: bash scripts/ci/release-image-tags.sh "$GITHUB_REF_NAME" "$BASE"
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
       - name: Login to GHCR
@@ -294,6 +273,9 @@ jobs:
         uses: sigstore/cosign-installer@756fe2d284c7292c4e9b62c8a28f1e5629c59532
         with:
           cosign-release: v2.6.3
+      - name: Read the pinned catalog
+        id: catalog
+        run: bash scripts/ci/craft-catalog-pins.sh tools/craft-components/catalog.txt >> "$GITHUB_OUTPUT"
       - name: Build immutable release image candidate
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
@@ -311,7 +293,7 @@ jobs:
             COMMIT=${{ github.sha }}
             DATE=${{ steps.meta.outputs.build_date }}
             SENTRY_DSN=${{ secrets.SENTRY_DSN }}
-            CRAFT_COMPONENT_PINS=${{ needs.craft-components.outputs.catalog }}
+            CRAFT_COMPONENT_PINS=${{ steps.catalog.outputs.pins }}
             CRAFT_COMPONENT_URL=https://github.com/crewship-ai/crewship/releases/download/${{ steps.meta.outputs.version }}
             NEXT_PUBLIC_SENTRY_DSN=${{ secrets.SENTRY_DSN_FRONTEND }}
           cache-from: type=gha,scope=server-image
@@ -344,8 +326,8 @@ jobs:
       - verified
       - craft-components
     outputs:
+      # Only the sha256 digest crosses jobs; it cannot contain a hyphen.
       digest: ${{ steps.build.outputs.digest }}
-      tags: ${{ steps.tags.outputs.list }}
   promote:
     name: Promote verified release image
     needs:
@@ -356,6 +338,9 @@ jobs:
     permissions:
       packages: write
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
       - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550
         with:
@@ -366,9 +351,9 @@ jobs:
         env:
           IMAGE: ghcr.io/${{ github.repository_owner }}/crewship
           DIGEST: ${{ needs.docker.outputs.digest }}
-          TAGS: ${{ needs.docker.outputs.tags }}
         run: |
           set -euo pipefail
+          TAGS="$(bash scripts/ci/release-image-tags.sh "$GITHUB_REF_NAME" "$IMAGE")"
           args=()
           while IFS= read -r tag; do
             [ -z "$tag" ] || args+=(--tag "$tag")
