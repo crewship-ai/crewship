@@ -401,7 +401,7 @@ func (p *Provisioner) recordProvisionSteps(
 	if err := writeToolchainInventory(ctx, noContainer, requiredBinaries, containerEnv, rec.exec); err != nil {
 		return err
 	}
-	if err := p.cleanupCaches(ctx, noContainer, rec.exec); err != nil {
+	if err := p.cleanupCaches(ctx, noContainer, rec.exec, containerEnv); err != nil {
 		return fmt.Errorf("cache cleanup: %w", err)
 	}
 	return nil
