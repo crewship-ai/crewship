@@ -84,6 +84,36 @@ func (h *ProvisioningHandler) sweepOrphanCacheImages(ctx context.Context) {
 }
 
 func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
+	h.mu.RLock()
+	owner := h.instanceID
+	h.mu.RUnlock()
+	unusedSince, err := h.ownedImagesUnusedSince(ctx, owner)
+	if err != nil {
+		h.logger.Warn("image collection: unused-image state unavailable; retaining images", "error", err)
+		return
+	}
+	now := time.Now()
+	if lastPass, known := unusedSince[lastPassMarker]; !known || now.Sub(lastPass) > ownedImageObservationGap || lastPass.After(now) {
+		// Nobody was watching: an image may have been used and released
+		// unseen. Start every window over rather than act on what was true
+		// before the gap.
+		if len(unusedSince) > 0 {
+			if _, err := h.db.ExecContext(ctx, `DELETE FROM resource_retention_images WHERE instance_id=?`, owner); err != nil {
+				h.logger.Warn("image collection: unused-image state reset failed; retaining images", "error", err)
+				return
+			}
+		}
+		unusedSince = map[string]time.Time{}
+	}
+	delete(unusedSince, lastPassMarker)
+	// Revoke the previous completion marker before observing any use. A
+	// failed state update (or a crash mid-pass) must force a fresh window next
+	// time, even when the previous completed pass was less than two hours ago.
+	if _, err := h.db.ExecContext(ctx, `DELETE FROM resource_retention_images WHERE instance_id=? AND image_id=?`, owner, lastPassMarker); err != nil {
+		h.logger.Warn("image collection: cannot begin durable observation; retaining images", "error", err)
+		return
+	}
+
 	// Inventory all containers, including stopped containers and foreign owners.
 	containers, err := h.gcClient.ContainerList(ctx, client.ContainerListOptions{All: true})
 	if err != nil {
@@ -123,28 +153,6 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 		return
 	}
 	cutoff := time.Now().Add(-ownedImageMinAge).Unix()
-	h.mu.RLock()
-	owner := h.instanceID
-	h.mu.RUnlock()
-	unusedSince, err := h.ownedImagesUnusedSince(ctx, owner)
-	if err != nil {
-		h.logger.Warn("image collection: unused-image state unavailable; retaining images", "error", err)
-		return
-	}
-	now := time.Now()
-	if lastPass, known := unusedSince[lastPassMarker]; !known || now.Sub(lastPass) > ownedImageObservationGap || lastPass.After(now) {
-		// Nobody was watching: an image may have been used and released
-		// unseen. Start every window over rather than act on what was true
-		// before the gap.
-		if len(unusedSince) > 0 {
-			if _, err := h.db.ExecContext(ctx, `DELETE FROM resource_retention_images WHERE instance_id=?`, owner); err != nil {
-				h.logger.Warn("image collection: unused-image state reset failed; retaining images", "error", err)
-				return
-			}
-		}
-		unusedSince = map[string]time.Time{}
-	}
-	delete(unusedSince, lastPassMarker)
 	present := map[string]bool{}
 	for _, img := range listed.Items {
 		if ctx.Err() != nil {
@@ -155,8 +163,11 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 		}
 		present[img.ID] = true
 		if used[img.ID] || protected[img.ID] {
+			// Any observed use restarts the window.
 			if _, tracked := unusedSince[img.ID]; tracked {
-				h.forgetOwnedImageUnused(ctx, owner, img.ID) // any use restarts the window
+				if err := h.forgetOwnedImageUnused(ctx, owner, img.ID); err != nil {
+					return
+				}
 			}
 			continue
 		}
@@ -169,6 +180,7 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 				if _, err := h.db.ExecContext(ctx, `INSERT INTO resource_retention_images(instance_id,image_id,first_unused_at) VALUES(?,?,?) ON CONFLICT(instance_id,image_id) DO NOTHING`,
 					owner, img.ID, tsformat.Format(now)); err != nil {
 					h.logger.Warn("image collection: unused-image state write failed", "error", err)
+					return
 				}
 				continue
 			}
@@ -176,14 +188,18 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 				continue
 			}
 		}
-		h.removeCollectedImage(ctx, img, true)
+		if err := h.removeCollectedImage(ctx, img, true); err != nil {
+			return
+		}
 	}
 	for id := range unusedSince {
 		if ctx.Err() != nil {
 			return
 		}
 		if !present[id] {
-			h.forgetOwnedImageUnused(ctx, owner, id)
+			if err := h.forgetOwnedImageUnused(ctx, owner, id); err != nil {
+				return
+			}
 		}
 	}
 	// Only a pass that looked at everything counts as an observation.
@@ -225,15 +241,19 @@ func (h *ProvisioningHandler) ownedImagesUnusedSince(ctx context.Context, owner 
 	}
 	_ = rows.Close()
 	for _, id := range unreadable {
-		h.forgetOwnedImageUnused(ctx, owner, id)
+		if err := h.forgetOwnedImageUnused(ctx, owner, id); err != nil {
+			return nil, err
+		}
 	}
 	return out, nil
 }
 
-func (h *ProvisioningHandler) forgetOwnedImageUnused(ctx context.Context, owner, imageID string) {
+func (h *ProvisioningHandler) forgetOwnedImageUnused(ctx context.Context, owner, imageID string) error {
 	if _, err := h.db.ExecContext(ctx, `DELETE FROM resource_retention_images WHERE instance_id=? AND image_id=?`, owner, imageID); err != nil {
 		h.logger.Warn("image collection: unused-image state write failed", "error", err)
+		return err
 	}
+	return nil
 }
 
 func ownedImage(img image.Summary, instanceID string) bool {
@@ -265,11 +285,7 @@ func ownedImage(img image.Summary, instanceID string) bool {
 // Current and previous selections protect bytes; immutable build history is
 // provenance, not the sequence of cache re-selections.
 func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[string]string, report bool) (map[string]bool, error) {
-	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,''),COALESCE(deleted_at,'') FROM crews
-		WHERE deleted_at IS NULL OR deleted_at >= ? OR deleted_at NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*'`,
-		// Old tombstones are skipped in SQL; anything that does not look like
-		// a timestamp is kept for the check below, which protects it.
-		time.Now().Add(-deletedCrewImageRetention-time.Hour).UTC().Format(time.RFC3339))
+	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,''),COALESCE(deleted_at,'') FROM crews`)
 	if err != nil {
 		return nil, err
 	}
@@ -322,19 +338,22 @@ func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[s
 
 // Inventory is outside the lifecycle gate. Final checks/removal have a small
 // deadline and exclude only this artifact's build aliases (and rare restores).
-func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidate image.Summary, owned bool) {
+func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidate image.Summary, owned bool) error {
 	gate := resourcelifecycle.Images(h.db)
 	release, ok := gate.TryCollect()
 	if !ok {
 		h.logger.Info("image collection deferred: restore or crew edit active")
-		return
+		return nil
 	}
 	defer release()
 	refs := append([]string{candidate.ID}, candidate.RepoTags...)
 	releaseImage, ok := gate.TryCollectImages(refs...)
 	if !ok {
 		h.logger.Info("image collection: candidate build active; retaining artifact", "image_id", candidate.ID)
-		return
+		if owned {
+			return h.forgetOwnedImageUnused(ctx, h.imageCollectionOwner(), candidate.ID)
+		}
+		return nil
 	}
 	defer releaseImage()
 	finalCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
@@ -342,7 +361,7 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 	listed, err := h.gcClient.ImageList(finalCtx, client.ImageListOptions{All: true})
 	if err != nil {
 		h.logger.Warn("image collection deferred: final inventory unavailable", "error", err)
-		return
+		return nil
 	}
 	byRef := map[string]string{}
 	var current *image.Summary
@@ -350,7 +369,7 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 		img := &listed.Items[i]
 		if owned && !dockerutil.IsLocalImageID(img.ID) {
 			h.logger.Warn("image collection deferred: final inventory incomplete")
-			return
+			return nil
 		}
 		byRef[img.ID] = img.ID
 		for _, tag := range img.RepoTags {
@@ -362,33 +381,42 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 	}
 	if current == nil {
 		h.logger.Info("image collection: candidate already absent", "image_id", candidate.ID)
-		return
+		if owned {
+			return h.forgetOwnedImageUnused(ctx, h.imageCollectionOwner(), candidate.ID)
+		}
+		return nil
 	}
 	if !slices.Equal(candidate.RepoTags, current.RepoTags) {
 		h.logger.Info("image collection: aliases changed; retry next pass", "image_id", candidate.ID)
-		return
+		return nil
 	}
 	h.mu.RLock()
 	owner := h.instanceID
 	h.mu.RUnlock()
 	if owned && !ownedImage(*current, owner) {
 		h.logger.Warn("image collection: ownership changed; retaining artifact", "image_id", candidate.ID)
-		return
+		return nil
 	}
 	if !owned && current.Labels[devcontainer.ImageInstanceLabel] != "" {
-		return
+		return nil
 	}
 	protected, err := h.protectedImageIDs(finalCtx, byRef, false)
 	if err != nil {
 		h.logger.Warn("image collection deferred: final references unavailable", "error", err)
-		return
+		return nil
 	}
 	if protected[candidate.ID] {
-		return
+		if owned {
+			return h.forgetOwnedImageUnused(ctx, owner, candidate.ID)
+		}
+		return nil
 	}
 	if _, err := h.gcClient.ImageRemove(finalCtx, candidate.ID, client.ImageRemoveOptions{Force: false, PruneChildren: false}); err != nil {
 		h.logger.Info("image collection: artifact retained", "image_id", candidate.ID, "error", err)
-		return
+		if owned {
+			return h.forgetOwnedImageUnused(ctx, owner, candidate.ID)
+		}
+		return nil
 	}
 	h.invalidateImageListCache()
 	h.InvalidateImageCache()
@@ -398,6 +426,13 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 		// must not inherit this window. The pass context may be spent.
 		forgetCtx, cancelForget := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 		defer cancelForget()
-		h.forgetOwnedImageUnused(forgetCtx, owner, candidate.ID)
+		return h.forgetOwnedImageUnused(forgetCtx, owner, candidate.ID)
 	}
+	return nil
+}
+
+func (h *ProvisioningHandler) imageCollectionOwner() string {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.instanceID
 }

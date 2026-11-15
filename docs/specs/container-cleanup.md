@@ -150,8 +150,12 @@ hours, unused by any container and unselected by every live crew in this
 installation, and must have stayed that way for 24 hours as this installation
 observed it: the first pass that sees an eligible image only records the time
 in `resource_retention_images`, a use or protection seen at a later pass
-restarts the window, and the record of an image that is gone or was removed is
-dropped. Passes (every 30 minutes) are the only observations: a use shorter
+restarts the window, including use discovered by a final lease or selection
+check, and the record of an image that is gone or was removed is dropped. Before
+observing Docker, the collector durably revokes the previous completion marker.
+After observation begins, a failed state reset or an interrupted pass leaves
+that marker absent, so the next pass restarts every window instead of trusting
+stale unused time. Passes (every 30 minutes) are the only observations: a use shorter
 than that interval is not seen, and after more than two hours without a
 completed pass (collection switched off, the server down) every window starts
 over. A host that is stopped or asleep for more than two hours every day
