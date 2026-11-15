@@ -129,6 +129,10 @@ cleanup() {
     cleanup_step "log the throwaway account out" env CREWSHIP_CONFIG="$manager_config" "$BIN" logout
   fi
   if [ -e "$manager_config" ]; then cleanup_step "delete its CLI config" rm -f -- "$manager_config"; fi
+  # Its pages first: a member who owns pages cannot be removed (409).
+  for n in granted denied; do
+    "$BIN" page get "qa-$n-$stamp" >/dev/null 2>&1 && cleanup_step "delete page qa-$n-$stamp" "$BIN" page delete "qa-$n-$stamp" --yes
+  done
   if [ "$made_account" = 1 ]; then
     if [ "$made_workspace" = 1 ] && [ -n "$manager_user_id" ]; then
       cleanup_step "remove it from the QA workspace" "$BIN" workspace member remove "$manager_user_id" --yes
@@ -230,7 +234,7 @@ fire() {
   local deadline=$((SECONDS + FIRE_TIMEOUT)) id="" status=""
   while [ $SECONDS -lt $deadline ]; do
     sleep 10
-    id="$(owner routine runs-all --limit 200 -f json | jq -r --arg s "$routine_slug" --arg b " $before " '[.[] | select(.pipeline_slug==$s and .triggered_via=="schedule" and ($b | contains(" " + .id + " ") | not))][0].id // empty')"
+    id="$(owner routine runs-all --limit 200 -f json | jq -r --arg s "$routine_slug" --arg b " $before " '[.[] | select(.pipeline_slug==$s and .triggered_via=="schedule") | .id as $i | select($b | contains(" " + $i + " ") | not)][0].id // empty')"
     [ -n "$id" ] || continue
     status="$(owner routine result "$id" -f json | jq -r '.status')"
     case "${status^^}" in RUNNING|PENDING|QUEUED|WAITING|STARTING|"") ;; *) break ;; esac
