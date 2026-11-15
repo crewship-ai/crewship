@@ -5,16 +5,18 @@
 //
 // A violation is recorded and the walk goes on, so one run shows every broken rule; the test
 // fails at the end on any violation. Only a walk that cannot continue aborts.
-import { chromium, type Frame, type Page } from "@playwright/test"
+import { chromium, type APIRequestContext, type Frame, type Page } from "@playwright/test"
 import { readFacts } from "../prd/craft-lease/sheet-workbook"
 import { holdsMarker, isUnconfirmedStatus, labelVersion, pendingReplies } from "../prd/craft-session/confirm"
 import { walk, wordFacts } from "../prd/craft-session/facts"
+import { WORD_VIEWPORT } from "../prd/craft-session/hour-steps"
 import { readAppBuild, type AppBuild } from "../prd/app-sha"
 import { apiAs, loginStorageState } from "../prd/auth"
 import { expect, prdRequirement, test, type PrdScenario } from "../prd/fixtures"
 import { disposeActors, isolatedActor } from "../prd/outage-lostack/actor"
 import * as N from "../prd/outage-lostack/native"
 import { EVIDENCE_FILE, HISTORY_NOT_ENABLED, SCENARIOS } from "./verdict.mjs"
+import { classifyVersions, lostReplyProblems, onlyCursorAfter } from "./sheet-versions.mjs"
 import { lockButton } from "../prd/craft-session/frame"
 
 const CONFIRM_MS = 30_000 // a save the status must confirm
@@ -27,8 +29,40 @@ const RENDER_MS = 15_000
 const LEASE_MS = 90_000 // the server caps a lease TTL at one minute
 const BLANK_DOMINANT = 0.998 // share of the commonest colour at which the area counts as blank
 const VERIFY = "Check the result"
-// At the 1440x1000 viewport, in the editor frame.
+// Points on the editor canvas. They assume the Home ribbon shows the Styles gallery, which needs a
+// canvas about 1600 px wide: the Artifacts frame puts the canvas at x=285, so the 1440 px viewport
+// leaves 1146 px and the gallery collapses into a "Styles" button. heading1 then lands on the empty
+// Voice group and noSpacing on the Find menu, which takes the keys. Word walks at WORD_VIEWPORT
+// (canvas 1626 px), and every ribbon click must hand the keys back to the document (keysBack).
 const WORD_UI = { homeTab: { x: 76, y: 53 }, heading1: { x: 918, y: 94 }, noSpacing: { x: 844, y: 94 } }
+// --workspace-flag (run.mjs): flags turned on in the walk's own QA workspace, never instance-wide.
+const WORKSPACE_FLAGS = (process.env.NATIVE_WALK_WORKSPACE_FLAGS ?? "").split(",").map((k) => k.trim()).filter(Boolean)
+const HISTORY_FLAG = "craft_version_history"
+
+type WorkspaceFlag = { key: string; status: number; overrideEnabled: boolean | null; error?: string }
+
+/**
+ * Turns each flag on for this workspace only, as `crewship feature-flag enable KEY` does
+ * (PUT /api/v1/feature-flags/{key}/override), and reads the override back from the list.
+ * A flag with no definition on the instance answers 404 and is not created here.
+ */
+async function enableWorkspaceFlags(owner: APIRequestContext, workspaceId: string, keys: string[]): Promise<WorkspaceFlag[]> {
+  const wsq = `workspace_id=${encodeURIComponent(workspaceId)}`
+  const set: WorkspaceFlag[] = []
+  for (const key of keys) {
+    const r = await owner.put(`/api/v1/feature-flags/${encodeURIComponent(key)}/override?${wsq}`, { data: { enabled: true } })
+    set.push({ key, status: r.status(), overrideEnabled: null, ...(r.status() === 200 ? {} : { error: (await r.text()).slice(0, 200) }) })
+  }
+  const l = await owner.get(`/api/v1/feature-flags?${wsq}`)
+  const listed = l.status() === 200 ? ((await l.json().catch(() => null)) as { key?: unknown; override_enabled?: unknown }[] | null) : null
+  for (const f of set) {
+    const row = Array.isArray(listed) ? listed.find((x) => x?.key === f.key) : undefined
+    f.overrideEnabled = typeof row?.override_enabled === "boolean" ? row.override_enabled : null
+    if (l.status() !== 200) f.error = `${f.error ? `${f.error}; ` : ""}list answered ${l.status()}`
+  }
+  return set
+}
+
 const BODY = { wordcraft: { x: 200, y: 215, width: 800, height: 480 }, gridcraft: { x: 60, y: 215, width: 800, height: 300 } }
 
 type Row = {
@@ -116,13 +150,34 @@ for (const scenario of SCENARIOS) {
     let proofAt: number | null = null // ops recorded when the version proof was taken
     try {
       await bounded(`${label} walk`, WALK_MS, (async () => {
-        const { context, page, api, ws } = await isolatedActor(prd, browser, `native walk ${label}`, { viewport: N.VIEWPORT })
+        const { context, page, api, ws, owner } = await isolatedActor(prd, browser, `native walk ${label}`, { viewport: app === "wordcraft" ? WORD_VIEWPORT : N.VIEWPORT })
+        if (WORKSPACE_FLAGS.length) {
+          const flags = await enableWorkspaceFlags(owner, ws.id, WORKSPACE_FLAGS)
+          out.workspaceFlags = flags
+          console.log(`[walk] ${label}: workspace flags ${flags.map((f) => `${f.key} PUT ${f.status} override ${String(f.overrideEnabled)}`).join(", ")}`)
+          const off = flags.filter((f) => f.status !== 200 || f.overrideEnabled !== true)
+          if (off.length) throw new Error(`workspace flag not turned on: ${off.map((f) => `${f.key} (PUT ${f.status}${f.error ? ` ${f.error}` : ""}, override ${String(f.overrideEnabled)})`).join(", ")}`)
+        }
         page.setDefaultTimeout(60_000)
         await context.addInitScript(spy)
         expect((await N.nativeEnabled(api, ws.id)).enabled, "native editing is on").toBe(true)
         const ref = await N.createNative(api, ws.id, app, `PRD native walk ${label}`)
         out.initVersion = ref.initVersion
         const ops = (opsRef.ops = N.instrument(context))
+        // Sheet only: the workbook each save or reconcile sent, by attempt, to tell a move of the active
+        // cell from a content change (sheet-versions.mjs). Word versions are all judged as content.
+        const sentBytes = new Map<string, string>()
+        const opened = app === "gridcraft" ? (await N.readHead(api, ref)).text : undefined
+        if (app === "gridcraft") context.on("request", (req) => {
+          if (req.method() !== "POST" || !/\/craft\/document\/(save|reconcile)$/.test(new URL(req.url()).pathname)) return
+          try {
+            const b = req.postDataJSON() as { attemptId?: unknown; bytes?: unknown }
+            if (typeof b?.attemptId === "string" && typeof b.bytes === "string") sentBytes.set(b.attemptId, Buffer.from(b.bytes, "base64").toString("utf8"))
+          } catch { /* unreadable: judged as content */ }
+        })
+        const versionKinds = () => classifyVersions({ version: ref.initVersion, text: opened },
+          ops.filter((o) => (o.kind === "save" || o.kind === "reconcile") && o.status === 200 && o.version !== undefined && o.unchanged !== true && o.baseVersion !== undefined)
+            .map((o) => ({ version: o.version as string, base: o.baseVersion as string, text: o.attemptId === undefined ? undefined : sentBytes.get(o.attemptId) })))
         page.on("pageerror", (e) => pageErrors.push({ at: new Date().toISOString(), step: steps.at(-1)?.name ?? "before the first step", message: String(e).slice(0, 240) }))
         page.on("console", (m) => { if (m.type() === "error") lines.push(`${new Date().toISOString()} error ${m.text().slice(0, 200)}`) })
 
@@ -238,7 +293,17 @@ for (const scenario of SCENARIOS) {
         let wordCheck: (raw: string) => { heading: boolean; bold: boolean; style: string } = () => ({ heading: false, bold: false, style: "" })
         if (app === "wordcraft") {
           const canvas = () => f.locator("canvas").first()
-          const click = async (at: { x: number; y: number }) => { await canvas().click({ position: at }); await page.waitForTimeout(700) }
+          // The editor types through its hidden INPUT; a click that leaves the focus elsewhere (a ribbon
+          // menu on the canvas) would swallow every key that follows, so it is a violation, not typing.
+          const keysBack = (at: { x: number; y: number }) => f.waitForFunction(() => document.activeElement?.tagName === "INPUT", undefined, { timeout: 5_000 }).then(() => true, () => false)
+          const click = async (at: { x: number; y: number }) => {
+            await canvas().click({ position: at })
+            await page.waitForTimeout(700)
+            if (!(await keysBack(at))) {
+              const on = await f.evaluate(() => document.activeElement?.tagName ?? "nothing").catch(() => "?")
+              violate(`ribbon click at (${at.x},${at.y}) left the keys on ${on}, not the document: the ribbon is not laid out as WORD_UI assumes (canvas ${Math.round((await canvas().boundingBox())?.width ?? 0)} px wide)`)
+            }
+          }
           const m = { text: mark(), more: mark(), heading: mark(), style: mark(), bold: mark() }
           await step("home tab", async (r) => { lastInput = await input(r, async () => { await kb.press("Control+End"); await click(WORD_UI.homeTab); await kb.press("Control+End") }) })
           await step("type text", async (r) => { lastInput = await input(r, () => kb.type(m.text)) })
@@ -302,9 +367,13 @@ for (const scenario of SCENARIOS) {
           const h1 = await settle()
           r.note = { label: v, base: h0.version, head: h1.version, saves: ops.slice(n0).map((o) => ({ kind: o.kind, sentAt: o.sentAt, base: o.baseVersion, version: o.version, status: o.status, hash: o.contentHash?.slice(7, 15) })), pressAt: new Date(pressAt).toISOString() }
           check(await pressSeen(pressAt), "the press never reached the editor")
-          check(BigInt(h1.version) === BigInt(h0.version) + 1n, `exactly one new version: v${h0.version} became v${h1.version}`)
-          check(committed(n0).length === 1, `exactly one committed save, saw ${committed(n0).length}`)
-          check(v === h1.version, `status said v${v}, head is v${h1.version}`)
+          // One content version; in Sheet, moves of the active cell right after it are counted, not versions of the change.
+          const { kinds } = versionKinds(), next = String(BigInt(h0.version) + 1n)
+          const contentSaves = committed(n0).filter((o) => o.unchanged !== true && kinds[o.version as string] !== "cursor-only")
+          const cursorSaves = committed(n0).filter((o) => kinds[o.version as string] === "cursor-only").length
+          check(BigInt(h1.version) >= BigInt(next) && kinds[next] !== "cursor-only" && onlyCursorAfter(kinds, next, h1.version), `exactly one new content version: v${h0.version} became v${h1.version} (${cursorSaves} of them only moved the active cell)`)
+          check(contentSaves.length === 1, `exactly one committed content save, saw ${contentSaves.length}${cursorSaves ? ` and ${cursorSaves} cursor-only` : ""}`)
+          check(v !== undefined && (v === h1.version || onlyCursorAfter(kinds, v, h1.version)), v === undefined ? `status showed no version newer than v${h0.version}, head is v${h1.version}` : `status said v${v}, head is v${h1.version}`)
           checkContent(h1, "after ctrl+s")
         })
 
@@ -400,13 +469,17 @@ for (const scenario of SCENARIOS) {
           const v = await confirm(r, loss.at, h0.version, RECOVER_MS)
           if (v === undefined && (await page.getByRole("button", { name: VERIFY, exact: true }).count())) { await press(); await confirm(r, loss.at, h0.version, 15_000) }
           check(v !== undefined, `did not recover by itself within ${RECOVER_MS} ms: "${(await N.status(page)).slice(0, 50)}"`)
-          check(v === undefined || v === lostV, `recovered to v${v}, the server committed v${lostV}`)
           await N.pause(QUIET_MS)
           const h1 = await settle()
-          const sent = ops.slice(n0)
-          r.note = { base: h0.version, lostVersion: lostV, head: h1.version, recoveryMs: r.confirmationMs, sent: sent.map((o) => ({ kind: o.kind, status: o.status, version: o.version, phase: o.phase, failed: o.failed })) }
-          check(h1.version === lostV, `no duplicate version: head v${h1.version}, lost save v${lostV}`)
-          check(!sent.some((o) => o.kind === "save"), `re-saved after the lost reply: ${sent.filter((o) => o.kind === "save").length} saves`)
+          const after = ops.slice(n0)
+          const { kinds } = versionKinds()
+          r.note = { base: h0.version, lostVersion: lostV, head: h1.version, recoveryMs: r.confirmationMs, sent: after.map((o) => ({ kind: o.kind, status: o.status, version: o.version, phase: o.phase, failed: o.failed, change: o.version === undefined ? undefined : kinds[o.version] })) }
+          // Sheet: Enter's move of the active cell may follow the lost save as a version of its own; it may not
+          // repeat the lost bytes, build on another version or change content.
+          check(v === undefined || v === lostV || onlyCursorAfter(kinds, lostV, v), `recovered to v${v}, the server committed v${lostV}`)
+          check(h1.version === lostV || onlyCursorAfter(kinds, lostV, h1.version), `no duplicate version: head v${h1.version}, lost save v${lostV}`)
+          if (app === "gridcraft") for (const p of lostReplyProblems({ version: lostV, contentHash: loss.serverHash }, after, kinds)) violate(p)
+          else check(!after.some((o) => o.kind === "save"), `re-saved after the lost reply: ${after.filter((o) => o.kind === "save").length} saves`)
           checkContent(h1, "after the lost reply")
         })
 
@@ -425,15 +498,17 @@ for (const scenario of SCENARIOS) {
           checkContent(h1, "after the next save")
         })
 
-        // Save receipts: every committed save the browser saw, plus the one whose reply was dropped.
-        const receiptsNow = () => [...ops.filter((o) => o.kind === "save" && o.status === 200 && o.version).map((o) => o.version as string), ...lost.map((x) => x.serverVersion ?? "?")].sort((a, b) => Number(a) - Number(b))
+        // Save receipts: every committed save the browser saw, plus the one whose reply was dropped. An
+        // `unchanged` answer names the base and creates no version (#5075), as in confirmsWrite().
+        const receiptsNow = () => [...ops.filter((o) => o.kind === "save" && o.status === 200 && o.version && o.unchanged !== true).map((o) => o.version as string), ...lost.map((x) => x.serverVersion ?? "?")].sort((a, b) => Number(a) - Number(b))
         const sameVersions = (a: unknown, b: string[]) => Array.isArray(a) && a.length === b.length && a.every((v, i) => typeof v === "string" && /^\d+$/.test(v) && v === b[i])
         let headAfterReload: string | null = null
         await step("final", async () => {
           const h = await settle()
           checkContent(h, "final")
           // The history listing: 200 must list exactly the observed versions, the flag-off 404 is
-          // recorded as not enabled (NOT VERIFIED in the verdict), anything else is a violation.
+          // recorded as not enabled (NOT VERIFIED in the verdict, a violation when this walk turned
+          // the flag on), anything else is a violation.
           const pageRef = encodeURIComponent("@" + ref.pageId), wsq = `workspace_id=${encodeURIComponent(ref.workspaceId)}`
           const s = await api.post(`/api/v1/pages/${pageRef}/craft/sessions?${wsq}`, { data: {} })
           check(s.status() === 201, `read admission for the history listing answered ${s.status()}`)
@@ -451,7 +526,9 @@ for (const scenario of SCENARIOS) {
           else if (l.status() !== 200) history = "error"
           else history = body?.truncated === false && sameVersions(listing, observed) ? "verified" : "mismatch"
           out.history = { result: history, listingStatus: l.status(), error, listing, truncated: body?.truncated ?? null, observed }
+          console.log(`[walk] ${label}: history ${history}, listing ${l.status()} ${JSON.stringify(listing)} (truncated ${String(body?.truncated ?? null)}), observed ${observed.join(",")}`)
           check(history !== "error", `version history listing answered ${l.status()}: ${error}`)
+          check(!(history === "not-enabled" && WORKSPACE_FLAGS.includes(HISTORY_FLAG)), `version history listing answered 404 "${HISTORY_NOT_ENABLED}" although ${HISTORY_FLAG} was turned on in the workspace`)
           check(history !== "mismatch", `version history listing ${JSON.stringify(listing)} (truncated ${String(body?.truncated)}) is not the observed ${observed.join(",")}`)
           await page.screenshot({ path: test.info().outputPath(`${app}-end.png`), timeout: 30_000 }).catch(() => {})
           releaseStatus = await N.release(page).then(() => "ok", (e: unknown) => `failed: ${String(e).slice(0, 200)}`)
@@ -488,14 +565,19 @@ for (const scenario of SCENARIOS) {
         if (finalStep?.versionAfter !== last) versionProblems.push(`final head v${finalStep?.versionAfter}, last receipt v${last}`)
         if (headAfterReload !== last) versionProblems.push(`head after the final reload v${headAfterReload}, last receipt v${last}`)
         if (!unchanged || unchanged.versionBefore !== unchanged.versionAfter) versionProblems.push(`ctrl+s without a change: v${unchanged?.versionBefore} to v${unchanged?.versionAfter}`)
-        if (!lostStep?.versionBefore || lostStep.versionAfter !== String(BigInt(lostStep.versionBefore) + 1n)) versionProblems.push(`lost reply: v${lostStep?.versionBefore} to v${lostStep?.versionAfter}`)
+        const classified = versionKinds()
+        versionProblems.push(...classified.problems)
+        if (!lostStep?.versionBefore || !lostStep.versionAfter || !onlyCursorAfter(classified.kinds, String(BigInt(lostStep.versionBefore) + 1n), lostStep.versionAfter) || BigInt(lostStep.versionAfter) <= BigInt(lostStep.versionBefore)) versionProblems.push(`lost reply: v${lostStep?.versionBefore} to v${lostStep?.versionAfter}`)
         out.versions = {
           start: ref.initVersion, receipts, head: finalStep?.versionAfter ?? null, headAfterReload,
           lostVersions: lost.map((x) => x.serverVersion ?? "?"), opsAtProof: proofAt,
           unchangedSave: { before: unchanged?.versionBefore ?? null, after: unchanged?.versionAfter ?? null },
           lostReply: { before: lostStep?.versionBefore ?? null, after: lostStep?.versionAfter ?? null },
           contiguous: versionProblems.length === 0, problems: versionProblems,
+          // Versions that only moved the active cell (Sheet), each right after a content change: allowed, kept visible.
+          cursorOnly: classified.cursorOnly, kinds: classified.kinds,
         }
+        if (classified.cursorOnly.length) console.log(`[walk] ${label}: ${classified.cursorOnly.length} version(s) only moved the active cell: ${classified.cursorOnly.map((c) => `v${c.version} on v${c.base}`).join(", ")}`)
         for (const p of versionProblems) violate(`version sequence: ${p}`)
         out.marks = marks.length
         const names = steps.map((x) => x.name)

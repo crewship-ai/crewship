@@ -30,8 +30,9 @@ const HELP = `Usage: pnpm acceptance:prd [--origin URL] [--quick|--full] [--outp
                  is empty and the engine pins match; alwaysRerun rows never carry over
   --origin-map M with --rc: canonical origins, craft=URL,artifacts=URL (or $PRD_RC_ORIGINS)
   --required F   with --rc: required-ids file (default required-ids.json)
-  --cleanup      delete leftovers of earlier runs and exit: workspaces prd-qa-* named "PRD acceptance …",
-                 and pages/Designs/Projects whose slug starts with prd- AND name with "PRD " (in the
+  --cleanup      delete leftovers of earlier runs and exit: workspaces qa-live-* (or the older prd-qa-*)
+                 named "PRD acceptance …", and pages/Designs/Projects whose slug starts with prd- or
+                 qa-live- AND name with "PRD " (in the
                  workspaces of PRD_AGENT_WORKSPACE_ID / PRD_WORKSPACE_ID). Nothing else is touched.
   --dry-run      with --cleanup: only list what would be deleted
   --older-than M with --cleanup: leave objects younger than M minutes (default 60)

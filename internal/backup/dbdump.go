@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"strings"
 )
 
@@ -1118,6 +1119,12 @@ type RestoreDumpHooks struct {
 // with the supplied lifecycle hooks. See RestoreDumpHooks for the
 // contract of each hook.
 func RestoreDumpTxHooks(ctx context.Context, db *sql.DB, dump *DBDump, hooks *RestoreDumpHooks) (RestoreStats, error) {
+	imageUse := resourcelifecycle.Images(db)
+	releaseImages := imageUse.Use()
+	defer releaseImages()
+	// Restore preserves exact captured selections. Image ownership is not
+	// authority to replace an environment with newly resolved dependencies.
+
 	if err := rejectMooringCollaborationCollision(ctx, db, dump); err != nil {
 		return RestoreStats{}, err
 	}

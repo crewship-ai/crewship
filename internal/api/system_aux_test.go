@@ -53,7 +53,7 @@ func TestAuxStatus_HappyPath_DefaultsAllSlots(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	// MVP defaults: 6 explicit slots, every one on anthropic/claude-haiku-4-5
+	// MVP defaults: 6 explicit slots, every one on anthropic/claude-haiku-5-5
 	// (Fallback is NOT in the slot list — it's an internal backstop).
 	// 5 consumed aux slots + the credential-access judge. `keeper` is
 	// gone: nothing calls ResolveAux for it (see system_aux_effective_test.go).
@@ -74,8 +74,8 @@ func TestAuxStatus_HappyPath_DefaultsAllSlots(t *testing.T) {
 		if row.Provider != "anthropic" {
 			t.Errorf("slots[%d].Provider = %q, want anthropic", i, row.Provider)
 		}
-		if row.Model != "claude-haiku-4-5" {
-			t.Errorf("slots[%d].Model = %q, want claude-haiku-4-5", i, row.Model)
+		if row.Model != "claude-haiku-5-5" {
+			t.Errorf("slots[%d].Model = %q, want claude-haiku-5-5", i, row.Model)
 		}
 		if row.Source != "explicit" {
 			t.Errorf("slots[%d].Source = %q, want explicit (default cfg sets every slot)", i, row.Source)

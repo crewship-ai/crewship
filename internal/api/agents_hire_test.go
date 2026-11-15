@@ -450,3 +450,21 @@ func TestProvideForModel(t *testing.T) {
 // hygiene rule trips otherwise when the test file imports context for
 // the resolver fixtures but no test directly references it.
 var _ = context.Background
+
+// A hire takes the same model-id shape check as create and update (#5376):
+// an id a runner could parse as an option never reaches the agent row.
+func TestHire_MalformedModelIs400(t *testing.T) {
+	db := setupTestDB(t)
+	userID, wsID, crewID := seedHireCrew(t, db, "trusted", 5)
+	h := newHireHandler(t, db)
+
+	rr := postHire(t, h, userID, wsID, "MANAGER", map[string]any{
+		"crew_id":       crewID,
+		"template_slug": "docs-writer",
+		"reason":        "ship the docs site",
+		"model":         "--yolo",
+	})
+	if rr.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400; body: %s", rr.Code, rr.Body.String())
+	}
+}

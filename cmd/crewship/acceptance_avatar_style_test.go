@@ -6,6 +6,7 @@ package main
 // request is sent.
 
 import (
+	"database/sql"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -23,6 +24,7 @@ const avatarStyleWorkspaceID = "cavatarws0000000000a1"
 type avatarStyleEnv struct {
 	cfg   string
 	style func(agentID string) string
+	db    *sql.DB
 }
 
 func startAvatarStyleServer(t *testing.T) avatarStyleEnv {
@@ -58,7 +60,7 @@ func startAvatarStyleServer(t *testing.T) avatarStyleEnv {
 	if err := os.WriteFile(cfgPath, []byte(cfg), 0o600); err != nil {
 		t.Fatalf("write config: %v", err)
 	}
-	return avatarStyleEnv{cfg: cfgPath, style: func(where string) string {
+	return avatarStyleEnv{cfg: cfgPath, db: db, style: func(where string) string {
 		t.Helper()
 		var s *string
 		if err := db.QueryRow(`SELECT avatar_style FROM agents WHERE ` + where).Scan(&s); err != nil {

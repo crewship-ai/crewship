@@ -24,6 +24,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/ratelimitcfg"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/toolchain"
 	"github.com/crewship-ai/crewship/internal/ws"
 )
@@ -746,7 +747,7 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 	}
 	if buildErr != nil {
 		h.clearDeferredResume(pendingMessageKey(msg))
-		if rejectPendingAsk(fmt.Sprintf("Your message could not run: the environment build failed (%s). Fix the devcontainer configuration and send your message again.", buildErr.Error())) {
+		if rejectPendingAsk(fmt.Sprintf("Your message could not run: the environment build failed (%s). %s", buildErr.Error(), buildFailureAdvice(buildErr))) {
 			return
 		}
 		run := h.wsHub.BeginSessionRun(msg.ChatID)
@@ -758,8 +759,8 @@ func (h *ProvisioningHandler) resumeMessage(msg chatbridge.PendingChatMessage, b
 		run.Emit(ws.ChatEvent{
 			Type: "error",
 			Content: fmt.Sprintf(
-				"Your message could not run: the environment build failed (%s). Fix the devcontainer configuration and send your message again.",
-				buildErr.Error(),
+				"Your message could not run: the environment build failed (%s). %s",
+				buildErr.Error(), buildFailureAdvice(buildErr),
 			),
 			Metadata: map[string]any{"reason": "provisioning_failed"},
 		})
@@ -1188,6 +1189,7 @@ func (h *ProvisioningHandler) runProvisioning(crewID, workspaceID, cfgJSON, mise
 // superseded by a definition edit. That leaves the job running and its pending
 // messages attached; actual build/publication errors remain terminal.
 func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID, workspaceID, cfgJSON, miseJSON, runtimeImg string, job *ProvisionJob) (superseded bool) {
+
 	h.mu.Lock()
 	job.Status = "running"
 	h.mu.Unlock()
@@ -1248,6 +1250,7 @@ func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID
 		return
 	}
 	miseJSON = cliPlan.MiseConfig
+
 	if len(cliPlan.AddedTools) > 0 || len(cliPlan.AddedCommands) > 0 {
 		h.logger.Info("adapter CLIs added to the build",
 			"crew_id", crewID, "adapters", adapters,
@@ -1335,7 +1338,21 @@ func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID
 		Refs: map[string]any{"crew_id": crewID},
 	})
 
+	var acquired []func()
+	defer func() {
+		for i := len(acquired) - 1; i >= 0; i-- {
+			acquired[i]()
+		}
+	}()
+	acquireImage := func(ctx context.Context, refs ...string) error {
+		release, err := resourcelifecycle.Images(h.db).UseImages(ctx, refs...)
+		if err == nil {
+			acquired = append(acquired, release)
+		}
+		return err
+	}
 	result, err := h.provisioner.Provision(ctx, baseImage, cfg, miseJSON,
+		devcontainer.WithImageAcquisition(acquireImage),
 		devcontainer.WithPlan(plan),
 		devcontainer.WithProgress(progress),
 		devcontainer.WithProvisionSink(provisionEventSink),

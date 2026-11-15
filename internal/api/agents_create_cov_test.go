@@ -68,6 +68,7 @@ func TestCovACCreate_Validation400s(t *testing.T) {
 		{"bad cli_adapter", `{"name":"Agent X","slug":"a-x","cli_adapter":"VIM"}`, "cli_adapter"},
 		{"bad llm_provider", `{"name":"Agent X","slug":"a-x","llm_provider":"SKYNET"}`, "llm_provider"},
 		{"bad tool_profile", `{"name":"Agent X","slug":"a-x","tool_profile":"EVERYTHING"}`, "tool_profile"},
+		{"malformed llm_model", `{"name":"Agent X","slug":"a-x","llm_provider":"OPENAI","llm_model":"gpt 6; id"}`, "llm_model may contain only"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -225,5 +226,23 @@ func TestCovACCreate_SlugCheckError500(t *testing.T) {
 	r.h.Create(rec, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rec.Code)
+	}
+}
+
+// A model id no catalog lists is stored as typed on create (#5376).
+func TestCovACCreate_CustomModelIDStored(t *testing.T) {
+	r := newCovACRig(t)
+	body := `{"name":"Custom","slug":"custom-model","cli_adapter":"CODEX_CLI","llm_provider":"OPENAI","llm_model":"gpt-7-preview"}`
+	rec := httptest.NewRecorder()
+	r.h.Create(rec, r.req(t, "ADMIN", body))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var got string
+	if err := r.db.QueryRow(`SELECT llm_model FROM agents WHERE slug = 'custom-model'`).Scan(&got); err != nil {
+		t.Fatal(err)
+	}
+	if got != "gpt-7-preview" {
+		t.Fatalf("stored llm_model = %q", got)
 	}
 }

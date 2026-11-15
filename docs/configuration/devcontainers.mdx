@@ -315,20 +315,92 @@ to remove crash leaks:
   by a crew row, so the sweeper treats any unreferenced one beyond the age
   floor the same way it treats orphaned cache images.
 
+### Image ownership
+
+An installation with a settled identity builds its images inside its own
+namespace and labels them with their origin:
+
+| Image | Tag | Labels |
+|---|---|---|
+| Crew image | `crewship-cache:{namespace}-{hash[:12]}` | `crewship.image.instance-id`, `crewship.image.kind=crew` |
+| Intermediate feature image | `crewship-feat:{namespace}-{hash[:12]}` | `crewship.image.instance-id`, `crewship.image.kind=feature` |
+
+`{namespace}` is the full installation identity (the
+value of the `crewship.instance-id` container label). `config_hash` itself is
+unchanged and not installation-specific.
+
+- Crews of one installation still share an image when their configuration
+  matches. New build cache lookups use distinct tags for each installation.
+  This does not change existing selections or enforce deletion ownership. Base images
+  and BuildKit layers remain shared by the daemon.
+- A shared image names no crew. The labels record which installation built
+  it; they are evidence of origin, not a permission to delete. What an
+  installation still needs is decided by its database.
+- The label keys are image-specific. A container inherits its image's labels,
+  and these keys are never used to recognise a runtime container.
+- Without a settled identity (an in-memory database, or a second server on
+  the same database file) the legacy names `crewship-cache:{hash[:12]}` and
+  `crewship-feat:{hash[:12]}` are used and reserved ownership labels are cleared to prevent inheritance.
+- Upgrading does not rebuild crews. A crew keeps running from the image it
+  already selected, by immutable image ID; the namespace applies from the next
+  build the crew needs. Images built before the upgrade are not claimed: they
+  keep their legacy names, carry no labels, and stay under the opt-in policy
+  below.
+
+### Storage check before a build
+
+A build that fills the disk does not only fail: the database on the same
+volume starts failing writes. Before a build pulls the base image or builds a
+layer, the server checks free space and refuses the build if there is too
+little. (On Apple Containers the feature archives are downloaded first.) Reusing an
+existing image (a cache hit) is never refused, and nothing is deleted to make
+room.
+
+| Volume | Floor | When it is checked |
+|---|---|---|
+| Crewship data volume (the directory of the main database file) | 1 GiB, fixed | Always, for a file-backed database |
+| Docker's storage (`DockerRootDir`) | 4 GiB, `CREWSHIP_BUILD_MIN_FREE_GB` | Only when the server can measure it |
+
+The server can measure Docker's storage when it reaches the daemon over a
+local Unix socket, the daemon is not Docker Desktop, and Docker's root
+directory is visible to the server process. Docker Desktop, a remote daemon,
+a VM-backed runtime and a server running in a container without that
+directory mounted are not measured: the result is unknown and the build
+proceeds. A probe that fails is treated the same way.
+
+A refused build fails with `provision.failed` (detail `storage_preflight`) and
+a message naming the volume, its free space and the floor, for example
+`3.0 GiB free on Docker's storage (/var/lib/docker), a build needs at least
+4.0 GiB`. Free up space and build again.
+
 ### Orphan deletion policy
 
-Cache-image deletion is opt-in via the `CREWSHIP_CACHE_GC_AUTODELETE` environment variable (also described in [Environment → Devcontainer cache GC](/configuration/environment#devcontainer-cache-gc)):
+Owned crew and feature image collection is experimental and **off by default**.
+Set `CREWSHIP_IMAGE_GC=true` only on a dedicated or coordinated Docker daemon. Current selections, the previous immutable
+selection of each live crew and all container source images are protected.
+An owned image older than 24 hours may be removed, including an untagged
+abandoned build, once it has stayed unused and unprotected for 24 hours as
+observed by this installation at its 30-minute passes; a use seen at a pass
+restarts that window, and so does a gap of more than two hours without a
+completed pass. A
+deleted crew's selections stay protected for 7 days after the deletion. `CREWSHIP_IMAGE_GC=false` explicitly disables this policy.
 
-| Value | Behaviour |
-|---|---|
-| unset / `0` / `false` (default) | **Log-only.** Orphans are enumerated and logged; nothing is deleted. Operators see the list and can decide. |
-| `1` / `true` | **Auto-delete.** Orphans beyond the 5-minute age floor are force-removed each pass. |
+Inventory runs outside the lifecycle gate. Final deletion checks exclude only
+the candidate's acquisitions through publication and restore replay, with a
+two-second Docker operation budget. Missing ownership or incomplete inventory prevents deletion. Absent references
+and malformed crew configurations are logged without freezing all collection.
+The collector never recursively prunes parents or shared BuildKit cache.
 
-The sweeper logs a single line per pass with `removed`, `total_orphans`, and `skipped_too_young` so dashboards can alert on cache growth regardless of mode.
+`CREWSHIP_CACHE_GC_AUTODELETE=true` remains the separate explicit opt-in for
+unlabelled historical artifacts, with its five-minute floor. Keep this legacy
+switch off on shared daemons. `CREWSHIP_CACHE_EVICTION` is a deprecated explicit opt-in alias for owned
+collection and no longer starts a second image sweeper. Copied/restored foreign
+selections remain compatible, so default enablement still needs a reviewed
+adoption/retention policy. See the [full lifecycle contract](/specs/container-cleanup#owned-image-collection).
 
 ### Image-list cache
 
-Docker's `ImageList` is O(n) over every image on the host. The sweeper and `GET /api/v1/cache/images` share a **10-second image-list cache** so admin UI polling does not pay that cost on every request. The cache is invalidated on any commit/delete performed by the provisioner itself, so the caller always sees its own writes.
+Docker's `ImageList` is O(n) over every image on the host. The cache inventory endpoint uses a **10-second image-list cache**; deletion decisions use fresh inventory. `GET /api/v1/cache/images` caches its list so admin UI polling does not pay that cost on every request. The cache is invalidated on any commit/delete performed by the provisioner itself, so the caller always sees its own writes.
 
 ## Code of record
 

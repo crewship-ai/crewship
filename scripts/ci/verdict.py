@@ -6,6 +6,8 @@ import sys
 
 GO = {'cli-subprocess-race', 'go', 'go-test', 'go-race', 'go-race-cli-shards', 'go-race-cli', 'go-race-api-template', 'go-race-api', 'go-race-api-shards', 'go-platforms', 'go-lint', 'go-shuffle', 'managed-environments'}
 CODE = {'mooring-actual', 'mooring', 'image', 'binary', 'frontend', 'frontend-test', 'frontend-test-types', 'frontend-test-shards', 'harness-pr', 'cli-command-smoke', 'onboarding-default-boots', 'pages-apps', 'playwright-pr', 'onboarding-journey'}
+# Word and Sheet packages and their browser gate (#5362): required with any code change.
+CRAFT = {'craft-packages-build', 'craft-packages'}
 PARITY = {'go-parity': 'go_parity', 'frontend-parity': 'frontend_parity', 'docs-inventory': 'docs_inventory'}
 ALWAYS = {'changes', 'merge-conflict-markers', 'shell'}
 # Expensive lanes a pull request may skip (plan output full=false, #4752).
@@ -14,16 +16,16 @@ FULL = {'go-platforms', 'go-race', 'go-race-cli-shards', 'go-race-cli', 'go-race
 
 
 def failures(needs, event=None):
-    required = ALWAYS | GO | CODE | PARITY.keys() | {'release-rehearsal'}
+    required = ALWAYS | GO | CODE | PARITY.keys() | {'release-rehearsal'} | CRAFT
     errors = [f'{name}: missing result' for name in sorted(required - needs.keys())]
     plan = needs.get('changes', {}).get('outputs', {})
-    if any(plan.get(k) not in ('true', 'false') for k in ('code', 'go', 'release', 'full', *PARITY.values())):
+    if any(plan.get(k) not in ('true', 'false') for k in ('code', 'go', 'release', 'craft', 'full', *PARITY.values())):
         errors.append('missing or invalid change plan')
     if plan.get('full') == 'false' and event != 'pull_request':
         errors.append(f'reduced matrix is only allowed on pull_request, not {event}')
     for name in sorted(required & needs.keys()):
         expected = 'success'
-        if (name in GO and plan.get('go') == 'false') or (name in CODE and plan.get('code') == 'false'):
+        if (name in GO and plan.get('go') == 'false') or (name in CODE | CRAFT and plan.get('code') == 'false'):
             expected = 'skipped'
         if name in PARITY and plan.get(PARITY[name]) == 'false':
             expected = 'skipped'

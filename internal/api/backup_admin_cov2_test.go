@@ -34,7 +34,16 @@ func covBak2Rig(t *testing.T) (*BackupHandler, *sql.DB, string, string, string) 
 	}
 	db := setupTestDB(t)
 	userID := seedTestUser(t, db)
-	wsID := seedTestWorkspace(t, db, userID)
+	// The backup runner shares a process-wide guard keyed by workspace ID.
+	// A fixture's database is isolated, but the usual fixed workspace ID is
+	// not: an earlier test's unwinding mission can block an unrelated backup.
+	wsID := generateCUID()
+	if _, err := db.Exec(`INSERT INTO workspaces (id,name,slug) VALUES (?,'Test','test')`, wsID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`INSERT INTO workspace_members (id,workspace_id,user_id,role) VALUES (?,?,?,'OWNER')`, generateCUID(), wsID, userID); err != nil {
+		t.Fatal(err)
+	}
 	h := NewBackupHandler(db, newTestLogger(), nil, "test-version")
 	return h, db, userID, wsID, dir
 }
@@ -338,5 +347,33 @@ func TestCovBak2SelfTest_CrewLookupError500(t *testing.T) {
 	h.SelfTest(rr, covBak2SelfTestReq(userID, wsID, `{"crew_id":"crew-st"}`))
 	if rr.Code != http.StatusInternalServerError {
 		t.Errorf("status = %d, want 500", rr.Code)
+	}
+}
+
+// A mission from another fixture must not block this fixture's real backup.
+// This reproduces the shuffle collision without depending on goroutine timing.
+func TestCovBak2RigIsolatesUnrelatedWorkspaceMission(t *testing.T) {
+	release, err := backup.DefaultGuard().BeginMission("test-workspace-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	h, _, userID, wsID, _ := covBak2Rig(t)
+	covBak2CreateBundle(t, h, userID, wsID)
+}
+
+func TestCovBak2RigStillRefusesItsOwnWorkspaceMission(t *testing.T) {
+	h, _, userID, wsID, _ := covBak2Rig(t)
+	release, err := backup.DefaultGuard().BeginMission(wsID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	req := withWorkspaceUser(httptest.NewRequest("POST", "/api/v1/admin/backups",
+		strings.NewReader(`{"scope":"workspace","passphrase":"cov-bak2-passphrase-123"}`)), userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.Create(rr, req)
+	if rr.Code != http.StatusInternalServerError || !strings.Contains(rr.Body.String(), backup.ErrGuardMissionsInFlight.Error()) {
+		t.Fatalf("same-workspace mission must still block backup: status=%d body=%s", rr.Code, rr.Body.String())
 	}
 }

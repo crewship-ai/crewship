@@ -25,7 +25,10 @@ crewship craft connect <page>
 human authentication, without opening a native admission or acquiring a lease.
 A missing shared version or redirect is an error; it never falls back to private latest bytes.
 
-`availability` reads `GET /api/v1/pages/{slug}/craft/availability`. `connect`
+`availability` reads `GET /api/v1/pages/{slug}/craft/availability`. While an
+administrator has Word or Sheet draining or off, it reports `can_edit: false`
+and, if you have Edit, `edit_refusal: app_draining` or `app_disabled`: the
+reason a lease `acquire` would be refused with. `connect`
 creates one session with `POST /api/v1/pages/{slug}/craft/sessions`, prints only
 its public `session_id`, then reads one JSON action per stdin line. The private
 session token stays in process memory and is attached as `X-Craft-Session`.

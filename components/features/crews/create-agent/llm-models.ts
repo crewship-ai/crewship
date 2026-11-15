@@ -109,5 +109,23 @@ export function defaultModelForProvider(provider: LLMProvider): string {
 /** True if the given model string is one of the provider's curated entries.
  *  False ⇒ the user is in "custom" mode and we render a text input. */
 export function isKnownModel(provider: LLMProvider, model: string): boolean {
-  return MODELS_BY_PROVIDER[provider].includes(model)
+  return MODELS_BY_PROVIDER[provider]?.includes(model) ?? false
+}
+
+/** Shape check for a hand-typed model id. Mirrors validateLLMModelID in
+ *  internal/api/agents_model_id.go: membership in a catalog is never
+ *  required, only an id the runners can take as a single argument. */
+export const MODEL_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/@+[\]-]{0,199}$/
+
+export function isValidModelId(id: string): boolean {
+  return MODEL_ID_PATTERN.test(id)
+}
+
+/** The model to keep when the provider or runner changes. A model the user
+ *  chose — catalog or custom — survives as long as the provider stays the
+ *  same; only a provider change falls back to that provider's default,
+ *  because another provider's id cannot run there. */
+export function modelAfterSwitch(prevProvider: LLMProvider, nextProvider: LLMProvider, model: string): string {
+  if (model && prevProvider === nextProvider) return model
+  return isKnownModel(nextProvider, model) ? model : defaultModelForProvider(nextProvider)
 }

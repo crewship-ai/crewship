@@ -275,7 +275,7 @@ export async function createNativePage(
   name: string,
   opts: { privateAudience?: boolean } = {},
 ): Promise<{ created: CreatedNativePage } | { unavailable: number; reason: string }> {
-  const slug = `prd-qa-${app}-${randomUUID().replaceAll("-", "").slice(0, 10)}`
+  const slug = `qa-live-${app}-${randomUUID().replaceAll("-", "").slice(0, 10)}`
   const q = `workspace_id=${encodeURIComponent(workspaceId)}`
   const c = await json<{ id?: string; error?: string }>(
     await api.post(`/api/v1/pages?${q}`, {

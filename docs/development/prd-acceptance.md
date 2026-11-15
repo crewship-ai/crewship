@@ -328,15 +328,17 @@ PRD_OWNER_EMAIL=… PRD_OWNER_PASSWORD=… PRD_AGENT_WORKSPACE_ID=… \
   node e2e/acceptance/prd/run.mjs --origin https://host --cleanup [--dry-run] [--older-than 60]
 ```
 
-It deletes only workspaces whose slug is `prd-qa-<label>-<10 hex>` AND name starts
-with `PRD acceptance `, and pages whose slug starts with `prd-` AND name with
-`PRD ` (in `PRD_AGENT_WORKSPACE_ID` / `PRD_WORKSPACE_ID`). Objects matching only
+It deletes only workspaces whose slug is `qa-live-<label>-<10 hex>` AND name starts
+with `PRD acceptance `, and pages whose slug starts with `prd-` or `qa-live-` AND name
+with `PRD ` (in `PRD_AGENT_WORKSPACE_ID` / `PRD_WORKSPACE_ID`). `qa-live-` is the one
+prefix of every QA workspace and synthetic `@example.test` account a live run creates;
+workspaces of older runs, `prd-qa-<label>-<10 hex>`, still match. Objects matching only
 one rule, or younger than `--older-than` minutes (default 60), are listed and kept.
 
 ## Agent workspace
 
 The scenarios that need a real agent (`A.craft.proposal.*`, `A.craft.agent.*`, `B.design.agent-*`, `B.project.agent-*`)
-cannot run in a disposable `prd-qa-*` workspace. An agent's model login is a
+cannot run in a disposable `qa-live-*` workspace. An agent's model login is a
 credential owned by one workspace; `crewship credential` has no way to share it
 into another workspace, and copying its value would mean handling a secret the
 harness must never see. A new workspace's agent therefore has no credential
@@ -556,18 +558,36 @@ It does not prove:
 - **Typing latency.** Opening (about 8–9 s) and reloading (about 19–20 s, including the
   wait for the closed page's lease, `leaseWaitMs` in the step note) are measured limits of what a person waits
   for, not per-keystroke latency.
-- **Version history.** The listing (`GET …/craft/document/versions`) is behind the
-  workspace flag `craft_version_history`, which stays off until the feature is
-  accepted. The flag-off 404 (`native version history is not enabled`) is recorded
-  as `history: "not-enabled"` and listed under `notVerified` in `verdict.json`; any
+- **Version history, by default.** The listing (`GET …/craft/document/versions`) is
+  behind the workspace flag `craft_version_history`, which stays off until the
+  feature is accepted. Without `--workspace-flag craft_version_history` the flag-off
+  404 (`native version history is not enabled`) is recorded as
+  `history: "not-enabled"` and listed under `notVerified` in `verdict.json`; any
   other non-200 fails, and a 200 must list exactly the observed versions.
+
+`--workspace-flag KEY` (repeatable) turns the flag `KEY` on in each walk's own QA
+workspace right after the walk creates it, through the same workspace override
+`crewship feature-flag enable KEY` sets (`PUT /api/v1/feature-flags/KEY/override`),
+and reads the override back from `GET /api/v1/feature-flags`. It never changes the
+instance-wide default and never creates a flag definition: a flag the instance does
+not define answers 404 and aborts the walk. The workspace, and the override with it,
+is deleted at the end as usual. `walk.json` records each flag as `workspaceFlags`
+(`key`, `status`, `overrideEnabled`), and `verdict.json` records the requested
+`workspaceFlags` and, per walk under `walks`, the recorded flags and the history
+result, status, listing and observed versions. A requested flag that did not answer
+200 or does not read back as on fails the run, and so does a recorded flag the run
+did not request. With `--workspace-flag craft_version_history` the listing must be
+compared: the flag-off 404 is a FAIL, not NOT VERIFIED, and a 200 must list exactly
+the observed versions (start, then every receipt, Sheet's cursor-only versions
+included).
 
 ```bash
 pnpm acceptance:native-walk \
-  --origin https://crewship-dev3.unifylab.cz \
+  --origin "$ORIGIN" \
   --rc "$RC_SHA" \
   --env-file "$HOME/.config/crewship/prd-qa-dev3.env" \
-  --output "$OUT"
+  --output "$OUT" \
+  --workspace-flag craft_version_history
 ```
 
 `--rc` is the full commit the origin must serve clean (`GET /api/v1/system/version`).
@@ -599,6 +619,18 @@ The verdict never reads Playwright's text output. `$OUT` holds `verdict.json`
 `evidence/native-walk/<test>/walk.json` with a screenshot after the reload, and
 `playwright/`. The rules are `e2e/acceptance/native-walk/verdict.mjs`, tested by
 `node --test e2e/acceptance/native-walk/verdict.test.mjs`.
+
+The Sheet editor stores the active cell (`sheets[*].view_active`) in the saved
+workbook, so when Enter lands after the autosave already captured the typed value,
+Enter's move of the active cell reaches the server as a version of its own (#5370). The walk
+reads the workbook each save sent and accepts such a version only when it differs
+from its base in nothing but `view_active` and directly follows a version that
+changed content; it is counted in `walk.json` under `versions.cursorOnly` and
+printed in the log. A repeat of the lost attempt, a save not built on the lost
+version, any content change after the lost reply, and more than one content version
+from one ctrl+s stay violations. Word versions are always judged as content. The
+classifier is `e2e/acceptance/native-walk/sheet-versions.mjs`, tested with the
+verdict in `verdict.test.mjs`.
 
 ## RC gate: required IDs
 

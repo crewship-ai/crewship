@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"log/slog"
 	"strings"
 	"time"
@@ -165,6 +166,9 @@ type setupCrewInfo struct {
 // (crew_devcontainer_default.go) because devcontainer_config is left NULL
 // here on purpose — that is the whole point of that chokepoint existing.
 func ensureOnboardingSetupCrew(ctx context.Context, db *sql.DB, logger *slog.Logger, workspaceID, userID string) (*setupCrewInfo, error) {
+	releaseImages := resourcelifecycle.Images(db).Use()
+	defer releaseImages()
+
 	workspaceID = strings.TrimSpace(workspaceID)
 	if workspaceID == "" {
 		return nil, errors.New("ensureOnboardingSetupCrew: workspace_id is required")

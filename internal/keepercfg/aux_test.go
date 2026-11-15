@@ -117,7 +117,7 @@ func TestAux_UntouchedInheritsTheShippedDefaults(t *testing.T) {
 	if behavior.TimeoutMS.Source != SourceDefault {
 		t.Errorf("timeout source = %s, want default", behavior.TimeoutMS.Source)
 	}
-	if behavior.Model.Value != "claude-haiku-4-5" {
+	if behavior.Model.Value != "claude-haiku-5-5" {
 		t.Errorf("model = %q, want the shipped default", behavior.Model.Value)
 	}
 	if behavior.Overridden {
@@ -127,7 +127,7 @@ func TestAux_UntouchedInheritsTheShippedDefaults(t *testing.T) {
 		t.Error("slot has no human-facing label")
 	}
 	// And the config the evaluators are actually built from is untouched.
-	if got := s.Resolved().Behavior.Model; got != "claude-haiku-4-5" {
+	if got := s.Resolved().Behavior.Model; got != "claude-haiku-5-5" {
 		t.Errorf("resolved model = %q", got)
 	}
 }
@@ -154,7 +154,7 @@ func TestAux_OverrideReachesTheResolvedConfig(t *testing.T) {
 		t.Errorf("resolved curator model = %q", resolved.Curator.Model)
 	}
 	// Untouched slots keep the shipped default — a per-slot override is per slot.
-	if resolved.Behavior.Model != "claude-haiku-4-5" {
+	if resolved.Behavior.Model != "claude-haiku-5-5" {
 		t.Errorf("an unrelated slot changed: %q", resolved.Behavior.Model)
 	}
 	// The timeout was not part of the patch, so it still inherits.
@@ -217,7 +217,7 @@ func TestAux_ClearingEveryFieldDropsTheOverride(t *testing.T) {
 	if eff.Model.Source == SourceInstance {
 		t.Errorf("model source = %s, want the inherited value back", eff.Model.Source)
 	}
-	if eff.Model.Value != "claude-haiku-4-5" {
+	if eff.Model.Value != "claude-haiku-5-5" {
 		t.Errorf("model = %q, want the inherited value back", eff.Model.Value)
 	}
 }

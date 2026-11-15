@@ -236,10 +236,12 @@ type Router struct {
 	dockerClient         *dockerclient.Client
 	// instanceBackups is Admin › Backups across the instance, kept so tests
 	// can point its instance backup at a temp directory.
-	instanceBackups    *InstanceBackupsHandler
-	imageBuilder       devcontainer.ImageBuilder
-	featureCacheDir    string
-	portExposeRegistry *PortExposeRegistry // closed via Shutdown() on server stop
+	instanceBackups     *InstanceBackupsHandler
+	imageBuilder        devcontainer.ImageBuilder
+	featureCacheDir     string
+	legacyImageEviction bool
+	installationID      string
+	portExposeRegistry  *PortExposeRegistry // closed via Shutdown() on server stop
 	// providerLogins owns the device-code sign-in pollers (#2428); stopped
 	// via Shutdown() so a pending sign-in is left for the next process to
 	// resume rather than polled by a goroutine outliving the listener.

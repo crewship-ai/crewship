@@ -263,15 +263,20 @@ func buildOutputSuffix(tail *boundedLog) string {
 // BuildKit. The returned tag is used as the base for the temp container that
 // then runs mise/postCreate/env. emit reports plan progress (pull + per-feature)
 // so the UI checklist advances identically to the container-commit path.
-func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string, emit func(string), sink ProvisionSink, force bool) (string, error) {
+func (p *Provisioner) buildFeatureImage(ctx context.Context, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string, emit func(string), sink ProvisionSink, force bool, acquire ...func(context.Context, ...string) error) (string, error) {
 	emit(pullStepLabel(baseImage))
 
-	contextDir, _, featTag, err := stageBuildContext(baseImage, features, optionsByRef, rootEnv)
+	contextDir, _, featTag, err := stageOwnedBuildContext(p.instanceID, baseImage, features, optionsByRef, rootEnv)
 	if err != nil {
 		emitProvision(sink, ProvisionEvent{Step: ProvStepFailed, Status: ProvStatusFailed, Detail: ProvStepImageBuildStart, Error: err.Error()})
 		return "", err
 	}
 	defer func() { _ = os.RemoveAll(contextDir) }()
+	if len(acquire) > 0 && acquire[0] != nil {
+		if err := acquire[0](ctx, featTag); err != nil {
+			return "", err
+		}
+	}
 
 	buildStart := time.Now()
 	emitProvision(sink, ProvisionEvent{
@@ -410,11 +415,21 @@ func (b *boundedLog) tail() string {
 // feature's own files yields a new tag and a clean rebuild). The caller is
 // responsible for removing contextDir.
 func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string) (contextDir, dockerfile, tag string, err error) {
+	return stageOwnedBuildContext("", baseImage, features, optionsByRef, rootEnv)
+}
+
+// stageOwnedBuildContext is stageBuildContext for an installation with a
+// settled identity: the feature image is labelled with its origin and tagged
+// inside the installation's namespace. BuildKit still shares the layers
+// themselves across installations. An empty instanceID stages the legacy,
+// unowned form.
+func stageOwnedBuildContext(instanceID, baseImage string, features []*ResolvedFeature, optionsByRef map[string]map[string]any, rootEnv map[string]string) (contextDir, dockerfile, tag string, err error) {
 	dockerfile, err = GenerateDockerfile(DockerfileBuild{
 		BaseImage:    baseImage,
 		Features:     features,
 		OptionsByRef: optionsByRef,
 		RootEnv:      rootEnv,
+		Labels:       imageOwnerLabels(instanceID, ImageKindFeature),
 	})
 	if err != nil {
 		return "", "", "", err
@@ -464,8 +479,7 @@ func stageBuildContext(baseImage string, features []*ResolvedFeature, optionsByR
 		cleanup()
 		return "", "", "", fmt.Errorf("hashing build inputs: %w", err)
 	}
-	tag = FeatureImageTagPrefix + contentHash[:12]
-	return contextDir, dockerfile, tag, nil
+	return contextDir, dockerfile, featureImageTag(instanceID, contentHash), nil
 }
 
 // hashBuildInputs returns a hex content hash over the generated Dockerfile and

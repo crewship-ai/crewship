@@ -16,7 +16,10 @@ import (
 )
 
 type ProvisioningHandler struct {
-	sandboxRuntime provider.SandboxRuntime // optional qualification backend; set before serving
+	gcWake              chan struct{}
+	legacyImageEviction bool                    // deprecated opt-in alias; protected by mu
+	instanceID          string                  // image ownership; read/written under mu
+	sandboxRuntime      provider.SandboxRuntime // optional qualification backend; set before serving
 
 	db             *sql.DB
 	logger         *slog.Logger
@@ -119,6 +122,31 @@ func (h *ProvisioningHandler) InvalidateImageCache() {
 	h.provisioner.InvalidateImageListCache()
 }
 
+// SetInstallationID binds the provisioner to this installation, so the images
+// it builds are tagged inside the installation's namespace and labelled with
+// their origin (#5375). Called once while routes are wired, before any
+// provision can run. Safe with no provisioner.
+func (h *ProvisioningHandler) SetInstallationID(id string) {
+	if h == nil || h.provisioner == nil {
+		return
+	}
+	h.provisioner.SetInstanceID(id)
+	id = devcontainer.ImageNamespace(id)
+	if id == "" {
+		return
+	}
+	h.mu.Lock()
+	h.instanceID = id
+	h.mu.Unlock()
+	select {
+	case h.gcWake <- struct{}{}:
+	default:
+	}
+	// Constructor-owned lifecycle performs inventory asynchronously. Never make
+	// route wiring wait for Docker or mutate selected artifacts on identity change.
+
+}
+
 func NewProvisioningHandler(
 	db *sql.DB,
 	logger *slog.Logger,
@@ -154,6 +182,7 @@ func NewProvisioningHandler(
 		rateLimiter:    newProvisionRateLimiter(),
 		wsHub:          wsHub,
 		bgCtx:          bgCtx,
+		gcWake:         make(chan struct{}, 1),
 		bgCancel:       bgCancel,
 		journal:        noopEmitter{},
 	}
@@ -247,3 +276,14 @@ func nullStringPtr(s sql.NullString) *string {
 // ProvisionStatus returns the provisioning status for a crew. If an active job
 // exists in memory, its status (pending/running/completed/failed) is returned;
 // otherwise the status is derived from the persisted cached_image column.
+
+// SetLegacyImageEviction preserves the old explicit opt-in as an alias for the
+// owned policy. It no longer starts an independent global image sweeper.
+func (h *ProvisioningHandler) SetLegacyImageEviction(enabled bool) {
+	h.mu.Lock()
+	h.legacyImageEviction = enabled
+	h.mu.Unlock()
+	if enabled {
+		h.logger.Warn("container.cache_eviction is deprecated; use CREWSHIP_IMAGE_GC for owned image collection")
+	}
+}

@@ -148,6 +148,11 @@ func truncateImageRef(ref string) string {
 	// For crewship-cache images, shorten long hash tags to 8 chars.
 	if strings.HasPrefix(name, "crewship-cache:") {
 		tag := strings.TrimPrefix(name, "crewship-cache:")
+		// An installation-owned tag is <namespace>-<hash>; the namespace is
+		// the same for every image here, the hash is what tells them apart.
+		if i := strings.LastIndexByte(tag, '-'); i >= 0 {
+			tag = tag[i+1:]
+		}
 		if len(tag) > 8 {
 			tag = tag[:8]
 		}

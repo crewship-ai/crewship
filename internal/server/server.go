@@ -787,6 +787,7 @@ func (s *Server) mountAPIRouter(
 	if cfg.Storage.BasePath != "" {
 		featureCacheDir = cfg.Storage.BasePath + "/feature-cache"
 	}
+	opts = append(opts, goapi.WithInstallationID(cfg.Container.InstanceID), goapi.WithLegacyImageEviction(cfg.Container.CacheEviction))
 	if dp, ok := ctr.(*dockerprovider.Provider); ok {
 		if dc := dp.DockerClient(); dc != nil {
 			opts = append(opts, goapi.WithDockerClient(dc))

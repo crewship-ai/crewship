@@ -1307,6 +1307,7 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 			return nil
 		})
 		var commitTx *sql.Tx
+		importedEnvironmentCrews := map[string]bool{}
 		var existingTranscriptChats map[string]bool
 		hooks := &RestoreDumpHooks{
 			legacySourceVersions: manifest.SchemaMigrationVersions,
@@ -1352,6 +1353,9 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 				if err := dockerRestore(ctx); err != nil {
 					return err
 				}
+				if err := selectRestoredEnvironments(ctx, commitTx, extracted, envOutcomes, importedEnvironmentCrews); err != nil {
+					return err
+				}
 				if err := servicePlan.renewCommitFences(ctx, commitTx); err != nil {
 					return err
 				}
@@ -1379,6 +1383,17 @@ func RestoreBackup(ctx context.Context, db *sql.DB, opts RestoreOptions) (result
 						return err
 					}
 				}
+				for _, crew := range extracted.DBDump.Tables["crews"] {
+					id := rowString(crew, "id")
+					var exists bool
+					if err := tx.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM crews WHERE id=?)`, id).Scan(&exists); err != nil {
+						return err
+					}
+					if !exists {
+						importedEnvironmentCrews[id] = true
+					}
+				}
+
 				if !opts.Replace {
 					var err error
 					existingTranscriptChats, err = checkedTranscriptChats(ctx, tx, extracted.DBDump, false)

@@ -36,7 +36,13 @@ func sealDocumentIterationChat(ctx context.Context, tx *sql.Tx, receipt *chataud
 // proposes. Another person's private Document is never reachable. The head may
 // move while the proposal is prepared; each proposal carries its own revision
 // and target hash, so only the generation must still match.
-func (h *PageHandler) documentIterationPage(ctx context.Context, workspace, human, agent string, intent documents.IterationIntent) (documentDraftScope, int64, error) {
+//
+// With the flag artifact_agent_access_modes on (#5317 step 5.2), a folder of
+// the agent's crew at level propose also lets it propose (scope.Reach is then
+// folder), and on a shared Document the requester's Edit must be their own as
+// an ordinary member: Edit held only through the ADMIN or OWNER role never
+// passes to the agent (amendment 2). crew is the run's crew.
+func (h *PageHandler) documentIterationPage(ctx context.Context, workspace, human, agent, crew string, intent documents.IterationIntent) (documentDraftScope, int64, error) {
 	var scope documentDraftScope
 	var slug string
 	var schema int
@@ -51,6 +57,7 @@ func (h *PageHandler) documentIterationPage(ctx context.Context, workspace, huma
 	scope.Schema = schema
 	scope.Propose = intent.Propose()
 	scope.Blocks = intent.Blocks
+	scope.Reach = runReachConsented
 	role, err := h.liveContentHumanRole(ctx, workspace, human)
 	if err != nil {
 		return scope, 0, errDocumentAccess
@@ -72,9 +79,19 @@ func (h *PageHandler) documentIterationPage(ctx context.Context, workspace, huma
 			return scope, 0, errDocumentIterationProposalUnavailable
 		}
 	} else if !personal {
-		if rec.PrivateAudience || !h.agentMayProposeOn(ctx, workspace, rec, agent) {
+		if rec.PrivateAudience {
 			return scope, 0, errDocumentAccess
 		}
+		reach := h.agentProposeReach(ctx, workspace, rec, agent, crew)
+		if reach == runReachNone {
+			return scope, 0, errDocumentAccess
+		}
+		if h.artifactRunModesOn(ctx, workspace) {
+			if edit, err := h.delegableEdit(ctx, workspace, human, rec); err != nil || !edit {
+				return scope, 0, errDocumentAccess
+			}
+		}
+		scope.Reach = reach
 	}
 	if rec.HasProject || rec.HasApplication {
 		return scope, 0, errDocumentAccess
@@ -106,6 +123,26 @@ func (h *PageHandler) agentMayProposeOn(ctx context.Context, workspace string, r
 		}
 	}
 	return false
+}
+
+// agentProposeReach says how the agent may propose on the page, or
+// runReachNone: a page grant (agentMayProposeOn) is runReachConsented, the
+// iteration consent being the reach. With the flag on (#5317 step 5.2), a
+// folder of the agent's crew at level propose is runReachFolder, decided by
+// folderAgentLevel, the same rule as a run's folder read; a folder at level
+// read never proposes. crew is the run's crew.
+func (h *PageHandler) agentProposeReach(ctx context.Context, workspace string, rec *pageRecord, agent, crew string) string {
+	if h.agentMayProposeOn(ctx, workspace, rec, agent) {
+		return runReachConsented
+	}
+	if agent == "" || !h.artifactRunModesOn(ctx, workspace) {
+		return runReachNone
+	}
+	level, err := folderAgentLevel(ctx, h.pageAuthReader(ctx), workspace, rec.ID, agent, crew)
+	if err != nil || level != folderAgentAccessPropose {
+		return runReachNone
+	}
+	return runReachFolder
 }
 
 // Called by the trusted human send boundary after SyncSession and successful
@@ -140,7 +177,7 @@ func (h *PageHandler) persistDocumentIterationIntent(r *http.Request, receipt *c
 	} else if existingErr != sql.ErrNoRows {
 		return existingErr
 	}
-	_, version, err := h.documentIterationPage(ctx, receipt.WorkspaceID, receipt.UserID, receipt.AgentID, currentIntent)
+	_, version, err := h.documentIterationPage(ctx, receipt.WorkspaceID, receipt.UserID, receipt.AgentID, crew, currentIntent)
 	if err != nil {
 		return err
 	}
@@ -192,7 +229,7 @@ func bindDocumentIterationRunTx(r *http.Request, db *sql.DB, tx *sql.Tx, run, me
 		_, err = h.documentIterationScope(ctx, &a, intent.PageID)
 		return err
 	}
-	_, version, err := h.documentIterationPage(ctx, a.WorkspaceID, a.HumanUserID, a.AgentID, intent)
+	_, version, err := h.documentIterationPage(ctx, a.WorkspaceID, a.HumanUserID, a.AgentID, a.CrewID, intent)
 	if err != nil {
 		return err
 	}
@@ -224,7 +261,7 @@ func (h *PageHandler) documentIterationScope(ctx context.Context, a *artifactRun
 	if err != nil || parseErr != nil || !time.Now().Before(deadline) || policy != currentPolicy || (page != "" && page != intent.PageID) {
 		return scope, errDocumentAccess
 	}
-	scope, currentVersion, err := h.documentIterationPage(ctx, a.WorkspaceID, a.HumanUserID, a.AgentID, intent)
+	scope, currentVersion, err := h.documentIterationPage(ctx, a.WorkspaceID, a.HumanUserID, a.AgentID, a.CrewID, intent)
 	if err != nil {
 		return scope, err
 	}

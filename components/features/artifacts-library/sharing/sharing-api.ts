@@ -81,8 +81,9 @@ export interface AccessEntry {
 export type DefaultAudience = "private" | "folder"
 /** What the agents of a folder's crew may do with its non-private artifacts (#5317 D2): never edit. */
 export type FolderAgentLevel = "none" | "read" | "propose"
-/** Levels the dialog offers. `propose` is not offered until a folder gives its
- * agents a real proposal path (#5317 step 5.2); today it reads like `read`. */
+/** Levels the dialog always offers. `propose` is offered only where the server
+ * names the kinds on which it gives a real proposal (`suggestKinds`, #5317 step
+ * 5.2: Docs); on every other kind it reads like `read`. */
 export const FOLDER_AGENT_LEVELS: readonly FolderAgentLevel[] = ["none", "read"]
 export const FOLDER_AGENT_LABEL: Record<FolderAgentLevel, string> = { none: "No access", read: "Viewer", propose: "Can suggest" }
 export interface FolderSettings {
@@ -92,7 +93,7 @@ export interface FolderSettings {
   /** Who the folder itself shares with. */
   entries: AccessEntry[]
   /** The crew's agents row, with the version it was read at; absent where it would not take effect. */
-  agents?: { level: FolderAgentLevel; aclVersion: number } | null
+  agents?: { level: FolderAgentLevel; aclVersion: number; suggestKinds?: readonly string[] } | null
 }
 
 export type BulkAction = "archive" | "unarchive" | "move" | "share"
@@ -313,7 +314,9 @@ export function httpSharingApi(workspaceId: string, guard?: RequestGuard, operat
       return [{ subjectType: type, subjectId: id, label: type === "workspace" ? EVERYONE : str(raw.label) || id, level: raw.can_write === true ? "write" : "read", via: "folder" }]
     })
     const level = (["none", "read", "propose"] as const).find(l => l === body.agent_access)
-    const agents = body.agent_access_available === true && level && typeof body.acl_version === "number" ? { level, aclVersion: body.acl_version } : null
+    // agent_propose_kinds: the UI kinds on which `propose` gives a real proposal; absent from a server without one.
+    const suggestKinds = Array.isArray(body.agent_propose_kinds) ? body.agent_propose_kinds.filter((k): k is string => typeof k === "string") : []
+    const agents = body.agent_access_available === true && level && typeof body.acl_version === "number" ? { level, aclVersion: body.acl_version, suggestKinds } : null
     return { slug, defaultAudience: null, entries, agents }
   }
 
@@ -584,7 +587,7 @@ export function mockSharingApi(workspaceId: string): SharingApi {
     async folderSettings(slug) {
       await pause()
       const saved = store().folders[slug]
-      return { slug, defaultAudience: saved?.defaultAudience ?? "folder", entries: saved?.entries ?? [], agents: { level: saved?.agents ?? "none", aclVersion: saved?.version ?? 0 } }
+      return { slug, defaultAudience: saved?.defaultAudience ?? "folder", entries: saved?.entries ?? [], agents: { level: saved?.agents ?? "none", aclVersion: saved?.version ?? 0, suggestKinds: ["docs"] } }
     },
     async saveFolderAgents(slug, level, aclVersion) {
       await pause()

@@ -282,6 +282,16 @@ func WithDockerClient(c *dockerclient.Client) RouterOption {
 	}
 }
 
+// WithInstallationID passes the settled installation identity to the image
+// provisioner, which namespaces and labels the images it builds with it
+// (#5375). Empty means no settled identity: images keep the legacy names and
+// are never treated as owned.
+func WithInstallationID(id string) RouterOption {
+	return func(r *Router) {
+		r.installationID = id
+	}
+}
+
 // WithImageBuilder attaches an image builder for container runtimes that
 // cannot commit. Apple Containers has no `commit`, so on macOS this is what
 // makes provisioning possible at all — the provisioner builds the whole image
@@ -555,4 +565,10 @@ func WithDocumentService(socket string) RouterOption {
 func WithSkillGitImportPolicy(policy skills.GitImportPolicy) RouterOption {
 	copyPolicy := skills.GitImportPolicy{PrivateHosts: append([]string(nil), policy.PrivateHosts...)}
 	return func(r *Router) { r.skillGitImportPolicy = copyPolicy }
+}
+
+// WithLegacyImageEviction maps the deprecated YAML/ENV opt-in onto the single
+// ownership-aware collector. An explicit CREWSHIP_IMAGE_GC value takes priority.
+func WithLegacyImageEviction(enabled bool) RouterOption {
+	return func(r *Router) { r.legacyImageEviction = enabled }
 }

@@ -165,7 +165,7 @@ func TestSetupPrompt_MarkerDoesNotProposeTheGuidesOwnModel(t *testing.T) {
 	}
 	// The menu must actually reach the model, cheapest tier included, or the
 	// "pick something cheaper" instruction has nothing to point at.
-	for _, want := range []string{"claude-haiku-4-5", "claude-sonnet-5", "claude-opus-5"} {
+	for _, want := range []string{"claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("rendered prompt is missing model tier %q", want)
 		}
@@ -814,7 +814,7 @@ func TestEnsureOnboardingSetupCrew_FollowsWorkspaceCredentialProvider(t *testing
 	if provider != "OPENAI" {
 		t.Errorf("agent llm_provider = %q, want OPENAI (matching the workspace's only credential)", provider)
 	}
-	if model != "gpt-5.5" {
+	if model != "gpt-6.1-sol" {
 		t.Errorf("agent llm_model = %q, want gpt-5.5", model)
 	}
 	// The marker's model is the PROPOSED CREW's, not the Guide's own, and the

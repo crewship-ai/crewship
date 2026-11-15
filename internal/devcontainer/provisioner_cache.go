@@ -33,12 +33,14 @@ const provisionerSchemaVersion = "v4"
 // cacheImageTag returns the Docker image tag for a given config hash.
 
 func cacheImageTag(configHash string) string {
-	short := configHash
-	if len(short) > 12 {
-		short = short[:12]
-	}
-	return "crewship-cache:" + short
+	return namespacedTag(cacheImageRepoPrefix, "", configHash)
 }
+
+// cacheImageRepoPrefix is the repository of provisioned crew images. An
+// installation with a settled identity publishes under
+// crewship-cache:<namespace>-<hash> (see Provisioner.cacheTag); the bare
+// crewship-cache:<hash> form is the legacy, unowned name.
+const cacheImageRepoPrefix = "crewship-cache:"
 
 // configHash computes a deterministic SHA-256 hash from the base image,
 // devcontainer config, mise config, AND the generated Dockerfile.
@@ -208,7 +210,7 @@ func (p *Provisioner) lockCacheTag(ctx context.Context, tag string) (func(), err
 // IsCached reports whether a cached image for the given config hash exists.
 
 func (p *Provisioner) IsCached(ctx context.Context, hash string) (bool, error) {
-	tag := cacheImageTag(hash)
+	tag := p.cacheTag(hash)
 	return p.imageExists(ctx, tag)
 }
 

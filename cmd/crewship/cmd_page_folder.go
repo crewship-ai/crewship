@@ -127,6 +127,9 @@ type pageFolderACLJSON struct {
 	ACLVersion int64                    `json:"acl_version" yaml:"acl_version"`
 	// AgentAccess: none, read or propose for the agents of the owning crew.
 	AgentAccess string `json:"agent_access" yaml:"agent_access"`
+	// AgentProposeKinds: the kinds on which propose gives a real proposal
+	// (docs); absent where the flag is off.
+	AgentProposeKinds []string `json:"agent_propose_kinds,omitempty" yaml:"agent_propose_kinds,omitempty"`
 }
 
 type pageFolderACLWriteBody struct {
@@ -624,8 +627,11 @@ var pageFolderAgentAccessCmd = &cobra.Command{
 	Use:   "agent-access <slug> --level none|read|propose",
 	Short: "Let the agents of a folder's owning crew read or suggest on its pages",
 	Long: `Set what the agents of the folder's owning crew may do with the pages filed
-in it: none (the default), read, or propose (read and suggest). Never edit: an
-agent edits a page only through a grant on that page from its owner. Private
+in it: none (the default), read, or propose. At propose the agents read every
+kind and propose changes on Docs, for a person with Edit to accept (only when
+the human asks for it in a chat); on every other kind propose is the same as
+read. Never edit: an agent edits a page only through a grant on that page from
+its owner. Private
 (Personal) pages are never reached, and agents of other crews are not covered.
 
 It takes effect only with the workspace feature flag
@@ -779,7 +785,9 @@ func pageFolderPrintACL(raw []byte, did string) error {
 	if did != "" {
 		fmt.Println(did)
 	}
-	if doc.AgentAccess != "" && doc.AgentAccess != "none" {
+	if doc.AgentAccess == "propose" && len(doc.AgentProposeKinds) > 0 {
+		fmt.Printf("Agents of the owning crew: propose (suggestions on %s, read on other kinds; crewship page folder agent-access).\n", strings.Join(doc.AgentProposeKinds, ", "))
+	} else if doc.AgentAccess != "" && doc.AgentAccess != "none" {
 		fmt.Printf("Agents of the owning crew: %s (crewship page folder agent-access).\n", doc.AgentAccess)
 	}
 	if len(doc.ACL) == 0 {
