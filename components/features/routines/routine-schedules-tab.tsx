@@ -342,7 +342,7 @@ export function RoutineSchedulesTab({
                         </p>
                       )}
                       {artifacts && (
-                        <p className="text-[11px] leading-relaxed text-warn" data-testid={`schedule-artifacts-reason-${s.id}`}>
+                        <p className="text-micro leading-relaxed text-warn" data-testid={`schedule-artifacts-reason-${s.id}`}>
                           {artifacts.reason}
                         </p>
                       )}

@@ -310,9 +310,17 @@ func sidecarRunCapabilityScript(runToken, capability string) string {
 	}
 	return "curl -s -m 2 -X POST http://127.0.0.1:9119/agent/run/artifact-capability " +
 		"-K /dev/fd/3 3<<'RUNCAP_AUTH_HEREDOC' >/dev/null 2>&1 || true\n" +
-		"header = \"Authorization: Bearer " + runToken + "\"\n" +
-		"header = \"X-Crewship-Run-Capability: " + capability + "\"\n" +
+		"header = \"Authorization: Bearer " + curlConfigQuoted(runToken) + "\"\n" +
+		"header = \"X-Crewship-Run-Capability: " + curlConfigQuoted(capability) + "\"\n" +
 		"RUNCAP_AUTH_HEREDOC\n"
+}
+
+// curlConfigQuoted escapes a value for a double-quoted curl config string.
+// The shape checks above already admit neither a quote nor a backslash, so
+// this changes nothing for a valid value; it keeps the quoting sound on its
+// own rather than relying on the regexes.
+func curlConfigQuoted(v string) string {
+	return strings.ReplaceAll(strings.ReplaceAll(v, `\`, `\\`), `"`, `\"`)
 }
 
 // agentRunTokenFromEnv returns the per-run token ensureSidecar put in env.

@@ -44,3 +44,16 @@ func TestAgentRunTokenFromEnv(t *testing.T) {
 		t.Fatalf("v1 token used: %q", got)
 	}
 }
+
+func TestCurlConfigQuotedEscapesQuoteAndBackslash(t *testing.T) {
+	for in, want := range map[string]string{
+		`urcv1.abc`: `urcv1.abc`,
+		`a"b`:       `a\"b`,
+		`a\b`:       `a\\b`,
+		`\"`:        `\\\"`,
+	} {
+		if got := curlConfigQuoted(in); got != want {
+			t.Errorf("curlConfigQuoted(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
