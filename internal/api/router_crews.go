@@ -703,6 +703,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	// for the auto-provision-on-first-message UX without a second instance.
 	provisioning := NewProvisioningHandler(r.db, r.logger, r.catalogFetcher, r.runtimeFetcher, r.dockerClient, r.imageBuilder, r.featureCacheDir, r.hub)
 	provisioning.SetInstallationID(r.installationID)
+	provisioning.EnableBuildStoragePreflight()
 	if sandbox, ok := r.activeContainer().(provider.SandboxRuntime); ok {
 		provisioning.sandboxRuntime = sandbox
 	}
