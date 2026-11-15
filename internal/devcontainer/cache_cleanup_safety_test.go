@@ -64,7 +64,7 @@ func TestBuildOnlyCleansMiseCacheInInstallationLayer(t *testing.T) {
 			found := false
 			for _, group := range rec.groups {
 				script := strings.Join(group.cmds, "\n")
-				install := strings.Index(script, "mise install")
+				install := strings.Index(script, shellQuote("mise")+" "+shellQuote("install"))
 				if install < 0 {
 					continue
 				}
