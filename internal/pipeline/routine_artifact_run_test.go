@@ -574,6 +574,65 @@ func TestScheduleCreatorStopped_EachReasonAndRestore(t *testing.T) {
 	}
 }
 
+// One shared checker caches a creator's raw standing, never one schedule's
+// verdict: a revocation between two saves stops the older schedule and not
+// the newer one, in either order. A failing standing read fails closed: the
+// check returns the error and the fire mints no capability.
+func TestScheduleAccess_CachesStandingNotVerdictAndFailsClosed(t *testing.T) {
+	db := routineArtifactDB(t)
+	for _, q := range []string{
+		`INSERT INTO users(id,email,full_name) VALUES('u_c','c@ex.com','C')`,
+		`INSERT INTO workspace_members(id,workspace_id,user_id,role,access_mode) VALUES('m_c','ws_art','u_c','MANAGER','trusted')`,
+		`INSERT INTO pipelines(id,workspace_id,slug,name,definition_json,definition_hash) VALUES('pipe_c','ws_art','c','c','{}','h')`,
+	} {
+		mustExec(t, db.DB, q)
+	}
+	store := NewScheduleStore(db.DB)
+	save := func(setAt string) *Schedule {
+		t.Helper()
+		s, err := store.Save(t.Context(), SaveScheduleInput{WorkspaceID: "ws_art", Name: "c", TargetPipelineID: "pipe_c", CronExpr: "0 8 * * *", Timezone: "UTC", Enabled: true, CreatorKind: ScheduleCreatorHuman, CreatorUserID: "u_c"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mustExec(t, db.DB, `UPDATE pipeline_schedules SET creator_set_at='`+setAt+`' WHERE id='`+s.ID+`'`)
+		got, err := store.GetByID(t.Context(), s.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	before := save("2026-01-01T00:00:00Z")
+	after := save("2026-03-01T00:00:00Z")
+	mustExec(t, db.DB, `UPDATE users SET access_revoked_at='2026-02-01T00:00:00Z' WHERE id='u_c'`)
+	want := map[string]string{before.ID: ScheduleStoppedAccessRevoked, after.ID: ""}
+	for name, order := range map[string][]*Schedule{"older first": {before, after}, "newer first": {after, before}} {
+		shared := NewScheduleAccess(db.DB, "ws_art")
+		for _, s := range order {
+			if got, err := shared.Stopped(t.Context(), CreatorOf(s), ""); err != nil || got != want[s.ID] {
+				t.Fatalf("%s: schedule saved at %s: %q %v, want %q", name, s.CreatorSetAt, got, err, want[s.ID])
+			}
+		}
+	}
+
+	// The standing read fails: the check says so and admits nothing.
+	closed := testutil.MigratedDB(t)
+	_ = closed.Close()
+	if got, err := NewScheduleAccess(closed.DB, "ws_art").Stopped(t.Context(), CreatorOf(after), ""); err == nil || got != "" {
+		t.Fatalf("a failing standing read: %q %v, want an error", got, err)
+	}
+	mustExec(t, db.DB, `ALTER TABLE users RENAME COLUMN access_revoked_at TO access_revoked_at_gone`)
+	req := AgentStepRequest{WorkspaceID: "ws_art", PipelineID: "pipe_c", PipelineRunID: "prun_c", StepID: "s", TriggeredVia: TriggeredViaSchedule, TriggeredByID: after.ID, ArtifactScheduleID: after.ID}
+	capability, end := recordRoutineArtifactRun(t.Context(), db.DB, nil, nil, req, "crew_art", "agent_b", "run_c", 10*time.Minute)
+	end()
+	var minted int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM artifact_unattended_runs WHERE run_id='run_c'`).Scan(&minted); err != nil {
+		t.Fatal(err)
+	}
+	if capability != "" || minted != 0 {
+		t.Fatalf("a fire whose standing read failed got capability=%q recorded=%d", capability, minted)
+	}
+}
+
 type countingQuerier struct {
 	q RowQuerier
 	n *int
