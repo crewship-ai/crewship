@@ -87,7 +87,8 @@ services:
       NETWORKS: 1
       # /volumes -- VolumeCreate, VolumeInspect, VolumeList, VolumeRemove.
       VOLUMES: 1
-      # /info -- cgroup version and host-filesystem detection.
+      # /info -- cgroup version, host-filesystem detection and Docker's
+      # storage directory for the free-space check before a build.
       INFO: 1
       # /_ping and /version -- daemon detection. The image defaults both to 1;
       # set explicitly so this file is the whole story.
