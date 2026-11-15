@@ -4,7 +4,7 @@
     ".github/workflows/ci.yml": "65a4fbab8638cf31029949412f38c9d73f316e03defd40e616877726da827503",
     ".github/workflows/security.yml": "cdfe9f0463c9a11b2f153a85d090f7af9a3b94854042a41e4a73723b08e4bf4a",
     ".github/workflows/codeql.yml": "f09dc28205bf4fdeca83a7638db3fdd028b2006149b83907bbaeb304dc04d0b8",
-    "scripts/ci/plan.py": "611394c5abd8a69b5954437b40c8babd3a0b0628c4c5fc581835870d33a6556d",
+    "scripts/ci/plan.py": "73d74490ca98a8029b3f3781e93a955f5a52e51948e1d8dcb50108f67d366aa7",
     "scripts/ci/verdict.py": "f4fe254c500b8879100154d08387f02e7b7650cfb32611610c7218e9dbe289d0"
   },
   "workflows": {

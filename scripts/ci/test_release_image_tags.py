@@ -72,7 +72,16 @@ class ReleaseImageTagsTest(unittest.TestCase):
     def test_promote_computes_the_list_instead_of_reading_a_job_output(self):
         promote = workflow()['jobs']['promote']
         self.assertEqual(promote['permissions'], {'contents': 'read', 'packages': 'write'})
+        self.assertNotIn('if', promote)
+        self.assertNotIn('continue-on-error', promote)
+        self.assertEqual(promote['needs'], ['docker', 'publish'])
+        checkout = [s for s in promote['steps'] if str(s.get('uses', '')).startswith('actions/checkout@')]
+        self.assertEqual(len(checkout), 1)
+        self.assertEqual(set(checkout[0]), {'uses', 'with'})
+        self.assertEqual(checkout[0]['with'], {'persist-credentials': False})
         step = named_step(promote, 'Promote the tested digest after binary publication')
+        # No if:, continue-on-error: or other key may soften the step.
+        self.assertEqual(set(step), {'name', 'env', 'run'})
         self.assertEqual(step['env'], {'IMAGE': 'ghcr.io/${{ github.repository_owner }}/crewship',
                                        'DIGEST': '${{ needs.docker.outputs.digest }}'})
         lines = code_lines(step['run'])
@@ -150,8 +159,8 @@ class ReleaseImageTagsTest(unittest.TestCase):
         build = names.index('Build immutable release image candidate')
         self.assertLess(docker.index(next(s for s in docker if s.get('id') == 'catalog')), guard)
         self.assertLess(guard, build)
+        self.assertEqual(set(docker[guard]), {'name', 'env', 'run'})
         self.assertEqual(docker[guard]['env'], {'PINS': pins})
-        self.assertNotIn('if', docker[guard])
         self.assertEqual(code_lines(docker[guard]['run'])[:2], [
             'set -euo pipefail',
             '[[ "$PINS" =~ ^[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64}(,[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64})*$ ]] || {'])
