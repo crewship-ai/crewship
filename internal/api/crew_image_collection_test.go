@@ -602,6 +602,7 @@ func TestOwnedImageCollectionRestartsTheWindowOnUse(t *testing.T) {
 	fake := &fakeGCClient{images: []image.Summary{img}, containers: []container.Summary{{ID: "c1", ImageID: img.ID, State: "exited"}}}
 	h := newGCTestHandler(t, fake)
 	h.instanceID = collectionOwner
+	h.sweepOrphanCacheImages(t.Context()) // observation is continuous from here
 	longAgo := time.Now().Add(-10 * ownedImageUnusedWindow)
 	setUnusedSince(t, h, img.ID, longAgo)
 	setUnusedSince(t, h, gone, longAgo)
@@ -610,7 +611,9 @@ func TestOwnedImageCollectionRestartsTheWindowOnUse(t *testing.T) {
 	if len(fake.removedImages) != 0 {
 		t.Fatalf("removed an image a container uses: %v", fake.removedImages)
 	}
-	if rows := unusedSinceRows(t, h); len(rows) != 0 {
+	rows := unusedSinceRows(t, h)
+	delete(rows, lastPassMarker)
+	if len(rows) != 0 {
 		t.Fatalf("use must forget the old observation, and a vanished image's row must go: %v", rows)
 	}
 
@@ -627,15 +630,115 @@ func TestOwnedImageCollectionRestartsTheWindowOnUse(t *testing.T) {
 // A young image is neither removed nor does it start a window.
 func TestOwnedImageCollectionLeavesYoungImagesAlone(t *testing.T) {
 	t.Setenv(imageGCEnv, "true")
-	removeAtFirstSight(t)
 	young := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
 	young.Created = time.Now().Add(-ownedImageMinAge + time.Hour).Unix()
 	fake := &fakeGCClient{images: []image.Summary{young}}
 	h := newGCTestHandler(t, fake)
 	h.instanceID = collectionOwner
 	h.sweepOrphanCacheImages(t.Context())
+	if _, tracked := unusedSinceRows(t, h)[young.ID]; tracked {
+		t.Fatal("a young image started an unused window")
+	}
+	removeAtFirstSight(t)
+	h.sweepOrphanCacheImages(t.Context())
 	if len(fake.removedImages) != 0 {
 		t.Fatalf("removed an image younger than %s: %v", ownedImageMinAge, fake.removedImages)
+	}
+}
+
+// Passes are the only observations. After a silence longer than the gap
+// (collection switched off, the server down) an image may have been used
+// unseen, so every window starts over instead of acting on the old row.
+func TestOwnedImageCollectionRestartsWindowsAfterAnObservationGap(t *testing.T) {
+	t.Setenv(imageGCEnv, "true")
+	img := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
+	fake := &fakeGCClient{images: []image.Summary{img}}
+	h := newGCTestHandler(t, fake)
+	h.instanceID = collectionOwner
+	longAgo := time.Now().Add(-10 * ownedImageUnusedWindow)
+
+	for name, lastPass := range map[string]*time.Time{
+		"no pass was ever recorded":         nil,
+		"the last pass is older than a gap": ptrTime(time.Now().Add(-ownedImageObservationGap - time.Minute)),
+		"the last pass is in the future":    ptrTime(time.Now().Add(time.Hour)),
+	} {
+		if _, err := h.db.Exec(`DELETE FROM resource_retention_images`); err != nil {
+			t.Fatal(err)
+		}
+		setUnusedSince(t, h, img.ID, longAgo)
+		if lastPass != nil {
+			setUnusedSince(t, h, lastPassMarker, *lastPass)
+		}
+		h.sweepOrphanCacheImages(t.Context())
+		if len(fake.removedImages) != 0 {
+			t.Fatalf("%s: removed on an observation from before the gap: %v", name, fake.removedImages)
+		}
+		rows := unusedSinceRows(t, h)
+		if first := rows[img.ID]; time.Since(first) > time.Minute {
+			t.Fatalf("%s: the window did not start over: %v", name, first)
+		}
+		if marker := rows[lastPassMarker]; time.Since(marker) > time.Minute || marker.After(time.Now().Add(time.Minute)) {
+			t.Fatalf("%s: the completed pass was not recorded: %v", name, marker)
+		}
+	}
+
+	// Continuous observation: a recent pass keeps the old row valid.
+	setUnusedSince(t, h, img.ID, longAgo)
+	setUnusedSince(t, h, lastPassMarker, time.Now().Add(-ownedImageObservationGap+time.Minute))
+	h.sweepOrphanCacheImages(t.Context())
+	if len(fake.removedImages) != 1 || fake.removedImages[0] != img.ID {
+		t.Fatalf("not removed although observed unused throughout: %v", fake.removedImages)
+	}
+	// The removed image's row is gone at once: the same ID coming back must
+	// not inherit the window.
+	if _, tracked := unusedSinceRows(t, h)[img.ID]; tracked {
+		t.Fatal("the removed image kept its unused window")
+	}
+}
+
+func ptrTime(t time.Time) *time.Time { return &t }
+
+// A crew selecting the image again protects it, and that restarts the window
+// just as a container using it does.
+func TestOwnedImageCollectionRestartsTheWindowOnSelection(t *testing.T) {
+	t.Setenv(imageGCEnv, "true")
+	img := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
+	fake := &fakeGCClient{images: []image.Summary{img}}
+	h := newGCTestHandler(t, fake)
+	h.instanceID = collectionOwner
+	user := seedTestUser(t, h.db)
+	ws := seedTestWorkspace(t, h.db, user)
+	crew := seedCrewRow(t, h.db, "picks", ws, "Picks", "picks")
+	h.sweepOrphanCacheImages(t.Context()) // records the marker and the first observation
+	setUnusedSince(t, h, img.ID, time.Now().Add(-10*ownedImageUnusedWindow))
+
+	if _, err := h.db.Exec(`UPDATE crews SET cached_image=? WHERE id=?`, img.ID, crew); err != nil {
+		t.Fatal(err)
+	}
+	h.sweepOrphanCacheImages(t.Context())
+	if _, tracked := unusedSinceRows(t, h)[img.ID]; tracked || len(fake.removedImages) != 0 {
+		t.Fatalf("a selected image kept its old window or was removed: %v", fake.removedImages)
+	}
+}
+
+// A row whose time cannot be read must not pin the image forever: it is
+// dropped and the window starts over at that pass.
+func TestOwnedImageCollectionHealsAnUnreadableObservation(t *testing.T) {
+	t.Setenv(imageGCEnv, "true")
+	img := collectionImage("a", collectionOwner, devcontainer.ImageKindCrew)
+	fake := &fakeGCClient{images: []image.Summary{img}}
+	h := newGCTestHandler(t, fake)
+	h.instanceID = collectionOwner
+	h.sweepOrphanCacheImages(t.Context())
+	if _, err := h.db.Exec(`UPDATE resource_retention_images SET first_unused_at='garbage' WHERE instance_id=? AND image_id=?`, collectionOwner, img.ID); err != nil {
+		t.Fatal(err)
+	}
+	h.sweepOrphanCacheImages(t.Context())
+	if first, tracked := unusedSinceRows(t, h)[img.ID]; !tracked || time.Since(first) > time.Minute {
+		t.Fatalf("an unreadable row was not replaced by a fresh observation: %v tracked=%t", first, tracked)
+	}
+	if len(fake.removedImages) != 0 {
+		t.Fatalf("removed on an unreadable observation: %v", fake.removedImages)
 	}
 }
 

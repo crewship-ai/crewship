@@ -24,9 +24,24 @@ const ownedImageMinAge = 24 * time.Hour
 // and unprotected, as this installation observed it, before it is removed.
 // The image's age alone is not a grace period: an image built days ago and
 // deselected a minute ago would otherwise go on the next pass (#5398). The
-// first observation is recorded in resource_retention_images; any use or
-// protection in between restarts the window. Zero removes at first sight.
+// first observation is recorded in resource_retention_images; a use or
+// protection seen at a pass restarts the window. Zero removes at first sight.
+//
+// Passes are the only observations. A use shorter than the pass interval is
+// not seen, and when passes stop for a while (collection switched off, the
+// server down) nothing is seen at all, so after a gap longer than
+// ownedImageObservationGap every window starts over instead of being trusted.
 var ownedImageUnusedWindow = 24 * time.Hour
+
+// ownedImageObservationGap is the longest silence between two completed
+// passes after which earlier observations still count. Four pass intervals:
+// a restart or a few deferred passes do not reset the windows, a day with
+// collection off does.
+const ownedImageObservationGap = 4 * orphanGCInterval
+
+// lastPassMarker is the image_id of the row that records when the last pass
+// completed for an installation. It can never be an image ID.
+const lastPassMarker = "last-completed-pass"
 
 // deletedCrewImageRetention keeps a soft-deleted crew's selections protected
 // for this long after the deletion, so reviving it (the onboarding setup crew
@@ -117,6 +132,19 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 		return
 	}
 	now := time.Now()
+	if lastPass, known := unusedSince[lastPassMarker]; !known || now.Sub(lastPass) > ownedImageObservationGap || lastPass.After(now) {
+		// Nobody was watching: an image may have been used and released
+		// unseen. Start every window over rather than act on what was true
+		// before the gap.
+		if len(unusedSince) > 0 {
+			if _, err := h.db.ExecContext(ctx, `DELETE FROM resource_retention_images WHERE instance_id=?`, owner); err != nil {
+				h.logger.Warn("image collection: unused-image state reset failed; retaining images", "error", err)
+				return
+			}
+		}
+		unusedSince = map[string]time.Time{}
+	}
+	delete(unusedSince, lastPassMarker)
 	present := map[string]bool{}
 	for _, img := range listed.Items {
 		if ctx.Err() != nil {
@@ -158,10 +186,20 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 			h.forgetOwnedImageUnused(ctx, owner, id)
 		}
 	}
+	// Only a pass that looked at everything counts as an observation.
+	if ctx.Err() != nil {
+		return
+	}
+	if _, err := h.db.ExecContext(ctx, `INSERT INTO resource_retention_images(instance_id,image_id,first_unused_at) VALUES(?,?,?)
+		ON CONFLICT(instance_id,image_id) DO UPDATE SET first_unused_at=excluded.first_unused_at`,
+		owner, lastPassMarker, tsformat.Format(now)); err != nil {
+		h.logger.Warn("image collection: pass marker write failed", "error", err)
+	}
 }
 
 // ownedImagesUnusedSince reads when this installation first observed each
-// owned image unused. Unreadable bookkeeping restarts that image's window.
+// owned image unused, plus the lastPassMarker row. A row whose time cannot be
+// read is deleted, so that image's window starts over at this pass.
 func (h *ProvisioningHandler) ownedImagesUnusedSince(ctx context.Context, owner string) (map[string]time.Time, error) {
 	rows, err := h.db.QueryContext(ctx, `SELECT image_id, first_unused_at FROM resource_retention_images WHERE instance_id=?`, owner)
 	if err != nil {
@@ -169,16 +207,27 @@ func (h *ProvisioningHandler) ownedImagesUnusedSince(ctx context.Context, owner 
 	}
 	defer rows.Close()
 	out := map[string]time.Time{}
+	var unreadable []string
 	for rows.Next() {
 		var id, at string
 		if err := rows.Scan(&id, &at); err != nil {
 			return nil, err
 		}
-		if t, err := time.Parse(time.RFC3339Nano, at); err == nil { // tsformat:allow: parse only; the value is written with tsformat.Format and compared as time.Time in Go
-			out[id] = t
+		t, err := time.Parse(time.RFC3339Nano, at) // tsformat:allow: parse only; the value is written with tsformat.Format and compared as time.Time in Go
+		if err != nil {
+			unreadable = append(unreadable, id)
+			continue
 		}
+		out[id] = t
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	_ = rows.Close()
+	for _, id := range unreadable {
+		h.forgetOwnedImageUnused(ctx, owner, id)
+	}
+	return out, nil
 }
 
 func (h *ProvisioningHandler) forgetOwnedImageUnused(ctx context.Context, owner, imageID string) {
@@ -216,7 +265,11 @@ func ownedImage(img image.Summary, instanceID string) bool {
 // Current and previous selections protect bytes; immutable build history is
 // provenance, not the sequence of cache re-selections.
 func (h *ProvisioningHandler) protectedImageIDs(ctx context.Context, byRef map[string]string, report bool) (map[string]bool, error) {
-	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,''),COALESCE(deleted_at,'') FROM crews`)
+	rows, err := h.db.QueryContext(ctx, `SELECT COALESCE(cached_image,''),COALESCE(last_selected_image,''),COALESCE(previous_image,''),COALESCE(runtime_image,''),COALESCE(devcontainer_config,''),COALESCE(deleted_at,'') FROM crews
+		WHERE deleted_at IS NULL OR deleted_at >= ? OR deleted_at NOT GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T*'`,
+		// Old tombstones are skipped in SQL; anything that does not look like
+		// a timestamp is kept for the check below, which protects it.
+		time.Now().Add(-deletedCrewImageRetention-time.Hour).UTC().Format(time.RFC3339))
 	if err != nil {
 		return nil, err
 	}
@@ -340,4 +393,11 @@ func (h *ProvisioningHandler) removeCollectedImage(ctx context.Context, candidat
 	h.invalidateImageListCache()
 	h.InvalidateImageCache()
 	h.logger.Info("image collection: removed unused artifact", "image_id", candidate.ID)
+	if owned {
+		// The same ID can come back (a reproducible rebuild, a restore). It
+		// must not inherit this window. The pass context may be spent.
+		forgetCtx, cancelForget := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+		defer cancelForget()
+		h.forgetOwnedImageUnused(forgetCtx, owner, candidate.ID)
+	}
 }

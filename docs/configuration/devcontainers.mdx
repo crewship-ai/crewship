@@ -380,7 +380,9 @@ Set `CREWSHIP_IMAGE_GC=true` only on a dedicated or coordinated Docker daemon. C
 selection of each live crew and all container source images are protected.
 An owned image older than 24 hours may be removed, including an untagged
 abandoned build, once it has stayed unused and unprotected for 24 hours as
-observed by this installation; any use in between restarts that window. A
+observed by this installation at its 30-minute passes; a use seen at a pass
+restarts that window, and so does a gap of more than two hours without a
+completed pass. A
 deleted crew's selections stay protected for 7 days after the deletion. `CREWSHIP_IMAGE_GC=false` explicitly disables this policy.
 
 Inventory runs outside the lifecycle gate. Final deletion checks exclude only
