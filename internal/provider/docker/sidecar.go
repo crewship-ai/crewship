@@ -302,6 +302,22 @@ func sidecarMatchesCrew(labels map[string]string, crewID, kind string) bool {
 // one — services without a healthcheck are considered ready as
 // soon as the container reports running.
 func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewConfig) (ids map[string]string, retErr error) {
+	if p.imageReferences != nil && len(team.Services) > 0 {
+		inputs := make([]string, 0, len(team.Services))
+		for _, service := range team.Services {
+			inputs = append(inputs, service.Image)
+		}
+		resolved, releaseImages, err := p.imageReferences.AcquireImageReferences(ctx, inputs)
+		if err != nil {
+			return nil, fmt.Errorf("retain service images: %w", err)
+		}
+		defer releaseImages()
+		team.Services = append([]provider.CrewService(nil), team.Services...)
+		for i := range team.Services {
+			team.Services[i].ResolvedImage = resolved[team.Services[i].Image]
+		}
+	}
+
 	if p.cfg.OwnerActive != nil {
 		if err := p.cfg.OwnerActive(ctx, team.ID); err != nil {
 			return nil, err
@@ -361,7 +377,7 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 		name := "/" + p.sidecarContainerName(team.ID, team.Slug, svc.Name)
 		for _, item := range existing.Items {
 			for _, candidate := range item.Names {
-				if candidate == name && item.Image == svc.Image && item.Labels[sidecarSpecHashLabel] == computeSidecarSpecHash(&svc) {
+				if candidate == name && serviceImageMatches(item.Image, item.ImageID, &svc) && item.Labels[sidecarSpecHashLabel] == computeSidecarSpecHash(&svc) {
 					warm = true
 				}
 			}
@@ -369,7 +385,7 @@ func (p *Provider) EnsureCrewServices(ctx context.Context, team provider.CrewCon
 		// A matching existing container retains the original warm-reattach
 		// behavior. The authoritative ownership/spec checks still run below.
 		if !warm && !pulled[svc.Image] {
-			if err := p.pullSidecarImage(ctx, svc.Image); err != nil {
+			if err := p.pullSidecarImage(ctx, serviceImageReference(&svc)); err != nil {
 				return nil, fmt.Errorf("sidecar %q: %w", svc.Name, err)
 			}
 			pulled[svc.Image] = true
@@ -531,7 +547,7 @@ func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug, 
 		// and the hash diff identifies it without enumerating
 		// fields in the log message.
 		drift := ""
-		if c.Image != svc.Image {
+		if !serviceImageMatches(c.Image, c.ImageID, svc) {
 			drift = fmt.Sprintf("image drift: %s → %s", c.Image, svc.Image)
 		} else if c.Labels[sidecarSpecHashLabel] != desiredHash {
 			drift = "spec drift (command/env/ports/volumes/healthcheck)"
@@ -604,7 +620,7 @@ func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug, 
 	// Direct callers still prepare their own image. EnsureCrewServices has
 	// already pulled it before acquiring bounded mutation admission.
 	if !imagePrepared {
-		if err := p.pullSidecarImage(ctx, svc.Image); err != nil {
+		if err := p.pullSidecarImage(ctx, serviceImageReference(svc)); err != nil {
 			return "", err
 		}
 	}
@@ -666,7 +682,7 @@ func (p *Provider) ensurePreparedSidecar(ctx context.Context, crewID, crewSlug, 
 	}
 
 	cfg := &container.Config{
-		Image:        svc.Image,
+		Image:        serviceImageReference(svc),
 		Env:          envSlice,
 		ExposedPorts: exposed,
 		Labels:       resourcelifecycle.WithInstanceLabel(sidecarContainerLabels(crewID, crewSlug, svc.Name, desiredHash), p.cfg.InstanceID),
@@ -987,4 +1003,18 @@ func (p *Provider) StopCrewService(ctx context.Context, crewID, crewSlug, name s
 		}
 	}
 	return errors.Join(failures...)
+}
+
+func serviceImageReference(service *provider.CrewService) string {
+	if service.ResolvedImage != "" {
+		return service.ResolvedImage
+	}
+	return service.Image
+}
+
+func serviceImageMatches(declared, actualID string, service *provider.CrewService) bool {
+	if service.ResolvedImage != "" {
+		return actualID == service.ResolvedImage
+	}
+	return declared == service.Image
 }

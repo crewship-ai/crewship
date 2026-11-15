@@ -20,8 +20,9 @@ import (
 // own a permission to delete: what an installation still needs is decided by
 // its database.
 const (
-	ImageInstanceLabel = "crewship.image.instance-id"
-	ImageKindLabel     = "crewship.image.kind"
+	ImageInstanceLabel       = "crewship.image.instance-id"
+	ImageKindLabel           = "crewship.image.kind"
+	ImageAcquisitionKeyLabel = "crewship.image.cache-key"
 
 	// ImageKindCrew marks the final image a crew runs from.
 	ImageKindCrew = "crew"
@@ -94,6 +95,36 @@ func imageOwnerLabels(instanceID, kind string) map[string]string {
 		return map[string]string{ImageInstanceLabel: "", ImageKindLabel: ""}
 	}
 	return map[string]string{ImageInstanceLabel: id, ImageKindLabel: kind}
+}
+
+// imageBuildLabels persists the cache acquisition identity even after Docker
+// drops its tag. Clearing the key prevents inheriting the base's acquisition.
+func imageBuildLabels(instanceID, kind, key string) map[string]string {
+	labels := imageOwnerLabels(instanceID, kind)
+	labels[ImageAcquisitionKeyLabel] = ""
+	if labels[ImageInstanceLabel] != "" {
+		labels[ImageAcquisitionKeyLabel] = key
+	}
+	return labels
+}
+
+// ImageAcquisitionRef recovers the canonical build alias from immutable image
+// provenance. Missing or malformed provenance is never guessed from an ID.
+func ImageAcquisitionRef(labels map[string]string) string {
+	owner := normalizeInstanceID(labels[ImageInstanceLabel])
+	key := labels[ImageAcquisitionKeyLabel]
+	raw, err := hex.DecodeString(key)
+	if owner == "" || err != nil || len(raw) != 32 || key != strings.ToLower(key) {
+		return ""
+	}
+	switch labels[ImageKindLabel] {
+	case ImageKindCrew:
+		return namespacedTag(cacheImageRepoPrefix, owner, key)
+	case ImageKindFeature:
+		return featureImageTag(owner, key)
+	default:
+		return ""
+	}
 }
 
 var (

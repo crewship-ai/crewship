@@ -429,7 +429,7 @@ func stageOwnedBuildContext(instanceID, baseImage string, features []*ResolvedFe
 		Features:     features,
 		OptionsByRef: optionsByRef,
 		RootEnv:      rootEnv,
-		Labels:       imageOwnerLabels(instanceID, ImageKindFeature),
+		Labels:       imageBuildLabels(instanceID, ImageKindFeature, ""),
 	})
 	if err != nil {
 		return "", "", "", err
@@ -441,11 +441,6 @@ func stageOwnedBuildContext(instanceID, baseImage string, features []*ResolvedFe
 	}
 	// Best-effort cleanup on any error after this point.
 	cleanup := func() { _ = os.RemoveAll(contextDir) }
-
-	if err = os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
-		cleanup()
-		return "", "", "", fmt.Errorf("writing Dockerfile: %w", err)
-	}
 
 	for _, f := range features {
 		if f == nil {
@@ -478,6 +473,16 @@ func stageOwnedBuildContext(instanceID, baseImage string, features []*ResolvedFe
 	if err != nil {
 		cleanup()
 		return "", "", "", fmt.Errorf("hashing build inputs: %w", err)
+	}
+	// Derive the key from the payload with an empty key, then append the
+	// derived value. The derivation excludes itself; staged bytes and returned
+	// Dockerfile still match exactly. This avoids a self-referential hash.
+	if ImageNamespace(instanceID) != "" {
+		dockerfile += "\nLABEL \"" + ImageAcquisitionKeyLabel + "\"=\"" + contentHash + "\"\n"
+	}
+	if err = os.WriteFile(filepath.Join(contextDir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
+		cleanup()
+		return "", "", "", fmt.Errorf("writing Dockerfile: %w", err)
 	}
 	return contextDir, dockerfile, featureImageTag(instanceID, contentHash), nil
 }

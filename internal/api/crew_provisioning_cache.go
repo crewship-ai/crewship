@@ -14,6 +14,7 @@ import (
 	"github.com/moby/moby/api/types/image"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/dockerutil"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 )
@@ -252,14 +253,22 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 	var candidateID string
+	var candidateRefs []string
 	for _, img := range inventory.Items {
 		if slices.Contains(img.RepoTags, tag) {
 			candidateID = img.ID
+			seen := map[string]bool{tag: true, "": true}
+			for _, ref := range append([]string{img.ID, devcontainer.ImageAcquisitionRef(img.Labels)}, img.RepoTags...) {
+				if !seen[ref] {
+					candidateRefs = append(candidateRefs, ref)
+					seen[ref] = true
+				}
+			}
 			break
 		}
 	}
 	if candidateID != "" {
-		releaseID, available := resourcelifecycle.Images(h.db).TryCollectImages(candidateID)
+		releaseID, available := resourcelifecycle.Images(h.db).TryCollectImages(candidateRefs...)
 		if !available {
 			replyError(w, http.StatusConflict, "this image is in use by a build; retry deletion later")
 			return

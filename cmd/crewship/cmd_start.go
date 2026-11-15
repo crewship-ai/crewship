@@ -642,6 +642,7 @@ var startCmd = &cobra.Command{
 				// already, but routines, schedules, webhooks and the
 				// terminal, which failed on it.
 				crewstart.SetImageGate(ph.EnsureCrewImage)
+				crewstart.SetImageAcquirer(ph.AcquireCrewImages)
 			}
 		}
 

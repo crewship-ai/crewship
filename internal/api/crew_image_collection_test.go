@@ -28,7 +28,7 @@ func collectionImage(char string, owner, kind string) image.Summary {
 	if kind == devcontainer.ImageKindFeature {
 		prefix = devcontainer.FeatureImageTagPrefix
 	}
-	return image.Summary{ID: "sha256:" + strings.Repeat(char, 64), Created: time.Now().Add(-48 * time.Hour).Unix(), RepoTags: []string{prefix + owner + "-" + strings.Repeat(char, 12)}, Labels: map[string]string{devcontainer.ImageInstanceLabel: owner, devcontainer.ImageKindLabel: kind}}
+	return image.Summary{ID: "sha256:" + strings.Repeat(char, 64), Created: time.Now().Add(-48 * time.Hour).Unix(), RepoTags: []string{prefix + owner + "-" + strings.Repeat(char, 12)}, Labels: map[string]string{devcontainer.ImageInstanceLabel: owner, devcontainer.ImageKindLabel: kind, devcontainer.ImageAcquisitionKeyLabel: strings.Repeat(char, 64)}}
 }
 
 func TestOwnedImageCollectionProtectsSelectionsRollbackAndContainers(t *testing.T) {

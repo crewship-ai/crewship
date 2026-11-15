@@ -470,12 +470,12 @@ func (h *ProvisioningHandler) enqueueForCrew(ctx context.Context, crewID, worksp
 		return EnqueueResult{}, ErrInvalidCrewID
 	}
 
-	var devcontainerCfg, miseCfg, runtimeImage sql.NullString
+	var devcontainerCfg, miseCfg, runtimeImage, selectedImage sql.NullString
 	err := h.db.QueryRowContext(ctx,
-		`SELECT devcontainer_config, mise_config, runtime_image
+		`SELECT devcontainer_config, mise_config, runtime_image, cached_image
 		 FROM crews WHERE id = ? AND workspace_id = ? AND deleted_at IS NULL`,
 		crewID, workspaceID,
-	).Scan(&devcontainerCfg, &miseCfg, &runtimeImage)
+	).Scan(&devcontainerCfg, &miseCfg, &runtimeImage, &selectedImage)
 	if err == sql.ErrNoRows {
 		return EnqueueResult{}, ErrCrewNotFound
 	}
@@ -503,6 +503,12 @@ func (h *ProvisioningHandler) enqueueForCrew(ctx context.Context, crewID, worksp
 		return EnqueueResult{AlreadyRunning: true, Status: status}, nil
 	}
 	h.mu.Unlock()
+
+	if !forceRebuild {
+		if _, err := resourcelifecycle.Images(h.db).Preserve(ctx, []resourcelifecycle.ImageReference{{Ref: selectedImage.String, Required: selectedImage.String != ""}}); err != nil {
+			return EnqueueResult{}, err
+		}
+	}
 
 	// Acquire the rate-limit slot BEFORE publishing the job. The previous
 	// order (publish "pending" → tryAcquire → delete on failure) created a
@@ -1346,9 +1352,15 @@ func (h *ProvisioningHandler) runProvisioningAttempt(ctx context.Context, crewID
 	}()
 	acquireImage := func(ctx context.Context, refs ...string) error {
 		release, err := resourcelifecycle.Images(h.db).UseImages(ctx, refs...)
-		if err == nil {
-			acquired = append(acquired, release)
+		if err != nil {
+			return err
 		}
+		acquired = append(acquired, release)
+		references := make([]resourcelifecycle.ImageReference, 0, len(refs))
+		for _, ref := range refs {
+			references = append(references, resourcelifecycle.ImageReference{Ref: ref, Required: ref == baseImage && isLocalEnvironmentReference(ref), BuildInput: true})
+		}
+		_, err = resourcelifecycle.Images(h.db).Preserve(ctx, references)
 		return err
 	}
 	result, err := h.provisioner.Provision(ctx, baseImage, cfg, miseJSON,

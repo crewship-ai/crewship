@@ -111,12 +111,12 @@ func (p *Provider) quotaServiceVolumes(ctx context.Context, crewID, crewSlug str
 // service did not classify, and returns the numeric owner a fresh volume
 // root is formatted for.
 func (p *Provider) quotaImageOwner(ctx context.Context, svc *provider.CrewService) (quota.Owner, error) {
-	image, err := p.client.ImageInspect(ctx, svc.Image)
+	image, err := p.client.ImageInspect(ctx, serviceImageReference(svc))
 	if err != nil {
-		if pullErr := p.pullSidecarImage(ctx, svc.Image); pullErr != nil {
+		if pullErr := p.pullSidecarImage(ctx, serviceImageReference(svc)); pullErr != nil {
 			return quota.Owner{}, pullErr
 		}
-		if image, err = p.client.ImageInspect(ctx, svc.Image); err != nil {
+		if image, err = p.client.ImageInspect(ctx, serviceImageReference(svc)); err != nil {
 			return quota.Owner{}, err
 		}
 	}

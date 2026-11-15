@@ -251,6 +251,11 @@ func (s *Starter) startResolved(ctx context.Context, cfg provider.CrewConfig, no
 		}
 	}
 
+	cfg, releaseImages, err := acquireImageReferences(ctx, cfg, s.completer)
+	if err != nil {
+		return "", cfg, fmt.Errorf("retain runtime images: %w", err)
+	}
+	defer releaseImages()
 	containerID, err := acquire(ctx, cfg)
 	if err != nil {
 		return "", cfg, err

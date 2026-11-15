@@ -332,6 +332,10 @@ func (h *CrewHandler) Create(w http.ResponseWriter, r *http.Request) {
 		}
 		storedServices = &sealed
 	}
+	if err := preserveConfiguredImageReferences(r.Context(), h.db, req.RuntimeImage, req.DevcontainerConfig, req.ServicesJSON); err != nil {
+		replyError(w, http.StatusServiceUnavailable, err.Error())
+		return
+	}
 	_, err = h.db.ExecContext(r.Context(),
 		`INSERT INTO crews (id, workspace_id, name, slug, description, color, icon, container_memory_mb, container_cpus, container_ttl_hours, network_mode, allowed_domains, allow_private_endpoints, runtime_image, devcontainer_config, mise_config, services_json, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
