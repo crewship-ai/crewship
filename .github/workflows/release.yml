@@ -276,6 +276,13 @@ jobs:
       - name: Read the pinned catalog
         id: catalog
         run: bash scripts/ci/craft-catalog-pins.sh tools/craft-components/catalog.txt >> "$GITHUB_OUTPUT"
+      - name: Require the pinned catalog before building
+        env:
+          PINS: ${{ steps.catalog.outputs.pins }}
+        run: |
+          set -euo pipefail
+          [[ "$PINS" =~ ^[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64}(,[a-z]+=[A-Za-z0-9.+_-]+=[0-9a-f]{64})*$ ]] || {
+            echo "::error::empty or malformed craft pins"; exit 1; }
       - name: Build immutable release image candidate
         id: build
         uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
@@ -336,6 +343,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      contents: read
       packages: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
@@ -353,6 +361,7 @@ jobs:
           DIGEST: ${{ needs.docker.outputs.digest }}
         run: |
           set -euo pipefail
+          [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]] || { echo "::error::malformed image digest: '$DIGEST'"; exit 1; }
           TAGS="$(bash scripts/ci/release-image-tags.sh "$GITHUB_REF_NAME" "$IMAGE")"
           args=()
           while IFS= read -r tag; do
