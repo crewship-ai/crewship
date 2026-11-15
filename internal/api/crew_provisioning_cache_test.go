@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/moby/moby/api/types/image"
@@ -300,6 +301,33 @@ func TestCacheDelete_ForceBypassesReferenceCheckAndInvalidatesCache(t *testing.T
 	// fresh Docker state.
 	if h.imgListCache.images != nil {
 		t.Errorf("expected image-list cache to be invalidated after delete")
+	}
+}
+
+// A forced delete removes the tag it was given. Removing the artifact by ID
+// with force would drop every other alias too, such as the crewship-env/* tag
+// a complete-environment restore publishes for the same image.
+func TestCacheDelete_ForceRemovesTheNamedTagNotEveryAlias(t *testing.T) {
+	id := "sha256:" + strings.Repeat("c", 64)
+	fake := &fakeGCClient{
+		images: []image.Summary{
+			{ID: id, RepoTags: []string{"crewship-cache:shared", "crewship-env/restored:1"}, Created: 1700000000},
+		},
+	}
+	h := newCacheTestHandler(t, fake)
+	userID := seedTestUser(t, h.db)
+	wsID := seedTestWorkspace(t, h.db, userID)
+
+	req := httptest.NewRequest("DELETE", "/api/v1/cache/crewship-cache:shared?force=true", nil)
+	req.SetPathValue("tag", "crewship-cache:shared")
+	req = withWorkspaceUser(req, userID, wsID, "OWNER")
+	rr := httptest.NewRecorder()
+	h.CacheDelete(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Fatalf("force delete code = %d body=%s, want 200", rr.Code, rr.Body.String())
+	}
+	if len(fake.removedImages) != 1 || fake.removedImages[0] != "crewship-cache:shared" {
+		t.Errorf("removedImages = %v, want only the named tag", fake.removedImages)
 	}
 }
 

@@ -51,6 +51,10 @@ const imageListCacheTTL = 10 * time.Second
 
 const cacheImagePrefix = "crewship-cache:"
 
+// cacheDeleteGateBudget bounds the work a manual cache delete does while it
+// holds the image-use gate exclusively.
+const cacheDeleteGateBudget = 15 * time.Second
+
 // CacheImageInfo describes a cached devcontainer image for the CLI/UI.
 
 type CacheImageInfo struct {
@@ -230,6 +234,11 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer releaseImages()
+	// The exclusive gate holds back crew create, update, onboarding and
+	// restore. Bound the daemon and database work done under it, so a wedged
+	// daemon costs this request, not every crew edit.
+	ctx, cancel := context.WithTimeout(r.Context(), cacheDeleteGateBudget)
+	defer cancel()
 	releaseArtifact, available := resourcelifecycle.Images(h.db).TryCollectImages(tag)
 	if !available {
 		replyError(w, http.StatusConflict, "this image is being acquired or built; retry deletion later")
@@ -237,7 +246,7 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 	}
 	defer releaseArtifact()
 	// Output tags and immutable base IDs are both acquisition keys.
-	inventory, inventoryErr := h.gcClient.ImageList(r.Context(), client.ImageListOptions{All: true})
+	inventory, inventoryErr := h.gcClient.ImageList(ctx, client.ImageListOptions{All: true})
 	if inventoryErr != nil {
 		replyInternalError(w, h.logger, "resolve image deletion target", inventoryErr)
 		return
@@ -260,12 +269,15 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 
 	force := r.URL.Query().Get("force") == "true"
 	removeRef := tag
-	if dockerutil.IsLocalImageID(candidateID) {
+	// A forced delete removes the named tag, as it always has. Forcing by
+	// image ID would drop every other alias of the artifact too, including
+	// a crewship-env/* tag a restore published.
+	if !force && dockerutil.IsLocalImageID(candidateID) {
 		removeRef = candidateID
 	}
 
 	if !force {
-		refs, err := h.referencedCacheImages(r.Context())
+		refs, err := h.referencedCacheImages(ctx)
 		if err != nil {
 			replyInternalError(w, h.logger, "query referenced cache images", err)
 			return
@@ -315,7 +327,7 @@ func (h *ProvisioningHandler) CacheDelete(w http.ResponseWriter, r *http.Request
 	// Use the narrow gcClient interface — same underlying *client.Client, but
 	// keeps the destructive surface aligned with the orphan sweeper for both
 	// readability and test parity.
-	_, err := h.gcClient.ImageRemove(r.Context(), removeRef, client.ImageRemoveOptions{Force: force, PruneChildren: true})
+	_, err := h.gcClient.ImageRemove(ctx, removeRef, client.ImageRemoveOptions{Force: force, PruneChildren: true})
 	if err != nil {
 		h.logger.Error("docker image remove", "tag", tag, "error", err)
 		replyError(w, http.StatusInternalServerError, "Failed to remove cached image")

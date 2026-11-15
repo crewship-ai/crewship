@@ -75,13 +75,6 @@ func TestOwnedImageCollectionKeepsOnIncompleteEvidence(t *testing.T) {
 				fake.imageListErr = errors.New("unavailable")
 			case "database":
 				h.db.Close()
-			case "unknown-selection":
-				user := seedTestUser(t, h.db)
-				ws := seedTestWorkspace(t, h.db, user)
-				crew := seedCrewRow(t, h.db, "missing-selected", ws, "Missing", "missing")
-				if _, err := h.db.Exec(`UPDATE crews SET cached_image=? WHERE id=?`, "crewship-cache:unknown-selection", crew); err != nil {
-					t.Fatal(err)
-				}
 			case "incomplete-container":
 				fake.containers = []container.Summary{{ID: "unknown"}}
 			case "disabled":

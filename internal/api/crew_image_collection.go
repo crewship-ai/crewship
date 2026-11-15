@@ -94,11 +94,14 @@ func (h *ProvisioningHandler) collectOwnedImages(ctx context.Context) {
 		return
 	}
 	cutoff := time.Now().Add(-ownedImageMinAge).Unix()
+	h.mu.RLock()
+	owner := h.instanceID
+	h.mu.RUnlock()
 	for _, img := range listed.Items {
 		if ctx.Err() != nil {
 			return
 		}
-		if !ownedImage(img, h.instanceID) || img.Created <= 0 || img.Created > cutoff || used[img.ID] || protected[img.ID] {
+		if !ownedImage(img, owner) || img.Created <= 0 || img.Created > cutoff || used[img.ID] || protected[img.ID] {
 			continue
 		}
 		h.removeCollectedImage(ctx, img, true)
