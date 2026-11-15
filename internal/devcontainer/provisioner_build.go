@@ -380,8 +380,20 @@ func (p *Provisioner) recordProvisionSteps(
 		return fmt.Errorf("agent home: %w", err)
 	}
 	if miseConfig != "" {
-		if err := p.installMise(ctx, noContainer, miseConfig, rec.exec); err != nil {
+		tools, err := ParseMiseConfig(miseConfig)
+		if err != nil {
 			return fmt.Errorf("mise provisioning: %w", err)
+		}
+		if err := tools.Validate(); err != nil {
+			return fmt.Errorf("mise provisioning: %w", err)
+		}
+		if err := p.installMiseConfig(ctx, noContainer, tools, rec.exec); err != nil {
+			return fmt.Errorf("mise provisioning: %w", err)
+		}
+		if !tools.IsEmpty() {
+			if err := p.cleanupMiseBuildCache(ctx, noContainer, rec.exec, containerEnv); err != nil {
+				return fmt.Errorf("mise cache cleanup: %w", err)
+			}
 		}
 	}
 	if err := p.runFeatureLifecycleCommands(ctx, noContainer, features, rec.exec); err != nil {
