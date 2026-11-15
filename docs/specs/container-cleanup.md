@@ -154,7 +154,10 @@ restarts the window, and the record of an image that is gone or was removed is
 dropped. Passes (every 30 minutes) are the only observations: a use shorter
 than that interval is not seen, and after more than two hours without a
 completed pass (collection switched off, the server down) every window starts
-over. An image's age alone is not a grace period. Current selections, configured bases,
+over. A host that is stopped or asleep for more than two hours every day
+therefore never completes a window and never collects; that is the safe
+direction, and such a host should prune by hand. An image's age alone is not a
+grace period. Current selections, configured bases,
 `last_selected_image` and `previous_image` are protected. A soft-deleted crew
 keeps the same protection for 7 days after its deletion, so reviving it does
 not rebuild its environment; a deletion time that cannot be read protects. SQLite records successful immutable selection
