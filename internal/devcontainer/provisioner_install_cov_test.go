@@ -702,8 +702,7 @@ func TestCleanupCaches(t *testing.T) {
 	}
 }
 
-// mainCleanupScript is the cleanup script as it was before #5384, byte for
-// byte. Keeping the mise build cache must reproduce it exactly.
+// mainCleanupScript checks the non-mise cleanup paths and symlink guard.
 const mainCleanupScript = `set -u
 for path in \
   /var/cache/apt \
@@ -717,7 +716,8 @@ for path in \
   /root/.yarn/cache \
   /home/agent/.cache/pip \
   /home/agent/.npm; do
-  rm -rf "$path"/* "$path"/.[!.]* 2>/dev/null || true
+  [ ! -L "$path" ] || continue
+  rm -rf "$path"/* "$path"/.[!.]* "$path"/..?* 2>/dev/null || true
 done
 # Keep mountpoints /tmp and /var/tmp themselves; recreate if the rm wiped them.
 mkdir -p /tmp /var/tmp
@@ -765,6 +765,8 @@ func TestRuntimeReadsMiseBuildCache(t *testing.T) {
 		{"runtime default", ensureAgentToolPath(nil), false},
 		{"operator points the runtime at the build cache", map[string]string{"MISE_CACHE_DIR": "/opt/mise/cache"}, true},
 		{"same directory, different spelling", map[string]string{"MISE_CACHE_DIR": " /opt/mise//cache/ "}, true},
+		{"runtime descendant", map[string]string{"MISE_CACHE_DIR": "/opt/mise/cache/runtime"}, true},
+		{"normalized descendant", map[string]string{"MISE_CACHE_DIR": "/opt/mise/cache/tmp/../runtime"}, true},
 		{"another directory", map[string]string{"MISE_CACHE_DIR": "/opt/mise/cache2"}, false},
 		{"empty value", map[string]string{"MISE_CACHE_DIR": ""}, false},
 	}

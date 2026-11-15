@@ -199,6 +199,14 @@ Parser lives in `internal/devcontainer/config.go`:
 
 mise tools are installed as the `agent` user (UID 1001) under `/opt/mise` — data and shims in `/opt/mise/data`, the global config in `/opt/mise/config/config.toml` — and the runtime container carries the matching `MISE_*` variables (cache and state, the two mise writes to on every call, point under `/home/agent`, the writable volume: the container's root filesystem is read-only). Not under `/home/agent` for the tools themselves: that directory is a per-crew named volume at runtime, and a volume hides whatever the image has at its mount point, so tools installed into the home inside the image were absent from the running container. `/opt/mise` is image-resident and survives cache rebuilds.
 
+Mise's build cache at `/opt/mise/cache` is emptied before committing a new image.
+A runtime `containerEnv.MISE_CACHE_DIR` pointing there or below it preserves the
+cache. Cleanup skips symlink roots. Build-only provisioning also cleans this
+cache in the installation RUN; deleting it in a later RUN would leave the
+downloaded bytes in the earlier layer. Existing cached images are unchanged,
+and the saving depends on what a fresh build downloads.
+
+
 ### The agent's PATH
 
 The agent runs through a non-login `docker exec`, which does not read `/etc/profile.d`. The build therefore puts the agent's own tool directories at the front of the image `PATH` — `/home/agent/.local/bin`, `/opt/crewship/bin` and `/opt/mise/data/shims` — in the image `ENV`, in `/etc/environment` and in the runtime container environment, so every mise tool and every agent-installed CLI resolves without a login shell. At container start the runtime merges three sources into one PATH — these directories, the build's aggregated `containerEnv` PATH (feature-declared directories and the image's own, with `${containerEnv:PATH}` expanded), and the login PATH captured at build time — so nothing a feature or a profile script added is lost, and a captured login PATH that does not know about mise's shims cannot hide them. You do not need to spell these out in `containerEnv.PATH`; a `PATH` you set there is kept behind them.
