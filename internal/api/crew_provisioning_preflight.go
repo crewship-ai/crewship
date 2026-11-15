@@ -10,9 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/moby/moby/client"
-
 	"github.com/crewship-ai/crewship/internal/diskusage"
+	dockerprovider "github.com/crewship-ai/crewship/internal/provider/docker"
 )
 
 // Storage check before a crew image build (#5391).
@@ -116,29 +115,26 @@ func buildMinFreeFromEnv() (floor int64, invalid bool) {
 	return int64(gb) << 30, false
 }
 
-// dockerInfoClient is the part of the Docker client the storage probe needs.
-type dockerInfoClient interface {
-	DaemonHost() string
-	Info(ctx context.Context, options client.InfoOptions) (client.SystemInfoResult, error)
-}
+// dockerStorageFunc answers where the daemon keeps its data and what it runs
+// on (dockerprovider.DaemonStorage).
+type dockerStorageFunc func(ctx context.Context) (rootDir, operatingSystem string, err error)
 
 // measurableDockerRoot returns Docker's root directory when free space
 // measured by this process is the daemon's free space: the daemon is reached
 // over a local Unix socket, is not Docker Desktop (its storage is a VM disk),
 // and the directory exists here. A server running in a container without the
 // directory mounted, a remote daemon and a VM-backed daemon all answer false.
-func measurableDockerRoot(ctx context.Context, docker dockerInfoClient, stat func(string) error) (string, bool) {
-	if docker == nil || !strings.HasPrefix(docker.DaemonHost(), "unix://") {
+func measurableDockerRoot(ctx context.Context, daemonHost string, storage dockerStorageFunc, stat func(string) error) (string, bool) {
+	if storage == nil || !strings.HasPrefix(daemonHost, "unix://") {
 		return "", false
 	}
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	info, err := docker.Info(ctx, client.InfoOptions{})
+	root, operatingSystem, err := storage(ctx)
 	if err != nil {
 		return "", false
 	}
-	root := info.Info.DockerRootDir
-	if root == "" || !filepath.IsAbs(root) || strings.Contains(info.Info.OperatingSystem, "Docker Desktop") {
+	if root == "" || !filepath.IsAbs(root) || strings.Contains(operatingSystem, "Docker Desktop") {
 		return "", false
 	}
 	if stat(root) != nil {
@@ -174,7 +170,9 @@ func (h *ProvisioningHandler) EnableBuildStoragePreflight() {
 			if h.docker == nil {
 				return "", false
 			}
-			return measurableDockerRoot(ctx, h.docker, func(p string) error { _, err := os.Stat(p); return err })
+			return measurableDockerRoot(ctx, h.docker.DaemonHost(),
+				func(ctx context.Context) (string, string, error) { return dockerprovider.DaemonStorage(ctx, h.docker) },
+				func(p string) error { _, err := os.Stat(p); return err })
 		},
 		usage:         diskusage.Usage,
 		dockerMinFree: floor,

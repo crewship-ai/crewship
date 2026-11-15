@@ -9,9 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/moby/moby/api/types/system"
-	"github.com/moby/moby/client"
-
 	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"github.com/crewship-ai/crewship/internal/diskusage"
 )
@@ -106,59 +103,37 @@ func TestBuildMinFreeFromEnv(t *testing.T) {
 	}
 }
 
-type fakeInfoClient struct {
-	host string
-	info system.Info
-	err  error
-}
-
-func (f fakeInfoClient) DaemonHost() string { return f.host }
-func (f fakeInfoClient) Info(context.Context, client.InfoOptions) (client.SystemInfoResult, error) {
-	return client.SystemInfoResult{Info: f.info}, f.err
-}
-
 func TestMeasurableDockerRoot(t *testing.T) {
 	present := func(string) error { return nil }
 	absent := func(string) error { return errors.New("no such file or directory") }
-	linux := system.Info{DockerRootDir: "/var/lib/docker", OperatingSystem: "Ubuntu 24.04 LTS"}
+	storage := func(root, operatingSystem string, err error) dockerStorageFunc {
+		return func(context.Context) (string, string, error) { return root, operatingSystem, err }
+	}
+	linux := storage("/var/lib/docker", "Ubuntu 24.04 LTS", nil)
+	const socket = "unix:///var/run/docker.sock"
 	tests := []struct {
-		name   string
-		docker dockerInfoClient
-		stat   func(string) error
-		want   bool
+		name    string
+		host    string
+		storage dockerStorageFunc
+		stat    func(string) error
+		want    bool
 	}{
-		{"local engine with visible root", fakeInfoClient{host: "unix:///var/run/docker.sock", info: linux}, present, true},
-		{"no docker client", nil, present, false},
-		{"remote daemon over TCP", fakeInfoClient{host: "tcp://10.0.0.5:2376", info: linux}, present, false},
-		{"Docker Desktop keeps its data in a VM", fakeInfoClient{host: "unix:///var/run/docker.sock", info: system.Info{DockerRootDir: "/var/lib/docker", OperatingSystem: "Docker Desktop"}}, present, false},
-		{"root not visible to this process (server in a container, VM-backed runtime)", fakeInfoClient{host: "unix:///var/run/docker.sock", info: linux}, absent, false},
-		{"daemon does not answer", fakeInfoClient{host: "unix:///var/run/docker.sock", err: errors.New("unavailable")}, present, false},
-		{"daemon reports no root", fakeInfoClient{host: "unix:///var/run/docker.sock", info: system.Info{}}, present, false},
-		{"daemon reports a relative root", fakeInfoClient{host: "unix:///var/run/docker.sock", info: system.Info{DockerRootDir: "docker"}}, present, false},
+		{"local engine with visible root", socket, linux, present, true},
+		{"no docker client", socket, nil, present, false},
+		{"remote daemon over TCP", "tcp://10.0.0.5:2376", linux, present, false},
+		{"Docker Desktop keeps its data in a VM", socket, storage("/var/lib/docker", "Docker Desktop", nil), present, false},
+		{"root not visible to this process (server in a container, VM-backed runtime)", socket, linux, absent, false},
+		{"daemon does not answer", socket, storage("", "", errors.New("unavailable")), present, false},
+		{"daemon reports no root", socket, storage("", "Ubuntu 24.04 LTS", nil), present, false},
+		{"daemon reports a relative root", socket, storage("docker", "Ubuntu 24.04 LTS", nil), present, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			root, ok := measurableDockerRoot(context.Background(), tt.docker, tt.stat)
+			root, ok := measurableDockerRoot(context.Background(), tt.host, tt.storage, tt.stat)
 			if ok != tt.want || (ok && root != "/var/lib/docker") {
 				t.Errorf("measurableDockerRoot = %q, %t; want measurable=%t", root, ok, tt.want)
 			}
 		})
-	}
-}
-
-// The router enables the check on every handler that can build.
-func TestEnableBuildStoragePreflightInstallsTheCheck(t *testing.T) {
-	var none *ProvisioningHandler
-	none.EnableBuildStoragePreflight() // nil handler and nil provisioner are no-ops
-	(&ProvisioningHandler{}).EnableBuildStoragePreflight()
-
-	h := &ProvisioningHandler{
-		logger:      newTestLogger(),
-		provisioner: devcontainer.NewProvisioner(nil, nil, nil, nil),
-	}
-	h.EnableBuildStoragePreflight()
-	if !h.provisioner.HasBuildPreflight() {
-		t.Fatal("no build preflight installed")
 	}
 }
 

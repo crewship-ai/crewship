@@ -1701,6 +1701,21 @@ func verifySidecarIsLinuxELF(path string) error {
 // Info() failure ⇒ VM-backed/remote, where we must trust VolumeInspect instead.
 // This is more reliable than a GOOS check (Docker Desktop on Linux is VM-backed
 // too).
+// DaemonStorage reports where the daemon keeps its data and what it runs on:
+// Info's DockerRootDir and OperatingSystem. Callers outside this package use
+// it instead of calling Info themselves, so the daemon API surface stays in
+// one place.
+func DaemonStorage(ctx context.Context, cli *client.Client) (rootDir, operatingSystem string, err error) {
+	if cli == nil {
+		return "", "", fmt.Errorf("docker: no client")
+	}
+	info, err := cli.Info(ctx, client.InfoOptions{})
+	if err != nil {
+		return "", "", err
+	}
+	return info.Info.DockerRootDir, info.Info.OperatingSystem, nil
+}
+
 func daemonSharesHostFS(ctx context.Context, cli *client.Client) bool {
 	info, err := cli.Info(ctx, client.InfoOptions{})
 	if err != nil || info.Info.DockerRootDir == "" {
