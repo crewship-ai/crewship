@@ -250,7 +250,8 @@ class GateTests(unittest.TestCase):
     def test_craft_rebuild_inputs(self):
         for path in ['tools/craft-components/catalog.txt', 'tools/craft-components/patches/gridcraft-wasi.patch',
                      'scripts/build-craft-components.py', 'scripts/build-mooring-runtime.py', 'mooring/build-tools.json',
-                     'scripts/check-craft-packages.sh', '.github/workflows/ci.yml', 'scripts/ci/plan.py', 'scripts/ci/verdict.py']:
+                     'scripts/check-craft-packages.sh', 'scripts/ci/craft-catalog-pins.sh', '.github/workflows/ci.yml',
+                     'scripts/ci/plan.py', 'scripts/ci/verdict.py']:
             self.assertTrue(craft_changed([path]), path)
         self.assertFalse(craft_changed(['components/button.tsx', 'docs/guide.mdx', 'internal/api/foo.go']))
 
