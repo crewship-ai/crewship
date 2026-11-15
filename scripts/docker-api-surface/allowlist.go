@@ -224,8 +224,8 @@ var allowList = []Endpoint{
 	},
 	{
 		Method: "Info", HTTP: "GET /info", ProxyVars: []string{"INFO"},
-		Tier: TierCore, Packages: []string{"internal/api", "internal/provider/docker"},
-		Why: "detects the cgroup version and whether the daemon shares the host filesystem, and finds Docker's storage directory for the free-space check before a build",
+		Tier: TierCore, Packages: []string{"internal/provider/docker"},
+		Why: "detects the cgroup version and whether the daemon shares the host filesystem",
 	},
 	{
 		Method: "NetworkConnect", HTTP: "POST /networks/{id}/connect", ProxyVars: []string{"NETWORKS", proxyVarPOST},

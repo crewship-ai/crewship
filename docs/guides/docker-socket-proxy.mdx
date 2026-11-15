@@ -154,7 +154,7 @@ API puts exec *creation* under `/containers`, so `EXEC: 0` does not stop it.
 
 | SDK method | Engine API | Why we call it |
 | --- | --- | --- |
-| `Info` | `GET /info` | Cgroup version and whether the daemon shares the host filesystem; Docker's storage directory for the free-space check before a build |
+| `Info` | `GET /info` | Cgroup version and whether the daemon shares the host filesystem |
 | `Ping` | `HEAD /_ping` (`GET` on fallback) | Reachability probe during socket detection |
 | `ServerVersion` | `GET /version` | Distinguishes dockerd from a nerdctl-style shim |
 
