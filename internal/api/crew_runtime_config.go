@@ -551,7 +551,7 @@ func (c *CrewConfigCompleter) AcquireCrewImages(ctx context.Context, cfg provide
 }
 
 func acquireCrewImages(ctx context.Context, db *sql.DB, cfg provider.CrewConfig) (provider.CrewConfig, func(), error) {
-	refs := []resourcelifecycle.ImageReference{{Ref: cfg.CachedImage, Required: cfg.CachedImage != ""}, {Ref: cfg.Image, Required: isLocalEnvironmentReference(cfg.Image)}}
+	refs := []resourcelifecycle.ImageReference{{Ref: cfg.CachedImage, Required: cfg.CachedImage != ""}, {Ref: cfg.Image, Required: cfg.CachedImage == "" && isLocalEnvironmentReference(cfg.Image)}}
 	resolved, release, err := resourcelifecycle.Images(db).Acquire(ctx, refs)
 	if err != nil {
 		return cfg, nil, err

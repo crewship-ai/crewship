@@ -109,3 +109,25 @@ func TestRuntimeInputsRequireMissingLocalAliasesButNotFutureBuildOutputs(t *test
 		t.Fatal("service treated missing local environment as a remote pull")
 	}
 }
+
+func TestSelectedEnvironmentDoesNotRequireItsMissingUnusedBase(t *testing.T) {
+	db := setupTestDB(t)
+	selected := "sha256:" + strings.Repeat("a", 64)
+	missingBase := "crewship-cache:removed-base-alias"
+	resourcelifecycle.Images(db).SetReferenceProtector(imageProtectionFunc(func(_ context.Context, refs []resourcelifecycle.ImageReference) (map[string]string, error) {
+		for _, ref := range refs {
+			if ref.Ref == missingBase && ref.Required {
+				return nil, errors.New("unused base was made required")
+			}
+		}
+		return map[string]string{selected: selected}, nil
+	}))
+	cfg, release, err := acquireCrewImages(t.Context(), db, provider.CrewConfig{CachedImage: selected, Image: missingBase})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if cfg.CachedImage != selected {
+		t.Fatal("runnable selected environment was replaced")
+	}
+}
