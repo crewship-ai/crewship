@@ -620,8 +620,6 @@ func (h *PipelineHandler) applyEffectiveVersions(ctx context.Context, rows []sch
 	}
 }
 
-// withEffectiveVersion is applyEffectiveVersions for a single-row response
-// (create / update / activate).
 // Seams for the per-request read counts (tests only).
 var (
 	scheduleArtifactFlag = featureflags.IsEnabledWith
@@ -685,6 +683,8 @@ func (h *PipelineHandler) withArtifactAccess(r *http.Request, access *pipeline.S
 	return row
 }
 
+// withEffectiveVersion is applyEffectiveVersions for a single-row response
+// (create / update / activate).
 func (h *PipelineHandler) withEffectiveVersion(ctx context.Context, row scheduleResponse) scheduleResponse {
 	batch := []scheduleResponse{row}
 	h.applyEffectiveVersions(ctx, batch)

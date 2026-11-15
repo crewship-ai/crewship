@@ -1807,8 +1807,10 @@ person, `creator_not_member`, `creator_suspended`, `creator_access_revoked`,
 `creator_role` or `creator_restricted`; those five are shown only to the
 creator and to workspace OWNER/ADMIN, everyone else sees
 `creator_not_in_good_standing`. The state is computed with the same check
-every fire runs. A change to what the schedule runs (for example
-`schedules update <id> --cron …`) by a person in good standing restores it.
+every fire runs. Except for `routine_agent_authored`, a change to what the
+schedule runs (for example `schedules update <id> --cron …`) by a person in
+good standing restores it; `routine_agent_authored` clears only when the
+schedule runs a routine a person authored.
 With the flag off ARTIFACTS is `—`.
 
 A schedule pinned to a specific routine version shows the pin in the ROUTINE column as `slug@vN` (e.g. `daily-digest@v3`). The `--json` output carries it as `target_pipeline_version`, plus `last_status` (`COMPLETED` | `FAILED` | `SKIPPED` | `WAITING` — `WAITING` means the run parked on an approval gate, which is healthy, not a failure).

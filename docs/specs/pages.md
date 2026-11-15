@@ -768,8 +768,9 @@ owner on 2026-11-13.
    agent, an automation, an issue, a page action and a wake check record
    nothing and their steps reach no artifact, and neither does a routine an
    agent authored, whoever starts it. All of these fail closed. A scheduled
-   step refused because of its schedule's creator, or a schedule claim the
-   host did not make, is journaled as `artifact.run_capability_withheld`
+   step refused because of its schedule's creator or its routine's agent
+   author, or a schedule claim the host did not make, is journaled as
+   `artifact.run_capability_withheld`
    once per schedule fire (not per step), flag on only. Its reason is
    `schedule_fire_unverified`, `schedule_target_mismatch`,
    `schedule_saved_by_agent`, `schedule_routine_agent_authored`,
