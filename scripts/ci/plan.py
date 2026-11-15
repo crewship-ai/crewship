@@ -56,7 +56,8 @@ def full_matrix(event_name, paths, labels):
 CRAFT_PREFIXES = ('tools/craft-components/',)
 CRAFT_FILES = {
     'scripts/build-craft-components.py', 'scripts/test_build_craft_components.py', 'scripts/build-mooring-runtime.py',
-    'mooring/build-tools.json', 'scripts/check-craft-packages.sh', '.github/workflows/ci.yml',
+    'mooring/build-tools.json', 'scripts/check-craft-packages.sh', 'scripts/ci/craft-catalog-pins.sh',
+    '.github/workflows/ci.yml',
     '.github/workflows/release.yml', 'scripts/ci/plan.py', 'scripts/ci/verdict.py',
 }
 
