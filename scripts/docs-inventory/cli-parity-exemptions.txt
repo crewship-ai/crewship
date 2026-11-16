@@ -32,8 +32,10 @@ PUT /api/v1/crews/{crewId}                         alias of PATCH on the same ha
 GET /api/v1/pages/{slug}/artifact/versions         alias of GET /api/v1/pages/{slug}/artifact on the same handler (GetArtifactProject), which `crewship page artifact versions` reads
 GET /api/v1/crews/{crewId}/issues/{identifier}     redundant with GET /api/v1/issues/{identifier} (identifiers are workspace-unique), which `crewship issue get` reads
 
+# --- Pre-existing gaps ------------------------------------------------------
 # Legacy template API is used by the UI and stores a different JSON shape in
 # the same table as workflow templates. Do not promote its weakly validated
-# writes through a dedicated CLI; reconcile the two consumers before removal.
+# writes through a dedicated CLI; reconcile the two consumers before removal
+# (tracked in #5431).
 /api/v1/templates                                  UI gallery uses this legacy shape; its writes bypass workflow-stage validation
 /api/v1/templates/{templateId}                     UI gallery uses this legacy shape; its writes bypass workflow-stage validation
