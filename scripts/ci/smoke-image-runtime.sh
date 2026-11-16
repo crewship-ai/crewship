@@ -38,11 +38,18 @@ CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags conformance -o "$work/r
 chmod 755 "$work/runtime.test"
 docker pull --platform "$platform" debian:bookworm-slim >/dev/null
 docker network create --internal "$prefix" >/dev/null
-docker run -d --name "$prefix-proxy" --network "$prefix" \
+docker run -d --name "$prefix-proxy" --network "$prefix" -p 127.0.0.1::2375 \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   -e POST=1 -e CONTAINERS=1 -e EXEC=1 -e IMAGES=1 -e NETWORKS=1 \
   -e VOLUMES=1 -e INFO=1 -e PING=1 -e VERSION=1 -e EVENTS=0 \
   tecnativa/docker-socket-proxy:v0.5.0 >/dev/null
+proxy_port=$(docker port "$prefix-proxy" 2375/tcp | awk -F: '{print $NF}')
+proxy_ready=0
+for _ in $(seq 1 30); do
+  if curl -fsS --max-time 2 "http://127.0.0.1:$proxy_port/_ping" >/dev/null 2>&1; then proxy_ready=1; break; fi
+  sleep 1
+ done
+[ "$proxy_ready" = 1 ] || { echo 'Socket proxy did not become ready' >&2; exit 1; }
 start_server() {
   local name=$1
   docker run -d --platform "$platform" --name "$name" --network "$prefix" \
