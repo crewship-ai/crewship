@@ -43,6 +43,7 @@ type scheduleResponse struct {
 	Enabled          bool           `json:"enabled"`
 	LastRunAt        *time.Time     `json:"last_run_at,omitempty"`
 	LastStatus       string         `json:"last_status,omitempty"`
+	LastSkipReason   string         `json:"last_skip_reason,omitempty"`
 	LastRunID        string         `json:"last_run_id,omitempty"`
 	// NextRunAt is when the schedule will actually be picked up next: the
 	// nominal cron occurrence plus the stable spread offset (when a spread is
@@ -224,6 +225,7 @@ func (h *PipelineHandler) toScheduleResponse(s *pipeline.Schedule, slug, wakeSlu
 		Enabled:                s.Enabled,
 		LastRunAt:              s.LastRunAt,
 		LastStatus:             s.LastStatus,
+		LastSkipReason:         s.LastSkipReason,
 		LastRunID:              s.LastRunID,
 		NextRunAt:              s.EffectiveNextRunAt(),
 		NextOccurrenceAt:       nominalNextRun(s),
