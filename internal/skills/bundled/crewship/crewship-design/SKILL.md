@@ -108,6 +108,9 @@ access audit but cannot write.
   one. A new node needs `id`, `type` (`frame`, `rect`, `text` or `image`) and
   numeric `x`, `y`, `width` and `height`. Optional fields are `name`, `fill`, `parentId`, `text`, `src`, `linkTo`, `fontFamily`, `fontWeight`, `fontSize`, `lineHeight`, `textAlign`, `textWrap`, `overflow`, `hidden`, `locked`, `radius`, `stroke` and `strokeWidth`.
   Other node fields are refused.
+  Leave text style fields out unless asked to change the look. Change `hidden`
+  or `locked` only when asked to hide or lock a layer; change `radius`, `stroke`
+  or `strokeWidth` only when asked for corners or a border.
 - `delete` removes the node with that `id` from the canvas and the order.
 - `reorder` replaces the whole drawing order. Include every existing node ID
   once, in the new order. An ID that does not exist is refused.

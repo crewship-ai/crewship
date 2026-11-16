@@ -28,6 +28,10 @@ operations:
 - `{"op":"reorder","order":[...]}` replaces the whole order and may name only
   existing nodes.
 
+Leave text style fields out unless asked to change the look. Change `hidden`
+or `locked` only when asked to hide or lock a layer; change `radius`, `stroke`
+or `strokeWidth` only when asked for corners or a border.
+
 ## Limits
 
 - At most 2000 nodes and 4 MiB of encoded canvas state.

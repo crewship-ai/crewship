@@ -63,6 +63,18 @@ func TestEveryGuideAnswersTheAgentContract(t *testing.T) {
 	}
 }
 
+func TestDesignGuideKeepsExplicitStyleIntent(t *testing.T) {
+	guide, err := Lookup("design")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rule := range []string{"unless asked to change the look", "only when asked to hide or lock", "only when asked for corners or a border"} {
+		if !strings.Contains(guide.Content, rule) {
+			t.Errorf("design guide lacks %q", rule)
+		}
+	}
+}
+
 // The shared rules are one source appended to every guide; the strings below
 // preserve the shared safety contract for every kind.
 func TestSharedRulesReachEveryGuide(t *testing.T) {

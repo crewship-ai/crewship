@@ -217,6 +217,10 @@ at most 1,000,000 and non-negative size. Keep existing node IDs when changing
 color, text or geometry. A canvas holds at most 2000 nodes and 4 MiB of
 encoded state; arguments are bounded to 1 MiB.
 
+Leave text style fields out unless asked to change the look. Change `hidden`
+or `locked` only when asked to hide or lock a layer; change `radius`, `stroke`
+or `strokeWidth` only when asked for corners or a border.
+
 `design_apply` changes the live Yjs document seen by live-authorized people, also without an
 open browser, and each successful call publishes a new retained version
 returned as `version`. `design_snapshot` saves the current live canvas,
