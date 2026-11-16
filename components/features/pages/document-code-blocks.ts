@@ -172,7 +172,7 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
         header.append(label, toggle, copy, status)
         pre.append(code); dom.append(header, preview, pre)
         let current = node, reset: ReturnType<typeof setTimeout> | undefined, pending: ReturnType<typeof setTimeout> | undefined, destroyed = false
-        let shown: { language: string; source: string } | null = null, ownMode: "source" | "preview" = "preview", slow = false, forced = false
+        let shown: { language: string; source: string } | null = null, ownMode: "source" | "preview" = "preview", slow = false
         const blockId = () => typeof current.attrs.id === "string" ? current.attrs.id : null
         const language = () => languages && typeof current.attrs.language === "string" ? current.attrs.language : null
         const mode = () => { const id = blockId(); return (id ? modesOf(editor).get(id) : undefined) ?? ownMode }
@@ -183,9 +183,9 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
           const { from, to } = editor.state.selection
           return to > pos && from < pos + current.nodeSize
         }
-        const setMode = (next: "source" | "preview") => { ownMode = next; const id = blockId(); if (id) modesOf(editor).set(id, next); showPreview() }
+        const setMode = (next: "source" | "preview", requested = false) => { ownMode = next; const id = blockId(); if (id) modesOf(editor).set(id, next); showPreview(requested) }
 
-        function showPreview() {
+        function showPreview(requested = false) {
           const lang = language()
           const active = lang !== null && previewable(lang) && mode() === "preview"
           toggle.hidden = lang === null || !previewable(lang)
@@ -225,13 +225,12 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
             const budget = budgetOf(editor)
             budget.queue = budget.queue.then(async () => {
               if (!stillWanted()) return
-              if (budget.spent > PREVIEW_BUDGET_MS && !forced) {
+              if (budget.spent > PREVIEW_BUDGET_MS && !requested) {
                 const note = document.createElement("p"); note.dataset.codePaused = ""; note.setAttribute("role", "status")
                 note.textContent = "Previews on this page took long to draw. Choose Preview to draw this one."
                 preview.replaceChildren(note); delete preview.dataset.error; pre.hidden = false; slow = true
                 return
               }
-              forced = false
               let result: PreviewResult
               let started = 0
               try {
@@ -274,10 +273,12 @@ export function codeBlockView(base: AnyExtension, { languages }: { languages: bo
           }
           if (caretInside()) return
           // Choosing Preview always draws the current source, also after a slow render.
-          if (slow) { slow = false; forced = true; shown = null }
+          slow = false; shown = null
           // The reader asked for previews here: later blocks on this page may draw by themselves again.
           budgetOf(editor).spent = 0
-          setMode("preview")
+          // Older queued work may spend the fresh budget before this task runs.
+          // The explicit request belongs to this render, never a later update.
+          setMode("preview", true)
         })
         const followCaret = () => { if (mode() === "preview" && previewable(language()) && caretInside()) setMode("source") }
         editor.on("selectionUpdate", followCaret)

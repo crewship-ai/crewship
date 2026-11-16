@@ -41,6 +41,7 @@ it("renders an explicit Preview even when an earlier queued render spends the bu
   ed.commands.updateAttributes("codeBlock", { language: "math" })
   expect(block("requested").querySelector("pre")!.hidden).toBe(false)
   block("requested").querySelector<HTMLButtonElement>("[data-code-mode] button:last-child")!.click()
+  ed.commands.setTextSelection(1)
   // An unrelated block also becomes previewable while the first render is held.
   const at = position("automatic")
   ed.view.dispatch(ed.state.tr.setNodeMarkup(at, undefined, { ...ed.state.doc.nodeAt(at)!.attrs, language: "math" }))

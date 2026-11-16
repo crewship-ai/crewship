@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Choosing Preview in a Docs code block always requests its render (#5436).** Earlier queued previews can no longer consume the page budget and pause the block the reader explicitly chose. Automatic previews still respect that budget, and typing keeps the source visible.
+
 - **Adding a Microsoft Teams channel no longer fails with “shoutrrr url missing host” (#5434).** Creation and draft testing now validate the signed HTTPS workflow carried in the Teams URL query rather than requiring an outer host. Missing targets, HTTP, unsigned workflows, unknown hosts and provider mismatches remain rejected; legacy stored URLs keep their encrypted representation.
 
 - **Teams notifications keep working after the dependency update (#5421).** Existing signed workflow URLs are adapted to the updated notification library, and new channels retain the full HTTPS URL and signature. ⚠️ **Behaviour change:** unsigned workflow URLs and retired Office connector webhooks are rejected; copy the complete signed HTTPS URL from Teams Workflows.
