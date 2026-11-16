@@ -18,6 +18,17 @@ on:
         options:
           - linux/amd64
           - linux/arm64
+      upgrade_candidate_sha:
+        description: Optional exact source SHA for an isolated storage upgrade rehearsal
+        type: string
+      upgrade_from:
+        description: Previous immutable image for the rehearsal (synthetic data only)
+        type: string
+        default: ghcr.io/crewship-ai/crewship@sha256:0c5dfce36b09abd73f0913c311fdb69c7a8e01438cdf80e0bb0b2f3d1d19d970
+      previous_sha:
+        description: Expected source commit embedded in the previous image
+        type: string
+        default: d1bd5918dde8355c16fde4084b9662ca406930f5
       registry_image:
         description: Existing immutable image to smoke on BOTH architectures (skips build)
         type: string
@@ -31,7 +42,7 @@ permissions:
 # Cancellation is owned by the calling workflow.
 jobs:
   build:
-    if: ${{ !inputs.registry_image }}
+    if: ${{ !inputs.registry_image && !inputs.upgrade_candidate_sha }}
     name: PR Image Build
     runs-on: ubuntu-latest
     # release.yml's docker job gets 45 for a multi-arch (amd64+arm64) push
@@ -121,7 +132,7 @@ jobs:
 
   registry-smoke:
     name: Smoke existing registry image (both platforms)
-    if: github.event_name == 'workflow_dispatch' && inputs.registry_image != ''
+    if: github.event_name == 'workflow_dispatch' && inputs.registry_image != '' && inputs.upgrade_candidate_sha == ''
     runs-on: ubuntu-latest
     timeout-minutes: 15
     env:
@@ -143,3 +154,65 @@ jobs:
         run: |
           bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/amd64
           bash scripts/ci/smoke-image.sh "$IMAGE" "$SHA" linux/arm64
+
+  upgrade-rehearsal:
+    name: Isolated storage upgrade rehearsal
+    if: github.event_name == 'workflow_dispatch' && inputs.upgrade_candidate_sha != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SHA: ${{ inputs.upgrade_candidate_sha }}
+      BASELINE: ${{ inputs.upgrade_from }}
+      PREVIOUS_SHA: ${{ inputs.previous_sha }}
+      REGISTRY_IMAGE: ${{ inputs.registry_image }}
+    steps:
+      - name: Validate bounded immutable inputs
+        run: |
+          [[ "$SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$PREVIOUS_SHA" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$BASELINE" =~ ^ghcr\.io/crewship-ai/crewship@sha256:[0-9a-f]{64}$ ]]
+          [ -z "$REGISTRY_IMAGE" ]
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          ref: ${{ inputs.upgrade_candidate_sha }}
+          path: candidate
+          persist-credentials: false
+      - name: Record fixture and candidate identities
+        id: metadata
+        run: |
+          [ "$(git -C candidate rev-parse HEAD)" = "$SHA" ]
+          echo "Fixture source: $(git rev-parse HEAD)"
+          echo "Candidate source: $SHA"
+          echo "date=$(git -C candidate log -1 --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069
+      - name: Build exact candidate without publication
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc
+        with:
+          context: ./candidate
+          pull: true
+          no-cache-filters: runtime
+          platforms: linux/amd64
+          load: true
+          provenance: false
+          tags: crewship:upgrade-rehearsal
+          build-args: |
+            VERSION=ci-${{ inputs.upgrade_candidate_sha }}
+            COMMIT=${{ inputs.upgrade_candidate_sha }}
+            DATE=${{ steps.metadata.outputs.date }}
+          cache-from: type=gha,scope=pr-image-build
+      - name: Scan the exact rehearsal image
+        uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439
+        with:
+          image: crewship:upgrade-rehearsal
+          fail-build: true
+          severity-cutoff: critical
+          output-format: table
+      - name: Rehearse offline restore, upgrade and rollback
+        working-directory: candidate
+        env:
+          CREWSHIP_SMOKE_UPGRADE_FROM: ${{ inputs.upgrade_from }}
+          CREWSHIP_SMOKE_PREVIOUS_SHA: ${{ inputs.previous_sha }}
+        run: bash ../scripts/ci/smoke-image-runtime.sh crewship:upgrade-rehearsal "$SHA" linux/amd64
