@@ -12,6 +12,16 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 class WorkflowContracts(unittest.TestCase):
+    def test_claude_action_keeps_explicit_permissions_and_untrusted_pr_restrictions(self):
+        workflow = self.text('claude.yml')
+        step = self.step(workflow, 'Run Claude Code')
+        # v1.0.273 changed the default to auto; keep the prior mode and the
+        # restriction on executing code from authors without write access.
+        self.assertRegex(step, r'claude_args: --permission-mode acceptEdits\n')
+        self.assertRegex(step, r'restrict_untrusted_prs: true\n')
+        self.assertNotIn('bypassPermissions', step)
+        self.assertNotIn('allowed_bots:', step)
+
     def test_native_privacy_browser_cases_execute_in_required_frontend_shards(self):
         ci = self.text('ci.yml')
         lane = self.job(ci, 'frontend-test-shards')
