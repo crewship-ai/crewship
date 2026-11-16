@@ -9,8 +9,8 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider"
 )
 
-// opencodeAdapter wires sst.dev's `opencode` CLI (opencode-ai npm package,
-// 1.14.33 as of 2026-05). OpenCode is BYOK across providers: the user picks
+// opencodeAdapter wires the `opencode` CLI (@opencode/cli package,
+// 2.3.0 as of 2026-11-16). OpenCode is BYOK across providers: the user picks
 // which provider/model to route to via the -m flag (e.g. anthropic/claude-...)
 // and the corresponding provider's API key needs to be in the container env.
 //
@@ -40,7 +40,9 @@ func (opencodeAdapter) Name() string { return "OPENCODE" }
 func (opencodeAdapter) PromptViaStdin(req AgentRunRequest) bool { return false }
 
 func (opencodeAdapter) BuildCommand(req AgentRunRequest) []string {
-	cmd := []string{"opencode", "run", "--format", "json"}
+	// V2 can reuse a background server whose configuration and credentials
+	// came from another invocation. Always own a private server for this run.
+	cmd := []string{"opencode", "run", "--standalone", "--format", "json"}
 	if req.LLMModel != "" {
 		// OpenCode BYOKs across providers, so --model MUST be in
 		// "provider/model" form. A bare model (e.g. "claude-sonnet-4-6")
@@ -86,6 +88,7 @@ var openCodeProviderIDs = map[string]string{
 	"OPENCODE-GO":     "opencode-go",
 	"ZAI_CODING_PLAN": "zai-coding-plan",
 	"ZAI-CODING-PLAN": "zai-coding-plan",
+	"AWS_BEDROCK":     "amazon-bedrock",
 }
 
 // ModelNameProviderID infers the LLM provider id from a bare model name's
@@ -138,7 +141,7 @@ func qualifyOpenCodeModel(provider, model string) string {
 	// when the model names a vendor.
 	p := strings.ToUpper(strings.TrimSpace(provider))
 	switch p {
-	case "OPENCODE", "OPENCODE_GO", "OPENCODE-GO", "ZAI_CODING_PLAN", "ZAI-CODING-PLAN":
+	case "OPENCODE", "OPENCODE_GO", "OPENCODE-GO", "ZAI_CODING_PLAN", "ZAI-CODING-PLAN", "AWS_BEDROCK":
 		return openCodeProviderIDs[p] + "/" + model
 	}
 	if id := ModelNameProviderID(model); id != "" {
@@ -150,22 +153,15 @@ func qualifyOpenCodeModel(provider, model string) string {
 	return model
 }
 
-// ParseStreamLine satisfies the CLIAdapter interface for isolated lines. A
-// fresh parser has no cross-line memory, which is correct for a single line
-// (a first-seen accumulated snapshot emits verbatim) but would double-append
-// accumulated text if called repeatedly for one stream — streamOutput
-// therefore never uses this path for OPENCODE: it goes through
-// NewStreamLineParser below so dedup state spans the whole stream.
+// ParseStreamLine consumes the V2 noninteractive envelope. OpenCode has already
+// converted text snapshots to deltas before writing JSONL.
 func (opencodeAdapter) ParseStreamLine(line []byte, handler EventHandler) {
-	newOpenCodeStreamParser().parseLine(line, handler)
+	newOpenCodeV2StreamParser().parseLine(line, handler)
 }
 
-// NewStreamLineParser implements streamLineParserFactory: one parser — and
-// thus one accumulated-text dedup namespace — per exec stream. State begins
-// and ends with the stream, so a run whose CLI exits before step_finish
-// (anomalyco/opencode#26855) cannot poison later runs' dedup (#1235).
+// NewStreamLineParser owns parser state for one V2 exec stream.
 func (opencodeAdapter) NewStreamLineParser() func(line []byte, handler EventHandler) {
-	return newOpenCodeStreamParser().parseLine
+	return newOpenCodeV2StreamParser().parseLine
 }
 
 // SetupSystemPrompt drops the canonical memory file set instead of just

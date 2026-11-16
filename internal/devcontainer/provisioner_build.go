@@ -212,6 +212,7 @@ func (p *Provisioner) provisionByBuild(ctx context.Context, baseImage string, cf
 	requirements := p.aggregateFeatureRequirements(resolvedFeatures, cfg.ContainerEnv)
 	requirements.ContainerEnv = ensureAgentToolPath(requirements.ContainerEnv)
 	requirements.AdapterBinaries = SortedBinaries(o.requiredBinaries)
+	requirements.AdapterReleasePolicy = AdapterReleasePolicy(o.requiredBinaries)
 	requirements.PostStartCommands = append(
 		requirements.PostStartCommands,
 		cfg.NormalizedPostStartCommands()...,

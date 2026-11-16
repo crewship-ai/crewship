@@ -32,7 +32,7 @@ func TestDeferredAskPageRevalidatesOriginalSubmission(t *testing.T) {
 				t.Fatalf("message not deferred: %v, attached=%v", err, enq.attachCalled)
 			}
 			info.CachedImage = "crewship-cache:ready"
-			info.CachedRequirements = &devcontainer.AggregatedRequirements{AdapterBinaries: []string{"claude"}}
+			info.CachedRequirements = &devcontainer.AggregatedRequirements{AdapterBinaries: []string{"claude"}, AdapterReleasePolicy: devcontainer.AdapterReleasePolicy([]string{"claude"})}
 			page.page.PageID = "page-current"
 			page.page.Name = "Current"
 			if mode == "form changed" {

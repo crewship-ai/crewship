@@ -9,7 +9,7 @@ import (
 )
 
 // geminiAdapter wires Google's `gemini` CLI (@google/gemini-cli npm package,
-// 0.40.1 as of 2026-05). Auth is GEMINI_API_KEY (canonical, AI Studio path)
+// 0.68.0 as of 2026-11-16). Auth is GEMINI_API_KEY (canonical, AI Studio path)
 // or GOOGLE_API_KEY (Vertex AI path); the CLI accepts either, and our env
 // builder mirrors the value into both.
 //

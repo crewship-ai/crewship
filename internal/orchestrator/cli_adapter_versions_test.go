@@ -7,7 +7,7 @@ import (
 )
 
 // TestAdapterArgvMatchesUpstreamRef pins each adapter's command-line shape
-// against the canonical reference for the upstream CLI as of 2026-05. When
+// against the canonical reference for the upstream CLI for the selected release matrix. When
 // upstream renames or removes a flag, this test fails with a precise message
 // pointing at the doc URL — much louder than the eventual "command not found"
 // or "unknown flag" error in production.
@@ -42,7 +42,7 @@ func TestAdapterArgvMatchesUpstreamRef(t *testing.T) {
 			// flags together mean the allowlist above silently means nothing —
 			// see adapter_claude.go and #1932 for the measurements.
 			mustNotHave:      []string{"--bare"},
-			pinnedNpmVersion: "@anthropic-ai/claude-code@2.1.226",
+			pinnedNpmVersion: "@anthropic-ai/claude-code@2.1.325",
 		},
 		{
 			adapter: "CODEX_CLI",
@@ -53,7 +53,7 @@ func TestAdapterArgvMatchesUpstreamRef(t *testing.T) {
 			// without it, and an agent workdir is not a repo (#2428).
 			mustHave:         []string{"exec", "--json", "--sandbox", "--skip-git-repo-check"},
 			mustNotHave:      []string{"--quiet"},
-			pinnedNpmVersion: "@openai/codex@0.153.2",
+			pinnedNpmVersion: "@openai/codex@0.169.0",
 		},
 		{
 			adapter:  "GEMINI_CLI",
@@ -62,15 +62,15 @@ func TestAdapterArgvMatchesUpstreamRef(t *testing.T) {
 			// --system-instruction is not in the public headless reference;
 			// adapter folds the system prompt into the prompt body instead.
 			mustNotHave:      []string{"--system-instruction"},
-			pinnedNpmVersion: "@google/gemini-cli@0.40.1",
+			pinnedNpmVersion: "@google/gemini-cli@0.68.0",
 		},
 		{
 			adapter: "OPENCODE",
 			docURL:  "https://opencode.ai/docs/cli/",
 			// Flag is --format, NOT --output-format — historical confusion.
-			mustHave:         []string{"run", "--format", "json"},
+			mustHave:         []string{"run", "--standalone", "--format", "json"},
 			mustNotHave:      []string{"--output-format"},
-			pinnedNpmVersion: "opencode-ai@1.14.33",
+			pinnedNpmVersion: "@opencode/cli@2.3.0",
 		},
 		{
 			adapter: "CURSOR_CLI",

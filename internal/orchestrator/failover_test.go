@@ -230,12 +230,12 @@ func TestBuildCLICommand(t *testing.T) {
 			// "default" or "json". Adapter passes --format json.
 			"opencode default",
 			AgentRunRequest{CLIAdapter: "OPENCODE", UserMessage: "hello"},
-			[]string{"opencode", "run", "--format", "json", "--", codexDroidPrompt("hello")},
+			[]string{"opencode", "run", "--standalone", "--format", "json", "--", codexDroidPrompt("hello")},
 		},
 		{
 			"opencode with provider/model namespaced model",
 			AgentRunRequest{CLIAdapter: "OPENCODE", LLMModel: "anthropic/claude-sonnet-4-6", UserMessage: "hello"},
-			[]string{"opencode", "run", "--format", "json", "--model", "anthropic/claude-sonnet-4-6", "--", codexDroidPrompt("hello")},
+			[]string{"opencode", "run", "--standalone", "--format", "json", "--model", "anthropic/claude-sonnet-4-6", "--", codexDroidPrompt("hello")},
 		},
 		{
 			// Cursor headless: --force prevents the agent from blocking on

@@ -2,8 +2,10 @@ package orchestrator
 
 import "encoding/json"
 
-// OpenCodeAuthFileRel is relative to the agent's isolated HOME. Schema:
-// github.com/anomalyco/opencode/packages/opencode/src/auth/index.ts (ApiAuth).
+// OpenCodeAuthFileRel is relative to the agent's isolated run HOME. V2 imports
+// this legacy shape into its credential database at first startup (core's
+// 20260805200742_import_legacy_credentials migration). Each run has its own
+// XDG_DATA_HOME; sidecar-routed provider settings override these dummy keys.
 const OpenCodeAuthFileRel = ".local/share/opencode/auth.json"
 
 func renderOpenCodeAuth(req AgentRunRequest) ([]byte, error) {

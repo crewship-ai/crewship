@@ -1264,7 +1264,7 @@ func credentialsFor(req AgentRunRequest, s llmroute.Spec) []Credential {
 //
 // viaSidecar decides whether the block may point at the proxy. On the routed
 // branch the endpoint becomes 127.0.0.1:9119 and NO credential material goes in:
-// options.apiKey holds a dummy and options.headers is omitted entirely, so the
+// settings.apiKey holds a dummy and provider headers are omitted, so the
 // real values live only in the sidecar heap. On the unrouted branch the block is
 // exactly what it has always been, auth material included, because there is
 // nothing between the driver and the endpoint to inject on its behalf.
@@ -1279,26 +1279,26 @@ func localModelConfigEnv(req AgentRunRequest, viaSidecar bool) (string, bool) {
 		// An options-only override preserves OpenCode's per-model SDK, model
 		// metadata and native session headers. Forcing openai-compatible here
 		// breaks Anthropic messages, Google models and OpenAI Responses models.
-		cfg := map[string]any{"provider": map[string]any{routed.ProviderID: map[string]any{
-			"options": map[string]string{"baseURL": routed.ProxyBaseURL(), "apiKey": routedProviderDummyKey},
+		cfg := map[string]any{"providers": map[string]any{routed.ProviderID: map[string]any{
+			"settings": map[string]string{"baseURL": routed.ProxyBaseURL(), "apiKey": routedProviderDummyKey},
 		}}}
 		raw, err := json.Marshal(cfg)
 		return "OPENCODE_CONFIG_CONTENT=" + string(raw), err == nil
 	}
 
 	type providerCfg struct {
-		NPM     string `json:"npm"`
+		NPM     string `json:"package"`
 		Name    string `json:"name"`
 		Options struct {
-			BaseURL string            `json:"baseURL"`
-			APIKey  string            `json:"apiKey,omitempty"`
-			Headers map[string]string `json:"headers,omitempty"`
-		} `json:"options"`
-		Models map[string]struct {
+			BaseURL string `json:"baseURL"`
+			APIKey  string `json:"apiKey,omitempty"`
+		} `json:"settings"`
+		Headers map[string]string `json:"headers,omitempty"`
+		Models  map[string]struct {
 			Name string `json:"name"`
 		} `json:"models"`
 	}
-	p := providerCfg{NPM: "@ai-sdk/openai-compatible"}
+	p := providerCfg{NPM: "@opencode/ai/providers/openai-compatible"}
 	providerID := strings.TrimSuffix(localModelPrefix, "/")
 
 	if isRouted {
@@ -1315,7 +1315,7 @@ func localModelConfigEnv(req AgentRunRequest, viaSidecar bool) (string, bool) {
 		p.Name = localModelDisplayName
 		p.Options.BaseURL = req.LocalModelBaseURL
 		// #961: optional auth for an authenticated endpoint. apiKey → the
-		// @ai-sdk/openai-compatible driver auto-adds `Authorization: Bearer`;
+		// @opencode/ai/providers/openai-compatible driver auto-adds `Authorization: Bearer`;
 		// headers is the escape hatch for Basic/custom-header/non-bearer
 		// schemes. OPENCODE_CONFIG_CONTENT is itself an agent env var, so on
 		// this branch they DO land in the agent environment — reported by
@@ -1323,14 +1323,14 @@ func localModelConfigEnv(req AgentRunRequest, viaSidecar bool) (string, bool) {
 		// (case-insensitive) apiKey pattern.
 		p.Options.APIKey = req.LocalModelAPIKey
 		if len(req.LocalModelHeaders) > 0 {
-			p.Options.Headers = req.LocalModelHeaders
+			p.Headers = req.LocalModelHeaders
 		}
 	}
 
 	p.Models = map[string]struct {
 		Name string `json:"name"`
 	}{modelID: {Name: modelID}}
-	cfg := map[string]any{"provider": map[string]providerCfg{providerID: p}}
+	cfg := map[string]any{"providers": map[string]providerCfg{providerID: p}}
 	raw, err := json.Marshal(cfg)
 	if err != nil {
 		// Statically-shaped struct — marshal cannot realistically fail; treat

@@ -28,6 +28,9 @@ type AdapterCLI struct {
 	// MiseTool is the tool name in the mise registry that installs Binary,
 	// empty when mise has none.
 	MiseTool string
+	// Version is the selected current stable release. Empty uses
+	// the installer's latest channel. Explicit customer pins remain authoritative.
+	Version string
 	// FeatureIDs are devcontainer feature ids (the last path segment of the
 	// feature ref, before the version) that already install Binary; when the
 	// crew declares one, no mise tool is added.
@@ -41,16 +44,16 @@ type AdapterCLI struct {
 // ones `crewship runtimes list` shows under the "tools" category; the droid
 // installer is the one cmd/crewship/seeddata/builtin/crews.yaml runs.
 var adapterCLIs = []AdapterCLI{
-	{Adapter: "CLAUDE_CODE", Binary: "claude", MiseTool: "claude", FeatureIDs: []string{"claude-code"}},
-	{Adapter: "CODEX_CLI", Binary: "codex", MiseTool: "codex"},
-	{Adapter: "GEMINI_CLI", Binary: "gemini", MiseTool: "gemini-cli"},
-	{Adapter: "OPENCODE", Binary: "opencode", MiseTool: "opencode"},
-	{Adapter: "CURSOR_CLI", Binary: "cursor-agent", MiseTool: "cursor-agent"},
+	{Adapter: "CLAUDE_CODE", Binary: "claude", MiseTool: "claude", Version: "2.1.325", FeatureIDs: []string{"claude-code"}},
+	{Adapter: "CODEX_CLI", Binary: "codex", MiseTool: "codex", Version: "0.169.0"},
+	{Adapter: "GEMINI_CLI", Binary: "gemini", MiseTool: "gemini-cli", Version: "0.68.0"},
+	{Adapter: "OPENCODE", Binary: "opencode", MiseTool: "opencode", Version: "2.3.0"},
+	{Adapter: "CURSOR_CLI", Binary: "cursor-agent", MiseTool: "cursor-agent", Version: "2026.11.13-eacade1"},
 	// The Factory installer copies the binary to $HOME/.local/bin, which is
 	// under the home volume and therefore invisible at runtime; it is run
 	// with a throwaway HOME and the binary moved to the image-resident,
 	// agent-owned AgentBinDir (agent_home.go), which is on the agent's PATH.
-	{Adapter: "FACTORY_DROID", Binary: "droid", InstallCommand: "curl -fsSL https://app.factory.ai/cli -o /tmp/droid-install.sh" +
+	{Adapter: "FACTORY_DROID", Binary: "droid", Version: "1.12.1", InstallCommand: "curl -fsSL https://app.factory.ai/cli -o /tmp/droid-install.sh" +
 		" && HOME=/tmp/droid-home sh /tmp/droid-install.sh" +
 		" && install -m 0755 /tmp/droid-home/.local/bin/droid " + AgentBinDir + "/droid" +
 		" && rm -rf /tmp/droid-install.sh /tmp/droid-home"},
@@ -140,16 +143,39 @@ func EnsureAdapterCLIs(cfg *Config, miseConfig string, adapters []string) (Adapt
 	miseChanged := false
 	for _, a := range required {
 		plan.Binaries = append(plan.Binaries, a.Binary)
+		// The V2 adapter uses a private server and native V2 configuration.
+		// Keep customer pins intact, but refuse an incompatible major rather
+		// than build an image that fails only at its first model request.
+		if a.Adapter == "OPENCODE" {
+			version := mise.Tools[a.MiseTool]
+			if mise.Lock != nil {
+				locked, err := LockedToolVersion(mise.Lock, a.MiseTool)
+				if err != nil {
+					return plan, fmt.Errorf("OpenCode 2 requires a readable version in the mise lock; resolve the toolchain again: %w", err)
+				}
+				version = locked
+			}
+			if normalized := strings.TrimPrefix(version, "v"); normalized == "1" || strings.HasPrefix(normalized, "1.") {
+				return plan, fmt.Errorf("OpenCode 2 is required; change the opencode tool pin %q to %s and reprovision", version, a.Version)
+			}
+		}
 		if cfg != nil && featureProvidesBinary(cfg, a) {
 			continue
 		}
 		switch {
 		case a.MiseTool != "":
-			if _, has := mise.Tools[a.MiseTool]; has {
+			version, has := mise.Tools[a.MiseTool]
+			if has && (version != "latest" || a.Version == "" || mise.Lock != nil) {
 				continue
 			}
-			mise.Tools[a.MiseTool] = "latest"
-			plan.AddedTools = append(plan.AddedTools, a.MiseTool)
+			version = a.Version
+			if version == "" {
+				version = "latest"
+			}
+			mise.Tools[a.MiseTool] = version
+			if !has {
+				plan.AddedTools = append(plan.AddedTools, a.MiseTool)
+			}
 			miseChanged = true
 		case a.InstallCommand != "":
 			if cfg == nil || existingCommands[a.InstallCommand] {
@@ -205,7 +231,7 @@ func ImageCoversAdapter(req *AggregatedRequirements, adapter string) bool {
 	}
 	for _, b := range req.AdapterBinaries {
 		if b == cli.Binary {
-			return true
+			return cli.Version == "" || req.AdapterReleasePolicy[b] == cli.Version
 		}
 	}
 	return false
@@ -226,4 +252,20 @@ func SortedBinaries(bins []string) []string {
 	out := append([]string(nil), bins...)
 	sort.Strings(out)
 	return out
+}
+
+// AdapterReleasePolicy identifies the selected installer policy for each
+// required binary. Changing a selected release invalidates existing image
+// coverage, so old containers are reprovisioned through the normal build path.
+// Explicit compatible customer pins remain part of the separate mise inputs.
+func AdapterReleasePolicy(bins []string) map[string]string {
+	policy := map[string]string{}
+	for _, binary := range bins {
+		for _, cli := range adapterCLIs {
+			if cli.Binary == binary && cli.Version != "" {
+				policy[binary] = cli.Version
+			}
+		}
+	}
+	return policy
 }

@@ -178,12 +178,13 @@ func parseOpencodeOptions(t *testing.T, raw, providerID string) struct {
 	t.Helper()
 	var cfg struct {
 		Provider map[string]struct {
+			Headers map[string]string `json:"headers"`
 			Options struct {
 				BaseURL string            `json:"baseURL"`
 				APIKey  string            `json:"apiKey"`
 				Headers map[string]string `json:"headers"`
-			} `json:"options"`
-		} `json:"provider"`
+			} `json:"settings"`
+		} `json:"providers"`
 	}
 	if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 		t.Fatalf("not valid JSON: %v\n%s", err, raw)
@@ -192,5 +193,6 @@ func parseOpencodeOptions(t *testing.T, raw, providerID string) struct {
 	if !ok {
 		t.Fatalf("provider block missing %q: %s", providerID, raw)
 	}
+	p.Options.Headers = p.Headers
 	return p.Options
 }

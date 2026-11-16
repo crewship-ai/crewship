@@ -82,7 +82,7 @@ func TestEnsureAdapterCLIs(t *testing.T) {
 			t.Fatal(err)
 		}
 		tools := miseTools(t, plan.MiseConfig)
-		if tools["claude"] != "latest" {
+		if tools["claude"] != "2.1.325" {
 			t.Errorf("claude tool not added: %v", tools)
 		}
 		if len(plan.AddedTools) != 1 || plan.AddedTools[0] != "claude" {
@@ -100,7 +100,7 @@ func TestEnsureAdapterCLIs(t *testing.T) {
 			t.Fatal(err)
 		}
 		tools := miseTools(t, plan.MiseConfig)
-		if tools["node"] != "22" || tools["claude"] != "2.1.0" || tools["codex"] != "latest" {
+		if tools["node"] != "22" || tools["claude"] != "2.1.0" || tools["codex"] != "0.169.0" {
 			t.Errorf("tools = %v", tools)
 		}
 		if !strings.Contains(plan.MiseConfig, `"FOO":"bar"`) {
@@ -132,7 +132,7 @@ func TestEnsureAdapterCLIs(t *testing.T) {
 			t.Fatal(err)
 		}
 		tools := miseTools(t, plan.MiseConfig)
-		if tools["node"] != "22" || tools["gemini-cli"] != "latest" {
+		if tools["node"] != "22" || tools["gemini-cli"] != "0.68.0" {
 			t.Errorf("tools = %v", tools)
 		}
 	})
@@ -182,7 +182,7 @@ func TestFeatureLeafID_StripsTagAndDigest(t *testing.T) {
 }
 
 func TestImageCoversAdapter(t *testing.T) {
-	req := &AggregatedRequirements{AdapterBinaries: []string{"claude"}}
+	req := &AggregatedRequirements{AdapterBinaries: []string{"claude"}, AdapterReleasePolicy: AdapterReleasePolicy([]string{"claude"})}
 	if !ImageCoversAdapter(req, "CLAUDE_CODE") || ImageCoversAdapter(req, "CODEX_CLI") {
 		t.Error("coverage by binary name is wrong")
 	}
@@ -194,5 +194,87 @@ func TestImageCoversAdapter(t *testing.T) {
 	}
 	if !ImageCoversAdapters(req, []string{"CLAUDE_CODE", "claude_code"}) || ImageCoversAdapters(req, []string{"CLAUDE_CODE", "GEMINI_CLI"}) {
 		t.Error("ImageCoversAdapters is not the conjunction")
+	}
+}
+
+// Moving installer aliases must resolve to the selected stable release before
+// hashing build inputs. Reprovisioning must be deterministic, and customer
+// version pins must not be silently upgraded.
+func TestEnsureAdapterCLIsStableRelease(t *testing.T) {
+	for _, tc := range []struct{ adapter, tool, version string }{
+		{"CLAUDE_CODE", "claude", "2.1.325"},
+		{"CODEX_CLI", "codex", "0.169.0"},
+		{"GEMINI_CLI", "gemini-cli", "0.68.0"},
+		{"OPENCODE", "opencode", "2.3.0"},
+	} {
+		t.Run(tc.adapter, func(t *testing.T) {
+			for _, before := range []string{"", `{"tools":{"` + tc.tool + `":"latest"}}`} {
+				first, err := EnsureAdapterCLIs(&Config{}, before, []string{tc.adapter})
+				if err != nil {
+					t.Fatal(err)
+				}
+				cfg, err := ParseMiseConfig(first.MiseConfig)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if cfg.Tools[tc.tool] != tc.version {
+					t.Fatalf("selected %v", cfg.Tools)
+				}
+				second, err := EnsureAdapterCLIs(&Config{}, first.MiseConfig, []string{tc.adapter})
+				if err != nil || second.MiseConfig != first.MiseConfig || len(second.AddedTools) != 0 {
+					t.Fatalf("not idempotent: %+v %v", second, err)
+				}
+			}
+			pin := "1.0.0"
+			if tc.adapter == "OPENCODE" {
+				pin = "2.0.0"
+			}
+			pinned := `{"tools":{"` + tc.tool + `":"` + pin + `"}}`
+			plan, err := EnsureAdapterCLIs(&Config{}, pinned, []string{tc.adapter})
+			if err != nil || plan.MiseConfig != pinned {
+				t.Fatalf("customer pin changed: %+v %v", plan, err)
+			}
+		})
+	}
+}
+
+func TestEnsureAdapterCLIsRejectsOpenCodeOne(t *testing.T) {
+	for _, version := range []string{"1", "1.19.5", "v1.19.5"} {
+		_, err := EnsureAdapterCLIs(&Config{}, `{"tools":{"opencode":"`+version+`"}}`, []string{"OPENCODE"})
+		if err == nil || !strings.Contains(err.Error(), "OpenCode 2 is required") {
+			t.Fatalf("pin %s: %v", version, err)
+		}
+	}
+}
+
+func TestEnsureAdapterCLIsRejectsLockedOpenCodeOne(t *testing.T) {
+	config := MiseConfig{Tools: map[string]string{"opencode": "latest"}, Lock: &MiseLockBundle{SchemaVersion: 1, Files: map[string]string{"mise.lock": "lockfile_version = 3\n[[tools.opencode]]\nversion = \"1.19.5\"\n"}}}
+	raw, err := json.Marshal(config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = EnsureAdapterCLIs(&Config{}, string(raw), []string{"OPENCODE"})
+	if err == nil || !strings.Contains(err.Error(), "OpenCode 2 is required") {
+		t.Fatal(err)
+	}
+}
+
+func TestImageCoverageRequiresCurrentInstallerPolicy(t *testing.T) {
+	for _, adapter := range []string{"CLAUDE_CODE", "CODEX_CLI", "GEMINI_CLI", "OPENCODE", "CURSOR_CLI", "FACTORY_DROID"} {
+		t.Run(adapter, func(t *testing.T) {
+			cli, _ := AdapterCLIFor(adapter)
+			req := &AggregatedRequirements{AdapterBinaries: []string{cli.Binary}}
+			if ImageCoversAdapter(req, adapter) {
+				t.Fatal("legacy image incorrectly covers updated adapter")
+			}
+			req.AdapterReleasePolicy = map[string]string{cli.Binary: "old-release"}
+			if ImageCoversAdapter(req, adapter) {
+				t.Fatal("stale installer policy accepted")
+			}
+			req.AdapterReleasePolicy = AdapterReleasePolicy(req.AdapterBinaries)
+			if !ImageCoversAdapter(req, adapter) {
+				t.Fatal("current installer policy rejected")
+			}
+		})
 	}
 }

@@ -50,7 +50,10 @@ type opencodeEnvelope struct {
 //	{"name":"UnknownError","data":{"message":"Unexpected server error...","ref":"err_..."}}
 type opencodeErrorObject struct {
 	Name string `json:"name"`
-	Data struct {
+	// OpenCode 2 emits {type,message}; 1.x used {name,data:{message}}.
+	Type    string `json:"type"`
+	Message string `json:"message"`
+	Data    struct {
 		Message string `json:"message"`
 		Ref     string `json:"ref"`
 	} `json:"data"`
@@ -83,6 +86,12 @@ func decodeOpenCodeError(raw json.RawMessage) string {
 	var obj opencodeErrorObject
 	if err := json.Unmarshal(raw, &obj); err == nil {
 		msg := obj.Data.Message
+		if msg == "" {
+			msg = obj.Message
+		}
+		if obj.Name == "" {
+			obj.Name = obj.Type
+		}
 		switch {
 		case obj.Name != "" && msg != "":
 			s = obj.Name + ": " + msg
@@ -143,7 +152,23 @@ const opencodeDedupCap = 4096
 // opencodeAdapter.NewStreamLineParser, so dedup state begins and ends with
 // the stream instead of leaking across runs through the adapter singleton.
 type opencodeStreamParser struct {
-	dedup opencodeTextDedup
+	dedup     opencodeTextDedup
+	deltaText bool
+}
+
+// OpenCode 2's noninteractive renderer already subtracts previously printed
+// text. Deduplicating those deltas again loses repeated words and prefixes.
+func newOpenCodeV2StreamParser() *opencodeStreamParser {
+	p := newOpenCodeStreamParser()
+	p.deltaText = true
+	return p
+}
+
+func (p *opencodeStreamParser) textChunk(sessionID, partID, text string) string {
+	if p.deltaText {
+		return text
+	}
+	return p.dedup.suffix(sessionID, partID, text)
 }
 
 func newOpenCodeStreamParser() *opencodeStreamParser {
@@ -226,7 +251,7 @@ func (p *opencodeStreamParser) parseLine(line []byte, handler EventHandler) {
 		// Assistant text. Events carry the part's accumulated text so far —
 		// emit only the new suffix (see opencodeTextDedup).
 		if msg.Part != nil && msg.Part.Text != "" {
-			if chunk := p.dedup.suffix(msg.SessionID, msg.Part.ID, msg.Part.Text); chunk != "" {
+			if chunk := p.textChunk(msg.SessionID, msg.Part.ID, msg.Part.Text); chunk != "" {
 				handler(AgentEvent{Type: "text", Content: chunk, Timestamp: time.Now()})
 			}
 		}
@@ -236,7 +261,7 @@ func (p *opencodeStreamParser) parseLine(line []byte, handler EventHandler) {
 		// the collapsible reasoning pane. Same accumulated-text semantics as
 		// "text" parts.
 		if msg.Part != nil && msg.Part.Text != "" {
-			chunk := p.dedup.suffix(msg.SessionID, msg.Part.ID, msg.Part.Text)
+			chunk := p.textChunk(msg.SessionID, msg.Part.ID, msg.Part.Text)
 			if chunk == "" {
 				return
 			}

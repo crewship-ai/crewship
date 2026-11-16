@@ -139,7 +139,7 @@ func TestContainerStartError_ImageMissingInvalidatesProvisionerCache(t *testing.
 			info := cacheMissingInfo("crewship-cache:present")
 			// Verified for the adapter, so the only reason to re-provision
 			// would be the start failure itself.
-			info.CachedRequirements = &devcontainer.AggregatedRequirements{AdapterBinaries: []string{"claude"}}
+			info.CachedRequirements = &devcontainer.AggregatedRequirements{AdapterBinaries: []string{"claude"}, AdapterReleasePolicy: devcontainer.AdapterReleasePolicy([]string{"claude"})}
 			resolver := &mockResolver{info: info}
 			b := testBridgeWithContainer(t, resolver, &legacyVolumeContainer{raw: tc.raw})
 			enq := &invalidatingEnqueuer{}

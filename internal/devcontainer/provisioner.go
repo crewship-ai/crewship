@@ -354,6 +354,9 @@ type AggregatedRequirements struct {
 	// to decide whether the crew must be rebuilt.
 	AdapterBinaries []string            `json:"adapterBinaries,omitempty"`
 	Toolchain       *ToolchainInventory `json:"toolchain,omitempty"`
+	// AdapterReleasePolicy records which installer release policy built this
+	// image. This is not an observed version (Toolchain carries that evidence).
+	AdapterReleasePolicy map[string]string `json:"adapterReleasePolicy,omitempty"`
 }
 
 // aggregateFeatureRequirements merges runtime requirements across features.
@@ -391,6 +394,7 @@ func (p *Provisioner) cacheHitRequirements(ctx context.Context, cfg *Config, o *
 	req := p.aggregateFeatureRequirements(resolved, cfg.ContainerEnv)
 	req.ContainerEnv = ensureAgentToolPath(req.ContainerEnv)
 	req.AdapterBinaries = SortedBinaries(o.requiredBinaries)
+	req.AdapterReleasePolicy = AdapterReleasePolicy(o.requiredBinaries)
 	req.PostStartCommands = append(req.PostStartCommands, cfg.NormalizedPostStartCommands()...)
 	return req, featureRecords(resolved), nil
 }
@@ -718,6 +722,7 @@ func (p *Provisioner) Provision(ctx context.Context, baseImage string, cfg *Conf
 	requirements := p.aggregateFeatureRequirements(resolvedFeatures, cfg.ContainerEnv)
 	requirements.ContainerEnv = ensureAgentToolPath(requirements.ContainerEnv)
 	requirements.AdapterBinaries = SortedBinaries(o.requiredBinaries)
+	requirements.AdapterReleasePolicy = AdapterReleasePolicy(o.requiredBinaries)
 
 	// 7a. Every adapter CLI the crew's agents need must resolve now, from the
 	// PATH the agent will actually get — the aggregated one, feature dirs

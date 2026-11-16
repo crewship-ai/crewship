@@ -47,14 +47,14 @@ func TestOpencodeLocalConfigEnv_InjectedForOllamaModel(t *testing.T) {
 			}
 			var cfg struct {
 				Provider map[string]struct {
-					NPM     string `json:"npm"`
+					NPM     string `json:"package"`
 					Options struct {
 						BaseURL string `json:"baseURL"`
-					} `json:"options"`
+					} `json:"settings"`
 					Models map[string]struct {
 						Name string `json:"name"`
 					} `json:"models"`
-				} `json:"provider"`
+				} `json:"providers"`
 			}
 			if err := json.Unmarshal([]byte(raw), &cfg); err != nil {
 				t.Fatalf("OPENCODE_CONFIG_CONTENT is not valid JSON: %v\n%s", err, raw)
@@ -63,8 +63,8 @@ func TestOpencodeLocalConfigEnv_InjectedForOllamaModel(t *testing.T) {
 			if !ok {
 				t.Fatalf("provider block missing 'ollama': %s", raw)
 			}
-			if p.NPM != "@ai-sdk/openai-compatible" {
-				t.Errorf("npm = %q, want @ai-sdk/openai-compatible", p.NPM)
+			if p.NPM != "@opencode/ai/providers/openai-compatible" {
+				t.Errorf("npm = %q, want @opencode/ai/providers/openai-compatible", p.NPM)
 			}
 			if p.Options.BaseURL != "http://host.docker.internal:11434/v1" {
 				t.Errorf("baseURL = %q", p.Options.BaseURL)
@@ -166,8 +166,8 @@ func TestEffectiveLocalModelBaseURL(t *testing.T) {
 // keeps pointing straight at the endpoint and the JSON stays byte-identical to
 // what #944/#957 shipped, sidecar or not.
 func TestLocalModelConfigEnv_UnauthenticatedOllamaUnchanged(t *testing.T) {
-	const want = `OPENCODE_CONFIG_CONTENT={"provider":{"ollama":{"npm":"@ai-sdk/openai-compatible",` +
-		`"name":"Ollama (local)","options":{"baseURL":"http://host.docker.internal:11434/v1"},` +
+	const want = `OPENCODE_CONFIG_CONTENT={"providers":{"ollama":{"package":"@opencode/ai/providers/openai-compatible",` +
+		`"name":"Ollama (local)","settings":{"baseURL":"http://host.docker.internal:11434/v1"},` +
 		`"models":{"qwen3-coder:30b":{"name":"qwen3-coder:30b"}}}}}`
 
 	for _, viaSidecar := range []bool{false, true} {

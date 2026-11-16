@@ -1,20 +1,36 @@
 ---
 title: "OpenCode"
-description: "sst.dev's BYOK multi-provider CLI (OPENCODE adapter)"
+description: "OpenCode multi-provider CLI (OPENCODE adapter)"
 icon: "terminal"
 stability: experimental
 tag: Experimental
 ---
 
-`opencode-ai` (v1.14.33+). Active upstream is `github.com/anomalyco/opencode` (sst/opencode redirects there).
+`@opencode/cli` (v2.3.0, selected stable release as of 2026-11-16).
+Upstream is `github.com/anomalyco/opencode`. The old `opencode-ai` package
+tracks the 1.x line and does not select OpenCode 2.
 
 ## Install
 
 ```bash
-npm install -g opencode-ai
+pnpm add -g @opencode/cli@2.3.0
 ```
 
-## Auth (BYOK across 75+ providers)
+New provisioning resolves an unpinned or `latest` OpenCode tool to this exact
+release before computing build inputs. Explicit V2 pins and locked tool selections are preserved. V1 pins or locks
+are refused with an upgrade message. Existing images using an older installer policy are reprovisioned through
+the normal crew build path when next needed. The build rejects OpenCode 1.x
+binaries before publishing a ready image. The build toolchain inventory records the observed version.
+
+Each run uses `--standalone` so a background OpenCode server cannot supply
+configuration or credentials from another invocation.
+
+Crewship generates native V2 `providers.<id>.settings` overrides and uses
+`@opencode/ai/providers/openai-compatible` for custom compatible endpoints.
+Go, Zen and Z.AI Coding Plan retain their native provider packages. MCP files
+currently use OpenCode 2's supported legacy-config normalization.
+
+## Auth (BYOK across providers)
 
 OpenCode reads provider credentials from env vars based on which `provider/model` you pick. Crewship's `apiKeyEnvVarsForAdapter("OPENCODE")` accepts:
 
@@ -52,7 +68,7 @@ ollama/qwen2.5-coder:7b | ollama/qwen3-coder:30b | ollama/devstral:24b
 ## Command shape
 
 ```bash
-opencode run --format json --model <provider/model> -- <user message>
+opencode run --standalone --format json --model <provider/model> -- <user message>
 ```
 
 `--format json` (NOT `--output-format`) emits JSONL events.
@@ -99,16 +115,20 @@ Crewship auto-injects two sidecar-hosted servers under `mcp` (`injectMemoryMCP` 
 
 ## Output stream
 
-Flat JSONL per `packages/opencode/src/cli/cmd/run.ts`:
+Flat JSONL per V2 `packages/cli/src/run/noninteractive.ts`. Text and reasoning
+are already deltas and must not be deduplicated as accumulated snapshots:
 
 ```
 {type: "text", sessionID: "...", part: {id, text}}
 {type: "reasoning", part: {text}}
 {type: "tool_use", part: {id, tool, state: {status, input, output}}}
 {type: "step_start", part: {}}
-{type: "step_finish", part: {tokens, cost, providerID, modelID}}
-{type: "error", error: "..."}
+{type: "step_finish", part: {tokens, cost, reason}}
+{type: "error", error: {type, message}}
 ```
+
+V1 recordings may also carry `providerID` and `modelID`; those fields remain
+accepted, but the V2 CLI does not promise to emit them.
 
 Note `type` IS the part type at top level — NOT a nested `message.part.updated` envelope. `step_finish` (snake_case, NOT hyphen).
 
