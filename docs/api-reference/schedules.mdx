@@ -110,6 +110,12 @@ The request fields are:
 | `wake_inputs` | object | Inputs for the wake pipeline. |
 | `wake_fail_closed` | boolean | When true, a failed/non-affirmative wake check holds the scheduled run; the default is fail-open. |
 
+JSON field names match without regard to letter case, including PATCH
+presence checks for version pins and wake references. For example,
+`Target_Pipeline_Version: null` clears the pin just like
+`target_pipeline_version: null`; naming a wake reference validates its preset
+even while the schedule is disabled. Use the canonical field names above.
+
 PATCH uses merge semantics for omitted fields: omitted name, target, cron,
 timezone, inputs, enabled, wake, catch-up, and breaker settings are retained.
 Invalid JSON, an invalid cron or timezone, a missing target, an invalid

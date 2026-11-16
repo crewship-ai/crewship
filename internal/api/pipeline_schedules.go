@@ -106,12 +106,11 @@ type scheduleResponse struct {
 // scheduleContentKeys are the PATCH fields that change what a schedule runs.
 var scheduleContentKeys = []string{"cron_expr", "timezone", "inputs", "target_pipeline_id", "target_pipeline_slug", "target_pipeline_version", "wake_pipeline_id", "wake_pipeline_slug", "wake_inputs", "wake_fail_closed"}
 
-// scheduleContentMentioned reports whether a PATCH body names any field that
-// changes what the schedule runs, in any letter case: json.Unmarshal fills
-// the request struct without regard to case, so the check must too.
-func scheduleContentMentioned(rawKeys map[string]json.RawMessage) bool {
+// scheduleFieldsMentioned matches the same Unicode case-folded field names
+// as json.Unmarshal, so presence checks agree with the decoded request.
+func scheduleFieldsMentioned(rawKeys map[string]json.RawMessage, fields ...string) bool {
 	for key := range rawKeys {
-		for _, k := range scheduleContentKeys {
+		for _, k := range fields {
 			if strings.EqualFold(key, k) {
 				return true
 			}
@@ -749,7 +748,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	}
 	var rawKeys map[string]json.RawMessage
 	_ = json.Unmarshal(rawBody, &rawKeys)
-	if _, pinMentioned := rawKeys["target_pipeline_version"]; !pinMentioned {
+	if !scheduleFieldsMentioned(rawKeys, "target_pipeline_version") {
 		// Absent → keep the existing pin. Explicit null (key present,
 		// body.TargetPipelineVersion == nil) clears it.
 		body.TargetPipelineVersion = existing.TargetPipelineVersion
@@ -849,7 +848,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	// rejects; and it only ran when `inputs` was present, so repinning alone
 	// walked a v1 preset onto v2 unjudged. Both reproduced by the opponent
 	// review of #2498.
-	_, versionMentioned := rawKeys["target_pipeline_version"]
+	versionMentioned := scheduleFieldsMentioned(rawKeys, "target_pipeline_version")
 	targetChanged := versionMentioned || body.TargetPipelineSlug != "" || body.TargetPipelineID != ""
 	enabling := !existing.Enabled && enabled
 	if body.Inputs != nil || targetChanged || enabling {
@@ -857,9 +856,8 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
-	_, wakeMentioned := rawKeys["wake_pipeline_id"]
-	_, wakeSlugMentioned := rawKeys["wake_pipeline_slug"]
-	if wakeID != "" && (body.WakeInputs != nil || wakeMentioned || wakeSlugMentioned || enabling) {
+	wakeMentioned := scheduleFieldsMentioned(rawKeys, "wake_pipeline_id", "wake_pipeline_slug")
+	if wakeID != "" && (body.WakeInputs != nil || wakeMentioned || enabling) {
 		if h.gateSchedulePreset(w, r, wakeID, nil, wakeInputs) {
 			return
 		}
@@ -897,7 +895,7 @@ func (h *PipelineHandler) UpdateSchedule(w http.ResponseWriter, r *http.Request)
 	// Enable, disable, rename and spread/catch-up/breaker tweaks keep the
 	// stored creator, so an admin re-enabling an agent's schedule does not
 	// silently vouch for it.
-	if scheduleContentMentioned(rawKeys) || scheduleContentChanged(existing, in) {
+	if scheduleFieldsMentioned(rawKeys, scheduleContentKeys...) || scheduleContentChanged(existing, in) {
 		in.CreatorKind, in.CreatorUserID = scheduleCreatorFromRequest(r)
 	} else {
 		in.KeepCreator = true
