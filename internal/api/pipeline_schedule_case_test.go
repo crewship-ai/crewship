@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -74,5 +75,30 @@ func TestSchedulePatch_MixedCaseWakeReferenceChecksDisabledPreset(t *testing.T) 
 				t.Fatalf("valid disabled wake preset refused: %d %s", rr.Code, rr.Body)
 			}
 		})
+	}
+}
+
+// A disabled plan does not get the enabled-preset store check. The handler
+// must still validate a named pin against the effective preset before saving.
+func TestSchedulePatch_MixedCaseRepinChecksDisabledPreset(t *testing.T) {
+	h, user, ws := presetRig(t)
+	_, id := pinnedPlanOnV1(t, h, user, ws)
+	if rr := patchPlan(t, h, user, ws, id, `{"enabled":false}`); rr.Code != http.StatusOK {
+		t.Fatalf("disable: %d %s", rr.Code, rr.Body)
+	}
+	before, err := h.schedules.GetByID(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rr := patchPlan(t, h, user, ws, id, `{"TARGET_PIPELINE_VERSION":2}`)
+	if rr.Code != http.StatusBadRequest || !strings.Contains(rr.Body.String(), "zone") {
+		t.Fatalf("invalid disabled repin accepted: %d %s", rr.Code, rr.Body)
+	}
+	after, err := h.schedules.GetByID(t.Context(), id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(before, after) {
+		t.Fatalf("refused disabled repin changed row: before=%+v after=%+v", before, after)
 	}
 }
