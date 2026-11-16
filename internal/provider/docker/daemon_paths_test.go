@@ -205,6 +205,7 @@ func TestMandatoryBindPreflightClassifiesFailures(t *testing.T) {
 					return
 				}
 				creates.Add(1)
+				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(tc.code)
 				_ = json.NewEncoder(w).Encode(map[string]string{"message": strings.ReplaceAll(tc.message, "SOURCE", root+"/sidecar")})
 			}))
@@ -339,6 +340,7 @@ func TestMandatoryPreflightRecoversFromTransientFailure(t *testing.T) {
 			return
 		}
 		creates.Add(1)
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(int(status.Load()))
 		message := "temporary daemon failure"
 		if status.Load() == 404 {
