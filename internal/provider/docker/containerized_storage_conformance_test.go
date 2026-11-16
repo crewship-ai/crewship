@@ -4,7 +4,6 @@ package docker
 
 import (
 	"context"
-	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -13,7 +12,6 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
-	"github.com/moby/moby/client"
 )
 
 // Executed INSIDE the exact candidate server image by smoke-image-runtime.sh.
@@ -53,15 +51,22 @@ func TestContainerizedStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		_, _ = p.client.ContainerRemove(context.Background(), id, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
-		for _, name := range []string{p.homeVolumeName(crew.ID, crew.Slug), p.toolsVolumeName(crew.ID, crew.Slug)} {
-			_, _ = p.client.VolumeRemove(context.Background(), name, client.VolumeRemoveOptions{})
+	// Retain the agent and its named volumes across server restarts. The
+	// outer invocation owns label-scoped cleanup even when a probe fails.
+	persisted := os.Getenv("CREWSHIP_SMOKE_PERSISTED") == "1"
+	idFile := filepath.Join(root, "container-id")
+	if persisted {
+		previous, err := os.ReadFile(idFile)
+		if err != nil || string(previous) != id {
+			t.Fatalf("cold reconcile replaced the persisted agent: %q -> %q (%v)", previous, id, err)
 		}
-	}()
+	} else if err := os.WriteFile(idFile, []byte(id), 0600); err != nil {
+		t.Fatal(err)
+	}
+
 	run := func(user, script string) string {
 		t.Helper()
-		out, code, err := execInContainerAs(ctx, p, id, user, script)
+		out, code, err := execInContainerAs(ctx, p, id, user, "set -eu\n"+script)
 		if err != nil || code != 0 {
 			t.Fatalf("exec failed (%d): %v %s", code, err, out)
 		}
@@ -72,6 +77,16 @@ func TestContainerizedStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, pair := range []struct{ local, target string }{{dirs.workspace, "/workspace"}, {dirs.output, "/output"}, {dirs.crew, "/crew"}} {
+		if persisted {
+			previous, err := os.ReadFile(filepath.Join(pair.local, "from-server"))
+			if err != nil || string(previous) != cfg.ContainerPrefix {
+				t.Fatalf("server data lost across restart: %q %v", previous, err)
+			}
+			previous, err = os.ReadFile(filepath.Join(pair.local, "from-agent"))
+			if err != nil || string(previous) != "agent" {
+				t.Fatalf("agent data lost across restart: %q %v", previous, err)
+			}
+		}
 		if err := os.WriteFile(filepath.Join(pair.local, "from-server"), []byte(cfg.ContainerPrefix), 0664); err != nil {
 			t.Fatal(err)
 		}
@@ -85,10 +100,29 @@ func TestContainerizedStorage(t *testing.T) {
 		run("1001:1001", fmt.Sprintf(`awk '$2=="%s" && $4 ~ /noexec/ && $4 ~ /nosuid/ {ok=1} END {exit !ok}' /proc/mounts`, pair.target))
 	}
 	run("1001:1001", `cp /bin/true /output/exec-probe; chmod +x /output/exec-probe; if /output/exec-probe; then exit 1; fi`)
+	for _, target := range []string{"/usr/local/bin/crewship-sidecar", "/usr/local/bin/entrypoint.sh"} {
+		run("1001:1001", fmt.Sprintf(`awk '$2=="%s" && $4 ~ /(^|,)ro(,|$)/ {ok=1} END {exit !ok}' /proc/mounts`, target))
+	}
 	run("0:0", `if echo corrupt >> /usr/local/bin/crewship-sidecar; then exit 1; fi; if echo corrupt >> /usr/local/bin/entrypoint.sh; then exit 1; fi`)
 	run("1001:1001", `test "$(stat -c %u /workspace)" = 1001; test "$(stat -c %u /home/agent)" = 1001; awk '$2=="/secrets" && $3=="tmpfs" {ok=1} END {exit !ok}' /proc/mounts`)
+	for _, target := range []string{"/home/agent/persisted", "/opt/crew-tools/persisted"} {
+		if persisted {
+			run("1001:1001", "test \"$(cat "+target+")\" = "+shellQuote(cfg.ContainerPrefix))
+		} else {
+			run("1001:1001", "printf %s "+shellQuote(cfg.ContainerPrefix)+" > "+target)
+		}
+	}
 	// Real distributed sidecar; empty credential list, no model endpoint called.
-	run("1002:1002", onboardingSidecarLaunchScript(base64.StdEncoding.EncodeToString([]byte(`{}`))))
+	run("1002:1002", `
+if ! crewship-sidecar --health-check --addr 127.0.0.1:9119 >/dev/null 2>&1; then
+  printf '%s' 'e30=' | base64 -d | crewship-sidecar --addr 127.0.0.1:9119 >/dev/null 2>/tmp/sidecar.log &
+fi
+for attempt in $(seq 1 40); do
+  if crewship-sidecar --health-check --addr 127.0.0.1:9119 >/dev/null 2>&1; then exit 0; fi
+  sleep 0.25
+done
+exit 1`)
+
 	again, err := p.EnsureCrewRuntime(ctx, crew)
 	if err != nil || again != id {
 		t.Fatalf("unnecessary recreate: %s -> %s: %v", id, again, err)

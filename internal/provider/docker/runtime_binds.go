@@ -18,6 +18,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	goruntime "runtime"
 	"strings"
 	"time"
 
@@ -174,7 +175,7 @@ func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
 			p.runtimeErr = fmt.Errorf("mandatory runtime file %s: %w", source, err)
 			return
 		}
-		if !info.Mode().IsRegular() || info.Mode().Perm()&0111 == 0 {
+		if !runtimeFileModeAllowed(info.Mode(), goruntime.GOOS) {
 			p.runtimeErr = fmt.Errorf("mandatory runtime file %s must be a regular executable", source)
 			return
 		}
@@ -302,4 +303,10 @@ func managedLauncherServerUIDError(uid int) error {
 		return fmt.Errorf("managed launch: server UID %d collides with agent/sidecar UID; use a host-native server under a different UID (official server image unsupported for this pilot)", uid)
 	}
 	return nil
+}
+
+// Windows reports regular files as 0444/0666 regardless of executable content.
+// Preserve its Docker Desktop path while checking POSIX execute bits elsewhere.
+func runtimeFileModeAllowed(mode os.FileMode, hostOS string) bool {
+	return mode.IsRegular() && (hostOS == "windows" || mode.Perm()&0111 != 0)
 }

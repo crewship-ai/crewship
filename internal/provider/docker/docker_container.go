@@ -1894,12 +1894,12 @@ func shellQuote(s string) string {
 // NAMED volumes. Their roots get a non-recursive chown + chmod 755 so the
 // agent can create entries in them — see fixBindMountOwnership for why
 // nothing else in the tree is able to do this, and why it is not -R. The
-// step is appended with `;` rather than `&&` so a failure on one volume
-// cannot skip the other, and cannot mask the bind chown's result.
+// The shell exits on the first failure; no later successful command can hide
+// an unsuccessful bind, memory or volume ownership operation.
 func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string) string {
 	mnt := func(p string) string { return shellQuote("/mnt" + p) }
 
-	chownCmd := "chown -R 1001:1001"
+	chownCmd := "set -e; chown -R 1001:1001"
 	for _, dir := range allDirs {
 		chownCmd += " " + mnt(dir)
 	}
@@ -1907,7 +1907,7 @@ func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string
 	// here: restore needs the same guarantee, and when it was spelled
 	// out only in this function the restore path could discover it only
 	// by failing (#1746).
-	chownCmd += ` && ` + memory.MemoryOwnershipCmd(mnt(crewPath))
+	chownCmd += ` ; ` + memory.MemoryOwnershipCmd(mnt(crewPath))
 	for _, target := range volumeTargets {
 		chownCmd += ` ; chown 1001:1001 ` + shellQuote(target) + ` ; chmod 755 ` + shellQuote(target)
 	}

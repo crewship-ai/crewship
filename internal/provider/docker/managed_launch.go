@@ -10,7 +10,6 @@ import (
 	"strings"
 	"time"
 
-	dockermount "github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
@@ -61,8 +60,15 @@ func (p *Provider) attestManagedLaunch(ctx context.Context, id string, d managed
 	launcherBound := false
 	for _, mount := range c.Mounts {
 		if mount.Destination == managedlaunch.LauncherPath {
-			expected, sourceErr := p.daemonMounts([]dockermount.Mount{{Type: dockermount.TypeBind, Source: p.cfg.SidecarBinaryPath}})
-			if sourceErr != nil || mount.Source != expected[0].Source {
+			expected := p.cfg.SidecarBinaryPath
+			if p.pathMap != nil {
+				mapped, mapErr := p.pathMap.translate(expected)
+				if mapErr != nil {
+					return denied
+				}
+				expected = mapped
+			}
+			if mount.Source != expected {
 				return errors.New("managed launch: recreate runtime with current immutable launcher generation required")
 			}
 			if mount.RW || mount.Type != "bind" {

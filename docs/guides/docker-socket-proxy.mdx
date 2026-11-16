@@ -94,7 +94,11 @@ supply immutable image digests and execute both amd64 and arm64 legs.
 
 This leg tests core runtime operation with a Debian crew image. Default
 onboarding feature provisioning has additional proxy permissions described
-below and requires its separate onboarding conformance test. Host-native and
+below and requires its separate onboarding conformance test. The server also
+needs controlled registry egress or a cache for feature downloads: both networks
+in the core Compose preset are internally isolated, and those HTTP downloads
+originate in the server process, not the Docker daemon. Track the supported
+provisioning profile separately in [#5420](https://github.com/crewship-ai/crewship/issues/5420). Host-native and
 VM runtime conformance remain separate tests. Neither a compiled test nor a
 skipped test is evidence of a successful image run.
 

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 )
@@ -36,18 +37,26 @@ func (p *Provider) resolveDaemonPaths(ctx context.Context) (*daemonPathMap, erro
 		if err != nil {
 			return nil, fmt.Errorf("inspect configured Docker server container: %w", err)
 		}
-		best := ""
-		for _, m := range inspected.Container.Mounts {
-			if !cleanAbsolutePath(m.Destination) || !pathContains(m.Destination, local) || len(m.Destination) <= len(best) {
+		var selected *container.MountPoint
+		for i := range inspected.Container.Mounts {
+			m := &inspected.Container.Mounts[i]
+			if !cleanAbsolutePath(m.Destination) || !pathContains(m.Destination, local) {
 				continue
 			}
-			if !m.RW || (m.Type != mount.TypeBind && m.Type != mount.TypeVolume) || !cleanAbsolutePath(m.Source) {
-				return nil, fmt.Errorf("server storage must be a writable bind or local volume with an absolute daemon source")
+			if selected == nil || len(m.Destination) > len(selected.Destination) {
+				selected = m
 			}
-			best = m.Destination
-			rel, _ := filepath.Rel(best, local)
-			remote = filepath.Join(m.Source, rel)
 		}
+		if selected == nil {
+			return nil, fmt.Errorf("configured server container has no storage mount covering %s", local)
+		}
+		if !selected.RW || (selected.Type != mount.TypeBind && selected.Type != mount.TypeVolume) || !cleanAbsolutePath(selected.Source) {
+			return nil, fmt.Errorf("server storage must be a writable bind or local volume with an absolute daemon source")
+		}
+		best := selected.Destination
+		rel, _ := filepath.Rel(best, local)
+		remote = filepath.Join(selected.Source, rel)
+
 		for _, m := range inspected.Container.Mounts {
 			if m.Destination != best && pathContains(local, m.Destination) {
 				return nil, fmt.Errorf("nested storage mounts require a single shared storage root")

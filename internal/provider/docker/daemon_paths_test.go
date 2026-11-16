@@ -66,6 +66,9 @@ func TestDaemonPathsResolveInspect(t *testing.T) {
 	}{
 		{"named volume", 200, []map[string]any{{"Type": "volume", "Source": "/docker/volume/_data", "Destination": "/data", "RW": true}}, false},
 		{"bind", 200, []map[string]any{{"Type": "bind", "Source": "/host/data", "Destination": "/data", "RW": true}}, false},
+		{"readonly parent first", 200, []map[string]any{{"Type": "bind", "Source": "/host/readonly", "Destination": "/data", "RW": false}, {"Type": "volume", "Source": "/docker/volume/storage", "Destination": "/data/storage", "RW": true}}, false},
+		{"readonly parent last", 200, []map[string]any{{"Type": "volume", "Source": "/docker/volume/storage", "Destination": "/data/storage", "RW": true}, {"Type": "bind", "Source": "/host/readonly", "Destination": "/data", "RW": false}}, false},
+		{"tmpfs ancestor", 200, []map[string]any{{"Type": "tmpfs", "Destination": "/data", "RW": true}, {"Type": "volume", "Source": "/docker/volume/storage", "Destination": "/data/storage", "RW": true}}, false},
 		{"missing mapping", 200, nil, true}, {"proxy denied", 403, nil, true}, {"daemon error", 500, nil, true},
 		{"readonly", 200, []map[string]any{{"Type": "volume", "Source": "/docker/data", "Destination": "/data", "RW": false}}, true},
 	} {
@@ -213,4 +216,25 @@ func mappingTempDir(t *testing.T) string {
 		t.Fatal(err)
 	}
 	return root
+}
+
+func TestRuntimeFileModePreservesWindows(t *testing.T) {
+	for _, tc := range []struct {
+		mode os.FileMode
+		host string
+		want bool
+	}{
+		{0666, "windows", true}, {0444, "windows", true}, {0644, "linux", false}, {0755, "linux", true}, {os.ModeDir | 0755, "windows", false}, {os.ModeDir | 0755, "linux", false},
+	} {
+		if got := runtimeFileModeAllowed(tc.mode, tc.host); got != tc.want {
+			t.Errorf("mode=%v host=%s accepted=%v", tc.mode, tc.host, got)
+		}
+	}
+}
+
+func TestMappedControllerDoesNotQualifyForHostCapture(t *testing.T) {
+	p := &Provider{detected: DetectResult{Host: "unix:///var/run/docker.sock"}, pathMap: &daemonPathMap{local: "/local", daemon: "/daemon"}}
+	if p.SupportsHostCapture() {
+		t.Fatal("mapped controller qualified without executor namespace handoff")
+	}
 }

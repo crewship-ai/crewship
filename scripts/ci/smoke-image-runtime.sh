@@ -38,22 +38,21 @@ CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags conformance -o "$work/r
 chmod 755 "$work/runtime.test"
 docker pull --platform "$platform" debian:bookworm-slim >/dev/null
 docker network create --internal "$prefix" >/dev/null
-docker run -d --name "$prefix-proxy" --network "$prefix" -p 127.0.0.1::2375 \
+docker run -d --name "$prefix-proxy" --network "$prefix" \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   -e POST=1 -e CONTAINERS=1 -e EXEC=1 -e IMAGES=1 -e NETWORKS=1 \
   -e VOLUMES=1 -e INFO=1 -e PING=1 -e VERSION=1 -e EVENTS=0 \
   tecnativa/docker-socket-proxy:v0.5.0 >/dev/null
-proxy_port=$(docker port "$prefix-proxy" 2375/tcp | awk -F: '{print $NF}')
 proxy_ready=0
 for _ in $(seq 1 30); do
-  if curl -fsS --max-time 2 "http://127.0.0.1:$proxy_port/_ping" >/dev/null 2>&1; then proxy_ready=1; break; fi
+  if docker exec "$prefix-proxy" wget -q -T 2 -O - http://127.0.0.1:2375/_ping >/dev/null 2>&1; then proxy_ready=1; break; fi
   sleep 1
  done
 [ "$proxy_ready" = 1 ] || { echo 'Socket proxy did not become ready' >&2; exit 1; }
 start_server() {
   local name=$1
   docker run -d --platform "$platform" --name "$name" --network "$prefix" \
-    -v "$name:/var/lib/crewship" -p 127.0.0.1::8080 \
+    -v "$name:/var/lib/crewship" \
     -e NEXTAUTH_SECRET="$auth" -e ENCRYPTION_KEY="$encryption" \
     -e CREWSHIP_HOME=/var/lib/crewship/server \
     -e DATABASE_URL=file:/var/lib/crewship/control.db \
@@ -65,10 +64,12 @@ start_server() {
     -e CREWSHIP_DOCKER_SERVER_CONTAINER="$name" \
     -e DOCKER_HOST="tcp://$prefix-proxy:2375" \
     "$image" start >/dev/null
-  local port
-  port=$(docker port "$name" 8080/tcp | awk -F: '{print $NF}')
+  wait_server "$name"
+}
+wait_server() {
+  local name=$1
   for _ in $(seq 1 90); do
-    if curl -fsS --max-time 3 "http://127.0.0.1:$port/readyz" >/dev/null 2>&1; then
+    if docker exec "$name" wget -q -T 3 -O - http://127.0.0.1:8080/readyz >/dev/null 2>&1; then
       docker cp "$work/runtime.test" "$name:/tmp/runtime.test"
       return
     fi
@@ -90,8 +91,9 @@ probe "$prefix-b"
 # Restart, then full recreate reusing precisely the same volume names.
 # Simulate a stale staged generation: the next provider must restage the exact
 # distributed sidecar, and the in-container test compares its bytes.
-docker exec "$prefix-a" sh -c 'printf stale > /var/lib/crewship/runtime-smoke/.runtime/crewship-sidecar'
+docker exec "$prefix-a" sh -ec 'printf stale > /var/lib/crewship/runtime-smoke/.runtime/crewship-sidecar.next; mv /var/lib/crewship/runtime-smoke/.runtime/crewship-sidecar.next /var/lib/crewship/runtime-smoke/.runtime/crewship-sidecar'
 docker restart "$prefix-a" >/dev/null
+wait_server "$prefix-a"
 probe "$prefix-a" 1
 docker rm -f "$prefix-a" >/dev/null
 start_server "$prefix-a"
