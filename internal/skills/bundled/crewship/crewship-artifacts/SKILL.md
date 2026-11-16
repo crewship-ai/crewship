@@ -210,7 +210,7 @@ Then call `design_apply` with 1–500
 `{"op":"delete","id":"cart"}` removes a node; `{"op":"reorder","order":[...]}`
 replaces the whole order and may name only existing nodes. Node fields are
 limited to `id`, `type` (`frame`, `rect`, `text`, `image`), `name`, `x`, `y`,
-`width`, `height`, `fill`, `parentId`, `text` and `src`; any other field is
+`width`, `height`, plus `name`, `fill`, `parentId`, `text`, `src`, `linkTo`, `fontFamily`, `fontWeight`, `fontSize`, `lineHeight`, `textAlign`, `textWrap`, `overflow`, `hidden`, `locked`, `radius`, `stroke` and `strokeWidth`; any other field is
 rejected. An upsert of an existing ID changes only the supplied fields; a new
 node needs `type` and numeric geometry. Geometry is finite with absolute value
 at most 1,000,000 and non-negative size. Keep existing node IDs when changing

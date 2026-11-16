@@ -106,8 +106,8 @@ access audit but cannot write.
 
 - `upsert` creates a node or changes only the fields you send for an existing
   one. A new node needs `id`, `type` (`frame`, `rect`, `text` or `image`) and
-  numeric `x`, `y`, `width` and `height`. Optional fields are `name`, `fill`,
-  `parentId`, `text` and `src`. No other node field is accepted.
+  numeric `x`, `y`, `width` and `height`. Optional fields are `name`, `fill`, `parentId`, `text`, `src`, `linkTo`, `fontFamily`, `fontWeight`, `fontSize`, `lineHeight`, `textAlign`, `textWrap`, `overflow`, `hidden`, `locked`, `radius`, `stroke` and `strokeWidth`.
+  Other node fields are refused.
 - `delete` removes the node with that `id` from the canvas and the order.
 - `reorder` replaces the whole drawing order. Include every existing node ID
   once, in the new order. An ID that does not exist is refused.

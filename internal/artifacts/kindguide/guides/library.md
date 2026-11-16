@@ -1,15 +1,15 @@
 ---
 kind: library
 title: Library (design system)
-version: 1.0.0
+version: 1.1.0
 modes: [ask, comment, propose]
 capabilities:
-  supported: [tokens.colors, tokens.typography, tokens.spacing, tokens.radii, components]
-  unsupported: [aliases, themes, fonts, install]
+  supported: [tokens.colors, tokens.typography, tokens.spacing, tokens.radii, components, themes, aliases, fonts]
+  unsupported: [install]
 ---
 # Library agent guide
 
-A Library is a Design in Library mode: a versioned project artifact whose
+A Library is a versioned project artifact whose
 manifest carries `design-system.json`. Where the Design System preview is
 enabled, people see its tokens there. Use the artifact
 tools (`artifact_create`, `artifact_versions`, `artifact_publish`,
@@ -29,8 +29,10 @@ The manifest is `{entrypoint, files:[{path, content, media_type}]}` with an
 ```
 
 `schema_version`, `colors`, `typography`, `spacing` and `radii` are
-required; `name` and `components` are optional. Any other field rejects the
-whole file.
+required for the schema 1 preview; `name` and `components` are optional.
+Schema 2 also supports themes and colour aliases. The preview uses a closed
+schema; server publication checks that the file is a bounded JSON object, so
+a successful publish alone does not guarantee a valid preview.
 
 ## Limits
 
@@ -41,7 +43,9 @@ whole file.
   to 4096. Type size is an integer 1 to 512, weight 100 to 900 in steps of
   100, line height 0.5 to 4.
 - At most 64 components; name at most 80 characters, description at most 280.
-- No aliases, themes, CSS expressions, URLs or font files.
+- Schema 2 supports themes and colour aliases. CSS expressions and URLs are
+  not token values. Font files and licences can be carried by Library pins;
+  see the Library guide for format, licence and size requirements.
 
 ## Write order
 
@@ -58,8 +62,9 @@ removed from the new version.
 
 ## Conflicts
 
-A 409 means another publish won. Read the new version, redo your token change
-on it and publish once more.
+For a Project version conflict, keep the candidate, read the versions, tell
+the person what differs and wait for a new request. Never retry with a newer
+base version.
 
 ## Agent modes
 

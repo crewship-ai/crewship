@@ -67,7 +67,7 @@ func TestEveryGuideAnswersTheAgentContract(t *testing.T) {
 // preserve the shared safety contract for every kind.
 func TestSharedRulesReachEveryGuide(t *testing.T) {
 	rules := []string{
-		"third refusal",                                // conflict: stop after 3 refusals and report
+		"never retry with a newer base version",        // project conflict: wait for a new request
 		"Comment is not Propose",                       // a comment never stands in for a proposal
 		"Only the artifact's Owner",                    // only the Owner delegates Edit
 		"A missing host mode is not a Propose mandate", // no implicit write authority

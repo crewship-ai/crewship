@@ -3308,8 +3308,9 @@ account and run IDs are omitted for every reader, including owners.
 Owners may select retained code versions. Other readers must select the current
 shared pin and can read only collections declared there. Pin selection,
 declaration and current ACL are checked together in the data transaction and
-again before commit. Writes require the current human owner or an admitted
-original signed agent run with the exact Page mandate and `pages:write` scope.
+again before commit. Writes require the owner, a human with a current Edit share or inherited folder
+write access, or an admitted owner-consented agent run with the exact Page
+mandate. Scoped CLI credentials also require `pages:write`.
 The supplied `base_version` must still be the latest code version. Clients
 cannot set attribution or timestamps.
 
