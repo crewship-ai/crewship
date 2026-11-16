@@ -1795,7 +1795,7 @@ crewship routine schedules list --slug summarize-text
 crewship routine schedules list --json
 ```
 
-**Output columns:** ID, NAME, ROUTINE, CRON, TZ, ENABLED, FAILS, WAKE, NEXT, MISSED, CREATOR, ARTIFACTS
+**Output columns:** ID, NAME, ROUTINE, CRON, TZ, ENABLED, FAILS, WAKE, NEXT, LAST STATUS, MISSED, CREATOR, ARTIFACTS
 
 With `artifact_agent_access_modes` on, ARTIFACTS says whether the schedule's
 fires reach their agents' standing artifacts now: `active`, or
@@ -1813,7 +1813,19 @@ good standing restores it; `routine_agent_authored` clears only when the
 schedule runs a routine a person authored.
 With the flag off ARTIFACTS is `—`.
 
-A schedule pinned to a specific routine version shows the pin in the ROUTINE column as `slug@vN` (e.g. `daily-digest@v3`). The `--json` output carries it as `target_pipeline_version`, plus `last_status` (`COMPLETED` | `FAILED` | `SKIPPED` | `WAITING` — `WAITING` means the run parked on an approval gate, which is healthy, not a failure).
+LAST STATUS shows the last recorded outcome. For `SKIPPED` it names the stored
+cause: capacity, catch-up, routine inactive, or previous run busy. Missing,
+empty and unknown reasons show `SKIPPED (reason unavailable)`; the CLI does
+not guess from today's routine state or missed count. `-f json` and `-f yaml`
+retain `last_status` and the optional `last_skip_reason` (`capacity`, `catchup`,
+`inactive`, `busy`), including unknown future reason strings. These are
+historical outcomes; `QUEUED` does not assert that a start is still waiting.
+
+A schedule pinned to a specific routine version shows the pin in the ROUTINE
+column as `slug@vN` (e.g. `daily-digest@v3`). The `--json` output carries it as
+`target_pipeline_version`, plus `last_status` (`COMPLETED` | `FAILED` |
+`SKIPPED` | `QUEUED` | `WAITING` | `DEDUPED` — `WAITING` means the run parked
+on an approval gate, which is healthy, not a failure).
 
 ### `schedules create`
 

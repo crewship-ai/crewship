@@ -26,6 +26,7 @@ import { toStatusTone } from "@/lib/status-tone"
 import { WakeGateChip } from "./routine-wake-gate-chip"
 import { describeCron } from "@/lib/cron-describe"
 import { scheduleHealth } from "@/lib/schedule-health"
+import { scheduleLastStatusLabel } from "@/lib/routine-schedule-status"
 import { scheduleArtifactAccess } from "@/lib/schedule-artifact-access"
 import { RoutineOnceSchedule } from "./routine-once-schedule"
 import { RoutineRecurrenceFields } from "./routine-recurrence-fields"
@@ -359,7 +360,7 @@ export function RoutineSchedulesTab({
                               {formatRoutineTime(s.last_run_at, s.timezone)}
                             </span>
                             {s.last_status && (
-                              <span className="ml-1 text-muted-foreground">({s.last_status})</span>
+                              <span className="ml-1 text-muted-foreground">({scheduleLastStatusLabel(s)})</span>
                             )}
                           </span>
                         )}

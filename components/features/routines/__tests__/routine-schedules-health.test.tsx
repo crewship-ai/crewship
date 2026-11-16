@@ -122,3 +122,20 @@ describe("RoutineSchedulesTab — artifact access (#5356)", () => {
     expect(screen.queryByTestId("schedule-artifacts-sch-ok")).toBeNull()
   })
 })
+
+// Recorded skip reasons describe the last fire, independently of the plan now.
+describe("RoutineSchedulesTab — recorded skip reasons", () => {
+  it.each([
+    ["capacity", "skipped: capacity"],
+    ["catchup", "skipped: catch-up"],
+    ["inactive", "skipped: routine inactive"],
+    ["busy", "skipped: previous run busy"],
+    [undefined, "skipped: reason unavailable"],
+    ["", "skipped: reason unavailable"],
+    ["future_reason", "skipped: reason unavailable"],
+  ])("shows %s without guessing from the current enabled state or backlog", (last_skip_reason, label) => {
+    h.schedules = [baseSchedule({ enabled: false, last_run_at: "2026-11-16T10:00:00Z", last_status: "SKIPPED", last_skip_reason, last_missed_count: 4 })]
+    render(<RoutineSchedulesTab workspaceId="ws-1" pipelineId="p1" slug="digest" />)
+    expect(screen.getByText(`(${label})`)).toBeInTheDocument()
+  })
+})

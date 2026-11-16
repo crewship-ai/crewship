@@ -37,6 +37,7 @@ type scheduleRow struct {
 	Enabled               bool                   `json:"enabled" yaml:"enabled"`
 	LastRunAt             *string                `json:"last_run_at,omitempty" yaml:"last_run_at,omitempty"`
 	LastStatus            *string                `json:"last_status,omitempty" yaml:"last_status,omitempty"`
+	LastSkipReason        string                 `json:"last_skip_reason,omitempty" yaml:"last_skip_reason,omitempty"`
 	LastRunID             *string                `json:"last_run_id,omitempty" yaml:"last_run_id,omitempty"`
 	NextRunAt             *string                `json:"next_run_at,omitempty" yaml:"next_run_at,omitempty"`
 	WakePipelineID        string                 `json:"wake_pipeline_id,omitempty" yaml:"wake_pipeline_id,omitempty"`
@@ -99,6 +100,29 @@ func artifactsCell(s scheduleRow) string {
 		return "stopped: " + s.StoppedReason
 	}
 	return s.ArtifactAccess
+}
+
+// scheduleLastStatusCell names the recorded last-fire outcome without
+// inferring history from the current routine, enabled flag or missed count.
+func scheduleLastStatusCell(s scheduleRow) string {
+	if s.LastStatus == nil || *s.LastStatus == "" {
+		return "—"
+	}
+	if *s.LastStatus != "SKIPPED" {
+		return *s.LastStatus
+	}
+	label := "reason unavailable"
+	switch s.LastSkipReason {
+	case "capacity":
+		label = "capacity"
+	case "catchup":
+		label = "catch-up"
+	case "inactive":
+		label = "routine inactive"
+	case "busy":
+		label = "previous run busy"
+	}
+	return "SKIPPED (" + label + ")"
 }
 
 // routineCell renders the ROUTINE column for trigger lists: the target
@@ -264,7 +288,7 @@ var routineSchedulesListCmd = &cobra.Command{
 			return nil
 		}
 		w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tFAILS\tWAKE\tNEXT\tMISSED\tCREATOR\tARTIFACTS")
+		fmt.Fprintln(w, "ID\tNAME\tROUTINE\tCRON\tTZ\tENABLED\tFAILS\tWAKE\tNEXT\tLAST STATUS\tMISSED\tCREATOR\tARTIFACTS")
 		for _, s := range rows {
 			next := "—"
 			if s.NextRunAt != nil && *s.NextRunAt != "" {
@@ -277,9 +301,9 @@ var routineSchedulesListCmd = &cobra.Command{
 			if s.LastMissedCount > 0 {
 				missed = fmt.Sprintf("%d (%s)", s.LastMissedCount, defaultIfBlankCLI(s.CatchupPolicy, "once"))
 			}
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
 				shortID(s.ID), s.Name, routineCell(s.TargetPipelineSlug, s.TargetPipelineVersion), s.CronExpr, s.Timezone,
-				enabledCell(s), failsCell(s), wakeCell(s), next, missed, creatorCell(s), artifactsCell(s))
+				enabledCell(s), failsCell(s), wakeCell(s), next, scheduleLastStatusCell(s), missed, creatorCell(s), artifactsCell(s))
 		}
 		return w.Flush()
 	},
