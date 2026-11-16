@@ -112,7 +112,7 @@ func TestContainerizedStorage(t *testing.T) {
 	for _, target := range []string{"/usr/local/bin/crewship-sidecar", "/usr/local/bin/entrypoint.sh"} {
 		run("1001:1001", fmt.Sprintf(`awk '$2=="%s" && $4 ~ /(^|,)ro(,|$)/ {ok=1} END {exit !ok}' /proc/mounts`, target))
 	}
-	run("0:0", `if echo corrupt >> /usr/local/bin/crewship-sidecar; then exit 1; fi; if echo corrupt >> /usr/local/bin/entrypoint.sh; then exit 1; fi`)
+	run("1001:1001", `if echo corrupt >> /usr/local/bin/crewship-sidecar; then exit 1; fi; if echo corrupt >> /usr/local/bin/entrypoint.sh; then exit 1; fi`)
 	run("1001:1001", `test "$(stat -c %u /workspace)" = 1001; test "$(stat -c %u /home/agent)" = 1001; awk '$2=="/secrets" && $3=="tmpfs" {ok=1} END {exit !ok}' /proc/mounts`)
 	for _, target := range []string{"/home/agent/persisted", "/opt/crew-tools/persisted"} {
 		if persisted {
