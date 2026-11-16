@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Adding a Microsoft Teams channel no longer fails with “shoutrrr url missing host” (#5434).** Creation and draft testing now validate the signed HTTPS workflow carried in the Teams URL query rather than requiring an outer host. Missing targets, HTTP, unsigned workflows, unknown hosts and provider mismatches remain rejected; legacy stored URLs keep their encrypted representation.
+
 - **Teams notifications keep working after the dependency update (#5421).** Existing signed workflow URLs are adapted to the updated notification library, and new channels retain the full HTTPS URL and signature. ⚠️ **Behaviour change:** unsigned workflow URLs and retired Office connector webhooks are rejected; copy the complete signed HTTPS URL from Teams Workflows.
 
 - **Image collection restarts its grace period after failed bookkeeping and late observed use (#5398).** A failed unused-state reset or an interrupted pass can no longer leave a trusted old window behind. Final checks that discover an active build or a newly selected image restart that image’s window. Malformed deletion timestamps also keep a deleted crew’s selections protected even when the text starts with an old date. Collection remains off by default.

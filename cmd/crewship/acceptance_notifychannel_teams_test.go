@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log/slog"
@@ -10,17 +11,32 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/api"
 	"github.com/crewship-ai/crewship/internal/encryption"
+	"github.com/crewship-ai/crewship/internal/notify"
 	"github.com/crewship-ai/crewship/internal/testutil"
 )
+
+type teamsAcceptanceProvider struct {
+	calls   atomic.Int64
+	lastURL atomic.Value
+}
+
+func (p *teamsAcceptanceProvider) Send(_ context.Context, rawURL, _ string, _ map[string]string) error {
+	p.lastURL.Store(rawURL)
+	p.calls.Add(1)
+	return nil
+}
 
 // Exercise the actual CLI, registered auth/router, channel store and encrypted
 // persistence. A mocked successful POST would miss the second URL validator
 // that rejected every query-host Teams URL after field composition (#5434).
 func TestAcceptance_NotifyChannelTeams_CreateThroughCLI(t *testing.T) {
+	provider := &teamsAcceptanceProvider{}
+	t.Cleanup(notify.SetProviderForTesting(provider))
 	t.Setenv("ENCRYPTION_KEY", strings.Repeat("ab", 32))
 	t.Setenv("CREWSHIP_ENCRYPTION_KEY_VERSION", "")
 	db := testutil.MigratedSQLDB(t)
@@ -62,6 +78,7 @@ func TestAcceptance_NotifyChannelTeams_CreateThroughCLI(t *testing.T) {
 		{"logic-apps-fields", workflows[1], false},
 		{"raw-service-url", workflows[0], true},
 		{"raw-uppercase-host", workflows[1], true},
+		{"legacy-raw-service-url", workflows[0], true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := []string{"notifychannel", "add", "--type", "chat", "--provider", "teams"}
@@ -70,7 +87,11 @@ func TestAcceptance_NotifyChannelTeams_CreateThroughCLI(t *testing.T) {
 				if tc.name == "raw-uppercase-host" {
 					key = "Host"
 				}
-				args = append(args, "--url", "teams://?"+key+"="+url.QueryEscape(tc.webhook))
+				target := tc.webhook
+				if tc.name == "legacy-raw-service-url" {
+					target = strings.TrimPrefix(target, "https://")
+				}
+				args = append(args, "--url", "teams://?"+key+"="+url.QueryEscape(target))
 			} else {
 				args = append(args, "--field", "webhook_url="+tc.webhook)
 			}
@@ -93,8 +114,32 @@ func TestAcceptance_NotifyChannelTeams_CreateThroughCLI(t *testing.T) {
 			if tc.name == "raw-uppercase-host" {
 				host = parsed.Query().Get("Host")
 			}
-			if err != nil || host != tc.webhook {
-				t.Fatalf("signed workflow URL changed: %v", err)
+			expectedHost := tc.webhook
+			if tc.name == "legacy-raw-service-url" {
+				expectedHost = strings.TrimPrefix(expectedHost, "https://")
+			}
+			if host != expectedHost {
+				t.Fatal("stored signed workflow URL changed")
+			}
+			draftArgs := append([]string(nil), args...)
+			draftArgs[1] = "test-draft"
+			before := provider.calls.Load()
+			if out, err := runFeedbackCLI(t, cfg, draftArgs...); err != nil {
+				t.Fatalf("test draft via CLI: %v\n%s", err, out)
+			}
+			if provider.calls.Load() != before+1 {
+				t.Fatal("valid draft did not reach the isolated delivery seam")
+			}
+			delivery, err := url.Parse(provider.lastURL.Load().(string))
+			if err != nil {
+				t.Fatal(err)
+			}
+			deliveryHost := delivery.Query().Get("host")
+			if tc.name == "raw-uppercase-host" {
+				deliveryHost = delivery.Query().Get("Host")
+			}
+			if deliveryHost != tc.webhook {
+				t.Fatal("draft delivery changed the signed workflow URL")
 			}
 			var encrypted string
 			if err := db.QueryRowContext(t.Context(), `SELECT secret_enc FROM notification_channels WHERE id=?`, channel.ID).Scan(&encrypted); err != nil {
@@ -131,6 +176,14 @@ func TestAcceptance_NotifyChannelTeams_CreateThroughCLI(t *testing.T) {
 			}
 			if strings.Contains(out, "EXAMPLE") {
 				t.Fatal("validation error leaked the workflow signature")
+			}
+			before := provider.calls.Load()
+			out, err = runFeedbackCLI(t, cfg, "notifychannel", "test-draft", "--type", "chat", "--provider", "teams", tc.flag, tc.value)
+			if err == nil || provider.calls.Load() != before {
+				t.Fatalf("invalid draft reached delivery: %v\n%s", err, out)
+			}
+			if strings.Contains(out, "EXAMPLE") {
+				t.Fatal("draft validation leaked the workflow signature")
 			}
 		})
 	}
