@@ -26,7 +26,7 @@ together when updating the engine.
 
 ## Position history compatibility
 
-The browser and service pin `@tiptap/y-tiptap` 3.2.0 and Yjs 13.6.33 together.
+The browser and service pin `@tiptap/y-tiptap` 3.3.0 and Yjs 13.6.33 together.
 Alongside `default`, validation continues to admit the legacy position-history map
 `__tiptap_position_migrations:root:default`. Its version 1 records contain numeric
 client/clock identities, causal vectors and position transfers; references must
@@ -39,7 +39,7 @@ The same limits include deleted and overwritten retained records: 256 records,
 4096 transfers, 128 causal pairs per record, 500000 total transferred positions,
 and 64 KiB of JSON metadata per Document, within the existing 1 MiB binary limit.
 A limit refuses the update without discarding confirmed content. Metadata is not
-compacted or discarded. The 3.2 binding clears the live legacy map on mount and
+compacted or discarded. The pinned binding clears the live legacy map on mount and
 when old peers update it; `gc:false` retains its deleted records in the binary
 snapshot, and validation still checks those retained payloads. Formatting tests
 cover this cleanup through a binary reload and the production service boundary,

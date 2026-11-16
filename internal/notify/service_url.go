@@ -5,8 +5,8 @@ import (
 	"strings"
 )
 
-// ServiceURLForDelivery applies provider options that belong to HOW a message
-// is presented rather than to WHERE it goes.
+// ServiceURLForDelivery adapts stored service URLs to current provider
+// requirements and applies presentation defaults.
 //
 // It runs on the way out, not when a channel is created, because a channel's
 // service URL is composed once and stored encrypted. Fixing the compose
@@ -15,9 +15,10 @@ import (
 // and the composed URL is deliberately never readable, so nobody could even
 // see what was wrong.
 //
-// It only ever supplies a DEFAULT. An option the operator set explicitly is
-// left as they set it.
+// Presentation defaults preserve explicit operator choices. Teams workflow
+// adaptation restores the HTTPS scheme stripped by older composers.
 func ServiceURLForDelivery(raw string) string {
+	raw = normalizeTeamsServiceURL(raw)
 	// splitLines is a Discord option. Adding it to a service that does not
 	// know the key makes shoutrrr reject the whole URL, turning a cosmetic
 	// improvement into a delivery outage — so this is matched on scheme, not

@@ -9,6 +9,8 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Teams notifications keep working after the dependency update (#5421).** Existing signed workflow URLs are adapted to the updated notification library, and new channels retain the full HTTPS URL and signature. ⚠️ **Behaviour change:** unsigned workflow URLs and retired Office connector webhooks are rejected; copy the complete signed HTTPS URL from Teams Workflows.
+
 - **Image collection restarts its grace period after failed bookkeeping and late observed use (#5398).** A failed unused-state reset or an interrupted pass can no longer leave a trusted old window behind. Final checks that discover an active build or a newly selected image restart that image’s window. Malformed deletion timestamps also keep a deleted crew’s selections protected even when the text starts with an old date. Collection remains off by default.
 
 - **Owned image collection waits for an image to stay unused, and keeps deleted crews' images for a week (#5398).** Still off by default. With `CREWSHIP_IMAGE_GC=true`, an owned image is no longer removed on the first pass that finds it unused: the pass records the time, and the image goes only after it stayed unused and unprotected for 24 hours, with a use seen at a pass, or more than two hours without a completed pass, restarting the window. Before, the rule looked only at when the image was built, so an image built two days ago and deselected a minute ago was removed at once. A soft-deleted crew's current and previous images are protected for 7 days after deletion, so a revived crew does not rebuild.
