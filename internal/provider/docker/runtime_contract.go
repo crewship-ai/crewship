@@ -48,6 +48,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"path/filepath"
 
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
@@ -93,13 +94,17 @@ const (
 // hash would be a far worse bug than the one this file exists to fix.
 func (p *Provider) crewRuntimeContractDigest() string {
 	p.contractOnce.Do(func() {
+		dirs := crewDirs{output: contractOutputDir, workspace: contractWorkingDir, crew: contractCrewDir}
+		if p.pathMap != nil {
+			dirs = crewDirs{output: filepath.Join(p.pathMap.local, ".contract/output"), workspace: filepath.Join(p.pathMap.local, ".contract/workspace"), crew: filepath.Join(p.pathMap.local, ".contract/crew")}
+		}
 		cfg, hostCfg, err := p.assembleCrewSpec(
 			provider.CrewConfig{ID: contractCrewID, Slug: contractCrewSlug},
 			"", // image: the container's own image is checked separately (image drift)
 			p.ociRuntime(),
 			contractMemoryMB,
 			contractCPUs,
-			crewDirs{output: contractOutputDir, workspace: contractWorkingDir, crew: contractCrewDir},
+			dirs,
 			[]string{"CREWSHIP_CREW_ID=" + contractCrewID},
 			nil, // no image ENV: applyDefaultEnv/applyAgentLoginPath both tolerate it
 		)

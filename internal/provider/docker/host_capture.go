@@ -179,7 +179,7 @@ func (p *Provider) hostSpoolHidden(ctx context.Context, mounts []container.Mount
 			return errors.New("host capture mount type is unqualified")
 		}
 		// Unlike a prospective spool, an inspected bind source must exist.
-		resolved, err := filepath.EvalSymlinks(source)
+		resolved, err := p.localBindSource(source)
 		if err != nil || !filepath.IsAbs(resolved) {
 			return errors.New("host capture cannot authenticate bind source")
 		}

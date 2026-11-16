@@ -19,6 +19,8 @@ services:
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:?NEXTAUTH_SECRET is required}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?ENCRYPTION_KEY is required}
       CREWSHIP_CONTAINER_PROVIDER: docker
+      # Inspect this server on the same daemon to translate storage mount sources.
+      CREWSHIP_DOCKER_SERVER_CONTAINER: crewship
       CREWSHIP_STORAGE_PROVIDER: localfs
       CREWSHIP_STATE_PROVIDER: bbolt
       CREWSHIP_STORAGE_BASE_PATH: /var/lib/crewship

@@ -26,6 +26,94 @@ most of that API ourselves. Deploying this and believing the agent container
 problem is solved would be worse than not deploying it.
 </Warning>
 
+## Server and daemon storage paths
+
+Bind sources and the local volume driver's `device` option are evaluated by the
+Docker daemon. A server running in a sibling container cannot pass its own
+filesystem paths unchanged. The production Compose configuration sets
+`CREWSHIP_DOCKER_SERVER_CONTAINER=crewship`, matching its `container_name`.
+Crewship inspects that explicitly named container on the configured daemon and
+resolves `storage.base_path` through its enclosing writable bind or local named
+volume. Container inspection must be allowed by the socket proxy. Mount names
+and Docker's storage directory are not guessed.
+
+For an existing Compose installation, add that environment value using the
+**actual server container name** and recreate the server while preserving all
+existing volumes. Do not rename the Compose project or its volumes. No storage
+migration, database replacement or backup-format change is required. Custom
+container names and multiple instances each need their own server identity.
+An incorrect identity is an operator configuration error; use the same daemon
+and the container that actually mounts the server's storage.
+
+Alternatively set `CREWSHIP_DOCKER_DAEMON_DATA_PATH` to the absolute daemon-side
+counterpart of `CREWSHIP_STORAGE_BASE_PATH`. Configure exactly one mechanism.
+For example, local `/var/lib/crewship` can map to
+`/var/lib/docker/volumes/example-data/_data`; obtain the latter from your actual
+Docker configuration, never assume Docker's default data directory. This mode
+requires the operator to ensure both roots reference the same shared data.
+It does not copy files to a remote daemon.
+
+Native servers and VM runtimes sharing paths with the same spelling retain
+existing behavior with both settings absent. A remote daemon requires storage
+shared between server and daemon and an explicit mapping. Separate nested mounts
+under storage are rejected by container inspection; place required files under a
+single shared storage root. The configured storage root must be canonical
+(without symlink ancestors) when mapping is enabled. Bind sources outside the configured root, traversal
+and symlinks escaping it are refused. Feature mounts from the existing explicit
+allowlist (such as the daemon socket) remain daemon-side resources.
+
+Only Docker request sources are translated. Local reads, writes, staging, file
+hashes and cleanup keep their local paths. Runtime binaries stay read-only;
+agent data retains `noexec,nosuid`; secrets remain tmpfs. Named home/tools
+volumes and installation labels are unchanged. The native managed-launch and
+protected host-capture pilots retain their existing host/UID restrictions; this
+mapping does not qualify those pilots for containerized controllers.
+
+A mandatory mount failure leaves HTTP administration available but makes
+`/readyz` return 503 and refuses crew starts with the stored runtime error.
+`/healthz` remains a liveness probe. An explicit Docker provider that cannot
+initialize also degrades readiness. `--no-docker` deliberately omits runtime
+readiness. Auto selection retains a detected Docker provider with failed mount
+preflight instead of switching to a provider with weaker isolation; if no daemon
+can be detected, its existing fallback policy still applies. After correcting a
+startup mapping or mandatory-file failure, restart the server to rerun preflight.
+A daemon outage after startup is checked by readiness ping.
+
+## Candidate verification and rollout
+
+The shared image smoke entrypoint runs both HTTP/UI boot and
+`scripts/ci/smoke-image-runtime.sh`. The runtime leg requires Docker and a test
+harness compiled from the exact embedded source commit. It runs the distributed
+server image behind the production socket proxy, with named volumes and two
+server instances. Inside the server namespace it exercises the production Docker
+provider, the distributed sidecar without model credentials, exec, bidirectional
+data, mount restrictions, ownership and stable reconcile. It then repeats after
+server restart and recreation using the same volumes. Missing Docker, proxy
+rejection and runtime readiness failure fail the gate. Release/nightly callers
+supply immutable image digests and execute both amd64 and arm64 legs.
+
+This leg tests core runtime operation with a Debian crew image. Default
+onboarding feature provisioning has additional proxy permissions described
+below and requires its separate onboarding conformance test. Host-native and
+VM runtime conformance remain separate tests. Neither a compiled test nor a
+skipped test is evidence of a successful image run.
+
+Before a canary, record the previous and candidate immutable image digest,
+embedded commit, build version and architecture. Run the gate against that exact
+candidate, then back up existing named volumes and validate restore on an
+isolated instance. Preserve the server HOME, database, audit key material and
+volume names. Recreate only the canary server with the mapping and candidate
+image. Check `/readyz` separately from liveness and run a credential-free sidecar
+and data smoke before permitting model traffic. Never repair audit verification
+by automatically resealing history.
+
+Rollback pins the previous image digest and recreates only the server using the
+same configuration and named volumes. No data-layout migration is introduced.
+The old image still has the original namespace defect: rollback does not make
+containerized crew execution functional. Stop canary crew containers before a
+rollback; preserve their data and home/tools volumes. If a later release adds
+schema migrations, follow that release's restore compatibility requirements.
+
 ## How it works
 
 Crewship resolves its daemon endpoint from `DOCKER_HOST` before falling back to
@@ -167,6 +255,12 @@ archive into a container and pinging the daemon all need it. There is no
 read-only mode of Crewship that would let you leave it off.
 
 ## Devcontainer provisioning is opt-in
+
+The default onboarding crew includes devcontainer features. Therefore the core
+proxy preset alone cannot provision that default crew. For that workflow,
+explicitly enable all three permissions below; changing a bind mapping does not
+resolve a provisioning 403. The core runtime image gate intentionally does not
+claim to qualify this build path.
 
 Crews that carry a devcontainer or mise config get a provisioned, cached image
 (`crewNeedsProvision` in `internal/api/crew_runtime_config.go`). That path needs

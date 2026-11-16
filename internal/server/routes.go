@@ -114,6 +114,15 @@ func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
 
 	checks := map[string]string{}
 
+	if s.runtimeInitError != nil {
+		checks["runtime"] = "unavailable"
+	}
+	if runtime, ok := s.container.(interface{ RuntimeReady(context.Context) error }); ok {
+		checks["runtime"] = "ok"
+		if runtime.RuntimeReady(ctx) != nil {
+			checks["runtime"] = "unavailable"
+		}
+	}
 	// Database
 	if s.db != nil {
 		if err := s.db.PingContext(ctx); err != nil {

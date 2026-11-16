@@ -147,6 +147,11 @@ func newDriftFixtureState(t *testing.T, containerName, runningImage string, stat
 				"Config":      map[string]any{"Env": []string{}},
 			})
 
+			// Ownership initialization must report successful completion.
+		case strings.HasSuffix(path, "/wait"):
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"StatusCode": 0})
+
 		// Container start — accept.
 		case strings.HasSuffix(path, "/start"):
 			w.WriteHeader(http.StatusNoContent)
