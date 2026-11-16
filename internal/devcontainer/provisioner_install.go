@@ -388,7 +388,7 @@ func VerifyBinariesResolve(ctx context.Context, containerID string, bins []strin
 		`[ -z "$missing" ] || { echo "crewship: adapter CLI not installed in this image:$missing (PATH=$PATH)" >&2; exit 1; }`
 	for _, binary := range bins {
 		if binary == "opencode" {
-			script += `; opencode_version=$(opencode --version 2>/dev/null) && [ "$opencode_version" = "$(printf '%s' "$opencode_version" | tr -d '\r\n')" ] && printf '%s\n' "$opencode_version" | grep -Eq '^v?2\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$' || { echo 'crewship: OpenCode 2 is required; update the toolchain and reprovision' >&2; exit 1; }`
+			script += `; opencode_version=$(opencode --version 2>/dev/null) && opencode_version=${opencode_version#opencode } && [ "$opencode_version" = "$(printf '%s' "$opencode_version" | tr -d '\r\n')" ] && printf '%s\n' "$opencode_version" | grep -Eq '^v?2\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$' || { echo 'crewship: OpenCode 2 is required; update the toolchain and reprovision' >&2; exit 1; }`
 			break
 		}
 	}

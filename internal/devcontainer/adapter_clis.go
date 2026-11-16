@@ -28,8 +28,9 @@ type AdapterCLI struct {
 	// MiseTool is the tool name in the mise registry that installs Binary,
 	// empty when mise has none.
 	MiseTool string
-	// Version is the selected current stable release. Empty uses
-	// the installer's latest channel. Explicit customer pins remain authoritative.
+	// Version records the selected stable release. Mise recipes pin it;
+	// script recipes retain their installer channel. Empty uses latest.
+	// Explicit compatible customer pins remain authoritative.
 	Version string
 	// FeatureIDs are devcontainer feature ids (the last path segment of the
 	// feature ref, before the version) that already install Binary; when the

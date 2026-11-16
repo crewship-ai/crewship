@@ -34,7 +34,7 @@ func TestCurrentCLIReleaseCommands(t *testing.T) {
 		flags   []string
 	}{
 		{"OPENCODE", []string{"run", "--help"}, []string{"--format", "--model", "--standalone"}},
-		{"CLAUDE_CODE", []string{"--help"}, []string{"--print", "--output-format", "--include-partial-messages", "--setting-sources", "--strict-mcp-config", "--tools", "--no-session-persistence", "--max-turns"}},
+		{"CLAUDE_CODE", []string{"--help"}, []string{"--print", "--output-format", "--include-partial-messages", "--setting-sources", "--strict-mcp-config", "--tools", "--no-session-persistence"}},
 		{"CODEX_CLI", []string{"exec", "--help"}, []string{"--json", "--sandbox", "--skip-git-repo-check"}},
 		{"GEMINI_CLI", []string{"--help"}, []string{"--prompt", "--output-format", "--model"}},
 	} {
@@ -147,5 +147,54 @@ func TestOpenCodeV2LocalEndpoint(t *testing.T) {
 	}
 	if failed || requests.Load() == 0 || !strings.Contains(text.String(), "Crewship fixture response") {
 		t.Fatalf("requests=%d failed=%t text=%s\n%s", requests.Load(), failed, text.String(), out)
+	}
+}
+
+// --max-turns is hidden from Claude's normal help in 2.1.325. Verify the
+// adapter's real argv reaches a local provider; removing the flag just to make
+// a help-text assertion pass would remove Crewship's runaway-loop cap.
+func TestCurrentClaudeCLIAdapterArguments(t *testing.T) {
+	if _, err := os.Stat("/etc/claude-code"); err == nil {
+		t.Fatal("run native qualification without managed /etc/claude-code configuration")
+	} else if !os.IsNotExist(err) {
+		t.Fatal(err)
+	}
+	dir := os.Getenv("CREWSHIP_CLI_QUALIFICATION_BIN_DIR")
+	if dir == "" {
+		t.Fatal("set CREWSHIP_CLI_QUALIFICATION_BIN_DIR")
+	}
+	var requests atomic.Int64
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == "POST" && r.URL.Path == "/v1/messages" {
+			requests.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		io.WriteString(w, `{"type":"error","error":{"type":"authentication_error","message":"Crewship local qualification endpoint"}}`)
+	}))
+	defer server.Close()
+	req := AgentRunRequest{CLIAdapter: "CLAUDE_CODE", LLMModel: "claude-sonnet-4-6", ToolProfile: "MINIMAL", MaxTurns: 1, UserMessage: "Reply with one word"}
+	argv := (claudeCodeAdapter{}).BuildCommand(req)
+	home := t.TempDir()
+	// Provisioning creates this file in the container's /crew/runs tree.
+	// Translate that container path to the isolated host qualification fixture.
+	mcpPath := filepath.Join(home, "mcp.json")
+	if err := os.WriteFile(mcpPath, []byte(`{"mcpServers":{}}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for i, arg := range argv {
+		if arg == "--mcp-config" && i+1 < len(argv) {
+			argv[i+1] = mcpPath
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, filepath.Join(dir, "claude"), argv[1:]...)
+	cmd.Dir = home
+	cmd.Env = []string{"HOME=" + home, "PATH=" + dir + ":/usr/local/bin:/usr/bin:/bin", "XDG_CONFIG_HOME=" + home + "/config", "XDG_DATA_HOME=" + home + "/data", "XDG_CACHE_HOME=" + home + "/cache", "DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "ANTHROPIC_API_KEY=crewship-local-fixture", "ANTHROPIC_BASE_URL=" + server.URL, "CI=1"}
+	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil || requests.Load() == 0 {
+		t.Fatalf("argv did not reach local provider: %v requests=%d\n%s", err, requests.Load(), out)
 	}
 }
