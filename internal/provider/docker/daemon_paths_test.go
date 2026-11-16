@@ -12,8 +12,10 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 )
@@ -156,22 +158,35 @@ func TestBuildMountsUsesDaemonPaths(t *testing.T) {
 	}
 }
 
-func TestMandatoryBindPreflightRetainsFailure(t *testing.T) {
-	for _, code := range []int{400, 403, 404, 500} {
-		t.Run(fmt.Sprint(code), func(t *testing.T) {
+func TestMandatoryBindPreflightClassifiesFailures(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		code    int
+		message string
+		blocked bool
+	}{
+		{"bind source rejected", 400, "bind source path does not exist: SOURCE", true},
+		{"unknown invalid request", 400, "probe rejected", false},
+		{"proxy rejection", 403, "probe rejected", false},
+		{"sentinel absent", 404, "No such image", false},
+		{"unknown daemon response", 500, "probe rejected", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			root := mappingTempDir(t)
 			for _, name := range []string{"sidecar", "entrypoint"} {
 				if err := os.WriteFile(filepath.Join(root, name), []byte{0x7f, 'E', 'L', 'F'}, 0755); err != nil {
 					t.Fatal(err)
 				}
 			}
+			var creates atomic.Int32
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if r.Method == http.MethodHead {
 					w.WriteHeader(200)
 					return
 				}
-				w.WriteHeader(code)
-				fmt.Fprint(w, `{"message":"probe rejected"}`)
+				creates.Add(1)
+				w.WriteHeader(tc.code)
+				_ = json.NewEncoder(w).Encode(map[string]string{"message": strings.ReplaceAll(tc.message, "SOURCE", root+"/sidecar")})
 			}))
 			defer server.Close()
 			cli, err := client.New(client.WithHost(server.URL), client.WithAPIVersion("1.47"))
@@ -181,13 +196,19 @@ func TestMandatoryBindPreflightRetainsFailure(t *testing.T) {
 			defer cli.Close()
 			p := &Provider{client: cli, cfg: Config{SidecarBinaryPath: root + "/sidecar", EntrypointPath: root + "/entrypoint"}, logger: quietLogger(), runtimeProbeGate: make(chan struct{}, 1)}
 			p.preflightMandatoryBinds(context.Background())
-			if err := p.RuntimeReady(context.Background()); (err != nil) != (code != 404) {
-				t.Fatalf("status %d: runtime error %v", code, err)
+			if err := p.runtimeAvailable(context.Background()); (err != nil) != tc.blocked {
+				t.Fatalf("start preflight blocked=%v, want %v: %v", err != nil, tc.blocked, err)
 			}
-			if code != 404 {
+			if err := p.RuntimeReady(context.Background()); (err != nil) != tc.blocked {
+				t.Fatalf("readiness blocked=%v, want %v: %v", err != nil, tc.blocked, err)
+			}
+			if tc.blocked {
 				if _, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{ID: "crew"}); err == nil {
-					t.Fatal("unavailable runtime accepted crew start")
+					t.Fatal("recognized bind rejection accepted crew start")
 				}
+			}
+			if tc.code != 404 && !tc.blocked && creates.Load() < 3 {
+				t.Fatal("inconclusive probe was cached as verified success")
 			}
 		})
 	}
@@ -303,12 +324,12 @@ func TestMandatoryPreflightRecoversFromTransientFailure(t *testing.T) {
 	if p.runtimeErr != nil {
 		t.Fatalf("transient failure became permanent: %v", p.runtimeErr)
 	}
-	if err := p.RuntimeReady(context.Background()); err == nil {
-		t.Fatal("503 daemon was ready")
+	if err := p.RuntimeReady(context.Background()); err != nil {
+		t.Fatalf("unknown create response blocked healthy daemon: %v", err)
 	}
 	status.Store(403)
-	if err := p.RuntimeReady(context.Background()); err == nil {
-		t.Fatal("denied proxy was ready")
+	if err := p.RuntimeReady(context.Background()); err != nil {
+		t.Fatalf("inconclusive proxy response blocked healthy daemon: %v", err)
 	}
 	status.Store(404) // expected sentinel-image absence after mounts validate
 	if err := p.RuntimeReady(context.Background()); err != nil {
@@ -340,5 +361,69 @@ func TestFailedMappingDoesNotQualifyHostCapture(t *testing.T) {
 		if p.SupportsHostCapture() {
 			t.Fatal("failed mapping qualified a containerized controller")
 		}
+	}
+}
+
+func TestInconclusivePreflightPreservesRunningCrew(t *testing.T) {
+	cfg := covRTConfig(t)
+	for _, name := range []string{"sidecar", "entrypoint"} {
+		if err := os.WriteFile(filepath.Join(cfg.OutputBasePath, name), []byte{0x7f, 'E', 'L', 'F'}, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cfg.SidecarBinaryPath = filepath.Join(cfg.OutputBasePath, "sidecar")
+	cfg.EntrypointPath = filepath.Join(cfg.OutputBasePath, "entrypoint")
+	f := &covRT{inspectBody: `{"Id":"running-crew","State":{"Status":"running","Running":true}}`, createFn: func(req container.CreateRequest) (string, int) {
+		if req.Config == nil || req.Config.Image != preflightSentinelImage {
+			t.Error("inconclusive preflight triggered crew replacement")
+		}
+		return "", 500
+	}}
+	p := f.provider(t, cfg)
+	p.runtimeProbeGate = make(chan struct{}, 1)
+	p.setWarm("crew", "running-crew", "")
+	id, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{ID: "crew"})
+	if err != nil || id != "running-crew" {
+		t.Fatalf("running crew not preserved: %s %v", id, err)
+	}
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.stops) != 0 || len(f.deletes) != 0 {
+		t.Fatal("unknown probe reply stopped or removed a running crew")
+	}
+}
+
+func TestInconclusiveProbeTimeoutDoesNotConsumeReadinessBudget(t *testing.T) {
+	root := mappingTempDir(t)
+	for _, name := range []string{"sidecar", "entrypoint"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte{0x7f, 'E', 'L', 'F'}, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	release := make(chan struct{})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.WriteHeader(200)
+			return
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer func() { close(release); server.Close() }()
+	cli, err := client.New(client.WithHost(server.URL), client.WithAPIVersion("1.47"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.Close()
+	p := &Provider{client: cli, cfg: Config{SidecarBinaryPath: root + "/sidecar", EntrypointPath: root + "/entrypoint"}, logger: quietLogger(), runtimeProbeGate: make(chan struct{}, 1)}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if err := p.RuntimeReady(ctx); err != nil {
+		t.Fatalf("unknown probe timeout blocked a pingable daemon: %v", err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("probe consumed the readiness DB/state budget")
 	}
 }

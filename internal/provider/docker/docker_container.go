@@ -445,7 +445,7 @@ func (p *Provider) migrateLegacyVolumeLabeled(ctx context.Context, legacy, targe
 // per-crew mutex makes the second caller see the freshly-created
 // container and reuse it instead.
 func (p *Provider) EnsureCrewRuntime(ctx context.Context, team provider.CrewConfig) (containerID string, err error) {
-	if runtimeErr := p.runtimeAvailable(ctx); runtimeErr != nil {
+	if runtimeErr := p.runtimeAvailableForRequest(ctx); runtimeErr != nil {
 		return "", fmt.Errorf("Docker runtime unavailable: %w", runtimeErr)
 	}
 	if p.cfg.OwnerActive != nil {

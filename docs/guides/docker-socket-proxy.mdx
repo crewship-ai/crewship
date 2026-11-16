@@ -66,21 +66,25 @@ allowlist (such as the daemon socket) remain daemon-side resources.
 
 Only Docker request sources are translated. Local reads, writes, staging, file
 hashes and cleanup keep their local paths. Runtime binaries stay read-only;
-data mounts retain the requested `noexec,nosuid` options; the image gate
-checks actual kernel flags and blocks release on failure. Secrets remain tmpfs. Named home/tools
+data mounts retain the requested options. The image gate compares actual kernel
+flags against a native control on the same backing filesystem. This parity
+check does not qualify the separate persistent-data hardening repair. Secrets remain tmpfs. Named home/tools
 volumes and installation labels are unchanged. The native managed-launch and
 protected host-capture pilots retain their existing host/UID restrictions; this
 mapping does not qualify those pilots for containerized controllers.
 
-A mandatory mount failure leaves HTTP administration available but makes
+A recognized mandatory bind-source rejection or a mapping/configuration error
+leaves HTTP administration available but makes
 `/readyz` return 503 and refuses crew starts with the stored runtime error.
 `/healthz` remains a liveness probe. An explicit Docker provider that cannot
 initialize also degrades readiness. `--no-docker` deliberately omits runtime
 readiness. Auto selection retains a detected Docker provider with failed mount
 preflight instead of switching to a provider with weaker isolation; if no daemon
 can be detected, its existing fallback policy still applies. Mapping discovery/configuration changes still require a server restart.
-Mandatory mount probes retry after failure on readiness/start requests, including
-transient API timeouts and proxy rejections. Only successful probes are cached
+Mandatory mount probes retry after recognized failure on readiness/start requests.
+Other create-probe responses, including timeouts and proxy rejections, are logged
+as inconclusive and do not introduce an unavailable state. A known prior failure
+remains blocking until a verified probe succeeds. Only verified success is cached
 for up to 30 seconds. Readiness also pings the daemon on every request.
 
 ## Candidate verification and rollout
@@ -91,9 +95,10 @@ harness compiled from the exact embedded source commit. It runs the distributed
 server image behind the production socket proxy, with named volumes and two
 server instances. Inside the server namespace it exercises the production Docker
 provider, the distributed sidecar without model credentials, exec, bidirectional
-data, mount restrictions, ownership and stable reconcile. It then repeats after
-server restart and recreation using the same volumes. Missing Docker, proxy
-rejection and runtime readiness failure fail the gate. Release/nightly callers
+data, native/mapped mount-flag parity, read-only runtime binds, ownership and
+stable reconcile. It then repeats after
+server restart and recreation using the same volumes. Missing Docker and failures of the real runtime create/exec/mount operations
+fail the gate. Release/nightly callers
 supply immutable image digests and execute both amd64 and arm64 legs.
 
 This leg tests core runtime operation with a Debian crew image. Default

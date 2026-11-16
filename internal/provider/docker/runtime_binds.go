@@ -155,17 +155,16 @@ func vmShareRemedy(runtime, path string) string {
 // the create always fails, and only the SHAPE of the failure is read.
 const preflightSentinelImage = "crewship-bind-preflight:does-not-exist"
 
-// preflightMandatoryBinds checks at boot that the daemon can see the sidecar
-// and entrypoint bind sources, instead of leaving it to blow up on a user's
-// first prompt (#1706).
-//
-// Keep the provider installed but unavailable on failure: auto selection must
-// not downgrade isolation after detecting a configured but unusable runtime.
-// Readiness and crew start return the retained failure.
-// Only successful mandatory probes are cached. A startup daemon/API timeout or
-// proxy rejection is retried on readiness/start; it never becomes a permanent
-// runtimeErr. Configuration/mapping remains immutable until server restart.
+// Probe errors are classified conservatively for unqualified runtimes. Only
+// local configuration/mapping errors and recognized daemon bind-source rejection
+// block runtime admission. Inconclusive API replies are logged, never promoted
+// to a new unavailable state. Only verified success is cached for 30 seconds.
 const runtimeProbeTTL = 30 * time.Second
+
+type mandatoryProbeState struct {
+	err        error
+	verifiedAt time.Time
+}
 
 func (p *Provider) runtimeAvailable(ctx context.Context) error {
 	if p.runtimeErr != nil || p.runtimeProbeGate == nil {
@@ -177,12 +176,47 @@ func (p *Provider) runtimeAvailable(ctx context.Context) error {
 		return ctx.Err()
 	}
 	defer func() { <-p.runtimeProbeGate }()
-	if p.runtimeProbeErr == nil && !p.runtimeProbeAt.IsZero() && time.Since(p.runtimeProbeAt) < runtimeProbeTTL {
+	previous := p.runtimeProbeState.Load()
+	if previous != nil && previous.err == nil && !previous.verifiedAt.IsZero() && time.Since(previous.verifiedAt) < runtimeProbeTTL {
 		return nil
 	}
-	p.runtimeProbeErr = p.probeMandatoryBinds(ctx)
-	p.runtimeProbeAt = time.Now()
-	return p.runtimeProbeErr
+	verified, err := p.probeMandatoryBinds(ctx)
+	// An inconclusive retry does not disprove a known prior bind/config failure.
+	if !verified && err == nil && previous != nil {
+		err = previous.err
+	}
+	state := &mandatoryProbeState{err: err}
+	if verified {
+		state.verifiedAt = time.Now()
+	}
+	p.runtimeProbeState.Store(state)
+	return err
+}
+
+// Keep a slow or queued probe from consuming the readiness handler's DB/state
+// budget or delaying warm crew reuse. The prior recognized failure remains
+// blocking; an unknown response or probe wait alone is not a runtime verdict.
+func (p *Provider) runtimeAvailableForRequest(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if p.runtimeErr != nil || p.runtimeProbeGate == nil {
+		return p.runtimeErr
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	err := p.runtimeAvailable(probeCtx)
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if err != nil && probeCtx.Err() != nil {
+		if previous := p.runtimeProbeState.Load(); previous != nil && previous.err != nil {
+			return previous.err
+		}
+		p.logger.Warn("mandatory bind probe inconclusive; retaining runtime availability", "error", err)
+		return nil
+	}
+	return err
 }
 
 func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
@@ -191,21 +225,21 @@ func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
 	}
 }
 
-func (p *Provider) probeMandatoryBinds(ctx context.Context) error {
+func (p *Provider) probeMandatoryBinds(ctx context.Context) (bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	for _, source := range []string{p.cfg.SidecarBinaryPath, p.cfg.EntrypointPath} {
 		info, err := os.Stat(source)
 		if err != nil {
-			return fmt.Errorf("mandatory runtime file %s: %w", source, err)
+			return false, fmt.Errorf("mandatory runtime file %s: %w", source, err)
 		}
 		if !runtimeFileModeAllowed(info.Mode(), goruntime.GOOS) {
-			return fmt.Errorf("mandatory runtime file %s must be a regular executable", source)
+			return false, fmt.Errorf("mandatory runtime file %s must be a regular executable", source)
 		}
 	}
 	mounts, err := p.buildMounts("preflight", "", "", "", "")
 	if err != nil {
-		return err
+		return false, err
 	}
 	var binds []mount.Mount
 	for _, m := range mounts {
@@ -214,7 +248,7 @@ func (p *Provider) probeMandatoryBinds(ctx context.Context) error {
 		}
 	}
 	if len(binds) == 0 {
-		return nil
+		return true, nil
 	}
 	created, createErr := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
 		Config: &container.Config{Image: preflightSentinelImage}, HostConfig: &container.HostConfig{Mounts: binds},
@@ -223,9 +257,13 @@ func (p *Provider) probeMandatoryBinds(ctx context.Context) error {
 		_, createErr = p.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{})
 	}
 	if createErr == nil || cerrdefs.IsNotFound(createErr) {
-		return nil
+		return true, nil
 	}
-	return p.explainBindFailure(createErr)
+	if unreachableBindSourcePath(createErr) != "" {
+		return false, p.explainBindFailure(createErr)
+	}
+	p.logger.Warn("mandatory bind probe inconclusive; retaining runtime availability", "error", createErr)
+	return false, nil
 }
 
 // A digest-addressed bind source is never replaced. Docker archive reads mount

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -123,16 +124,15 @@ type Provider struct {
 	// Tests only.
 	networkDisconnectHook func(netName string) error
 
-	serviceOperation serviceOperationGate
-	runtimeErr       error         // immutable mapping/configuration error
-	runtimeProbeGate chan struct{} // context-aware serialization; nil on bare test providers
-	runtimeProbeErr  error
-	runtimeProbeAt   time.Time
-	pathMap          *daemonPathMap
-	client           *client.Client
-	cfg              Config
-	logger           *slog.Logger
-	detected         DetectResult
+	serviceOperation  serviceOperationGate
+	runtimeErr        error         // immutable mapping/configuration error
+	runtimeProbeGate  chan struct{} // context-aware serialization; nil on bare test providers
+	runtimeProbeState atomic.Pointer[mandatoryProbeState]
+	pathMap           *daemonPathMap
+	client            *client.Client
+	cfg               Config
+	logger            *slog.Logger
+	detected          DetectResult
 
 	// digestResolver short-circuits repeated HEAD requests to the registry
 	// for the runtime image. Shared helper (see internal/dockerutil) so the

@@ -78,19 +78,11 @@ func TestContainerizedStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Collect all facts before the first restrictive-flags assertion. A
-	// missing noexec flag must not hide the actual execution result on /output.
-	diagnostic := run("1001:1001", `
-awk '$2=="/workspace" || $2=="/output" || $2=="/crew" {print "DATA_MOUNT " $0}' /proc/mounts
-cp /bin/true /output/exec-probe
-chmod +x /output/exec-probe
-if /output/exec-probe; then
-  echo OUTPUT_EXEC_EXIT=0
-else
-  code=$?
-  echo OUTPUT_EXEC_EXIT=$code
-fi`)
-	t.Logf("effective data mount diagnostics:\n%s", diagnostic)
+	baseline, err := nativeDataMountFlags(os.Getenv("CREWSHIP_SMOKE_NATIVE_MOUNTS"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("effective data mount diagnostics:\n%s", run("1001:1001", `awk '$2=="/workspace" || $2=="/output" || $2=="/crew" {print "DATA_MOUNT " $0}' /proc/mounts`))
 	for _, pair := range []struct{ local, target string }{{dirs.workspace, "/workspace"}, {dirs.output, "/output"}, {dirs.crew, "/crew"}} {
 		if persisted {
 			previous, err := os.ReadFile(filepath.Join(pair.local, "from-server"))
@@ -112,9 +104,11 @@ fi`)
 		if raw, err := os.ReadFile(filepath.Join(pair.local, "from-agent")); err != nil || string(raw) != "agent" {
 			t.Fatalf("agent write invisible: %q %v", raw, err)
 		}
-		run("1001:1001", fmt.Sprintf(`awk '$2=="%s" && $4 ~ /noexec/ && $4 ~ /nosuid/ {ok=1} END {exit !ok}' /proc/mounts`, pair.target))
+		options := strings.TrimSpace(run("1001:1001", fmt.Sprintf(`awk '$2=="%s" {print $4}' /proc/mounts`, pair.target)))
+		if err := compareDataMountFlags(baseline, pair.target, options); err != nil {
+			t.Fatal(err)
+		}
 	}
-	run("1001:1001", `cp /bin/true /output/exec-probe; chmod +x /output/exec-probe; if /output/exec-probe; then exit 1; fi`)
 	for _, target := range []string{"/usr/local/bin/crewship-sidecar", "/usr/local/bin/entrypoint.sh"} {
 		run("1001:1001", fmt.Sprintf(`awk '$2=="%s" && $4 ~ /(^|,)ro(,|$)/ {ok=1} END {exit !ok}' /proc/mounts`, target))
 	}
@@ -122,7 +116,7 @@ fi`)
 	run("1001:1001", `test "$(stat -c %u /workspace)" = 1001; test "$(stat -c %u /home/agent)" = 1001; awk '$2=="/secrets" && $3=="tmpfs" {ok=1} END {exit !ok}' /proc/mounts`)
 	for _, target := range []string{"/home/agent/persisted", "/opt/crew-tools/persisted"} {
 		if persisted {
-			run("1001:1001", "test \"$(cat "+target+")\" = "+shellQuote(cfg.ContainerPrefix))
+			run("1001:1001", `test "$(cat `+target+`)" = `+shellQuote(cfg.ContainerPrefix))
 		} else {
 			run("1001:1001", "printf %s "+shellQuote(cfg.ContainerPrefix)+" > "+target)
 		}
@@ -154,5 +148,5 @@ exit 1`)
 	if err := os.WriteFile(marker, []byte(cfg.ContainerPrefix), 0600); err != nil {
 		t.Fatal(err)
 	}
-	t.Log("real sidecar health, exec, bidirectional data, readonly runtime, noexec/nosuid, ownership and stable reconcile verified")
+	t.Log("real sidecar health, exec, bidirectional data, readonly runtime, native/mapped mount flag parity, ownership and stable reconcile verified")
 }

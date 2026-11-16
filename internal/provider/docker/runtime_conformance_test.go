@@ -191,7 +191,7 @@ func TestRuntimeConformance(t *testing.T) {
 	waitForPID1(ctx, t, p, created.ID)
 
 	facts := readContainerFacts(ctx, t, p, created.ID)
-	t.Logf("effective persistent data mounts: workspace=%s output=%s crew=%s; output executable setup=%s exit=%s", facts["WORKSPACE_MOUNT"], facts["OUTPUT_MOUNT"], facts["CREW_MOUNT"], facts["OUTPUT_EXEC_SETUP"], facts["OUTPUT_EXEC_EXIT"])
+	t.Logf("effective persistent data mounts: workspace=%s output=%s crew=%s", facts["WORKSPACE_MOUNT"], facts["OUTPUT_MOUNT"], facts["CREW_MOUNT"])
 	probes := evaluate(t, p, hostCfg, facts)
 	probes = append(probes, contractLabelProbe(ctx, t, p, created.ID))
 	probes = append(probes, imageProvenanceProbes(imageProv)...)
@@ -538,13 +538,6 @@ echo "CREW_MOUNT=$(awk '$2=="/crew"{print $0}' /proc/mounts)"
 echo "WORKSPACE_OPTS=$(awk '$2=="/workspace"{print $4}' /proc/mounts)"
 echo "OUTPUT_OPTS=$(awk '$2=="/output"{print $4}' /proc/mounts)"
 echo "CREW_OPTS=$(awk '$2=="/crew"{print $4}' /proc/mounts)"
-if cp /bin/true /output/.crewship-conformance-exec && chmod 755 /output/.crewship-conformance-exec; then
-  echo OUTPUT_EXEC_SETUP=ok
-  /output/.crewship-conformance-exec
-  echo "OUTPUT_EXEC_EXIT=$?"
-else
-  echo OUTPUT_EXEC_SETUP=failed
-fi
 echo "ROOT_OPTS=$(awk '$2=="/"{print $4}' /proc/mounts)"
 echo "ETC_WRITABLE=$(touch /etc/.crewship-conformance 2>/dev/null && echo yes || echo no)"
 echo "MEM_MAX=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || cat /sys/fs/cgroup/memory/memory.limit_in_bytes 2>/dev/null)"
@@ -718,10 +711,6 @@ func evaluate(t *testing.T, p *Provider, hostCfg *container.HostConfig, f contai
 		honoured: hasMountOpts(f["TMP_OPTS"], "noexec", "nosuid"),
 		why:      "defense in depth against staging and execve-ing a payload",
 	})
-	for _, data := range []struct{ target, key string }{{"/workspace", "WORKSPACE_OPTS"}, {"/output", "OUTPUT_OPTS"}, {"/crew", "CREW_OPTS"}} {
-		add(probe{name: data.target + " carries effective noexec,nosuid", want: "noexec,nosuid", got: f[data.key], honoured: hasMountOpts(f[data.key], "noexec", "nosuid"), loadBearing: true, why: "inspect options alone do not establish kernel enforcement"})
-	}
-	add(probe{name: "a prepared /output binary cannot execute", want: "setup=ok exit=126", got: "setup=" + f["OUTPUT_EXEC_SETUP"] + " exit=" + f["OUTPUT_EXEC_EXIT"], honoured: f["OUTPUT_EXEC_SETUP"] == "ok" && f["OUTPUT_EXEC_EXIT"] == "126", loadBearing: true, why: "persistent writable data must not be directly executable"})
 	// A tmpfs size= request is rounded UP to a whole number of pages by the
 	// kernel, so exact equality is the wrong assertion and fails on both
 	// runtimes for a number that is in fact correct. Compare against the

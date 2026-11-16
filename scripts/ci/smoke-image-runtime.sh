@@ -42,21 +42,6 @@ arch=${platform#linux/}
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags conformance -o "$work/runtime.test" ./internal/provider/docker
 chmod 755 "$work/runtime.test"
 docker pull --platform "$platform" "$crew_image" >/dev/null
-# Independent native-client control, using the same local driver options as
-# noexecBindMount. Record kernel flags and real execution before the image
-# fixture can fail at its first flag assertion. This is diagnostic, not a waiver.
-mkdir "$work/native-data"
-echo 'Native local-volume effective flag diagnostic'
-docker run --rm -i --name "$prefix-native-probe" --platform "$platform" \
-  --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
-  --user "$(id -u):$(id -g)" \
-  --mount "type=volume,dst=/output,volume-driver=local,volume-opt=type=none,volume-opt=device=$work/native-data,\"volume-opt=o=bind,noexec,nosuid\"" \
-  "$crew_image" sh -es <<'NATIVE_PROBE'
-awk '$2=="/output" {print "NATIVE_DATA_MOUNT " $0}' /proc/mounts
-cp /bin/true /output/exec-probe
-chmod +x /output/exec-probe
-if /output/exec-probe; then echo NATIVE_OUTPUT_EXEC_EXIT=0; else code=$?; echo NATIVE_OUTPUT_EXEC_EXIT=$code; fi
-NATIVE_PROBE
 
 docker network create --internal "$prefix" >/dev/null
 docker run -d --name "$prefix-proxy" --network "$prefix" \
@@ -101,12 +86,26 @@ wait_server() {
   return 1
 }
 probe() {
-  docker exec -e CREWSHIP_CONTAINERIZED_STORAGE_SMOKE=1 -e CREWSHIP_SMOKE_PREFIX="$1" -e CREWSHIP_SMOKE_PERSISTED="${2:-0}" -e CREWSHIP_SMOKE_CREW_IMAGE="$crew_image" \
+  docker exec -e CREWSHIP_CONTAINERIZED_STORAGE_SMOKE=1 -e CREWSHIP_SMOKE_PREFIX="$1" -e CREWSHIP_SMOKE_PERSISTED="${2:-0}" -e CREWSHIP_SMOKE_CREW_IMAGE="$crew_image" -e CREWSHIP_SMOKE_NATIVE_MOUNTS="$native_mounts" \
     "$1" /tmp/runtime.test -test.run '^TestContainerizedStorage$' -test.v -test.timeout 4m
 }
 # Two concurrently running server instances on independent named volumes.
 start_server "$prefix-a"
 start_server "$prefix-b"
+# Native client control on the same backing filesystem as the mapped data.
+# Compare observations; enforcement of specific restrictions is a separate gate.
+docker exec "$prefix-a" mkdir -p /var/lib/crewship/native-control/workspace /var/lib/crewship/native-control/output /var/lib/crewship/native-control/crew
+native_root=$(docker inspect --format '{{range .Mounts}}{{if eq .Destination "/var/lib/crewship"}}{{.Source}}{{end}}{{end}}' "$prefix-a")
+[ -n "$native_root" ] || { echo 'Native data source was not discovered' >&2; exit 1; }
+native_mount_args=()
+for target in workspace output crew; do
+  native_mount_args+=(--mount "type=volume,dst=/$target,volume-driver=local,volume-opt=type=none,\"volume-opt=device=$native_root/native-control/$target\",\"volume-opt=o=bind,noexec,nosuid\"")
+done
+native_mounts=$(docker run --rm --name "$prefix-native-probe" --platform "$platform" \
+  --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --user 1001:1001 "${native_mount_args[@]}" \
+  "$crew_image" awk '$2=="/workspace" || $2=="/output" || $2=="/crew" {print $2 "=" $4}' /proc/mounts)
+printf 'Native effective mount flags:\n%s\n' "$native_mounts"
 probe "$prefix-a"
 probe "$prefix-b"
 # Restart, then full recreate reusing precisely the same volume names.

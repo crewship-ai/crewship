@@ -160,7 +160,7 @@ func (p *Provider) localBindSource(source string) (string, error) {
 // RuntimeReady retains a failed mandatory mount check without removing the
 // provider (which would silently downgrade auto mode to a different runtime).
 func (p *Provider) RuntimeReady(ctx context.Context) error {
-	if err := p.runtimeAvailable(ctx); err != nil {
+	if err := p.runtimeAvailableForRequest(ctx); err != nil {
 		return err
 	}
 	_, err := p.client.Ping(ctx, client.PingOptions{})
