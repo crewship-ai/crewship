@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -60,7 +61,7 @@ var sampleFields = map[string]map[string]string{
 		"access_token": "EXAMPLE-not-a-real-token",
 	},
 	ProviderTeams: {
-		"webhook_url": "https://prod-00.westeurope.logic.azure.com:443/workflows/abc/triggers/manual/paths/invoke",
+		"webhook_url": "https://prod-00.westeurope.logic.azure.com:443/workflows/abc/triggers/manual/paths/invoke?sig=EXAMPLE-not-a-real-signature",
 	},
 	ProviderGoogleChat: {
 		"webhook_url": "https://chat.googleapis.com/v1/spaces/AAAA/messages?key=abc&token=def",
@@ -195,6 +196,50 @@ func TestSupportedProvidersMatchesCatalog(t *testing.T) {
 		}
 		if _, ok := ProviderByName(p.Name); !ok {
 			t.Errorf("ProviderByName(%q) does not resolve", p.Name)
+		}
+	}
+}
+
+// Teams must retain the full HTTPS URL and its signed query, including on
+// channels composed before shoutrrr started requiring a scheme in host.
+func TestTeamsWorkflowCompatibility(t *testing.T) {
+	for _, host := range []string{
+		"prod-00.westeurope.logic.azure.com:443/workflows/abc/triggers/manual/paths/invoke",
+		"example.environment.api.powerplatform.com/powerautomate/automations/direct/cu/04/workflows/abc/triggers/manual/paths/invoke",
+	} {
+		t.Run(host, func(t *testing.T) {
+			webhook := "https://" + host + "?api-version=1&sig=EXAMPLE%2Bsignature%2Fvalue%3D"
+			raw, err := ComposeServiceURL(ProviderTeams, map[string]string{"webhook_url": webhook})
+			if err != nil {
+				t.Fatal(err)
+			}
+			parsed, err := url.Parse(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := parsed.Query().Get("host"); got != webhook {
+				t.Fatalf("webhook changed: %q", got)
+			}
+			legacy := "teams://?host=" + url.QueryEscape(strings.TrimPrefix(webhook, "https://"))
+			if err := ValidateServiceURL(legacy); err != nil {
+				t.Fatalf("stored channel rejected: %v", err)
+			}
+			if got := ServiceURLForDelivery(legacy); got != raw {
+				t.Fatalf("stored channel normalized to %q, want %q", got, raw)
+			}
+			if got := ServiceURLForDelivery(raw); got != raw {
+				t.Fatalf("new channel changed: %q", got)
+			}
+		})
+	}
+	for _, webhook := range []string{
+		"http://example.logic.azure.com/workflows/abc?sig=EXAMPLE",
+		"https://example.logic.azure.com/workflows/abc",
+		"https://example.webhook.office.com/webhookb2/EXAMPLE?sig=EXAMPLE",
+		"https://example.com/workflows/abc?sig=EXAMPLE",
+	} {
+		if _, err := ComposeServiceURL(ProviderTeams, map[string]string{"webhook_url": webhook}); err == nil {
+			t.Errorf("accepted unsupported webhook %q", webhook)
 		}
 	}
 }

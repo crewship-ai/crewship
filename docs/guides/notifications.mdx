@@ -228,6 +228,8 @@ Each destination carries a **category** — `chat`, `push` or `incident` — whi
 
 Each one asks for **what that service actually gives you** — Discord for the webhook URL you copy out of Server Settings, Telegram for a bot token and a chat ID — with a line under each field saying where to find it. You never construct or see a delivery URL: the server composes one from your answers and stores it encrypted, in the same `secret_enc` column the webhook signing secret uses. It is never returned by any read endpoint.
 
+Microsoft Teams requires the complete signed **HTTPS workflow URL**, including the `sig` query parameter, from Teams Workflows or Azure Logic Apps. URLs requiring Microsoft sign-in and retired Office connector webhooks are rejected. Existing channels with a signed workflow URL continue to work without re-creating the channel.
+
 To see what a provider needs:
 
 ```bash

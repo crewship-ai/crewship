@@ -2,6 +2,7 @@ package notify
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -86,5 +87,49 @@ func TestDeliverCategoryMessage_AppliesTheDeliveryURL(t *testing.T) {
 	}
 	if got := fp.calls()[0].URL; !strings.Contains(got, "splitLines=No") {
 		t.Errorf("delivery url = %q, want the Discord option applied", got)
+	}
+}
+
+func TestDeliverCategoryMessage_AdaptsStoredTeamsWorkflow(t *testing.T) {
+	fp := &fakeProvider{}
+	defer SetProviderForTesting(fp)()
+	d := fastDispatcher(t, staticLister{}, nil)
+	webhook := "https://example.logic.azure.com/workflows/abc?sig=EXAMPLE%2Bsignature"
+	legacy := "teams://?host=" + url.QueryEscape(strings.TrimPrefix(webhook, "https://"))
+	ch := Channel{ID: "teams-channel", Type: ChannelShoutrrr, Secret: legacy, Enabled: true}
+	if err := d.DeliverCategoryMessage(context.Background(), ch, CategoryMessage{
+		WorkspaceID: "w", Category: CategoryRoutinesCompleted, Title: "Done",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	calls := fp.calls()
+	if len(calls) != 1 {
+		t.Fatalf("got %d deliveries", len(calls))
+	}
+	parsed, err := url.Parse(calls[0].URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := parsed.Query().Get("host"); got != webhook {
+		t.Fatalf("delivery webhook changed: %q", got)
+	}
+	if err := ValidateServiceURL(calls[0].URL); err != nil {
+		t.Fatalf("delivery URL rejected: %v", err)
+	}
+}
+
+func TestStoredTeamsWorkflowDoesNotRepairUnsupportedTargets(t *testing.T) {
+	for _, host := range []string{
+		"example.logic.azure.com/workflows/abc",
+		"example.com/workflows/abc?sig=EXAMPLE",
+		"http://example.logic.azure.com/workflows/abc?sig=EXAMPLE",
+	} {
+		raw := "teams://?host=" + url.QueryEscape(host)
+		if got := ServiceURLForDelivery(raw); got != raw {
+			t.Errorf("unsupported URL changed: %q", got)
+		}
+		if err := ValidateServiceURL(raw); err == nil {
+			t.Errorf("unsupported URL accepted: %q", raw)
+		}
 	}
 }

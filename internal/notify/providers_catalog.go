@@ -320,8 +320,8 @@ var providerCatalog = []ProviderSpec{
 		Fields: []ProviderField{
 			{
 				Key: "webhook_url", Label: "Workflow URL", Type: FieldURL, Required: true, Secret: true,
-				Placeholder: "https://prod-00.westeurope.logic.azure.com:443/workflows/...",
-				Help:        "Teams channel → Workflows → 'Post to a channel when a webhook request is received'. Copy the URL the flow gives you.",
+				Placeholder: "https://example.environment.api.powerplatform.com/powerautomate/automations/direct/workflows/...?sig=...",
+				Help:        "Teams channel → Workflows → 'Post to a channel when a webhook request is received'. Copy the complete HTTPS URL, including its sig query parameter.",
 				HelpURL:     "https://support.microsoft.com/en-us/office/create-incoming-webhooks-with-workflows-for-microsoft-teams-8ae491c7-0394-4861-ba59-055e33f75498",
 			},
 		},
@@ -545,7 +545,7 @@ func composeTeams(f map[string]string) (string, error) {
 	if _, err := url.Parse(raw); err != nil {
 		return "", fmt.Errorf("notify: Teams workflow URL is not a valid URL")
 	}
-	return "teams://?host=" + url.QueryEscape(stripScheme(raw)), nil
+	return "teams://?host=" + url.QueryEscape(raw), nil
 }
 
 // composeGoogleChat carries the whole webhook URL, which already contains the
