@@ -107,6 +107,25 @@ if ( cd "$TMP" && PATH="$TMP/bin:$PATH" node "$GEN" "$TMP/future-worker" ) > "$T
 fi
 echo "ok  reviewed worker-f declaration notice and unreviewed version refusal"
 
+# Newly reviewed provider-utils version remains exact-version scoped.
+rm -rf "$TMP/node_modules"
+mkpkg "@ai-sdk+provider-utils@5.0.81" "@ai-sdk/provider-utils" "@ai-sdk/provider-utils" "5.0.81" "-"
+cat > "$TMP/expected-provider.json" <<'J'
+{"Apache-2.0": [{"name": "@ai-sdk/provider-utils", "versions": ["5.0.81"]}]}
+J
+write_stub_pnpm "$TMP/expected-provider.json"
+( cd "$TMP" && PATH="$TMP/bin:$PATH" node "$GEN" "$TMP/provider" ) > "$TMP/provider-log" 2>&1
+grep -q -F 'provider-utils-5.0.81.tgz' "$TMP/provider/texts/@ai-sdk/provider-utils@5.0.81/EXCEPTION-NOTICE.md"
+grep -q -F 'NOT a copy of the' "$TMP/provider/texts/@ai-sdk/provider-utils@5.0.81/EXCEPTION-NOTICE.md"
+mkpkg "@ai-sdk+provider-utils@5.0.82" "@ai-sdk/provider-utils" "@ai-sdk/provider-utils" "5.0.82" "-"
+cat > "$TMP/expected-provider.json" <<'J'
+{"Apache-2.0": [{"name": "@ai-sdk/provider-utils", "versions": ["5.0.82"]}]}
+J
+if ( cd "$TMP" && PATH="$TMP/bin:$PATH" node "$GEN" "$TMP/future-provider" ) > "$TMP/future-provider-log" 2>&1; then
+  echo "TEST FAIL: unreviewed provider-utils version passed without license text" >&2; exit 1
+fi
+echo "ok  reviewed provider-utils notice and unreviewed version refusal"
+
 # ── case 4: real-repo sanity for the actually installed scoped deps ────────
 if [ -d "$REPO_ROOT/node_modules/.pnpm" ] && command -v pnpm >/dev/null 2>&1; then
   OUT="$TMP/real"
