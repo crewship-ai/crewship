@@ -25,9 +25,27 @@ func ValidateServiceURL(raw string) error {
 	if raw == "" {
 		return fmt.Errorf("empty service url")
 	}
+	normalized := normalizeTeamsServiceURL(raw)
 	var r router.ServiceRouter
-	if _, err := r.Locate(normalizeTeamsServiceURL(raw)); err != nil {
+	if _, err := r.Locate(normalized); err != nil {
 		return err
+	}
+	parsed, err := url.Parse(normalized)
+	if err != nil {
+		return err
+	}
+	if parsed.Scheme == teams.Scheme {
+		// The library permits an empty Host for callers supplying a send-time
+		// override. Stored channels have no such override and must name a
+		// concrete workflow. Its config parser preserves upstream key casing
+		// and query-validation semantics (including Host= as well as host=).
+		var config teams.Config
+		if err := config.SetURL(parsed); err != nil {
+			return err
+		}
+		if config.Host == "" {
+			return fmt.Errorf("notify: Teams channel needs a workflow URL")
+		}
 	}
 	return nil
 }

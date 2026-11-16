@@ -48,7 +48,7 @@ func TestAcceptance_NotifyChannelTeams_CreateThroughCLI(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte("server: "+srv.URL+"\nworkspace: "+workspace+"\ntoken: "+token+"\nformat: json\n"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	const signature = "EXAMPLE-not-a-real-signature"
+	const signature = "EXAMPLE%2Bnot%2Fa%3Dsignature"
 	workflows := []string{
 		"https://example.environment.api.powerplatform.com/powerautomate/automations/direct/workflows/example/triggers/manual/paths/invoke?sig=" + signature,
 		"https://example.logic.azure.com/workflows/example/triggers/manual/paths/invoke?api-version=1&sig=" + signature,
@@ -61,11 +61,16 @@ func TestAcceptance_NotifyChannelTeams_CreateThroughCLI(t *testing.T) {
 		{"power-platform-fields", workflows[0], false},
 		{"logic-apps-fields", workflows[1], false},
 		{"raw-service-url", workflows[0], true},
+		{"raw-uppercase-host", workflows[1], true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			args := []string{"notifychannel", "add", "--type", "chat", "--provider", "teams"}
 			if tc.raw {
-				args = append(args, "--url", "teams://?host="+url.QueryEscape(tc.webhook))
+				key := "host"
+				if tc.name == "raw-uppercase-host" {
+					key = "Host"
+				}
+				args = append(args, "--url", "teams://?"+key+"="+url.QueryEscape(tc.webhook))
 			} else {
 				args = append(args, "--field", "webhook_url="+tc.webhook)
 			}
@@ -81,14 +86,21 @@ func TestAcceptance_NotifyChannelTeams_CreateThroughCLI(t *testing.T) {
 				t.Fatalf("missing channel/one-time secret: %+v", channel)
 			}
 			parsed, err := url.Parse(channel.Secret)
-			if err != nil || parsed.Query().Get("host") != tc.webhook {
+			if err != nil {
+				t.Fatal(err)
+			}
+			host := parsed.Query().Get("host")
+			if tc.name == "raw-uppercase-host" {
+				host = parsed.Query().Get("Host")
+			}
+			if err != nil || host != tc.webhook {
 				t.Fatalf("signed workflow URL changed: %v", err)
 			}
 			var encrypted string
 			if err := db.QueryRowContext(t.Context(), `SELECT secret_enc FROM notification_channels WHERE id=?`, channel.ID).Scan(&encrypted); err != nil {
 				t.Fatal(err)
 			}
-			if strings.Contains(encrypted, signature) || encrypted == channel.Secret {
+			if strings.Contains(encrypted, "EXAMPLE") || encrypted == channel.Secret {
 				t.Fatal("workflow URL was persisted in plaintext")
 			}
 			decrypted, err := encryption.Decrypt(encrypted)
@@ -107,13 +119,17 @@ func TestAcceptance_NotifyChannelTeams_CreateThroughCLI(t *testing.T) {
 		{"unsigned-raw", "teams://?host=" + url.QueryEscape("https://example.logic.azure.com/workflows/example"), "--url"},
 		{"untrusted-raw", "teams://?host=" + url.QueryEscape("https://example.test/workflows/example?sig="+signature), "--url"},
 		{"provider-mismatch", "ntfy://ntfy.sh/example", "--url"},
+		{"missing-host", "teams://", "--url"},
+		{"empty-host", "teams://?host=", "--url"},
+		{"title-only", "teams://?title=hello", "--url"},
+		{"outer-host-only", "teams://example.logic.azure.com", "--url"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			out, err := runFeedbackCLI(t, cfg, "notifychannel", "add", "--type", "chat", "--provider", "teams", tc.flag, tc.value)
 			if err == nil {
 				t.Fatalf("invalid Teams channel accepted: %s", out)
 			}
-			if strings.Contains(out, signature) {
+			if strings.Contains(out, "EXAMPLE") {
 				t.Fatal("validation error leaked the workflow signature")
 			}
 		})
@@ -122,7 +138,7 @@ func TestAcceptance_NotifyChannelTeams_CreateThroughCLI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list via CLI: %v\n%s", err, out)
 	}
-	if strings.Contains(out, signature) || strings.Contains(out, "teams://") {
+	if strings.Contains(out, "EXAMPLE") || strings.Contains(out, "teams://") {
 		t.Fatal("CLI list leaked the workflow URL")
 	}
 	var channels []NotifyChannelRow
@@ -144,7 +160,7 @@ func TestAcceptance_NotifyChannelTeams_CreateThroughCLI(t *testing.T) {
 	if err != nil || res.StatusCode != http.StatusOK {
 		t.Fatalf("API list: status=%d err=%v body=%s", res.StatusCode, err, body)
 	}
-	if strings.Contains(string(body), signature) || strings.Contains(string(body), "teams://") || strings.Contains(string(body), "\"secret\"") {
+	if strings.Contains(string(body), "EXAMPLE") || strings.Contains(string(body), "teams://") || strings.Contains(string(body), "\"secret\"") {
 		t.Fatal("API list leaked the workflow URL")
 	}
 	var count int
