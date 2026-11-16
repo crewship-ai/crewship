@@ -8,6 +8,23 @@ tag: Experimental
 
 # Template
 
+`crewship template prompt` manages workspace prompt templates. This is a
+separate API from crew templates and workflow templates: `template_json` is a
+JSON value. Use `list`, `get <id>`, `create`, `update <id>`, or `delete <id>`.
+
+## `crewship template prompt create`
+
+`--file` supplies the JSON request object; `-` reads stdin. The object must
+include `name` and `template_json`.
+
+## `crewship template prompt update`
+
+`--file` supplies the JSON request object; `-` reads stdin.
+
+## `crewship template prompt delete`
+
+`--yes` confirms deletion. Built-in templates cannot be deleted.
+
 `cmd/crewship/cmd_template.go` manages crew templates: named bundles of a crew plus its agents that you can stamp out fresh in one call. Useful for "every new project gets a backend + frontend + reviewer triad" workflows. Backed by `/api/v1/crew-templates`.
 
 ## Slug scope and shadowing
