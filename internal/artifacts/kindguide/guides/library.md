@@ -39,9 +39,9 @@ a successful publish alone does not guarantee a valid preview.
 - `design-system.json` at most 32 KiB; at most 128 tokens per group.
 - Token names: lowercase, start with a letter, then letters, digits or `-`,
   at most 48 characters.
-- Colours are literal `#RRGGBB`. Spacing and radii are integer pixels from 0
-  to 4096. Type size is an integer 1 to 512, weight 100 to 900 in steps of
-  100, line height 0.5 to 4.
+- Colours are literal `#RRGGBB`, or in schema 2 an alias to another colour
+  token. Spacing and radii are integer pixels from 0 to 4096. Type size is an
+  integer 1 to 512, weight 100 to 900 in steps of 100, line height 0.5 to 4.
 - At most 64 components; name at most 80 characters, description at most 280.
 - Schema 2 supports themes and colour aliases. CSS expressions and URLs are
   not token values. Font files and licences can be carried by Library pins;

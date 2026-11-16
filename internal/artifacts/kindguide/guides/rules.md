@@ -20,8 +20,9 @@ a live read/write grant. Follow the actual tool refusal and current run scope.
 3. Conflicts. Follow the specific tool’s conflict instructions. For a Project
    version conflict, keep your candidate, read the versions, tell the person
    what differs and wait for a new request; never retry with a newer base version.
-   For other writes, read again and reconcile only if the tool permits it.
-   Never force a write.
+   For other writes, read again and reconcile only if the tool permits it;
+   after the third refusal for the same change, stop, keep your candidate and
+   tell the person what conflicted. Never force a write.
 4. Uncertain outcomes. A timeout or an unavailable answer may have saved. Read
    before you retry, or retry with the exact same request and mutation ID.
 5. Agent modes. Use only the mode explicitly delegated for this artifact and

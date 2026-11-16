@@ -68,6 +68,7 @@ func TestEveryGuideAnswersTheAgentContract(t *testing.T) {
 func TestSharedRulesReachEveryGuide(t *testing.T) {
 	rules := []string{
 		"never retry with a newer base version",        // project conflict: wait for a new request
+		"third refusal",                                // other conflicts have a bounded retry limit
 		"Comment is not Propose",                       // a comment never stands in for a proposal
 		"Only the artifact's Owner",                    // only the Owner delegates Edit
 		"A missing host mode is not a Propose mandate", // no implicit write authority
