@@ -91,7 +91,7 @@ func (m *daemonPathMap) translate(source string) (string, error) {
 	if root != m.local {
 		return "", fmt.Errorf("Docker mapping storage root must be canonical; use %s", root)
 	}
-	resolved, err := prospectiveHostPath(source)
+	resolved, err := prospectiveMappingPath(source)
 	if err != nil {
 		return "", fmt.Errorf("resolve Docker bind source: %w", err)
 	}
@@ -103,6 +103,32 @@ func (m *daemonPathMap) translate(source string) (string, error) {
 		return "", fmt.Errorf("Docker bind source escapes storage")
 	}
 	return filepath.Join(m.daemon, rel), nil
+}
+
+// Resolve existing references before retaining an ordinary missing suffix.
+// An existing but unresolved reference cannot establish a shared path identity.
+func prospectiveMappingPath(source string) (string, error) {
+	current := source
+	var tail []string
+	for {
+		resolved, err := filepath.EvalSymlinks(current)
+		if err == nil {
+			for i := len(tail) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, tail[i])
+			}
+			return resolved, nil
+		}
+		if !os.IsNotExist(err) || current == filepath.Dir(current) {
+			return "", err
+		}
+		if _, statErr := os.Lstat(current); statErr == nil {
+			return "", fmt.Errorf("cannot map unresolved filesystem reference %s", current)
+		} else if !os.IsNotExist(statErr) {
+			return "", statErr
+		}
+		tail = append(tail, filepath.Base(current))
+		current = filepath.Dir(current)
+	}
 }
 
 // daemonMounts owns the local-to-daemon boundary, including local driver device

@@ -255,8 +255,11 @@ func (p *Provider) probeMandatoryBinds(ctx context.Context) (bool, error) {
 	})
 	if createErr == nil {
 		_, createErr = p.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{})
+		if createErr == nil || cerrdefs.IsNotFound(createErr) {
+			return true, nil
+		}
 	}
-	if createErr == nil || cerrdefs.IsNotFound(createErr) {
+	if cerrdefs.IsNotFound(createErr) && strings.HasSuffix(strings.TrimSpace(createErr.Error()), "No such image: "+preflightSentinelImage) {
 		return true, nil
 	}
 	if unreachableBindSourcePath(createErr) != "" {

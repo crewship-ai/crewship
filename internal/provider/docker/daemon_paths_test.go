@@ -61,6 +61,22 @@ func TestDaemonStorageMapping(t *testing.T) {
 	}
 }
 
+func TestMappingRequiresResolvableReferences(t *testing.T) {
+	root := mappingTempDir(t)
+	if err := os.Symlink(filepath.Join(root, "pending"), filepath.Join(root, "reference")); err != nil {
+		t.Fatal(err)
+	}
+	mapping := &daemonPathMap{local: root, daemon: "/daemon/storage"}
+	for _, path := range []string{"reference", "reference/child", "reference/child/deeper"} {
+		if _, err := mapping.translate(filepath.Join(root, path)); err == nil {
+			t.Errorf("unresolved reference accepted: %s", path)
+		}
+	}
+	if got, err := mapping.translate(filepath.Join(root, "new", "child")); err != nil || got != "/daemon/storage/new/child" {
+		t.Fatalf("ordinary missing suffix: %q, %v", got, err)
+	}
+}
+
 func TestDaemonPathsResolveInspect(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
@@ -160,16 +176,20 @@ func TestBuildMountsUsesDaemonPaths(t *testing.T) {
 
 func TestMandatoryBindPreflightClassifiesFailures(t *testing.T) {
 	for _, tc := range []struct {
-		name    string
-		code    int
-		message string
-		blocked bool
+		name     string
+		code     int
+		message  string
+		blocked  bool
+		verified bool
 	}{
-		{"bind source rejected", 400, "bind source path does not exist: SOURCE", true},
-		{"unknown invalid request", 400, "probe rejected", false},
-		{"proxy rejection", 403, "probe rejected", false},
-		{"sentinel absent", 404, "No such image", false},
-		{"unknown daemon response", 500, "probe rejected", false},
+		{"bind source rejected", 400, "bind source path does not exist: SOURCE", true, false},
+		{"unknown invalid request", 400, "probe rejected", false, false},
+		{"proxy rejection", 403, "probe rejected", false, false},
+		{"sentinel absent", 404, "No such image: " + preflightSentinelImage, false, true},
+		{"unknown not found", 404, "Not Found", false, false},
+		{"unrelated image absent", 404, "No such image: unrelated", false, false},
+		{"different sentinel image", 404, "No such image: " + preflightSentinelImage + "-other", false, false},
+		{"unknown daemon response", 500, "probe rejected", false, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := mappingTempDir(t)
@@ -207,8 +227,20 @@ func TestMandatoryBindPreflightClassifiesFailures(t *testing.T) {
 					t.Fatal("recognized bind rejection accepted crew start")
 				}
 			}
-			if tc.code != 404 && !tc.blocked && creates.Load() < 3 {
-				t.Fatal("inconclusive probe was cached as verified success")
+			if !tc.verified && !tc.blocked {
+				if creates.Load() < 3 {
+					t.Error("inconclusive probe was cached as verified success")
+				}
+			}
+			if !tc.blocked {
+				known := errors.New("previous confirmed bind rejection")
+				p.runtimeProbeState.Store(&mandatoryProbeState{err: known})
+				got := p.RuntimeReady(context.Background())
+				if tc.verified && got != nil {
+					t.Errorf("verified success retained prior rejection: %v", got)
+				} else if !tc.verified && !errors.Is(got, known) {
+					t.Errorf("inconclusive reply cleared confirmed rejection: %v", got)
+				}
 			}
 		})
 	}
@@ -308,7 +340,11 @@ func TestMandatoryPreflightRecoversFromTransientFailure(t *testing.T) {
 		}
 		creates.Add(1)
 		w.WriteHeader(int(status.Load()))
-		fmt.Fprint(w, `{"message":"temporary daemon failure"}`)
+		message := "temporary daemon failure"
+		if status.Load() == 404 {
+			message = "No such image: " + preflightSentinelImage
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": message})
 	}))
 	defer server.Close()
 	cli, err := client.New(client.WithHost(server.URL), client.WithAPIVersion("1.47"))
