@@ -23343,6 +23343,17 @@
           "last_run_id": {
             "type": "string"
           },
+          "last_skip_reason": {
+            "description": "Cause recorded at the last skipped main occurrence; omitted when unknown (legacy) or after a non-skipped outcome. Not inferred from the routine's current lifecycle.",
+            "enum": [
+              "capacity",
+              "catchup",
+              "inactive",
+              "busy"
+            ],
+            "readOnly": true,
+            "type": "string"
+          },
           "last_status": {
             "type": "string"
           },
