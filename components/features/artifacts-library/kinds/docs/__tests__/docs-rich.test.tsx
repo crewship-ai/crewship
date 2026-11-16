@@ -294,7 +294,7 @@ describe("Docs math blocks", () => {
   })
 
   it("keeps the source shown when the block under the caret becomes latex, so typing is never hidden", async () => {
-    serve()
+    serve({ ...formatted, content: formatted.content.filter(node => node.attrs.id === "goal" || node.attrs.id === "code") })
     open()
     const editor = await editable()
     let start = -1
@@ -314,7 +314,7 @@ describe("Docs math blocks", () => {
   })
 
   it("previews the last block of the page with the caret in it by moving the caret before it", async () => {
-    serve()
+    serve({ ...formatted, content: formatted.content.filter(node => node.attrs.id === "goal") })
     open()
     const editor = await editable()
     act(() => { editor.editor.commands.insertContentAt(editor.editor.state.doc.content.size, { type: "codeBlock", attrs: { id: "last", language: "latex" }, content: [{ type: "text", text: "a^2" }] }) })
