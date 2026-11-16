@@ -3,6 +3,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -37,6 +38,13 @@ func (p *Provider) resolveDaemonPaths(ctx context.Context) (*daemonPathMap, erro
 		if err != nil {
 			return nil, fmt.Errorf("inspect configured Docker server container: %w", err)
 		}
+		hostname, hostErr := os.Hostname()
+		if hostErr != nil {
+			return nil, fmt.Errorf("read server hostname: %w", hostErr)
+		}
+		if inspected.Container.Config == nil || inspected.Container.Config.Hostname != hostname {
+			return nil, fmt.Errorf("configured Docker server container does not match this server hostname")
+		}
 		var selected *container.MountPoint
 		for i := range inspected.Container.Mounts {
 			m := &inspected.Container.Mounts[i]
@@ -50,7 +58,7 @@ func (p *Provider) resolveDaemonPaths(ctx context.Context) (*daemonPathMap, erro
 		if selected == nil {
 			return nil, fmt.Errorf("configured server container has no storage mount covering %s", local)
 		}
-		if !selected.RW || (selected.Type != mount.TypeBind && selected.Type != mount.TypeVolume) || !cleanAbsolutePath(selected.Source) {
+		if !selected.RW || (selected.Type != mount.TypeBind && selected.Type != mount.TypeVolume) || (selected.Type == mount.TypeVolume && selected.Driver != "local") || !cleanAbsolutePath(selected.Source) {
 			return nil, fmt.Errorf("server storage must be a writable bind or local volume with an absolute daemon source")
 		}
 		best := selected.Destination
@@ -61,9 +69,6 @@ func (p *Provider) resolveDaemonPaths(ctx context.Context) (*daemonPathMap, erro
 			if m.Destination != best && pathContains(local, m.Destination) {
 				return nil, fmt.Errorf("nested storage mounts require a single shared storage root")
 			}
-		}
-		if best == "" {
-			return nil, fmt.Errorf("configured server container has no storage mount covering %s", local)
 		}
 	}
 	if !cleanAbsolutePath(remote) || remote == string(filepath.Separator) || local == string(filepath.Separator) {
@@ -155,8 +160,8 @@ func (p *Provider) localBindSource(source string) (string, error) {
 // RuntimeReady retains a failed mandatory mount check without removing the
 // provider (which would silently downgrade auto mode to a different runtime).
 func (p *Provider) RuntimeReady(ctx context.Context) error {
-	if p.runtimeErr != nil {
-		return p.runtimeErr
+	if err := p.runtimeAvailable(ctx); err != nil {
+		return err
 	}
 	_, err := p.client.Ping(ctx, client.PingOptions{})
 	return err

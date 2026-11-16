@@ -113,6 +113,24 @@ func (p *Provider) crewRuntimeContractDigest() string {
 				"error", err)
 			return
 		}
+		// Data paths are canonical placeholders in this contract, not a
+		// per-installation layout. Building inside a mapped root must not
+		// change the digest when its effective daemon mapping is identity.
+		for i := range hostCfg.Mounts {
+			m := &hostCfg.Mounts[i]
+			canonical := ""
+			switch m.Target {
+			case "/workspace":
+				canonical = contractWorkingDir
+			case "/output":
+				canonical = contractOutputDir
+			case "/crew":
+				canonical = contractCrewDir
+			}
+			if canonical != "" && m.VolumeOptions != nil && m.VolumeOptions.DriverConfig != nil {
+				m.VolumeOptions.DriverConfig.Options["device"] = canonical
+			}
+		}
 		p.contractDigest = digestCrewSpec(cfg, hostCfg)
 	})
 	return p.contractDigest

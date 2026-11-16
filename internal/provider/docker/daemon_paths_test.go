@@ -3,12 +3,14 @@ package docker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -64,19 +66,26 @@ func TestDaemonPathsResolveInspect(t *testing.T) {
 		mounts []map[string]any
 		bad    bool
 	}{
-		{"named volume", 200, []map[string]any{{"Type": "volume", "Source": "/docker/volume/_data", "Destination": "/data", "RW": true}}, false},
+		{"named volume", 200, []map[string]any{{"Type": "volume", "Driver": "local", "Source": "/docker/volume/_data", "Destination": "/data", "RW": true}}, false},
 		{"bind", 200, []map[string]any{{"Type": "bind", "Source": "/host/data", "Destination": "/data", "RW": true}}, false},
-		{"readonly parent first", 200, []map[string]any{{"Type": "bind", "Source": "/host/readonly", "Destination": "/data", "RW": false}, {"Type": "volume", "Source": "/docker/volume/storage", "Destination": "/data/storage", "RW": true}}, false},
-		{"readonly parent last", 200, []map[string]any{{"Type": "volume", "Source": "/docker/volume/storage", "Destination": "/data/storage", "RW": true}, {"Type": "bind", "Source": "/host/readonly", "Destination": "/data", "RW": false}}, false},
-		{"tmpfs ancestor", 200, []map[string]any{{"Type": "tmpfs", "Destination": "/data", "RW": true}, {"Type": "volume", "Source": "/docker/volume/storage", "Destination": "/data/storage", "RW": true}}, false},
+		{"readonly parent first", 200, []map[string]any{{"Type": "bind", "Source": "/host/readonly", "Destination": "/data", "RW": false}, {"Type": "volume", "Driver": "local", "Source": "/docker/volume/storage", "Destination": "/data/storage", "RW": true}}, false},
+		{"readonly parent last", 200, []map[string]any{{"Type": "volume", "Driver": "local", "Source": "/docker/volume/storage", "Destination": "/data/storage", "RW": true}, {"Type": "bind", "Source": "/host/readonly", "Destination": "/data", "RW": false}}, false},
+		{"tmpfs ancestor", 200, []map[string]any{{"Type": "tmpfs", "Destination": "/data", "RW": true}, {"Type": "volume", "Driver": "local", "Source": "/docker/volume/storage", "Destination": "/data/storage", "RW": true}}, false},
+		{"foreign hostname", 200, []map[string]any{{"Type": "volume", "Driver": "local", "Source": "/docker/data", "Destination": "/data", "RW": true}}, true},
+		{"foreign volume driver", 200, []map[string]any{{"Type": "volume", "Driver": "remote", "Source": "/docker/data", "Destination": "/data", "RW": true}}, true},
+		{"unknown volume driver", 200, []map[string]any{{"Type": "volume", "Source": "/docker/data", "Destination": "/data", "RW": true}}, true},
 		{"missing mapping", 200, nil, true}, {"proxy denied", 403, nil, true}, {"daemon error", 500, nil, true},
-		{"readonly", 200, []map[string]any{{"Type": "volume", "Source": "/docker/data", "Destination": "/data", "RW": false}}, true},
+		{"readonly", 200, []map[string]any{{"Type": "volume", "Driver": "local", "Source": "/docker/data", "Destination": "/data", "RW": false}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				if strings.Contains(r.URL.Path, "/containers/server/json") {
 					w.WriteHeader(tc.status)
-					_ = json.NewEncoder(w).Encode(map[string]any{"Mounts": tc.mounts})
+					hostname, _ := os.Hostname()
+					if tc.name == "foreign hostname" {
+						hostname = "another-server"
+					}
+					_ = json.NewEncoder(w).Encode(map[string]any{"Mounts": tc.mounts, "Config": map[string]any{"Hostname": hostname}})
 					return
 				}
 				w.Header().Set("API-Version", "1.47")
@@ -157,6 +166,10 @@ func TestMandatoryBindPreflightRetainsFailure(t *testing.T) {
 				}
 			}
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodHead {
+					w.WriteHeader(200)
+					return
+				}
 				w.WriteHeader(code)
 				fmt.Fprint(w, `{"message":"probe rejected"}`)
 			}))
@@ -166,10 +179,10 @@ func TestMandatoryBindPreflightRetainsFailure(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer cli.Close()
-			p := &Provider{client: cli, cfg: Config{SidecarBinaryPath: root + "/sidecar", EntrypointPath: root + "/entrypoint"}, logger: quietLogger()}
+			p := &Provider{client: cli, cfg: Config{SidecarBinaryPath: root + "/sidecar", EntrypointPath: root + "/entrypoint"}, logger: quietLogger(), runtimeProbeGate: make(chan struct{}, 1)}
 			p.preflightMandatoryBinds(context.Background())
-			if (p.runtimeErr != nil) != (code != 404) {
-				t.Fatalf("status %d: runtime error %v", code, p.runtimeErr)
+			if err := p.RuntimeReady(context.Background()); (err != nil) != (code != 404) {
+				t.Fatalf("status %d: runtime error %v", code, err)
 			}
 			if code != 404 {
 				if _, err := p.EnsureCrewRuntime(context.Background(), provider.CrewConfig{ID: "crew"}); err == nil {
@@ -236,5 +249,96 @@ func TestMappedControllerDoesNotQualifyForHostCapture(t *testing.T) {
 	p := &Provider{detected: DetectResult{Host: "unix:///var/run/docker.sock"}, pathMap: &daemonPathMap{local: "/local", daemon: "/daemon"}}
 	if p.SupportsHostCapture() {
 		t.Fatal("mapped controller qualified without executor namespace handoff")
+	}
+}
+
+func TestIdentityMappingKeepsRuntimeContract(t *testing.T) {
+	root := mappingTempDir(t)
+	cfg := Config{OutputBasePath: root, SidecarBinaryPath: root + "/sidecar", EntrypointPath: root + "/entrypoint"}
+	for _, file := range []string{cfg.SidecarBinaryPath, cfg.EntrypointPath} {
+		if err := os.WriteFile(file, []byte{0x7f, 'E', 'L', 'F'}, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	native := &Provider{cfg: cfg, logger: quietLogger()}
+	mapped := &Provider{cfg: cfg, logger: quietLogger(), pathMap: &daemonPathMap{local: root, daemon: root}}
+	if got, want := mapped.crewRuntimeContractDigest(), native.crewRuntimeContractDigest(); got == "" || got != want {
+		t.Fatalf("identity mapping changed contract: %s -> %s", want, got)
+	}
+	if mapped.SupportsHostCapture() {
+		t.Fatal("identity mapping must still retain mapped-controller capability restrictions")
+	}
+}
+
+func TestMandatoryPreflightRecoversFromTransientFailure(t *testing.T) {
+	root := mappingTempDir(t)
+	for _, name := range []string{"sidecar", "entrypoint"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte{0x7f, 'E', 'L', 'F'}, 0755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var status atomic.Int32
+	var creates atomic.Int32
+	status.Store(503)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodHead {
+			w.WriteHeader(200)
+			return
+		}
+		creates.Add(1)
+		w.WriteHeader(int(status.Load()))
+		fmt.Fprint(w, `{"message":"temporary daemon failure"}`)
+	}))
+	defer server.Close()
+	cli, err := client.New(client.WithHost(server.URL), client.WithAPIVersion("1.47"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cli.Close()
+	p := &Provider{client: cli, cfg: Config{SidecarBinaryPath: root + "/sidecar", EntrypointPath: root + "/entrypoint"}, logger: quietLogger(), runtimeProbeGate: make(chan struct{}, 1)}
+	// A cancelled startup probe must not permanently disable the provider.
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	p.preflightMandatoryBinds(cancelled)
+	if p.runtimeErr != nil {
+		t.Fatalf("transient failure became permanent: %v", p.runtimeErr)
+	}
+	if err := p.RuntimeReady(context.Background()); err == nil {
+		t.Fatal("503 daemon was ready")
+	}
+	status.Store(403)
+	if err := p.RuntimeReady(context.Background()); err == nil {
+		t.Fatal("denied proxy was ready")
+	}
+	status.Store(404) // expected sentinel-image absence after mounts validate
+	if err := p.RuntimeReady(context.Background()); err != nil {
+		t.Fatalf("provider did not recover without restart: %v", err)
+	}
+	before := creates.Load()
+	if err := p.RuntimeReady(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if creates.Load() != before {
+		t.Fatal("successful mandatory probes were not cached")
+	}
+}
+
+func TestMandatoryPreflightGateHonorsRequestCancellation(t *testing.T) {
+	p := &Provider{runtimeProbeGate: make(chan struct{}, 1)}
+	p.runtimeProbeGate <- struct{}{}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := p.RuntimeReady(ctx); !errors.Is(err, context.Canceled) {
+		t.Fatalf("waiting readiness ignored cancellation: %v", err)
+	}
+	<-p.runtimeProbeGate
+}
+
+func TestFailedMappingDoesNotQualifyHostCapture(t *testing.T) {
+	for _, cfg := range []Config{{ServerContainer: "server"}, {DaemonDataPath: "/daemon"}} {
+		p := &Provider{cfg: cfg, detected: DetectResult{Host: "unix:///var/run/docker.sock"}, runtimeErr: errors.New("mapping discovery failed")}
+		if p.SupportsHostCapture() {
+			t.Fatal("failed mapping qualified a containerized controller")
+		}
 	}
 }

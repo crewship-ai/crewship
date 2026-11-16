@@ -162,31 +162,51 @@ const preflightSentinelImage = "crewship-bind-preflight:does-not-exist"
 // Keep the provider installed but unavailable on failure: auto selection must
 // not downgrade isolation after detecting a configured but unusable runtime.
 // Readiness and crew start return the retained failure.
+// Only successful mandatory probes are cached. A startup daemon/API timeout or
+// proxy rejection is retried on readiness/start; it never becomes a permanent
+// runtimeErr. Configuration/mapping remains immutable until server restart.
+const runtimeProbeTTL = 30 * time.Second
+
+func (p *Provider) runtimeAvailable(ctx context.Context) error {
+	if p.runtimeErr != nil || p.runtimeProbeGate == nil {
+		return p.runtimeErr
+	}
+	select {
+	case p.runtimeProbeGate <- struct{}{}:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	defer func() { <-p.runtimeProbeGate }()
+	if p.runtimeProbeErr == nil && !p.runtimeProbeAt.IsZero() && time.Since(p.runtimeProbeAt) < runtimeProbeTTL {
+		return nil
+	}
+	p.runtimeProbeErr = p.probeMandatoryBinds(ctx)
+	p.runtimeProbeAt = time.Now()
+	return p.runtimeProbeErr
+}
+
 func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
+	if err := p.runtimeAvailable(ctx); err != nil {
+		p.logger.Error("no crew can start on this container runtime: mandatory mount preflight failed", "runtime", p.detected.Runtime, "socket", p.detected.Socket, "error", err)
+	}
+}
+
+func (p *Provider) probeMandatoryBinds(ctx context.Context) error {
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
-	if p.runtimeErr != nil {
-		p.logger.Error("Docker storage mapping unavailable", "error", p.runtimeErr)
-		return
-	}
 	for _, source := range []string{p.cfg.SidecarBinaryPath, p.cfg.EntrypointPath} {
 		info, err := os.Stat(source)
 		if err != nil {
-			p.runtimeErr = fmt.Errorf("mandatory runtime file %s: %w", source, err)
-			return
+			return fmt.Errorf("mandatory runtime file %s: %w", source, err)
 		}
 		if !runtimeFileModeAllowed(info.Mode(), goruntime.GOOS) {
-			p.runtimeErr = fmt.Errorf("mandatory runtime file %s must be a regular executable", source)
-			return
+			return fmt.Errorf("mandatory runtime file %s must be a regular executable", source)
 		}
 	}
 	mounts, err := p.buildMounts("preflight", "", "", "", "")
 	if err != nil {
-		p.runtimeErr = err
-		return
+		return err
 	}
-	// Keep only the read-only sidecar/entrypoint binds: the crew data dirs are
-	// per-crew and do not exist yet at boot.
 	var binds []mount.Mount
 	for _, m := range mounts {
 		if m.Type == mount.TypeBind {
@@ -194,25 +214,18 @@ func (p *Provider) preflightMandatoryBinds(ctx context.Context) {
 		}
 	}
 	if len(binds) == 0 {
-		return
+		return nil
 	}
 	created, createErr := p.client.ContainerCreate(ctx, client.ContainerCreateOptions{
-		Config:     &container.Config{Image: preflightSentinelImage},
-		HostConfig: &container.HostConfig{Mounts: binds},
+		Config: &container.Config{Image: preflightSentinelImage}, HostConfig: &container.HostConfig{Mounts: binds},
 	})
 	if createErr == nil {
-		// Even the sentinel might exist on a daemon; never leak a probe.
 		_, createErr = p.client.ContainerRemove(ctx, created.ID, client.ContainerRemoveOptions{})
 	}
 	if createErr == nil || cerrdefs.IsNotFound(createErr) {
-		return
+		return nil
 	}
-	p.runtimeErr = p.explainBindFailure(createErr)
-	p.logger.Error("no crew can start on this container runtime: mandatory mount preflight failed",
-		"runtime", p.detected.Runtime,
-		"socket", p.detected.Socket,
-		"error", p.explainBindFailure(createErr).Error(),
-	)
+	return p.explainBindFailure(createErr)
 }
 
 // A digest-addressed bind source is never replaced. Docker archive reads mount

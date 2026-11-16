@@ -124,7 +124,10 @@ type Provider struct {
 	networkDisconnectHook func(netName string) error
 
 	serviceOperation serviceOperationGate
-	runtimeErr       error
+	runtimeErr       error         // immutable mapping/configuration error
+	runtimeProbeGate chan struct{} // context-aware serialization; nil on bare test providers
+	runtimeProbeErr  error
+	runtimeProbeAt   time.Time
 	pathMap          *daemonPathMap
 	client           *client.Client
 	cfg              Config
@@ -636,6 +639,7 @@ func New(ctx context.Context, cfg Config, logger *slog.Logger) (*Provider, error
 	}
 
 	p.pathMap, p.runtimeErr = p.resolveDaemonPaths(ctx)
+	p.runtimeProbeGate = make(chan struct{}, 1)
 
 	logger.Info("container runtime detected",
 		"runtime", detected.Runtime,

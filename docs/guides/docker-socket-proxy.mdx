@@ -42,7 +42,9 @@ For an existing Compose installation, add that environment value using the
 existing volumes. Do not rename the Compose project or its volumes. No storage
 migration, database replacement or backup-format change is required. Custom
 container names and multiple instances each need their own server identity.
-An incorrect identity is an operator configuration error; use the same daemon
+The inspected hostname must match this server and a volume must use the local
+driver. The explicit mapping remains trusted operator configuration; duplicate
+custom hostnames are not a unique identity proof. Use the same daemon
 and the container that actually mounts the server's storage.
 
 Alternatively set `CREWSHIP_DOCKER_DAEMON_DATA_PATH` to the absolute daemon-side
@@ -64,7 +66,8 @@ allowlist (such as the daemon socket) remain daemon-side resources.
 
 Only Docker request sources are translated. Local reads, writes, staging, file
 hashes and cleanup keep their local paths. Runtime binaries stay read-only;
-agent data retains `noexec,nosuid`; secrets remain tmpfs. Named home/tools
+data mounts retain the requested `noexec,nosuid` options; the image gate
+checks actual kernel flags and blocks release on failure. Secrets remain tmpfs. Named home/tools
 volumes and installation labels are unchanged. The native managed-launch and
 protected host-capture pilots retain their existing host/UID restrictions; this
 mapping does not qualify those pilots for containerized controllers.
@@ -75,9 +78,10 @@ A mandatory mount failure leaves HTTP administration available but makes
 initialize also degrades readiness. `--no-docker` deliberately omits runtime
 readiness. Auto selection retains a detected Docker provider with failed mount
 preflight instead of switching to a provider with weaker isolation; if no daemon
-can be detected, its existing fallback policy still applies. After correcting a
-startup mapping or mandatory-file failure, restart the server to rerun preflight.
-A daemon outage after startup is checked by readiness ping.
+can be detected, its existing fallback policy still applies. Mapping discovery/configuration changes still require a server restart.
+Mandatory mount probes retry after failure on readiness/start requests, including
+transient API timeouts and proxy rejections. Only successful probes are cached
+for up to 30 seconds. Readiness also pings the daemon on every request.
 
 ## Candidate verification and rollout
 

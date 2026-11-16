@@ -41,7 +41,7 @@ type hostCaptureAuthority struct {
 // SupportsHostCapture reports the qualified Docker transport. Kernel process
 // identity permissions are checked again before any exact-execution stop.
 func (p *Provider) SupportsHostCapture() bool {
-	return p.pathMap == nil && runtime.GOOS == "linux" && strings.HasPrefix(p.detected.Host, "unix://") && hostCaptureControllerUIDSupported(os.Geteuid())
+	return p.pathMap == nil && p.cfg.ServerContainer == "" && p.cfg.DaemonDataPath == "" && runtime.GOOS == "linux" && strings.HasPrefix(p.detected.Host, "unix://") && hostCaptureControllerUIDSupported(os.Geteuid())
 }
 
 // Workload identities cannot own a protected host spool. Select the legacy
