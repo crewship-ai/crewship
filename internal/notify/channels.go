@@ -730,6 +730,12 @@ func validateShoutrrrURL(raw, wantScheme string) error {
 	if u.Scheme != wantScheme {
 		return fmt.Errorf("notify: shoutrrr url scheme must be %q for this provider, got %q", wantScheme, u.Scheme)
 	}
+	// Teams carries its signed HTTPS workflow in a query parameter, so its
+	// outer URL has no host. Validate the concrete delivery config instead;
+	// the shared validator also refuses send-time-only/missing targets.
+	if wantScheme == ProviderTeams {
+		return ValidateServiceURL(raw)
+	}
 	if u.Host == "" && u.Opaque == "" {
 		return fmt.Errorf("notify: shoutrrr url missing host")
 	}

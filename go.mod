@@ -28,8 +28,8 @@ require (
 	github.com/mattn/go-isatty v0.0.24
 	github.com/mdlayher/netlink v1.11.2
 	github.com/moby/docker-image-spec v1.3.1
-	github.com/moby/moby/api v1.56.1
-	github.com/moby/moby/client v0.6.2
+	github.com/moby/moby/api v1.57.0
+	github.com/moby/moby/client v0.6.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/nicholas-fedor/shoutrrr v0.24.0
 	github.com/phpdave11/gofpdi v1.0.16

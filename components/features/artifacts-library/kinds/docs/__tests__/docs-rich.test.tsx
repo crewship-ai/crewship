@@ -18,6 +18,7 @@ import { documentSchema } from "@/lib/documents/schema"
 import { ArtifactFrame, NO_FRAME_CAPABILITIES, type FrameLayout } from "../../../frame"
 import type { LibraryItem } from "../../../library-items"
 import { DocsBody, type DocsFrameReport } from "../docs-view"
+import * as diagramPreview from "@/components/features/pages/code-preview-diagram"
 
 
 const env = vi.hoisted(() => ({ canWrite: true, canComment: true, comments: "ok" as "ok" | "missing" | "conflict" }))
@@ -40,7 +41,7 @@ vi.mock("@/lib/document-queue", async importOriginal => ({ ...await importOrigin
 vi.mock("@/lib/api-fetch", () => ({ apiFetch: request, broadcastSessionExpired: vi.fn() }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ status: "authenticated", data: { user: { id: "docs-human" } } }) }))
 
-afterEach(() => { cleanup(); request.mockReset(); env.canWrite = true; env.canComment = true; env.comments = "ok" })
+afterEach(() => { cleanup(); vi.restoreAllMocks(); request.mockReset(); env.canWrite = true; env.canComment = true; env.comments = "ok" })
 
 const item = {
   slug: "launch-notes", pageId: "page-docs", name: "Launch notes", kind: "word", family: "document", sharedVersion: null, native: false,
@@ -82,9 +83,9 @@ const comments = [
   { id: "t2", body: "Done.", actor: "user:tomas", rev: 1, version: 2, resolved: true, created_at: "2026-11-07T09:58:00Z", block: "bold", quote: "Partners", from: 0, to: 8, status: "resolved" },
 ]
 
-function serve() {
+function serve(initial = formatted) {
   // The fake server stores what it acknowledges, as the real one does: Saved means it holds the editor's content.
-  const doc = documentSchema.create(structuredClone(formatted), 4) as Y.Doc
+  const doc = documentSchema.create(structuredClone(initial), 4) as Y.Doc
   let rev = 1
   request.mockImplementation(async (url: string, init?: RequestInit) => {
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
@@ -293,7 +294,7 @@ describe("Docs math blocks", () => {
   })
 
   it("keeps the source shown when the block under the caret becomes latex, so typing is never hidden", async () => {
-    serve()
+    serve({ ...formatted, content: formatted.content.filter(node => node.attrs.id === "goal" || node.attrs.id === "code") })
     open()
     const editor = await editable()
     let start = -1
@@ -313,7 +314,7 @@ describe("Docs math blocks", () => {
   })
 
   it("previews the last block of the page with the caret in it by moving the caret before it", async () => {
-    serve()
+    serve({ ...formatted, content: formatted.content.filter(node => node.attrs.id === "goal") })
     open()
     const editor = await editable()
     act(() => { editor.editor.commands.insertContentAt(editor.editor.state.doc.content.size, { type: "codeBlock", attrs: { id: "last", language: "latex" }, content: [{ type: "text", text: "a^2" }] }) })
@@ -438,7 +439,11 @@ describe("Docs diagram and chart blocks", () => {
   })
 
   it("lets further blocks wait for the reader once the page's preview time is spent", async () => {
-    serve()
+    // Exercise real diagram rendering, but charge a known cost: CPU contention
+    // must not decide whether the first or second diagram spends the budget.
+    const draw = diagramPreview.renderDiagram
+    vi.spyOn(diagramPreview, "renderDiagram").mockImplementation(async source => ({ ...await draw(source), ms: source.includes("Slow") ? 600 : 0 }))
+    serve({ ...formatted, content: formatted.content.filter(node => node.attrs.id === "goal" || node.attrs.id === "slow-flow") })
     open()
     const editor = await editable()
     const fixture = blockDom(editor, "slow-flow")
