@@ -103,3 +103,12 @@ func TestRequestedToolchainExplicitMiseOverridesFeatureSource(t *testing.T) {
 		t.Fatalf("explicit pin hidden behind feature: %+v", got)
 	}
 }
+
+func TestObservedOpenCodeV2Version(t *testing.T) {
+	if got := ObservedToolVersion("opencode", "opencode v2.3.0\n"); got != "2.3.0" {
+		t.Fatal(got)
+	}
+	if got := ObservedToolVersion("opencode", "opencode v2.3.0\nextra output"); got != "" {
+		t.Fatal("diagnostic accepted as version")
+	}
+}

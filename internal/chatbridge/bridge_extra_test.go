@@ -353,7 +353,7 @@ func TestHandleChatMessage_NoReprovisionWhenCachedImagePresent(t *testing.T) {
 	t.Parallel()
 	info := cacheMissingInfo("crewship-cache:0d08da4b8ac3")
 	// Present AND verified for this agent's adapter CLI: nothing to rebuild.
-	info.CachedRequirements = &devcontainer.AggregatedRequirements{AdapterBinaries: []string{"claude"}}
+	info.CachedRequirements = &devcontainer.AggregatedRequirements{AdapterBinaries: []string{"claude"}, AdapterReleasePolicy: devcontainer.AdapterReleasePolicy([]string{"claude"})}
 	resolver := &mockResolver{info: info}
 	b := testBridgeWithContainer(t, resolver, &cacheCheckContainer{present: true})
 	enq := &stubEnqueuer{resStarted: true}
@@ -383,7 +383,7 @@ func TestHandleChatMessage_NoReprovisionWhenCachedImagePresent(t *testing.T) {
 func TestHandleChatMessage_ReprovisionWhenImageNotVerifiedForAdapter(t *testing.T) {
 	t.Parallel()
 	info := cacheMissingInfo("crewship-cache:0d08da4b8ac3")
-	info.CachedRequirements = &devcontainer.AggregatedRequirements{AdapterBinaries: []string{"codex"}}
+	info.CachedRequirements = &devcontainer.AggregatedRequirements{AdapterBinaries: []string{"codex"}, AdapterReleasePolicy: devcontainer.AdapterReleasePolicy([]string{"codex"})}
 	resolver := &mockResolver{info: info}
 	b := testBridgeWithContainer(t, resolver, &cacheCheckContainer{present: true})
 	enq := &stubEnqueuer{resStarted: true}

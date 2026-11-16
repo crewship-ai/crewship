@@ -11,7 +11,7 @@ import (
 )
 
 // codexAdapter wires OpenAI's `codex` CLI (Rust port distributed as the
-// @openai/codex npm package, current as of 0.153.2). Two auth paths (#2428):
+// @openai/codex npm package, current as of 0.169.0). Two auth paths (#2428):
 //
 //   - API key: the dummy OPENAI_API_KEY in the env is sent to a custom
 //     model_provider pointing at the sidecar's /openai route, where the real

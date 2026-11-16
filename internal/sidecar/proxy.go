@@ -1073,7 +1073,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	// net/http buffers small writes. SSE must reach the caller while upstream
 	// remains open, including when usage observation is disabled.
 	var dst io.Writer = w
-	if strings.HasPrefix(strings.ToLower(resp.Header.Get("Content-Type")), "text/event-stream") {
+	if isStreamingLLMResponse(resp.Header.Get("Content-Type")) {
 		dst = sseFlushWriter{w: w, controller: http.NewResponseController(w)}
 	}
 	// Bail out fast for non-LLM traffic or when nobody's listening for usage.
@@ -1102,6 +1102,17 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 				}
 				// Do not turn unknown usage into a zero-token billing row,
 				// even if quota headers would otherwise trigger the callback.
+				return
+			}
+		} else if codec == "bedrock" && strings.HasPrefix(strings.ToLower(contentType), "application/vnd.amazon.eventstream") {
+			observer := &bedrockUsageObserver{}
+			_, _ = io.Copy(io.MultiWriter(dst, observer), resp.Body)
+			var complete bool
+			usage, complete = observer.finish()
+			if !complete {
+				if p.logger != nil {
+					p.logger.Warn("Bedrock usage unavailable: invalid, incomplete or oversized event stream")
+				}
 				return
 			}
 		} else {
@@ -1138,6 +1149,11 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	usage.Provider = ledgerProvider
 	quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 	p.onLLMCall(usage, quota, billingMode, subPlan)
+}
+
+func isStreamingLLMResponse(contentType string) bool {
+	contentType = strings.ToLower(contentType)
+	return strings.HasPrefix(contentType, "text/event-stream") || strings.HasPrefix(contentType, "application/vnd.amazon.eventstream")
 }
 
 // sseFlushWriter deliberately exposes only Write, keeping io.Copy from

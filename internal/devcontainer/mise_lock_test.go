@@ -99,7 +99,7 @@ func TestMiseLockIsPreservedByAdapterPlanningAndChangesBuildIdentity(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.Lock == nil || cfg.Lock.Files["mise.lock"] != "original" || cfg.Tools["codex"] != "latest" {
+	if cfg.Lock == nil || cfg.Lock.Files["mise.lock"] != "original" || cfg.Tools["codex"] != "0.169.0" {
 		t.Fatalf("plan=%s", plan.MiseConfig)
 	}
 	changed := strings.Replace(input, "original", "replacement", 1)

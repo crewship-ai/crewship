@@ -70,8 +70,8 @@ func TestEnsureCrewImageHasAdapter(t *testing.T) {
 		wantRebuild  bool
 	}{
 		{"no image yet: start the first build on create", "", "", "CLAUDE_CODE", true},
-		{"image verified for the adapter", "crewship-cache:abc", `{"adapterBinaries":["claude"]}`, "CLAUDE_CODE", false},
-		{"image verified for another adapter", "crewship-cache:abc", `{"adapterBinaries":["claude"]}`, "CODEX_CLI", true},
+		{"image verified for the adapter", "crewship-cache:abc", `{"adapterBinaries":["claude"],"adapterReleasePolicy":{"claude":"2.1.325"}}`, "CLAUDE_CODE", false},
+		{"image verified for another adapter", "crewship-cache:abc", `{"adapterBinaries":["claude"],"adapterReleasePolicy":{"claude":"2.1.325"}}`, "CODEX_CLI", true},
 		{"image built before verification existed", "crewship-cache:abc", `{"loginPath":"/usr/bin"}`, "CLAUDE_CODE", true},
 		{"image with unreadable requirements", "crewship-cache:abc", `{not json`, "CLAUDE_CODE", true},
 	}
@@ -93,7 +93,7 @@ func TestEnsureCrewImageHasAdapter(t *testing.T) {
 
 	t.Run("no provisioner wired: create still succeeds", func(t *testing.T) {
 		rig := newCovACRig(t)
-		setCrewImage(t, rig, "crewship-cache:abc", `{"adapterBinaries":["claude"]}`)
+		setCrewImage(t, rig, "crewship-cache:abc", `{"adapterBinaries":["claude"],"adapterReleasePolicy":{"claude":"2.1.325"}}`)
 		createAgentWith(t, rig, "agent-y", "CODEX_CLI")
 	})
 }
@@ -104,7 +104,7 @@ func TestUpdateAgentAdapterRebuilds(t *testing.T) {
 	rig := newCovACRig(t)
 	fake := &rebuildFake{}
 	rig.h.SetProvisioner(fake)
-	setCrewImage(t, rig, "crewship-cache:abc", `{"adapterBinaries":["claude"]}`)
+	setCrewImage(t, rig, "crewship-cache:abc", `{"adapterBinaries":["claude"],"adapterReleasePolicy":{"claude":"2.1.325"}}`)
 	createAgentWith(t, rig, "agent-z", "CLAUDE_CODE")
 	if len(fake.calls) != 0 {
 		t.Fatalf("covered adapter must not rebuild: %v", fake.calls)
@@ -162,10 +162,10 @@ func TestCrewImageReady(t *testing.T) {
 	}{
 		{"no agents, bare image, no customisation", `{"image":"debian"}`, nil, "", "", present, false, true},
 		{"plain image but an agent needs claude: build required", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "", "", present, true, false},
-		{"image built and verified", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "crewship-cache:a", `{"adapterBinaries":["claude"]}`, present, true, true},
-		{"image built for claude, codex agent added later", `{"image":"debian"}`, []string{"CLAUDE_CODE", "CODEX_CLI"}, "crewship-cache:a", `{"adapterBinaries":["claude"]}`, present, true, false},
+		{"image built and verified", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "crewship-cache:a", `{"adapterBinaries":["claude"],"adapterReleasePolicy":{"claude":"2.1.325"}}`, present, true, true},
+		{"image built for claude, codex agent added later", `{"image":"debian"}`, []string{"CLAUDE_CODE", "CODEX_CLI"}, "crewship-cache:a", `{"adapterBinaries":["claude"],"adapterReleasePolicy":{"claude":"2.1.325"}}`, present, true, false},
 		{"image from before verification", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "crewship-cache:a", `{"loginPath":"/usr/bin"}`, present, true, false},
-		{"image gone from the daemon", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "crewship-cache:a", `{"adapterBinaries":["claude"]}`, absent, true, false},
+		{"image gone from the daemon", `{"image":"debian"}`, []string{"CLAUDE_CODE"}, "crewship-cache:a", `{"adapterBinaries":["claude"],"adapterReleasePolicy":{"claude":"2.1.325"}}`, absent, true, false},
 		{"NULL config defaults to the claude-code image and still needs verification", "", []string{"CLAUDE_CODE"}, "crewship-cache:a", "", present, true, false},
 		// A crew that needs no build may still have been provisioned (`crew
 		// provision`); the runtime then starts from cached_image and fails

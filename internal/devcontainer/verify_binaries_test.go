@@ -3,6 +3,9 @@ package devcontainer
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -65,5 +68,35 @@ func TestVerifyBinariesResolve_UsesAggregatedPath(t *testing.T) {
 	line := strings.Join(rec.groups[0].cmds, "\n")
 	if !strings.Contains(line, `export PATH="/usr/local/py-utils/bin:/opt/mise/data/shims:$PATH"`) {
 		t.Errorf("aggregated PATH not used:\n%s", line)
+	}
+}
+
+// Run the recorded build gate against synthetic CLIs: mere presence of an
+// old binary must not mark a V2 image ready. No Docker or provider calls.
+func TestVerifyBinariesResolveOpenCodeMajor(t *testing.T) {
+	for _, version := range []string{"1.19.5", "opencode v1.19.5", "2.3.0", "opencode v2.3.0", "2.3.0\nextra output"} {
+		t.Run(strings.ReplaceAll(version, "\n", "_"), func(t *testing.T) {
+			dir := t.TempDir()
+			binary := filepath.Join(dir, "opencode")
+			if err := os.WriteFile(binary, []byte("#!/bin/sh\nprintf '%s\\n' '"+version+"'\n"), 0700); err != nil {
+				t.Fatal(err)
+			}
+			run := func(ctx context.Context, _ string, args []string, _ string, _ []string) (string, int, error) {
+				cmd := exec.CommandContext(ctx, args[0], args[1:]...)
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					var exited *exec.ExitError
+					if errors.As(err, &exited) {
+						return string(out), exited.ExitCode(), nil
+					}
+					return string(out), -1, err
+				}
+				return string(out), 0, nil
+			}
+			err := VerifyBinariesResolve(t.Context(), "", []string{"opencode"}, dir+":/usr/bin:/bin", run)
+			if (err == nil) != (version == "2.3.0" || version == "opencode v2.3.0") {
+				t.Fatalf("version %q: %v", version, err)
+			}
+		})
 	}
 }

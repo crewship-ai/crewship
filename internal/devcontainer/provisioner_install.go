@@ -386,6 +386,12 @@ func VerifyBinariesResolve(ctx context.Context, containerID string, bins []strin
 	script := `export PATH="` + search + `"; ` +
 		`missing=""; for b in ` + strings.Join(quoted, " ") + `; do command -v "$b" >/dev/null 2>&1 || missing="$missing $b"; done; ` +
 		`[ -z "$missing" ] || { echo "crewship: adapter CLI not installed in this image:$missing (PATH=$PATH)" >&2; exit 1; }`
+	for _, binary := range bins {
+		if binary == "opencode" {
+			script += `; opencode_version=$(opencode --version 2>/dev/null) && opencode_version=${opencode_version#opencode } && [ "$opencode_version" = "$(printf '%s' "$opencode_version" | tr -d '\r\n')" ] && printf '%s\n' "$opencode_version" | grep -Eq '^v?2\.[0-9]+\.[0-9]+([+-][0-9A-Za-z.-]+)?$' || { echo 'crewship: OpenCode 2 is required; update the toolchain and reprovision' >&2; exit 1; }`
+			break
+		}
+	}
 	output, exitCode, err := exec(ctx, containerID,
 		[]string{"sh", "-c", script},
 		"1001:1001",
@@ -395,7 +401,7 @@ func VerifyBinariesResolve(ctx context.Context, containerID string, bins []strin
 		return fmt.Errorf("verify adapter binaries %v: %w", bins, err)
 	}
 	if exitCode != 0 {
-		return fmt.Errorf("adapter CLI missing from the image (%v): %s", bins, strings.TrimSpace(output))
+		return fmt.Errorf("adapter CLI image verification failed (%v): %s", bins, strings.TrimSpace(output))
 	}
 	return nil
 }

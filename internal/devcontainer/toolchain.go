@@ -59,9 +59,11 @@ func ObservedToolVersion(binary, output string) string {
 		line = strings.TrimSuffix(line, " (Claude Code)")
 	case "codex":
 		line = strings.TrimPrefix(line, "codex-cli ")
+	case "opencode":
+		line = strings.TrimPrefix(line, "opencode ")
 	case "droid":
 		line = strings.TrimPrefix(line, "droid ")
-	case "gemini", "opencode", "cursor-agent":
+	case "gemini", "cursor-agent":
 	default:
 		return ""
 	}
