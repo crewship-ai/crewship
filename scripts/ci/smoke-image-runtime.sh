@@ -26,23 +26,44 @@ cleanup() {
     while IFS= read -r id; do [ -z "$id" ] || docker rm -fv "$id" >/dev/null 2>&1 || true; done < <(docker ps -aq --filter "label=crewship.instance-id=$instance")
     while IFS= read -r name; do [ -z "$name" ] || docker volume rm "$name" >/dev/null 2>&1 || true; done < <(docker volume ls -q --filter "label=crewship.instance-id=$instance")
   done
-  for n in "$prefix-a" "$prefix-b" "$prefix-proxy"; do docker rm -fv "$n" >/dev/null 2>&1 || true; done
+  for n in "$prefix-a" "$prefix-b" "$prefix-proxy" "$prefix-native-probe"; do docker rm -fv "$n" >/dev/null 2>&1 || true; done
   docker volume rm "$prefix-a" "$prefix-b" >/dev/null 2>&1 || true
   docker network rm "$prefix" >/dev/null 2>&1 || true
   rm -rf "$work"
   exit "$status"
 }
 trap cleanup EXIT
+# Multi-architecture index digests: no mutable third-party tags are executed
+# by publication jobs that also have registry credentials.
+proxy_image=tecnativa/docker-socket-proxy@sha256:1f5038b54f06c3e18422902cf00ba21803d1c97805aae032e5e6673d532d3459
+crew_image=debian@sha256:734a72b3d6142a71993b4bc580ca01d8ca687f77a2c422d96a961d3376b179bc
+crew_image=$(docker manifest inspect "$crew_image" | python3 "$(dirname "$0")/image-platform.py" "$crew_image" "$platform")
 arch=${platform#linux/}
 CGO_ENABLED=0 GOOS=linux GOARCH="$arch" go test -c -tags conformance -o "$work/runtime.test" ./internal/provider/docker
 chmod 755 "$work/runtime.test"
-docker pull --platform "$platform" debian:bookworm-slim >/dev/null
+docker pull --platform "$platform" "$crew_image" >/dev/null
+# Independent native-client control, using the same local driver options as
+# noexecBindMount. Record kernel flags and real execution before the image
+# fixture can fail at its first flag assertion. This is diagnostic, not a waiver.
+mkdir "$work/native-data"
+echo 'Native local-volume effective flag diagnostic'
+docker run --rm -i --name "$prefix-native-probe" --platform "$platform" \
+  --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --user "$(id -u):$(id -g)" \
+  --mount "type=volume,dst=/output,volume-driver=local,volume-opt=type=none,volume-opt=device=$work/native-data,\"volume-opt=o=bind,noexec,nosuid\"" \
+  "$crew_image" sh -es <<'NATIVE_PROBE'
+awk '$2=="/output" {print "NATIVE_DATA_MOUNT " $0}' /proc/mounts
+cp /bin/true /output/exec-probe
+chmod +x /output/exec-probe
+if /output/exec-probe; then echo NATIVE_OUTPUT_EXEC_EXIT=0; else code=$?; echo NATIVE_OUTPUT_EXEC_EXIT=$code; fi
+NATIVE_PROBE
+
 docker network create --internal "$prefix" >/dev/null
 docker run -d --name "$prefix-proxy" --network "$prefix" \
   -v /var/run/docker.sock:/var/run/docker.sock:ro \
   -e POST=1 -e CONTAINERS=1 -e EXEC=1 -e IMAGES=1 -e NETWORKS=1 \
   -e VOLUMES=1 -e INFO=1 -e PING=1 -e VERSION=1 -e EVENTS=0 \
-  tecnativa/docker-socket-proxy:v0.5.0 >/dev/null
+  "$proxy_image" >/dev/null
 proxy_ready=0
 for _ in $(seq 1 30); do
   if docker exec "$prefix-proxy" wget -q -T 2 -O - http://127.0.0.1:2375/_ping >/dev/null 2>&1; then proxy_ready=1; break; fi
@@ -80,7 +101,7 @@ wait_server() {
   return 1
 }
 probe() {
-  docker exec -e CREWSHIP_CONTAINERIZED_STORAGE_SMOKE=1 -e CREWSHIP_SMOKE_PREFIX="$1" -e CREWSHIP_SMOKE_PERSISTED="${2:-0}" \
+  docker exec -e CREWSHIP_CONTAINERIZED_STORAGE_SMOKE=1 -e CREWSHIP_SMOKE_PREFIX="$1" -e CREWSHIP_SMOKE_PERSISTED="${2:-0}" -e CREWSHIP_SMOKE_CREW_IMAGE="$crew_image" \
     "$1" /tmp/runtime.test -test.run '^TestContainerizedStorage$' -test.v -test.timeout 4m
 }
 # Two concurrently running server instances on independent named volumes.

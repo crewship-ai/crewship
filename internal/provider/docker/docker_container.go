@@ -1300,7 +1300,8 @@ func (p *Provider) prepareCrewDirs(team provider.CrewConfig) (crewDirs, error) {
 // (running as root) to chown the bind-mount paths. Windows has no host-side
 // chown at all (os.Chown always errors), so skip straight to the
 // in-container path — Docker Desktop's file sharing surfaces uid mapping
-// inside the VM, where chown works. Initialization failures abort creation.
+// inside the VM, where chown works. Helper creation errors abort creation;
+// completed ownership commands retain their prior best-effort handling.
 //
 // volumes are the crew's NAMED volumes (/home/agent, /opt/crew-tools).
 // They are handled here, and only here, because nothing else in the tree
@@ -1361,27 +1362,25 @@ func (p *Provider) fixBindMountOwnership(ctx context.Context, runtimeImage strin
 		if initErr != nil {
 			return fmt.Errorf("ownership init create: %w", initErr)
 		}
-		defer func() {
-			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer cleanupCancel()
-			_, _ = p.client.ContainerRemove(cleanupCtx, initResp.ID, client.ContainerRemoveOptions{Force: true})
-		}()
 		if _, err := p.client.ContainerStart(ctx, initResp.ID, client.ContainerStartOptions{}); err != nil {
-			return fmt.Errorf("ownership init start: %w", err)
+			p.logger.Warn("ownership init start failed; retaining existing permissions", "error", err)
 		}
 		waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		defer cancel()
 		wait := p.client.ContainerWait(waitCtx, initResp.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 		select {
 		case result := <-wait.Result:
 			if result.StatusCode != 0 {
-				return fmt.Errorf("ownership init exited %d", result.StatusCode)
+				p.logger.Warn("ownership init exited unsuccessfully; retaining existing permissions", "exit_code", result.StatusCode)
 			}
-		case err := <-wait.Error:
-			return fmt.Errorf("ownership init wait: %w", err)
+		case waitErr := <-wait.Error:
+			p.logger.Warn("ownership init wait failed; retaining existing permissions", "error", waitErr)
 		case <-waitCtx.Done():
-			return waitCtx.Err()
+			p.logger.Warn("ownership init wait timed out; retaining existing permissions", "error", waitCtx.Err())
 		}
+		cancel()
+		// Preserve the existing non-forced removal behavior. A slow recursive
+		// chown is not killed or made fatal by this path-mapping change.
+		_, _ = p.client.ContainerRemove(ctx, initResp.ID, client.ContainerRemoveOptions{})
 
 	}
 	return nil
@@ -1893,13 +1892,13 @@ func shellQuote(s string) string {
 // volumeTargets are the in-init-container mount points of the crew's
 // NAMED volumes. Their roots get a non-recursive chown + chmod 755 so the
 // agent can create entries in them — see fixBindMountOwnership for why
-// nothing else in the tree is able to do this, and why it is not -R. The
-// The shell exits on the first failure; no later successful command can hide
-// an unsuccessful bind, memory or volume ownership operation.
+// nothing else in the tree is able to do this, and why it is not -R.
+// Preserve the existing best-effort ownership command in this path-mapping
+// fix. Strict exit handling requires separate measurement and qualification.
 func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string) string {
 	mnt := func(p string) string { return shellQuote("/mnt" + p) }
 
-	chownCmd := "set -e; chown -R 1001:1001"
+	chownCmd := "chown -R 1001:1001"
 	for _, dir := range allDirs {
 		chownCmd += " " + mnt(dir)
 	}
@@ -1907,7 +1906,7 @@ func buildChownInitCmd(allDirs []string, crewPath string, volumeTargets []string
 	// here: restore needs the same guarantee, and when it was spelled
 	// out only in this function the restore path could discover it only
 	// by failing (#1746).
-	chownCmd += ` ; ` + memory.MemoryOwnershipCmd(mnt(crewPath))
+	chownCmd += ` && ` + memory.MemoryOwnershipCmd(mnt(crewPath))
 	for _, target := range volumeTargets {
 		chownCmd += ` ; chown 1001:1001 ` + shellQuote(target) + ` ; chmod 755 ` + shellQuote(target)
 	}

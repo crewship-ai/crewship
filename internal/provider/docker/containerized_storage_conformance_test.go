@@ -18,6 +18,8 @@ import (
 // Ordinary host conformance cannot reproduce the server/daemon namespace split.
 func TestContainerizedStorage(t *testing.T) {
 	if os.Getenv("CREWSHIP_CONTAINERIZED_STORAGE_SMOKE") != "1" {
+		// SKIP-WAIVER(#5418): optional outside the distributed-image harness;
+		// the mandatory image gate sets this environment and cannot skip Docker.
 		t.Skip("run scripts/ci/smoke-image-runtime.sh")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
@@ -26,8 +28,8 @@ func TestContainerizedStorage(t *testing.T) {
 	if err := os.MkdirAll(root, 0755); err != nil {
 		t.Fatal(err)
 	}
-	cfg := Config{OutputBasePath: root, ServerContainer: os.Getenv("CREWSHIP_DOCKER_SERVER_CONTAINER"), SidecarBinaryPath: "/usr/local/bin/crewship-sidecar", EntrypointPath: "/usr/local/bin/entrypoint.sh", ContainerPrefix: os.Getenv("CREWSHIP_SMOKE_PREFIX"), RuntimeImage: "debian:bookworm-slim", InstanceID: os.Getenv("CREWSHIP_SMOKE_PREFIX")}
-	if cfg.ServerContainer == "" || cfg.ContainerPrefix == "" {
+	cfg := Config{OutputBasePath: root, ServerContainer: os.Getenv("CREWSHIP_DOCKER_SERVER_CONTAINER"), SidecarBinaryPath: "/usr/local/bin/crewship-sidecar", EntrypointPath: "/usr/local/bin/entrypoint.sh", ContainerPrefix: os.Getenv("CREWSHIP_SMOKE_PREFIX"), RuntimeImage: os.Getenv("CREWSHIP_SMOKE_CREW_IMAGE"), InstanceID: os.Getenv("CREWSHIP_SMOKE_PREFIX")}
+	if cfg.ServerContainer == "" || cfg.ContainerPrefix == "" || !strings.Contains(cfg.RuntimeImage, "@sha256:") {
 		t.Fatal("explicit isolated server identity and prefix required")
 	}
 	p, err := New(ctx, cfg, quietLogger())
@@ -76,6 +78,19 @@ func TestContainerizedStorage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Collect all facts before the first restrictive-flags assertion. A
+	// missing noexec flag must not hide the actual execution result on /output.
+	diagnostic := run("1001:1001", `
+awk '$2=="/workspace" || $2=="/output" || $2=="/crew" {print "DATA_MOUNT " $0}' /proc/mounts
+cp /bin/true /output/exec-probe
+chmod +x /output/exec-probe
+if /output/exec-probe; then
+  echo OUTPUT_EXEC_EXIT=0
+else
+  code=$?
+  echo OUTPUT_EXEC_EXIT=$code
+fi`)
+	t.Logf("effective data mount diagnostics:\n%s", diagnostic)
 	for _, pair := range []struct{ local, target string }{{dirs.workspace, "/workspace"}, {dirs.output, "/output"}, {dirs.crew, "/crew"}} {
 		if persisted {
 			previous, err := os.ReadFile(filepath.Join(pair.local, "from-server"))

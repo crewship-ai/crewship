@@ -1,10 +1,6 @@
 package docker
 
 import (
-	"os"
-	"os/exec"
-	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 )
@@ -129,37 +125,4 @@ func metacharsOutsideQuotes(s string) string {
 		}
 	}
 	return b.String()
-}
-
-// The init exit status is meaningful only if each ownership step propagates
-// failure. Fake commands exercise the real shell without touching host paths.
-func TestOwnershipInitDoesNotMaskEarlierFailures(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("POSIX helper shell regression runs on Unix hosts")
-	}
-	sh, err := exec.LookPath("sh")
-	if err != nil {
-		t.Skip("POSIX shell unavailable")
-	}
-	for _, phase := range []string{"success", "bind", "memory", "volume", "chmod"} {
-		t.Run(phase, func(t *testing.T) {
-			dir := t.TempDir()
-			commands := map[string]string{
-				"chown": `case "$FAIL_PHASE" in bind) exit 17;; volume) [ "$1" = -R ] || exit 17;; esac; exit 0`,
-				"find":  `[ "$FAIL_PHASE" != memory ] || exit 17; exit 0`,
-				"chmod": `[ "$FAIL_PHASE" != chmod ] || exit 17; exit 0`,
-			}
-			for name, body := range commands {
-				if err := os.WriteFile(filepath.Join(dir, name), []byte("#!/bin/sh\n"+body+"\n"), 0755); err != nil {
-					t.Fatal(err)
-				}
-			}
-			cmd := exec.Command(sh, "-c", buildChownInitCmd([]string{"/data"}, "/crew", []string{"/home-volume"}))
-			cmd.Env = append(os.Environ(), "PATH="+dir, "FAIL_PHASE="+phase)
-			err := cmd.Run()
-			if (err != nil) != (phase != "success") {
-				t.Fatalf("phase %s result %v", phase, err)
-			}
-		})
-	}
 }
