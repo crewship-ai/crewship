@@ -1,4 +1,4 @@
-//go:build integration
+//go:build integration && (linux || darwin)
 
 package orchestrator
 
@@ -14,6 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"testing"
 	"time"
 
@@ -48,7 +49,7 @@ func TestCurrentCLIReleaseCommands(t *testing.T) {
 			run := func(args ...string) string {
 				ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 				defer cancel()
-				cmd := exec.CommandContext(ctx, filepath.Join(dir, cli.Binary), args...)
+				cmd := qualificationCommand(ctx, filepath.Join(dir, cli.Binary), args...)
 				cmd.Env, cmd.Dir = env, home
 				out, err := cmd.CombinedOutput()
 				if err != nil {
@@ -122,7 +123,7 @@ func TestOpenCodeV2LocalEndpoint(t *testing.T) {
 	ctx, cancel := context.WithTimeout(t.Context(), 90*time.Second)
 	defer cancel()
 	command := (opencodeAdapter{}).BuildCommand(req)
-	cmd := exec.CommandContext(ctx, filepath.Join(dir, "opencode"), command[1:]...)
+	cmd := qualificationCommand(ctx, filepath.Join(dir, "opencode"), command[1:]...)
 	cmd.Dir = home
 	cmd.Env = []string{"HOME=" + home, "PATH=" + dir + ":/usr/local/bin:/usr/bin:/bin", "XDG_CONFIG_HOME=" + home + "/config", "XDG_DATA_HOME=" + home + "/data", "XDG_CACHE_HOME=" + home + "/cache", "OPENCODE_DISABLE_AUTOUPDATE=1", "OPENCODE_DISABLE_MODELS_FETCH=1", "OPENCODE_CONFIG_CONTENT=" + string(raw), "OPENCODE_CONFIG_PROJECT_DISABLE=1", "OPENCODE_DISABLE_CLAUDE_CODE=1", "CI=1"}
 	out, err := cmd.CombinedOutput()
@@ -168,9 +169,22 @@ func TestCurrentClaudeCLIAdapterArguments(t *testing.T) {
 		if r.Method == "POST" && r.URL.Path == "/v1/messages" {
 			requests.Add(1)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusUnauthorized)
-		io.WriteString(w, `{"type":"error","error":{"type":"authentication_error","message":"Crewship local qualification endpoint"}}`)
+		if r.Method != "POST" || r.URL.Path != "/v1/messages" {
+			http.Error(w, "local fixture only", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, event := range []struct{ kind, body string }{
+			{"message_start", `{"type":"message_start","message":{"id":"msg_fixture","type":"message","role":"assistant","content":[],"model":"claude-sonnet-4-6","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":10,"output_tokens":0}}}`},
+			{"content_block_start", `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
+			{"content_block_delta", `{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Crewship local qualification reply"}}`},
+			{"content_block_stop", `{"type":"content_block_stop","index":0}`},
+			{"message_delta", `{"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}`},
+			{"message_stop", `{"type":"message_stop"}`},
+		} {
+			io.WriteString(w, "event: "+event.kind+"\ndata: "+event.body+"\n\n")
+		}
+
 	}))
 	defer server.Close()
 	req := AgentRunRequest{CLIAdapter: "CLAUDE_CODE", LLMModel: "claude-sonnet-4-6", ToolProfile: "MINIMAL", MaxTurns: 1, UserMessage: "Reply with one word"}
@@ -190,11 +204,30 @@ func TestCurrentClaudeCLIAdapterArguments(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(t.Context(), 60*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, filepath.Join(dir, "claude"), argv[1:]...)
+	cmd := qualificationCommand(ctx, filepath.Join(dir, "claude"), argv[1:]...)
 	cmd.Dir = home
 	cmd.Env = []string{"HOME=" + home, "PATH=" + dir + ":/usr/local/bin:/usr/bin:/bin", "XDG_CONFIG_HOME=" + home + "/config", "XDG_DATA_HOME=" + home + "/data", "XDG_CACHE_HOME=" + home + "/cache", "DISABLE_AUTOUPDATER=1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1", "ANTHROPIC_API_KEY=crewship-local-fixture", "ANTHROPIC_BASE_URL=" + server.URL, "CI=1"}
 	out, err := cmd.CombinedOutput()
-	if ctx.Err() != nil || requests.Load() == 0 {
+	if err != nil || requests.Load() == 0 || !strings.Contains(string(out), "Crewship local qualification reply") {
 		t.Fatalf("argv did not reach local provider: %v requests=%d\n%s", err, requests.Load(), out)
 	}
+}
+
+// Each native launcher may spawn children. Cancel its owned process group so
+// a timed-out probe cannot leave a native CLI retrying after its wrapper dies.
+func qualificationCommand(ctx context.Context, executable string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, executable, args...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return os.ErrProcessDone
+		}
+		err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		if err == syscall.ESRCH {
+			return os.ErrProcessDone
+		}
+		return err
+	}
+	cmd.WaitDelay = 2 * time.Second
+	return cmd
 }
