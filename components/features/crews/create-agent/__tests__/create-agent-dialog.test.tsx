@@ -755,3 +755,59 @@ describe("Bedrock account in Edit", () => {
     expect(calls(spy)).not.toContain("PATCH /api/v1/agents/existing")
   })
 })
+
+// #5446 — a crew's Bedrock account rule is the new agent's default, and
+// choosing another provider stays an explicit choice.
+describe("crew Bedrock account rule in New agent", () => {
+  afterEach(() => vi.restoreAllMocks())
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } })
+  const ruleAccount = {
+    id: "c_rule", name: "Crew Bedrock", provider: "AWS_BEDROCK", status: "ACTIVE",
+    login: { mode: "api_key", provider: "AWS_BEDROCK", plan: null, plan_label: null, owner_user_id: null, owner_email: null, expires_at: null,
+      refresh: { supported: false, status: "none", last_at: null, next_at: null, error: null }, quota: null,
+      delivery: { kind: "sidecar", target: "AWS_BEARER_TOKEN_BEDROCK" }, pays_for: { agents: 0, crews: 1 },
+      bedrock: { region: "eu-central-1", models: ["eu.anthropic.claude-opus-5-5", "eu.anthropic.claude-sonnet-5-5"], auth_method: "bedrock_api_key", eu_only: true } },
+  }
+  function stub() {
+    return vi.spyOn(global, "fetch").mockImplementation(async (url, init) => {
+      const u = String(url)
+      if (init?.method === "POST" && u.includes("/api/v1/agents")) return json({ id: "new-1", slug: "filip", name: "Filip" }, 201)
+      if (u.includes("/api/v1/credentials/bindings?") && u.includes("scope=CREW") && u.includes("crew_id=c1"))
+        return json({ bindings: [{ id: "rule", credential_id: "c_rule", scope: "CREW", crew_id: "c1", agent_id: null, slot: "AWS_BEARER_TOKEN_BEDROCK", bedrock_model: "eu.anthropic.claude-sonnet-5-5" }] })
+      if (u.includes("/api/v1/credentials?")) return json([ruleAccount])
+      if (init?.method === "PUT") return json({})
+      return catalogueResponse(u) ?? json({})
+    })
+  }
+  const posted = (spy: ReturnType<typeof stub>) =>
+    JSON.parse(String(spy.mock.calls.find(([u, i]) => String(u).includes("/api/v1/agents") && i?.method === "POST")![1]!.body))
+
+  it("preselects the crew's account and model, and creates the agent on them", async () => {
+    const spy = stub()
+    render(<CreateAgentDialog workspaceId="ws-1" open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Step 2: Model" }))
+    const account = await screen.findByRole("radiogroup", { name: "Bedrock account" })
+    expect(within(account).getByRole("radio", { name: /Crew Bedrock/ })).toHaveAttribute("aria-checked", "true")
+    expect(within(screen.getByRole("radiogroup", { name: "Bedrock model" })).getByRole("radio", { name: /Claude Sonnet 5\.5/ })).toHaveAttribute("aria-checked", "true")
+    fireEvent.click(screen.getByRole("button", { name: "Step 1: Who" }))
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(createButton())
+    await waitFor(() => expect(spy.mock.calls.some(([u, i]) => String(u).includes("/api/v1/agents") && i?.method === "POST")).toBe(true))
+    expect(posted(spy)).toMatchObject({ llm_provider: "AWS_BEDROCK", cli_adapter: "OPENCODE", llm_model: "amazon-bedrock/eu.anthropic.claude-sonnet-5-5" })
+    // The account comes from the crew rule on the server; no second assignment.
+    expect(spy.mock.calls.some(([u]) => String(u).includes("/bedrock-assign"))).toBe(false)
+  })
+
+  it("keeps another provider the person chose", async () => {
+    const spy = stub()
+    render(<CreateAgentDialog workspaceId="ws-1" open onOpenChange={vi.fn()} defaultCrewSlug="engineering" crews={CREWS} onCreated={vi.fn()} />)
+    fireEvent.click(screen.getByRole("button", { name: "Step 2: Model" }))
+    await screen.findByRole("radiogroup", { name: "Bedrock account" })
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "Anthropic" }))
+    fireEvent.click(screen.getByRole("button", { name: "Step 1: Who" }))
+    fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Filip" } })
+    fireEvent.click(createButton())
+    await waitFor(() => expect(spy.mock.calls.some(([u, i]) => String(u).includes("/api/v1/agents") && i?.method === "POST")).toBe(true))
+    expect(posted(spy).llm_provider).toBe("ANTHROPIC")
+  })
+})

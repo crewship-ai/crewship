@@ -34,6 +34,8 @@ import {
 import { cn } from "@/lib/utils"
 import { CrewPicker } from "@/components/features/crews/crew-picker"
 import { apiFetch } from "@/lib/api-fetch"
+import { bedrockAgentModel } from "@/lib/credentials/bedrock"
+import { useCrewBedrockRule } from "./crew-bedrock-rule"
 import { ApiError, toApiError } from "@/lib/api-error"
 import { storeAgentAvatar } from "@/lib/agent-avatar-persist"
 import { AVATAR_STYLES, DEFAULT_AVATAR_STYLE } from "@/lib/agent-avatar"
@@ -266,6 +268,17 @@ export function CreateAgentDialog({
   })()
   const hasNoCrews = crews.length === 0
   const crewName = crews.find((c) => c.slug === draft.crewSlug)?.name
+
+  // The crew's Bedrock account rule (#5445) is the default for a new agent in
+  // it: offered preselected, so leaving it is what keeps the crew's account,
+  // and picking another provider is an explicit choice the server keeps.
+  const crewRule = useCrewBedrockRule(workspaceId, agent ? null : crews.find((c) => c.slug === draft.crewSlug)?.id ?? null)
+  useEffect(() => {
+    if (agent || providerConfirmed || !crewRule) return
+    setDraft((d) => ({ ...d, llmProvider: "AWS_BEDROCK", cliAdapter: "OPENCODE", llmModel: bedrockAgentModel(crewRule.model) }))
+    setSeatDraft(null)
+    setProviderConfirmed(true)
+  }, [agent, providerConfirmed, crewRule])
 
   const handlePickPersona = useCallback((persona: AgentPersona) => {
     setDraft((d) => applyPersonaDefaults(d, persona))
@@ -876,7 +889,7 @@ WORK STYLE: …`}
           </CreateSurfaceSection>}
           </EditorPanel>
           <EditorPanel active={show("model")}>
-            <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} seat={seatDraft} autoPick={!agent} boundSeatId={agent?.llm_provider === "AWS_BEDROCK" ? agent.pays_with?.credential_id ?? null : null} onSeat={setSeatDraft} />
+            <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} seat={seatDraft} autoPick={!agent} boundSeatId={agent ? (agent.llm_provider === "AWS_BEDROCK" ? agent.pays_with?.credential_id ?? null : null) : crewRule?.credentialId ?? null} onSeat={setSeatDraft} />
             {agent && (
               <RestrictedExecutionField
                 value={restrictedDraft ?? (agent.restricted_execution_profile as RestrictedProfile | undefined) ?? "disabled"}
