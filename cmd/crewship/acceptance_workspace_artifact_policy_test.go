@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http/httptest"
 	"os"
@@ -158,6 +160,46 @@ func TestAcceptance_WorkspaceArtifactPolicy(t *testing.T) {
 	read()
 	if policy.Version != 7 || *policy.SaveRequiresRunToken {
 		t.Fatalf("save_requires_run_token after clear %+v", policy)
+	}
+
+	// Missing --enabled is a local usage error: exit 2, diagnostics only on
+	// stderr, no success JSON on stdout and no request that changes the policy.
+	before, err := json.Marshal(policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name string
+		args []string
+	}{
+		{"create limit", []string{"set", "--base-version", "0", "--chat-run-create-limit", "21"}},
+		{"all limits and run token", []string{"set", "--base-version", "0", "--chat-run-create-limit", "2", "--run-read-limit", "5", "--crew-hourly-page-limit", "10", "--save-requires-run-token=true"}},
+	} {
+		t.Run("missing enabled/"+tc.name, func(t *testing.T) {
+			command := exec.Command(binary, append([]string{"workspace", "artifact-policy"}, tc.args...)...)
+			command.Env = append(os.Environ(), "CREWSHIP_CONFIG="+config, "CREWSHIP_SERVER=", "CREWSHIP_PROFILE=", "CREWSHIP_TOKEN=", "CREWSHIP_WORKSPACE=", "NO_COLOR=1")
+			var stdout, stderr bytes.Buffer
+			command.Stdout, command.Stderr = &stdout, &stderr
+			err := command.Run()
+			var exit *exec.ExitError
+			if err == nil || !strings.Contains(stderr.String(), "--enabled=true or --enabled=false is required") {
+				t.Fatalf("err=%v, stderr=%s", err, stderr.String())
+			}
+			if !errors.As(err, &exit) || exit.ExitCode() != 2 {
+				t.Fatalf("exit=%v, want 2; stderr=%s", err, stderr.String())
+			}
+			if stdout.Len() != 0 {
+				t.Fatalf("rejected input wrote stdout: %s", stdout.String())
+			}
+			read()
+			after, err := json.Marshal(policy)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(after, before) {
+				t.Fatalf("rejected input changed policy: before=%s after=%s", before, after)
+			}
+		})
 	}
 	if _, err := db.Exec(`UPDATE cli_tokens SET scopes='["pages:read"]' WHERE id='policy-cli-token'`); err != nil {
 		t.Fatal(err)

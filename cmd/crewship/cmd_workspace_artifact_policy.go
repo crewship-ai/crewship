@@ -37,7 +37,7 @@ func newWorkspaceArtifactPolicyCommand() *cobra.Command {
 			return fmt.Errorf("--base-version is required and must be nonnegative")
 		}
 		if !cmd.Flags().Changed("enabled") {
-			return fmt.Errorf("--enabled=true or --enabled=false is required")
+			return cli.WithExitCode(fmt.Errorf("--enabled=true or --enabled=false is required"), cli.ExitValidation)
 		}
 		enabled, _ := cmd.Flags().GetBool("enabled")
 		crews, _ := cmd.Flags().GetStringSlice("crew-id")
