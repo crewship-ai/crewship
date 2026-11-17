@@ -54,6 +54,7 @@ var responseShapeContracts = []struct {
 	value any
 }{
 
+	{name: "BedrockAssignmentResponse", pointer: "/components/schemas/BedrockAssignmentResponse", value: bedrockAssignmentResponse{}},
 	{name: "DesignCreateResponse", pointer: "/components/schemas/DesignCreateResponse", value: designCreateResponse{}},
 	{name: "DesignSnapshot", pointer: "/components/schemas/DesignSnapshot", value: designSnapshotResponse{}},
 	{name: "DesignActor", pointer: "/components/schemas/DesignActor", value: designActorResponse{}},

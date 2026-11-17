@@ -32,6 +32,12 @@ func selectedBedrockAccount(ctx context.Context, db sqlQuerier, agentID string) 
 	return id, rows.Err()
 }
 
+type bedrockAssignmentResponse struct {
+	Assigned int    `json:"assigned"`
+	Provider string `json:"provider"`
+	Model    string `json:"model"`
+}
+
 // AssignBedrock atomically binds a saved account and configures the native model
 // and supported runner. Existing assignments are never silently overwritten.
 func (h *CredentialHandler) AssignBedrock(w http.ResponseWriter, r *http.Request) {
@@ -162,5 +168,5 @@ func (h *CredentialHandler) AssignBedrock(w http.ResponseWriter, r *http.Request
 		replyError(w, 500, "Could not commit model assignment")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"assigned": len(targets), "provider": bedrock.Provider, "model": bedrock.NativeProvider + "/" + strings.TrimSpace(body.Model)})
+	writeJSON(w, http.StatusOK, bedrockAssignmentResponse{Assigned: len(targets), Provider: bedrock.Provider, Model: bedrock.NativeProvider + "/" + strings.TrimSpace(body.Model)})
 }

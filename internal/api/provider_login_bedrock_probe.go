@@ -10,7 +10,14 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/bedrock"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
+
+var bedrockProbeHTTPClient = func() *http.Client {
+	client := httpsafe.SafeClient(20 * time.Second)
+	client.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return client
+}()
 
 // Only the regional AWS runtime derived from a validated region is dialled.
 // No redirects, AWS credential chain, provider error text or secret-bearing URLs.
@@ -24,16 +31,19 @@ func probeBedrock(ctx context.Context, value string) testResult {
 	}
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	client := &http.Client{Transport: http.DefaultTransport, Timeout: 20 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	payload := []byte(`{"messages":[{"role":"user","content":[{"text":"Reply OK."}]}],"inferenceConfig":{"maxTokens":1}}`)
 	for _, model := range a.Models {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.Endpoint()+"/model/"+model+"/converse", bytes.NewReader(payload))
+		target := a.Endpoint() + "/model/" + model + "/converse"
+		if _, err := httpsafe.ValidateURL(target, "https"); err != nil {
+			return testResult{Error: "Invalid regional Bedrock runtime"}
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(payload))
 		if err != nil {
 			return testResult{Error: "Could not construct Bedrock verification"}
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+a.APIKey)
-		resp, err := client.Do(req)
+		resp, err := bedrockProbeHTTPClient.Do(req)
 		if err != nil {
 			return testResult{Error: "Bedrock verification could not reach the regional runtime"}
 		}

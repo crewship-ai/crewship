@@ -1,15 +1,21 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/santhosh-tekuri/jsonschema/v5"
+
 	"github.com/crewship-ai/crewship/internal/bedrock"
+	"github.com/crewship-ai/crewship/internal/httpsafe"
 )
 
 func bedrockAccountFixture(t *testing.T) string {
@@ -53,6 +59,9 @@ func TestBedrockAccountCreateAssignAndIsolation(t *testing.T) {
 		r.SetPathValue("credentialId", id)
 		w := httptest.NewRecorder()
 		h.AssignBedrock(w, r)
+		if w.Code == http.StatusOK {
+			assertBedrockAssignmentSchema(t, w.Body.Bytes())
+		}
 		return w.Code
 	}
 	if code := assign(first, "MEMBER", []string{"bedrock-a"}); code != 403 {
@@ -142,11 +151,13 @@ type bedrockProbeTransport func(*http.Request) (*http.Response, error)
 func (f bedrockProbeTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 func TestBedrockProbeChecksModelsAndSanitizesErrors(t *testing.T) {
-	old := http.DefaultTransport
-	defer func() { http.DefaultTransport = old }()
+	old := bedrockProbeHTTPClient
+	defer func() { bedrockProbeHTTPClient = old }()
+	client := *old
+	bedrockProbeHTTPClient = &client
 	for _, status := range []int{200, 401, 403, 404, 429, 500, 307} {
 		calls := 0
-		http.DefaultTransport = bedrockProbeTransport(func(r *http.Request) (*http.Response, error) {
+		client.Transport = bedrockProbeTransport(func(r *http.Request) (*http.Response, error) {
 			calls++
 			if r.URL.Host != "bedrock-runtime.eu-central-1.amazonaws.com" || r.Header.Get("Authorization") != "Bearer bedrock-synthetic-secret" || r.URL.Path != "/model/eu.anthropic.claude-opus-5-5/converse" {
 				t.Fatal("unsafe Bedrock probe target/auth")
@@ -161,5 +172,56 @@ func TestBedrockProbeChecksModelsAndSanitizesErrors(t *testing.T) {
 		if !result.Supported || result.Valid != (status == 200) || calls != 1 || strings.Contains(result.Error, "bedrock-synthetic-secret") {
 			t.Fatalf("probe %d: %+v calls=%d", status, result, calls)
 		}
+	}
+}
+
+func assertBedrockAssignmentSchema(t *testing.T, wire []byte) {
+	t.Helper()
+	raw, err := os.ReadFile("openapi.gen.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiler := jsonschema.NewCompiler()
+	if err := compiler.AddResource("spec.json", bytes.NewReader(raw)); err != nil {
+		t.Fatal(err)
+	}
+	schema, err := compiler.Compile("spec.json#/components/schemas/BedrockAssignmentResponse")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(wire, &body); err != nil {
+		t.Fatal(err)
+	}
+	if err := schema.Validate(body); err != nil {
+		t.Fatalf("actual Bedrock assignment response violates OpenAPI: %v", err)
+	}
+	for _, field := range []string{"assigned", "provider", "model"} {
+		value := body[field]
+		delete(body, field)
+		if schema.Validate(body) == nil {
+			t.Fatalf("assignment schema accepts missing %s", field)
+		}
+		body[field] = value
+	}
+}
+
+func TestBedrockProbeTransportRejectsPrivateDestinations(t *testing.T) {
+	transport, ok := bedrockProbeHTTPClient.Transport.(*http.Transport)
+	if !ok || transport.DialContext == nil {
+		t.Fatal("Bedrock probe must use a guarded transport")
+	}
+	for _, addr := range []string{"127.0.0.1:443", "169.254.169.254:443", "[::1]:443", "[fd00:ec2::254]:443"} {
+		conn, err := transport.DialContext(t.Context(), "tcp", addr)
+		if conn != nil {
+			conn.Close()
+			t.Fatalf("probe reached private destination %s", addr)
+		}
+		if !errors.Is(err, httpsafe.ErrBlocked) {
+			t.Fatalf("private destination %s was not blocked: %v", addr, err)
+		}
+	}
+	if bedrockProbeHTTPClient.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
+		t.Fatal("probe must refuse all redirects")
 	}
 }
