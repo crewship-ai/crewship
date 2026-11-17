@@ -1,8 +1,9 @@
 package docker
 
 import (
-	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
 // wellKnownDevcontainerBinDirs are PATH entries that devcontainer features add
