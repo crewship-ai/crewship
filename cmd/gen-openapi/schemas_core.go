@@ -93,7 +93,8 @@ func coreResourceSchemas() map[string]any {
 		"description", "color", "icon", "avatar_style", "container_ttl_hours", "issue_prefix")
 
 	agent := object(map[string]any{
-		"id": stringSchema(), "crew_id": nullableString(), "workspace_id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
+		"credential_readiness": ref("RemainingAgentCredentialReadinessV1"),
+		"id":                   stringSchema(), "crew_id": nullableString(), "workspace_id": stringSchema(), "name": stringSchema(), "slug": stringSchema(),
 		"description": nullableString(), "role_title": nullableString(), "agent_role": stringSchema(), "lead_mode": nullableString(), "status": stringSchema(),
 		"cli_adapter": stringSchema(), "llm_provider": nullableString(), "llm_model": nullableString(), "system_prompt": nullableString(),
 		"avatar_seed": nullableString(), "avatar_style": nullableString(), "avatar_url": nullableString(), "timeout_seconds": intSchema(),

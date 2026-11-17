@@ -2,6 +2,7 @@ package seeddata
 
 import (
 	"encoding/json"
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 	"strings"
 	"testing"
 )
@@ -133,4 +134,22 @@ func extractPostCreateCommand(t *testing.T, c CrewDef) string {
 		t.Fatalf("%s: postCreateCommand is blank", c.Slug)
 	}
 	return postCreate
+}
+
+func TestLocalAIInstallsManagedOpenCode2(t *testing.T) {
+	cli, ok := devcontainer.AdapterCLIFor("OPENCODE")
+	if !ok {
+		t.Fatal("missing managed OpenCode")
+	}
+	for _, c := range Crews {
+		if c.Slug != "local-ai" {
+			continue
+		}
+		command := extractPostCreateCommand(t, c)
+		if strings.Contains(command, "opencode-ai") || !strings.Contains(command, "@opencode/cli@"+cli.Version) {
+			t.Fatalf("Local AI installs incompatible OpenCode: %s", command)
+		}
+		return
+	}
+	t.Fatal("Local AI seed missing")
 }

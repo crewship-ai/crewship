@@ -15,7 +15,7 @@ package api
 // run uses — credTypeToProvider, credentialOAuthKind, the adapter's
 // AuthDelivery — over the same delivery set (loadDeliveredCredentials, the
 // chokepoint every boot path reads). This handler loads the agent, loads the
-// set without decrypting anything, asks, and renders. Putting the provider
+// set, opens Bedrock policy only in-process, asks, and renders. Putting the provider
 // tables in a second place — this file, or TypeScript — is how the two guards
 // before it went wrong.
 //
@@ -26,6 +26,7 @@ package api
 
 import (
 	"database/sql"
+	"github.com/crewship-ai/crewship/internal/bedrock"
 	"net/http"
 
 	"github.com/crewship-ai/crewship/internal/orchestrator"
@@ -86,8 +87,8 @@ func resolveAgentCredentialReadiness(r *http.Request, db *sql.DB, workspaceID, a
 	}
 
 	// The delivery set, still encrypted: readiness is decided by type,
-	// provider, variable name and handle-only — never by the value, which
-	// this endpoint must not open for a report.
+	// provider, variable name and handle-only. Bedrock also validates the
+	// encrypted account policy below; no credential value leaves this process.
 	delivered, slotNotices, err := loadDeliveredCredentials(ctx, db, agentID)
 	if err != nil {
 		return nil, err
@@ -109,6 +110,14 @@ func resolveAgentCredentialReadiness(r *http.Request, db *sql.DB, workspaceID, a
 			}
 			c.Fields = append(c.Fields, orchestrator.CredentialField{Key: f.Key, EnvVar: f.EnvVar, Value: f.Value})
 		}
+		// Bedrock validity includes expiry and its model allowlist, stored
+		// inside the atomic encrypted document. Open it only in-process;
+		// the response contains the verdict and metadata, never the value.
+		if d.Provider == bedrock.Provider && !d.HandleOnly {
+			if plain, err := decryptCredential(d.EncryptedValue); err == nil {
+				c.PlainValue = plain
+			}
+		}
 		creds = append(creds, c)
 	}
 
@@ -122,6 +131,9 @@ func resolveAgentCredentialReadiness(r *http.Request, db *sql.DB, workspaceID, a
 			Provider: rep.Provider,
 		},
 		Notes: rep.Notes,
+	}
+	if llmProvider == bedrock.Provider {
+		out.Notes = append(out.Notes, "This verdict validates local credentials and model policy; it does not verify live AWS model access.")
 	}
 	if out.Notes == nil {
 		out.Notes = []string{}

@@ -29,7 +29,7 @@ var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$`)
 func Parse(value string) (Account, error) {
 	var a Account
 	if len(value) > 32768 || json.Unmarshal([]byte(value), &a) != nil {
-		return a, errors.New("Bedrock requires an account document with authentication method, API key, region, models and expiry")
+		return a, errors.New("Bedrock requires an account document with authentication method, API key, region and models")
 	}
 	if a.AuthMethod != "bedrock_api_key" {
 		return a, errors.New("Bedrock supports the bedrock_api_key authentication method")
@@ -53,8 +53,10 @@ func Parse(value string) (Account, error) {
 		}
 		seen[m] = true
 	}
-	if _, err := time.Parse(time.RFC3339, a.ExpiresAt); err != nil {
-		return a, errors.New("Bedrock API key expiry is required in RFC3339 format")
+	if a.ExpiresAt != "" {
+		if _, err := time.Parse(time.RFC3339, a.ExpiresAt); err != nil {
+			return a, errors.New("Bedrock API key expiry must use RFC3339 format when provided")
+		}
 	}
 	return a, nil
 }
@@ -109,6 +111,9 @@ func (a Account) Endpoint() string {
 	}
 }
 func (a Account) Expired(now time.Time) bool {
+	if a.ExpiresAt == "" {
+		return false
+	}
 	t, e := time.Parse(time.RFC3339, a.ExpiresAt)
 	return e != nil || !now.Before(t)
 }

@@ -9,7 +9,11 @@ Pre-1.0 releases may introduce breaking changes in minor versions
 
 ## [Unreleased]
 
+- **Bedrock peer queries reuse the running crew sidecar (#5427).** A missing exact peer account is resolved through a bounded sidecar-only host request, without restarting its parent or exporting a key to the agent. Incomplete Bedrock usage is retained as unknown or a partial lower bound, and the Local AI seed installs managed OpenCode 2. Separate AWS infrastructure credentials remain available through approved Keeper executions; ambient AWS/MCP authentication stays isolated from inference.
+
 - **Choosing Preview in a Docs code block always requests its render (#5436).** Earlier queued previews can no longer consume the page budget and pause the block the reader explicitly chose. Automatic previews still respect that budget, and typing keeps the source visible.
+
+- **Bedrock account settings support the model UI (#5427).** Expiration is optional, an assigned agent can change its allowed model in place, and explicit crew account rules apply atomically to later members. Agent model PATCH validates the assigned Bedrock account; agent GET includes credential readiness without exposing account values or claiming live model verification.
 
 - **Adding a Microsoft Teams channel no longer fails with “shoutrrr url missing host” (#5434).** Creation and draft testing now validate the signed HTTPS workflow carried in the Teams URL query rather than requiring an outer host. Missing targets, HTTP, unsigned workflows, unknown hosts and provider mismatches remain rejected; legacy stored URLs keep their encrypted representation.
 

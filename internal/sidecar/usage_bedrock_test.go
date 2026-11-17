@@ -133,3 +133,58 @@ func TestBedrockFlushesBeforeUpstreamEOF(t *testing.T) {
 		})
 	}
 }
+
+func TestBedrockIncompleteUsageIsStillAccounted(t *testing.T) {
+	valid := bedrockTestFrame(bedrockTestUsage)
+	broken := append([]byte(nil), valid...)
+	broken[len(broken)-1] ^= 1
+	for name, body := range map[string][]byte{
+		"empty-usage":         bedrockTestFrame(`{"usage":{}}`),
+		"partial-usage":       bedrockTestFrame(`{"usage":{"inputTokens":40}}`),
+		"negative-usage":      bedrockTestFrame(`{"usage":{"inputTokens":-10,"outputTokens":-1}}`),
+		"missing":             bedrockTestFrame(`{"contentBlockDelta":{"delta":{"text":"hello"}}}`),
+		"damaged":             broken,
+		"truncated":           valid[:len(valid)-1],
+		"partial-after-usage": append(append([]byte(nil), valid...), broken...),
+	} {
+		t.Run(name, func(t *testing.T) {
+			var got LLMUsage
+			calls := 0
+			p := NewProxy(ProxyConfig{OnLLMCall: func(u LLMUsage, _ QuotaInfo, mode, _ string) {
+				got = u
+				calls++
+				if mode != "metered" {
+					t.Errorf("billing mode=%q", mode)
+				}
+			}})
+			resp := jsonUpstreamResponse(200, "application/vnd.amazon.eventstream", "", nil)
+			resp.Body = io.NopCloser(bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			p.copyAndObserveLLM(w, resp, "bedrock", "amazon-bedrock", "agent", "account", "eu.anthropic.claude-opus-5-5")
+			if calls != 1 || !got.UsageIncomplete || got.AgentID != "agent" || got.CredentialID != "account" || got.Model != "eu.anthropic.claude-opus-5-5" {
+				t.Fatalf("lost attribution/incomplete usage: calls=%d %+v", calls, got)
+			}
+			if !bytes.Equal(w.Body.Bytes(), body) {
+				t.Fatal("forwarded bytes changed")
+			}
+			wantInput := int64(0)
+			if name == "partial-after-usage" || name == "partial-usage" {
+				wantInput = 40
+			}
+			if got.InputTokens != wantInput {
+				t.Fatalf("input=%d want %d", got.InputTokens, wantInput)
+			}
+		})
+	}
+}
+
+func TestBedrockJSONUsageCompleteness(t *testing.T) {
+	for _, body := range []string{`{"usage":{}}`, `{"usage":{"inputTokens":40}}`, `{"usage":{"outputTokens":1}}`, `{"usage":{"inputTokens":-1,"outputTokens":0}}`} {
+		if got := parseLLMUsage("bedrock", body); !got.UsageIncomplete {
+			t.Fatalf("partial usage precise: %s %+v", body, got)
+		}
+	}
+	if got := parseLLMUsage("bedrock", `{"usage":{"inputTokens":0,"outputTokens":0}}`); got.UsageIncomplete {
+		t.Fatal("explicit zero counters are complete")
+	}
+}

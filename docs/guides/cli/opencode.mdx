@@ -199,10 +199,10 @@ configured by this connection.
 ## Amazon Bedrock
 
 Choose **Vault → AI providers → Add AI provider → Amazon Bedrock**. Enter a
-Bedrock API key and its expiration, pick its AWS region from the list and tick
-the inference profiles this account may use. A profile that is not listed can be
-added by its ID. **EU profiles only** keeps the region in the EU and offers only
-`eu.` profiles. These settings and the key are encrypted together. Pasted keys
+Bedrock API key and an optional expiration, pick its AWS region from the list
+and tick the inference profiles this account may use. A profile that is not
+listed can be added by its ID. **EU profiles only** keeps the region in the EU
+and offers only `eu.` profiles. These settings and the key are encrypted together. Pasted keys
 require manual renewal; AWS role authentication is not offered by this method.
 See [AWS Bedrock API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html).
 
@@ -211,21 +211,22 @@ Saving alone does not verify access. The result distinguishes authentication,
 model-access/permissions, unavailable models and quota failures. Successful
 verification describes access at that moment, not a guarantee of future quota.
 
-In **Pays for**, choose agents or current crew members and a permitted model.
+In **Pays for**, choose agents or crews and a permitted model.
 Crewship atomically assigns the account, sets the OpenCode runner and stores the
 full model ID, for example `amazon-bedrock/eu.anthropic.claude-opus-5-5`.
 The devcontainer's normal preparation installs the managed OpenCode version on
 its next run. Later assignments are available in the saved account's **Pays for**
 tab, which can also move every agent it already pays for to another permitted
-model.
+model. Crew assignment persists a rule and materializes exact bindings for current
+and future members. Individual model edits override the model default; removing
+a crew rule removes inherited accounts and preserves explicit individual account assignments.
 
 In **New agent → Model** (and **Edit agent → Model**), choosing **Amazon
 Bedrock** asks for the account first and then offers that account's permitted
 models by name. The runner is shown as OpenCode and cannot be changed; the
 account, model and runner are assigned together when the agent is saved.
 **Pays with** offers only logins of the agent's model provider, and a Bedrock
-account only for a Bedrock agent. Crew assignment expands to explicit bindings for the current members;
-new crew members must be assigned separately. A missing, expired, revoked or
+account only for a Bedrock agent. A missing, expired, revoked or
 withheld account stops the run, without trying another payer.
 
 The real key remains in the credential-injecting sidecar. The agent gets dummy
@@ -234,6 +235,31 @@ provider configuration. Sidecar-off execution is refused. Images with an
 `/etc/opencode` configuration are refused for Bedrock because managed settings
 can override the runtime's privacy-critical configuration. Project configuration
 and model-catalog downloads are disabled for these runs.
+
+### Account API for model settings
+
+- The encrypted Bedrock document may omit `expires_at` (or use an empty string).
+  This means no local expiry is recorded; it does not verify AWS validity or
+  enable renewal. Invalid nonempty dates are refused.
+- Repeat `POST /api/v1/credentials/{credentialId}/bedrock-assign` with the same
+  `agent_ids` and a different allowed native `model` to change that model in
+  place. The account stays assigned throughout the transaction.
+- `crew_ids` persist a crew account/model rule, including for an empty crew.
+  Later API, hire, internal and manifest agent inserts inherit an exact account
+  and OpenCode model atomically. Moving an inherited agent removes the old
+  inheritance; explicit individual assignments are preserved.
+- `PATCH /api/v1/agents/{agentId}` checks Bedrock model, provider and runner
+  changes against the assigned account in the update transaction. A denied
+  model leaves the whole patch unapplied. Store full `amazon-bedrock/…` IDs.
+- `GET /api/v1/agents/{agentId}` includes `credential_readiness` using the same
+  shape as the existing `/credential-readiness` endpoint. `ready` describes
+  local credential/model policy, including expiry; it is not an AWS probe.
+- The credential binding list exposes optional `bedrock_model` for a crew rule
+  and `inherited_from_binding_id` for materialized members. Remove a rule through
+  `DELETE /api/v1/credentials/bindings/{bindingId}`. Revoked or expired accounts
+  stay selected and fail readiness/run checks without an alternate payer.
+
+### EU policy scope
 
 The EU profile restriction requires an EU region and exact `eu.` model IDs;
 `global.` and bare model IDs are refused. OpenCode title/compaction configuration
@@ -262,3 +288,29 @@ grant its `AWS_BEARER_TOKEN_BEDROCK` slot to an agent using the OpenCode runner 
 an allowed `amazon-bedrock/…` model. This slot identifies the account grant; the
 secret is still not exported as an agent environment variable. Workspace defaults
 and account pools are not fallback payers for Bedrock.
+
+### Shared sidecar and infrastructure credentials
+
+A Bedrock peer query reuses the crew's running sidecar without restarting its
+parent. If the exact peer account is not loaded there, a sidecar-only host
+request checks the current run, crew, agent, explicit account, model and expiry
+in one database snapshot. Failure stops that request; it never selects another
+payer or caches a fallback key. The parent sidecar's credentials, fingerprint
+and general network allowlist remain unchanged. Fresh account resolution has a
+five-second timeout and at most 16 concurrent admissions per sidecar; streaming
+responses do not retain those admission slots.
+
+Bedrock inference deliberately clears ambient `AWS_*` authentication variables
+and other model-provider keys from the OpenCode environment. A separate
+infrastructure credential with provider `AWS` remains eligible for an explicitly
+approved **Keeper execution**. It is not exported into OpenCode's ambient
+environment. Standard AWS environment references in an MCP configuration are
+therefore unavailable on this path; use Keeper for those infrastructure actions.
+Other model accounts remain withheld from Bedrock agents, including Keeper/MCP
+exports. Separate-purpose AI tool grants are not implemented by this release.
+
+Incomplete Bedrock responses still create a cost observation. Missing usage is
+marked `cost_confidence=unknown` and `usage_status=incomplete`; numeric zero
+means no measured amount, not a free call. Observed partial counters are a lower
+bound, tagged `cost_is_lower_bound=true` with estimated confidence. These rows
+are not a replacement for reconciling the AWS invoice.

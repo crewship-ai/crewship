@@ -145,7 +145,7 @@ func (s *Server) buildLLMCallObserver() LLMCallObserver {
 			usage.CachedInputTokens != 0 ||
 			usage.CacheCreationTokens != 0
 		hasQuota := quota.HadStatus429 || quota.Window != ""
-		if !hasUsage && !hasQuota {
+		if !hasUsage && !hasQuota && !usage.UsageIncomplete {
 			return
 		}
 
@@ -176,6 +176,7 @@ type sidecarCostRecord struct {
 	CachedInputTokens   int64 `json:"cached_input_tokens"`
 	CacheCreationTokens int64 `json:"cache_creation_tokens"`
 
+	UsageIncomplete   bool    `json:"usage_incomplete,omitempty"`
 	BillingMode       string  `json:"billing_mode"`
 	SubscriptionPlan  string  `json:"subscription_plan,omitempty"`
 	QuotaRemainingPct float64 `json:"quota_remaining_pct,omitempty"`
@@ -208,6 +209,7 @@ func (s *Server) postCostRecord(ctx context.Context, usage LLMUsage, quota Quota
 		OutputTokens:        usage.OutputTokens,
 		CachedInputTokens:   usage.CachedInputTokens,
 		CacheCreationTokens: usage.CacheCreationTokens,
+		UsageIncomplete:     usage.UsageIncomplete,
 		BillingMode:         mode,
 		SubscriptionPlan:    plan,
 		QuotaRemainingPct:   quota.RemainingPct,

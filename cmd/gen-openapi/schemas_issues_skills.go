@@ -172,6 +172,7 @@ func issueSkillCredentialSchemaComponents() map[string]any {
 		"key": str(), "is_secret": boolean(), "ordinal": integer(), "value": nullable("string"), "created_at": str(), "updated_at": str(),
 	}, "key", "is_secret", "ordinal", "value", "created_at", "updated_at")
 	credentialBinding := obj(map[string]any{
+		"bedrock_model": nullable("string"), "inherited_from_binding_id": nullable("string"),
 		"id": str(), "credential_id": str(), "credential_name": str(), "scope": str(), "crew_id": nullable("string"),
 		"agent_id": nullable("string"), "slot": str(), "created_at": str(),
 	}, "id", "credential_id", "credential_name", "scope", "slot", "created_at", "crew_id", "agent_id")

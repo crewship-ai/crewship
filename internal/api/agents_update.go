@@ -481,6 +481,32 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "update agent", err)
 		return
 	}
+	// Crew triggers materialize defaults. Reapply explicitly supplied model
+	// fields so validation sees the caller's intent, including an invalid ID.
+	for _, field := range []string{"llm_model", "llm_provider", "cli_adapter"} {
+		if value, provided := body[field]; provided {
+			if _, err := tx.ExecContext(r.Context(), "UPDATE agents SET "+field+"=? WHERE id=? AND workspace_id=?", value, agentID, workspaceID); err != nil {
+				replyInternalError(w, h.logger, "apply explicit model fields", err)
+				return
+			}
+		}
+	}
+	_, providerChange := body["llm_provider"]
+	_, adapterChange := body["cli_adapter"]
+	if _, modelChange := body["llm_model"]; modelChange || providerChange || adapterChange {
+		if err := validateBedrockAgentModel(r.Context(), tx, workspaceID, agentID); err != nil {
+			replyError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+	}
+	if _, changed := body["llm_model"]; changed {
+		// Model choice and account provenance are independent.
+		if _, err := tx.ExecContext(r.Context(), `UPDATE credential_bindings SET bedrock_model_overridden=1 WHERE workspace_id=? AND agent_id=? AND scope='AGENT' AND slot='AWS_BEARER_TOKEN_BEDROCK'`, workspaceID, agentID); err != nil {
+			replyInternalError(w, h.logger, "record individual model override", err)
+			return
+		}
+	}
+
 	meta := agentUpdateAuditChanges(body, allowed)
 	if privilegeFieldInBody(body) || len(demoted) > 0 {
 		current, err := agentPrivileges(r.Context(), tx, workspaceID, agentID)

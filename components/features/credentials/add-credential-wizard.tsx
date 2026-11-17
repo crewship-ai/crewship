@@ -1053,7 +1053,7 @@ export function AddCredentialWizard({
                 </div>
                 {isBedrock && <div className="space-y-3">
                   <BedrockAccountFields region={extras.bedrock_region ?? ""} models={extras.bedrock_models ?? ""} euOnly={bedrockEUOnly} onChange={(next) => setExtras({...extras, ...(next.region !== undefined ? {bedrock_region: next.region} : {}), ...(next.models !== undefined ? {bedrock_models: next.models} : {}), ...(next.euOnly !== undefined ? {bedrock_eu_only: String(next.euOnly)} : {})})} />
-                  <CreateSurfaceField label="Key expires at" htmlFor="bedrock-expiry"><Input id="bedrock-expiry" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} /></CreateSurfaceField>
+                  <CreateSurfaceField label="Key expires at" htmlFor="bedrock-expiry" hint="Optional. Leave empty for a long-term key; short-term keys stop working at this time."><Input id="bedrock-expiry" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} /></CreateSurfaceField>
                   <CardNote>Bedrock API key authentication · automatic renewal is not available. Test makes a minimal billable request to each permitted model. Saving alone does not verify model access.</CardNote>
                 </div>}
                 {attempted && valueError && <p role="alert" className="text-xs text-destructive">{valueError}</p>}

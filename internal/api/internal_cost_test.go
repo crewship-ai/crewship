@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -112,5 +113,35 @@ func TestHandleSidecarCostRecord_PayerMustBelongToWorkspace(t *testing.T) {
 	var payer string
 	if err := r.db.QueryRow(`SELECT credential_id FROM cost_ledger`).Scan(&payer); err != nil || payer != credID {
 		t.Fatalf("payer not persisted: %q %v", payer, err)
+	}
+}
+
+func TestHandleSidecarCostRecord_IncompleteUsage(t *testing.T) {
+	for _, partial := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unknown", true: "lower-bound"}[partial], func(t *testing.T) {
+			r, _ := costRouter(t)
+			user := seedTestUser(t, r.db)
+			ws := seedTestWorkspace(t, r.db, user)
+			input := 0
+			confidence := "unknown"
+			if partial {
+				input = 100
+				confidence = "estimate"
+			}
+			raw, _ := json.Marshal(map[string]any{"workspace_id": ws, "provider": "amazon-bedrock", "model": "eu.anthropic.claude-opus-5-5", "input_tokens": input, "usage_incomplete": true})
+			if rr := postCost(t, r, string(raw)); rr.Code != http.StatusAccepted {
+				t.Fatalf("%d %s", rr.Code, rr.Body.String())
+			}
+			var gotConfidence, tags string
+			if err := r.db.QueryRow(`SELECT cost_confidence,tags FROM cost_ledger WHERE workspace_id=?`, ws).Scan(&gotConfidence, &tags); err != nil {
+				t.Fatal(err)
+			}
+			if gotConfidence != confidence || !strings.Contains(tags, `"usage_status":"incomplete"`) {
+				t.Fatalf("confidence=%q tags=%s", gotConfidence, tags)
+			}
+			if partial && !strings.Contains(tags, `"cost_is_lower_bound":true`) {
+				t.Fatal(tags)
+			}
+		})
 	}
 }

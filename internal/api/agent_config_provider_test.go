@@ -220,6 +220,7 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 	// point is that adding a name here is a decision someone made, not a way to
 	// silence the test.
 	notUpstreamDelivery := map[string]string{
+		"internal/api/internal_bedrock.go":         "returns only strictly parsed PROVIDER_LOGIN Bedrock account data to its authenticated first-party crew sidecar; never loads an API_KEY endpoint object or delivers it to a third party",
 		"internal/api/provider_login_bedrock.go":   "decrypts a Bedrock account solely to validate expiry/model before a local binding transaction; no credential is delivered upstream",
 		"internal/api/pages_draft_key.go":          "decrypts purpose-bound local browser data-key envelopes for their original authorized human; never selects an API_KEY row or delivers provider credentials upstream",
 		"internal/providerlogin/codex_proof.go":    "only signed PROVIDER_LOGIN identity verification; selects no API_KEY rows and grants no inference entitlement or upstream auth delivery",
@@ -257,6 +258,9 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 		// leaks — but see #2043: that also means the one provider where a
 		// connectivity test matters most cannot be tested from this endpoint.
 		"internal/api/credentials_test_endpoint.go": "probes by provider arm; endpoint-backed providers hit default: and are never dialled",
+
+		"internal/api/bedrock_model_validation.go":   "decrypts only an assigned Bedrock PROVIDER_LOGIN policy to validate a local model PATCH; never delivers a credential",
+		"internal/api/agent_credential_readiness.go": "opens Bedrock expiry/model policy in-process and returns readiness metadata only; never delivers any decrypted credential value",
 
 		// Outside internal/api — the half this guard could not see before.
 		"internal/backup/keyring.go":                                       "backup keyring material, not a vault credential",

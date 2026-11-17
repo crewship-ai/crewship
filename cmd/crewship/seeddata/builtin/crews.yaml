@@ -39,4 +39,4 @@ crews:
   runtime_image: mcr.microsoft.com/devcontainers/javascript-node:22-bookworm
   devcontainer_config: '{"image":"mcr.microsoft.com/devcontainers/javascript-node:22-bookworm","containerEnv":{"PATH":"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"},"features":{"ghcr.io/devcontainers/features/common-utils:2":{"username":"agent","userUid":"1001","userGid":"1001","installZsh":false,"upgradePackages":false}},"postCreateCommand":"mkdir
     -p $HOME/.local && npm config set prefix $HOME/.local 2>/dev/null || true && npm
-    install -g opencode-ai 2>&1 | tail -5 || true"}'
+    install -g @opencode/cli@2.3.0 2>&1 | tail -5 || true"}'

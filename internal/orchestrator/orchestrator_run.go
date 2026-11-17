@@ -1675,13 +1675,14 @@ func (o *Orchestrator) assembleSystemPrompt(ctx context.Context, req *AgentRunRe
 // mutates req's local-model fields. Pure extraction from RunAgent.
 func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, cred *Credential, runID string) ([]string, error) {
 	o.mu.RLock()
-	sidecarEnabled := o.sidecarEnabled && !req.SkipSidecar
+	sidecarConfigured := o.sidecarEnabled
+	sidecarEnabled := sidecarConfigured && !req.SkipSidecar
 	keeperEnabled := o.keeperEnabled
 	ipcBaseURL := o.ipcBaseURL
 	ipcToken := o.ipcToken
 	localModelBaseURL := o.localModelBaseURL
 	o.mu.RUnlock()
-	if bedrockRun(*req) && !sidecarEnabled {
+	if bedrockRun(*req) && !sidecarConfigured {
 		return nil, fmt.Errorf("Amazon Bedrock requires the credential-injecting sidecar; direct credential delivery is disabled")
 	}
 
@@ -1712,6 +1713,29 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 			"agent_id", req.AgentID, "container_id", req.ContainerID)
 	}
 
+	// A peer query reuses the running crew sidecar; it must never restart
+	// that process while its parent waits for the answer. The sidecar resolves
+	// the exact peer account from host authority when it was not boot-loaded.
+	if bedrockRun(*req) && req.SkipSidecar {
+		health := checkSidecar(ctx, o.container, req.ContainerID)
+		if health == nil || health.Stale || health.ConfigFingerprint == "" || req.RunID == "" || req.CrewID == "" || ipcBaseURL == "" || ipcToken == "" {
+			return nil, fmt.Errorf("Amazon Bedrock peer query requires a healthy current crew sidecar and host authority")
+		}
+		mode := strings.ToLower(strings.TrimSpace(req.NetworkMode))
+		if mode == "" {
+			mode = "free"
+		}
+		if mode != health.NetworkMode {
+			return nil, fmt.Errorf("Bedrock peer network policy differs from running crew sidecar")
+		}
+		req.sidecarActive = true
+		env := BuildEnvVarsSidecar(*req, keeperEnabled)
+		key := internaltoken.DeriveLLMRouteKey(ipcToken, req.WorkspaceID, req.CrewID)
+		env = bindLLMRouteToken(env, internaltoken.DeriveLLMRunRouteToken(key, req.AgentID, req.RunID), health.ConfigFingerprint)
+		runKey := agentRunKey(ipcToken, req.WorkspaceID, req.CrewID, o.loggerForRun(*req))
+		env = append(env, "CREWSHIP_AGENT_TOKEN="+agentRunAuthToken(runKey, req.WorkspaceID, req.AgentID, req.RunID, o.loggerForRun(*req)))
+		return injectMCPCredentialEnvVars(*req, env, keeperEnabled, o.loggerForRun(*req)), nil
+	}
 	var env []string
 	req.sidecarActive = sidecarEnabled
 	if sidecarEnabled {

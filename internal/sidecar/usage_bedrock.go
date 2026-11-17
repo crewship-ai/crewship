@@ -21,6 +21,7 @@ type bedrockUsageObserver struct {
 	invalid   bool
 	broken    bool
 	usage     LLMUsage
+	seenUsage bool
 }
 
 func (s *bedrockUsageObserver) Write(p []byte) (int, error) {
@@ -92,20 +93,50 @@ func (s *bedrockUsageObserver) observeFrame() {
 	}
 	// ConverseStream's metadata event body carries usage. Other events have
 	// no usage and do not alter the observation.
-	var body struct {
-		Usage *struct {
-			Input  int64 `json:"inputTokens"`
-			Output int64 `json:"outputTokens"`
-			Read   int64 `json:"cacheReadInputTokens"`
-			Write  int64 `json:"cacheWriteInputTokens"`
-		} `json:"usage"`
+	observed := parseBedrockUsagePayload(payload)
+	if observed.UsageIncomplete {
+		s.invalid = true
+	} else {
+		s.seenUsage = true
 	}
-	if json.Unmarshal(payload, &body) != nil || body.Usage == nil {
-		return
-	}
-	mergeLLMUsageMax(&s.usage, LLMUsage{InputTokens: body.Usage.Input, OutputTokens: body.Usage.Output, CachedInputTokens: body.Usage.Read, CacheCreationTokens: body.Usage.Write})
+	mergeLLMUsageMax(&s.usage, observed)
 }
 
 func (s *bedrockUsageObserver) finish() (LLMUsage, bool) {
-	return s.usage, !s.invalid && s.used == 0 && s.remaining == 0
+	return s.usage, s.seenUsage && !s.invalid && s.used == 0 && s.remaining == 0
+}
+
+// Missing counters are unknown, not zero. Preserve valid observed counters as
+// lower bounds while refusing to call a partial/negative payload precise.
+func parseBedrockUsagePayload(payload []byte) LLMUsage {
+	var body struct {
+		Usage *struct {
+			Input  *int64 `json:"inputTokens"`
+			Output *int64 `json:"outputTokens"`
+			Read   *int64 `json:"cacheReadInputTokens"`
+			Write  *int64 `json:"cacheWriteInputTokens"`
+		} `json:"usage"`
+	}
+	out := LLMUsage{}
+	if json.Unmarshal(payload, &body) != nil || body.Usage == nil {
+		out.UsageIncomplete = true
+		return out
+	}
+	u := body.Usage
+	out.UsageIncomplete = u.Input == nil || u.Output == nil
+	count := func(value *int64) int64 {
+		if value == nil {
+			return 0
+		}
+		if *value < 0 {
+			out.UsageIncomplete = true
+			return 0
+		}
+		return *value
+	}
+	out.InputTokens = count(u.Input)
+	out.OutputTokens = count(u.Output)
+	out.CachedInputTokens = count(u.Read)
+	out.CacheCreationTokens = count(u.Write)
+	return out
 }

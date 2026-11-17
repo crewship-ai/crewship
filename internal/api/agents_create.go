@@ -321,6 +321,12 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A persistent crew account rule materializes its payer/model at INSERT.
+	// Return and provision the stored runner rather than stale request defaults.
+	if err := tx.QueryRowContext(r.Context(), `SELECT cli_adapter,llm_provider,llm_model FROM agents WHERE id=? AND workspace_id=?`, agentID, workspaceID).Scan(&req.CLIAdapter, &req.LLMProvider, &req.LLMModel); err != nil {
+		replyInternalError(w, h.logger, "read created agent model", err)
+		return
+	}
 	current, err := agentPrivileges(r.Context(), tx, workspaceID, agentID)
 	if err != nil {
 		replyInternalError(w, h.logger, "read created agent privileges", err)

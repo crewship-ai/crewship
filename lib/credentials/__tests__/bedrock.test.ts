@@ -4,6 +4,8 @@ import {
   BEDROCK_PROFILES,
   BEDROCK_REGIONS,
   bedrockAccountModels,
+  bedrockAccountValue,
+  bedrockEntryError,
   bedrockAgentModel,
   bedrockModelFor,
   bedrockModelLabel,
@@ -68,5 +70,15 @@ describe("catalog", () => {
     expect(new Set(BEDROCK_PROFILES).size).toBe(BEDROCK_PROFILES.length)
     for (const id of BEDROCK_PROFILES) expect(id).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$/)
     expect(BEDROCK_PROFILES.some((id) => id.startsWith("eu."))).toBe(true)
+  })
+})
+
+describe("bedrockEntryError expiry (#5445: optional)", () => {
+  it("accepts a key without an expiration", () => {
+    expect(bedrockEntryError("eu-central-1", ["eu.anthropic.claude-opus-5-5"], "", true)).toBeNull()
+    expect(JSON.parse(bedrockAccountValue("k", "eu-central-1", ["eu.anthropic.claude-opus-5-5"], "", true)).expires_at).toBe("")
+  })
+  it("still refuses a past expiration", () => {
+    expect(bedrockEntryError("eu-central-1", ["eu.anthropic.claude-opus-5-5"], "2000-01-01T00:00", true)).toMatch(/future expiration/)
   })
 })
