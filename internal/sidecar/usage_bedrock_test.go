@@ -188,3 +188,27 @@ func TestBedrockJSONUsageCompleteness(t *testing.T) {
 		t.Fatal("explicit zero counters are complete")
 	}
 }
+
+// #5446: AWS refused the call (throttled, denied, invalid model, server
+// error). The error body has no usage because nothing was served or billed,
+// so it must not become an "incomplete" ledger row. A 2xx stream that breaks
+// stays incomplete (TestBedrockIncompleteUsageIsStillAccounted).
+func TestBedrockRefusedCallIsNotIncompleteUsage(t *testing.T) {
+	for _, status := range []int{400, 403, 429, 500, 503} {
+		t.Run(http.StatusText(status), func(t *testing.T) {
+			var got LLMUsage
+			calls := 0
+			p := NewProxy(ProxyConfig{OnLLMCall: func(u LLMUsage, _ QuotaInfo, _, _ string) { got = u; calls++ }})
+			body := `{"message":"refused"}`
+			resp := jsonUpstreamResponse(status, "application/json", body, nil)
+			w := httptest.NewRecorder()
+			p.copyAndObserveLLM(w, resp, "bedrock", "amazon-bedrock", "agent", "account", "eu.anthropic.claude-opus-5-5")
+			if calls > 0 && (got.UsageIncomplete || got.InputTokens != 0 || got.OutputTokens != 0) {
+				t.Fatalf("refused call recorded as usage: %+v", got)
+			}
+			if w.Body.String() != body {
+				t.Fatal("forwarded bytes changed")
+			}
+		})
+	}
+}
