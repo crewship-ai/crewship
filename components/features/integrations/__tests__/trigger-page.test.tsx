@@ -27,6 +27,13 @@ function setup(pane: "overview" | "mapping" | "settings" = "settings") {
   return { update, remove, onDeleted }
 }
 
+function missing(error: string | null) {
+  const refresh = vi.fn()
+  const data = { targets: [], rows: [], hooks: { update: vi.fn(), remove: vi.fn() }, refresh, loading: false, error } as unknown as IncomingData
+  render(<TriggerPage workspaceId="ws" row={null} data={data} pane="overview" onPane={vi.fn()} canEdit onBack={vi.fn()} onDeleted={vi.fn()} />)
+  return refresh
+}
+
 afterEach(cleanup)
 
 describe("TriggerPage", () => {
@@ -69,6 +76,21 @@ describe("TriggerPage", () => {
     setup("mapping")
     expect(screen.getByDisplayValue("repo")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Replay|Use last call|Send test/ })).not.toBeInTheDocument()
+  })
+
+  it("shows a retryable load error when the trigger row is unavailable", () => {
+    const refresh = missing("network unavailable")
+    expect(screen.getByRole("alert")).toHaveTextContent("Triggers could not load")
+    expect(screen.getByRole("alert")).toHaveTextContent("network unavailable")
+    expect(screen.queryByText(/This trigger doesn[’']t exist/)).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button", { name: "Retry" }))
+    expect(refresh).toHaveBeenCalledOnce()
+  })
+
+  it("shows not found only after a successful load without the trigger", () => {
+    missing(null)
+    expect(screen.getByText("This trigger doesn’t exist")).toBeInTheDocument()
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument()
   })
 })
 
