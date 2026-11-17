@@ -153,7 +153,8 @@ shell tools with fresh homes and isolated local providers. Every adapter must
 verify raw token delivery, exact opaque file/password bytes, native path aliases,
 child-shell inheritance, standard pinned-host OpenSSH authentication, mTLS with
 standard `curl`, and a synthetic USERPASS HTTP basic login through curl's stdin
-configuration. The mTLS private key is the certificate's secret `key_pem` field;
+configuration. A CLI token authenticates through curl's stdin header input.
+The mTLS private key is the certificate's secret `key_pem` field;
 the certificate primary is a valid X.509 chain. No password is passed to curl
 as a process argument. The basic-login fixture uses a deliberately simple
 synthetic value, not a general curl-configuration serializer.

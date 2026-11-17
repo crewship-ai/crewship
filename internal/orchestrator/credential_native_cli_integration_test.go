@@ -66,6 +66,14 @@ func TestNativeCLIShellEnvironment(t *testing.T) {
 			password := "fixture-password-$HOME\n"
 			basicPassword := "fixture-curl-password-$HOME"
 			basic := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/token" {
+					if r.Header.Get("Authorization") != "Bearer fixture-token-value" {
+						http.Error(w, "fixture token required", http.StatusUnauthorized)
+						return
+					}
+					fmt.Fprint(w, "fixture-token-authenticated")
+					return
+				}
 				username, password, ok := r.BasicAuth()
 				if !ok || username != "fixture-user" || password != basicPassword {
 					w.Header().Set("WWW-Authenticate", `Basic realm="fixture"`)
@@ -146,6 +154,7 @@ test "$(curl --silent --show-error --fail --noproxy '*' --connect-timeout 3 --ma
 # curl reads this synthetic login through its native stdin configuration;
 # neither the password nor its expansion is passed as a process argument.
 test "$(printf 'user = "%%s:%%s"\n' "$(cat "$NATIVE_TEST_BASIC_LOGIN_USERNAME")" "$(cat "$NATIVE_TEST_BASIC_LOGIN_PASSWORD")" | curl --config - --silent --show-error --fail --noproxy '*' --connect-timeout 3 --max-time 5 "$NATIVE_TEST_BASIC_URL")" = fixture-basic-authenticated
+test "$(printf 'Authorization: Bearer %%s\n' "$NATIVE_TEST_TOKEN" | curl --header @- --silent --show-error --fail --noproxy '*' --connect-timeout 3 --max-time 5 "$NATIVE_TEST_TOKEN_URL")" = fixture-token-authenticated
 printf '%%s%%s' NATIVE_ENV_ OK`, sha256.Sum256([]byte(generic)), sha256.Sum256([]byte(password)), port)
 			var passed atomic.Bool
 			var calls atomic.Int32
@@ -257,6 +266,7 @@ printf '%%s%%s' NATIVE_ENV_ OK`, sha256.Sum256([]byte(generic)), sha256.Sum256([
 			env = overrideEnv(env, "NATIVE_TEST_CA_FILE", caFile)
 			env = overrideEnv(env, "NATIVE_TEST_MTLS_URL", mtls.URL)
 			env = overrideEnv(env, "NATIVE_TEST_BASIC_URL", basic.URL)
+			env = overrideEnv(env, "NATIVE_TEST_TOKEN_URL", basic.URL+"/token")
 			if err := os.MkdirAll(filepath.Join(home, "codex"), 0700); err != nil {
 				t.Fatal(err)
 			}
