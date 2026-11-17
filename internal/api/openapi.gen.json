@@ -3452,6 +3452,48 @@
         ],
         "type": "object"
       },
+      "BedrockAssignmentRequest": {
+        "properties": {
+          "agent_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "crew_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "model": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "type": "object"
+      },
+      "BedrockAssignmentResponse": {
+        "properties": {
+          "assigned": {
+            "type": "integer"
+          },
+          "model": {
+            "type": "string"
+          },
+          "provider": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "assigned",
+          "provider",
+          "model"
+        ],
+        "type": "object"
+      },
       "BulkReplayRequest": {
         "properties": {
           "fingerprint": {
@@ -82977,17 +83019,18 @@
           "content": {
             "application/json": {
               "schema": {
-                "type": "object"
+                "$ref": "#/components/schemas/BedrockAssignmentRequest"
               }
             }
-          }
+          },
+          "required": true
         },
         "responses": {
           "200": {
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object"
+                  "$ref": "#/components/schemas/BedrockAssignmentResponse"
                 }
               }
             },
