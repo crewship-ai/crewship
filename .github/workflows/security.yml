@@ -87,7 +87,6 @@ jobs:
               - '**/package.json'
               - '**/pnpm-lock.yaml'
               - '**/pnpm-workspace.yaml'
-              - 'osv-scanner.toml'
 
   # ── Secret scan: gitleaks ──
   # Uses the gitleaks CLI binary directly (free, MIT licensed) instead of
@@ -393,10 +392,9 @@ jobs:
       # once the High baseline (deepmerge-ts GHSA-ggr8-5vv4-36mx, nanoid
       # GHSA-2v37-7h3g-55p8 — see #2236) hit zero. Gate on Critical/High only,
       # mirroring grype's `severity-cutoff: high` above — osv-scanner exits
-      # non-zero for ANY known vulnerability regardless of severity, and at
-      # promotion two Medium/Unknown-severity findings remained that a
-      # High-only baseline doesn't cover (both gone from the scan by
-      # 2026-11; the rule stands for the next ones):
+      # non-zero for ANY known vulnerability regardless of severity, and two
+      # Medium/Unknown-severity findings remain that a High-only baseline
+      # doesn't cover:
       #   - GHSA-rgwj-5xj2-c3m3 (mysql2, via prisma's own devDependency
       #     graph) is Medium (CVSS 3.1 ~5.8, DoS needs AC:H) and outside this
       #     issue's stated scope.
@@ -412,16 +410,10 @@ jobs:
       # this promotion is meant to fix, just moved from warn-only to
       # everyone-ignores-a-perma-red-check. A NEW Critical/High still fails
       # the build immediately, which is the point.
-      #
-      # Exceptions live in osv-scanner.toml, each with a reason and an
-      # ignoreUntil date after which it blocks again. --config applies the
-      # root file to every lockfile; without it osv-scanner reads only the
-      # config next to each lockfile, so tools/pages-build would ignore it.
       - name: Run osv-scanner against lockfiles
         run: |
           set +e
           osv-scanner \
-            --config=osv-scanner.toml \
             --lockfile=go.mod \
             --lockfile=pnpm-lock.yaml \
             --lockfile=tools/pages-build/pnpm-lock.yaml \

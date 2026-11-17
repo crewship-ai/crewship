@@ -1,8 +1,12 @@
-# OSV Scanner exceptions (.github/workflows/security.yml, job osv-scan).
+# OSV Scanner exceptions for the root lockfiles (go.mod, pnpm-lock.yaml);
+# see .github/workflows/security.yml, job osv-scan. osv-scanner reads the
+# osv-scanner.toml next to each lockfile, so tools/pages-build/osv-scanner.toml
+# carries the same entry for that lockfile.
 #
 # Every entry is time-boxed: when ignoreUntil passes, the advisory blocks the
 # gate again. Extend only with a fresh justification; remove the entry once a
-# fixed version is in the lockfiles.
+# fixed version is in the lockfiles. Keep ignoreUntil at most 90 days ahead;
+# a CI check of that shape is tracked in #5453.
 
 [[IgnoredVulns]]
 # picomatch ReDoS through single-branch repeated extglobs (#5449). Rescored
