@@ -13,6 +13,8 @@ import React from "react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, render, screen, fireEvent, cleanup, waitFor } from "@testing-library/react"
 
+import { measureCollapsedRail } from "@/components/layout/__tests__/measure-collapsed-rail"
+
 const identity = vi.hoisted(() => ({ id: "pages-test-human" }))
 vi.mock("@/hooks/use-auth", () => ({ useSessionSafe: () => ({ data: { user: { id: identity.id } }, status: "authenticated" }) }))
 
@@ -163,6 +165,16 @@ describe("PagesLayout", () => {
     expect(screen.queryByRole("button", {name: "Share"})).toBeNull()
     expect(screen.queryByText("Jede to?")).toBeNull()
   })
+
+  it("keeps the collapsed Pages target inside its rail on touch screens", async () => {
+    renderLayout([FLEET])
+    await screen.findByText("Flotila .201")
+    fireEvent.click(screen.getByRole("button", { name: "Collapse sidebar" }))
+    const expand = screen.getByRole("button", { name: "Expand sidebar" })
+    await measureCollapsedRail(expand.closest("aside")!.outerHTML)
+    fireEvent.click(expand)
+    expect(screen.getByRole("button", { name: "Collapse sidebar" })).toBeInTheDocument()
+  }, 60_000)
 
   it("preserves legacy application routing with the artifact flag off", async () => {
     vi.stubEnv("NEXT_PUBLIC_CHAT_ARTIFACT_PROJECTS", "false")

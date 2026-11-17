@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react"
 
 // =============================================================================
 // Three props the surface rewrite dropped on the floor.
@@ -56,8 +56,8 @@ vi.mock("@/components/features/chat/conversations-sidebar", async () => {
   >("@/components/features/chat/conversations-sidebar")
   return {
     ...actual,
-    ConversationsSidebar: ({ threadsLoaded }: { threadsLoaded: boolean }) => (
-      <div data-testid="sidebar" data-loaded={String(!!threadsLoaded)} />
+    ConversationsSidebar: ({ threadsLoaded, onToggleCollapse }: { threadsLoaded: boolean; onToggleCollapse?: () => void }) => (
+      <div data-testid="sidebar" data-loaded={String(!!threadsLoaded)}><button onClick={onToggleCollapse}>Collapse conversations</button></div>
     ),
   }
 })
@@ -85,6 +85,7 @@ vi.mock("@/components/features/chat/chat-panel", () => ({
 }))
 
 import { ChatClient } from "../chat-client"
+import { measureCollapsedRail } from "@/components/layout/__tests__/measure-collapsed-rail"
 
 const receiptForm = JSON.stringify([
   {
@@ -175,6 +176,35 @@ describe("<ChatClient> — the panel gets what the roster record already holds",
     await waitFor(() => expect(screen.getByTestId("chat-panel")).toBeInTheDocument())
     return screen.getByTestId("chat-panel")
   }
+
+  it("keeps the collapsed conversations target inside its rail on touch screens", async () => {
+    await panel()
+    fireEvent.click(screen.getByRole("button", { name: "Collapse conversations" }))
+    const expand = screen.getByRole("button", { name: "Expand sidebar" })
+    await measureCollapsedRail(expand.closest("aside")!.outerHTML)
+    fireEvent.click(expand)
+    expect(screen.getByTestId("sidebar")).toBeInTheDocument()
+  }, 60_000)
+
+  it("offers one phone tab row including Memory with arrow-key navigation", async () => {
+    window.innerWidth = 390
+    render(<ChatClient />)
+    await screen.findByTestId("chat-panel")
+    const tabs = within(await screen.findByRole("tablist", { name: "Chat panel" })).getAllByRole("tab")
+    expect(tabs.map(tab => tab.textContent)).toEqual(["Chat", "Artifacts", "Work", "Memory"])
+    tabs[0].focus()
+    fireEvent.keyDown(tabs[0], { key: "End" })
+    expect(tabs[3]).toHaveFocus()
+    expect(tabs[3]).toHaveAttribute("aria-selected", "true")
+    fireEvent.keyDown(tabs[3], { key: "ArrowRight" })
+    expect(tabs[0]).toHaveFocus()
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true")
+    fireEvent.keyDown(tabs[0], { key: "ArrowLeft" })
+    expect(tabs[3]).toHaveFocus()
+    fireEvent.keyDown(tabs[3], { key: "Home" })
+    expect(tabs[0]).toHaveFocus()
+    expect(tabs.filter(tab => tab.tabIndex === 0)).toEqual([tabs[0]])
+  })
 
   it("passes the record's suggested_prompts, so a configured agent keeps its own chips", async () => {
     expect((await panel()).getAttribute("data-suggested")).toBe(

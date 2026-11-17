@@ -101,7 +101,7 @@ describe("chat artifact entry points", () => {
     expect(screen.getByTestId("composer-context")).toHaveTextContent("Selected source A2:B2")
     expect(screen.queryByTestId("artifact-pane")).not.toBeInTheDocument()
   })
-  it.each(["chat", "work"] as const)("keeps an open artifact from covering the mobile %s panel", async (panel) => {
+  it.each(["chat", "work", "memory"] as const)("keeps an open artifact from covering the mobile %s panel", async (panel) => {
     const view = render(<ChatPanel {...props} mobilePanel="artifacts" />)
     await screen.findByTestId("context-tab")
     act(() => useArtifactStore.getState().openFile({ id: "source", agentId: "agent-1", path: "report.csv", title: "report.csv" }))

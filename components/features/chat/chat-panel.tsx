@@ -184,7 +184,7 @@ interface ChatPanelProps {
   /** A Docs proposal request (#5137): the next message asks the agent to propose on this schema-4 Doc. */
   proposalRequest?: ProposalRequestTarget
   /** Mobile-only: which panel to show full-screen. Undefined = desktop mode. */
-  mobilePanel?: "chat" | "artifacts" | "work"
+  mobilePanel?: "chat" | "artifacts" | "work" | "memory"
   /** Fired when the user sends a message — lets the parent optimistically
    *  title a freshly-created session in the sidebar (matching the server's
    *  auto-title) so the new entry shows its name without a manual refresh. */
@@ -194,7 +194,7 @@ interface ChatPanelProps {
    *  the user just watched doesn't linger as a server-side unread. */
   onReplySettled?: (sessionId: string) => void
   onNewConversation?: () => void
-  onMobilePanelChange?: (panel: "chat" | "artifacts" | "work") => void
+  onMobilePanelChange?: (panel: "chat" | "artifacts" | "work" | "memory") => void
 }
 
 /** How the chat palette's key is written for a human. The binding itself is
@@ -1565,10 +1565,12 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
     </div>
   ) : null
 
-  if (mobilePanel === "artifacts" || mobilePanel === "work") {
+  if (mobilePanel === "artifacts" || mobilePanel === "work" || mobilePanel === "memory") {
     if (executionProfile !== "trusted") return <div className="h-full overflow-auto">
       {executionProfile === "restricted" && sessionId && workspaceId
-        ? <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />
+        ? mobilePanel === "memory"
+          ? <RestrictedMemory key={sessionId} chatId={sessionId} workspaceId={workspaceId} userId={currentUserId ?? undefined} refreshKey={turns.length * 2 + Number(isStreaming)} />
+          : <RestrictedFiles key={sessionId} chatId={sessionId} workspaceId={workspaceId} refreshKey={turns.length * 2 + Number(isStreaming)} />
         : <p className="p-4 text-sm text-muted-foreground">Checking conversation access…</p>}
     </div>
     return (
@@ -1581,6 +1583,7 @@ function ChatPanelBody({ agentId, sessionId, draft, agentName, agentSlug, agentR
           chatId={sessionId}
           viewerId={currentUserId}
           initialTab={mobilePanel}
+          hideTabs
           workHeader={waitingForYou}
           style={{ width: "100%", height: "100%" }}
         />

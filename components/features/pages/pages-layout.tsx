@@ -60,7 +60,7 @@ import { duration } from "@/lib/motion"
 import { AppWindow, FilePlus2, FolderUser, LayoutGrid, MessageSquare, Pencil, Share2, Upload } from "lucide-react"
 
 import { SubBar, SubBarPrimary, SubBarSecondary } from "@/components/layout/sub-bar"
-import { SidebarCollapseButton, SIDEBAR_WIDTH } from "@/components/layout/sidebar-kit"
+import { SidebarCollapseButton, SIDEBAR_WIDTH, SIDEBAR_WIDTH_COLLAPSED } from "@/components/layout/sidebar-kit"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { useSessionSafe } from "@/hooks/use-auth"
 import { CONCEPT_ICON } from "@/lib/concept-icons"
@@ -505,7 +505,7 @@ export function PagesLayout({ workspaceId, slug, initialArtifactVersion, now }: 
         <aside
           className={cn(
             "shrink-0 overflow-hidden border-r border-foreground/[0.06] bg-card transition-all print:hidden",
-            collapsed ? "w-9" : SIDEBAR_WIDTH,
+            collapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH,
             isMobile && !collapsed && "fixed inset-y-0 left-0 z-50 pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] shadow-2xl",
           )}
         >

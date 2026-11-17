@@ -20,7 +20,7 @@ vi.mock("../right-rail", () => ({ RightRail: () => null }))
 vi.mock("../right-drawer", () => ({ RightDrawer: ({ children }: { children: React.ReactNode }) => children }))
 vi.mock("../right-panel-tabs/agent-work-tab", () => ({ AgentWorkTab: () => <p>Canonical Work</p> }))
 vi.mock("../right-panel-tabs/agent-artifacts-tab", () => ({ AgentArtifactsTab: () => null }))
-vi.mock("../right-panel-tabs/preferences-tab", () => ({ PreferencesTab: () => null }))
+vi.mock("../right-panel-tabs/preferences-tab", () => ({ PreferencesTab: () => <p>Canonical Memory</p> }))
 vi.mock("../artifact/artifact-pane", () => ({ ArtifactPane: () => null }))
 vi.mock("../composer/slash-palette", () => ({ SlashPalette: () => null }))
 vi.mock("../composer/chat-composer", () => ({ ChatComposer: () => null }))
@@ -163,4 +163,23 @@ it.each(["pending", "restricted"])("does not fetch decision sources for %s execu
   await act(async () => { await new Promise(resolve => setTimeout(resolve,10)) })
   expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("/decisions?"))).toBe(false)
   expect(screen.queryByRole("region", { name: "Waiting for you" })).toBeNull()
+})
+
+it.each(["artifacts", "work", "memory"] as const)("shows mobile %s without the panel's duplicate tabs", async mobilePanel => {
+  state.mobile = true
+  const client = new QueryClient()
+  render(<QueryClientProvider client={client}><ChatPanel {...props} mobilePanel={mobilePanel} /></QueryClientProvider>)
+  await screen.findByRole("heading", { name: mobilePanel === "memory" ? "Memory" : mobilePanel === "work" ? "Work" : "Artifacts", exact: true })
+  expect(screen.queryAllByRole("tab")).toHaveLength(0)
+  if (mobilePanel === "memory") expect(screen.getByText("Canonical Memory")).toBeInTheDocument()
+ })
+
+it("keeps the phone Memory tab within the restricted conversation surface", async () => {
+  profile = "restricted"
+  state.mobile = true
+  const client = new QueryClient()
+  render(<QueryClientProvider client={client}><ChatPanel {...props} mobilePanel="memory" /></QueryClientProvider>)
+  await screen.findByText("Conversation memory")
+  expect(screen.queryByText("Canonical Memory")).not.toBeInTheDocument()
+  await waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).includes("restricted-context") && String(url).includes("kind=memory"))).toBe(true))
 })

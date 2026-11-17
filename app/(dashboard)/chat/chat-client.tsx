@@ -4,7 +4,7 @@ import { useAttachmentScopePrefix } from "@/hooks/use-attachment-scope"
 import { AttachmentLifecycle } from "@/components/features/chat/composer/attachment-lifecycle"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
+import { Brain, LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
 
 import { UnifiedConversationPanel, UnifiedNewChatMenu, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
 import { SubBar } from "@/components/layout/sub-bar"
@@ -26,7 +26,7 @@ import {
   scopeKindParam,
   type ChatScope,
 } from "@/components/features/chat/chat-kind"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { SidebarCollapseButton, SIDEBAR_WIDTH_COLLAPSED } from "@/components/layout/sidebar-kit"
 import { Skeleton } from "@/components/ui/skeleton"
 import { deriveSessionTitle } from "@/lib/chat-title"
 import { useComposerStore } from "@/stores/composer-store"
@@ -97,12 +97,13 @@ function useAgentSlugFromUrl(): string | null {
 
 /** Which full-screen panel the phone is showing. ChatPanel has had these
  *  branches since it was written. */
-type MobilePanel = "chat" | "artifacts" | "work"
+type MobilePanel = "chat" | "artifacts" | "work" | "memory"
 
 const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquare }[] = [
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
   { id: "work", label: "Work", icon: ListTodo },
+  { id: "memory", label: "Memory", icon: Brain },
 ]
 
 /**
@@ -895,8 +896,8 @@ function ChatClientBody() {
    * phone breakpoint: 280px of conversations beside a transcript survives an
    * 800px window and does not survive a 390px one. The column becomes an
    * overlay drawer reached from a header button, and ChatPanel is handed the
-   * `mobilePanel` prop for chat/artifacts/work — on
-   * desktop those three live side by side in the panel's own right rail, so
+   * `mobilePanel` prop for chat/artifacts/work/memory — on
+   * desktop those panels live side by side in the panel's own right rail, so
    * the strip would be a duplicate there.
    */
   if (isMobile) {
@@ -907,15 +908,28 @@ function ChatClientBody() {
         {!humanConversationId && <div
           role="tablist"
           aria-label="Chat panel"
-          className="flex h-9 shrink-0 items-stretch border-b border-foreground/[0.08]"
+          className="flex h-9 coarse:h-[44px] shrink-0 items-stretch border-b border-foreground/[0.08]"
         >
           {MOBILE_PANELS.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               type="button"
               role="tab"
+              id={`chat-phone-tab-${id}`}
+              aria-controls="chat-phone-panel"
+              tabIndex={mobilePanel === id ? 0 : -1}
               aria-selected={mobilePanel === id}
               onClick={() => setMobilePanel(id)}
+              onKeyDown={event => {
+                const index = MOBILE_PANELS.findIndex(panel => panel.id === id)
+                const next = event.key === "Home" ? 0 : event.key === "End" ? MOBILE_PANELS.length - 1
+                  : event.key === "ArrowRight" ? (index + 1) % MOBILE_PANELS.length
+                    : event.key === "ArrowLeft" ? (index + MOBILE_PANELS.length - 1) % MOBILE_PANELS.length : null
+                if (next === null) return
+                event.preventDefault()
+                setMobilePanel(MOBILE_PANELS[next].id)
+                event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next]?.focus()
+              }}
               className={cn(
                 "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 text-micro",
                 mobilePanel === id
@@ -929,7 +943,7 @@ function ChatClientBody() {
           ))}
         </div>}
 
-        <div className="surface-pane min-h-0 flex-1 overflow-hidden">{conversation}</div>
+        <div id="chat-phone-panel" role={humanConversationId ? undefined : "tabpanel"} aria-labelledby={humanConversationId ? undefined : `chat-phone-tab-${mobilePanel}`} className="surface-pane min-h-0 flex-1 overflow-hidden">{conversation}</div>
 
         {drawerOpen && (
           <>
@@ -985,7 +999,7 @@ function ChatClientBody() {
       <aside
         className={cn(
           "shrink-0 overflow-hidden border-r border-foreground/[0.06] transition-all",
-          leftCollapsed ? "w-9" : "w-[280px]",
+          leftCollapsed ? SIDEBAR_WIDTH_COLLAPSED : "w-[280px]",
         )}
       >
         {leftCollapsed ? (

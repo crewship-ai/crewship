@@ -30,7 +30,8 @@ export { SidebarRowTile } from "@/components/layout/row-tile"
  */
 
 export const SIDEBAR_WIDTH = "w-[272px]"
-export const SIDEBAR_WIDTH_COLLAPSED = "w-11"
+// The pixel width fits the 44px touch target plus its border at every text scale.
+export const SIDEBAR_WIDTH_COLLAPSED = "w-11 coarse:w-[48px]"
 
 /* ---------------------------------------------------------------- toolbar */
 
