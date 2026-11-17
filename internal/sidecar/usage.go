@@ -23,6 +23,9 @@ type LLMUsage struct {
 	// (llmroute.Spec.LedgerProvider), e.g. "anthropic" / "openrouter" — not
 	// the uppercase CredStore ProviderType and not the body codec. It is set
 	// by copyAndObserveLLM, never by parseLLMUsage.
+	// UsageIncomplete preserves an admitted call when transport or usage metadata is incomplete.
+	// Observed counters are lower bounds, never a complete zero-cost observation.
+	UsageIncomplete     bool
 	Provider            string
 	Model               string
 	InputTokens         int64
@@ -84,23 +87,13 @@ type QuotaInfo struct {
 func parseLLMUsage(codec, body string) LLMUsage {
 	var out LLMUsage
 	if body == "" {
+		out.UsageIncomplete = codec == "bedrock"
 		return out
 	}
 
 	switch codec {
 	case "bedrock":
-		var v struct {
-			Usage struct {
-				Input  int64 `json:"inputTokens"`
-				Output int64 `json:"outputTokens"`
-				Read   int64 `json:"cacheReadInputTokens"`
-				Write  int64 `json:"cacheWriteInputTokens"`
-			} `json:"usage"`
-		}
-		if json.Unmarshal([]byte(body), &v) != nil {
-			return out
-		}
-		return LLMUsage{InputTokens: v.Usage.Input, OutputTokens: v.Usage.Output, CachedInputTokens: v.Usage.Read, CacheCreationTokens: v.Usage.Write}
+		return parseBedrockUsagePayload([]byte(body))
 
 	case "anthropic":
 		// Anthropic message body shape:

@@ -261,6 +261,7 @@ func (s *Server) llmRouteIdentity(r *http.Request) (agentID, configFingerprint s
 			return "", fp, true, false
 		}
 		s.registerRunFromToken(runID, id)
+		*r = *r.WithContext(context.WithValue(r.Context(), authenticatedLLMRunKey{}, runID))
 		return id, fp, true, true
 	}
 	return "", "", false, false

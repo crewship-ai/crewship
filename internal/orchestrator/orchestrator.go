@@ -146,9 +146,9 @@ type AgentRunRequest struct {
 	// crew is reachable, so it refuses the work or guesses a crew-local
 	// endpoint and reports the crew as unreachable.
 	ConnectedCrews []ConnectedCrew
-	SkipSidecar    bool // When true, skip sidecar even if enabled globally (prevents port conflict in sub-agents)
+	SkipSidecar    bool // Reuse the existing crew sidecar without starting/restarting it.
 	// sidecarActive is set by ensureSidecar after the instance-level switch and
-	// SkipSidecar have both been applied. Adapter command builders use it to
+	// peer-reuse decision have been applied. Adapter command builders use it to
 	// emit provider-specific routing only when the loopback proxy really exists.
 	sidecarActive   bool
 	ApprovalMode    string // "none" | "async" | "sync" — drives Harbor Master gate in RunAgent

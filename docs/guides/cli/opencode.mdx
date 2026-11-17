@@ -252,3 +252,29 @@ grant its `AWS_BEARER_TOKEN_BEDROCK` slot to an agent using the OpenCode runner 
 an allowed `amazon-bedrock/…` model. This slot identifies the account grant; the
 secret is still not exported as an agent environment variable. Workspace defaults
 and account pools are not fallback payers for Bedrock.
+
+### Shared sidecar and infrastructure credentials
+
+A Bedrock peer query reuses the crew's running sidecar without restarting its
+parent. If the exact peer account is not loaded there, a sidecar-only host
+request checks the current run, crew, agent, explicit account, model and expiry
+in one database snapshot. Failure stops that request; it never selects another
+payer or caches a fallback key. The parent sidecar's credentials, fingerprint
+and general network allowlist remain unchanged. Fresh account resolution has a
+five-second timeout and at most 16 concurrent admissions per sidecar; streaming
+responses do not retain those admission slots.
+
+Bedrock inference deliberately clears ambient `AWS_*` authentication variables
+and other model-provider keys from the OpenCode environment. A separate
+infrastructure credential with provider `AWS` remains eligible for an explicitly
+approved **Keeper execution**. It is not exported into OpenCode's ambient
+environment. Standard AWS environment references in an MCP configuration are
+therefore unavailable on this path; use Keeper for those infrastructure actions.
+Other model accounts remain withheld from Bedrock agents, including Keeper/MCP
+exports. Separate-purpose AI tool grants are not implemented by this release.
+
+Incomplete Bedrock responses still create a cost observation. Missing usage is
+marked `cost_confidence=unknown` and `usage_status=incomplete`; numeric zero
+means no measured amount, not a free call. Observed partial counters are a lower
+bound, tagged `cost_is_lower_bound=true` with estimated confidence. These rows
+are not a replacement for reconciling the AWS invoice.

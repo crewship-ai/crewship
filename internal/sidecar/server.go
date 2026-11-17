@@ -164,7 +164,8 @@ type RouteAuth struct {
 // It provides an HTTP forward proxy with credential injection,
 // optional memory search API, and assignment routing for lead agents.
 type Server struct {
-	httpServer *http.Server
+	peerPatterns peerCredentialPatterns
+	httpServer   *http.Server
 	// runCapabilities holds the host-minted capability of each run without a
 	// human (#5339), attached to that run's artifact tool calls only.
 	runCapabilities  runCapabilities
@@ -455,6 +456,7 @@ func NewServer(cfg ServerConfig) *Server {
 		OnLLMAdmission:     s.buildLLMAdmission(),
 		OnGraceFallback:    s.buildGraceFallbackObserver(),
 		ResolveLLMIdentity: s.llmRouteIdentity,
+		ResolveBedrock:     s.resolveBedrock,
 		BillingMode:        billingMode,
 		SubscriptionPlan:   subscriptionPlan,
 		BuildHash:          selfExeHash(),
@@ -932,6 +934,9 @@ func (s *Server) proxyIPCJSON(w http.ResponseWriter, r *http.Request, method, pa
 // internal token is set, so an extras map can never override
 // X-Internal-Token.
 func (s *Server) proxyIPCJSONHeaders(w http.ResponseWriter, r *http.Request, method, path, label string, body []byte, extra http.Header) {
+	if refuseSecretResolutionForward(w, path) {
+		return
+	}
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
 		return
