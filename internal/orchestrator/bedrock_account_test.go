@@ -45,6 +45,16 @@ func TestBedrockNeverExportsAccountAndFailsClosed(t *testing.T) {
 	if !ok || !strings.Contains(cfg, "selected-account") || !strings.Contains(cfg, "provider.use") || !strings.Contains(cfg, "amazon-bedrock") {
 		t.Fatal("missing native/fenced configuration")
 	}
+	expired := req
+	expired.Credentials = append([]Credential(nil), req.Credentials...)
+	var account bedrock.Account
+	_ = json.Unmarshal([]byte(expired.Credentials[0].PlainValue), &account)
+	account.ExpiresAt = time.Now().Add(-time.Hour).UTC().Format(time.RFC3339)
+	raw, _ := json.Marshal(account)
+	expired.Credentials[0].PlainValue = string(raw)
+	if ModelCredentialReadiness(expired.CLIAdapter, expired.LLMProvider, expired.LLMModel, expired.Credentials).State != ModelCredentialMissing || validateManagedOpenCodeCredential(expired) == nil {
+		t.Fatal("expired account reported ready")
+	}
 	bad := req
 	bad.LLMModel = "amazon-bedrock/global.anthropic.haiku"
 	if validateManagedOpenCodeCredential(bad) == nil {

@@ -135,6 +135,13 @@ func ModelCredentialReadiness(adapter, llmProvider, llmModel string, creds []Cre
 	login := getAdapter(adapter).AuthDelivery()
 
 	for _, cred := range creds {
+		if want == bedrock.Provider {
+			a, err := bedrock.Parse(cred.PlainValue)
+			if providerlogin.Canonical(cred.Provider) != bedrock.Provider || err != nil || a.Expired(time.Now()) || !a.Allows(strings.TrimPrefix(llmModel, bedrock.NativeProvider+"/")) {
+				continue
+			}
+		}
+
 		if cred.HandleOnly {
 			// Every delivery selector reads PlainValue == "" as "not
 			// delivered"; a handle-only value is empty by construction.

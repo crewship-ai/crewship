@@ -371,6 +371,9 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string, keeperEnabled
 
 	// Match credentials to MCP env var references
 	for _, cred := range req.Credentials {
+		if bedrockRun(req) && providerlogin.IsProvider(cred.Provider) {
+			continue
+		}
 		if cred.EnvVarName == "" || cred.PlainValue == "" {
 			continue
 		}
@@ -545,6 +548,16 @@ func SidecarProxyEnv() []string {
 // When keeperEnabled is false, SECRET credentials are injected as env vars directly.
 // The agent gets dummy API keys and proxy configuration pointing to the sidecar.
 func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
+	if bedrockRun(req) {
+		filtered := make([]Credential, 0, len(req.Credentials))
+		for _, c := range req.Credentials {
+			if !providerlogin.IsProvider(c.Provider) || providerlogin.Canonical(c.Provider) == bedrock.Provider {
+				filtered = append(filtered, c)
+			}
+		}
+		req.Credentials = filtered
+	}
+
 	// Check if we have an OAuth token -- this changes the env var strategy.
 	// OAuth tokens use HTTPS CONNECT tunnel (sidecar just allowlists the domain).
 	// Claude Code sets Authorization: Bearer itself inside the encrypted tunnel.
@@ -821,6 +834,13 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 			env = append(env, name+"=")
 		}
 		env = append(env, "AWS_EC2_METADATA_DISABLED=true", "AWS_SHARED_CREDENTIALS_FILE=/dev/null", "AWS_CONFIG_FILE=/dev/null")
+		for _, p := range providerlogin.Providers() {
+			if slot := providerlogin.DeliveryFor(p, providerlogin.ModeAPIKey).Target; slot != "" {
+				env = overrideEnv(env, slot, "")
+			}
+		}
+		env = overrideEnv(env, "CLAUDE_CODE_OAUTH_TOKEN", "")
+
 	}
 
 	return env

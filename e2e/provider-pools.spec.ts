@@ -99,7 +99,7 @@ for (const width of [1280, 390]) {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
     })
     await page.goto("/credentials?space=providers")
-    await page.getByRole("button", { name: "Add AI provider", exact: true }).click()
+    await page.getByRole("button", { name: "Add AI provider", exact: true }).first().click()
     const dialog = page.getByRole("dialog")
     await dialog.getByRole("button", { name: /^Amazon Bedrock/ }).click()
     await dialog.getByText("Name and labels", { exact: false }).click()
@@ -114,7 +114,7 @@ for (const width of [1280, 390]) {
     await expect(dialog.getByLabel("Agent model")).toHaveValue("eu.anthropic.claude-opus-5-5")
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
     await page.screenshot({ path: testInfo.outputPath(`bedrock-pays-for-${width}.png`) })
-    await dialog.getByRole("button", { name: /save provider|finish setup/i }).click()
+    await dialog.getByRole("button", { name: "Save & assign", exact: true }).click()
     await expect.poll(() => assigned).toBe(true)
   })
 }

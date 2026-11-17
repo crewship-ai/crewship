@@ -26,14 +26,19 @@ func (e bedrockRetagEvaluator) Evaluate(ctx context.Context, _ gatekeeper.EvalRe
 }
 
 func TestBedrockKeeperExecuteCannotExportModelAccount(t *testing.T) {
-	for _, retag := range []bool{false, true} {
-		t.Run(map[bool]string{false: "before-evaluation", true: "during-evaluation"}[retag], func(t *testing.T) {
+	for _, scenario := range []string{"before-evaluation", "during-evaluation", "other-model-provider"} {
+		t.Run(scenario, func(t *testing.T) {
+			retag := scenario == "during-evaluation"
 			db := setupTestDB(t)
 			ws, crew, agent, id := seedKeeperFixture(t, db)
 			// Invalid ciphertext makes an accidental live-decrypt path fail differently;
 			// the panic getter also proves neither cache path is reached.
 			if !retag {
 				execOrFatal(t, db, `UPDATE credentials SET provider='AWS_BEDROCK',type='PROVIDER_LOGIN',encrypted_value='must-not-be-decrypted' WHERE id=?`, id)
+			}
+			if scenario == "other-model-provider" {
+				execOrFatal(t, db, `UPDATE credentials SET provider='ANTHROPIC' WHERE id=?`, id)
+				execOrFatal(t, db, `UPDATE agents SET llm_provider='AWS_BEDROCK' WHERE id=?`, agent)
 			}
 			ctr := &mockContainerExec{output: "unexpected", exitCode: 0, execID: "unexpected"}
 			var eval gatekeeper.Evaluator = &mockEvaluator{resp: keeper.GatekeeperResponse{Decision: string(keeper.DecisionAllow), Reason: "allow", RiskScore: 1}}

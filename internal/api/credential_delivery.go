@@ -4,7 +4,11 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/crewship-ai/crewship/internal/llmroute"
+	"github.com/crewship-ai/crewship/internal/providerlogin"
 	"log/slog"
+	"sort"
+	"strings"
 )
 
 // Which credentials does an agent receive? — one definition, three consumers.
@@ -71,9 +75,26 @@ const (
 // Bind order is (agentID /* CTE */, agentID /* explicit arm */,
 // leaseComparisonNow()). The WITH clause is first in the text, so its parameter
 // is first in the sequence — moving the CTE would silently shift every bind.
+// Derived from the existing provider registries; this is not another provider list.
+var modelAccountProviderSQL = func() string {
+	ids := map[string]bool{}
+	for _, p := range providerlogin.Providers() {
+		ids[p] = true
+	}
+	for _, s := range llmroute.Specs() {
+		ids[s.ID] = true
+	}
+	keys := make([]string, 0, len(ids))
+	for p := range ids {
+		keys = append(keys, p)
+	}
+	sort.Strings(keys)
+	return "'" + strings.Join(keys, "','") + "'"
+}()
+
 var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	WITH agent_scope AS (
-		SELECT a.id AS agent_id, a.workspace_id AS workspace_id, a.crew_id AS crew_id
+		SELECT a.id AS agent_id, a.workspace_id AS workspace_id, a.crew_id AS crew_id, COALESCE(a.llm_provider,'') AS llm_provider
 		FROM agents a
 		WHERE a.id = ? AND a.deleted_at IS NULL
 	),
@@ -98,7 +119,7 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 		SELECT ab.agent_id, ab.workspace_id, ab.credential_id, ab.slot, ab.spec
 		FROM applicable_bindings ab
 		WHERE ab.spec = (SELECT MIN(x.spec) FROM applicable_bindings x WHERE x.slot = ab.slot)
-	)
+	), all_deliveries AS (
 
 	SELECT ac.credential_id AS credential_id,
 	       ac.env_var_name  AS env_var_name,
@@ -173,10 +194,13 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	      SELECT 1 FROM resolved_bindings rb WHERE rb.credential_id = c.id
 	  )
 
-	ORDER BY priority ASC, source_rank ASC
+ )
+ SELECT * FROM all_deliveries
+ WHERE NOT ((SELECT llm_provider FROM agent_scope)='AWS_BEDROCK' AND provider<>'AWS_BEDROCK' AND provider IN (%s))
+ ORDER BY priority ASC, source_rank ASC
 `,
 	credSourceBindingAgent, credSourceBindingCrew, credSourceBindingWorkspace,
-	credSourceAgentGrant, credentialLeaseGateSQL, credSourceCrewLink)
+	credSourceAgentGrant, credentialLeaseGateSQL, credSourceCrewLink, modelAccountProviderSQL)
 
 // deliveredCredential is one row of agentDeliveredCredentialsSQL, still
 // encrypted. Decryption stays with the caller so each delivery path keeps its

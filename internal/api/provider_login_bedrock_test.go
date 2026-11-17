@@ -84,9 +84,22 @@ func TestBedrockAccountCreateAssignAndIsolation(t *testing.T) {
 	if d, _, e := loadDeliveredCredentials(t.Context(), db, "bedrock-b"); e != nil || len(d) != 0 {
 		t.Fatalf("peer inherited payer: %v %+v", e, d)
 	}
+	thirdCode, thirdAccount := plCreate(t, h, user, ws, map[string]any{"name": "Other payer", "provider": "ANTHROPIC", "type": "PROVIDER_LOGIN", "mode": "api_key", "value": "other-model-key"})
+	if thirdCode != 201 {
+		t.Fatal("could not create other model account")
+	}
+	third := thirdAccount["id"].(string)
+	execOrFatal(t, db, `INSERT INTO credential_crews(credential_id,crew_id) VALUES(?,'bedrock-crew')`, third)
+	d, _, e = loadDeliveredCredentials(t.Context(), db, "bedrock-a")
+	if e != nil || len(d) != 1 || d[0].ID != first {
+		t.Fatal("Bedrock agent received another provider's account")
+	}
 	grants, e := loadEffectiveCredentialGrants(t.Context(), db, "bedrock-a")
 	if e != nil || len(grants[second]) != 0 || len(grants[first]) != 1 {
 		t.Fatalf("grant snapshots disagree with explicit payer: %v %+v", e, grants)
+	}
+	if _, exists := grants[third]["bedrock-a"]; exists {
+		t.Fatal("another provider can pay for Bedrock agent")
 	}
 	view, _, e := loadLoginView(t.Context(), db, nil, first)
 	raw, _ := json.Marshal(view)
