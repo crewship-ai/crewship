@@ -252,4 +252,24 @@ func TestBedrockCrewRuleExplicitChoicesAndDefaults(t *testing.T) {
 			t.Fatalf("explicit switch rewritten: %s/%s/%s payer=%q", r, p, m, payer)
 		}
 	})
+
+	t.Run("applying a rule again leaves agents on other providers alone", func(t *testing.T) {
+		var codex string
+		if err := db.QueryRow(`SELECT id FROM agents WHERE slug='defaults-codex'`).Scan(&codex); err != nil {
+			t.Fatal(err)
+		}
+		crewC := seedCrewRow(t, db, "defaults-c", ws, "C", "defaults-c")
+		late := seedAgentRow(t, db, "defaults-late", ws, crewC, "Late", "defaults-late", "AGENT")
+		rule(crewA, models[0])
+		rule(crewC, models[1])
+		if r, p, m, _, payer := state(codex); r != "CODEX_CLI" || p != "" || m != "gpt-6" || payer != "" {
+			t.Fatalf("codex rewritten by a reapplied rule: %s/%s/%s payer=%q", r, p, m, payer)
+		}
+		if r, p, m, _, payer := state("defaults-switch"); r != "CLAUDE_CODE" || p != "ANTHROPIC" || m != "claude-sonnet-5-5" || payer != "" {
+			t.Fatalf("anthropic rewritten by a reapplied rule: %s/%s/%s payer=%q", r, p, m, payer)
+		}
+		if r, p, m, o, payer := state(late); r != "OPENCODE" || p != bedrock.Provider || m != native(models[1]) || o != 0 || payer != account {
+			t.Fatalf("default agent did not take a new rule: %s/%s/%s overridden=%d payer=%q", r, p, m, o, payer)
+		}
+	})
 }
