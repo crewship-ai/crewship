@@ -893,7 +893,7 @@ jobs:
           mkdir -p "$artifact_dir"
           printf '{"private":true}\n' > "$artifact_dir/package.json"
           pnpm --dir "$artifact_dir" add --ignore-scripts --save-exact @openai/codex@0.169.0
-          native=$(rg --files --hidden --follow --no-ignore "$artifact_dir/node_modules" | awk '/\/vendor\/x86_64-unknown-linux-musl\/bin\/codex$/ && !found {print; found=1}')
+          native=$(find "$artifact_dir/node_modules" -type f -path '*/vendor/x86_64-unknown-linux-musl/bin/codex' -print -quit)
           test -n "$native" && test -x "$native"
           printf 'CREWSHIP_TEST_CODEX_NATIVE=%s\n' "$native" >> "$GITHUB_ENV"
       - name: Require executed Docker and protected capture fixtures
