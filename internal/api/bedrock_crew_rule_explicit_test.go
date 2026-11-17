@@ -89,7 +89,10 @@ func TestBedrockCrewRuleRespectsExplicitProvider(t *testing.T) {
 
 	t.Run("leaving for a crew without a rule keeps a usable model", func(t *testing.T) {
 		agent := seedAgentRow(t, db, "explicit-leaver", ws, ruled, "Leaver", "explicit-leaver", "AGENT")
-		execOrFatal(t, db, `UPDATE agents SET crew_id=NULL WHERE id=?`, agent)
+		// Through the API, as people and the CLI do it.
+		if w := covAUPatch(t, agents, user, ws, "OWNER", agent, `{"crew_id":""}`); w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
 		if p, r, m, payer := config(agent); p != bedrock.Provider || r != "OPENCODE" || m != bedrock.NativeProvider+"/"+models[0] || payer != "" {
 			t.Fatalf("leaver stranded: %s/%s/%s payer=%q", p, r, m, payer)
 		}
