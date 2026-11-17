@@ -868,6 +868,9 @@
           "created_by_user_id": {
             "type": "string"
           },
+          "credential_readiness": {
+            "$ref": "#/components/schemas/RemainingAgentCredentialReadinessV1"
+          },
           "crew": {
             "$ref": "#/components/schemas/AgentCrew"
           },
@@ -7140,6 +7143,10 @@
             "nullable": true,
             "type": "string"
           },
+          "bedrock_model": {
+            "nullable": true,
+            "type": "string"
+          },
           "created_at": {
             "type": "string"
           },
@@ -7154,6 +7161,10 @@
             "type": "string"
           },
           "id": {
+            "type": "string"
+          },
+          "inherited_from_binding_id": {
+            "nullable": true,
             "type": "string"
           },
           "scope": {
