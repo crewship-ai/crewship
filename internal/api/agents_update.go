@@ -321,6 +321,12 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 			}
+			// "" detaches the agent from its crew (see the crew_id check
+			// above). Stored as NULL: an empty string is not a crew, and the
+			// foreign key refuses it.
+			if col == "crew_id" && val == "" {
+				val = nil
+			}
 			ub.Set(col, val)
 		}
 	}
