@@ -149,3 +149,104 @@ func TestBedrockCrewRuleRespectsExplicitProvider(t *testing.T) {
 		}
 	})
 }
+
+// #5446 review: the cases a regression in either trigger would slip through.
+func TestBedrockCrewRuleExplicitChoicesAndDefaults(t *testing.T) {
+	h, db := newCredHandler(t)
+	user := seedTestUser(t, db)
+	ws := seedTestWorkspace(t, db, user)
+	crewA := seedCrewRow(t, db, "defaults-a", ws, "A", "defaults-a")
+	crewB := seedCrewRow(t, db, "defaults-b", ws, "B", "defaults-b")
+	models := []string{"eu.anthropic.claude-opus-5-5", "eu.anthropic.claude-sonnet-5-5", "eu.anthropic.claude-haiku-5-5"}
+	document, _ := json.Marshal(bedrock.Account{AuthMethod: "bedrock_api_key", APIKey: "defaults-synthetic-key", Region: "eu-central-1", Models: models, EUOnly: true})
+	code, out := plCreate(t, h, user, ws, map[string]any{"name": "Defaults account", "provider": bedrock.Provider, "type": "PROVIDER_LOGIN", "mode": "api_key", "value": string(document)})
+	if code != 201 {
+		t.Fatal(code, out)
+	}
+	account := out["id"].(string)
+	rule := func(crew, model string) {
+		t.Helper()
+		raw, _ := json.Marshal(map[string]any{"agent_ids": []string{}, "crew_ids": []string{crew}, "model": model})
+		r := plRequest(t, "POST", "/assign", string(raw), user, ws, "OWNER")
+		r.SetPathValue("credentialId", account)
+		w := httptest.NewRecorder()
+		h.AssignBedrock(w, r)
+		if w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+	}
+	rule(crewA, models[0])
+	rule(crewB, models[1])
+	agents := NewAgentHandler(db, newTestLogger())
+	create := func(body string) string {
+		t.Helper()
+		w := httptest.NewRecorder()
+		agents.Create(w, plRequest(t, "POST", "/api/v1/agents", body, user, ws, "OWNER"))
+		if w.Code != 201 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		var created agentResponse
+		_ = json.Unmarshal(w.Body.Bytes(), &created)
+		return created.ID
+	}
+	state := func(agent string) (runner, provider, model string, overridden int, payer string) {
+		t.Helper()
+		var p, m *string
+		if err := db.QueryRow(`SELECT cli_adapter,llm_provider,llm_model FROM agents WHERE id=?`, agent).Scan(&runner, &p, &m); err != nil {
+			t.Fatal(err)
+		}
+		if p != nil {
+			provider = *p
+		}
+		if m != nil {
+			model = *m
+		}
+		overridden = -1
+		_ = db.QueryRow(`SELECT bedrock_model_overridden FROM credential_bindings WHERE agent_id=? AND slot=? AND inherited_from_binding_id IS NOT NULL`, agent, bedrock.Slot).Scan(&overridden)
+		payer, _ = selectedBedrockAccount(t.Context(), db, agent)
+		return
+	}
+	native := func(id string) string { return bedrock.NativeProvider + "/" + id }
+
+	t.Run("an explicit runner and model without a provider are kept", func(t *testing.T) {
+		agent := create(`{"name":"Codex","slug":"defaults-codex","crew_id":"` + crewA + `","cli_adapter":"CODEX_CLI","llm_model":"gpt-6"}`)
+		if r, p, m, _, payer := state(agent); r != "CODEX_CLI" || p != "" || m != "gpt-6" || payer != "" {
+			t.Fatalf("explicit runner/model rewritten: %s/%s/%s payer=%q", r, p, m, payer)
+		}
+	})
+
+	t.Run("the rule's own model is a default, another permitted model an override", func(t *testing.T) {
+		same := create(`{"name":"Same","slug":"defaults-same","crew_id":"` + crewA + `","cli_adapter":"OPENCODE","llm_provider":"AWS_BEDROCK","llm_model":"` + native(models[0]) + `"}`)
+		if _, _, m, o, payer := state(same); m != native(models[0]) || o != 0 || payer != account {
+			t.Fatalf("rule model: %s overridden=%d payer=%q", m, o, payer)
+		}
+		own := create(`{"name":"Own","slug":"defaults-own","crew_id":"` + crewA + `","cli_adapter":"OPENCODE","llm_provider":"AWS_BEDROCK","llm_model":"` + native(models[2]) + `"}`)
+		if _, _, m, o, payer := state(own); m != native(models[2]) || o != 1 || payer != account {
+			t.Fatalf("own model: %s overridden=%d payer=%q", m, o, payer)
+		}
+	})
+
+	t.Run("a crew default follows the agent to another rule crew's default", func(t *testing.T) {
+		agent := seedAgentRow(t, db, "defaults-mover", ws, crewA, "Mover", "defaults-mover", "AGENT")
+		if _, _, m, o, _ := state(agent); m != native(models[0]) || o != 0 {
+			t.Fatalf("precondition: %s overridden=%d", m, o)
+		}
+		if w := covAUPatch(t, agents, user, ws, "OWNER", agent, `{"crew_id":"`+crewB+`"}`); w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		if _, p, m, o, payer := state(agent); p != bedrock.Provider || m != native(models[1]) || o != 0 || payer != account {
+			t.Fatalf("crew A default kept under crew B: %s/%s overridden=%d payer=%q", p, m, o, payer)
+		}
+	})
+
+	t.Run("moving in while switching to another provider keeps that provider", func(t *testing.T) {
+		execOrFatal(t, db, `INSERT INTO agents(id,workspace_id,name,slug,cli_adapter) VALUES('defaults-switch',?,'Switch','defaults-switch','CLAUDE_CODE')`, ws)
+		body := `{"crew_id":"` + crewA + `","cli_adapter":"CLAUDE_CODE","llm_provider":"ANTHROPIC","llm_model":"claude-sonnet-5-5"}`
+		if w := covAUPatch(t, agents, user, ws, "OWNER", "defaults-switch", body); w.Code != 200 {
+			t.Fatal(w.Code, w.Body.String())
+		}
+		if r, p, m, _, payer := state("defaults-switch"); r != "CLAUDE_CODE" || p != "ANTHROPIC" || m != "claude-sonnet-5-5" || payer != "" {
+			t.Fatalf("explicit switch rewritten: %s/%s/%s payer=%q", r, p, m, payer)
+		}
+	})
+}

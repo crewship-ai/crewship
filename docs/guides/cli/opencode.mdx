@@ -218,8 +218,9 @@ tab. Crew assignment persists a rule and materializes exact bindings for current
 and future members. Individual model edits override the model default; removing
 a crew rule removes inherited accounts and preserves explicit individual account assignments.
 The rule is a default: an agent created or moved into the crew inherits it
-only when it is already on Amazon Bedrock or has no model provider chosen.
-An agent configured for another provider keeps its runner, provider and model,
+only when it is already on Amazon Bedrock or has made no other choice: no
+model provider, the default or OpenCode runner, and no model or a Bedrock model.
+An agent configured for another provider, runner or model keeps them,
 and an agent that leaves the crew keeps its model. A Bedrock model the crew's
 account does not permit is refused when the agent is created or moved.
 Unsharing a crew-scoped account from a crew removes that crew's rule. A refused
