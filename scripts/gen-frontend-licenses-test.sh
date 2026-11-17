@@ -107,6 +107,25 @@ if ( cd "$TMP" && PATH="$TMP/bin:$PATH" node "$GEN" "$TMP/future-worker" ) > "$T
 fi
 echo "ok  reviewed worker-f declaration notice and unreviewed version refusal"
 
+# The read-excel-file update brings a newly reviewed worker-f tarball.
+rm -rf "$TMP/node_modules"
+mkpkg "worker-f@0.1.24" "worker-f" "worker-f" "0.1.24" "-"
+cat > "$TMP/expected-worker.json" <<'J'
+{"MIT": [{"name": "worker-f", "versions": ["0.1.24"]}]}
+J
+write_stub_pnpm "$TMP/expected-worker.json"
+( cd "$TMP" && PATH="$TMP/bin:$PATH" node "$GEN" "$TMP/worker-new" ) > "$TMP/worker-new-log" 2>&1
+grep -q -F 'NOT a copy of the' "$TMP/worker-new/texts/worker-f@0.1.24/EXCEPTION-NOTICE.md"
+grep -q -F '60518db528d5b4cfdd8a5a70a631990bf8b623eb' "$TMP/worker-new/texts/worker-f@0.1.24/EXCEPTION-NOTICE.md"
+mkpkg "worker-f@0.1.25" "worker-f" "worker-f" "0.1.25" "-"
+cat > "$TMP/expected-worker.json" <<'J'
+{"MIT": [{"name": "worker-f", "versions": ["0.1.25"]}]}
+J
+if ( cd "$TMP" && PATH="$TMP/bin:$PATH" node "$GEN" "$TMP/future-worker-new" ) > "$TMP/future-worker-new-log" 2>&1; then
+  echo "TEST FAIL: future worker-f version passed without license text" >&2; exit 1
+fi
+echo "ok  reviewed worker-f 0.1.24 declaration and future version refusal"
+
 # Newly reviewed provider-utils version remains exact-version scoped.
 rm -rf "$TMP/node_modules"
 mkpkg "@ai-sdk+provider-utils@5.0.81" "@ai-sdk/provider-utils" "@ai-sdk/provider-utils" "5.0.81" "-"
