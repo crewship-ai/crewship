@@ -56,3 +56,24 @@ func TestMisePreflightRejectsMissingInstallation(t *testing.T) {
 		t.Fatalf("expected actionable failed preflight, got %v", err)
 	}
 }
+
+func TestMiseReadinessIgnoresProjectWorkingDirectory(t *testing.T) {
+	project := t.TempDir()
+	if err := os.WriteFile(filepath.Join(project, "mise.toml"), []byte("invalid untrusted project configuration\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	fake := `#!/bin/sh
+if test -f mise.toml; then echo 'project config was loaded'; exit 17; fi
+test "$*" = 'ls --global --missing --no-header' || exit 18
+`
+	if err := os.WriteFile(filepath.Join(bin, "mise"), []byte(fake), 0755); err != nil {
+		t.Fatal(err)
+	}
+	cmd := exec.Command("/bin/sh", "-c", miseMissingInstallCheck)
+	cmd.Dir = project
+	cmd.Env = []string{"PATH=" + bin + ":/usr/bin:/bin"}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("project WORKDIR leaked into global readiness: %v %s", err, out)
+	}
+}

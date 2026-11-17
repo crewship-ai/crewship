@@ -30,6 +30,7 @@ type covContainer struct {
 	ensureErr      error
 	ensureCalls    int
 	execErr        error
+	nativePath     string
 	execCalls      []provider.ExecConfig
 	inspectRunning bool
 	inspectExit    int
@@ -74,6 +75,9 @@ func (m *covContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provid
 	m.execCalls = append(m.execCalls, cfg)
 	if m.execErr != nil {
 		return nil, m.execErr
+	}
+	if len(cfg.Cmd) == 3 && cfg.Cmd[0] == "/bin/sh" && cfg.Cmd[2] == `printf '%s' "$PATH"` {
+		return &provider.ExecResult{ExecID: "exec-native-path", Reader: io.NopCloser(strings.NewReader(m.nativePath))}, nil
 	}
 	if len(cfg.Cmd) > 1 && cfg.Cmd[0] == "tmux" && cfg.Cmd[1] == "list-sessions" {
 		return &provider.ExecResult{
@@ -217,7 +221,7 @@ func TestServeHTTP_FullShellSession(t *testing.T) {
 	db := seedTerminalDB(t)
 
 	serverSide, testSide := net.Pipe()
-	im := &covInteractive{covContainer: &covContainer{states: []string{"running"}}, conn: serverSide}
+	im := &covInteractive{covContainer: &covContainer{states: []string{"running"}, nativePath: "/opt/mise/data/shims:/opt/legacy-feature/bin:/usr/bin:/bin"}, conn: serverSide}
 	h := New(im, v, db, silentLogger(), nil)
 
 	conn, done := dialTerminalDone(t, h)
@@ -243,10 +247,13 @@ func TestServeHTTP_FullShellSession(t *testing.T) {
 	if len(cfg.Cmd) != 2 || cfg.Cmd[0] != "/bin/bash" || cfg.Cmd[1] != "-i" {
 		t.Errorf("Cmd = %v, want [/bin/bash -i]", cfg.Cmd)
 	}
-	// Only terminal metadata is supplied: PATH and mise configuration must
-	// come from the crew container, never from a credential-bearing run env.
-	if strings.Join(cfg.Env, "\n") != "TERM=xterm-256color\nHOME=/home/agent" {
+	// Only metadata plus the shared native PATH are supplied. Other env must
+	// remain inherited from the container, never copied from an agent run.
+	if len(cfg.Env) != 3 || cfg.Env[0] != "TERM=xterm-256color" || cfg.Env[1] != "HOME=/home/agent" || !strings.Contains(cfg.Env[2], "/opt/crew-tools/bin") || !strings.Contains(cfg.Env[2], "/opt/mise/data/shims") {
 		t.Errorf("terminal must inherit native runtime environment, got %v", cfg.Env)
+	}
+	if !strings.Contains(cfg.Env[2], "/opt/legacy-feature/bin") {
+		t.Fatalf("native fallback lost the existing image/feature PATH: %v", cfg.Env)
 	}
 	if cfg.Rows != 24 || cfg.Cols != 80 {
 		t.Errorf("default size = %dx%d, want 24x80", cfg.Rows, cfg.Cols)
@@ -327,7 +334,9 @@ func TestServeHTTP_AgentShellCreatesHomeDir(t *testing.T) {
 	if cfg.Rows != 30 || cfg.Cols != 100 {
 		t.Errorf("size = %dx%d, want 30x100 (client values must pass through)", cfg.Rows, cfg.Cols)
 	}
-	mkdir := im.lastExecCmd()
+	im.covContainer.mu.Lock()
+	mkdir := im.execCalls[0].Cmd
+	im.covContainer.mu.Unlock()
 	if len(mkdir) != 3 || mkdir[0] != "mkdir" || mkdir[1] != "-p" || mkdir[2] != "/crew/agents/agent-1" {
 		t.Errorf("mkdir exec = %v, want [mkdir -p /crew/agents/agent-1]", mkdir)
 	}

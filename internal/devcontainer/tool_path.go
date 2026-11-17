@@ -140,3 +140,13 @@ func AgentToolProfile() string {
 	b.WriteString("export PATH\n")
 	return b.String()
 }
+
+// NativeToolPath adds the shared tool directories without losing inherited
+// image/feature paths. Existing runtimes need this too: their Config.Env is
+// immutable and predates additions such as the persistent crew-tools bin dir.
+func NativeToolPath(inherited string) string {
+	if strings.TrimSpace(inherited) == "" {
+		inherited = "/usr/local/bin:/usr/bin:/bin"
+	}
+	return ensureAgentToolPath(map[string]string{"PATH": inherited})["PATH"]
+}

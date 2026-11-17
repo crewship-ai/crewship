@@ -592,6 +592,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"TERM=xterm-256color",
 			"HOME=/home/agent",
 		}
+		execEnv, err = crewstart.NativeToolExecEnv(r.Context(), h.container, containerName, execEnv)
+		if err != nil {
+			h.logger.Error("terminal native tool environment failed", "error", err)
+			writeError("failed to prepare native tool PATH")
+			return
+		}
 	}
 
 	if !current(r.Context()) {
