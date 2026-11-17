@@ -26,6 +26,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/crewship-ai/crewship/internal/bedrock"
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/geminiauth"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
@@ -158,6 +159,10 @@ const credentialValueTooLongMsg = "value is too long (max 65536 bytes)"
 // Returns an empty string when the payload is valid, otherwise an
 // end-user-readable error message suitable for a 400 response body.
 func validateCredentialPayload(req *createCredentialRequest) string {
+	if req.Provider == bedrock.Provider && req.Type != CredTypeProviderLogin {
+		return "Bedrock model accounts must use PROVIDER_LOGIN with explicit Bedrock authentication"
+	}
+
 	if msg := validateCredentialType(req.Type); msg != "" {
 		return msg
 	}
@@ -225,8 +230,8 @@ func validateCredentialPayload(req *createCredentialRequest) string {
 		// pasted bare key would store fine and fail at run time as a 502
 		// from a provider with no upstream to reach.
 		if providerNeedsEndpointValue(req.Provider) {
-			if msg := validateEndpointURL(req.Value); msg != "" {
-				return msg
+			if _, _, _, err := providerEndpointFromValue(req.Provider, req.Value); err != nil {
+				return err.Error()
 			}
 		}
 
@@ -341,6 +346,14 @@ func providerNeedsEndpointValue(provider string) bool {
 // or a hand-edited row) being refused with a named error instead of delivered
 // blank, which would otherwise surface as an unexplained 502 with no audit trail.
 func providerEndpointFromValue(provider, value string) (token, baseURL string, headers map[string]string, err error) {
+	if provider == bedrock.Provider {
+		a, e := bedrock.Parse(value)
+		if e != nil {
+			return "", "", nil, e
+		}
+		return value, a.Endpoint(), nil, nil
+	}
+
 	if !providerNeedsEndpointValue(provider) {
 		return value, "", nil, nil
 	}

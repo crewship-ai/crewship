@@ -1,5 +1,6 @@
 /** Only providers accepted by the provider-login API; not the decorative brand catalog. */
 export const LOGIN_PROVIDERS = [
+ { key: "AWS_BEDROCK", label: "Amazon Bedrock", detail: "AWS-hosted models · via OpenCode", subscription: false },
   { key: "OPENAI", label: "ChatGPT / OpenAI", detail: "Codex sign-in or API key", subscription: true },
   { key: "ANTHROPIC", label: "Claude / Anthropic", detail: "Claude setup token or API key", subscription: true },
   { key: "GOOGLE", label: "Gemini / Google", detail: "Gemini login file or API key", subscription: true },

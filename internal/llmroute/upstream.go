@@ -3,6 +3,7 @@ package llmroute
 import (
 	"fmt"
 	"net/url"
+	"regexp"
 	"strings"
 )
 
@@ -68,6 +69,9 @@ func ResolveUpstream(s Spec, credBaseURL string) (Upstream, error) {
 	}
 	if u.Host == "" {
 		return Upstream{}, fmt.Errorf("llmroute: %s: base URL has no host", s.ID)
+	}
+	if s.ID == "AWS_BEDROCK" && (u.Scheme != "https" || !regexp.MustCompile(`^bedrock-runtime\.[a-z]+-[a-z]+-[0-9]+\.amazonaws\.com$`).MatchString(u.Host) || u.Path != "" || u.RawQuery != "" || u.Fragment != "") {
+		return Upstream{}, fmt.Errorf("invalid Bedrock regional endpoint")
 	}
 	if u.User != nil {
 		return Upstream{}, fmt.Errorf("llmroute: %s: base URL must not carry userinfo", s.ID)

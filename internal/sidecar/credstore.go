@@ -594,3 +594,17 @@ func (cs *CredStore) CountsByProvider() map[string]int {
 	}
 	return out
 }
+
+// SelectAccount never rotates or substitutes a different payer.
+func (cs *CredStore) SelectAccount(provider ProviderType, id, agentID string) *Credential {
+	cs.mu.RLock()
+	defer cs.mu.RUnlock()
+	for i := range cs.creds {
+		c := &cs.creds[i]
+		if c.ID == id && c.Provider == provider && !c.leaseLapsed(time.Now()) && c.grantedTo(agentID) {
+			copy := *c
+			return &copy
+		}
+	}
+	return nil
+}

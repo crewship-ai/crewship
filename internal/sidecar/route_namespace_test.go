@@ -145,6 +145,10 @@ func TestHandleLocal_RoutingIsolation_AllDescriptors(t *testing.T) {
 		if s.UpstreamFromCredential {
 			c.BaseURL = "https://endpoint-" + strings.ToLower(s.ID) + ".example/v1"
 		}
+		if s.ID == "AWS_BEDROCK" {
+			c.Token = `{"auth_method":"bedrock_api_key","api_key":"tok-aws_bedrock-000000000000","region":"eu-central-1","models":["eu.test-model"],"expires_at":"2099-01-01T00:00:00Z","eu_only":true}`
+			c.BaseURL = "https://bedrock-runtime.eu-central-1.amazonaws.com"
+		}
 		creds = append(creds, c)
 	}
 
@@ -165,6 +169,10 @@ func TestHandleLocal_RoutingIsolation_AllDescriptors(t *testing.T) {
 			})
 
 			req := httptest.NewRequest("POST", "http://127.0.0.1:9119"+s.PathPrefix+"/probe/endpoint", strings.NewReader(`{}`))
+			if s.ID == "AWS_BEDROCK" {
+				req.URL.Path = s.PathPrefix + "/model/eu.test-model/converse"
+				req.Header.Set("X-Crewship-Bedrock-Account", "cred-AWS_BEDROCK")
+			}
 			req.Host = "127.0.0.1:9119"
 			req.RemoteAddr = "127.0.0.1:54321"
 			w := httptest.NewRecorder()
@@ -177,6 +185,9 @@ func TestHandleLocal_RoutingIsolation_AllDescriptors(t *testing.T) {
 			wantHost := s.UpstreamHost
 			if s.UpstreamFromCredential {
 				wantHost = "endpoint-" + strings.ToLower(s.ID) + ".example"
+			}
+			if s.ID == "AWS_BEDROCK" {
+				wantHost = "bedrock-runtime.eu-central-1.amazonaws.com"
 			}
 			if upstream.URL.Host != wantHost {
 				t.Errorf("%s%s routed to %q, want %q — another descriptor swallowed this prefix",

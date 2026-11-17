@@ -297,7 +297,9 @@ export function ProviderLoginCards({ workspaceId, credential, accountId, canUpda
               : "Requests go through the sidecar, so the key is metered and model policy applies."
           }
         >
-          {login.delivery.kind === "file" ? (
+          {login.delivery.kind === "sidecar" ? (
+ <div className="space-y-2 text-sm"><p>Bedrock API key stays in the sidecar. OpenCode receives a temporary routing token.</p><p>Region: {login.bedrock?.region ?? "unknown"}</p><p>Permitted models: {login.bedrock?.models.join(", ") ?? "unknown"}</p><p>{login.bedrock?.eu_only ? "Only EU model destinations" : "Destinations follow the permitted model IDs"} · Automatic renewal unavailable</p></div>
+ ) : login.delivery.kind === "file" ? (
             <>
               <p className="font-mono text-[13px] text-foreground/90">
                 {login.delivery.target}

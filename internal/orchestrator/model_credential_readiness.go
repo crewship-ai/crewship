@@ -28,7 +28,9 @@ package orchestrator
 import (
 	"fmt"
 	"strings"
+	"time"
 
+	"github.com/crewship-ai/crewship/internal/bedrock"
 	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
@@ -133,6 +135,13 @@ func ModelCredentialReadiness(adapter, llmProvider, llmModel string, creds []Cre
 	login := getAdapter(adapter).AuthDelivery()
 
 	for _, cred := range creds {
+		if want == bedrock.Provider {
+			a, err := bedrock.Parse(cred.PlainValue)
+			if providerlogin.Canonical(cred.Provider) != bedrock.Provider || err != nil || a.Expired(time.Now()) || !a.Allows(strings.TrimPrefix(llmModel, bedrock.NativeProvider+"/")) {
+				continue
+			}
+		}
+
 		if cred.HandleOnly {
 			// Every delivery selector reads PlainValue == "" as "not
 			// delivered"; a handle-only value is empty by construction.
@@ -210,12 +219,28 @@ func sameKeyVariable(have, want string) bool {
 // Managed OpenCode products cannot fall back to an unmanaged payer. Report
 // a missing grant before OpenCode turns absent native auth into UnknownError.
 func validateManagedOpenCodeCredential(req AgentRunRequest) error {
+	if bedrockRun(req) {
+		if req.CLIAdapter != "OPENCODE" || providerlogin.Canonical(req.LLMProvider) != bedrock.Provider {
+			return fmt.Errorf("Amazon Bedrock requires the OpenCode runner and AWS_BEDROCK provider")
+		}
+		model := strings.TrimPrefix(req.LLMModel, bedrock.NativeProvider+"/")
+		spec, _ := llmroute.Lookup(bedrock.Provider)
+		c, found := credentialFor(req, spec)
+		if !found {
+			return fmt.Errorf("no explicitly assigned Bedrock account; assign an account and model in Vault")
+		}
+		a, err := bedrock.Parse(c.PlainValue)
+		if err != nil || a.Expired(time.Now()) || !a.Allows(model) {
+			return fmt.Errorf("Bedrock account expired or selected model is not permitted")
+		}
+	}
+
 	if req.CLIAdapter != "OPENCODE" {
 		return nil
 	}
 	r := ModelCredentialReadiness(req.CLIAdapter, req.LLMProvider, req.LLMModel, req.Credentials)
 	switch r.Provider {
-	case "OPENCODE", "OPENCODE_GO", "ZAI_CODING_PLAN":
+	case "OPENCODE", "OPENCODE_GO", "ZAI_CODING_PLAN", "AWS_BEDROCK":
 		if r.State == ModelCredentialMissing {
 			return fmt.Errorf("no assigned %s credential for this agent; connect the provider in Credentials and grant this agent access", r.Provider)
 		}

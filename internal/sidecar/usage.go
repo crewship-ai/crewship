@@ -88,6 +88,20 @@ func parseLLMUsage(codec, body string) LLMUsage {
 	}
 
 	switch codec {
+	case "bedrock":
+		var v struct {
+			Usage struct {
+				Input  int64 `json:"inputTokens"`
+				Output int64 `json:"outputTokens"`
+				Read   int64 `json:"cacheReadInputTokens"`
+				Write  int64 `json:"cacheWriteInputTokens"`
+			} `json:"usage"`
+		}
+		if json.Unmarshal([]byte(body), &v) != nil {
+			return out
+		}
+		return LLMUsage{InputTokens: v.Usage.Input, OutputTokens: v.Usage.Output, CachedInputTokens: v.Usage.Read, CacheCreationTokens: v.Usage.Write}
+
 	case "anthropic":
 		// Anthropic message body shape:
 		//   { "model": "...", "usage": {

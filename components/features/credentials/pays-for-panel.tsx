@@ -15,6 +15,7 @@
 import * as React from "react"
 import { Building2, Users } from "lucide-react"
 
+import { apiFetch } from "@/lib/api-fetch"
 import { AgentAvatar } from "@/components/ui/agent-avatar"
 import { Button } from "@/components/ui/button"
 import { CrewIcon } from "@/components/ui/crew-icon"
@@ -46,6 +47,9 @@ export function PaysForPanel({ workspaceId, credential, canBind, crewsById, onCh
   const { login } = credential
   const provider = login.provider ?? credential.provider
   const slot = loginBindingSlot(login)
+  const isBedrock = provider === "AWS_BEDROCK"
+  const [bedrockModel,setBedrockModel] = React.useState(login.bedrock?.models[0] ?? "")
+
   const { agents, bindings, setBindings, error, loading, reload } = useBindingTargets(workspaceId, credential.id)
   const [busy, setBusy] = React.useState<Set<string>>(new Set())
 
@@ -55,7 +59,7 @@ export function PaysForPanel({ workspaceId, credential, canBind, crewsById, onCh
     return m
   }, [bindings, credential.id])
 
-  const fit = (agents ?? []).filter((a) => runnerFits(a.cli_adapter, provider))
+  const fit = (agents ?? []).filter((a) => isBedrock || runnerFits(a.cli_adapter, provider))
   const unfit = (agents ?? []).length - fit.length
   const crews = agentsByCrew(fit, (id) => crewsById[id]?.name)
 
@@ -65,7 +69,13 @@ export function PaysForPanel({ workspaceId, credential, canBind, crewsById, onCh
     if (busy.has(key)) return
     setBusy((s) => new Set(s).add(key))
     const existing = mine.get(key)
-    const err = existing ? await deleteBinding(workspaceId, existing) : await createBinding(workspaceId, credential.id, target, slot)
+    let err: string | null
+    if (isBedrock && !existing) {
+      try {
+        const result = await apiFetch(`/api/v1/credentials/${encodeURIComponent(credential.id)}/bedrock-assign?workspace_id=${encodeURIComponent(workspaceId)}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({model:bedrockModel,agent_ids:target.scope === "AGENT" ? [target.agentId] : [],crew_ids:target.scope === "CREW" ? [target.crewId] : []})})
+        const data = await result.json().catch(() => ({}));err = result.ok ? null : data.error || "Bedrock assignment failed"
+      } catch {err = "Bedrock assignment could not run"}
+    } else {err = existing ? await deleteBinding(workspaceId, existing) : await createBinding(workspaceId, credential.id, target, slot)}
     setBusy((s) => { const n = new Set(s); n.delete(key); return n })
     if (err) {
       toast.error(existing ? `Couldn't stop paying for ${label}` : `Couldn't pay for ${label}`, { description: err })
@@ -94,7 +104,8 @@ export function PaysForPanel({ workspaceId, credential, canBind, crewsById, onCh
       {!canBind && (
         <p role="note" className="text-label text-muted-foreground">Only workspace owners and admins change which agents an account pays for.</p>
       )}
-      <SettingsCard title="Workspace default" icon={Building2}>
+      {isBedrock && <SettingsCard title="Bedrock model" icon={Users}><div className="space-y-2 p-4"><label htmlFor="bedrock-pays-model" className="text-sm">Model for new assignments</label><select id="bedrock-pays-model" disabled={!canBind} className="min-h-11 coarse:min-h-[44px] w-full rounded-md border bg-background px-2" value={bedrockModel} onChange={(e) => setBedrockModel(e.target.value)}>{login.bedrock?.models.map((m) => <option key={m} value={m}>{m}</option>)}</select><p className="text-sm text-muted-foreground">Assignment sets the OpenCode runner, this account and model together. Missing or expired access stops the run. To change an existing agent's model, turn its assignment off and on with the model selected here.</p></div></SettingsCard>}
+      {!isBedrock && <SettingsCard title="Workspace default" icon={Building2}>
         <div className="flex flex-wrap items-center gap-3 px-4 py-3">
           <p className="min-w-0 flex-1 text-label text-muted-foreground">
             {ws ? "Pays for every agent that has no account of its own or of its crew." : "Agents without their own or their crew's account do not use it."}
@@ -105,7 +116,7 @@ export function PaysForPanel({ workspaceId, credential, canBind, crewsById, onCh
             </Button>
           )}
         </div>
-      </SettingsCard>
+      </SettingsCard>}
 
       {crews.length === 0 && (
         <p className="text-label text-muted-foreground">No agent here runs on {providerRunners(provider).join(" or ")}.</p>
@@ -150,9 +161,9 @@ export function PaysForPanel({ workspaceId, credential, canBind, crewsById, onCh
           </section>
         )
       })}
-      <p className="text-label text-muted-foreground">
+      {!isBedrock && <p className="text-label text-muted-foreground">
         Only agents whose runner can use {providerLabel(provider)} are listed ({providerRunners(provider).join(", ")}){unfit > 0 ? `; ${unfit} other agent${unfit === 1 ? " is" : "s are"} not` : ""}. An agent uses the account bound to it, then its crew&apos;s, then the workspace default.
-      </p>
+      </p>}
     </div>
   )
 }

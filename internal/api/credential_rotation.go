@@ -198,8 +198,12 @@ func (h *CredentialHandler) Rotate(w http.ResponseWriter, r *http.Request) {
 	// is not an endpoint credential, and a full-value rotate stored a bare key
 	// with no validation at all — silently discarding the baseURL and leaving a
 	// credential that routes nowhere.
+	if credProvider == "AWS_BEDROCK" {
+		replyError(w, http.StatusBadRequest, "Replace the complete Bedrock account through credential update so region, models and expiry rotate atomically")
+		return
+	}
 	valueToStore := req.Value
-	if credType == CredTypeEndpointURL || providerNeedsEndpointValue(credProvider) {
+	if credType == CredTypeEndpointURL || (providerNeedsEndpointValue(credProvider) && credProvider != "AWS_BEDROCK") {
 		merged, msg := mergeEndpointRotateValue(&req, oldEncrypted)
 		if msg != "" {
 			replyError(w, http.StatusBadRequest, msg)

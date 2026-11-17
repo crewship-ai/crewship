@@ -262,6 +262,7 @@ POST /api/v1/credential-folders roleInline
 POST /api/v1/credentials roleInline
 POST /api/v1/credentials/bindings roleManage
 POST /api/v1/credentials/test roleSelf
+POST /api/v1/credentials/{credentialId}/bedrock-assign roleManage
 POST /api/v1/credentials/{credentialId}/fields roleCreate
 POST /api/v1/credentials/{credentialId}/refresh roleCreate
 POST /api/v1/credentials/{credentialId}/reveal roleInline

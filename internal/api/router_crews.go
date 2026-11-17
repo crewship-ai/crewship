@@ -552,6 +552,7 @@ func (r *Router) registerCrewsRoutes() *ProvisioningHandler {
 	r.mux.Handle("GET /api/v1/credentials", authed(wsCtx(http.HandlerFunc(creds.List))))
 	r.authedMut("POST", "/api/v1/credentials", roleInline, creds.Create)
 	r.authedSelfMut("POST", "/api/v1/credentials/test", creds.Test)
+	r.authedMut("POST", "/api/v1/credentials/{credentialId}/bedrock-assign", roleManage, creds.AssignBedrock)
 
 	// Pool definitions remain admin-only even for read requests. Creating a
 	// set does not bind it to any runtime or grant access to its members.

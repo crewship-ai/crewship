@@ -706,6 +706,9 @@ func validateCredentialUpdate(body map[string]interface{}, currentType string, c
 		}
 	}
 
+	if mergedProvider == "AWS_BEDROCK" && mergedType != CredTypeProviderLogin {
+		return "Bedrock model accounts must remain PROVIDER_LOGIN credentials"
+	}
 	// Per-type field rules. Skip value-shape checks for SSH_KEY and
 	// CERTIFICATE when the patch doesn't touch `value` — we trust the
 	// stored encrypted blob was PEM-shaped when it was written by
@@ -777,7 +780,11 @@ func validateCredentialUpdate(body map[string]interface{}, currentType string, c
 	// first, and only when a value is actually being written: a PATCH that
 	// touches only the name must not be failed by a stored value it is not
 	// changing.
-	if valueSent && (mergedType == CredTypeEndpointURL || providerNeedsEndpointValue(mergedProvider)) {
+	if valueSent && mergedProvider == "AWS_BEDROCK" {
+		if _, _, _, err := providerEndpointFromValue(mergedProvider, valueStr); err != nil {
+			return err.Error()
+		}
+	} else if valueSent && (mergedType == CredTypeEndpointURL || providerNeedsEndpointValue(mergedProvider)) {
 		if msg := validateEndpointURL(valueStr); msg != "" {
 			return msg
 		}

@@ -17,12 +17,14 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/bedrock"
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/providerlogin"
 )
 
 // loginView is the wire shape of `login` (§10.1), field for field.
 type loginView struct {
+	Bedrock     *bedrockAccountView    `json:"bedrock,omitempty"`
 	Mode        string                 `json:"mode"`
 	Provider    string                 `json:"provider"`
 	Plan        *string                `json:"plan"`
@@ -34,6 +36,13 @@ type loginView struct {
 	Quota       *loginQuotaView        `json:"quota"`
 	Delivery    providerlogin.Delivery `json:"delivery"`
 	PaysFor     loginPaysFor           `json:"pays_for"`
+}
+
+type bedrockAccountView struct {
+	Region     string   `json:"region"`
+	Models     []string `json:"models"`
+	AuthMethod string   `json:"auth_method"`
+	EUOnly     bool     `json:"eu_only"`
 }
 
 type loginRefreshView struct {
@@ -160,6 +169,13 @@ func attachLoginViews(ctx context.Context, db *sql.DB, logger *slog.Logger, rows
 func buildLoginView(src loginSource, parts map[string]string, state *refreshStateRow, ownerEmail string, pays loginPaysFor, logger *slog.Logger) loginView {
 	provider := providerlogin.Canonical(src.Provider)
 	v := loginView{Provider: provider, PaysFor: pays}
+	if provider == bedrock.Provider {
+		if dec, e := decryptCredential(src.EncryptedValue); e == nil {
+			if a, e := bedrock.Parse(dec); e == nil {
+				v.Bedrock = &bedrockAccountView{Region: a.Region, Models: a.Models, AuthMethod: a.AuthMethod, EUOnly: a.EUOnly}
+			}
+		}
+	}
 	if src.CreatedBy != "" {
 		owner := src.CreatedBy
 		v.OwnerUserID = &owner

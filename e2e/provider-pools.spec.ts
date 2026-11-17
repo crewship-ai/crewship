@@ -67,3 +67,54 @@ for (const role of ["MANAGER", "MEMBER", "VIEWER"]) {
     expect(reads).toBe(0)
   })
 }
+
+// The real exported wizard, with only HTTP responses replaced. Covers both
+// layouts and the exact account -> model -> agent provisioning payload.
+for (const width of [1280, 390]) {
+  test(`Bedrock account onboarding at ${width}px`, async ({ page }, testInfo) => {
+    await page.setViewportSize({ width, height: 950 })
+    let saved = false
+    let assigned = false
+    await page.route("**/api/**", async route => {
+      const path = new URL(route.request().url()).pathname
+      const method = route.request().method()
+      let body: unknown = []
+      if (path === "/api/auth/session") body = { user: { id: "user", email: "fixture@example.test" }, expires: "2099-01-01T00:00:00Z" }
+      else if (path === "/api/v1/workspaces") body = [{ id: "ws", name: "Fixture", slug: "fixture", currentUserRole: "OWNER" }]
+      else if (path === "/api/v1/agents") body = [{ id: "agent", name: "Bedrock test agent", cli_adapter: "CLAUDE_CODE" }]
+      else if (path === "/api/v1/credentials" && method === "POST") {
+        const submitted = route.request().postDataJSON()
+        expect(submitted).toMatchObject({ name: "Bedrock EU", type: "PROVIDER_LOGIN", provider: "AWS_BEDROCK", mode: "api_key" })
+        expect(JSON.parse(submitted.value)).toMatchObject({ auth_method: "bedrock_api_key", api_key: "synthetic-bedrock-key", region: "eu-central-1", models: ["eu.anthropic.claude-opus-5-5"], eu_only: true })
+        saved = true
+        return route.fulfill({ status: 201, contentType: "application/json", body: JSON.stringify({ id: "bedrock-account" }) })
+      } else if (path === "/api/v1/credentials/bedrock-account/bedrock-assign") {
+        expect(saved).toBe(true)
+        expect(route.request().postDataJSON()).toEqual({ agent_ids: ["agent"], crew_ids: [], model: "eu.anthropic.claude-opus-5-5" })
+        assigned = true
+        body = { assigned: 1 }
+      } else if (path === "/api/v1/credentials/bindings") body = { bindings: [] }
+      else if (path === "/api/v1/provider-logins/pools") body = { items: [] }
+      else if (/settings|config|health/.test(path)) body = {}
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) })
+    })
+    await page.goto("/credentials?space=providers")
+    await page.getByRole("button", { name: "Add AI provider", exact: true }).first().click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("button", { name: /^Amazon Bedrock/ }).click()
+    await dialog.getByText("Name and labels", { exact: false }).click()
+    await dialog.getByLabel("Name", { exact: true }).fill("Bedrock EU")
+    await dialog.getByLabel("API key", { exact: true }).fill("synthetic-bedrock-key")
+    await dialog.getByLabel("Permitted Bedrock model IDs").fill("eu.anthropic.claude-opus-5-5")
+    await dialog.getByLabel("Key expires at").fill("2099-01-01T12:00")
+    await expect(dialog.getByText(/automatic renewal is not available/i)).toBeVisible()
+    await dialog.getByRole("button", { name: "Continue", exact: true }).click()
+    await dialog.getByRole("button", { name: "Choose now", exact: true }).click()
+    await dialog.getByLabel("Bedrock test agent", { exact: true }).check()
+    await expect(dialog.getByLabel("Agent model")).toHaveValue("eu.anthropic.claude-opus-5-5")
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBe(true)
+    await page.screenshot({ path: testInfo.outputPath(`bedrock-pays-for-${width}.png`) })
+    await dialog.getByRole("button", { name: "Save & assign", exact: true }).click()
+    await expect.poll(() => assigned).toBe(true)
+  })
+}

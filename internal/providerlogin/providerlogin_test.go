@@ -165,7 +165,11 @@ func TestIsProviderAndDelivery(t *testing.T) {
 		if !IsProvider(p) {
 			t.Errorf("IsProvider(%q) = false", p)
 		}
-		if _, err := Split(p, ModeAPIKey, "fixture-key"); err != nil {
+		value := "fixture-key"
+		if p == "AWS_BEDROCK" {
+			value = `{"auth_method":"bedrock_api_key","api_key":"fixture-key","region":"eu-central-1","models":["eu.anthropic.claude-opus-5-5"],"expires_at":"2099-01-01T00:00:00Z","eu_only":true}`
+		}
+		if _, err := Split(p, ModeAPIKey, value); err != nil {
 			t.Errorf("API key for %s rejected: %v", p, err)
 		}
 		if DeliveryFor(p, ModeAPIKey).Target == "" {

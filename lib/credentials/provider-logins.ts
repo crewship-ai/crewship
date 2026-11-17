@@ -21,6 +21,7 @@ export type ProviderLoginRefreshStatus = "ok" | "pending" | "failed" | "needs_re
 
 /** The `login` object of contract §10.1, field for field. */
 export interface ProviderLogin {
+ bedrock?: {region: string; models: string[]; auth_method: "bedrock_api_key"; eu_only: boolean}
   mode: ProviderLoginMode
   provider: string
   plan: string | null
@@ -42,7 +43,7 @@ export interface ProviderLogin {
     window_weekly_pct: number | null
     resets_at: string | null
   } | null
-  delivery: { kind: "env" | "file"; target: string }
+  delivery: { kind: "env" | "file" | "sidecar"; target: string }
   pays_for: { agents: number; crews: number }
 }
 
@@ -141,7 +142,7 @@ export function loginStatusLabel(c: LoginCredential, now = Date.now()): { label:
     case "pending":
       return { label: "pending", tone: "default", status }
     default:
-      return { label: "active", tone: "success", status }
+      return { label: c.provider === "AWS_BEDROCK" ? "saved" : "active", tone: c.provider === "AWS_BEDROCK" ? "default" : "success", status }
   }
 }
 
@@ -227,7 +228,7 @@ export function planLabel(login: ProviderLogin | null | undefined): string {
  * use, so the pool rule (same scope, same slot) keeps working.
  */
 export function loginBindingSlot(login: ProviderLogin | null | undefined, fallback: string | null = null): string | null {
-  if (login?.delivery?.kind === "env" && login.delivery.target) return login.delivery.target
+  if ((login?.delivery?.kind === "env" || login?.delivery?.kind === "sidecar") && login.delivery.target) return login.delivery.target
   if (fallback) return fallback
   const provider = (login?.provider ?? "").toUpperCase()
   const byProvider: Record<string, string> = {
@@ -525,6 +526,7 @@ export function providerRunners(provider: string | null | undefined): string[] {
  * not know) is offered for every provider.
  */
 export function runnerFits(cliAdapter: string | null | undefined, provider: string | null | undefined): boolean {
+  if (provider === "AWS_BEDROCK") return cliAdapter === "OPENCODE"
   const own = adapterProvider(cliAdapter)
   return own === null || own === (provider ?? "").toUpperCase()
 }
@@ -539,6 +541,7 @@ export function accountState(c: LoginCredential, now = Date.now()): { key: Accou
   if (s === "pending") return { key: "pending", label: "Pending", tone: "default" }
   if (s === "at_limit") return { key: "limit", label: "At limit", tone: "warn" }
   if (s === "expiring") return { key: "expiring", label: "Expires soon", tone: "warn" }
+  if (c.provider === "AWS_BEDROCK") return {key: isUnassigned(c) ? "idle" : "ready", label: isUnassigned(c) ? "Saved" : "Assigned", tone: "default"}
   if (isUnassigned(c)) return { key: "idle", label: "Not used", tone: "default" }
   return { key: "ready", label: "Ready", tone: "success" }
 }

@@ -127,18 +127,21 @@ func credentialsConnectorsAuthProfileSchemaCatalog() (map[string]map[string]Doma
 		"CLIToken":                     cliToken, "CLITokenList": object(map[string]any{"data": array(cliToken)}),
 		"CLITokenValidateResponse": object(map[string]any{"valid": boolean(), "user_id": str(), "user_email": str()}),
 		"Profile":                  profile, "ProfileUpdateRequest": request(map[string]any{"full_name": str()}, "full_name"),
-		"PasswordChangeRequest":  request(map[string]any{"current_password": str(), "new_password": str()}, "current_password", "new_password"),
-		"PasswordChangeResponse": object(map[string]any{"success": boolean(), "sessions_revoked": integer()}),
-		"StatusResponse":         object(map[string]any{"status": str()}),
+		"PasswordChangeRequest":     request(map[string]any{"current_password": str(), "new_password": str()}, "current_password", "new_password"),
+		"PasswordChangeResponse":    object(map[string]any{"success": boolean(), "sessions_revoked": integer()}),
+		"StatusResponse":            object(map[string]any{"status": str()}),
+		"BedrockAssignmentRequest":  request(map[string]any{"agent_ids": array(str()), "crew_ids": array(str()), "model": str()}, "model"),
+		"BedrockAssignmentResponse": object(map[string]any{"assigned": integer(), "provider": str(), "model": str()}, "assigned", "provider", "model"),
 	}
 
 	// Request bodies for these routes are owned by schemas_request_core_resources_v2.go
 	// and schemas_integrations_auth_request_bodies.go; only responses are declared here.
 	credentialRoutes := map[string]DomainSchema{
-		"GET /api/v1/credential-folders":               {Response: ref("CredentialFolderList"), SuccessStatuses: []string{"200"}},
-		"POST /api/v1/credential-folders":              {Request: ref("CredentialFolderCreateRequest"), RequestRequired: true, Response: ref("CredentialFolder"), SuccessStatuses: []string{"201"}},
-		"PATCH /api/v1/credential-folders/{folderId}":  {Request: ref("CredentialFolderUpdateRequest"), RequestRequired: true, Response: ref("CredentialFolder"), SuccessStatuses: []string{"200"}},
-		"DELETE /api/v1/credential-folders/{folderId}": {SuccessStatuses: []string{"204"}},
+		"POST /api/v1/credentials/{credentialId}/bedrock-assign": {Request: ref("BedrockAssignmentRequest"), RequestRequired: true, Response: ref("BedrockAssignmentResponse"), SuccessStatuses: []string{"200"}},
+		"GET /api/v1/credential-folders":                         {Response: ref("CredentialFolderList"), SuccessStatuses: []string{"200"}},
+		"POST /api/v1/credential-folders":                        {Request: ref("CredentialFolderCreateRequest"), RequestRequired: true, Response: ref("CredentialFolder"), SuccessStatuses: []string{"201"}},
+		"PATCH /api/v1/credential-folders/{folderId}":            {Request: ref("CredentialFolderUpdateRequest"), RequestRequired: true, Response: ref("CredentialFolder"), SuccessStatuses: []string{"200"}},
+		"DELETE /api/v1/credential-folders/{folderId}":           {SuccessStatuses: []string{"204"}},
 
 		// Bare array by default; `?paginate=true` switches to the
 		// {credentials, next_cursor, limit} envelope (credentials.go:217).

@@ -128,5 +128,6 @@ export const PROVIDER_ICONS: Record<string, React.ComponentType<IconProps>> = {
   GITLAB: GitLabIcon,
   VERCEL: VercelIcon,
   AWS: AWSIcon,
+ AWS_BEDROCK: AWSIcon,
   CUSTOM_CLI: CustomCLIIcon,
 }

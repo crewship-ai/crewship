@@ -64,6 +64,9 @@ func (opencodeAdapter) BuildCommand(req AgentRunRequest) []string {
 	}
 	// `--` separator: see adapter_codex.go for rationale.
 	cmd = append(cmd, "--", prompt)
+	if bedrockRun(req) {
+		return append([]string{"sh", "-c", `if [ -e /etc/opencode ]; then echo 'Bedrock requires an image without overriding /etc/opencode configuration' >&2; exit 1; fi; exec "$@"`, "crewship-bedrock"}, cmd...)
+	}
 	return cmd
 }
 

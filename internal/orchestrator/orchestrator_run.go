@@ -1681,6 +1681,9 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 	ipcToken := o.ipcToken
 	localModelBaseURL := o.localModelBaseURL
 	o.mu.RUnlock()
+	if bedrockRun(*req) && !sidecarEnabled {
+		return nil, fmt.Errorf("Amazon Bedrock requires the credential-injecting sidecar; direct credential delivery is disabled")
+	}
 
 	// #955: the local-model endpoint is now resolved from the vault
 	// (ENDPOINT_URL credential, per-agent → workspace default) and arrives on

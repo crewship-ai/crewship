@@ -192,11 +192,11 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	if v, ok := body["llm_provider"]; ok {
 		s, isStr := v.(string)
 		if !isStr || s == "" {
-			replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, OPENCODE_GO, or ZAI_CODING_PLAN")
+			replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, OPENCODE_GO, ZAI_CODING_PLAN, or AWS_BEDROCK")
 			return
 		}
 		if !validLLMProviders[s] {
-			replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, OPENCODE_GO, or ZAI_CODING_PLAN")
+			replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, OPENCODE_GO, ZAI_CODING_PLAN, or AWS_BEDROCK")
 			return
 		}
 	}

@@ -72,6 +72,7 @@ var supportedModelProviders = map[string]bool{
 	"OPENCODE":        true,
 	"OPENCODE_GO":     true,
 	"ZAI_CODING_PLAN": true,
+	"AWS_BEDROCK":     true,
 }
 
 // NewModelsHandler builds a ModelsHandler. ollamaURL is the daemon URL used
@@ -133,7 +134,7 @@ func (h *ModelsHandler) List(w http.ResponseWriter, r *http.Request) {
 	}
 	if !supportedModelProviders[provider] {
 		writeProblem(w, r, http.StatusBadRequest,
-			"unsupported provider; expected one of ANTHROPIC, OPENAI, GOOGLE, OLLAMA, OPENCODE, OPENCODE_GO, ZAI_CODING_PLAN")
+			"unsupported provider; expected one of ANTHROPIC, OPENAI, GOOGLE, OLLAMA, OPENCODE, OPENCODE_GO, ZAI_CODING_PLAN, AWS_BEDROCK")
 		return
 	}
 
