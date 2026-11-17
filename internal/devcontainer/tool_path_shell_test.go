@@ -66,6 +66,7 @@ func TestMiseReadinessIgnoresProjectWorkingDirectory(t *testing.T) {
 	fake := `#!/bin/sh
 if test -f mise.toml; then echo 'project config was loaded'; exit 17; fi
 test "$*" = 'ls --global --missing --no-header' || exit 18
+test "$MISE_CEILING_PATHS" = / || exit 19
 `
 	if err := os.WriteFile(filepath.Join(bin, "mise"), []byte(fake), 0755); err != nil {
 		t.Fatal(err)

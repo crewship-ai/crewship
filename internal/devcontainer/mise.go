@@ -469,7 +469,7 @@ const MiseShimsDir = miseRoot + "/data/shims"
 const miseShimsDir = MiseShimsDir
 
 // Keep project WORKDIR/config/trust out of image-global installation readiness.
-const miseMissingInstallCheck = `cd / || exit $?; missing=$(mise ls --global --missing --no-header) || exit $?; ` +
+const miseMissingInstallCheck = `cd / || exit $?; missing=$(MISE_CEILING_PATHS=/ mise ls --global --missing --no-header) || exit $?; ` +
 	`[ -z "$missing" ] || { printf 'missing mise installations: %s\n' "$missing"; exit 1; }; `
 
 // verifyMiseShims fails when any shim mise just wrote does not resolve.
