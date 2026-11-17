@@ -24,7 +24,6 @@ type Account struct {
 	EUOnly     bool     `json:"eu_only"`
 }
 
-var regionPattern = regexp.MustCompile(`^(us|eu|ap|ca|sa|me|af|il|mx)-(north|south|east|west|central|northeast|northwest|southeast|southwest)-[1-9][0-9]?$`)
 var modelPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$`)
 
 func Parse(value string) (Account, error) {
@@ -38,8 +37,8 @@ func Parse(value string) (Account, error) {
 	if len(a.APIKey) < 1 || len(a.APIKey) > 16384 || strings.ContainsAny(a.APIKey, "\r\n\t ") {
 		return a, errors.New("invalid Bedrock API key")
 	}
-	if !regionPattern.MatchString(a.Region) {
-		return a, errors.New("unsupported AWS commercial region")
+	if a.Endpoint() == "" {
+		return a, errors.New("unsupported AWS Bedrock runtime region")
 	}
 	if len(a.Models) == 0 || len(a.Models) > 32 {
 		return a, errors.New("specify between 1 and 32 permitted Bedrock model IDs")
@@ -60,7 +59,55 @@ func Parse(value string) (Account, error) {
 	return a, nil
 }
 
-func (a Account) Endpoint() string { return "https://bedrock-runtime." + a.Region + ".amazonaws.com" }
+// Endpoint chooses a fixed commercial inference destination, never a URL built
+// from user input. Keep this runtime-only allowlist aligned with AWS:
+// https://docs.aws.amazon.com/general/latest/gr/bedrock.html
+func (a Account) Endpoint() string {
+	switch a.Region {
+	case "us-east-1":
+		return "https://bedrock-runtime.us-east-1.amazonaws.com"
+	case "us-east-2":
+		return "https://bedrock-runtime.us-east-2.amazonaws.com"
+	case "us-west-2":
+		return "https://bedrock-runtime.us-west-2.amazonaws.com"
+	case "ap-south-1":
+		return "https://bedrock-runtime.ap-south-1.amazonaws.com"
+	case "ap-south-2":
+		return "https://bedrock-runtime.ap-south-2.amazonaws.com"
+	case "ap-northeast-1":
+		return "https://bedrock-runtime.ap-northeast-1.amazonaws.com"
+	case "ap-northeast-2":
+		return "https://bedrock-runtime.ap-northeast-2.amazonaws.com"
+	case "ap-northeast-3":
+		return "https://bedrock-runtime.ap-northeast-3.amazonaws.com"
+	case "ap-southeast-1":
+		return "https://bedrock-runtime.ap-southeast-1.amazonaws.com"
+	case "ap-southeast-2":
+		return "https://bedrock-runtime.ap-southeast-2.amazonaws.com"
+	case "ca-central-1":
+		return "https://bedrock-runtime.ca-central-1.amazonaws.com"
+	case "eu-central-1":
+		return "https://bedrock-runtime.eu-central-1.amazonaws.com"
+	case "eu-central-2":
+		return "https://bedrock-runtime.eu-central-2.amazonaws.com"
+	case "eu-west-1":
+		return "https://bedrock-runtime.eu-west-1.amazonaws.com"
+	case "eu-west-2":
+		return "https://bedrock-runtime.eu-west-2.amazonaws.com"
+	case "eu-west-3":
+		return "https://bedrock-runtime.eu-west-3.amazonaws.com"
+	case "eu-south-1":
+		return "https://bedrock-runtime.eu-south-1.amazonaws.com"
+	case "eu-south-2":
+		return "https://bedrock-runtime.eu-south-2.amazonaws.com"
+	case "eu-north-1":
+		return "https://bedrock-runtime.eu-north-1.amazonaws.com"
+	case "sa-east-1":
+		return "https://bedrock-runtime.sa-east-1.amazonaws.com"
+	default:
+		return ""
+	}
+}
 func (a Account) Expired(now time.Time) bool {
 	t, e := time.Parse(time.RFC3339, a.ExpiresAt)
 	return e != nil || !now.Before(t)

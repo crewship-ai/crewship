@@ -24,3 +24,17 @@ func TestAccountPolicyAndAtomicDocument(t *testing.T) {
 		}
 	}
 }
+
+func TestEndpointSelectsOnlyFixedRuntimeDestinations(t *testing.T) {
+	for _, region := range []string{"eu-central-1", "eu-central-2", "us-east-1", "ap-northeast-3"} {
+		a := Account{Region: region}
+		if a.Endpoint() != "https://bedrock-runtime."+region+".amazonaws.com" {
+			t.Fatalf("missing supported runtime %s", region)
+		}
+	}
+	for _, region := range []string{"eu-northwest-99", "127.0.0.1", "eu-central-1.amazonaws.com@evil.example", "eu-central-1/path", "us-gov-east-1", ""} {
+		if (Account{Region: region}).Endpoint() != "" {
+			t.Fatalf("unapproved runtime %s", region)
+		}
+	}
+}
