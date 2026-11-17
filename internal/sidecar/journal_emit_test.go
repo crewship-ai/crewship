@@ -516,3 +516,35 @@ func TestSidecar_BuildLLMCallObserver_NilIPC_Noop(t *testing.T) {
 	}()
 	obs(LLMUsage{Provider: "anthropic", InputTokens: 100}, QuotaInfo{}, "metered", "")
 }
+
+// #5446: an admitted Bedrock call with no usage counters is still sent to the
+// server, flagged incomplete, so the ledger shows a call of unknown cost
+// instead of nothing. A call with neither usage, quota nor the flag is not.
+func TestSidecar_LLMCallObserver_IncompleteUsageReachesBackend(t *testing.T) {
+	got := make(chan sidecarCostRecord, 2)
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var rec sidecarCostRecord
+		_ = json.NewDecoder(r.Body).Decode(&rec)
+		got <- rec
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+	observe := newJournalTestServer(backend.URL).buildLLMCallObserver()
+
+	observe(LLMUsage{Provider: "amazon-bedrock", Model: "eu.anthropic.claude-opus-5-5"}, QuotaInfo{}, "metered", "")
+	select {
+	case rec := <-got:
+		t.Fatalf("empty call without the incomplete flag was recorded: %+v", rec)
+	case <-time.After(300 * time.Millisecond):
+	}
+
+	observe(LLMUsage{Provider: "amazon-bedrock", Model: "eu.anthropic.claude-opus-5-5", UsageIncomplete: true}, QuotaInfo{}, "metered", "")
+	select {
+	case rec := <-got:
+		if !rec.UsageIncomplete || rec.Provider != "amazon-bedrock" || rec.InputTokens != 0 {
+			t.Fatalf("incomplete call not flagged: %+v", rec)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("incomplete call never reached the backend")
+	}
+}

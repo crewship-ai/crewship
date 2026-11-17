@@ -1167,6 +1167,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 		if codec == "bedrock" && len(nativeModel) > 0 {
 			usage.Model = nativeModel[0]
 		}
+		usage.UsageIncomplete = usage.UsageIncomplete && !bedrockRefused(codec, resp.StatusCode)
 		quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 		if usage.UsageIncomplete || usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CachedInputTokens != 0 ||
 			usage.CacheCreationTokens != 0 || quota.Window != "" || quota.HadStatus429 {
@@ -1200,8 +1201,17 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	if codec == "bedrock" && len(nativeModel) > 0 {
 		usage.Model = nativeModel[0]
 	}
+	usage.UsageIncomplete = usage.UsageIncomplete && !bedrockRefused(codec, resp.StatusCode)
 	quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 	p.onLLMCall(usage, quota, billingMode, subPlan)
+}
+
+// bedrockRefused: AWS answered with an error status (throttled, denied,
+// invalid model, server error). The error body carries no usage because the
+// call was not served or billed, so it must not become an "incomplete" ledger
+// row. A stream that breaks after a 2xx stays incomplete.
+func bedrockRefused(codec string, status int) bool {
+	return codec == "bedrock" && status >= 400
 }
 
 func isStreamingLLMResponse(contentType string) bool {
