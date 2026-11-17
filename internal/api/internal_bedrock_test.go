@@ -68,6 +68,11 @@ func TestResolveBedrock_CurrentExactPeerAccountOnly(t *testing.T) {
 	if w := call(token, body); w.Code != 200 || !strings.Contains(w.Body.String(), "bedrock-synthetic-secret") || w.Header().Get("Cache-Control") != "no-store" {
 		t.Fatal(w.Code, w.Body.String())
 	}
+	execOrFatal(t, db, `UPDATE credentials SET type='API_KEY' WHERE id=?`, accountID)
+	if w := call(token, body); w.Code == 200 || strings.Contains(w.Body.String(), "bedrock-synthetic-secret") {
+		t.Fatal("generic API_KEY row exported by Bedrock resolver")
+	}
+	execOrFatal(t, db, `UPDATE credentials SET type='PROVIDER_LOGIN' WHERE id=?`, accountID)
 	execOrFatal(t, db, `UPDATE credentials SET handle_only=1 WHERE id=?`, accountID)
 	if w := call(token, body); w.Code == 200 || strings.Contains(w.Body.String(), "bedrock-synthetic-secret") {
 		t.Fatal("handle-only account exported")

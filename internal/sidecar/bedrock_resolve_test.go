@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -130,5 +131,22 @@ func TestBedrockSecretResolutionCannotBeForwardedToAgent(t *testing.T) {
 	transport, ok := bedrockAuthorityClient.Transport.(*http.Transport)
 	if !ok || transport.Proxy != nil || bedrockAuthorityClient.CheckRedirect(nil, nil) != http.ErrUseLastResponse {
 		t.Fatal("secret IPC allows ambient proxy or redirects")
+	}
+}
+
+func TestBedrockAuthorityAdmissionIsBounded(t *testing.T) {
+	for range cap(bedrockAuthoritySlots) {
+		bedrockAuthoritySlots <- struct{}{}
+	}
+	defer func() {
+		for range cap(bedrockAuthoritySlots) {
+			<-bedrockAuthoritySlots
+		}
+	}()
+	s := &Server{ipc: &IPCConfig{BaseURL: "http://must-not-be-contacted.invalid", Token: "crew-token", CrewID: "crew"}}
+	r := httptest.NewRequest("POST", "/llm/amazon-bedrock", nil)
+	r = r.WithContext(context.WithValue(r.Context(), authenticatedLLMRunKey{}, "run"))
+	if _, err := s.resolveBedrock(r, "agent", "account", "model"); err == nil || !strings.Contains(err.Error(), "busy") {
+		t.Fatal("unbounded authority admission", err)
 	}
 }

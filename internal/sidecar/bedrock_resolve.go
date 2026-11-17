@@ -3,6 +3,7 @@ package sidecar
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -18,6 +19,10 @@ import (
 )
 
 type authenticatedLLMRunKey struct{}
+
+// Bound fresh-authority work per sidecar. Streams consume no slot after
+// admission; excess concurrent admissions fail promptly rather than piling up.
+var bedrockAuthoritySlots = make(chan struct{}, 16)
 
 // Host IPC is a trusted configured destination, not user input. Never use an
 // ambient proxy or follow a redirect carrying the crew token or account data.
@@ -38,6 +43,12 @@ func (s *Server) resolveBedrock(r *http.Request, actorID, accountID, model strin
 	runID, _ := r.Context().Value(authenticatedLLMRunKey{}).(string)
 	if s.ipc == nil || s.ipc.BaseURL == "" || s.ipc.Token == "" || s.ipc.CrewID == "" || runID == "" || actorID == "" || accountID == "" {
 		return nil, errors.New("Bedrock account authority unavailable")
+	}
+	select {
+	case bedrockAuthoritySlots <- struct{}{}:
+		defer func() { <-bedrockAuthoritySlots }()
+	default:
+		return nil, errors.New("Bedrock account authority is busy")
 	}
 	target, err := url.Parse(s.ipc.BaseURL)
 	if err != nil || (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" || target.User != nil || target.RawQuery != "" || target.Fragment != "" {
@@ -78,7 +89,14 @@ func (s *Server) resolveBedrock(r *http.Request, actorID, accountID, model strin
 		return nil, errors.New("Bedrock account expired or model not permitted")
 	}
 	// Register the actual key, not merely the surrounding JSON document.
-	digest := sha256.Sum256([]byte(account.APIKey))
+	// This is a bounded in-process redaction deduplication identifier, not
+	// password storage. Key it like other credential fingerprints so even a
+	// future diagnostic cannot become an offline credential oracle.
+	mac := hmac.New(sha256.New, []byte(s.ipc.Token))
+	_, _ = mac.Write([]byte("bedrock-redaction\x00"))
+	_, _ = mac.Write([]byte(account.APIKey))
+	var digest [sha256.Size]byte
+	copy(digest[:], mac.Sum(nil))
 	s.peerPatterns.Lock()
 	defer s.peerPatterns.Unlock()
 	if s.peerPatterns.seen == nil {

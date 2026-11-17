@@ -260,7 +260,9 @@ parent. If the exact peer account is not loaded there, a sidecar-only host
 request checks the current run, crew, agent, explicit account, model and expiry
 in one database snapshot. Failure stops that request; it never selects another
 payer or caches a fallback key. The parent sidecar's credentials, fingerprint
-and general network allowlist remain unchanged.
+and general network allowlist remain unchanged. Fresh account resolution has a
+five-second timeout and at most 16 concurrent admissions per sidecar; streaming
+responses do not retain those admission slots.
 
 Bedrock inference deliberately clears ambient `AWS_*` authentication variables
 and other model-provider keys from the OpenCode environment. A separate
