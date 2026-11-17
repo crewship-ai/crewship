@@ -5,15 +5,22 @@
 -- provider on purpose, and cleared the model of an agent leaving such a crew
 -- while leaving it on AWS_BEDROCK: no account and no model, so its runs
 -- failed. The rule now applies only to agents that are on Bedrock already or
--- have no provider chosen. Agents on another provider keep their runner,
--- provider and model; an agent leaving a rule crew keeps its model.
+-- have made no other choice: no provider, the default or OpenCode runner, and
+-- no model or a Bedrock model. Agents on another provider, runner or model
+-- keep them; an agent leaving a rule crew keeps its model.
+--
+-- Agents already converted or stranded by 20261117120910 are not rewritten:
+-- their previous settings were not recorded. Credential readiness reports a
+-- Bedrock agent without an account.
 
 DROP TRIGGER IF EXISTS trg_bedrock_crew_agent_insert;
 DROP TRIGGER IF EXISTS trg_bedrock_crew_agent_move;
 
 CREATE TRIGGER trg_bedrock_crew_agent_insert AFTER INSERT ON agents
 WHEN NEW.crew_id IS NOT NULL AND NEW.deleted_at IS NULL
-  AND COALESCE(NEW.llm_provider,'') IN ('','AWS_BEDROCK')
+  AND (COALESCE(NEW.llm_provider,'')='AWS_BEDROCK'
+    OR (COALESCE(NEW.llm_provider,'')='' AND NEW.cli_adapter IN ('CLAUDE_CODE','OPENCODE')
+        AND (COALESCE(NEW.llm_model,'')='' OR NEW.llm_model LIKE 'amazon-bedrock/%')))
 BEGIN
     INSERT INTO credential_bindings
         (id,workspace_id,credential_id,scope,agent_id,slot,created_by,inherited_from_binding_id,bedrock_model_overridden)
@@ -21,8 +28,7 @@ BEGIN
            'AGENT', NEW.id, 'AWS_BEARER_TOKEN_BEDROCK', parent.created_by, parent.id,
            -- Overridden only when the agent names a Bedrock model other
            -- than the rule's: the rule's own model stays a crew default.
-           CASE WHEN COALESCE(NEW.llm_provider,'')='AWS_BEDROCK'
-             AND COALESCE(NEW.llm_model,'') LIKE 'amazon-bedrock/%'
+           CASE WHEN COALESCE(NEW.llm_model,'') LIKE 'amazon-bedrock/%'
              AND NEW.llm_model <> 'amazon-bedrock/' || parent.bedrock_model THEN 1 ELSE 0 END
     FROM credential_bindings parent
     WHERE parent.scope='CREW' AND parent.crew_id=NEW.crew_id
@@ -79,7 +85,10 @@ BEGIN
     WHERE parent.scope='CREW' AND parent.crew_id=NEW.crew_id
       AND parent.workspace_id=NEW.workspace_id AND parent.bedrock_model IS NOT NULL
       AND parent.slot='AWS_BEARER_TOKEN_BEDROCK'
-      AND COALESCE((SELECT llm_provider FROM agents WHERE id=NEW.id),'') IN ('','AWS_BEDROCK')
+      -- Same eligibility as on insert, judged on the row as moved.
+      AND (COALESCE(NEW.llm_provider,'')='AWS_BEDROCK'
+        OR (COALESCE(NEW.llm_provider,'')='' AND NEW.cli_adapter IN ('CLAUDE_CODE','OPENCODE')
+            AND (COALESCE(NEW.llm_model,'')='' OR NEW.llm_model LIKE 'amazon-bedrock/%')))
       AND NOT EXISTS (SELECT 1 FROM credential_bindings own
           WHERE own.agent_id=NEW.id AND own.scope='AGENT' AND own.slot='AWS_BEARER_TOKEN_BEDROCK')
       AND NOT EXISTS (SELECT 1 FROM agent_credentials legacy
