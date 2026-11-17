@@ -390,7 +390,7 @@ var crewUpdateCmd = &cobra.Command{
 		// it before the first OOM-killed run.
 		var updated struct {
 			Warnings               []string `json:"warnings" yaml:"warnings"`
-			AllowCodexOuterSandbox *bool    `json:"allow_codex_outer_sandbox"`
+			AllowCodexOuterSandbox *bool    `json:"allow_codex_outer_sandbox" yaml:"allow_codex_outer_sandbox"`
 		}
 		if err := cli.ReadJSON(resp, &updated); err != nil {
 			return err

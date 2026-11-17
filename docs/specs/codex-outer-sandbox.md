@@ -102,11 +102,13 @@ and an already cached `alpine:3` image. The test never installs a CLI or reads a
 provider login:
 
 ```bash
-CREWSHIP_TEST_CODEX_NATIVE=/absolute/path/to/native/codex \
-  go test -tags integration ./internal/orchestrator \
-  -run '^TestCodexOuterActualNativeDocker$' -count=1 -v
+go test -tags integration ./internal/orchestrator \
+  -run '^TestCodexOuterActualNativeDocker$' -count=1 -v \
+  -args -codex-outer-native-artifact=/absolute/path/to/native/codex
 ```
 
-An absent artifact is a skip, and a refused Docker gateway is an unmet test
-precondition. Neither is a successful release qualification. A successful receipt
+An absent artifact fails the selected fixture, and a refused Docker gateway is
+an unmet test precondition. Neither is a successful release qualification.
+The required CI conformance lane provides the pinned native 0.169.0 artifact
+and rejects missing, skipped or failed fixture execution. A successful receipt
 includes the actual native version, immutable image ID and artifact SHA-256.

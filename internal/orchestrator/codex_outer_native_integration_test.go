@@ -6,6 +6,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -26,13 +27,15 @@ import (
 	"github.com/crewship-ai/crewship/internal/provider/runtimestage"
 )
 
+var codexOuterNativeArtifact = flag.String("codex-outer-native-artifact", "", "Explicit static native Codex artifact for real Docker qualification")
+
 // Release qualification requires an explicit real static Codex artifact. The
 // fixture never installs a CLI, reads a login, calls a paid model or pulls an
 // image. Its only provider is an isolated host bridge listener.
 func TestCodexOuterActualNativeDocker(t *testing.T) {
-	native := os.Getenv("CREWSHIP_TEST_CODEX_NATIVE")
+	native := *codexOuterNativeArtifact
 	if native == "" {
-		t.Skip("set CREWSHIP_TEST_CODEX_NATIVE to the real static Codex artifact; wrapper/version output is not qualification")
+		t.Fatal("provide -codex-outer-native-artifact with the real static Codex artifact; wrapper/version output is not qualification")
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
 	defer cancel()
@@ -65,7 +68,13 @@ func TestCodexOuterActualNativeDocker(t *testing.T) {
 		t.Fatal(err)
 	}
 	target.Close()
-	versionOut, err := exec.CommandContext(ctx, filepath.Join(dir, "native"), "--version").Output()
+	versionHome := filepath.Join(dir, "version-home")
+	if err := os.MkdirAll(filepath.Join(versionHome, "codex"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	versionCmd := exec.CommandContext(ctx, filepath.Join(dir, "native"), "--version")
+	versionCmd.Env = []string{"HOME=" + versionHome, "CODEX_HOME=" + filepath.Join(versionHome, "codex"), "PATH=" + managedlaunch.SafePath}
+	versionOut, err := versionCmd.Output()
 	if err != nil {
 		t.Fatal("identify explicit native artifact", err)
 	}
@@ -84,7 +93,7 @@ func TestCodexOuterActualNativeDocker(t *testing.T) {
 	if err := os.WriteFile(entrypoint, []byte("#!/bin/sh\nexec /bin/sleep infinity\n"), 0555); err != nil {
 		t.Fatal(err)
 	}
-	dockerfile := "FROM alpine:3\nUSER 0\nCOPY --chmod=0555 native /opt/native/codex\nENTRYPOINT [\"/bin/sleep\"]\nCMD [\"120\"]\n"
+	dockerfile := "FROM alpine:3\nUSER 0\nRUN addgroup -g 1001 agent && adduser -D -u 1001 -G agent -s /bin/sh agent\nCOPY --chmod=0555 native /opt/native/codex\nENTRYPOINT [\"/bin/sleep\"]\nCMD [\"120\"]\n"
 	if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -189,6 +198,7 @@ func TestCodexOuterActualNativeDocker(t *testing.T) {
 		t.Fatal(err)
 	}
 	env = overrideEnv(env, "HOME", "/tmp/outer-fixture-home")
+	env = overrideEnv(env, "SHELL", "/bin/sh")
 	env = overrideEnv(env, "CODEX_HOME", "/tmp/outer-fixture-home/codex")
 	env = overrideEnv(env, "NO_PROXY", gateway+",localhost,127.0.0.1")
 	env = overrideEnv(env, "no_proxy", gateway+",localhost,127.0.0.1")
@@ -228,4 +238,25 @@ func TestCodexOuterActualNativeDocker(t *testing.T) {
 	if _, err := os.Stat(staged); err != nil {
 		t.Fatal(err)
 	}
+	noNNPName := label + "-no-nnp"
+	noNNP := docker("run", "-d", "--name", noNNPName, "--network=none", "--label=crewship.temp=codex-outer-test", "--label=crewship.test="+label, "--user=1001:1001", "--cap-drop=ALL", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid,size=16m,mode=1777", "--mount", "type=bind,src="+staged+",dst="+managedlaunch.LauncherPath+",readonly", image, "120")
+	t.Cleanup(func() { exec.Command("docker", "rm", "-f", noNNP).Run() })
+	rejected := req
+	rejected.ContainerID = noNNP
+	rejected.RunID = "outer-rejected-kernel"
+	rejectedCfg, err := managedExecConfig(rejected, argv, env, "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	denied, err := p.Exec(ctx, rejectedCfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deniedOutput, readErr := io.ReadAll(io.LimitReader(denied.Reader, 16384))
+	denied.Reader.Close()
+	running, code, err = p.ExecInspect(ctx, denied.ExecID)
+	if readErr != nil || err != nil || running || code != 126 || !strings.Contains(string(deniedOutput), "Codex outer isolation: effective UID") || calls.Load() != before {
+		t.Fatalf("kernel controls did not refuse before Codex: code%d running%t calls%d read%v inspect%v %s", code, running, calls.Load(), readErr, err, deniedOutput)
+	}
+
 }

@@ -1,3 +1,4 @@
+import os
 import importlib.util
 from pathlib import Path
 import unittest
@@ -52,7 +53,7 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         self.assertNotIn('./internal/orchestrator', legacy)
         self.assertEqual(launcher[:2], ['sudo', 'env'])
         self.assertEqual(launcher[-1], './internal/orchestrator')
-        self.assertEqual(launcher[launcher.index('-run') + 1], '^(TestManagedLaunchRealDocker)$')
+        self.assertEqual(launcher[launcher.index('-run') + 1], '^(TestCodexOuterActualNativeDocker|TestManagedLaunchRealDocker)$')
         for package, names in managed.TESTS.items():
             for name in names:
                 command = launcher if package == 'internal/orchestrator' else legacy
@@ -84,6 +85,16 @@ class ManagedEnvironmentEvidenceTests(unittest.TestCase):
         events = [event for event in self.passing()
                   if (event['Package'], event['Test']) in legacy]
         self.assertTrue(managed.failures(events, 0))
+
+    def test_real_codex_artifact_is_explicit_across_sudo(self):
+        with mock.patch.dict(os.environ, {'CREWSHIP_TEST_CODEX_NATIVE': '/fixture/native-codex'}):
+            legacy, elevated = managed.commands()
+        self.assertNotIn('-codex-outer-native-artifact=/fixture/native-codex', legacy)
+        self.assertIn('-codex-outer-native-artifact=/fixture/native-codex', elevated)
+        self.assertIn('TestCodexOuterActualNativeDocker', elevated[elevated.index('-run') + 1])
+        with mock.patch.dict(os.environ, {'CREWSHIP_TEST_CODEX_NATIVE': 'relative'}):
+            with self.assertRaises(ValueError):
+                managed.commands()
 
     def test_selected_go_toolchain_survives_sudo_and_nested_fixture_builds(self):
         binary = '/trusted/toolchain/bin/go'
