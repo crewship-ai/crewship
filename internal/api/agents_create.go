@@ -327,6 +327,14 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		replyInternalError(w, h.logger, "read created agent model", err)
 		return
 	}
+	if err := validateAssignedBedrockModel(r.Context(), tx, workspaceID, agentID); err != nil {
+		if isBedrockPolicyError(err) {
+			replyError(w, http.StatusBadRequest, err.Error())
+		} else {
+			replyInternalError(w, h.logger, "validate created Bedrock agent model", err)
+		}
+		return
+	}
 	current, err := agentPrivileges(r.Context(), tx, workspaceID, agentID)
 	if err != nil {
 		replyInternalError(w, h.logger, "read created agent privileges", err)

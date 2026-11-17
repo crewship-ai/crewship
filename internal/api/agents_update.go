@@ -493,11 +493,22 @@ func (h *AgentHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 	_, providerChange := body["llm_provider"]
 	_, adapterChange := body["cli_adapter"]
-	if _, modelChange := body["llm_model"]; modelChange || providerChange || adapterChange {
-		if err := validateBedrockAgentModel(r.Context(), tx, workspaceID, agentID); err != nil {
-			replyError(w, http.StatusBadRequest, err.Error())
-			return
+	_, modelChange := body["llm_model"]
+	var validationErr error
+	if modelChange || providerChange || adapterChange {
+		validationErr = validateBedrockAgentModel(r.Context(), tx, workspaceID, agentID)
+	} else if crewChange {
+		// A move can attach the new crew's account: the agent's own Bedrock
+		// model must be one that account permits.
+		validationErr = validateAssignedBedrockModel(r.Context(), tx, workspaceID, agentID)
+	}
+	if validationErr != nil {
+		if isBedrockPolicyError(validationErr) {
+			replyError(w, http.StatusBadRequest, validationErr.Error())
+		} else {
+			replyInternalError(w, h.logger, "validate Bedrock agent model", validationErr)
 		}
+		return
 	}
 	if _, changed := body["llm_model"]; changed {
 		// Model choice and account provenance are independent.

@@ -315,12 +315,14 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		llmProvider = *a.LLMProvider
 	}
 	a.PaysWith = loadAgentPaysWith(r.Context(), h.db, h.logger, a.ID, a.CLIAdapter, llmProvider)
-	readiness, err := resolveAgentCredentialReadiness(r, h.db, workspaceID, a.ID)
-	if err != nil {
-		replyInternalError(w, h.logger, "resolve agent credential readiness", err)
-		return
+	// Readiness is an advisory summary next to the agent, not the agent
+	// itself: a failure to compute it omits the field (the dedicated
+	// /credential-readiness endpoint still reports the error).
+	if readiness, err := resolveAgentCredentialReadiness(r, h.db, workspaceID, a.ID); err != nil {
+		h.logger.Warn("resolve agent credential readiness", "agent_id", a.ID, "error", err)
+	} else {
+		a.CredentialReadiness = readiness
 	}
-	a.CredentialReadiness = readiness
 
 	writeJSON(w, http.StatusOK, a)
 }
