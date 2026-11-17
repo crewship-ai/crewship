@@ -21,7 +21,8 @@ import (
 // and binary frames as use-terminal.ts. The CLI token only authenticates the
 // connection; it is never printed or supplied to the container.
 // CREWSHIP_NATIVE_TOOLS_PROFILE and CREWSHIP_NATIVE_TOOLS_CREW_ID are required.
-// Optional CREWSHIP_NATIVE_TOOLS_GLAB_VERSION asserts every observed selection
+// Optional CREWSHIP_NATIVE_TOOLS_CLAUDE_PATH checks terminal/routine lookup parity.
+// CREWSHIP_NATIVE_TOOLS_GLAB_VERSION asserts every observed selection
 // (terminal, child, login and zsh) against the declared version after an update.
 func TestNativeToolsLiveTerminal(t *testing.T) {
 	profile, crewID := os.Getenv("CREWSHIP_NATIVE_TOOLS_PROFILE"), os.Getenv("CREWSHIP_NATIVE_TOOLS_CREW_ID")
@@ -78,6 +79,7 @@ glab --version
 code=$?; printf 'TOOL_STATUS:glab:%s\n' "$code"; test "$code" -eq 0 || fail=1
 codex --version
 code=$?; printf 'TOOL_STATUS:codex:%s\n' "$code"; test "$code" -eq 0 || fail=1
+claude_path=$(command -v claude); code=$?; printf 'TOOL_PATH:claude:%s\n' "$claude_path"; test "$code" -eq 0 || fail=1
 claude --version
 code=$?; printf 'TOOL_STATUS:claude:%s\n' "$code"; test "$code" -eq 0 || fail=1
 sh -c 'glab --version && codex --version && claude --version'
@@ -125,6 +127,12 @@ printf '\nNATIVE_DONE:%s\n' "$fail"; exit "$fail"
 			t.Logf("actual terminal result:\n%s", output.String())
 			if match[1] != "0" {
 				t.Fatalf("native tool commands failed (receipt %s)", match[1])
+			}
+			if expected := os.Getenv("CREWSHIP_NATIVE_TOOLS_CLAUDE_PATH"); expected != "" {
+				match := regexp.MustCompile(`(?m)^TOOL_PATH:claude:([^\r\n]+)\r?$`).FindStringSubmatch(output.String())
+				if len(match) != 2 || match[1] != expected {
+					t.Fatalf("terminal claude path differs from declared expectation %q: %v", expected, match)
+				}
 			}
 			if expected := os.Getenv("CREWSHIP_NATIVE_TOOLS_GLAB_VERSION"); expected != "" {
 				versions := regexp.MustCompile(`glab ([^[:space:]]+) \(`).FindAllStringSubmatch(output.String(), -1)

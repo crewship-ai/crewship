@@ -209,26 +209,40 @@ and the saving depends on what a fresh build downloads.
 
 ### The agent's PATH
 
-The agent runs through a non-login `docker exec`, which does not read `/etc/profile.d`. The build therefore puts the agent's own tool directories at the front of the image `PATH` — `/home/agent/.local/bin`, `/opt/crewship/bin` and `/opt/mise/data/shims` — in the image `ENV`, in `/etc/environment` and in the runtime container environment, so every mise tool and every agent-installed CLI resolves without a login shell. At container start the runtime merges three sources into one PATH — these directories, the build's aggregated `containerEnv` PATH (feature-declared directories and the image's own, with `${containerEnv:PATH}` expanded), and the login PATH captured at build time — so nothing a feature or a profile script added is lost, and a captured login PATH that does not know about mise's shims cannot hide them. You do not need to spell these out in `containerEnv.PATH`; a `PATH` you set there is kept behind them.
+Provisioning, Docker runtime creation, explicit Apple runtime PATH and the
+interactive terminal use `devcontainer.NativeToolPath` and the single
+`AgentToolPathDirs` list. The list covers user-local bin, Crewship bin, mise
+shims, persistent crew-tools, pipx and npm-global feature bins. The generated
+POSIX login hook follows the same policy and is checked against that function.
 
-The interactive terminal opens non-login Bash. It reads only PATH from
-container inspect metadata and normalizes the shared native directories in the
-same order for old and new runtimes. Other image/feature/direct-install paths
-are retained. The shared relative order is user-local bin, Crewship bin, mise
-shims, then crew-tools; missing entries do not change that order. This keeps
-`/opt/crew-tools/bin` reachable in older containers.
-No probe process runs inside the container and no agent-run environment is
-copied. If metadata inspection fails, the terminal logs the failure and opens
-with the shared native directories plus the standard system PATH; custom
-image/feature paths cannot be recovered in that fallback.
+The policy preserves the relative order of existing PATH entries, removes
+duplicates and prepends only missing shared directories. For example, an
+operator PATH with `/opt/mise/data/shims` before `/home/agent/.local/bin` keeps
+that precedence. The listed fallback order applies only to missing entries;
+it does not move existing entries into a fixed order. Docker merges the
+aggregated container PATH with captured login contributions before applying
+this policy. Provisioned Apple images carry the same image ENV; an explicit
+runtime PATH is completed by the same function. An already completed runtime
+PATH is unchanged when a terminal opens, so inherited agent exec and terminal
+exec select the same executable for that PATH.
+
+The interactive terminal opens non-login Bash and reads only PATH from
+container inspect metadata. No probe process runs inside the container and no
+agent-run environment is copied. If inspection fails or the provider does not
+support it, the terminal logs a warning and supplies only TERM and HOME,
+**omitting PATH** so exec inherits the complete container PATH, including
+system sbin and feature paths. This degraded path cannot repair missing
+entries in a legacy container, but it does not replace a usable inherited PATH.
 
 New images install `/etc/profile.d/zz-crewship-tools.sh` from the same directory
 list for POSIX login shells. Adding stable mise shims does not remove inherited
 installation directories or prove how a production runtime constructed PATH.
-Persistent user binaries still precede mise shims; pin precedence remains open
-in [#5459](https://github.com/crewship-ai/crewship/issues/5459).
+The default missing-directory order still puts persistent user binaries before
+mise shims; general pin precedence remains open in
+[#5459](https://github.com/crewship-ai/crewship/issues/5459). Preserving an
+explicit operator order does not resolve that separate issue.
 
-The generated hook changes crew image cache keys once. The next provision
+Changing the generated hook invalidates crew image cache keys. The next provision
 builds a new crew image even with unchanged declarations; underlying feature
 and Docker/BuildKit layers may be reused. Restarting the server does not rebuild
 every running container. Existing images need reprovisioning for the hook.

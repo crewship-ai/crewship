@@ -743,8 +743,8 @@ func TestServeHTTP_PathInspectFailureStillOpensTerminal(t *testing.T) {
 		t.Fatalf("fallback did not open: %q", got)
 	}
 	cfg := im.config()
-	if cfg == nil || len(cfg.Env) != 3 || !strings.Contains(cfg.Env[2], "/opt/crew-tools/bin") || !strings.Contains(cfg.Env[2], "/opt/mise/data/shims") {
-		t.Fatalf("missing shared fallback: %+v", cfg)
+	if cfg == nil || strings.Join(cfg.Env, "|") != "TERM=xterm-256color|HOME=/home/agent" {
+		t.Fatalf("inspect failure must inherit PATH, passing TERM/HOME only: %+v", cfg)
 	}
 	conn.Close()
 	select {

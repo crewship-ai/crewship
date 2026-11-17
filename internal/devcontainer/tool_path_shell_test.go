@@ -83,6 +83,8 @@ func TestNativeToolPathOrderMatchesProfileForLegacyAndNew(t *testing.T) {
 	for _, base := range []string{
 		"/opt/mise/data/shims:/usr/bin:/opt/crew-tools/bin:/opt/feature/bin:/bin",
 		strings.Join(AgentToolPathDirs, ":") + ":/usr/bin:/opt/feature/bin:/bin",
+		"/opt/mise/data/shims:/home/agent/.local/bin:/usr/local/share/npm-global/bin:/usr/bin:/bin",
+		"/usr/local/share/npm-global/bin:/opt/mise/data/shims:/usr/bin:/usr/bin:/bin",
 	} {
 		for _, shell := range []string{"/bin/sh", "/bin/bash"} {
 			cmd := exec.Command(shell, "-c", AgentToolProfile()+`printf '%s' "$PATH"`)

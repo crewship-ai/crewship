@@ -594,7 +594,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		execEnv, err = crewstart.NativeToolExecEnv(r.Context(), h.container, containerName, execEnv)
 		if err != nil {
-			h.logger.Warn("terminal PATH inspection failed; using shared native fallback", "error", err)
+			h.logger.Warn("terminal PATH inspection failed; inheriting container PATH", "error", err)
 		}
 	}
 

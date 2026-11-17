@@ -8,6 +8,8 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/crewship-ai/crewship/internal/devcontainer"
 )
 
 // Container-side destinations for the two host artefacts a crew container
@@ -264,7 +266,11 @@ func buildCreateArgs(in createArgsInput) ([]string, error) {
 	}
 	sort.Strings(envKeys)
 	for _, k := range envKeys {
-		args = append(args, "--env", k+"="+in.containerEnv[k])
+		value := in.containerEnv[k]
+		if k == "PATH" {
+			value = devcontainer.NativeToolPath(value)
+		}
+		args = append(args, "--env", k+"="+value)
 	}
 
 	args = append(args, "--entrypoint", entrypointTargetPath)

@@ -56,7 +56,7 @@ func TestNativeToolExecEnvRepairsLegacyRuntime(t *testing.T) {
 		t.Fatal("mutated caller environment")
 	}
 }
-func TestNativeToolExecEnvFallsBackOnMetadataFailure(t *testing.T) {
+func TestNativeToolExecEnvInheritsOnInvalidMetadata(t *testing.T) {
 	for name, p := range map[string]*pathProbeContainer{
 		"timeout": {err: context.DeadlineExceeded}, "inspect": {err: errors.New("runtime overloaded")}, "oversize": {path: strings.Repeat("x", 32769)},
 		"nul": {path: "/bin\x00"}, "multiple lines": {path: "/bin\nUNRELATED=value"},
@@ -66,8 +66,8 @@ func TestNativeToolExecEnvFallsBackOnMetadataFailure(t *testing.T) {
 			if err == nil {
 				t.Fatal("missing diagnostic")
 			}
-			if len(env) != 3 || !strings.Contains(env[2], "/opt/crew-tools/bin") || !strings.Contains(env[2], "/opt/mise/data/shims") {
-				t.Fatalf("terminal lost native fallback: %v", env)
+			if !reflect.DeepEqual(env, []string{"TERM=xterm-256color", "HOME=/home/agent"}) {
+				t.Fatalf("terminal must inherit container PATH: %v", env)
 			}
 			if p.execCalls != 0 {
 				t.Fatal("metadata lookup executed a process")

@@ -379,7 +379,7 @@ func VerifyBinariesResolve(ctx context.Context, containerID string, bins []strin
 	}
 	search := strings.TrimSpace(pathValue)
 	if search == "" {
-		search = strings.Join(AgentToolPathDirs, ":") + ":${containerEnv:PATH}"
+		search = NativeToolPath("${containerEnv:PATH}")
 	}
 	search = strings.ReplaceAll(search, "${containerEnv:PATH}", "$PATH")
 	search = strings.ReplaceAll(search, "${PATH}", "$PATH")

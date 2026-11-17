@@ -12,8 +12,8 @@ import (
 
 // NativeToolExecEnv repairs only PATH from read-only runtime metadata. It
 // never starts a probe process or copies other container/run environment.
-// On inspection failure it returns the shared fallback AND a diagnostic:
-// callers can still open a terminal to inspect a degraded runtime.
+// On inspection failure it omits PATH and returns a diagnostic. Docker/Apple
+// exec then inherit the complete container environment, including feature paths.
 func NativeToolExecEnv(ctx context.Context, container provider.ContainerProvider, id string, env []string) ([]string, error) {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
@@ -37,5 +37,8 @@ func NativeToolExecEnv(ctx context.Context, container provider.ContainerProvider
 			out = append(out, item)
 		}
 	}
-	return append(out, "PATH="+devcontainer.NativeToolPath(path)), err
+	if err != nil {
+		return out, err
+	}
+	return append(out, "PATH="+devcontainer.NativeToolPath(path)), nil
 }

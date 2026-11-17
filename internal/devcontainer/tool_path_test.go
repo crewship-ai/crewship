@@ -12,15 +12,15 @@ func TestEnsureAgentToolPath(t *testing.T) {
 		want string
 	}{
 		{"nil env refers to the image's own PATH behind the tool dirs", nil,
-			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:${containerEnv:PATH}"},
+			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:${containerEnv:PATH}"},
 		{"empty PATH same as absent", map[string]string{"PATH": "  "},
-			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:${containerEnv:PATH}"},
+			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:${containerEnv:PATH}"},
 		{"operator PATH is kept, tool dirs go first", map[string]string{"PATH": "/opt/x/bin:/usr/bin"},
-			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/opt/x/bin:/usr/bin"},
-		{"already complete is untouched", map[string]string{"PATH": "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
-			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
-		{"partially present uses canonical native order", map[string]string{"PATH": "/opt/mise/data/shims:/usr/bin"},
-			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
+			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/opt/x/bin:/usr/bin"},
+		{"complete native entries retain their order", map[string]string{"PATH": "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
+			"/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
+		{"partially present entries retain precedence", map[string]string{"PATH": "/opt/mise/data/shims:/usr/bin"},
+			"/home/agent/.local/bin:/opt/crewship/bin:/opt/crew-tools/bin:/usr/local/py-utils/bin:/usr/local/share/npm-global/bin:/opt/mise/data/shims:/usr/bin"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
