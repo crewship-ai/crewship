@@ -118,6 +118,7 @@ func executionSchemaComponents() map[string]any {
 		"effective_version": map[string]any{"type": "integer", "nullable": true}, "version_pinned": boolean(),
 		"cron_expr": str(), "timezone": str(), "inputs": anyMap, "enabled": boolean(),
 		"last_run_at": timeString(), "last_status": str(), "last_run_id": str(), "next_run_at": timeString(),
+		"last_skip_reason": map[string]any{"type": "string", "readOnly": true, "enum": []string{"capacity", "catchup", "inactive", "busy"}, "description": "Cause recorded at the last skipped main occurrence; omitted when unknown (legacy) or after a non-skipped outcome. Not inferred from the routine's current lifecycle."},
 		"wake_pipeline_id": str(), "wake_pipeline_slug": str(), "wake_inputs": anyMap, "wake_fail_closed": boolean(),
 		"wake_check_count": integer(), "wake_fire_count": integer(), "last_wake_at": timeString(), "last_wake_status": str(),
 		"catchup_policy": str(), "last_missed_count": integer(),

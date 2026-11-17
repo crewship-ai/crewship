@@ -181,6 +181,7 @@ export interface TriggerScheduleInput {
   activation?: "draft"
   last_run_at?: string
   last_status?: string
+  last_skip_reason?: string
   last_missed_count?: number
 }
 

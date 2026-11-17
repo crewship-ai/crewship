@@ -214,3 +214,18 @@ describe("<RoutineTriggersTab>", () => {
     expect(screen.queryByRole("button", { name: "Add trigger" })).toBeNull()
   })
 })
+
+
+it.each([
+  ["capacity", "skipped: capacity"],
+  ["catchup", "skipped: catch-up"],
+  ["inactive", "skipped: routine inactive"],
+  ["busy", "skipped: previous run busy"],
+  [undefined, "skipped: reason unavailable"],
+  ["future_reason", "skipped: reason unavailable"],
+])("keeps recorded %s history in the mounted trigger row", (last_skip_reason, label) => {
+  h.schedules = [{ ...schedule, last_run_at: "2026-11-16T10:00:00Z", last_status: "SKIPPED", last_skip_reason, last_missed_count: 4 }]
+  const rows = routineTriggerRows({ slug: routine.slug, lifecycle: "disabled", schedules: h.schedules as never[], webhooks: [], automations: [] })
+  render(<RoutineTriggersTab workspaceId="ws" routine={routine} lifecycle="disabled" depth="simple" rows={rows} onOpenRun={vi.fn()} onSettings={vi.fn()} />)
+  expect(screen.getByTestId("routine-trigger-list")).toHaveTextContent(label)
+})

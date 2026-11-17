@@ -110,6 +110,12 @@ The request fields are:
 | `wake_inputs` | object | Inputs for the wake pipeline. |
 | `wake_fail_closed` | boolean | When true, a failed/non-affirmative wake check holds the scheduled run; the default is fail-open. |
 
+JSON field names match without regard to letter case, including PATCH
+presence checks for version pins and wake references. For example,
+`Target_Pipeline_Version: null` clears the pin just like
+`target_pipeline_version: null`; naming a wake reference validates its preset
+even while the schedule is disabled. Use the canonical field names above.
+
 PATCH uses merge semantics for omitted fields: omitted name, target, cron,
 timezone, inputs, enabled, wake, catch-up, and breaker settings are retained.
 Invalid JSON, an invalid cron or timezone, a missing target, an invalid
@@ -139,7 +145,7 @@ fields (nullable/empty telemetry fields are omitted when unset):
 `id`, `workspace_id`, `name`, `target_pipeline_id`, `target_pipeline_slug`,
 `target_pipeline_version`, `effective_version`, `version_pinned`, `cron_expr`,
 `timezone`, `inputs`, `enabled`,
-`last_run_at`, `last_status`, `last_run_id`, `next_run_at`, `wake_pipeline_id`,
+`last_run_at`, `last_status`, `last_skip_reason`, `last_run_id`, `next_run_at`, `wake_pipeline_id`,
 `wake_pipeline_slug`, `wake_inputs`, `wake_fail_closed`, `wake_check_count`,
 `wake_fire_count`, `last_wake_at`, `last_wake_status`, `catchup_policy`,
 `last_missed_count`, `consecutive_failures`, `max_consecutive_failures`,
@@ -151,7 +157,24 @@ there is one, otherwise the target routine's current head — and `null` when
 the target routine no longer exists. Both are always present, so a client can
 say "Uses latest (now v3)" or "Pinned to v2" without a second request.
 
-`last_status` can be `COMPLETED`, `FAILED`, `SKIPPED`, `WAITING`, or `DEDUPED`.
+`last_status` can be `COMPLETED`, `FAILED`, `SKIPPED`, `QUEUED`, `WAITING`, or
+`DEDUPED`. `last_skip_reason` is read-only history for the last `SKIPPED` fire:
+
+| Value | Why that occurrence was skipped |
+|---|---|
+| `capacity` | A capacity-queued occurrence was already waiting; this later occurrence was not added. |
+| `catchup` | Missed occurrences were dropped by the schedule's `skip` catch-up policy. |
+| `inactive` | The target routine was inactive when the occurrence was considered. |
+| `busy` | The previous run occupied the concurrency slot and the routine's policy was `skip`. |
+
+The reason is recorded with that fire's `last_run_at`; a catch-up skip records
+the time the scheduler observed the skip. Later non-skipped outcomes clear
+the reason. Renaming or enabling a schedule does not rewrite its history,
+and the target's current lifecycle does not describe its earlier skip.
+Older rows can omit the reason; clients show a neutral fallback for missing,
+empty or unrecognized values rather than infer one from `last_missed_count`.
+`QUEUED` describes admission at that fire, not whether the queued start is still
+waiting now.
 Wake telemetry uses `WOKE`, `SKIPPED`, `ERROR`, or `HELD`. A circuit breaker
 disables the schedule after its threshold and sets `disabled_reason` to
 `circuit_breaker`; operator-disabled schedules have an empty reason.

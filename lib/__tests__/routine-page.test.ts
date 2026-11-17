@@ -142,10 +142,14 @@ describe("the one list of triggers", () => {
     expect(detail({ last_run_at: "2026-10-15T06:00:00Z", last_status: "QUEUED" })).toBe(
       "Europe/Prague · next Thu 08:00 · if missed: run once · follows the published version · last fire Thu 08:00 · queued for capacity",
     )
-    expect(detail({ last_run_at: "2026-10-15T06:00:00Z", last_status: "SKIPPED", last_missed_count: 2 })).toMatch(/· skipped: capacity or catch-up$/)
-    // A busy skip on a routine disabled afterwards keeps both causes: the
-    // lifecycle now says nothing about the lifecycle when it fired.
-    expect(detail({ last_run_at: "2026-10-15T06:00:00Z", last_status: "SKIPPED", last_missed_count: 0 }, "disabled")).toMatch(/· skipped: previous run busy or routine inactive$/)
+    expect(detail({ last_run_at: "2026-10-15T06:00:00Z", last_status: "SKIPPED", last_missed_count: 2 })).toMatch(/· skipped: reason unavailable$/)
+    // A legacy row stays neutral after disable: today's lifecycle does
+    // not supply the cause of its earlier skip.
+    expect(detail({ last_run_at: "2026-10-15T06:00:00Z", last_status: "SKIPPED", last_missed_count: 0 }, "disabled")).toMatch(/· skipped: reason unavailable$/)
+    for (const lifecycle of ["active", "disabled"] as const) {
+      expect(detail({ last_run_at: "2026-10-15T06:00:00Z", last_status: "SKIPPED", last_skip_reason: "busy" }, lifecycle)).toMatch(/· skipped: previous run busy$/)
+      expect(detail({ last_run_at: "2026-10-15T06:00:00Z", last_status: "SKIPPED", last_skip_reason: "inactive" }, lifecycle)).toMatch(/· skipped: routine inactive$/)
+    }
     expect(detail({ last_status: "QUEUED" })).not.toMatch(/last fire/)
   })
 

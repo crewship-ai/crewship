@@ -42,17 +42,21 @@ type Schedule struct {
 	InputsJSON            string // raw JSON; parsed lazily at fire time
 	Enabled               bool
 	LastRunAt             *time.Time
-	// LastStatus is the outcome of the last main-routine fire:
+	// LastStatus is the outcome of the last main-routine occurrence:
 	//   COMPLETED — run finished successfully
 	//   FAILED    — run errored (a MANAGER inbox alert was raised)
-	//   SKIPPED   — target inactive, or capacity full with an occurrence already waiting
+	//   SKIPPED   — capacity, catch-up policy, inactive target or skip-when-busy
+	//   QUEUED    — an occurrence was accepted to wait for capacity
 	//   WAITING   — run parked on a human approval gate (healthy,
 	//               non-terminal; resumes when the approval lands)
 	//   DEDUPED   — a re-fire of the same occurrence hit the idempotency
 	//               chokepoint; the original run owns the result (healthy)
 	LastStatus string
-	LastRunID  string
-	NextRunAt  *time.Time
+	// LastSkipReason describes that historical SKIPPED outcome. Empty means
+	// unknown (legacy), and every later main outcome replaces or clears it.
+	LastSkipReason string
+	LastRunID      string
+	NextRunAt      *time.Time
 
 	// Wake gate. When WakePipelineID is set, each cron tick first
 	// runs that (agentless — enforced at API save time) probe
@@ -137,6 +141,15 @@ type Schedule struct {
 	UpdatedAt time.Time
 	DeletedAt *time.Time
 }
+
+// Historical main-schedule skip causes (#4490). Separate from wake telemetry,
+// artifact standing reasons and the routine's current lifecycle.
+const (
+	ScheduleSkipCapacity = "capacity"
+	ScheduleSkipCatchup  = "catchup"
+	ScheduleSkipInactive = "inactive"
+	ScheduleSkipBusy     = "busy"
+)
 
 // Schedule creator kinds (pipeline_schedules.creator_kind, #5339).
 const (
@@ -871,6 +884,14 @@ ORDER BY next_run_at ASC`,
 // fire increments it. SKIPPED / WAITING / DEDUPED are non-terminal or
 // healthy-but-not-a-success outcomes and leave the counter untouched.
 func (s *ScheduleStore) recordRun(ctx context.Context, scheduleID, runID, status string, nextRun time.Time, missedCount int) error {
+	return s.recordOutcome(ctx, scheduleID, runID, status, "", nextRun, missedCount)
+}
+
+func (s *ScheduleStore) recordSkippedRun(ctx context.Context, scheduleID, reason string, nextRun time.Time, missedCount int) error {
+	return s.recordOutcome(ctx, scheduleID, "", "SKIPPED", reason, nextRun, missedCount)
+}
+
+func (s *ScheduleStore) recordOutcome(ctx context.Context, scheduleID, runID, status, skipReason string, nextRun time.Time, missedCount int) error {
 	now := tsformat.Format(time.Now())
 	var counterSQL string
 	switch status {
@@ -881,27 +902,19 @@ func (s *ScheduleStore) recordRun(ctx context.Context, scheduleID, runID, status
 	}
 	_, err := s.db.ExecContext(ctx, `
 UPDATE pipeline_schedules
-SET last_run_at = ?, last_status = ?, last_run_id = ?, next_run_at = ?, last_missed_count = ?, updated_at = ?`+counterSQL+`
+SET last_run_at = ?, last_status = ?, last_skip_reason = ?, last_run_id = ?, next_run_at = ?, last_missed_count = ?, updated_at = ?`+counterSQL+`
 WHERE id = ?`,
-		now, status, nullStr(runID), tsformat.Format(nextRun), missedCount, now, scheduleID,
+		now, status, skipReason, nullStr(runID), tsformat.Format(nextRun), missedCount, now, scheduleID,
 	)
 	return err
 }
 
-// recordCatchupSkip persists a catchup_policy='skip' tick that dropped an
-// entire overdue backlog without firing anything: next_run_at advances,
-// last_missed_count records the drop, and last_run_* is left untouched
-// (no run happened) — the same convention the wake gate's SKIPPED tick
-// uses (recordWakeCheck with advanceNext=true).
+// recordCatchupSkip records a skipped main occurrence with its own time and
+// no run link. Retaining the previous execution's time or ID would pair the
+// new SKIPPED outcome with unrelated historical work. Wake-only checks retain
+// their separate main-run telemetry convention in recordWakeCheck.
 func (s *ScheduleStore) recordCatchupSkip(ctx context.Context, scheduleID string, missedCount int, nextRun time.Time) error {
-	now := tsformat.Format(time.Now())
-	_, err := s.db.ExecContext(ctx, `
-UPDATE pipeline_schedules
-SET last_status = 'SKIPPED', next_run_at = ?, last_missed_count = ?, updated_at = ?
-WHERE id = ?`,
-		tsformat.Format(nextRun), missedCount, now, scheduleID,
-	)
-	return err
+	return s.recordSkippedRun(ctx, scheduleID, ScheduleSkipCatchup, nextRun, missedCount)
 }
 
 // disableForCircuitBreaker disables a schedule and stamps
@@ -1495,7 +1508,7 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 	if SkipsStartWhenBusy(pipeline.DefinitionJSON, runErr) {
 		s.logger.Info("pipeline scheduler: skipping start, the previous run is still going",
 			"schedule", sched.ID, "pipeline", pipeline.Slug)
-		if err := s.store.recordRun(ctx, sched.ID, "", "SKIPPED", nextRun, missedCount); err != nil {
+		if err := s.store.recordSkippedRun(ctx, sched.ID, ScheduleSkipBusy, nextRun, missedCount); err != nil {
 			s.logger.Warn("pipeline scheduler: record skipped run", "error", err)
 		}
 		return true
@@ -1517,7 +1530,7 @@ func (s *PipelineScheduler) fireSingleOccurrence(ctx context.Context, sched *Sch
 	if errors.Is(runErr, ErrRoutineNotActive) {
 		s.logger.Info("pipeline scheduler: skipping non-active routine",
 			"schedule", sched.ID, "pipeline", pipeline.Slug, "reason", runErr)
-		if err := s.store.recordRun(ctx, sched.ID, "", "SKIPPED", nextRun, missedCount); err != nil {
+		if err := s.store.recordSkippedRun(ctx, sched.ID, ScheduleSkipInactive, nextRun, missedCount); err != nil {
 			s.logger.Warn("pipeline scheduler: record skipped run", "error", err)
 		}
 		return true
@@ -1827,7 +1840,7 @@ func (s *PipelineScheduler) runWakeCheck(ctx context.Context, sched *Schedule) (
 const scheduleSelect = `
 SELECT id, workspace_id, name, target_pipeline_id, target_pipeline_version,
        cron_expr, timezone, inputs_json, enabled,
-       last_run_at, COALESCE(last_status, ''), COALESCE(last_run_id, ''),
+       last_run_at, COALESCE(last_status, ''), last_skip_reason, COALESCE(last_run_id, ''),
        next_run_at,
        COALESCE(wake_pipeline_id, ''), COALESCE(wake_inputs_json, '{}'),
        wake_check_count, wake_fire_count,
@@ -1858,7 +1871,7 @@ func scanSchedule(rs rowScanner) (*Schedule, error) {
 	err := rs.Scan(
 		&s.ID, &s.WorkspaceID, &s.Name, &s.TargetPipelineID, &targetVersion,
 		&s.CronExpr, &s.Timezone, &s.InputsJSON, &enabled,
-		&lastRunAt, &s.LastStatus, &s.LastRunID,
+		&lastRunAt, &s.LastStatus, &s.LastSkipReason, &s.LastRunID,
 		&nextRunAt,
 		&s.WakePipelineID, &s.WakeInputsJSON,
 		&s.WakeCheckCount, &s.WakeFireCount,
@@ -1944,6 +1957,7 @@ func (s *PipelineScheduler) queueScheduledOccurrence(ctx context.Context, sched 
 	}
 	confirmedRunID := ""
 	status := "QUEUED"
+	skipReason := ""
 	if existing == nil {
 		now := s.now().UTC()
 		// Include a claimed but not yet linked start, so dispatch cannot open a
@@ -1961,6 +1975,7 @@ WHERE workspace_id=? AND triggered_via=? AND triggered_by_id=?
 		}
 		if waiting {
 			status = "SKIPPED"
+			skipReason = ScheduleSkipCapacity
 			missedCount++ // The current occurrence, in addition to catch-up misses.
 		} else {
 			expires := now.Add(time.Hour)
@@ -1981,10 +1996,10 @@ WHERE workspace_id=? AND triggered_via=? AND triggered_by_id=?
 	now := tsformat.Format(s.now())
 	cursor := tsformat.Format(nextRun)
 	result, err := tx.ExecContext(ctx, `UPDATE pipeline_schedules
-SET last_run_at=?,last_status=?,last_run_id=?,
+SET last_run_at=?,last_status=?,last_skip_reason=?,last_run_id=?,
     next_run_at=CASE WHEN next_run_at IS NULL OR next_run_at < ? THEN ? ELSE next_run_at END,
     last_missed_count=?,updated_at=?
-WHERE workspace_id=? AND id=? AND deleted_at IS NULL`, now, status, nullStr(confirmedRunID), cursor, cursor, missedCount, now, sched.WorkspaceID, sched.ID)
+WHERE workspace_id=? AND id=? AND deleted_at IS NULL`, now, status, skipReason, nullStr(confirmedRunID), cursor, cursor, missedCount, now, sched.WorkspaceID, sched.ID)
 	if err != nil {
 		return err
 	}

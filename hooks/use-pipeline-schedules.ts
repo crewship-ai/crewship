@@ -31,6 +31,8 @@ export interface PipelineSchedule {
   enabled: boolean
   last_run_at?: string
   last_status?: string
+  /** Recorded cause of the last SKIPPED fire; unknown values retain a neutral label. */
+  last_skip_reason?: string
   last_run_id?: string
   next_run_at?: string
   created_at: string

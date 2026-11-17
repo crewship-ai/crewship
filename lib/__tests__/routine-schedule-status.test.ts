@@ -3,36 +3,39 @@ import { scheduleLastStatusLabel } from "@/lib/routine-schedule-status"
 
 describe("scheduleLastStatusLabel", () => {
   it.each([
-    ["QUEUED", undefined, "queued for capacity"],
-    ["QUEUED", 2, "queued for capacity"],
-    ["SKIPPED", 1, "skipped: capacity or catch-up"],
-    ["SKIPPED", 3, "skipped: capacity or catch-up"], // also a busy skip with a catch-up backlog
-    ["SKIPPED", 0, "skipped: previous run busy or routine inactive"],
-    ["SKIPPED", undefined, "skipped: previous run busy or routine inactive"],
-    ["COMPLETED", undefined, "COMPLETED"],
-    ["FAILED", 1, "FAILED"],
-    ["WAITING", undefined, "WAITING"],
-  ] as const)("reads %s with last_missed_count=%s as %s", (last_status, last_missed_count, label) => {
-    expect(scheduleLastStatusLabel({ last_status, last_missed_count })).toBe(label)
+    ["capacity", "skipped: capacity"],
+    ["catchup", "skipped: catch-up"],
+    ["inactive", "skipped: routine inactive"],
+    ["busy", "skipped: previous run busy"],
+  ])("reads the recorded %s skip independently of backlog", (last_skip_reason, label) => {
+    for (const last_missed_count of [undefined, 0, 4]) {
+      expect(scheduleLastStatusLabel({ last_status: "SKIPPED", last_skip_reason, last_missed_count })).toBe(label)
+    }
+  })
+
+  it.each([undefined, "", "future_reason", "constructor", "__proto__"])("does not invent a missing or unknown cause (%s)", last_skip_reason => {
+    for (const last_missed_count of [undefined, 0, 4]) {
+      expect(scheduleLastStatusLabel({ last_status: "SKIPPED", last_skip_reason, last_missed_count })).toBe("skipped: reason unavailable")
+    }
+  })
+
+  it.each([
+    ["QUEUED", "queued for capacity"],
+    ["COMPLETED", "COMPLETED"],
+    ["FAILED", "FAILED"],
+    ["WAITING", "WAITING"],
+  ])("keeps %s independent of stale skip metadata", (last_status, label) => {
+    expect(scheduleLastStatusLabel({ last_status, last_skip_reason: "busy" })).toBe(label)
   })
 
   it("never claims a run is waiting now", () => {
-    // Catch-up after downtime records SKIPPED with the backlog as
-    // last_missed_count, exactly like a capacity skip (#3791), and a QUEUED
-    // fire is not updated when its start later runs or expires.
-    for (const s of [{ last_status: "SKIPPED", last_missed_count: 4 }, { last_status: "QUEUED" }]) {
+    for (const s of [{ last_status: "SKIPPED", last_skip_reason: "capacity" }, { last_status: "QUEUED" }]) {
       expect(scheduleLastStatusLabel(s)).not.toMatch(/waiting/i)
     }
   })
 
-  it("never names an uncounted skip's cause outright", () => {
-    // concurrency_policy: skip drops a busy tick as SKIPPED with no count,
-    // and a routine disabled afterwards was still active when it skipped.
-    expect(scheduleLastStatusLabel({ last_status: "SKIPPED", last_missed_count: 0 })).toMatch(/busy/)
-  })
-
   it("shows nothing for a schedule that never fired", () => {
     expect(scheduleLastStatusLabel({})).toBeUndefined()
-    expect(scheduleLastStatusLabel({ last_status: "" })).toBeUndefined()
+    expect(scheduleLastStatusLabel({ last_status: "", last_skip_reason: "busy" })).toBeUndefined()
   })
 })
