@@ -22,6 +22,9 @@ import (
 // connection; it is never printed or supplied to the container.
 // CREWSHIP_NATIVE_TOOLS_PROFILE and CREWSHIP_NATIVE_TOOLS_CREW_ID are required.
 // Optional CREWSHIP_NATIVE_TOOLS_CLAUDE_PATH checks terminal/routine lookup parity.
+// CREWSHIP_NATIVE_TOOLS_BUILD_COMMIT can bind the receipt to a deployed build.
+// CREWSHIP_NATIVE_TOOLS_INHERITED_PROBES=1 checks feature/sbin tools on a
+// dedicated fixture whose oversized metadata must leave PATH inherited.
 // CREWSHIP_NATIVE_TOOLS_GLAB_VERSION asserts every observed selection
 // (terminal, child, login and zsh) against the declared version after an update.
 func TestNativeToolsLiveTerminal(t *testing.T) {
@@ -42,6 +45,26 @@ func TestNativeToolsLiveTerminal(t *testing.T) {
 		t.Fatal("live gate accepts only an explicit local dev server")
 	}
 	client := cli.NewClient(p.Server, p.Token, p.Workspace)
+	observeBuild := func() string {
+		r, err := client.Get("/api/v1/system/version")
+		if err != nil {
+			t.Fatal("request deployed build identity failed")
+		}
+		defer r.Body.Close()
+		var build struct {
+			Commit    string `json:"commit"`
+			BuildTime string `json:"build_time"`
+		}
+		if r.StatusCode != http.StatusOK || json.NewDecoder(io.LimitReader(r.Body, 16384)).Decode(&build) != nil || build.Commit == "" {
+			t.Fatal("deployed build identity required")
+		}
+		t.Logf("SERVER_BUILD:%s BUILD_TIME:%s", build.Commit, build.BuildTime)
+		if want := os.Getenv("CREWSHIP_NATIVE_TOOLS_BUILD_COMMIT"); want != "" && want != build.Commit {
+			t.Fatalf("server build %s != requested %s", build.Commit, want)
+		}
+		return build.Commit
+	}
+	initialBuild := observeBuild()
 	response, err := client.Get("/api/v1/ws-token")
 	if err != nil {
 		t.Fatal("request terminal ticket failed")
@@ -89,6 +112,19 @@ code=$?; printf 'LOGIN_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
 if command -v zsh >/dev/null; then zsh -c 'glab --version && codex --version && claude --version'; code=$?; printf 'ZSH_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1; fi
 printf '\nNATIVE_DONE:%s\n' "$fail"; exit "$fail"
 `
+	if os.Getenv("CREWSHIP_NATIVE_TOOLS_INHERITED_PROBES") == "1" {
+		probes := `printf 'INHERITED_PATH_BYTES:%s\n' "${#PATH}"
+for probe in eslint ldconfig; do
+  resolved=$(command -v "$probe"); code=$?
+  printf 'INHERITED_TOOL_PATH:%s:%s\n' "$probe" "$resolved"
+  test "$code" -eq 0 || fail=1
+  "$probe" --version
+  code=$?; printf 'INHERITED_TOOL_STATUS:%s:%s\n' "$probe" "$code"
+  test "$code" -eq 0 || fail=1
+done
+`
+		script = strings.Replace(script, "glab --version\n", probes+"glab --version\n", 1)
+	}
 	if err := c.WriteMessage(websocket.BinaryMessage, []byte("{\n"+script+"}\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -144,6 +180,9 @@ printf '\nNATIVE_DONE:%s\n' "$fail"; exit "$fail"
 						t.Fatalf("glab selected %s, declared %s", version[1], expected)
 					}
 				}
+			}
+			if finalBuild := observeBuild(); finalBuild != initialBuild {
+				t.Fatalf("deployment changed during live test: %s -> %s", initialBuild, finalBuild)
 			}
 			break
 		}

@@ -55,11 +55,15 @@ func TestNativePathRuntimeTerminalCollisionParity(t *testing.T) {
 		}
 		var observed []string
 		for _, path := range []string{runtime, terminal} {
-			for dir := range locations {
-				path = strings.ReplaceAll(path, dir, filepath.Join(root, dir))
+			// Materialize every container directory under the fixture root,
+			// including empty home/feature dirs. A host-installed executable
+			// must never shadow the two synthetic collision candidates.
+			parts := strings.Split(path, ":")
+			for i, dir := range parts {
+				parts[i] = filepath.Join(root, dir)
 			}
 			cmd := exec.Command("/bin/sh", "-c", "command -v claude && claude --version")
-			cmd.Env = []string{"PATH=" + path}
+			cmd.Env = []string{"PATH=" + strings.Join(parts, ":")}
 			out, err := cmd.CombinedOutput()
 			if err != nil {
 				t.Fatalf("fixture lookup: %v %s", err, out)
@@ -68,6 +72,16 @@ func TestNativePathRuntimeTerminalCollisionParity(t *testing.T) {
 		}
 		if observed[0] != observed[1] {
 			t.Errorf("runtime and terminal chose different fixture binaries:\n%s\n%s", observed[0], observed[1])
+		}
+		wantDir := "/opt/mise/data/shims"
+		if strings.Index(input, "/usr/local/share/npm-global/bin") < strings.Index(input, wantDir) {
+			wantDir = "/usr/local/share/npm-global/bin"
+		}
+		want := filepath.Join(root, wantDir, "claude") + "\n" + locations[wantDir] + "\n"
+		for _, actual := range observed {
+			if actual != want {
+				t.Errorf("existing operator precedence changed: got %q, want %q", actual, want)
+			}
 		}
 	}
 }
