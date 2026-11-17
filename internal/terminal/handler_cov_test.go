@@ -69,15 +69,17 @@ func (m *covContainer) ContainerStatus(_ context.Context, id string) (*provider.
 func (m *covContainer) ContainerStats(context.Context, string) (*provider.ContainerMetrics, error) {
 	return nil, nil
 }
+func (m *covContainer) ContainerPath(context.Context, string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.nativePath, m.inspectErr
+}
 func (m *covContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.execCalls = append(m.execCalls, cfg)
 	if m.execErr != nil {
 		return nil, m.execErr
-	}
-	if len(cfg.Cmd) == 3 && cfg.Cmd[0] == "/bin/sh" && cfg.Cmd[2] == `printf '%s' "$PATH"` {
-		return &provider.ExecResult{ExecID: "exec-native-path", Reader: io.NopCloser(strings.NewReader(m.nativePath))}, nil
 	}
 	if len(cfg.Cmd) > 1 && cfg.Cmd[0] == "tmux" && cfg.Cmd[1] == "list-sessions" {
 		return &provider.ExecResult{
@@ -721,4 +723,33 @@ func TestServeHTTP_SlugSpoofRejected(t *testing.T) {
 
 	conn.Close()
 	<-done
+}
+
+func TestServeHTTP_PathInspectFailureStillOpensTerminal(t *testing.T) {
+	v := newTestValidator(t)
+	db := seedTerminalDB(t)
+	serverSide, testSide := net.Pipe()
+	defer testSide.Close()
+	im := &covInteractive{covContainer: &covContainer{states: []string{"running"}, inspectErr: errors.New("runtime overloaded")}, conn: serverSide}
+	h := New(im, v, db, silentLogger(), nil)
+	conn, done := dialTerminalDone(t, h)
+	authAndInit(t, conn, v, map[string]any{"crew_id": "c1", "crew_slug": "crew-a"})
+	conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+	go func() {
+		testSide.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		_, _ = testSide.Write([]byte("fallback shell ready"))
+	}()
+	if got := readBinaryFrame(t, conn); string(got) != "fallback shell ready" {
+		t.Fatalf("fallback did not open: %q", got)
+	}
+	cfg := im.config()
+	if cfg == nil || len(cfg.Env) != 3 || !strings.Contains(cfg.Env[2], "/opt/crew-tools/bin") || !strings.Contains(cfg.Env[2], "/opt/mise/data/shims") {
+		t.Fatalf("missing shared fallback: %+v", cfg)
+	}
+	conn.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("terminal failed to close")
+	}
 }

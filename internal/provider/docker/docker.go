@@ -2101,6 +2101,18 @@ func (p *Provider) ContainerIP(ctx context.Context, containerID, network string)
 	return net.IPAddress.String(), nil
 }
 
+// ContainerPath returns only PATH from immutable container configuration.
+func (p *Provider) ContainerPath(ctx context.Context, id string) (string, error) {
+	inspected, err := p.client.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	if err != nil {
+		return "", fmt.Errorf("inspect container PATH: %w", err)
+	}
+	if inspected.Container.Config == nil {
+		return "", fmt.Errorf("inspect container PATH: missing config")
+	}
+	return envValue(inspected.Container.Config.Env, "PATH"), nil
+}
+
 // ContainerUser returns the container's configured run-as user — the
 // Config.User set when the container was created (e.g. "1001:1001", the agent
 // user). Keeper uses this to run a credential-injected command as the same

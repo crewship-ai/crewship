@@ -19,8 +19,8 @@ func TestEnsureAgentToolPath(t *testing.T) {
 			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/opt/x/bin:/usr/bin"},
 		{"already complete is untouched", map[string]string{"PATH": "/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
 			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
-		{"partially present adds only the missing dirs", map[string]string{"PATH": "/opt/mise/data/shims:/usr/bin"},
-			"/home/agent/.local/bin:/opt/crewship/bin:/opt/crew-tools/bin:/opt/mise/data/shims:/usr/bin"},
+		{"partially present uses canonical native order", map[string]string{"PATH": "/opt/mise/data/shims:/usr/bin"},
+			"/home/agent/.local/bin:/opt/crewship/bin:/opt/mise/data/shims:/opt/crew-tools/bin:/usr/bin"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

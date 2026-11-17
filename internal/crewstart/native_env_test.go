@@ -5,7 +5,6 @@ package crewstart
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -18,23 +17,19 @@ import (
 
 type pathProbeContainer struct {
 	provider.ContainerProvider
-	path       string
-	code       int
-	running    bool
-	err        error
-	inspectErr error
-	got        provider.ExecConfig
+	path        string
+	err         error
+	inspectedID string
+	execCalls   int
 }
 
-func (p *pathProbeContainer) Exec(_ context.Context, cfg provider.ExecConfig) (*provider.ExecResult, error) {
-	p.got = cfg
-	if p.err != nil {
-		return nil, p.err
-	}
-	return &provider.ExecResult{ExecID: "path-probe", Reader: io.NopCloser(strings.NewReader(p.path))}, nil
+func (p *pathProbeContainer) ContainerPath(_ context.Context, id string) (string, error) {
+	p.inspectedID = id
+	return p.path, p.err
 }
-func (p *pathProbeContainer) ExecInspect(context.Context, string) (bool, int, error) {
-	return p.running, p.code, p.inspectErr
+func (p *pathProbeContainer) Exec(context.Context, provider.ExecConfig) (*provider.ExecResult, error) {
+	p.execCalls++
+	return nil, errors.New("must not exec to read PATH")
 }
 
 func TestNativeToolExecEnvRepairsLegacyRuntime(t *testing.T) {
@@ -54,22 +49,28 @@ func TestNativeToolExecEnvRepairsLegacyRuntime(t *testing.T) {
 			t.Errorf("lost or duplicated inherited/native path %s: %s", dir, path)
 		}
 	}
-	if p.got.User != "1001:1001" || len(p.got.Env) != 0 || !reflect.DeepEqual(p.got.Cmd, []string{"/bin/sh", "-c", `printf '%s' "$PATH"`}) {
-		t.Fatalf("probe must read PATH only, without a run env: %+v", p.got)
+	if p.execCalls != 0 || p.inspectedID != "legacy-runtime" {
+		t.Fatalf("expected metadata only, got %d execs, inspect=%q", p.execCalls, p.inspectedID)
 	}
 	if len(input) != 2 {
 		t.Fatal("mutated caller environment")
 	}
 }
-func TestNativeToolExecEnvRejectsIncompleteProbe(t *testing.T) {
+func TestNativeToolExecEnvFallsBackOnMetadataFailure(t *testing.T) {
 	for name, p := range map[string]*pathProbeContainer{
-		"exec": {err: errors.New("transport")}, "inspect": {inspectErr: errors.New("inspect")},
-		"running": {running: true}, "failed": {code: 1}, "oversize": {path: strings.Repeat("x", 32769)},
+		"timeout": {err: context.DeadlineExceeded}, "inspect": {err: errors.New("runtime overloaded")}, "oversize": {path: strings.Repeat("x", 32769)},
 		"nul": {path: "/bin\x00"}, "multiple lines": {path: "/bin\nUNRELATED=value"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			if _, err := NativeToolExecEnv(context.Background(), p, "legacy", nil); err == nil {
-				t.Fatal("accepted incomplete PATH probe")
+			env, err := NativeToolExecEnv(context.Background(), p, "legacy", []string{"TERM=xterm-256color", "HOME=/home/agent"})
+			if err == nil {
+				t.Fatal("missing diagnostic")
+			}
+			if len(env) != 3 || !strings.Contains(env[2], "/opt/crew-tools/bin") || !strings.Contains(env[2], "/opt/mise/data/shims") {
+				t.Fatalf("terminal lost native fallback: %v", env)
+			}
+			if p.execCalls != 0 {
+				t.Fatal("metadata lookup executed a process")
 			}
 		})
 	}

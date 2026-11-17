@@ -78,3 +78,22 @@ test "$MISE_CEILING_PATHS" = / || exit 19
 		t.Fatalf("project WORKDIR leaked into global readiness: %v %s", err, out)
 	}
 }
+
+func TestNativeToolPathOrderMatchesProfileForLegacyAndNew(t *testing.T) {
+	for _, base := range []string{
+		"/opt/mise/data/shims:/usr/bin:/opt/crew-tools/bin:/opt/feature/bin:/bin",
+		strings.Join(AgentToolPathDirs, ":") + ":/usr/bin:/opt/feature/bin:/bin",
+	} {
+		for _, shell := range []string{"/bin/sh", "/bin/bash"} {
+			cmd := exec.Command(shell, "-c", AgentToolProfile()+`printf '%s' "$PATH"`)
+			cmd.Env = []string{"PATH=" + base}
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("%s: %v %s", shell, err, out)
+			}
+			if string(out) != NativeToolPath(base) {
+				t.Fatalf("profile/runtime order differs: %q != %q", out, NativeToolPath(base))
+			}
+		}
+	}
+}
