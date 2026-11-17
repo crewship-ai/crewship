@@ -373,9 +373,11 @@ func (o *Orchestrator) StopRunAt(ctx context.Context, location RunLocation) (boo
 			// surfaces as an identity error. As on the tmux path below, an
 			// authoritative container inspect settles it; any other inspect
 			// failure stays an error.
-			if absent, inspectErr := o.containerRuntimeAbsent(ctx, containerID); inspectErr == nil && absent {
+			absent, inspectErr := o.containerRuntimeAbsent(ctx, containerID)
+			if inspectErr == nil && absent {
 				return true, nil
 			}
+			return false, errors.Join(err, inspectErr)
 		}
 		return stopped, err
 	}

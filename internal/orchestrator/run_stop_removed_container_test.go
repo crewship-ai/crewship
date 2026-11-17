@@ -38,17 +38,18 @@ func (c *removedContainerStatus) ContainerStatus(context.Context, string) (*prov
 // run whose probe fails, whichever step of the probe fails.
 func TestStopRunAtHostRunRemovedContainerIsStopped(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		state    string
-		status   error
-		wantStop bool
-		wantErr  bool
+		name        string
+		state       string
+		status      error
+		wantStop    bool
+		wantErr     bool
+		wantRefusal error
 	}{
-		{"removed container", "", provider.ErrContainerNotFound, true, false},
-		{"stopped container", "stopped", nil, true, false},
-		{"dead container", "error", nil, true, false},
-		{"unknown state is no proof", "paused", nil, false, true},
-		{"inspect unavailable", "", errors.New("daemon unreachable"), false, true},
+		{"removed container", "", provider.ErrContainerNotFound, true, false, nil},
+		{"stopped container", "stopped", nil, true, false, nil},
+		{"dead container", "error", nil, true, false, nil},
+		{"unknown state is no proof", "paused", nil, false, true, nil},
+		{"inspect unavailable", "", errors.New("daemon unreachable"), false, true, ErrRuntimeUnavailable},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
@@ -69,6 +70,12 @@ func TestStopRunAtHostRunRemovedContainerIsStopped(t *testing.T) {
 			stopped, err := o.StopRunAt(t.Context(), RunLocation{ContainerID: run.ContainerID, AgentSlug: "agent", RunID: run.ID})
 			if stopped != tc.wantStop || (err != nil) != tc.wantErr {
 				t.Fatalf("stopped=%v err=%v, want stopped=%v err=%v", stopped, err, tc.wantStop, tc.wantErr)
+			}
+			if tc.wantRefusal != nil {
+				refusal := classifyStopRefusal([]error{err})
+				if !errors.Is(refusal, tc.wantRefusal) || errors.Is(refusal, ErrStopNotConfirmed) {
+					t.Fatalf("refusal=%v, want only %v", refusal, tc.wantRefusal)
+				}
 			}
 		})
 	}
