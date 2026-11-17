@@ -6,7 +6,9 @@ import {
   OpenCodeIcon,
   CursorIcon,
   FactoryIcon,
+  AWSIcon,
 } from "@/components/icons/provider-icons"
+import { BEDROCK_MODEL_PREFIX, bedrockModelLabel } from "@/lib/credentials/bedrock"
 import { ZAIIcon } from "@/lib/credential-providers/grok-groq-icons"
 import type { ComponentType, SVGProps } from "react"
 import { adapterDefaultModel, adapterModels, catalogModelLabel } from "@/lib/model-catalog"
@@ -194,7 +196,7 @@ export function getProviderLabel(provider: string): string {
     OPENCODE: "OpenCode Zen",
     OPENCODE_GO: "OpenCode Go",
     ZAI_CODING_PLAN: "Z.AI Coding Plan",
- AWS_BEDROCK: "Amazon Bedrock",
+    AWS_BEDROCK: "Amazon Bedrock",
     NONE: "--",
   }
   return labels[provider] ?? provider
@@ -217,6 +219,9 @@ export function getModelLabel(value: string): string {
   // Provider rows and aliases come first: claude-sonnet-4-6 is also an
   // adapter row under Cursor with a "(Cursor)" suffix, and an existing Claude
   // Code workspace on that model briefly read "Claude Sonnet 4.6 (Cursor)".
+  // Bedrock ids are an account's allowlist, not catalog rows; their name is
+  // read off the id ("amazon-bedrock/eu.anthropic.claude-opus-5-5" → "Claude Opus 5.5 · EU").
+  if (value.startsWith(BEDROCK_MODEL_PREFIX)) return bedrockModelLabel(value)
   return catalogModelLabel(value) ?? value
 }
 
@@ -227,5 +232,6 @@ export function getModelLabel(value: string): string {
 export function getProviderIcon(provider: string): ComponentType<SVGProps<SVGSVGElement>> {
   if (provider === "OPENCODE" || provider === "OPENCODE_GO") return OpenCodeIcon
   if (provider === "ZAI_CODING_PLAN") return ZAIIcon
+  if (provider === "AWS_BEDROCK") return AWSIcon
   return CLI_ADAPTERS[Object.keys(CLI_ADAPTERS).find((k) => CLI_ADAPTERS[k].provider === provider) ?? ""]?.icon ?? AnthropicIcon
 }
