@@ -546,7 +546,7 @@ expect_osv() {
     '"$OSV_RUN_SRC" > "$OSV_TMP/result" 2>&1
   rc=$?
   args="$(cat "$OSV_TMP/args" 2>/dev/null)"
-  if [ "$args" != $'--lockfile=go.mod\n--lockfile=pnpm-lock.yaml\n--lockfile=tools/pages-build/pnpm-lock.yaml' ]; then
+  if [ "$args" != $'--config=osv-scanner.toml\n--lockfile=go.mod\n--lockfile=pnpm-lock.yaml\n--lockfile=tools/pages-build/pnpm-lock.yaml' ]; then
     fail "$label (scanner missing, lockfiles changed, or analysis disabled)"
   elif [ "$rc" -ne "$want" ]; then
     fail "$label (want gate exit $want, got $rc)"
@@ -571,6 +571,27 @@ expect_osv "unparseable findings -> fail" 1 1 'unexpected output format'
 expect_osv "SSA panic after valid low summary -> fail" 1 2 \
   "$OSV_MEDIUM"$'\npanic: unexpected expr: *ast.KeyValueExpr'
 expect_osv "network error after valid low summary -> fail" 1 129 "$OSV_MEDIUM"
+
+echo
+echo "OSV exceptions (osv-scanner.toml) are time-boxed and justified:"
+# Each [[IgnoredVulns]] entry needs an id, a reason and an ignoreUntil date,
+# so an exception can never silently become permanent.
+osv_exceptions="$(awk '
+  /^\[\[IgnoredVulns\]\]/ { if (n) print id "|" reason "|" until; n++; id = reason = until = ""; next }
+  /^id *=/ { id = $0 } /^reason *=/ { reason = $0 } /^ignoreUntil *=/ { until = $0 }
+  END { if (n) print id "|" reason "|" until }
+' osv-scanner.toml)"
+if [ -z "$osv_exceptions" ]; then
+  pass "no exceptions"
+else
+  while IFS='|' read -r id reason until; do
+    if [ -z "$id" ] || [ -z "$reason" ] || [ -z "$until" ]; then
+      fail "exception without id, reason or ignoreUntil: ${id:-<no id>}"
+    else
+      pass "${id#id = }"
+    fi
+  done <<< "$osv_exceptions"
+fi
 
 echo
 if [ "$FAILURES" -eq 0 ]; then

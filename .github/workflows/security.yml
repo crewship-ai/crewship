@@ -87,6 +87,7 @@ jobs:
               - '**/package.json'
               - '**/pnpm-lock.yaml'
               - '**/pnpm-workspace.yaml'
+              - 'osv-scanner.toml'
 
   # ── Secret scan: gitleaks ──
   # Uses the gitleaks CLI binary directly (free, MIT licensed) instead of
@@ -410,10 +411,16 @@ jobs:
       # this promotion is meant to fix, just moved from warn-only to
       # everyone-ignores-a-perma-red-check. A NEW Critical/High still fails
       # the build immediately, which is the point.
+      #
+      # Exceptions live in osv-scanner.toml, each with a reason and an
+      # ignoreUntil date after which it blocks again. --config applies the
+      # root file to every lockfile; without it osv-scanner reads only the
+      # config next to each lockfile, so tools/pages-build would ignore it.
       - name: Run osv-scanner against lockfiles
         run: |
           set +e
           osv-scanner \
+            --config=osv-scanner.toml \
             --lockfile=go.mod \
             --lockfile=pnpm-lock.yaml \
             --lockfile=tools/pages-build/pnpm-lock.yaml \

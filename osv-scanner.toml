@@ -1,0 +1,21 @@
+# OSV Scanner exceptions (.github/workflows/security.yml, job osv-scan).
+#
+# Every entry is time-boxed: when ignoreUntil passes, the advisory blocks the
+# gate again. Extend only with a fresh justification; remove the entry once a
+# fixed version is in the lockfiles.
+
+[[IgnoredVulns]]
+# picomatch ReDoS through single-branch repeated extglobs (#5449). Rescored
+# High on 2026-11-17; every version up to 4.0.7 is affected and no fixed
+# version is published.
+#
+# Reach: build and test tooling only (vite, vitest, rollup plugins,
+# tinyglobby/fdir, @parcel/watcher); it is not in the Go binary or the
+# embedded UI bundle. The one place it sees patterns we do not write is the
+# Pages preview builder (tools/pages-build): user source may call
+# import.meta.glob. That compile runs in a throwaway container with 1 CPU,
+# 1 GiB, no network and a 120 s KILL (internal/pagebuild/docker.go), so the
+# worst case is the author's own build timing out.
+id = "GHSA-fc5q-39xc-vjpf"
+ignoreUntil = 2026-12-17T00:00:00Z
+reason = "picomatch ReDoS, no fix published; build tooling and the sandboxed Pages builder only (#5449)"
