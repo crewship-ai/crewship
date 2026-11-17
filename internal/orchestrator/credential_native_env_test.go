@@ -94,31 +94,45 @@ func TestNativeCLITokenProviderSlotKeepsDirectValue(t *testing.T) {
 }
 
 func TestNativeFileSelectorsAndExplicitMCP(t *testing.T) {
-	req := AgentRunRequest{AgentSlug: "fixture", RunID: "run-one", CLIAdapter: "OPENCODE", Credentials: []Credential{
-		{ID: "generic", Type: "GENERIC_SECRET", EnvVarName: "NATIVE", PlainValue: "literal-$HOME-${TOKEN}"},
-		{ID: "oauth-shaped", Type: "GENERIC_SECRET", EnvVarName: "OTHER", PlainValue: "sk-ant-oat-synthetic-material"},
-		{ID: "gated", Type: "SECRET", EnvVarName: "GATED", PlainValue: "sk-ant-oat-keeper-withheld"},
-	}, CrewMCPConfigJSON: `{"mcpServers":{"fixture":{"command":"fixture","env":{"TOKEN":"${NATIVE}"}}}}`}
-	env := BuildEnvVarsSidecar(req, true)
-	if envHasAssignment(env, "CLAUDE_CODE_OAUTH_TOKEN", req.Credentials[1].PlainValue) || envHasAssignment(env, "CLAUDE_CODE_OAUTH_TOKEN", req.Credentials[2].PlainValue) {
-		t.Fatal("value shape bypassed delivery policy")
-	}
-	env = injectMCPCredentialEnvVars(req, env, true, nil)
-	dir := agentSecretsDir(req.AgentSlug, req.RunID)
-	env, err := appendCredentialFileEnv(env, req.Credentials, dir, true, collectMCPEnvRefs(req.CrewMCPConfigJSON))
-	if err != nil {
-		t.Fatal(err)
-	}
-	got := envMap(t, env)
-	if got["NATIVE"] != "literal-$HOME-${TOKEN}" || got["NATIVE_PATH"] != dir+"/NATIVE" {
-		t.Fatal("explicit MCP literal or native path changed")
-	}
-	if envHasName(BuildEnvVars(req, nil, true), "GATED") {
-		t.Fatal("non-sidecar path bypassed Keeper")
-	}
-	req.Credentials = append(req.Credentials, Credential{ID: "collision", Type: "GENERIC_SECRET", EnvVarName: "NATIVE_PATH", PlainValue: "other"})
-	env = injectMCPCredentialEnvVars(req, BuildEnvVarsSidecar(req, true), true, nil)
-	if _, err := appendCredentialFileEnv(env, req.Credentials, dir, true, collectMCPEnvRefs(req.CrewMCPConfigJSON)); err == nil {
-		t.Fatal("MCP extra alias collision accepted")
+	for _, source := range []string{"raw-json", "resolved-list"} {
+		for _, sidecar := range []bool{false, true} {
+			t.Run(source+map[bool]string{false: "/direct", true: "/sidecar"}[sidecar], func(t *testing.T) {
+				req := AgentRunRequest{AgentSlug: "fixture", RunID: "run-one", CLIAdapter: "OPENCODE", Credentials: []Credential{
+					{ID: "generic", Type: "GENERIC_SECRET", EnvVarName: "NATIVE", PlainValue: "literal-$HOME-${TOKEN}"},
+					{ID: "oauth-shaped", Type: "GENERIC_SECRET", EnvVarName: "OTHER", PlainValue: "sk-ant-oat-synthetic-material"},
+					{ID: "gated", Type: "SECRET", EnvVarName: "GATED", PlainValue: "sk-ant-oat-keeper-withheld"},
+				}, CrewMCPConfigJSON: `{"mcpServers":{"fixture":{"command":"fixture","env":{"TOKEN":"${NATIVE}"}}}}`}
+				if source == "resolved-list" {
+					req.CrewMCPConfigJSON = ""
+					req.MCPServers = []MCPServerConfig{{Env: map[string]string{"TOKEN": "${NATIVE}"}}}
+				}
+				env := BuildEnvVarsSidecar(req, true)
+				if !sidecar {
+					env = BuildEnvVars(req, nil, true)
+				}
+
+				if envHasAssignment(env, "CLAUDE_CODE_OAUTH_TOKEN", req.Credentials[1].PlainValue) || envHasAssignment(env, "CLAUDE_CODE_OAUTH_TOKEN", req.Credentials[2].PlainValue) {
+					t.Fatal("value shape bypassed delivery policy")
+				}
+				env = injectMCPCredentialEnvVars(req, env, true, nil)
+				dir := agentSecretsDir(req.AgentSlug, req.RunID)
+				env, err := appendCredentialFileEnv(env, req.Credentials, dir, true, collectRequestMCPEnvRefs(req))
+				if err != nil {
+					t.Fatal(err)
+				}
+				got := envMap(t, env)
+				if got["NATIVE"] != "literal-$HOME-${TOKEN}" || got["NATIVE_PATH"] != dir+"/NATIVE" {
+					t.Fatal("explicit MCP literal or native path changed")
+				}
+				if envHasName(BuildEnvVars(req, nil, true), "GATED") {
+					t.Fatal("non-sidecar path bypassed Keeper")
+				}
+				req.Credentials = append(req.Credentials, Credential{ID: "collision", Type: "GENERIC_SECRET", EnvVarName: "NATIVE_PATH", PlainValue: "other"})
+				env = injectMCPCredentialEnvVars(req, BuildEnvVarsSidecar(req, true), true, nil)
+				if _, err := appendCredentialFileEnv(env, req.Credentials, dir, true, collectRequestMCPEnvRefs(req)); err == nil {
+					t.Fatal("MCP extra alias collision accepted")
+				}
+			})
+		}
 	}
 }

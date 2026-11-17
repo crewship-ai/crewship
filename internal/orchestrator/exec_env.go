@@ -346,18 +346,7 @@ func injectMCPCredentialEnvVars(req AgentRunRequest, env []string, keeperEnabled
 	// headers. Substring match on regex so "Bearer ${LINEAR_TOKEN}" gets
 	// picked up — the pre-fix prefix-suffix check missed every header in
 	// every adapter, causing all HTTP MCP servers to 401 in production.
-	mcpEnvRefs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
-
-	// Also collect from table-based MCPServers (after JSON blob migration).
-	// Substring-aware scan covers values like "Bearer ${TOKEN}" and bare
-	// $VAR, not just whole-string ${VAR} as before.
-	for _, srv := range req.MCPServers {
-		for _, v := range srv.Env {
-			for _, name := range extractEnvRefs(v) {
-				mcpEnvRefs[name] = true
-			}
-		}
-	}
+	mcpEnvRefs := collectRequestMCPEnvRefs(req)
 
 	if len(mcpEnvRefs) == 0 {
 		return env
@@ -460,6 +449,25 @@ func extractEnvRefs(s string) []string {
 // was silently missed and the bearer token never got injected, so all HTTP
 // MCP servers hit upstream with literal "${LINEAR_TOKEN}" as the credential.
 // Production-blocking gap; this rewrite closes it.
+// collectRequestMCPEnvRefs is shared by explicit value injection and native
+// alias preparation, including workers and migrated table-based MCP bindings.
+func collectRequestMCPEnvRefs(req AgentRunRequest) map[string]bool {
+	refs := collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON)
+
+	// Also collect from table-based MCPServers (after JSON blob migration).
+	// Substring-aware scan covers values like "Bearer ${TOKEN}" and bare
+	// $VAR, not just whole-string ${VAR} as before.
+	for _, srv := range req.MCPServers {
+		for _, v := range srv.Env {
+			for _, name := range extractEnvRefs(v) {
+				refs[name] = true
+			}
+		}
+	}
+
+	return refs
+}
+
 func collectMCPEnvRefs(configs ...string) map[string]bool {
 	refs := make(map[string]bool)
 	for _, cfg := range configs {

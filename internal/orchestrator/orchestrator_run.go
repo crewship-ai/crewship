@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"io"
 	"log/slog"
 	"path"
@@ -22,6 +21,7 @@ import (
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
 	"github.com/crewship-ai/crewship/internal/chataudience"
 	"github.com/crewship-ai/crewship/internal/conversation"
+	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/memory"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -1963,14 +1963,6 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 		}
 		o.loggerForRun(*req).Info("sidecar ready", "agent_id", req.AgentID, "credentials", credCount)
 
-		// MCP servers configured via .mcp.json use ${ENV_VAR} references that
-		// Claude Code expands from the process environment. With sidecar enabled
-		// credentials normally skip env vars (they go via stdin instead), but
-		// MCP env references still need the actual values in the exec env.
-		// #1362: reuse the keeperEnabled read taken under o.mu.RLock at the top
-		// of ensureSidecar (L830). injectMCPCredentialEnvVars is the third
-		// credential-delivery path and must withhold SECRETs under Keeper too.
-		env = injectMCPCredentialEnvVars(*req, env, keeperEnabled, o.loggerForRun(*req))
 	} else {
 		env = BuildEnvVars(*req, cred, keeperEnabled)
 		// #1754: a worker sub-agent skips STARTING a sidecar (the crew's is
@@ -2001,6 +1993,10 @@ func (o *Orchestrator) ensureSidecar(ctx context.Context, req *AgentRunRequest, 
 			env = append(env, "CREWSHIP_AGENT_TOKEN="+agentTok)
 		}
 	}
+
+	// Explicit MCP references are an intentional env channel on both adapter
+	// and worker execs, under the same policy and Keeper state as native files.
+	env = injectMCPCredentialEnvVars(*req, env, keeperEnabled, o.loggerForRun(*req))
 
 	return env, nil
 }
@@ -2182,7 +2178,7 @@ func (o *Orchestrator) preparePreflightDirs(ctx context.Context, req AgentRunReq
 		return nil, "", fmt.Errorf("deliver %s login for %s: %w", req.CLIAdapter, req.AgentSlug, err)
 	}
 	var credentialEnvErr error
-	env, credentialEnvErr = appendCredentialFileEnv(env, req.Credentials, secretsAgentDir, keeperEnabled, collectMCPEnvRefs(req.CrewMCPConfigJSON, req.AgentMCPConfigJSON))
+	env, credentialEnvErr = appendCredentialFileEnv(env, req.Credentials, secretsAgentDir, keeperEnabled, collectRequestMCPEnvRefs(req))
 	if credentialEnvErr != nil {
 		o.failRun(ctx, req, runID, "error")
 		return nil, "", fmt.Errorf("prepare credential environment: %w", credentialEnvErr)
