@@ -202,16 +202,32 @@ var credCreateCmd = &cobra.Command{
 		flags := cmd.Flags()
 		name, _ := flags.GetString("name")
 		credType, _ := flags.GetString("type")
+		credType = strings.ToUpper(credType)
 		provider, _ := flags.GetString("provider")
 		value, _ := flags.GetString("value")
 		valueStdin, _ := flags.GetBool("value-stdin")
+		passwordStdin, _ := flags.GetBool("password-stdin")
+		username, _ := flags.GetString("username")
+		if passwordStdin {
+			if credType != "USERPASS" {
+				return fmt.Errorf("--password-stdin requires --type USERPASS")
+			}
+			if valueStdin || flags.Changed("value") || flags.Changed("from-file") {
+				return fmt.Errorf("--password-stdin cannot be combined with other value inputs")
+			}
+			valueStdin = true
+		}
+		if credType == "USERPASS" && strings.TrimSpace(username) == "" {
+			return fmt.Errorf("--username is required for USERPASS credentials")
+		}
+
 		envVarName, _ := flags.GetString("env-var-name")
 
 		if name == "" {
 			return fmt.Errorf("--name is required")
 		}
 		if credType == "" {
-			return fmt.Errorf("--type is required (SECRET, API_KEY, AI_CLI_TOKEN, or CLI_TOKEN)")
+			return fmt.Errorf("--type is required (see credential create --help for supported types)")
 		}
 
 		// An OAuth app and a value are two different ways to fill the same
@@ -260,7 +276,7 @@ var credCreateCmd = &cobra.Command{
 		}
 
 		if valueStdin {
-			v, err := readValueStdin()
+			v, err := readValueStdin(credType)
 			if err != nil {
 				return err
 			}
@@ -409,6 +425,9 @@ var credCreateCmd = &cobra.Command{
 			"name": name,
 			"type": credType,
 		}
+		if credType == "USERPASS" {
+			body["username"] = username
+		}
 		if oauthApp == nil {
 			body["value"] = value
 		} else {
@@ -526,6 +545,8 @@ var credCreateCmd = &cobra.Command{
 			// shape instead, and the first Codex run is the live test.
 			cli.PrintWarning("No key probe for a Codex login (it is a chatgpt.com JWT, not an API key) — the first Codex run is the test")
 
+		case credType == "SECRET" || provider == "" || provider == "NONE":
+			cli.PrintWarning("No authentication test was performed; the server validates the credential payload")
 		default:
 			valid, errMsg := testCredentialValue(client, provider, credType, value)
 			if valid {
@@ -603,6 +624,26 @@ var credUpdateCmd = &cobra.Command{
 		body := map[string]interface{}{}
 		flags := cmd.Flags()
 
+		passwordStdin, _ := flags.GetBool("password-stdin")
+		valueStdin, _ := flags.GetBool("value-stdin")
+		if passwordStdin {
+			if flags.Changed("value") || valueStdin {
+				return fmt.Errorf("--password-stdin cannot be combined with --value or --value-stdin")
+			}
+			value, err := readExistingCredentialStdin(client, credID, "USERPASS")
+			if err != nil {
+				return err
+			}
+			if value == "" {
+				return fmt.Errorf("stdin value cannot be empty")
+			}
+			body["value"] = value
+		}
+		if flags.Changed("username") {
+			username, _ := flags.GetString("username")
+			body["username"] = username
+		}
+
 		if flags.Changed("value") {
 			v, _ := flags.GetString("value")
 			if v == "" {
@@ -615,7 +656,7 @@ var credUpdateCmd = &cobra.Command{
 			body["name"] = v
 		}
 		if flags.Changed("value-stdin") {
-			v, err := readValueStdin()
+			v, err := readExistingCredentialStdin(client, credID)
 			if err != nil {
 				return err
 			}
@@ -708,6 +749,8 @@ var credUpdateCmd = &cobra.Command{
 						cli.PrintWarning(fmt.Sprintf(
 							"%s is not validated on update — Crewship does not dial an operator-supplied endpoint.",
 							spec.ID))
+					} else if cred.Type == "SECRET" || cred.Provider == "" || cred.Provider == "NONE" {
+						cli.PrintWarning("No authentication test was performed; the server validates the credential payload")
 					} else if codexauth.IsLogin(cred.Type, cred.Provider) {
 						// Same as create: a ChatGPT login is not an API key and
 						// the probe would only report "Invalid API key" (#2428).
@@ -778,8 +821,16 @@ Examples:
 		flags := cmd.Flags()
 		value, _ := flags.GetString("value")
 		valueStdin, _ := flags.GetBool("value-stdin")
+		passwordStdin, _ := flags.GetBool("password-stdin")
+		if passwordStdin {
+			if flags.Changed("value") || valueStdin {
+				return fmt.Errorf("--password-stdin cannot be combined with --value or --value-stdin")
+			}
+			valueStdin = true
+		}
+
 		if valueStdin {
-			v, err := readValueStdin()
+			v, err := readCredentialValueLimit(os.Stdin, "stdin", 64*1024+2)
 			if err != nil {
 				return err
 			}
@@ -813,6 +864,32 @@ Examples:
 			return err
 		}
 
+		if valueStdin {
+			resp, err := client.Get("/api/v1/credentials/" + credID)
+			if err != nil {
+				return err
+			}
+			if err := cli.CheckError(resp); err != nil {
+				return err
+			}
+			var meta struct {
+				Type string `json:"type" yaml:"type"`
+			}
+			if err := cli.ReadJSON(resp, &meta); err != nil {
+				return err
+			}
+			if passwordStdin && meta.Type != "USERPASS" {
+				return fmt.Errorf("--password-stdin requires an existing USERPASS credential")
+			}
+			value, err = credentialStdinValue(meta.Type, value)
+			if err != nil {
+				return err
+			}
+			if value == "" && !rotatingEndpointAuth {
+				return fmt.Errorf("stdin value cannot be empty")
+			}
+
+		}
 		body := map[string]interface{}{}
 		if rotatingEndpointAuth {
 			// Guard REGARDLESS of whether --value was passed: --auth-token/--header

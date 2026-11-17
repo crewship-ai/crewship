@@ -3,6 +3,8 @@ package server
 import (
 	"context"
 	"database/sql"
+	"errors"
+	"log/slog"
 
 	goapi "github.com/crewship-ai/crewship/internal/api"
 )
@@ -34,4 +36,19 @@ func (a *orchestratorAuditAdapter) RecordAudit(ctx context.Context, action, enti
 		return
 	}
 	goapi.WriteAuditLog(ctx, a.db, nil, action, entityType, entityID, userID, workspaceID, metadata)
+}
+
+// DELIVERED is scoped to the actual agent/run after the file preflight passed.
+// It must not update last_used_at, which remains a separate USE signal.
+func (a *orchestratorAuditAdapter) RecordNativeCredentialDelivery(ctx context.Context, credentialID, agentID, runID string) error {
+	if a == nil || a.db == nil {
+		return errors.New("credential audit database unavailable")
+	}
+	if agentID == "" || runID == "" {
+		return errors.New("native credential delivery requires agent and run attribution")
+	}
+	return goapi.RecordCredentialEvent(ctx, a.db, slog.Default(), credentialID,
+		goapi.AuditEventDelivered, agentID, "", map[string]any{
+			"run_id": runID, "source": "native_preflight", "channel": "file", "authentication": "unknown",
+		})
 }
