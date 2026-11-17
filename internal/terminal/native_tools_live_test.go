@@ -93,7 +93,7 @@ code=$?; printf 'CHILD_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
 bash -lc 'glab --version && codex --version && claude --version'
 code=$?; printf 'LOGIN_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
 if command -v zsh >/dev/null; then zsh -c 'glab --version && codex --version && claude --version'; code=$?; printf 'ZSH_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1; fi
-printf '\nNATIVE_DONE:%s\n' "$fail"
+printf '\nNATIVE_DONE:%s\n' "$fail"; exit "$fail"
 `
 	if err := c.WriteMessage(websocket.BinaryMessage, []byte(script)); err != nil {
 		t.Fatal(err)
