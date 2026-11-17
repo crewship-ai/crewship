@@ -259,6 +259,9 @@ func TestEveryCredentialLoader_SplitsTheEndpointObject(t *testing.T) {
 		// connectivity test matters most cannot be tested from this endpoint.
 		"internal/api/credentials_test_endpoint.go": "probes by provider arm; endpoint-backed providers hit default: and are never dialled",
 
+		"internal/api/bedrock_model_validation.go":   "decrypts only an assigned Bedrock PROVIDER_LOGIN policy to validate a local model PATCH; never delivers a credential",
+		"internal/api/agent_credential_readiness.go": "opens Bedrock expiry/model policy in-process and returns readiness metadata only; never delivers any decrypted credential value",
+
 		// Outside internal/api — the half this guard could not see before.
 		"internal/backup/keyring.go":                                       "backup keyring material, not a vault credential",
 		"internal/database/migrate_consts_v140_encrypt_webhook_secrets.go": "one-shot migration re-encrypting webhook secrets at rest",

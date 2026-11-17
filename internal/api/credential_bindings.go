@@ -91,8 +91,10 @@ func NewCredentialBindingHandler(db *sql.DB, logger *slog.Logger) *CredentialBin
 }
 
 type credentialBindingResponse struct {
-	ID           string `json:"id"`
-	CredentialID string `json:"credential_id"`
+	BedrockModel           *string `json:"bedrock_model,omitempty"`
+	InheritedFromBindingID *string `json:"inherited_from_binding_id,omitempty"`
+	ID                     string  `json:"id"`
+	CredentialID           string  `json:"credential_id"`
 	// CredentialName is denormalised into the response deliberately. Without
 	// it the slot map reads as a list of opaque ids, and the entire point of
 	// §2.5b is that a human can tell github-acme from github-globex.
@@ -164,7 +166,7 @@ func (h *CredentialBindingHandler) List(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 	rows, err := h.db.QueryContext(r.Context(), `
-		SELECT b.id, b.credential_id, c.name, b.scope, b.crew_id, b.agent_id, b.slot, b.created_at
+		SELECT b.id, b.credential_id, c.name, b.scope, b.crew_id, b.agent_id, b.slot, b.created_at,b.bedrock_model,b.inherited_from_binding_id
 		FROM credential_bindings b
 		JOIN credentials c ON c.id = b.credential_id
 		WHERE `+strings.Join(where, " AND ")+`
@@ -180,7 +182,7 @@ func (h *CredentialBindingHandler) List(w http.ResponseWriter, r *http.Request) 
 	for rows.Next() {
 		var b credentialBindingResponse
 		if err := rows.Scan(&b.ID, &b.CredentialID, &b.CredentialName, &b.Scope,
-			&b.CrewID, &b.AgentID, &b.Slot, &b.CreatedAt); err != nil {
+			&b.CrewID, &b.AgentID, &b.Slot, &b.CreatedAt, &b.BedrockModel, &b.InheritedFromBindingID); err != nil {
 			h.logger.Error("scan credential binding", "error", err)
 			replyError(w, http.StatusInternalServerError, "Internal server error")
 			return

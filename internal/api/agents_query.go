@@ -315,6 +315,12 @@ func (h *AgentHandler) Get(w http.ResponseWriter, r *http.Request) {
 		llmProvider = *a.LLMProvider
 	}
 	a.PaysWith = loadAgentPaysWith(r.Context(), h.db, h.logger, a.ID, a.CLIAdapter, llmProvider)
+	readiness, err := resolveAgentCredentialReadiness(r, h.db, workspaceID, a.ID)
+	if err != nil {
+		replyInternalError(w, h.logger, "resolve agent credential readiness", err)
+		return
+	}
+	a.CredentialReadiness = readiness
 
 	writeJSON(w, http.StatusOK, a)
 }
