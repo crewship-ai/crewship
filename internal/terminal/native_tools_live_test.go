@@ -21,6 +21,8 @@ import (
 // and binary frames as use-terminal.ts. The CLI token only authenticates the
 // connection; it is never printed or supplied to the container.
 // CREWSHIP_NATIVE_TOOLS_PROFILE and CREWSHIP_NATIVE_TOOLS_CREW_ID are required.
+// Optional CREWSHIP_NATIVE_TOOLS_GLAB_VERSION asserts every observed selection
+// (terminal, child, login and zsh) against the declared version after an update.
 func TestNativeToolsLiveTerminal(t *testing.T) {
 	profile, crewID := os.Getenv("CREWSHIP_NATIVE_TOOLS_PROFILE"), os.Getenv("CREWSHIP_NATIVE_TOOLS_CREW_ID")
 	if profile == "" || crewID == "" {
@@ -123,6 +125,17 @@ printf '\nNATIVE_DONE:%s\n' "$fail"; exit "$fail"
 			t.Logf("actual terminal result:\n%s", output.String())
 			if match[1] != "0" {
 				t.Fatalf("native tool commands failed (receipt %s)", match[1])
+			}
+			if expected := os.Getenv("CREWSHIP_NATIVE_TOOLS_GLAB_VERSION"); expected != "" {
+				versions := regexp.MustCompile(`glab ([^[:space:]]+) \(`).FindAllStringSubmatch(output.String(), -1)
+				if len(versions) == 0 {
+					t.Fatal("no actual glab version evidence")
+				}
+				for _, version := range versions {
+					if version[1] != expected {
+						t.Fatalf("glab selected %s, declared %s", version[1], expected)
+					}
+				}
 			}
 			break
 		}
