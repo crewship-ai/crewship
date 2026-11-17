@@ -1105,6 +1105,9 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	// Authentication with an API key does not imply metered billing. This
 	// route is the Coding Plan product, regardless of the process default.
 	billingMode, subPlan := p.billingMode, p.subPlan
+	if ledgerProvider == "amazon-bedrock" {
+		billingMode, subPlan = "metered", ""
+	}
 	if ledgerProvider == "zai-coding-plan" {
 		billingMode, subPlan = "flat_rate", "GLM Coding Plan"
 	}

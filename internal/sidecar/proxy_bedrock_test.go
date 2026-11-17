@@ -18,7 +18,12 @@ func TestBedrockAccountRouteNeverSubstitutesPayerOrDestination(t *testing.T) {
 	cs.Load([]Credential{{ID: "one", Provider: "AWS_BEDROCK", Token: string(raw)}, {ID: "peer", Provider: "AWS_BEDROCK", Token: string(raw), AgentIDs: []string{"other-agent"}}})
 	calls := 0
 	var usage LLMUsage
-	p := NewProxy(ProxyConfig{CredStore: cs, Logger: covLogger(), FreeMode: true, OnLLMCall: func(u LLMUsage, _ QuotaInfo, _, _ string) { usage = u }})
+	p := NewProxy(ProxyConfig{CredStore: cs, Logger: covLogger(), FreeMode: true, BillingMode: "flat_rate", OnLLMCall: func(u LLMUsage, _ QuotaInfo, mode, plan string) {
+		if mode != "metered" || plan != "" {
+			t.Fatal("Bedrock inherited another account billing mode")
+		}
+		usage = u
+	}})
 	p.transport = roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 		calls++
 		if r.URL.Host != "bedrock-runtime.eu-central-1.amazonaws.com" || r.Header.Get("Authorization") != "Bearer secret-account-one" || r.Header.Get(bedrock.AccountHeader) != "" {
