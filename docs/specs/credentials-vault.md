@@ -151,13 +151,25 @@ are not same-UID isolation.
 `TestNativeCLIShellEnvironment` drives actual Claude Code, Codex and OpenCode
 shell tools with fresh homes and isolated local providers. Every adapter must
 verify raw token delivery, exact opaque file/password bytes, native path aliases,
-child-shell inheritance and standard pinned-host OpenSSH fixture authentication.
+child-shell inheritance, standard pinned-host OpenSSH authentication, mTLS with
+standard `curl`, and a synthetic USERPASS HTTP basic login through curl's stdin
+configuration. The mTLS private key is the certificate's secret `key_pem` field;
+the certificate primary is a valid X.509 chain. No password is passed to curl
+as a process argument. The basic-login fixture uses a deliberately simple
+synthetic value, not a general curl-configuration serializer.
 The CI runner requires each adapter subtest to start and pass; a parent package
 success, missing CLI, skipped subtest or final model response cannot satisfy it.
 The CLI trio runs without root; the separate qualified Codex Docker fixture
 retains its stricter runtime/artifact/kernel-control checks. No paid model or
 production credential is used. These checks do not qualify every protocol,
 tmux/routine lifecycle, Gemini runtime or a production Windows login.
+
+`TestNativeVaultCLIToStandardSSH` separately follows the built Crewship CLI
+through the actual API, encrypted SQLite Vault, grant, native IPC resolver,
+writer and standard SSH authentication. It also imports a multiline secret
+field through native CLI stdin, checks encryption/exact bytes/0400 mode and
+authenticates with that field's native file alias. This closes the first-line
+scanner truncation path without adding an onboarding API workaround.
 
 ## What this is NOT
 
