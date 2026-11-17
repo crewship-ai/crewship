@@ -331,7 +331,7 @@ test.describe("mobile artifact selection", () => {
     await grid.getByRole("checkbox", { name: "Select source row 2", exact: true }).check()
     await grid.getByRole("button", { name: "Ask about selection (1)", exact: true }).focus()
     await page.keyboard.press("Enter")
-    await expect(chat).toHaveAttribute("aria-selected", "true")
+    await expect(chat).toHaveAttribute("aria-checked", "true")
     await expect(page.getByRole("complementary", { name: "Live artifact", exact: true })).toHaveCount(0)
     await composer.click({ trial: true })
     await expect(composer).toHaveValue(/Keep this existing draft\.[\s\S]*A2:B2/)
