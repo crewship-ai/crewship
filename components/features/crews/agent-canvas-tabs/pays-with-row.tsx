@@ -122,7 +122,12 @@ export async function applyPaysWith(workspaceId: string, agentId: string, seat: 
   const list = await listRes.json()
   const body = (await bindRes.json()) as { bindings?: BindingRow[] }
   const seatIds = new Set((Array.isArray(list) ? (list as LoginCredential[]) : []).filter((c) => c?.login).map((c) => c.id))
-  const bound = (Array.isArray(body?.bindings) ? body.bindings : []).find((b) => seatIds.has(b.credential_id)) ?? null
+  // A Bedrock account replaces the agent's Bedrock binding, including one
+  // materialized from its crew's account rule (#5445); any other login
+  // replaces the agent's first login binding.
+  const rows = (Array.isArray(body?.bindings) ? body.bindings : []).filter((b) => seatIds.has(b.credential_id))
+  const bedrock = (seat.login?.provider ?? seat.provider) === "AWS_BEDROCK"
+  const bound = (bedrock ? rows.find((b) => b.slot === BEDROCK_SLOT) : rows.find((b) => b.slot !== BEDROCK_SLOT)) ?? null
   await swapSeat(workspaceId, agentId, seat, bound, agentModel)
 }
 

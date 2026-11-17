@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
-import { PaysWithRow, releaseBedrockSeat, seatProvider } from "../pays-with-row"
+import { PaysWithRow, applyPaysWith, releaseBedrockSeat, seatProvider } from "../pays-with-row"
 import type { LoginCredential, ProviderLogin } from "@/lib/credentials/provider-logins"
 
 const h = vi.hoisted(() => ({
@@ -304,5 +304,25 @@ describe("seat scoping helpers", () => {
     await releaseBedrockSeat("ws1", "a1")
     const deletes = h.apiFetch.mock.calls.filter(([, i]) => (i as { method?: string })?.method === "DELETE").map(([u]) => String(u).split("?")[0])
     expect(deletes).toEqual(["/api/v1/credentials/bindings/b1"])
+  })
+})
+
+describe("applyPaysWith with a crew account rule", () => {
+  it("replaces the Bedrock binding the crew rule materialized, not another login", async () => {
+    const other = { ...bedrockSeat, id: "c_lab", name: "Bedrock lab" }
+    h.apiFetch.mockImplementation(async (url: unknown, init?: { method?: string }) => {
+      const u = String(url)
+      if (u.startsWith("/api/v1/credentials?")) return ok([claude, bedrockSeat, other])
+      if (u.startsWith("/api/v1/credentials/bindings?")) return ok({ bindings: [
+        { id: "b_claude", credential_id: claude.id, scope: "AGENT", agent_id: "a1", slot: "CLAUDE_CODE_OAUTH_TOKEN" },
+        { id: "b_rule", credential_id: bedrockSeat.id, scope: "AGENT", agent_id: "a1", slot: "AWS_BEARER_TOKEN_BEDROCK", inherited_from_binding_id: "crew_rule" },
+      ] })
+      if (init?.method === "DELETE") return ok({})
+      if (u.includes("/bedrock-assign")) return ok({ assigned: 1 })
+      throw new Error(`unexpected ${u}`)
+    })
+    await applyPaysWith("ws1", "a1", other, "")
+    const writes = h.apiFetch.mock.calls.filter(([, i]) => (i as { method?: string })?.method).map(([u, i]) => `${(i as { method: string }).method} ${String(u).split("?")[0]}`)
+    expect(writes).toEqual(["DELETE /api/v1/credentials/bindings/b_rule", "POST /api/v1/credentials/c_lab/bedrock-assign"])
   })
 })
