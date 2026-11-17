@@ -169,7 +169,8 @@ it.each(["artifacts", "work", "memory"] as const)("shows mobile %s without the p
   state.mobile = true
   const client = new QueryClient()
   render(<QueryClientProvider client={client}><ChatPanel {...props} mobilePanel={mobilePanel} /></QueryClientProvider>)
-  await screen.findByRole("heading", { name: mobilePanel === "memory" ? "Memory" : mobilePanel === "work" ? "Work" : "Artifacts", exact: true })
+  const name = { memory: /^Memory$/, work: /^Work$/, artifacts: /^Artifacts$/ }[mobilePanel]
+  await screen.findByRole("heading", { name })
   expect(screen.queryAllByRole("tab")).toHaveLength(0)
   if (mobilePanel === "memory") expect(screen.getByText("Canonical Memory")).toBeInTheDocument()
  })

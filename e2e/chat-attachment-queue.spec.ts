@@ -290,11 +290,11 @@ test.describe("chat attachment queue (real backend)", () => {
     await expect.poll(() => gate.seen, { timeout: TIMEOUT }).toEqual([first])
 
     // The composer unmounts on the Artifacts tab and mounts again on Chat.
-    const tabs = page.getByRole("tablist", { name: "Chat panel" })
-    await tabs.getByRole("tab", { name: "Artifacts" }).click()
+    const tabs = page.getByRole("radiogroup", { name: "Chat panel" })
+    await tabs.getByRole("radio", { name: "Artifacts" }).click()
     await expect(page.getByPlaceholder(/^Message /)).toHaveCount(0)
-    await tabs.getByRole("tab", { name: "Work" }).click()
-    await tabs.getByRole("tab", { name: "Chat" }).click()
+    await tabs.getByRole("radio", { name: "Work" }).click()
+    await tabs.getByRole("radio", { name: "Chat" }).click()
     await expect(page.getByPlaceholder(/^Message /)).toBeVisible({ timeout: TIMEOUT })
 
     // Nothing was cancelled: the held upload is still running, the second waits.
