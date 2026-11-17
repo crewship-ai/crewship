@@ -136,8 +136,18 @@ func TestStageRuntimeArtifactsRestagesAChangedArtifact(t *testing.T) {
 		t.Fatal(err)
 	}
 	second := stageRuntimeArtifacts(Config{OutputBasePath: dataDir, SidecarBinaryPath: src}, quietLogger())
-	if second.SidecarBinaryPath != first.SidecarBinaryPath {
-		t.Fatalf("staged path moved between boots: %q then %q", first.SidecarBinaryPath, second.SidecarBinaryPath)
+	// Ordinary staging retains the fixed-path fallback on unsupported host
+	// identities/filesystems; only qualified immutable staging creates generations.
+	if managedLauncherServerUIDError(os.Geteuid()) == nil {
+		if second.SidecarBinaryPath == first.SidecarBinaryPath {
+			t.Fatal("changed bytes reused an immutable launcher generation")
+		}
+		original, err := os.ReadFile(first.SidecarBinaryPath)
+		if err != nil || string(original) != string([]byte{0x7f, 'E', 'L', 'F', 1}) {
+			t.Fatal("existing runtime's old launcher generation changed")
+		}
+	} else if second.SidecarBinaryPath != first.SidecarBinaryPath {
+		t.Fatal("unsupported host changed legacy fallback staging")
 	}
 	got, err := os.ReadFile(second.SidecarBinaryPath)
 	if err != nil {

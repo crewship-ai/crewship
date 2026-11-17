@@ -36,7 +36,11 @@ func (o *Orchestrator) admitCodexSandbox(ctx context.Context, req *AgentRunReque
 	if o.codexSandboxPolicy != nil {
 		policy, err = o.codexSandboxPolicy(ctx, req.WorkspaceID, req.CrewID)
 		if err != nil {
-			return fmt.Errorf("Codex sandbox authority unavailable: %w", err)
+			cause := fmt.Errorf("Codex sandbox authority unavailable: %w", err)
+			if policy.Enabled {
+				return o.denyCodexSandbox(ctx, *req, cause)
+			}
+			return cause
 		}
 	}
 	if !policy.Enabled {
@@ -46,22 +50,24 @@ func (o *Orchestrator) admitCodexSandbox(ctx context.Context, req *AgentRunReque
 		return nil
 	}
 	if use == nil || !use.Matches(req.CrewID, req.ContainerID) || policy.Launch == nil {
-		return errors.New("Codex outer isolation: reserved runtime and immutable build authority required")
+		return o.denyCodexSandbox(ctx, *req, errors.New("Codex outer isolation: reserved runtime and immutable build authority required"))
 	}
 	d := *policy.Launch
 	d.EnvKeys = nil
 	d.OuterSandbox = true
 	if err := d.Validate(); err != nil {
-		return err
+		return o.denyCodexSandbox(ctx, *req, err)
 	}
-	req.codexOuterSandbox = true
+	candidate := *req
+	candidate.managedLaunch = &d
+	candidate.runtimeImageID = d.ImageID
+	if err := o.attestCodexOuterSandbox(ctx, candidate); err != nil {
+		return o.denyCodexSandbox(ctx, candidate, err)
+	}
+	candidate.codexOuterSandbox = true
+	*req = candidate
 	if owner, ok := o.agentRuns.Load(req.RunID); ok {
 		owner.(*agentRunControl).outerManaged.Store(true)
-	}
-	req.managedLaunch = &d
-	req.runtimeImageID = d.ImageID
-	if err := o.attestCodexOuterSandbox(ctx, *req); err != nil {
-		return o.denyCodexSandbox(ctx, *req, err)
 	}
 	// Effective kernel controls are checked by the trusted static launcher
 	// immediately before the same open artifact is executed. No extra probe

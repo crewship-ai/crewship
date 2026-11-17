@@ -11,6 +11,7 @@ import (
 	"github.com/moby/moby/api/types/mount"
 	"github.com/moby/moby/client"
 
+	"github.com/crewship-ai/crewship/internal/config"
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/safepath"
@@ -73,8 +74,13 @@ func (p *Provider) attestCodexOuterMetadata(ctx context.Context, id, crew string
 	// The only writable host-backed locations are these crew-owned roots.
 	expected := map[string][]string{"/output": {crew}, "/workspace": {"workspaces", crew}, "/crew": {"crews", crew}}
 	seen := map[string]bool{}
+	// Native Vault delivery must remain RAM-only under the expected ownership
+	// and noexec/nosuid policy, including the legacy-material upgrade path.
+	if h.Tmpfs[config.ContainerTempMount] == "" || h.Tmpfs[config.ContainerSecretsMount] != secretsTmpfsSpec {
+		return denied
+	}
 	for destination := range h.Tmpfs {
-		if destination != "/tmp" && destination != "/secrets" {
+		if destination != config.ContainerTempMount && destination != config.ContainerSecretsMount {
 			return denied
 		}
 	}
@@ -85,7 +91,7 @@ func (p *Provider) attestCodexOuterMetadata(ctx context.Context, id, crew string
 		seen[m.Destination] = true
 		switch m.Type {
 		case mount.TypeTmpfs:
-			if m.Destination != "/tmp" && m.Destination != "/secrets" && m.Destination != "/dev/shm" {
+			if m.Destination != config.ContainerTempMount && m.Destination != config.ContainerSecretsMount && m.Destination != "/dev/shm" {
 				return denied
 			}
 		case mount.TypeBind:

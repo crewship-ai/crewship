@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/provider"
@@ -177,5 +178,100 @@ func TestCodexOuterEnvironmentKeepsMiseConstantsAndRejectsCollision(t *testing.T
 	}
 	if _, err := managedExecConfig(req, []string{"codex", "exec"}, []string{"MISE_DATA_DIR=/crew/untrusted"}, "/"); err == nil {
 		t.Fatal("runtime metadata collision accepted")
+	}
+}
+
+func TestCodexOuterKnownOptInFailuresAreAuditedWithoutAuthority(t *testing.T) {
+	for _, which := range []string{"authority-error", "missing-use", "missing-descriptor", "invalid-descriptor", "audit-error"} {
+		t.Run(which, func(t *testing.T) {
+			c := &codexOuterContainer{}
+			o := New(c, newLockedMemState(), slog.New(slog.NewTextHandler(io.Discard, nil)))
+			audit := &codexOuterAudit{fail: which == "audit-error"}
+			o.SetAuditLog(audit)
+			o.SetCodexSandboxPolicyResolver(func(context.Context, string, string) (CodexSandboxPolicy, error) {
+				policy := CodexSandboxPolicy{Enabled: true, Launch: launchDescriptor()}
+				switch which {
+				case "authority-error", "audit-error":
+					return policy, errors.New("fixture missing immutable authority")
+				case "missing-descriptor":
+					policy.Launch = nil
+				case "invalid-descriptor":
+					policy.Launch.SHA256 = "invalid"
+				}
+				return policy, nil
+			})
+			req := AgentRunRequest{WorkspaceID: "ws", CrewID: "crew", ContainerID: "c1", AgentID: "agent", AgentSlug: "fixture", RunID: "outer-reject-" + which, CLIAdapter: "CODEX_CLI", ToolProfile: "CODING"}
+			var use *provider.RuntimeUse
+			if which != "missing-use" {
+				use = provider.NewRuntimeUse("crew", "c1", func() {})
+				defer use.Release()
+			}
+			err := o.admitCodexSandbox(context.Background(), &req, use)
+			if err == nil || req.codexOuterSandbox || req.managedLaunch != nil || len(c.commands) != 0 {
+				t.Fatalf("rejected admission gained authority/process: %v", err)
+			}
+			if which == "audit-error" {
+				if !strings.Contains(err.Error(), "durable audit failure") {
+					t.Fatal("audit failure was hidden")
+				}
+			} else {
+				if len(audit.events) != 1 || audit.events[0].Status != "denied" || audit.events[0].RunID != req.RunID || audit.events[0].AgentID != req.AgentID {
+					t.Fatal("opt-in refusal not attributed in audit")
+				}
+			}
+		})
+	}
+}
+
+func TestCodexOuterStopBeforeRunStateCannotCreateProcess(t *testing.T) {
+	c := &codexOuterContainer{}
+	state := newLockedMemState()
+	o := New(c, state, slog.New(slog.NewTextHandler(io.Discard, nil)))
+	o.SetCodexSandboxPolicyResolver(func(context.Context, string, string) (CodexSandboxPolicy, error) {
+		return CodexSandboxPolicy{Enabled: true, Launch: launchDescriptor()}, nil
+	})
+	req := AgentRunRequest{WorkspaceID: "ws", CrewID: "crew", ContainerID: "c1", AgentID: "agent", AgentSlug: "fixture", RunID: "outer-preparing-stop", CLIAdapter: "CODEX_CLI", ToolProfile: "CODING"}
+	ctx, finish, err := o.trackAgentRun(context.Background(), &req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	use := provider.NewRuntimeUse("crew", "c1", func() {})
+	defer use.Release()
+	if err := o.admitCodexSandbox(ctx, &req, use); err != nil {
+		t.Fatal(err)
+	}
+	location := RunLocation{ContainerID: "c1", AgentSlug: "fixture", RunID: req.RunID}
+	if !o.knownManagedRunLocation(location) {
+		t.Fatal("nonpilot outer run lost managed identity before state persistence")
+	}
+	go func() { <-ctx.Done(); finish() }()
+	bounded, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := o.StopAgent(bounded, req.AgentID); err != nil {
+		t.Fatal(err)
+	}
+	if err := req.ExecGate(context.Background()); err == nil {
+		t.Fatal("stopped preparation may still create a process")
+	}
+	if len(c.commands) != 0 {
+		t.Fatal("admission/stop spawned an extra probe")
+	}
+}
+
+func TestCodexOuterRecoveredLocationRetainsManagedProbe(t *testing.T) {
+	state := newLockedMemState()
+	o := New(nil, state, slog.Default())
+	d := launchDescriptor()
+	d.OuterSandbox = true
+	saved := RunState{ID: "outer-recovered", AgentID: "agent", AgentSlug: "fixture", ContainerID: "c1", ManagedLaunch: d}
+	raw, _ := json.Marshal(saved)
+	if err := state.Set(context.Background(), "agent_runs", saved.ID, raw); err != nil {
+		t.Fatal(err)
+	}
+	// No agentRuns entry or pilot selector survives this simulated recovery.
+	location := RunLocation{ContainerID: "c1", AgentSlug: "fixture", RunID: saved.ID}
+	probe, err := o.managedRunProbe(context.Background(), location, true)
+	if err != nil || !strings.Contains(probe, "echo UNKNOWN; exit;") || strings.Contains(probe, "tmux") {
+		t.Fatalf("recovered outer run fell back to legacy absence: %v %s", err, probe)
 	}
 }

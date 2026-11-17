@@ -9,6 +9,7 @@ import (
 
 	"github.com/crewship-ai/crewship/internal/journal"
 	"github.com/crewship-ai/crewship/internal/provider"
+	"github.com/crewship-ai/crewship/internal/tsformat"
 )
 
 // RecordCodexSandboxPreflight atomically persists compliance and the configured
@@ -34,7 +35,7 @@ func RecordCodexSandboxPreflight(ctx context.Context, db *sql.DB, emitter journa
 	if err != nil {
 		return err
 	}
-	id, stamp := generateCUID(), time.Now().UTC().Format(time.RFC3339Nano)
+	id, stamp := generateCUID(), tsformat.Format(time.Now())
 	result, err := tx.ExecContext(ctx, `INSERT INTO audit_logs(id,workspace_id,action,entity_type,entity_id,metadata,created_at) VALUES(?,?,'codex.sandbox_preflight','RUN',?,?,?)`, id, e.WorkspaceID, e.RunID, string(raw), stamp)
 	if err != nil {
 		return err
