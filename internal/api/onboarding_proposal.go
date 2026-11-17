@@ -104,6 +104,8 @@ func providerRuntimeDefaults(provider string) (cliAdapter, model string) {
 		return "CURSOR_CLI", "composer"
 	case "FACTORY":
 		return "FACTORY_DROID", crewAgentDefaultModel
+	case "AWS_BEDROCK":
+		return "OPENCODE", "" // An explicitly selected account supplies permitted model IDs.
 	case "OPENCODE", "OPENCODE_GO", "ZAI_CODING_PLAN":
 		return "OPENCODE", llm.DefaultModel(provider)
 	case "OLLAMA":

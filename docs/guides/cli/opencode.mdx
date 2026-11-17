@@ -195,3 +195,60 @@ Model suggestions are the catalog entries of the deployed OpenCode version
 (verified against 1.18.31); use a custom native model ID for others your plan
 supports. Zhipu/BigModel regional variants are separate products and are not
 configured by this connection.
+
+## Amazon Bedrock
+
+Choose **Vault → AI providers → Add AI provider → Amazon Bedrock**. Enter a
+Bedrock API key, its AWS region and expiration, and the native model IDs this
+account may use. These settings and the key are encrypted together. Pasted keys
+require manual renewal; AWS role authentication is not offered by this method.
+See [AWS Bedrock API keys](https://docs.aws.amazon.com/bedrock/latest/userguide/api-keys.html).
+
+**Test** sends a minimal, billable Converse request to each permitted model.
+Saving alone does not verify access. The result distinguishes authentication,
+model-access/permissions, unavailable models and quota failures. Successful
+verification describes access at that moment, not a guarantee of future quota.
+
+In **Pays for**, choose agents or current crew members and a permitted model.
+Crewship atomically assigns the account, sets the OpenCode runner and stores the
+full model ID, for example `amazon-bedrock/eu.anthropic.claude-opus-5-5`.
+The devcontainer's normal preparation installs the managed OpenCode version on
+its next run. Later assignments are available in the saved account's **Pays for**
+tab. Crew assignment expands to explicit bindings for the current members;
+new crew members must be assigned separately. A missing, expired, revoked or
+withheld account stops the run, without trying another payer.
+
+The real key remains in the credential-injecting sidecar. The agent gets dummy
+authentication, a specific account routing identifier and the native Bedrock
+provider configuration. Sidecar-off execution is refused. Images with an
+`/etc/opencode` configuration are refused for Bedrock because managed settings
+can override the runtime's privacy-critical configuration. Project configuration
+and model-catalog downloads are disabled for these runs.
+
+The EU profile restriction requires an EU region and exact `eu.` model IDs;
+`global.` and bare model IDs are refused. OpenCode title/compaction configuration
+uses the selected model, other providers are denied, and the sidecar independently
+checks every Converse model path against the account's permitted IDs. This is a
+restriction on OpenCode model inference, not a claim of whole-workspace residency:
+server-side evaluators, external tools and integrations have their own destinations.
+
+Token usage is observed incrementally from AWS EventStream responses, with a
+64 KiB frame bound, and attributed to the selected account, agent and native model
+under `amazon-bedrock`. Crewship's catalog prices or provider fallback are estimates;
+AWS billing and quotas remain authoritative.
+
+For the CLI, create a `PROVIDER_LOGIN` with provider `AWS_BEDROCK` using an
+account JSON document through stdin or a protected file, never a secret argument:
+`auth_method` is `bedrock_api_key`; `api_key`, `region`, `models`, `expires_at`
+(RFC3339), and `eu_only` carry the same fields as the form. Then use:
+
+```sh
+crewship credential bedrock-assign bedrock-eu --agent worker --model eu.anthropic.claude-opus-5-5
+crewship credential test-stored bedrock-eu
+```
+
+A manifest may refer to the saved credential by its stable name/ID and explicitly
+grant its `AWS_BEARER_TOKEN_BEDROCK` slot to an agent using the OpenCode runner and
+an allowed `amazon-bedrock/…` model. This slot identifies the account grant; the
+secret is still not exported as an agent environment variable. Workspace defaults
+and account pools are not fallback payers for Bedrock.

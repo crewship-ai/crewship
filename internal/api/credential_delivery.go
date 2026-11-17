@@ -90,7 +90,11 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 		      OR (b.scope = 'CREW'  AND s.crew_id IS NOT NULL AND b.crew_id = s.crew_id)
 		      OR  b.scope = 'WORKSPACE')
 	),
-	resolved_bindings AS (
+	bedrock_candidates AS (
+ SELECT b.credential_id FROM agent_scope s JOIN credential_bindings b ON b.agent_id=s.agent_id AND b.workspace_id=s.workspace_id WHERE b.scope='AGENT' AND b.slot='AWS_BEARER_TOKEN_BEDROCK'
+ UNION SELECT ac.credential_id FROM agent_scope s JOIN agent_credentials ac ON ac.agent_id=s.agent_id WHERE ac.env_var_name='AWS_BEARER_TOKEN_BEDROCK'
+ ), selected_bedrock AS (SELECT MIN(credential_id) AS id FROM bedrock_candidates HAVING COUNT(*)=1),
+ resolved_bindings AS (
 		SELECT ab.agent_id, ab.workspace_id, ab.credential_id, ab.slot, ab.spec
 		FROM applicable_bindings ab
 		WHERE ab.spec = (SELECT MIN(x.spec) FROM applicable_bindings x WHERE x.slot = ab.slot)
@@ -109,6 +113,7 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	FROM agent_credentials ac
 	JOIN credentials c ON c.id = ac.credential_id
 	WHERE ac.agent_id = ? AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
+ AND (COALESCE(c.provider,'') <> 'AWS_BEDROCK' OR c.id=(SELECT id FROM selected_bedrock))
 	  AND %s
 
 	UNION ALL
@@ -126,6 +131,7 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	FROM resolved_bindings rb
 	JOIN credentials c ON c.id = rb.credential_id
 	WHERE c.deleted_at IS NULL AND c.status = 'ACTIVE'
+ AND (COALESCE(c.provider,'') <> 'AWS_BEDROCK' OR c.id=(SELECT id FROM selected_bedrock))
 	  AND c.workspace_id = rb.workspace_id
 	  AND NOT EXISTS (
 	      SELECT 1 FROM agent_credentials ac2
@@ -149,6 +155,7 @@ var agentDeliveredCredentialsSQL = fmt.Sprintf(`
 	JOIN credentials c ON c.id = cc.credential_id
 	WHERE s.crew_id IS NOT NULL
 	  AND c.deleted_at IS NULL AND c.status = 'ACTIVE'
+ AND (COALESCE(c.provider,'') <> 'AWS_BEDROCK' OR c.id=(SELECT id FROM selected_bedrock))
 	  AND c.workspace_id = s.workspace_id
 	  AND NOT EXISTS (
 	      SELECT 1 FROM agent_credentials ac2

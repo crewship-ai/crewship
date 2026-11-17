@@ -81,7 +81,7 @@ export function ProviderKeyTest({ provider, providerLabel, mode, value, onResult
       {state.kind === "busy" && <span role="status" className="type-meta text-muted-foreground">Asking {providerLabel}…</span>}
       {state.kind === "ok" && (
         <span role="status" className="inline-flex items-center gap-1.5 type-meta text-success">
-          <CheckCircle2 className="size-3.5" aria-hidden /> The {what} works
+          <CheckCircle2 className="size-3.5" aria-hidden /> {provider === "AWS_BEDROCK" ? "Permitted model access verified" : `The ${what} works`}
         </span>
       )}
       {state.kind === "rejected" && (

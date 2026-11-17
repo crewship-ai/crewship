@@ -227,6 +227,7 @@ var validLLMProviders = map[string]bool{
 	"OPENCODE":        true,
 	"OPENCODE_GO":     true,
 	"ZAI_CODING_PLAN": true,
+	"AWS_BEDROCK":     true,
 }
 
 // validToolProfiles mirrors lib/validations.ts tool_profile enum.

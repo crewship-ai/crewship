@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/bedrock"
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/geminiauth"
 )
@@ -90,13 +91,15 @@ var providers = map[string]struct{}{
 	"ANTHROPIC": {}, "OPENAI": {}, "GOOGLE": {}, "CURSOR": {}, "FACTORY": {},
 	"XAI": {}, "GROQ": {}, "OPENROUTER": {}, "DEEPSEEK": {},
 	"MOONSHOT": {}, "ZAI": {}, "MINIMAX": {}, "OPENCODE": {}, "OPENCODE_GO": {},
-	"ZAI_CODING_PLAN": {},
+	"ZAI_CODING_PLAN": {}, "AWS_BEDROCK": {},
 }
 
 // Canonical folds a provider onto its stored spelling.
 func Canonical(provider string) string {
 	p := strings.ToUpper(strings.TrimSpace(provider))
 	switch p {
+	case "AMAZON-BEDROCK", "AWS-BEDROCK":
+		return "AWS_BEDROCK"
 	case "OPENCODE-GO":
 		return "OPENCODE_GO"
 	case "ZAI-CODING-PLAN":
@@ -113,7 +116,7 @@ func IsProvider(provider string) bool {
 
 // Providers lists the accepted providers, for error messages and help text.
 func Providers() []string {
-	return []string{"ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "XAI", "GROQ", "OPENROUTER", "DEEPSEEK", "MOONSHOT", "ZAI", "MINIMAX", "OPENCODE", "OPENCODE_GO", "ZAI_CODING_PLAN"}
+	return []string{"ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "XAI", "GROQ", "OPENROUTER", "DEEPSEEK", "MOONSHOT", "ZAI", "MINIMAX", "OPENCODE", "OPENCODE_GO", "ZAI_CODING_PLAN", "AWS_BEDROCK"}
 }
 
 // ValidMode reports whether mode is one of the two.
@@ -163,6 +166,21 @@ func Split(provider, mode, value string) (Login, error) {
 		return Login{}, fmt.Errorf("mode must be %q or %q", ModeSubscription, ModeAPIKey)
 	}
 	l := Login{Provider: p, Mode: mode}
+	if p == bedrock.Provider {
+		if mode != ModeAPIKey {
+			return Login{}, errors.New("Bedrock requires a Bedrock API key, not subscription login")
+		}
+		a, err := bedrock.Parse(v)
+		if err != nil {
+			return Login{}, err
+		}
+		if a.Expired(time.Now()) {
+			return Login{}, errors.New("Bedrock API key has expired")
+		}
+		l.ExpiresAt, _ = time.Parse(time.RFC3339, a.ExpiresAt)
+		l.AccessToken = v
+		return l, nil
+	}
 	if mode == ModeAPIKey {
 		l.AccessToken = v
 		return l, nil
@@ -246,11 +264,15 @@ var apiKeyEnvVar = map[string]string{
 	// subscription key from a metered one; Crewship keeps its own identity so
 	// one product's key is never delivered as another's payer.
 	"ZAI_CODING_PLAN": "ZAI_CODING_PLAN_API_KEY",
+	"AWS_BEDROCK":     bedrock.Slot,
 }
 
 // DeliveryFor returns the delivery shape for a (provider, mode) pair.
 func DeliveryFor(provider, mode string) Delivery {
 	p := Canonical(provider)
+	if p == bedrock.Provider {
+		return Delivery{Kind: "sidecar", Target: bedrock.Slot}
+	}
 	if mode == ModeSubscription {
 		switch p {
 		case "OPENAI":

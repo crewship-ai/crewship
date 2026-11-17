@@ -141,6 +141,7 @@ func TestSpecs_Table(t *testing.T) {
 			upstreamHost: "api.z.ai", basePath: "/api/coding/paas/v4",
 			requireCred: true, ledger: "zai-coding-plan", codec: "openai", keyEnvVars: []string{"ZAI_CODING_PLAN_API_KEY"},
 		},
+		{id: "AWS_BEDROCK", pathPrefix: "/llm/amazon-bedrock", strip: true, fromCred: true, requireCred: true, ledger: "amazon-bedrock", codec: "bedrock", keyEnvVars: []string{"AWS_BEARER_TOKEN_BEDROCK"}},
 		{
 			id: "OPENAI_COMPAT", pathPrefix: "/llm/openai-compat", strip: true,
 			hosts: nil, fromCred: true,

@@ -38,7 +38,17 @@ func loadAgentPaysWith(ctx context.Context, db *sql.DB, logger *slog.Logger, age
 		}
 		return nil
 	}
+	selected := ""
+	if want == "AWS_BEDROCK" {
+		selected, err = selectedBedrockAccount(ctx, db, agentID)
+		if err != nil {
+			return nil
+		}
+	}
 	for _, d := range delivered {
+		if want == "AWS_BEDROCK" && d.ID != selected {
+			continue
+		}
 		if !isLoginRow(d.Type, d.Provider) || providerlogin.Canonical(d.Provider) != want {
 			continue
 		}

@@ -45,6 +45,7 @@ import { defaultEnvVarName } from "@/lib/credential-provider"
 import { detectPastedValue } from "@/lib/credentials/paste-detect"
 import { loginProvider } from "@/lib/credentials/login-providers"
 import { runnerFits } from "@/lib/credentials/provider-logins"
+import { bedrockAccountValue, bedrockEntryError, bedrockModels } from "@/lib/credentials/bedrock"
 import { providerConnectionGuide } from "@/lib/credentials/provider-connection-guides"
 import { LoginProviderPicker } from "./login-provider-picker"
 import {
@@ -339,6 +340,12 @@ export function AddCredentialWizard({
   // is the fallback for every other shape.
   const login = itemTypeKey === "PROVIDER_LOGIN" ? providerLoginPresentation(provider, loginMode) : null
   const connectionGuide = providerConnectionGuide(provider)
+  const isBedrock = provider === "AWS_BEDROCK" && Boolean(login)
+  const permittedBedrockModels = bedrockModels(extras.bedrock_models ?? "")
+  const selectedBedrockModel = permittedBedrockModels.includes(extras.bedrock_model) ? extras.bedrock_model : (permittedBedrockModels[0] ?? "")
+  const bedrockEUOnly = extras.bedrock_eu_only !== "false"
+  const loginValue = isBedrock ? bedrockAccountValue(primaryValue, extras.bedrock_region ?? "", permittedBedrockModels, expiresAt, bedrockEUOnly) : primaryValue
+
   const suggestedSlot = login?.slot ?? (detected ? defaultEnvVarName(detected) : null)
   // Which providers can sign in with a code — the server runs the device flow
   // (PRD §5.6 v2, §10.3). Anthropic has no device flow: `claude setup-token`
@@ -387,7 +394,8 @@ export function AddCredentialWizard({
     if (!nameTouched.current) setName(loginProvider(key)?.label ?? key)
     setLoginMode(loginProvider(key)?.subscription && key !== "GOOGLE" ? "subscription" : "api_key")
     setPrimaryValue("")
-    setExtras({})
+    setExtras(key === "AWS_BEDROCK" ? {bedrock_region:"eu-central-1",bedrock_eu_only:"true"} : {})
+    if (key === "AWS_BEDROCK") {setScope("AGENT");setPoolId("")}
     setDeviceBusy(false)
     setSignIn(key === "OPENAI" ? "device" : "paste")
   }
@@ -423,7 +431,7 @@ export function AddCredentialWizard({
 
   // What is holding step 2 back, in the order the boxes are on screen. The
   // Continue button being dead is not an explanation; naming the box is.
-  const valueError = usingDevice ? null : credentialEntryError(primaryValue, itemTypeKey, provider, loginMode)
+  const valueError = usingDevice ? null : isBedrock ? bedrockEntryError(extras.bedrock_region ?? "", permittedBedrockModels, expiresAt, bedrockEUOnly) : credentialEntryError(primaryValue, itemTypeKey, provider, loginMode)
   const blocker = missingRequired ?? (name.trim() ? null : "Name")
   const stepIndex = STEP_ORDER.indexOf(step)
 
@@ -495,7 +503,7 @@ export function AddCredentialWizard({
       if (initial?.credentialId) {
         saveRequested = true
         const response = await apiFetch(`/api/v1/credentials/${encodeURIComponent(initial.credentialId)}?workspace_id=${encodeURIComponent(workspaceId)}`, {
-          method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify({value: primaryValue, mode: loginMode}),
+          method: "PATCH", headers: {"Content-Type": "application/json"}, body: JSON.stringify({value: loginValue, mode: loginMode}),
         })
         if (!response.ok) { const result = await response.json().catch(() => ({})); setError(result.error || "Could not update this login."); return }
         onSuccess(initial.credentialId); return
@@ -522,7 +530,7 @@ export function AddCredentialWizard({
       } else if (!credentialId) {
         const body: Record<string, unknown> = {
           name: name.trim(),
-          value: primaryValue,
+          value: loginValue,
           description: description.trim(),
           type: login ? providerLoginCredentialType(loginMode) : itemType.credentialType,
           provider,
@@ -589,7 +597,13 @@ export function AddCredentialWizard({
         }
       }
 
-      if (credentialId && assignNow && canBind && slot.trim()) {
+      if (credentialId && isBedrock && assignNow && canBind) {
+        try {
+          const result = await apiFetch(`/api/v1/credentials/${encodeURIComponent(credentialId)}/bedrock-assign?workspace_id=${encodeURIComponent(workspaceId)}`, {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({agent_ids:scope === "AGENT" ? agentIds : [],crew_ids:scope === "CREW" ? crewIds : [],model:selectedBedrockModel})})
+          if (!result.ok) {const data = await result.json().catch(() => ({}));problems.push(data.error || "Bedrock account/model assignment")}
+        } catch {problems.push("Bedrock account/model assignment")}
+      }
+      if (credentialId && !isBedrock && assignNow && canBind && slot.trim()) {
         const targets = scope === "CREW" ? crewIds : scope === "AGENT" ? agentIds : [""]
         for (const targetId of targets) {
           const writeKey = `binding:${scope}:${targetId}:${slot.trim()}`
@@ -1036,13 +1050,20 @@ export function AddCredentialWizard({
                   />
                 )}
                 </div>
+                {isBedrock && <div className="space-y-3">
+                  <CreateSurfaceField label="AWS region" htmlFor="bedrock-region"><Input id="bedrock-region" value={extras.bedrock_region ?? ""} placeholder="eu-central-1" onChange={(e) => setExtras({...extras,bedrock_region:e.target.value})} /></CreateSurfaceField>
+                  <CreateSurfaceField label="Permitted Bedrock model IDs" htmlFor="bedrock-models"><Textarea id="bedrock-models" value={extras.bedrock_models ?? ""} placeholder="eu.anthropic.claude-opus-5-5" onChange={(e) => setExtras({...extras,bedrock_models:e.target.value})} /><CardNote>Enter native model IDs, one per line. Use the exact regional inference profile ID available in your AWS account.</CardNote></CreateSurfaceField>
+                  <CreateSurfaceField label="Key expires at" htmlFor="bedrock-expiry"><Input id="bedrock-expiry" type="datetime-local" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} /></CreateSurfaceField>
+                  <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={bedrockEUOnly} onChange={(e) => setExtras({...extras,bedrock_eu_only:String(e.target.checked)})} />Restrict OpenCode to EU Bedrock profiles</label>
+                  <CardNote>Bedrock API key authentication · automatic renewal is not available. Test makes a minimal billable request to each permitted model. Saving alone does not verify model access.</CardNote>
+                </div>}
                 {attempted && valueError && <p role="alert" className="text-xs text-destructive">{valueError}</p>}
                 {login && !usingDevice && (loginMode === "api_key" || provider === "ANTHROPIC") && (
                   <ProviderKeyTest
                     provider={provider}
                     providerLabel={loginProvider(provider)?.label ?? provider}
                     mode={loginMode}
-                    value={primaryValue}
+                    value={loginValue}
                     onResult={setKeyTested}
                   />
                 )}
@@ -1158,7 +1179,7 @@ export function AddCredentialWizard({
           <>
             <div className="flex items-center gap-3 rounded-xl border border-border/60 p-3">
               {login ? <BrandIcon className="size-5" /> : <ItemIcon className="size-5" />}
-              <div><h3 className="text-sm font-medium">{name}</h3><p className="text-xs text-muted-foreground">{deviceCredentialId ? "Account saved · finish its setup" : keyTested ? `Connection tested · the ${loginMode === "api_key" ? "key" : "token"} works` : "Connection not tested · save does not verify access"}</p></div>
+              <div><h3 className="text-sm font-medium">{name}</h3><p className="text-xs text-muted-foreground">{deviceCredentialId ? "Account saved · finish its setup" : keyTested ? (isBedrock ? "Permitted Bedrock model access verified" : `Connection tested · the ${loginMode === "api_key" ? "key" : "token"} works`) : "Connection not tested · save does not verify access"}</p></div>
             </div>
             <CreateSurfaceSection title={login ? "Pays for" : "How will you use it?"} icon={Users} accent="teal">
               <div className="grid grid-cols-2 gap-2">
@@ -1183,6 +1204,7 @@ export function AddCredentialWizard({
                 <CardNote>Switching to the next account in a group at a limit is not available yet.</CardNote>
               </CreateSurfaceField>
             )}
+            {isBedrock && <CreateSurfaceField label="Agent model" htmlFor="bedrock-selected-model"><select id="bedrock-selected-model" className={cn(FIELD,"w-full rounded-md border bg-background px-2")} value={selectedBedrockModel} onChange={(e) => setExtras({...extras,bedrock_model:e.target.value})}>{permittedBedrockModels.map((m) => <option key={m} value={m}>{m}</option>)}</select><CardNote>Selected agents will use OpenCode with this account and model. Missing or expired access stops the run.</CardNote></CreateSurfaceField>}
             {assignNow && <>
             <CreateSurfaceSection title="Assign to" icon={Users} accent="teal">
               <div className="space-y-3">
@@ -1190,7 +1212,7 @@ export function AddCredentialWizard({
                     "Who gets it", and a second sr-only <label> pointing at
                     nothing is noise in the a11y tree, not help. */}
                 <div role="group" aria-label="Who gets it" className="grid grid-cols-2 gap-2">
-                  {(["AGENT", "CREW", "WORKSPACE"] as const).map((s) => (
+                  {(["AGENT", "CREW", "WORKSPACE"] as const).filter((s) => !isBedrock || s !== "WORKSPACE").map((s) => (
                     <ChoiceButton
                       key={s}
                       selected={scope === s}
@@ -1203,7 +1225,7 @@ export function AddCredentialWizard({
 
                 {scope === "AGENT" && <div className="max-h-48 space-y-1 overflow-y-auto">
                   {agents.length === 0 && <p className="text-xs text-muted-foreground">No agents available.</p>}
-                  {agents.filter((agent) => !login || runnerFits(agent.cli_adapter, provider)).map((agent) => <label key={agent.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-border/60 p-2 text-sm"><input type="checkbox" checked={agentIds.includes(agent.id)} onChange={(e) => setAgentIds(e.target.checked ? [...agentIds, agent.id] : agentIds.filter((id) => id !== agent.id))} /><AgentAvatar seed={agent.id} className="size-6" alt="" />{agent.name}</label>)}
+                  {agents.filter((agent) => !login || isBedrock || runnerFits(agent.cli_adapter, provider)).map((agent) => <label key={agent.id} className="flex cursor-pointer items-center gap-2 rounded-lg border border-border/60 p-2 text-sm"><input type="checkbox" checked={agentIds.includes(agent.id)} onChange={(e) => setAgentIds(e.target.checked ? [...agentIds, agent.id] : agentIds.filter((id) => id !== agent.id))} /><AgentAvatar seed={agent.id} className="size-6" alt="" />{agent.name}</label>)}
                 </div>}
                 {scope === "CREW" && (
                   <CreateSurfaceField label="Crews">

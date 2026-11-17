@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/crewship-ai/crewship/internal/bedrock"
 	"github.com/crewship-ai/crewship/internal/httpsafe"
 	"github.com/crewship-ai/crewship/internal/llmroute"
 	"github.com/crewship-ai/crewship/internal/scrubber"
@@ -761,7 +762,26 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 	// so a credential picked for the wrong member sends this agent's prompt to
 	// another member's gateway with that member's key — allowlisted (the #2051
 	// union covers it) and therefore silent.
-	cred := p.credStore.Select(ProviderType(s.ID), actorID)
+	var cred *Credential
+	if s.ID == bedrock.Provider {
+		cred = p.credStore.SelectAccount(ProviderType(s.ID), r.Header.Get(bedrock.AccountHeader), actorID)
+		if cred != nil {
+			a, err := bedrock.Parse(cred.Token)
+			modelPath := strings.TrimPrefix(r.URL.Path, s.PathPrefix+"/model/")
+			model, action, ok := strings.Cut(modelPath, "/")
+			if err != nil || a.Expired(time.Now()) || !ok || !a.Allows(model) || r.Method != http.MethodPost || (action != "converse" && action != "converse-stream") {
+				http.Error(w, "Bedrock account expired or model/request is not permitted", http.StatusForbidden)
+				return
+			}
+			cred.Token = a.APIKey
+			cred.BaseURL = a.Endpoint()
+			cred.GraceToken = ""
+			cred.Headers = nil
+		}
+		r.Header.Del(bedrock.AccountHeader)
+	} else {
+		cred = p.credStore.Select(ProviderType(s.ID), actorID)
+	}
 	// A nil credential means two different things now, and only one of them may
 	// fall through. An EMPTY store for a spec that does not RequireCredential is
 	// the pass-through this route has always had: the request goes upstream
@@ -895,7 +915,7 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 	if cred != nil {
 		credentialID = cred.ID
 	}
-	p.copyAndObserveLLM(w, resp, s.ResponseCodec(r.URL.Path), s.LedgerProvider, actorID, credentialID)
+	p.copyAndObserveLLM(w, resp, s.ResponseCodec(r.URL.Path), s.LedgerProvider, actorID, credentialID, strings.Split(strings.TrimPrefix(r.URL.Path, s.PathPrefix+"/model/"), "/")[0])
 }
 
 // graceReplay is what a request looked like BEFORE the current credential was
@@ -1069,7 +1089,7 @@ func (p *Proxy) authorizeLLMRoute(w http.ResponseWriter, r *http.Request) (strin
 // `ledgerProvider` is the lowercase paymaster rate-card key
 // (Spec.LedgerProvider) stamped onto the usage row. OpenRouter is why they
 // are separate — OpenAI-shaped bodies, its own rate card.
-func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, codec, ledgerProvider, actorID, credentialID string) {
+func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, codec, ledgerProvider, actorID, credentialID string, nativeModel ...string) {
 	// net/http buffers small writes. SSE must reach the caller while upstream
 	// remains open, including when usage observation is disabled.
 	var dst io.Writer = w
@@ -1121,6 +1141,9 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 		usage.AgentID = actorID
 		usage.CredentialID = credentialID
 		usage.Provider = ledgerProvider
+		if codec == "bedrock" && len(nativeModel) > 0 {
+			usage.Model = nativeModel[0]
+		}
 		quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 		if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CachedInputTokens != 0 ||
 			usage.CacheCreationTokens != 0 || quota.Window != "" || quota.HadStatus429 {
@@ -1147,6 +1170,9 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	usage.AgentID = actorID
 	usage.CredentialID = credentialID
 	usage.Provider = ledgerProvider
+	if codec == "bedrock" && len(nativeModel) > 0 {
+		usage.Model = nativeModel[0]
+	}
 	quota := parseQuotaInfo(resp.Header, resp.StatusCode)
 	p.onLLMCall(usage, quota, billingMode, subPlan)
 }

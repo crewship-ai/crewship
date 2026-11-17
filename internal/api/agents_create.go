@@ -206,7 +206,7 @@ func (h *AgentHandler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req.LLMProvider != nil && *req.LLMProvider != "" && !validLLMProviders[*req.LLMProvider] {
-		replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, OPENCODE_GO, or ZAI_CODING_PLAN")
+		replyError(w, http.StatusBadRequest, "llm_provider must be ANTHROPIC, OPENAI, GOOGLE, CURSOR, FACTORY, OLLAMA, OPENCODE, OPENCODE_GO, ZAI_CODING_PLAN, or AWS_BEDROCK")
 		return
 	}
 	if req.LLMModel != nil {

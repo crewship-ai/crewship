@@ -194,6 +194,7 @@ export function getProviderLabel(provider: string): string {
     OPENCODE: "OpenCode Zen",
     OPENCODE_GO: "OpenCode Go",
     ZAI_CODING_PLAN: "Z.AI Coding Plan",
+ AWS_BEDROCK: "Amazon Bedrock",
     NONE: "--",
   }
   return labels[provider] ?? provider

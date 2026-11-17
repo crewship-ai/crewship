@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/crewship-ai/crewship/internal/auth/internaltoken"
+	"github.com/crewship-ai/crewship/internal/bedrock"
 	"github.com/crewship-ai/crewship/internal/codexauth"
 	"github.com/crewship-ai/crewship/internal/credpolicy"
 	"github.com/crewship-ai/crewship/internal/geminiauth"
@@ -73,6 +74,9 @@ func baseAgentEnv(req AgentRunRequest) []string {
 // to a path that never had it.
 func BuildEnvVars(req AgentRunRequest, activeCred *Credential) []string {
 	env := baseAgentEnv(req)
+	if bedrockRun(req) {
+		return env
+	}
 
 	if activeCred != nil {
 		// #2092/#2246: a further review found this selector still unguarded
@@ -242,7 +246,7 @@ func envHasAssignment(env []string, name, value string) bool {
 // once, instead of each selector remembering its own copy of the same guard
 // (the shape of bug that produced this in the first place).
 func credEnvDeliverable(cred Credential) bool {
-	return credpolicy.For(cred.Type).Delivery != credpolicy.DeliveryNone
+	return providerlogin.Canonical(cred.Provider) != bedrock.Provider && credpolicy.For(cred.Type).Delivery != credpolicy.DeliveryNone
 }
 
 // oauthKind says WHICH vendor's login an OAuth-shaped credential is. It exists
@@ -804,6 +808,21 @@ func BuildEnvVarsSidecar(req AgentRunRequest, keeperEnabled bool) []string {
 		env = append(env, e)
 	}
 
+	if providerlogin.Canonical(req.LLMProvider) == bedrock.Provider || strings.HasPrefix(req.LLMModel, bedrock.NativeProvider+"/") {
+		clean := env[:0]
+		for _, entry := range env {
+			name, _, _ := strings.Cut(entry, "=")
+			if !strings.HasPrefix(name, "AWS_") {
+				clean = append(clean, entry)
+			}
+		}
+		env = append(clean, "OPENCODE_DISABLE_MODELS_FETCH=1", "OPENCODE_CONFIG_PROJECT_DISABLE=1", "OPENCODE_DISABLE_CLAUDE_CODE=1")
+		for _, name := range []string{"AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN", "AWS_BEARER_TOKEN_BEDROCK", "AWS_REGION", "AWS_DEFAULT_REGION", "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_WEB_IDENTITY_TOKEN_FILE", "AWS_ROLE_ARN", "AWS_CONTAINER_CREDENTIALS_FULL_URI", "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"} {
+			env = append(env, name+"=")
+		}
+		env = append(env, "AWS_EC2_METADATA_DISABLED=true", "AWS_SHARED_CREDENTIALS_FILE=/dev/null", "AWS_CONFIG_FILE=/dev/null")
+	}
+
 	return env
 }
 
@@ -1151,6 +1170,9 @@ func resolveRoutedProvider(req AgentRunRequest, viaSidecar bool) (routedProvider
 	if s.ID == "OPENCODE" {
 		prefix = "opencode"
 	}
+	if s.ID == bedrock.Provider {
+		prefix = bedrock.NativeProvider
+	}
 	if s.ID == "ZAI_CODING_PLAN" {
 		prefix = "zai-coding-plan"
 	}
@@ -1275,6 +1297,29 @@ func localModelConfigEnv(req AgentRunRequest, viaSidecar bool) (string, bool) {
 		return "", false
 	}
 
+	if isRouted && routed.Spec.ID == bedrock.Provider {
+		c, found := credentialFor(req, routed.Spec)
+		if !found {
+			return "", false
+		}
+		a, err := bedrock.Parse(c.PlainValue)
+		if err != nil || a.Expired(time.Now()) || !a.Allows(routed.ModelID) {
+			return "", false
+		}
+		full := bedrock.NativeProvider + "/" + routed.ModelID
+		models := map[string]any{}
+		for _, m := range a.Models {
+			models[m] = map[string]any{"name": m, "package": "@opencode/ai/providers/amazon-bedrock"}
+		}
+		cfg := map[string]any{
+			"model": full, "small_model": full,
+			"agents":    map[string]any{"title": map[string]string{"model": full}, "compaction": map[string]string{"model": full}},
+			"policies":  []map[string]string{{"action": "provider.use", "resource": "*", "effect": "deny"}, {"action": "provider.use", "resource": bedrock.NativeProvider, "effect": "allow"}},
+			"providers": map[string]any{bedrock.NativeProvider: map[string]any{"package": "@opencode/ai/providers/amazon-bedrock", "env": []string{}, "models": models, "headers": map[string]string{bedrock.AccountHeader: c.ID}, "settings": map[string]any{"auth": "bearer", "region": a.Region, "apiKey": routedProviderDummyKey, "baseURL": routed.ProxyBaseURL()}}},
+		}
+		raw, e := json.Marshal(cfg)
+		return "OPENCODE_CONFIG_CONTENT=" + string(raw), e == nil
+	}
 	if isRouted && (routed.Spec.ID == "OPENCODE" || routed.Spec.ID == "OPENCODE_GO" || routed.Spec.ID == "ZAI_CODING_PLAN") {
 		// An options-only override preserves OpenCode's per-model SDK, model
 		// metadata and native session headers. Forcing openai-compatible here
@@ -1799,4 +1844,8 @@ func DefaultEnvVarForProvider(provider string) string {
 	default:
 		return ""
 	}
+}
+
+func bedrockRun(req AgentRunRequest) bool {
+	return providerlogin.Canonical(req.LLMProvider) == bedrock.Provider || strings.HasPrefix(req.LLMModel, bedrock.NativeProvider+"/")
 }

@@ -628,7 +628,7 @@ export function CredentialDetailSheet({
           <div className="min-w-0 flex-1">
             <b className="text-control font-semibold text-foreground">Signed out</b>
             <p className="text-label text-foreground/85">
-              {seat.login.refresh.error ? `${seat.login.refresh.error}. ` : ""}Agents that pay with it fall back to their crew&apos;s or the workspace account until someone signs in again.
+              {seat.login.refresh.error ? `${seat.login.refresh.error}. ` : ""}{seat.login.provider === "AWS_BEDROCK" ? "Bedrock agents stop until this account is reconnected; another payer is never substituted." : "Agents that pay with it fall back to their crew’s or the workspace account until someone signs in again."}
             </p>
           </div>
           {canUpdate && onRelogin && <Button size="sm" onClick={() => onRelogin(credential)}>Sign in again</Button>}

@@ -68,6 +68,7 @@ type testResult struct {
 // way to post the stored secret to a baseURL that whoever holds "update" on the
 // credential can repoint at will.
 var probeSupportedProviders = map[string]struct{}{
+	"AWS_BEDROCK":   {},
 	"ANTHROPIC":     {},
 	"OPENAI":        {},
 	"OPENAI_COMPAT": {},
@@ -156,6 +157,8 @@ func probeProviderLogin(ctx context.Context, provider, mode, value string, dialE
 
 func probeProviderInner(ctx context.Context, provider, ctype, value string, dialEndpoint bool) testResult {
 	switch provider {
+	case "AWS_BEDROCK":
+		return probeBedrock(ctx, value)
 	case "ANTHROPIC":
 		// OAuth CLI tokens ARE checkable, and used to be reported as valid
 		// without anyone asking. The comment that stood here claimed they

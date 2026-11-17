@@ -337,6 +337,7 @@ export function providerLoginPresentation(provider: string, mode: ProviderLoginM
   const p = (provider ?? "").toUpperCase()
   if (mode === "api_key") {
     const keyOf: Record<string, { placeholder: string; slot: string }> = {
+ AWS_BEDROCK: { placeholder: "Paste the Bedrock API key", slot: "AWS_BEARER_TOKEN_BEDROCK" },
       ANTHROPIC: { placeholder: "sk-ant-api03-…", slot: "ANTHROPIC_API_KEY" },
       OPENAI: { placeholder: "sk-proj-… or sk-svcacct-…", slot: "OPENAI_API_KEY" },
       GOOGLE: { placeholder: "AIza…", slot: "GOOGLE_API_KEY" },

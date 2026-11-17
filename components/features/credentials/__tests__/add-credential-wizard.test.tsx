@@ -381,6 +381,25 @@ describe("provider login (#2428)", () => {
     expect(bodyOf(createCall)).toMatchObject({ provider: "XAI", type: "PROVIDER_LOGIN", mode: "api_key", value: "fixture-xai-key" })
   })
 
+  it("stores Bedrock authentication, region, model policy and expiry atomically", async () => {
+    const {onSuccess}=renderWizard()
+    fireEvent.click(screen.getByRole("button",{name:/^Amazon Bedrock/i}))
+    fireEvent.change(screen.getByLabelText(/^API key$/i),{target:{value:"fixture-bedrock-key"}})
+    fireEvent.change(screen.getByLabelText(/^name$/i),{target:{value:"Bedrock EU"}})
+    fireEvent.change(screen.getByLabelText("Permitted Bedrock model IDs"),{target:{value:"eu.anthropic.claude-opus-5-5"}})
+    fireEvent.change(screen.getByLabelText("Key expires at"),{target:{value:"2099-01-01T12:00"}})
+    expect(screen.getByText(/automatic renewal is not available/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button",{name:/^continue$/i}))
+    expect(screen.getByLabelText("Agent model")).toBeInTheDocument()
+    fireEvent.click(screen.getByRole("button",{name:/save provider|finish setup/i}))
+    await waitFor(()=>expect(onSuccess).toHaveBeenCalled())
+    const call=h.apiFetch.mock.calls.find(([url])=>String(url).startsWith("/api/v1/credentials?"))!
+    const body=bodyOf(call)
+    expect(body).toMatchObject({provider:"AWS_BEDROCK",type:"PROVIDER_LOGIN",mode:"api_key"})
+    expect(JSON.parse(body.value as string)).toMatchObject({auth_method:"bedrock_api_key",api_key:"fixture-bedrock-key",region:"eu-central-1",models:["eu.anthropic.claude-opus-5-5"],eu_only:true})
+    expect(h.apiFetch.mock.calls.some(([url])=>String(url).endsWith("/fields"))).toBe(false)
+  })
+
   it.each([
     ["OpenCode Go", "OPENCODE_GO", "https://opencode.ai/auth"],
     ["OpenCode Zen", "OPENCODE", "https://opencode.ai/auth"],

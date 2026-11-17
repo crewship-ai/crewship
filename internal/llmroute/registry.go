@@ -87,6 +87,7 @@ var bodyCodecs = map[string]bool{
 	"anthropic": true,
 	"openai":    true,
 	"google":    true,
+	"bedrock":   true,
 }
 
 // ReservedPathSegments returns the top-level loopback path segments a provider
@@ -503,6 +504,8 @@ func init() {
 		AuthRules:  []AuthRule{{Slots: []AuthSlot{{Placement: PlaceHeader, Name: "Authorization", Prefix: "Bearer "}}}},
 		KeyEnvVars: []string{"ZAI_CODING_PLAN_API_KEY"},
 	})
+	register(Spec{ID: "AWS_BEDROCK", DisplayName: "Amazon Bedrock", LedgerProvider: "amazon-bedrock", BodyCodec: "bedrock", PathPrefix: "/llm/amazon-bedrock", StripPrefix: true, UpstreamFromCredential: true, RequireCredential: true, AuthRules: []AuthRule{{Slots: []AuthSlot{{Placement: PlaceHeader, Name: "Authorization", Prefix: "Bearer "}}}}, KeyEnvVars: []string{"AWS_BEARER_TOKEN_BEDROCK"}})
+
 	register(Spec{
 		ID:          "OPENAI_COMPAT",
 		DisplayName: "OpenAI-compatible endpoint",

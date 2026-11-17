@@ -258,6 +258,7 @@ export type BrandCategory =
 // picker a sensible default top row.
 
 export const BRAND_REGISTRY: BrandEntry[] = [
+ { key: "AWS_BEDROCK", label: "Amazon Bedrock", hex: "#FF9900", Icon: Server as unknown as IconComponent, category: "AI", keywords: ["bedrock", "amazon-bedrock", "aws_bedrock"], cli: true },
   // ─── AI / inference ─────────────────────────────────────────────
   { key: "ANTHROPIC", label: "Anthropic", hex: "#D97757", Icon: SiAnthropic as IconComponent, category: "AI", keywords: ["anthropic", "claude"], prefixes: ["sk-ant-"], cli: true },
   { key: "OPENAI", label: "OpenAI", hex: "#412991", Icon: SiOpenai as IconComponent, category: "AI", keywords: ["openai", "chatgpt", "gpt", "oai_"], prefixes: ["sk-proj-", "sk-svcacct-"], cli: true },
