@@ -8,11 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/moby/moby/api/types/mount"
+	"github.com/moby/moby/client"
+
 	"github.com/crewship-ai/crewship/internal/managedlaunch"
 	"github.com/crewship-ai/crewship/internal/resourcelifecycle"
 	"github.com/crewship-ai/crewship/internal/safepath"
-	"github.com/moby/moby/api/types/mount"
-	"github.com/moby/moby/client"
 )
 
 // AttestCodexOuterSandbox is a stronger, separate qualification than the

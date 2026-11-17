@@ -42,7 +42,7 @@ func RecordCodexSandboxPreflight(ctx context.Context, db *sql.DB, emitter journa
 	if n, err := result.RowsAffected(); err != nil || n != 1 {
 		return errors.New("Codex sandbox compliance audit not inserted")
 	}
-	notify, err := appendAuthorizationAudit(ctx, tx, emitter, journal.Entry{WorkspaceID: e.WorkspaceID, CrewID: e.CrewID, AgentID: e.AgentID, Type: journal.AuditEntityUpdated, Severity: journal.SeverityNotice, ActorType: journal.ActorSystem, Summary: "Codex outer sandbox preflight " + e.Status, Payload: map[string]any{"action": "codex.sandbox_preflight", "entity_type": "RUN", "entity_id": e.RunID, "metadata": e}})
+	notify, err := appendAuthorizationAudit(ctx, tx, emitter, journal.Entry{WorkspaceID: e.WorkspaceID, CrewID: e.CrewID, AgentID: e.AgentID, Type: classifyAuditAction("codex.sandbox_preflight"), Severity: journal.SeverityNotice, ActorType: journal.ActorSystem, Summary: "Codex outer sandbox preflight " + e.Status, Payload: map[string]any{"action": "codex.sandbox_preflight", "entity_type": "RUN", "entity_id": e.RunID, "metadata": e}})
 	if err != nil {
 		return err
 	}

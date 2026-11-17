@@ -389,10 +389,18 @@ var crewUpdateCmd = &cobra.Command{
 		// is accepted, and this is the only place the operator hears about
 		// it before the first OOM-killed run.
 		var updated struct {
-			Warnings []string `json:"warnings" yaml:"warnings"`
+			Warnings               []string `json:"warnings" yaml:"warnings"`
+			AllowCodexOuterSandbox *bool    `json:"allow_codex_outer_sandbox"`
 		}
 		if err := cli.ReadJSON(resp, &updated); err != nil {
 			return err
+		}
+
+		if flags.Changed("allow-codex-outer-sandbox") {
+			want, _ := flags.GetBool("allow-codex-outer-sandbox")
+			if updated.AllowCodexOuterSandbox == nil || *updated.AllowCodexOuterSandbox != want {
+				return fmt.Errorf("server did not acknowledge Codex outer-isolation consent; upgrade the server before using this flag")
+			}
 		}
 
 		cli.PrintSuccess("Crew updated successfully.")

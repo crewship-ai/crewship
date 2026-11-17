@@ -96,3 +96,17 @@ trust boundary: `/opt/crew-tools` is writable and its tools are not attested.
 These fixed paths do not cover every devcontainer feature's custom bin directory;
 no complete feature-tool availability is claimed. The original managed pilot's
 fixed system PATH and environment contract are unchanged.
+
+For the real native Docker release fixture, provide an explicit static artifact
+and an already cached `alpine:3` image. The test never installs a CLI or reads a
+provider login:
+
+```bash
+CREWSHIP_TEST_CODEX_NATIVE=/absolute/path/to/native/codex \
+  go test -tags integration ./internal/orchestrator \
+  -run '^TestCodexOuterActualNativeDocker$' -count=1 -v
+```
+
+An absent artifact is a skip, and a refused Docker gateway is an unmet test
+precondition. Neither is a successful release qualification. A successful receipt
+includes the actual native version, immutable image ID and artifact SHA-256.

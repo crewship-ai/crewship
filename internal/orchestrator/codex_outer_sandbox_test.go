@@ -5,13 +5,14 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"github.com/crewship-ai/crewship/internal/managedlaunch"
-	"github.com/crewship-ai/crewship/internal/provider"
 	"io"
 	"log/slog"
 	"slices"
 	"strings"
 	"testing"
+
+	"github.com/crewship-ai/crewship/internal/managedlaunch"
+	"github.com/crewship-ai/crewship/internal/provider"
 )
 
 // A process-global environment variable must never grant outer-isolation consent.
