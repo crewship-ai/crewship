@@ -574,24 +574,64 @@ expect_osv "network error after valid low summary -> fail" 1 129 "$OSV_MEDIUM"
 
 echo
 echo "OSV exceptions (osv-scanner.toml) are time-boxed and justified:"
-# Each [[IgnoredVulns]] entry needs an id, a reason and an ignoreUntil date,
-# so an exception can never silently become permanent.
-osv_exceptions="$(awk '
-  /^\[\[IgnoredVulns\]\]/ { if (n) print id "|" reason "|" until; n++; id = reason = until = ""; next }
-  /^id *=/ { id = $0 } /^reason *=/ { reason = $0 } /^ignoreUntil *=/ { until = $0 }
-  END { if (n) print id "|" reason "|" until }
-' osv-scanner.toml)"
-if [ -z "$osv_exceptions" ]; then
-  pass "no exceptions"
-else
-  while IFS='|' read -r id reason until; do
-    if [ -z "$id" ] || [ -z "$reason" ] || [ -z "$until" ]; then
-      fail "exception without id, reason or ignoreUntil: ${id:-<no id>}"
-    else
-      pass "${id#id = }"
-    fi
-  done <<< "$osv_exceptions"
-fi
+# osv-scanner.toml may only hold [[IgnoredVulns]] entries, each with a
+# non-empty id and reason and an ignoreUntil at most 90 days ahead, so an
+# exception can never silently become permanent or hide a whole package.
+# Parsed as TOML, so spacing, inline tables and quoting cannot slip past.
+check_osv_exceptions() {
+  python3 - "$1" <<'PY'
+import datetime, sys, tomllib
+try:
+    with open(sys.argv[1], "rb") as f:
+        doc = tomllib.load(f)
+except FileNotFoundError:
+    print("ok|no exceptions"); sys.exit(0)
+except tomllib.TOMLDecodeError as e:
+    print(f"fail|unparseable: {e}"); sys.exit(0)
+for key in doc:
+    if key != "IgnoredVulns":
+        print(f"fail|unsupported setting {key} (only time-boxed IgnoredVulns entries)")
+entries = doc.get("IgnoredVulns", [])
+if not isinstance(entries, list):
+    print("fail|IgnoredVulns must be a list of entries"); entries = []
+now = datetime.datetime.now(datetime.timezone.utc)
+for e in entries:
+    vid = e.get("id") if isinstance(e, dict) else None
+    label = vid if isinstance(vid, str) and vid.strip() else "<no id>"
+    if not isinstance(e, dict) or set(e) - {"id", "reason", "ignoreUntil"}:
+        print(f"fail|{label}: unexpected fields"); continue
+    if label == "<no id>" or not isinstance(e.get("reason"), str) or not e["reason"].strip():
+        print(f"fail|{label}: needs an id and a reason"); continue
+    until = e.get("ignoreUntil")
+    if isinstance(until, datetime.date) and not isinstance(until, datetime.datetime):
+        until = datetime.datetime.combine(until, datetime.time(), datetime.timezone.utc)
+    if not isinstance(until, datetime.datetime) or until.tzinfo is None:
+        print(f"fail|{label}: needs ignoreUntil as a UTC date or datetime"); continue
+    if until > now + datetime.timedelta(days=90):
+        print(f"fail|{label}: ignoreUntil more than 90 days ahead"); continue
+    print(f"ok|{label} until {until.date()}")
+if not entries and all(k == "IgnoredVulns" for k in doc):
+    print("ok|no exceptions")
+PY
+}
+while IFS='|' read -r verdict text; do
+  if [ "$verdict" = ok ]; then pass "$text"; else fail "$text"; fi
+done < <(check_osv_exceptions osv-scanner.toml)
+
+# The check itself, against configs osv-scanner accepts as permanent ignores.
+expect_osv_config_rejected() {
+  local label="$1" body="$2" f
+  f="$(mktemp)"; printf '%s\n' "$body" > "$f"
+  if check_osv_exceptions "$f" | grep -q '^fail|'; then pass "rejects $label"; else fail "accepted $label"; fi
+  rm -f "$f"
+}
+expect_osv_config_rejected "a spaced table header without ignoreUntil" $'[[ IgnoredVulns ]]\nid = "GHSA-x"\nreason = "r"'
+expect_osv_config_rejected "an inline table without ignoreUntil" 'IgnoredVulns = [{ id = "GHSA-x", reason = "r" }]'
+expect_osv_config_rejected "a package-wide override" $'[[PackageOverrides]]\nname = "picomatch"\nignore = true'
+expect_osv_config_rejected "a reason with | and no ignoreUntil" $'[[IgnoredVulns]]\nid = "GHSA-x"\nreason = "a|2026-12-01"'
+expect_osv_config_rejected "an empty id" $'[[IgnoredVulns]]\nid = ""\nreason = "r"\nignoreUntil = 2026-12-01T00:00:00Z'
+expect_osv_config_rejected "a local datetime" $'[[IgnoredVulns]]\nid = "GHSA-x"\nreason = "r"\nignoreUntil = 2026-12-01T00:00:00'
+expect_osv_config_rejected "an exception a year ahead" $'[[IgnoredVulns]]\nid = "GHSA-x"\nreason = "r"\nignoreUntil = 2099-01-01T00:00:00Z'
 
 echo
 if [ "$FAILURES" -eq 0 ]; then
