@@ -64,23 +64,13 @@ func TestNativeToolsLiveTerminal(t *testing.T) {
 		t.Fatal(err)
 	}
 	c.SetReadDeadline(time.Now().Add(10 * time.Minute))
-	// Wait for actual shell output before input; text frames are server events.
-	for {
-		kind, b, err := c.ReadMessage()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if kind == websocket.TextMessage {
-			t.Logf("terminal event: %s", b)
-		}
-		if kind == websocket.BinaryMessage {
-			break
-		}
-	}
+	// The protocol does not promise a startup prompt frame. Queue input after
+	// auth/init just as a user can type before the first shell output arrives.
 	script := `fail=0
 id -u
 printf 'SHELL_EXE='; readlink /proc/$$/exe
 if shopt -q login_shell; then echo MODE=login; else echo MODE=non-login; fi
+test -z "${NATIVE_RUN_ONLY_5452+x}"; code=$?; printf 'TERMINAL_RUN_ENV_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
 printf 'HOME=%s\nPATH=%s\nMISE_DATA_DIR=%s\nMISE_GLOBAL_CONFIG_FILE=%s\n' "$HOME" "$PATH" "$MISE_DATA_DIR" "$MISE_GLOBAL_CONFIG_FILE"
 glab --version
 code=$?; printf 'TOOL_STATUS:glab:%s\n' "$code"; test "$code" -eq 0 || fail=1
@@ -95,13 +85,23 @@ code=$?; printf 'LOGIN_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1
 if command -v zsh >/dev/null; then zsh -c 'glab --version && codex --version && claude --version'; code=$?; printf 'ZSH_STATUS:%s\n' "$code"; test "$code" -eq 0 || fail=1; fi
 printf '\nNATIVE_DONE:%s\n' "$fail"; exit "$fail"
 `
-	if err := c.WriteMessage(websocket.BinaryMessage, []byte(script)); err != nil {
+	if err := c.WriteMessage(websocket.BinaryMessage, []byte("{\n"+script+"}\n")); err != nil {
 		t.Fatal(err)
 	}
+	// Real xterm answers terminal color/cursor queries. glab can issue these
+	// even for --version; a headless WS client must answer them too. Parse the
+	// whole shell block before executing it so query readers cannot consume
+	// the remaining commands as terminal responses.
+	replies := []struct{ query, response string }{
+		{"\x1b]11;?", "\x1b]11;rgb:0000/0000/0000\x1b\\"},
+		{"\x1b]10;?", "\x1b]10;rgb:ffff/ffff/ffff\x1b\\"},
+		{"\x1b[6n", "\x1b[1;1R"},
+	}
+	answered := map[string]int{}
 	var output strings.Builder
 	done := regexp.MustCompile(`(?m)^NATIVE_DONE:([0-9]+)\r?$`)
 	for {
-		_, b, err := c.ReadMessage()
+		kind, b, err := c.ReadMessage()
 		if err != nil {
 			t.Fatalf("terminal ended without command receipt: %v", err)
 		}
@@ -109,6 +109,16 @@ printf '\nNATIVE_DONE:%s\n' "$fail"; exit "$fail"
 		if output.Len() > 128<<10 {
 			t.Fatal("bounded terminal output exceeded")
 		}
+		for _, reply := range replies {
+			count := strings.Count(output.String(), reply.query)
+			for answered[reply.query] < count {
+				if err := c.WriteMessage(websocket.BinaryMessage, []byte(reply.response)); err != nil {
+					t.Fatal(err)
+				}
+				answered[reply.query]++
+			}
+		}
+		t.Logf("terminal frame %d: %q", kind, b)
 		if match := done.FindStringSubmatch(output.String()); match != nil {
 			t.Logf("actual terminal result:\n%s", output.String())
 			if match[1] != "0" {
