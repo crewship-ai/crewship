@@ -1,0 +1,1 @@
+- **Stopping a chat before any reply no longer makes the assistant turn disappear (#3880).** Legacy streams retain an outcome note for empty and partial replies, and a Stop racing with completion leaves the completed reply intact.

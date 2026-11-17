@@ -106,7 +106,7 @@ describe("ChatClient: crossing the breakpoint mid-upload", () => {
     // Cross to the compact (phone) layout: the whole tree is replaced.
     Object.defineProperty(window, "innerWidth", { value: 500, writable: true, configurable: true })
     await act(async () => listeners.forEach((cb) => cb()))
-    await waitFor(() => expect(screen.getByRole("tablist", { name: "Chat panel" })).toBeTruthy())
+    await waitFor(() => expect(screen.getByRole("radiogroup", { name: "Chat panel" })).toBeTruthy())
 
     expect(calls[0].signal?.aborted).toBe(false)
     const status = () => Object.values(useComposerStore.getState().attachments).flat().map((a) => a.status)

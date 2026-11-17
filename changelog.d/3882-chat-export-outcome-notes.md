@@ -1,0 +1,1 @@
+- **Markdown chat exports explain stopped, interrupted and failed replies (#3882).** Empty replies retain their outcome note, and partial replies are identified instead of appearing complete.

@@ -15,6 +15,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import type { ChatTurn } from "@/hooks/use-chat"
+import { chatTurnStatusNote } from "@/lib/chat-turn-status"
 
 interface ExportDialogProps {
   turns: ChatTurn[]
@@ -27,6 +28,8 @@ interface ExportDialogProps {
   onOpenChange?: (open: boolean) => void
 }
 
+// Completed content/parts match CLI Markdown. Local Stop and canonical terminal
+// notes additionally describe browser turn state unavailable in persisted CLI messages.
 function turnsToMarkdown(turns: ChatTurn[], agentName?: string): string {
   const ts = new Date().toISOString()
   const out: string[] = [
@@ -47,6 +50,8 @@ function turnsToMarkdown(turns: ChatTurn[], agentName?: string): string {
         else if (p.type === "tool_call")
           out.push(`> _Tool:_ \`${p.metadata?.tool_name ?? p.content}\``)
       }
+      const note = chatTurnStatusNote(turn)
+      if (note) out.push(note)
       out.push("")
     }
   }

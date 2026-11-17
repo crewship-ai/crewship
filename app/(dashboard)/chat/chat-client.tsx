@@ -4,7 +4,7 @@ import { useAttachmentScopePrefix } from "@/hooks/use-attachment-scope"
 import { AttachmentLifecycle } from "@/components/features/chat/composer/attachment-lifecycle"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
+import { Brain, LayoutGrid, ListTodo, Menu, MessageSquare } from "lucide-react"
 
 import { UnifiedConversationPanel, UnifiedNewChatMenu, useUnifiedConversations } from "@/components/features/conversations/unified-chat"
 import { SubBar } from "@/components/layout/sub-bar"
@@ -26,8 +26,9 @@ import {
   scopeKindParam,
   type ChatScope,
 } from "@/components/features/chat/chat-kind"
-import { SidebarCollapseButton } from "@/components/layout/sidebar-kit"
+import { SidebarCollapseButton, SIDEBAR_WIDTH_COLLAPSED } from "@/components/layout/sidebar-kit"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Segmented } from "@/components/ui/segmented"
 import { deriveSessionTitle } from "@/lib/chat-title"
 import { useComposerStore } from "@/stores/composer-store"
 import { useArtifactStore } from "@/stores/artifact-store"
@@ -97,12 +98,13 @@ function useAgentSlugFromUrl(): string | null {
 
 /** Which full-screen panel the phone is showing. ChatPanel has had these
  *  branches since it was written. */
-type MobilePanel = "chat" | "artifacts" | "work"
+type MobilePanel = "chat" | "artifacts" | "work" | "memory"
 
-const MOBILE_PANELS: { id: MobilePanel; label: string; icon: typeof MessageSquare }[] = [
-  { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "artifacts", label: "Artifacts", icon: LayoutGrid },
-  { id: "work", label: "Work", icon: ListTodo },
+const MOBILE_PANELS: { value: MobilePanel; label: string; icon: typeof MessageSquare }[] = [
+  { value: "chat", label: "Chat", icon: MessageSquare },
+  { value: "artifacts", label: "Artifacts", icon: LayoutGrid },
+  { value: "work", label: "Work", icon: ListTodo },
+  { value: "memory", label: "Memory", icon: Brain },
 ]
 
 /**
@@ -895,8 +897,8 @@ function ChatClientBody() {
    * phone breakpoint: 280px of conversations beside a transcript survives an
    * 800px window and does not survive a 390px one. The column becomes an
    * overlay drawer reached from a header button, and ChatPanel is handed the
-   * `mobilePanel` prop for chat/artifacts/work — on
-   * desktop those three live side by side in the panel's own right rail, so
+   * `mobilePanel` prop for chat/artifacts/work/memory — on
+   * desktop those panels live side by side in the panel's own right rail, so
    * the strip would be a duplicate there.
    */
   if (isMobile) {
@@ -904,30 +906,15 @@ function ChatClientBody() {
       <div className="flex h-full min-h-0 flex-col overflow-hidden bg-card">
         {subbar}
 
-        {!humanConversationId && <div
-          role="tablist"
-          aria-label="Chat panel"
-          className="flex h-9 shrink-0 items-stretch border-b border-foreground/[0.08]"
-        >
-          {MOBILE_PANELS.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={mobilePanel === id}
-              onClick={() => setMobilePanel(id)}
-              className={cn(
-                "-mb-px flex flex-1 items-center justify-center gap-1.5 border-b-2 text-micro",
-                mobilePanel === id
-                  ? "border-primary text-foreground"
-                  : "border-transparent text-muted-foreground",
-              )}
-            >
-              <Icon className="h-3.5 w-3.5" />
-              {label}
-            </button>
-          ))}
-        </div>}
+        {!humanConversationId && <Segmented
+          value={mobilePanel}
+          onChange={setMobilePanel}
+          options={MOBILE_PANELS}
+          ariaLabel="Chat panel"
+          size="xs"
+          fill
+          className="rounded-none border-x-0 border-t-0"
+        />}
 
         <div className="surface-pane min-h-0 flex-1 overflow-hidden">{conversation}</div>
 
@@ -985,7 +972,7 @@ function ChatClientBody() {
       <aside
         className={cn(
           "shrink-0 overflow-hidden border-r border-foreground/[0.06] transition-all",
-          leftCollapsed ? "w-9" : "w-[280px]",
+          leftCollapsed ? SIDEBAR_WIDTH_COLLAPSED : "w-[280px]",
         )}
       >
         {leftCollapsed ? (

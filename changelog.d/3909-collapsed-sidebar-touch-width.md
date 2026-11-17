@@ -1,0 +1,1 @@
+- **Collapsed Chat and Pages sidebars keep their Expand button visible on touch screens (#3909).** A fixed pixel width accommodates the 44px touch target even at Small text size.
