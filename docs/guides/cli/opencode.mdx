@@ -226,6 +226,31 @@ provider configuration. Sidecar-off execution is refused. Images with an
 can override the runtime's privacy-critical configuration. Project configuration
 and model-catalog downloads are disabled for these runs.
 
+### Account API for model settings
+
+- The encrypted Bedrock document may omit `expires_at` (or use an empty string).
+  This means no local expiry is recorded; it does not verify AWS validity or
+  enable renewal. Invalid nonempty dates are refused.
+- Repeat `POST /api/v1/credentials/{credentialId}/bedrock-assign` with the same
+  `agent_ids` and a different allowed native `model` to change that model in
+  place. The account stays assigned throughout the transaction.
+- `crew_ids` persist a crew account/model rule, including for an empty crew.
+  Later API, hire, internal and manifest agent inserts inherit an exact account
+  and OpenCode model atomically. Moving an inherited agent removes the old
+  inheritance; explicit individual assignments are preserved.
+- `PATCH /api/v1/agents/{agentId}` checks Bedrock model, provider and runner
+  changes against the assigned account in the update transaction. A denied
+  model leaves the whole patch unapplied. Store full `amazon-bedrock/…` IDs.
+- `GET /api/v1/agents/{agentId}` includes `credential_readiness` using the same
+  shape as the existing `/credential-readiness` endpoint. `ready` describes
+  local credential/model policy, including expiry; it is not an AWS probe.
+- The credential binding list exposes optional `bedrock_model` for a crew rule
+  and `inherited_from_binding_id` for materialized members. Remove a rule through
+  `DELETE /api/v1/credentials/bindings/{bindingId}`. Revoked or expired accounts
+  stay selected and fail readiness/run checks without an alternate payer.
+
+### EU policy scope
+
 The EU profile restriction requires an EU region and exact `eu.` model IDs;
 `global.` and bare model IDs are refused. OpenCode title/compaction configuration
 uses the selected model, other providers are denied, and the sidecar independently
@@ -253,26 +278,3 @@ grant its `AWS_BEARER_TOKEN_BEDROCK` slot to an agent using the OpenCode runner 
 an allowed `amazon-bedrock/…` model. This slot identifies the account grant; the
 secret is still not exported as an agent environment variable. Workspace defaults
 and account pools are not fallback payers for Bedrock.
-
-### Account API for model settings
-
-- The encrypted Bedrock document may omit `expires_at` (or use an empty string).
-  This means no local expiry is recorded; it does not verify AWS validity or
-  enable renewal. Invalid nonempty dates are refused.
-- Repeat `POST /api/v1/credentials/{credentialId}/bedrock-assign` with the same
-  `agent_ids` and a different allowed native `model` to change that model in
-  place. The account stays assigned throughout the transaction.
-- `crew_ids` persist a crew account/model rule, including for an empty crew.
-  Later API, hire, internal and manifest agent inserts inherit an exact account
-  and OpenCode model atomically. Moving an inherited agent removes the old
-  inheritance; explicit individual assignments are preserved.
-- `PATCH /api/v1/agents/{agentId}` checks Bedrock model, provider and runner
-  changes against the assigned account in the update transaction. A denied
-  model leaves the whole patch unapplied. Store full `amazon-bedrock/…` IDs.
-- `GET /api/v1/agents/{agentId}` includes `credential_readiness` using the same
-  shape as the existing `/credential-readiness` endpoint. `ready` describes
-  local credential/model policy, including expiry; it is not an AWS probe.
-- The credential binding list exposes optional `bedrock_model` for a crew rule
-  and `inherited_from_binding_id` for materialized members. Remove a rule through
-  `DELETE /api/v1/credentials/bindings/{bindingId}`. Revoked or expired accounts
-  stay selected and fail readiness/run checks without an alternate payer.
