@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useRef, type KeyboardEvent } from "react"
+import { useCallback, useRef } from "react"
+import { moveRadio, radioTabIndex } from "./radio-keys"
 import { SiOllama } from "react-icons/si"
 import { PROVIDER_ICONS } from "@/components/icons/provider-icons"
 import { Cpu, Lock, Timer } from "lucide-react"
@@ -23,7 +24,7 @@ const BRAND_ICON_COLOR: Record<string, string> = {
   FACTORY: "#EF6F2E", FACTORY_DROID: "#EF6F2E",
 }
 
-export function AgentModelSettings({ draft, setDraft, workspaceId, providerConfirmed = true, onProviderConfirmed, seat = null, boundSeatId = null, onSeat }: { draft: AgentDraft; setDraft: (draft: AgentDraft) => void; workspaceId: string; providerConfirmed?: boolean; onProviderConfirmed?: () => void; seat?: LoginCredential | null; boundSeatId?: string | null; onSeat?: (seat: LoginCredential | null) => void }) {
+export function AgentModelSettings({ draft, setDraft, workspaceId, providerConfirmed = true, onProviderConfirmed, seat = null, boundSeatId = null, autoPick = true, onSeat }: { draft: AgentDraft; setDraft: (draft: AgentDraft) => void; workspaceId: string; providerConfirmed?: boolean; onProviderConfirmed?: () => void; seat?: LoginCredential | null; boundSeatId?: string | null; autoPick?: boolean; onSeat?: (seat: LoginCredential | null) => void }) {
   const runners = PROVIDER_RUNNERS[draft.llmProvider]
   const bedrock = draft.llmProvider === "AWS_BEDROCK"
   // A Bedrock account chosen below is the draft Pays with; read through a ref
@@ -44,17 +45,17 @@ export function AgentModelSettings({ draft, setDraft, workspaceId, providerConfi
       }} />
     </CreateSurfaceField>
     {providerConfirmed && <>{bedrock
-      ? <BedrockAccountModel workspaceId={workspaceId} model={draft.llmModel} seat={seat} boundId={boundSeatId} onChange={pickBedrock} />
+      ? <BedrockAccountModel workspaceId={workspaceId} model={draft.llmModel} seat={seat} boundId={boundSeatId} autoPick={autoPick} onChange={pickBedrock} />
       : <ConfigModel key={draft.llmProvider} draftMode label="Model" workspaceId={workspaceId} provider={draft.llmProvider} value={draft.llmModel} onSave={model => setDraft({ ...draft, llmModel: model })} />}
     {runners.length === 1
       ? <CreateSurfaceField label="Runs with" hint={`${PROVIDERS[draft.llmProvider]} runs only on ${CLI_ADAPTERS[runners[0]]?.label ?? runners[0]}. It is installed automatically when the crew environment is prepared.`}>
           <FixedRunner runner={runners[0]} provider={PROVIDERS[draft.llmProvider]} />
         </CreateSurfaceField>
       : <CreateSurfaceField label="Runs with" hint={`The application launched inside the crew container. ${PROVIDERS[draft.llmProvider]} models run on its own CLI or on OpenCode.`}>
-      <div role="radiogroup" aria-label="Agent runner" onKeyDown={moveRadio} className="grid grid-cols-1 gap-2 md:grid-cols-2">{runners.map((key) => {
+      <div role="radiogroup" aria-label="Agent runner" onKeyDown={moveRadio} className="grid grid-cols-1 gap-2 md:grid-cols-2">{runners.map((key, index) => {
         const adapter = CLI_ADAPTERS[key]
         const Icon = adapter.icon
-        return <button key={key} type="button" role="radio" aria-checked={draft.cliAdapter === key} tabIndex={draft.cliAdapter === key ? 0 : -1} onClick={() => {
+        return <button key={key} type="button" role="radio" aria-checked={draft.cliAdapter === key} tabIndex={radioTabIndex(draft.cliAdapter === key, index, (runners as readonly string[]).includes(draft.cliAdapter))} onClick={() => {
           setDraft({ ...draft, cliAdapter: key })
         }} className={cn("flex items-start gap-3 rounded-lg border p-3 text-left focus-visible:ring-2 focus-visible:ring-primary", draft.cliAdapter === key ? "border-primary bg-primary/10" : "border-border hover:bg-muted")}><Icon className="mt-0.5 h-5 w-5 shrink-0 text-foreground" style={{ color: BRAND_ICON_COLOR[key] }} aria-hidden="true" /><span><span className="block text-sm">{adapter.label}</span><span className="mt-1 block text-xs text-muted-foreground">{adapter.description}</span></span></button>
       })}</div>
@@ -87,13 +88,3 @@ export function ProviderPicker({ value, onChange }: { value: AgentDraft["llmProv
   })}</div>
 }
 
-function moveRadio(event: KeyboardEvent<HTMLDivElement>) {
-  if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return
-  const radios = Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="radio"]'))
-  const index = radios.indexOf(event.target as HTMLButtonElement)
-  if (index < 0) return
-  event.preventDefault()
-  const next = event.key === "Home" ? 0 : event.key === "End" ? radios.length - 1 : (index + (["ArrowLeft", "ArrowUp"].includes(event.key) ? -1 : 1) + radios.length) % radios.length
-  radios[next]?.focus()
-  radios[next]?.click()
-}

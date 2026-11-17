@@ -5,7 +5,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, fireEvent, waitFor, within } from "@testing-library/react"
-import { PaysWithRow } from "../pays-with-row"
+import { PaysWithRow, releaseBedrockSeat, seatProvider } from "../pays-with-row"
 import type { LoginCredential, ProviderLogin } from "@/lib/credentials/provider-logins"
 
 const h = vi.hoisted(() => ({
@@ -129,6 +129,16 @@ describe("the picker", () => {
     const options = await screen.findAllByRole("option")
     expect(options.find((o) => o.textContent?.includes("ChatGPT Plus · jana"))).toBeDisabled()
     expect(options.find((o) => o.textContent?.includes("Claude Max · pavel"))).not.toBeDisabled()
+  })
+
+  it("OpenCode on a model of a provider without its own llm_provider (xai/…) takes any login but Bedrock", async () => {
+    const xai: LoginCredential = { ...openaiKey, id: "c_xai", name: "xAI · workspace", provider: "XAI", login: { ...openaiKey.login!, provider: "XAI" } }
+    serve([xai, claude, bedrockSeat])
+    renderRow({ cliAdapter: "OPENCODE", llmProvider: "OPENCODE", llmModel: "xai/grok-5" })
+    fireEvent.click(await screen.findByRole("button", { name: /pays with/i }))
+    const options = await screen.findAllByRole("option")
+    expect(options.find((o) => o.textContent?.includes("xAI · workspace"))).not.toBeDisabled()
+    expect(options.find((o) => o.textContent?.includes("Bedrock EU"))).toBeDisabled()
   })
 
   it("a Bedrock account pays only for a Bedrock agent", async () => {
@@ -266,5 +276,33 @@ describe("the warning", () => {
     serve([chatgpt, claude])
     renderRow({ paysWith: { credential_id: "c_claude", name: "Claude Max · pavel", login: claude.login! } })
     expect(screen.getByRole("status")).toHaveTextContent(/openai models cannot be paid with a anthropic seat/i)
+  })
+})
+
+describe("seat scoping helpers", () => {
+  it.each([
+    ["CODEX_CLI", "OPENAI", "", "OPENAI"],
+    ["OPENCODE", "ANTHROPIC", "claude-sonnet-5-5", "ANTHROPIC"],
+    ["OPENCODE", "OPENCODE", "anthropic/claude-sonnet-5-5", "ANTHROPIC"],
+    ["OPENCODE", "OPENCODE", "openrouter/openai/gpt-6", null],
+    ["OPENCODE", "AWS_BEDROCK", "amazon-bedrock/eu.anthropic.claude-opus-5-5", "AWS_BEDROCK"],
+    ["OPENCODE", "OLLAMA", "ollama/qwen3", null],
+  ])("%s + %s + %s → %s", (adapter, provider, model, want) => {
+    expect(seatProvider(adapter, provider, model)).toBe(want)
+  })
+
+  it("releases only the agent's own Bedrock binding", async () => {
+    h.apiFetch.mockImplementation(async (url: unknown, init?: { method?: string }) => {
+      const u = String(url)
+      if (u.startsWith("/api/v1/credentials/bindings?")) return ok({ bindings: [
+        { id: "b1", credential_id: "c_bedrock", scope: "AGENT", agent_id: "a1", slot: "AWS_BEARER_TOKEN_BEDROCK" },
+        { id: "b2", credential_id: "c_claude", scope: "AGENT", agent_id: "a1", slot: "CLAUDE_CODE_OAUTH_TOKEN" },
+      ] })
+      if (init?.method === "DELETE") return ok({})
+      throw new Error(`unexpected ${u}`)
+    })
+    await releaseBedrockSeat("ws1", "a1")
+    const deletes = h.apiFetch.mock.calls.filter(([, i]) => (i as { method?: string })?.method === "DELETE").map(([u]) => String(u).split("?")[0])
+    expect(deletes).toEqual(["/api/v1/credentials/bindings/b1"])
   })
 })

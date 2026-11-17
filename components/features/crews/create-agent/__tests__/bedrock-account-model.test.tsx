@@ -37,11 +37,11 @@ function serve(rows: LoginCredential[]) {
   })
 }
 
-function Harness({ initial, boundSeatId = null }: { initial?: Partial<AgentDraft>; boundSeatId?: string | null }) {
+function Harness({ initial, boundSeatId = null, autoPick = true }: { initial?: Partial<AgentDraft>; boundSeatId?: string | null; autoPick?: boolean }) {
   const [draft, setDraft] = useState<AgentDraft>({ ...initialAgentDraft(null), ...initial })
   const [seat, setSeat] = useState<LoginCredential | null>(null)
   return <>
-    <AgentModelSettings draft={draft} setDraft={setDraft} workspaceId="ws1" seat={seat} boundSeatId={boundSeatId} onSeat={setSeat} />
+    <AgentModelSettings draft={draft} setDraft={setDraft} workspaceId="ws1" seat={seat} boundSeatId={boundSeatId} autoPick={autoPick} onSeat={setSeat} />
     <output data-testid="draft">{JSON.stringify({ ...draft, seat: seat?.id ?? null })}</output>
   </>
 }
@@ -98,5 +98,34 @@ describe("Bedrock account and model", () => {
     await waitFor(() => expect(state().seat).toBe("c_eu"))
     fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "Anthropic" }))
     expect(state()).toMatchObject({ llmProvider: "ANTHROPIC", seat: null })
+  })
+
+  it("Edit does not pick an account by itself", async () => {
+    serve([eu])
+    render(<Harness autoPick={false} initial={{ llmProvider: "AWS_BEDROCK", cliAdapter: "OPENCODE", llmModel: "" }} />)
+    await screen.findByRole("radiogroup", { name: "Bedrock account" })
+    expect(state()).toMatchObject({ seat: null, llmModel: "" })
+  })
+
+  it("puts back a permitted model after a switch away and back empties it", async () => {
+    serve([eu])
+    render(<Harness boundSeatId="c_eu" initial={{ llmProvider: "AWS_BEDROCK", cliAdapter: "OPENCODE", llmModel: "amazon-bedrock/eu.anthropic.claude-opus-5-5" }} />)
+    await screen.findByRole("radiogroup", { name: "Bedrock model" })
+    const providers = screen.getByRole("radiogroup", { name: "Model provider" })
+    fireEvent.click(within(providers).getByRole("radio", { name: "Anthropic" }))
+    fireEvent.click(within(providers).getByRole("radio", { name: "Amazon Bedrock" }))
+    await waitFor(() => expect(state()).toMatchObject({ llmProvider: "AWS_BEDROCK", llmModel: "amazon-bedrock/eu.anthropic.claude-sonnet-5-5", seat: null }))
+  })
+
+  it("moves through accounts with the arrow keys, one tab stop per group", async () => {
+    serve([eu, lab])
+    render(<Harness initial={{ llmProvider: "AWS_BEDROCK", cliAdapter: "OPENCODE", llmModel: "" }} />)
+    const group = await screen.findByRole("radiogroup", { name: "Bedrock account" })
+    const radios = within(group).getAllByRole("radio")
+    expect(radios.filter((r) => r.tabIndex === 0)).toHaveLength(1)
+    radios[0].focus()
+    fireEvent.keyDown(radios[0], { key: "ArrowDown" })
+    expect(state().seat).toBe("c_lab")
+    expect(radios[1]).toHaveFocus()
   })
 })

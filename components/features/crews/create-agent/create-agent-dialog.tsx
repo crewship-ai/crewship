@@ -58,7 +58,7 @@ import { AskFormsBuilder } from "../ask-forms-builder"
 import { EditorLayout, EditorPanel } from "../editor-layout"
 import { AgentModelSettings } from "./agent-model-settings"
 import { RestrictedExecutionField, saveRestrictedProfile, type RestrictedProfile } from "../agent-canvas-tabs/restricted-execution-profile"
-import { PaysWithRow, applyPaysWith } from "../agent-canvas-tabs/pays-with-row"
+import { PaysWithRow, applyPaysWith, releaseBedrockSeat } from "../agent-canvas-tabs/pays-with-row"
 import { saveLearning, type LearningDraft } from "@/components/features/agents/agent-learning-toggle"
 import type { LoginCredential } from "@/lib/credentials/provider-logins"
 import { PersonaDraft } from "../persona-draft"
@@ -246,7 +246,7 @@ export function CreateAgentDialog({
     draft.editedPersonaPrompt === null &&
     !draft.customPrompt.trim()
   const learningReasonMissing = learningDraft !== null && learningDraft.reason.trim() === ""
-  const valid = isIdentityValid(draft) && (!!agent || !providerConfirmed || !!draft.llmModel.trim()) && !learningReasonMissing
+  const valid = isIdentityValid(draft) && ((!!agent && draft.llmProvider !== "AWS_BEDROCK") || !providerConfirmed || !!draft.llmModel.trim()) && !learningReasonMissing
   // What's blocking submit? Shown to the user as an inline hint so they
   // don't have to guess why Create is disabled. Mirrors isIdentityValid
   // — keep the order matching so the hint reflects the first failing rule.
@@ -358,6 +358,20 @@ export function CreateAgentDialog({
       const payload: Record<string, unknown> = agent && baseline
         ? { ...Object.fromEntries(Object.entries(body).filter(([key, value]) => JSON.stringify(value) !== JSON.stringify(agentBody(baseline, crews)[key]))), ...extra }
         : { ...body, ...extra }
+      // An existing agent moving onto a Bedrock account is assigned first: the
+      // assignment sets the account, model and OpenCode runner in one
+      // transaction, so a refused assignment (expired key, model no longer
+      // permitted, another Bedrock account) leaves the agent as it was
+      // instead of a Bedrock agent with no account.
+      const bedrockFirst = Boolean(agent && seatDraft && (seatDraft.login?.provider ?? seatDraft.provider) === "AWS_BEDROCK" && draft.llmProvider === "AWS_BEDROCK")
+      if (agent && seatDraft && bedrockFirst) {
+        try {
+          await applyPaysWith(workspaceId, agent.id, seatDraft, draft.llmModel)
+        } catch (err) {
+          throw new Error(`Nothing was saved: the Amazon Bedrock account could not be assigned. ${err instanceof Error ? err.message : String(err)}`)
+        }
+        setSeatDraft(null)
+      }
       const res = await apiFetch(
         `/api/v1/agents${agent ? `/${agent.id}` : ""}?workspace_id=${encodeURIComponent(workspaceId)}`,
         {
@@ -377,7 +391,15 @@ export function CreateAgentDialog({
       // After the agent, so a refused agent change leaves the seat and the
       // posture untouched. Each is cleared once applied, so a retry after a
       // later failure does not apply it twice.
-      if (agent && seatDraft) {
+      // Off Bedrock: its account must stop paying for (and reaching) the agent.
+      if (agent && agent.llm_provider === "AWS_BEDROCK" && draft.llmProvider !== "AWS_BEDROCK") {
+        try {
+          await releaseBedrockSeat(workspaceId, agent.id)
+        } catch (err) {
+          throw new Error(`Agent settings saved, but its Amazon Bedrock account is still assigned: ${err instanceof Error ? err.message : String(err)}`)
+        }
+      }
+      if (agent && seatDraft && !bedrockFirst) {
         try {
           await applyPaysWith(workspaceId, agent.id, seatDraft, draft.llmModel)
         } catch (err) {
@@ -854,7 +876,7 @@ WORK STYLE: …`}
           </CreateSurfaceSection>}
           </EditorPanel>
           <EditorPanel active={show("model")}>
-            <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} seat={seatDraft} boundSeatId={agent?.llm_provider === "AWS_BEDROCK" ? agent.pays_with?.credential_id ?? null : null} onSeat={setSeatDraft} />
+            <AgentModelSettings providerConfirmed={!!agent || providerConfirmed} onProviderConfirmed={() => setProviderConfirmed(true)} workspaceId={workspaceId} draft={draft} setDraft={setDraft} seat={seatDraft} autoPick={!agent} boundSeatId={agent?.llm_provider === "AWS_BEDROCK" ? agent.pays_with?.credential_id ?? null : null} onSeat={setSeatDraft} />
             {agent && (
               <RestrictedExecutionField
                 value={restrictedDraft ?? (agent.restricted_execution_profile as RestrictedProfile | undefined) ?? "disabled"}
@@ -887,7 +909,9 @@ WORK STYLE: …`}
           <EditorPanel active={show("access")}>
             {!agent && (
               <CreateSurfaceSection title="Pays with" icon={CreditCard} hint="the provider account its runs are charged to">
-                <PaysWithRow workspaceId={workspaceId} agentId="" agentName={draft.name || "this agent"} cliAdapter={draft.cliAdapter} llmProvider={draft.llmProvider} paysWith={null} pending={seatDraft} onPick={setSeatDraft} />
+                {draft.llmProvider === "AWS_BEDROCK"
+                  ? <p className="text-sm text-muted-foreground">{seatDraft ? `Pays with ${seatDraft.name}, chosen under Model.` : "The Amazon Bedrock account is chosen under Model."}</p>
+                  : <PaysWithRow workspaceId={workspaceId} agentId="" agentName={draft.name || "this agent"} cliAdapter={draft.cliAdapter} llmProvider={draft.llmProvider} llmModel={draft.llmModel} paysWith={null} pending={seatDraft} onPick={setSeatDraft} />}
                 <p className="text-xs text-muted-foreground">Left alone, it uses the account shared with {crewName ?? "the workspace"}. Assigned right after the agent is created.</p>
               </CreateSurfaceSection>
             )}
@@ -897,7 +921,7 @@ WORK STYLE: …`}
               </CreateSurfaceSection>
             )}
             {!agent && <AgentAccessSection catalog={accessCatalog} selection={access} onChange={setAccess} />}
-            {agent && <CreateSurfaceSection title="Provider account" icon={CreditCard}><p className="text-xs text-muted-foreground">The account changes with the rest when you choose Save changes.</p>{draft.llmProvider === "AWS_BEDROCK" ? <p className="text-sm text-muted-foreground">{seatDraft ? `Pays with ${seatDraft.name}, chosen under Model.` : "The Amazon Bedrock account is chosen under Model."}</p> : draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} llmProvider={agent.llm_provider} paysWith={agent.pays_with ?? null} pending={seatDraft} onPick={setSeatDraft} />}</CreateSurfaceSection>}
+            {agent && <CreateSurfaceSection title="Provider account" icon={CreditCard}><p className="text-xs text-muted-foreground">The account changes with the rest when you choose Save changes.</p>{draft.llmProvider === "AWS_BEDROCK" ? <p className="text-sm text-muted-foreground">{seatDraft ? `Pays with ${seatDraft.name}, chosen under Model.` : "The Amazon Bedrock account is chosen under Model."}</p> : draft.cliAdapter !== agent.cli_adapter || draft.llmProvider !== agent.llm_provider ? <p className="text-sm text-muted-foreground">Save the new provider and runner first, then choose its account here.</p> : <PaysWithRow workspaceId={workspaceId} agentId={agent.id} agentName={agent.name} cliAdapter={agent.cli_adapter} llmProvider={agent.llm_provider} llmModel={agent.llm_model ?? ""} paysWith={agent.pays_with ?? null} pending={seatDraft} onPick={setSeatDraft} />}</CreateSurfaceSection>}
             {agent && <p className="text-sm text-muted-foreground">Manage this agent&apos;s assigned skills, credentials and integrations under Tools and access.</p>}
           </EditorPanel>
           <EditorPanel active={show("chat")}>

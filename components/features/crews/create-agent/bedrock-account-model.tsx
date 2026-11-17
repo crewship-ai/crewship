@@ -10,6 +10,7 @@ import { apiFetch } from "@/lib/api-fetch"
 import { bedrockAccountModels, bedrockAgentModel, bedrockModelFor, bedrockModelLabel, bedrockNativeModel } from "@/lib/credentials/bedrock"
 import type { LoginCredential } from "@/lib/credentials/provider-logins"
 import { cn } from "@/lib/utils"
+import { moveRadio, radioTabIndex } from "./radio-keys"
 
 /**
  * Amazon Bedrock in New agent › Model and the agent Edit dialog: the account
@@ -21,7 +22,7 @@ import { cn } from "@/lib/utils"
  * applies it after the agent is saved, through the Bedrock assignment that
  * sets the account, the model and the OpenCode runner together.
  */
-export function BedrockAccountModel({ workspaceId, model, seat, boundId = null, onChange }: {
+export function BedrockAccountModel({ workspaceId, model, seat, boundId = null, autoPick = true, onChange }: {
   workspaceId: string
   /** The agent's llm_model (`amazon-bedrock/<id>`). */
   model: string
@@ -29,6 +30,8 @@ export function BedrockAccountModel({ workspaceId, model, seat, boundId = null, 
   seat: LoginCredential | null
   /** The account the saved agent pays with now (Edit). */
   boundId?: string | null
+  /** Pick the only account by itself (New agent). Edit never changes the payer on open. */
+  autoPick?: boolean
   /** `account` is null when the pick is the account the agent already pays with. */
   onChange: (account: LoginCredential | null, model: string) => void
 }) {
@@ -54,16 +57,24 @@ export function BedrockAccountModel({ workspaceId, model, seat, boundId = null, 
   }, [workspaceId])
 
   // One account and nothing chosen yet: it is the only answer, so take it.
-  const only = accounts?.length === 1 && !boundId ? accounts[0] : null
+  const only = autoPick && accounts?.length === 1 && !boundId ? accounts[0] : null
   React.useEffect(() => {
     if (only && !seat) onChange(only, bedrockAgentModel(bedrockModelFor(only, model)))
   }, [only, seat, model, onChange])
 
   const currentId = seat?.id ?? boundId
   const current = accounts?.find((a) => a.id === currentId) ?? null
-  const pick = (account: LoginCredential, next: string) => onChange(account.id === boundId ? null : account, next)
   const models = current ? bedrockAccountModels(current) : []
   const selected = bedrockNativeModel(model)
+  const pick = React.useCallback((account: LoginCredential, next: string) => onChange(account.id === boundId ? null : account, next), [onChange, boundId])
+
+  // The account is set but the draft's model is not one it permits (a switch
+  // to another provider and back empties it): take the account's first, so
+  // the agent is never saved on a model its account refuses.
+  const repair = current && models.length > 0 && !models.includes(selected) ? current : null
+  React.useEffect(() => {
+    if (repair) pick(repair, bedrockAgentModel(bedrockAccountModels(repair)[0]))
+  }, [repair, pick])
 
   return (
     <>
@@ -79,8 +90,8 @@ export function BedrockAccountModel({ workspaceId, model, seat, boundId = null, 
           </div>
         )}
         {accounts && accounts.length > 0 && (
-          <div role="radiogroup" aria-label="Bedrock account" className="grid grid-cols-1 gap-2 md:grid-cols-2">
-            {accounts.map((account) => {
+          <div role="radiogroup" aria-label="Bedrock account" onKeyDown={moveRadio} className="grid grid-cols-1 gap-2 md:grid-cols-2">
+            {accounts.map((account, index) => {
               const on = account.id === current?.id
               const b = account.login?.bedrock
               return (
@@ -89,6 +100,7 @@ export function BedrockAccountModel({ workspaceId, model, seat, boundId = null, 
                   type="button"
                   role="radio"
                   aria-checked={on}
+                  tabIndex={radioTabIndex(on, index, Boolean(current))}
                   onClick={() => pick(account, bedrockAgentModel(bedrockModelFor(account, model)))}
                   className={cn("flex min-h-9 coarse:min-h-[44px] items-start gap-3 rounded-lg border p-3 text-left focus-visible:ring-2 focus-visible:ring-primary", on ? "border-primary bg-primary/10" : "border-border hover:bg-muted")}
                 >
@@ -108,8 +120,8 @@ export function BedrockAccountModel({ workspaceId, model, seat, boundId = null, 
       </CreateSurfaceField>
       {current && (
         <CreateSurfaceField label="Model" hint={`Allowed by ${current.name}. Change the list in Vault.`}>
-          <div role="radiogroup" aria-label="Bedrock model" className="flex flex-col overflow-hidden rounded-lg border border-border">
-            {models.map((id) => {
+          <div role="radiogroup" aria-label="Bedrock model" onKeyDown={moveRadio} className="flex flex-col overflow-hidden rounded-lg border border-border">
+            {models.map((id, index) => {
               const on = id === selected
               return (
                 <button
@@ -117,6 +129,7 @@ export function BedrockAccountModel({ workspaceId, model, seat, boundId = null, 
                   type="button"
                   role="radio"
                   aria-checked={on}
+                  tabIndex={radioTabIndex(on, index, models.includes(selected))}
                   onClick={() => pick(current, bedrockAgentModel(id))}
                   className={cn("flex min-h-9 coarse:min-h-[44px] flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border px-3 py-2 text-left last:border-b-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary", on ? "bg-primary/10" : "hover:bg-muted")}
                 >

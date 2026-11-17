@@ -40,7 +40,7 @@ import {
   type ProviderLogin,
 } from "@/lib/credentials/provider-logins"
 import { LoginBrandMark, LoginStatusPill } from "@/components/features/credentials/provider-login-bits"
-import { bedrockModelFor } from "@/lib/credentials/bedrock"
+import { BEDROCK_SLOT, bedrockModelFor } from "@/lib/credentials/bedrock"
 import { cn } from "@/lib/utils"
 
 import { ConfigRow } from "../canvas/config-field"
@@ -126,16 +126,48 @@ export async function applyPaysWith(workspaceId: string, agentId: string, seat: 
   await swapSeat(workspaceId, agentId, seat, bound, agentModel)
 }
 
+// The provider a model id names by its OpenCode prefix. A prefix outside this
+// map (xai/, groq/, openrouter/…) is a provider OpenCode reaches with that
+// provider's own login, which is not one of the agent's llm_provider values.
+const MODEL_PREFIX_PROVIDER: Record<string, string> = {
+  anthropic: "ANTHROPIC",
+  openai: "OPENAI",
+  google: "GOOGLE",
+  opencode: "OPENCODE",
+  "opencode-go": "OPENCODE_GO",
+  "zai-coding-plan": "ZAI_CODING_PLAN",
+  "amazon-bedrock": "AWS_BEDROCK",
+}
+
 // Model providers whose models only a login of the same provider can pay for.
 // Anything else an OpenCode agent runs (Ollama, a router) is not checked here.
 const SEAT_PROVIDERS = new Set(["ANTHROPIC", "OPENAI", "GOOGLE", "CURSOR", "FACTORY", "OPENCODE", "OPENCODE_GO", "ZAI_CODING_PLAN", "AWS_BEDROCK"])
 
-/** The provider whose seats can pay for this agent, or null when any can. */
-export function seatProvider(cliAdapter: string | null | undefined, llmProvider: string | null | undefined): string | null {
+/** The provider whose seats can pay for this agent, or null when any (but Bedrock) can. */
+export function seatProvider(cliAdapter: string | null | undefined, llmProvider: string | null | undefined, llmModel = ""): string | null {
   const own = adapterProvider(cliAdapter)
   if (own) return own
+  const slash = llmModel.indexOf("/")
+  if (slash > 0) return MODEL_PREFIX_PROVIDER[llmModel.slice(0, slash).toLowerCase()] ?? null
   const llm = (llmProvider ?? "").toUpperCase()
   return SEAT_PROVIDERS.has(llm) ? llm : null
+}
+
+/**
+ * Release the agent's own Bedrock account (its AGENT binding on the Bedrock
+ * slot) after the agent moved to another provider. Left bound, the account
+ * would still be delivered to the container and counted in its Pays for,
+ * where re-assigning a model would turn the agent back into a Bedrock agent.
+ */
+export async function releaseBedrockSeat(workspaceId: string, agentId: string): Promise<void> {
+  const ws = encodeURIComponent(workspaceId)
+  const res = await apiFetch(`/api/v1/credentials/bindings?workspace_id=${ws}&scope=AGENT&agent_id=${encodeURIComponent(agentId)}`)
+  if (!res.ok) throw new Error(`Couldn't read the agent's Bedrock account (HTTP ${res.status}).`)
+  const body = (await res.json()) as { bindings?: BindingRow[] }
+  for (const b of (body?.bindings ?? []).filter((row) => row.slot === BEDROCK_SLOT && row.agent_id === agentId)) {
+    const del = await apiFetch(`/api/v1/credentials/bindings/${encodeURIComponent(b.id)}?workspace_id=${ws}`, { method: "DELETE" })
+    if (!del.ok && del.status !== 404) throw new Error(`Couldn't release the Bedrock account (HTTP ${del.status}).`)
+  }
 }
 
 /**
@@ -187,7 +219,7 @@ export function PaysWithRow({ workspaceId, agentId, agentName, cliAdapter, llmPr
   React.useEffect(() => { setSnapshotStale(false) }, [paysWith])
   const snapshot = snapshotStale ? null : paysWith
 
-  const provider = seatProvider(cliAdapter, llmProvider)
+  const provider = seatProvider(cliAdapter, llmProvider, llmModel)
   const ws = encodeURIComponent(workspaceId)
 
   // Loaded when the picker opens, not when the tab does. The resting state

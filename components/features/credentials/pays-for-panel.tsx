@@ -62,7 +62,15 @@ export function PaysForPanel({ workspaceId, credential, canBind, crewsById, onCh
 
   // Agents this account already pays for: re-assigning them with another
   // permitted model changes the model in place (same account, no off and on).
-  const assigned = React.useMemo(() => (bindings ?? []).filter((b) => b.credential_id === credential.id && b.scope === "AGENT" && b.agent_id).map((b) => b.agent_id as string), [bindings, credential.id])
+  // Only agents still on Bedrock: an agent that moved to another provider
+  // must not be turned back into a Bedrock agent by a model change here.
+  const assigned = React.useMemo(() => {
+    const provider = new Map((agents ?? []).map((a) => [a.id, a.llm_provider]))
+    return (bindings ?? [])
+      .filter((b) => b.credential_id === credential.id && b.scope === "AGENT" && b.agent_id)
+      .map((b) => b.agent_id as string)
+      .filter((id) => { const p = provider.get(id); return !p || p === "AWS_BEDROCK" })
+  }, [agents, bindings, credential.id])
   const [applying, setApplying] = React.useState(false)
   const applyModel = async () => {
     setApplying(true)
