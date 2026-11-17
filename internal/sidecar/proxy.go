@@ -101,6 +101,7 @@ type Proxy struct {
 	onLLMCall          LLMCallObserver
 	onLLMAdmission     func(context.Context, string, string, string) error
 	onGraceFallback    GraceFallbackObserver
+	resolveBedrock     func(*http.Request, string, string, string) (*Credential, error)
 	resolveLLMIdentity func(*http.Request) (agentID, configFingerprint string, present, ok bool)
 	billingMode        string // "metered" | "flat_rate" | "" — set from env at startup
 	subPlan            string // human label for flat-rate (e.g. "Anthropic Max 20×")
@@ -166,6 +167,7 @@ type ProxyConfig struct {
 	// ResolveLLMIdentity authenticates the per-agent token embedded in the
 	// disposable provider key before that key is overwritten. The returned
 	// fingerprint must match this sidecar's keyed credential-set fingerprint.
+	ResolveBedrock     func(*http.Request, string, string, string) (*Credential, error)
 	ResolveLLMIdentity func(*http.Request) (agentID, configFingerprint string, present, ok bool)
 	// BillingMode and SubscriptionPlan come from the agent container's
 	// CREWSHIP_BILLING_MODE / CREWSHIP_SUBSCRIPTION_PLAN env vars (set by
@@ -215,6 +217,7 @@ func NewProxy(cfg ProxyConfig) *Proxy {
 		onLLMAdmission:     cfg.OnLLMAdmission,
 		onGraceFallback:    cfg.OnGraceFallback,
 		resolveLLMIdentity: cfg.ResolveLLMIdentity,
+		resolveBedrock:     cfg.ResolveBedrock,
 		billingMode:        cfg.BillingMode,
 		subPlan:            cfg.SubscriptionPlan,
 		buildHash:          cfg.BuildHash,
@@ -763,8 +766,25 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 	// another member's gateway with that member's key — allowlisted (the #2051
 	// union covers it) and therefore silent.
 	var cred *Credential
+	hostResolvedBedrock := false
 	if s.ID == bedrock.Provider {
 		cred = p.credStore.SelectAccount(ProviderType(s.ID), r.Header.Get(bedrock.AccountHeader), actorID)
+		if cred == nil && p.resolveBedrock != nil {
+			modelPath := strings.TrimPrefix(r.URL.Path, s.PathPrefix+"/model/")
+			model, action, ok := strings.Cut(modelPath, "/")
+			if !ok || r.Method != http.MethodPost || (action != "converse" && action != "converse-stream") {
+				http.Error(w, "Bedrock request is not permitted", http.StatusForbidden)
+				return
+			}
+			var err error
+			cred, err = p.resolveBedrock(r, actorID, r.Header.Get(bedrock.AccountHeader), model)
+			if err != nil || cred == nil {
+				http.Error(w, "assigned Bedrock account unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			hostResolvedBedrock = true
+		}
+
 		if cred != nil {
 			a, err := bedrock.Parse(cred.Token)
 			modelPath := strings.TrimPrefix(r.URL.Path, s.PathPrefix+"/model/")
@@ -830,7 +850,7 @@ func (p *Proxy) reverseProxyToProvider(w http.ResponseWriter, r *http.Request, s
 	// the crew-scoped decision isn't knowable then. Layer 3 is p.dialSSRF, which
 	// resolves-then-pins and refuses link-local / cloud-metadata / reserved
 	// unconditionally and RFC1918 / loopback unless the crew opted in.
-	if s.UpstreamFromCredential && !p.freeMode && !p.allowlist.IsAllowed(up.Host) {
+	if s.UpstreamFromCredential && !p.freeMode && !p.allowlist.IsAllowed(up.Host) && !hostResolvedBedrock {
 		p.logger.Warn("blocked reverse-proxy upstream not on the crew allowlist", "provider", s.ID, "host", up.Host)
 		if p.onEgress != nil {
 			p.onEgress(up.Host, r.Method, s.ID, http.StatusForbidden, true)
@@ -1129,14 +1149,14 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 			}
 		} else if codec == "bedrock" && strings.HasPrefix(strings.ToLower(contentType), "application/vnd.amazon.eventstream") {
 			observer := &bedrockUsageObserver{}
-			_, _ = io.Copy(io.MultiWriter(dst, observer), resp.Body)
+			_, copyErr := io.Copy(io.MultiWriter(dst, observer), resp.Body)
 			var complete bool
 			usage, complete = observer.finish()
-			if !complete {
+			if !complete || copyErr != nil {
+				usage.UsageIncomplete = true
 				if p.logger != nil {
 					p.logger.Warn("Bedrock usage unavailable: invalid, incomplete or oversized event stream")
 				}
-				return
 			}
 		} else {
 			_, _ = io.Copy(dst, resp.Body)
@@ -1148,7 +1168,7 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 			usage.Model = nativeModel[0]
 		}
 		quota := parseQuotaInfo(resp.Header, resp.StatusCode)
-		if usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CachedInputTokens != 0 ||
+		if usage.UsageIncomplete || usage.InputTokens != 0 || usage.OutputTokens != 0 || usage.CachedInputTokens != 0 ||
 			usage.CacheCreationTokens != 0 || quota.Window != "" || quota.HadStatus429 {
 			p.onLLMCall(usage, quota, billingMode, subPlan)
 		}
@@ -1162,14 +1182,18 @@ func (p *Proxy) copyAndObserveLLM(w http.ResponseWriter, resp *http.Response, co
 	// shape: read once, write twice.
 	buf := &boundedBuffer{cap: maxRequestBodyBytes}
 	tee := io.TeeReader(resp.Body, buf)
-	if _, err := io.Copy(dst, tee); err != nil {
+	_, copyErr := io.Copy(dst, tee)
+	if copyErr != nil {
 		// Client disconnected or upstream cut off mid-stream. We still try
 		// to parse whatever we've got — partial JSON returns zero usage,
 		// which is fine.
-		p.logger.Debug("response copy interrupted", "provider", ledgerProvider, "error", err)
+		p.logger.Debug("response copy interrupted", "provider", ledgerProvider, "error", copyErr)
 	}
 
 	usage := parseLLMUsage(codec, buf.String())
+	if codec == "bedrock" && copyErr != nil {
+		usage.UsageIncomplete = true
+	}
 	usage.AgentID = actorID
 	usage.CredentialID = credentialID
 	usage.Provider = ledgerProvider

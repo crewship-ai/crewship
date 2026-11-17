@@ -36,6 +36,7 @@ type sidecarCostRecordRequest struct {
 	CachedInputTokens   int64 `json:"cached_input_tokens"`
 	CacheCreationTokens int64 `json:"cache_creation_tokens"`
 
+	UsageIncomplete   bool    `json:"usage_incomplete,omitempty"`
 	BillingMode       string  `json:"billing_mode"`
 	SubscriptionPlan  string  `json:"subscription_plan,omitempty"`
 	QuotaRemainingPct float64 `json:"quota_remaining_pct,omitempty"`
@@ -129,6 +130,16 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 		confidence = paymaster.ConfidencePrecise
 	}
 
+	tags := map[string]any{"source": "sidecar"}
+	if body.UsageIncomplete {
+		confidence = paymaster.ConfidenceUnknown
+		if body.InputTokens > 0 || body.OutputTokens > 0 || body.CachedInputTokens > 0 || body.CacheCreationTokens > 0 {
+			confidence = paymaster.ConfidenceEstimate
+			tags["cost_is_lower_bound"] = true
+		}
+		tags["usage_status"] = "incomplete"
+	}
+
 	scope := paymaster.Scope{
 		WorkspaceID: body.WorkspaceID,
 		CrewID:      body.CrewID,
@@ -161,7 +172,7 @@ func (r *Router) handleSidecarCostRecord(w http.ResponseWriter, req *http.Reques
 		SubscriptionPlan:    body.SubscriptionPlan,
 		QuotaRemainingPct:   body.QuotaRemainingPct,
 		QuotaWindow:         paymaster.QuotaWindow(body.QuotaWindow),
-		Tags:                map[string]any{"source": "sidecar"},
+		Tags:                tags,
 	})
 	if err != nil {
 		// errors.Is replaced an earlier strings.HasPrefix check that

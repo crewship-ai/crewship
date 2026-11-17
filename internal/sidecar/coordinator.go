@@ -205,6 +205,9 @@ func (s *Server) proxyToAPIFiltered(
 	method, path string,
 	transform func(json.RawMessage) json.RawMessage,
 ) {
+	if refuseSecretResolutionForward(w, path) {
+		return
+	}
 	if s.ipc == nil {
 		writeJSONResponse(w, http.StatusServiceUnavailable, map[string]string{"error": "IPC not configured"})
 		return
