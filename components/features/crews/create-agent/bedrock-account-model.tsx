@@ -90,7 +90,7 @@ export function BedrockAccountModel({ workspaceId, model, seat, boundId = null, 
                   role="radio"
                   aria-checked={on}
                   onClick={() => pick(account, bedrockAgentModel(bedrockModelFor(account, model)))}
-                  className={cn("flex min-h-11 items-start gap-3 rounded-lg border p-3 text-left focus-visible:ring-2 focus-visible:ring-primary", on ? "border-primary bg-primary/10" : "border-border hover:bg-muted")}
+                  className={cn("flex min-h-9 coarse:min-h-[44px] items-start gap-3 rounded-lg border p-3 text-left focus-visible:ring-2 focus-visible:ring-primary", on ? "border-primary bg-primary/10" : "border-border hover:bg-muted")}
                 >
                   <LoginBrandMark provider="AWS_BEDROCK" size="sm" />
                   <span className="min-w-0 flex-1">
@@ -118,7 +118,7 @@ export function BedrockAccountModel({ workspaceId, model, seat, boundId = null, 
                   role="radio"
                   aria-checked={on}
                   onClick={() => pick(current, bedrockAgentModel(id))}
-                  className={cn("flex min-h-11 flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border px-3 py-2 text-left last:border-b-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary", on ? "bg-primary/10" : "hover:bg-muted")}
+                  className={cn("flex min-h-9 coarse:min-h-[44px] flex-wrap items-center gap-x-3 gap-y-0.5 border-b border-border px-3 py-2 text-left last:border-b-0 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary", on ? "bg-primary/10" : "hover:bg-muted")}
                 >
                   <span className="text-sm">{bedrockModelLabel(id)}</span>
                   <span className="min-w-0 truncate font-mono text-xs text-muted-foreground">{id}</span>

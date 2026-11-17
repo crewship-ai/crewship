@@ -72,7 +72,7 @@ export function AgentModelSettings({ draft, setDraft, workspaceId, providerConfi
 function FixedRunner({ runner, provider }: { runner: string; provider: string }) {
   const adapter = CLI_ADAPTERS[runner]
   const Icon = adapter?.icon
-  return <div className="flex min-h-11 items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
+  return <div className="flex min-h-9 coarse:min-h-[44px] items-center gap-3 rounded-lg border border-border bg-muted/40 px-3 py-2 text-sm">
     {Icon && <Icon className="h-5 w-5 shrink-0 text-foreground" aria-hidden="true" />}
     <span className="flex-1">{adapter?.label ?? runner}</span>
     <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><Lock className="h-3 w-3" aria-hidden="true" />set by {provider}</span>

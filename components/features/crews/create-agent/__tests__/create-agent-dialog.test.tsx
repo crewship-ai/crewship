@@ -438,7 +438,7 @@ describe("CreateAgentDialog", () => {
     renderDialog()
     fireEvent.change(screen.getByPlaceholderText("Filip"), { target: { value: "Ada" } })
     fireEvent.click(screen.getByRole("button", { name: "Step 2: Model" }))
-    fireEvent.click(screen.getByRole("radio", { name: /^Codex CLI/ }))
+    fireEvent.click(within(screen.getByRole("radiogroup", { name: "Model provider" })).getByRole("radio", { name: "OpenAI" }))
     fireEvent.change(screen.getByLabelText("Maximum run duration"), { target: { value: "15" } })
     fireEvent.click(screen.getByRole("button", { name: "Step 4: Instructions" }))
     fireEvent.change(screen.getByRole("textbox", { name: "Agent system prompt" }), { target: { value: "Review documents carefully." } })

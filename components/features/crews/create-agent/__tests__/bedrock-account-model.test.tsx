@@ -32,7 +32,8 @@ const claude = { id: "c_claude", name: "Claude Max", provider: "ANTHROPIC", stat
 function serve(rows: LoginCredential[]) {
   h.apiFetch.mockImplementation(async (url: unknown) => {
     if (String(url).startsWith("/api/v1/credentials?")) return { ok: true, status: 200, json: async () => rows } as unknown as Response
-    throw new Error(`unexpected ${String(url)}`)
+    // Other surfaces on the step (status pills, abilities) may ask too; they get nothing.
+    return { ok: false, status: 404, json: async () => ({}) } as unknown as Response
   })
 }
 
